@@ -1,0 +1,44 @@
+HELP.md
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**
+!**/src/test/**
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+.gitignore
+
+### IntelliJ IDEA ###
+.idea/
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+.gradle/
+### VS Code ###
+.vscode/
+######log#########
+logs
+*.log
+hxdi-docs/
+hxdi-apis/hxdi-api-uploader/src/
+App.java
+
+
+#########Mac########
+.DS_Store/
+.DS_Store
