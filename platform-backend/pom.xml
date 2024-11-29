@@ -13,27 +13,55 @@
     <version>0.0.1-SNAPSHOT</version>
     <name>RecordPlatform-backend</name>
     <description>存证平台后端服务</description>
+    <properties>
+        <java.version>17</java.version>
+    </properties>
+    <!--  设置打包方式pom  -->
+    <packaging>pom</packaging>
 
-    <dependencies>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter</artifactId>
-        </dependency>
+    <modules>
+        <module>backend-api</module>
+        <module>backend-common</module>
+        <module>backend-dao</module>
+        <module>backend-service</module>
+        <module>backend-web</module>
+    </modules>
 
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-            </plugin>
-        </plugins>
-    </build>
+    <dependencyManagement>
+        <dependencies>
+            <!--    项目子模块    -->
+            <dependency>
+                <groupId>cn.flying</groupId>
+                <artifactId>backend-dao</artifactId>
+                <version>0.0.1-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>cn.flying</groupId>
+                <artifactId>backend-api</artifactId>
+                <version>0.0.1-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>cn.flying</groupId>
+                <artifactId>backend-common</artifactId>
+                <version>0.0.1-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>cn.flying</groupId>
+                <artifactId>backend-service</artifactId>
+                <version>0.0.1-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>cn.flying</groupId>
+                <artifactId>backend-web</artifactId>
+                <version>0.0.1-SNAPSHOT</version>
+            </dependency>
+            <!--     共享库     -->
+            <dependency>
+                <groupId>cn.hutool</groupId>
+                <artifactId>hutool-all</artifactId>
+                <version>5.8.32</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
 </project>

@@ -1,13 +1,13 @@
-package cn.flying.backendfisco;
+package cn.flying;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class BackendFiscoApplication {
+public class BackendWebApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(BackendFiscoApplication.class, args);
+        SpringApplication.run(BackendWebApplication.class, args);
     }
 
 }

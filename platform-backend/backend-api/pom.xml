@@ -8,10 +8,10 @@
         <version>0.0.1-SNAPSHOT</version>
     </parent>
     <groupId>cn.flying</groupId>
-    <artifactId>backend-service</artifactId>
+    <artifactId>backend-api</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>backend-service</name>
-    <description>backend-service</description>
+    <name>backend-api</name>
+    <description>backend-api</description>
 
     <properties>
         <java.version>17</java.version>
@@ -20,8 +20,9 @@
     <dependencies>
         <dependency>
             <groupId>cn.flying</groupId>
-            <artifactId>backend-dao</artifactId>
+            <artifactId>backend-common</artifactId>
         </dependency>
     </dependencies>
+
 
 </project>
