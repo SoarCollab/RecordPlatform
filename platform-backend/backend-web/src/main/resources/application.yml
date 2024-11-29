@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: backend-web
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 1000MB
+  profiles:
+    active: dev
+  jackson:
+    time-zone: GMT+8
+#mp??
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    #??sql??
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+  global-config:
+    db-config:
+      #id??????
+      id-type: ASSIGN_ID
+      #????????
+      logic-delete-field: deleted
+      logic-not-delete-value: 0
+      logic-delete-value: 1
+    #???mybatis-plus??
+    banner: true
