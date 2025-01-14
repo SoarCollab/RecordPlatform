@@ -34,8 +34,6 @@ build/
 ######log#########
 logs
 *.log
-hxdi-docs/
-hxdi-apis/hxdi-api-uploader/src/
 App.java
 
 

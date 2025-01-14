@@ -9,19 +9,19 @@ spring:
     active: dev
   jackson:
     time-zone: GMT+8
-#mp??
+#mybatis-plus config
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
-    #??sql??
+    #sqlLogPrint
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
 
   global-config:
     db-config:
-      #id??????
+      #id Self-increment strategy
       id-type: ASSIGN_ID
-      #????????
-      logic-delete-field: deleted
+      #
+      logic-delete-field: isDelete
       logic-not-delete-value: 0
       logic-delete-value: 1
     #???mybatis-plus??
