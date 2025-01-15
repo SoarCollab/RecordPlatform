@@ -1,4 +1,4 @@
-package cn.flying.backendcommon.constant;
+package cn.flying.common.constant;
 
 import lombok.Data;
 
@@ -49,6 +49,10 @@ public class Result<T> {
     //失败返回封装-使用返回结果枚举提示信息
     public static Result<String> error(ResultEnum resultCode) {
         return new Result<>(resultCode);
+    }
+    //失败返回封装-携带数据与错误信息一起返回
+    public static  Result error(ResultEnum resultCode, Object data) {
+        return new Result<>(resultCode, data);
     }
     //失败返回封装-使用自定义提示信息
     public static Result<String> error(String message) {
