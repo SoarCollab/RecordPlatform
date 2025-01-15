@@ -1,4 +1,4 @@
-package cn.flying.backendcommon.constant;
+package cn.flying.common.constant;
 
 import lombok.Getter;
 
@@ -12,10 +12,10 @@ import lombok.Getter;
 public enum ResultEnum {
 
     /* 成功状态码 */
-    SUCCESS(1, "操作成功！"),
+    SUCCESS(1, "操作成功!"),
 
     /* 错误状态码 */
-    FAIL(0, "操作失败！"),
+    FAIL(0, "服务器内部错误，请联系管理员!"),
 
     /* 参数错误：10001-19999 */
     PARAM_IS_INVALID(10001, "参数无效"),
@@ -42,9 +42,9 @@ public enum ResultEnum {
 
 
     /* 权限错误：70001-79999 */
-    PERMISSION_UNAUTHENTICATED(70001, "此操作需要登陆系统！"),
+    PERMISSION_UNAUTHENTICATED(70001, "此操作需要登陆系统!"),
 
-    PERMISSION_UNAUTHORIZED(70002, "权限不足，无权操作！"),
+    PERMISSION_UNAUTHORIZED(70002, "权限不足，无权操作!"),
 
     PERMISSION_EXPIRE(70003, "登录状态过期！"),
 
