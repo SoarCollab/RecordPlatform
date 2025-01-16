@@ -1,5 +1,7 @@
 package cn.flying.common.constant;
 
+import com.alibaba.fastjson2.JSONObject;
+import com.alibaba.fastjson2.JSONWriter;
 import lombok.Data;
 
 /**
@@ -57,6 +59,14 @@ public class Result<T> {
     //失败返回封装-使用自定义提示信息
     public static Result<String> error(String message) {
         return new Result<>(message);
-
     }
+
+    /**
+     * 快速将当前实体转换为JSON字符串格式
+     * @return JSON字符串
+     */
+    public String asJsonString() {
+        return JSONObject.toJSONString(this, JSONWriter.Feature.WriteNulls);
+    }
+
 }
