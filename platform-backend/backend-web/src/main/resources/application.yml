@@ -9,6 +9,30 @@ spring:
     active: dev
   jackson:
     time-zone: GMT+8
+
+  security:
+    jwt:
+      key: 'record-platform-key'
+      expire: 72
+      limit:
+        base: 10
+        upgrade: 300
+        frequency: 30
+    filter:
+      order: -100
+
+  web:
+    verify:
+      mail-limit: 60
+    flow:
+      period: 3
+      limit: 50
+      block: 30
+    cors:
+      origin: '*'
+      credentials: false
+      methods: '*'
+
 #mybatis-plus config
 mybatis-plus:
   configuration:
@@ -18,9 +42,7 @@ mybatis-plus:
 
   global-config:
     db-config:
-      #id Self-increment strategy
-      id-type: ASSIGN_ID
-      #
+      #logic-delete-field
       logic-delete-field: isDelete
       logic-not-delete-value: 0
       logic-delete-value: 1

@@ -39,21 +39,19 @@ public enum ResultEnum {
     DATA_IS_WRONG(50002, "数据有误"),
     DATA_ALREADY_EXISTED(50003, "数据已存在"),
     AUTH_CODE_ERROR(50004, "验证码错误"),
-
+    File_UPLOAD_ERROR(50005, "文件上传失败"),
+    File_DOWNLOAD_ERROR(50006, "文件下载失败"),
+    FILE_DELETE_ERROR(50007, "文件删除失败"),
+    FILE_NOT_EXIST(50008, "文件不存在"),
+    FILE_EMPTY(50009, "文件为空"),
 
     /* 权限错误：70001-79999 */
     PERMISSION_UNAUTHENTICATED(70001, "此操作需要登陆系统!"),
-
     PERMISSION_UNAUTHORIZED(70002, "权限不足，无权操作!"),
-
     PERMISSION_EXPIRE(70003, "登录状态过期！"),
-
     PERMISSION_TOKEN_EXPIRED(70004, "token已过期"),
-
     PERMISSION_LIMIT(70005, "访问次数受限制"),
-
     PERMISSION_TOKEN_INVALID(70006, "无效token"),
-
     PERMISSION_SIGNATURE_ERROR(70007, "签名失败");
 
     // 状态码
