@@ -85,7 +85,7 @@ public class SwaggerConfiguration {
                                 .addApiResponse("200", new ApiResponse()
                                         .description("OK")
                                         .content(new Content().addMediaType("*/*", new MediaType()
-                                                .example(Result.success(new AuthorizeVO()).asJsonString())
+                                                .example(Result.success(new AuthorizeVO()).toString())
                                         ))
                                 )
                         )
