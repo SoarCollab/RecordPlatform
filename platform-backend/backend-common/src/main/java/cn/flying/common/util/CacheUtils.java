@@ -7,7 +7,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -48,5 +51,13 @@ public class CacheUtils {
             String json = objectMapper.writeValueAsString(data);
             stringRedisTemplate.opsForValue().set(key, json, expire, TimeUnit.SECONDS);
         } catch (Exception ignored) {}
+    }
+
+    public void deleteCachePattern(String key){
+        Set<String> keys = Optional.of(stringRedisTemplate.keys(key)).orElse(Collections.emptySet());
+        stringRedisTemplate.delete(keys);
+    }
+    public void deleteCache(String key){
+        stringRedisTemplate.delete(key);
     }
 }
