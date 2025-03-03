@@ -2,6 +2,7 @@ package cn.flying.controller;
 
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.Const;
 import cn.flying.service.ImageService;
 import io.minio.errors.ErrorResponseException;
@@ -101,22 +102,23 @@ public class FileController {
      * @throws Exception 异常
      */
     private void fetchImage(HttpServletRequest request, HttpServletResponse response) throws Exception {
-        String imagePath= request.getServletPath().substring(25);
-        ServletOutputStream outputStream = response.getOutputStream();
-        if (imagePath.length()<=13){
-            response.setStatus(404);
-            outputStream.println(Result.error(ResultEnum.FILE_NOT_EXIST).toString());
-        }else {
-            try {
-                imageService.fetchImage(outputStream, imagePath);
-                response.setHeader("Cache-Control","max-age=2592000");
-            }catch (ErrorResponseException e){
-                if (e.response().code()==404){
-                    response.setStatus(404);
-                    outputStream.println(Result.error(ResultEnum.FILE_NOT_EXIST).toString());
-                }else {
-                    log.error("从minIO读取图片出现异常：{}", e.getMessage(), e);
-                }
+        String imagePath = request.getServletPath().substring(25);
+
+        try (ServletOutputStream outputStream = response.getOutputStream()) {
+            if (imagePath.length() <= 13) {
+                response.setStatus(404);
+                response.setContentType("application/json");
+                response.getWriter().write(Result.error(ResultEnum.FILE_NOT_EXIST).toString());
+                return;
+            }
+            imageService.fetchImage(outputStream, imagePath);
+            response.setHeader("Cache-Control", "max-age=2592000");
+        } catch (ErrorResponseException e) {
+            if (e.response() != null && e.response().code() == 404) {
+                throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
+            } else {
+                log.error("从minIO读取图片出现异常：{}", e.getMessage(), e);
+                throw new GeneralException(ResultEnum.FAIL);
             }
         }
     }

@@ -77,6 +77,6 @@ public class FlowLimitingFilter extends HttpFilter {
         response.setStatus(HttpServletResponse.SC_FORBIDDEN);
         response.setContentType("application/json;charset=utf-8");
         PrintWriter writer = response.getWriter();
-        writer.write(Result.error(ResultEnum.PERMISSION_LIMIT).asJsonString());
+        writer.write(Result.error(ResultEnum.PERMISSION_LIMIT).toString());
     }
 }
