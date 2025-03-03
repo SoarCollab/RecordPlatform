@@ -1,8 +1,8 @@
 package cn.flying.filter;
 
-import com.alibaba.fastjson2.JSONObject;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.SnowflakeIdGenerator;
+import cn.hutool.json.JSONObject;
 import jakarta.annotation.Resource;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -81,7 +81,7 @@ public class RequestLogFilter extends OncePerRequestFilter {
         long reqId = generator.nextId();
         MDC.put("reqId", String.valueOf(reqId));
         JSONObject object = new JSONObject();
-        request.getParameterMap().forEach((k, v) -> object.put(k, v.length > 0 ? v[0] : null));
+        request.getParameterMap().forEach((k, v) -> object.set(k, v.length > 0 ? v[0] : null));
         Object id = request.getAttribute(Const.ATTR_USER_ID);
         if(id != null) {
             User user = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
