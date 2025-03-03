@@ -101,20 +101,20 @@ public class SecurityConfiguration {
         PrintWriter writer = response.getWriter();
         if(exceptionOrAuthentication instanceof AccessDeniedException exception) {
             writer.write(Result
-                    .error(exception.getMessage()).asJsonString());
+                    .error(exception.getMessage()).toString());
         } else if(exceptionOrAuthentication instanceof Exception exception) {
             writer.write(Result
-                    .error(exception.getMessage()).asJsonString());
+                    .error(exception.getMessage()).toString());
         } else if(exceptionOrAuthentication instanceof Authentication authentication){
             User user = (User) authentication.getPrincipal();
             Account account = service.findAccountByNameOrEmail(user.getUsername());
             String jwt = utils.createJwt(user, account.getUsername(), account.getId());
             if(jwt == null) {
-                writer.write(Result.error(ResultEnum.PERMISSION_LIMIT).asJsonString());
+                writer.write(Result.error(ResultEnum.PERMISSION_LIMIT).toString());
             } else {
                 AuthorizeVO vo = account.asViewObject(AuthorizeVO.class, o -> o.setToken(jwt));
                 vo.setExpire(utils.expireTime());
-                writer.write(Result.success(vo).asJsonString());
+                writer.write(Result.success(vo).toString());
             }
         }
     }
@@ -133,9 +133,9 @@ public class SecurityConfiguration {
         PrintWriter writer = response.getWriter();
         String authorization = request.getHeader("Authorization");
         if(utils.invalidateJwt(authorization)) {
-            writer.write(Result.success("退出登录成功").asJsonString());
+            writer.write(Result.success("退出登录成功").toString());
             return;
         }
-        writer.write(Result.error(ResultEnum.PERMISSION_TOKEN_EXPIRED).asJsonString());
+        writer.write(Result.error(ResultEnum.PERMISSION_TOKEN_EXPIRED).toString());
     }
 }

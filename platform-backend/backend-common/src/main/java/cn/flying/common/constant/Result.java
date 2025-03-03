@@ -1,8 +1,9 @@
 package cn.flying.common.constant;
 
-import com.alibaba.fastjson2.JSONObject;
-import com.alibaba.fastjson2.JSONWriter;
-import lombok.Data;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.Getter;
+import lombok.Setter;
 
 /**
  * @program: RecordPlatform
@@ -11,26 +12,38 @@ import lombok.Data;
  * @create: 2025-01-15 15:38
  */
 
-@Data
+@Getter
+@Setter
 public class Result<T> {
 
     // 操作代码
-    Integer code;
+    private int code;
 
     // 提示信息
-    String message;
+    private String message;
 
     // 结果数据
-    T data;
+    private T data;
+
+    @JsonCreator
+    public Result(
+            @JsonProperty("code") int code,
+            @JsonProperty("message") String message,
+            @JsonProperty("data") T data
+    ) {
+        this.code = code;
+        this.message = message;
+        this.data = data;
+    }
 
     public Result(ResultEnum resultCode) {
-        this.code = resultCode.code();
-        this.message = resultCode.message();
+        this.code = resultCode.getCode();
+        this.message = resultCode.getMessage();
     }
 
     public Result(ResultEnum resultCode, T data) {
-        this.code = resultCode.code();
-        this.message = resultCode.message();
+        this.code = resultCode.getCode();
+        this.message = resultCode.getMessage();
         this.data = data;
     }
     public Result(String message) {
@@ -38,35 +51,26 @@ public class Result<T> {
     }
     //成功返回封装-无数据
     public static Result<String> success() {
-        return new Result<>(ResultEnum.SUCCESS);
+        return new Result<>(ResultEnum.SUCCESS.getCode(), ResultEnum.SUCCESS.getMessage(), null);
     }
     //成功返回封装-带数据
     public static <T> Result<T> success(T data) {
-        return new Result<>(ResultEnum.SUCCESS, data);
+        return new Result<>(ResultEnum.SUCCESS.getCode(), ResultEnum.SUCCESS.getMessage(), data);
     }
     //失败返回封装-使用默认提示信息
     public static Result<String> error() {
-        return new Result<>(ResultEnum.FAIL);
+        return new Result<>(ResultEnum.FAIL.getCode(), ResultEnum.FAIL.getMessage(), null);
     }
     //失败返回封装-使用返回结果枚举提示信息
     public static Result<String> error(ResultEnum resultCode) {
-        return new Result<>(resultCode);
+        return new Result<>(resultCode.getCode(), resultCode.getMessage(), null);
     }
     //失败返回封装-携带数据与错误信息一起返回
     public static  Result error(ResultEnum resultCode, Object data) {
-        return new Result<>(resultCode, data);
+        return new Result<>(resultCode.getCode(), resultCode.getMessage(), data);
     }
     //失败返回封装-使用自定义提示信息
     public static Result<String> error(String message) {
-        return new Result<>(message);
+        return new Result<>(500, message, null);
     }
-
-    /**
-     * 快速将当前实体转换为JSON字符串格式
-     * @return JSON字符串
-     */
-    public String asJsonString() {
-        return JSONObject.toJSONString(this, JSONWriter.Feature.WriteNulls);
-    }
-
 }
