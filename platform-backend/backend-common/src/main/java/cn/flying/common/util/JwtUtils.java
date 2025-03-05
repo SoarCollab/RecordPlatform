@@ -80,7 +80,7 @@ public class JwtUtils {
      * @param user 用户信息
      * @return 令牌
      */
-    public String createJwt(UserDetails user, String username, String userId) {
+    public String createJwt(UserDetails user, String username, Long userId) {
         if(this.frequencyCheck(userId)) {
             Algorithm algorithm = Algorithm.HMAC256(KEY);
             Date expire = this.expireTime();
@@ -153,7 +153,7 @@ public class JwtUtils {
      * @param userId 用户ID
      * @return 是否通过频率检测
      */
-    private boolean frequencyCheck(String userId){
+    private boolean frequencyCheck(Long userId){
         String key = Const.JWT_FREQUENCY + userId;
         return utils.limitOnceUpgradeCheck(key, LIMIT_FREQUENCY, LIMIT_BASE, LIMIT_UPGRADE);
     }

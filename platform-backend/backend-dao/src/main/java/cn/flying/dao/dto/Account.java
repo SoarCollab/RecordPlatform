@@ -16,8 +16,7 @@ import java.util.Date;
 @Getter
 @TableName("account")
 public class Account implements BaseData {
-    @TableId(type = IdType.ASSIGN_ID)
-    String id;
+    Long id;
     String username;
     String password;
     String email;
@@ -25,10 +24,11 @@ public class Account implements BaseData {
     String avatar;
     @TableField(fill = FieldFill.INSERT)
     Date registerTime;
-    @TableField(fill = FieldFill.INSERT)
-    Integer isDelete;
+    @TableLogic
+    Integer deleted;
 
-    public Account(String username, String password, String email, String role, String avatar) {
+    public Account(Long id, String username, String password, String email, String role, String avatar) {
+        this.id=id;
         this.username = username;
         this.password = password;
         this.email = email;
