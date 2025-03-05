@@ -2,6 +2,7 @@ package cn.flying.service.impl;
 
 import cn.flying.common.util.Const;
 import cn.flying.common.util.FlowUtils;
+import cn.flying.common.util.SnowflakeIdGenerator;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.vo.request.*;
@@ -42,6 +43,9 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
 
     @Resource
     PasswordEncoder passwordEncoder;
+
+    @Resource
+    SnowflakeIdGenerator snowflakeIdGenerator;
 
     @Resource
     FlowUtils flow;
@@ -99,7 +103,7 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
         String username = info.getUsername();
         if(this.existsAccountByUsername(username)) return "该用户名已被他人使用，请重新更换";
         String password = passwordEncoder.encode(info.getPassword());
-        Account account = new Account( info.getUsername(),
+        Account account = new Account(snowflakeIdGenerator.nextId(),info.getUsername(),
                 password, email, Const.ROLE_DEFAULT,null);
         if(!this.save(account)) {
             return "内部错误，注册失败";
@@ -148,7 +152,7 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
      * @return
      */
     @Override
-    public String modifyEmail(String userId, ModifyEmailVO modifyEmailVO) {
+    public String modifyEmail(Long userId, ModifyEmailVO modifyEmailVO) {
         String email = modifyEmailVO.getEmail();
         String code = this.getEmailVerifyCode(email);
         if(code == null) return "请先获取验证码";

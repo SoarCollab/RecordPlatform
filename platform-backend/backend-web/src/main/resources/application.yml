@@ -33,18 +33,21 @@ spring:
       credentials: false
       methods: '*'
 
-#mybatis-plus config
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
-    #sqlLogPrint
+    #打印sql日志
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
 
+
   global-config:
-    db-config:
-      #logic-delete-field
-      logic-delete-field: isDelete
-      logic-not-delete-value: 0
-      logic-delete-value: 1
-    #mybatis-plus
+    #控制台mybatis-plus标记
     banner: true
+    db-config:
+      logic-delete-field: deleted # 全局逻辑删除字段名
+      logic-delete-value: 1 # 逻辑已删除值
+      logic-not-delete-value: 0 # 逻辑未删除值
+
+snowflake:
+  worker-id: 0
+  data-center-id: 0

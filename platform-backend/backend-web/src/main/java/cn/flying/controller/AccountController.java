@@ -48,7 +48,7 @@ public class AccountController {
      */
     @PostMapping("/modify-email")
     @Operation(summary = "修改邮箱地址")
-    public Result<String> modifyEmail(@RequestAttribute(Const.ATTR_USER_ID) String userId, @RequestBody @Valid ModifyEmailVO modifyEmailVO) {
+    public Result<String> modifyEmail(@RequestAttribute(Const.ATTR_USER_ID) Long userId, @RequestBody @Valid ModifyEmailVO modifyEmailVO) {
         return utils.messageHandle(() ->
                 accountService.modifyEmail(userId, modifyEmailVO));
     }
