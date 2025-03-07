@@ -2,6 +2,7 @@ package cn.flying.dao.dto;
 
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.util.Date;
@@ -14,6 +15,7 @@ import java.util.Date;
  */
 @Setter
 @Getter
+@NoArgsConstructor
 @TableName("account")
 public class Account implements BaseData {
     Long id;
