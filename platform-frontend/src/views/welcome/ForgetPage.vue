@@ -1,6 +1,10 @@
 <template>
-    <div>
-        <div style="margin: 30px 20px">
+    <div class="forget-container">
+        <div class="back-button" @click="router.push('/')">
+            <el-icon><Back /></el-icon>
+            <span>返回登录</span>
+        </div>
+        <div style="margin: 70px 20px 30px 20px">
             <el-steps :active="active" finish-status="success" align-center>
                 <el-step title="验证电子邮件" />
                 <el-step title="重新设定密码" />
@@ -8,7 +12,7 @@
         </div>
         <transition name="el-fade-in-linear" mode="out-in">
             <div style="text-align: center;margin: 0 20px;height: 100%" v-if="active === 0">
-                <div style="margin-top: 80px">
+                <div style="margin-top: 50px">
                     <div style="font-size: 25px;font-weight: bold">重置密码</div>
                     <div style="font-size: 14px;color: grey">请输入需要重置密码的电子邮件地址</div>
                 </div>
@@ -47,7 +51,7 @@
         </transition>
         <transition name="el-fade-in-linear" mode="out-in">
             <div style="text-align: center;margin: 0 20px;height: 100%" v-if="active === 1">
-                <div style="margin-top: 80px">
+                <div style="margin-top: 50px">
                     <div style="font-size: 25px;font-weight: bold">重置密码</div>
                     <div style="font-size: 14px;color: grey">请填写您的新密码，务必牢记，防止丢失</div>
                 </div>
@@ -79,7 +83,7 @@
 
 <script setup>
 import {reactive, ref} from "vue";
-import {EditPen, Lock, Message} from "@element-plus/icons-vue";
+import {EditPen, Lock, Message, Back} from "@element-plus/icons-vue";
 import {get, post} from "@/net";
 import {ElMessage} from "element-plus";
 import router from "@/router";
@@ -174,5 +178,34 @@ const doReset = () => {
 </script>
 
 <style scoped>
+.forget-container {
+    min-height: 600px;
+    position: relative;
+    padding-top: 20px;
+}
 
+.back-button {
+    position: absolute;
+    top: 30px;
+    left: 30px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 15px;
+    border-radius: 20px;
+    background: rgba(64, 158, 255, 0.1);
+    color: var(--el-color-primary);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.back-button:hover {
+    background: rgba(64, 158, 255, 0.2);
+    transform: translateX(-3px);
+}
+
+.back-button .el-icon {
+    font-size: 16px;
+}
 </style>

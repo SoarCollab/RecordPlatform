@@ -1,6 +1,6 @@
 <template>
     <div style="text-align: center;margin: 0 20px">
-        <div style="margin-top: 100px">
+        <div style="margin-top: 50px">
             <div style="font-size: 25px;font-weight: bold">注册新用户</div>
             <div style="font-size: 14px;color: grey">欢迎注册本系统，请您在下方填写相关信息</div>
         </div>
