@@ -9,6 +9,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.jetbrains.annotations.NotNull;
+import org.slf4j.MDC;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -21,6 +22,7 @@ import java.io.IOException;
 /**
  * 用于对请求头中Jwt令牌进行校验的工具，为当前请求添加用户验证信息
  * 并将用户的ID存放在请求对象属性中，方便后续使用
+ * 同时将用户ID放入MDC上下文，便于日志记录
  */
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -40,8 +42,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
             authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
             SecurityContextHolder.getContext().setAuthentication(authentication);
-            request.setAttribute(Const.ATTR_USER_ID, utils.toId(jwt));
+            
+            // 从JWT中获取用户ID
+            Long userId = utils.toId(jwt);
+            
+            // 将用户ID存入请求属性
+            request.setAttribute(Const.ATTR_USER_ID, userId);
+            
+            // 将用户ID放入MDC上下文，便于日志记录
+            if (userId != null) {
+                MDC.put("userId", userId.toString());
+            }
         }
-        filterChain.doFilter(request, response);
+        
+        try {
+            filterChain.doFilter(request, response);
+        } finally {
+            // 请求结束后清理MDC上下文
+            MDC.remove("userId");
+        }
     }
 }

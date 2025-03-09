@@ -40,3 +40,4 @@ App.java
 #########Mac########
 .DS_Store/
 .DS_Store
+/platform-frontend/node_modules/**/**/
