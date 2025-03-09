@@ -1,0 +1,39 @@
+### Java sdk configuration
+cryptoMaterial:
+  certPath: conf
+network:
+  peers[0]: 192.168.81.100:20200
+### network.peers[1]=192.168.81.100:20201
+
+### System configuration
+system:
+  groupId: group0
+  hexPrivateKey:
+
+### Contract configuration
+contract:
+  sharingAddress: '0x6d5de407db930fd7f5a0d9f19be7ec7bc7b36a2a'
+  storageAddress: '0xe7d7b002e51431b300ddc00b2c059ccc41ce4660'
+
+### Springboot configuration
+server:
+  port: 8081
+spring:
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+  main:
+    allow-bean-definition-overriding: true
+    allow-circular-references: true
+  output:
+    ansi:
+      enabled: ALWAYS
+
+logging:
+  level:
+    root: INFO
+    org:
+      fisco: DEBUG
+  pattern:
+    console: '%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr([%thread]){magenta} %clr(%-5level) %clr(%logger{50}){cyan} - %msg%n'
+
