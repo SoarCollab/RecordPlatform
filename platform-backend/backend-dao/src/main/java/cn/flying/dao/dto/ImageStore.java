@@ -1,5 +1,6 @@
 package cn.flying.dao.dto;
 
+import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.AllArgsConstructor;
@@ -17,7 +18,7 @@ import java.util.Date;
 @TableName("image_store")
 @AllArgsConstructor
 public class ImageStore {
-    @TableId
+    @TableId(type = IdType.INPUT)
     String uid;
     String name;
     Date time;

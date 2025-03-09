@@ -28,7 +28,7 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(GeneralException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public Result generalBusinessExceptionHandler(GeneralException ex) {
+    public Result<?> generalBusinessExceptionHandler(GeneralException ex) {
         if(ex.getData() != null) {
             return Result.error(ex.getResultEnum(),ex.getData());
         } else if(ex.getResultEnum() != null){
