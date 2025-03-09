@@ -17,7 +17,7 @@ import lombok.Setter;
 public class Result<T> {
 
     // 操作代码
-    private int code;
+    private Integer code;
 
     // 提示信息
     private String message;
@@ -27,7 +27,7 @@ public class Result<T> {
 
     @JsonCreator
     public Result(
-            @JsonProperty("code") int code,
+            @JsonProperty("code") Integer code,
             @JsonProperty("message") String message,
             @JsonProperty("data") T data
     ) {
@@ -66,7 +66,7 @@ public class Result<T> {
         return new Result<>(resultCode.getCode(), resultCode.getMessage(), null);
     }
     //失败返回封装-携带数据与错误信息一起返回
-    public static  Result error(ResultEnum resultCode, Object data) {
+    public static  Result<?> error(ResultEnum resultCode, Object data) {
         return new Result<>(resultCode.getCode(), resultCode.getMessage(), data);
     }
     //失败返回封装-使用自定义提示信息

@@ -25,4 +25,8 @@ public final class Const {
     public final static String ROLE_ADMINISTER = "admin";
     //文件
     public final static String IMAGE_COUNTER = "image:";
+
+    //用户相关实体类(用于AOP判断是否混淆ID)
+    public final static String USER_ENTITY = "user";
+    public final static String ACCOUNT_ENTITY = "account";
 }
