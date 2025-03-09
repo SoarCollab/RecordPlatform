@@ -142,9 +142,9 @@ public class JwtUtils {
      * @param jwt 已解析的Jwt对象
      * @return 用户ID
      */
-    public Integer toId(DecodedJWT jwt) {
+    public Long toId(DecodedJWT jwt) {
         Map<String, Claim> claims = jwt.getClaims();
-        return claims.get("id").asInt();
+        return claims.get("id").asLong();
     }
 
     /**

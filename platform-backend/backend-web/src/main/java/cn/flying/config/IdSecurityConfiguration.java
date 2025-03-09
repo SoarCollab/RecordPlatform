@@ -1,4 +1,4 @@
-package cn.flying.common.config;
+package cn.flying.config;
 
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,7 +22,6 @@ public class IdSecurityConfiguration {
     @Bean
     public ObjectMapper objectMapper(Jackson2ObjectMapperBuilder builder) {
         ObjectMapper objectMapper = builder.createXmlMapper(false).build();
-        
         // 配置Long类型为String序列化，防止前端精度丢失
         SimpleModule simpleModule = new SimpleModule();
         simpleModule.addSerializer(Long.class, ToStringSerializer.instance);

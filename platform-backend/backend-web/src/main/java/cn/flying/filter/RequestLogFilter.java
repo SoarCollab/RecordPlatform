@@ -22,24 +22,36 @@ import java.util.Set;
 
 /**
  * 请求日志过滤器，用于记录所有用户请求信息
+ * 与操作日志切面配合使用，该过滤器负责常规请求日志，操作日志切面负责业务操作日志
  */
 @Slf4j
 @Component
 public class RequestLogFilter extends OncePerRequestFilter {
 
-    private final Set<String> ignores = Set.of("/swagger-ui","/v3/api-docs","/api/file");
+    private final Set<String> ignores = Set.of("/swagger-ui","/v3/api-docs","/api/file","/api/system/logs");
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, @NotNull HttpServletResponse response, @NotNull FilterChain filterChain) throws ServletException, IOException {
         if(this.isIgnoreUrl(request.getServletPath())) {
             filterChain.doFilter(request, response);
         } else {
+            // 设置请求唯一ID
+            String reqId = IdUtils.nextLogId();
+            MDC.put("reqId", reqId);
+            
             long startTime = System.currentTimeMillis();
             this.logRequestStart(request);
+            
+            // 使用ContentCachingResponseWrapper包装响应，允许多次读取响应内容
             ContentCachingResponseWrapper wrapper = new ContentCachingResponseWrapper(response);
-            filterChain.doFilter(request, wrapper);
-            this.logRequestEnd(wrapper, startTime);
-            wrapper.copyBodyToResponse();
+            try {
+                filterChain.doFilter(request, wrapper);
+                this.logRequestEnd(wrapper, startTime);
+            } finally {
+                wrapper.copyBodyToResponse();
+                // 清理MDC
+                MDC.remove("reqId");
+            }
         }
     }
 
@@ -65,9 +77,15 @@ public class RequestLogFilter extends OncePerRequestFilter {
     public void logRequestEnd(ContentCachingResponseWrapper wrapper, long startTime){
         long time = System.currentTimeMillis() - startTime;
         int status = wrapper.getStatus();
-        String content = status != 200 ?
-                status + " 错误" : new String(wrapper.getContentAsByteArray());
-        log.info("请求处理耗时: {}ms | 响应结果: {}", time, content);
+        
+        // 仅在DEBUG级别打印完整响应内容
+        if (log.isDebugEnabled()) {
+            String content = status != 200 ?
+                    status + " 错误" : new String(wrapper.getContentAsByteArray());
+            log.debug("请求处理耗时: {}ms | 响应状态: {} | 响应结果: {}", time, status, content);
+        } else {
+            log.info("请求处理耗时: {}ms | 响应状态: {}", time, status);
+        }
     }
 
     /**
@@ -75,10 +93,11 @@ public class RequestLogFilter extends OncePerRequestFilter {
      * @param request 请求
      */
     public void logRequestStart(HttpServletRequest request){
-        String reqId = IdUtils.nextLogId();
-        MDC.put("reqId", reqId);
+        // 将请求参数转换为JSON
         JSONObject object = new JSONObject();
         request.getParameterMap().forEach((k, v) -> object.set(k, v.length > 0 ? v[0] : null));
+        
+        // 获取用户信息
         Object id = request.getAttribute(Const.ATTR_USER_ID);
         if(id != null) {
             User user = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();

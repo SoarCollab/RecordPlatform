@@ -52,12 +52,4 @@
         </root>
     </springProfile>
 
-    <springProfile name="test">
-        <!-- 测试环境：输出所有调试信息 -->
-        <logger name="cn.flying.common.aspect" level="DEBUG" />
-        <logger name="org.springframework.aop" level="DEBUG" />
-        <root level="INFO">
-            <appender-ref ref="CONSOLE" />
-        </root>
-    </springProfile>
 </configuration>

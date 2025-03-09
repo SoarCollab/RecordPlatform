@@ -108,7 +108,11 @@ public class SecurityConfiguration {
         } else if(exceptionOrAuthentication instanceof Authentication authentication){
             User user = (User) authentication.getPrincipal();
             Account account = service.findAccountByNameOrEmail(user.getUsername());
-            String jwt = utils.createJwt(user, account.getUsername(), account.getId());
+            
+            // 确保使用Long类型的用户ID
+            Long userId = account.getId();
+            String jwt = utils.createJwt(user, account.getUsername(), userId);
+            
             if(jwt == null) {
                 writer.write(Result.error(ResultEnum.PERMISSION_LIMIT).toString());
             } else {
