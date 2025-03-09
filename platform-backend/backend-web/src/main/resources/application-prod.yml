@@ -7,7 +7,7 @@ spring:
     druid:
       type: com.alibaba.druid.pool.DruidDataSource
       driver-class-name: com.mysql.cj.jdbc.Driver
-      url: jdbc:mysql://localhost:3306/RecordPlatform?serverTimezone=UTC&useUnicode=true&characterEncoding=utf-8&useSSL=false
+      url: jdbc:mysql://localhost:3306/RecordPlatform?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8&useSSL=false
       username: ${spring.datasource.username}
       password: ${spring.datasource.password}
       initialSize: 5

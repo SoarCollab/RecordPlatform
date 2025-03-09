@@ -1,7 +1,6 @@
 package cn.flying.backendTest;
 
 
-import cn.flying.common.aspect.SecureIdAspect;
 import cn.flying.common.constant.Result;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.Account;
@@ -12,7 +11,6 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
-import org.springframework.test.context.ActiveProfiles;
 
 import com.alibaba.druid.pool.DruidDataSource;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -27,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * @program: RecordPlatform
@@ -36,7 +35,6 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 @SpringBootTest
-@ActiveProfiles("test") // 激活test配置文件
 public class DataBaseTest {
     @Autowired
     private DataSource dataSource;
@@ -46,9 +44,7 @@ public class DataBaseTest {
     
     @Autowired
     private ApplicationContext applicationContext;
-    
-    @Autowired
-    private SecureIdAspect secureIdAspect;
+
 
     @Test
     void druid_Test() {
@@ -59,16 +55,17 @@ public class DataBaseTest {
     }
 
     @Test
+    @Transactional
     void Mybatis_Test() {
         List<Account> testList = new ArrayList<>();
         //雪花ID作为主键
 
         Account account1 = new Account();
         account1.setId(IdUtils.nextEntityId());
-        account1.setUsername("flyingTest111");
-        account1.setPassword("12345689");
+        account1.setUsername("flyingTest");
+        account1.setPassword("123456");
         account1.setRole("user");
-        account1.setEmail("flyingTest@163.com");
+        account1.setEmail("flyingcoding@test1.com");
 
         testList.add(account1);
         accountService.saveBatch(testList);
@@ -80,6 +77,7 @@ public class DataBaseTest {
     }
 
     @Test
+    @Transactional
     void Mybatis_Test2() {
         //逻辑删除测试（逻辑删除字段deleted）
         LambdaQueryWrapper<Account> wrapper = Wrappers.<Account>lambdaQuery()
@@ -87,14 +85,19 @@ public class DataBaseTest {
         Account account = accountService.getOne(wrapper);
         
         if (account != null) {
-            System.out.println(account);
-        }else{
-            System.out.println("用户已被删除!");
+            accountService.removeById(account.getId());
+            Account account_del = accountService.getOne(wrapper);
+            if (account_del != null) {
+                log.warn("用户删除失败！");
+            }else{
+                log.info("用户已被删除!");
+            }
         }
     }
 
     @Test
     void OutEntity_Test() {
+        // 测试ID混淆功能
         log.info("======= 开始测试ID混淆功能 =======");
         
         // 创建测试用户账号

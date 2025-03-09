@@ -21,6 +21,8 @@ public class MybatisHandler implements MetaObjectHandler {
         log.info("开始插入填充...");
         // 创建时间使用当前时间填充
         this.setFieldValByName("createTime", new Date(), metaObject);
+         // 注册时间使用当前时间填充
+         this.setFieldValByName("registerTime", new Date(), metaObject);
         // 更新时间使用当前时间填充
         this.setFieldValByName("updateTime", new Date(), metaObject);
     }

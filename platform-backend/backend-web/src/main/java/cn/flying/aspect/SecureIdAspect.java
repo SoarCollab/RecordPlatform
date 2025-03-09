@@ -1,4 +1,4 @@
-package cn.flying.common.aspect;
+package cn.flying.aspect;
 
 import cn.flying.common.annotation.SecureId;
 import cn.flying.common.constant.Result;

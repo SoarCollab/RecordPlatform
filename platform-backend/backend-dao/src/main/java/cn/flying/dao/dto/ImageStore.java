@@ -18,7 +18,7 @@ import java.util.Date;
 @TableName("image_store")
 @AllArgsConstructor
 public class ImageStore {
-    @TableId(type = IdType.INPUT)
+    @TableId
     String uid;
     String name;
     Date time;
