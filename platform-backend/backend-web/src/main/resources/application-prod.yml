@@ -50,3 +50,8 @@ minio:
   access-key: ${minio.access-key}
   secret-key: ${minio.secret-key}
   bucket-name: forum
+
+# 日志配置
+logging:
+  level:
+    root: WARN  # 全局日志级别保持为WARN

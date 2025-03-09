@@ -1,8 +1,10 @@
 package cn.flying.controller;
 
+import cn.flying.common.annotation.SecureId;
 import cn.flying.common.constant.Result;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.ControllerUtils;
+import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.vo.request.ChangePasswordVO;
 import cn.flying.dao.vo.request.ModifyEmailVO;
@@ -36,8 +38,9 @@ public class AccountController {
      */
     @GetMapping("/info")
     @Operation(summary = "获取用户信息")
+    @SecureId(hideOriginalId = true)
     public Result<AccountVO> getAccountInfo(@RequestAttribute(Const.ATTR_USER_ID) String userId) {
-        Account account = accountService.findAccountById(userId);
+        Account account = accountService.findAccountById(IdUtils.fromExternalId(userId));
         return Result.success(account.asViewObject(AccountVO.class));
     }
     /**

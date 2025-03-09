@@ -18,6 +18,7 @@ import java.util.Date;
 @NoArgsConstructor
 @TableName("account")
 public class Account implements BaseData {
+    @TableId(type = IdType.INPUT)
     Long id;
     String username;
     String password;

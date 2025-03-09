@@ -3,6 +3,7 @@ package cn.flying.common.util;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.InitializingBean;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
@@ -14,11 +15,11 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 优化的雪花算法ID生成器（支持自动注入数据中心/节点ID）
+ * 雪花算法ID生成器（自动注入数据中心/节点ID）
  */
 @Slf4j
 @Component
-public class SnowflakeIdGenerator {
+public class SnowflakeIdGenerator implements InitializingBean {
 
     private static final long DEFAULT_START_TIMESTAMP = 1691087910202L;
     private static final int DATA_CENTER_ID_BITS = 5;
@@ -46,21 +47,27 @@ public class SnowflakeIdGenerator {
     private final AtomicLock atomicLock = new AtomicLock();
     private final long lastTimestamp = -1L;
 
-    public SnowflakeIdGenerator() {
+    @Override
+    public void afterPropertiesSet() {
+        log.info("Snowflake ID Generator initializing...");
         autoConfigureIds();
     }
 
     /** 自动配置数据中心ID和节点ID */
     private void autoConfigureIds() {
         if (dataCenterId < 0 || dataCenterId > MAX_DATA_CENTER_ID) {
+            int originalId = dataCenterId;
             dataCenterId = resolveDataCenterId(); // 自动获取逻辑（如系统环境变量）
+            log.info("数据中心ID {} 无效，自动调整为: {}", originalId, dataCenterId);
         }
         if (workerId < 0 || workerId > MAX_WORKER_ID) {
+            int originalId = workerId;
             workerId = resolveWorkerId(); // 自动获取逻辑（如IP哈希）
+            log.info("工作节点ID {} 无效，自动调整为: {}", originalId, workerId);
         }
         validateIds();
 
-        log.info("Auto-configured Snowflake IDs: dataCenterId={}, workerId={}", dataCenterId, workerId);
+        log.info("Snowflake IDs Initialization completed: dataCenterId={}, workerId={}", dataCenterId, workerId);
     }
 
     /** 生成ID（无锁化） */
@@ -81,6 +88,43 @@ public class SnowflakeIdGenerator {
                     seq;
         });
     }
+    
+    /**
+     * 解析雪花ID中的时间戳
+     * @param id 雪花ID
+     * @return 时间戳（毫秒）
+     */
+    public long extractTimestamp(long id) {
+        return ((id >> TIMESTAMP_SHIFT) + DEFAULT_START_TIMESTAMP);
+    }
+    
+    /**
+     * 解析雪花ID中的数据中心ID
+     * @param id 雪花ID
+     * @return 数据中心ID
+     */
+    public int extractDataCenterId(long id) {
+        return (int) ((id >> DATA_CENTER_ID_SHIFT) & MAX_DATA_CENTER_ID);
+    }
+    
+    /**
+     * 解析雪花ID中的工作节点ID
+     * @param id 雪花ID
+     * @return 工作节点ID
+     */
+    public int extractWorkerId(long id) {
+        return (int) ((id >> WORKER_ID_SHIFT) & MAX_WORKER_ID);
+    }
+    
+    /**
+     * 解析雪花ID中的序列号
+     * @param id 雪花ID
+     * @return 序列号
+     */
+    public int extractSequence(long id) {
+        return (int) (id & MAX_SEQUENCE);
+    }
+
     private long getCurrentTimestamp() {
         return System.currentTimeMillis();
     }

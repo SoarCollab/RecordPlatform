@@ -2,7 +2,7 @@ package cn.flying.service.impl;
 
 import cn.flying.common.util.Const;
 import cn.flying.common.util.FlowUtils;
-import cn.flying.common.util.SnowflakeIdGenerator;
+import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.vo.request.*;
@@ -43,9 +43,6 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
 
     @Resource
     PasswordEncoder passwordEncoder;
-
-    @Resource
-    SnowflakeIdGenerator snowflakeIdGenerator;
 
     @Resource
     FlowUtils flow;
@@ -103,7 +100,7 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
         String username = info.getUsername();
         if(this.existsAccountByUsername(username)) return "该用户名已被他人使用，请重新更换";
         String password = passwordEncoder.encode(info.getPassword());
-        Account account = new Account(snowflakeIdGenerator.nextId(),info.getUsername(),
+        Account account = new Account(IdUtils.nextUserId(),info.getUsername(),
                 password, email, Const.ROLE_DEFAULT,null);
         if(!this.save(account)) {
             return "内部错误，注册失败";
@@ -224,6 +221,7 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
         return this.query()
                 .eq("username", text).or()
                 .eq("email", text)
+                .last("limit 1")
                 .one();
     }
 
@@ -233,7 +231,7 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
      * @return 账户实体
      */
     @Override
-    public Account findAccountById(String id) {
+    public Account findAccountById(Long id) {
         return this.query().eq("id", id).one();
     }
 

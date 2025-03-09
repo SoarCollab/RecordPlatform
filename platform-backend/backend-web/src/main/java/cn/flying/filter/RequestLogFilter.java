@@ -1,7 +1,7 @@
 package cn.flying.filter;
 
 import cn.flying.common.util.Const;
-import cn.flying.common.util.SnowflakeIdGenerator;
+import cn.flying.common.util.IdUtils;
 import cn.hutool.json.JSONObject;
 import jakarta.annotation.Resource;
 import jakarta.servlet.FilterChain;
@@ -26,9 +26,6 @@ import java.util.Set;
 @Slf4j
 @Component
 public class RequestLogFilter extends OncePerRequestFilter {
-
-    @Resource
-    SnowflakeIdGenerator generator;
 
     private final Set<String> ignores = Set.of("/swagger-ui","/v3/api-docs","/api/file");
 
@@ -78,8 +75,8 @@ public class RequestLogFilter extends OncePerRequestFilter {
      * @param request 请求
      */
     public void logRequestStart(HttpServletRequest request){
-        long reqId = generator.nextId();
-        MDC.put("reqId", String.valueOf(reqId));
+        String reqId = IdUtils.nextLogId();
+        MDC.put("reqId", reqId);
         JSONObject object = new JSONObject();
         request.getParameterMap().forEach((k, v) -> object.set(k, v.length > 0 ? v[0] : null));
         Object id = request.getAttribute(Const.ATTR_USER_ID);

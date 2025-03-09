@@ -14,10 +14,26 @@ import java.util.Date;
 @Setter
 @Getter
 public class AccountVO {
-    String id;
+    // 内部ID，在安全切面处理后不会返回给前端
+    private Long id;
+    // 外部ID，由安全切面自动填充
+    private String externalId;
     String username;
     String email;
     String role;
     String avatar;
     Date registerTime;
+
+    @Override
+    public String toString() {
+        return "AccountVO{" +
+                "id=" + id +
+                ", externalId='" + externalId + '\'' +
+                ", username='" + username + '\'' +
+                ", email='" + email + '\'' +
+                ", role='" + role + '\'' +
+                ", avatar='" + avatar + '\'' +
+                ", registerTime=" + registerTime +
+                '}';
+    }
 }
