@@ -17,5 +17,12 @@
         <java.version>21</java.version>
     </properties>
 
+    <dependencies>
+        <dependency>
+            <groupId>cn.flying</groupId>
+            <artifactId>backend-common</artifactId>
+        </dependency>
+    </dependencies>
+
 
 </project>

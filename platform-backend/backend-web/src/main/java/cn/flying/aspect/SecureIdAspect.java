@@ -66,11 +66,10 @@ public class SecureIdAspect {
                     }
                     return result;
                 }
-                case Map<?, ?> map -> {
+                case Map<?, ?> ignored -> {
                     log.debug("跳过Map类型处理");
                     // 不处理Map，因为Map的结构不确定
                     return result;
-                    // 不处理Map，因为Map的结构不确定
                 }
                 default -> {
                     log.debug("处理单个对象: {}", result.getClass().getName());
