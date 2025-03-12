@@ -218,7 +218,7 @@ public class OperationLogAspect {
             
             // 设置响应数据
             if (operationLogAnnotation.saveResponseData() && result != null) {
-                operationLog.setResponseResult(JsonConverter.toJson(result));
+                operationLog.setResponseResult(JsonConverter.toJsonWithPretty(result));
             }
             
             // 设置操作状态和时间

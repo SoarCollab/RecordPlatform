@@ -99,7 +99,6 @@ public class IdUtils {
         if (internalId == null) return null;
         try {
             // 将ID与密钥组合后进行SHA-256哈希，然后Base64编码
-            // 实际应用中可以使用更安全的可逆算法
             String input = internalId + ":" + obfuscationKey;
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
