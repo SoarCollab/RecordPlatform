@@ -1,17 +1,13 @@
-package cn.flying.backendapi.response;
+package cn.flying.platformapi.response;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
-import lombok.NoArgsConstructor;
 
 @Data
 @AllArgsConstructor
-@NoArgsConstructor
-public class FileDetailVO {
-    private String uploader;
+public class FileSharingVO {
     private String fileName;
     private String param;
     private String content;
-//  private String fileHash;
     private String uploadTime;
-} 
+}

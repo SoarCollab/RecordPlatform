@@ -1,9 +1,10 @@
-package cn.flying.backendapi.external;
+package cn.flying.platformapi.external;
 
-import cn.flying.backendapi.response.FileDetailVO;
-import cn.flying.backendapi.response.FileVO;
-import cn.flying.backendapi.response.SharingVO;
-import cn.flying.common.constant.Result;
+import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.response.FileDetailVO;
+import cn.flying.platformapi.response.FileVO;
+import cn.flying.platformapi.response.SharingVO;
+import org.apache.dubbo.config.annotation.DubboService;
 
 import java.util.List;
 
@@ -13,7 +14,7 @@ import java.util.List;
  * @author: flyingcoding
  * @create: 2025-03-10 09:40
  */
-
+@DubboService
 public interface BlockChainService {
     Result<String> storeFile(String uploader, String fileName, String param, String content);
     Result<List<FileVO>> getUserFiles(String uploader);
