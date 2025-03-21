@@ -34,6 +34,10 @@
             <groupId>cn.flying</groupId>
             <artifactId>backend-service</artifactId>
         </dependency>
+        <dependency>
+            <groupId>cn.flying</groupId>
+            <artifactId>backend-api</artifactId>
+        </dependency>
 
         <!-- POI for Excel export -->
         <dependency>

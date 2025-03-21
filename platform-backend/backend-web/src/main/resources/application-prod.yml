@@ -51,6 +51,16 @@ minio:
   secret-key: ${minio.secret-key}
   bucket-name: forum
 
+# dubbo配置
+dubbo:
+  application:
+    name: RecordPlatform_Main
+    logger: slf4j
+    qos-port: -1
+  registry:
+    register-mode: instance
+    address: nacos://localhost:8848?username=nacos&password=flyingcoding
+
 # 日志配置
 logging:
   level:
