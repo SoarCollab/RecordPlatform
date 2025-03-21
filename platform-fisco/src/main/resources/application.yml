@@ -31,6 +31,18 @@ spring:
     ansi:
       enabled: ALWAYS
 
+## dubbo config
+dubbo:
+  application:
+    name: RecordPlatform_fisco
+    logger: slf4j
+  protocol:
+    name: tri
+    port: -1
+  registry:
+    register-mode: instance
+    address: nacos://localhost:8848?username=nacos&password=flyingcoding
+
 logging:
   level:
     root: INFO
