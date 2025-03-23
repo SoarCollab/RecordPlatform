@@ -1,9 +1,7 @@
 package cn.flying.platformapi.external;
 
 import cn.flying.platformapi.constant.Result;
-import cn.flying.platformapi.response.FileDetailVO;
-import cn.flying.platformapi.response.FileVO;
-import cn.flying.platformapi.response.SharingVO;
+import cn.flying.platformapi.response.*;
 import org.apache.dubbo.config.annotation.DubboService;
 
 import java.util.List;
@@ -23,4 +21,6 @@ public interface BlockChainService {
     Result<Boolean> deleteFile(String uploader, String fileHash);
     Result<String> shareFiles(String uploader, List<String> fileHash, Integer maxAccesses);
     Result<SharingVO> getSharedFiles(String shareCode);
+    Result<BlockChainMessage> getCurrentBlockChainMessage();
+    Result<TransactionVO> getTransactionByHash(String transactionHash);
 }

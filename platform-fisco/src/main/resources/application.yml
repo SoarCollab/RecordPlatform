@@ -38,7 +38,7 @@ dubbo:
     logger: slf4j
   protocol:
     name: tri
-    port: -1
+    port: 8091
   registry:
     register-mode: instance
     address: nacos://localhost:8848?username=nacos&password=flyingcoding

@@ -3,21 +3,24 @@ package org.fisco.fisco_bcos.service;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.BlockChainService;
-import cn.flying.platformapi.response.FileDetailVO;
-import cn.flying.platformapi.response.FileSharingVO;
-import cn.flying.platformapi.response.FileVO;
-import cn.flying.platformapi.response.SharingVO;
+import cn.flying.platformapi.response.*;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.apidocs.annotations.ApiDoc;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.fisco.bcos.sdk.v3.client.protocol.response.BcosTransaction;
+import org.fisco.bcos.sdk.v3.client.protocol.response.BcosTransactionReceipt;
+import org.fisco.bcos.sdk.v3.client.protocol.response.TotalTransactionCount;
+import org.fisco.bcos.sdk.v3.model.TransactionReceipt;
 import org.fisco.bcos.sdk.v3.transaction.model.dto.CallResponse;
 import org.fisco.bcos.sdk.v3.transaction.model.dto.TransactionResponse;
 import org.fisco.fisco_bcos.model.bo.*;
 import org.fisco.fisco_bcos.utils.Convert;
+import org.springframework.beans.BeanUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @program: RecordPlatform
@@ -228,6 +231,65 @@ public class BlockChainServiceImpl implements BlockChainService{
         } catch (Exception e) {
             log.error("deleteFiles error:", e);
             return Result.error(ResultEnum.DELETE_USER_FILE_ERROR,null);
+        }
+    }
+
+    @ApiDoc(value = "获取当前区块链状态")
+    public Result<BlockChainMessage> getCurrentBlockChainMessage() {
+        try {
+            TotalTransactionCount totalTransactionCount = sharingService.getCurrentBlockChainMessage();
+            BlockChainMessage message=new BlockChainMessage();
+            BeanUtils.copyProperties(totalTransactionCount,message);
+            return Result.success(message);
+        }catch (Exception e){
+            log.error("getCurrentBlockChainMessage error:", e);
+            return Result.error(ResultEnum.BLOCKCHAIN_ERROR,null);
+        }
+    }
+    
+    @ApiDoc(value = "根据交易哈希获取交易详情")
+    public Result<TransactionVO> getTransactionByHash(String transactionHash) {
+        try {
+            // 获取交易信息
+            BcosTransaction transaction = sharingService.getTransactionByHash(transactionHash);
+            if (transaction == null || transaction.getResult() == null) {
+                return Result.error(ResultEnum.TRANSACTION_NOT_FOUND, null);
+            }
+            
+            // 获取交易回执
+            BcosTransactionReceipt receipt = sharingService.getTransactionReceipt(transactionHash);
+            if (receipt == null || receipt.getResult() == null) {
+                return Result.error(ResultEnum.TRANSACTION_RECEIPT_NOT_FOUND, null);
+            }
+            
+            // 解析交易信息
+            Object result = transaction.getResult();
+            Map<String, Object> txResponse;
+            if (result instanceof Map) {
+                txResponse = (Map<String, Object>) result;
+            } else {
+                log.error("交易结果格式不符合预期: {}", result);
+                return Result.error(ResultEnum.BLOCKCHAIN_ERROR, null);
+            }
+            TransactionReceipt txReceipt = receipt.getResult();
+            
+            // 构建响应VO对象
+            TransactionVO transactionVO = new TransactionVO(
+                    (String) txResponse.get("hash"),
+                    (String) txResponse.get("blockHash"),
+                    (String) txResponse.get("blockNumber"),
+                    (String) txResponse.get("from"),
+                    (String) txResponse.get("to"),
+                    (String) txResponse.get("input"),
+                    txReceipt.getOutput(),
+                    Long.valueOf(txResponse.get("gas").toString()),
+                    Convert.timeStampToDate(Long.parseLong(txResponse.get("blockTimestamp").toString()))
+            );
+            
+            return Result.success(transactionVO);
+        } catch (Exception e) {
+            log.error("getTransactionByHash error:", e);
+            return Result.error(ResultEnum.BLOCKCHAIN_ERROR, null);
         }
     }
 }
