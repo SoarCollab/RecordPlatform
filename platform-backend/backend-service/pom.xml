@@ -22,6 +22,11 @@
             <groupId>cn.flying</groupId>
             <artifactId>backend-dao</artifactId>
         </dependency>
+        <dependency>
+            <groupId>cn.flying</groupId>
+            <artifactId>platform-api</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
     </dependencies>
 
 </project>

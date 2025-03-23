@@ -34,6 +34,9 @@ public enum ResultEnum {
     GET_USER_FILE_ERROR(30003, "获取用户文件失败"),
     DELETE_USER_FILE_ERROR(30004, "删除用户文件失败"),
     GET_USER_SHARE_FILE_ERROR(30005, "获取用户分享文件失败"),
+    BLOCKCHAIN_ERROR(30006,"区块链服务请求失败"),
+    TRANSACTION_NOT_FOUND(30007, "交易记录未找到"),
+    TRANSACTION_RECEIPT_NOT_FOUND(30008, "交易记录回执未找到"),
 
     /* 系统错误：40001-49999 */
     FILE_MAX_SIZE_OVERFLOW(40003, "上传尺寸过大"),
