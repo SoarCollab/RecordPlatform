@@ -8,6 +8,9 @@ import jakarta.annotation.Resource;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.fisco.bcos.sdk.v3.client.Client;
+import org.fisco.bcos.sdk.v3.client.protocol.response.BcosTransaction;
+import org.fisco.bcos.sdk.v3.client.protocol.response.BcosTransactionReceipt;
+import org.fisco.bcos.sdk.v3.client.protocol.response.TotalTransactionCount;
 import org.fisco.bcos.sdk.v3.transaction.manager.AssembleTransactionProcessor;
 import org.fisco.bcos.sdk.v3.transaction.manager.TransactionProcessorFactory;
 import org.fisco.bcos.sdk.v3.transaction.model.dto.CallResponse;
@@ -66,5 +69,17 @@ public class SharingService {
 
   public TransactionResponse storeFile(SharingStoreFileInputBO input) throws Exception {
     return this.txProcessor.sendTransactionAndGetResponse(this.address, ContractConstants.SharingAbi, "storeFile", input.toArgs());
+  }
+
+  public TotalTransactionCount getCurrentBlockChainMessage() {
+    return this.client.getTotalTransactionCount();
+  }
+  
+  public BcosTransaction getTransactionByHash(String transactionHash) {
+    return this.client.getTransaction(transactionHash, false);
+  }
+  
+  public BcosTransactionReceipt getTransactionReceipt(String transactionHash) {
+    return this.client.getTransactionReceipt(transactionHash, false);
   }
 }

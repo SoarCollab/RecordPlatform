@@ -37,6 +37,10 @@ spring:
         smtp:
           socketFactory:
             class: javax.net.ssl.SSLSocketFactory
+  rabbitmq:
+    addresses: ${spring.rabbitmq.addresses}
+    username: ${spring.rabbitmq.username}
+    password: ${spring.rabbitmq.password}
   data:
     redis:
       database: 0
