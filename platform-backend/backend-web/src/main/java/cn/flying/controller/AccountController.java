@@ -1,5 +1,6 @@
 package cn.flying.controller;
 
+import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.annotation.SecureId;
 import cn.flying.common.constant.Result;
 import cn.flying.common.util.Const;
@@ -39,6 +40,7 @@ public class AccountController {
     @GetMapping("/info")
     @Operation(summary = "获取用户信息")
     @SecureId(hideOriginalId = true)
+    @OperationLog(module = "用户模块", operationType = "查询", description = "获取用户信息")
     public Result<AccountVO> getAccountInfo(@RequestAttribute(Const.ATTR_USER_ID) String userId) {
         Account account = accountService.findAccountById(IdUtils.fromExternalId(userId));
         return Result.success(account.asViewObject(AccountVO.class));
@@ -51,6 +53,7 @@ public class AccountController {
      */
     @PostMapping("/modify-email")
     @Operation(summary = "修改邮箱地址")
+    @OperationLog(module = "用户模块", operationType = "修改", description = "修改邮箱地址")
     public Result<String> modifyEmail(@RequestAttribute(Const.ATTR_USER_ID) Long userId, @RequestBody @Valid ModifyEmailVO modifyEmailVO) {
         return utils.messageHandle(() ->
                 accountService.modifyEmail(userId, modifyEmailVO));
@@ -63,6 +66,7 @@ public class AccountController {
      */
     @PostMapping("/change-password")
     @Operation(summary = "修改密码")
+    @OperationLog(module = "用户模块", operationType = "修改", description = "修改密码")
     public Result<String> changePassword(@RequestAttribute(Const.ATTR_USER_ID) String userId, @RequestBody @Valid ChangePasswordVO changePasswordVO) {
         return utils.messageHandle(() ->
                 accountService.changePassword(userId, changePasswordVO));

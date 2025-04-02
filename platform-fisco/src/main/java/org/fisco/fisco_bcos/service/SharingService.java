@@ -1,8 +1,5 @@
 package org.fisco.fisco_bcos.service;
 
-import java.lang.Exception;
-import java.lang.String;
-
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.Data;

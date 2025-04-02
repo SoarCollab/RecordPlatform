@@ -1,6 +1,5 @@
 package org.fisco.fisco_bcos.model.bo;
 
-import java.lang.String;
 import java.math.BigInteger;
 import org.fisco.bcos.sdk.v3.codec.datatypes.DynamicStruct;
 import org.fisco.bcos.sdk.v3.codec.datatypes.Utf8String;

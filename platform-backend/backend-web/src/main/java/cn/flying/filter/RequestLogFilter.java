@@ -3,7 +3,6 @@ package cn.flying.filter;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.IdUtils;
 import cn.hutool.json.JSONObject;
-import jakarta.annotation.Resource;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;

@@ -1,9 +1,7 @@
 package org.fisco.fisco_bcos.constants;
 
 import org.apache.commons.io.IOUtils;
-import java.lang.Exception;
-import java.lang.RuntimeException;
-import java.lang.String;
+
 import java.util.Objects;
 import java.nio.charset.StandardCharsets;
 
