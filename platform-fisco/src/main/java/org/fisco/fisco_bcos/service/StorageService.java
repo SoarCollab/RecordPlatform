@@ -1,9 +1,7 @@
 package org.fisco.fisco_bcos.service;
 
-import java.lang.Exception;
-import java.lang.String;
-
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.Resource;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.fisco.bcos.sdk.v3.client.Client;
@@ -17,7 +15,6 @@ import org.fisco.fisco_bcos.model.bo.StorageDeleteFilesInputBO;
 import org.fisco.fisco_bcos.model.bo.StorageGetFileInputBO;
 import org.fisco.fisco_bcos.model.bo.StorageGetUserFilesInputBO;
 import org.fisco.fisco_bcos.model.bo.StorageStoreFileInputBO;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -28,7 +25,7 @@ public class StorageService {
   @Value("${contract.storageAddress}")
   private String address;
 
-  @Autowired
+  @Resource
   private Client client;
 
   AssembleTransactionProcessor txProcessor;

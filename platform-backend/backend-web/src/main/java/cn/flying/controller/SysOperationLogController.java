@@ -1,4 +1,4 @@
-package cn.flying.web.controller;
+package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.dao.dto.SysOperationLog;
@@ -6,6 +6,8 @@ import cn.flying.dao.vo.SysOperationLogVO;
 import cn.flying.service.SysOperationLogService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,6 +18,7 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/system/logs")
+@Tag(name = "系统操作日志", description = "包括操作日志的查询、导出、清空等操作。")
 public class SysOperationLogController {
 
     @Resource
@@ -34,6 +37,7 @@ public class SysOperationLogController {
      * @return 分页结果
      */
     @GetMapping("/page")
+    @Operation(summary = "分页查询操作日志")
     @OperationLog(module = "系统管理", operationType = "查询", description = "分页查询操作日志")
     public IPage<SysOperationLogVO> page(
             @RequestParam(defaultValue = "1") Integer pageNum,
@@ -55,6 +59,7 @@ public class SysOperationLogController {
      * @return 日志详情
      */
     @GetMapping("/{id}")
+    @Operation(summary = "获取操作日志详情")
     @OperationLog(module = "系统管理", operationType = "查询", description = "查询操作日志详情")
     public SysOperationLog getLogDetail(@PathVariable Long id) {
         return operationLogService.getLogDetailById(id);
@@ -71,6 +76,7 @@ public class SysOperationLogController {
      * @return 日志列表
      */
     @GetMapping("/export")
+    @Operation(summary = "导出操作日志")
     @OperationLog(module = "系统管理", operationType = "导出", description = "导出操作日志")
     public List<SysOperationLogVO> export(
             @RequestParam(required = false) String module,
@@ -86,6 +92,7 @@ public class SysOperationLogController {
      * 清空操作日志
      */
     @DeleteMapping("/clean")
+    @Operation(summary = "清空操作日志")
     @OperationLog(module = "系统管理", operationType = "删除", description = "清空操作日志")
     public void cleanLogs() {
         operationLogService.cleanOperationLogs();

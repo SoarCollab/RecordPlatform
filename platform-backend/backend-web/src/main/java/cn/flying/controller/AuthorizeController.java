@@ -1,5 +1,6 @@
 package cn.flying.controller;
 
+import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
 import cn.flying.common.util.ControllerUtils;
 import cn.flying.dao.vo.request.ConfirmResetVO;
@@ -39,6 +40,7 @@ public class AuthorizeController {
      */
     @GetMapping("/ask-code")
     @Operation(summary = "请求邮件验证码")
+    @OperationLog(module = "登录校验模块", operationType = "查询", description = "请求邮件验证码")
     public Result<String> askVerifyCode(@RequestParam @Email String email,
                                       @RequestParam @Pattern(regexp = "(register|reset|modify)")  String type,
                                       HttpServletRequest request){

@@ -38,13 +38,13 @@ CREATE OR REPLACE VIEW `v_operation_log_stats` AS
 SELECT 
     module,
     operation_type,
-    COUNT(*) as operation_count,
-    SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) as success_count,
-    SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as error_count,
-    AVG(execution_time) as avg_execution_time,
-    MAX(execution_time) as max_execution_time,
-    MIN(execution_time) as min_execution_time,
-    DATE(operation_time) as operation_date
+    COUNT(*)                  as operation_count,
+    SUM(IF(status = 0, 1, 0)) as success_count,
+    SUM(IF(status = 1, 1, 0)) as error_count,
+    AVG(execution_time)       as avg_execution_time,
+    MAX(execution_time)       as max_execution_time,
+    MIN(execution_time)       as min_execution_time,
+    DATE(operation_time)      as operation_date
 FROM 
     sys_operation_log
 GROUP BY 
@@ -59,7 +59,7 @@ SELECT
     COUNT(DISTINCT DATE(operation_time)) as active_days,
     MIN(operation_time) as first_operation,
     MAX(operation_time) as last_operation,
-    SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) as error_count
+    SUM(IF(status = 1, 1, 0)) as error_count
 FROM 
     sys_operation_log
 WHERE 

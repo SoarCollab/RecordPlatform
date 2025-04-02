@@ -16,6 +16,7 @@ public final class Const {
     //过滤器优先级
     public final static int ORDER_FLOW_LIMIT = -101;
     public final static int ORDER_CORS = -102;
+    public final static int ORDER_ID_SECURITY = 100;
     //请求自定义属性
     public final static String ATTR_USER_ID = "userId";
     //消息队列

@@ -1,6 +1,7 @@
 package cn.flying.filter;
 
 
+import cn.flying.common.util.Const;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,7 +22,7 @@ import java.util.regex.Pattern;
  */
 @Slf4j
 @Component
-@Order(100) // 确保在安全过滤器之后执行
+@Order(Const.ORDER_ID_SECURITY) // 确保在安全过滤器之后执行
 public class IdSecurityFilter extends OncePerRequestFilter {
 
     private static final Pattern ID_PATTERN = Pattern.compile("/api/(\\w+)/(\\d+)");

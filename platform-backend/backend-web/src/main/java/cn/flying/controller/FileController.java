@@ -1,5 +1,6 @@
 package cn.flying.controller;
 
+import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
@@ -26,7 +27,7 @@ import java.io.IOException;
  */
 @Slf4j
 @RestController
-@Tag(name = "文件上传下载相关", description = "包括头像、图片等文件的上传下载操作。")
+@Tag(name = "图片上传下载相关", description = "包括头像、图片等文件的上传下载操作。")
 @RequestMapping("/api/file")
 public class FileController {
     @Resource
@@ -40,6 +41,7 @@ public class FileController {
      */
     @PostMapping("/upload/avatar")
     @Operation(summary = "上传头像")
+    @OperationLog(module = "图片上传模块", operationType = "上传", description = "上传头像")
     public Result<String> uploadAvatar(@RequestParam("file") MultipartFile file,
                                        @RequestAttribute(Const.ATTR_USER_ID) String userId) throws IOException {
         if (file.isEmpty()) {
@@ -65,6 +67,7 @@ public class FileController {
      */
     @PostMapping("/upload/image")
     @Operation(summary = "上传图片")
+    @OperationLog(module = "图片上传模块", operationType = "上传", description = "上传图片")
     public Result<String> uploadImage(@RequestParam("file") MultipartFile file,
                                         @RequestAttribute(Const.ATTR_USER_ID) String userId,
                                         HttpServletResponse response) throws IOException {
@@ -91,6 +94,7 @@ public class FileController {
      */
     @GetMapping("/download/images/**")
     @Operation(summary = "下载图片")
+    @OperationLog(module = "图片上传模块", operationType = "下载", description = "下载图片")
     public void avatarFetch(HttpServletRequest request, HttpServletResponse response) throws Exception {
         response.setHeader("Content-Type","image/jpeg");
         this.fetchImage(request,response);
