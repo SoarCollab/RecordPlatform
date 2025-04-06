@@ -27,6 +27,10 @@
             <artifactId>platform-api</artifactId>
             <version>0.0.1-SNAPSHOT</version>
         </dependency>
+        <dependency>
+            <groupId>cn.flying</groupId>
+            <artifactId>backend-api</artifactId>
+        </dependency>
     </dependencies>
 
 </project>

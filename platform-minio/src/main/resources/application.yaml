@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: platform-minio
+
+## dubbo config
+dubbo:
+  application:
+    name: RecordPlatform_minio
+    logger: slf4j
+  protocol:
+    name: tri
+    port: 8092
+  registry:
+    register-mode: instance
+    address: nacos://localhost:8848?username=nacos&password=flyingcoding
