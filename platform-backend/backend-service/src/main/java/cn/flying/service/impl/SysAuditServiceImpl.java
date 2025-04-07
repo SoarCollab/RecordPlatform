@@ -1,7 +1,6 @@
 package cn.flying.service.impl;
 
 import cn.flying.dao.dto.SysOperationLog;
-import cn.flying.dao.mapper.SysAuditMapper;
 import cn.flying.dao.mapper.SysOperationLogMapper;
 import cn.flying.dao.vo.audit.*;
 import cn.flying.service.SysAuditService;
@@ -10,9 +9,12 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.checkerframework.checker.units.qual.A;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.Resource;
+
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
@@ -28,9 +30,6 @@ public class SysAuditServiceImpl implements SysAuditService {
 
     @Resource
     private SysOperationLogMapper operationLogMapper;
-    
-    @Resource
-    private SysAuditMapper sysAuditMapper;
     
     @Override
     public IPage<SysOperationLog> queryOperationLogs(AuditLogQueryVO queryVO) {
@@ -81,7 +80,7 @@ public class SysAuditServiceImpl implements SysAuditService {
     @Override
     public List<HighFrequencyOperationVO> getHighFrequencyOperations() {
         // 直接使用Mapper查询视图
-        return sysAuditMapper.selectHighFrequencyOperations();
+        return operationLogMapper.selectHighFrequencyOperations();
     }
     
     @Override
@@ -90,7 +89,7 @@ public class SysAuditServiceImpl implements SysAuditService {
         int offset = (queryVO.getPageNum() - 1) * queryVO.getPageSize();
         
         // 查询数据
-        List<SysOperationLog> records = sysAuditMapper.selectSensitiveOperations(
+        List<SysOperationLog> records = operationLogMapper.selectSensitiveOperations(
                 queryVO.getUserId(),
                 queryVO.getUsername(),
                 queryVO.getModule(),
@@ -102,7 +101,7 @@ public class SysAuditServiceImpl implements SysAuditService {
         );
         
         // 查询总数
-        Long total = sysAuditMapper.countSensitiveOperations(
+        Long total = operationLogMapper.countSensitiveOperations(
                 queryVO.getUserId(),
                 queryVO.getUsername(),
                 queryVO.getModule(),
@@ -119,22 +118,22 @@ public class SysAuditServiceImpl implements SysAuditService {
     
     @Override
     public List<ErrorOperationStatsVO> getErrorOperationStats() {
-        return sysAuditMapper.selectErrorOperationStats();
+        return operationLogMapper.selectErrorOperationStats();
     }
     
     @Override
     public List<UserTimeDistributionVO> getUserTimeDistribution() {
-        return sysAuditMapper.selectUserTimeDistribution();
+        return operationLogMapper.selectUserTimeDistribution();
     }
     
     @Override
     public List<AuditConfigVO> getAuditConfigs() {
-        return sysAuditMapper.selectAuditConfigs();
+        return operationLogMapper.selectAuditConfigs();
     }
     
     @Override
     public boolean updateAuditConfig(AuditConfigVO configVO) {
-        int rows = sysAuditMapper.updateAuditConfig(
+        int rows = operationLogMapper.updateAuditConfig(
                 configVO.getConfigKey(),
                 configVO.getConfigValue(),
                 configVO.getDescription()
@@ -194,22 +193,50 @@ public class SysAuditServiceImpl implements SysAuditService {
         
         return operationLogMapper.selectList(queryWrapper);
     }
-    
+
     @Override
     public Map<String, Object> getAuditOverview() {
         Map<String, Object> overview = new HashMap<>();
+        LocalDate today = LocalDate.now();
+        LocalDateTime startOfDay = today.atStartOfDay();
+        LocalDateTime endOfDay = today.plusDays(1).atStartOfDay(); // Exclusive end
 
-        overview.put("totalOperations", sysAuditMapper.selectTotalOperations());
-        overview.put("todayOperations", sysAuditMapper.selectTodayOperations());
-        overview.put("errorOperations", sysAuditMapper.selectErrorOperations());
-        overview.put("sensitiveOperations", sysAuditMapper.selectSensitiveOperationCount());
-        overview.put("activeUsers", sysAuditMapper.selectActiveUsers());
-        
-        // 获取每日统计数据
-        List<Map<String, Object>> dailyStats = sysAuditMapper.selectDailyStats();
-        overview.put("dailyStats", dailyStats);
-        
+        try {
+            overview.put("totalOperations", operationLogMapper.selectTotalOperations());
+            overview.put("todayOperations", operationLogMapper.selectOperationsBetween(startOfDay, endOfDay));
+            overview.put("totalErrorOperations", operationLogMapper.selectTotalErrorOperations());
+            overview.put("todayErrorOperations", operationLogMapper.selectErrorOperationsBetween(startOfDay, endOfDay));
+            overview.put("todaySensitiveOperations", operationLogMapper.selectSensitiveOperationsCountBetween(startOfDay, endOfDay));
+            overview.put("todayActiveUsers", operationLogMapper.selectActiveUsersBetween(startOfDay, endOfDay));
+            overview.put("highFrequencyAlerts", operationLogMapper.selectHighFrequencyAlertCount());
+
+            // 获取过去7天的每日统计数据
+            int daysForStats = 7;
+            List<Map<String, Object>> dailyStats = operationLogMapper.selectDailyStats(daysForStats);
+            overview.put("dailyStats", dailyStats); // Example: [{date: '2024-04-01', count: 150}, ...]
+
+            // 获取审计配置状态
+            overview.put("auditEnabled", getAuditConfigValue("AUDIT_ENABLED", "true")); // Default to true if not found
+            overview.put("logRetentionDays", getAuditConfigValue("LOG_RETENTION_DAYS", "180")); // Default retention
+
+        } catch (Exception e) {
+            log.error("获取审计概览数据失败", e);
+            // Optionally return partial data or throw a custom exception
+            overview.put("error", "获取概览数据时发生错误: " + e.getMessage());
+        }
+
         return overview;
+    }
+
+    // Helper method to get specific audit config value
+    private String getAuditConfigValue(String key, String defaultValue) {
+        try {
+            AuditConfigVO config = operationLogMapper.selectAuditConfigByKey(key);
+            return (config != null && config.getConfigValue() != null) ? config.getConfigValue() : defaultValue;
+        } catch (Exception e) {
+            log.warn("无法获取审计配置项 '{}': {}", key, e.getMessage());
+            return defaultValue;
+        }
     }
     
     @Override
@@ -217,7 +244,7 @@ public class SysAuditServiceImpl implements SysAuditService {
         Map<String, Object> result = new HashMap<>();
         
         try {
-            Map<String, Object> procedureResult = sysAuditMapper.checkAnomalies();
+            Map<String, Object> procedureResult = operationLogMapper.checkAnomalies();
             
             Boolean hasAnomalies = (Boolean) procedureResult.get("hasAnomalies");
             String anomalyDetails = (String) procedureResult.get("anomalyDetails");
@@ -238,7 +265,7 @@ public class SysAuditServiceImpl implements SysAuditService {
     @Override
     public String backupLogs(Integer days, Boolean deleteAfterBackup) {
         try {
-            sysAuditMapper.backupLogs(days, deleteAfterBackup);
+            operationLogMapper.backupLogs(days, deleteAfterBackup);
             return "成功备份" + days + "天前的日志" + (deleteAfterBackup ? "并清理原表数据" : "");
         } catch (Exception e) {
             log.error("调用日志备份存储过程失败", e);
