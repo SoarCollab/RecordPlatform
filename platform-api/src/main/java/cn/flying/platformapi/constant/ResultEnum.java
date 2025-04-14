@@ -37,6 +37,9 @@ public enum ResultEnum {
     BLOCKCHAIN_ERROR(30006,"区块链服务请求失败"),
     TRANSACTION_NOT_FOUND(30007, "交易记录未找到"),
     TRANSACTION_RECEIPT_NOT_FOUND(30008, "交易记录回执未找到"),
+    FILE_SERVICE_ERROR(30009, "文件服务请求失败"),
+
+
 
     /* 系统错误：40001-49999 */
     FILE_MAX_SIZE_OVERFLOW(40003, "上传尺寸过大"),
