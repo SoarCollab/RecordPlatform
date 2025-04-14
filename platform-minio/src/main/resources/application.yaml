@@ -1,15 +1,32 @@
 spring:
   application:
-    name: platform-minio
+    name: platform-minio # 应用名称
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: 6379
+      username: ${REDIS_USERNAME}
+      password: ${REDIS_PASSWORD}
+      database: 0
 
 ## dubbo config
 dubbo:
   application:
     name: RecordPlatform_minio
     logger: slf4j
+    protocol: tri
   protocol:
     name: tri
     port: 8092
   registry:
     register-mode: instance
     address: nacos://localhost:8848?username=nacos&password=flyingcoding
+
+
+# 其他 Spring Boot 配置...
+logging:
+  level:
+    cn.flying.minio: DEBUG # 保持或根据需要调整
+    com.alibaba.cloud.nacos: DEBUG # Nacos 相关日志
+    org.springframework.boot.context.properties.bind: TRACE # Spring Boot 属性绑定详细日志
+    root: INFO

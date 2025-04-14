@@ -1,5 +1,6 @@
 package cn.flying.platformapi.external;
 
+import cn.flying.platformapi.constant.Result;
 import org.apache.dubbo.config.annotation.DubboService;
 
 import java.io.File;
@@ -15,9 +16,9 @@ import java.util.Map;
 @DubboService
 public interface DistributedStorageService {
 
-    List<File> getFileListByHash(List<String> filePathList, List<String> fileHashList);
-    List<String> getFileUrlListByHash(List<String> filePathList, List<String> fileHashList);
-    Map<String, String> storeFile(List<File> fileList, List<String> FileHashList);
+    Result<List<File>> getFileListByHash(List<String> filePathList, List<String> fileHashList);
+    Result<List<String>> getFileUrlListByHash(List<String> filePathList, List<String> fileHashList);
+    Result<Map<String, String>> storeFile(List<File> fileList, List<String> FileHashList);
 
 }
 
