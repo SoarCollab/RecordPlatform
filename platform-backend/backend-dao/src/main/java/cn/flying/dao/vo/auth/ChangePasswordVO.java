@@ -1,4 +1,4 @@
-package cn.flying.dao.vo.request;
+package cn.flying.dao.vo.auth;
 
 import lombok.Data;
 import org.hibernate.validator.constraints.Length;

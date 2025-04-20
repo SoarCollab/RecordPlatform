@@ -4,7 +4,7 @@ package cn.flying.backendTest;
 import cn.flying.common.constant.Result;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.Account;
-import cn.flying.dao.vo.response.AccountVO;
+import cn.flying.dao.vo.auth.AccountVO;
 import jakarta.annotation.Resource;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.BeanUtils;

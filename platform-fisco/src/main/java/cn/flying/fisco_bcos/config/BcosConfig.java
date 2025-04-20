@@ -10,10 +10,10 @@ import java.util.Map;
 
 @Data
 @Configuration
-@ConfigurationProperties
+@ConfigurationProperties(prefix = "bcos")
 public class BcosConfig {
     private Map<String, Object> cryptoMaterial;
-    public Map<String, List<String>> network;
+    public Map<String, Object> network;
     public List<AmopTopic> amop;
     public Map<String, Object> account;
     public Map<String, Object> threadPool;

@@ -19,14 +19,24 @@ import java.util.Date;
 @TableName("account")
 public class Account implements BaseData {
     @TableId(type = IdType.INPUT)
-    Long id;
-    String username;
-    String password;
-    String email;
-    String role;
-    String avatar;
+    private Long id;
+
+    private String username;
+
+    private String password;
+
+    private String email;
+
+    private String role;
+
+    private String avatar;
+
     @TableField(fill = FieldFill.INSERT)
     Date registerTime;
+
+    @TableField(fill = FieldFill.INSERT_UPDATE)
+    Date updateTime;
+
     @TableLogic
     Integer deleted;
 
