@@ -1,4 +1,4 @@
-package cn.flying.dao.vo.response;
+package cn.flying.dao.vo.auth;
 
 import lombok.Getter;
 import lombok.Setter;

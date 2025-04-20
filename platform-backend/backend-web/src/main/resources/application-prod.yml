@@ -63,7 +63,7 @@ dubbo:
     qos-port: -1
   registry:
     register-mode: instance
-    address: nacos://localhost:8848?username=nacos&password=flyingcoding
+    address: nacos://localhost:8848?username=${nacos.username}&password=${nacos.password}
 
 # 日志配置
 logging:

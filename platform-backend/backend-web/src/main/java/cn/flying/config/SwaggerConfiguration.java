@@ -1,7 +1,7 @@
 package cn.flying.config;
 
 import cn.flying.common.constant.Result;
-import cn.flying.dao.vo.response.AuthorizeVO;
+import cn.flying.dao.vo.auth.AuthorizeVO;
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeIn;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;

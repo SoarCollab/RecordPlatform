@@ -1,18 +1,15 @@
-package cn.flying.dao.vo.request;
+package cn.flying.dao.vo.auth;
 
 import jakarta.validation.constraints.Email;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 import org.hibernate.validator.constraints.Length;
 
-/**
- * 密码重置表单实体
- */
 @Data
-public class EmailResetVO {
+@AllArgsConstructor
+public class ConfirmResetVO {
     @Email
     String email;
     @Length(max = 6, min = 6)
     String code;
-    @Length(min = 6, max = 20)
-    String password;
 }

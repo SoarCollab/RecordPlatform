@@ -19,7 +19,9 @@ import java.util.Date;
 public class ImageStore {
     @TableId
     String uid;
+
     String name;
+
     Date time;
 
 }

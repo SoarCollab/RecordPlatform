@@ -5,7 +5,7 @@ import cn.flying.common.util.FlowUtils;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.mapper.AccountMapper;
-import cn.flying.dao.vo.request.*;
+import cn.flying.dao.vo.auth.*;
 import cn.flying.service.AccountService;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;

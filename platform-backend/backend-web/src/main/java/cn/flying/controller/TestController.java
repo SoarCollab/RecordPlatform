@@ -5,7 +5,7 @@ import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.dao.dto.Account;
-import cn.flying.dao.vo.response.AccountVO;
+import cn.flying.dao.vo.auth.AccountVO;
 import cn.flying.service.AccountService;
 import jakarta.annotation.Resource;
 import org.springframework.beans.BeanUtils;

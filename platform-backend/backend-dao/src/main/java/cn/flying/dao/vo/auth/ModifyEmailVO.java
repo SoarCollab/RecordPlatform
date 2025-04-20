@@ -1,4 +1,4 @@
-package cn.flying.dao.vo.request;
+package cn.flying.dao.vo.auth;
 
 import jakarta.validation.constraints.Email;
 import lombok.Data;
