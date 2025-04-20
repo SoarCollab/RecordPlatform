@@ -26,7 +26,7 @@ public class JsonConverter {
     static{
         //忽略空值的序列化行为
         om.setSerializationInclusion(JsonInclude.Include.NON_NULL);
-        //该属性设置主要是取消将对象的时间默认转换timesstamps(时间戳)形式
+        //该属性设置主要是取消将对象的时间默认转换timestamps(时间戳)形式
         om.configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
         //该属性设置主要是将忽略空bean转json错误
         om.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);

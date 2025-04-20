@@ -5,7 +5,7 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.JwtUtils;
 import cn.flying.dao.dto.Account;
-import cn.flying.dao.vo.response.AuthorizeVO;
+import cn.flying.dao.vo.auth.AuthorizeVO;
 import cn.flying.filter.JwtAuthenticationFilter;
 import cn.flying.filter.RequestLogFilter;
 import cn.flying.service.AccountService;

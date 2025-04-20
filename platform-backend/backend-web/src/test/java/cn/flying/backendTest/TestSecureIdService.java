@@ -3,7 +3,7 @@ package cn.flying.backendTest;
 
 import cn.flying.common.annotation.SecureId;
 import cn.flying.common.constant.Result;
-import cn.flying.dao.vo.response.AccountVO;
+import cn.flying.dao.vo.auth.AccountVO;
 import org.springframework.stereotype.Service;
 
 import lombok.extern.slf4j.Slf4j;

@@ -1,8 +1,9 @@
 ### Java sdk configuration
-cryptoMaterial:
-  certPath: conf
-network:
-  peers[0]: 192.168.5.100:20200
+bcos:
+  cryptoMaterial:
+    certPath: conf
+  network:
+    peers[0]: 192.168.5.100:20200
 ### network.peers[1]=192.168.5.100:20201
 
 ### System configuration
