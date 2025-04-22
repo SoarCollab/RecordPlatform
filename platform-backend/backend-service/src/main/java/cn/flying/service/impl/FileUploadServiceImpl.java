@@ -2,11 +2,14 @@ package cn.flying.service.impl;
 
 import cn.flying.common.exception.GeneralException;
 import cn.flying.dao.vo.file.*;
+import cn.flying.service.FileService;
 import cn.flying.service.FileUploadService;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
+import org.slf4j.MDC;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -86,6 +89,9 @@ public class FileUploadServiceImpl implements FileUploadService {
     private final Map<String, FileUploadState> activeUploads = new ConcurrentHashMap<>(); // 活跃的上传会话
     private final Map<String, String> fileClientKeyToSessionId = new ConcurrentHashMap<>(); // 映射: "fileName_clientId" -> sessionId
     private final Set<String> pausedSessionIds = ConcurrentHashMap.newKeySet(); // 暂停的会话ID集合
+
+    @Resource
+    private FileService fileService;
 
     public FileUploadServiceImpl() {
         int corePoolSize = Math.max(2, Runtime.getRuntime().availableProcessors());
@@ -365,6 +371,11 @@ public class FileUploadServiceImpl implements FileUploadService {
             activeUploads.remove(sessionId);
             fileClientKeyToSessionId.remove(state.getFileName() + "_" + state.getClientId());
             pausedSessionIds.remove(sessionId); // 确保移除暂停状态
+
+            // 从MDC中获取用户ID
+            String Uid = MDC.get("userId");
+            // 调用文件服务初始化文件元信息
+            fileService.prepareStoreFile(Uid, state.getFileName());
 
             log.info("文件上传和处理流程完成: 会话ID={}, 文件名={}", sessionId, state.getFileName());
 
