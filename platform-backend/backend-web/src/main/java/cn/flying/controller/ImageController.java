@@ -28,8 +28,8 @@ import java.io.IOException;
 @Slf4j
 @RestController
 @Tag(name = "图片上传下载相关", description = "包括头像、图片等文件的上传下载操作。")
-@RequestMapping("/api/file")
-public class FileController {
+@RequestMapping("/api/image")
+public class ImageController {
     @Resource
     ImageService imageService;
     /**

@@ -1,11 +1,5 @@
 package cn.flying.dao.vo.file;
 
-/**
- * @program: RecordPlatform
- * @description:
- * @author: flyingcoding
- * @create: 2025-04-01 13:37
- */
 import lombok.Getter;
 import lombok.Setter;
 
@@ -13,8 +7,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-
-/** 文件上传状态内部类 */
+/**
+ * @program: RecordPlatform
+ * @description: 文件上传状态内部类
+ * @author: flyingcoding
+ * @create: 2025-04-01 13:37
+ */
 @Getter
 @Setter
 public class FileUploadState {

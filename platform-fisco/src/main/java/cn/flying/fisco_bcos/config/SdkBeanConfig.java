@@ -41,7 +41,7 @@ public class SdkBeanConfig {
     }
 
     public void configNetwork(ConfigProperty configProperty){
-        Map<String,Object> peers = bcosConfig.getNetwork();
+        Map peers = bcosConfig.getNetwork();
         configProperty.setNetwork(peers);
     }
 
