@@ -52,4 +52,14 @@
         </root>
     </springProfile>
 
+    <springProfile name="local">
+        <!-- 开发环境：输出重要信息，但不包括debug -->
+        <logger name="cn.flying.common.aspect" level="INFO" />
+        <logger name="org.springframework.aop" level="INFO" />
+        <root level="INFO">
+            <appender-ref ref="CONSOLE" />
+            <appender-ref ref="FILE" />
+        </root>
+    </springProfile>
+
 </configuration>

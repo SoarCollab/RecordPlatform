@@ -1,5 +1,6 @@
 package cn.flying.dao.vo.file;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -13,13 +14,21 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
+@Schema(description = "文件上传进度类")
 public class ProgressVO {
+    @Schema(description = "是否成功")
     private int progress; // 总体进度百分比
+    @Schema(description = "上传进度百分比")
     private int uploadProgress; // 原始分片上传进度百分比
+    @Schema(description = "处理进度百分比")
     private int processProgress; // 分片处理进度百分比
+    @Schema(description = "已上传原始分片数量")
     private int uploadedChunkCount; // 已上传原始分片数量
+    @Schema(description = "已处理分片数量")
     private int processedChunkCount; // 已处理分片数量
+    @Schema(description = "总分片数量")
     private int totalChunks; // 总分片数量
+    @Schema(description = "会话ID")
     private String sessionId;
 
     public ProgressVO(boolean success, String message, int progress, int uploadProgress,

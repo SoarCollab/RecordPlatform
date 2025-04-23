@@ -379,6 +379,7 @@ public class FileUploadServiceImpl implements FileUploadService {
 
             log.info("文件上传和处理流程完成: 会话ID={}, 文件名={}", sessionId, state.getFileName());
 
+            //todo 消息队列实现文件异步存证
         } catch (IOException e) {
             log.error("完成文件处理或清理时失败: 会话ID={}", sessionId, e);
             // 考虑更具体的错误处理或回滚机制

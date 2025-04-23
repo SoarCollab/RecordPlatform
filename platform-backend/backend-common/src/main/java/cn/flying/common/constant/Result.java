@@ -2,6 +2,7 @@ package cn.flying.common.constant;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -14,15 +15,19 @@ import lombok.Setter;
 
 @Getter
 @Setter
+@Schema(description = "返回结果封装")
 public class Result<T> {
 
     // 操作代码
+    @Schema(description = "操作代码")
     private Integer code;
 
     // 提示信息
+    @Schema(description = "提示信息")
     private String message;
 
     // 结果数据
+    @Schema(description = "结果数据")
     private T data;
 
     @JsonCreator
