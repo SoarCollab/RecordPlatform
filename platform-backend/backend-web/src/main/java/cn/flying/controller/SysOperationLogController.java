@@ -9,6 +9,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -18,6 +19,7 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/system/logs")
+@PreAuthorize("hasRole('admin')") // 仅允许管理员访问
 @Tag(name = "系统操作日志", description = "包括操作日志的查询、导出、清空等操作。")
 public class SysOperationLogController {
 
