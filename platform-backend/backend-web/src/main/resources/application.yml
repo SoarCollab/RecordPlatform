@@ -6,7 +6,7 @@ spring:
       max-file-size: 100MB
       max-request-size: 1000MB
   profiles:
-    active: dev
+    active: local
   jackson:
     time-zone: GMT+8
 
@@ -32,6 +32,34 @@ spring:
       origin: '*'
       credentials: false
       methods: '*'
+
+# springdoc-openapi项目配置
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+  group-configs:
+    - group: 'default'
+      paths-to-match: '/**'
+      #生成文档所需的扫包路径，一般为启动类目录
+      packages-to-scan: cn.flying.controller
+
+#knife4j配置
+knife4j:
+  #是否启用增强设置
+  enable: true
+  #开启生产环境屏蔽
+  production: false
+  #是否启用登录认证
+  basic:
+    enable: true
+    username: admin
+    password: 123456
+  setting:
+    language: zh_cn
 
 mybatis-plus:
   configuration:

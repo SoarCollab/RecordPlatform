@@ -7,6 +7,8 @@ import cn.flying.common.exception.GeneralException;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.vo.auth.AccountVO;
 import cn.flying.service.AccountService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,23 +25,27 @@ import java.util.List;
  * @create: 2024-11-01 09:51
  */
 @RestController
+@Tag(name = "测试接口", description = "用于测试接口的异常处理和权限控制")
 public class TestController {
 
     @Resource
     private AccountService accountService;
 
-    @RequestMapping("/")
+    @GetMapping("/")
+    @Operation(summary = "测试接口")
     public String index(){
         return "hello world,I'm flying!!!";
     }
 
-    @RequestMapping("/testException")
+    @GetMapping("/testException")
+    @Operation(summary = "测试其他异常")
     public String testException(){
         int i = 1/0;
         return "测试其他异常";
     }
 
-    @RequestMapping("/testBusinessException")
+    @GetMapping("/testBusinessException")
+    @Operation(summary = "测试业务异常")
     public String testBusinessException(){
         throw new GeneralException(ResultEnum.RESULT_DATA_NONE);
     }
@@ -49,6 +55,7 @@ public class TestController {
      * 示例：处理集合类型
      */
     @GetMapping("/multiple")
+    @Operation(summary = "获取多个用户信息（隐藏用户原始Id）")
     @SecureId(hideOriginalId = true)  // 隐藏原始ID
     public Result<List<AccountVO>> getMultipleUsers() {
         // 模拟查询多个用户
