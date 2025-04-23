@@ -6,7 +6,6 @@ import cn.flying.dao.vo.file.FileUploadStatusVO;
 import cn.flying.dao.vo.file.ProgressVO;
 import cn.flying.dao.vo.file.ResumeUploadVO;
 import cn.flying.dao.vo.file.StartUploadVO;
-import cn.flying.service.FileService;
 import cn.flying.service.FileUploadService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -18,14 +17,13 @@ import org.springframework.web.multipart.MultipartFile;
 
 /**
  * @program: RecordPlatform
- * @description: 文件上传控制器 (处理HTTP请求和响应)
+ * @description: 文件分片上传、断点续传控制器
  * @author: flyingcoding
  * @create: 2025-03-31 11:22 (Refactored: YYYY-MM-DD)
  */
 @Slf4j
 @RestController
-@CrossOrigin(origins = "*")
-@RequestMapping("/api/file/uploader/")
+@RequestMapping("/api/file/uploader")
 @Tag(name = "文件分片上传相关接口", description = "包括文件开始上传、检查上传状态、暂停上传、取消上传等操作。")
 public class FileUploadController {
 
