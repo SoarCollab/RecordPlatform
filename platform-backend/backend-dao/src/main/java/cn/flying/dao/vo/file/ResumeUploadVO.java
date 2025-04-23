@@ -1,5 +1,6 @@
 package cn.flying.dao.vo.file;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -15,8 +16,11 @@ import java.util.List;
 @Getter
 @Setter
 @NoArgsConstructor
+@Schema(description = "文件上传进度类")
 public class ResumeUploadVO {
+    @Schema(description = "已处理的分片序号列表")
     private List<Integer> processedChunks; // 已处理的分片序号列表
+    @Schema(description = "总分片数量")
     private int totalChunks;
 
     public ResumeUploadVO(boolean success, String message, List<Integer> processedChunks, int totalChunks) {

@@ -1,5 +1,6 @@
 package cn.flying.common.constant;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 
 /**
@@ -9,6 +10,7 @@ import lombok.Getter;
  * @create: 2025-01-15 15:36
  */
 @Getter
+@Schema(description = "返回结果枚举")
 public enum ResultEnum {
 
     /* 成功状态码 */
@@ -56,8 +58,10 @@ public enum ResultEnum {
     PERMISSION_SIGNATURE_ERROR(70007, "签名失败");
 
     // 状态码
+    @Schema(description = "状态码")
     int code;
     // 提示信息
+    @Schema(description = "提示信息")
     String message;
 
     ResultEnum(int code, String message) {

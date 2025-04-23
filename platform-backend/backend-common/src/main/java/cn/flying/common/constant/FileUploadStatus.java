@@ -1,5 +1,6 @@
 package cn.flying.common.constant;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 
 /**
@@ -9,6 +10,7 @@ import lombok.Getter;
  * @create: 2025-04-20 17:31
  */
 @Getter
+@Schema(description = "文件上传状态")
 public enum FileUploadStatus {
     DELETE(2, "已完成删除"),
     SUCCESS(1, "上传成功"),

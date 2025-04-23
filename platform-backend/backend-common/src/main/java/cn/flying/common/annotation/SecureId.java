@@ -1,5 +1,7 @@
 package cn.flying.common.annotation;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -11,16 +13,19 @@ import java.lang.annotation.Target;
  */
 @Target({ElementType.METHOD, ElementType.TYPE})
 @Retention(RetentionPolicy.RUNTIME)
+@Schema(description = "安全ID注解")
 public @interface SecureId {
     
     /**
      * 是否启用ID混淆（默认启用）
      */
+    @Schema(description = "是否启用ID混淆")
     boolean value() default true;
     
     /**
      * ID字段名称（默认为'id'）
      */
+    @Schema(description = "ID字段名称")
     String field() default "id";
     
     /**
@@ -28,5 +33,6 @@ public @interface SecureId {
      * 如果设为true，则返回值中的原始ID字段将被设为null
      * 如果设为false，则原始ID和混淆ID都会保留
      */
+    @Schema(description = "是否隐藏原始ID")
     boolean hideOriginalId() default false;
 } 

@@ -1,5 +1,6 @@
 package cn.flying.dao.vo.file;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -15,20 +16,35 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Getter
 @Setter
+@Schema(description = "文件上传状态类")
 public class FileUploadState {
+    @Schema(description = "会话ID")
     private final String sessionId;
+    @Schema(description = "客户端ID")
     private final String clientId;
+    @Schema(description = "文件名")
     private final String fileName;
+    @Schema(description = "文件大小")
     private final long fileSize;
+    @Schema(description = "文件类型")
     private final String contentType;
+    @Schema(description = "分片大小")
     private final int chunkSize;
+    @Schema(description = "总分片数量")
     private final int totalChunks;
+    @Schema(description = "开始时间")
     private final long startTime;
+    @Schema(description = "已上传分片")
     private final Set<Integer> uploadedChunks;
+    @Schema(description = "已处理分片")
     private final Set<Integer> processedChunks;
+    @Schema(description = "分片哈希值")
     private final Map<String, String> chunkHashes;
+    @Schema(description = "密钥")
     private final Map<Integer, byte[]> keys; // 存储加密密钥
+    @Schema(description = "最后活动时间")
     private volatile long lastActivityTime;
+    @Schema(description = "最后进度日志时间")
     private volatile long lastProgressLogTime;
 
     private static final long MIN_CHUNK_FILE_SIZE_BYTES = 500 * 1024; // 500KB 小于此大小的文件不进行分片
