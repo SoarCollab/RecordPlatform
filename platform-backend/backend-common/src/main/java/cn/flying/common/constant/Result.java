@@ -1,10 +1,13 @@
 package cn.flying.common.constant;
 
+import cn.flying.common.util.JsonConverter;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 import lombok.Setter;
+
+import java.io.Serializable;
 
 /**
  * @program: RecordPlatform
@@ -16,7 +19,7 @@ import lombok.Setter;
 @Getter
 @Setter
 @Schema(description = "返回结果封装")
-public class Result<T> {
+public class Result<T> implements Serializable {
 
     // 操作代码
     @Schema(description = "操作代码")
@@ -77,5 +80,9 @@ public class Result<T> {
     //失败返回封装-使用自定义提示信息
     public static Result<String> error(String message) {
         return new Result<>(500, message, null);
+    }
+
+    public String toJson(){
+        return JsonConverter.toJson(this);
     }
 }
