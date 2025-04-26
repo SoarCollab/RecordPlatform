@@ -47,6 +47,7 @@ public enum ResultEnum {
     FILE_NOT_EXIST(50008, "文件不存在"),
     FILE_EMPTY(50009, "文件为空"),
     JSON_PARSE_ERROR(50010, "JSON格式化失败"),
+    FILE_RECORD_ERROR(50011, "文件存证失败"),
 
     /* 权限错误：70001-79999 */
     PERMISSION_UNAUTHENTICATED(70001, "此操作需要登陆系统!"),

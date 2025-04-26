@@ -49,8 +49,7 @@ public class FileUploadController {
     public Result<String> uploadChunk(
             @RequestParam("file") MultipartFile file,
             @RequestParam("sessionId") String sessionId,
-            @RequestParam("chunkNumber") int chunkNumber,
-            @RequestParam("totalChunks") int totalChunksParam) {
+            @RequestParam("chunkNumber") int chunkNumber) {
 
         fileUploadService.uploadChunk(sessionId, chunkNumber, file);
         return Result.success("分片上传成功");
