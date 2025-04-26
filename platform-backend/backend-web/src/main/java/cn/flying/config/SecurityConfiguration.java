@@ -101,10 +101,10 @@ public class SecurityConfiguration {
         PrintWriter writer = response.getWriter();
         if(exceptionOrAuthentication instanceof AccessDeniedException exception) {
             writer.write(Result
-                    .error(exception.getMessage()).toString());
+                    .error(exception.getMessage()).toJson());
         } else if(exceptionOrAuthentication instanceof Exception exception) {
             writer.write(Result
-                    .error(exception.getMessage()).toString());
+                    .error(exception.getMessage()).toJson());
         } else if(exceptionOrAuthentication instanceof Authentication authentication){
             User user = (User) authentication.getPrincipal();
             Account account = service.findAccountByNameOrEmail(user.getUsername());
@@ -114,11 +114,11 @@ public class SecurityConfiguration {
             String jwt = utils.createJwt(user, account.getUsername(), userId);
             
             if(jwt == null) {
-                writer.write(Result.error(ResultEnum.PERMISSION_LIMIT).toString());
+                writer.write(Result.error(ResultEnum.PERMISSION_LIMIT).toJson());
             } else {
                 AuthorizeVO vo = account.asViewObject(AuthorizeVO.class, o -> o.setToken(jwt));
                 vo.setExpire(utils.expireTime());
-                writer.write(Result.success(vo).toString());
+                writer.write(Result.success(vo).toJson());
             }
         }
     }
@@ -137,9 +137,9 @@ public class SecurityConfiguration {
         PrintWriter writer = response.getWriter();
         String authorization = request.getHeader("Authorization");
         if(utils.invalidateJwt(authorization)) {
-            writer.write(Result.success("退出登录成功").toString());
+            writer.write(Result.success("退出登录成功").toJson());
             return;
         }
-        writer.write(Result.error(ResultEnum.PERMISSION_TOKEN_EXPIRED).toString());
+        writer.write(Result.error(ResultEnum.PERMISSION_TOKEN_EXPIRED).toJson());
     }
 }
