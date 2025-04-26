@@ -10,6 +10,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.MDC;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.stereotype.Component;
@@ -25,6 +26,7 @@ import java.util.Set;
  */
 @Slf4j
 @Component
+@Order(Const.LOG_ORDER)
 public class RequestLogFilter extends OncePerRequestFilter {
 
     private final Set<String> ignores = Set.of("/doc.html","/swagger-ui","/v3/api-docs","/api/file","/api/system/logs");
@@ -36,7 +38,7 @@ public class RequestLogFilter extends OncePerRequestFilter {
         } else {
             // 设置请求唯一ID
             String reqId = IdUtils.nextLogId();
-            MDC.put("reqId", reqId);
+            MDC.put(Const.ATTR_REQ_ID, reqId);
             
             long startTime = System.currentTimeMillis();
             this.logRequestStart(request);
@@ -49,7 +51,7 @@ public class RequestLogFilter extends OncePerRequestFilter {
             } finally {
                 wrapper.copyBodyToResponse();
                 // 清理MDC
-                MDC.remove("reqId");
+                MDC.remove(Const.ATTR_REQ_ID);
             }
         }
     }

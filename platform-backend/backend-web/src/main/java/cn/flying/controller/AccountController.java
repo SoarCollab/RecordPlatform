@@ -39,10 +39,9 @@ public class AccountController {
      */
     @GetMapping("/info")
     @Operation(summary = "获取用户信息")
-    @SecureId(hideOriginalId = true)
     @OperationLog(module = "用户模块", operationType = "查询", description = "获取用户信息")
     public Result<AccountVO> getAccountInfo(@RequestAttribute(Const.ATTR_USER_ID) String userId) {
-        Account account = accountService.findAccountById(IdUtils.fromExternalId(userId));
+        Account account = accountService.findAccountById(userId);
         return Result.success(account.asViewObject(AccountVO.class));
     }
     /**
