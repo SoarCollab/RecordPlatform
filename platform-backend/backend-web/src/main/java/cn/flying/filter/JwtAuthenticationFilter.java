@@ -10,6 +10,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.MDC;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -25,6 +26,7 @@ import java.io.IOException;
  * 同时将用户ID放入MDC上下文，便于日志记录
  */
 @Component
+@Order(Const.SECURITY_ORDER)
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     @Resource
@@ -51,7 +53,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             
             // 将用户ID放入MDC上下文，便于日志记录
             if (userId != null) {
-                MDC.put("userId", userId.toString());
+                MDC.put(Const.ATTR_USER_ID, userId.toString());
             }
         }
         

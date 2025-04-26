@@ -230,7 +230,7 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
      * @return 账户实体
      */
     @Override
-    public Account findAccountById(Long id) {
+    public Account findAccountById(String id) {
         return this.query().eq("id", id).one();
     }
 
