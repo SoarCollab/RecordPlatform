@@ -10,11 +10,13 @@ import io.swagger.v3.oas.annotations.security.SecurityScheme;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
+import io.swagger.v3.oas.models.info.Contact;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
 import io.swagger.v3.oas.models.media.Content;
 import io.swagger.v3.oas.models.media.MediaType;
-import io.swagger.v3.oas.models.parameters.QueryParameter;
+import io.swagger.v3.oas.models.media.Schema;
+import io.swagger.v3.oas.models.parameters.Parameter;
 import io.swagger.v3.oas.models.responses.ApiResponse;
 import io.swagger.v3.oas.models.responses.ApiResponses;
 import org.springdoc.core.customizers.OpenApiCustomizer;
@@ -44,12 +46,16 @@ public class SwaggerConfiguration {
     @Bean
     public OpenAPI springShopOpenAPI() {
         return new OpenAPI()
-                .info(new Info().title("RecordPlatform 项目 API 文档")
+                .info(new Info()
+                        .title("RecordPlatform 项目 API 文档")
                         .description("欢迎来到本项目API测试文档，在这里可以快速进行接口调试")
                         .version("1.0")
+                        .contact( new Contact()
+                                .name("flying")
+                                .url("https://github.com/wbq123789/RecordPlatform"))
                         .license(new License()
-                                .name("项目开源地址")
-                                .url("https://github.com/wbq123789/RecordPlatform")
+                                .name("Apache 2.0")
+                                .url("https://www.apache.org/licenses/LICENSE-2.0.html")
                         )
                 );
     }
@@ -69,43 +75,66 @@ public class SwaggerConfiguration {
      */
     private Map<String, PathItem> authorizePathItems(){
         Map<String, PathItem> map = new HashMap<>();
+        // 登录接口
         map.put("/api/auth/login", new PathItem()
                 .post(new Operation()
                         .tags(List.of("登录校验相关"))
                         .summary("登录验证接口")
-                        .addParametersItem(new QueryParameter()
+                        .description("用户登录接口，返回JWT令牌")
+                        .addParametersItem(new Parameter()
+                                .in("query")
                                 .name("username")
+                                .description("用户名")
                                 .required(true)
+                                .schema(new Schema<String>().type("string"))
                         )
-                        .addParametersItem(new QueryParameter()
+                        .addParametersItem(new Parameter()
+                                .in("query")
                                 .name("password")
+                                .description("密码")
                                 .required(true)
+                                .schema(new Schema<String>().type("string").format("password"))
                         )
                         .responses(new ApiResponses()
                                 .addApiResponse("200", new ApiResponse()
-                                        .description("OK")
-                                        .content(new Content().addMediaType("*/*", new MediaType()
+                                        .description("登录成功")
+                                        .content(new Content().addMediaType("application/json", new MediaType()
                                                 .example(Result.success(new AuthorizeVO()))
+                                        ))
+                                )
+                                .addApiResponse("401", new ApiResponse()
+                                        .description("登录失败")
+                                        .content(new Content().addMediaType("application/json", new MediaType()
+                                                .example(Result.error("用户名或密码错误"))
                                         ))
                                 )
                         )
                 )
         );
+
+        // 退出登录接口
         map.put("/api/auth/logout", new PathItem()
                 .get(new Operation()
                         .tags(List.of("登录校验相关"))
                         .summary("退出登录接口")
+                        .description("用户退出登录，使当前JWT令牌失效")
                         .responses(new ApiResponses()
                                 .addApiResponse("200", new ApiResponse()
-                                        .description("OK")
-                                        .content(new Content().addMediaType("*/*", new MediaType()
+                                        .description("退出成功")
+                                        .content(new Content().addMediaType("application/json", new MediaType()
                                                 .example(Result.success())
+                                        ))
+                                )
+                                .addApiResponse("401", new ApiResponse()
+                                        .description("未授权")
+                                        .content(new Content().addMediaType("application/json", new MediaType()
+                                                .example(Result.error("用户未登录"))
                                         ))
                                 )
                         )
                 )
-
         );
+
         return map;
     }
 }

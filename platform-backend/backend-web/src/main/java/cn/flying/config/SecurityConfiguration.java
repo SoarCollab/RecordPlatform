@@ -60,7 +60,7 @@ public class SecurityConfiguration {
                         .requestMatchers("/api/auth/**", "/error").permitAll()
                         .requestMatchers("/api/file/download/images/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/doc.html/**","/webjars/**","/favicon.ico").permitAll()
-                        .anyRequest().hasAnyRole(Const.ROLE_DEFAULT)
+                        .anyRequest().hasAnyRole(Const.ROLE_DEFAULT,Const.ROLE_ADMINISTER,Const.ROLE_MONITOR)
                 )
                 .formLogin(conf -> conf
                         .loginProcessingUrl("/api/auth/login")
