@@ -1,7 +1,6 @@
 package cn.flying.common.annotation;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import io.swagger.v3.oas.models.annotations.OpenAPI30;
 
 import java.lang.annotation.*;
 

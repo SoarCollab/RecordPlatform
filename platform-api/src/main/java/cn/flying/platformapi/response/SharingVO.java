@@ -9,5 +9,5 @@ import java.util.List;
 @AllArgsConstructor
 public class SharingVO {
     private String uploader;
-    private List<FileSharingVO> fileSharingVO;
+    private List<String> fileHashList;
 }

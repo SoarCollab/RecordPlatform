@@ -32,8 +32,8 @@ public interface FileService extends IService<File> {
 
     /**
      * 删除文件
-     * @param Uid
-     * @param fileHash
+     * @param Uid 用户ID
+     * @param fileHash 文件哈希
      * @return
      */
     void deleteFile(String Uid, String fileHash);
@@ -60,6 +60,28 @@ public interface FileService extends IService<File> {
      * @return 文件分片列表
      */
     List<java.io.File> getFile(String Uid, String fileHash);
+
+    /**
+     * 分享文件给其它用户
+     * @param Uid 用户ID
+     * @param fileHash 待分享的文件哈希
+     * @param maxAccesses 最大访问次数
+     * @return 分享码
+     */
+    String generateSharingCode(String Uid, List<String> fileHash, Integer maxAccesses);
+
+    /**
+     * 获取根据分享码获取他人分享的文件
+     * @param sharingCode 分享码
+     * @return
+     */
+    List<File> getShareFile(String sharingCode);
+
+    /**
+     * 保存他人分享的文件
+     * @param sharingFileIdList 分享文件Id列表
+     */
+    void saveShareFile(List<String> sharingFileIdList);
 
 
 }
