@@ -77,22 +77,15 @@ public class BlockChainServiceImpl implements BlockChainService{
                 if (response.getReturnObject() instanceof List<?> returnList) {
                     if (returnList.size() == 2) {
                         String uploader = String.valueOf(returnList.getFirst());
-                        List<FileSharingVO> fileList = new ArrayList<>();
+                        List<String> fileList = new ArrayList<>();
 
                         // 处理文件列表
                         if (returnList.getLast() instanceof List<?> files) {
                             for (Object file : files) {
                                 if (file instanceof List<?> fileInfo && fileInfo.size() == 6) {
-                                    fileList.add(new FileSharingVO(
-                                            // fileName
-                                            String.valueOf(fileInfo.getFirst()),
-                                            // fileParam
-                                            String.valueOf(fileInfo.get(3)),
-                                            // fileContent
-                                            String.valueOf(fileInfo.get(2)),
-                                            // fileUploadTime
-                                            Convert.timeStampToDate(Long.parseLong(String.valueOf(fileInfo.getLast())))
-                                    ));
+                                    String hexHash = Convert.bytesToHex((byte[]) fileInfo.get(5));
+                                    hexHash = hexHash.startsWith("0x") ? hexHash.substring(2) : hexHash;
+                                    fileList.add(hexHash);
                                 }
                             }
                         }
