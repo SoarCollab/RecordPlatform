@@ -30,7 +30,7 @@ public class File implements Serializable {
     @Schema(description = "主键ID")
     private Long id;
 
-    @Schema(description = "文件UID")
+    @Schema(description = "用户ID")
     private String uid;
 
     /**

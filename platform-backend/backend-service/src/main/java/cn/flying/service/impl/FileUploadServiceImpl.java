@@ -2,12 +2,13 @@ package cn.flying.service.impl;
 
 import cn.flying.common.event.FileStorageEvent;
 import cn.flying.common.util.CommonUtils;
+import cn.flying.common.util.Const;
+import cn.flying.common.util.JsonConverter;
 import cn.flying.service.assistant.FileUploadRedisStateManager;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.dao.vo.file.*;
 import cn.flying.service.FileService;
 import cn.flying.service.FileUploadService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.annotation.Resource;
@@ -18,6 +19,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.ApplicationEventPublisherAware;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.crypto.Cipher;
@@ -49,6 +51,7 @@ import java.util.stream.Stream;
  */
 @Service
 @Slf4j
+@Transactional(rollbackFor = Exception.class)
 public class FileUploadServiceImpl implements FileUploadService , ApplicationEventPublisherAware {
 
     // 添加事件发布器
@@ -130,7 +133,7 @@ public class FileUploadServiceImpl implements FileUploadService , ApplicationEve
         try {
             Files.createDirectories(Paths.get(UPLOAD_BASE_DIR));
             Files.createDirectories(Paths.get(PROCESSED_BASE_DIR));
-            log.info("基础上传和处理目录已确保存在。");
+            log.info("The basic upload and processing directory has been ensured to exist");
         } catch (IOException e) {
             log.error("初始化基础目录失败", e);
             // 初始化失败是严重问题，可以抛出运行时异常阻止应用启动
@@ -138,7 +141,7 @@ public class FileUploadServiceImpl implements FileUploadService , ApplicationEve
         }
         // 启动定时清理任务
         cleanupScheduler.scheduleAtFixedRate(this::cleanupExpiredUploadSessions, 1, 1, TimeUnit.HOURS);
-        log.info("定时清理任务已启动。");
+        log.info("The scheduled cleaning task has been initiated...");
     }
 
     @PreDestroy
@@ -380,7 +383,7 @@ public class FileUploadServiceImpl implements FileUploadService , ApplicationEve
             redisStateManager.removeSession(sessionId);
 
             // 从MDC中获取用户ID
-            String Uid = MDC.get("userId");
+            String Uid = MDC.get(Const.ATTR_USER_ID);
             // 调用文件服务初始化文件元信息
             fileService.prepareStoreFile(Uid, state.getFileName());
 
@@ -660,7 +663,7 @@ public class FileUploadServiceImpl implements FileUploadService , ApplicationEve
     }
 
     /** 定时任务：清理过期的上传会话 */
-    @Scheduled(fixedRate = 3600000) // 每小时执行一次
+    @Scheduled(fixedRate = 6 * 3600000) // 每6小时执行一次
     public void cleanupExpiredUploadSessions() {
         long now = System.currentTimeMillis();
         long timeoutMillis = 24 * 60 * 60 * 1000L; // 24 小时
@@ -800,7 +803,7 @@ public class FileUploadServiceImpl implements FileUploadService , ApplicationEve
         params.put("chunkCount", state.getTotalChunks());
 
         try {
-            return new ObjectMapper().writeValueAsString(params);
+            return JsonConverter.toJson(params);
         } catch (Exception e) {
             log.error("生成文件参数失败: {}", e.getMessage(), e);
             return "{}"; // 返回空参数

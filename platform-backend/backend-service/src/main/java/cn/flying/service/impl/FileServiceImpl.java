@@ -3,6 +3,7 @@ package cn.flying.service.impl;
 import cn.flying.api.utils.ResultUtils;
 import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.util.CommonUtils;
+import cn.flying.common.util.Const;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.mapper.FileMapper;
@@ -10,12 +11,15 @@ import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.response.FileDetailVO;
+import cn.flying.platformapi.response.SharingVO;
 import cn.flying.service.FileService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.apache.dubbo.config.annotation.DubboReference;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -27,6 +31,7 @@ import java.util.Map;
  * @create: 2025-03-12 21:22
  */
 @Service
+@Transactional(rollbackFor = Exception.class)
 public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements FileService {
     @DubboReference
     private BlockChainService blockChainService;
@@ -114,5 +119,55 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         Map<String,String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
         Result<List<java.io.File>> fileListResult = storageService.getFileListByHash(fileContentMap.keySet().stream().toList(), fileContentMap.values().stream().toList());
         return ResultUtils.getData(fileListResult);
+    }
+
+    @Override
+    public String generateSharingCode(String Uid, List<String> fileHash, Integer maxAccesses) {
+        Result<String> result = blockChainService.shareFiles(Uid, fileHash, maxAccesses);
+        return ResultUtils.getData(result);
+    }
+
+    @Override
+    public List<File> getShareFile(String sharingCode) {
+        Result<SharingVO> result = blockChainService.getSharedFiles(sharingCode);
+        if(ResultUtils.isSuccess(result)){
+            SharingVO sharingFiles = ResultUtils.getData(result);
+            String uid= sharingFiles.getUploader();
+            List<String> fileHashList = sharingFiles.getFileHashList();
+            if(CommonUtils.isNotEmpty(fileHashList)){
+                LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                        .eq(File::getUid, uid)
+                        .in(File::getFileHash, fileHashList);
+                return this.list(wrapper);
+            }
+        }
+        return List.of();
+    }
+
+    @Override
+    public void saveShareFile(List<String> sharingFileIdList) {
+        if(CommonUtils.isNotEmpty(sharingFileIdList)){
+            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                    .in(File::getId, sharingFileIdList);
+            List<File> FileList = this.list(wrapper);
+            //获取当前登录用户Id
+            String Uid = MDC.get(Const.ATTR_USER_ID);
+            if(CommonUtils.isNotEmpty(FileList)){
+                //拷贝其它用户分享文件对应的信息，修改文件所有人并增加文件来源
+                FileList.forEach(file -> {
+                    //如果源文件已经有来源，则保留最初的文件所有人
+                    if(CommonUtils.isEmpty(file.getOrigin())){
+                        file.setOrigin(file.getId());
+                    }
+                    //重置文件ID和创建时间
+                        file
+                            .setUid(Uid)
+                            .setId(null)
+                            .setCreateTime(null);
+                });
+                //批量保存文件信息
+                this.saveBatch(FileList);
+            }
+        }
     }
 }
