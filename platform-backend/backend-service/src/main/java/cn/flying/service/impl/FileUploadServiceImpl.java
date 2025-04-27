@@ -454,8 +454,6 @@ public class FileUploadServiceImpl implements FileUploadService , ApplicationEve
 
         // 创建包含已处理分片列表的恢复响应 DTO
         ResumeUploadVO responseDto = new ResumeUploadVO(
-                true,
-                wasPaused ? "上传已恢复" : "上传未被暂停",
                 new ArrayList<>(state.getProcessedChunks()), // 返回已处理的分片列表给客户端
                 state.getTotalChunks()
         );
@@ -520,8 +518,7 @@ public class FileUploadServiceImpl implements FileUploadService , ApplicationEve
         redisStateManager.updateLastActivityTime(sessionId);
         ProgressInfo progressInfo = calculateProgressInfo(state);
 
-        ProgressVO responseDto = new ProgressVO(
-                true, "获取进度成功", progressInfo.totalProgress,
+        ProgressVO responseDto = new ProgressVO(progressInfo.totalProgress,
                 progressInfo.uploadProgressPercent, progressInfo.processProgressPercent,
                 progressInfo.uploadedCount, progressInfo.processedCount, progressInfo.totalChunks,
                 sessionId
