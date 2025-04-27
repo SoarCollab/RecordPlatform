@@ -320,20 +320,10 @@ public abstract class CommonUtils {
             return str;
         }
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        GZIPOutputStream gzip = null;
-        try {
-            gzip = new GZIPOutputStream(out);
+        try (GZIPOutputStream gzip = new GZIPOutputStream(out)) {
             gzip.write(str.getBytes());
         } catch (IOException e) {
-            log.warn( "Failed to compress string: {}", e.getMessage());
-        } finally {
-            if (gzip != null) {
-                try {
-                    gzip.close();
-                } catch (IOException e) {
-                    log.warn( "Failed to close gzip stream: {}", e.getMessage());
-                }
-            }
+            log.warn("Failed to compress string: {}", e.getMessage());
         }
         return Base64.encodeBase64String(out.toByteArray());
     }

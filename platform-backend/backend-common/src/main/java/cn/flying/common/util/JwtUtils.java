@@ -192,6 +192,6 @@ public class JwtUtils {
      * @return 是否操作成功
      */
     private boolean isInvalidToken(String uuid){
-        return Boolean.TRUE.equals(template.hasKey(Const.JWT_BLACK_LIST + uuid));
+        return template.hasKey(Const.JWT_BLACK_LIST + uuid);
     }
 }

@@ -1,11 +1,5 @@
 package cn.flying.dao.vo.file;
 
-/**
- * @program: RecordPlatform
- * @description:
- * @author: flyingcoding
- * @create: 2025-04-01 13:41
- */
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
