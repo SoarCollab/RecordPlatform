@@ -8,6 +8,7 @@ import cn.flying.dao.vo.auth.EmailRegisterVO;
 import cn.flying.dao.vo.auth.EmailResetVO;
 import cn.flying.service.AccountService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
@@ -40,9 +41,9 @@ public class AuthorizeController {
      */
     @GetMapping("/ask-code")
     @Operation(summary = "请求邮件验证码")
-    @OperationLog(module = "登录校验模块", operationType = "查询", description = "请求邮件验证码")
+    //@OperationLog(module = "登录校验模块", operationType = "查询", description = "请求邮件验证码")
     public Result<String> askVerifyCode(@RequestParam @Email String email,
-                                      @RequestParam @Pattern(regexp = "(register|reset|modify)")  String type,
+                                        @Schema(description = "类型 (register -> 注册 | reset -> 重置密码 | modify -> 修改密码 )") @RequestParam @Pattern(regexp = "(register|reset|modify)")  String type,
                                       HttpServletRequest request){
         return utils.messageHandle(() ->
                 accountService.registerEmailVerifyCode(type, String.valueOf(email), request.getRemoteAddr()));
@@ -55,6 +56,7 @@ public class AuthorizeController {
      */
     @PostMapping("/register")
     @Operation(summary = "用户注册操作")
+    @OperationLog(module = "登录校验模块", operationType = "提交", description = "用户注册操作")
     public Result<String> register(@RequestBody @Valid EmailRegisterVO vo){
         return utils.messageHandle(() ->
                 accountService.registerEmailAccount(vo));
@@ -78,6 +80,7 @@ public class AuthorizeController {
      */
     @PostMapping("/reset-password")
     @Operation(summary = "密码重置操作")
+    @OperationLog(module = "登录校验模块", operationType = "提交", description = "密码重置操作")
     public Result<String> resetPassword(@RequestBody @Valid EmailResetVO vo){
         return utils.messageHandle(() ->
                 accountService.resetEmailAccountPassword(vo));

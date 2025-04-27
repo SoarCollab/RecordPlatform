@@ -73,7 +73,7 @@ public class SysAuditController {
      */
     @PostMapping("/logs/export")
     @Operation(summary = "导出操作日志")
-    @OperationLog(module = "系统审计", operationType = "导出", description = "导出操作日志")
+    //@OperationLog(module = "系统审计", operationType = "导出", description = "导出操作日志")
     public void exportOperationLogs(@RequestBody AuditLogQueryVO queryVO, HttpServletResponse response) throws IOException {
         List<SysOperationLog> logs = auditService.exportOperationLogs(queryVO);
         
