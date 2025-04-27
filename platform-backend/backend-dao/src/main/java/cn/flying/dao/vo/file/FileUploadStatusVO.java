@@ -31,7 +31,7 @@ public class FileUploadStatusVO {
     @Schema(description = "是否暂停")
     private boolean paused;
     // 例如 "UPLOADING", "PAUSED", "PROCESSING_COMPLETE", "NOT_FOUND"
-    @Schema(description = "上传状态")
+    @Schema(description = "上传状态：UPLOADING -> 上传中, PAUSED -> 暂停, PROCESSING_COMPLETE -> 处理完成")
     private String status;
     // 总体进度百分比
     @Schema(description = "上传进度百分比")
