@@ -211,10 +211,10 @@ public class FileUploadRedisStateManager {
     /**
      * 移除会话及相关数据
      */
-    public boolean removeSession(String sessionId) {
+    public void removeSession(String sessionId) {
         FileUploadState state = getState(sessionId);
         if (state == null) {
-            return false;
+            return;
         }
 
         // 删除映射
@@ -236,7 +236,6 @@ public class FileUploadRedisStateManager {
         cacheUtils.setRemove(ACTIVE_UPLOADS_KEY, sessionId);
         cacheUtils.setRemove(PAUSED_SESSIONS_KEY, sessionId);
 
-        return true;
     }
 
     /**

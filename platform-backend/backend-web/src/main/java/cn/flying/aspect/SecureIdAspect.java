@@ -268,7 +268,9 @@ public class SecureIdAspect {
         // 1. 检查对象类上是否有SecureId注解
         if (obj != null && obj.getClass().isAnnotationPresent(SecureId.class)) {
             SecureId annotation = obj.getClass().getAnnotation(SecureId.class);
-            hideOriginalId = annotation.hideOriginalId();
+            if (annotation != null) {
+                hideOriginalId = annotation.hideOriginalId();
+            }
             if (log.isDebugEnabled()) {
                 log.debug("从对象 {} 类注解获取hideOriginalId={}", obj.getClass().getSimpleName(), hideOriginalId);
             }
