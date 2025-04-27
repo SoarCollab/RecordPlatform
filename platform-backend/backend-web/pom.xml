@@ -28,6 +28,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!--    接口参数校验模块    -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
         <!--    actuator组件    -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -39,9 +44,11 @@
             <groupId>cn.flying</groupId>
             <artifactId>backend-service</artifactId>
         </dependency>
+
+        <!--    邮件发送模块    -->
         <dependency>
-            <groupId>cn.flying</groupId>
-            <artifactId>backend-api</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
 
         <!-- POI for Excel export -->

@@ -45,7 +45,6 @@ public class FileUploadController {
 
     @PostMapping("/chunk")
     @Operation(summary = "检查上传状态")
-    @OperationLog(module = "文件分片上传模块", operationType = "查询", description = "检查上传状态")
     public Result<String> uploadChunk(
             @RequestParam("file") MultipartFile file,
             @RequestParam("sessionId") String sessionId,
@@ -68,7 +67,6 @@ public class FileUploadController {
 
     @PostMapping("/upload/pause")
     @Operation(summary = "暂停上传")
-    @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "暂停文件上传")
     public Result<String> pauseUpload(@RequestParam("sessionId") String sessionId) {
     
         fileUploadService.pauseUpload(sessionId);
@@ -78,7 +76,6 @@ public class FileUploadController {
 
     @PostMapping("/upload/resume")
     @Operation(summary = "恢复上传")
-    @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "恢复文件上传")
     public Result<ResumeUploadVO> resumeUpload(@RequestParam("sessionId") String sessionId) {
         
         ResumeUploadVO response = fileUploadService.resumeUpload(sessionId);
@@ -100,7 +97,6 @@ public class FileUploadController {
 
     @GetMapping("/upload/check")
     @Operation(summary = "检查上传状态")
-    @OperationLog(module = "文件分片上传模块", operationType = "查询", description = "检查上传状态")
     public Result<FileUploadStatusVO> checkFileStatus(@RequestParam("sessionId") String sessionId) {
 
         FileUploadStatusVO statusVO = fileUploadService.checkFileStatus(sessionId);
@@ -110,7 +106,6 @@ public class FileUploadController {
 
     @GetMapping("/upload/progress")
     @Operation(summary = "获取上传进度")
-    @OperationLog(module = "文件分片上传模块", operationType = "查询", description = "获取上传进度")
     public Result<ProgressVO> getUploadProgress(@RequestParam("sessionId") String sessionId) {
 
         ProgressVO progressVO = fileUploadService.getUploadProgress(sessionId);
