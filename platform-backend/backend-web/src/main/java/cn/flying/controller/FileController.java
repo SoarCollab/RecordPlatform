@@ -4,6 +4,7 @@ import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
 import cn.flying.common.util.Const;
 import cn.flying.dao.dto.File;
+import cn.flying.dao.vo.file.SaveSharingFile;
 import cn.flying.dao.vo.file.fileSharingVO;
 import cn.flying.service.FileService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -54,7 +55,7 @@ public class FileController {
     @OperationLog(module = "文件操作", operationType = "删除", description = "删除文件")
     public Result<String> deleteFile(
             @RequestAttribute(Const.ATTR_USER_ID) String userId,
-            @RequestParam("fileHash") String fileHash) {
+            @Schema(description = "待删除文件哈希") @RequestParam("fileHash") String fileHash) {
         fileService.deleteFile(userId, fileHash);
         return Result.success("文件删除成功");
     }
@@ -70,7 +71,7 @@ public class FileController {
     @OperationLog(module = "文件操作", operationType = "下载", description = "获取文件下载地址")
     public Result<List<String>> getFileAddress(
             @RequestAttribute(Const.ATTR_USER_ID) String userId,
-            @RequestParam("fileHash") String fileHash) {
+            @Schema(description = "待下载文件哈希") @RequestParam("fileHash") String fileHash) {
         List<String> addresses = fileService.getFileAddress(userId, fileHash);
         return Result.success(addresses);
     }
@@ -86,7 +87,7 @@ public class FileController {
     @OperationLog(module = "文件操作", operationType = "下载", description = "下载文件内容")
     public Result<List<java.io.File>> getFile(
             @RequestAttribute(Const.ATTR_USER_ID) String userId,
-           @Schema(description = "文件哈希") @RequestParam("fileHash") String fileHash) {
+           @Schema(description = "待下载文件哈希") @RequestParam("fileHash") String fileHash) {
         List<java.io.File> files = fileService.getFile(userId, fileHash);
         return Result.success(files);
     }
@@ -113,8 +114,8 @@ public class FileController {
     @Operation(summary = "保存分享文件")
     @OperationLog(module = "文件操作", operationType = "保存", description = "保存分享文件")
     public Result<String> saveShareFile(
-            @RequestBody List<String> sharingFileIdList) {
-        fileService.saveShareFile(sharingFileIdList);
+            @RequestBody SaveSharingFile sharingFile) {
+        fileService.saveShareFile(sharingFile.getSharingFileIdList());
         return Result.success("保存成功");
     }
 }

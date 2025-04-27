@@ -8,12 +8,14 @@ import cn.flying.common.util.Const;
 import cn.flying.service.ImageService;
 import io.minio.errors.ErrorResponseException;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Scope;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -42,7 +44,7 @@ public class ImageController {
     @PostMapping("/upload/avatar")
     @Operation(summary = "上传头像")
     @OperationLog(module = "图片上传模块", operationType = "上传", description = "上传头像")
-    public Result<String> uploadAvatar(@RequestParam("file") MultipartFile file,
+    public Result<String> uploadAvatar(@Schema(description = "头像文件") @RequestParam("file") MultipartFile file,
                                        @RequestAttribute(Const.ATTR_USER_ID) String userId) throws IOException {
         if (file.isEmpty()) {
             return Result.error(ResultEnum.FILE_EMPTY);
@@ -68,7 +70,7 @@ public class ImageController {
     @PostMapping("/upload/image")
     @Operation(summary = "上传图片")
     @OperationLog(module = "图片上传模块", operationType = "上传", description = "上传图片")
-    public Result<String> uploadImage(@RequestParam("file") MultipartFile file,
+    public Result<String> uploadImage(@Schema(description = "图片文件") @RequestParam("file") MultipartFile file,
                                         @RequestAttribute(Const.ATTR_USER_ID) String userId,
                                         HttpServletResponse response) throws IOException {
         if (file.isEmpty()) {

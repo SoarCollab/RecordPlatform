@@ -23,7 +23,7 @@ public class ResumeUploadVO {
     @Schema(description = "总分片数量")
     private int totalChunks;
 
-    public ResumeUploadVO(boolean success, String message, List<Integer> processedChunks, int totalChunks) {
+    public ResumeUploadVO(List<Integer> processedChunks, int totalChunks) {
         this.processedChunks = processedChunks;
         this.totalChunks = totalChunks;
     }

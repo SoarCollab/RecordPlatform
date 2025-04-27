@@ -31,9 +31,10 @@ public class ProgressVO {
     @Schema(description = "会话ID")
     private String sessionId;
 
-    public ProgressVO(boolean success, String message, int progress, int uploadProgress,
-                      int processProgress, int uploadedChunkCount, int processedChunkCount,
-                      int totalChunks, String sessionId) {
+    public ProgressVO(int progress, int uploadProgress,
+                      int processProgress, int uploadedChunkCount,
+                      int processedChunkCount, int totalChunks,
+                      String sessionId) {
         this.progress = progress;
         this.uploadProgress = uploadProgress;
         this.processProgress = processProgress;
