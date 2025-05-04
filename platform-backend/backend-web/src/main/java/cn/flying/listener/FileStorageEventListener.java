@@ -1,10 +1,10 @@
 package cn.flying.listener;
 
-import cn.flying.common.constant.ResultEnum;
-import cn.flying.common.exception.GeneralException;
+import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.dao.dto.File;
 import cn.flying.service.FileService;
 import cn.flying.common.event.FileStorageEvent;
+import cn.flying.common.util.CommonUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 
 import jakarta.annotation.Resource;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * 文件存证事件监听器
@@ -27,43 +28,59 @@ public class FileStorageEventListener {
     @Resource
     private FileService fileService;
 
+    // 注入文件处理线程池
+    @Resource(name = "fileProcessTaskExecutor")
+    private Executor fileProcessTaskExecutor;
+
     /**
      * 异步处理文件存证事件
      * 接收文件上传完成事件，处理文件存证上链与MinIO集群存储
      */
     @EventListener
-    @Async("fileProcessTaskExecutor") // 使用专用的异步线程池
+    @Async("fileProcessTaskExecutor") // 使用指定的线程池进行异步处理
     public void handleFileStorageEvent(FileStorageEvent event) {
-        String uid = event.getUid();
-        String fileName = event.getFileName();
+        log.info("收到文件存证事件: 用户={}, 文件名={}", event.getUid(), event.getFileName());
 
-        log.info("收到文件存证事件: 用户={}, 文件名={}", uid, fileName);
-
-
-            // 调用文件服务进行存证和存储
-            File fileRecord = fileService.storeFile(
-                    uid,
-                    fileName,
-                    event.getProcessedFiles(),
-                    event.getFileHashes(),
-                    event.getFileParam()
-            );
-
-        if (fileRecord != null) {
-            log.info("文件存证和存储成功: 用户={}, 文件名={}, 文件哈希={}",
-                    uid, fileName, fileRecord.getFileHash());
-
-            // 可以在这里添加额外的后处理逻辑，如通知用户等
-            notifyUser(uid, fileName, fileRecord.getFileHash())
-                    .exceptionally(ex -> {
-                        log.error("通知用户失败: {}", ex.getMessage(), ex);
-                        return null;
-                    });
-        } else {
-            log.error("文件存证和存储失败: 用户={}, 文件名={}", uid, fileName);
-            // 记录失败日志，并抛出异常
-            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR);
+        if (CommonUtils.isEmpty(event.getProcessedFiles())) {
+            log.warn("文件存证事件中止：文件列表为空，用户={}, 文件名={}", event.getUid(), event.getFileName());
+            // 可以考虑更新文件状态为失败
+            // fileService.updateFileStatus(event.getUid(), event.getOriginFileName(), FileUploadStatus.FAILED.getCode(), "文件列表为空");
+            return;
         }
+
+        // 异步执行文件存储和上链操作
+        CompletableFuture.runAsync(() -> {
+            try {
+                File storedFile = fileService.storeFile(
+                        event.getUid(),
+                        event.getFileName(),
+                        event.getProcessedFiles(),
+                        event.getFileHashes(),
+                        event.getFileParam()
+                );
+
+                if (storedFile != null) {
+                    log.info("文件异步存储和上链成功: 用户={}, 文件名={}, 文件哈希={}",
+                            event.getUid(), event.getFileName(), storedFile.getFileHash());
+                } else {
+                    log.error("文件异步存储或上链失败，返回结果为 null: 用户={}, 文件名={}",
+                            event.getUid(), event.getFileName());
+                    // 根据业务逻辑决定是否需要更新文件状态为失败
+                     fileService.changeFileStatus(event.getUid(), event.getFileName(), FileUploadStatus.FAIL.getCode());
+                }
+            } catch (Exception e) {
+                log.error("处理文件存证事件时发生异常: 用户={}, 文件名={}",
+                        event.getUid(), event.getFileName(), e);
+                // 可以在这里添加更详细的错误处理逻辑，例如更新数据库状态为失败
+                fileService.changeFileStatus(event.getUid(), event.getFileName(), FileUploadStatus.FAIL.getCode());
+            }
+        }, fileProcessTaskExecutor).exceptionally(ex -> {
+            // 处理 CompletableFuture 内部的异常 (例如线程池拒绝任务等)
+            log.error("文件存储 CompletableFuture 执行异常: 用户={}, 文件名={}, 错误: {}",
+                    event.getUid(), event.getFileName(), ex.getMessage(), ex);
+            fileService.changeFileStatus(event.getUid(), event.getFileName(), FileUploadStatus.FAIL.getCode());
+            return null; // 返回 null 表示异常已处理
+        });
     }
 
     /**
