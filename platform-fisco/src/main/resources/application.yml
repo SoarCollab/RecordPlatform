@@ -35,6 +35,7 @@ dubbo:
   application:
     name: RecordPlatform_fisco
     logger: slf4j
+    protocol: tri
   protocol:
     name: tri
     port: 8091

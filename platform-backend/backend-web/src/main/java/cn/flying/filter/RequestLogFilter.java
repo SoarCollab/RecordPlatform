@@ -29,7 +29,7 @@ import java.util.Set;
 @Order(Const.LOG_ORDER)
 public class RequestLogFilter extends OncePerRequestFilter {
 
-    private final Set<String> ignores = Set.of("/doc.html","/swagger-ui","/v3/api-docs","/api/file","/api/system/logs");
+    private final Set<String> ignores = Set.of("/favicon.ico","/webjars","/doc.html","/swagger-ui","/v3/api-docs","/api/file","/api/system/logs");
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, @NotNull HttpServletResponse response, @NotNull FilterChain filterChain) throws ServletException, IOException {

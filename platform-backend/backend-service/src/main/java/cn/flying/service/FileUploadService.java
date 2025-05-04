@@ -20,9 +20,11 @@ public interface FileUploadService {
      * @param fileSize 文件大小
      * @param contentType 文件类型
      * @param providedClientId 客户端提供的上传会话ID
+     * @param chunkSize 分片大小
+     * @param totalChunks 分片总数
      * @return
      */
-    StartUploadVO startUpload(String fileName, long fileSize, String contentType, String providedClientId);
+    StartUploadVO startUpload(String fileName, long fileSize, String contentType, String providedClientId, int chunkSize, int totalChunks);
     /**
      * 上传分片
      * @param sessionId 上传会话ID
