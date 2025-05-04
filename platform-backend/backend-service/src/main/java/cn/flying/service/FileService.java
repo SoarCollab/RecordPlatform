@@ -2,6 +2,7 @@ package cn.flying.service;
 
 import cn.flying.dao.dto.File;
 import com.baomidou.mybatisplus.extension.service.IService;
+import org.springframework.data.relational.core.sql.In;
 
 import java.util.List;
 
@@ -29,6 +30,14 @@ public interface FileService extends IService<File> {
      * @return
      */
     File storeFile(String Uid, String OriginFileName, List<java.io.File> fileList,List<String> fileHashList, String fileParam);
+
+    /**
+     * 修改文件状态
+     * @param Uid
+     * @param fileHash
+     * @param fileStatus
+     */
+    void changeFileStatus(String Uid, String fileHash, Integer fileStatus);
 
     /**
      * 删除文件

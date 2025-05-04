@@ -8,6 +8,8 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.zip.GZIPInputStream;
@@ -371,6 +373,50 @@ public abstract class CommonUtils {
             } catch (IOException ignored) {}
         }
         return decompressed;
+    }
+
+    /**
+     * 将字节数组转换为十六进制字符串
+     * @param bytes 字节数组
+     * @return 十六进制字符串 (小写)
+     */
+    public static String bytesToHex(byte[] bytes) {
+        if (bytes == null) {
+            return null;
+        }
+        StringBuilder hexString = new StringBuilder(2 * bytes.length);
+        for (byte b : bytes) {
+            String hex = Integer.toHexString(0xff & b);
+            if (hex.length() == 1) {
+                hexString.append('0');
+            }
+            hexString.append(hex);
+        }
+        return hexString.toString();
+    }
+
+    /**
+     * 计算文件的 SHA-256 哈希值并返回 Hex 字符串
+     * @param filePath 文件路径
+     * @return SHA-256 Hex 字符串，如果出错则返回 null
+     */
+    public static String calculateFileSha256Hex(java.nio.file.Path filePath) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            try (java.io.InputStream fis = java.nio.file.Files.newInputStream(filePath)) {
+                while ((bytesRead = fis.read(buffer)) != -1) {
+                    digest.update(buffer, 0, bytesRead);
+                }
+            }
+            byte[] hashBytes = digest.digest();
+            return bytesToHex(hashBytes);
+        } catch (NoSuchAlgorithmException | java.io.IOException e) {
+            //记录日志
+            log.error("无法计算文件哈希: {}", filePath, e);
+            return null;
+        }
     }
 
 

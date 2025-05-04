@@ -82,6 +82,16 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
+    public void changeFileStatus(String Uid, String fileHash, Integer fileStatus) {
+        LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
+                .eq(File::getFileHash, fileHash)
+                .eq(File::getUid, Uid);
+        File file = new File()
+                .setStatus(fileStatus);
+        this.update(file,wrapper);
+    }
+
+    @Override
     public void deleteFile(String Uid, String fileHash) {
         if(CommonUtils.isEmpty(fileHash)) return;
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()

@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
  * @author: flyingcoding
  * @create: 2025-04-07 00:07
  */
-@DubboService
+@DubboService(methods = {@org.apache.dubbo.config.annotation.Method(name = "storeFile", timeout = 60000)})
 @Slf4j
 public class DistributedStorageServiceImpl implements DistributedStorageService {
     @Resource
