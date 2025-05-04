@@ -28,19 +28,19 @@ public class ProgressVO {
     private int processedChunkCount; // 已处理分片数量
     @Schema(description = "总分片数量")
     private int totalChunks; // 总分片数量
-    @Schema(description = "会话ID")
-    private String sessionId;
+    @Schema(description = "客户端ID")
+    private String clientId;
 
     public ProgressVO(int progress, int uploadProgress,
                       int processProgress, int uploadedChunkCount,
                       int processedChunkCount, int totalChunks,
-                      String sessionId) {
+                      String clientId) {
         this.progress = progress;
         this.uploadProgress = uploadProgress;
         this.processProgress = processProgress;
         this.uploadedChunkCount = uploadedChunkCount;
         this.processedChunkCount = processedChunkCount;
         this.totalChunks = totalChunks;
-        this.sessionId = sessionId;
+        this.clientId = clientId;
     }
 }

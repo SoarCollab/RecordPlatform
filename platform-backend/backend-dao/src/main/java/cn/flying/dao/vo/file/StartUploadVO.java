@@ -17,8 +17,6 @@ import java.util.List;
 @AllArgsConstructor
 @Schema(description = "文件上传开始响应类")
 public class StartUploadVO {
-    @Schema(description = "会话Id")
-    private String sessionId;
     @Schema(description = "客户端Id")
     private String clientId;
     @Schema(description = "分片大小")
