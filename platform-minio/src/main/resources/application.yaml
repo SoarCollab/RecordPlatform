@@ -15,6 +15,9 @@ dubbo:
     name: RecordPlatform_minio
     logger: slf4j
     protocol: tri
+    qos-port: 2233  # 使用 23333 端口
+    qos-enable: on # 启用 QoS 功能
+    qos-accept-foreign-ip: false # 只允许本机访问
   protocol:
     name: tri
     port: 8092
