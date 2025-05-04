@@ -22,7 +22,7 @@ public class FileUploadRedisStateManager {
 
     // 键前缀和过期时间配置
     private static final String ACTIVE_UPLOADS_KEY = "file:upload:active_sessions";
-    private static final String FILE_CLIENT_MAPPING_KEY = "file:upload:filename_client_mapping";
+    private static final String FILE_SUID_MAPPING_KEY = "file:upload:filename_suid_mapping";
     private static final String PAUSED_SESSIONS_KEY = "file:upload:paused_sessions";
     private static final String SESSION_KEY_PREFIX = "file:upload:session:";
     private static final String SESSION_UPLOADED_CHUNKS_KEY_PREFIX = "file:upload:uploaded_chunks:";
@@ -39,8 +39,8 @@ public class FileUploadRedisStateManager {
     /**
      * 保存新创建的上传状态
      */
-    public void saveNewState(FileUploadState state) {
-        String sessionId = state.getSessionId();
+    public void saveNewState(FileUploadState state,String SUID) {
+        String sessionId = state.getClientId();
         String stateKey = getSessionKey(sessionId);
 
         // 1. 保存会话状态本身
@@ -49,9 +49,9 @@ public class FileUploadRedisStateManager {
         // 2. 将会话ID添加到活跃会话集合
         cacheUtils.setAdd(ACTIVE_UPLOADS_KEY, sessionId);
 
-        // 3. 保存文件名和客户端ID到会话ID的映射
-        String fileClientKey = state.getFileName() + "_" + state.getClientId();
-        cacheUtils.hashPut(FILE_CLIENT_MAPPING_KEY, fileClientKey, sessionId);
+        // 3. 保存文件名和SUID到会话ID的映射
+        String fileClientKey = state.getFileName() + "_" + SUID;
+        cacheUtils.hashPut(FILE_SUID_MAPPING_KEY, fileClientKey, sessionId);
 
         // 4. 初始化上传分片和处理分片的集合
         String uploadedChunksKey = getUploadedChunksKey(sessionId);
@@ -83,7 +83,7 @@ public class FileUploadRedisStateManager {
      * 更新会话状态
      */
     public void updateState(FileUploadState state) {
-        String sessionId = state.getSessionId();
+        String sessionId = state.getClientId();
         String stateKey = getSessionKey(sessionId);
 
         // 保存状态基本信息
@@ -201,25 +201,26 @@ public class FileUploadRedisStateManager {
     }
 
     /**
-     * 根据文件名和客户端ID获取会话ID
+     * 根据文件名和SUID获取会话ID
      */
-    public String getSessionIdByFileClientKey(String fileName, String clientId) {
-        String fileClientKey = fileName + "_" + clientId;
-        return cacheUtils.hashGet(FILE_CLIENT_MAPPING_KEY, fileClientKey, String.class);
+    public String getSessionIdByFileClientKey(String fileName, String SUID) {
+        String fileClientKey = fileName + "_" + SUID;
+        return cacheUtils.hashGet(FILE_SUID_MAPPING_KEY, fileClientKey, String.class);
     }
 
     /**
      * 移除会话及相关数据
      */
-    public void removeSession(String sessionId) {
+    public void removeSession(String sessionId, String SUID) {
         FileUploadState state = getState(sessionId);
+
         if (state == null) {
             return;
         }
 
         // 删除映射
-        String fileClientKey = state.getFileName() + "_" + state.getClientId();
-        cacheUtils.hashDelete(FILE_CLIENT_MAPPING_KEY, fileClientKey);
+        String fileClientKey = state.getFileName() + "_" + SUID;
+        cacheUtils.hashDelete(FILE_SUID_MAPPING_KEY, fileClientKey);
 
         // 删除分片集合
         cacheUtils.deleteCache(getUploadedChunksKey(sessionId));
@@ -252,7 +253,7 @@ public class FileUploadRedisStateManager {
      * 填充状态中的集合数据
      */
     private void populateStateCollections(FileUploadState state) {
-        String sessionId = state.getSessionId();
+        String sessionId = state.getClientId();
 
         // 获取已上传分片
         String uploadedChunksKey = getUploadedChunksKey(sessionId);
@@ -295,7 +296,7 @@ public class FileUploadRedisStateManager {
         state.getKeys().putAll(keys);
     }
 
-    // 键构建助手方法
+    // 键构建辅助方法
 
     private String getSessionKey(String sessionId) {
         return SESSION_KEY_PREFIX + sessionId;

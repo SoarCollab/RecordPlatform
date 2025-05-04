@@ -129,7 +129,7 @@ public class SnowflakeIdGenerator implements InitializingBean {
         return System.currentTimeMillis();
     }
 
-    /** 处理时钟回拨（示例：短暂等待） */
+    /** 处理时钟回拨（短暂等待） */
     private void handleClockBackwards(long currentTimestamp) {
         long offset = lastTimestamp - currentTimestamp;
         if (offset <= 5_000) { // 允许5秒内的回拨
@@ -206,7 +206,7 @@ public class SnowflakeIdGenerator implements InitializingBean {
             log.warn("Failed to resolve data center ID, using default value", e);
         }
 
-        // 优先级3: 返回默认值（需确保不同机器默认值不同，此处仅为示例）
+        // 优先级3: 返回默认值
         return 0;
     }
 

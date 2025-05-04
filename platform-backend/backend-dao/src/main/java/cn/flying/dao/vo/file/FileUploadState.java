@@ -6,7 +6,6 @@ import lombok.Setter;
 
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 /**
  * @program: RecordPlatform
@@ -18,9 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Setter
 @Schema(description = "文件上传状态类")
 public class FileUploadState {
-    @Schema(description = "会话ID（后端自动生成）")
-    private String sessionId;
-    @Schema(description = "客户端ID（标识唯一的）")
+    @Schema(description = "客户端ID（标识唯一的客户端会话）")
     private String clientId;
     @Schema(description = "文件名")
     private String fileName;
@@ -48,7 +45,6 @@ public class FileUploadState {
     private volatile long lastProgressLogTime;
 
     public FileUploadState(String fileName, long fileSize, String contentType, String clientId, int chunkSize, int totalChunks) {
-        this.sessionId = UUID.randomUUID().toString();
         this.clientId = clientId;
         this.fileName = fileName;
         this.fileSize = fileSize;
