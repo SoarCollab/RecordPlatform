@@ -24,8 +24,6 @@ public class FileUploadStatusVO {
     private String fileName;
     @Schema(description = "文件大小")
     private long fileSize;
-    @Schema(description = "会话ID")
-    private String sessionId;
     @Schema(description = "客户端ID")
     private String clientId;
     @Schema(description = "是否暂停")
