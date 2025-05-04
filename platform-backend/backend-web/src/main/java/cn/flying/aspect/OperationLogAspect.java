@@ -38,7 +38,7 @@ public class OperationLogAspect {
     private SysOperationLogService operationLogService;
     
     // 忽略记录的URL前缀，与RequestLogFilter保持一致
-    private final Set<String> ignores = Set.of("/doc.html","/swagger-ui", "/v3/api-docs", "/api/file");
+    private final Set<String> ignores = Set.of("/favicon.ico","/webjars","/doc.html","/swagger-ui", "/v3/api-docs", "/api/file");
 
     /**
      * 设置操作日志切入点 记录操作日志 在注解的位置切入代码

@@ -1,5 +1,6 @@
 package cn.flying.service.impl;
 
+import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.event.FileStorageEvent;
 import cn.flying.common.util.CommonUtils;
 import cn.flying.common.util.Const;
@@ -16,7 +17,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.MDC;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.context.ApplicationEventPublisherAware;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -52,15 +52,10 @@ import java.util.stream.Stream;
 @Service
 @Slf4j
 @Transactional(rollbackFor = Exception.class)
-public class FileUploadServiceImpl implements FileUploadService , ApplicationEventPublisherAware {
+public class FileUploadServiceImpl implements FileUploadService {
 
-    // 添加事件发布器
+    @Resource
     private ApplicationEventPublisher eventPublisher;
-
-    @Override
-    public void setApplicationEventPublisher(@NotNull ApplicationEventPublisher applicationEventPublisher) {
-        this.eventPublisher = applicationEventPublisher;
-    }
 
     // --- 目录常量 ---
     private static final String UPLOAD_BASE_DIR = "uploads"; // 原始分片存储基础目录
@@ -182,7 +177,8 @@ public class FileUploadServiceImpl implements FileUploadService , ApplicationEve
      * @throws GeneralException 输入验证失败
      * @throws GeneralException IO 操作失败
      */
-    public StartUploadVO startUpload(String fileName, long fileSize, String contentType, String providedClientId) {
+    @Override
+    public StartUploadVO startUpload(String fileName, long fileSize, String contentType, String providedClientId, int chunkSize, int totalChunks) {
 
         String clientId = (providedClientId == null || providedClientId.trim().isEmpty())
                 ? UUID.randomUUID().toString() : providedClientId;
@@ -225,7 +221,7 @@ public class FileUploadServiceImpl implements FileUploadService , ApplicationEve
 
         // --- 创建新会话 ---
         try {
-            FileUploadState newState = new FileUploadState(fileName, fileSize, contentType, clientId);
+            FileUploadState newState = new FileUploadState(fileName, fileSize, contentType, clientId, chunkSize, totalChunks);
             redisStateManager.saveNewState(newState);
 
             // 确保客户端和会话的目录存在
@@ -299,6 +295,7 @@ public class FileUploadServiceImpl implements FileUploadService , ApplicationEve
                 log.warn("写入字节数 ({}) 与文件大小 ({}) 不符: 分片={}, 会话={}",
                         bytesWritten, file.getSize(), chunkNumber, sessionId);
                 // 可以考虑是否需要抛异常
+                throw new GeneralException(ResultEnum.File_UPLOAD_ERROR);
             }
 
             byte[] hashBytes = digest.digest();
@@ -389,7 +386,6 @@ public class FileUploadServiceImpl implements FileUploadService , ApplicationEve
 
             log.info("文件上传和处理流程完成: 会话ID={}, 文件名={}", sessionId, state.getFileName());
 
-            //todo 基于spring事件监听实现文件异步存证上链与minio集群存储
 
             // 收集处理后的文件和哈希值
             List<java.io.File> processedFiles = collectProcessedFiles(state.getClientId(), sessionId);
@@ -478,7 +474,7 @@ public class FileUploadServiceImpl implements FileUploadService , ApplicationEve
     public FileUploadStatusVO checkFileStatus(String sessionId){
         FileUploadState state = redisStateManager.getState(sessionId);
         if (state == null) {
-            throw new GeneralException("上传会话不存在或已完成: 会话ID=" + sessionId);
+            throw new GeneralException("上传会话不存在或会话已被清除: 会话ID=" + sessionId);
         }
 
         redisStateManager.updateLastActivityTime(sessionId);
@@ -660,10 +656,10 @@ public class FileUploadServiceImpl implements FileUploadService , ApplicationEve
     }
 
     /** 定时任务：清理过期的上传会话 */
-    @Scheduled(fixedRate = 6 * 3600000) // 每6小时执行一次
+    @Scheduled(cron = "0 0 0/12 * * ?",initialDelay = 12 * 60 * 60 * 1000) // 每12小时执行一次（启动后间隔12小时执行）
     public void cleanupExpiredUploadSessions() {
         long now = System.currentTimeMillis();
-        long timeoutMillis = 24 * 60 * 60 * 1000L; // 24 小时
+        long timeoutMillis = 12 * 60 * 60 * 1000L; // 12 小时
         log.info("开始执行定时清理任务，查找超过 {} 小时未活动的上传会话...", TimeUnit.MILLISECONDS.toHours(timeoutMillis));
 
         Set<String> activeSessionIds = redisStateManager.getAllActiveSessionIds();
@@ -750,7 +746,6 @@ public class FileUploadServiceImpl implements FileUploadService , ApplicationEve
     private void tryDelete(Path path) {
         try {
             Files.delete(path);
-            // logger.trace("已删除: {}", path); // 可以用更低的日志级别
         } catch (NoSuchFileException e) {
             // Ignore
         } catch (DirectoryNotEmptyException e) {

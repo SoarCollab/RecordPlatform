@@ -38,14 +38,16 @@ public class FileUploadController {
             @Schema(description = "文件名") @RequestParam("fileName") String fileName,
             @Schema(description = "文件大小") @RequestParam("fileSize") long fileSize,
             @Schema(description = "文件类型") @RequestParam(value = "contentType", required = false) String contentType,
-            @Schema(description = "客户端ID") @RequestParam(value = "clientId", required = false) String providedClientId) {
+            @Schema(description = "客户端ID") @RequestParam(value = "clientId", required = false) String providedClientId,
+            @Schema(description = "分片大小") @RequestParam(value = "chunkSize") int chunkSize,
+            @Schema(description = "分片总数") @RequestParam(value = "totalChunks") int totalChunks) {
 
-        StartUploadVO uploadVO = fileUploadService.startUpload(fileName, fileSize, contentType, providedClientId);
+        StartUploadVO uploadVO = fileUploadService.startUpload(fileName, fileSize, contentType, providedClientId,chunkSize,totalChunks);
         return Result.success(uploadVO);
     }
 
-    @PostMapping("/chunk")
-    @Operation(summary = "检查上传状态")
+    @PostMapping("/upload/chunk")
+    @Operation(summary = "上传分片文件")
     public Result<String> uploadChunk(
             @Schema(description = "上传的文件") @RequestParam("file") MultipartFile file,
             @Schema(description = "会话ID") @RequestParam("sessionId") String sessionId,
