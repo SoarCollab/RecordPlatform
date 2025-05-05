@@ -1,0 +1,58 @@
+/* 所有元素使用更直观的盒模型 */
+*,
+*::before,
+*::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-weight: normal;
+}
+
+/* 根元素设置主题变量 */
+:root {
+    /* 明亮主题变量 */
+    --el-bg-color: #f2f3f5;
+    --el-bg-color-page: #f2f3f5;
+    --el-text-color-primary: rgba(0, 0, 0, 0.85);
+}
+
+/* 暗黑主题变量 */
+html.dark {
+    --el-bg-color: #1f1f22;
+    --el-bg-color-page: #0a0a0a;
+    --el-text-color-primary: rgba(255, 255, 255, 0.85);
+}
+
+/* 设置body元素的样式 */
+body{
+    background-color: var(--el-bg-color);
+    color: var(--el-text-color-primary);
+    text-rendering: optimizeLegibility;
+    overflow: hidden;
+}
+
+/* 设置html, body和app元素占满整个视口高度 */
+html,body,#app{
+    height: 100vh;
+}
+
+/* 设置app元素内容不可横向滚动 */
+#app{
+    overflow-x: hidden;
+}
+
+.scrollbar::-webkit-scrollbar {
+    width: 4px;
+    height: 8px;
+}
+.scrollbar::-webkit-scrollbar-thumb {
+    border-radius: 4px;
+    -webkit-box-shadow: inset 0 0 4px rgba(0, 0, 0, 0.2);
+    background: rgba(190, 190, 190, 0.2);
+}
+.scrollbar::-webkit-scrollbar-track {
+    -webkit-box-shadow: inset 0 0 4px rgba(227, 227, 227, 0.2);
+    border-radius: 0;
+    background: rgba(0, 0, 0, 0.1);
+}
+
