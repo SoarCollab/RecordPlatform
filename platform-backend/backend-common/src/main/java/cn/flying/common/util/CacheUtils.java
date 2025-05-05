@@ -1,8 +1,8 @@
 package cn.flying.common.util;
 
-import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -17,6 +17,7 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Component
+@Getter
 public class CacheUtils {
     @Resource
     private StringRedisTemplate stringRedisTemplate;
@@ -35,8 +36,10 @@ public class CacheUtils {
         String s = stringRedisTemplate.opsForValue().get(key);
         if(s == null) return null;
         try {
-            return objectMapper.readValue(s, dataType);
+            // 使用 JsonConverter 进行反序列化
+            return JsonConverter.parse(s, dataType);
         } catch (Exception e) {
+            log.error("缓存反序列化失败 (key: {}): {}", key, e.getMessage());
             return null;
         }
     }
@@ -48,10 +51,10 @@ public class CacheUtils {
         String s = stringRedisTemplate.opsForValue().get(key);
         if(s == null) return null;
         try {
-            JavaType type = objectMapper.getTypeFactory()
-                    .constructCollectionType(List.class, itemType);
-            return objectMapper.readValue(s, type);
+            // 使用 JsonConverter 进行列表反序列化
+            return JsonConverter.parse(s, List.class, itemType);
         } catch (Exception e) {
+            log.error("缓存列表反序列化失败 (key: {}): {}", key, e.getMessage());
             return null;
         }
     }
@@ -61,9 +64,14 @@ public class CacheUtils {
      */
     public <T> void saveToCache(String key, T data, long expire) {
         try {
-            String json = objectMapper.writeValueAsString(data);
-            stringRedisTemplate.opsForValue().set(key, json, expire, TimeUnit.SECONDS);
-        } catch (Exception ignored) {}
+            // 使用 JsonConverter 进行序列化
+            String json = JsonConverter.toJson(data);
+            if (json != null) { // JsonConverter.toJson 可能返回 null
+                stringRedisTemplate.opsForValue().set(key, json, expire, TimeUnit.SECONDS);
+            }
+        } catch (Exception e) {
+            log.error("保存到缓存失败 (key: {}): {}", key, e.getMessage());
+        }
     }
 
     /**
@@ -71,9 +79,14 @@ public class CacheUtils {
      */
     public <T> void saveToCache(String key, T data) {
         try {
-            String json = objectMapper.writeValueAsString(data);
-            stringRedisTemplate.opsForValue().set(key, json);
-        } catch (Exception ignored) {}
+            // 使用 JsonConverter 进行序列化
+            String json = JsonConverter.toJson(data);
+            if (json != null) { // JsonConverter.toJson 可能返回 null
+                stringRedisTemplate.opsForValue().set(key, json);
+            }
+        } catch (Exception e) {
+            log.error("保存到缓存失败 (key: {}): {}", key, e.getMessage());
+        }
     }
 
     /**
@@ -118,8 +131,11 @@ public class CacheUtils {
                 String base64Value = BYTES_PREFIX + Base64.getEncoder().encodeToString(byteArray);
                 hashOps.put(key, hashKey, base64Value);
             } else {
-                String json = objectMapper.writeValueAsString(value);
-                hashOps.put(key, hashKey, json);
+                // 使用 JsonConverter 进行序列化
+                String json = JsonConverter.toJson(value);
+                if (json != null) { // JsonConverter.toJson 可能返回 null
+                    hashOps.put(key, hashKey, json);
+                }
             }
         } catch (Exception e) {
             // 记录日志但不抛出异常
@@ -141,8 +157,10 @@ public class CacheUtils {
                 String base64 = value.substring(BYTES_PREFIX.length());
                 return (T) Base64.getDecoder().decode(base64);
             }
-            return objectMapper.readValue(value, type);
+            // 使用 JsonConverter 进行反序列化
+            return JsonConverter.parse(value, type);
         } catch (Exception e) {
+            log.error("获取哈希表字段并反序列化失败 (key: {}, hashKey: {}): {}", key, hashKey, e.getMessage());
             return null;
         }
     }
@@ -188,7 +206,11 @@ public class CacheUtils {
                     String base64Value = BYTES_PREFIX + Base64.getEncoder().encodeToString(byteArray);
                     stringMap.put(entry.getKey(), base64Value);
                 } else {
-                    stringMap.put(entry.getKey(), objectMapper.writeValueAsString(entry.getValue()));
+                    // 使用 JsonConverter 进行序列化
+                    String jsonValue = JsonConverter.toJson(entry.getValue());
+                    if (jsonValue != null) { // JsonConverter.toJson 可能返回 null
+                        stringMap.put(entry.getKey(), jsonValue);
+                    }
                 }
             }
             stringRedisTemplate.opsForHash().putAll(key, stringMap);

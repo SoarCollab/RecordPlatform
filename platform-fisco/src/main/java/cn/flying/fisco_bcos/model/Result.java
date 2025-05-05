@@ -1,9 +1,13 @@
+
 package cn.flying.fisco_bcos.model;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 import lombok.Setter;
+
+import java.io.Serial;
+import java.io.Serializable;
 
 /**
  * @program: RecordPlatform
@@ -14,7 +18,10 @@ import lombok.Setter;
 
 @Getter
 @Setter
-public class Result<T> {
+public class Result<T> implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 
     // 操作代码
     private Integer code;

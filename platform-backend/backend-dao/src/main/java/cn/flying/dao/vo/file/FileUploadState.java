@@ -2,6 +2,7 @@ package cn.flying.dao.vo.file;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.util.Map;
@@ -15,6 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Getter
 @Setter
+@NoArgsConstructor
 @Schema(description = "文件上传状态类")
 public class FileUploadState {
     @Schema(description = "客户端ID（标识唯一的客户端会话）")
