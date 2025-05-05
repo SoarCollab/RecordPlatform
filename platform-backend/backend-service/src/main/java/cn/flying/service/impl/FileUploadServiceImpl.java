@@ -264,7 +264,6 @@ public class FileUploadServiceImpl implements FileUploadService {
 
         redisStateManager.updateLastActivityTime(clientId); // 更新活动时间
 
-        // 注意: totalChunksParam 从 Controller 传来，但我们应使用 state 中的 totalChunks 进行验证
         if (!isValidChunkNumber(chunkNumber, state.getTotalChunks())) {
             throw new GeneralException("无效的分片序号: 序号=" + chunkNumber + ", 总数=" + state.getTotalChunks());
         }
@@ -661,7 +660,7 @@ public class FileUploadServiceImpl implements FileUploadService {
     }
 
     /** 定时任务：清理过期的上传会话 */
-    @Scheduled(cron = "0 0 0/12 * * ?",initialDelay = 12 * 60 * 60 * 1000) // 每12小时执行一次（启动后间隔12小时执行）
+    @Scheduled(fixedDelay = 12 * 60 * 60 * 1000, initialDelay = 24 * 60 * 60 * 1000) // 每12小时执行一次（启动后间隔24小时执行）
     public void cleanupExpiredUploadSessions() {
         long now = System.currentTimeMillis();
         long timeoutMillis = 12 * 60 * 60 * 1000L; // 12 小时

@@ -3,6 +3,8 @@ package cn.flying.common.constant;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 
+import java.io.Serializable;
+
 /**
  * @program: RecordPlatform
  * @description: 返回结果枚举
@@ -11,7 +13,7 @@ import lombok.Getter;
  */
 @Getter
 @Schema(description = "返回结果枚举")
-public enum ResultEnum {
+public enum ResultEnum implements Serializable {
 
     /* 成功状态码 */
     SUCCESS(1, "操作成功!"),

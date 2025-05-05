@@ -160,10 +160,11 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             File file = fileList.get(i);
             String fileHash = fileHashList.get(i);
 
+            int finalI = i;
             futures.add(CompletableFuture.runAsync(() -> {
                 try {
-                    // 2. 为当前文件选择负载最低的逻辑节点
-                    String targetLogicNode = selectBestLogicNode(availableLogicNodes);
+                    // 2. 按顺序选择逻辑节点
+                    String targetLogicNode = availableLogicNodes.get(finalI % availableLogicNodes.size());
                     if (targetLogicNode == null) {
                         failedResults.put(fileHash, "无法选择合适的 logic node");
                         return;
@@ -176,7 +177,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                         return;
                     }
 
-                    // 4. 并发上传到两个物理节点
+                    // 4. 并发上传到两个物理节点(双份冗余存储)
                     CompletableFuture<Void> upload1 = uploadToNodeAsync(physicalNodePair.get(0), fileHash, file);
                     CompletableFuture<Void> upload2 = uploadToNodeAsync(physicalNodePair.get(1), fileHash, file);
 
