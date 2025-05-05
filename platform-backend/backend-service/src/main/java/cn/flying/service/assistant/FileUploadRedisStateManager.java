@@ -1,11 +1,13 @@
 package cn.flying.service.assistant;
 
 import cn.flying.common.util.CacheUtils;
+import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.vo.file.FileUploadState;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.AbstractMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -247,8 +249,6 @@ public class FileUploadRedisStateManager {
         return members != null ? members : new HashSet<>();
     }
 
-    // 私有辅助方法
-
     /**
      * 填充状态中的集合数据
      */
@@ -271,24 +271,34 @@ public class FileUploadRedisStateManager {
         String chunkHashesKey = getChunkHashesKey(sessionId);
         Map<Object, Object> rawChunkHashes = cacheUtils.hashGetAll(chunkHashesKey);
 
-        // 检查返回值是否为空
-        if (rawChunkHashes != null) {
+        if (rawChunkHashes != null && !rawChunkHashes.isEmpty()) {
             // 转换 Map<Object, Object>
             Map<String, String> chunkHashes = rawChunkHashes.entrySet().stream()
                     .filter(entry -> entry.getKey() instanceof String && entry.getValue() instanceof String)
+                    // 显式类型转换，帮助类型推断
+                    .map(entry -> new AbstractMap.SimpleEntry<>((String) entry.getKey(), (String) entry.getValue()))
                     .collect(Collectors.toMap(
-                            entry -> (String) entry.getKey(),
-                            entry -> (String) entry.getValue()
+                            AbstractMap.SimpleEntry::getKey,
+                            entry -> {
+                                String rawValue = entry.getValue();
+                                try {
+                                    // 直接使用 JsonConverter 进行反序列化
+                                    return JsonConverter.parse(rawValue, String.class);
+                                } catch (Exception e) {
+                                    log.error("反序列化 Redis 哈希值失败: key={}, value={}, error={}",
+                                            entry.getKey(), rawValue, e.getMessage());
+                                    // 返回原始值或 null，根据错误处理策略决定
+                                    // 注意: 如果原始值不是有效的JSON字符串，这里会保留原始值
+                                    return rawValue;
+                                }
+                            }
                     ));
-
-            // 更新状态中的分片哈希集合
             state.getChunkHashes().clear();
             state.getChunkHashes().putAll(chunkHashes);
         } else {
             // 如果 Redis 中没有数据，清空集合以确保一致性
             state.getChunkHashes().clear();
         }
-
 
         // 获取密钥
         Map<Integer, byte[]> keys = getChunkKeys(sessionId);

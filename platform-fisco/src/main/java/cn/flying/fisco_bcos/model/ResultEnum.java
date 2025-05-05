@@ -2,6 +2,8 @@ package cn.flying.fisco_bcos.model;
 
 import lombok.Getter;
 
+import java.io.Serializable;
+
 /**
  * @program: RecordPlatform
  * @description: 返回结果枚举
@@ -9,7 +11,7 @@ import lombok.Getter;
  * @create: 2025-01-15 15:36
  */
 @Getter
-public enum ResultEnum {
+public enum ResultEnum implements Serializable {
 
     /* 成功状态码 */
     SUCCESS(1, "操作成功!"),
