@@ -64,7 +64,7 @@ const deleteClient = () => {
 </script>
 
 <template>
-  <el-card :style="{width: `${width}px`,minHeight: `${height}px`}" class="" >
+  <el-card :style="{width: `${width}px`,}" class="" >
     <div class="flex flex-col gap-3" >
       <div class="flex items-center justify-between" >
         <div class="flex items-center gap-1" >

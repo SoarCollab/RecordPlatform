@@ -55,7 +55,7 @@ const handleDel = (row, index) => {
     <el-table-column align="center" prop="fileType" label="文件类型" />
 <!--    <el-table-column prop="type" label="哈希值" />-->
 <!--    <el-table-column prop="type" label="状态" />-->
-    <el-table-column prop="createTime" label="创建时间" />
+    <el-table-column align="center" prop="createTime" label="创建时间" />
     <el-table-column align="center" width="300" label="操作" >
       <template #default="{row, $index}">
         <el-button text :icon="Download" type="primary" @click="handleDownload(row, $index)" >下载</el-button>
