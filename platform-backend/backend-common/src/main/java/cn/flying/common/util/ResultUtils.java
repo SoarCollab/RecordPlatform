@@ -4,11 +4,13 @@ package cn.flying.common.util;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
+import org.springframework.stereotype.Component;
 
 /**
  * Result 结果处理工具类
  * 用于处理 Result 类型的返回值判断和错误传递
  */
+@Component
 public class ResultUtils {
 
     /**

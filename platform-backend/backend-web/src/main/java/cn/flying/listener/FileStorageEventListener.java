@@ -66,19 +66,19 @@ public class FileStorageEventListener {
                     log.error("文件异步存储或上链失败，返回结果为 null: 用户={}, 文件名={}",
                             event.getUid(), event.getFileName());
                     // 根据业务逻辑决定是否需要更新文件状态为失败
-                     fileService.changeFileStatus(event.getUid(), event.getFileName(), FileUploadStatus.FAIL.getCode());
+                     fileService.changeFileStatusByName(event.getUid(), event.getFileName(), FileUploadStatus.FAIL.getCode());
                 }
             } catch (Exception e) {
                 log.error("处理文件存证事件时发生异常: 用户={}, 文件名={}",
                         event.getUid(), event.getFileName(), e);
                 // 可以在这里添加更详细的错误处理逻辑，例如更新数据库状态为失败
-                fileService.changeFileStatus(event.getUid(), event.getFileName(), FileUploadStatus.FAIL.getCode());
+                fileService.changeFileStatusByName(event.getUid(), event.getFileName(), FileUploadStatus.FAIL.getCode());
             }
         }, fileProcessTaskExecutor).exceptionally(ex -> {
             // 处理 CompletableFuture 内部的异常 (例如线程池拒绝任务等)
             log.error("文件存储 CompletableFuture 执行异常: 用户={}, 文件名={}, 错误: {}",
                     event.getUid(), event.getFileName(), ex.getMessage(), ex);
-            fileService.changeFileStatus(event.getUid(), event.getFileName(), FileUploadStatus.FAIL.getCode());
+            fileService.changeFileStatusByName(event.getUid(), event.getFileName(), FileUploadStatus.FAIL.getCode());
             return null; // 返回 null 表示异常已处理
         });
     }
