@@ -36,3 +36,40 @@ export function formatSize(bytes) {
   }
   return `${size.toFixed(2)} ${units[unitIndex]}`
 }
+
+/**
+ * 将 File 对象转换为 Base64
+ * @param {File} file - 文件对象
+ * @returns {Promise<string>} Base64 字符串
+ */
+export function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result.split(',')[1]); // 去掉 data URL 前缀
+    reader.onerror = error => reject(error);
+  });
+}
+
+/**
+ * 将 Base64 字符串转换为 File 对象
+ * @param {string} base64 - Base64 字符串
+ * @param {string} filename - 文件名
+ * @param {string} mimeType - MIME 类型
+ * @returns {Promise<File>} File 对象
+ */
+export async function base64ToFile(base64, filename, mimeType) {
+  const response = await fetch(`data:${mimeType};base64,${base64}`);
+  const blob = await response.blob();
+  return new File([blob], filename, { type: mimeType });
+}
+
+export async function buildFile (file) {
+
+  return {
+    // file: fileToBase64(file),
+    fileName: file.name,
+    fineType: file.type,
+    fileSize: formatSize(file.size),
+  }
+}

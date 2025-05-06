@@ -30,7 +30,7 @@ const props = defineProps({
     <div class="p-5 bg-white rounded-md">
       <!-- 标题 -->
       <div class="flex flex-col gap-5 mb-5">
-        <div class="text-align-center text-[26px] font-bold" >{{props.title}}</div>
+        <div class="text-align-center text-[26px] font-bold text-black" >{{props.title}}</div>
         <div class="text-[17px] text-gray text-align-center">{{ props.subTitle }}</div>
       </div>
       <!-- 表单 -->

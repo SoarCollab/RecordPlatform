@@ -157,7 +157,7 @@ const getNow = async (id) => {
 
 const id = setInterval(()=>{
   getNow(route.params.id)
-}, 2000)
+}, 10000)
 onMounted(() => {
   getDetail(route.params.id)
   getHistory(route.params.id)

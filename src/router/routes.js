@@ -140,6 +140,16 @@ const dynamicRoute = [
           hide: false,
         }
       },
+      {
+        path: '/file/get',
+        name: 'fileGet',
+        component: () => import('@/views/file/get.vue'),
+        meta: {
+          title: '获取文件',
+          icon: 'Promotion',
+          hide: false,
+        }
+      }
     ]
   },
   {

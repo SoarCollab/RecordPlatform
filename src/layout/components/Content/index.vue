@@ -20,7 +20,7 @@ const cls = computed(() => {
 const contentCls = computed(() => {
   return {
     'bg-white': !isDark.value,
-    'bg-[#1F1F22FF]': isDark.value
+    'bg-[#141414FF]': isDark.value
   }
 })
 

@@ -130,6 +130,8 @@ watch(
 
 <style scoped>
 .grid-container {
+  width: 100%;
+  //height: 100%;
   display: grid;
   gap: v-bind('props.gap + "px"'); /* 动态绑定间距值 */
   justify-content: center;

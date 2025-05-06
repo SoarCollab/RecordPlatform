@@ -5,8 +5,10 @@ import MenuIcon from "@/components/Icon/MenuIcon.vue";
 import {useMessage} from "@/utils/message.js";
 import {ChunkedUploader} from './ChunkedUploader.js'
 import {useAuthorization} from "@/composables/authorization.js";
-import {formatSize, generateUUID} from '@/utils/file.js'
+import {buildFile, formatSize, generateUUID} from '@/utils/file.js'
 import {markRaw} from "vue";
+import {useStorage} from "@vueuse/core";
+import {dayjs} from "element-plus";
 
 const baseUrl = import.meta.env.VITE_BASE_URL
 const {token,monitorAuth} = useAuthorization()
@@ -205,6 +207,7 @@ const handleCompleteApi = async (pms) => {
     file: fileTemp,
     clientId: pms.uploadId,
     status: 'success',
+    createTime: dayjs().format('YYYY-MM-DD HH:mm:ss'),
   }
   console.log('完成上传', response)
   // 检查响应
@@ -223,6 +226,17 @@ const handleCompleteApi = async (pms) => {
   }
   page.uploadStatus = 'completed'
   page.uploadHistory.push(itemTemp)
+  // localStorage.setItem('uploadHistory', JSON.stringify(page.uploadHistory))
+  const list = JSON.parse(localStorage.getItem('fileList') || '[]')
+  list.push({
+    clientId: itemTemp.clientId,
+    createTime: itemTemp.createTime,
+    fileName: itemTemp.file.name,
+    fileSize: formatSize(itemTemp.file.size),
+    fileType: itemTemp.file.type,
+    status: itemTemp.status,
+  })
+  localStorage.setItem('fileList', JSON.stringify(list))
 }
 /**
  * 取消上传Api
