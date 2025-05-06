@@ -177,7 +177,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                         return;
                     }
 
-                    // 4. 并发上传到两个物理节点(双份冗余存储)
+                    // 4. 并发上传到两个物理节点(冗余存储)
                     CompletableFuture<Void> upload1 = uploadToNodeAsync(physicalNodePair.get(0), fileHash, file);
                     CompletableFuture<Void> upload2 = uploadToNodeAsync(physicalNodePair.get(1), fileHash, file);
 
@@ -213,6 +213,11 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
 
         log.info("文件上传完成，成功：{}", successResults.size());
         return Result.success(successResults);
+    }
+
+    @Override
+    public Result<Boolean> deleteFile(Map<String, String> fileContent) {
+        return null;
     }
 
     // --- 内部辅助方法 ---

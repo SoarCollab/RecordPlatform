@@ -5,6 +5,7 @@ import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.util.CommonUtils;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.JsonConverter;
+import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.platformapi.constant.Result;
@@ -15,6 +16,7 @@ import cn.flying.platformapi.response.SharingVO;
 import cn.flying.service.FileService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.slf4j.MDC;
@@ -82,7 +84,17 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
-    public void changeFileStatus(String Uid, String fileHash, Integer fileStatus) {
+    public void changeFileStatusByName(String Uid, String fileName, Integer fileStatus) {
+        LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
+                .eq(File::getFileName, fileName)
+                .eq(File::getUid, Uid);
+        File file = new File()
+                .setStatus(fileStatus);
+        this.update(file,wrapper);
+    }
+
+    @Override
+    public void changeFileStatusByHash(String Uid, String fileHash, Integer fileStatus) {
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getFileHash, fileHash)
                 .eq(File::getUid, Uid);
@@ -92,23 +104,35 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
-    public void deleteFile(String Uid, String fileHash) {
-        if(CommonUtils.isEmpty(fileHash)) return;
+    public void deleteFile(String Uid, List<String> fileHashList) {
+        if(CommonUtils.isEmpty(fileHashList)) return;
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                .eq(File::getFileHash, fileHash)
-                .eq(File::getUid, Uid);
+                .eq(File::getUid, Uid)
+                .in(File::getFileHash, fileHashList);
         //此处不执行实际的文件删除操作，仅更新文件元信息（实际操作使用定时任务批量执行，将文件删除或移入冷数据存储器）
         //todo 后续实现定时任务
         this.remove(wrapper);
     }
 
     @Override
-    public List<File> getUserFiles(String Uid) {
-        LambdaQueryWrapper<File> wrapper= new LambdaQueryWrapper<File>()
-                .eq(File::getUid, Uid)
-                .eq(File::getStatus, FileUploadStatus.SUCCESS.getCode())
-                .eq(File::getStatus, FileUploadStatus.PREPARE.getCode());
+    public List<File> getUserFilesList(String Uid) {
+        LambdaQueryWrapper<File> wrapper= new LambdaQueryWrapper<>();
+        //超管账号可查看所有文件
+        if(!SecurityUtils.isAdmin()){
+            wrapper.eq(File::getUid, Uid);
+        }
+
         return this.list(wrapper);
+    }
+
+    @Override
+    public void getUserFilesPage(String Uid, Page<File> page) {
+        LambdaQueryWrapper<File> wrapper= new LambdaQueryWrapper<>();
+        //超管账号可查看所有文件
+        if(!SecurityUtils.isAdmin()){
+            wrapper.eq(File::getUid, Uid);
+        }
+        this.page(page, wrapper);
     }
 
     @Override
