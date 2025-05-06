@@ -148,6 +148,16 @@ public class JwtUtils {
     }
 
     /**
+     * 将jwt对象中的用户role提取出来
+     * @param jwt 已解析的Jwt对象
+     * @return 用户ID
+     */
+    public String toRole(DecodedJWT jwt) {
+        Map<String, Claim> claims = jwt.getClaims();
+        return claims.get("authorities").toString();
+    }
+
+    /**
      * 频率检测，防止用户高频申请Jwt令牌，并且采用阶段封禁机制
      * 如果已经提示无法登录的情况下用户还在刷，那么就封禁更长时间
      * @param userId 用户ID

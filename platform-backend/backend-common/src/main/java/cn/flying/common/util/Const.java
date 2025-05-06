@@ -21,6 +21,7 @@ public final class Const {
     public final static int ORDER_ID_SECURITY = 100;
     //请求自定义属性
     public final static String ATTR_USER_ID = "userId";
+    public final static String ATTR_USER_ROLE = "userRole";
     public final static String ATTR_REQ_ID = "reqId";
     //消息队列
     public final static String MQ_MAIL = "mail";

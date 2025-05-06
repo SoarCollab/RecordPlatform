@@ -7,11 +7,13 @@ import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.SaveSharingFile;
 import cn.flying.dao.vo.file.fileSharingVO;
 import cn.flying.service.FileService;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -40,23 +42,54 @@ public class FileController {
     @Operation(summary = "获取用户文件列表（只包含文件元信息，没有实际的文件数据内容）")
     @OperationLog(module = "文件操作", operationType = "查询", description = "获取用户文件列表")
     public Result<List<File>> getUserFiles(@RequestAttribute(Const.ATTR_USER_ID) String userId) {
-        List<File> files = fileService.getUserFiles(userId);
+        List<File> files = fileService.getUserFilesList(userId);
         return Result.success(files);
+    }
+
+    /**
+     * 获取用户文件列表
+     * @param userId 用户ID
+     * @return 用户文件列表
+     */
+    @GetMapping("/page")
+    @Operation(summary = "获取用户文件分页（只包含文件元信息，没有实际的文件数据内容）")
+    @OperationLog(module = "文件操作", operationType = "查询", description = "获取用户文件分页")
+    public Result<Page<File>> getUserFiles(@RequestAttribute(Const.ATTR_USER_ID) String userId,
+                                          @Schema(description = "当前分页") Integer pageNum,
+                                          @Schema(description = "分页大小") Integer pageSize) {
+        Page<File> page = new Page<>(pageNum, pageSize);
+        fileService.getUserFilesPage(userId, page);
+        return Result.success(page);
     }
 
     /**
      * 删除文件
      * @param userId 用户ID
-     * @param fileHash 文件哈希
+     * @param fileHashList 文件哈希列表
      * @return 删除结果
      */
-    @DeleteMapping("/delete")
-    @Operation(summary = "删除文件")
+    @DeleteMapping("/deleteByHash")
+    @Operation(summary = "根据文件hash列表批量删除文件")
     @OperationLog(module = "文件操作", operationType = "删除", description = "删除文件")
     public Result<String> deleteFile(
             @RequestAttribute(Const.ATTR_USER_ID) String userId,
-            @Schema(description = "待删除文件哈希") @RequestParam("fileHash") String fileHash) {
-        fileService.deleteFile(userId, fileHash);
+            @Schema(description = "待删除文件hash列表") @RequestParam("hashList") List<String> fileHashList) {
+        fileService.deleteFile(userId, fileHashList);
+        return Result.success("文件删除成功");
+    }
+
+    /**
+     * 删除文件
+     * @param fileIdList 文件id列表
+     * @return 删除结果
+     */
+    @DeleteMapping("/deleteById")
+    @Operation(summary = "根据文件id列表批量删除文件（管理员专用）")
+    @PreAuthorize("hasRole('admin')") // 仅允许管理员使用
+    @OperationLog(module = "文件操作", operationType = "删除", description = "删除文件")
+    public Result<String> deleteFileById(
+            @Schema(description = "待删除文件Id列表") @RequestParam("idList") List<String> fileIdList) {
+        fileService.removeByIds(fileIdList);
         return Result.success("文件删除成功");
     }
 

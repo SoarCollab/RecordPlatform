@@ -45,15 +45,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
             SecurityContextHolder.getContext().setAuthentication(authentication);
             
-            // 从JWT中获取用户ID
+            // 从JWT中获取用户Id与Role
             Long userId = utils.toId(jwt);
+            String userRole = utils.toRole(jwt);
             
-            // 将用户ID存入请求属性
+            // 将用户ID与Role存入请求属性
             request.setAttribute(Const.ATTR_USER_ID, userId);
-            
+            request.setAttribute(Const.ATTR_USER_ROLE, userRole);
+
             // 将用户ID放入MDC上下文，便于日志记录
             if (userId != null) {
                 MDC.put(Const.ATTR_USER_ID, userId.toString());
+            }
+            // 将用户Role放入MDC上下文，便于后续获取用户角色
+            if (userRole != null) {
+                MDC.put(Const.ATTR_USER_ROLE, userRole);
             }
         }
         
@@ -62,6 +68,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         } finally {
             // 请求结束后清理MDC上下文
             MDC.remove("userId");
+            MDC.remove("userRole");
         }
     }
 }

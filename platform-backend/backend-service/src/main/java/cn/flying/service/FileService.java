@@ -1,8 +1,8 @@
 package cn.flying.service;
 
 import cn.flying.dao.dto.File;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
-import org.springframework.data.relational.core.sql.In;
 
 import java.util.List;
 
@@ -34,10 +34,18 @@ public interface FileService extends IService<File> {
     /**
      * 修改文件状态
      * @param Uid
+     * @param fileName
+     * @param fileStatus
+     */
+    void changeFileStatusByName(String Uid, String fileName, Integer fileStatus);
+
+    /**
+     * 修改文件状态
+     * @param Uid
      * @param fileHash
      * @param fileStatus
      */
-    void changeFileStatus(String Uid, String fileHash, Integer fileStatus);
+    void changeFileStatusByHash(String Uid, String fileHash, Integer fileStatus);
 
     /**
      * 删除文件
@@ -45,14 +53,22 @@ public interface FileService extends IService<File> {
      * @param fileHash 文件哈希
      * @return
      */
-    void deleteFile(String Uid, String fileHash);
+    void deleteFile(String Uid, List<String> fileHashList);
 
     /**
      * 根据用户Id获取用户文件列表（只包含文件元信息，没有实际的文件数据）
      * @param Uid 用户ID
      * @return 文件元信息列表
      */
-    List<File> getUserFiles(String Uid);
+    List<File> getUserFilesList(String Uid);
+
+    /**
+     * 获取用户文件分页（只包含文件元信息，没有实际的文件数据）
+     *
+     * @param Uid
+     * @param page
+     */
+    void getUserFilesPage(String Uid, Page<File> page);
 
     /**
      * 获取文件分片地址
