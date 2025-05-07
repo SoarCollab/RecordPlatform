@@ -106,7 +106,7 @@ public class MinioMonitor {
         } catch (InvalidKeyException | IOException | NoSuchAlgorithmException e) {
             markNodeOffline(nodeName, "运行状况检查期间出现连接/凭证错误: " + e.getClass().getSimpleName() + " - " + e.getMessage());
             nodeOperationCounter.labels(nodeName, "health_check", "failure").inc();
-        } catch (Exception e) { // 捕获更广泛的异常，包括潜在的 SigV4 或 OkHttp 问题
+        } catch (Exception e) { // 捕获更广泛地异常，包括潜在的 SigV4 或 OkHttp 问题
             markNodeOffline(nodeName, "运行状况检查期间出现意外错误: " + e.getClass().getSimpleName() + " - " + e.getMessage());
             nodeOperationCounter.labels(nodeName, "health_check", "failure").inc();
         }
