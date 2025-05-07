@@ -71,7 +71,7 @@ public class BlockChainServiceImpl implements BlockChainService{
                 // 检查合约执行是否成功
                 if (response.getReturnCode() != 0) {
                     // 返回合约的错误信息
-                    return Result.error(ResultEnum.FAIL,null);
+                    return Result.error(ResultEnum.GET_USER_SHARE_FILE_ERROR,null);
                 }
 
                 if (response.getReturnObject() instanceof List<?> returnList) {
@@ -83,7 +83,7 @@ public class BlockChainServiceImpl implements BlockChainService{
                         if (returnList.getLast() instanceof List<?> files) {
                             for (Object file : files) {
                                 if (file instanceof List<?> fileInfo && fileInfo.size() == 6) {
-                                    String hexHash = Convert.bytesToHex((byte[]) fileInfo.get(5));
+                                    String hexHash = Convert.bytesToHex((byte[]) fileInfo.get(4));
                                     hexHash = hexHash.startsWith("0x") ? hexHash.substring(2) : hexHash;
                                     fileList.add(hexHash);
                                 }

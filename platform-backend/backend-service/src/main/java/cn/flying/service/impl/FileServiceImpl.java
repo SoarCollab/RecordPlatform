@@ -2,6 +2,8 @@ package cn.flying.service.impl;
 
 import cn.flying.api.utils.ResultUtils;
 import cn.flying.common.constant.FileUploadStatus;
+import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.CommonUtils;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.JsonConverter;
@@ -23,6 +25,8 @@ import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
 
@@ -55,7 +59,16 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
         if(CommonUtils.isEmpty(fileList)) return null;
         //todo 这里暂时不做失败重试，后续优化
-        Result<Map<String, String>> storeedResult = storageService.storeFile(fileList, fileHashList);
+
+        List<byte[]> fileByteList = fileList.stream().map(file -> {
+            try {
+                return Files.readAllBytes(file.toPath());
+            } catch (IOException e) {
+                throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
+            }
+        }).toList();
+
+        Result<Map<String, String>> storeedResult = storageService.storeFile(fileByteList, fileHashList);
         //最终得到的文件存储位置（JSON）
         String fileContent = JsonConverter.toJsonWithPretty(ResultUtils.getData(storeedResult));
         Result<String> recordResult = blockChainService.storeFile(Uid, OriginFileName, fileParam, fileContent);
@@ -141,17 +154,17 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         FileDetailVO detailVO = ResultUtils.getData(filePointer);
         String fileContent = detailVO.getContent();
         Map<String,String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
-        Result<List<String>> urlListResult = storageService.getFileUrlListByHash(fileContentMap.keySet().stream().toList(), fileContentMap.values().stream().toList());
+        Result<List<String>> urlListResult = storageService.getFileUrlListByHash(fileContentMap.values().stream().toList(), fileContentMap.keySet().stream().toList());
         return ResultUtils.getData(urlListResult);
     }
 
     @Override
-    public List<java.io.File> getFile(String Uid, String fileHash) {
+    public List<byte[]> getFile(String Uid, String fileHash) {
         Result<FileDetailVO> filePointer = blockChainService.getFile(Uid, fileHash);
         FileDetailVO detailVO = ResultUtils.getData(filePointer);
         String fileContent = detailVO.getContent();
         Map<String,String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
-        Result<List<java.io.File>> fileListResult = storageService.getFileListByHash(fileContentMap.keySet().stream().toList(), fileContentMap.values().stream().toList());
+        Result<List<byte[]>> fileListResult = storageService.getFileListByHash(fileContentMap.values().stream().toList(), fileContentMap.keySet().stream().toList());
         return ResultUtils.getData(fileListResult);
     }
 

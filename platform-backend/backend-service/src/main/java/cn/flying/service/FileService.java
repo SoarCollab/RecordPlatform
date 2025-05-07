@@ -50,7 +50,7 @@ public interface FileService extends IService<File> {
     /**
      * 删除文件
      * @param Uid 用户ID
-     * @param fileHash 文件哈希
+     * @param fileHashList 文件哈希
      * @return
      */
     void deleteFile(String Uid, List<String> fileHashList);
@@ -84,7 +84,7 @@ public interface FileService extends IService<File> {
      * @param fileHash 文件哈希
      * @return 文件分片列表
      */
-    List<java.io.File> getFile(String Uid, String fileHash);
+    List<byte[]> getFile(String Uid, String fileHash);
 
     /**
      * 分享文件给其它用户
