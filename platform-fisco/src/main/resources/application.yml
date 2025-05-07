@@ -3,8 +3,7 @@ bcos:
   cryptoMaterial:
     certPath: conf
   network:
-    peers[0]: 192.168.5.100:20200
-### network.peers[1]=192.168.5.100:20201
+    peers[0]: 127.0.0.1:20200
 
 ### System configuration
 system:
@@ -36,12 +35,19 @@ dubbo:
     name: RecordPlatform_fisco
     logger: slf4j
     protocol: tri
+    qos-port: 22331  # 使用 23333 端口
+    qos-enable: on # 启用 QoS 功能
+    qos-accept-foreign-ip: false # 只允许本机访问
+    check-serializable: false
+    serialize-check-status: DISABLE
+  provider:
+    timeout: 60000 # 全局提供者超时设置为 60000ms (60秒)
   protocol:
-    name: tri
+    name: tri   # 使用 Triple 协议
     port: 8091
   registry:
     register-mode: instance
-    address: nacos://localhost:8848?username=nacos&password=flyingcoding
+    address: nacos://localhost:8848
 
 logging:
   level:
