@@ -15,15 +15,18 @@ dubbo:
     name: RecordPlatform_minio
     logger: slf4j
     protocol: tri
-    qos-port: 2233  # 使用 23333 端口
+    qos-port: 22332  # 使用 23333 端口
     qos-enable: on # 启用 QoS 功能
     qos-accept-foreign-ip: false # 只允许本机访问
+    check-serializable: false # 关闭序列化检查
+    serialize-check-status: DISABLE
   protocol:
-    name: tri
+    name: tri   # 使用 Triple 协议
     port: 8092
+    payload: 104857600 # 将最大载荷大小设置为 100MB (100 * 1024 * 1024 bytes)
   registry:
     register-mode: instance
-    address: nacos://localhost:8848?username=nacos&password=flyingcoding
+    address: nacos://localhost:8848
 
 
 # 其他 Spring Boot 配置...

@@ -303,7 +303,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             }
 
             byte[] hashBytes = digest.digest();
-            calculatedHashBase64 = Base64.getEncoder().encodeToString(hashBytes);
+            calculatedHashBase64 = Base64.getUrlEncoder().withoutPadding().encodeToString(hashBytes);
 
             log.info("分片 {} 保存成功: 客户端ID={}, 大小={}, 哈希={}", chunkNumber, clientId, bytesWritten, calculatedHashBase64);
             redisStateManager.addUploadedChunk(clientId, chunkNumber);
