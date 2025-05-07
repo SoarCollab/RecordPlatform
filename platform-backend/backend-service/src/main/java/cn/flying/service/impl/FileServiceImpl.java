@@ -119,7 +119,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     @Override
     public void deleteFile(String Uid, List<String> fileHashList) {
         if(CommonUtils.isEmpty(fileHashList)) return;
-        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+        LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getUid, Uid)
                 .in(File::getFileHash, fileHashList);
         //此处不执行实际的文件删除操作，仅更新文件元信息（实际操作使用定时任务批量执行，将文件删除或移入冷数据存储器）
