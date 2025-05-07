@@ -13,14 +13,12 @@ import io.minio.errors.ErrorResponseException;
 import io.minio.http.Method;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.io.IOUtils;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.*;
@@ -53,8 +51,8 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     // 缓存 Bucket 是否存在，减少重复检查开销
     private final ConcurrentHashMap<String, Boolean> bucketExistenceCache = new ConcurrentHashMap<>();
 
-    @Override
-    public Result<List<File>> getFileListByHash(List<String> filePathList, List<String> fileHashList) {
+
+    public Result<List<byte[]>> getFileListByHash(List<String> filePathList, List<String> fileHashList) {
         if (CollectionUtils.isEmpty(filePathList) || CollectionUtils.isEmpty(fileHashList)) {
             log.warn("获取文件列表时传入Hash列表为空");
             return Result.success(null);
@@ -64,13 +62,13 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             return Result.error(ResultEnum.PARAM_IS_INVALID,null);
         }
 
-        List<File> result = new ArrayList<>();
+        List<byte[]> result = new ArrayList<>();
         List<String> errors = new ArrayList<>();
         for (int i = 0; i < filePathList.size(); i++) {
             String filePath = filePathList.get(i);
             String fileHash = fileHashList.get(i);
             try {
-                Optional<File> fileOpt = getFileByHashInternal(filePath, fileHash);
+                Optional<byte[]> fileOpt = getFileByHashInternal(filePath, fileHash);
                 fileOpt.ifPresent(result::add);
                 if (fileOpt.isEmpty()) {
                     // 如果内部方法返回 empty，表示尝试过但失败了，但没有抛出异常（按需调整）
@@ -132,8 +130,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         return Result.success(result);
     }
 
-    @Override
-    public Result<Map<String,String>> storeFile(List<File> fileList, List<String> fileHashList) {
+    public Result<Map<String,String>> storeFile(List<byte[]> fileList, List<String> fileHashList) {
         if (CollectionUtils.isEmpty(fileList) || CollectionUtils.isEmpty(fileHashList)) {
             log.warn("storeFile调用时列表参数为空");
             return Result.error(ResultEnum.PARAM_IS_INVALID, null);
@@ -157,7 +154,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         // 使用 CompletableFuture 并发处理每个文件
         List<CompletableFuture<Void>> futures = new ArrayList<>();
         for (int i = 0; i < fileList.size(); i++) {
-            File file = fileList.get(i);
+            byte[] file = fileList.get(i);
             String fileHash = fileHashList.get(i);
 
             int finalI = i;
@@ -305,7 +302,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      * @return Optional<File> 如果成功获取文件；Optional.empty() 如果尝试后未找到或节点不可用；
      * @throws RuntimeException 如果发生不可恢复的存储错误
      */
-    private Optional<File> getFileByHashInternal(String filePath, String fileHash) throws RuntimeException {
+    private Optional<byte[]> getFileByHashInternal(String filePath, String fileHash) throws RuntimeException {
         ParsedPath parsedPath = parseLogicalPath(filePath, fileHash);
         if (parsedPath == null) {
             return Optional.empty(); // 解析失败，已记录日志
@@ -322,7 +319,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         String secondaryNode = physicalNodes.get(0).equals(primaryNode) ? physicalNodes.get(1) : physicalNodes.get(0);
 
         // 尝试从主节点获取
-        Optional<File> fileOpt = tryGetObjectFromNode(primaryNode, parsedPath.objectName);
+        Optional<byte[]> fileOpt = tryGetObjectFromNode(primaryNode, parsedPath.objectName);
         if (fileOpt.isPresent()) {
             return fileOpt;
         }
@@ -440,7 +437,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     /**
      * 尝试从指定节点获取对象并写入临时文件
      */
-    private Optional<File> tryGetObjectFromNode(String nodeName, String objectName) {
+    private Optional<byte[]> tryGetObjectFromNode(String nodeName, String objectName) {
         if (!minioMonitor.isNodeOnline(nodeName)) {
             log.warn("节点'{}'处于离线状态，无法获取对象'{}'", nodeName, objectName);
             return Optional.empty();
@@ -460,13 +457,9 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                     .object(objectName)
                     .build();
             try (InputStream inputStream = client.getObject(args)) {
-                // 创建临时文件
-                tempFile = File.createTempFile("minio_download_", "_" + objectName);
-                tempFile.deleteOnExit(); // 确保程序退出时删除
-                // 将输入流写入临时文件
-                Files.copy(inputStream, tempFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-                log.info("已成功将对象“{}”从节点“{}”下载到临时文件 {}", objectName, nodeName, tempFile.getAbsolutePath());
-                return Optional.of(tempFile);
+                byte[] fileBytes = IOUtils.toByteArray(inputStream);
+                log.info("已成功将对象“{}”从节点“{}”读取到服务器", objectName, nodeName);
+                return Optional.of(fileBytes);
             } // try-with-resources 会自动关闭 inputStream
         } catch (MinioException e) {
             // 特别处理对象不存在的错误
@@ -479,15 +472,6 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             }
         } catch (Exception e) {
             log.error("从节点'{}'获取对象'{}'时出现意外错误：{}", objectName, nodeName, e.getMessage(), e);
-        } finally {
-            // 如果中途失败且已创建临时文件，尝试删除
-            // 只有在获取失败且临时文件存在的情况下，才删除临时文件
-            if (tempFile != null && tempFile.exists()) {
-                try {
-                    // 使用 Files.deleteIfExists() 方法删除临时文件
-                    Files.deleteIfExists(tempFile.toPath());
-                } catch (IOException ignored) {}
-            }
         }
         return Optional.empty(); // 获取失败
     }
@@ -541,7 +525,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     /**
      * 异步上传文件到单个 MinIO 节点 (从 File 对象读取)
      */
-    private CompletableFuture<Void> uploadToNodeAsync(String nodeName, String objectName, File file) {
+    private CompletableFuture<Void> uploadToNodeAsync(String nodeName, String objectName, byte[] file) {
         return CompletableFuture.runAsync(() -> {
             if (!minioMonitor.isNodeOnline(nodeName)) {
                 throw new RuntimeException("Node '" + nodeName + "' is offline, cannot upload file '" + objectName + "'.");
@@ -557,11 +541,11 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 ensureBucketExists(client, nodeName, nodeName);
 
                 // 使用 FileInputStream 读取文件内容
-                try (InputStream inputStream = new FileInputStream(file)) {
+                try (InputStream inputStream = new ByteArrayInputStream(file)) {
                     PutObjectArgs args = PutObjectArgs.builder()
                             .bucket(nodeName)
                             .object(objectName)
-                            .stream(inputStream, file.length(), -1) // 使用文件长度
+                            .stream(inputStream, file.length, -1) // 使用文件长度
                             .build();
                     client.putObject(args);
                     log.debug("已成功将'{}'上传到节点'{}'", objectName, nodeName);

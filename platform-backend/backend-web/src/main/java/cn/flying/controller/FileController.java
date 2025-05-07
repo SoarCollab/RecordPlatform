@@ -118,10 +118,10 @@ public class FileController {
     @GetMapping("/download")
     @Operation(summary = "下载文件（包含多个文件加密分片）")
     @OperationLog(module = "文件操作", operationType = "下载", description = "下载文件内容")
-    public Result<List<java.io.File>> getFile(
+    public Result<List<byte[]>> getFile(
             @RequestAttribute(Const.ATTR_USER_ID) String userId,
            @Schema(description = "待下载文件哈希") @RequestParam("fileHash") String fileHash) {
-        List<java.io.File> files = fileService.getFile(userId, fileHash);
+        List<byte[]> files = fileService.getFile(userId, fileHash);
         return Result.success(files);
     }
 
