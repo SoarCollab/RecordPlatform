@@ -226,17 +226,17 @@ const handleCompleteApi = async (pms) => {
   }
   page.uploadStatus = 'completed'
   page.uploadHistory.push(itemTemp)
-  // localStorage.setItem('uploadHistory', JSON.stringify(page.uploadHistory))
-  const list = JSON.parse(localStorage.getItem('fileList') || '[]')
-  list.push({
-    clientId: itemTemp.clientId,
-    createTime: itemTemp.createTime,
-    fileName: itemTemp.file.name,
-    fileSize: formatSize(itemTemp.file.size),
-    fileType: itemTemp.file.type,
-    status: itemTemp.status,
-  })
-  localStorage.setItem('fileList', JSON.stringify(list))
+  // // localStorage.setItem('uploadHistory', JSON.stringify(page.uploadHistory))
+  // const list = JSON.parse(localStorage.getItem('fileList') || '[]')
+  // list.push({
+  //   clientId: itemTemp.clientId,
+  //   createTime: itemTemp.createTime,
+  //   fileName: itemTemp.file.name,
+  //   fileSize: formatSize(itemTemp.file.size),
+  //   fileType: itemTemp.file.type,
+  //   status: itemTemp.status,
+  // })
+  // localStorage.setItem('fileList', JSON.stringify(list))
 }
 /**
  * 取消上传Api
