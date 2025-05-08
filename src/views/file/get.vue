@@ -122,6 +122,7 @@ const handleBatchSave = () => {
           </el-button>
         </div>
         <el-table 
+          height="250"
           :data="shareList" 
           style="width: 100%" 
           border 

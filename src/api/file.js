@@ -1,4 +1,3 @@
-
 // /file/list 获取用户文件列表
 
 import request from "@/utils/request.js";
@@ -22,7 +21,7 @@ export const saveShareFileApi = (sharingFileIdList) => {
 };
 
 // /file/share 生成分享码
-export const generateShareCodeApi = (fileHash,maxAccesses) => {
+export const generateShareCodeApi = (fileHash, maxAccesses) => {
   return request({
     url: '/file/share',
     method: 'post',

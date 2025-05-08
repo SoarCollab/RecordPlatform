@@ -12,7 +12,9 @@ const emitter = mitt()
 
 export const TaskManager = {
   addTask(task) {
-    emitter.emit('add-task', task)
+    const id = task.id || Date.now() + Math.random();
+    emitter.emit('add-task', { ...task, id });
+    return id;
   },
 
   updateTask(taskId, updates) {
