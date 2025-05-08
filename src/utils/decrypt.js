@@ -217,9 +217,14 @@ export async function decryptAndParseChunk(processedChunkData, decryptionKeyByte
             // 4. 解密数据
             console.log('开始解密数据...');
             try {
+                // 打印iv
+                console.log('iv:', iv);
                 // 确保IV是Uint8Array类型
                 const ivArray = new Uint8Array(iv);
-                
+                // 打印ivArray
+                console.log('ivArray:', ivArray);
+                console.log('cryptoKey', cryptoKey);
+                console.log('encryptedData', encryptedData);
                 result.decryptedData = await window.crypto.subtle.decrypt(
                     {
                         name: 'AES-GCM',
