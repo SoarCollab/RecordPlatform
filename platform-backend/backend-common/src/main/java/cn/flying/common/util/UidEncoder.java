@@ -5,6 +5,7 @@ import cn.flying.common.exception.GeneralException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
 import java.util.Arrays;
 
 /**
@@ -16,12 +17,16 @@ import java.util.Arrays;
 public class UidEncoder {
     // 输出编码字符集
     private static final char[] ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz".toCharArray();
-    // 固定输出长度
+    // 固定输出长度 (指核心编码部分的长度)
     private static final int OUTPUT_LENGTH = 12;
-    // 加盐
+    // 新增：盐的长度
+    private static final int SALT_LENGTH = 4;
+    // 加盐 (用于encodeUid)
     private static final String SALT = "RecordPlatform_Uid_Key";
-    // 密钥
+    // 密钥 (用于encodeCid)
     private static final String KEY = "RecordPlatform_Client_Key";
+    //用于生成盐的SecureRandom实例
+    private static final SecureRandom random = new SecureRandom();
 
     /**
      * 将UID编码为固定长度字符串
@@ -57,16 +62,14 @@ public class UidEncoder {
         }
     }
 
-    /**
-     * 将加密之后的UID编码为固定长度字符串
-     */
-    public static String encodeCid(String SUID) {
-        if (SUID == null || SUID.isEmpty()) {
-            throw new IllegalArgumentException("SUID不能为空");
+    //内部方法，用于根据SUID和盐生成核心编码部分
+    private static String encodeCidInternal(String suid, String salt) {
+        if (suid == null || suid.isEmpty()) {
+            throw new IllegalArgumentException("SUID 不能为空");
         }
 
-        // 添加密钥混合
-        String mixed = SUID + KEY;
+        // 添加密钥和盐混合
+        String mixed = suid + KEY + salt;
 
         // 生成初始数值
         int value = 0;
@@ -93,15 +96,67 @@ public class UidEncoder {
     }
 
     /**
-     * 验证字符串是否是特定CID的编码
-     * 注意：由于使用的是单向哈希混合，此方法只能验证，不能还原
-     * 但可以验证某个CID是否匹配这个编码
+     * 将加密之后的UID (SUID) 编码为包含随机盐的字符串（每次调用结果都不同）
+     * 返回的字符串格式为: [盐值 (SALT_LENGTH个字符)][核心编码 (OUTPUT_LENGTH个字符)]
+     * 总长度为: SALT_LENGTH + OUTPUT_LENGTH
      */
-    public static boolean verifyCid(String encoded, String cid) {
-        if (encoded == null || cid == null) {
+    public static String encodeCid(String SUID) {
+        if (SUID == null || SUID.isEmpty()) {
+            throw new IllegalArgumentException("SUID 不能为空");
+        }
+
+        // 生成随机盐
+        char[] saltChars = new char[SALT_LENGTH];
+        for (int i = 0; i < SALT_LENGTH; i++) {
+            saltChars[i] = ALPHABET[random.nextInt(ALPHABET.length)];
+        }
+        String salt = new String(saltChars);
+
+        String baseEncodedPart = encodeCidInternal(SUID, salt);
+        return salt + baseEncodedPart;
+    }
+
+    /**
+     * 验证带盐的编码字符串 (encodedWithSalt) 是否是特定原始SUID (cid参数) 的有效编码
+     * @param encodedWithSalt 包含盐和核心编码的完整字符串，期望长度为 SALT_LENGTH + OUTPUT_LENGTH。
+     * @param cid 要验证的原始SUID
+     * @return 是否验证成功
+     */
+    public static boolean verifyCid(String encodedWithSalt, String cid) {
+        if (encodedWithSalt == null || cid == null || cid.isEmpty()) {
             return false;
         }
 
-        return encoded.equals(encodeCid(cid));
+        // 校验总长度是否正确
+        if (encodedWithSalt.length() != SALT_LENGTH + OUTPUT_LENGTH) {
+            return false;
+        }
+
+        // 解析盐和核心编码部分
+        String salt = encodedWithSalt.substring(0, SALT_LENGTH);
+        String actualBaseEncodedPart = encodedWithSalt.substring(SALT_LENGTH);
+
+        // 校验盐中字符的合法性，确保它们都来自 ALPHABET
+         for (char c : salt.toCharArray()) {
+             boolean isValidChar = false;
+             for (char valid : ALPHABET) {
+                 if (c == valid) {
+                     isValidChar = true;
+                     break;
+                 }
+             }
+             if (!isValidChar) return false; // 盐包含非法字符
+         }
+
+        try {
+            // 使用解析出的盐和原始cid重新计算期望的核心编码部分
+            String expectedBaseEncodedPart = encodeCidInternal(cid, salt);
+            // 比较实际的核心编码部分和期望的核心编码部分
+            return actualBaseEncodedPart.equals(expectedBaseEncodedPart);
+        } catch (IllegalArgumentException e) {
+            // 如果 encodeCidInternal 由于 cid 为空或 salt 格式问题（理论上已通过长度校验）抛出异常，
+            // 也应视为验证失败。
+            return false;
+        }
     }
 }
