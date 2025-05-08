@@ -3,10 +3,10 @@ spring:
     name: platform-minio # 应用名称
   data:
     redis:
-      host: 192.168.5.100
+      host: localhost
       port: 6379
       username: default
-      password: redis_EHb2Yc
+      password: ${REDIS_PASSWORD}
       database: 2
 
 ## dubbo config
@@ -26,8 +26,7 @@ dubbo:
     payload: 104857600 # 将最大载荷大小设置为 100MB (100 * 1024 * 1024 bytes)
   registry:
     register-mode: instance
-    address: nacos://192.168.5.100:8848
-    # address: nacos://47.92.80.128:8848?username=nacos&password=flyingcoding
+    address: nacos://localhost:8848
 
 # 其他 Spring Boot 配置...
 logging:
