@@ -10,17 +10,45 @@ export const getFileListApi = (params) => {
     params,
   });
 };
-
 // /file/saveShareFile 保存文件分享
-export const saveShareFileApi = (data) => {
+export const saveShareFileApi = (sharingFileIdList) => {
   return request({
     url: '/file/saveShareFile',
     method: 'post',
-    data,
+    data: {
+      sharingFileIdList
+    }
   });
 };
 
 // /file/share 生成分享码
+export const generateShareCodeApi = (fileHash,maxAccesses) => {
+  return request({
+    url: '/file/share',
+    method: 'post',
+    data: {
+      fileHash,
+      maxAccesses
+    },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
+  });
+};
+
+// file/getSharingFiles 获取分享文件列表
+export const getSharingFilesApi = (sharingCode) => {
+  return request({
+    url: '/file/getSharingFiles',
+    method: 'get',
+    params: {
+      sharingCode
+    },
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    }
+  });
+};
 
 
 // /file/address 获取文件下载地址

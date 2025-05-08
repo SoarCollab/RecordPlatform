@@ -1,15 +1,15 @@
 <script setup>
 
 import ContainerPage from "@/components/ContainerPage.vue";
-import {getFileListApi, getFileAddressApi, deleteFileApi, adminDeleteFileApi} from "@/api/file.js";
+import {getFileListApi, getFileAddressApi, deleteFileApi, adminDeleteFileApi, generateShareCodeApi} from "@/api/file.js";
 import {useStorage} from "@vueuse/core";
 import {Promotion, DeleteFilled, Download} from '@element-plus/icons-vue'
 import {formatSize} from "@/utils/file.js";
 import {decryptAndAssembleFile, base64ToUint8Array} from "@/utils/decrypt.js";
 import TaskManager from "@/utils/taskNotification.js";
 import {ElMessage} from "element-plus";
-import { useMessageBox } from "@/utils/message";
-
+import { useMessage, useMessageBox } from "@/utils/message";
+import {useClipboard} from "@vueuse/core";
 const page = reactive({
   loading: false,
   dataList: [],
@@ -249,6 +249,39 @@ function findSequenceReverse(buffer, sequence) {
 
 const handleShare = (row, index) => {
   console.log('handleShare',row, index)
+  useMessageBox().prompt('请输入最大分享次数', '分享文件',{
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    type: 'warning',
+    inputType: 'number',
+    inputPlaceholder: '请输入最大分享次数',
+    inputValidator: (value) => {
+      if (!value) {
+        return '请输入最大分享次数'
+      }
+      if (!/^[1-9][0-9]*$/.test(value)) {
+        return '请输入大于0的整数'
+      }
+      return true
+    },
+    inputErrorMessage: '输入格式不正确',
+  }).then(({value})=>{
+    generateShareCodeApi(row.fileHash, value).then(res=>{
+      console.log('generateShareCodeApi',res)
+      useMessageBox().alert('分享码：'+res.data, '分享文件',{
+        confirmButtonText: '复制',
+        cancelButtonText: '取消',
+        type: 'success',
+      }).then(()=>{
+        const {copy} = useClipboard()
+        copy(res.data).then(()=>{
+          useMessage().success('复制成功')
+        }).catch(()=>{
+          useMessage().error('复制失败')
+        })
+      })
+    })
+  })
 }
 
 const handleDel = (row, index) => {
