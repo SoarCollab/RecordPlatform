@@ -6,6 +6,7 @@ import cn.flying.common.util.Const;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.SaveSharingFile;
 import cn.flying.dao.vo.file.fileSharingVO;
+import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FileService;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
@@ -107,6 +108,14 @@ public class FileController {
             @Schema(description = "待下载文件哈希") @RequestParam("fileHash") String fileHash) {
         List<String> addresses = fileService.getFileAddress(userId, fileHash);
         return Result.success(addresses);
+    }
+
+    @GetMapping("/getTransaction")
+    @Operation(summary = "获取根据交易hash获取对应的文件交易记录（存证记录）")
+    @OperationLog(module = "文件操作", operationType = "查询", description = "获取根据交易hash获取对应的文件交易记录")
+    public Result<TransactionVO> getTransaction(@Schema(description = "交易hash") @RequestParam("transactionHash") String transactionHash){
+        TransactionVO transaction = fileService.getTransactionByHash(transactionHash);
+        return Result.success(transaction);
     }
 
     /**

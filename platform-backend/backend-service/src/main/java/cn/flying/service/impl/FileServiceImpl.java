@@ -15,6 +15,7 @@ import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.SharingVO;
+import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FileService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -71,12 +72,17 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         Result<Map<String, String>> storeedResult = storageService.storeFile(fileByteList, fileHashList);
         //最终得到的文件存储位置（JSON）
         String fileContent = JsonConverter.toJsonWithPretty(ResultUtils.getData(storeedResult));
-        Result<String> recordResult = blockChainService.storeFile(Uid, OriginFileName, fileParam, fileContent);
+        Result<List<String>> recordResult = blockChainService.storeFile(Uid, OriginFileName, fileParam, fileContent);
         //获取存储到区块链上的文件的哈希值
-        String fileHash = ResultUtils.getData(recordResult);
-        if(CommonUtils.isEmpty(fileHash)) return null;
+        List<String> res = ResultUtils.getData(recordResult);
+        //判断是不是正常返回
+        if(CommonUtils.isEmpty(res)||res.size()!=2) return null;
+        //交易hash
+        String transactionHash = res.get(0);
+        //文件hash
+        String fileHash=res.get(1);
         //完成上传后更新文件元信息
-        if(CommonUtils.isNotEmpty(fileHash)){
+        if(CommonUtils.isNotEmpty(fileHash)&&CommonUtils.isNotEmpty(transactionHash)){
             //根据用户名及对应的文件名查找文件元信息（即要求用户所文件名不能重复）
             LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                     .eq(File::getUid, Uid)
@@ -86,6 +92,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 .setUid(Uid)
                 .setFileName(OriginFileName)
                 .setFileHash(fileHash)
+                .setTransactionHash(transactionHash)
                 .setFileParam(fileParam)
                 .setStatus(FileUploadStatus.SUCCESS.getCode());
 
@@ -156,6 +163,12 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         Map<String,String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
         Result<List<String>> urlListResult = storageService.getFileUrlListByHash(fileContentMap.values().stream().toList(), fileContentMap.keySet().stream().toList());
         return ResultUtils.getData(urlListResult);
+    }
+
+    @Override
+    public TransactionVO getTransactionByHash(String transactionHash) {
+        Result<TransactionVO> result = blockChainService.getTransactionByHash(transactionHash);
+        return ResultUtils.getData(result);
     }
 
     @Override

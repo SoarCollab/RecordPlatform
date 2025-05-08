@@ -51,7 +51,7 @@ public class SysAuditController {
     /**
      * 分页查询操作日志
      */
-    @PostMapping("/logs/page")
+    @GetMapping("/logs/page")
     @Operation(summary = "分页查询操作日志")
     @OperationLog(module = "系统审计", operationType = "查询", description = "分页查询操作日志")
     public Result<IPage<SysOperationLog>> queryOperationLogs(@RequestBody AuditLogQueryVO queryVO) {

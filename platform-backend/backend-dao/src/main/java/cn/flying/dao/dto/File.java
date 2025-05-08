@@ -57,6 +57,9 @@ public class File implements Serializable {
     @Schema(description = "文件哈希")
     private String fileHash;
 
+    @Schema(description = "交易哈希")
+    private String transactionHash;
+
     /**
      * 文件上传状态(是否成功上传至区块链与分布式存储): 见——>FileUploadStatus
      */

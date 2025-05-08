@@ -14,7 +14,7 @@ import java.util.List;
  */
 @DubboService
 public interface BlockChainService {
-    Result<String> storeFile(String uploader, String fileName, String param, String content);
+    Result<List<String>> storeFile(String uploader, String fileName, String param, String content);
     Result<List<FileVO>> getUserFiles(String uploader);
     Result<FileDetailVO> getFile(String uploader, String fileHash);
     Result<Boolean> deleteFiles(String uploader, List<String> fileHashList);
