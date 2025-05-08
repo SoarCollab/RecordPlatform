@@ -107,26 +107,35 @@ public class BlockChainServiceImpl implements BlockChainService{
     }
 
     @ApiDoc(value = "保存文件")
-    public Result<String> storeFile(String uploader, String fileName, String param, String content) {
+    public Result<List<String>> storeFile(String uploader, String fileName, String param, String content) {
         try {
+            List<String> res=new ArrayList<>();
             TransactionResponse response = sharingService.storeFile(new SharingStoreFileInputBO(fileName, uploader, content, param));
             if (response != null) {
+                TransactionReceipt receipt = response.getTransactionReceipt();
+                if (receipt == null|| receipt.getTransactionHash() == null) {
+                    return Result.error(ResultEnum.BLOCKCHAIN_ERROR,null);
+                }
+                String transactionHash = receipt.getTransactionHash();
+                res.add(transactionHash.startsWith("0x") ? transactionHash.substring(2) : transactionHash);
                 if (response.getReturnCode() == 0) {
                     Object returnValue = response.getReturnObject();
                     if (returnValue instanceof List<?> returnList && !returnList.isEmpty()) {
                         Object firstValue = returnList.getFirst();
                         if (firstValue instanceof byte[]) {
                             String hexHash = Convert.bytesToHex((byte[]) firstValue);
-                            return Result.success(hexHash.startsWith("0x") ? hexHash.substring(2) : hexHash);
+                            res.add(hexHash.startsWith("0x") ? hexHash.substring(2) : hexHash);
+                            return Result.success(res);
+
                         }
                     }
-                    return Result.error(ResultEnum.INVALID_RETURN_VALUE);
+                    return Result.error(ResultEnum.INVALID_RETURN_VALUE,null);
                 }
             }
-            return Result.error(ResultEnum.CONTRACT_ERROR);
+            return Result.error(ResultEnum.CONTRACT_ERROR,null);
         } catch (Exception e) {
             log.error("storeFile error:", e);
-            return Result.error(ResultEnum.GET_USER_FILE_ERROR);
+            return Result.error(ResultEnum.GET_USER_FILE_ERROR,null);
         }
     }
 
