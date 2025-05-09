@@ -1,5 +1,6 @@
 package cn.flying.fisco_bcos.service;
 
+import cn.flying.fisco_bcos.constants.ContractConstants;
 import cn.flying.fisco_bcos.model.bo.*;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
@@ -9,6 +10,7 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.apidocs.annotations.ApiDoc;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.fisco.bcos.sdk.v3.client.protocol.model.JsonTransactionResponse;
 import org.fisco.bcos.sdk.v3.client.protocol.response.BcosTransaction;
 import org.fisco.bcos.sdk.v3.client.protocol.response.BcosTransactionReceipt;
 import org.fisco.bcos.sdk.v3.client.protocol.response.TotalTransactionCount;
@@ -265,27 +267,20 @@ public class BlockChainServiceImpl implements BlockChainService{
             }
             
             // 解析交易信息
-            Object result = transaction.getResult();
-            Map<String, Object> txResponse;
-            if (result instanceof Map) {
-                txResponse = (Map<String, Object>) result;
-            } else {
-                log.error("交易结果格式不符合预期: {}", result);
-                return Result.error(ResultEnum.BLOCKCHAIN_ERROR, null);
-            }
-            TransactionReceipt txReceipt = receipt.getResult();
+            JsonTransactionResponse result = transaction.getResult();
+            result.setAbi(ContractConstants.SharingAbi);
             
             // 构建响应VO对象
             TransactionVO transactionVO = new TransactionVO(
-                    (String) txResponse.get("hash"),
-                    (String) txResponse.get("blockHash"),
-                    (String) txResponse.get("blockNumber"),
-                    (String) txResponse.get("from"),
-                    (String) txResponse.get("to"),
-                    (String) txResponse.get("input"),
-                    txReceipt.getOutput(),
-                    Long.valueOf(txResponse.get("gas").toString()),
-                    Convert.timeStampToDate(Long.parseLong(txResponse.get("blockTimestamp").toString()))
+                    result.getHash(),
+                    result.getChainID(),
+                    result.getGroupID(),
+                    result.getAbi(),
+                    result.getFrom(),
+                    result.getTo(),
+                    result.getInput(),
+                    result.getSignature(),
+                    result.getImportTime()
             );
             
             return Result.success(transactionVO);
