@@ -85,3 +85,14 @@ export const adminDeleteFileApi = (idList) => {
   });
 }
 
+// /api/file/getTransaction 根据交易hash获取对应的文件交易记录
+export const getFileTransactionApi = (transactionHash) => {
+  return request({
+    url: '/file/getTransaction',
+    method: 'get',
+    params: {
+      transactionHash
+    }
+  });
+};
+

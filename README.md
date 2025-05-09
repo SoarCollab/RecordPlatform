@@ -1,29 +1,64 @@
-# my-project-frontend
+# 文件存证平台前端
 
-This template should help get you started developing with Vue 3 in Vite.
+本项目是基于Vue 3和Vite开发的文件存证平台前端应用，提供文件上传、存储、分享和验证等功能。
 
-## Recommended IDE Setup
+## 功能特性
 
-[VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur) + [TypeScript Vue Plugin (Volar)](https://marketplace.visualstudio.com/items?itemName=Vue.vscode-typescript-vue-plugin).
+1. **文件管理**
+   - 文件上传：支持大文件分片上传
+   - 文件列表：查看已上传文件
+   - 文件下载：下载已上传文件
+   - 文件分享：生成分享码，分享给其他用户
+   - 文件验证：验证文件区块链存证信息，确保文件真实性和完整性
 
-## Customize configuration
+2. **审计管理**
+   - 操作日志：查看用户操作日志记录
+   - 日志详情：查看操作日志详细信息
+   - 错误统计：统计分析用户错误操作情况
 
-See [Vite Configuration Reference](https://vitejs.dev/config/).
+3. **监控管理**
+   - 主机管理：管理服务器主机
+   - SSH登录：远程登录服务器
 
-## Project Setup
+## 推荐的IDE设置
+
+[VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (禁用Vetur) + [TypeScript Vue Plugin (Volar)](https://marketplace.visualstudio.com/items?itemName=Vue.vscode-typescript-vue-plugin)。
+
+## 自定义配置
+
+参考 [Vite配置参考](https://vitejs.dev/config/)。
+
+## 项目设置
 
 ```sh
 npm install
 ```
 
-### Compile and Hot-Reload for Development
+### 开发环境编译和热重载
 
 ```sh
 npm run dev
 ```
 
-### Compile and Minify for Production
+### 生产环境编译和压缩
 
 ```sh
 npm run build
 ```
+
+## 使用指南
+
+### 文件验证功能
+
+在文件列表中，每个文件条目都有一个"验证"按钮。点击此按钮会显示文件在区块链上的存证信息，包括交易哈希、区块链ID、交易发起方和接收方等信息，可以验证文件的真实性和完整性。
+
+### 审计功能
+
+1. **操作日志**：显示系统中所有用户的操作记录，可以按用户名、操作类型、时间等条件筛选。
+2. **错误统计**：以图表形式展示用户操作错误的统计信息，帮助管理员了解系统使用情况和潜在问题。
+
+## 权限控制
+
+- 管理员：可以访问所有功能模块
+- 普通用户：只能访问文件管理模块
+- 监控员：只能访问监控管理模块

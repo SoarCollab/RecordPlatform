@@ -172,15 +172,15 @@ const handleTabChange = (tab) => {
           </div>
         </el-card>
       </el-col>
-      <el-col :span="17">
-        <el-card class="box-card">
-          <template #header>
-            <div class="card-title">
-              操作日志
-            </div>
-          </template>
-        </el-card>
-      </el-col>
+<!--      <el-col :span="17">-->
+<!--        <el-card class="box-card">-->
+<!--          <template #header>-->
+<!--            <div class="card-title">-->
+<!--              操作日志-->
+<!--            </div>-->
+<!--          </template>-->
+<!--        </el-card>-->
+<!--      </el-col>-->
     </el-row>
   </ContainerPage>
   <el-dialog v-model="page.dialog.visible" title="修改信息" width="30%" :show-close="false" >

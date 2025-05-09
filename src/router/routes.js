@@ -153,6 +153,48 @@ const dynamicRoute = [
     ]
   },
   {
+    path: '/audit',
+    name: 'audit',
+    meta: {
+      title: '审计管理',
+      icon: 'DataAnalysis',
+      hide: false,
+    },
+    redirect: '/audit/logs',
+    children: [
+      {
+        path: '/audit/logs',
+        name: 'auditLogs',
+        component: () => import('@/views/audit/logs.vue'),
+        meta: {
+          title: '操作日志',
+          icon: 'Document',
+          hide: false,
+        }
+      },
+      {
+        path: '/audit/statistics',
+        name: 'auditStatistics',
+        component: () => import('@/views/audit/statistics.vue'),
+        meta: {
+          title: '错误统计',
+          icon: 'PieChart',
+          hide: false,
+        }
+      },
+      {
+        path: '/audit/detail/:id',
+        name: 'auditDetail',
+        component: () => import('@/views/audit/detail.vue'),
+        meta: {
+          title: '日志详情',
+          icon: 'InfoFilled',
+          hide: true,
+        }
+      }
+    ]
+  },
+  {
     path: '/monitor',
     name: 'monitor',
     meta: {

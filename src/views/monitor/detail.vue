@@ -131,28 +131,46 @@ const colorToPercentage = (percentage) => {
     return 'red'
 }
 
-const getDetail = async (id) => {
-  const res = await getMonitorDetailsApi(id)
-  console.log('getDetail', res)
-  page.details.base  = res.data
-}
+const getDetail = (id) => {
+  getMonitorDetailsApi(id)
+    .then(res => {
+      console.log('getDetail', res);
+      page.details.base = res.data;
+    })
+    .catch(err => {
+      console.error('getDetail failed:', err);
+      // Handle error appropriately, e.g., show a message
+      useMessage().error('获取监控详情失败');
+    });
+};
 
-const getHistory = async (id) => {
-  const res = await getMonitorRuntimeHistoryApi(id)
-  console.log('getHistory', res)
-  page.details.runtime = res.data
-}
+const getHistory = (id) => {
+  getMonitorRuntimeHistoryApi(id)
+    .then(res => {
+      console.log('getHistory', res);
+      page.details.runtime = res.data;
+    })
+    .catch(err => {
+      console.error('getHistory failed:', err);
+      useMessage().error('获取监控历史记录失败');
+    });
+};
 
-const getNow = async (id) => {
-  const res = await getMonitorRuntimeNowApi(id)
-  console.log('getNow', res)
-  if(page.details.runtime.list.length >= 360){
-    page.details.runtime.list.shift()
-    // page.details.runtime.list.splice(0, 1)
-  }
-  page.details.runtime.list.push(res.data)
-
-}
+const getNow = (id) => {
+  getMonitorRuntimeNowApi(id)
+    .then(res => {
+      console.log('getNow', res);
+      if (page.details.runtime.list.length >= 360) {
+        page.details.runtime.list.shift();
+      }
+      page.details.runtime.list.push(res.data);
+    })
+    .catch(err => {
+      console.error('getNow failed:', err);
+      // Potentially a less intrusive error for periodic updates
+      // console.warn('获取当前监控数据失败'); 
+    });
+};
 
 
 const id = setInterval(()=>{
@@ -189,32 +207,44 @@ const handleResetNode = () => {
 const handleSubmit = () => {
   formRef.value.validate((valid) => {
     if (valid) {
-      if(page.dialog.title==='重命名服务器'){
+      if (page.dialog.title === '重命名服务器') {
         renameMonitorApi({
           id: page.dialog.form.id,
           name: page.dialog.form.name
-        }).then(() => {
-          useMessage().success('重命名成功')
-        }).finally(() => {
-          getDetail(route.params.id)
-          handleCancel()
         })
+        .then(() => {
+          useMessage().success('重命名成功');
+        })
+        .catch(err => {
+          useMessage().error('重命名失败');
+          console.error('renameMonitorApi failed:', err);
+        })
+        .finally(() => {
+          getDetail(route.params.id);
+          handleCancel();
+        });
       }
-      if(page.dialog.title==='重置节点'){
+      if (page.dialog.title === '重置节点') {
         resetMonitorNodeApi({
           id: page.dialog.form.id,
           node: page.dialog.form.node,
           location: page.dialog.form.location
-        }).then(() => {
-          useMessage().success('重置节点成功')
-        }).finally(() => {
-          getDetail(route.params.id)
-          handleCancel()
         })
+        .then(() => {
+          useMessage().success('重置节点成功');
+        })
+        .catch(err => {
+          useMessage().error('重置节点失败');
+          console.error('resetMonitorNodeApi failed:', err);
+        })
+        .finally(() => {
+          getDetail(route.params.id);
+          handleCancel();
+        });
       }
     }
-  })
-}
+  });
+};
 
 const handleCancel = () => {
   page.dialog.visible = false
