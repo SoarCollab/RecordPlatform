@@ -1,5 +1,6 @@
 package cn.flying.service.impl;
 
+import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.event.FileStorageEvent;
 import cn.flying.common.util.*;
@@ -355,21 +356,12 @@ public class FileUploadServiceImpl implements FileUploadService {
             log.warn("请求完成上传时，并非所有分片都已处理: 客户端ID={}, 已处理={}, 总数={}",
                     clientId, state.getProcessedChunks().size(), expectedChunks);
 
-            // 尝试等待一小段时间，让可能正在进行的异步处理完成
-            try {
-                TimeUnit.SECONDS.sleep((expectedChunks-state.getProcessedChunks().size())* 2L); // 等待时间，未处理的分片数乘以2秒
-                state = redisStateManager.getState(clientId); // 重新获取最新状态
-                allProcessed = state.getProcessedChunks().size() == expectedChunks; // 重新检查
-                if (!allProcessed) {
-                    log.error("等待后，仍有分片未处理完成: 客户端ID={}", clientId);
-                    throw new GeneralException("部分分片未处理完成，请稍后重试或检查状态");
-                }
-                log.info("等待后，所有分片处理完成: 客户端ID={}", clientId);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                log.error("等待分片处理完成时被中断: 客户端ID={}", clientId, e);
-                // 可以抛出特定异常或包装IO异常
-                throw new GeneralException("处理被中断");
+            // 使用非阻塞方式等待异步处理完成
+            allProcessed = waitForChunkProcessingCompletionNonBlocking(clientId, expectedChunks);
+            if (!allProcessed) {
+                log.error("等待超时，仍有分片未处理完成: 客户端ID={}, 已处理={}, 总数={}",
+                         clientId, state.getProcessedChunks().size(), expectedChunks);
+                throw new GeneralException("部分分片未处理完成，请稍后重试或检查状态");
             }
         }
 
@@ -393,10 +385,35 @@ public class FileUploadServiceImpl implements FileUploadService {
 
             // 收集处理后的文件和哈希值
             List<java.io.File> processedFiles = collectProcessedFiles(SUID, clientId);
+            if (processedFiles == null) {
+                log.error("收集处理后的文件失败，无法继续存证流程: 客户端ID={}, 文件名={}", clientId, state.getFileName());
+                // 更新文件状态为失败
+                fileService.changeFileStatusByName(uid, state.getFileName(), FileUploadStatus.FAIL.getCode());
+                throw new GeneralException("收集处理后的文件失败，文件存证中止");
+            }
+
             List<String> fileHashes = collectFileHashes(state);
+            if (fileHashes == null) {
+                log.error("收集文件哈希值失败，无法继续存证流程: 客户端ID={}, 文件名={}", clientId, state.getFileName());
+                // 更新文件状态为失败
+                fileService.changeFileStatusByName(uid, state.getFileName(), FileUploadStatus.FAIL.getCode());
+                throw new GeneralException("收集文件哈希值失败，文件存证中止");
+            }
+
+            // 验证文件数量与哈希数量一致
+            if (processedFiles.size() != fileHashes.size()) {
+                log.error("处理后的文件数量({})与哈希值数量({})不匹配: 客户端ID={}, 文件名={}",
+                         processedFiles.size(), fileHashes.size(), clientId, state.getFileName());
+                // 更新文件状态为失败
+                fileService.changeFileStatusByName(uid, state.getFileName(), FileUploadStatus.FAIL.getCode());
+                throw new GeneralException("文件数量与哈希数量不匹配，文件存证中止");
+            }
+
+            log.info("成功收集文件和哈希值: 客户端ID={}, 文件名={}, 分片数量={}",
+                    clientId, state.getFileName(), processedFiles.size());
 
             // 发布文件存证事件，触发异步存证处理
-            if (CommonUtils.isNotEmpty(eventPublisher) && CommonUtils.isNotEmpty(processedFiles)) {
+            if (CommonUtils.isNotEmpty(eventPublisher)) {
                 eventPublisher.publishEvent(new FileStorageEvent(
                         this,
                         uid,
@@ -408,9 +425,12 @@ public class FileUploadServiceImpl implements FileUploadService {
                         generateFileParam(state) // 生成文件参数
                 ));
 
-                log.info("已发布文件存证事件: 用户={}, 文件名={}", uid, state.getFileName());
+                log.info("已发布文件存证事件: 用户={}, 文件名={}, 分片数量={}", uid, state.getFileName(), processedFiles.size());
             } else {
-                log.error("事件发布器未初始化，无法发送文件存证事件");
+                log.error("事件发布器未初始化，无法发送文件存证事件: 客户端ID={}, 文件名={}", clientId, state.getFileName());
+                // 更新文件状态为失败
+                fileService.changeFileStatusByName(uid, state.getFileName(), FileUploadStatus.FAIL.getCode());
+                throw new GeneralException("事件发布器未初始化，文件存证中止");
             }
 
 
@@ -418,7 +438,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             log.error("完成文件处理或清理时失败: 客户端ID={}", clientId, e);
             // 考虑更具体的错误处理或回滚机制
             throw new GeneralException("完成处理失败：" + e.getMessage());
-        } catch (Exception e) { // 捕获其他潜在异常
+        } catch (Exception e) {
             log.error("完成文件处理时发生未知错误: 客户端ID={}", clientId, e);
             throw new RuntimeException("完成处理时发生未知错误：" + e.getMessage(), e);
         }
@@ -539,7 +559,7 @@ public class FileUploadServiceImpl implements FileUploadService {
         CompletableFuture.runAsync(() -> {
             String clientId = state.getClientId();
             Path processedChunkPath = getChunkProcessedPath(SUID, clientId, chunkNumber);
-            log.debug("开始异步处理分片 {}: 原始路径={}", chunkNumber, chunkPath);
+            log.debug("-------------开始异步处理分片 {}: 原始路径={} -------------", chunkNumber, chunkPath);
 
             try {
                 // 1. 生成密钥和 IV
@@ -594,7 +614,7 @@ public class FileUploadServiceImpl implements FileUploadService {
      * 文件处理的最后一步：追加下一个分片的密钥。
      */
     private void completeFileProcessing(String SUID,FileUploadState state) throws IOException {
-        log.info("开始最终处理步骤 (追加下一个分片密钥): 客户端ID={}", state.getClientId());
+        log.info("------------开始最终处理步骤 (追加下一个分片密钥): 客户端ID={}--------------", state.getClientId());
         int totalChunks = state.getTotalChunks();
         Map<Integer, byte[]> keys = redisStateManager.getChunkKeys(state.getClientId());
 
@@ -659,12 +679,130 @@ public class FileUploadServiceImpl implements FileUploadService {
         return iv;
     }
 
+    /**
+     * 非阻塞方式等待分片处理完成
+     * 使用 CompletableFuture 和 ScheduledExecutorService
+     *
+     * @param clientId 客户端ID
+     * @param expectedChunks 期望的分片总数
+     * @return 是否所有分片都已处理完成
+     */
+    private boolean waitForChunkProcessingCompletionNonBlocking(String clientId, int expectedChunks) {
+        final int maxWaitTimeSeconds = Math.min(300, Math.max(60, expectedChunks * 10));
+        final int checkIntervalMs = 500; // 检查间隔：500毫秒
+
+        log.info("--------------开始非阻塞等待分片处理完成: 客户端ID={}, 期望分片数={}, 最大等待时间={}秒--------------",
+                clientId, expectedChunks, maxWaitTimeSeconds);
+
+        // 创建一个 CompletableFuture 来处理异步等待
+        CompletableFuture<Boolean> completionFuture = new CompletableFuture<>();
+
+        // 使用 ScheduledExecutorService 进行定期检查，避免忙等待
+        try (ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "ChunkProcessingWaiter-" + clientId);
+            t.setDaemon(true);
+            return t;
+        })) {
+
+            // 进度跟踪
+            final AtomicInteger checkCount = new AtomicInteger(0);
+            final AtomicInteger lastProcessedCount = new AtomicInteger(0);
+            final AtomicInteger stagnationCounter = new AtomicInteger(0);
+            final long startTime = System.currentTimeMillis();
+
+            // 定期检查任务
+            ScheduledFuture<?> checkTask = scheduler.scheduleAtFixedRate(() -> {
+                try {
+                    int currentCheckCount = checkCount.incrementAndGet();
+                    long elapsedTime = System.currentTimeMillis() - startTime;
+
+                    // 检查超时
+                    if (elapsedTime > maxWaitTimeSeconds * 1000L) {
+                        log.warn("等待超时: 客户端ID={}, 耗时={}ms", clientId, elapsedTime);
+                        completionFuture.complete(false);
+                        return;
+                    }
+
+                    // 获取最新状态
+                    FileUploadState currentState = redisStateManager.getState(clientId);
+                    if (currentState == null) {
+                        log.warn("等待过程中状态丢失: 客户端ID={}", clientId);
+                        completionFuture.complete(false);
+                        return;
+                    }
+
+                    int processedCount = currentState.getProcessedChunks().size();
+
+                    // 检查是否所有分片都已处理完成
+                    if (processedCount >= expectedChunks) {
+                        log.info("所有分片处理完成: 客户端ID={}, 耗时={}ms, 检查次数={}",
+                                clientId, elapsedTime, currentCheckCount);
+                        completionFuture.complete(true);
+                        return;
+                    }
+
+                    // 检测进度停滞
+                    int lastCount = lastProcessedCount.get();
+                    if (processedCount == lastCount) {
+                        int stagnation = stagnationCounter.incrementAndGet();
+                        if (stagnation >= 10) { // 5秒无进度（10次 * 500ms）
+                            log.warn("检测到进度停滞: 客户端ID={}, 已处理={}/{}, 停滞时间={}秒",
+                                    clientId, processedCount, expectedChunks, stagnation * checkIntervalMs / 1000);
+
+                            if (stagnation >= 30) { // 15秒无进度，认为异常
+                                log.error("进度长时间停滞，可能存在处理异常: 客户端ID={}", clientId);
+                                completionFuture.complete(false);
+                                return;
+                            }
+                        }
+                    } else {
+                        // 有进度，重置停滞计数器
+                        stagnationCounter.set(0);
+                        lastProcessedCount.set(processedCount);
+                    }
+
+                } catch (Exception e) {
+                    log.error("检查分片处理状态时发生异常: 客户端ID={}", clientId, e);
+                    completionFuture.completeExceptionally(e);
+                }
+            }, 0, checkIntervalMs, TimeUnit.MILLISECONDS);
+
+            try {
+                // 等待完成或超时
+                return completionFuture.get(maxWaitTimeSeconds + 10, TimeUnit.SECONDS);
+
+            } catch (TimeoutException e) {
+                log.error("CompletableFuture 等待超时: 客户端ID={}", clientId, e);
+                return false;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.error("等待被中断: 客户端ID={}", clientId, e);
+                return false;
+            } catch (ExecutionException e) {
+                log.error("等待执行异常: 客户端ID={}", clientId, e.getCause());
+                return false;
+            } finally {
+                // 清理资源
+                checkTask.cancel(true);
+                scheduler.shutdown();
+                try {
+                    if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                        scheduler.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    scheduler.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
+    }
+
     /** 定时任务：清理过期的上传会话 */
     @Scheduled(fixedDelay = 12 * 60 * 60 * 1000, initialDelay = 24 * 60 * 60 * 1000) // 每12小时执行一次（启动后间隔24小时执行）
     public void cleanupExpiredUploadSessions() {
         long now = System.currentTimeMillis();
         long timeoutMillis = 12 * 60 * 60 * 1000L; // 12 小时
-        log.info("开始执行定时清理任务，查找超过 {} 小时未活动的上传会话...", TimeUnit.MILLISECONDS.toHours(timeoutMillis));
+        log.info("-------------开始执行定时清理任务，查找超过 {} 小时未活动的上传会话----------------", TimeUnit.MILLISECONDS.toHours(timeoutMillis));
 
         Set<String> activeSessionIds = redisStateManager.getAllActiveSessionIds();
         List<String> expiredSessionIds = new ArrayList<>();
@@ -704,7 +842,7 @@ public class FileUploadServiceImpl implements FileUploadService {
     private boolean cleanupUploadSessionInternal(String SUID,String clientId) {
         FileUploadState state = redisStateManager.getState(clientId);
         if (state != null) {
-            log.info("开始清理会话 {} 的相关文件", clientId);
+            log.info("--------------------开始清理会话 {} 的相关文件-----------------", clientId);
 
             // 使用线程池异步清理文件，避免阻塞当前线程（特别是定时任务线程）
             fileProcessingExecutor.submit(() -> {
@@ -763,30 +901,76 @@ public class FileUploadServiceImpl implements FileUploadService {
     }
 
 
-    /**
-     * 收集处理后的文件
-     */
+    /** 收集处理后的文件（按分片索引顺序）*/
     private List<java.io.File> collectProcessedFiles(String SUID, String clientId) {
-        Path processedDir = getProcessedSessionDir(SUID, clientId);
-        List<java.io.File> files = new ArrayList<>();
-
-        try (Stream<Path> paths = Files.list(processedDir)) {
-            paths.filter(Files::isRegularFile)
-                    .map(Path::toFile)
-                    .forEach(files::add);
-        } catch (IOException e) {
-            log.error("收集处理后的文件失败: {}", e.getMessage(), e);
+        // 获取上传状态以确定总分片数
+        FileUploadState state = redisStateManager.getState(clientId);
+        if (state == null) {
+            log.error("无法获取上传状态，无法收集处理后的文件: 客户端ID={}", clientId);
             return null;
         }
 
-        return files;
+        int totalChunks = state.getTotalChunks();
+        List<java.io.File> orderedFiles = new ArrayList<>(totalChunks);
+
+        log.info("------------开始按顺序收集处理后的文件: 客户端ID={}, 总分片数={}-------------", clientId, totalChunks);
+
+        // 按分片索引顺序收集文件
+        for (int i = 0; i < totalChunks; i++) {
+            Path chunkPath = getChunkProcessedPath(SUID, clientId, i);
+
+            if (Files.exists(chunkPath) && Files.isRegularFile(chunkPath)) {
+                java.io.File chunkFile = chunkPath.toFile();
+                orderedFiles.add(chunkFile);
+                log.debug("收集分片文件 {}: 路径={}, 大小={} bytes", i, chunkPath, chunkFile.length());
+            } else {
+                log.error("分片文件不存在或不是常规文件: 索引={}, 路径={}", i, chunkPath);
+                return null;
+            }
+        }
+
+        // 验证收集的文件数量
+        if (orderedFiles.size() != totalChunks) {
+            log.error("收集的文件数量({})与预期分片数量({})不匹配: 客户端ID={}",
+                     orderedFiles.size(), totalChunks, clientId);
+            return null;
+        }
+
+        log.info("成功按顺序收集了 {} 个处理后的分片文件: 客户端ID={}", orderedFiles.size(), clientId);
+        return orderedFiles;
     }
 
-    /**
-     * 收集文件哈希值
-     */
+    /** 收集文件哈希值（按分片索引顺序）*/
     private List<String> collectFileHashes(FileUploadState state) {
-        return new ArrayList<>(state.getChunkHashes().values());
+        int totalChunks = state.getTotalChunks();
+        List<String> orderedHashes = new ArrayList<>(totalChunks);
+        Map<String, String> chunkHashes = state.getChunkHashes();
+
+        log.info("---------开始按顺序收集文件哈希值: 客户端ID={}, 总分片数={}------------", state.getClientId(), totalChunks);
+
+        // 按分片索引顺序收集哈希值
+        for (int i = 0; i < totalChunks; i++) {
+            String chunkKey = "chunk_" + i;
+            String hash = chunkHashes.get(chunkKey);
+
+            if (hash != null && !hash.trim().isEmpty()) {
+                orderedHashes.add(hash);
+                log.debug("收集分片哈希 {}: key={}, hash={}", i, chunkKey, hash);
+            } else {
+                log.error("分片哈希值缺失或为空: 索引={}, key={}, 客户端ID={}", i, chunkKey, state.getClientId());
+                return null;
+            }
+        }
+
+        // 验证收集的哈希数量
+        if (orderedHashes.size() != totalChunks) {
+            log.error("收集的哈希数量({})与预期分片数量({})不匹配: 客户端ID={}",
+                     orderedHashes.size(), totalChunks, state.getClientId());
+            return null;
+        }
+
+        log.info("成功按顺序收集了 {} 个分片哈希值: 客户端ID={}", orderedHashes.size(), state.getClientId());
+        return orderedHashes;
     }
 
     /**
