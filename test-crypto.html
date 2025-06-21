@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Crypto API 测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-result {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        pre {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Web Crypto API 测试页面</h1>
+    
+    <div id="environment-info" class="test-result info">
+        <h3>环境信息</h3>
+        <div id="env-details"></div>
+    </div>
+    
+    <div>
+        <button onclick="testBasicAvailability()">测试基本可用性</button>
+        <button onclick="testCryptoOperations()">测试加密操作</button>
+        <button onclick="testRandomValues()">测试随机值生成</button>
+        <button onclick="runFullTest()">运行完整测试</button>
+    </div>
+    
+    <div id="test-results"></div>
+    
+    <script>
+        // 显示环境信息
+        function showEnvironmentInfo() {
+            const protocol = window.location.protocol;
+            const hostname = window.location.hostname;
+            const port = window.location.port;
+            const isSecure = protocol === 'https:' || 
+                           hostname === 'localhost' || 
+                           hostname === '127.0.0.1' ||
+                           hostname.endsWith('.localhost');
+            
+            const envDetails = document.getElementById('env-details');
+            envDetails.innerHTML = `
+                <p><strong>协议:</strong> ${protocol}</p>
+                <p><strong>主机:</strong> ${hostname}</p>
+                <p><strong>端口:</strong> ${port || '默认'}</p>
+                <p><strong>完整URL:</strong> ${window.location.href}</p>
+                <p><strong>安全上下文:</strong> ${isSecure ? '是' : '否'}</p>
+                <p><strong>用户代理:</strong> ${navigator.userAgent}</p>
+            `;
+        }
+        
+        // 添加测试结果
+        function addResult(title, success, message, details = null) {
+            const resultsDiv = document.getElementById('test-results');
+            const resultDiv = document.createElement('div');
+            resultDiv.className = `test-result ${success ? 'success' : 'error'}`;
+            
+            let html = `<h3>${title}</h3><p>${message}</p>`;
+            if (details) {
+                html += `<pre>${details}</pre>`;
+            }
+            
+            resultDiv.innerHTML = html;
+            resultsDiv.appendChild(resultDiv);
+        }
+        
+        // 测试基本可用性
+        function testBasicAvailability() {
+            try {
+                const hasWindow = typeof window !== 'undefined';
+                const hasCrypto = !!window.crypto;
+                const hasSubtle = !!window.crypto?.subtle;
+                const hasImportKey = typeof window.crypto?.subtle?.importKey === 'function';
+                const hasGetRandomValues = typeof window.crypto?.getRandomValues === 'function';
+                
+                const details = `
+window: ${hasWindow}
+window.crypto: ${hasCrypto}
+window.crypto.subtle: ${hasSubtle}
+window.crypto.subtle.importKey: ${hasImportKey}
+window.crypto.getRandomValues: ${hasGetRandomValues}`;
+                
+                const allAvailable = hasWindow && hasCrypto && hasSubtle && hasImportKey && hasGetRandomValues;
+                
+                addResult(
+                    '基本可用性测试',
+                    allAvailable,
+                    allAvailable ? 'Web Crypto API 基本功能可用' : 'Web Crypto API 基本功能不完整',
+                    details
+                );
+            } catch (error) {
+                addResult('基本可用性测试', false, `测试失败: ${error.message}`);
+            }
+        }
+        
+        // 测试随机值生成
+        function testRandomValues() {
+            try {
+                const randomArray = window.crypto.getRandomValues(new Uint8Array(16));
+                const isValid = randomArray instanceof Uint8Array && randomArray.length === 16;
+                
+                addResult(
+                    '随机值生成测试',
+                    isValid,
+                    isValid ? '随机值生成功能正常' : '随机值生成功能异常',
+                    `生成的随机值: ${Array.from(randomArray).map(b => b.toString(16).padStart(2, '0')).join(' ')}`
+                );
+            } catch (error) {
+                addResult('随机值生成测试', false, `测试失败: ${error.message}`);
+            }
+        }
+        
+        // 测试加密操作
+        async function testCryptoOperations() {
+            try {
+                // 生成测试密钥
+                const testKey = await window.crypto.subtle.generateKey(
+                    {
+                        name: 'AES-GCM',
+                        length: 256
+                    },
+                    true,
+                    ['encrypt', 'decrypt']
+                );
+                
+                // 测试数据
+                const testData = new TextEncoder().encode('Hello, Web Crypto API!');
+                const iv = window.crypto.getRandomValues(new Uint8Array(12));
+                
+                // 加密测试
+                const encrypted = await window.crypto.subtle.encrypt(
+                    {
+                        name: 'AES-GCM',
+                        iv: iv
+                    },
+                    testKey,
+                    testData
+                );
+                
+                // 解密测试
+                const decrypted = await window.crypto.subtle.decrypt(
+                    {
+                        name: 'AES-GCM',
+                        iv: iv
+                    },
+                    testKey,
+                    encrypted
+                );
+                
+                // 验证结果
+                const decryptedText = new TextDecoder().decode(decrypted);
+                const success = decryptedText === 'Hello, Web Crypto API!';
+                
+                const details = `
+原始文本: "Hello, Web Crypto API!"
+解密文本: "${decryptedText}"
+加密数据大小: ${encrypted.byteLength} 字节
+IV: ${Array.from(iv).map(b => b.toString(16).padStart(2, '0')).join(' ')}`;
+                
+                addResult(
+                    '加密操作测试',
+                    success,
+                    success ? '加密/解密操作成功' : '加密/解密操作失败',
+                    details
+                );
+            } catch (error) {
+                addResult('加密操作测试', false, `测试失败: ${error.message}`);
+            }
+        }
+        
+        // 运行完整测试
+        async function runFullTest() {
+            document.getElementById('test-results').innerHTML = '';
+            testBasicAvailability();
+            testRandomValues();
+            await testCryptoOperations();
+        }
+        
+        // 页面加载时显示环境信息
+        window.onload = function() {
+            showEnvironmentInfo();
+        };
+    </script>
+</body>
+</html>

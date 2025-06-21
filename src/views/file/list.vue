@@ -6,6 +6,7 @@ import { useStorage } from "@vueuse/core";
 import { Promotion, DeleteFilled, Download } from '@element-plus/icons-vue'
 import { formatSize } from "@/utils/file.js";
 import { decryptAndAssembleFile, base64ToUint8Array } from "@/utils/decrypt.js";
+import { checkAndShowCryptoStatus, runCryptoTest, generateDiagnosticReport } from "@/utils/cryptoStatus.js";
 import TaskManager from "@/utils/taskNotification.js";
 import { ElMessage } from "element-plus";
 import { useMessage, useMessageBox } from "@/utils/message";
@@ -56,6 +57,13 @@ onMounted(() => {
 })
 
 const handleDownload = async (row) => {
+  // 首先检查Web Crypto API是否可用
+  const cryptoAvailable = await checkAndShowCryptoStatus(ElMessage.error);
+  if (!cryptoAvailable) {
+    console.error('Web Crypto API 不可用，无法进行文件解密');
+    return;
+  }
+
   const taskId = TaskManager.addTask({
     title: `下载文件: ${row.fileName}`,
     progress: 0
@@ -377,12 +385,30 @@ const renderState = (st) => {
   }
 }
 
+// 测试Web Crypto API功能
+const handleTestCrypto = async () => {
+  console.log('开始测试Web Crypto API...');
+  const testPassed = await runCryptoTest(ElMessage);
+
+  if (testPassed) {
+    console.log('Web Crypto API 测试通过');
+  } else {
+    console.log('Web Crypto API 测试失败');
+    // 生成诊断报告
+    const report = generateDiagnosticReport();
+    console.log('诊断报告:\n', report);
+  }
+}
+
 </script>
 
 <template>
   <ContainerPage>
     <template #title>
       <div class="flex flex-row-reverse gap-2">
+        <el-button size="small" type="info" @click="handleTestCrypto">
+          测试解密功能
+        </el-button>
         <el-button size="small" type="success" :disabled="page.selectedRows.length === 0" @click="handleBatchShare">
           <el-icon>
             <Promotion />

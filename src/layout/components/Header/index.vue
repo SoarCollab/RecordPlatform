@@ -31,8 +31,8 @@ const userRole = computed(() => {
       return '管理员'
     case 'monitor':
       return '监控员'
-    case 'guest':
-      return '游客'
+    case 'user':
+      return '普通用户'
     default:
       return '未知角色'
   }

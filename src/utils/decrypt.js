@@ -120,6 +120,103 @@ export function compareArrayBuffers(buf1, buf2) {
 }
 
 /**
+ * 检查Web Crypto API是否可用
+ * @returns {boolean} 如果Web Crypto API可用则返回true
+ */
+export function isWebCryptoAvailable() {
+    return typeof window !== 'undefined' &&
+           window.crypto &&
+           window.crypto.subtle &&
+           typeof window.crypto.subtle.importKey === 'function' &&
+           typeof window.crypto.getRandomValues === 'function';
+}
+
+/**
+ * 获取Web Crypto API可用性的详细信息
+ * @returns {object} 包含可用性状态和详细信息的对象
+ */
+export function getWebCryptoStatus() {
+    const status = {
+        available: false,
+        reason: '',
+        suggestions: []
+    };
+
+    if (typeof window === 'undefined') {
+        status.reason = '不在浏览器环境中';
+        return status;
+    }
+
+    if (!window.crypto) {
+        status.reason = '浏览器不支持 Crypto API';
+        status.suggestions.push('请使用现代浏览器（Chrome 37+, Firefox 34+, Safari 7+）');
+        return status;
+    }
+
+    if (!window.crypto.subtle) {
+        status.reason = '浏览器不支持 SubtleCrypto API';
+        status.suggestions.push('请使用现代浏览器（Chrome 37+, Firefox 34+, Safari 7+）');
+        return status;
+    }
+
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    const isSecureContext = protocol === 'https:' ||
+                           hostname === 'localhost' ||
+                           hostname === '127.0.0.1' ||
+                           hostname.endsWith('.localhost');
+
+    if (!isSecureContext) {
+        status.reason = `当前运行在非安全上下文中 (${protocol}//${hostname})`;
+        status.suggestions.push('请使用 HTTPS 协议访问应用');
+        status.suggestions.push('或者使用 localhost 进行本地开发');
+        status.suggestions.push('Web Crypto API 需要安全上下文才能使用');
+        return status;
+    }
+
+    if (typeof window.crypto.subtle.importKey !== 'function') {
+        status.reason = 'SubtleCrypto API 不完整';
+        status.suggestions.push('请更新浏览器到最新版本');
+        return status;
+    }
+
+    if (typeof window.crypto.getRandomValues !== 'function') {
+        status.reason = 'Crypto API 缺少 getRandomValues 方法';
+        status.suggestions.push('请更新浏览器到最新版本');
+        status.suggestions.push('检查浏览器是否支持完整的 Web Crypto API');
+        return status;
+    }
+
+    status.available = true;
+    status.reason = 'Web Crypto API 可用';
+    return status;
+}
+
+/**
+ * 获取安全的crypto对象
+ * @returns {SubtleCrypto} Web Crypto API的subtle对象
+ * @throws {Error} 如果Web Crypto API不可用
+ */
+function getSecureCrypto() {
+    const status = getWebCryptoStatus();
+
+    if (!status.available) {
+        let errorMessage = `Web Crypto API 不可用: ${status.reason}`;
+        if (status.suggestions.length > 0) {
+            errorMessage += '\n\n解决方案:';
+            status.suggestions.forEach((suggestion, index) => {
+                errorMessage += `\n${index + 1}. ${suggestion}`;
+            });
+        }
+
+        console.error('Web Crypto API 状态:', status);
+        throw new Error(errorMessage);
+    }
+
+    return window.crypto.subtle;
+}
+
+/**
  * 解密并解析单个文件分片
  * @param {ArrayBuffer} processedChunkData - 从后端获取的处理过的分片数据 (包含 IV, 加密内容, 哈希, 下一个密钥)
  * @param {ArrayBuffer} decryptionKeyBytes - 用于解密 *这个* 分片的原始密钥字节 (从上一个分片末尾或初始获取)
@@ -144,11 +241,15 @@ export async function decryptAndParseChunk(processedChunkData, decryptionKeyByte
     };
 
     try {
+        // 首先检查Web Crypto API是否可用
+        const crypto = getSecureCrypto();
+
         console.log('开始解析分片数据:', {
             totalSize: processedChunkData.byteLength,
             ivSize: IV_SIZE,
             hashSeparatorSize: HASH_SEPARATOR_BYTES.length,
-            keySeparatorSize: KEY_SEPARATOR_BYTES.length
+            keySeparatorSize: KEY_SEPARATOR_BYTES.length,
+            cryptoAvailable: true
         });
 
         // 1. 分离各个部分
@@ -203,7 +304,7 @@ export async function decryptAndParseChunk(processedChunkData, decryptionKeyByte
 
             // 3. 导入解密密钥
             console.log('导入解密密钥...');
-            const cryptoKey = await window.crypto.subtle.importKey(
+            const cryptoKey = await crypto.importKey(
                 'raw',
                 decryptionKeyBytes,
                 {
@@ -251,7 +352,7 @@ export async function decryptAndParseChunk(processedChunkData, decryptionKeyByte
             // 5. 验证哈希
             if (result.decryptedData) {
                 console.log('验证哈希...');
-                const calculatedHashBuffer = await window.crypto.subtle.digest('SHA-256', result.decryptedData);
+                const calculatedHashBuffer = await crypto.digest('SHA-256', result.decryptedData);
                 result.hashVerified = compareArrayBuffers(calculatedHashBuffer, result.originalHashBytes.buffer);
                 if (!result.hashVerified) {
                     console.warn("解密后分片的哈希值与原始哈希值不匹配！");
@@ -260,7 +361,7 @@ export async function decryptAndParseChunk(processedChunkData, decryptionKeyByte
 
             // 6. 导入下一个密钥
             console.log('导入下一个密钥...');
-            result.nextKey = await window.crypto.subtle.importKey(
+            result.nextKey = await crypto.importKey(
                 'raw',
                 nextKeyBytes,
                 {
@@ -287,7 +388,20 @@ export async function decryptAndParseChunk(processedChunkData, decryptionKeyByte
             message: err.message,
             stack: err.stack
         });
-        result.error = err.message || "未知错误";
+
+        // 提供更友好的错误信息
+        let errorMessage = err.message || "未知错误";
+        if (err.message && err.message.includes('Web Crypto API 不可用')) {
+            errorMessage = err.message; // 保持详细的Web Crypto API错误信息
+        } else if (err.name === 'OperationError') {
+            errorMessage = '加密操作失败，可能是密钥或数据格式不正确';
+        } else if (err.name === 'InvalidAccessError') {
+            errorMessage = '无法访问加密功能，请检查浏览器安全设置';
+        } else if (err.name === 'NotSupportedError') {
+            errorMessage = '浏览器不支持所需的加密算法';
+        }
+
+        result.error = errorMessage;
         result.decryptedData = null;
         result.nextKey = null;
         result.hashVerified = false;
@@ -395,7 +509,8 @@ export async function decryptAndAssembleFile(processedChunksData, initialDecrypt
             totalSize += result.decryptedData.byteLength;
 
             try {
-                currentDecryptionKeyBytes = await window.crypto.subtle.exportKey('raw', result.nextKey);
+                const crypto = getSecureCrypto();
+                currentDecryptionKeyBytes = await crypto.exportKey('raw', result.nextKey);
                 console.log(`分片 ${i + 1} 下一个密钥:`, {
                     size: currentDecryptionKeyBytes.byteLength,
                     preview: Array.from(new Uint8Array(currentDecryptionKeyBytes.slice(0, 16))).map(b => b.toString(16).padStart(2, '0')).join(' ')
@@ -461,6 +576,76 @@ export async function decryptAndAssembleFile(processedChunksData, initialDecrypt
         });
         return null;
     }
+}
+
+/**
+ * 测试Web Crypto API功能
+ * @returns {Promise<object>} 测试结果
+ */
+export async function testWebCryptoAPI() {
+    const result = {
+        available: false,
+        status: null,
+        testPassed: false,
+        error: null
+    };
+
+    try {
+        // 检查基本可用性
+        result.status = getWebCryptoStatus();
+        result.available = result.status.available;
+
+        if (!result.available) {
+            return result;
+        }
+
+        // 进行简单的加密测试
+        const crypto = getSecureCrypto();
+
+        // 生成测试密钥
+        const testKey = await crypto.generateKey(
+            {
+                name: 'AES-GCM',
+                length: 256
+            },
+            true,
+            ['encrypt', 'decrypt']
+        );
+
+        // 测试数据
+        const testData = new TextEncoder().encode('Hello, Web Crypto API!');
+        const iv = window.crypto.getRandomValues(new Uint8Array(12));
+
+        // 加密测试
+        const encrypted = await crypto.encrypt(
+            {
+                name: 'AES-GCM',
+                iv: iv
+            },
+            testKey,
+            testData
+        );
+
+        // 解密测试
+        const decrypted = await crypto.decrypt(
+            {
+                name: 'AES-GCM',
+                iv: iv
+            },
+            testKey,
+            encrypted
+        );
+
+        // 验证结果
+        const decryptedText = new TextDecoder().decode(decrypted);
+        result.testPassed = decryptedText === 'Hello, Web Crypto API!';
+
+    } catch (error) {
+        result.error = error.message;
+        console.error('Web Crypto API 测试失败:', error);
+    }
+
+    return result;
 }
 
 // ... existing code ...
