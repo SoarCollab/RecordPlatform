@@ -10,9 +10,12 @@ const message = useMessage()
 </script>
 
 <template>
-  <ContainerPage>
+  <div>
+    <h1>欢迎登录</h1>
+  </div>
+  <!-- <ContainerPage>
     <el-button  type="primary" @click="message.success('测试')">测试</el-button>
-  </ContainerPage>
+  </ContainerPage> -->
 </template>
 
 <style scoped>

@@ -40,7 +40,7 @@ export default defineConfig({
     // 配置代理，解决开发环境下的跨域问题
     proxy: {
       '/api': {
-        target: 'http://47.92.80.128:8080',
+        target: 'http://110.42.57.131:8080',
         changeOrigin: true,
         // rewrite: (path) => path.replace(/^\/api/, ''),
         secure: false,

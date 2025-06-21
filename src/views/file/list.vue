@@ -4,6 +4,7 @@ import ContainerPage from "@/components/ContainerPage.vue";
 import { getFileListApi, getFileAddressApi, adminDeleteFileApi, generateShareCodeApi, getFileTransactionApi } from "@/api/file.js";
 import { Promotion, DeleteFilled, Download, InfoFilled } from '@element-plus/icons-vue'
 import { formatSize } from "@/utils/file.js";
+import { checkAndShowCryptoStatus, runCryptoTest, generateDiagnosticReport } from "@/utils/cryptoStatus.js";
 import { decryptAndAssembleFile } from "@/utils/decrypt.js";
 import TaskManager from "@/utils/taskNotification.js";
 import { ElMessage } from "element-plus";
@@ -84,7 +85,14 @@ onMounted(() => {
   getList();
 });
 
-const handleDownload = (row) => {
+const handleDownload = async (row) => {
+  // 首先检查Web Crypto API是否可用
+  const cryptoAvailable = await checkAndShowCryptoStatus(ElMessage.error);
+  if (!cryptoAvailable) {
+    console.error('Web Crypto API 不可用，无法进行文件解密');
+    return;
+  }
+
   const taskId = TaskManager.addTask({
     title: `下载文件: ${row.fileName}`,
     progress: 0
@@ -114,8 +122,8 @@ const handleDownload = (row) => {
           if (keyIndex === -1) throw new Error('在最后一个分片中未找到密钥分隔符');
           const keyBase64 = new TextDecoder().decode(lastChunkData.slice(keyIndex + keySeparator.length)).trim();
           if (!isValidBase64(keyBase64)) throw new Error('提取的密钥不是有效的Base64格式');
-          
-          const chunkPromises = fileAddresses.map((address, i) => 
+
+          const chunkPromises = fileAddresses.map((address, i) =>
             fetch(address).then(response => {
               if (!response.ok) throw new Error(`下载分片 ${i + 1} 失败: ${response.status} ${response.statusText}`);
               TaskManager.updateTask(taskId, { progress: Math.round(((i + 1) / fileAddresses.length) * 100) });
@@ -281,12 +289,30 @@ const handleVerify = (row) => {
     });
 };
 
+// 测试Web Crypto API功能
+const handleTestCrypto = async () => {
+  console.log('开始测试Web Crypto API...');
+  const testPassed = await runCryptoTest(ElMessage);
+
+  if (testPassed) {
+    console.log('Web Crypto API 测试通过');
+  } else {
+    console.log('Web Crypto API 测试失败');
+    // 生成诊断报告
+    const report = generateDiagnosticReport();
+    console.log('诊断报告:\n', report);
+  }
+}
+
 </script>
 
 <template>
   <ContainerPage>
     <template #title>
       <div class="flex flex-row-reverse gap-2">
+        <el-button size="small" type="info" @click="handleTestCrypto">
+          测试解密功能
+        </el-button>
         <el-button size="small" type="success" :disabled="page.selectedRows.length === 0" @click="handleBatchShare">
           <el-icon><Promotion /></el-icon>批量分享
         </el-button>
@@ -327,10 +353,10 @@ const handleVerify = (row) => {
   <el-dialog
     v-model="transactionDialogVisible"
     title="文件交易记录"
-    width="60%" 
+    width="60%"
     :close-on-click-modal="false"
     append-to-body
-    class="transaction-verify-dialog-vue" 
+    class="transaction-verify-dialog-vue"
   >
     <div v-if="currentTransaction.transactionHash" class="transaction-detail-content-vue">
       <el-descriptions :column="1" border label-class-name="tx-label" class-name="tx-content-cell">
@@ -368,8 +394,8 @@ const handleVerify = (row) => {
           {{ isABISectionExpanded ? '点击收起' : '点击展开' }}
         </el-button>
         <div class="abi-content-vue">
-          <el-scrollbar :max-height="isABISectionExpanded ? '400px' : '100px'"> 
-             <pre class="dialog-pre-wrap breakable-scroll">{{ currentTransaction.formattedABI }}</pre> 
+          <el-scrollbar :max-height="isABISectionExpanded ? '400px' : '100px'">
+             <pre class="dialog-pre-wrap breakable-scroll">{{ currentTransaction.formattedABI }}</pre>
           </el-scrollbar>
         </div>
       </div>
@@ -386,13 +412,13 @@ const handleVerify = (row) => {
 
 <style scoped>
 :deep(.transaction-verify-dialog-vue) {
-  max-width: 800px; 
+  max-width: 800px;
 }
 
 :deep(.transaction-verify-dialog-vue .el-dialog__body) {
-  padding-top: 10px; 
+  padding-top: 10px;
   padding-bottom: 20px;
-  overflow-y: auto; 
+  overflow-y: auto;
 }
 
 .transaction-detail-content-vue {
@@ -400,32 +426,32 @@ const handleVerify = (row) => {
 }
 
 :deep(.transaction-verify-dialog-vue .el-descriptions__table) {
-  width: 100% !important; 
-  table-layout: fixed !important; 
+  width: 100% !important;
+  table-layout: fixed !important;
 }
 
-:deep(.transaction-verify-dialog-vue .el-descriptions .tx-label) { 
-  width: 120px !important; 
+:deep(.transaction-verify-dialog-vue .el-descriptions .tx-label) {
+  width: 120px !important;
   font-weight: bold;
-  background-color: #fafafa; 
+  background-color: #fafafa;
   text-align: right;
-  padding-right: 12px; 
-  vertical-align: top; 
-  word-break: normal; 
+  padding-right: 12px;
+  vertical-align: top;
+  word-break: normal;
 }
 
-:deep(.transaction-verify-dialog-vue .el-descriptions .tx-content-cell) { 
-  word-break: break-all; 
+:deep(.transaction-verify-dialog-vue .el-descriptions .tx-content-cell) {
+  word-break: break-all;
   overflow-wrap: break-word;
-  vertical-align: top; 
+  vertical-align: top;
 }
 
 :deep(.transaction-verify-dialog-vue .el-descriptions .tx-content-cell .el-descriptions__content),
 :deep(.transaction-verify-dialog-vue .el-descriptions .tx-content-cell .dialog-breakable-text) {
-  word-break: break-all; 
-  overflow-wrap: break-word; 
-  white-space: normal; 
-  display: block; 
+  word-break: break-all;
+  overflow-wrap: break-word;
+  white-space: normal;
+  display: block;
 }
 
 .dialog-breakable-text {
@@ -433,13 +459,13 @@ const handleVerify = (row) => {
    overflow-wrap: break-word;
    white-space: pre-wrap; /* Changed from normal to pre-wrap for potentially better formatting */
  }
- 
+
 .dialog-pre-wrap {
    white-space: pre-wrap;
    font-family: monospace;
    word-break: break-word; /* Changed from break-all for better readability */
  }
- 
+
 .breakable-scroll { /* Applied to the div/pre inside scrollbar */
    /* max-width: 100%; This might be implicitly handled by scrollbar */
    overflow-wrap: break-word;
@@ -447,13 +473,13 @@ const handleVerify = (row) => {
  }
 
 .abi-section-vue {
-  margin-top: 1rem; 
+  margin-top: 1rem;
 }
 .abi-section-vue .font-bold {
   font-weight: bold;
 }
 .abi-section-vue .mb-2 {
-  margin-bottom: 0.5rem; 
+  margin-bottom: 0.5rem;
 }
 
 :deep(.transaction-verify-dialog-vue .el-scrollbar .dialog-pre-wrap) { /* Adjusted selector based on user's HTML changes */
@@ -462,12 +488,12 @@ const handleVerify = (row) => {
   border-radius: 4px;
   font-size: 0.9em;
   line-height: 1.5;
-  white-space: pre-wrap;  
-  word-break: break-all;  
-  margin: 0; 
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
 }
 
-.mt-4 { 
-    margin-top: 1rem; 
+.mt-4 {
+    margin-top: 1rem;
 }
 </style>
