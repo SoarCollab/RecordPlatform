@@ -2,6 +2,7 @@ package cn.flying.service.assistant;
 
 import cn.flying.common.util.CacheUtils;
 import cn.flying.common.util.JsonConverter;
+import cn.flying.common.util.UidEncoder;
 import cn.flying.dao.vo.file.FileUploadState;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -217,6 +218,7 @@ public class FileUploadRedisStateManager {
         FileUploadState state = getState(sessionId);
 
         if (state == null) {
+            log.debug("尝试移除会话，但状态不存在: sessionId={}", sessionId);
             return;
         }
 
@@ -239,6 +241,26 @@ public class FileUploadRedisStateManager {
         cacheUtils.setRemove(ACTIVE_UPLOADS_KEY, sessionId);
         cacheUtils.setRemove(PAUSED_SESSIONS_KEY, sessionId);
 
+        log.info("Redis: 已移除会话及相关数据 sessionId={}, fileClientKey={}", sessionId, fileClientKey);
+    }
+
+    /**
+     * 根据用户ID和文件名查找并清理会话
+     * 用于存证失败时清理Redis状态
+     *
+     * @param uid      用户ID
+     * @param fileName 文件名
+     */
+    public void removeSessionByFileName(String uid, String fileName) {
+        String SUID = UidEncoder.encodeUid(uid);
+        String sessionId = getSessionIdByFileClientKey(fileName, SUID);
+
+        if (sessionId != null) {
+            removeSession(sessionId, SUID);
+            log.info("Redis: 根据文件名清理会话成功 fileName={}, sessionId={}", fileName, sessionId);
+        } else {
+            log.debug("Redis: 根据文件名未找到对应会话 fileName={}", fileName);
+        }
     }
 
     /**

@@ -19,8 +19,6 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -148,8 +146,9 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
         }
 
-        Map<String, String> successResults = new ConcurrentHashMap<>();
-        Map<String, String> failedResults = new ConcurrentHashMap<>();
+        // 使用 ConcurrentHashMap 临时存储并发处理结果
+        Map<String, String> tempSuccessResults = new ConcurrentHashMap<>();
+        Map<String, String> tempFailedResults = new ConcurrentHashMap<>();
 
         // 使用 CompletableFuture 并发处理每个文件
         List<CompletableFuture<Void>> futures = new ArrayList<>();
@@ -163,14 +162,14 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                     // 2. 按顺序选择逻辑节点
                     String targetLogicNode = availableLogicNodes.get(finalI % availableLogicNodes.size());
                     if (targetLogicNode == null) {
-                        failedResults.put(fileHash, "无法选择合适的 logic node");
+                        tempFailedResults.put(fileHash, "无法选择合适的 logic node");
                         return;
                     }
 
                     // 3. 获取该逻辑节点对应的物理节点对
                     List<String> physicalNodePair = getPhysicalNodePair(targetLogicNode);
                     if (physicalNodePair == null || physicalNodePair.size() != 2) {
-                        failedResults.put(fileHash, "逻辑节点的物理节点对无效:" + targetLogicNode);
+                        tempFailedResults.put(fileHash, "逻辑节点的物理节点对无效:" + targetLogicNode);
                         return;
                     }
 
@@ -183,13 +182,13 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
 
                     // 5. 构建并记录成功结果
                     String logicalPath = "minio/node/" + targetLogicNode + "/" + fileHash;
-                    successResults.put(fileHash, logicalPath);
+                    tempSuccessResults.put(fileHash, logicalPath);
                     log.info("已成功将文件 '{}' 存储到逻辑节点 '{}' （路径： {}）", fileHash, targetLogicNode, logicalPath);
 
                 } catch (Exception e) {
                     // 捕获 join 抛出的 CompletionException 或其他异常
                     log.error("无法存储文件'{}'：{}", fileHash, e.getMessage(), e);
-                    failedResults.put(fileHash, "上传失败：" + e.getMessage());
+                    tempFailedResults.put(fileHash, "上传失败：" + e.getMessage());
                 }
             }));
         }
@@ -202,14 +201,23 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             log.warn("某些文件存储任务可能意外失败：{}", e.getMessage());
         }
 
-        if (!failedResults.isEmpty()) {
-            log.warn("存储部分完成，失败消息如下：{}", failedResults);
-            //返回失败消息
-            return Result.error(ResultEnum.FILE_SERVICE_ERROR, successResults);
+        //按照原始输入顺序重新组织结果，确保分片顺序正确
+        Map<String, String> orderedSuccessResults = new LinkedHashMap<>();
+
+        // 按照 fileHashList 的原始顺序重新组织结果
+        for (String fileHash : fileHashList) {
+            if (tempSuccessResults.containsKey(fileHash)) {
+                orderedSuccessResults.put(fileHash, tempSuccessResults.get(fileHash));
+            }
         }
 
-        log.info("文件上传完成，成功：{}", successResults.size());
-        return Result.success(successResults);
+        if (!tempFailedResults.isEmpty()) {
+            log.warn("存储过程中发生错误：{}", tempFailedResults);
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR, tempFailedResults);
+        }
+
+        log.info("文件上传完成，成功：{}", orderedSuccessResults.size());
+        return Result.success(orderedSuccessResults);
     }
 
     @Override
