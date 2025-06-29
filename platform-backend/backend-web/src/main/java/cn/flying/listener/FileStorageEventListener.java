@@ -3,6 +3,7 @@ package cn.flying.listener;
 import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.dao.dto.File;
 import cn.flying.service.FileService;
+import cn.flying.service.assistant.FileUploadRedisStateManager;
 import cn.flying.common.event.FileStorageEvent;
 import cn.flying.common.util.CommonUtils;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,9 @@ public class FileStorageEventListener {
 
     @Resource
     private FileService fileService;
+
+    @Resource
+    private FileUploadRedisStateManager redisStateManager;
 
     // 注入文件处理线程池
     @Resource(name = "fileProcessTaskExecutor")
@@ -71,14 +75,32 @@ public class FileStorageEventListener {
             } catch (Exception e) {
                 log.error("处理文件存证事件时发生异常: 用户={}, 文件名={}",
                         event.getUid(), event.getFileName(), e);
-                // 可以在这里添加更详细的错误处理逻辑，例如更新数据库状态为失败
+                // 更新数据库状态为失败
                 fileService.changeFileStatusByName(event.getUid(), event.getFileName(), FileUploadStatus.FAIL.getCode());
+
+                // 存证失败时清理Redis上传状态
+                try {
+                    redisStateManager.removeSessionByFileName(event.getUid(), event.getFileName());
+                    log.info("存证失败，已清理Redis状态: 用户={}, 文件名={}", event.getUid(), event.getFileName());
+                } catch (Exception cleanupEx) {
+                    log.warn("存证失败时清理Redis状态异常: 用户={}, 文件名={}",
+                            event.getUid(), event.getFileName(), cleanupEx);
+                }
             }
         }, fileProcessTaskExecutor).exceptionally(ex -> {
             // 处理 CompletableFuture 内部的异常 (例如线程池拒绝任务等)
             log.error("文件存储 CompletableFuture 执行异常: 用户={}, 文件名={}, 错误: {}",
                     event.getUid(), event.getFileName(), ex.getMessage(), ex);
             fileService.changeFileStatusByName(event.getUid(), event.getFileName(), FileUploadStatus.FAIL.getCode());
+
+            // CompletableFuture异常时也清理Redis状态
+            try {
+                redisStateManager.removeSessionByFileName(event.getUid(), event.getFileName());
+                log.info("CompletableFuture异常，已清理Redis状态: 用户={}, 文件名={}", event.getUid(), event.getFileName());
+            } catch (Exception cleanupEx) {
+                log.warn("CompletableFuture异常时清理Redis状态失败: 用户={}, 文件名={}",
+                        event.getUid(), event.getFileName(), cleanupEx);
+            }
             return null; // 返回 null 表示异常已处理
         });
     }
