@@ -3,11 +3,15 @@ package cn.flying.minio.core;
 import cn.flying.minio.config.NodeConfig;
 import cn.flying.minio.config.NodeMetrics;
 import io.minio.MinioClient;
-import io.minio.errors.*;
+import io.minio.errors.MinioException;
 import io.prometheus.client.Counter;
 import io.prometheus.client.Gauge;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -15,6 +19,8 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Map;
@@ -25,12 +31,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.Response;
-import okhttp3.ResponseBody;
-import java.net.URISyntaxException;
-import java.nio.charset.StandardCharsets;
 
 /**
  * 定期监控 MinIO 物理节点的在线状态和负载情况
@@ -39,27 +39,21 @@ import java.nio.charset.StandardCharsets;
 @Component
 public class MinioMonitor {
 
-    @Resource
-    private MinioClientManager clientManager;
-
     // 存储当前在线的物理节点名称
     private final Set<String> onlineNodes = ConcurrentHashMap.newKeySet();
     // 指标缓存
     private final Map<String, NodeMetrics> nodeMetricsCache = new ConcurrentHashMap<>();
-    
     //OkHttpClient 实例
     private final OkHttpClient httpClient = new OkHttpClient.Builder()
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(5, TimeUnit.SECONDS)
             .build();
-
     // 统计节点操作成功和失败的计数器
     private final Counter nodeOperationCounter = Counter.build()
             .name("minio_node_operations_total")
             .help("Total operations attempted on MinIO nodes")
             .labelNames("node", "operation", "result")
             .register();
-
     // Prometheus Gauge，用于公开节点在线状态
     private final Gauge nodeOnlineStatus = Gauge.build()
             .name("minio_node_online_status")
@@ -71,6 +65,32 @@ public class MinioMonitor {
             .help("Calculated load score for MinIO nodes (lower is better).")
             .labelNames("node")
             .register();
+    @Resource
+    private MinioClientManager clientManager;
+
+    private static double getScore(double apiInflight, double apiWaiting, double diskUsage) {
+        // API Inflight: 使用 tanh 平滑处理，假设 50 个请求是较高负载 (可调)
+        double normApiInflight = Math.tanh(apiInflight / 50.0);
+        // API Waiting: 使用 tanh 平滑处理，假设 20 个请求是较高负载 (可调)
+        double normApiWaiting = Math.tanh(apiWaiting / 20.0);
+        // Disk Usage: 已经是百分比，直接除以 100
+        double normDiskUsage = Math.max(0.0, Math.min(1.0, diskUsage / 100.0));
+
+        // 定义权重 (可根据实际情况调整)
+        double wApiInflight = 0.5; // Inflight 请求数权重最高
+        double wApiWaiting = 0.3;  // Waiting 请求数权重次之
+        double wDiskUsage = 0.2;   // 磁盘使用率权重
+
+
+        // 计算加权分数
+        double score = wApiInflight * normApiInflight +
+                wApiWaiting * normApiWaiting +  // 添加 waiting 分数
+                wDiskUsage * normDiskUsage;     // 使用 disk usage 分数
+
+        // 确保分数在 [0, 1.0] 范围内 (理论上加权和可能略大于1，做个限制)
+        score = Math.max(0.0, Math.min(1.0, score));
+        return score;
+    }
 
     /**
      * 检查节点健康状况
@@ -94,11 +114,11 @@ public class MinioMonitor {
                 fetchAndParseMetrics(nodeName, nodeConfig, currentMetrics); // 传入 NodeMetrics 对象进行填充
             } catch (Exception e) {
                 log.warn("节点 '{}'：无法获取或解析指标 {}。Node 保持在线状态，但指标可能已过时。",
-                         nodeName, e.getMessage(), e); // Log the exception details
+                        nodeName, e.getMessage(), e); // Log the exception details
                 // 获取指标失败不应标记节点为离线，但分数会受影响
                 // 清除该节点的缓存指标，使其获得默认低负载分数
-                 nodeMetricsCache.remove(nodeName); 
-                 log.warn("节点 '{}'：由于 fetch/parse 错误，已清除指标缓存。", nodeName);
+                nodeMetricsCache.remove(nodeName);
+                log.warn("节点 '{}'：由于 fetch/parse 错误，已清除指标缓存。", nodeName);
             }
         } catch (MinioException e) {
             markNodeOffline(nodeName, "运行状况检查期间出现 MinIO API 错误: " + e.getClass().getSimpleName() + " - " + e.getMessage());
@@ -133,13 +153,16 @@ public class MinioMonitor {
                 .get()
                 .build();
 
-        // --- 执行请求并处理响应 --- 
+        // --- 执行请求并处理响应 ---
         try (Response response = httpClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 String errorBody = "";
-                try (ResponseBody body = response.body()) { if (body != null) errorBody = body.string(); } catch(Exception ignored) {}
-                 // 更新错误消息
-                 throw new IOException("Node '" + nodeName + "': 获取监控指标失败 '" + metricsPath + "', HTTP status: " + response.code() + " - " + response.message() + " Body: " + errorBody);
+                try (ResponseBody body = response.body()) {
+                    if (body != null) errorBody = body.string();
+                } catch (Exception ignored) {
+                }
+                // 更新错误消息
+                throw new IOException("Node '" + nodeName + "': 获取监控指标失败 '" + metricsPath + "', HTTP status: " + response.code() + " - " + response.message() + " Body: " + errorBody);
             }
 
             try (ResponseBody responseBody = response.body()) {
@@ -161,7 +184,7 @@ public class MinioMonitor {
             // 如果发生 IO 异常，直接向上抛出
             throw new IOException("Node '" + nodeName + "': 获取指标时出现IOException'" + metricsPath + "': " + e.getMessage(), e);
         }
-        
+
         // 解析完成后，计算聚合指标
         metricsToFill.calculateDiskUsagePercent(); // 计算磁盘使用率
         log.debug("已完成节点 '{}' 的指标获取，最终指标：{}", nodeName, metricsToFill);
@@ -194,7 +217,7 @@ public class MinioMonitor {
             Map<String, String> labels = parseLabels(labelsString);
 
             switch (metricName) {
-                // --- 节点级 S3 指标 --- 
+                // --- 节点级 S3 指标 ---
                 case "minio_s3_requests_inflight_total":
                     metricsToFill.addApiInflightRequests(value);
                     break;
@@ -246,7 +269,7 @@ public class MinioMonitor {
             log.warn("无法为节点 '{}' 设置离线分数，节点可能已被删除。", nodeName);
         }
         if (wasOnline) {
-             log.warn("MinIO 节点 '{}' 现在处于离线状态，原因：{}。已清除指标缓存。。。", nodeName, reason);
+            log.warn("MinIO 节点 '{}' 现在处于离线状态，原因：{}。已清除指标缓存。。。", nodeName, reason);
         } else {
             log.debug("MinIO 节点 '{}' 仍处于离线状态，原因：{}", nodeName, reason);
         }
@@ -281,12 +304,12 @@ public class MinioMonitor {
             // 确保在 getNodeLoadScore 之前 checkNodeHealth 已更新缓存
             if (isNodeOnline(nodeName)) {
                 try {
-                     nodeLoadScoreGauge.labels(nodeName).set(getNodeLoadScore(nodeName));
+                    nodeLoadScoreGauge.labels(nodeName).set(getNodeLoadScore(nodeName));
                 } catch (Exception e) {
-                     log.warn("更新节点 {} 的负载分数仪表时出错：{}", nodeName, e.getMessage());
+                    log.warn("更新节点 {} 的负载分数仪表时出错：{}", nodeName, e.getMessage());
                 }
             } else {
-                 try {
+                try {
                     nodeLoadScoreGauge.labels(nodeName).set(Double.MAX_VALUE);
                 } catch (Exception e) {
                     log.warn("在清理期间无法为节点“{}”设置离线分数。", nodeName);
@@ -311,7 +334,7 @@ public class MinioMonitor {
                 try {
                     nodeLoadScoreGauge.labels(node).set(Double.MAX_VALUE);
                 } catch (Exception e) {
-                     log.warn("无法为已删除的节点 '{}' 设置离线分数。", node);
+                    log.warn("无法为已删除的节点 '{}' 设置离线分数。", node);
                 }
             });
         }
@@ -330,7 +353,7 @@ public class MinioMonitor {
         }
 
         log.debug("已完成计划的 MinIO 节点运行状况检查。联机节点数：{}，指标缓存结果集大小：{}",
-                 getOnlineNodes(), nodeMetricsCache.size());
+                getOnlineNodes(), nodeMetricsCache.size());
     }
 
     /**
@@ -383,31 +406,7 @@ public class MinioMonitor {
         double score = getScore(apiInflight, apiWaiting, diskUsage);
 
         log.trace("节点 '{}'：计算的负载分数：{}(正在进行的：{}，等待中：{}，DiskUsage：{}%)",
-                  nodeName, score, apiInflight, apiWaiting, diskUsage);
-        return score;
-    }
-
-    private static double getScore(double apiInflight, double apiWaiting, double diskUsage) {
-        // API Inflight: 使用 tanh 平滑处理，假设 50 个请求是较高负载 (可调)
-        double normApiInflight = Math.tanh(apiInflight / 50.0);
-        // API Waiting: 使用 tanh 平滑处理，假设 20 个请求是较高负载 (可调)
-        double normApiWaiting = Math.tanh(apiWaiting / 20.0);
-        // Disk Usage: 已经是百分比，直接除以 100
-        double normDiskUsage = Math.max(0.0, Math.min(1.0, diskUsage / 100.0));
-
-        // 定义权重 (可根据实际情况调整)
-        double wApiInflight = 0.5; // Inflight 请求数权重最高
-        double wApiWaiting = 0.3;  // Waiting 请求数权重次之
-        double wDiskUsage = 0.2;   // 磁盘使用率权重
-
-
-        // 计算加权分数
-        double score = wApiInflight * normApiInflight +
-                       wApiWaiting * normApiWaiting +  // 添加 waiting 分数
-                       wDiskUsage * normDiskUsage;     // 使用 disk usage 分数
-
-        // 确保分数在 [0, 1.0] 范围内 (理论上加权和可能略大于1，做个限制)
-        score = Math.max(0.0, Math.min(1.0, score));
+                nodeName, score, apiInflight, apiWaiting, diskUsage);
         return score;
     }
 } 
