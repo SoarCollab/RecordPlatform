@@ -1,9 +1,10 @@
 package cn.flying.minio.config;
 
-import com.alibaba.nacos.api.config.annotation.NacosConfigurationProperties;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.cloud.context.config.annotation.RefreshScope;
 import org.springframework.stereotype.Component;
+
 import java.util.List;
 
 /**
@@ -11,11 +12,7 @@ import java.util.List;
  */
 @Data
 @Component
-// 使用 NacosConfigurationProperties 注解加载数据
-@NacosConfigurationProperties(dataId = "platform-minio.yaml", // Nacos 中的 Data ID
-                              autoRefreshed = true // 启用自动刷新
-)
-// 使用 ConfigurationProperties 指定绑定前缀
+@RefreshScope
 @ConfigurationProperties(prefix = "minio")
 public class MinioProperties {
 
@@ -30,4 +27,4 @@ public class MinioProperties {
      */
     private List<LogicNodeMapping> logicalMapping;
 
-} 
+}

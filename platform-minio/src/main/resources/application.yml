@@ -16,7 +16,7 @@ dubbo:
     logger: slf4j
     protocol: tri
     qos-port: 22332  # 使用 23333 端口
-    qos-enable: on # 启用 QoS 功能
+    qos-enable: true # 启用 QoS 功能
     qos-accept-foreign-ip: false # 只允许本机访问
     check-serializable: false # 关闭序列化检查
     serialize-check-status: DISABLE
