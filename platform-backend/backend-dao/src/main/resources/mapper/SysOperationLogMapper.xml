@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.flying.dao.mapper.SysOperationLogMapper">
+    <!-- 查询高频操作记录 -->
+    <select id="selectHighFrequencyOperations" resultType="cn.flying.dao.vo.audit.HighFrequencyOperationVO">
+        SELECT
+            user_id as userId,
+            username,
+            request_ip as requestIp,
+            operation_count as operationCount,
+            start_time as startTime,
+            end_time as endTime,
+            time_span_seconds as timeSpanSeconds
+        FROM v_high_frequency_operations
+        ORDER BY operation_count DESC
+        LIMIT 100 -- Limit results for performance
+    </select>
+
+    <!-- 查询敏感操作记录 (分页) -->
+    <select id="selectSensitiveOperations" resultType="cn.flying.dao.dto.SysOperationLog">
+        SELECT
+        id, user_id as userId, username, request_ip as requestIp, module,
+        operation_type as operationType, description, method, request_url as requestUrl,
+        request_param as requestParam, operation_time as operationTime, status
+        FROM v_sensitive_operations
+        <where>
+            <if test="userId != null and userId != ''">
+                AND user_id = #{userId}
+            </if>
+            <if test="username != null and username != ''">
+                AND username LIKE CONCAT('%', #{username}, '%')
+            </if>
+            <if test="module != null and module != ''">
+                AND module LIKE CONCAT('%', #{module}, '%')
+            </if>
+            <if test="operationType != null and operationType != ''">
+                AND operation_type = #{operationType}
+            </if>
+            <if test="startTime != null and startTime != ''">
+                AND operation_time >= #{startTime}
+            </if>
+            <if test="endTime != null and endTime != ''">
+                AND operation_time &lt;= #{endTime}
+            </if>
+        </where>
+        ORDER BY operation_time DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- 查询敏感操作记录总数 -->
+    <select id="countSensitiveOperations" resultType="java.lang.Long">
+        SELECT COUNT(*)
+        FROM v_sensitive_operations
+        <where>
+            <if test="userId != null and userId != ''">
+                AND user_id = #{userId}
+            </if>
+            <if test="username != null and username != ''">
+                AND username LIKE CONCAT('%', #{username}, '%')
+            </if>
+            <if test="module != null and module != ''">
+                AND module LIKE CONCAT('%', #{module}, '%')
+            </if>
+            <if test="operationType != null and operationType != ''">
+                AND operation_type = #{operationType}
+            </if>
+            <if test="startTime != null and startTime != ''">
+                AND operation_time >= #{startTime}
+            </if>
+            <if test="endTime != null and endTime != ''">
+                AND operation_time &lt;= #{endTime}
+            </if>
+        </where>
+    </select>
+
+    <!-- 查询错误操作统计 -->
+    <select id="selectErrorOperationStats" resultType="cn.flying.dao.vo.audit.ErrorOperationStatsVO">
+        SELECT
+            module,
+            operation_type as operationType,
+            error_msg as errorMsg,
+            error_count as errorCount,
+            first_occurrence as firstOccurrence,
+            last_occurrence as lastOccurrence
+        FROM v_error_operations_stats
+        ORDER BY error_count DESC
+        LIMIT 100 -- Limit results
+    </select>
+
+    <!-- 查询用户操作时间分布 -->
+    <select id="selectUserTimeDistribution" resultType="cn.flying.dao.vo.audit.UserTimeDistributionVO">
+        SELECT
+            hour_of_day as hourOfDay,
+            day_of_week as dayOfWeek, -- 0=Monday, 1=Tuesday, ..., 6=Sunday
+            operation_count as operationCount
+        FROM v_user_time_distribution
+        ORDER BY day_of_week, hour_of_day
+    </select>
+
+    <!-- 查询所有审计配置 -->
+    <select id="selectAuditConfigs" resultType="cn.flying.dao.vo.audit.AuditConfigVO">
+        SELECT
+            id,
+            config_key as configKey,
+            config_value as configValue,
+            description,
+            create_time as createTime,
+            update_time as updateTime
+        FROM sys_audit_config
+        ORDER BY id
+    </select>
+
+    <!-- 根据Key查询单个审计配置 -->
+    <select id="selectAuditConfigByKey" resultType="cn.flying.dao.vo.audit.AuditConfigVO">
+        SELECT
+            id,
+            config_key as configKey,
+            config_value as configValue,
+            description,
+            create_time as createTime,
+            update_time as updateTime
+        FROM sys_audit_config
+        WHERE config_key = #{configKey}
+    </select>
+
+    <!-- 更新审计配置 -->
+    <update id="updateAuditConfig">
+        UPDATE sys_audit_config
+        SET config_value = #{configValue}, description = #{description}
+        WHERE config_key = #{configKey}
+    </update>
+
+    <!-- == Audit Overview Methods == -->
+
+    <select id="selectTotalOperations" resultType="java.lang.Long">
+        SELECT COUNT(*) FROM sys_operation_log
+    </select>
+
+    <select id="selectOperationsBetween" resultType="java.lang.Long">
+        SELECT COUNT(*) FROM sys_operation_log
+        WHERE operation_time >= #{startTime} AND operation_time &lt; #{endTime}
+    </select>
+
+    <select id="selectTotalErrorOperations" resultType="java.lang.Long">
+        SELECT COUNT(*) FROM sys_operation_log WHERE status = 1
+    </select>
+
+    <select id="selectErrorOperationsBetween" resultType="java.lang.Long">
+        SELECT COUNT(*) FROM sys_operation_log
+        WHERE status = 1 AND operation_time >= #{startTime} AND operation_time &lt; #{endTime}
+    </select>
+
+    <select id="selectSensitiveOperationsCountBetween" resultType="java.lang.Long">
+        SELECT COUNT(*) FROM v_sensitive_operations
+        WHERE operation_time >= #{startTime} AND operation_time &lt; #{endTime}
+    </select>
+
+    <select id="selectActiveUsersBetween" resultType="java.lang.Long">
+        SELECT COUNT(DISTINCT user_id) FROM sys_operation_log
+        WHERE operation_time >= #{startTime} AND operation_time &lt; #{endTime}
+          AND user_id IS NOT NULL AND user_id != '' AND user_id != 'system'
+    </select>
+
+    <select id="selectHighFrequencyAlertCount" resultType="java.lang.Long">
+        SELECT COUNT(*) FROM v_high_frequency_operations
+    </select>
+
+    <select id="selectDailyStats" resultType="java.util.Map">
+        SELECT
+            DATE(operation_time) as operation_date,
+            COUNT(*) as operation_count
+        FROM sys_operation_log
+        WHERE operation_time >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)
+        GROUP BY DATE(operation_time)
+        ORDER BY operation_date ASC
+    </select>
+
+    <!-- == Stored Procedure Calls == -->
+
+    <select id="checkAnomalies" statementType="CALLABLE" resultType="java.util.Map">
+        {CALL proc_check_operation_anomalies(
+                #{hasAnomalies, mode=OUT, jdbcType=BOOLEAN},
+                #{anomalyDetails, mode=OUT, jdbcType=VARCHAR}
+              )}
+    </select>
+
+    <update id="backupLogs" statementType="CALLABLE">
+        {CALL proc_backup_operation_logs(
+                #{days, mode=IN, jdbcType=INTEGER},
+                #{deleteAfterBackup, mode=IN, jdbcType=BOOLEAN}
+              )}
+    </update>
+</mapper>

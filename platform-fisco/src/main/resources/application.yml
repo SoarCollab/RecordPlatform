@@ -1,0 +1,59 @@
+### Java sdk configuration
+bcos:
+  cryptoMaterial:
+    certPath: conf
+  network:
+    peers[0]: 127.0.0.1:20200
+
+### System configuration
+system:
+  groupId: group0
+  hexPrivateKey:
+
+### Contract configuration
+contract:
+  sharingAddress: '0x6d5de407db930fd7f5a0d9f19be7ec7bc7b36a2a'
+  storageAddress: '0xe7d7b002e51431b300ddc00b2c059ccc41ce4660'
+
+### Springboot configuration
+spring:
+  application:
+    name: platform-fisco
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+  main:
+    allow-bean-definition-overriding: true
+    allow-circular-references: true
+  output:
+    ansi:
+      enabled: ALWAYS
+
+## dubbo config
+dubbo:
+  application:
+    name: RecordPlatform_fisco
+    logger: slf4j
+    protocol: tri
+    qos-port: 22331  # 使用 23333 端口
+    qos-enable: true # 启用 QoS 功能
+    qos-accept-foreign-ip: false # 只允许本机访问
+    check-serializable: false
+    serialize-check-status: DISABLE
+  provider:
+    timeout: 60000 # 全局提供者超时设置为 60000ms (60秒)
+  protocol:
+    name: tri   # 使用 Triple 协议
+    port: 8091
+  registry:
+    register-mode: instance
+    address: nacos://localhost:8848
+
+logging:
+  level:
+    root: INFO
+    org:
+      fisco: DEBUG
+  pattern:
+    console: '%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr([%thread]){magenta} %clr(%-5level) %clr(%logger{50}){cyan} - %msg%n'
+

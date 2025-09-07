@@ -1,0 +1,98 @@
+spring:
+  application:
+    name: backend-web
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 1000MB
+  profiles:
+    active: @environment@
+  jackson:
+    time-zone: GMT+8
+
+  security:
+    jwt:
+      key: 'record-platform-key'
+      expire: 72
+      limit:
+        base: 10
+        upgrade: 300
+        frequency: 30
+    filter:
+      order: -100
+
+  web:
+    verify:
+      mail-limit: 60
+    flow:
+      period: 3
+      limit: 50
+      block: 30
+    cors:
+      origin: '*'
+      credentials: false
+      methods: '*'
+
+# springdoc-openapi项目配置
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+  group-configs:
+    - group: 'default'
+      paths-to-match: '/**'
+      #生成文档所需的扫包路径，一般为启动类目录
+      packages-to-scan: cn.flying.controller
+
+#knife4j配置
+knife4j:
+  #是否启用增强设置
+  enable: true
+  #开启生产环境屏蔽
+  production: false
+  #是否启用登录认证
+  basic:
+    enable: true
+    username: admin
+    password: 123456
+  setting:
+    language: zh_cn
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    #打印sql日志
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+  global-config:
+    #控制台mybatis-plus标记
+    banner: true
+    db-config:
+      logic-delete-field: deleted # 全局逻辑删除字段名
+      logic-delete-value: 1 # 逻辑已删除值
+      logic-not-delete-value: 0 # 逻辑未删除值
+      id-type: INPUT
+
+snowflake:
+  worker-id: 1
+  data-center-id: 20
+
+# ID生成器安全配置
+id:
+  security:
+    key: "${ID_SECURITY_KEY:record-platform-secure-key-2025}"  # ID混淆密钥，可通过环境变量配置
+  monitor:
+    threshold: 200  # 1分钟内单线程生成ID数量阈值，超过触发告警
+  mapping:
+    expire-hours: 48  # ID映射缓存过期时间(小时)
+
+# actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: '*'
+    enabled-by-default: on
