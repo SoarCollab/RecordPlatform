@@ -5,7 +5,7 @@ import lombok.Getter;
 /**
  * 用户权限枚举
  * 从 platform-backend 迁移而来，用于定义系统中的用户角色
- * 
+ *
  * @author 王贝强
  * @create 2025-05-06 20:54
  */
@@ -20,7 +20,7 @@ public enum UserRole {
      * 角色标识
      */
     private final String role;
-    
+
     /**
      * 角色描述
      */
@@ -33,6 +33,7 @@ public enum UserRole {
 
     /**
      * 根据角色标识获取枚举
+     *
      * @param role 角色标识
      * @return 对应的用户角色枚举，如果未找到则返回 ROLE_NOOP
      */

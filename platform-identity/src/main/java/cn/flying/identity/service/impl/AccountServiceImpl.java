@@ -39,7 +39,7 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
     @Resource
     private EmailService emailService;
 
-    @Resource
+    @Resource(name = "stringRedisTemplate")
     private StringRedisTemplate stringRedisTemplate;
 
     @Resource

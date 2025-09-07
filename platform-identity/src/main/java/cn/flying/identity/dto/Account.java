@@ -5,7 +5,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-import java.util.Date;
+import java.time.LocalDateTime;
 
 /**
  * 用户实体类
@@ -17,7 +17,7 @@ import java.util.Date;
 @NoArgsConstructor
 @TableName("account")
 public class Account implements BaseData {
-    
+
     @TableId(type = IdType.INPUT)
     private Long id;
 
@@ -50,13 +50,13 @@ public class Account implements BaseData {
      * 注册时间
      */
     @TableField(fill = FieldFill.INSERT)
-    private Date registerTime;
+    private LocalDateTime registerTime;
 
     /**
      * 更新时间
      */
     @TableField(fill = FieldFill.INSERT_UPDATE)
-    private Date updateTime;
+    private LocalDateTime updateTime;
 
     /**
      * 逻辑删除字段：0->未删除，1->已删除
@@ -66,12 +66,13 @@ public class Account implements BaseData {
 
     /**
      * 构造函数
-     * @param id 用户ID
+     *
+     * @param id       用户ID
      * @param username 用户名
      * @param password 密码
-     * @param email 邮箱
-     * @param role 角色
-     * @param avatar 头像
+     * @param email    邮箱
+     * @param role     角色
+     * @param avatar   头像
      */
     public Account(Long id, String username, String password, String email, String role, String avatar) {
         this.id = id;

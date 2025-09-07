@@ -1,6 +1,6 @@
 package cn.flying.identity.service;
 
-import cn.flying.identity.dto.OperationLogEntity;
+import cn.flying.identity.dto.OperationLog;
 import cn.flying.platformapi.constant.Result;
 import com.baomidou.mybatisplus.extension.service.IService;
 
@@ -13,7 +13,7 @@ import java.util.Map;
  * 
  * @author 王贝强
  */
-public interface OperationLogService extends IService<OperationLogEntity> {
+public interface OperationLogService extends IService<OperationLog> {
     
     /**
      * 保存操作日志
@@ -21,7 +21,7 @@ public interface OperationLogService extends IService<OperationLogEntity> {
      * @param operationLog 操作日志实体
      * @return 保存结果
      */
-    Result<Void> saveOperationLog(OperationLogEntity operationLog);
+    Result<Void> saveOperationLog(OperationLog operationLog);
     
     /**
      * 分页查询操作日志
@@ -88,7 +88,7 @@ public interface OperationLogService extends IService<OperationLogEntity> {
      * @param logId 日志ID
      * @return 日志详情
      */
-    Result<OperationLogEntity> getOperationLogDetail(Long logId);
+    Result<OperationLog> getOperationLogDetail(Long logId);
     
     /**
      * 批量删除操作日志

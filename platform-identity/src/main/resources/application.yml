@@ -4,9 +4,8 @@ spring:
   profiles:
     active: dev
     include:
+      - redis
       - oauth
-      - audit
-      - third-party
       - verify-code
       - identity
   # 数据库配置
@@ -37,7 +36,7 @@ management:
     web:
       exposure:
         include: '*'
-    enabled-by-default: on
+    enabled-by-default: true
 
 server:
   # 端口
@@ -72,6 +71,105 @@ id:
     threshold: 200  # 1分钟内单线程生成ID数量阈值，超过触发告警
   mapping:
     expire-hours: 48  # ID映射缓存过期时间(小时)
+
+# 缓存过期时间配置
+cache:
+  expire:
+    sso:
+      token: 7200      # SSO Token过期时间（秒），默认2小时
+
+# 异步任务配置
+async:
+  task:
+    core-pool-size: 5             # 核心线程数
+    max-pool-size: 20             # 最大线程数
+    queue-capacity: 100           # 队列容量
+    thread-name-prefix: "async-task-"  # 线程名前缀
+    keep-alive-seconds: 60        # 线程空闲时间（秒）
+    await-termination-seconds: 60 # 等待时间（秒）
+
+# 操作日志监控配置
+operation:
+  log:
+    # 操作日志配置
+    operation-log:
+      enabled: true              # 是否启用审计日志
+      async-enabled: true        # 是否启用异步记录
+      retention-days: 90         # 日志保留天数
+      log-request-params: true   # 是否记录请求参数
+      log-response-result: false # 是否记录响应结果
+      sensitive-operations:      # 敏感操作列表
+        - "DELETE"
+        - "UPDATE"
+        - "EXPORT"
+      high-risk-modules:         # 高风险模块列表
+        - "USER"
+        - "ROLE"
+        - "PERMISSION"
+      abnormal-detection:
+        enabled: true            # 是否启用异常检测
+        time-window: 60          # 时间窗口（分钟）
+        max-failures-per-ip: 10 # 每IP最大失败次数
+        max-operations-per-user: 100 # 每用户最大操作次数
+        location-detection-enabled: true # 地理位置检测
+        time-detection-enabled: true     # 时间异常检测
+        working-hours: "09:00-18:00"     # 工作时间
+    
+    
+    # 告警配置
+    alert:
+      enabled: true              # 是否启用告警
+      check-interval: 60         # 检查间隔（秒）
+      high-risk-threshold: 80    # 高风险阈值
+      abnormal-event-threshold: 5 # 异常事件阈值
+      notification-methods:      # 通知方式
+        - "EMAIL"
+        - "SMS"
+      alert-emails:              # 告警邮箱
+        - "admin@example.com"
+
+# 网关流量监控配置
+gateway:
+  traffic:
+    # 流量监控配置
+    monitor:
+      enabled: true               # 是否启用流量监控
+      async-enabled: true         # 是否启用异步记录
+      retention-days: 7           # 监控数据保留天数
+      time-window: 60             # 统计时间窗口（秒）
+      sampling-rate: 1.0          # 采样率（0.0-1.0）
+    
+    # 限流配置
+    rate-limit:
+      enabled: true               # 是否启用限流
+      global-requests-per-minute: 10000   # 全局每分钟最大请求数
+      ip-requests-per-minute: 300         # 单IP每分钟最大请求数
+      user-requests-per-minute: 600       # 单用户每分钟最大请求数
+      api-requests-per-minute: 1000       # 单API每分钟最大请求数
+      max-concurrent-connections-per-ip: 50  # 单IP最大并发连接数
+      block-duration: 300         # 限流后阻塞时间（秒）
+    
+    # 异常检测配置
+    anomaly-detection:
+      enabled: true               # 是否启用异常检测
+      response-time-threshold: 5000       # 响应时间异常阈值（毫秒）
+      error-rate-threshold: 10.0          # 错误率异常阈值（百分比）
+      geo-anomaly-enabled: true           # 地理位置检测
+      time-anomaly-enabled: true          # 时间异常检测
+      device-anomaly-enabled: true        # 设备指纹检测
+      bot-detection-enabled: true         # 机器人检测
+      ddos-threshold: 100         # DDoS检测阈值（每秒请求数）
+      risk-score-threshold: 70    # 风险评分阈值
+    
+    # 拦截配置
+    blocking:
+      auto-block-enabled: true    # 是否启用自动拦截
+      blacklist-expire-hours: 24  # 黑名单过期时间（小时）
+      progressive-block-enabled: true     # 渐进式拦截启用
+      whitelist-ips: []           # 白名单IP列表
+      permanent-blacklist-ips: [] # 永久黑名单IP列表
+      block-response-code: 429    # 拦截响应码
+      block-response-message: "Request blocked due to suspicious activity"
 
 
 ############## Sa-Token 配置 ##############

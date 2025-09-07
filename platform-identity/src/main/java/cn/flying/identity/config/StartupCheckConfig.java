@@ -23,7 +23,7 @@ public class StartupCheckConfig implements ApplicationRunner {
     @Resource
     private DataSource dataSource;
 
-    @Resource
+    @Resource(name = "stringRedisTemplate")
     private StringRedisTemplate redisTemplate;
 
     @Resource

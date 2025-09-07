@@ -7,8 +7,8 @@ import cn.flying.platformapi.constant.ResultEnum;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
@@ -17,7 +17,7 @@ import java.util.Map;
 /**
  * 第三方认证控制器
  * 提供第三方登录相关功能
- * 
+ *
  * @author 王贝强
  */
 @RestController
@@ -25,12 +25,12 @@ import java.util.Map;
 @Tag(name = "第三方登录", description = "提供GitHub、Google、微信等第三方登录功能")
 public class ThirdPartyAuthController {
 
-    @Autowired
+    @Resource
     private ThirdPartyAuthService thirdPartyAuthService;
 
     /**
      * 获取支持的第三方登录提供商列表
-     * 
+     *
      * @return 提供商列表
      */
     @GetMapping("/providers")
@@ -41,10 +41,10 @@ public class ThirdPartyAuthController {
 
     /**
      * 获取第三方登录授权URL
-     * 
-     * @param provider 第三方提供商
+     *
+     * @param provider    第三方提供商
      * @param redirectUri 回调地址
-     * @param state 状态参数
+     * @param state       状态参数
      * @return 授权URL
      */
     @GetMapping("/{provider}/authorize")
@@ -53,17 +53,17 @@ public class ThirdPartyAuthController {
             @Parameter(description = "第三方提供商") @PathVariable String provider,
             @Parameter(description = "回调地址") @RequestParam String redirectUri,
             @Parameter(description = "状态参数") @RequestParam(required = false) String state) {
-        
+
         return thirdPartyAuthService.getAuthorizationUrl(provider, redirectUri, state);
     }
 
     /**
      * 第三方登录授权重定向
-     * 
-     * @param provider 第三方提供商
+     *
+     * @param provider    第三方提供商
      * @param redirectUri 回调地址
-     * @param state 状态参数
-     * @param response HTTP响应
+     * @param state       状态参数
+     * @param response    HTTP响应
      * @throws IOException IO异常
      */
     @GetMapping("/{provider}/login")
@@ -73,7 +73,7 @@ public class ThirdPartyAuthController {
             @Parameter(description = "回调地址") @RequestParam String redirectUri,
             @Parameter(description = "状态参数") @RequestParam(required = false) String state,
             HttpServletResponse response) throws IOException {
-        
+
         Result<String> result = thirdPartyAuthService.getAuthorizationUrl(provider, redirectUri, state);
         if (result.getCode() == ResultEnum.SUCCESS.getCode() && result.getData() != null) {
             response.sendRedirect(result.getData());
@@ -84,11 +84,11 @@ public class ThirdPartyAuthController {
 
     /**
      * 处理第三方登录回调
-     * 
+     *
      * @param provider 第三方提供商
-     * @param code 授权码
-     * @param state 状态参数
-     * @param error 错误信息
+     * @param code     授权码
+     * @param state    状态参数
+     * @param error    错误信息
      * @return 登录结果
      */
     @GetMapping("/{provider}/callback")
@@ -98,7 +98,7 @@ public class ThirdPartyAuthController {
             @Parameter(description = "授权码") @RequestParam(required = false) String code,
             @Parameter(description = "状态参数") @RequestParam(required = false) String state,
             @Parameter(description = "错误信息") @RequestParam(required = false) String error) {
-        
+
         if (error != null) {
             return Result.error(ResultEnum.PARAM_IS_INVALID, null);
         }
@@ -106,15 +106,15 @@ public class ThirdPartyAuthController {
         if (code == null) {
             return Result.error(ResultEnum.PARAM_IS_INVALID, null);
         }
-        
+
         return thirdPartyAuthService.handleCallback(provider, code, state);
     }
 
     /**
      * 绑定第三方账号
-     * 
+     *
      * @param provider 第三方提供商
-     * @param code 授权码
+     * @param code     授权码
      * @return 绑定结果
      */
     @PostMapping("/{provider}/bind")
@@ -122,18 +122,18 @@ public class ThirdPartyAuthController {
     public Result<Void> bindThirdPartyAccount(
             @Parameter(description = "第三方提供商") @PathVariable String provider,
             @Parameter(description = "授权码") @RequestParam String code) {
-        
+
         if (!StpUtil.isLogin()) {
             return Result.error(ResultEnum.USER_NOT_LOGGED_IN, null);
         }
-        
+
         Long userId = StpUtil.getLoginIdAsLong();
         return thirdPartyAuthService.bindThirdPartyAccount(userId, provider, code);
     }
 
     /**
      * 解绑第三方账号
-     * 
+     *
      * @param provider 第三方提供商
      * @return 解绑结果
      */
@@ -141,7 +141,7 @@ public class ThirdPartyAuthController {
     @Operation(summary = "解绑第三方账号", description = "解除第三方账号与当前用户的绑定关系")
     public Result<Void> unbindThirdPartyAccount(
             @Parameter(description = "第三方提供商") @PathVariable String provider) {
-        
+
         if (!StpUtil.isLogin()) {
             return Result.error(ResultEnum.USER_NOT_LOGGED_IN, null);
         }
@@ -161,15 +161,15 @@ public class ThirdPartyAuthController {
         if (!StpUtil.isLogin()) {
             return Result.error(ResultEnum.USER_NOT_LOGGED_IN, null);
         }
-        
+
         Long userId = StpUtil.getLoginIdAsLong();
         return thirdPartyAuthService.getUserThirdPartyAccounts(userId);
     }
 
     /**
      * 验证第三方访问令牌
-     * 
-     * @param provider 第三方提供商
+     *
+     * @param provider    第三方提供商
      * @param accessToken 访问令牌
      * @return 验证结果
      */
@@ -178,14 +178,14 @@ public class ThirdPartyAuthController {
     public Result<Boolean> validateThirdPartyToken(
             @Parameter(description = "第三方提供商") @PathVariable String provider,
             @Parameter(description = "访问令牌") @RequestParam String accessToken) {
-        
+
         return thirdPartyAuthService.validateThirdPartyToken(provider, accessToken);
     }
 
     /**
      * 获取第三方用户信息
-     * 
-     * @param provider 第三方提供商
+     *
+     * @param provider    第三方提供商
      * @param accessToken 访问令牌
      * @return 用户信息
      */
@@ -194,13 +194,13 @@ public class ThirdPartyAuthController {
     public Result<Map<String, Object>> getThirdPartyUserInfo(
             @Parameter(description = "第三方提供商") @PathVariable String provider,
             @Parameter(description = "访问令牌") @RequestParam String accessToken) {
-        
+
         return thirdPartyAuthService.getThirdPartyUserInfo(provider, accessToken);
     }
 
     /**
      * 刷新第三方访问令牌
-     * 
+     *
      * @param provider 第三方提供商
      * @return 刷新结果
      */
@@ -208,11 +208,11 @@ public class ThirdPartyAuthController {
     @Operation(summary = "刷新第三方访问令牌", description = "刷新指定第三方提供商的访问令牌")
     public Result<Map<String, Object>> refreshThirdPartyToken(
             @Parameter(description = "第三方提供商") @PathVariable String provider) {
-        
+
         if (!StpUtil.isLogin()) {
             return Result.error(ResultEnum.USER_NOT_LOGGED_IN, null);
         }
-        
+
         Long userId = StpUtil.getLoginIdAsLong();
         return thirdPartyAuthService.refreshThirdPartyToken(userId, provider);
     }

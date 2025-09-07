@@ -6,14 +6,13 @@ import cn.flying.identity.util.SecurityUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 /**
  * SA-Token 认证拦截器
  * 替代原来的 JWT 过滤器，使用 SA-Token 进行权限验证
- * 
+ *
  * @author 王贝强
  */
 @Slf4j
@@ -21,32 +20,32 @@ import org.springframework.web.servlet.HandlerInterceptor;
 public class SaTokenAuthInterceptor implements HandlerInterceptor {
 
     @Override
-    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         String requestURI = request.getRequestURI();
         String method = request.getMethod();
-        
+
         log.debug("SA-Token 认证拦截器处理请求: {} {}", method, requestURI);
-        
+
         try {
             // 检查用户是否已登录
             if (StpUtil.isLogin()) {
                 // 获取用户ID和角色信息
                 Long userId = Long.valueOf(StpUtil.getLoginId().toString());
                 String userRole = getUserRole(userId);
-                
+
                 // 将用户信息存入请求属性
                 request.setAttribute(Const.ATTR_USER_ID, userId);
                 request.setAttribute(Const.ATTR_USER_ROLE, userRole);
-                
+
                 // 将用户信息放入 MDC 上下文，便于日志记录
                 SecurityUtils.setUserIdToMDC(userId);
                 SecurityUtils.setUserRoleToMDC(userRole);
-                
+
                 log.debug("用户认证成功: userId={}, role={}, uri={}", userId, userRole, requestURI);
             } else {
                 log.debug("用户未登录，请求路径: {}", requestURI);
             }
-            
+
             return true;
         } catch (Exception e) {
             log.error("SA-Token 认证拦截器处理异常: {}", e.getMessage(), e);
@@ -55,14 +54,14 @@ public class SaTokenAuthInterceptor implements HandlerInterceptor {
     }
 
     @Override
-    public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) throws Exception {
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
         // 请求结束后清理 MDC 上下文
         SecurityUtils.clearMDC();
     }
 
     /**
      * 获取用户角色
-     * 
+     *
      * @param userId 用户ID
      * @return 用户角色
      */
@@ -73,7 +72,7 @@ public class SaTokenAuthInterceptor implements HandlerInterceptor {
             if (roleObj != null) {
                 return roleObj.toString();
             }
-            
+
             // 如果 Session 中没有角色信息，从数据库查询
             return SecurityUtils.getLoginUserRole().getRole();
         } catch (Exception e) {

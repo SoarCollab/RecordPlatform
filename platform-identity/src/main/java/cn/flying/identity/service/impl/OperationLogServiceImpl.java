@@ -1,6 +1,6 @@
 package cn.flying.identity.service.impl;
 
-import cn.flying.identity.dto.OperationLogEntity;
+import cn.flying.identity.dto.OperationLog;
 import cn.flying.identity.mapper.OperationLogMapper;
 import cn.flying.identity.service.OperationLogService;
 import cn.flying.platformapi.constant.Result;
@@ -24,10 +24,10 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Service
-public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, OperationLogEntity> implements OperationLogService {
+public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, OperationLog> implements OperationLogService {
 
     @Override
-    public Result<Void> saveOperationLog(OperationLogEntity operationLog) {
+    public Result<Void> saveOperationLog(OperationLog operationLog) {
         try {
             operationLog.setCreateTime(LocalDateTime.now());
             operationLog.setUpdateTime(LocalDateTime.now());
@@ -44,7 +44,7 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
     public Result<Map<String, Object>> getOperationLogs(int page, int size, Long userId, String module, 
                                                         String operationType, LocalDateTime startTime, LocalDateTime endTime) {
         try {
-            QueryWrapper<OperationLogEntity> queryWrapper = new QueryWrapper<>();
+            QueryWrapper<OperationLog> queryWrapper = new QueryWrapper<>();
             
             // 构建查询条件
             if (userId != null) {
@@ -67,7 +67,7 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
             queryWrapper.orderByDesc("operation_time");
             
             // 分页查询
-            Page<OperationLogEntity> pageResult = this.page(new Page<>(page, size), queryWrapper);
+            Page<OperationLog> pageResult = this.page(new Page<>(page, size), queryWrapper);
             
             Map<String, Object> result = new HashMap<>();
             result.put("logs", pageResult.getRecords());
@@ -91,7 +91,7 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
             LocalDateTime endTime = LocalDateTime.now();
             LocalDateTime startTime = endTime.minusDays(days);
             
-            QueryWrapper<OperationLogEntity> queryWrapper = new QueryWrapper<>();
+            QueryWrapper<OperationLog> queryWrapper = new QueryWrapper<>();
             queryWrapper.ge("operation_time", startTime);
             queryWrapper.le("operation_time", endTime);
             
@@ -99,34 +99,34 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
             long totalOperations = this.count(queryWrapper);
             
             // 成功操作数
-            QueryWrapper<OperationLogEntity> successWrapper = new QueryWrapper<>();
+            QueryWrapper<OperationLog> successWrapper = new QueryWrapper<>();
             successWrapper.ge("operation_time", startTime).le("operation_time", endTime);
             successWrapper.eq("status", 0);
             long successOperations = this.count(successWrapper);
 
             // 失败操作数
-            QueryWrapper<OperationLogEntity> failWrapper = new QueryWrapper<>();
+            QueryWrapper<OperationLog> failWrapper = new QueryWrapper<>();
             failWrapper.ge("operation_time", startTime).le("operation_time", endTime);
             failWrapper.eq("status", 1);
             long failOperations = this.count(failWrapper);
             
             // 操作用户数
-            List<OperationLogEntity> logs = this.list(queryWrapper);
+            List<OperationLog> logs = this.list(queryWrapper);
             long uniqueUsers = logs.stream()
                     .filter(log -> log.getUserId() != null)
-                    .map(OperationLogEntity::getUserId)
+                    .map(OperationLog::getUserId)
                     .distinct()
                     .count();
             
             // 模块统计
             Map<String, Long> moduleStats = logs.stream()
                     .filter(log -> log.getModule() != null && !log.getModule().trim().isEmpty())
-                    .collect(Collectors.groupingBy(OperationLogEntity::getModule, Collectors.counting()));
+                    .collect(Collectors.groupingBy(OperationLog::getModule, Collectors.counting()));
             
             // 操作类型统计
             Map<String, Long> operationTypeStats = logs.stream()
                     .filter(log -> log.getOperationType() != null && !log.getOperationType().trim().isEmpty())
-                    .collect(Collectors.groupingBy(OperationLogEntity::getOperationType, Collectors.counting()));
+                    .collect(Collectors.groupingBy(OperationLog::getOperationType, Collectors.counting()));
             
             stats.put("total_operations", totalOperations);
             stats.put("success_operations", successOperations);
@@ -154,12 +154,12 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
             LocalDateTime endTime = LocalDateTime.now();
             LocalDateTime startTime = endTime.minusDays(days);
             
-            QueryWrapper<OperationLogEntity> queryWrapper = new QueryWrapper<>();
+            QueryWrapper<OperationLog> queryWrapper = new QueryWrapper<>();
             queryWrapper.eq("user_id", userId);
             queryWrapper.ge("operation_time", startTime);
             queryWrapper.le("operation_time", endTime);
             
-            List<OperationLogEntity> userLogs = this.list(queryWrapper);
+            List<OperationLog> userLogs = this.list(queryWrapper);
             
             // 总操作数
             long totalOperations = userLogs.size();
@@ -175,17 +175,17 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
             // 模块统计
             Map<String, Long> moduleStats = userLogs.stream()
                     .filter(log -> log.getModule() != null && !log.getModule().trim().isEmpty())
-                    .collect(Collectors.groupingBy(OperationLogEntity::getModule, Collectors.counting()));
+                    .collect(Collectors.groupingBy(OperationLog::getModule, Collectors.counting()));
             
             // 操作类型统计
             Map<String, Long> operationTypeStats = userLogs.stream()
                     .filter(log -> log.getOperationType() != null && !log.getOperationType().trim().isEmpty())
-                    .collect(Collectors.groupingBy(OperationLogEntity::getOperationType, Collectors.counting()));
+                    .collect(Collectors.groupingBy(OperationLog::getOperationType, Collectors.counting()));
             
             // 平均执行时间
             double avgExecutionTime = userLogs.stream()
                     .filter(log -> log.getExecutionTime() != null)
-                    .mapToLong(OperationLogEntity::getExecutionTime)
+                    .mapToLong(OperationLog::getExecutionTime)
                     .average()
                     .orElse(0.0);
             
@@ -212,13 +212,13 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
             LocalDateTime endTime = LocalDateTime.now();
             LocalDateTime startTime = endTime.minusDays(days);
             
-            QueryWrapper<OperationLogEntity> queryWrapper = new QueryWrapper<>();
+            QueryWrapper<OperationLog> queryWrapper = new QueryWrapper<>();
             queryWrapper.ge("operation_time", startTime);
             queryWrapper.le("operation_time", endTime);
             queryWrapper.in("risk_level", Arrays.asList("HIGH", "CRITICAL"));
             queryWrapper.orderByDesc("operation_time");
             
-            List<OperationLogEntity> highRiskLogs = this.list(queryWrapper);
+            List<OperationLog> highRiskLogs = this.list(queryWrapper);
             
             Map<String, Object> result = new HashMap<>();
             result.put("high_risk_operations", highRiskLogs);
@@ -237,7 +237,7 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
         try {
             LocalDateTime cutoffTime = LocalDateTime.now().minusDays(retentionDays);
             
-            QueryWrapper<OperationLogEntity> queryWrapper = new QueryWrapper<>();
+            QueryWrapper<OperationLog> queryWrapper = new QueryWrapper<>();
             queryWrapper.lt("operation_time", cutoffTime);
             
             long expiredCount = this.count(queryWrapper);
@@ -268,9 +268,9 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
     }
 
     @Override
-    public Result<OperationLogEntity> getOperationLogDetail(Long logId) {
+    public Result<OperationLog> getOperationLogDetail(Long logId) {
         try {
-            OperationLogEntity log = this.getById(logId);
+            OperationLog log = this.getById(logId);
             return log != null ? Result.success(log) : Result.error(ResultEnum.RESULT_DATA_NONE, null);
         } catch (Exception e) {
             log.error("获取操作日志详情失败", e);

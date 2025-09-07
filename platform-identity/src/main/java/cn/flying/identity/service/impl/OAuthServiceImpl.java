@@ -1,6 +1,7 @@
 package cn.flying.identity.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
+import cn.flying.identity.config.OAuthConfig;
 import cn.flying.identity.dto.Account;
 import cn.flying.identity.dto.OAuthClient;
 import cn.flying.identity.dto.OAuthCode;
@@ -14,6 +15,7 @@ import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -28,8 +30,12 @@ import java.util.concurrent.TimeUnit;
  * OAuth2.0服务实现类
  * 实现SSO单点登录和第三方应用接入的具体逻辑
  */
+@Slf4j
 @Service
 public class OAuthServiceImpl implements OAuthService {
+
+    @Resource
+    private OAuthConfig oauthConfig;
 
     @Resource
     private OAuthClientMapper oauthClientMapper;
@@ -40,7 +46,7 @@ public class OAuthServiceImpl implements OAuthService {
     @Resource
     private AccountMapper accountMapper;
 
-    @Resource
+    @Resource(name = "stringRedisTemplate")
     private StringRedisTemplate redisTemplate;
 
     /**
@@ -62,7 +68,7 @@ public class OAuthServiceImpl implements OAuthService {
             }
 
             // 验证重定向URI
-            if (isValidRedirectUri(client, redirectUri)) {
+            if (!isValidRedirectUri(client, redirectUri)) {
                 return Result.error(ResultEnum.PARAM_IS_INVALID, null);
             }
 
@@ -106,7 +112,7 @@ public class OAuthServiceImpl implements OAuthService {
             }
 
             // 验证重定向URI
-            if (isValidRedirectUri(client, redirectUri)) {
+            if (!isValidRedirectUri(client, redirectUri)) {
                 return Result.error(ResultEnum.PARAM_IS_INVALID, null);
             }
 
@@ -205,6 +211,12 @@ public class OAuthServiceImpl implements OAuthService {
     public Result<Map<String, Object>> refreshAccessToken(String grantType, String refreshToken,
                                                           String clientKey, String clientSecret) {
         try {
+            // 参数验证
+            if (StrUtil.isBlank(grantType) || StrUtil.isBlank(refreshToken) || 
+                StrUtil.isBlank(clientKey) || StrUtil.isBlank(clientSecret)) {
+                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+            }
+
             // 验证授权类型
             if (!"refresh_token".equals(grantType)) {
                 return Result.error(ResultEnum.PARAM_IS_INVALID, null);
@@ -212,38 +224,96 @@ public class OAuthServiceImpl implements OAuthService {
 
             // 验证客户端
             OAuthClient client = validateClient(clientKey, clientSecret);
-            if (client == null) {
+            if (client == null || client.getStatus() != 1) {
                 return Result.error(ResultEnum.PARAM_IS_INVALID, null);
             }
 
             // 验证刷新令牌
-            String tokenKey = "oauth:refresh_token:" + refreshToken;
-            String tokenData = redisTemplate.opsForValue().get(tokenKey);
-            if (StrUtil.isBlank(tokenData)) {
+            String tokenKey = oauthConfig.getRefreshTokenPrefix() + refreshToken;
+            Map<Object, Object> tokenData = redisTemplate.opsForHash().entries(tokenKey);
+            
+            if (tokenData.isEmpty()) {
+                log.warn("刷新令牌不存在或已过期: {}", refreshToken);
                 return Result.error(ResultEnum.PARAM_IS_INVALID, null);
             }
 
-            Map<String, Object> tokenInfo = JSONUtil.toBean(tokenData, Map.class);
-            Long userId = Long.valueOf(tokenInfo.get("userId").toString());
-            String scope = (String) tokenInfo.get("scope");
+            // 提取令牌信息
+            String userIdStr = (String) tokenData.get("user_id");
+            String tokenClientKey = (String) tokenData.get("client_key");
+            String oldAccessToken = (String) tokenData.get("access_token");
+
+            // 验证客户端匹配
+            if (!clientKey.equals(tokenClientKey)) {
+                log.warn("刷新令牌客户端不匹配: expected={}, actual={}", clientKey, tokenClientKey);
+                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+            }
+
+            Long userId = null;
+            if (StrUtil.isNotBlank(userIdStr)) {
+                userId = Long.valueOf(userIdStr);
+                
+                // 验证用户是否存在且有效
+                Account account = accountMapper.selectById(userId);
+                if (account == null || account.getDeleted() == 1) {
+                    log.warn("用户不存在或已删除: {}", userId);
+                    return Result.error(ResultEnum.USER_NOT_EXIST, null);
+                }
+            }
 
             // 生成新的访问令牌
+            String scope = (String) tokenData.get("scope");
+            if (StrUtil.isBlank(scope)) {
+                scope = oauthConfig.getDefaultScope();
+            }
+
             String newAccessToken = generateAccessToken(userId, clientKey, scope);
             String newRefreshToken = generateRefreshToken(userId, clientKey);
 
-            // 删除旧的刷新令牌
+            // 删除旧的刷新令牌和访问令牌
             redisTemplate.delete(tokenKey);
+            if (StrUtil.isNotBlank(oldAccessToken)) {
+                String oldAccessTokenKey = oauthConfig.getAccessTokenPrefix() + oldAccessToken;
+                redisTemplate.delete(oldAccessTokenKey);
+            }
+
+            // 存储新的访问令牌
+            String newAccessTokenKey = oauthConfig.getAccessTokenPrefix() + newAccessToken;
+            Map<String, String> newTokenInfo = new HashMap<>();
+            if (userId != null) {
+                newTokenInfo.put("user_id", userId.toString());
+            }
+            newTokenInfo.put("client_key", clientKey);
+            newTokenInfo.put("scope", scope);
+            newTokenInfo.put("create_time", String.valueOf(System.currentTimeMillis()));
+            
+            redisTemplate.opsForHash().putAll(newAccessTokenKey, newTokenInfo);
+            redisTemplate.expire(newAccessTokenKey, oauthConfig.getAccessTokenTimeout(), TimeUnit.SECONDS);
+
+            // 存储新的刷新令牌
+            String newRefreshTokenKey = oauthConfig.getRefreshTokenPrefix() + newRefreshToken;
+            Map<String, String> newRefreshTokenInfo = new HashMap<>();
+            if (userId != null) {
+                newRefreshTokenInfo.put("user_id", userId.toString());
+            }
+            newRefreshTokenInfo.put("client_key", clientKey);
+            newRefreshTokenInfo.put("access_token", newAccessToken);
+            newRefreshTokenInfo.put("scope", scope);
+            
+            redisTemplate.opsForHash().putAll(newRefreshTokenKey, newRefreshTokenInfo);
+            redisTemplate.expire(newRefreshTokenKey, oauthConfig.getRefreshTokenTimeout(), TimeUnit.SECONDS);
 
             // 构建响应
             Map<String, Object> response = new HashMap<>();
             response.put("access_token", newAccessToken);
             response.put("token_type", "Bearer");
-            response.put("expires_in", client.getAccessTokenValidity());
+            response.put("expires_in", oauthConfig.getAccessTokenTimeout());
             response.put("refresh_token", newRefreshToken);
+            response.put("refresh_token_expires_in", oauthConfig.getRefreshTokenTimeout());
             response.put("scope", scope);
 
             return Result.success(response);
         } catch (Exception e) {
+            log.error("刷新访问令牌失败", e);
             return Result.error(ResultEnum.SYSTEM_ERROR, null);
         }
     }
@@ -536,6 +606,7 @@ public class OAuthServiceImpl implements OAuthService {
 
     /**
      * 验证重定向URI是否有效
+     * 检查重定向URI是否在客户端注册的URI列表中
      *
      * @param client      客户端信息
      * @param redirectUri 重定向URI
@@ -543,30 +614,35 @@ public class OAuthServiceImpl implements OAuthService {
      */
     private boolean isValidRedirectUri(OAuthClient client, String redirectUri) {
         if (StrUtil.isBlank(client.getRedirectUris()) || StrUtil.isBlank(redirectUri)) {
-            return true;
+            return false; // 如果没有配置重定向URI或传入的URI为空，则无效
         }
 
         List<String> validUris = JSONUtil.toList(client.getRedirectUris(), String.class);
-        return !validUris.contains(redirectUri);
+        return validUris.contains(redirectUri); // 修复逻辑：包含在列表中才有效
     }
 
     /**
      * 生成访问令牌
+     * 创建UUID格式的访问令牌，并将令牌信息存储到Redis中
+     * 令牌信息包含用户ID、客户端标识、授权范围和创建时间
      *
-     * @param userId    用户ID
+     * @param userId    用户ID（客户端凭证模式时可为null）
      * @param clientKey 客户端标识符
      * @param scope     授权范围
-     * @return 访问令牌
+     * @return 访问令牌字符串
      */
     private String generateAccessToken(Long userId, String clientKey, String scope) {
+        // 生成UUID格式的令牌
         String token = IdUtil.fastSimpleUUID();
 
+        // 构建令牌信息
         Map<String, Object> tokenInfo = new HashMap<>();
         tokenInfo.put("userId", userId);
         tokenInfo.put("clientKey", clientKey);
         tokenInfo.put("scope", scope);
         tokenInfo.put("createTime", System.currentTimeMillis());
 
+        // 存储到Redis，设置2小时过期时间
         String tokenKey = "oauth:access_token:" + token;
         redisTemplate.opsForValue().set(tokenKey, JSONUtil.toJsonStr(tokenInfo), 2, TimeUnit.HOURS);
 
@@ -575,19 +651,24 @@ public class OAuthServiceImpl implements OAuthService {
 
     /**
      * 生成刷新令牌
+     * 创建UUID格式的刷新令牌，用于获取新的访问令牌
+     * 刷新令牌的有效期比访问令牌更长，通常为30天
      *
      * @param userId    用户ID
      * @param clientKey 客户端标识符
-     * @return 刷新令牌
+     * @return 刷新令牌字符串
      */
     private String generateRefreshToken(Long userId, String clientKey) {
+        // 生成UUID格式的刷新令牌
         String token = IdUtil.fastSimpleUUID();
 
+        // 构建刷新令牌信息
         Map<String, Object> tokenInfo = new HashMap<>();
         tokenInfo.put("userId", userId);
         tokenInfo.put("clientKey", clientKey);
         tokenInfo.put("createTime", System.currentTimeMillis());
 
+        // 存储到Redis，设置30天过期时间
         String tokenKey = "oauth:refresh_token:" + token;
         redisTemplate.opsForValue().set(tokenKey, JSONUtil.toJsonStr(tokenInfo), 30, TimeUnit.DAYS);
 

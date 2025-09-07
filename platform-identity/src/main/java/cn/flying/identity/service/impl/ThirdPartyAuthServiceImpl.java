@@ -2,6 +2,8 @@ package cn.flying.identity.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
 import cn.flying.identity.dto.Account;
+import cn.flying.identity.dto.ThirdPartyAccount;
+import cn.flying.identity.mapper.ThirdPartyAccountMapper;
 import cn.flying.identity.service.AccountService;
 import cn.flying.identity.service.ThirdPartyAuthService;
 import cn.flying.identity.util.IdUtils;
@@ -12,8 +14,8 @@ import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -26,54 +28,54 @@ import java.util.concurrent.TimeUnit;
 /**
  * 第三方认证服务实现类
  * 支持 GitHub、Google、微信等第三方登录
- * 
+ *
  * @author 王贝强
  */
 @Slf4j
 @Service
 public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
 
-    @Autowired
-    private AccountService accountService;
-    
-    @Autowired
-    private StringRedisTemplate redisTemplate;
-    
-    // GitHub OAuth 配置
-    @Value("${oauth.github.client-id:}")
-    private String githubClientId;
-    
-    @Value("${oauth.github.client-secret:}")
-    private String githubClientSecret;
-    
-    // Google OAuth 配置
-    @Value("${oauth.google.client-id:}")
-    private String googleClientId;
-    
-    @Value("${oauth.google.client-secret:}")
-    private String googleClientSecret;
-    
-    // 微信 OAuth 配置
-    @Value("${oauth.wechat.app-id:}")
-    private String wechatAppId;
-    
-    @Value("${oauth.wechat.app-secret:}")
-    private String wechatAppSecret;
-    
     private static final String THIRD_PARTY_STATE_PREFIX = "third_party:state:";
     private static final String THIRD_PARTY_BIND_PREFIX = "third_party:bind:";
     private static final String THIRD_PARTY_TOKEN_PREFIX = "third_party:token:";
-    
+
+    @Resource
+    private AccountService accountService;
+
+    @Resource
+    private ThirdPartyAccountMapper thirdPartyAccountMapper;
+
+    @Resource(name = "stringRedisTemplate")
+    private StringRedisTemplate redisTemplate;
+
+    // GitHub OAuth 配置
+    @Value("${oauth.github.client-id:}")
+    private String githubClientId;
+    @Value("${oauth.github.client-secret:}")
+    private String githubClientSecret;
+
+    // Google OAuth 配置
+    @Value("${oauth.google.client-id:}")
+    private String googleClientId;
+    @Value("${oauth.google.client-secret:}")
+    private String googleClientSecret;
+
+    // 微信 OAuth 配置
+    @Value("${oauth.wechat.app-id:}")
+    private String wechatAppId;
+    @Value("${oauth.wechat.app-secret:}")
+    private String wechatAppSecret;
+
     @Override
     public Result<String> getAuthorizationUrl(String provider, String redirectUri, String state) {
         try {
             String authUrl;
             String stateParam = state != null ? state : IdUtils.nextIdWithPrefix("STATE");
-            
+
             // 存储状态参数到Redis，防止CSRF攻击
             String stateKey = THIRD_PARTY_STATE_PREFIX + stateParam;
             redisTemplate.opsForValue().set(stateKey, provider + ":" + redirectUri, 10, TimeUnit.MINUTES);
-            
+
             switch (provider.toLowerCase()) {
                 case "github":
                     authUrl = buildGitHubAuthUrl(redirectUri, stateParam);
@@ -87,7 +89,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                 default:
                     return Result.error(ResultEnum.PARAM_IS_INVALID, null);
             }
-            
+
             return Result.success(authUrl);
         } catch (Exception e) {
             log.error("获取第三方登录授权URL失败", e);
@@ -104,40 +106,40 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
             if (stateValue == null) {
                 return Result.error(ResultEnum.PARAM_IS_INVALID, null);
             }
-            
+
             // 清除状态参数
             redisTemplate.delete(stateKey);
-            
+
             // 获取访问令牌
             String accessToken = getAccessTokenFromProvider(provider, code, stateValue.split(":")[1]);
             if (accessToken == null) {
                 return Result.error(ResultEnum.SYSTEM_ERROR, null);
             }
-            
+
             // 获取第三方用户信息
             Result<Map<String, Object>> userInfoResult = getThirdPartyUserInfo(provider, accessToken);
             if (userInfoResult.getCode() != ResultEnum.SUCCESS.getCode()) {
                 return userInfoResult;
             }
-            
+
             Map<String, Object> thirdPartyUser = userInfoResult.getData();
             String thirdPartyId = thirdPartyUser.get("id").toString();
             String email = (String) thirdPartyUser.get("email");
             String username = (String) thirdPartyUser.get("login");
             String avatar = (String) thirdPartyUser.get("avatar_url");
-            
+
             // 查找是否已有绑定的账号
             Account existingAccount = findAccountByThirdPartyId(provider, thirdPartyId);
-            
+
             Map<String, Object> result = new HashMap<>();
-            
+
             if (existingAccount != null) {
                 // 已有绑定账号，直接登录
                 StpUtil.login(existingAccount.getId());
                 StpUtil.getSession().set("role", existingAccount.getRole());
                 StpUtil.getSession().set("username", existingAccount.getUsername());
                 StpUtil.getSession().set("email", existingAccount.getEmail());
-                
+
                 result.put("status", "login_success");
                 result.put("user_id", existingAccount.getId());
                 result.put("username", existingAccount.getUsername());
@@ -153,7 +155,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                         result.put("email", email);
                         result.put("provider", provider);
                         result.put("third_party_id", thirdPartyId);
-                        
+
                         // 临时存储第三方信息，用于后续绑定
                         String bindKey = THIRD_PARTY_BIND_PREFIX + emailAccount.getId() + ":" + provider;
                         String bindValue = thirdPartyId + ":" + accessToken;
@@ -166,7 +168,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                             StpUtil.getSession().set("role", newAccount.getRole());
                             StpUtil.getSession().set("username", newAccount.getUsername());
                             StpUtil.getSession().set("email", newAccount.getEmail());
-                            
+
                             result.put("status", "register_success");
                             result.put("user_id", newAccount.getId());
                             result.put("username", newAccount.getUsername());
@@ -184,7 +186,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                     result.put("avatar", avatar);
                 }
             }
-            
+
             return Result.success(result);
         } catch (Exception e) {
             log.error("处理第三方登录回调失败", e);
@@ -356,27 +358,115 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
     }
 
     /**
-     * 构建 GitHub 授权URL
+     * 获取第三方绑定关系列表
      */
-    private String buildGitHubAuthUrl(String redirectUri, String state) {
-        return String.format("https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&scope=user:email&state=%s",
-                githubClientId, URLEncoder.encode(redirectUri, StandardCharsets.UTF_8), state);
+    private List<Map<String, Object>> getThirdPartyBindings(Long userId) {
+        try {
+            List<Map<String, Object>> bindings = new ArrayList<>();
+            
+            // 从数据库查询绑定关系
+            List<ThirdPartyAccount> thirdPartyAccounts = thirdPartyAccountMapper.findByUserId(userId);
+            
+            for (ThirdPartyAccount account : thirdPartyAccounts) {
+                Map<String, Object> binding = new HashMap<>();
+                binding.put("provider", account.getProvider());
+                binding.put("third_party_id", account.getThirdPartyId());
+                binding.put("bind_time", account.getBindTime());
+                
+                // 检查令牌是否过期
+                if (account.getExpiresAt() != null && account.getExpiresAt().isBefore(java.time.LocalDateTime.now())) {
+                    binding.put("status", "expired");
+                } else {
+                    binding.put("status", "active");
+                }
+                
+                // 添加提供商友好名称
+                switch (account.getProvider().toLowerCase()) {
+                    case "github":
+                        binding.put("provider_name", "GitHub");
+                        break;
+                    case "google":
+                        binding.put("provider_name", "Google");
+                        break;
+                    case "wechat":
+                        binding.put("provider_name", "微信");
+                        break;
+                    default:
+                        binding.put("provider_name", account.getProvider());
+                        break;
+                }
+                
+                bindings.add(binding);
+            }
+
+            return bindings;
+        } catch (Exception e) {
+            log.error("获取第三方绑定关系列表失败: userId={}", userId, e);
+            return new ArrayList<>();
+        }
     }
 
     /**
-     * 构建 Google 授权URL
+     * 移除第三方绑定关系
      */
-    private String buildGoogleAuthUrl(String redirectUri, String state) {
-        return String.format("https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&scope=openid email profile&response_type=code&state=%s",
-                googleClientId, URLEncoder.encode(redirectUri, StandardCharsets.UTF_8), state);
+    private void removeThirdPartyBinding(Long userId, String provider) {
+        try {
+            // 从数据库中删除绑定关系（逻辑删除）
+            int affectedRows = thirdPartyAccountMapper.deleteByUserIdAndProvider(userId, provider);
+            if (affectedRows > 0) {
+                log.info("从数据库移除第三方绑定关系: userId={}, provider={}", userId, provider);
+            }
+            
+            // 同时从Redis中删除缓存
+            String bindingKey = THIRD_PARTY_TOKEN_PREFIX + userId + ":" + provider;
+            redisTemplate.delete(bindingKey);
+            
+            log.info("移除第三方绑定关系: userId={}, provider={}", userId, provider);
+        } catch (Exception e) {
+            log.error("移除第三方绑定关系失败: userId={}, provider={}", userId, provider, e);
+            throw new RuntimeException("移除第三方绑定关系失败", e);
+        }
     }
 
     /**
-     * 构建微信授权URL
+     * 保存第三方绑定关系
      */
-    private String buildWeChatAuthUrl(String redirectUri, String state) {
-        return String.format("https://open.weixin.qq.com/connect/qrconnect?appid=%s&redirect_uri=%s&response_type=code&scope=snsapi_login&state=%s",
-                wechatAppId, URLEncoder.encode(redirectUri, StandardCharsets.UTF_8), state);
+    private void saveThirdPartyBinding(Long userId, String provider, String thirdPartyId, String accessToken) {
+        try {
+            // 检查是否已存在绑定关系
+            ThirdPartyAccount existingBinding = thirdPartyAccountMapper.findByUserIdAndProvider(userId, provider);
+            
+            if (existingBinding != null) {
+                // 更新现有绑定关系
+                existingBinding.setThirdPartyId(thirdPartyId);
+                existingBinding.setAccessToken(accessToken);
+                existingBinding.setExpiresAt(java.time.LocalDateTime.now().plusDays(30)); // 30天后过期
+                thirdPartyAccountMapper.updateById(existingBinding);
+                log.info("更新第三方绑定关系: userId={}, provider={}, thirdPartyId={}", userId, provider, thirdPartyId);
+            } else {
+                // 创建新的绑定关系
+                ThirdPartyAccount thirdPartyAccount = new ThirdPartyAccount();
+                thirdPartyAccount.setId(IdUtils.nextUserId());
+                thirdPartyAccount.setUserId(userId);
+                thirdPartyAccount.setProvider(provider);
+                thirdPartyAccount.setThirdPartyId(thirdPartyId);
+                thirdPartyAccount.setAccessToken(accessToken);
+                thirdPartyAccount.setExpiresAt(java.time.LocalDateTime.now().plusDays(30)); // 30天后过期
+                thirdPartyAccount.setDeleted(0);
+                
+                thirdPartyAccountMapper.insert(thirdPartyAccount);
+                log.info("保存第三方绑定关系: userId={}, provider={}, thirdPartyId={}", userId, provider, thirdPartyId);
+            }
+
+            // 同时在Redis中缓存，便于快速访问
+            String bindingKey = THIRD_PARTY_TOKEN_PREFIX + userId + ":" + provider;
+            String bindingValue = thirdPartyId + ":" + accessToken + ":" + System.currentTimeMillis();
+            redisTemplate.opsForValue().set(bindingKey, bindingValue, 30, TimeUnit.DAYS);
+            
+        } catch (Exception e) {
+            log.error("保存第三方绑定关系失败: userId={}, provider={}, thirdPartyId={}", userId, provider, thirdPartyId, e);
+            throw new RuntimeException("保存第三方绑定关系失败", e);
+        }
     }
 
     /**
@@ -433,37 +523,21 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
     }
 
     /**
-     * 获取微信用户信息
-     */
-    private Result<Map<String, Object>> getWeChatUserInfo(String accessToken) {
-        try {
-            // 微信需要先获取openid
-            String userInfoUrl = "https://api.weixin.qq.com/sns/userinfo?access_token=" + accessToken + "&openid=OPENID";
-
-            HttpResponse response = HttpRequest.get(userInfoUrl)
-                    .timeout(10000)
-                    .execute();
-
-            if (response.isOk()) {
-                String responseBody = response.body();
-                JSONObject userInfo = JSONUtil.parseObj(responseBody);
-                return Result.success(userInfo);
-            } else {
-                return Result.error(ResultEnum.SYSTEM_ERROR, null);
-            }
-        } catch (Exception e) {
-            log.error("获取微信用户信息失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
-        }
-    }
-
-    /**
      * 根据第三方ID查找账号
      */
     private Account findAccountByThirdPartyId(String provider, String thirdPartyId) {
-        // 这里需要查询第三方绑定表，目前简化处理
-        // 实际项目中需要创建 third_party_binding 表
-        return null;
+        try {
+            // 从数据库查询第三方绑定关系
+            ThirdPartyAccount thirdPartyAccount = thirdPartyAccountMapper.findByProviderAndThirdPartyId(provider, thirdPartyId);
+            if (thirdPartyAccount != null) {
+                // 根据绑定的用户ID查找用户账号
+                return accountService.findAccountById(thirdPartyAccount.getUserId());
+            }
+            return null;
+        } catch (Exception e) {
+            log.error("根据第三方ID查找账号失败: provider={}, thirdPartyId={}", provider, thirdPartyId, e);
+            return null;
+        }
     }
 
     /**
@@ -506,56 +580,51 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
     }
 
     /**
-     * 保存第三方绑定关系
+     * 获取微信用户信息
      */
-    private void saveThirdPartyBinding(Long userId, String provider, String thirdPartyId, String accessToken) {
-        // 这里需要保存到数据库
-        // 目前简化处理，存储到Redis
-        String bindingKey = THIRD_PARTY_TOKEN_PREFIX + userId + ":" + provider;
-        String bindingValue = thirdPartyId + ":" + accessToken + ":" + System.currentTimeMillis();
-        redisTemplate.opsForValue().set(bindingKey, bindingValue, 30, TimeUnit.DAYS);
+    private Result<Map<String, Object>> getWeChatUserInfo(String accessToken) {
+        try {
+            // 微信需要先获取openid
+            String userInfoUrl = "https://api.weixin.qq.com/sns/userinfo?access_token=" + accessToken + "&openid=OPENID";
 
-        log.info("保存第三方绑定关系: userId={}, provider={}, thirdPartyId={}", userId, provider, thirdPartyId);
-    }
+            HttpResponse response = HttpRequest.get(userInfoUrl)
+                    .timeout(10000)
+                    .execute();
 
-    /**
-     * 移除第三方绑定关系
-     */
-    private void removeThirdPartyBinding(Long userId, String provider) {
-        String bindingKey = THIRD_PARTY_TOKEN_PREFIX + userId + ":" + provider;
-        redisTemplate.delete(bindingKey);
-
-        log.info("移除第三方绑定关系: userId={}, provider={}", userId, provider);
-    }
-
-    /**
-     * 获取第三方绑定关系列表
-     */
-    private List<Map<String, Object>> getThirdPartyBindings(Long userId) {
-        List<Map<String, Object>> bindings = new ArrayList<>();
-
-        String pattern = THIRD_PARTY_TOKEN_PREFIX + userId + ":*";
-        Set<String> keys = redisTemplate.keys(pattern);
-
-        if (keys != null) {
-            for (String key : keys) {
-                String provider = key.substring(key.lastIndexOf(":") + 1);
-                String bindingValue = redisTemplate.opsForValue().get(key);
-
-                if (bindingValue != null) {
-                    String[] parts = bindingValue.split(":");
-                    if (parts.length >= 3) {
-                        Map<String, Object> binding = new HashMap<>();
-                        binding.put("provider", provider);
-                        binding.put("third_party_id", parts[0]);
-                        binding.put("bind_time", Long.parseLong(parts[2]));
-                        binding.put("status", "active");
-                        bindings.add(binding);
-                    }
-                }
+            if (response.isOk()) {
+                String responseBody = response.body();
+                JSONObject userInfo = JSONUtil.parseObj(responseBody);
+                return Result.success(userInfo);
+            } else {
+                return Result.error(ResultEnum.SYSTEM_ERROR, null);
             }
+        } catch (Exception e) {
+            log.error("获取微信用户信息失败", e);
+            return Result.error(ResultEnum.SYSTEM_ERROR, null);
         }
+    }
 
-        return bindings;
+    /**
+     * 构建 GitHub 授权URL
+     */
+    private String buildGitHubAuthUrl(String redirectUri, String state) {
+        return String.format("https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&scope=user:email&state=%s",
+                githubClientId, URLEncoder.encode(redirectUri, StandardCharsets.UTF_8), state);
+    }
+
+    /**
+     * 构建 Google 授权URL
+     */
+    private String buildGoogleAuthUrl(String redirectUri, String state) {
+        return String.format("https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&scope=openid email profile&response_type=code&state=%s",
+                googleClientId, URLEncoder.encode(redirectUri, StandardCharsets.UTF_8), state);
+    }
+
+    /**
+     * 构建微信授权URL
+     */
+    private String buildWeChatAuthUrl(String redirectUri, String state) {
+        return String.format("https://open.weixin.qq.com/connect/qrconnect?appid=%s&redirect_uri=%s&response_type=code&scope=snsapi_login&state=%s",
+                wechatAppId, URLEncoder.encode(redirectUri, StandardCharsets.UTF_8), state);
     }
 }

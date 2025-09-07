@@ -7,7 +7,7 @@ import cn.flying.platformapi.constant.ResultEnum;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.annotation.Resource;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -15,7 +15,7 @@ import java.util.Map;
 /**
  * 用户统计控制器
  * 提供用户相关的统计分析接口（管理员专用）
- * 
+ *
  * @author 王贝强
  */
 @RestController
@@ -24,12 +24,12 @@ import java.util.Map;
 @SaCheckRole("admin")
 public class UserStatisticsController {
 
-    @Autowired
+    @Resource
     private UserStatisticsService userStatisticsService;
 
     /**
      * 获取用户总数统计
-     * 
+     *
      * @return 用户总数统计
      */
     @GetMapping("/count")
@@ -40,7 +40,7 @@ public class UserStatisticsController {
 
     /**
      * 获取用户注册趋势
-     * 
+     *
      * @param days 统计天数
      * @return 注册趋势数据
      */
@@ -53,7 +53,7 @@ public class UserStatisticsController {
 
     /**
      * 获取用户活跃度统计
-     * 
+     *
      * @param days 统计天数
      * @return 活跃度统计
      */
@@ -66,7 +66,7 @@ public class UserStatisticsController {
 
     /**
      * 获取用户角色分布
-     * 
+     *
      * @return 角色分布统计
      */
     @GetMapping("/role-distribution")
@@ -77,7 +77,7 @@ public class UserStatisticsController {
 
     /**
      * 获取用户地理分布
-     * 
+     *
      * @return 地理分布统计
      */
     @GetMapping("/geographic-distribution")
@@ -88,7 +88,7 @@ public class UserStatisticsController {
 
     /**
      * 获取用户登录统计
-     * 
+     *
      * @param days 统计天数
      * @return 登录统计
      */
@@ -101,7 +101,7 @@ public class UserStatisticsController {
 
     /**
      * 获取用户留存率
-     * 
+     *
      * @param days 统计天数
      * @return 留存率统计
      */
@@ -114,7 +114,7 @@ public class UserStatisticsController {
 
     /**
      * 获取用户增长率
-     * 
+     *
      * @param days 统计天数
      * @return 增长率统计
      */
@@ -127,9 +127,9 @@ public class UserStatisticsController {
 
     /**
      * 获取用户行为统计
-     * 
+     *
      * @param userId 用户ID
-     * @param days 统计天数
+     * @param days   统计天数
      * @return 行为统计
      */
     @GetMapping("/behavior/{userId}")
@@ -142,7 +142,7 @@ public class UserStatisticsController {
 
     /**
      * 获取用户设备统计
-     * 
+     *
      * @param days 统计天数
      * @return 设备统计
      */
@@ -155,7 +155,7 @@ public class UserStatisticsController {
 
     /**
      * 获取用户统计仪表板数据
-     * 
+     *
      * @return 仪表板数据
      */
     @GetMapping("/dashboard")
@@ -163,14 +163,14 @@ public class UserStatisticsController {
     public Result<Map<String, Object>> getUserStatsDashboard() {
         try {
             Map<String, Object> dashboard = new java.util.HashMap<>();
-            
+
             // 获取各项统计数据
             Result<Map<String, Object>> countStats = userStatisticsService.getUserCountStats();
             Result<Map<String, Object>> registrationTrend = userStatisticsService.getRegistrationTrend(30);
             Result<Map<String, Object>> activityStats = userStatisticsService.getUserActivityStats(30);
             Result<Map<String, Object>> roleDistribution = userStatisticsService.getUserRoleDistribution();
             Result<Map<String, Object>> growthRate = userStatisticsService.getUserGrowthRate(30);
-            
+
             // 组装仪表板数据
             if (countStats.getCode() == ResultEnum.SUCCESS.getCode()) {
                 dashboard.put("count_stats", countStats.getData());
@@ -187,9 +187,9 @@ public class UserStatisticsController {
             if (growthRate.getCode() == ResultEnum.SUCCESS.getCode()) {
                 dashboard.put("growth_rate", growthRate.getData());
             }
-            
+
             dashboard.put("last_updated", System.currentTimeMillis());
-            
+
             return Result.success(dashboard);
         } catch (Exception e) {
             return Result.error(ResultEnum.SYSTEM_ERROR, null);

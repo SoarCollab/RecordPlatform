@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.flying.identity.mapper.UserSessionMapper">
+
+    <resultMap id="UserSessionResultMap" type="cn.flying.identity.dto.UserSession">
+        <id column="id" property="id" jdbcType="VARCHAR"/>
+        <result column="user_id" property="userId" jdbcType="BIGINT"/>
+        <result column="login_type" property="loginType" jdbcType="VARCHAR"/>
+        <result column="device_id" property="deviceId" jdbcType="VARCHAR"/>
+        <result column="login_ip" property="loginIp" jdbcType="VARCHAR"/>
+        <result column="login_time" property="loginTime" jdbcType="TIMESTAMP"/>
+        <result column="last_active_time" property="lastActiveTime" jdbcType="TIMESTAMP"/>
+        <result column="expire_time" property="expireTime" jdbcType="TIMESTAMP"/>
+        <result column="status" property="status" jdbcType="VARCHAR"/>
+        <result column="user_agent" property="userAgent" jdbcType="VARCHAR"/>
+        <result column="extra_info" property="extraInfo" jdbcType="VARCHAR"/>
+    </resultMap>
+
+    <!-- 根据用户ID查找活跃的会话列表 -->
+    <select id="findActiveSessionsByUserId" resultMap="UserSessionResultMap">
+        SELECT id, user_id, login_type, device_id, login_ip, login_time, 
+               last_active_time, expire_time, status, user_agent, extra_info
+        FROM user_session
+        WHERE user_id = #{userId}
+          AND status = 'active'
+          AND (expire_time IS NULL OR expire_time > NOW())
+        ORDER BY last_active_time DESC
+    </select>
+
+    <!-- 根据会话ID和用户ID查找会话 -->
+    <select id="findBySessionIdAndUserId" resultMap="UserSessionResultMap">
+        SELECT id, user_id, login_type, device_id, login_ip, login_time, 
+               last_active_time, expire_time, status, user_agent, extra_info
+        FROM user_session
+        WHERE id = #{sessionId}
+          AND user_id = #{userId}
+    </select>
+
+    <!-- 根据用户ID和设备ID查找会话 -->
+    <select id="findByUserIdAndDeviceId" resultMap="UserSessionResultMap">
+        SELECT id, user_id, login_type, device_id, login_ip, login_time, 
+               last_active_time, expire_time, status, user_agent, extra_info
+        FROM user_session
+        WHERE user_id = #{userId}
+          AND device_id = #{deviceId}
+          AND status = 'active'
+          AND (expire_time IS NULL OR expire_time > NOW())
+        ORDER BY last_active_time DESC
+        LIMIT 1
+    </select>
+
+    <!-- 更新会话状态 -->
+    <update id="updateSessionStatus">
+        UPDATE user_session
+        SET status = #{status},
+            last_active_time = NOW()
+        WHERE id = #{sessionId}
+    </update>
+
+    <!-- 更新会话的最后活跃时间 -->
+    <update id="updateLastActiveTime">
+        UPDATE user_session
+        SET last_active_time = #{lastActiveTime}
+        WHERE id = #{sessionId}
+    </update>
+
+    <!-- 批量过期指定用户的所有会话 -->
+    <update id="expireAllUserSessions">
+        UPDATE user_session
+        SET status = 'expired',
+            last_active_time = NOW()
+        WHERE user_id = #{userId}
+          AND status = 'active'
+    </update>
+
+    <!-- 清理过期的会话记录 -->
+    <delete id="cleanExpiredSessions">
+        DELETE FROM user_session
+        WHERE expire_time &lt; #{beforeTime}
+           OR (status IN ('expired', 'revoked') AND last_active_time &lt; #{beforeTime})
+    </delete>
+
+    <!-- 根据时间范围统计用户会话数量 -->
+    <select id="countSessionsByTimeRange" resultType="java.util.Map">
+        SELECT 
+            DATE(login_time) as date,
+            COUNT(*) as count,
+            COUNT(DISTINCT user_id) as unique_users
+        FROM user_session
+        WHERE login_time BETWEEN #{startTime} AND #{endTime}
+        GROUP BY DATE(login_time)
+        ORDER BY date DESC
+    </select>
+
+    <!-- 根据登录类型统计会话数量 -->
+    <select id="countSessionsByLoginType" resultType="java.util.Map">
+        SELECT 
+            login_type,
+            COUNT(*) as count,
+            COUNT(DISTINCT user_id) as unique_users
+        FROM user_session
+        WHERE login_time BETWEEN #{startTime} AND #{endTime}
+        GROUP BY login_type
+        ORDER BY count DESC
+    </select>
+
+</mapper>

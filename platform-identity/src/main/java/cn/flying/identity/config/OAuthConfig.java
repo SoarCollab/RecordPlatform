@@ -1,13 +1,14 @@
 package cn.flying.identity.config;
 
-import org.springframework.context.annotation.Configuration;
-import org.springframework.beans.factory.annotation.Value;
 import lombok.Getter;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Configuration;
 
 /**
  * OAuth2.0 配置类
- * 定义OAuth相关的配置参数
- * 
+ * 定义OAuth相关的配置参数，支持从配置文件动态读取
+ * 提供OAuth2.0协议实现所需的各种超时时间、开关配置等
+ *
  * @author flying
  * @date 2024
  */
@@ -17,24 +18,28 @@ public class OAuthConfig {
 
     /**
      * 授权码有效期（秒）
+     * 默认5分钟，符合OAuth2.0规范建议
      */
     @Value("${oauth.code.timeout:300}")
     private int codeTimeout;
 
     /**
      * 访问令牌有效期（秒）
+     * 默认1小时
      */
     @Value("${oauth.access-token.timeout:3600}")
     private int accessTokenTimeout;
 
     /**
      * 刷新令牌有效期（秒）
+     * 默认24小时
      */
     @Value("${oauth.refresh-token.timeout:86400}")
     private int refreshTokenTimeout;
 
     /**
      * 客户端令牌有效期（秒）
+     * 默认2小时
      */
     @Value("${oauth.client-token.timeout:7200}")
     private int clientTokenTimeout;
@@ -58,14 +63,39 @@ public class OAuthConfig {
     private boolean clientCredentialsEnabled;
 
     /**
-     * Redis键前缀配置
+     * 是否要求HTTPS重定向
      */
-    public static class RedisPrefix {
-        public static final String ACCESS_TOKEN = "oauth2:access_token:";
-        public static final String REFRESH_TOKEN = "oauth2:refresh_token:";
-        public static final String CLIENT_TOKEN = "oauth2:client_token:";
-        public static final String AUTH_CODE = "oauth2:code:";
-        public static final String USER_TOKEN = "oauth2:user_token:";
+    @Value("${oauth.security.require-https:false}")
+    private boolean requireHttps;
+
+    /**
+     * Redis键前缀
+     */
+    @Value("${oauth.redis.key-prefix:oauth2:}")
+    private String redisKeyPrefix;
+
+    /**
+     * 获取Redis键前缀配置
+     * 动态生成Redis键前缀，支持配置文件自定义
+     */
+    public String getAccessTokenPrefix() {
+        return redisKeyPrefix + "access_token:";
+    }
+
+    public String getRefreshTokenPrefix() {
+        return redisKeyPrefix + "refresh_token:";
+    }
+
+    public String getClientTokenPrefix() {
+        return redisKeyPrefix + "client_token:";
+    }
+
+    public String getAuthCodePrefix() {
+        return redisKeyPrefix + "code:";
+    }
+
+    public String getUserTokenPrefix() {
+        return redisKeyPrefix + "user_token:";
     }
 
     /**

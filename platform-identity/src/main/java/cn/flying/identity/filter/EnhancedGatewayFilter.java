@@ -10,12 +10,16 @@ import cn.flying.identity.util.IpUtils;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.hutool.json.JSONUtil;
-import jakarta.servlet.*;
+import jakarta.annotation.Resource;
+import jakarta.servlet.Filter;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.util.ContentCachingResponseWrapper;
@@ -27,7 +31,7 @@ import java.util.List;
 /**
  * 增强的网关过滤器
  * 集成流量监控、性能统计、安全验证等功能
- * 
+ *
  * @author 王贝强
  */
 @Slf4j
@@ -35,53 +39,57 @@ import java.util.List;
 @Order(1)
 public class EnhancedGatewayFilter implements Filter {
 
-    @Autowired
-    private GatewayMonitorService gatewayMonitorService;
-
     /**
      * 不需要鉴权的路径列表
      */
     private static final List<String> EXCLUDE_PATHS = Arrays.asList(
             "/api/auth/login",
-            "/api/auth/signin", 
+            "/api/auth/signin",
             "/api/auth/register",
             "/api/auth/signup",
             "/api/auth/verify-code",
             "/api/auth/reset-password",
             "/api/auth/status",
             "/api/auth/third-party",
-            "/oauth",
-            "/api/sso",
+            "/oauth/**",
+            "/api/sso/**",
             "/doc.html",
-            "/swagger-ui",
-            "/swagger-resources",
-            "/v3/api-docs",
-            "/webjars",
-            "/druid",
-            "/static",
+            "/swagger-ui/**",
+            "/swagger-resources/**",
+            "/v3/api-docs/**",
+            "/webjars/**",
+            "/druid/**",
+            "/static/**",
             "/favicon.ico",
-            "/actuator",
-            "/error"
+            "/actuator/**",
+            "/error",
+            "/docs/**"
     );
 
+    @Value("${server.servlet.context-path}")
+    String PREFIX;
+
+    @Resource
+    private GatewayMonitorService gatewayMonitorService;
+
     @Override
-    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) 
-            throws IOException, ServletException {
-        
+    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
+            throws IOException {
+
         HttpServletRequest httpRequest = (HttpServletRequest) request;
         HttpServletResponse httpResponse = (HttpServletResponse) response;
-        
+
         // 生成请求ID
         String requestId = IdUtils.nextIdWithPrefix("REQ");
         MDC.put("requestId", requestId);
-        
+
         String requestURI = httpRequest.getRequestURI();
         String method = httpRequest.getMethod();
         String clientIp = IpUtils.getClientIp(httpRequest);
         String userAgent = httpRequest.getHeader("User-Agent");
-        
+
         long startTime = System.currentTimeMillis();
-        
+
         try {
             // 获取用户ID（如果已登录）
             Long userId = null;
@@ -92,11 +100,11 @@ public class EnhancedGatewayFilter implements Filter {
             } catch (Exception e) {
                 // 忽略获取用户ID的异常
             }
-            
+
             // 记录请求开始
-            gatewayMonitorService.recordRequestStart(requestId, method, requestURI, 
-                                                    clientIp, userAgent, userId);
-            
+            gatewayMonitorService.recordRequestStart(requestId, method, requestURI,
+                    clientIp, userAgent, userId);
+
             // 检查流量限制
             Result<Boolean> rateLimitResult = gatewayMonitorService.checkRateLimit(clientIp, userId, requestURI);
             if (rateLimitResult.getCode() == ResultEnum.SUCCESS.getCode() && !rateLimitResult.getData()) {
@@ -104,41 +112,46 @@ public class EnhancedGatewayFilter implements Filter {
                 recordRequestEnd(requestId, 429, 0, System.currentTimeMillis() - startTime, "Rate limit exceeded");
                 return;
             }
-            
+
+            String url = requestURI;
+            if (requestURI.startsWith(PREFIX)) {
+                url = requestURI.substring(PREFIX.length());
+            }
+
             // 检查是否为排除路径
-            if (isExcludePath(requestURI)) {
+            if (isExcludePath(url)) {
                 log.debug("请求路径 {} 在排除列表中，跳过鉴权", requestURI);
-                
+
                 // 使用响应包装器以便记录响应信息
                 ContentCachingResponseWrapper responseWrapper = new ContentCachingResponseWrapper(httpResponse);
                 chain.doFilter(request, responseWrapper);
-                
+
                 // 记录请求结束
                 recordRequestEnd(requestId, responseWrapper.getStatus(),
-                               responseWrapper.getContentSize(),
-                               System.currentTimeMillis() - startTime, null);
-                
+                        responseWrapper.getContentSize(),
+                        System.currentTimeMillis() - startTime, null);
+
                 responseWrapper.copyBodyToResponse();
                 return;
             }
-            
+
             // 执行Token验证
             validateToken(httpRequest);
-            
+
             // 执行权限验证
             validatePermission(requestURI, method);
-            
+
             // 使用响应包装器以便记录响应信息
             ContentCachingResponseWrapper responseWrapper = new ContentCachingResponseWrapper(httpResponse);
             chain.doFilter(request, responseWrapper);
-            
+
             // 记录请求结束
             recordRequestEnd(requestId, responseWrapper.getStatus(),
-                           responseWrapper.getContentSize(),
-                           System.currentTimeMillis() - startTime, null);
-            
+                    responseWrapper.getContentSize(),
+                    System.currentTimeMillis() - startTime, null);
+
             responseWrapper.copyBodyToResponse();
-            
+
         } catch (NotLoginException e) {
             log.warn("用户未登录，请求路径: {}, IP: {}", requestURI, clientIp);
             writeErrorResponse(httpResponse, Result.error(ResultEnum.USER_NOT_LOGGED_IN, null));
@@ -162,10 +175,41 @@ public class EnhancedGatewayFilter implements Filter {
     }
 
     /**
+     * 写入错误响应
+     */
+    private void writeErrorResponse(HttpServletResponse response, Result<?> result) throws IOException {
+        response.setStatus(getHttpStatusFromResult(result));
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write(JSONUtil.toJsonStr(result));
+    }
+
+    /**
+     * 记录请求结束
+     */
+    private void recordRequestEnd(String requestId, int statusCode, long responseSize,
+                                  long executionTime, String errorMessage) {
+        try {
+            gatewayMonitorService.recordRequestEnd(requestId, statusCode, responseSize,
+                    executionTime, errorMessage);
+        } catch (Exception e) {
+            log.error("记录请求结束失败", e);
+        }
+    }
+
+    /**
      * 检查是否为排除路径
+     * 支持精确路径匹配和通配符前缀匹配（如"/doc/**"）
      */
     private boolean isExcludePath(String requestURI) {
-        return EXCLUDE_PATHS.stream().anyMatch(requestURI::startsWith);
+        return EXCLUDE_PATHS.stream().anyMatch(excludePath -> {
+            // 如果排除路径以"/**"结尾，则进行前缀匹配
+            if (excludePath.endsWith("/**")) {
+                String prefix = excludePath.substring(0, excludePath.length() - 3);
+                return requestURI.startsWith(prefix);
+            }
+            // 否则进行精确匹配
+            return requestURI.equals(excludePath);
+        });
     }
 
     /**
@@ -196,7 +240,7 @@ public class EnhancedGatewayFilter implements Filter {
     /**
      * 验证权限
      */
-    private void validatePermission(String requestURI, String method) 
+    private void validatePermission(String requestURI, String method)
             throws NotPermissionException, NotRoleException {
 
         // 管理员接口权限验证
@@ -241,15 +285,6 @@ public class EnhancedGatewayFilter implements Filter {
     }
 
     /**
-     * 写入错误响应
-     */
-    private void writeErrorResponse(HttpServletResponse response, Result<?> result) throws IOException {
-        response.setStatus(getHttpStatusFromResult(result));
-        response.setContentType("application/json;charset=UTF-8");
-        response.getWriter().write(JSONUtil.toJsonStr(result));
-    }
-
-    /**
      * 从Result获取HTTP状态码
      */
     private int getHttpStatusFromResult(Result<?> result) {
@@ -261,19 +296,6 @@ public class EnhancedGatewayFilter implements Filter {
             return 429;
         } else {
             return 500;
-        }
-    }
-
-    /**
-     * 记录请求结束
-     */
-    private void recordRequestEnd(String requestId, int statusCode, long responseSize, 
-                                 long executionTime, String errorMessage) {
-        try {
-            gatewayMonitorService.recordRequestEnd(requestId, statusCode, responseSize, 
-                                                  executionTime, errorMessage);
-        } catch (Exception e) {
-            log.error("记录请求结束失败", e);
         }
     }
 }

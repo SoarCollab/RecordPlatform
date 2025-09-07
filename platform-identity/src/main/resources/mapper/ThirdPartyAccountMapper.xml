@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.flying.identity.mapper.ThirdPartyAccountMapper">
+
+    <resultMap id="ThirdPartyAccountResultMap" type="cn.flying.identity.dto.ThirdPartyAccount">
+        <id column="id" property="id" jdbcType="BIGINT"/>
+        <result column="user_id" property="userId" jdbcType="BIGINT"/>
+        <result column="provider" property="provider" jdbcType="VARCHAR"/>
+        <result column="third_party_id" property="thirdPartyId" jdbcType="VARCHAR"/>
+        <result column="access_token" property="accessToken" jdbcType="VARCHAR"/>
+        <result column="refresh_token" property="refreshToken" jdbcType="VARCHAR"/>
+        <result column="expires_at" property="expiresAt" jdbcType="TIMESTAMP"/>
+        <result column="bind_time" property="bindTime" jdbcType="TIMESTAMP"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
+        <result column="deleted" property="deleted" jdbcType="INTEGER"/>
+    </resultMap>
+
+    <!-- 根据用户ID和第三方平台提供商查找绑定账号 -->
+    <select id="findByUserIdAndProvider" resultMap="ThirdPartyAccountResultMap">
+        SELECT id, user_id, provider, third_party_id, access_token, refresh_token, 
+               expires_at, bind_time, update_time, deleted
+        FROM third_party_account
+        WHERE user_id = #{userId}
+          AND provider = #{provider}
+          AND deleted = 0
+    </select>
+
+    <!-- 根据第三方平台提供商和第三方用户ID查找绑定账号 -->
+    <select id="findByProviderAndThirdPartyId" resultMap="ThirdPartyAccountResultMap">
+        SELECT id, user_id, provider, third_party_id, access_token, refresh_token, 
+               expires_at, bind_time, update_time, deleted
+        FROM third_party_account
+        WHERE provider = #{provider}
+          AND third_party_id = #{thirdPartyId}
+          AND deleted = 0
+    </select>
+
+    <!-- 根据用户ID获取所有绑定的第三方账号 -->
+    <select id="findByUserId" resultMap="ThirdPartyAccountResultMap">
+        SELECT id, user_id, provider, third_party_id, access_token, refresh_token, 
+               expires_at, bind_time, update_time, deleted
+        FROM third_party_account
+        WHERE user_id = #{userId}
+          AND deleted = 0
+        ORDER BY bind_time DESC
+    </select>
+
+    <!-- 删除用户的指定第三方平台绑定（逻辑删除） -->
+    <update id="deleteByUserIdAndProvider">
+        UPDATE third_party_account
+        SET deleted = 1,
+            update_time = NOW()
+        WHERE user_id = #{userId}
+          AND provider = #{provider}
+          AND deleted = 0
+    </update>
+
+    <!-- 更新第三方账号的访问令牌信息 -->
+    <update id="updateTokens">
+        UPDATE third_party_account
+        SET access_token = #{accessToken},
+            refresh_token = #{refreshToken},
+            expires_at = #{expiresAt},
+            update_time = NOW()
+        WHERE user_id = #{userId}
+          AND provider = #{provider}
+          AND deleted = 0
+    </update>
+
+</mapper>

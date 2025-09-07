@@ -7,7 +7,7 @@ import cn.flying.platformapi.constant.ResultEnum;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.annotation.Resource;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -15,7 +15,7 @@ import java.util.Map;
 /**
  * 网关监控控制器
  * 提供网关流量监控、性能统计等管理接口
- * 
+ *
  * @author 王贝强
  */
 @RestController
@@ -24,12 +24,12 @@ import java.util.Map;
 @SaCheckRole("admin")
 public class GatewayMonitorController {
 
-    @Autowired
+    @Resource
     private GatewayMonitorService gatewayMonitorService;
 
     /**
      * 获取实时流量统计
-     * 
+     *
      * @param timeRange 时间范围（分钟）
      * @return 流量统计数据
      */
@@ -42,9 +42,9 @@ public class GatewayMonitorController {
 
     /**
      * 获取API调用统计
-     * 
+     *
      * @param timeRange 时间范围（分钟）
-     * @param limit 返回条数限制
+     * @param limit     返回条数限制
      * @return API调用统计
      */
     @GetMapping("/api/stats")
@@ -57,7 +57,7 @@ public class GatewayMonitorController {
 
     /**
      * 获取错误统计
-     * 
+     *
      * @param timeRange 时间范围（分钟）
      * @return 错误统计数据
      */
@@ -70,7 +70,7 @@ public class GatewayMonitorController {
 
     /**
      * 获取性能统计
-     * 
+     *
      * @param timeRange 时间范围（分钟）
      * @return 性能统计数据
      */
@@ -83,7 +83,7 @@ public class GatewayMonitorController {
 
     /**
      * 获取用户活跃度统计
-     * 
+     *
      * @param timeRange 时间范围（分钟）
      * @return 用户活跃度统计
      */
@@ -96,9 +96,9 @@ public class GatewayMonitorController {
 
     /**
      * 检测异常流量
-     * 
+     *
      * @param clientIp 客户端IP
-     * @param userId 用户ID（可选）
+     * @param userId   用户ID（可选）
      * @return 异常检测结果
      */
     @GetMapping("/traffic/anomaly")
@@ -111,7 +111,7 @@ public class GatewayMonitorController {
 
     /**
      * 获取系统健康状态
-     * 
+     *
      * @return 系统健康状态
      */
     @GetMapping("/health")
@@ -122,9 +122,9 @@ public class GatewayMonitorController {
 
     /**
      * 获取热点API排行
-     * 
+     *
      * @param timeRange 时间范围（分钟）
-     * @param limit 返回条数限制
+     * @param limit     返回条数限制
      * @return 热点API排行
      */
     @GetMapping("/api/hot")
@@ -137,7 +137,7 @@ public class GatewayMonitorController {
 
     /**
      * 获取慢查询统计
-     * 
+     *
      * @param timeRange 时间范围（分钟）
      * @param threshold 慢查询阈值（毫秒）
      * @return 慢查询统计
@@ -152,7 +152,7 @@ public class GatewayMonitorController {
 
     /**
      * 获取地理位置统计
-     * 
+     *
      * @param timeRange 时间范围（分钟）
      * @return 地理位置统计
      */
@@ -165,7 +165,7 @@ public class GatewayMonitorController {
 
     /**
      * 清理过期的监控数据
-     * 
+     *
      * @param retentionDays 保留天数
      * @return 清理结果
      */
@@ -178,7 +178,7 @@ public class GatewayMonitorController {
 
     /**
      * 获取综合监控仪表板数据
-     * 
+     *
      * @param timeRange 时间范围（分钟）
      * @return 仪表板数据
      */
@@ -186,10 +186,10 @@ public class GatewayMonitorController {
     @Operation(summary = "获取监控仪表板数据", description = "获取网关监控仪表板的综合数据")
     public Result<Map<String, Object>> getDashboardData(
             @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange) {
-        
+
         try {
             Map<String, Object> dashboard = new java.util.HashMap<>();
-            
+
             // 获取各项统计数据
             Result<Map<String, Object>> trafficStats = gatewayMonitorService.getRealTimeTrafficStats(timeRange);
             Result<Map<String, Object>> apiStats = gatewayMonitorService.getApiCallStats(timeRange, 10);
@@ -197,7 +197,7 @@ public class GatewayMonitorController {
             Result<Map<String, Object>> performanceStats = gatewayMonitorService.getPerformanceStats(timeRange);
             Result<Map<String, Object>> userStats = gatewayMonitorService.getUserActivityStats(timeRange);
             Result<Map<String, Object>> healthStats = gatewayMonitorService.getSystemHealth();
-            
+
             // 组装仪表板数据
             if (trafficStats.getCode() == ResultEnum.SUCCESS.getCode()) {
                 dashboard.put("traffic", trafficStats.getData());
@@ -217,10 +217,10 @@ public class GatewayMonitorController {
             if (healthStats.getCode() == ResultEnum.SUCCESS.getCode()) {
                 dashboard.put("system_health", healthStats.getData());
             }
-            
+
             dashboard.put("time_range", timeRange);
             dashboard.put("last_updated", System.currentTimeMillis());
-            
+
             return Result.success(dashboard);
         } catch (Exception e) {
             return Result.error(ResultEnum.SYSTEM_ERROR, null);

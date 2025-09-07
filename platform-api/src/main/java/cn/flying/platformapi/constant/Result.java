@@ -28,7 +28,11 @@ public class Result<T> implements Serializable {
     // 提示信息
     private String message;
 
-    //交易返回值
+    /**
+     * 交易返回值
+     * 用于区块链交易场景，存储交易哈希值
+     */
+    @JsonProperty("transactionHash")
     private String transactionHash;
 
     // 结果数据

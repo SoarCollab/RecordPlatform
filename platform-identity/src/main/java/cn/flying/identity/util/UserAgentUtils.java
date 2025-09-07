@@ -215,4 +215,55 @@ public class UserAgentUtils {
         
         return String.format("%s on %s (%s)", browser, os, deviceType);
     }
+
+    /**
+     * 生成设备指纹
+     * 
+     * @param userAgent User-Agent字符串
+     * @return 设备指纹
+     */
+    public static String generateDeviceFingerprint(String userAgent) {
+        if (StrUtil.isBlank(userAgent)) {
+            return UNKNOWN;
+        }
+
+        // 简单的设备指纹生成，基于User-Agent的hash值
+        // 在实际应用中，可以结合更多的浏览器特征信息
+        String browser = getBrowserFromUserAgent(userAgent);
+        String os = getOperatingSystemFromUserAgent(userAgent);
+        String deviceType = getDeviceTypeFromUserAgent(userAgent);
+        
+        String fingerprint = String.format("%s|%s|%s", browser, os, deviceType);
+        return String.valueOf(fingerprint.hashCode());
+    }
+
+    /**
+     * 判断是否为机器人User-Agent
+     * 
+     * @param userAgent User-Agent字符串
+     * @return 是否为机器人
+     */
+    public static boolean isBotUserAgent(String userAgent) {
+        if (StrUtil.isBlank(userAgent)) {
+            return false;
+        }
+
+        userAgent = userAgent.toLowerCase();
+        
+        String[] botKeywords = {
+            "bot", "crawler", "spider", "scraper", "slurp", "wget", "curl",
+            "googlebot", "bingbot", "yahoobot", "facebookexternalhit",
+            "twitterbot", "linkedinbot", "whatsapp", "telegrambot",
+            "postman", "insomnia", "httpie", "python-requests",
+            "java/", "okhttp", "apache-httpclient", "python-urllib"
+        };
+
+        for (String keyword : botKeywords) {
+            if (userAgent.contains(keyword)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

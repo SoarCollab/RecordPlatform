@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class FlowUtils {
 
-    @Resource
+    @Resource(name = "stringRedisTemplate")
     private StringRedisTemplate stringRedisTemplate;
 
     /**
@@ -80,20 +80,22 @@ public class FlowUtils {
      */
     public boolean limitCountCheck(String key, int maxCount, int timeWindow) {
         try {
-            // 获取当前计数
-            String countStr = stringRedisTemplate.opsForValue().get(key);
-            int currentCount = countStr != null ? Integer.parseInt(countStr) : 0;
-
-            if (currentCount >= maxCount) {
-                return false; // 超过最大计数，被限流
+            // 使用原子递增操作
+            Long currentCount = stringRedisTemplate.opsForValue().increment(key);
+            
+            if (currentCount == null) {
+                log.warn("Redis increment 操作返回 null，键: {}", key);
+                return false;
             }
-
-            // 增加计数
-            Long newCount = stringRedisTemplate.opsForValue().increment(key);
-
+            
             // 如果是第一次计数，设置过期时间
-            if (newCount != null && newCount == 1) {
+            if (currentCount == 1) {
                 stringRedisTemplate.expire(key, timeWindow, TimeUnit.SECONDS);
+            }
+            
+            // 检查是否超过最大计数
+            if (currentCount > maxCount) {
+                return false; // 超过最大计数，被限流
             }
 
             return true; // 通过限流检查
@@ -161,6 +163,7 @@ public class FlowUtils {
 
     /**
      * 针对于在时间段内多次请求限制，如3秒内限制请求20次
+     * 修复逻辑：简化实现，使用原子操作确保一致性
      *
      * @param counterKey 计数键
      * @param frequency  请求频率
@@ -169,26 +172,21 @@ public class FlowUtils {
      */
     public boolean limitPeriodCountCheck(String counterKey, int frequency, int period) {
         try {
-            // 获取当前计数
-            String countStr = stringRedisTemplate.opsForValue().get(counterKey);
-
-            if (countStr != null) {
-                // 增加计数
-                Long newCount = stringRedisTemplate.opsForValue().increment(counterKey);
-
-                // 如果计数不连续，重新设置过期时间
-                int currentCount = Integer.parseInt(countStr);
-                if (newCount != null && newCount != currentCount + 1) {
-                    stringRedisTemplate.expire(counterKey, period, TimeUnit.SECONDS);
-                }
-
-                // 检查是否超过频率限制
-                return newCount == null || newCount <= frequency;
-            } else {
-                // 第一次请求，设置计数为1并设置过期时间
-                stringRedisTemplate.opsForValue().set(counterKey, "1", period, TimeUnit.SECONDS);
-                return true; // 通过限流检查
+            // 使用原子递增操作
+            Long currentCount = stringRedisTemplate.opsForValue().increment(counterKey);
+            
+            if (currentCount == null) {
+                log.warn("Redis increment 操作返回 null，键: {}", counterKey);
+                return false;
             }
+            
+            // 如果是第一次计数，设置过期时间
+            if (currentCount == 1) {
+                stringRedisTemplate.expire(counterKey, period, TimeUnit.SECONDS);
+            }
+            
+            // 检查是否超过频率限制
+            return currentCount <= frequency;
         } catch (Exception e) {
             log.error("周期限流检查异常，键: {}", counterKey, e);
             // 异常情况下允许通过，避免影响正常业务

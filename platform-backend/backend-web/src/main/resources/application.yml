@@ -95,4 +95,4 @@ management:
     web:
       exposure:
         include: '*'
-    enabled-by-default: on
+    enabled-by-default: true

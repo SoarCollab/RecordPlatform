@@ -196,6 +196,6 @@ public Result<String> login(String username, String password) {
 - 相关的日志信息
 
 联系方式：
-- **技术文档**: [API变更文档](./API_CHANGES.md)
-- **配置文档**: [配置说明](./CONFIGURATION.md)
+- **技术文档**: [API变更文档](API_CHANGES.md)
+- **配置文档**: [配置说明](CONFIGURATION.md)
 - **问题反馈**: 请通过系统日志或技术支持渠道反馈

@@ -5,69 +5,71 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
 
+import java.io.Serial;
 import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
- * 操作审计日志实体类
- * 用于记录用户的操作行为和系统事件
- * 
- * @author flying
- * @date 2024
+ * 操作日志实体类
+ * 整合了原 AuditLog 的功能，用于记录用户的操作行为和系统事件
+ * 支持风险评估、地理位置、设备信息等高级功能
+ *
+ * @author 王贝强
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
 @Accessors(chain = true)
-@TableName("audit_log")
-public class AuditLog implements Serializable {
+@TableName("operation_log")
+public class OperationLog implements Serializable {
 
+    @Serial
     private static final long serialVersionUID = 1L;
 
     /**
      * 主键ID
      */
-    @TableId(value = "id", type = IdType.ASSIGN_ID)
-    private String id;
+    @TableId(type = IdType.ASSIGN_ID)
+    private Long id;
 
     /**
-     * 操作用户ID
+     * 用户ID
      */
     @TableField("user_id")
     private Long userId;
 
     /**
-     * 操作用户名
+     * 用户名
      */
     @TableField("username")
     private String username;
 
     /**
+     * 用户角色
+     */
+    @TableField("user_role")
+    private String userRole;
+
+    /**
+     * 操作模块
+     * USER-用户管理, ROLE-角色管理, PERMISSION-权限管理, OAUTH-OAuth管理,
+     * RECORD-存证管理, FILE-文件管理, SYSTEM-系统管理, AUTH-认证管理
+     */
+    @TableField("module")
+    private String module;
+
+    /**
      * 操作类型
-     * LOGIN-登录, LOGOUT-登出, CREATE-创建, UPDATE-更新, DELETE-删除, 
+     * LOGIN-登录, LOGOUT-登出, CREATE-创建, UPDATE-更新, DELETE-删除,
      * VIEW-查看, EXPORT-导出, IMPORT-导入, UPLOAD-上传, DOWNLOAD-下载
      */
     @TableField("operation_type")
     private String operationType;
 
     /**
-     * 操作模块
-     * USER-用户管理, ROLE-角色管理, PERMISSION-权限管理, OAUTH-OAuth管理,
-     * RECORD-存证管理, FILE-文件管理, SYSTEM-系统管理
-     */
-    @TableField("module")
-    private String module;
-
-    /**
      * 操作描述
      */
-    @TableField("operation_desc")
-    private String operationDesc;
-
-    /**
-     * 请求方法
-     */
-    @TableField("request_method")
-    private String requestMethod;
+    @TableField("description")
+    private String description;
 
     /**
      * 请求URL
@@ -76,10 +78,16 @@ public class AuditLog implements Serializable {
     private String requestUrl;
 
     /**
+     * 请求方法
+     */
+    @TableField("request_method")
+    private String requestMethod;
+
+    /**
      * 请求参数
      */
-    @TableField("request_params")
-    private String requestParams;
+    @TableField("request_param")
+    private String requestParam;
 
     /**
      * 响应结果
@@ -88,38 +96,7 @@ public class AuditLog implements Serializable {
     private String responseResult;
 
     /**
-     * 操作状态
-     * 0-失败, 1-成功
-     */
-    @TableField("operation_status")
-    private Integer operationStatus;
-
-    /**
-     * 设置操作是否成功
-     * 
-     * @param success 是否成功
-     */
-    public void setIsSuccess(boolean success) {
-        this.operationStatus = success ? 1 : 0;
-    }
-
-    /**
-     * 获取操作是否成功
-     * 
-     * @return 是否成功
-     */
-    public boolean getIsSuccess() {
-        return this.operationStatus != null && this.operationStatus == 1;
-    }
-
-    /**
-     * 错误信息
-     */
-    @TableField("error_message")
-    private String errorMessage;
-
-    /**
-     * 客户端IP地址
+     * 客户端IP
      */
     @TableField("client_ip")
     private String clientIp;
@@ -131,10 +108,41 @@ public class AuditLog implements Serializable {
     private String userAgent;
 
     /**
-     * 操作耗时（毫秒）
+     * 类名
+     */
+    @TableField("class_name")
+    private String className;
+
+    /**
+     * 方法名
+     */
+    @TableField("method_name")
+    private String methodName;
+
+    /**
+     * 操作状态（0-失败，1-成功）
+     */
+    @TableField("status")
+    private Integer status;
+
+    /**
+     * 错误信息
+     */
+    @TableField("error_msg")
+    private String errorMsg;
+
+    /**
+     * 执行时间（毫秒）
      */
     @TableField("execution_time")
     private Long executionTime;
+
+    /**
+     * 风险等级
+     * LOW-低风险, MEDIUM-中风险, HIGH-高风险, CRITICAL-严重风险
+     */
+    @TableField("risk_level")
+    private String riskLevel;
 
     /**
      * 会话ID
@@ -161,13 +169,6 @@ public class AuditLog implements Serializable {
     private String businessType;
 
     /**
-     * 风险等级
-     * LOW-低风险, MEDIUM-中风险, HIGH-高风险, CRITICAL-严重风险
-     */
-    @TableField("risk_level")
-    private String riskLevel;
-
-    /**
      * 地理位置
      */
     @TableField("location")
@@ -178,6 +179,12 @@ public class AuditLog implements Serializable {
      */
     @TableField("device_info")
     private String deviceInfo;
+
+    /**
+     * 是否为敏感操作
+     */
+    @TableField("sensitive")
+    private Boolean sensitive;
 
     /**
      * 操作时间
@@ -196,6 +203,24 @@ public class AuditLog implements Serializable {
      */
     @TableField(value = "update_time", fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updateTime;
+
+    /**
+     * 获取操作是否成功
+     *
+     * @return 是否成功
+     */
+    public boolean getIsSuccess() {
+        return this.status != null && this.status == 1;
+    }
+
+    /**
+     * 设置操作是否成功
+     *
+     * @param success 是否成功
+     */
+    public void setIsSuccess(boolean success) {
+        this.status = success ? 1 : 0;
+    }
 
     /**
      * 操作类型枚举

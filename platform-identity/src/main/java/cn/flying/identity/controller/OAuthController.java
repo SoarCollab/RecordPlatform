@@ -1,6 +1,5 @@
 package cn.flying.identity.controller;
 
-import cn.dev33.satoken.oauth2.SaOAuth2Manager;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.flying.identity.dto.OAuthClient;
 import cn.flying.identity.service.OAuthService;
@@ -9,10 +8,10 @@ import cn.flying.platformapi.constant.ResultEnum;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * OAuth2.0控制器
@@ -27,30 +26,13 @@ public class OAuthController {
     private OAuthService oauthService;
 
     /**
-     * 获取授权页面信息
-     * @param clientId 客户端ID
-     * @param redirectUri 重定向URI
-     * @param scope 授权范围
-     * @param state 状态参数
-     * @return 授权页面信息
-     */
-    @GetMapping("/authorize")
-    @Operation(summary = "获取授权页面信息")
-    public Result<Map<String, Object>> authorize(
-            @RequestParam("client_id") String clientId,
-            @RequestParam("redirect_uri") String redirectUri,
-            @RequestParam(value = "scope", defaultValue = "read") String scope,
-            @RequestParam(value = "state", required = false) String state) {
-        return oauthService.getAuthorizeInfo(clientId, redirectUri, scope, state);
-    }
-
-    /**
      * 用户授权确认
-     * @param clientId 客户端ID
+     *
+     * @param clientId    客户端ID
      * @param redirectUri 重定向URI
-     * @param scope 授权范围
-     * @param state 状态参数
-     * @param approved 是否同意授权
+     * @param scope       授权范围
+     * @param state       状态参数
+     * @param approved    是否同意授权
      * @return 授权结果
      */
     @PostMapping("/authorize")
@@ -66,13 +48,14 @@ public class OAuthController {
 
     /**
      * 获取访问令牌
-     * @param grantType 授权类型
-     * @param code 授权码
-     * @param redirectUri 重定向URI
-     * @param clientId 客户端ID
+     *
+     * @param grantType    授权类型
+     * @param code         授权码
+     * @param redirectUri  重定向URI
+     * @param clientId     客户端ID
      * @param clientSecret 客户端密钥
      * @param refreshToken 刷新令牌
-     * @param scope 授权范围
+     * @param scope        授权范围
      * @return 访问令牌信息
      */
     @PostMapping("/token")
@@ -85,21 +68,20 @@ public class OAuthController {
             @RequestParam("client_secret") String clientSecret,
             @RequestParam(value = "refresh_token", required = false) String refreshToken,
             @RequestParam(value = "scope", required = false) String scope) {
-        
-        switch (grantType) {
-            case "authorization_code":
-                return oauthService.getAccessToken(grantType, code, redirectUri, clientId, clientSecret);
-            case "refresh_token":
-                return oauthService.refreshAccessToken(grantType, refreshToken, clientId, clientSecret);
-            case "client_credentials":
-                return oauthService.getClientCredentialsToken(grantType, scope, clientId, clientSecret);
-            default:
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
-        }
+
+        return switch (grantType) {
+            case "authorization_code" ->
+                    oauthService.getAccessToken(grantType, code, redirectUri, clientId, clientSecret);
+            case "refresh_token" -> oauthService.refreshAccessToken(grantType, refreshToken, clientId, clientSecret);
+            case "client_credentials" ->
+                    oauthService.getClientCredentialsToken(grantType, scope, clientId, clientSecret);
+            default -> Result.error(ResultEnum.PARAM_IS_INVALID, null);
+        };
     }
 
     /**
      * 获取用户信息
+     *
      * @param authorization 授权头
      * @return 用户信息
      */
@@ -112,10 +94,11 @@ public class OAuthController {
 
     /**
      * 撤销令牌
-     * @param token 令牌
+     *
+     * @param token         令牌
      * @param tokenTypeHint 令牌类型提示
-     * @param clientId 客户端ID
-     * @param clientSecret 客户端密钥
+     * @param clientId      客户端ID
+     * @param clientSecret  客户端密钥
      * @return 撤销结果
      */
     @PostMapping("/revoke")
@@ -130,6 +113,7 @@ public class OAuthController {
 
     /**
      * 注册OAuth客户端
+     *
      * @param client 客户端信息
      * @return 注册结果
      */
@@ -141,6 +125,7 @@ public class OAuthController {
 
     /**
      * 更新OAuth客户端
+     *
      * @param client 客户端信息
      * @return 更新结果
      */
@@ -152,6 +137,7 @@ public class OAuthController {
 
     /**
      * 删除OAuth客户端
+     *
      * @param clientId 客户端ID
      * @return 删除结果
      */
@@ -163,6 +149,7 @@ public class OAuthController {
 
     /**
      * 获取客户端信息
+     *
      * @param clientId 客户端ID
      * @return 客户端信息
      */
@@ -174,10 +161,11 @@ public class OAuthController {
 
     /**
      * SSO单点登录页面
-     * @param clientId 客户端ID
+     *
+     * @param clientId    客户端ID
      * @param redirectUri 重定向URI
-     * @param scope 授权范围
-     * @param state 状态参数
+     * @param scope       授权范围
+     * @param state       状态参数
      * @return 登录页面或授权页面
      */
     @GetMapping("/sso/login")
@@ -187,7 +175,7 @@ public class OAuthController {
             @RequestParam("redirect_uri") String redirectUri,
             @RequestParam(value = "scope", defaultValue = "read") String scope,
             @RequestParam(value = "state", required = false) String state) {
-        
+
         // 检查用户是否已登录
         if (StpUtil.isLogin()) {
             // 已登录，直接跳转到授权页面
@@ -199,7 +187,27 @@ public class OAuthController {
     }
 
     /**
+     * 获取授权页面信息
+     *
+     * @param clientId    客户端ID
+     * @param redirectUri 重定向URI
+     * @param scope       授权范围
+     * @param state       状态参数
+     * @return 授权页面信息
+     */
+    @GetMapping("/authorize")
+    @Operation(summary = "获取授权页面信息")
+    public Result<Map<String, Object>> authorize(
+            @RequestParam("client_id") String clientId,
+            @RequestParam("redirect_uri") String redirectUri,
+            @RequestParam(value = "scope", defaultValue = "read") String scope,
+            @RequestParam(value = "state", required = false) String state) {
+        return oauthService.getAuthorizeInfo(clientId, redirectUri, scope, state);
+    }
+
+    /**
      * SSO单点注销
+     *
      * @param redirectUri 注销后重定向URI
      * @return 注销结果
      */
@@ -209,11 +217,7 @@ public class OAuthController {
         if (StpUtil.isLogin()) {
             StpUtil.logout();
         }
-        
-        if (redirectUri != null) {
-            return Result.success(redirectUri);
-        } else {
-            return Result.success("注销成功");
-        }
+
+        return Result.success(Objects.requireNonNullElse(redirectUri, "注销成功"));
     }
 }

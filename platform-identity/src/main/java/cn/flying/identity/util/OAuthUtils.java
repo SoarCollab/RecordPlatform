@@ -11,7 +11,9 @@ import java.util.regex.Pattern;
 
 /**
  * OAuth2.0 工具类
- * 提供OAuth相关的通用工具方法
+ * 提供OAuth2.0协议实现所需的各种工具方法
+ * 包括令牌生成、URI验证、范围检查、响应构建等功能
+ * 遵循RFC 6749 OAuth2.0规范标准
  *
  * @author flying
  * @date 2024
@@ -71,13 +73,24 @@ public class OAuthUtils {
      * @return 是否合法
      */
     public static boolean validateRedirectUri(String redirectUri, String registeredUris) {
-        if (!StringUtils.hasText(redirectUri) || !StringUtils.hasText(registeredUris)) {
+        return validateGrantType(redirectUri, registeredUris);
+    }
+
+    /**
+     * 验证授权类型是否合法
+     *
+     * @param grantType      授权类型
+     * @param supportedTypes 支持的授权类型
+     * @return 是否合法
+     */
+    public static boolean validateGrantType(String grantType, String supportedTypes) {
+        if (!StringUtils.hasText(grantType) || !StringUtils.hasText(supportedTypes)) {
             return false;
         }
 
-        String[] uris = registeredUris.split(",");
-        for (String uri : uris) {
-            if (redirectUri.trim().equals(uri.trim())) {
+        String[] types = supportedTypes.split(",");
+        for (String type : types) {
+            if (grantType.trim().equals(type.trim())) {
                 return true;
             }
         }
@@ -109,27 +122,6 @@ public class OAuthUtils {
             }
         }
         return true;
-    }
-
-    /**
-     * 验证授权类型是否合法
-     *
-     * @param grantType      授权类型
-     * @param supportedTypes 支持的授权类型
-     * @return 是否合法
-     */
-    public static boolean validateGrantType(String grantType, String supportedTypes) {
-        if (!StringUtils.hasText(grantType) || !StringUtils.hasText(supportedTypes)) {
-            return false;
-        }
-
-        String[] types = supportedTypes.split(",");
-        for (String type : types) {
-            if (grantType.trim().equals(type.trim())) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**
@@ -245,16 +237,6 @@ public class OAuthUtils {
     }
 
     /**
-     * 生成客户端密钥哈希
-     *
-     * @param clientSecret 客户端密钥
-     * @return 哈希值
-     */
-    public static String hashClientSecret(String clientSecret) {
-        return DigestUtil.sha256Hex(clientSecret);
-    }
-
-    /**
      * 验证客户端密钥
      *
      * @param clientSecret 客户端密钥
@@ -263,6 +245,16 @@ public class OAuthUtils {
      */
     public static boolean verifyClientSecret(String clientSecret, String hashedSecret) {
         return hashClientSecret(clientSecret).equals(hashedSecret);
+    }
+
+    /**
+     * 生成客户端密钥哈希
+     *
+     * @param clientSecret 客户端密钥
+     * @return 哈希值
+     */
+    public static String hashClientSecret(String clientSecret) {
+        return DigestUtil.sha256Hex(clientSecret);
     }
 
     /**

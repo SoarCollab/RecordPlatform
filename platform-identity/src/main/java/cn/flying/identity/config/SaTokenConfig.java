@@ -6,7 +6,7 @@ import cn.dev33.satoken.router.SaRouter;
 import cn.dev33.satoken.stp.StpLogic;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.flying.identity.interceptor.SaTokenAuthInterceptor;
-import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.annotation.Resource;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -19,7 +19,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 public class SaTokenConfig implements WebMvcConfigurer {
 
-    @Autowired
+    @Resource
     private SaTokenAuthInterceptor saTokenAuthInterceptor;
 
     // Sa-Token 整合 jwt (Stateless 无状态模式)
@@ -31,6 +31,7 @@ public class SaTokenConfig implements WebMvcConfigurer {
     /**
      * 注册Sa-Token拦截器
      * 配置哪些路径需要进行权限验证
+     *
      * @param registry 拦截器注册器
      */
     @Override
@@ -60,6 +61,8 @@ public class SaTokenConfig implements WebMvcConfigurer {
                     // 排除静态资源
                     .notMatch("/static/**")
                     .notMatch("/favicon.ico")
+                    // 排除文档路径
+                    .notMatch("/docs/**")
                     // 排除健康检查
                     .notMatch("/actuator/**")
                     // 执行认证函数

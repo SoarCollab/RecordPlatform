@@ -181,5 +181,5 @@ platform:
 
 如有问题，请联系开发团队或查看详细文档：
 - **API文档**: http://localhost:8888/identity/doc.html
-- **配置文档**: [配置说明](./CONFIGURATION.md)
-- **故障排除**: [故障排除指南](./TROUBLESHOOTING.md)
+- **配置文档**: [配置说明](docs/CONFIGURATION.mdON.md)
+- **故障排除**: [故障排除指南](docs/TROUBLESHOOTING.mdNG.md)

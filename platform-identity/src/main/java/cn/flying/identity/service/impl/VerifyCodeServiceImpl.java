@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class VerifyCodeServiceImpl implements VerifyCodeService {
 
-    @Resource
+    @Resource(name = "stringRedisTemplate")
     private StringRedisTemplate redisTemplate;
     
     @Resource
@@ -67,12 +67,21 @@ public class VerifyCodeServiceImpl implements VerifyCodeService {
     @Value("${verify-code.image.expire-minutes:5}")
     private int imageExpireMinutes;
     
-    // Redis 键前缀
-    private static final String EMAIL_CODE_PREFIX = "verify:email:";
-    private static final String SMS_CODE_PREFIX = "verify:sms:";
-    private static final String IMAGE_CODE_PREFIX = "verify:image:";
-    private static final String SEND_LIMIT_PREFIX = "verify:limit:";
-    private static final String SEND_COUNT_PREFIX = "verify:count:";
+    // Redis 键前缀 - 从配置文件获取
+    @Value("${redis.prefix.verify.email:verify:email:}")
+    private String emailCodePrefix;
+    
+    @Value("${redis.prefix.verify.sms:verify:sms:}")
+    private String smsCodePrefix;
+    
+    @Value("${redis.prefix.verify.image:verify:image:}")
+    private String imageCodePrefix;
+    
+    @Value("${redis.prefix.verify.limit:verify:limit:}")
+    private String sendLimitPrefix;
+    
+    @Value("${redis.prefix.verify.count:verify:count:}")
+    private String sendCountPrefix;
 
     @Override
     public Result<Void> sendEmailVerifyCode(String email, String type, String clientIp) {
@@ -93,7 +102,7 @@ public class VerifyCodeServiceImpl implements VerifyCodeService {
             }
             
             // 存储验证码到Redis
-            String codeKey = EMAIL_CODE_PREFIX + type + ":" + email;
+            String codeKey = emailCodePrefix + type + ":" + email;
             redisTemplate.opsForValue().set(codeKey, code, emailCodeExpireMinutes, TimeUnit.MINUTES);
             
             // 记录发送次数
@@ -114,7 +123,7 @@ public class VerifyCodeServiceImpl implements VerifyCodeService {
                 return Result.success(false);
             }
             
-            String codeKey = EMAIL_CODE_PREFIX + type + ":" + email;
+            String codeKey = emailCodePrefix + type + ":" + email;
             String storedCode = redisTemplate.opsForValue().get(codeKey);
             
             boolean isValid = code.equals(storedCode);
@@ -149,7 +158,7 @@ public class VerifyCodeServiceImpl implements VerifyCodeService {
             log.info("短信验证码: {}, 手机号: {}, 类型: {}", code, phone, type);
             
             // 存储验证码到Redis
-            String codeKey = SMS_CODE_PREFIX + type + ":" + phone;
+            String codeKey = smsCodePrefix + type + ":" + phone;
             redisTemplate.opsForValue().set(codeKey, code, smsCodeExpireMinutes, TimeUnit.MINUTES);
             
             // 记录发送次数
@@ -170,7 +179,7 @@ public class VerifyCodeServiceImpl implements VerifyCodeService {
                 return Result.success(false);
             }
             
-            String codeKey = SMS_CODE_PREFIX + type + ":" + phone;
+            String codeKey = smsCodePrefix + type + ":" + phone;
             String storedCode = redisTemplate.opsForValue().get(codeKey);
             
             boolean isValid = code.equals(storedCode);
@@ -197,7 +206,7 @@ public class VerifyCodeServiceImpl implements VerifyCodeService {
             String imageBase64 = captcha.getImageBase64();
             
             // 存储验证码到Redis
-            String codeKey = IMAGE_CODE_PREFIX + sessionId;
+            String codeKey = imageCodePrefix + sessionId;
             redisTemplate.opsForValue().set(codeKey, code.toLowerCase(), imageExpireMinutes, TimeUnit.MINUTES);
             
             Map<String, Object> result = new HashMap<>();
@@ -220,7 +229,7 @@ public class VerifyCodeServiceImpl implements VerifyCodeService {
                 return Result.success(false);
             }
             
-            String codeKey = IMAGE_CODE_PREFIX + sessionId;
+            String codeKey = imageCodePrefix + sessionId;
             String storedCode = redisTemplate.opsForValue().get(codeKey);
             
             boolean isValid = code.toLowerCase().equals(storedCode);
@@ -244,11 +253,11 @@ public class VerifyCodeServiceImpl implements VerifyCodeService {
     public Result<Void> clearVerifyCode(String identifier, String type) {
         try {
             // 清除邮件验证码
-            String emailKey = EMAIL_CODE_PREFIX + type + ":" + identifier;
+            String emailKey = emailCodePrefix + type + ":" + identifier;
             redisTemplate.delete(emailKey);
 
             // 清除短信验证码
-            String smsKey = SMS_CODE_PREFIX + type + ":" + identifier;
+            String smsKey = smsCodePrefix + type + ":" + identifier;
             redisTemplate.delete(smsKey);
 
             log.info("验证码清除成功，标识符: {}, 类型: {}", identifier, type);
@@ -265,7 +274,7 @@ public class VerifyCodeServiceImpl implements VerifyCodeService {
             Map<String, Object> stats = new HashMap<>();
 
             // 获取发送次数统计
-            String countKey = SEND_COUNT_PREFIX + identifier;
+            String countKey = sendCountPrefix + identifier;
             String countStr = redisTemplate.opsForValue().get(countKey);
             int sendCount = countStr != null ? Integer.parseInt(countStr) : 0;
 
@@ -285,21 +294,21 @@ public class VerifyCodeServiceImpl implements VerifyCodeService {
     public Result<Boolean> checkSendLimit(String identifier, String type, String clientIp) {
         try {
             // 检查标识符发送频率
-            String identifierLimitKey = SEND_LIMIT_PREFIX + "identifier:" + identifier;
+            String identifierLimitKey = sendLimitPrefix + "identifier:" + identifier;
             if (!flowUtils.limitCountCheck(identifierLimitKey, emailLimitPerHour, 3600)) {
                 log.warn("标识符 {} 超出每小时发送限制", identifier);
                 return Result.success(false);
             }
 
             // 检查IP发送频率
-            String ipLimitKey = SEND_LIMIT_PREFIX + "ip:" + clientIp;
+            String ipLimitKey = sendLimitPrefix + "ip:" + clientIp;
             if (!flowUtils.limitCountCheck(ipLimitKey, emailLimitPerHour * 3, 3600)) {
                 log.warn("IP {} 超出每小时发送限制", clientIp);
                 return Result.success(false);
             }
 
             // 检查单次发送间隔（60秒内只能发送一次）
-            String onceLimitKey = SEND_LIMIT_PREFIX + "once:" + identifier + ":" + type;
+            String onceLimitKey = sendLimitPrefix + "once:" + identifier + ":" + type;
             if (!flowUtils.limitOnceCheck(onceLimitKey, 60)) {
                 log.warn("标识符 {} 类型 {} 发送过于频繁", identifier, type);
                 return Result.success(false);
@@ -317,7 +326,7 @@ public class VerifyCodeServiceImpl implements VerifyCodeService {
     public Result<Long> getVerifyCodeTtl(String identifier, String type) {
         try {
             // 检查邮件验证码
-            String emailKey = EMAIL_CODE_PREFIX + type + ":" + identifier;
+            String emailKey = emailCodePrefix + type + ":" + identifier;
             Long emailTtl = redisTemplate.getExpire(emailKey, TimeUnit.SECONDS);
 
             if (emailTtl != null && emailTtl > 0) {
@@ -325,7 +334,7 @@ public class VerifyCodeServiceImpl implements VerifyCodeService {
             }
 
             // 检查短信验证码
-            String smsKey = SMS_CODE_PREFIX + type + ":" + identifier;
+            String smsKey = smsCodePrefix + type + ":" + identifier;
             Long smsTtl = redisTemplate.getExpire(smsKey, TimeUnit.SECONDS);
 
             if (smsTtl != null && smsTtl > 0) {
@@ -398,7 +407,7 @@ public class VerifyCodeServiceImpl implements VerifyCodeService {
      */
     private void recordSendCount(String identifier, String type, String clientIp) {
         try {
-            String countKey = SEND_COUNT_PREFIX + identifier;
+            String countKey = sendCountPrefix + identifier;
             redisTemplate.opsForValue().increment(countKey);
             redisTemplate.expire(countKey, 1, TimeUnit.HOURS);
 

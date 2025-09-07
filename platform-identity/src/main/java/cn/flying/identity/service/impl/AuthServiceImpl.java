@@ -4,7 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import cn.flying.identity.dto.Account;
 import cn.flying.identity.service.AccountService;
 import cn.flying.identity.service.AuthService;
-import cn.flying.identity.util.IpUtils;
+import cn.flying.identity.util.WebContextUtils;
 import cn.flying.identity.vo.AccountVO;
 import cn.flying.identity.vo.request.ChangePasswordVO;
 import cn.flying.identity.vo.request.EmailRegisterVO;
@@ -12,11 +12,8 @@ import cn.flying.identity.vo.request.EmailResetVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import jakarta.annotation.Resource;
-import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
-import org.springframework.web.context.request.RequestContextHolder;
-import org.springframework.web.context.request.ServletRequestAttributes;
 
 /**
  * 认证服务实现类
@@ -38,7 +35,7 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public Result<String> login(String username, String password) {
-        try {
+        return WebContextUtils.safeExecute(() -> {
             // 查找用户
             Account account = accountService.findAccountByNameOrEmail(username);
             if (account == null) {
@@ -59,11 +56,8 @@ public class AuthServiceImpl implements AuthService {
             StpUtil.getSession().set("email", account.getEmail());
 
             String token = StpUtil.getTokenValue();
-
             return Result.success(token);
-        } catch (Exception e) {
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
-        }
+        }, "用户登录失败");
     }
 
     /**
@@ -72,12 +66,10 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public Result<Void> logout() {
-        try {
+        return WebContextUtils.safeExecuteVoid(() -> {
             StpUtil.logout();
             return Result.success(null);
-        } catch (Exception e) {
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
-        }
+        }, "用户注销失败");
     }
 
     /**
@@ -100,26 +92,10 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public Result<Void> askVerifyCode(String email, String type) {
         // 获取客户端IP地址
-        String clientIp = getCurrentRequestIp();
+        String clientIp = WebContextUtils.getCurrentClientIp();
 
         // 委托给 AccountService
         return accountService.registerEmailVerifyCode(type, email, clientIp);
-    }
-
-    /**
-     * 获取当前请求的IP地址
-     */
-    private String getCurrentRequestIp() {
-        try {
-            ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-            if (attributes != null) {
-                HttpServletRequest request = attributes.getRequest();
-                return IpUtils.getClientIp(request);
-            }
-        } catch (Exception e) {
-            // 忽略异常，返回默认值
-        }
-        return "127.0.0.1";
     }
 
     /**
@@ -140,7 +116,7 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public Result<Void> changePassword(ChangePasswordVO vo) {
-        try {
+        return WebContextUtils.safeExecuteVoid(() -> {
             // 检查登录状态
             if (!StpUtil.isLogin()) {
                 return Result.error(ResultEnum.USER_NOT_LOGGED_IN, null);
@@ -151,9 +127,7 @@ public class AuthServiceImpl implements AuthService {
 
             // 委托给 AccountService
             return accountService.changePassword(userId, vo);
-        } catch (Exception e) {
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
-        }
+        }, "修改密码失败");
     }
 
     /**
@@ -162,7 +136,7 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public Result<AccountVO> getUserInfo() {
-        try {
+        return WebContextUtils.safeExecute(() -> {
             // 检查登录状态
             if (!StpUtil.isLogin()) {
                 return Result.error(ResultEnum.USER_NOT_LOGGED_IN, null);
@@ -181,9 +155,7 @@ public class AuthServiceImpl implements AuthService {
             vo.setExternalId(String.valueOf(account.getId()));
 
             return Result.success(vo);
-        } catch (Exception e) {
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
-        }
+        }, "获取用户信息失败");
     }
 
     /**
@@ -202,16 +174,14 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public Result<Object> checkLoginStatus() {
-        try {
+        return WebContextUtils.safeExecuteObject(() -> {
             boolean isLogin = StpUtil.isLogin();
             if (isLogin) {
                 return Result.success("用户已登录，用户ID：" + StpUtil.getLoginId());
             } else {
                 return Result.success("用户未登录");
             }
-        } catch (Exception e) {
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
-        }
+        }, "检查登录状态失败");
     }
 
     /**
@@ -220,14 +190,12 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public Result<Object> getTokenInfo() {
-        try {
+        return WebContextUtils.safeExecuteObject(() -> {
             if (!StpUtil.isLogin()) {
                 return Result.error(ResultEnum.USER_NOT_LOGGED_IN, null);
             }
 
             return Result.success(StpUtil.getTokenInfo());
-        } catch (Exception e) {
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
-        }
+        }, "获取Token信息失败");
     }
 }

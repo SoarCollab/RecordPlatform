@@ -13,9 +13,9 @@ import cn.flying.platformapi.constant.ResultEnum;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
 import org.springframework.beans.BeanUtils;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 /**
  * 用户管理控制器
  * 提供用户信息管理、密码修改、邮箱修改等功能
- * 
+ *
  * @author 王贝强
  */
 @RestController
@@ -34,12 +34,12 @@ import java.util.stream.Collectors;
 @SaCheckLogin
 public class UserController {
 
-    @Autowired
+    @Resource
     private AccountService accountService;
 
     /**
      * 获取当前用户信息
-     * 
+     *
      * @return 用户信息
      */
     @GetMapping("/info")
@@ -48,15 +48,15 @@ public class UserController {
         try {
             Long userId = StpUtil.getLoginIdAsLong();
             Account account = accountService.findAccountById(userId);
-            
+
             if (account == null) {
                 return Result.error(ResultEnum.USER_NOT_EXIST, null);
             }
-            
+
             AccountVO vo = new AccountVO();
             BeanUtils.copyProperties(account, vo);
             vo.setExternalId(String.valueOf(account.getId()));
-            
+
             return Result.success(vo);
         } catch (Exception e) {
             return Result.error(ResultEnum.SYSTEM_ERROR, null);
@@ -65,7 +65,7 @@ public class UserController {
 
     /**
      * 修改用户密码
-     * 
+     *
      * @param vo 修改密码信息
      * @return 修改结果
      */
@@ -82,7 +82,7 @@ public class UserController {
 
     /**
      * 修改用户邮箱
-     * 
+     *
      * @param vo 修改邮箱信息
      * @return 修改结果
      */
@@ -99,7 +99,7 @@ public class UserController {
 
     /**
      * 获取用户基本信息（公开信息）
-     * 
+     *
      * @param userId 用户ID
      * @return 用户基本信息
      */
@@ -107,22 +107,22 @@ public class UserController {
     @Operation(summary = "获取用户基本信息", description = "获取指定用户的公开信息")
     public Result<Map<String, Object>> getUserProfile(
             @Parameter(description = "用户ID") @PathVariable Long userId) {
-        
+
         try {
             Account account = accountService.findAccountById(userId);
             if (account == null) {
                 return Result.error(ResultEnum.USER_NOT_EXIST, null);
             }
-            
+
             // 只返回公开信息
             Map<String, Object> profile = Map.of(
-                "id", account.getId(),
-                "username", account.getUsername(),
-                "avatar", account.getAvatar() != null ? account.getAvatar() : "",
-                "role", account.getRole(),
-                "registerTime", account.getRegisterTime()
+                    "id", account.getId(),
+                    "username", account.getUsername(),
+                    "avatar", account.getAvatar() != null ? account.getAvatar() : "",
+                    "role", account.getRole(),
+                    "registerTime", account.getRegisterTime()
             );
-            
+
             return Result.success(profile);
         } catch (Exception e) {
             return Result.error(ResultEnum.SYSTEM_ERROR, null);
@@ -131,7 +131,7 @@ public class UserController {
 
     /**
      * 更新用户头像
-     * 
+     *
      * @param avatarUrl 头像URL
      * @return 更新结果
      */
@@ -144,7 +144,7 @@ public class UserController {
                     .eq("id", userId)
                     .set("avatar", avatarUrl)
                     .update();
-            
+
             return success ? Result.success(null) : Result.error(ResultEnum.SYSTEM_ERROR, null);
         } catch (Exception e) {
             return Result.error(ResultEnum.SYSTEM_ERROR, null);
@@ -153,7 +153,7 @@ public class UserController {
 
     /**
      * 注销当前用户账号
-     * 
+     *
      * @param password 确认密码
      * @return 注销结果
      */
@@ -163,22 +163,22 @@ public class UserController {
         try {
             Long userId = StpUtil.getLoginIdAsLong();
             Account account = accountService.findAccountById(userId);
-            
+
             if (account == null) {
                 return Result.error(ResultEnum.USER_NOT_EXIST, null);
             }
-            
+
             // 验证密码
             if (!accountService.matchesPassword(password, account.getPassword())) {
                 return Result.error(ResultEnum.USER_LOGIN_ERROR, null);
             }
-            
+
             // 软删除用户
             boolean success = accountService.update()
                     .eq("id", userId)
                     .set("deleted", 1)
                     .update();
-            
+
             if (success) {
                 // 注销登录
                 StpUtil.logout();
@@ -195,9 +195,9 @@ public class UserController {
 
     /**
      * 获取用户列表（管理员）
-     * 
-     * @param page 页码
-     * @param size 页大小
+     *
+     * @param page    页码
+     * @param size    页大小
      * @param keyword 搜索关键词
      * @return 用户列表
      */
@@ -208,21 +208,21 @@ public class UserController {
             @Parameter(description = "页码") @RequestParam(defaultValue = "1") int page,
             @Parameter(description = "页大小") @RequestParam(defaultValue = "20") int size,
             @Parameter(description = "搜索关键词") @RequestParam(required = false) String keyword) {
-        
+
         try {
             // 构建查询条件
             var query = accountService.query().eq("deleted", 0);
-            
+
             if (keyword != null && !keyword.trim().isEmpty()) {
                 query.and(wrapper -> wrapper
                         .like("username", keyword)
                         .or()
                         .like("email", keyword));
             }
-            
+
             // 分页查询
             var pageResult = query.page(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(page, size));
-            
+
             // 转换为VO
             List<AccountVO> users = pageResult.getRecords().stream()
                     .map(account -> {
@@ -232,15 +232,15 @@ public class UserController {
                         return vo;
                     })
                     .collect(Collectors.toList());
-            
+
             Map<String, Object> result = Map.of(
-                "users", users,
-                "total", pageResult.getTotal(),
-                "page", page,
-                "size", size,
-                "pages", pageResult.getPages()
+                    "users", users,
+                    "total", pageResult.getTotal(),
+                    "page", page,
+                    "size", size,
+                    "pages", pageResult.getPages()
             );
-            
+
             return Result.success(result);
         } catch (Exception e) {
             return Result.error(ResultEnum.SYSTEM_ERROR, null);
@@ -249,8 +249,8 @@ public class UserController {
 
     /**
      * 禁用/启用用户（管理员）
-     * 
-     * @param userId 用户ID
+     *
+     * @param userId   用户ID
      * @param disabled 是否禁用
      * @return 操作结果
      */
@@ -260,13 +260,13 @@ public class UserController {
     public Result<Void> updateUserStatus(
             @Parameter(description = "用户ID") @PathVariable Long userId,
             @Parameter(description = "是否禁用") @RequestParam boolean disabled) {
-        
+
         try {
             boolean success = accountService.update()
                     .eq("id", userId)
                     .set("deleted", disabled ? 1 : 0)
                     .update();
-            
+
             return success ? Result.success(null) : Result.error(ResultEnum.SYSTEM_ERROR, null);
         } catch (Exception e) {
             return Result.error(ResultEnum.SYSTEM_ERROR, null);
@@ -275,8 +275,8 @@ public class UserController {
 
     /**
      * 重置用户密码（管理员）
-     * 
-     * @param userId 用户ID
+     *
+     * @param userId      用户ID
      * @param newPassword 新密码
      * @return 重置结果
      */
@@ -286,14 +286,14 @@ public class UserController {
     public Result<Void> resetUserPassword(
             @Parameter(description = "用户ID") @PathVariable Long userId,
             @Parameter(description = "新密码") @RequestParam String newPassword) {
-        
+
         try {
             String encodedPassword = accountService.encodePassword(newPassword);
             boolean success = accountService.update()
                     .eq("id", userId)
                     .set("password", encodedPassword)
                     .update();
-            
+
             return success ? Result.success(null) : Result.error(ResultEnum.SYSTEM_ERROR, null);
         } catch (Exception e) {
             return Result.error(ResultEnum.SYSTEM_ERROR, null);

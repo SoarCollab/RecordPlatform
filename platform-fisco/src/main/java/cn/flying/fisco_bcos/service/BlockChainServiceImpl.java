@@ -194,7 +194,7 @@ public class BlockChainServiceImpl implements BlockChainService{
                             // param
                             String.valueOf(fileInfo.get(2)),
                             // fileHash
-//                          hexHash,
+                            null,
                             // uploadTime
                             formattedUploadTime
                     ));

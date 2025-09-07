@@ -76,10 +76,10 @@ curl http://localhost:8888/identity/actuator/health/redis
 ## 📚 文档导航
 
 ### 📖 技术文档
-- **[API变更文档](./API_CHANGES.md)**: 详细的API变更说明和迁移指南
-- **[错误码文档](./ERROR_CODES.md)**: 完整的错误码列表和处理建议
-- **[配置文档](./CONFIGURATION.md)**: 详细的配置项说明和最佳实践
-- **[故障排除指南](./TROUBLESHOOTING.md)**: 常见问题诊断和解决方案
+- **[API变更文档](API_CHANGES.md)**: 详细的API变更说明和迁移指南
+- **[错误码文档](ERROR_CODES.md)**: 完整的错误码列表和处理建议
+- **[配置文档](CONFIGURATION.md)**: 详细的配置项说明和最佳实践
+- **[故障排除指南](TROUBLESHOOTING.md)**: 常见问题诊断和解决方案
 
 ### 🔧 开发指南
 - **API文档**: http://localhost:8888/identity/doc.html

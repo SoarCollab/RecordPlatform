@@ -1,12 +1,12 @@
 package cn.flying.identity.service.impl;
 
+import cn.flying.identity.service.BaseService;
 import cn.flying.identity.service.GatewayMonitorService;
 import cn.flying.identity.util.FlowUtils;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
-import cn.hutool.core.util.StrUtil;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -18,162 +18,226 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * 网关监控服务实现类
- * 基于 Redis 实现流量监控、性能统计等功能
- * 
+ * 基于 Redis 实现流量监控、性能统计、异常检测等功能
+ * <p>
+ * 主要功能：
+ * 1. 请求流量统计：记录请求数量、成功率、错误率等指标
+ * 2. API调用统计：统计各API的调用频次和热点排行
+ * 3. 性能监控：记录响应时间、慢查询统计等性能指标
+ * 4. 错误统计：记录错误类型、错误详情等异常信息
+ * 5. 用户活跃度：统计独立用户数和活跃度
+ * 6. 地理位置统计：基于IP地址的地理分布统计
+ * 7. 流量限制：实现IP、用户、API级别的流量控制
+ * 8. 异常检测：检测异常流量模式和攻击行为
+ * 9. 数据清理：自动清理过期的监控数据
+ * <p>
+ * 数据存储结构：
+ * - 使用Redis Hash存储统计数据，按时间分片（分钟级别）
+ * - 使用Redis Set存储独立IP和用户统计
+ * - 使用Redis List存储错误详情，支持FIFO队列
+ * - 支持配置化的数据保留时间和存储前缀
+ *
  * @author 王贝强
  */
 @Slf4j
 @Service
-public class GatewayMonitorServiceImpl implements GatewayMonitorService {
+public class GatewayMonitorServiceImpl extends BaseService implements GatewayMonitorService {
 
-    @Autowired
+    // Redis 键前缀配置
+    @Value("${gateway.redis.prefix:gateway:}")
+    private String redisPrefix;
+    
+    // 动态生成Redis键前缀
+    private String getRequestPrefix() { return redisPrefix + "request:"; }
+    private String getTrafficPrefix() { return redisPrefix + "traffic:"; }
+    private String getApiStatsPrefix() { return redisPrefix + "api:"; }
+    private String getErrorStatsPrefix() { return redisPrefix + "error:"; }
+    private String getPerformancePrefix() { return redisPrefix + "performance:"; }
+    private String getUserActivityPrefix() { return redisPrefix + "user:"; }
+    private String getRateLimitPrefix() { return redisPrefix + "limit:"; }
+    
+    // 数据保留时间配置
+    @Value("${gateway.data.retention-hours:24}")
+    private int dataRetentionHours;
+    
+    // 错误详情保留数量配置
+    @Value("${gateway.error.max-details:100}")
+    private int maxErrorDetails;
+
+    @Resource(name = "stringRedisTemplate")
     private StringRedisTemplate redisTemplate;
-    
-    @Autowired
+
+    @Resource
     private FlowUtils flowUtils;
-    
+
     // 流量限制配置
     @Value("${gateway.rate-limit.requests-per-minute:60}")
     private int requestsPerMinute;
-    
+
     @Value("${gateway.rate-limit.requests-per-hour:1000}")
     private int requestsPerHour;
-    
+
     @Value("${gateway.rate-limit.block-time:300}")
     private int blockTime;
-    
-    // Redis 键前缀
-    private static final String REQUEST_PREFIX = "gateway:request:";
-    private static final String TRAFFIC_PREFIX = "gateway:traffic:";
-    private static final String API_STATS_PREFIX = "gateway:api:";
-    private static final String ERROR_STATS_PREFIX = "gateway:error:";
-    private static final String PERFORMANCE_PREFIX = "gateway:performance:";
-    private static final String USER_ACTIVITY_PREFIX = "gateway:user:";
-    private static final String RATE_LIMIT_PREFIX = "gateway:limit:";
-    
+
     @Override
-    public Result<Void> recordRequestStart(String requestId, String method, String uri, 
-                                          String clientIp, String userAgent, Long userId) {
-        try {
-            String timestamp = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now());
-            
+    public Result<Void> recordRequestStart(String requestId, String method, String uri,
+                                           String clientIp, String userAgent, Long userId) {
+        return safeExecuteAction(() -> {
+            // 参数验证
+            requireNonBlank(requestId, "请求ID不能为空");
+            requireNonBlank(method, "请求方法不能为空");
+            requireNonBlank(uri, "请求URI不能为空");
+            requireNonBlank(clientIp, "客户端IP不能为空");
+
+            String timestamp = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm:ss");
+
             // 记录请求基本信息
             Map<String, String> requestInfo = new HashMap<>();
             requestInfo.put("method", method);
             requestInfo.put("uri", uri);
             requestInfo.put("client_ip", clientIp);
-            requestInfo.put("user_agent", userAgent);
+            requestInfo.put("user_agent", getOrElse(userAgent, ""));
             requestInfo.put("user_id", userId != null ? userId.toString() : "");
             requestInfo.put("start_time", timestamp);
             requestInfo.put("status", "processing");
-            
-            String requestKey = REQUEST_PREFIX + requestId;
+
+            String requestKey = getRequestPrefix() + requestId;
             redisTemplate.opsForHash().putAll(requestKey, requestInfo);
             redisTemplate.expire(requestKey, 1, TimeUnit.HOURS);
-            
+
             // 更新实时流量统计
             updateTrafficStats(method, uri, clientIp, userId);
-            
+
             // 更新API调用统计
             updateApiStats(method, uri);
-            
+
             // 更新用户活跃度统计
             if (userId != null) {
                 updateUserActivityStats(userId);
             }
-            
-            return Result.success(null);
-        } catch (Exception e) {
-            log.error("记录请求开始失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
-        }
+        }, "记录请求开始失败");
     }
 
     @Override
-    public Result<Void> recordRequestEnd(String requestId, int statusCode, long responseSize, 
-                                        long executionTime, String errorMessage) {
-        try {
-            String requestKey = REQUEST_PREFIX + requestId;
-            
+    public Result<Void> recordRequestEnd(String requestId, int statusCode, long responseSize,
+                                         long executionTime, String errorMessage) {
+        return safeExecuteAction(() -> {
+            // 参数验证
+            requireNonBlank(requestId, "请求ID不能为空");
+            requireCondition(statusCode, code -> code >= 100 && code < 600, "状态码必须在100-599之间");
+            requireCondition(responseSize, size -> size >= 0, "响应大小不能为负数");
+            requireCondition(executionTime, time -> time >= 0, "执行时间不能为负数");
+
+            String requestKey = getRequestPrefix() + requestId;
+
             // 更新请求信息
             Map<String, String> updateInfo = new HashMap<>();
             updateInfo.put("status_code", String.valueOf(statusCode));
             updateInfo.put("response_size", String.valueOf(responseSize));
             updateInfo.put("execution_time", String.valueOf(executionTime));
-            updateInfo.put("end_time", DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now()));
+            updateInfo.put("end_time", formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm:ss"));
             updateInfo.put("status", "completed");
-            
-            if (StrUtil.isNotBlank(errorMessage)) {
+
+            if (isNotBlank(errorMessage)) {
                 updateInfo.put("error_message", errorMessage);
             }
-            
+
             redisTemplate.opsForHash().putAll(requestKey, updateInfo);
-            
+
             // 获取请求信息用于统计
             Map<Object, Object> requestInfo = redisTemplate.opsForHash().entries(requestKey);
             String method = (String) requestInfo.get("method");
             String uri = (String) requestInfo.get("uri");
-            
+
             // 更新性能统计
             updatePerformanceStats(method, uri, executionTime);
-            
-            // 更新错误统计
+
+            // 更新错误统计或成功统计
             if (statusCode >= 400) {
                 updateErrorStats(method, uri, statusCode, errorMessage);
+            } else {
+                // 更新成功请求统计
+                String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
+                String trafficKey = getTrafficPrefix() + timeKey;
+                redisTemplate.opsForHash().increment(trafficKey, "success", 1);
             }
-            
-            return Result.success(null);
-        } catch (Exception e) {
-            log.error("记录请求结束失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
-        }
+        }, "记录请求结束失败");
     }
 
     @Override
     public Result<Boolean> checkRateLimit(String clientIp, Long userId, String uri) {
         try {
-            // IP级别限流
-            String ipMinuteKey = RATE_LIMIT_PREFIX + "ip:minute:" + clientIp;
-            String ipHourKey = RATE_LIMIT_PREFIX + "ip:hour:" + clientIp;
-            
+            // 参数验证
+            if (isBlank(clientIp)) {
+                logWarn("客户端IP为空，拒绝请求");
+                return success(false);
+            }
+
+            // 检查IP是否在黑名单中
+            String blacklistKey = getRateLimitPrefix() + "blacklist:" + clientIp;
+            if (existsCache(blacklistKey)) {
+                logWarn("IP {} 在黑名单中，拒绝请求", clientIp);
+                return success(false);
+            }
+
+            // IP级别限流 - 使用滑动窗口算法
+            String ipMinuteKey = getRateLimitPrefix() + "ip:minute:" + clientIp;
+            String ipHourKey = getRateLimitPrefix() + "ip:hour:" + clientIp;
+
+            // 检查是否超过每分钟限制
             if (!flowUtils.limitPeriodCountCheck(ipMinuteKey, requestsPerMinute, 60)) {
-                log.warn("IP {} 超出每分钟请求限制", clientIp);
-                return Result.success(false);
+                logWarn("IP {} 超出每分钟请求限制 {}", clientIp, requestsPerMinute);
+                // 触发临时封禁机制
+                String tempBanKey = getRateLimitPrefix() + "temp_ban:" + clientIp;
+                setCache(tempBanKey, "1", blockTime);
+                return success(false);
             }
-            
+
+            // 检查是否超过每小时限制
             if (!flowUtils.limitPeriodCountCheck(ipHourKey, requestsPerHour, 3600)) {
-                log.warn("IP {} 超出每小时请求限制", clientIp);
-                return Result.success(false);
+                logWarn("IP {} 超出每小时请求限制 {}", clientIp, requestsPerHour);
+                // 触发长期封禁机制
+                String longBanKey = getRateLimitPrefix() + "long_ban:" + clientIp;
+                setCache(longBanKey, "1", blockTime * 4);
+                return success(false);
             }
-            
+
+            // 检查是否处于临时封禁状态
+            String tempBanKey = getRateLimitPrefix() + "temp_ban:" + clientIp;
+            if (existsCache(tempBanKey)) {
+                logWarn("IP {} 处于临时封禁状态", clientIp);
+                return success(false);
+            }
+
             // 用户级别限流
             if (userId != null) {
-                String userMinuteKey = RATE_LIMIT_PREFIX + "user:minute:" + userId;
-                String userHourKey = RATE_LIMIT_PREFIX + "user:hour:" + userId;
-                
+                String userMinuteKey = getRateLimitPrefix() + "user:minute:" + userId;
+                String userHourKey = getRateLimitPrefix() + "user:hour:" + userId;
+
                 if (!flowUtils.limitPeriodCountCheck(userMinuteKey, requestsPerMinute * 2, 60)) {
-                    log.warn("用户 {} 超出每分钟请求限制", userId);
-                    return Result.success(false);
+                    logWarn("用户 {} 超出每分钟请求限制", userId);
+                    return success(false);
                 }
-                
+
                 if (!flowUtils.limitPeriodCountCheck(userHourKey, requestsPerHour * 2, 3600)) {
-                    log.warn("用户 {} 超出每小时请求限制", userId);
-                    return Result.success(false);
+                    logWarn("用户 {} 超出每小时请求限制", userId);
+                    return success(false);
                 }
             }
-            
+
             // API级别限流
-            String apiKey = RATE_LIMIT_PREFIX + "api:minute:" + uri;
+            String apiKey = getRateLimitPrefix() + "api:minute:" + uri;
             if (!flowUtils.limitPeriodCountCheck(apiKey, requestsPerMinute * 10, 60)) {
-                log.warn("API {} 超出每分钟请求限制", uri);
-                return Result.success(false);
+                logWarn("API {} 超出每分钟请求限制", uri);
+                return success(false);
             }
-            
-            return Result.success(true);
+
+            return success(true);
         } catch (Exception e) {
-            log.error("检查流量限制失败", e);
+            logError("检查流量限制失败", e);
             // 异常情况下允许通过，避免影响正常业务
-            return Result.success(true);
+            return success(true);
         }
     }
 
@@ -181,36 +245,80 @@ public class GatewayMonitorServiceImpl implements GatewayMonitorService {
     public Result<Map<String, Object>> getRealTimeTrafficStats(int timeRange) {
         try {
             Map<String, Object> stats = new HashMap<>();
-            
+
             // 获取指定时间范围内的流量数据
             String currentMinute = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(LocalDateTime.now());
-            
+
             long totalRequests = 0;
             long successRequests = 0;
             long errorRequests = 0;
-            
+            Set<String> uniqueIps = new HashSet<>();
+            Set<String> uniqueUsers = new HashSet<>();
+            Map<String, Long> methodStats = new HashMap<>();
+            List<Map<String, Object>> timeSeriesData = new ArrayList<>();
+
             for (int i = 0; i < timeRange; i++) {
                 LocalDateTime time = LocalDateTime.now().minusMinutes(i);
                 String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(time);
-                
-                String trafficKey = TRAFFIC_PREFIX + timeKey;
+
+                String trafficKey = getTrafficPrefix() + timeKey;
                 Map<Object, Object> trafficData = redisTemplate.opsForHash().entries(trafficKey);
+
+                long minuteTotal = 0;
+                long minuteError = 0;
                 
                 if (!trafficData.isEmpty()) {
-                    totalRequests += Long.parseLong((String) trafficData.getOrDefault("total", "0"));
-                    successRequests += Long.parseLong((String) trafficData.getOrDefault("success", "0"));
-                    errorRequests += Long.parseLong((String) trafficData.getOrDefault("error", "0"));
+                    minuteTotal = Long.parseLong((String) trafficData.getOrDefault("total", "0"));
+                    minuteError = Long.parseLong((String) trafficData.getOrDefault("error", "0"));
+                    
+                    totalRequests += minuteTotal;
+                    errorRequests += minuteError;
+                    
+                    // 统计方法分布
+                    for (Map.Entry<Object, Object> entry : trafficData.entrySet()) {
+                        String key = (String) entry.getKey();
+                        if (key.startsWith("method:")) {
+                            String method = key.substring(7);
+                            long count = Long.parseLong((String) entry.getValue());
+                            methodStats.merge(method, count, Long::sum);
+                        }
+                    }
+                    
+                    // 获取独立IP和用户数
+                    String ipSetKey = trafficKey + ":unique_ips";
+                    String userSetKey = trafficKey + ":unique_users";
+                    
+                    Set<String> ips = redisTemplate.opsForSet().members(ipSetKey);
+                    Set<String> users = redisTemplate.opsForSet().members(userSetKey);
+                    
+                    if (ips != null) uniqueIps.addAll(ips);
+                    if (users != null) uniqueUsers.addAll(users);
                 }
+                
+                // 构建时间序列数据
+                Map<String, Object> timePoint = new HashMap<>();
+                timePoint.put("time", timeKey);
+                timePoint.put("total", minuteTotal);
+                timePoint.put("error", minuteError);
+                timePoint.put("success", minuteTotal - minuteError);
+                timeSeriesData.add(timePoint);
             }
             
+            successRequests = totalRequests - errorRequests;
+
             stats.put("total_requests", totalRequests);
             stats.put("success_requests", successRequests);
             stats.put("error_requests", errorRequests);
             stats.put("success_rate", totalRequests > 0 ? (double) successRequests / totalRequests * 100 : 0);
             stats.put("error_rate", totalRequests > 0 ? (double) errorRequests / totalRequests * 100 : 0);
+            stats.put("unique_ips", uniqueIps.size());
+            stats.put("unique_users", uniqueUsers.size());
+            stats.put("method_stats", methodStats);
+            stats.put("time_series", timeSeriesData);
             stats.put("time_range", timeRange);
             stats.put("current_time", currentMinute);
-            
+            stats.put("avg_requests_per_minute", timeRange > 0 ? (double) totalRequests / timeRange : 0);
+
             return Result.success(stats);
         } catch (Exception e) {
             log.error("获取实时流量统计失败", e);
@@ -228,7 +336,7 @@ public class GatewayMonitorServiceImpl implements GatewayMonitorService {
                 LocalDateTime time = LocalDateTime.now().minusMinutes(i);
                 String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(time);
 
-                String apiStatsKey = API_STATS_PREFIX + timeKey;
+                String apiStatsKey = getApiStatsPrefix() + timeKey;
                 Map<Object, Object> apiData = redisTemplate.opsForHash().entries(apiStatsKey);
 
                 for (Map.Entry<Object, Object> entry : apiData.entrySet()) {
@@ -266,24 +374,55 @@ public class GatewayMonitorServiceImpl implements GatewayMonitorService {
         try {
             Map<String, Object> stats = new HashMap<>();
             Map<String, Long> errorCounts = new HashMap<>();
+            Map<String, Long> apiErrorCounts = new HashMap<>();
+            List<String> recentErrors = new ArrayList<>();
             long totalErrors = 0;
 
             for (int i = 0; i < timeRange; i++) {
                 LocalDateTime time = LocalDateTime.now().minusMinutes(i);
                 String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(time);
 
-                String errorStatsKey = ERROR_STATS_PREFIX + timeKey;
+                String errorStatsKey = getErrorStatsPrefix() + timeKey;
                 Map<Object, Object> errorData = redisTemplate.opsForHash().entries(errorStatsKey);
 
                 for (Map.Entry<Object, Object> entry : errorData.entrySet()) {
-                    String errorType = (String) entry.getKey();
+                    String key = (String) entry.getKey();
                     Long count = Long.parseLong((String) entry.getValue());
-                    errorCounts.merge(errorType, count, Long::sum);
+                    
+                    if (key.startsWith("api:")) {
+                        // API错误统计
+                        String api = key.substring(4);
+                        apiErrorCounts.merge(api, count, Long::sum);
+                    } else {
+                        // 错误类型统计
+                        errorCounts.merge(key, count, Long::sum);
+                    }
                     totalErrors += count;
                 }
+                
+                // 获取错误详情
+                String errorDetailsKey = errorStatsKey + ":details";
+                List<String> details = redisTemplate.opsForList().range(errorDetailsKey, 0, 19); // 获取最近20条
+                if (details != null && !details.isEmpty()) {
+                    recentErrors.addAll(details);
+                }
             }
+            
+            // 按错误数量排序API错误统计
+            List<Map<String, Object>> topErrorApis = apiErrorCounts.entrySet().stream()
+                    .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                    .limit(10)
+                    .map(entry -> {
+                        Map<String, Object> apiError = new HashMap<>();
+                        apiError.put("api", entry.getKey());
+                        apiError.put("error_count", entry.getValue());
+                        return apiError;
+                    })
+                    .toList();
 
             stats.put("error_types", errorCounts);
+            stats.put("api_errors", topErrorApis);
+            stats.put("recent_errors", recentErrors.stream().limit(20).toList());
             stats.put("total_errors", totalErrors);
             stats.put("time_range", timeRange);
 
@@ -304,7 +443,7 @@ public class GatewayMonitorServiceImpl implements GatewayMonitorService {
                 LocalDateTime time = LocalDateTime.now().minusMinutes(i);
                 String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(time);
 
-                String performanceKey = PERFORMANCE_PREFIX + timeKey;
+                String performanceKey = getPerformancePrefix() + timeKey;
                 Map<Object, Object> performanceData = redisTemplate.opsForHash().entries(performanceKey);
 
                 for (Map.Entry<Object, Object> entry : performanceData.entrySet()) {
@@ -317,8 +456,8 @@ public class GatewayMonitorServiceImpl implements GatewayMonitorService {
                 responseTimes.sort(Long::compareTo);
 
                 double avgResponseTime = responseTimes.stream().mapToLong(Long::longValue).average().orElse(0);
-                long minResponseTime = responseTimes.get(0);
-                long maxResponseTime = responseTimes.get(responseTimes.size() - 1);
+                long minResponseTime = responseTimes.getFirst();
+                long maxResponseTime = responseTimes.getLast();
                 long p95ResponseTime = responseTimes.get((int) (responseTimes.size() * 0.95));
                 long p99ResponseTime = responseTimes.get((int) (responseTimes.size() * 0.99));
 
@@ -356,7 +495,7 @@ public class GatewayMonitorServiceImpl implements GatewayMonitorService {
                 LocalDateTime time = LocalDateTime.now().minusMinutes(i);
                 String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(time);
 
-                String userActivityKey = USER_ACTIVITY_PREFIX + timeKey;
+                String userActivityKey = getUserActivityPrefix() + timeKey;
                 Set<String> users = redisTemplate.opsForSet().members(userActivityKey);
                 if (users != null) {
                     activeUsers.addAll(users);
@@ -381,7 +520,7 @@ public class GatewayMonitorServiceImpl implements GatewayMonitorService {
             List<String> reasons = new ArrayList<>();
 
             // 检查IP请求频率
-            String ipKey = RATE_LIMIT_PREFIX + "ip:minute:" + clientIp;
+            String ipKey = getRateLimitPrefix() + "ip:minute:" + clientIp;
             String ipCount = redisTemplate.opsForValue().get(ipKey);
             if (ipCount != null && Integer.parseInt(ipCount) > requestsPerMinute * 0.8) {
                 isAbnormal = true;
@@ -390,7 +529,7 @@ public class GatewayMonitorServiceImpl implements GatewayMonitorService {
 
             // 检查用户请求频率
             if (userId != null) {
-                String userKey = RATE_LIMIT_PREFIX + "user:minute:" + userId;
+                String userKey = getRateLimitPrefix() + "user:minute:" + userId;
                 String userCount = redisTemplate.opsForValue().get(userKey);
                 if (userCount != null && Integer.parseInt(userCount) > requestsPerMinute * 1.6) {
                     isAbnormal = true;
@@ -455,14 +594,70 @@ public class GatewayMonitorServiceImpl implements GatewayMonitorService {
             // 清理过期的请求记录
             LocalDateTime cutoffTime = LocalDateTime.now().minusDays(retentionDays);
             String cutoffTimeStr = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(cutoffTime);
+            
+            // 清理过期的流量统计数据
+            for (int i = retentionDays * 24 * 60; i < retentionDays * 24 * 60 + 1440; i++) {
+                LocalDateTime expiredTime = LocalDateTime.now().minusMinutes(i);
+                String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(expiredTime);
+                
+                // 清理各类统计数据
+                 String[] prefixes = {getTrafficPrefix(), getApiStatsPrefix(), getErrorStatsPrefix(), 
+                                     getPerformancePrefix(), getUserActivityPrefix()};
+                
+                for (String prefix : prefixes) {
+                    String key = prefix + timeKey;
+                    if (redisTemplate.hasKey(key)) {
+                        redisTemplate.delete(key);
+                        cleanedCount++;
+                    }
+                    
+                    // 清理相关的详细数据
+                    String detailKey = key + ":details";
+                    if (redisTemplate.hasKey(detailKey)) {
+                        redisTemplate.delete(detailKey);
+                        cleanedCount++;
+                    }
+                    
+                    String uniqueIpKey = key + ":unique_ips";
+                    if (redisTemplate.hasKey(uniqueIpKey)) {
+                        redisTemplate.delete(uniqueIpKey);
+                        cleanedCount++;
+                    }
+                    
+                    String uniqueUserKey = key + ":unique_users";
+                    if (redisTemplate.hasKey(uniqueUserKey)) {
+                        redisTemplate.delete(uniqueUserKey);
+                        cleanedCount++;
+                    }
+                }
+            }
+            
+            // 清理过期的请求详情
+             Set<String> requestKeys = redisTemplate.keys(getRequestPrefix() + "*");
+            for (String requestKey : requestKeys) {
+                Long ttl = redisTemplate.getExpire(requestKey);
+                if (ttl <= 0) {
+                    redisTemplate.delete(requestKey);
+                    cleanedCount++;
+                }
+            }
 
-            // 这里可以实现具体的清理逻辑
-            // 由于使用Redis存储，可以通过设置TTL自动过期
+            // 清理过期的限流数据
+             Set<String> rateLimitKeys = redisTemplate.keys(getRateLimitPrefix() + "*");
+            for (String rateLimitKey : rateLimitKeys) {
+                Long ttl = redisTemplate.getExpire(rateLimitKey);
+                if (ttl <= 0) {
+                    redisTemplate.delete(rateLimitKey);
+                    cleanedCount++;
+                }
+            }
 
             result.put("cleaned_count", cleanedCount);
             result.put("retention_days", retentionDays);
             result.put("cutoff_time", cutoffTimeStr);
+            result.put("cleanup_time", LocalDateTime.now().toString());
 
+            log.info("清理过期数据完成，清理了 {} 个键", cleanedCount);
             return Result.success(result);
         } catch (Exception e) {
             log.error("清理过期数据失败", e);
@@ -486,7 +681,7 @@ public class GatewayMonitorServiceImpl implements GatewayMonitorService {
                 LocalDateTime time = LocalDateTime.now().minusMinutes(i);
                 String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(time);
 
-                String performanceKey = PERFORMANCE_PREFIX + timeKey;
+                String performanceKey = getPerformancePrefix() + timeKey;
                 Map<Object, Object> performanceData = redisTemplate.opsForHash().entries(performanceKey);
 
                 for (Map.Entry<Object, Object> entry : performanceData.entrySet()) {
@@ -524,12 +719,65 @@ public class GatewayMonitorServiceImpl implements GatewayMonitorService {
             Map<String, Object> stats = new HashMap<>();
             Map<String, Integer> countryStats = new HashMap<>();
             Map<String, Integer> cityStats = new HashMap<>();
+            Map<String, Integer> ipStats = new HashMap<>();
+            Set<String> allIps = new HashSet<>();
 
-            // 这里可以根据IP地址解析地理位置
-            // 目前简化处理，返回空统计
+            // 收集所有IP地址
+            for (int i = 0; i < timeRange; i++) {
+                LocalDateTime time = LocalDateTime.now().minusMinutes(i);
+                String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(time);
+                String trafficKey = getTrafficPrefix() + timeKey;
+                
+                Map<Object, Object> trafficData = redisTemplate.opsForHash().entries(trafficKey);
+                for (Map.Entry<Object, Object> entry : trafficData.entrySet()) {
+                    String key = (String) entry.getKey();
+                    if (key.startsWith("ip:")) {
+                        String ip = key.substring(3);
+                        Integer count = Integer.parseInt((String) entry.getValue());
+                        ipStats.merge(ip, count, Integer::sum);
+                        allIps.add(ip);
+                    }
+                }
+            }
+            
+            // 简化的地理位置解析（基于IP地址模式）
+            for (String ip : allIps) {
+                Integer count = ipStats.get(ip);
+                
+                // 简单的地理位置推断（实际应用中应使用专业的IP地理位置数据库）
+                String country = getCountryByIp(ip);
+                String city = getCityByIp(ip);
+                
+                countryStats.merge(country, count, Integer::sum);
+                cityStats.merge(city, count, Integer::sum);
+            }
+            
+            // 按访问量排序
+            List<Map<String, Object>> topCountries = countryStats.entrySet().stream()
+                    .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                    .limit(10)
+                    .map(entry -> {
+                        Map<String, Object> countryInfo = new HashMap<>();
+                        countryInfo.put("country", entry.getKey());
+                        countryInfo.put("count", entry.getValue());
+                        return countryInfo;
+                    })
+                    .toList();
+                    
+            List<Map<String, Object>> topCities = cityStats.entrySet().stream()
+                    .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                    .limit(10)
+                    .map(entry -> {
+                        Map<String, Object> cityInfo = new HashMap<>();
+                        cityInfo.put("city", entry.getKey());
+                        cityInfo.put("count", entry.getValue());
+                        return cityInfo;
+                    })
+                    .toList();
 
-            stats.put("country_stats", countryStats);
-            stats.put("city_stats", cityStats);
+            stats.put("top_countries", topCountries);
+            stats.put("top_cities", topCities);
+            stats.put("total_ips", allIps.size());
             stats.put("time_range", timeRange);
 
             return Result.success(stats);
@@ -538,86 +786,145 @@ public class GatewayMonitorServiceImpl implements GatewayMonitorService {
             return Result.error(ResultEnum.SYSTEM_ERROR, null);
         }
     }
-
+    
     /**
-     * 更新流量统计
+     * 根据IP地址推断国家（简化实现）
+     * 实际应用中应使用专业的IP地理位置数据库如MaxMind GeoIP
      */
-    private void updateTrafficStats(String method, String uri, String clientIp, Long userId) {
-        try {
-            String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(LocalDateTime.now());
-            String trafficKey = TRAFFIC_PREFIX + timeKey;
-
-            redisTemplate.opsForHash().increment(trafficKey, "total", 1);
-            redisTemplate.expire(trafficKey, 24, TimeUnit.HOURS);
-        } catch (Exception e) {
-            log.error("更新流量统计失败", e);
+    private String getCountryByIp(String ip) {
+        if (ip.startsWith("127.") || ip.startsWith("192.168.") || ip.startsWith("10.")) {
+            return "本地网络";
         }
+        // 简化的地理位置推断
+        if (ip.startsWith("1.") || ip.startsWith("14.") || ip.startsWith("27.")) {
+            return "中国";
+        }
+        if (ip.startsWith("8.") || ip.startsWith("4.")) {
+            return "美国";
+        }
+        return "其他";
     }
-
+    
     /**
-     * 更新API统计
+     * 根据IP地址推断城市（简化实现）
      */
-    private void updateApiStats(String method, String uri) {
-        try {
-            String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(LocalDateTime.now());
-            String apiStatsKey = API_STATS_PREFIX + timeKey;
-            String apiKey = method + " " + uri;
-
-            redisTemplate.opsForHash().increment(apiStatsKey, apiKey, 1);
-            redisTemplate.expire(apiStatsKey, 24, TimeUnit.HOURS);
-        } catch (Exception e) {
-            log.error("更新API统计失败", e);
+    private String getCityByIp(String ip) {
+        if (ip.startsWith("127.") || ip.startsWith("192.168.") || ip.startsWith("10.")) {
+            return "本地";
         }
-    }
-
-    /**
-     * 更新用户活跃度统计
-     */
-    private void updateUserActivityStats(Long userId) {
-        try {
-            String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(LocalDateTime.now());
-            String userActivityKey = USER_ACTIVITY_PREFIX + timeKey;
-
-            redisTemplate.opsForSet().add(userActivityKey, userId.toString());
-            redisTemplate.expire(userActivityKey, 24, TimeUnit.HOURS);
-        } catch (Exception e) {
-            log.error("更新用户活跃度统计失败", e);
-        }
+        // 简化的城市推断
+        return "未知城市";
     }
 
     /**
      * 更新性能统计
      */
     private void updatePerformanceStats(String method, String uri, long executionTime) {
-        try {
-            String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(LocalDateTime.now());
-            String performanceKey = PERFORMANCE_PREFIX + timeKey;
+        safeExecuteAction(() -> {
+            String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
+            String performanceKey = getPerformancePrefix() + timeKey;
             String apiKey = method + " " + uri;
 
             redisTemplate.opsForHash().put(performanceKey, apiKey, String.valueOf(executionTime));
-            redisTemplate.expire(performanceKey, 24, TimeUnit.HOURS);
-        } catch (Exception e) {
-            log.error("更新性能统计失败", e);
-        }
+            redisTemplate.expire(performanceKey, dataRetentionHours, TimeUnit.HOURS);
+        }, "更新性能统计失败");
     }
 
     /**
      * 更新错误统计
+     * 记录错误类型、API错误统计等详细信息
      */
     private void updateErrorStats(String method, String uri, int statusCode, String errorMessage) {
-        try {
-            String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(LocalDateTime.now());
-            String errorStatsKey = ERROR_STATS_PREFIX + timeKey;
+        safeExecuteAction(() -> {
+            String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
+            String errorStatsKey = getErrorStatsPrefix() + timeKey;
             String errorType = "HTTP_" + statusCode;
+            String apiKey = method + " " + uri;
 
+            // 更新错误类型统计
             redisTemplate.opsForHash().increment(errorStatsKey, errorType, 1);
-            redisTemplate.expire(errorStatsKey, 24, TimeUnit.HOURS);
+            
+            // 更新API错误统计
+            redisTemplate.opsForHash().increment(errorStatsKey, "api:" + apiKey, 1);
+            
+            // 记录具体错误信息（如果有）
+            if (isNotBlank(errorMessage)) {
+                String errorKey = errorStatsKey + ":details";
+                String errorDetail = apiKey + ":" + statusCode + ":" + errorMessage;
+                redisTemplate.opsForList().leftPush(errorKey, errorDetail);
+                redisTemplate.opsForList().trim(errorKey, 0, maxErrorDetails - 1); // 保留配置数量的错误详情
+                redisTemplate.expire(errorKey, dataRetentionHours, TimeUnit.HOURS);
+            }
+            
+            redisTemplate.expire(errorStatsKey, dataRetentionHours, TimeUnit.HOURS);
 
             // 更新流量统计中的错误计数
-            String trafficKey = TRAFFIC_PREFIX + timeKey;
+            String trafficKey = getTrafficPrefix() + timeKey;
             redisTemplate.opsForHash().increment(trafficKey, "error", 1);
-        } catch (Exception e) {
-            log.error("更新错误统计失败", e);
-        }
+        }, "更新错误统计失败");
+    }
+
+    /**
+     * 更新流量统计
+     * 记录总请求数、IP统计、用户统计等详细信息
+     */
+    private void updateTrafficStats(String method, String uri, String clientIp, Long userId) {
+        safeExecuteAction(() -> {
+            String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
+            String trafficKey = getTrafficPrefix() + timeKey;
+
+            // 更新总请求数
+            redisTemplate.opsForHash().increment(trafficKey, "total", 1);
+            
+            // 更新IP统计
+            if (isNotBlank(clientIp)) {
+                redisTemplate.opsForHash().increment(trafficKey, "ip:" + clientIp, 1);
+                // 记录独立IP数量
+                String ipSetKey = trafficKey + ":unique_ips";
+                redisTemplate.opsForSet().add(ipSetKey, clientIp);
+                redisTemplate.expire(ipSetKey, 24, TimeUnit.HOURS);
+            }
+            
+            // 更新用户统计
+            if (userId != null) {
+                redisTemplate.opsForHash().increment(trafficKey, "user:" + userId, 1);
+                // 记录独立用户数量
+                String userSetKey = trafficKey + ":unique_users";
+                redisTemplate.opsForSet().add(userSetKey, userId.toString());
+                redisTemplate.expire(userSetKey, 24, TimeUnit.HOURS);
+            }
+            
+            // 更新方法统计
+            redisTemplate.opsForHash().increment(trafficKey, "method:" + method, 1);
+            
+            redisTemplate.expire(trafficKey, dataRetentionHours, TimeUnit.HOURS);
+        }, "更新流量统计失败");
+    }
+
+    /**
+     * 更新API统计
+     */
+    private void updateApiStats(String method, String uri) {
+        safeExecuteAction(() -> {
+            String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
+            String apiStatsKey = getApiStatsPrefix() + timeKey;
+            String apiKey = method + " " + uri;
+
+            redisTemplate.opsForHash().increment(apiStatsKey, apiKey, 1);
+            redisTemplate.expire(apiStatsKey, dataRetentionHours, TimeUnit.HOURS);
+        }, "更新API统计失败");
+    }
+
+    /**
+     * 更新用户活跃度统计
+     */
+    private void updateUserActivityStats(Long userId) {
+        safeExecuteAction(() -> {
+            String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
+            String userActivityKey = getUserActivityPrefix() + timeKey;
+
+            redisTemplate.opsForSet().add(userActivityKey, userId.toString());
+            redisTemplate.expire(userActivityKey, dataRetentionHours, TimeUnit.HOURS);
+        }, "更新用户活跃度统计失败");
     }
 }
