@@ -69,11 +69,35 @@ public class OAuthUtils {
      * 验证重定向URI是否合法
      *
      * @param redirectUri    重定向URI
-     * @param registeredUris 注册的重定向URI列表
+     * @param registeredUris 注册的重定向URI列表（JSON数组或逗号分隔）
      * @return 是否合法
      */
     public static boolean validateRedirectUri(String redirectUri, String registeredUris) {
-        return validateGrantType(redirectUri, registeredUris);
+        if (!StringUtils.hasText(redirectUri) || !StringUtils.hasText(registeredUris)) {
+            return false;
+        }
+
+        // 支持JSON数组格式或逗号分隔格式
+        String[] uris;
+        if (registeredUris.trim().startsWith("[")) {
+            // JSON数组格式
+            try {
+                List<String> uriList = Arrays.asList(registeredUris.replace("[", "").replace("]", "").replace("\"", "").split(","));
+                uris = uriList.toArray(new String[0]);
+            } catch (Exception e) {
+                return false;
+            }
+        } else {
+            // 逗号分隔格式
+            uris = registeredUris.split(",");
+        }
+
+        for (String uri : uris) {
+            if (redirectUri.trim().equals(uri.trim())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

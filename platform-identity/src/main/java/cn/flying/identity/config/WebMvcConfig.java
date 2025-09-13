@@ -25,10 +25,6 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addResourceHandler("/static/**")
                 .addResourceLocations("classpath:/static/");
 
-        // 配置docs文档资源映射
-        registry.addResourceHandler("/docs/**")
-                .addResourceLocations("classpath:/static/docs/");
-
         // 配置favicon.ico映射
         registry.addResourceHandler("/favicon.ico")
                 .addResourceLocations("classpath:/static/favicon.ico");

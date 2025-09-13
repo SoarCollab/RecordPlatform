@@ -143,42 +143,4 @@ public class AuthController {
     public Result<Object> getTokenInfo() {
         return authService.getTokenInfo();
     }
-
-    // 兼容原Spring Security接口的额外端点
-
-    /**
-     * 兼容原登录接口
-     *
-     * @param username 用户名
-     * @param password 密码
-     * @return 登录结果
-     */
-    @PostMapping("/signin")
-    @Operation(summary = "登录（兼容接口）", description = "兼容原Spring Security的登录接口")
-    public Result<String> signin(@RequestParam String username, @RequestParam String password) {
-        return authService.login(username, password);
-    }
-
-    /**
-     * 兼容原注册接口
-     *
-     * @param vo 注册信息
-     * @return 注册结果
-     */
-    @PostMapping("/signup")
-    @Operation(summary = "注册（兼容接口）", description = "兼容原Spring Security的注册接口")
-    public Result<Void> signup(@Valid @RequestBody EmailRegisterVO vo) {
-        return authService.register(vo);
-    }
-
-    /**
-     * 兼容原用户信息接口
-     *
-     * @return 用户信息
-     */
-    @GetMapping("/me")
-    @Operation(summary = "获取用户信息（兼容接口）", description = "兼容原Spring Security的用户信息接口")
-    public Result<AccountVO> getCurrentUser() {
-        return authService.getUserInfo();
-    }
 }

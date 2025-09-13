@@ -48,6 +48,7 @@ public class SaTokenConfig implements WebMvcConfigurer {
                     .notMatch("/api/auth/register")
                     .notMatch("/api/auth/signup")
                     .notMatch("/api/auth/verify-code")
+                    .notMatch("/api/verify/**")
                     .notMatch("/api/auth/reset-password")
                     .notMatch("/api/auth/status")
                     // 排除Swagger文档相关路径

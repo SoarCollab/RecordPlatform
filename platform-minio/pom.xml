@@ -96,12 +96,6 @@
             <version>8.5.9</version> <!-- 你可以选择一个更新的版本 -->
         </dependency>
 
-        <!-- Spring Data Redis -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-redis</artifactId>
-        </dependency>
-
         <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>

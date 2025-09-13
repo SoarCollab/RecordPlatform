@@ -46,37 +46,21 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
     // Redis 键前缀配置
     @Value("${gateway.redis.prefix:gateway:}")
     private String redisPrefix;
-    
-    // 动态生成Redis键前缀
-    private String getRequestPrefix() { return redisPrefix + "request:"; }
-    private String getTrafficPrefix() { return redisPrefix + "traffic:"; }
-    private String getApiStatsPrefix() { return redisPrefix + "api:"; }
-    private String getErrorStatsPrefix() { return redisPrefix + "error:"; }
-    private String getPerformancePrefix() { return redisPrefix + "performance:"; }
-    private String getUserActivityPrefix() { return redisPrefix + "user:"; }
-    private String getRateLimitPrefix() { return redisPrefix + "limit:"; }
-    
     // 数据保留时间配置
     @Value("${gateway.data.retention-hours:24}")
     private int dataRetentionHours;
-    
     // 错误详情保留数量配置
     @Value("${gateway.error.max-details:100}")
     private int maxErrorDetails;
-
     @Resource(name = "stringRedisTemplate")
     private StringRedisTemplate redisTemplate;
-
     @Resource
     private FlowUtils flowUtils;
-
     // 流量限制配置
     @Value("${gateway.rate-limit.requests-per-minute:60}")
     private int requestsPerMinute;
-
     @Value("${gateway.rate-limit.requests-per-hour:1000}")
     private int requestsPerHour;
-
     @Value("${gateway.rate-limit.block-time:300}")
     private int blockTime;
 
@@ -117,6 +101,87 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                 updateUserActivityStats(userId);
             }
         }, "记录请求开始失败");
+    }
+
+    // 动态生成Redis键前缀
+    private String getRequestPrefix() {
+        return redisPrefix + "request:";
+    }
+
+    /**
+     * 更新流量统计
+     * 记录总请求数、IP统计、用户统计等详细信息
+     */
+    private void updateTrafficStats(String method, String uri, String clientIp, Long userId) {
+        safeExecuteAction(() -> {
+            String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
+            String trafficKey = getTrafficPrefix() + timeKey;
+
+            // 更新总请求数
+            redisTemplate.opsForHash().increment(trafficKey, "total", 1);
+
+            // 更新IP统计
+            if (isNotBlank(clientIp)) {
+                redisTemplate.opsForHash().increment(trafficKey, "ip:" + clientIp, 1);
+                // 记录独立IP数量
+                String ipSetKey = trafficKey + ":unique_ips";
+                redisTemplate.opsForSet().add(ipSetKey, clientIp);
+                redisTemplate.expire(ipSetKey, 24, TimeUnit.HOURS);
+            }
+
+            // 更新用户统计
+            if (userId != null) {
+                redisTemplate.opsForHash().increment(trafficKey, "user:" + userId, 1);
+                // 记录独立用户数量
+                String userSetKey = trafficKey + ":unique_users";
+                redisTemplate.opsForSet().add(userSetKey, userId.toString());
+                redisTemplate.expire(userSetKey, 24, TimeUnit.HOURS);
+            }
+
+            // 更新方法统计
+            redisTemplate.opsForHash().increment(trafficKey, "method:" + method, 1);
+
+            redisTemplate.expire(trafficKey, dataRetentionHours, TimeUnit.HOURS);
+        }, "更新流量统计失败");
+    }
+
+    /**
+     * 更新API统计
+     */
+    private void updateApiStats(String method, String uri) {
+        safeExecuteAction(() -> {
+            String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
+            String apiStatsKey = getApiStatsPrefix() + timeKey;
+            String apiKey = method + " " + uri;
+
+            redisTemplate.opsForHash().increment(apiStatsKey, apiKey, 1);
+            redisTemplate.expire(apiStatsKey, dataRetentionHours, TimeUnit.HOURS);
+        }, "更新API统计失败");
+    }
+
+    /**
+     * 更新用户活跃度统计
+     */
+    private void updateUserActivityStats(Long userId) {
+        safeExecuteAction(() -> {
+            String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
+            String userActivityKey = getUserActivityPrefix() + timeKey;
+
+            redisTemplate.opsForSet().add(userActivityKey, userId.toString());
+            redisTemplate.expire(userActivityKey, dataRetentionHours, TimeUnit.HOURS);
+        }, "更新用户活跃度统计失败");
+    }
+
+    private String getTrafficPrefix() {
+        return redisPrefix + "traffic:";
+    }
+
+    private String getApiStatsPrefix() {
+        return redisPrefix + "api:";
+    }
+
+    private String getUserActivityPrefix() {
+        return redisPrefix + "user:";
     }
 
     @Override
@@ -241,6 +306,10 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
         }
     }
 
+    private String getRateLimitPrefix() {
+        return redisPrefix + "limit:";
+    }
+
     @Override
     public Result<Map<String, Object>> getRealTimeTrafficStats(int timeRange) {
         try {
@@ -266,14 +335,14 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
 
                 long minuteTotal = 0;
                 long minuteError = 0;
-                
+
                 if (!trafficData.isEmpty()) {
                     minuteTotal = Long.parseLong((String) trafficData.getOrDefault("total", "0"));
                     minuteError = Long.parseLong((String) trafficData.getOrDefault("error", "0"));
-                    
+
                     totalRequests += minuteTotal;
                     errorRequests += minuteError;
-                    
+
                     // 统计方法分布
                     for (Map.Entry<Object, Object> entry : trafficData.entrySet()) {
                         String key = (String) entry.getKey();
@@ -283,18 +352,18 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                             methodStats.merge(method, count, Long::sum);
                         }
                     }
-                    
+
                     // 获取独立IP和用户数
                     String ipSetKey = trafficKey + ":unique_ips";
                     String userSetKey = trafficKey + ":unique_users";
-                    
+
                     Set<String> ips = redisTemplate.opsForSet().members(ipSetKey);
                     Set<String> users = redisTemplate.opsForSet().members(userSetKey);
-                    
+
                     if (ips != null) uniqueIps.addAll(ips);
                     if (users != null) uniqueUsers.addAll(users);
                 }
-                
+
                 // 构建时间序列数据
                 Map<String, Object> timePoint = new HashMap<>();
                 timePoint.put("time", timeKey);
@@ -303,7 +372,7 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                 timePoint.put("success", minuteTotal - minuteError);
                 timeSeriesData.add(timePoint);
             }
-            
+
             successRequests = totalRequests - errorRequests;
 
             stats.put("total_requests", totalRequests);
@@ -388,7 +457,7 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                 for (Map.Entry<Object, Object> entry : errorData.entrySet()) {
                     String key = (String) entry.getKey();
                     Long count = Long.parseLong((String) entry.getValue());
-                    
+
                     if (key.startsWith("api:")) {
                         // API错误统计
                         String api = key.substring(4);
@@ -399,7 +468,7 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                     }
                     totalErrors += count;
                 }
-                
+
                 // 获取错误详情
                 String errorDetailsKey = errorStatsKey + ":details";
                 List<String> details = redisTemplate.opsForList().range(errorDetailsKey, 0, 19); // 获取最近20条
@@ -407,7 +476,7 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                     recentErrors.addAll(details);
                 }
             }
-            
+
             // 按错误数量排序API错误统计
             List<Map<String, Object>> topErrorApis = apiErrorCounts.entrySet().stream()
                     .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
@@ -594,36 +663,36 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
             // 清理过期的请求记录
             LocalDateTime cutoffTime = LocalDateTime.now().minusDays(retentionDays);
             String cutoffTimeStr = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(cutoffTime);
-            
+
             // 清理过期的流量统计数据
             for (int i = retentionDays * 24 * 60; i < retentionDays * 24 * 60 + 1440; i++) {
                 LocalDateTime expiredTime = LocalDateTime.now().minusMinutes(i);
                 String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(expiredTime);
-                
+
                 // 清理各类统计数据
-                 String[] prefixes = {getTrafficPrefix(), getApiStatsPrefix(), getErrorStatsPrefix(), 
-                                     getPerformancePrefix(), getUserActivityPrefix()};
-                
+                String[] prefixes = {getTrafficPrefix(), getApiStatsPrefix(), getErrorStatsPrefix(),
+                        getPerformancePrefix(), getUserActivityPrefix()};
+
                 for (String prefix : prefixes) {
                     String key = prefix + timeKey;
                     if (redisTemplate.hasKey(key)) {
                         redisTemplate.delete(key);
                         cleanedCount++;
                     }
-                    
+
                     // 清理相关的详细数据
                     String detailKey = key + ":details";
                     if (redisTemplate.hasKey(detailKey)) {
                         redisTemplate.delete(detailKey);
                         cleanedCount++;
                     }
-                    
+
                     String uniqueIpKey = key + ":unique_ips";
                     if (redisTemplate.hasKey(uniqueIpKey)) {
                         redisTemplate.delete(uniqueIpKey);
                         cleanedCount++;
                     }
-                    
+
                     String uniqueUserKey = key + ":unique_users";
                     if (redisTemplate.hasKey(uniqueUserKey)) {
                         redisTemplate.delete(uniqueUserKey);
@@ -631,9 +700,9 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                     }
                 }
             }
-            
+
             // 清理过期的请求详情
-             Set<String> requestKeys = redisTemplate.keys(getRequestPrefix() + "*");
+            Set<String> requestKeys = redisTemplate.keys(getRequestPrefix() + "*");
             for (String requestKey : requestKeys) {
                 Long ttl = redisTemplate.getExpire(requestKey);
                 if (ttl <= 0) {
@@ -643,7 +712,7 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
             }
 
             // 清理过期的限流数据
-             Set<String> rateLimitKeys = redisTemplate.keys(getRateLimitPrefix() + "*");
+            Set<String> rateLimitKeys = redisTemplate.keys(getRateLimitPrefix() + "*");
             for (String rateLimitKey : rateLimitKeys) {
                 Long ttl = redisTemplate.getExpire(rateLimitKey);
                 if (ttl <= 0) {
@@ -727,7 +796,7 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                 LocalDateTime time = LocalDateTime.now().minusMinutes(i);
                 String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(time);
                 String trafficKey = getTrafficPrefix() + timeKey;
-                
+
                 Map<Object, Object> trafficData = redisTemplate.opsForHash().entries(trafficKey);
                 for (Map.Entry<Object, Object> entry : trafficData.entrySet()) {
                     String key = (String) entry.getKey();
@@ -739,19 +808,19 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                     }
                 }
             }
-            
+
             // 简化的地理位置解析（基于IP地址模式）
             for (String ip : allIps) {
                 Integer count = ipStats.get(ip);
-                
+
                 // 简单的地理位置推断（实际应用中应使用专业的IP地理位置数据库）
                 String country = getCountryByIp(ip);
                 String city = getCityByIp(ip);
-                
+
                 countryStats.merge(country, count, Integer::sum);
                 cityStats.merge(city, count, Integer::sum);
             }
-            
+
             // 按访问量排序
             List<Map<String, Object>> topCountries = countryStats.entrySet().stream()
                     .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
@@ -763,7 +832,7 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                         return countryInfo;
                     })
                     .toList();
-                    
+
             List<Map<String, Object>> topCities = cityStats.entrySet().stream()
                     .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
                     .limit(10)
@@ -785,35 +854,6 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
             log.error("获取地理位置统计失败", e);
             return Result.error(ResultEnum.SYSTEM_ERROR, null);
         }
-    }
-    
-    /**
-     * 根据IP地址推断国家（简化实现）
-     * 实际应用中应使用专业的IP地理位置数据库如MaxMind GeoIP
-     */
-    private String getCountryByIp(String ip) {
-        if (ip.startsWith("127.") || ip.startsWith("192.168.") || ip.startsWith("10.")) {
-            return "本地网络";
-        }
-        // 简化的地理位置推断
-        if (ip.startsWith("1.") || ip.startsWith("14.") || ip.startsWith("27.")) {
-            return "中国";
-        }
-        if (ip.startsWith("8.") || ip.startsWith("4.")) {
-            return "美国";
-        }
-        return "其他";
-    }
-    
-    /**
-     * 根据IP地址推断城市（简化实现）
-     */
-    private String getCityByIp(String ip) {
-        if (ip.startsWith("127.") || ip.startsWith("192.168.") || ip.startsWith("10.")) {
-            return "本地";
-        }
-        // 简化的城市推断
-        return "未知城市";
     }
 
     /**
@@ -843,10 +883,10 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
 
             // 更新错误类型统计
             redisTemplate.opsForHash().increment(errorStatsKey, errorType, 1);
-            
+
             // 更新API错误统计
             redisTemplate.opsForHash().increment(errorStatsKey, "api:" + apiKey, 1);
-            
+
             // 记录具体错误信息（如果有）
             if (isNotBlank(errorMessage)) {
                 String errorKey = errorStatsKey + ":details";
@@ -855,7 +895,7 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                 redisTemplate.opsForList().trim(errorKey, 0, maxErrorDetails - 1); // 保留配置数量的错误详情
                 redisTemplate.expire(errorKey, dataRetentionHours, TimeUnit.HOURS);
             }
-            
+
             redisTemplate.expire(errorStatsKey, dataRetentionHours, TimeUnit.HOURS);
 
             // 更新流量统计中的错误计数
@@ -864,67 +904,178 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
         }, "更新错误统计失败");
     }
 
-    /**
-     * 更新流量统计
-     * 记录总请求数、IP统计、用户统计等详细信息
-     */
-    private void updateTrafficStats(String method, String uri, String clientIp, Long userId) {
-        safeExecuteAction(() -> {
-            String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
-            String trafficKey = getTrafficPrefix() + timeKey;
+    private String getPerformancePrefix() {
+        return redisPrefix + "performance:";
+    }
 
-            // 更新总请求数
-            redisTemplate.opsForHash().increment(trafficKey, "total", 1);
-            
-            // 更新IP统计
-            if (isNotBlank(clientIp)) {
-                redisTemplate.opsForHash().increment(trafficKey, "ip:" + clientIp, 1);
-                // 记录独立IP数量
-                String ipSetKey = trafficKey + ":unique_ips";
-                redisTemplate.opsForSet().add(ipSetKey, clientIp);
-                redisTemplate.expire(ipSetKey, 24, TimeUnit.HOURS);
-            }
-            
-            // 更新用户统计
-            if (userId != null) {
-                redisTemplate.opsForHash().increment(trafficKey, "user:" + userId, 1);
-                // 记录独立用户数量
-                String userSetKey = trafficKey + ":unique_users";
-                redisTemplate.opsForSet().add(userSetKey, userId.toString());
-                redisTemplate.expire(userSetKey, 24, TimeUnit.HOURS);
-            }
-            
-            // 更新方法统计
-            redisTemplate.opsForHash().increment(trafficKey, "method:" + method, 1);
-            
-            redisTemplate.expire(trafficKey, dataRetentionHours, TimeUnit.HOURS);
-        }, "更新流量统计失败");
+    private String getErrorStatsPrefix() {
+        return redisPrefix + "error:";
     }
 
     /**
-     * 更新API统计
+     * 根据IP地址推断国家（简化实现）
+     * 实际应用中应使用专业的IP地理位置数据库如MaxMind GeoIP
      */
-    private void updateApiStats(String method, String uri) {
-        safeExecuteAction(() -> {
-            String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
-            String apiStatsKey = getApiStatsPrefix() + timeKey;
-            String apiKey = method + " " + uri;
+    private String getCountryByIp(String ip) {
+        if (ip == null || ip.isEmpty()) {
+            return "未知";
+        }
 
-            redisTemplate.opsForHash().increment(apiStatsKey, apiKey, 1);
-            redisTemplate.expire(apiStatsKey, dataRetentionHours, TimeUnit.HOURS);
-        }, "更新API统计失败");
+        // 内网IP判断
+        if (isInternalIp(ip)) {
+            return "内网";
+        }
+
+        // 基于IP段的地理位置推断（简化实现）
+        // 实际应用中应使用专业的IP地理位置数据库如MaxMind GeoIP2
+        try {
+            String[] parts = ip.split("\\.");
+            if (parts.length != 4) {
+                return "未知";
+            }
+
+            int firstOctet = Integer.parseInt(parts[0]);
+            int secondOctet = Integer.parseInt(parts[1]);
+
+            // 中国大陆常见IP段
+            if ((firstOctet >= 1 && firstOctet <= 2) ||
+                    (firstOctet >= 14 && firstOctet <= 15) ||
+                    (firstOctet >= 27 && firstOctet <= 28) ||
+                    (firstOctet >= 36 && firstOctet <= 37) ||
+                    (firstOctet >= 42 && firstOctet <= 43) ||
+                    (firstOctet >= 58 && firstOctet <= 63) ||
+                    (firstOctet >= 101 && firstOctet <= 106) ||
+                    (firstOctet >= 110 && firstOctet <= 125) ||
+                    (firstOctet >= 180 && firstOctet <= 183) ||
+                    (firstOctet >= 202 && firstOctet <= 203) ||
+                    (firstOctet >= 210 && firstOctet <= 222)) {
+                return "中国";
+            }
+
+            // 美国常见IP段
+            if ((firstOctet >= 3 && firstOctet <= 11) ||
+                    (firstOctet >= 12 && firstOctet <= 13) ||
+                    (firstOctet >= 16 && firstOctet <= 26) ||
+                    (firstOctet >= 29 && firstOctet <= 35) ||
+                    (firstOctet >= 38 && firstOctet <= 41) ||
+                    (firstOctet >= 44 && firstOctet <= 57) ||
+                    (firstOctet >= 64 && firstOctet <= 100)) {
+                return "美国";
+            }
+
+            // 其他常见国家/地区
+            if (firstOctet == 128 || firstOctet == 129) {
+                return "日本";
+            }
+            if (firstOctet >= 130 && firstOctet <= 132) {
+                return "韩国";
+            }
+            if (firstOctet >= 133 && firstOctet <= 139) {
+                return "新加坡";
+            }
+            if (firstOctet >= 140 && firstOctet <= 149) {
+                return "香港";
+            }
+            if (firstOctet >= 150 && firstOctet <= 159) {
+                return "台湾";
+            }
+
+            return "其他";
+        } catch (NumberFormatException e) {
+            return "未知";
+        }
     }
 
     /**
-     * 更新用户活跃度统计
+     * 根据IP地址推断城市（简化实现）
      */
-    private void updateUserActivityStats(Long userId) {
-        safeExecuteAction(() -> {
-            String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
-            String userActivityKey = getUserActivityPrefix() + timeKey;
+    private String getCityByIp(String ip) {
+        if (ip == null || ip.isEmpty()) {
+            return "未知";
+        }
 
-            redisTemplate.opsForSet().add(userActivityKey, userId.toString());
-            redisTemplate.expire(userActivityKey, dataRetentionHours, TimeUnit.HOURS);
-        }, "更新用户活跃度统计失败");
+        if (isInternalIp(ip)) {
+            return "本地网络";
+        }
+
+        // 基于国家进一步推断城市（简化实现）
+        String country = getCountryByIp(ip);
+
+        return switch (country) {
+            case "中国" ->
+                // 简化的中国城市推断
+                    getChinaCityByIp(ip);
+            case "美国" -> "美国主要城市";
+            case "日本" -> "东京";
+            case "韩国" -> "首尔";
+            case "新加坡" -> "新加坡";
+            case "香港" -> "香港";
+            case "台湾" -> "台北";
+            default -> "未知城市";
+        };
+    }
+
+    /**
+     * 根据IP推断中国城市（简化实现）
+     */
+    private String getChinaCityByIp(String ip) {
+        try {
+            String[] parts = ip.split("\\.");
+            int firstOctet = Integer.parseInt(parts[0]);
+            int secondOctet = Integer.parseInt(parts[1]);
+
+            // 简化的城市推断（实际应使用专业数据库）
+            if (firstOctet == 1 || (firstOctet == 42 && secondOctet >= 120)) {
+                return "北京";
+            }
+            if (firstOctet == 14 || (firstOctet == 101 && secondOctet >= 80)) {
+                return "上海";
+            }
+            if (firstOctet == 27 || (firstOctet == 183 && secondOctet >= 1 && secondOctet <= 63)) {
+                return "深圳";
+            }
+            if (firstOctet == 36 || (firstOctet == 202 && secondOctet >= 96)) {
+                return "广州";
+            }
+            if (firstOctet == 58 || (firstOctet == 110 && secondOctet >= 80)) {
+                return "杭州";
+            }
+
+            return "其他城市";
+        } catch (NumberFormatException e) {
+            return "未知城市";
+        }
+    }
+
+    /**
+     * 判断是否为内网IP
+     */
+    private boolean isInternalIp(String ip) {
+        if (ip == null || ip.isEmpty()) {
+            return false;
+        }
+
+        return ip.startsWith("127.") ||
+                ip.startsWith("192.168.") ||
+                ip.startsWith("10.") ||
+                (ip.startsWith("172.") && isValidPrivateIp172(ip)) ||
+                ip.equals("::1") ||
+                ip.equals("localhost");
+    }
+
+    /**
+     * 检查172网段的私有IP
+     */
+    private boolean isValidPrivateIp172(String ip) {
+        try {
+            String[] parts = ip.split("\\.");
+            if (parts.length >= 2) {
+                int secondOctet = Integer.parseInt(parts[1]);
+                return secondOctet >= 16 && secondOctet <= 31;
+            }
+        } catch (NumberFormatException e) {
+            // 忽略异常
+        }
+        return false;
     }
 }

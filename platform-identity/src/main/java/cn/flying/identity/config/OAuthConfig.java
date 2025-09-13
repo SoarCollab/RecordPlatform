@@ -69,6 +69,24 @@ public class OAuthConfig {
     private boolean requireHttps;
 
     /**
+     * 是否使用BCrypt加密客户端密钥
+     */
+    @Value("${oauth.security.use-bcrypt:false}")
+    private boolean useBcrypt;
+
+    /**
+     * 是否要求状态参数验证（防CSRF攻击）
+     */
+    @Value("${oauth.security.require-state:true}")
+    private boolean requireState;
+
+    /**
+     * 授权码最大重试次数
+     */
+    @Value("${oauth.security.max-code-attempts:3}")
+    private int maxCodeAttempts;
+
+    /**
      * Redis键前缀
      */
     @Value("${oauth.redis.key-prefix:oauth2:}")

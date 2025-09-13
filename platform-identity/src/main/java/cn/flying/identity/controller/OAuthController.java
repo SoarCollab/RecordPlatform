@@ -3,6 +3,7 @@ package cn.flying.identity.controller;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.flying.identity.dto.OAuthClient;
 import cn.flying.identity.service.OAuthService;
+import cn.flying.identity.service.SSOService;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import io.swagger.v3.oas.annotations.Operation;
@@ -11,7 +12,6 @@ import jakarta.annotation.Resource;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * OAuth2.0控制器
@@ -24,6 +24,9 @@ public class OAuthController {
 
     @Resource
     private OAuthService oauthService;
+
+    @Resource
+    private SSOService ssoService;
 
     /**
      * 用户授权确认
@@ -88,7 +91,14 @@ public class OAuthController {
     @GetMapping("/userinfo")
     @Operation(summary = "获取用户信息")
     public Result<Map<String, Object>> userinfo(@RequestHeader("Authorization") String authorization) {
-        String accessToken = authorization.replace("Bearer ", "");
+        // 验证Authorization头格式
+        if (authorization == null || !authorization.startsWith("Bearer ")) {
+            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+        }
+        String accessToken = authorization.substring(7);
+        if (accessToken.trim().isEmpty()) {
+            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+        }
         return oauthService.getUserInfo(accessToken);
     }
 
@@ -213,11 +223,13 @@ public class OAuthController {
      */
     @PostMapping("/sso/logout")
     @Operation(summary = "SSO单点注销")
-    public Result<String> ssoLogout(@RequestParam(value = "redirect_uri", required = false) String redirectUri) {
-        if (StpUtil.isLogin()) {
-            StpUtil.logout();
+    public Result<String> ssoLogout(
+            @RequestParam(value = "redirect_uri", required = false) String redirectUri,
+            @RequestParam(value = "client_id", required = false) String clientId) {
+        Result<Map<String, Object>> res = ssoService.ssoLogout(redirectUri, clientId);
+        if (res.getCode() == 1) {
+            return Result.success(String.valueOf(res.getData().getOrDefault("status", "logout_success")));
         }
-
-        return Result.success(Objects.requireNonNullElse(redirectUri, "注销成功"));
+        return Result.error(ResultEnum.SYSTEM_ERROR, null);
     }
 }

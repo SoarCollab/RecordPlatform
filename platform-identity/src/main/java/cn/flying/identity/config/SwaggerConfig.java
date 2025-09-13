@@ -1,13 +1,18 @@
 package cn.flying.identity.config;
 
+import io.swagger.v3.oas.annotations.OpenAPIDefinition;
+import io.swagger.v3.oas.annotations.enums.SecuritySchemeIn;
+import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.security.SecurityScheme;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Contact;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
-import io.swagger.v3.oas.models.security.SecurityRequirement;
-import io.swagger.v3.oas.models.security.SecurityScheme;
+import io.swagger.v3.oas.models.security.SecurityScheme.Type;
 import jakarta.annotation.Resource;
+import org.springdoc.core.customizers.OpenApiCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -16,6 +21,14 @@ import org.springframework.context.annotation.Configuration;
  * 配置API文档的基本信息和展示内容
  */
 @Configuration
+@SecurityScheme(
+        type = SecuritySchemeType.HTTP,
+        scheme = "Bearer",
+        name = "Bearer Authentication",
+        in = SecuritySchemeIn.HEADER,
+        description = "请在请求头中添加 Authorization: Bearer {token}"
+)
+@OpenAPIDefinition(security = {@SecurityRequirement(name = "Bearer Authentication")})
 public class SwaggerConfig {
 
     @Resource
@@ -42,14 +55,78 @@ public class SwaggerConfig {
                         .license(new License()
                                 .name("Apache License 2.0")
                                 .url("https://www.apache.org/licenses/LICENSE-2.0")))
-                .addSecurityItem(new SecurityRequirement().addList("Bearer Authentication"))
+                // 全局添加安全要求
+                .addSecurityItem(new io.swagger.v3.oas.models.security.SecurityRequirement()
+                        .addList("Bearer Authentication"))
                 .components(new Components()
                         .addSecuritySchemes("Bearer Authentication",
-                                new SecurityScheme()
-                                        .type(SecurityScheme.Type.HTTP)
+                                new io.swagger.v3.oas.models.security.SecurityScheme()
+                                        .type(Type.HTTP)
                                         .scheme("bearer")
                                         .bearerFormat("JWT")
                                         .description("请在请求头中添加 Authorization: Bearer {token}")));
+    }
+
+    /**
+     * 全局OpenAPI自定义配置
+     * 为所有接口自动添加安全要求，除了明确排除的接口
+     */
+    @Bean
+    public OpenApiCustomizer globalSecurityCustomizer() {
+        return openApi -> {
+            // 不需要认证的接口路径
+            String[] excludePaths = {
+                    "/api/auth/login",
+                    "/api/auth/register", 
+                    "/api/auth/verify-code",
+                    "/api/auth/reset-password",
+                    "/api/auth/signin",
+                    "/api/auth/signup",
+                    "/api/verify/email/send",
+                    "/api/verify/image/generate",
+                    "/api/verify/image/verify",
+                    "/api/verify/check-limit",
+                    "/api/verify/config",
+                    "/oauth/authorize",
+                    "/oauth/token",
+                    "/oauth/userinfo"
+            };
+
+            if (openApi.getPaths() != null) {
+                openApi.getPaths().forEach((path, pathItem) -> {
+                    boolean isExcluded = false;
+                    for (String excludePath : excludePaths) {
+                        if (path.equals(excludePath)) {
+                            isExcluded = true;
+                            break;
+                        }
+                    }
+                    
+                    // 为非排除的接口添加安全要求
+                    if (!isExcluded) {
+                        io.swagger.v3.oas.models.security.SecurityRequirement securityRequirement = 
+                            new io.swagger.v3.oas.models.security.SecurityRequirement()
+                                .addList("Bearer Authentication");
+                        
+                        if (pathItem.getGet() != null) {
+                            pathItem.getGet().addSecurityItem(securityRequirement);
+                        }
+                        if (pathItem.getPost() != null) {
+                            pathItem.getPost().addSecurityItem(securityRequirement);
+                        }
+                        if (pathItem.getPut() != null) {
+                            pathItem.getPut().addSecurityItem(securityRequirement);
+                        }
+                        if (pathItem.getDelete() != null) {
+                            pathItem.getDelete().addSecurityItem(securityRequirement);
+                        }
+                        if (pathItem.getPatch() != null) {
+                            pathItem.getPatch().addSecurityItem(securityRequirement);
+                        }
+                    }
+                });
+            }
+        };
     }
 
     /**
@@ -85,11 +162,6 @@ public class SwaggerConfig {
                 - **第三方登录**: GitHub、Google、微信等
                 - **权限管理**: 基于角色的权限控制
                 - **监控审计**: 操作日志、流量监控
-                
-                ### 📞 技术支持
-                - **错误码文档**: [查看详细错误码说明](./docs/ERROR_CODES.md)
-                - **配置文档**: [查看配置说明](./docs/CONFIGURATION.md)
-                - **故障排除**: [查看故障排除指南](./docs/TROUBLESHOOTING.md)
                 
                 """;
     }

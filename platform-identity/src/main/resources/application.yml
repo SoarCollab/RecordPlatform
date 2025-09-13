@@ -8,6 +8,7 @@ spring:
       - oauth
       - verify-code
       - identity
+      - sms
   # 数据库配置
   datasource:
     druid:
@@ -194,3 +195,19 @@ sa-token:
   is-log: false
   # 是否写入响应头
   is-write-header: true
+
+# Knife4j 自定义配置
+knife4j:
+  enable: true
+  production: false
+  basic:
+    enable: true
+    username: admin
+    password: 123456
+  setting:
+    language: zh-CN
+    enable-home-custom: true
+    home-custom-path: classpath:static/home.md
+    enable-footer: true
+    enable-footer-custom: true
+    footer-custom-content: "Copyright © 2025 RecordPlatform Team. All rights reserved."

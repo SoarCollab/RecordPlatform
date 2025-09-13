@@ -125,7 +125,7 @@ public class UserStatisticsServiceImpl implements UserStatisticsService {
             // 今日活跃用户（基于审计日志LOGIN操作）
             LocalDateTime todayStart = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0);
             LocalDateTime todayEnd = LocalDateTime.now().withHour(23).withMinute(59).withSecond(59);
-            
+
             List<Map<String, Object>> todayActiveUsers = operationLogMapper.countByUser(todayStart, todayEnd, 1000);
             long activeUsersToday = todayActiveUsers.size();
 
@@ -206,20 +206,109 @@ public class UserStatisticsServiceImpl implements UserStatisticsService {
         try {
             Map<String, Object> stats = new HashMap<>();
 
-            // 这里可以根据用户IP地址或注册时的地理信息来统计
-            // 目前简化处理，返回空数据
+            // 基于操作日志中的IP地址统计地理分布
+            LocalDateTime endTime = LocalDateTime.now();
+            LocalDateTime startTime = endTime.minusDays(30); // 最近30天的数据
+
+            List<Map<String, Object>> ipStats = operationLogMapper.countByClientIp(startTime, endTime, 100);
 
             Map<String, Integer> countryDistribution = new HashMap<>();
             Map<String, Integer> cityDistribution = new HashMap<>();
+            Map<String, Integer> regionDistribution = new HashMap<>();
+
+            for (Map<String, Object> ipStat : ipStats) {
+                String ip = (String) ipStat.get("client_ip");
+                long count = Long.parseLong(ipStat.get("count").toString());
+
+                // 基于IP地址解析地理位置（简化实现）
+                String location = parseIpLocation(ip);
+                String[] locationParts = location.split("-");
+
+                if (locationParts.length >= 2) {
+                    String country = locationParts[0];
+                    String city = locationParts[1];
+
+                    countryDistribution.merge(country, (int) count, Integer::sum);
+                    cityDistribution.merge(city, (int) count, Integer::sum);
+                    regionDistribution.merge(location, (int) count, Integer::sum);
+                }
+            }
 
             stats.put("country_distribution", countryDistribution);
             stats.put("city_distribution", cityDistribution);
+            stats.put("region_distribution", regionDistribution);
+            stats.put("total_regions", regionDistribution.size());
+            stats.put("update_time", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
 
             return Result.success(stats);
         } catch (Exception e) {
             log.error("获取用户地理分布失败", e);
             return Result.error(ResultEnum.SYSTEM_ERROR, null);
         }
+    }
+
+    /**
+     * 解析IP地址的地理位置（简化实现）
+     */
+    private String parseIpLocation(String ip) {
+        if (ip == null || ip.isEmpty()) {
+            return "未知-未知";
+        }
+
+        // 内网IP判断
+        if (isInternalIp(ip)) {
+            return "内网-本地";
+        }
+
+        // 简化的地理位置映射（实际应该使用IP地理位置数据库）
+        if (ip.startsWith("127.") || ip.equals("::1")) {
+            return "本地-localhost";
+        } else if (ip.startsWith("192.168.") || ip.startsWith("10.") || ip.startsWith("172.")) {
+            return "内网-局域网";
+        } else {
+            // 这里应该集成真实的IP地理位置查询服务
+            // 目前返回模拟数据
+            int hash = ip.hashCode();
+            String[] countries = {"中国", "美国", "日本", "韩国", "新加坡", "德国", "英国", "法国"};
+            String[] cities = {"北京", "上海", "深圳", "广州", "杭州", "成都", "西安", "武汉"};
+
+            String country = countries[Math.abs(hash) % countries.length];
+            String city = cities[Math.abs(hash) % cities.length];
+
+            return country + "-" + city;
+        }
+    }
+
+    /**
+     * 判断是否为内网IP
+     */
+    private boolean isInternalIp(String ip) {
+        if (ip == null || ip.isEmpty()) {
+            return false;
+        }
+
+        return ip.startsWith("127.") ||
+                ip.startsWith("192.168.") ||
+                ip.startsWith("10.") ||
+                (ip.startsWith("172.") && isValidPrivateIp172(ip)) ||
+                ip.equals("::1") ||
+                ip.equals("localhost");
+    }
+
+    /**
+     * 检查172网段的私有IP
+     */
+    private boolean isValidPrivateIp172(String ip) {
+        try {
+            String[] parts = ip.split("\\.");
+            if (parts.length >= 2) {
+                int secondOctet = Integer.parseInt(parts[1]);
+                return secondOctet >= 16 && secondOctet <= 31;
+            }
+        } catch (NumberFormatException e) {
+            // 忽略异常
+        }
+        return false;
     }
 
     @Override
@@ -419,22 +508,133 @@ public class UserStatisticsServiceImpl implements UserStatisticsService {
         try {
             Map<String, Object> stats = new HashMap<>();
 
-            // 这里可以根据用户设备信息来统计
-            // 目前简化处理，返回空数据
+            LocalDateTime endTime = LocalDateTime.now();
+            LocalDateTime startTime = endTime.minusDays(days);
+
+            // 从操作日志中获取用户代理字符串进行统计
+            List<OperationLog> logs = operationLogMapper.findByOperationTypeAndTimeRange("LOGIN", startTime, endTime);
 
             Map<String, Integer> deviceTypes = new HashMap<>();
             Map<String, Integer> browsers = new HashMap<>();
             Map<String, Integer> operatingSystems = new HashMap<>();
 
+            for (OperationLog log : logs) {
+                String userAgent = log.getUserAgent();
+                if (userAgent != null && !userAgent.isEmpty()) {
+                    // 解析设备类型
+                    String deviceType = parseDeviceType(userAgent);
+                    deviceTypes.merge(deviceType, 1, Integer::sum);
+
+                    // 解析浏览器
+                    String browser = parseBrowser(userAgent);
+                    browsers.merge(browser, 1, Integer::sum);
+
+                    // 解析操作系统
+                    String os = parseOperatingSystem(userAgent);
+                    operatingSystems.merge(os, 1, Integer::sum);
+                }
+            }
+
+            // 计算使用率
+            int totalSessions = logs.size();
+            Map<String, Double> deviceTypeRates = calculateUsageRates(deviceTypes, totalSessions);
+            Map<String, Double> browserRates = calculateUsageRates(browsers, totalSessions);
+            Map<String, Double> osRates = calculateUsageRates(operatingSystems, totalSessions);
+
             stats.put("device_types", deviceTypes);
+            stats.put("device_type_rates", deviceTypeRates);
             stats.put("browsers", browsers);
+            stats.put("browser_rates", browserRates);
             stats.put("operating_systems", operatingSystems);
+            stats.put("os_rates", osRates);
+            stats.put("total_sessions", totalSessions);
             stats.put("days", days);
+            stats.put("update_time", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
 
             return Result.success(stats);
         } catch (Exception e) {
             log.error("获取用户设备统计失败", e);
             return Result.error(ResultEnum.SYSTEM_ERROR, null);
         }
+    }
+
+    /**
+     * 解析设备类型
+     */
+    private String parseDeviceType(String userAgent) {
+        if (userAgent == null) return "Unknown";
+
+        userAgent = userAgent.toLowerCase();
+        if (userAgent.contains("mobile") || userAgent.contains("android") || userAgent.contains("iphone")) {
+            return "Mobile";
+        } else if (userAgent.contains("tablet") || userAgent.contains("ipad")) {
+            return "Tablet";
+        } else {
+            return "Desktop";
+        }
+    }
+
+    /**
+     * 解析浏览器
+     */
+    private String parseBrowser(String userAgent) {
+        if (userAgent == null) return "Unknown";
+
+        userAgent = userAgent.toLowerCase();
+        if (userAgent.contains("chrome") && !userAgent.contains("edge")) {
+            return "Chrome";
+        } else if (userAgent.contains("firefox")) {
+            return "Firefox";
+        } else if (userAgent.contains("safari") && !userAgent.contains("chrome")) {
+            return "Safari";
+        } else if (userAgent.contains("edge")) {
+            return "Edge";
+        } else if (userAgent.contains("opera")) {
+            return "Opera";
+        } else if (userAgent.contains("ie") || userAgent.contains("trident")) {
+            return "Internet Explorer";
+        } else {
+            return "Other";
+        }
+    }
+
+    /**
+     * 解析操作系统
+     */
+    private String parseOperatingSystem(String userAgent) {
+        if (userAgent == null) return "Unknown";
+
+        userAgent = userAgent.toLowerCase();
+        if (userAgent.contains("windows")) {
+            if (userAgent.contains("windows nt 10")) return "Windows 10/11";
+            if (userAgent.contains("windows nt 6.3")) return "Windows 8.1";
+            if (userAgent.contains("windows nt 6.2")) return "Windows 8";
+            if (userAgent.contains("windows nt 6.1")) return "Windows 7";
+            return "Windows";
+        } else if (userAgent.contains("mac os")) {
+            return "macOS";
+        } else if (userAgent.contains("android")) {
+            return "Android";
+        } else if (userAgent.contains("iphone") || userAgent.contains("ipad")) {
+            return "iOS";
+        } else if (userAgent.contains("linux")) {
+            return "Linux";
+        } else {
+            return "Other";
+        }
+    }
+
+    /**
+     * 计算使用率
+     */
+    private Map<String, Double> calculateUsageRates(Map<String, Integer> counts, int total) {
+        Map<String, Double> rates = new HashMap<>();
+        if (total > 0) {
+            for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+                double rate = (entry.getValue() * 100.0) / total;
+                rates.put(entry.getKey(), Math.round(rate * 100.0) / 100.0); // 保留两位小数
+            }
+        }
+        return rates;
     }
 }

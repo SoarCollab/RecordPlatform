@@ -15,6 +15,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
+import jakarta.annotation.Resource;
+import cn.flying.identity.service.JwtBlacklistService;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -55,6 +57,9 @@ public class SaTokenGatewayFilter implements Filter {
 
     @Value("${server.servlet.context-path}")
     String PREFIX;
+
+    @Resource
+    private JwtBlacklistService jwtBlacklistService;
 
     /**
      * 过滤器初始化
@@ -163,6 +168,10 @@ public class SaTokenGatewayFilter implements Filter {
 
         // 验证Token
         if (token != null && !token.trim().isEmpty()) {
+            // 黑名单检查：若在黑名单中则视为未登录
+            if (jwtBlacklistService != null && jwtBlacklistService.isBlacklisted(token)) {
+                throw new NotLoginException("token in blacklist", null, null);
+            }
             // 设置当前请求的Token
             StpUtil.setTokenValue(token);
         }

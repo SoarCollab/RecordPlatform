@@ -219,13 +219,8 @@ public class TrafficMonitorController {
             @Parameter(description = "IP列表") @RequestBody List<String> ipList,
             @Parameter(description = "操作原因") @RequestParam(required = false) String reason,
             @Parameter(description = "持续时间（小时）") @RequestParam(defaultValue = "24") int durationHours) {
-        
-        Map<String, Object> result = Map.of(
-                "operation", operation,
-                "totalCount", ipList.size(),
-                "successCount", 0,
-                "failedCount", 0
-        );
+
+        Map<String, Object> result;
 
         int successCount = 0;
         int failedCount = 0;

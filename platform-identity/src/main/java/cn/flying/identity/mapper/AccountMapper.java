@@ -19,7 +19,7 @@ public interface AccountMapper extends BaseMapper<Account> {
      * @param text 用户名或邮箱
      * @return 用户实体
      */
-    @Select("SELECT * FROM account WHERE username = #{text} OR email = #{text} AND deleted = 0")
+    @Select("SELECT * FROM account WHERE (username = #{text} OR email = #{text}) AND deleted = 0")
     Account findAccountByNameOrEmail(@Param("text") String text);
 
     /**

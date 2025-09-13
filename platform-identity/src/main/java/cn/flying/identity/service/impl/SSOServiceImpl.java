@@ -5,6 +5,7 @@ import cn.flying.identity.dto.Account;
 import cn.flying.identity.dto.OAuthClient;
 import cn.flying.identity.service.AccountService;
 import cn.flying.identity.service.BaseService;
+import cn.flying.identity.service.JwtBlacklistService;
 import cn.flying.identity.service.OAuthService;
 import cn.flying.identity.service.SSOService;
 import cn.flying.identity.util.IdUtils;
@@ -32,13 +33,13 @@ public class SSOServiceImpl extends BaseService implements SSOService {
 
     @Value("${redis.prefix.sso.token:sso:token:}")
     private String ssoTokenPrefix;
-    
+
     @Value("${redis.prefix.sso.client:sso:client:}")
     private String ssoClientPrefix;
-    
+
     @Value("${redis.prefix.sso.user:sso:user:}")
     private String ssoUserPrefix;
-    
+
     @Value("${cache.expire.sso.token:7200}")
     private int ssoTokenTimeout;
 
@@ -47,6 +48,9 @@ public class SSOServiceImpl extends BaseService implements SSOService {
 
     @Resource
     private OAuthService oauthService;
+
+    @Resource
+    private JwtBlacklistService jwtBlacklistService;
 
     @Resource(name = "stringRedisTemplate")
     private StringRedisTemplate redisTemplate;
@@ -224,6 +228,13 @@ public class SSOServiceImpl extends BaseService implements SSOService {
                 } else {
                     // 全局注销
                     clearAllClientLogins(userId);
+                    try {
+                        String token = StpUtil.getTokenValue();
+                        if (token != null && !token.isBlank()) {
+                            jwtBlacklistService.blacklistToken(token, -1);
+                        }
+                    } catch (Exception ignored) {
+                    }
                     StpUtil.logout();
                     result.put("status", "global_logout_success");
                 }
@@ -424,22 +435,9 @@ public class SSOServiceImpl extends BaseService implements SSOService {
     }
 
     /**
-     * 生成 SSO Token
-     */
-    private String generateSSOToken(Long userId, String clientId) {
-        String token = IdUtils.nextIdWithPrefix("SSO");
-        String tokenKey = ssoTokenPrefix + token;
-        String userInfo = userId + ":" + clientId + ":" + System.currentTimeMillis();
-
-        redisTemplate.opsForValue().set(tokenKey, userInfo, ssoTokenTimeout, TimeUnit.SECONDS);
-
-        return token;
-    }
-
-    /**
      * 验证重定向URI的安全性
      * 防止开放重定向攻击
-     * 
+     *
      * @param client      OAuth客户端
      * @param redirectUri 重定向URI
      * @return 是否有效
@@ -453,7 +451,7 @@ public class SSOServiceImpl extends BaseService implements SSOService {
             // 检查重定向URI格式
             java.net.URI uri = new java.net.URI(redirectUri);
             String scheme = uri.getScheme();
-            
+
             // 仅允许 https 和 http (仅开发环境)
             if (!"https".equals(scheme) && !"http".equals(scheme)) {
                 log.warn("不支持的重定向URI协议: {}", scheme);
@@ -481,8 +479,8 @@ public class SSOServiceImpl extends BaseService implements SSOService {
                 // 支持子路径匹配（但要防止子域名攻击）
                 if (allowedUri.endsWith("/*") && redirectUri.startsWith(allowedUri.substring(0, allowedUri.length() - 2))) {
                     java.net.URI allowedDomain = new java.net.URI(allowedUri.substring(0, allowedUri.length() - 2));
-                    if (uri.getHost().equals(allowedDomain.getHost()) && 
-                        uri.getPort() == allowedDomain.getPort()) {
+                    if (uri.getHost().equals(allowedDomain.getHost()) &&
+                            uri.getPort() == allowedDomain.getPort()) {
                         return true;
                     }
                 }
@@ -493,6 +491,19 @@ public class SSOServiceImpl extends BaseService implements SSOService {
             log.error("验证重定向URI失败: {}", redirectUri, e);
             return false;
         }
+    }
+
+    /**
+     * 生成 SSO Token
+     */
+    private String generateSSOToken(Long userId, String clientId) {
+        String token = IdUtils.nextIdWithPrefix("SSO");
+        String tokenKey = ssoTokenPrefix + token;
+        String userInfo = userId + ":" + clientId + ":" + System.currentTimeMillis();
+
+        redisTemplate.opsForValue().set(tokenKey, userInfo, ssoTokenTimeout, TimeUnit.SECONDS);
+
+        return token;
     }
 
     /**

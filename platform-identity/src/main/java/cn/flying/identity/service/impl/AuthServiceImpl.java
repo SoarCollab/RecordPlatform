@@ -4,6 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import cn.flying.identity.dto.Account;
 import cn.flying.identity.service.AccountService;
 import cn.flying.identity.service.AuthService;
+import cn.flying.identity.service.JwtBlacklistService;
 import cn.flying.identity.util.WebContextUtils;
 import cn.flying.identity.vo.AccountVO;
 import cn.flying.identity.vo.request.ChangePasswordVO;
@@ -25,10 +26,12 @@ public class AuthServiceImpl implements AuthService {
     @Resource
     private AccountService accountService;
 
-    // 密码相关方法委托给 AccountService
+    @Resource
+    private JwtBlacklistService jwtBlacklistService;
 
     /**
      * 用户登录
+     *
      * @param username 用户名或邮箱
      * @param password 密码
      * @return 登录结果，包含Token信息
@@ -62,11 +65,20 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * 用户注销
+     *
      * @return 注销结果
      */
     @Override
     public Result<Void> logout() {
         return WebContextUtils.safeExecuteVoid(() -> {
+            // 将当前 Token 加入黑名单，确保登出后旧 Token 立即失效
+            try {
+                String token = StpUtil.getTokenValue();
+                if (token != null && !token.isBlank()) {
+                    jwtBlacklistService.blacklistToken(token, -1);
+                }
+            } catch (Exception ignored) {
+            }
             StpUtil.logout();
             return Result.success(null);
         }, "用户注销失败");
@@ -74,6 +86,7 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * 用户注册
+     *
      * @param vo 注册信息
      * @return 注册结果
      */
@@ -85,8 +98,9 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * 发送邮箱验证码
+     *
      * @param email 邮箱地址
-     * @param type 验证码类型（register/reset）
+     * @param type  验证码类型（register/reset）
      * @return 发送结果
      */
     @Override
@@ -100,6 +114,7 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * 重置密码确认
+     *
      * @param vo 重置密码信息
      * @return 重置结果
      */
@@ -111,6 +126,7 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * 修改密码
+     *
      * @param vo 修改密码信息
      * @return 修改结果
      */
@@ -132,6 +148,7 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * 获取当前登录用户信息
+     *
      * @return 用户信息
      */
     @Override
@@ -160,6 +177,7 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * 根据用户名或邮箱查找用户
+     *
      * @param text 用户名或邮箱
      * @return 用户实体
      */
@@ -170,6 +188,7 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * 检查登录状态
+     *
      * @return 登录状态信息
      */
     @Override
@@ -186,6 +205,7 @@ public class AuthServiceImpl implements AuthService {
 
     /**
      * 获取Token信息
+     *
      * @return Token详细信息
      */
     @Override

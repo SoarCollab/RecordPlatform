@@ -5,6 +5,7 @@ import cn.dev33.satoken.exception.NotPermissionException;
 import cn.dev33.satoken.exception.NotRoleException;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.flying.identity.service.GatewayMonitorService;
+import cn.flying.identity.service.JwtBlacklistService;
 import cn.flying.identity.util.IdUtils;
 import cn.flying.identity.util.IpUtils;
 import cn.flying.platformapi.constant.Result;
@@ -71,6 +72,9 @@ public class EnhancedGatewayFilter implements Filter {
 
     @Resource
     private GatewayMonitorService gatewayMonitorService;
+
+    @Resource
+    private JwtBlacklistService jwtBlacklistService;
 
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
@@ -229,6 +233,10 @@ public class EnhancedGatewayFilter implements Filter {
 
         // 验证Token
         if (token != null && !token.trim().isEmpty()) {
+            // 黑名单检查：若在黑名单中则视为未登录
+            if (jwtBlacklistService != null && jwtBlacklistService.isBlacklisted(token)) {
+                throw new NotLoginException("token in blacklist", null, null);
+            }
             // 设置当前请求的Token
             StpUtil.setTokenValue(token);
         }

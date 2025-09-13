@@ -3,26 +3,26 @@ package cn.flying.identity.service.impl;
 import at.favre.lib.crypto.bcrypt.BCrypt;
 import cn.flying.identity.config.ApplicationProperties;
 import cn.flying.identity.service.PasswordService;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
  * 密码加密服务实现类
  * 使用 BCrypt 算法进行密码加密，替代 Spring Security 的 PasswordEncoder
- * 
+ *
  * @author 王贝强
  */
 @Slf4j
 @Service
 public class PasswordServiceImpl implements PasswordService {
-    
-    @Autowired
+
+    @Resource
     private ApplicationProperties applicationProperties;
-    
+
     /**
      * 加密密码
-     * 
+     *
      * @param rawPassword 原始密码
      * @return 加密后的密码
      */
@@ -40,11 +40,11 @@ public class PasswordServiceImpl implements PasswordService {
             throw new RuntimeException("密码加密失败: " + e.getMessage(), e);
         }
     }
-    
+
     /**
      * 验证密码
-     * 
-     * @param rawPassword 原始密码
+     *
+     * @param rawPassword     原始密码
      * @param encodedPassword 加密后的密码
      * @return 是否匹配
      */
@@ -53,7 +53,7 @@ public class PasswordServiceImpl implements PasswordService {
         if (rawPassword == null || encodedPassword == null) {
             return false;
         }
-        
+
         try {
             BCrypt.Result result = BCrypt.verifyer().verify(rawPassword.toCharArray(), encodedPassword);
             return result.verified;

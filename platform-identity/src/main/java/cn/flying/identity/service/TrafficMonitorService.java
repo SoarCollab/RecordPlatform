@@ -19,12 +19,12 @@ public interface TrafficMonitorService extends IService<TrafficMonitorEntity> {
     /**
      * 记录请求流量信息
      *
-     * @param requestId 请求ID
-     * @param clientIp 客户端IP
-     * @param userId 用户ID（可选）
-     * @param requestPath 请求路径
+     * @param requestId     请求ID
+     * @param clientIp      客户端IP
+     * @param userId        用户ID（可选）
+     * @param requestPath   请求路径
      * @param requestMethod HTTP方法
-     * @param userAgent 用户代理
+     * @param userAgent     用户代理
      * @return 操作结果
      */
     Result<Void> recordTrafficInfo(String requestId, String clientIp, Long userId,
@@ -33,11 +33,11 @@ public interface TrafficMonitorService extends IService<TrafficMonitorEntity> {
     /**
      * 记录请求完成信息
      *
-     * @param requestId 请求ID
+     * @param requestId      请求ID
      * @param responseStatus 响应状态码
-     * @param responseTime 响应时间
-     * @param requestSize 请求大小
-     * @param responseSize 响应大小
+     * @param responseTime   响应时间
+     * @param requestSize    请求大小
+     * @param responseSize   响应大小
      * @return 操作结果
      */
     Result<Void> recordResponseInfo(String requestId, Integer responseStatus, Long responseTime,
@@ -46,10 +46,10 @@ public interface TrafficMonitorService extends IService<TrafficMonitorEntity> {
     /**
      * 检查是否需要拦截请求
      *
-     * @param clientIp 客户端IP
-     * @param userId 用户ID（可选）
+     * @param clientIp    客户端IP
+     * @param userId      用户ID（可选）
      * @param requestPath 请求路径
-     * @param userAgent 用户代理
+     * @param userAgent   用户代理
      * @return 拦截检查结果
      */
     Result<Map<String, Object>> checkTrafficBlock(String clientIp, Long userId,
@@ -58,10 +58,10 @@ public interface TrafficMonitorService extends IService<TrafficMonitorEntity> {
     /**
      * 执行异常检测
      *
-     * @param clientIp 客户端IP
-     * @param userId 用户ID（可选）
-     * @param requestPath 请求路径
-     * @param responseTime 响应时间
+     * @param clientIp       客户端IP
+     * @param userId         用户ID（可选）
+     * @param requestPath    请求路径
+     * @param responseTime   响应时间
      * @param responseStatus 响应状态
      * @return 异常检测结果
      */
@@ -71,8 +71,8 @@ public interface TrafficMonitorService extends IService<TrafficMonitorEntity> {
     /**
      * 添加IP到黑名单
      *
-     * @param clientIp 客户端IP
-     * @param reason 拉黑原因
+     * @param clientIp      客户端IP
+     * @param reason        拉黑原因
      * @param durationHours 持续时间（小时）
      * @return 操作结果
      */
@@ -114,7 +114,7 @@ public interface TrafficMonitorService extends IService<TrafficMonitorEntity> {
      * 获取IP流量排行
      *
      * @param timeRangeMinutes 时间范围（分钟）
-     * @param limit 返回数量限制
+     * @param limit            返回数量限制
      * @return IP流量排行
      */
     Result<List<Map<String, Object>>> getTopTrafficIps(int timeRangeMinutes, int limit);
@@ -123,7 +123,7 @@ public interface TrafficMonitorService extends IService<TrafficMonitorEntity> {
      * 获取API访问统计
      *
      * @param timeRangeMinutes 时间范围（分钟）
-     * @param limit 返回数量限制
+     * @param limit            返回数量限制
      * @return API访问统计
      */
     Result<List<Map<String, Object>>> getTopApis(int timeRangeMinutes, int limit);
@@ -147,8 +147,8 @@ public interface TrafficMonitorService extends IService<TrafficMonitorEntity> {
      * 导出流量监控数据
      *
      * @param startTime 开始时间
-     * @param endTime 结束时间
-     * @param clientIp 客户端IP（可选）
+     * @param endTime   结束时间
+     * @param clientIp  客户端IP（可选）
      * @return 导出文件路径
      */
     Result<String> exportTrafficData(LocalDateTime startTime, LocalDateTime endTime, String clientIp);
@@ -163,7 +163,7 @@ public interface TrafficMonitorService extends IService<TrafficMonitorEntity> {
     /**
      * 更新拦截规则
      *
-     * @param ruleType 规则类型
+     * @param ruleType  规则类型
      * @param ruleValue 规则值
      * @return 操作结果
      */

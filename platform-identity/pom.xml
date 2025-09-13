@@ -159,6 +159,13 @@
             <version>4.4.0</version>
         </dependency>
 
+        <!--    SMS4J 短信框架    -->
+        <dependency>
+            <groupId>org.dromara.sms4j</groupId>
+            <artifactId>sms4j-spring-boot-starter</artifactId>
+            <version>3.3.2</version>
+        </dependency>
+
         <!--    平台API依赖    -->
         <dependency>
             <groupId>cn.flying</groupId>

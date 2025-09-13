@@ -25,15 +25,8 @@ public interface OAuthClientMapper extends BaseMapper<OAuthClient> {
     @Select("SELECT * FROM oauth_client WHERE client_key = #{clientKey} AND deleted = 0")
     OAuthClient findByClientKey(@Param("clientKey") String clientKey);
 
-    /**
-     * 根据客户端标识符和密钥查找客户端
-     *
-     * @param clientKey    客户端标识符
-     * @param clientSecret 客户端密钥
-     * @return 客户端信息
-     */
-    @Select("SELECT * FROM oauth_client WHERE client_key = #{clientKey} AND client_secret = #{clientSecret} AND deleted = 0")
-    OAuthClient findByClientKeyAndSecret(@Param("clientKey") String clientKey, @Param("clientSecret") String clientSecret);
+    // 已删除不安全的密钥比较方法 findByClientKeyAndSecret
+    // 客户端验证现在统一通过 OAuthClientSecretService 进行安全验证
 
     /**
      * 根据客户端名称查找客户端
@@ -44,13 +37,6 @@ public interface OAuthClientMapper extends BaseMapper<OAuthClient> {
     @Select("SELECT * FROM oauth_client WHERE client_name = #{clientName} AND deleted = 0")
     OAuthClient findByClientName(@Param("clientName") String clientName);
 
-    /**
-     * 获取所有启用的客户端
-     *
-     * @return 启用的客户端列表
-     */
-    @Select("SELECT * FROM oauth_client WHERE status = 1 AND deleted = 0 ORDER BY create_time DESC")
-    List<OAuthClient> findAllEnabled();
 
     /**
      * 根据状态查找客户端

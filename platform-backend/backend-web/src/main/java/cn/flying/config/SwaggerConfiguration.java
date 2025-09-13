@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.enums.SecuritySchemeIn;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.security.SecurityScheme;
+import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
@@ -48,7 +49,12 @@ public class SwaggerConfiguration {
         return new OpenAPI()
                 .info(new Info()
                         .title("RecordPlatform 项目 API 文档")
-                        .description("欢迎来到本项目API测试文档，在这里可以快速进行接口调试")
+                        .description("欢迎来到本项目API测试文档，在这里可以快速进行接口调试\n\n" +
+                                "### 🔐 认证方式\n" +
+                                "本API使用JWT进行身份认证，请在请求头中添加：\n" +
+                                "```\n" +
+                                "Authorization: Bearer {your-token}\n" +
+                                "```")
                         .version("1.0")
                         .contact( new Contact()
                                 .name("flying")
@@ -57,7 +63,16 @@ public class SwaggerConfiguration {
                                 .name("Apache 2.0")
                                 .url("https://www.apache.org/licenses/LICENSE-2.0.html")
                         )
-                );
+                )
+                // 添加安全配置，使knife4j能够显示认证按钮
+                .addSecurityItem(new io.swagger.v3.oas.models.security.SecurityRequirement().addList("Authorization"))
+                .components(new Components()
+                        .addSecuritySchemes("Authorization",
+                                new io.swagger.v3.oas.models.security.SecurityScheme()
+                                        .type(io.swagger.v3.oas.models.security.SecurityScheme.Type.HTTP)
+                                        .scheme("bearer")
+                                        .bearerFormat("JWT")
+                                        .description("请在请求头中添加 Authorization: Bearer {token}")));
     }
 
     /**

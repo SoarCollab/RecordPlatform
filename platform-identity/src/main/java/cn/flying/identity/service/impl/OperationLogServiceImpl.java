@@ -13,13 +13,16 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
  * 操作日志服务实现类
  * 提供操作日志的记录、查询、统计等功能
- * 
+ *
  * @author 王贝强
  */
 @Slf4j
@@ -31,7 +34,7 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
         try {
             operationLog.setCreateTime(LocalDateTime.now());
             operationLog.setUpdateTime(LocalDateTime.now());
-            
+
             boolean saved = this.save(operationLog);
             return saved ? Result.success(null) : Result.error(ResultEnum.SYSTEM_ERROR, null);
         } catch (Exception e) {
@@ -41,11 +44,11 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
     }
 
     @Override
-    public Result<Map<String, Object>> getOperationLogs(int page, int size, Long userId, String module, 
+    public Result<Map<String, Object>> getOperationLogs(int page, int size, Long userId, String module,
                                                         String operationType, LocalDateTime startTime, LocalDateTime endTime) {
         try {
             QueryWrapper<OperationLog> queryWrapper = new QueryWrapper<>();
-            
+
             // 构建查询条件
             if (userId != null) {
                 queryWrapper.eq("user_id", userId);
@@ -62,20 +65,20 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
             if (endTime != null) {
                 queryWrapper.le("operation_time", endTime);
             }
-            
+
             // 按操作时间倒序
             queryWrapper.orderByDesc("operation_time");
-            
+
             // 分页查询
             Page<OperationLog> pageResult = this.page(new Page<>(page, size), queryWrapper);
-            
+
             Map<String, Object> result = new HashMap<>();
             result.put("logs", pageResult.getRecords());
             result.put("total", pageResult.getTotal());
             result.put("page", page);
             result.put("size", size);
             result.put("pages", pageResult.getPages());
-            
+
             return Result.success(result);
         } catch (Exception e) {
             log.error("查询操作日志失败", e);
@@ -87,17 +90,17 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
     public Result<Map<String, Object>> getOperationLogStats(int days) {
         try {
             Map<String, Object> stats = new HashMap<>();
-            
+
             LocalDateTime endTime = LocalDateTime.now();
             LocalDateTime startTime = endTime.minusDays(days);
-            
+
             QueryWrapper<OperationLog> queryWrapper = new QueryWrapper<>();
             queryWrapper.ge("operation_time", startTime);
             queryWrapper.le("operation_time", endTime);
-            
+
             // 总操作数
             long totalOperations = this.count(queryWrapper);
-            
+
             // 成功操作数
             QueryWrapper<OperationLog> successWrapper = new QueryWrapper<>();
             successWrapper.ge("operation_time", startTime).le("operation_time", endTime);
@@ -109,7 +112,7 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
             failWrapper.ge("operation_time", startTime).le("operation_time", endTime);
             failWrapper.eq("status", 1);
             long failOperations = this.count(failWrapper);
-            
+
             // 操作用户数
             List<OperationLog> logs = this.list(queryWrapper);
             long uniqueUsers = logs.stream()
@@ -117,17 +120,17 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
                     .map(OperationLog::getUserId)
                     .distinct()
                     .count();
-            
+
             // 模块统计
             Map<String, Long> moduleStats = logs.stream()
                     .filter(log -> log.getModule() != null && !log.getModule().trim().isEmpty())
                     .collect(Collectors.groupingBy(OperationLog::getModule, Collectors.counting()));
-            
+
             // 操作类型统计
             Map<String, Long> operationTypeStats = logs.stream()
                     .filter(log -> log.getOperationType() != null && !log.getOperationType().trim().isEmpty())
                     .collect(Collectors.groupingBy(OperationLog::getOperationType, Collectors.counting()));
-            
+
             stats.put("total_operations", totalOperations);
             stats.put("success_operations", successOperations);
             stats.put("fail_operations", failOperations);
@@ -138,7 +141,7 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
             stats.put("days", days);
             stats.put("start_time", startTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
             stats.put("end_time", endTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-            
+
             return Result.success(stats);
         } catch (Exception e) {
             log.error("获取操作日志统计失败", e);
@@ -150,45 +153,45 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
     public Result<Map<String, Object>> getUserOperationStats(Long userId, int days) {
         try {
             Map<String, Object> stats = new HashMap<>();
-            
+
             LocalDateTime endTime = LocalDateTime.now();
             LocalDateTime startTime = endTime.minusDays(days);
-            
+
             QueryWrapper<OperationLog> queryWrapper = new QueryWrapper<>();
             queryWrapper.eq("user_id", userId);
             queryWrapper.ge("operation_time", startTime);
             queryWrapper.le("operation_time", endTime);
-            
+
             List<OperationLog> userLogs = this.list(queryWrapper);
-            
+
             // 总操作数
             long totalOperations = userLogs.size();
-            
+
             // 成功操作数
             long successOperations = userLogs.stream()
                     .filter(log -> log.getStatus() != null && log.getStatus() == 0)
                     .count();
-            
+
             // 失败操作数
             long failOperations = totalOperations - successOperations;
-            
+
             // 模块统计
             Map<String, Long> moduleStats = userLogs.stream()
                     .filter(log -> log.getModule() != null && !log.getModule().trim().isEmpty())
                     .collect(Collectors.groupingBy(OperationLog::getModule, Collectors.counting()));
-            
+
             // 操作类型统计
             Map<String, Long> operationTypeStats = userLogs.stream()
                     .filter(log -> log.getOperationType() != null && !log.getOperationType().trim().isEmpty())
                     .collect(Collectors.groupingBy(OperationLog::getOperationType, Collectors.counting()));
-            
+
             // 平均执行时间
             double avgExecutionTime = userLogs.stream()
                     .filter(log -> log.getExecutionTime() != null)
                     .mapToLong(OperationLog::getExecutionTime)
                     .average()
                     .orElse(0.0);
-            
+
             stats.put("user_id", userId);
             stats.put("total_operations", totalOperations);
             stats.put("success_operations", successOperations);
@@ -198,7 +201,7 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
             stats.put("module_stats", moduleStats);
             stats.put("operation_type_stats", operationTypeStats);
             stats.put("days", days);
-            
+
             return Result.success(stats);
         } catch (Exception e) {
             log.error("获取用户操作统计失败", e);
@@ -211,20 +214,20 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
         try {
             LocalDateTime endTime = LocalDateTime.now();
             LocalDateTime startTime = endTime.minusDays(days);
-            
+
             QueryWrapper<OperationLog> queryWrapper = new QueryWrapper<>();
             queryWrapper.ge("operation_time", startTime);
             queryWrapper.le("operation_time", endTime);
             queryWrapper.in("risk_level", Arrays.asList("HIGH", "CRITICAL"));
             queryWrapper.orderByDesc("operation_time");
-            
+
             List<OperationLog> highRiskLogs = this.list(queryWrapper);
-            
+
             Map<String, Object> result = new HashMap<>();
             result.put("high_risk_operations", highRiskLogs);
             result.put("total", highRiskLogs.size());
             result.put("days", days);
-            
+
             return Result.success(result);
         } catch (Exception e) {
             log.error("获取高风险操作日志失败", e);
@@ -236,18 +239,18 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
     public Result<Map<String, Object>> cleanExpiredLogs(int retentionDays) {
         try {
             LocalDateTime cutoffTime = LocalDateTime.now().minusDays(retentionDays);
-            
+
             QueryWrapper<OperationLog> queryWrapper = new QueryWrapper<>();
             queryWrapper.lt("operation_time", cutoffTime);
-            
+
             long expiredCount = this.count(queryWrapper);
             boolean removed = this.remove(queryWrapper);
-            
+
             Map<String, Object> result = new HashMap<>();
             result.put("cleaned_count", removed ? expiredCount : 0);
             result.put("retention_days", retentionDays);
             result.put("cutoff_time", cutoffTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
-            
+
             return Result.success(result);
         } catch (Exception e) {
             log.error("清理过期操作日志失败", e);

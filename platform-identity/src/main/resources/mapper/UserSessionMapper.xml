@@ -3,81 +3,94 @@
 <mapper namespace="cn.flying.identity.mapper.UserSessionMapper">
 
     <resultMap id="UserSessionResultMap" type="cn.flying.identity.dto.UserSession">
-        <id column="id" property="id" jdbcType="VARCHAR"/>
+        <id column="id" property="id" jdbcType="BIGINT"/>
+        <result column="session_id" property="sessionId" jdbcType="VARCHAR"/>
         <result column="user_id" property="userId" jdbcType="BIGINT"/>
-        <result column="login_type" property="loginType" jdbcType="VARCHAR"/>
-        <result column="device_id" property="deviceId" jdbcType="VARCHAR"/>
-        <result column="login_ip" property="loginIp" jdbcType="VARCHAR"/>
-        <result column="login_time" property="loginTime" jdbcType="TIMESTAMP"/>
-        <result column="last_active_time" property="lastActiveTime" jdbcType="TIMESTAMP"/>
-        <result column="expire_time" property="expireTime" jdbcType="TIMESTAMP"/>
-        <result column="status" property="status" jdbcType="VARCHAR"/>
+        <result column="username" property="username" jdbcType="VARCHAR"/>
+        <result column="client_ip" property="clientIp" jdbcType="VARCHAR"/>
         <result column="user_agent" property="userAgent" jdbcType="VARCHAR"/>
-        <result column="extra_info" property="extraInfo" jdbcType="VARCHAR"/>
+        <result column="location" property="location" jdbcType="VARCHAR"/>
+        <result column="device_fingerprint" property="deviceFingerprint" jdbcType="VARCHAR"/>
+        <result column="login_time" property="loginTime" jdbcType="TIMESTAMP"/>
+        <result column="last_access_time" property="lastAccessTime" jdbcType="TIMESTAMP"/>
+        <result column="expire_time" property="expireTime" jdbcType="TIMESTAMP"/>
+        <result column="status" property="status" jdbcType="TINYINT"/>
+        <result column="logout_reason" property="logoutReason" jdbcType="VARCHAR"/>
+        <result column="logout_time" property="logoutTime" jdbcType="TIMESTAMP"/>
+        <result column="create_time" property="createTime" jdbcType="TIMESTAMP"/>
+        <result column="update_time" property="updateTime" jdbcType="TIMESTAMP"/>
     </resultMap>
 
     <!-- 根据用户ID查找活跃的会话列表 -->
     <select id="findActiveSessionsByUserId" resultMap="UserSessionResultMap">
-        SELECT id, user_id, login_type, device_id, login_ip, login_time, 
-               last_active_time, expire_time, status, user_agent, extra_info
+        SELECT id, session_id, user_id, username, client_ip, user_agent, location, device_fingerprint,
+               login_time, last_access_time, expire_time, status, logout_reason, logout_time, 
+               create_time, update_time
         FROM user_session
         WHERE user_id = #{userId}
-          AND status = 'active'
+          AND status = 1
           AND (expire_time IS NULL OR expire_time > NOW())
-        ORDER BY last_active_time DESC
+        ORDER BY last_access_time DESC
     </select>
 
     <!-- 根据会话ID和用户ID查找会话 -->
     <select id="findBySessionIdAndUserId" resultMap="UserSessionResultMap">
-        SELECT id, user_id, login_type, device_id, login_ip, login_time, 
-               last_active_time, expire_time, status, user_agent, extra_info
+        SELECT id, session_id, user_id, username, client_ip, user_agent, location, device_fingerprint,
+               login_time, last_access_time, expire_time, status, logout_reason, logout_time, 
+               create_time, update_time
         FROM user_session
-        WHERE id = #{sessionId}
+        WHERE session_id = #{sessionId}
           AND user_id = #{userId}
     </select>
 
-    <!-- 根据用户ID和设备ID查找会话 -->
+    <!-- 根据用户ID和设备指纹查找会话 -->
     <select id="findByUserIdAndDeviceId" resultMap="UserSessionResultMap">
-        SELECT id, user_id, login_type, device_id, login_ip, login_time, 
-               last_active_time, expire_time, status, user_agent, extra_info
+        SELECT id, session_id, user_id, username, client_ip, user_agent, location, device_fingerprint,
+               login_time, last_access_time, expire_time, status, logout_reason, logout_time, 
+               create_time, update_time
         FROM user_session
         WHERE user_id = #{userId}
-          AND device_id = #{deviceId}
-          AND status = 'active'
+          AND device_fingerprint = #{deviceId}
+          AND status = 1
           AND (expire_time IS NULL OR expire_time > NOW())
-        ORDER BY last_active_time DESC
+        ORDER BY last_access_time DESC
         LIMIT 1
     </select>
 
     <!-- 更新会话状态 -->
     <update id="updateSessionStatus">
         UPDATE user_session
-        SET status = #{status},
-            last_active_time = NOW()
-        WHERE id = #{sessionId}
+        SET status = #{status,jdbcType=TINYINT},
+            last_access_time = NOW(),
+            update_time = NOW()
+        WHERE session_id = #{sessionId}
     </update>
 
     <!-- 更新会话的最后活跃时间 -->
     <update id="updateLastActiveTime">
         UPDATE user_session
-        SET last_active_time = #{lastActiveTime}
-        WHERE id = #{sessionId}
+        SET last_access_time = #{lastActiveTime},
+            update_time = NOW()
+        WHERE session_id = #{sessionId}
     </update>
 
     <!-- 批量过期指定用户的所有会话 -->
     <update id="expireAllUserSessions">
         UPDATE user_session
-        SET status = 'expired',
-            last_active_time = NOW()
+        SET status = 0,
+            logout_reason = 'FORCE_LOGOUT',
+            logout_time = NOW(),
+            last_access_time = NOW(),
+            update_time = NOW()
         WHERE user_id = #{userId}
-          AND status = 'active'
+          AND status = 1
     </update>
 
     <!-- 清理过期的会话记录 -->
     <delete id="cleanExpiredSessions">
         DELETE FROM user_session
         WHERE expire_time &lt; #{beforeTime}
-           OR (status IN ('expired', 'revoked') AND last_active_time &lt; #{beforeTime})
+           OR (status IN (0) AND logout_time &lt; #{beforeTime})
     </delete>
 
     <!-- 根据时间范围统计用户会话数量 -->
@@ -92,15 +105,15 @@
         ORDER BY date DESC
     </select>
 
-    <!-- 根据登录类型统计会话数量 -->
+    <!-- 根据客户端IP统计会话数量 -->
     <select id="countSessionsByLoginType" resultType="java.util.Map">
         SELECT 
-            login_type,
+            client_ip as login_type,
             COUNT(*) as count,
             COUNT(DISTINCT user_id) as unique_users
         FROM user_session
         WHERE login_time BETWEEN #{startTime} AND #{endTime}
-        GROUP BY login_type
+        GROUP BY client_ip
         ORDER BY count DESC
     </select>
 

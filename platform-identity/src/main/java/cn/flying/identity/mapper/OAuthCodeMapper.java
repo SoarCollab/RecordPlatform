@@ -34,12 +34,13 @@ public interface OAuthCodeMapper extends BaseMapper<OAuthCode> {
     OAuthCode findByCodeAndClientKey(@Param("code") String code, @Param("clientKey") String clientKey);
 
     /**
-     * 标记授权码为已使用
+     * 标记授权码为已使用（原子性操作）
+     * 只有当授权码状态为1（有效）且未过期时才会更新
      *
      * @param code 授权码
-     * @return 更新行数
+     * @return 更新行数，0表示授权码已使用或不存在
      */
-    @Update("UPDATE oauth_code SET status = 0, used_time = NOW() WHERE code = #{code}")
+    @Update("UPDATE oauth_code SET status = 0, used_time = NOW() WHERE code = #{code} AND status = 1 AND expire_time > NOW()")
     int markCodeAsUsed(@Param("code") String code);
 
     /**

@@ -35,10 +35,10 @@ public interface UserSessionMapper extends BaseMapper<UserSession> {
     UserSession findBySessionIdAndUserId(@Param("sessionId") String sessionId, @Param("userId") Long userId);
 
     /**
-     * 根据用户ID和设备ID查找会话
+     * 根据用户ID和设备指纹查找会话
      * 
      * @param userId 用户ID
-     * @param deviceId 设备ID
+     * @param deviceId 设备指纹
      * @return 用户会话信息
      */
     UserSession findByUserIdAndDeviceId(@Param("userId") Long userId, @Param("deviceId") String deviceId);
@@ -47,10 +47,10 @@ public interface UserSessionMapper extends BaseMapper<UserSession> {
      * 更新会话状态
      * 
      * @param sessionId 会话ID
-     * @param status 新状态
+     * @param status 新状态（0-失效，1-有效）
      * @return 影响的记录数
      */
-    int updateSessionStatus(@Param("sessionId") String sessionId, @Param("status") String status);
+    int updateSessionStatus(@Param("sessionId") String sessionId, @Param("status") Integer status);
 
     /**
      * 更新会话的最后活跃时间
