@@ -13,6 +13,7 @@ import io.swagger.v3.oas.models.info.License;
 import io.swagger.v3.oas.models.security.SecurityScheme.Type;
 import jakarta.annotation.Resource;
 import org.springdoc.core.customizers.OpenApiCustomizer;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -34,6 +35,12 @@ public class SwaggerConfig {
     @Resource
     private ApplicationProperties applicationProperties;
 
+    @Value("${swagger.contact.url:https://platform.flyingcoding.cn}")
+    private String contactUrl;
+
+    @Value("${swagger.license.url:https://www.apache.org/licenses/LICENSE-2.0}")
+    private String licenseUrl;
+
     /**
      * 创建OpenAPI配置
      *
@@ -51,10 +58,10 @@ public class SwaggerConfig {
                         .contact(new Contact()
                                 .name("Platform Team")
                                 .email("wbq124593655@gmail.com")
-                                .url("https://platform.flyingcoding.cn"))
+                                .url(contactUrl))
                         .license(new License()
                                 .name("Apache License 2.0")
-                                .url("https://www.apache.org/licenses/LICENSE-2.0")))
+                                .url(licenseUrl)))
                 // 全局添加安全要求
                 .addSecurityItem(new io.swagger.v3.oas.models.security.SecurityRequirement()
                         .addList("Bearer Authentication"))

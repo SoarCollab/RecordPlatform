@@ -29,6 +29,13 @@ import java.util.stream.Collectors;
 @Service
 public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, OperationLog> implements OperationLogService {
 
+    private final OperationLogMapper operationLogMapper;
+
+    public OperationLogServiceImpl(OperationLogMapper operationLogMapper) {
+        this.operationLogMapper = operationLogMapper;
+        super.baseMapper = operationLogMapper;
+    }
+
     @Override
     public Result<Void> saveOperationLog(OperationLog operationLog) {
         try {

@@ -36,16 +36,21 @@ public class CacheUtils {
             if (value != null) {
                 return value;
             }
-            
+
             // 从数据源获取
             value = dataSupplier.get();
             if (value != null) {
-                redisTemplate.opsForValue().set(key, value, timeout, timeUnit);
+                try {
+                    redisTemplate.opsForValue().set(key, value, timeout, timeUnit);
+                } catch (Exception e) {
+                    log.error("设置缓存失败, key: {}, 数据已从数据源获取", key, e);
+                    // 设置缓存失败，但数据已从数据源获取，直接返回
+                }
             }
             return value;
         } catch (Exception e) {
             log.error("缓存操作失败, key: {}", key, e);
-            // 缓存失败时直接从数据源获取
+            // 缓存读取失败时直接从数据源获取
             return dataSupplier.get();
         }
     }
@@ -102,8 +107,7 @@ public class CacheUtils {
      */
     public boolean exists(String key) {
         try {
-            Boolean exists = redisTemplate.hasKey(key);
-            return Boolean.TRUE.equals(exists);
+            return redisTemplate.hasKey(key);
         } catch (Exception e) {
             log.error("检查缓存存在性失败, key: {}", key, e);
             return false;

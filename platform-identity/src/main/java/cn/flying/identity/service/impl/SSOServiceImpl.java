@@ -15,6 +15,9 @@ import cn.hutool.core.util.StrUtil;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.RedisCallback;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -347,7 +350,9 @@ public class SSOServiceImpl extends BaseService implements SSOService {
 
             Long userId = StpUtil.getLoginIdAsLong();
             String pattern = ssoClientPrefix + userId + ":*";
-            Set<String> keys = redisTemplate.keys(pattern);
+
+            // 使用SCAN替代KEYS命令，避免阻塞Redis
+            Set<String> keys = scanKeys(pattern);
 
             List<Map<String, Object>> clients = new ArrayList<>();
 
@@ -423,9 +428,9 @@ public class SSOServiceImpl extends BaseService implements SSOService {
         // 清除用户客户端列表
         redisTemplate.delete(userKey);
 
-        // 清除相关的 SSO Token
+        // 清除相关的 SSO Token - 使用SCAN替代KEYS
         String pattern = ssoTokenPrefix + "*";
-        Set<String> tokenKeys = redisTemplate.keys(pattern);
+        Set<String> tokenKeys = scanKeys(pattern);
         for (String tokenKey : tokenKeys) {
             String userInfo = redisTemplate.opsForValue().get(tokenKey);
             if (userInfo != null && userInfo.startsWith(userId + ":")) {
@@ -519,5 +524,38 @@ public class SSOServiceImpl extends BaseService implements SSOService {
         String userKey = ssoUserPrefix + userId;
         redisTemplate.opsForSet().add(userKey, clientId);
         redisTemplate.expire(userKey, ssoTokenTimeout, TimeUnit.SECONDS);
+    }
+
+    /**
+     * 使用SCAN命令扫描Redis键
+     * 替代阻塞的KEYS命令
+     *
+     * @param pattern 匹配模式
+     * @return 匹配的键集合
+     */
+    private Set<String> scanKeys(String pattern) {
+        Set<String> keys = new HashSet<>();
+
+        try {
+            // 使用SCAN命令迭代扫描
+            redisTemplate.execute((RedisCallback<Set<String>>) connection -> {
+                try (Cursor<byte[]> cursor = connection.scan(
+                        ScanOptions.scanOptions()
+                                .match(pattern)
+                                .count(100)  // 每次扫描100个键
+                                .build())) {
+                    while (cursor.hasNext()) {
+                        keys.add(new String(cursor.next()));
+                    }
+                } catch (Exception e) {
+                    log.error("扫描Redis键失败: pattern={}", pattern, e);
+                }
+                return keys;
+            });
+        } catch (Exception e) {
+            log.error("执行Redis SCAN命令失败: pattern={}", pattern, e);
+        }
+
+        return keys;
     }
 }

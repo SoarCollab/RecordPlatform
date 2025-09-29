@@ -1,0 +1,1 @@
+authFilter=cn.flying.identity.rpc.filter.DubboProviderAuthFilter

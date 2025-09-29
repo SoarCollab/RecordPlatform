@@ -27,8 +27,9 @@ spring:
         allow:
         deny:
         reset-enable: false
-        login-username: admin
-        login-password: 123456
+        # 使用环境变量配置监控页面的用户名和密码
+        login-username: ${DRUID_USERNAME:admin}
+        login-password: ${DRUID_PASSWORD:123456}
 
 
 # actuator
@@ -107,27 +108,6 @@ operation:
         - "USER"
         - "ROLE"
         - "PERMISSION"
-      abnormal-detection:
-        enabled: true            # 是否启用异常检测
-        time-window: 60          # 时间窗口（分钟）
-        max-failures-per-ip: 10 # 每IP最大失败次数
-        max-operations-per-user: 100 # 每用户最大操作次数
-        location-detection-enabled: true # 地理位置检测
-        time-detection-enabled: true     # 时间异常检测
-        working-hours: "09:00-18:00"     # 工作时间
-    
-    
-    # 告警配置
-    alert:
-      enabled: true              # 是否启用告警
-      check-interval: 60         # 检查间隔（秒）
-      high-risk-threshold: 80    # 高风险阈值
-      abnormal-event-threshold: 5 # 异常事件阈值
-      notification-methods:      # 通知方式
-        - "EMAIL"
-        - "SMS"
-      alert-emails:              # 告警邮箱
-        - "admin@example.com"
 
 # 网关流量监控配置
 gateway:
@@ -172,13 +152,12 @@ gateway:
       block-response-code: 429    # 拦截响应码
       block-response-message: "Request blocked due to suspicious activity"
 
-
 ############## Sa-Token 配置 ##############
 sa-token:
   # token 名称（同时也是 cookie 名称）
   token-name: record-platform
-  # jwt秘钥
-  jwt-secret-key: record-platform-jwt-secret-key
+  # jwt秘钥 - 使用环境变量配置，提供默认值仅用于开发环境
+  jwt-secret-key: ${SA_TOKEN_JWT_SECRET_KEY:record-platform-jwt-secret-key-dev-only}
   # token 有效期（单位：秒） 默认30天，-1 代表永久有效
   timeout: 2592000
   # token 最低活跃频率（单位：秒），如果 token 超过此时间没有访问系统就会被冻结，默认-1 代表不限制，永不冻结
@@ -211,3 +190,68 @@ knife4j:
     enable-footer: true
     enable-footer-custom: true
     footer-custom-content: "Copyright © 2025 RecordPlatform Team. All rights reserved."
+
+# Dubbo 配置（对内 RPC，仅内网可达）
+dubbo:
+  application:
+    name: RecordPlatform_identity
+    logger: slf4j
+    protocol: tri
+    qos-port: 22331
+    qos-enable: true
+    qos-accept-foreign-ip: false
+    check-serializable: false
+    serialize-check-status: DISABLE
+  protocol:
+    name: tri
+    port: 8091
+    payload: 104857600
+  registry:
+    register-mode: instance
+    address: nacos://localhost:8848
+  provider:
+    # 开启内置 token 校验，防止未授权的消费者调用
+    token: ${DUBBO_PROVIDER_TOKEN:record-platform-internal-token}
+    # 显式启用鉴权过滤器
+    filter: authFilter
+    # 可按需配置超时与线程池
+    timeout: 5000
+
+
+api:
+    gateway:
+      # 连接池配置
+      pool:
+        max-total: 500
+        max-per-route: 50
+        connect-timeout: 5000
+        socket-timeout: 30000
+
+      # 缓存配置
+      cache:
+        l1:
+          max-size: 10000
+          expire-seconds: 60
+        l2:
+          expire-seconds: 3600
+        enable-stats: true
+
+      # 熔断器配置
+      circuit:
+        failure-rate-threshold: 50
+        slow-call-rate-threshold: 50
+        slow-call-duration-threshold: 1000
+        sliding-window-size: 100
+        minimum-number-of-calls: 10
+        wait-duration-in-open-state: 60
+        rate-limit-qps: 100
+        max-retry-attempts: 3
+
+      # 告警配置
+      alert:
+        email:
+          enabled: true
+        dingtalk:
+          enabled: true
+        suppress-window: 300
+        aggregate-threshold: 10

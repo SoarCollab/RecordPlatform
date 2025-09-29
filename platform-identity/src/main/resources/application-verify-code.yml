@@ -1,0 +1,34 @@
+# 验证码配置
+verify-code:
+  # 邮件验证码配置
+  email:
+    # 验证码长度
+    length: 6
+    # 过期时间（分钟）
+    expire-minutes: 5
+    # 每小时发送限制
+    limit-per-hour: 10
+  
+  # 短信验证码配置
+  sms:
+    # 验证码长度
+    length: 6
+    # 过期时间（分钟）
+    expire-minutes: 5
+    # 每小时发送限制
+    limit-per-hour: 5
+  
+  # 图形验证码配置
+  image:
+    # 图片宽度
+    width: 130
+    # 图片高度
+    height: 48
+    # 过期时间（分钟）
+    expire-minutes: 5
+
+# 日志配置
+logging:
+  level:
+    cn.flying.identity.service.impl.VerifyCodeServiceImpl: DEBUG
+    cn.flying.identity.controller.VerifyCodeController: DEBUG

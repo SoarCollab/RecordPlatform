@@ -58,7 +58,7 @@ public class ApplicationProperties {
         /**
          * API文档地址
          */
-        private String apiDocUrl = "http://localhost:8081/identity/doc.html";
+        private String apiDocUrl;
     }
 
     /**

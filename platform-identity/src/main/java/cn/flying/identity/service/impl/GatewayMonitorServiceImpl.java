@@ -3,6 +3,7 @@ package cn.flying.identity.service.impl;
 import cn.flying.identity.service.BaseService;
 import cn.flying.identity.service.GatewayMonitorService;
 import cn.flying.identity.util.FlowUtils;
+import cn.flying.identity.util.ValidationUtils;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import jakarta.annotation.Resource;
@@ -46,33 +47,45 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
     // Redis 键前缀配置
     @Value("${gateway.redis.prefix:gateway:}")
     private String redisPrefix;
+
     // 数据保留时间配置
     @Value("${gateway.data.retention-hours:24}")
     private int dataRetentionHours;
+
     // 错误详情保留数量配置
     @Value("${gateway.error.max-details:100}")
     private int maxErrorDetails;
+
     @Resource(name = "stringRedisTemplate")
     private StringRedisTemplate redisTemplate;
+
     @Resource
     private FlowUtils flowUtils;
+
     // 流量限制配置
     @Value("${gateway.rate-limit.requests-per-minute:60}")
     private int requestsPerMinute;
+
     @Value("${gateway.rate-limit.requests-per-hour:1000}")
     private int requestsPerHour;
+
     @Value("${gateway.rate-limit.block-time:300}")
     private int blockTime;
 
     @Override
     public Result<Void> recordRequestStart(String requestId, String method, String uri,
                                            String clientIp, String userAgent, Long userId) {
-        return safeExecuteAction(() -> {
+        try {
             // 参数验证
-            requireNonBlank(requestId, "请求ID不能为空");
-            requireNonBlank(method, "请求方法不能为空");
-            requireNonBlank(uri, "请求URI不能为空");
-            requireNonBlank(clientIp, "客户端IP不能为空");
+            Result<?> validation = ValidationUtils.validateAll(
+                    requireNonBlank(requestId, "请求ID不能为空"),
+                    requireNonBlank(method, "请求方法不能为空"),
+                    requireNonBlank(uri, "请求URI不能为空"),
+                    requireNonBlank(clientIp, "客户端IP不能为空")
+            );
+            if (!validation.isSuccess()) {
+                return new Result<>(ResultEnum.PARAM_IS_INVALID.getCode(), validation.getMessage(), null);
+            }
 
             String timestamp = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm:ss");
 
@@ -100,7 +113,12 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
             if (userId != null) {
                 updateUserActivityStats(userId);
             }
-        }, "记录请求开始失败");
+
+            return Result.success();
+        } catch (Exception e) {
+            logError("记录请求开始失败", e);
+            return new Result<>(ResultEnum.SYSTEM_ERROR.getCode(), "记录请求开始失败: " + e.getMessage(), null);
+        }
     }
 
     // 动态生成Redis键前缀
@@ -187,12 +205,17 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
     @Override
     public Result<Void> recordRequestEnd(String requestId, int statusCode, long responseSize,
                                          long executionTime, String errorMessage) {
-        return safeExecuteAction(() -> {
+        try {
             // 参数验证
-            requireNonBlank(requestId, "请求ID不能为空");
-            requireCondition(statusCode, code -> code >= 100 && code < 600, "状态码必须在100-599之间");
-            requireCondition(responseSize, size -> size >= 0, "响应大小不能为负数");
-            requireCondition(executionTime, time -> time >= 0, "执行时间不能为负数");
+            Result<?> validation = ValidationUtils.validateAll(
+                    requireNonBlank(requestId, "请求ID不能为空"),
+                    requireCondition(statusCode, code -> code >= 100 && code < 600, "状态码必须在100-599之间"),
+                    requireCondition(responseSize, size -> size >= 0, "响应大小不能为负数"),
+                    requireCondition(executionTime, time -> time >= 0, "执行时间不能为负数")
+            );
+            if (!validation.isSuccess()) {
+                return new Result<>(ResultEnum.PARAM_IS_INVALID.getCode(), validation.getMessage(), null);
+            }
 
             String requestKey = getRequestPrefix() + requestId;
 
@@ -227,7 +250,12 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                 String trafficKey = getTrafficPrefix() + timeKey;
                 redisTemplate.opsForHash().increment(trafficKey, "success", 1);
             }
-        }, "记录请求结束失败");
+
+            return Result.success();
+        } catch (Exception e) {
+            logError("记录请求结束失败", e);
+            return new Result<>(ResultEnum.SYSTEM_ERROR.getCode(), "记录请求结束失败: " + e.getMessage(), null);
+        }
     }
 
     @Override
@@ -264,7 +292,7 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                 logWarn("IP {} 超出每小时请求限制 {}", clientIp, requestsPerHour);
                 // 触发长期封禁机制
                 String longBanKey = getRateLimitPrefix() + "long_ban:" + clientIp;
-                setCache(longBanKey, "1", blockTime * 4);
+                setCache(longBanKey, "1", blockTime * 4L);
                 return success(false);
             }
 
@@ -537,11 +565,11 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                 stats.put("p99_response_time", p99ResponseTime);
                 stats.put("total_requests", responseTimes.size());
             } else {
-                stats.put("avg_response_time", 0);
-                stats.put("min_response_time", 0);
-                stats.put("max_response_time", 0);
-                stats.put("p95_response_time", 0);
-                stats.put("p99_response_time", 0);
+                stats.put("avg_response_time", 0.0);
+                stats.put("min_response_time", 0L);
+                stats.put("max_response_time", 0L);
+                stats.put("p95_response_time", 0L);
+                stats.put("p99_response_time", 0L);
                 stats.put("total_requests", 0);
             }
 

@@ -1,0 +1,46 @@
+# OAuth2.0 配置
+# 基于标准OAuth2.0协议实现的单点登录和第三方应用接入配置
+oauth:
+  # 授权码配置
+  code:
+    timeout: 300  # 授权码有效期（秒），默认5分钟，符合OAuth2.0安全建议
+  
+  # 访问令牌配置
+  access-token:
+    timeout: 3600  # 访问令牌有效期（秒），默认1小时
+  
+  # 刷新令牌配置
+  refresh-token:
+    timeout: 86400  # 刷新令牌有效期（秒），默认24小时
+  
+  # 客户端令牌配置
+  
+  # 默认配置
+  default:
+    scope: "read"  # 默认授权范围，可选值：read, write, admin
+  
+  # 授权模式配置
+  
+  # Redis配置
+  redis:
+    key-prefix: "oauth2:"  # Redis键前缀，用于区分不同环境
+  
+  # 安全配置
+  security:
+    # 客户端密钥是否使用BCrypt加密存储
+    use-bcrypt: false     # TODO: 生产环境应设为true
+    # 是否启用状态参数验证（防CSRF攻击）
+    require-state: true
+  
+  # 第三方OAuth提供商配置
+  github:
+    client-id: "${GITHUB_CLIENT_ID:}"
+    client-secret: "${GITHUB_CLIENT_SECRET:}"
+  
+  google:
+    client-id: "${GOOGLE_CLIENT_ID:}"
+    client-secret: "${GOOGLE_CLIENT_SECRET:}"
+  
+  wechat:
+    app-id: "${WECHAT_APP_ID:}"
+    app-secret: "${WECHAT_APP_SECRET:}"

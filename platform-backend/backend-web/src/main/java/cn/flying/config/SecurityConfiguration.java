@@ -7,7 +7,9 @@ import cn.flying.common.util.JwtUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.vo.auth.AuthorizeVO;
 import cn.flying.filter.JwtAuthenticationFilter;
+import cn.flying.filter.OAuth2AuthenticationFilter;
 import cn.flying.filter.RequestLogFilter;
+import cn.flying.filter.SSOAuthenticationEntryPoint;
 import cn.flying.service.AccountService;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
@@ -47,8 +49,15 @@ public class SecurityConfiguration {
     @Resource
     AccountService service;
 
+    @Resource
+    OAuth2AuthenticationFilter oAuth2AuthenticationFilter;
+
+    @Resource
+    SSOAuthenticationEntryPoint ssoAuthenticationEntryPoint;
+
     /**
      * 针对于 SpringSecurity 6 的新版配置方法
+     * 支持JWT、OAuth2 Bearer Token和SSO单点登录三种认证方式
      *
      * @param http 配置器
      * @return 自动构建的内置过滤器链
@@ -58,13 +67,19 @@ public class SecurityConfiguration {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         return http
                 .authorizeHttpRequests(conf -> conf
+                        // 监控端点
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/metrics/**").permitAll()
                         .requestMatchers("/trace").permitAll()
                         .requestMatchers("/heapdump").permitAll()
+                        // 认证相关端点（JWT和SSO）
                         .requestMatchers("/api/auth/**", "/error").permitAll()
+                        .requestMatchers("/api/oauth2/**").permitAll() // SSO登录和回调端点
+                        // 公开资源
                         .requestMatchers("/api/file/download/images/**").permitAll()
+                        // API文档
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/doc.html/**", "/webjars/**", "/favicon.ico").permitAll()
+                        // 其他请求需要认证和授权
                         .anyRequest().hasAnyRole(Const.ROLE_DEFAULT, Const.ROLE_ADMINISTER, Const.ROLE_MONITOR)
                 )
                 .formLogin(conf -> conf
@@ -79,13 +94,16 @@ public class SecurityConfiguration {
                 )
                 .exceptionHandling(conf -> conf
                         .accessDeniedHandler(this::handleProcess)
-                        .authenticationEntryPoint(this::handleProcess)
+                        // 使用SSO认证入口点处理未认证请求
+                        .authenticationEntryPoint(ssoAuthenticationEntryPoint)
                 )
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(conf -> conf
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                // 过滤器链顺序：RequestLogFilter -> OAuth2AuthenticationFilter -> JwtAuthenticationFilter
                 .addFilterBefore(requestLogFilter, UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(jwtAuthenticationFilter, RequestLogFilter.class)
+                .addFilterBefore(oAuth2AuthenticationFilter, cn.flying.filter.RequestLogFilter.class)
+                .addFilterBefore(jwtAuthenticationFilter, cn.flying.filter.OAuth2AuthenticationFilter.class)
                 .build();
     }
 

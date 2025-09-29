@@ -5,6 +5,7 @@ import cn.flying.identity.dto.Account;
 import cn.flying.identity.service.AccountService;
 import cn.flying.identity.service.AuthService;
 import cn.flying.identity.service.JwtBlacklistService;
+import cn.flying.identity.util.SecureLogger;
 import cn.flying.identity.util.WebContextUtils;
 import cn.flying.identity.vo.AccountVO;
 import cn.flying.identity.vo.request.ChangePasswordVO;
@@ -42,11 +43,17 @@ public class AuthServiceImpl implements AuthService {
             // 查找用户
             Account account = accountService.findAccountByNameOrEmail(username);
             if (account == null) {
+                // 记录登录失败事件
+                String clientIp = WebContextUtils.getCurrentClientIp();
+                SecureLogger.logAuthenticationFailure(username, clientIp, "用户不存在");
                 return Result.error(ResultEnum.USER_NOT_EXIST, null);
             }
 
             // 验证密码
             if (!accountService.matchesPassword(password, account.getPassword())) {
+                // 记录密码错误事件
+                String clientIp = WebContextUtils.getCurrentClientIp();
+                SecureLogger.logAuthenticationFailure(username, clientIp, "密码错误");
                 return Result.error(ResultEnum.USER_LOGIN_ERROR, null);
             }
 
@@ -59,6 +66,11 @@ public class AuthServiceImpl implements AuthService {
             StpUtil.getSession().set("email", account.getEmail());
 
             String token = StpUtil.getTokenValue();
+
+            // 记录登录成功事件
+            String clientIp = WebContextUtils.getCurrentClientIp();
+            SecureLogger.logAuthenticationSuccess(username, clientIp);
+
             return Result.success(token);
         }, "用户登录失败");
     }
@@ -71,6 +83,15 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public Result<Void> logout() {
         return WebContextUtils.safeExecuteVoid(() -> {
+            // 获取用户信息用于日志记录
+            String username = "unknown";
+            try {
+                if (StpUtil.isLogin()) {
+                    username = (String) StpUtil.getSession().get("username");
+                }
+            } catch (Exception ignored) {
+            }
+
             // 将当前 Token 加入黑名单，确保登出后旧 Token 立即失效
             try {
                 String token = StpUtil.getTokenValue();
@@ -80,6 +101,11 @@ public class AuthServiceImpl implements AuthService {
             } catch (Exception ignored) {
             }
             StpUtil.logout();
+
+            // 记录注销事件
+            String clientIp = WebContextUtils.getCurrentClientIp();
+            SecureLogger.info("用户注销成功 - User: {}, IP: {}", username, clientIp);
+
             return Result.success(null);
         }, "用户注销失败");
     }
@@ -184,6 +210,60 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public Account findAccountByNameOrEmail(String text) {
         return accountService.findAccountByNameOrEmail(text);
+    }
+
+    /**
+     * 根据用户名或邮箱查找用户（需要管理员权限）
+     * 返回脱敏后的用户信息
+     *
+     * @param text 用户名或邮箱
+     * @return 脱敏后的用户信息
+     */
+    @Override
+    public Result<AccountVO> findUserWithMasking(String text) {
+        return WebContextUtils.safeExecute(() -> {
+            // 检查登录状态
+            if (!StpUtil.isLogin()) {
+                return Result.error(ResultEnum.USER_NOT_LOGGED_IN, null);
+            }
+
+            // 检查是否有管理员权限
+            String role = (String) StpUtil.getSession().get("role");
+            String currentUser = (String) StpUtil.getSession().get("username");
+            if (!"admin".equals(role) && !"ADMIN".equals(role)) {
+                // 记录非授权访问尝试
+                String clientIp = WebContextUtils.getCurrentClientIp();
+                SecureLogger.logAccessDenied("findUserWithMasking", currentUser, "非管理员权限");
+                return Result.error(ResultEnum.PERMISSION_UNAUTHORIZED, null);
+            }
+
+            // 查找用户
+            Account account = accountService.findAccountByNameOrEmail(text);
+            if (account == null) {
+                return Result.error(ResultEnum.USER_NOT_EXIST, null);
+            }
+
+            // 转换为VO并进行脱敏
+            AccountVO vo = new AccountVO();
+            BeanUtils.copyProperties(account, vo);
+            vo.setExternalId(String.valueOf(account.getId()));
+
+            // 邮箱脱敏：保留前3位和@后的域名
+            String email = account.getEmail();
+            if (email != null && !email.isEmpty()) {
+                int atIndex = email.indexOf("@");
+                if (atIndex > 3) {
+                    String prefix = email.substring(0, 3);
+                    String domain = email.substring(atIndex);
+                    vo.setEmail(prefix + "***" + domain);
+                } else if (atIndex > 0) {
+                    String domain = email.substring(atIndex);
+                    vo.setEmail("***" + domain);
+                }
+            }
+
+            return Result.success(vo);
+        }, "查找用户失败");
     }
 
     /**

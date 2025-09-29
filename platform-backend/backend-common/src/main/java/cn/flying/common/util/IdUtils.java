@@ -11,7 +11,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Base64;
-import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -23,7 +22,6 @@ public class IdUtils {
 
     private static SnowflakeIdGenerator snowflakeIdGenerator;
     private static StringRedisTemplate redisTemplate;
-    private static final Random RANDOM = new Random();
     
     // 监控配置
     private static final String MONITOR_KEY_PREFIX = "id:monitor:";
@@ -81,13 +79,14 @@ public class IdUtils {
     
     /**
      * 生成日志ID (适用于日志记录)
-     * 使用不同于实体ID的生成策略
+     * 使用雪花算法保证唯一性
      * @return 日志ID
      */
     public static String nextLogId() {
-        // 生成策略：时间戳+随机数
-        return "L" + System.currentTimeMillis() + 
-               String.format("%04d", RANDOM.nextInt(10000));
+        // 使用雪花算法生成唯一ID，加上L前缀以标识为日志ID
+        long id = snowflakeIdGenerator.nextId();
+        monitorIdGeneration("log"); // 监控ID生成
+        return "L" + id;
     }
     
     /**

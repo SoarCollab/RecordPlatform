@@ -1,0 +1,101 @@
+# Redis配置统一管理
+spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      username: default
+      password: ${REDIS_PASSWORD:redis_EHb2Yc}
+      database: ${REDIS_DATABASE:1}
+      timeout: 3000ms
+      connect-timeout: 3000ms
+
+# 业务相关Redis键前缀配置
+redis:
+  prefix:
+    # 基础前缀
+    base: "identity:"
+    
+    # JWT相关
+    jwt:
+      blacklist: "${redis.prefix.base}jwt:blacklist:"
+      frequency: "${redis.prefix.base}jwt:frequency:"
+    
+    # 验证码相关
+    verify:
+      email: "${redis.prefix.base}verify:email:"
+      sms: "${redis.prefix.base}verify:sms:"
+      image: "${redis.prefix.base}verify:image:"
+      limit: "${redis.prefix.base}verify:limit:"
+      count: "${redis.prefix.base}verify:count:"
+    
+    # SSO相关
+    sso:
+      token: "${redis.prefix.base}sso:token:"
+      client: "${redis.prefix.base}sso:client:"
+      user: "${redis.prefix.base}sso:user:"
+    
+    # OAuth相关
+    oauth:
+      access-token: "${redis.prefix.base}oauth:access_token:"
+      refresh-token: "${redis.prefix.base}oauth:refresh_token:"
+      client-token: "${redis.prefix.base}oauth:client_token:"
+      auth-code: "${redis.prefix.base}oauth:code:"
+      user-token: "${redis.prefix.base}oauth:user_token:"
+    
+    # 网关监控相关
+    gateway:
+      request: "${redis.prefix.base}gateway:request:"
+      traffic: "${redis.prefix.base}gateway:traffic:"
+      api: "${redis.prefix.base}gateway:api:"
+      error: "${redis.prefix.base}gateway:error:"
+      performance: "${redis.prefix.base}gateway:performance:"
+      user: "${redis.prefix.base}gateway:user:"
+      limit: "${redis.prefix.base}gateway:limit:"
+    
+    # 第三方认证相关
+    third-party:
+      state: "${redis.prefix.base}third_party:state:"
+      bind: "${redis.prefix.base}third_party:bind:"
+      token: "${redis.prefix.base}third_party:token:"
+
+# 缓存过期时间配置
+cache:
+  expire:
+    # JWT相关过期时间（秒）
+    jwt:
+      token: 7200  # 2小时
+      blacklist: 7200  # 2小时
+      frequency: 300   # 5分钟
+    
+    # 验证码过期时间（秒）
+    verify:
+      email: 600     # 10分钟
+      sms: 600       # 10分钟
+      image: 300     # 5分钟
+      limit: 60      # 1分钟发送限制
+    
+    # SSO相关过期时间（秒）
+    sso:
+      token: 7200    # 2小时
+      client: 7200   # 2小时
+      user: 7200     # 2小时
+    
+    # OAuth相关过期时间（秒）
+    oauth:
+      access-token: 3600     # 1小时
+      refresh-token: 86400   # 24小时
+      client-token: 7200     # 2小时
+      auth-code: 600         # 10分钟
+    
+    # 网关监控相关过期时间（小时）
+    gateway:
+      request: 1        # 1小时
+      traffic: 24       # 24小时
+      stats: 168        # 7天
+    
+    # 第三方认证相关过期时间（秒）
+    third-party:
+      state: 600        # 10分钟
+      bind: 3600        # 1小时
+      token: 7200       # 2小时

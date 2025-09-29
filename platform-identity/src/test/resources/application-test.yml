@@ -1,0 +1,130 @@
+spring:
+  application:
+    name: platform-identity-test
+  profiles:
+    active: test
+  
+  # 使用H2内存数据库进行测试
+  datasource:
+    driver-class-name: org.h2.Driver
+    url: jdbc:h2:mem:testdb;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password: 
+    hikari:
+      maximum-pool-size: 10
+  
+  # H2数据库配置
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  
+  # Redis配置 - 使用嵌入式Redis或Mock
+  data:
+    redis:
+      host: localhost
+      port: 6370  # 测试端口，避免冲突
+      database: 0
+      timeout: 3000
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+  
+  # RabbitMQ配置 - 测试环境可以禁用
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /
+
+server:
+  port: 0  # 随机端口，避免冲突
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.nop.NopLoggingImpl  # 关闭SQL日志
+  global-config:
+    banner: false
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+      id-type: AUTO
+
+# Sa-Token配置
+sa-token:
+  token-name: test-token
+  jwt-secret-key: test-jwt-secret-key-for-integration-testing
+  timeout: 7200
+  active-timeout: -1
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+  is-log: false
+
+# ID生成器配置
+snowflake:
+  worker-id: 1
+  data-center-id: 1
+
+id:
+  security:
+    key: test-security-key-for-integration-testing
+  monitor:
+    threshold: 1000
+  mapping:
+    expire-hours: 1
+
+# 缓存配置
+cache:
+  expire:
+    sso:
+      token: 3600
+
+# 测试用OAuth配置
+oauth:
+  clients:
+    test-client:
+      client-id: test-client-id
+      client-secret: test-client-secret
+      redirect-uris:
+        - http://localhost:8080/callback
+      scopes:
+        - read
+        - write
+
+# 网关配置 - 简化测试
+gateway:
+  traffic:
+    monitor:
+      enabled: false
+    rate-limit:
+      enabled: false
+    anomaly-detection:
+      enabled: false
+
+# Dubbo配置 - 测试环境可以禁用
+dubbo:
+  application:
+    name: test-identity
+    qos-enable: false
+  registry:
+    address: N/A
+  protocol:
+    name: tri
+    port: -1  # 禁用
+
+# Knife4j配置 - 测试环境禁用
+knife4j:
+  enable: false
+
+# 日志配置
+logging:
+  level:
+    cn.flying.identity: DEBUG
+    org.springframework: WARN
+    com.baomidou: WARN

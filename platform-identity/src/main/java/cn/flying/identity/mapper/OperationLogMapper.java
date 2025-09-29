@@ -87,7 +87,7 @@ public interface OperationLogMapper extends BaseMapper<OperationLog> {
      * @param endTime   结束时间
      * @return 失败操作日志列表
      */
-    @Select("SELECT * FROM operation_log WHERE status = 0 " +
+    @Select("SELECT * FROM operation_log WHERE status = 1 " +
             "AND operation_time BETWEEN #{startTime} AND #{endTime} " +
             "ORDER BY operation_time DESC")
     List<OperationLog> findFailedOperations(@Param("startTime") LocalDateTime startTime,

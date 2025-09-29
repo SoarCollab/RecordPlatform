@@ -46,3 +46,8 @@ App.java
 /platform-frontend/node_modules/**/**/
 /platform-frontend/node_modules/.package-lock.json
 .cursorignore
+/CLAUDE.md
+/AGENTS.md
+/platform-monitor/AGENTS.md
+/platform-monitor/CLAUDE.md
+/.kiro/settings/mcp.json

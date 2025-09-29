@@ -1,0 +1,37 @@
+spring:
+  mail:
+    host: ${MAIL_HOST:smtp.163.com}
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    port: ${MAIL_PORT:465}
+    protocol: smtps
+    properties:
+      from: ${MAIL_USERNAME}
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          ssl:
+            enable: true
+          socketFactory:
+            class: javax.net.ssl.SSLSocketFactory
+            fallback: false
+          timeout: 10000
+          connectiontimeout: 10000
+  rabbitmq:
+    addresses: ${RABBITMQ_HOST}
+    stream:
+      port: 5672
+    username: ${RABBITMQ_USERNAME}
+    password: ${RABBITMQ_PASSWORD}
+    virtual-host: /
+  data:
+    redis:
+      database: 0
+      host: ${REDIS_HOST}
+      port: 6379
+      timeout: 5000
+      username: default
+      password: ${REDIS_PASSWORD}

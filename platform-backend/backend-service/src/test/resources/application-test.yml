@@ -1,0 +1,109 @@
+# 测试环境配置
+spring:
+  # Web配置
+  web:
+    verify:
+      mail-limit: 60
+    flow:
+      period: 3
+      limit: 10
+      block: 30
+  
+  # 使用H2内存数据库进行测试
+  datasource:
+    driver-class-name: org.h2.Driver
+    url: jdbc:h2:mem:testdb;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_UPPER=false
+    username: sa
+    password:
+
+  # 禁用Flyway数据库迁移
+  flyway:
+    enabled: false
+
+  # Redis使用内嵌模式（如果需要）
+  # RabbitMQ使用测试配置
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+
+  # 邮件发送禁用
+  mail:
+    host: localhost
+    port: 1025
+    username: test
+    password: test
+  data:
+    redis:
+      host: localhost
+      database: 0
+      password:
+      port: 6379
+
+# MyBatis Plus配置
+mybatis-plus:
+  configuration:
+    # 打印SQL日志用于调试
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      # 逻辑删除配置
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# 日志配置
+logging:
+  level:
+    cn.flying: DEBUG
+    org.springframework.web: INFO
+    org.springframework.security: DEBUG
+
+# MinIO测试配置
+minio:
+  endpoint: http://localhost:9000
+  access-key: minioadmin
+  secret-key: minioadmin
+  bucket-name: test-bucket
+
+# Nacos测试配置
+spring.cloud:
+  nacos:
+    discovery:
+      enabled: false
+    config:
+      enabled: false
+
+# Dubbo测试配置
+dubbo:
+  application:
+    name: backend-service-test
+  registry:
+    address: N/A
+  consumer:
+    check: false
+
+# JaCoCo配置
+jacoco:
+  skip: false
+
+# 测试用的JWT配置
+spring.security:
+  jwt:
+    key: test-jwt-secret-key-for-testing-only
+    expire: 72
+    limit:
+      base: 5
+      upgrade: 10
+      frequency: 30
+
+# ID安全配置
+id:
+  security:
+    key: test-id-security-key
+
+# 雪花算法配置
+snowflake:
+  worker-id: 1
+  data-center-id: 1

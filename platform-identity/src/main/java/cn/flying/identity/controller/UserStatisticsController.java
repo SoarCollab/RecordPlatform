@@ -2,22 +2,26 @@ package cn.flying.identity.controller;
 
 import cn.dev33.satoken.annotation.SaCheckRole;
 import cn.flying.identity.service.UserStatisticsService;
+import cn.flying.identity.util.ResponseConverter;
+import cn.flying.identity.vo.RestResponse;
 import cn.flying.platformapi.constant.Result;
-import cn.flying.platformapi.constant.ResultEnum;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
 /**
- * 用户统计控制器
- * 提供用户相关的统计分析接口（管理员专用）
- *
- * @author 王贝强
+ * 用户统计管理Controller
+ * 提供用户相关的统计分析功能（管理员专用）
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/admin/user-stats")
 @Tag(name = "用户统计", description = "用户相关的统计分析功能（管理员专用）")
@@ -29,138 +33,192 @@ public class UserStatisticsController {
 
     /**
      * 获取用户总数统计
-     *
-     * @return 用户总数统计
      */
     @GetMapping("/count")
     @Operation(summary = "获取用户总数统计", description = "获取用户总数、活跃用户数、新增用户数等统计信息")
-    public Result<Map<String, Object>> getUserCountStats() {
-        return userStatisticsService.getUserCountStats();
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功"),
+            @ApiResponse(responseCode = "401", description = "未认证"),
+            @ApiResponse(responseCode = "403", description = "无权限")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> getUserCountStats() {
+        Result<Map<String, Object>> result = userStatisticsService.getUserCountStats();
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
      * 获取用户注册趋势
-     *
-     * @param days 统计天数
-     * @return 注册趋势数据
      */
     @GetMapping("/registration-trend")
     @Operation(summary = "获取用户注册趋势", description = "获取指定天数内的用户注册趋势数据")
-    public Result<Map<String, Object>> getRegistrationTrend(
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功"),
+            @ApiResponse(responseCode = "401", description = "未认证"),
+            @ApiResponse(responseCode = "403", description = "无权限")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> getRegistrationTrend(
             @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") int days) {
-        return userStatisticsService.getRegistrationTrend(days);
+
+        Result<Map<String, Object>> result = userStatisticsService.getRegistrationTrend(days);
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
      * 获取用户活跃度统计
-     *
-     * @param days 统计天数
-     * @return 活跃度统计
      */
     @GetMapping("/activity")
     @Operation(summary = "获取用户活跃度统计", description = "获取用户活跃度相关统计数据")
-    public Result<Map<String, Object>> getUserActivityStats(
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功"),
+            @ApiResponse(responseCode = "401", description = "未认证"),
+            @ApiResponse(responseCode = "403", description = "无权限")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> getUserActivityStats(
             @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") int days) {
-        return userStatisticsService.getUserActivityStats(days);
+
+        Result<Map<String, Object>> result = userStatisticsService.getUserActivityStats(days);
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
      * 获取用户角色分布
-     *
-     * @return 角色分布统计
      */
     @GetMapping("/role-distribution")
     @Operation(summary = "获取用户角色分布", description = "获取不同角色用户的数量分布")
-    public Result<Map<String, Object>> getUserRoleDistribution() {
-        return userStatisticsService.getUserRoleDistribution();
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功"),
+            @ApiResponse(responseCode = "401", description = "未认证"),
+            @ApiResponse(responseCode = "403", description = "无权限")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> getUserRoleDistribution() {
+        Result<Map<String, Object>> result = userStatisticsService.getUserRoleDistribution();
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
      * 获取用户地理分布
-     *
-     * @return 地理分布统计
      */
     @GetMapping("/geographic-distribution")
     @Operation(summary = "获取用户地理分布", description = "获取用户的地理位置分布统计")
-    public Result<Map<String, Object>> getUserGeographicDistribution() {
-        return userStatisticsService.getUserGeographicDistribution();
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功"),
+            @ApiResponse(responseCode = "401", description = "未认证"),
+            @ApiResponse(responseCode = "403", description = "无权限")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> getUserGeographicDistribution() {
+        Result<Map<String, Object>> result = userStatisticsService.getUserGeographicDistribution();
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
      * 获取用户登录统计
-     *
-     * @param days 统计天数
-     * @return 登录统计
      */
     @GetMapping("/login-stats")
     @Operation(summary = "获取用户登录统计", description = "获取用户登录相关统计数据")
-    public Result<Map<String, Object>> getUserLoginStats(
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功"),
+            @ApiResponse(responseCode = "401", description = "未认证"),
+            @ApiResponse(responseCode = "403", description = "无权限")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> getUserLoginStats(
             @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") int days) {
-        return userStatisticsService.getUserLoginStats(days);
+
+        Result<Map<String, Object>> result = userStatisticsService.getUserLoginStats(days);
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
      * 获取用户留存率
-     *
-     * @param days 统计天数
-     * @return 留存率统计
      */
     @GetMapping("/retention-rate")
     @Operation(summary = "获取用户留存率", description = "获取用户留存率统计数据")
-    public Result<Map<String, Object>> getUserRetentionRate(
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功"),
+            @ApiResponse(responseCode = "401", description = "未认证"),
+            @ApiResponse(responseCode = "403", description = "无权限")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> getUserRetentionRate(
             @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") int days) {
-        return userStatisticsService.getUserRetentionRate(days);
+
+        Result<Map<String, Object>> result = userStatisticsService.getUserRetentionRate(days);
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
      * 获取用户增长率
-     *
-     * @param days 统计天数
-     * @return 增长率统计
      */
     @GetMapping("/growth-rate")
     @Operation(summary = "获取用户增长率", description = "获取用户增长率统计数据")
-    public Result<Map<String, Object>> getUserGrowthRate(
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功"),
+            @ApiResponse(responseCode = "401", description = "未认证"),
+            @ApiResponse(responseCode = "403", description = "无权限")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> getUserGrowthRate(
             @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") int days) {
-        return userStatisticsService.getUserGrowthRate(days);
+
+        Result<Map<String, Object>> result = userStatisticsService.getUserGrowthRate(days);
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
      * 获取用户行为统计
-     *
-     * @param userId 用户ID
-     * @param days   统计天数
-     * @return 行为统计
      */
     @GetMapping("/behavior/{userId}")
     @Operation(summary = "获取用户行为统计", description = "获取指定用户的行为统计数据")
-    public Result<Map<String, Object>> getUserBehaviorStats(
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功"),
+            @ApiResponse(responseCode = "401", description = "未认证"),
+            @ApiResponse(responseCode = "403", description = "无权限"),
+            @ApiResponse(responseCode = "404", description = "用户不存在")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> getUserBehaviorStats(
             @Parameter(description = "用户ID") @PathVariable Long userId,
             @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") int days) {
-        return userStatisticsService.getUserBehaviorStats(userId, days);
+
+        Result<Map<String, Object>> result = userStatisticsService.getUserBehaviorStats(userId, days);
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
      * 获取用户设备统计
-     *
-     * @param days 统计天数
-     * @return 设备统计
      */
     @GetMapping("/device-stats")
     @Operation(summary = "获取用户设备统计", description = "获取用户使用设备的统计数据")
-    public Result<Map<String, Object>> getUserDeviceStats(
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功"),
+            @ApiResponse(responseCode = "401", description = "未认证"),
+            @ApiResponse(responseCode = "403", description = "无权限")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> getUserDeviceStats(
             @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") int days) {
-        return userStatisticsService.getUserDeviceStats(days);
+
+        Result<Map<String, Object>> result = userStatisticsService.getUserDeviceStats(days);
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
-     * 获取用户统计仪表板数据
-     *
-     * @return 仪表板数据
+     * 获取用户统计仪表板
      */
     @GetMapping("/dashboard")
     @Operation(summary = "获取用户统计仪表板", description = "获取用户统计仪表板的综合数据")
-    public Result<Map<String, Object>> getUserStatsDashboard() {
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功"),
+            @ApiResponse(responseCode = "401", description = "未认证"),
+            @ApiResponse(responseCode = "403", description = "无权限"),
+            @ApiResponse(responseCode = "500", description = "系统错误")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> getUserStatsDashboard() {
         try {
             Map<String, Object> dashboard = new java.util.HashMap<>();
 
@@ -172,27 +230,31 @@ public class UserStatisticsController {
             Result<Map<String, Object>> growthRate = userStatisticsService.getUserGrowthRate(30);
 
             // 组装仪表板数据
-            if (countStats.getCode() == ResultEnum.SUCCESS.getCode()) {
+            if (countStats != null && countStats.getData() != null) {
                 dashboard.put("count_stats", countStats.getData());
             }
-            if (registrationTrend.getCode() == ResultEnum.SUCCESS.getCode()) {
+            if (registrationTrend != null && registrationTrend.getData() != null) {
                 dashboard.put("registration_trend", registrationTrend.getData());
             }
-            if (activityStats.getCode() == ResultEnum.SUCCESS.getCode()) {
+            if (activityStats != null && activityStats.getData() != null) {
                 dashboard.put("activity_stats", activityStats.getData());
             }
-            if (roleDistribution.getCode() == ResultEnum.SUCCESS.getCode()) {
+            if (roleDistribution != null && roleDistribution.getData() != null) {
                 dashboard.put("role_distribution", roleDistribution.getData());
             }
-            if (growthRate.getCode() == ResultEnum.SUCCESS.getCode()) {
+            if (growthRate != null && growthRate.getData() != null) {
                 dashboard.put("growth_rate", growthRate.getData());
             }
 
             dashboard.put("last_updated", System.currentTimeMillis());
 
-            return Result.success(dashboard);
+            Result<Map<String, Object>> result = Result.success(dashboard);
+            RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+            return ResponseEntity.status(response.getStatus()).body(response);
         } catch (Exception e) {
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            log.error("获取用户统计仪表板数据失败", e);
+            RestResponse<Map<String, Object>> response = RestResponse.internalServerError(500, "获取仪表板数据失败");
+            return ResponseEntity.status(response.getStatus()).body(response);
         }
     }
 }

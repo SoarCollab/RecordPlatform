@@ -1,0 +1,97 @@
+# SMS4J 短信服务配置
+sms:
+  # 配置类型：yaml配置
+  config-type: yaml
+  # 短信发送功能开关控制（true=禁用，false=启用）
+  restricted: ${SMS_RESTRICTED:true}
+  
+  # 短信服务提供商配置 - 可配置多个
+  blends:
+    # 阿里云短信配置
+    alibaba:
+      # 供应商标识
+      supplier: alibaba
+      # 阿里云AccessKey ID
+      access-key-id: ${SMS_ALIBABA_ACCESS_KEY_ID:your_access_key_id}
+      # 阿里云AccessKey Secret
+      access-key-secret: ${SMS_ALIBABA_ACCESS_KEY_SECRET:your_access_key_secret}
+      # 短信签名
+      signature: ${SMS_ALIBABA_SIGNATURE:存证平台}
+      # 短信模板ID
+      template-id: ${SMS_ALIBABA_TEMPLATE_ID:SMS_123456789}
+      # 接口地址
+      request-url: dysmsapi.aliyuncs.com
+      # API操作名称
+      action: SendSms
+      # API版本
+      version: 2017-05-25
+      # 区域ID
+      region-id: cn-hangzhou
+      
+    # 腾讯云短信配置
+    tencent:
+      # 供应商标识
+      supplier: tencent
+      # 腾讯云SecretId
+      secret-id: ${SMS_TENCENT_SECRET_ID:your_secret_id}
+      # 腾讯云SecretKey
+      secret-key: ${SMS_TENCENT_SECRET_KEY:your_secret_key}
+      # 短信应用ID
+      app-id: ${SMS_TENCENT_APP_ID:your_app_id}
+      # 短信签名
+      signature: ${SMS_TENCENT_SIGNATURE:存证平台}
+      # 短信模板ID
+      template-id: ${SMS_TENCENT_TEMPLATE_ID:123456}
+      # 接口地址
+      request-url: sms.tencentcloudapi.com
+      # API版本
+      version: 2021-01-11
+      # 区域
+      region: ap-beijing
+      
+    # 华为云短信配置
+    huawei:
+      # 供应商标识
+      supplier: huawei
+      # 华为云AccessKey ID
+      access-key-id: ${SMS_HUAWEI_ACCESS_KEY_ID:your_access_key_id}
+      # 华为云SecretKey
+      access-key-secret: ${SMS_HUAWEI_SECRET_KEY:your_secret_key}
+      # 短信签名
+      signature: ${SMS_HUAWEI_SIGNATURE:存证平台}
+      # 短信模板ID
+      template-id: ${SMS_HUAWEI_TEMPLATE_ID:your_template_id}
+      # 接口地址
+      request-url: https://smsapi.cn-north-4.myhuaweicloud.com:443
+      # 应用密钥
+      app-key: ${SMS_HUAWEI_APP_KEY:your_app_key}
+      # 应用密码
+      app-secret: ${SMS_HUAWEI_APP_SECRET:your_app_secret}
+      # 通道号
+      sender: ${SMS_HUAWEI_SENDER:8821}
+      
+    # 模拟短信配置（测试环境使用）
+    mock:
+      # 供应商标识
+      supplier: mock
+      # 模拟发送延迟（毫秒）
+      delay: 100
+      # 是否模拟发送失败
+      fail-rate: 0.0
+      
+# 短信服务总开关配置
+verify-code:
+  sms:
+    # 短信验证码长度
+    length: 6
+    # 短信验证码过期时间（分钟）
+    expire-minutes: 5
+    # 每小时发送限制
+    limit-per-hour: 5
+    # 默认使用的短信服务提供商
+    default-supplier: mock
+    
+  # 当前使用的短信服务提供商配置
+  config:
+    # 当前使用的短信服务提供商（对应上面配置的key）
+    supplier: ${SMS_SUPPLIER:mock}

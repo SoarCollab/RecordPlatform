@@ -89,6 +89,11 @@ public class Result<T> implements Serializable {
         return new Result<>(resultCode.getCode(), resultCode.getMessage(), data);
     }
 
+    //失败返回封装-使用返回结果枚举的错误码但自定义提示信息
+    public static <T> Result<T> errorWithMessage(ResultEnum resultCode, String message) {
+        return new Result<>(resultCode.getCode(), message, null);
+    }
+
     //失败返回封装-使用自定义提示信息
     public static Result<String> error(String message) {
         return new Result<>(500, message, null);

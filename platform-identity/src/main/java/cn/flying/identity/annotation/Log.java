@@ -83,19 +83,4 @@ public @interface Log {
      * @return 是否异步记录
      */
     boolean async() default true;
-
-    /**
-     * 是否忽略异常
-     * 如果为true，即使审计日志记录失败也不会影响主业务
-     *
-     * @return 是否忽略异常
-     */
-    boolean ignoreException() default true;
-
-    /**
-     * 是否记录执行时间
-     *
-     * @return 是否记录执行时间
-     */
-    boolean recordExecutionTime() default true;
 }

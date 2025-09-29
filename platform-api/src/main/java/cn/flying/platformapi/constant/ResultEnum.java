@@ -53,8 +53,8 @@ public enum ResultEnum implements Serializable {
     DATA_IS_WRONG(50002, "数据有误"),
     DATA_ALREADY_EXISTED(50003, "数据已存在"),
     AUTH_CODE_ERROR(50004, "验证码错误"),
-    File_UPLOAD_ERROR(50005, "文件上传失败"),
-    File_DOWNLOAD_ERROR(50006, "文件下载失败"),
+    FILE_UPLOAD_ERROR(50005, "文件上传失败"),
+    FILE_DOWNLOAD_ERROR(50006, "文件下载失败"),
     FILE_DELETE_ERROR(50007, "文件删除失败"),
     FILE_NOT_EXIST(50008, "文件不存在"),
     FILE_EMPTY(50009, "文件为空"),
@@ -76,7 +76,13 @@ public enum ResultEnum implements Serializable {
     PERMISSION_TOKEN_INVALID(70006, "无效token"),
     PERMISSION_SIGNATURE_ERROR(70007, "签名失败"),
     SYSTEM_ERROR(90001, "系统繁忙，请稍后重试！"),
-    SYSTEM_BUSY(90002, "系统繁忙，请稍后重试！");
+    SYSTEM_BUSY(90002, "系统繁忙，请稍后重试！"),
+
+    /* API网关错误：80001-89999 */
+    SERVICE_ERROR(80001,"服务内部错误!"),
+    SERVICE_UNAVAILABLE(80002,"服务暂时不可用!"),
+    OPERATION_FAILED(80003,"操作失败!"),
+    PARAMETER_ERROR(80004,"令牌错误!");
 
     // 状态码
     int code;
@@ -94,13 +100,5 @@ public enum ResultEnum implements Serializable {
 
     public String message() {
         return message;
-    }
-
-    public void setCode(int code) {
-        this.code = code;
-    }
-
-    public void setMessage(String message) {
-        this.message = message;
     }
 }

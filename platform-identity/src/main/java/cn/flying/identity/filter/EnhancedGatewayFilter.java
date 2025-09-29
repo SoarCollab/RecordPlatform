@@ -31,9 +31,7 @@ import java.util.List;
 
 /**
  * 增强的网关过滤器
- * 集成流量监控、性能统计、安全验证等功能
- *
- * @author 王贝强
+ * 集成流量监控、性能统计、安全验证等功能。
  */
 @Slf4j
 @Component
@@ -42,6 +40,7 @@ public class EnhancedGatewayFilter implements Filter {
 
     /**
      * 不需要鉴权的路径列表
+     * 注意：API网关代理路径由ApiGatewayProxyFilter处理认证和权限验证
      */
     private static final List<String> EXCLUDE_PATHS = Arrays.asList(
             "/api/auth/login",
@@ -64,7 +63,12 @@ public class EnhancedGatewayFilter implements Filter {
             "/favicon.ico",
             "/actuator/**",
             "/error",
-            "/docs/**"
+            "/docs/**",
+            // API网关代理路径，由ApiGatewayProxyFilter专门处理
+            "/api/gateway/proxy/**",
+            "/api/v1/**",
+            "/api/v2/**",
+            "/gateway/**"
     );
 
     @Value("${server.servlet.context-path}")
@@ -83,7 +87,7 @@ public class EnhancedGatewayFilter implements Filter {
         HttpServletRequest httpRequest = (HttpServletRequest) request;
         HttpServletResponse httpResponse = (HttpServletResponse) response;
 
-        // 生成请求ID
+        // 生成请求ID并写入MDC，便于链路追踪
         String requestId = IdUtils.nextIdWithPrefix("REQ");
         MDC.put("requestId", requestId);
 
@@ -95,7 +99,6 @@ public class EnhancedGatewayFilter implements Filter {
         long startTime = System.currentTimeMillis();
 
         try {
-            // 获取用户ID（如果已登录）
             Long userId = null;
             try {
                 if (StpUtil.isLogin()) {
@@ -126,11 +129,9 @@ public class EnhancedGatewayFilter implements Filter {
             if (isExcludePath(url)) {
                 log.debug("请求路径 {} 在排除列表中，跳过鉴权", requestURI);
 
-                // 使用响应包装器以便记录响应信息
                 ContentCachingResponseWrapper responseWrapper = new ContentCachingResponseWrapper(httpResponse);
                 chain.doFilter(request, responseWrapper);
 
-                // 记录请求结束
                 recordRequestEnd(requestId, responseWrapper.getStatus(),
                         responseWrapper.getContentSize(),
                         System.currentTimeMillis() - startTime, null);
@@ -142,14 +143,12 @@ public class EnhancedGatewayFilter implements Filter {
             // 执行Token验证
             validateToken(httpRequest);
 
-            // 执行权限验证
+            // 执行权限验证（按路径与方法细分）
             validatePermission(requestURI, method);
 
-            // 使用响应包装器以便记录响应信息
             ContentCachingResponseWrapper responseWrapper = new ContentCachingResponseWrapper(httpResponse);
             chain.doFilter(request, responseWrapper);
 
-            // 记录请求结束
             recordRequestEnd(requestId, responseWrapper.getStatus(),
                     responseWrapper.getContentSize(),
                     System.currentTimeMillis() - startTime, null);
@@ -180,6 +179,7 @@ public class EnhancedGatewayFilter implements Filter {
 
     /**
      * 写入错误响应
+     * 根据业务错误码映射为标准HTTP状态码。
      */
     private void writeErrorResponse(HttpServletResponse response, Result<?> result) throws IOException {
         response.setStatus(getHttpStatusFromResult(result));
@@ -189,6 +189,7 @@ public class EnhancedGatewayFilter implements Filter {
 
     /**
      * 记录请求结束
+     * 将请求的收尾指标写入监控服务中。
      */
     private void recordRequestEnd(String requestId, int statusCode, long responseSize,
                                   long executionTime, String errorMessage) {
@@ -202,51 +203,45 @@ public class EnhancedGatewayFilter implements Filter {
 
     /**
      * 检查是否为排除路径
-     * 支持精确路径匹配和通配符前缀匹配（如"/doc/**"）
+     * 支持通配符后缀 /** 的前缀匹配与精确匹配。
      */
     private boolean isExcludePath(String requestURI) {
         return EXCLUDE_PATHS.stream().anyMatch(excludePath -> {
-            // 如果排除路径以"/**"结尾，则进行前缀匹配
             if (excludePath.endsWith("/**")) {
                 String prefix = excludePath.substring(0, excludePath.length() - 3);
                 return requestURI.startsWith(prefix);
             }
-            // 否则进行精确匹配
             return requestURI.equals(excludePath);
         });
     }
 
     /**
      * 验证Token
+     * 支持从Authorization Bearer或参数satoken读取，并校验黑名单。
      */
     private void validateToken(HttpServletRequest request) throws NotLoginException {
-        // 从请求头获取Token
         String token = request.getHeader("Authorization");
         if (token != null && token.startsWith("Bearer ")) {
             token = token.substring(7);
         }
 
-        // 如果请求头没有Token，尝试从参数获取
         if (token == null || token.trim().isEmpty()) {
             token = request.getParameter("satoken");
         }
 
-        // 验证Token
         if (token != null && !token.trim().isEmpty()) {
-            // 黑名单检查：若在黑名单中则视为未登录
             if (jwtBlacklistService != null && jwtBlacklistService.isBlacklisted(token)) {
                 throw new NotLoginException("token in blacklist", null, null);
             }
-            // 设置当前请求的Token
             StpUtil.setTokenValue(token);
         }
 
-        // 检查登录状态
         StpUtil.checkLogin();
     }
 
     /**
      * 验证权限
+     * 简要按路径进行角色/权限校验，复杂细粒度控制可在Controller层实现。
      */
     private void validatePermission(String requestURI, String method)
             throws NotPermissionException, NotRoleException {
@@ -263,37 +258,31 @@ public class EnhancedGatewayFilter implements Filter {
             return;
         }
 
-        // OAuth和SSO接口需要登录即可
+        // OAuth和SSO接口需要登录即可（由具体端点内再做细化逻辑）
         if (requestURI.startsWith("/oauth") || requestURI.startsWith("/api/sso")) {
-            // 已经通过了Token验证，无需额外权限检查
             return;
         }
 
-        // 根据HTTP方法进行权限验证
         switch (method.toUpperCase()) {
             case "GET":
-                // 读取权限
                 StpUtil.checkPermissionOr("read", "admin");
                 break;
             case "POST":
             case "PUT":
             case "PATCH":
-                // 写入权限
                 StpUtil.checkPermissionOr("write", "admin");
                 break;
             case "DELETE":
-                // 删除权限
                 StpUtil.checkPermissionOr("delete", "admin");
                 break;
             default:
-                // 其他方法需要基本权限
                 StpUtil.checkPermissionOr("basic", "admin");
                 break;
         }
     }
 
     /**
-     * 从Result获取HTTP状态码
+     * 将业务错误码映射为HTTP状态码
      */
     private int getHttpStatusFromResult(Result<?> result) {
         if (result.getCode() == ResultEnum.USER_NOT_LOGGED_IN.getCode()) {

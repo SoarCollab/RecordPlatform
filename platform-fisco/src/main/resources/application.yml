@@ -42,6 +42,7 @@ dubbo:
     serialize-check-status: DISABLE
   provider:
     timeout: 60000 # 全局提供者超时设置为 60000ms (60秒)
+    token: ${DUBBO_PROVIDER_TOKEN:record-platform-internal-token}
   protocol:
     name: tri   # 使用 Triple 协议
     port: 8091

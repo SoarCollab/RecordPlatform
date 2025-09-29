@@ -6,9 +6,7 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * 操作日志监控配置类
- * 整合了原审计监控功能，用于配置操作日志和Token监控的相关参数
- *
- * @author 王贝强
+ * 提供操作日志开关、异步开关、保留天数、参数/结果记录与敏感操作配置。
  */
 @Data
 @Configuration
@@ -20,14 +18,8 @@ public class OperationLogMonitorConfig {
      */
     private OperationLogConfig operationLog = new OperationLogConfig();
 
-
     /**
-     * 告警配置
-     */
-    private AlertConfig alert = new AlertConfig();
-
-    /**
-     * 操作日志配置
+     * 操作日志配置项
      */
     @Data
     public static class OperationLogConfig {
@@ -65,100 +57,16 @@ public class OperationLogMonitorConfig {
         };
 
         /**
-         * 高风险模块列表
+         * 高风险模块列表（预留）
          */
         private String[] highRiskModules = {
                 "USER", "ROLE", "PERMISSION", "OAUTH", "SYSTEM"
         };
-
-        /**
-         * 异常检测配置
-         */
-        private AbnormalDetectionConfig abnormalDetection = new AbnormalDetectionConfig();
-    }
-
-
-    /**
-     * 告警配置
-     */
-    @Data
-    public static class AlertConfig {
-
-        /**
-         * 是否启用告警
-         */
-        private boolean enabled = true;
-
-        /**
-         * 检查间隔（秒）
-         */
-        private int checkInterval = 60;
-
-        /**
-         * 高风险阈值
-         */
-        private int highRiskThreshold = 80;
-
-        /**
-         * 异常事件阈值
-         */
-        private int abnormalEventThreshold = 5;
-
-        /**
-         * 通知方式
-         */
-        private String[] notificationMethods = {"EMAIL", "SMS"};
-
-        /**
-         * 告警邮箱
-         */
-        private String[] alertEmails = {"admin@example.com"};
     }
 
     /**
-     * 异常检测配置
+     * 常量定义
      */
-    @Data
-    public static class AbnormalDetectionConfig {
-
-        /**
-         * 是否启用异常检测
-         */
-        private boolean enabled = true;
-
-        /**
-         * 时间窗口（分钟）
-         */
-        private int timeWindow = 60;
-
-        /**
-         * 每个IP最大失败次数
-         */
-        private int maxFailuresPerIp = 10;
-
-        /**
-         * 每个用户最大操作次数
-         */
-        private int maxOperationsPerUser = 100;
-
-        /**
-         * 是否启用地理位置检测
-         */
-        private boolean locationDetectionEnabled = true;
-
-        /**
-         * 是否启用时间检测
-         */
-        private boolean timeDetectionEnabled = true;
-
-        /**
-         * 工作时间
-         */
-        private String workingHours = "09:00-18:00";
-    }
-
-
-    // 常量定义
     public static final class Constants {
 
         // 操作类型
@@ -208,11 +116,5 @@ public class OperationLogMonitorConfig {
         public static final String ABNORMAL_TYPE_CONCURRENT_USAGE = "CONCURRENT_USAGE";
         public static final String ABNORMAL_TYPE_DEVICE_MISMATCH = "DEVICE_MISMATCH";
         public static final String ABNORMAL_TYPE_TIME_ANOMALY = "TIME_ANOMALY";
-
-        // 处理状态
-        public static final String PROCESS_STATUS_PENDING = "PENDING";
-        public static final String PROCESS_STATUS_PROCESSING = "PROCESSING";
-        public static final String PROCESS_STATUS_PROCESSED = "PROCESSED";
-        public static final String PROCESS_STATUS_IGNORED = "IGNORED";
     }
 }

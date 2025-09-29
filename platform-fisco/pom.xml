@@ -18,6 +18,7 @@
         <fisco.bcos.version>3.8.0</fisco.bcos.version>
         <web3j.version>4.9.8</web3j.version>
         <jakarta.servlet-api.version>6.0.0</jakarta.servlet-api.version>
+        <jacoco.version>0.8.11</jacoco.version>
     </properties>
     <dependencies>
         <dependency>
@@ -105,6 +106,119 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>${argLine} -Djdk.attach.allowAttachSelf=true -XX:+EnableDynamicAgentLoading</argLine>
+                </configuration>
+            </plugin>
+            <!-- JaCoCo 代码覆盖率插件 -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <executions>
+                    <!-- 准备JaCoCo代理，用于收集覆盖率数据 -->
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <!-- 生成测试覆盖率报告 -->
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                        <configuration>
+                            <formats>
+                                <format>HTML</format>
+                                <format>XML</format>
+                                <format>CSV</format>
+                            </formats>
+                            <outputDirectory>${project.build.directory}/site/jacoco</outputDirectory>
+                        </configuration>
+                    </execution>
+                    <!-- 检查覆盖率是否达标 -->
+                    <execution>
+                        <id>check</id>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <!-- 整体覆盖率规则 -->
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>CLASS</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>METHOD</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <!-- 类级别覆盖率规则，排除DTO、VO、配置类等 -->
+                                <rule>
+                                    <element>CLASS</element>
+                                    <excludes>
+                                        <!-- 排除实体类 -->
+                                        <exclude>**/dto/**</exclude>
+                                        <exclude>**/vo/**</exclude>
+                                        <exclude>**/entity/**</exclude>
+                                        <exclude>**/model/**</exclude>
+                                        <!-- 排除配置类 -->
+                                        <exclude>**/config/**</exclude>
+                                        <exclude>**/*Config</exclude>
+                                        <!-- 排除启动类 -->
+                                        <exclude>**/*Application</exclude>
+                                        <!-- 排除常量和枚举 -->
+                                        <exclude>**/constant/**</exclude>
+                                        <exclude>**/enums/**</exclude>
+                                        <exclude>**/*Enum</exclude>
+                                        <!-- 排除异常类 -->
+                                        <exclude>**/exception/**</exclude>
+                                        <!-- 排除合约包装类（自动生成） -->
+                                        <exclude>**/contract/**</exclude>
+                                        <!-- 排除工具类（可选） -->
+                                        <exclude>**/util/**</exclude>
+                                    </excludes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>METHOD</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

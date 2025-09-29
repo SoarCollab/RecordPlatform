@@ -69,6 +69,33 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
     @Value("${oauth.wechat.app-secret:}")
     private String wechatAppSecret;
 
+    // 第三方服务URL配置
+    // GitHub URLs
+    @Value("${third-party.auth.github.auth-url:https://github.com/login/oauth/authorize}")
+    private String githubAuthUrl;
+    @Value("${third-party.auth.github.token-url:https://github.com/login/oauth/access_token}")
+    private String githubTokenUrl;
+    @Value("${third-party.auth.github.user-info-url:https://api.github.com/user}")
+    private String githubUserInfoUrl;
+
+    // Google URLs
+    @Value("${third-party.auth.google.auth-url:https://accounts.google.com/o/oauth2/v2/auth}")
+    private String googleAuthUrl;
+    @Value("${third-party.auth.google.token-url:https://oauth2.googleapis.com/token}")
+    private String googleTokenUrl;
+    @Value("${third-party.auth.google.user-info-url:https://www.googleapis.com/oauth2/v2/userinfo}")
+    private String googleUserInfoUrl;
+
+    // WeChat URLs
+    @Value("${third-party.auth.wechat.auth-url:https://open.weixin.qq.com/connect/qrconnect}")
+    private String wechatAuthUrl;
+    @Value("${third-party.auth.wechat.token-url:https://api.weixin.qq.com/sns/oauth2/access_token}")
+    private String wechatTokenUrl;
+    @Value("${third-party.auth.wechat.refresh-token-url:https://api.weixin.qq.com/sns/oauth2/refresh_token}")
+    private String wechatRefreshTokenUrl;
+    @Value("${third-party.auth.wechat.user-info-url:https://api.weixin.qq.com/sns/userinfo}")
+    private String wechatUserInfoUrl;
+
     @Override
     public Result<String> getAuthorizationUrl(String provider, String redirectUri, String state) {
         try {
@@ -114,14 +141,26 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
             redisTemplate.delete(stateKey);
 
             // 获取访问令牌
-            String redirectUri = stateValue.split(":")[1];
-            String accessToken = getAccessTokenFromProvider(provider, code, redirectUri);
+            int separatorIndex = stateValue.indexOf(":");
+            if (separatorIndex <= 0 || separatorIndex >= stateValue.length() - 1) {
+                log.warn("state参数格式不正确: {}", stateValue);
+                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+            }
+
+            String providerFromState = stateValue.substring(0, separatorIndex);
+            String redirectUri = stateValue.substring(separatorIndex + 1);
+
+            if (!providerFromState.equalsIgnoreCase(provider)) {
+                log.warn("回调provider与state中的provider不一致: {} != {}", provider, providerFromState);
+            }
+
+            String accessToken = getAccessTokenFromProvider(providerFromState, code, redirectUri);
             if (accessToken == null) {
                 return Result.error(ResultEnum.SYSTEM_ERROR, null);
             }
 
             // 获取第三方用户信息
-            Result<Map<String, Object>> userInfoResult = getThirdPartyUserInfo(provider, accessToken);
+            Result<Map<String, Object>> userInfoResult = getThirdPartyUserInfo(providerFromState, accessToken);
             if (userInfoResult.getCode() != ResultEnum.SUCCESS.getCode()) {
                 return userInfoResult;
             }
@@ -135,7 +174,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
             // 微信专属：优先使用unionid作为第三方标识；若无则退回openid
             String unionId = null;
             String openId = null;
-            if ("wechat".equalsIgnoreCase(provider)) {
+            if ("wechat".equalsIgnoreCase(providerFromState)) {
                 Object rawObj = thirdPartyUser.get("raw");
                 if (rawObj instanceof JSONObject wxRaw) {
                     unionId = wxRaw.getStr("unionid");
@@ -149,16 +188,16 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
 
             // 选择用于绑定/查找的第三方ID
             String thirdPartyIdForBinding = normalizedId;
-            if ("wechat".equalsIgnoreCase(provider)) {
+            if ("wechat".equalsIgnoreCase(providerFromState)) {
                 thirdPartyIdForBinding = org.apache.commons.lang3.StringUtils.isNotBlank(unionId)
                         ? unionId
                         : (org.apache.commons.lang3.StringUtils.isNotBlank(openId) ? openId : normalizedId);
             }
 
             // 查找是否已有绑定的账号（微信场景优先以unionid匹配，其次openid）
-            Account existingAccount = findAccountByThirdPartyId(provider, thirdPartyIdForBinding);
-            if (existingAccount == null && "wechat".equalsIgnoreCase(provider) && org.apache.commons.lang3.StringUtils.isNotBlank(openId)) {
-                existingAccount = findAccountByThirdPartyId(provider, openId);
+            Account existingAccount = findAccountByThirdPartyId(providerFromState, thirdPartyIdForBinding);
+            if (existingAccount == null && "wechat".equalsIgnoreCase(providerFromState) && org.apache.commons.lang3.StringUtils.isNotBlank(openId)) {
+                existingAccount = findAccountByThirdPartyId(providerFromState, openId);
             }
 
             Map<String, Object> result = new HashMap<>();
@@ -166,15 +205,22 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
             if (existingAccount != null) {
                 // 已有绑定账号，直接登录
                 StpUtil.login(existingAccount.getId());
-                StpUtil.getSession().set("role", existingAccount.getRole());
-                StpUtil.getSession().set("username", existingAccount.getUsername());
-                StpUtil.getSession().set("email", existingAccount.getEmail());
+                try {
+                    cn.dev33.satoken.session.SaSession session = StpUtil.getSession();
+                    if (session != null) {
+                        session.set("role", existingAccount.getRole());
+                        session.set("username", existingAccount.getUsername());
+                        session.set("email", existingAccount.getEmail());
+                    }
+                } catch (Exception sessionEx) {
+                    log.warn("设置会话属性失败: {}", sessionEx.getMessage());
+                }
 
                 result.put("status", "login_success");
                 result.put("user_id", existingAccount.getId());
                 result.put("username", existingAccount.getUsername());
                 result.put("token", StpUtil.getTokenValue());
-                result.put("provider", provider);
+                result.put("provider", providerFromState);
             } else {
                 // 未绑定账号，需要注册或绑定
                 if (email != null) {
@@ -183,11 +229,11 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                         // 邮箱已存在，提示绑定
                         result.put("status", "need_bind");
                         result.put("email", email);
-                        result.put("provider", provider);
+                        result.put("provider", providerFromState);
                         result.put("third_party_id", thirdPartyIdForBinding);
 
                         // 临时存储第三方信息（JSON格式）
-                        String bindKey = THIRD_PARTY_BIND_PREFIX + emailAccount.getId() + ":" + provider;
+                        String bindKey = THIRD_PARTY_BIND_PREFIX + emailAccount.getId() + ":" + providerFromState;
                         JSONObject bindValue = JSONUtil.createObj()
                                 .set("thirdPartyId", thirdPartyIdForBinding)
                                 .set("accessToken", accessToken)
@@ -196,7 +242,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                                 .set("username", username)
                                 .set("avatar", avatar);
 
-                        if ("wechat".equalsIgnoreCase(provider)) {
+                        if ("wechat".equalsIgnoreCase(providerFromState)) {
                             // 从缓存的access映射中取出refresh_token
                             String mappingKey = THIRD_PARTY_TOKEN_PREFIX + "wechat:access:" + accessToken;
                             String mappingJson = redisTemplate.opsForValue().get(mappingKey);
@@ -210,25 +256,32 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                         redisTemplate.opsForValue().set(bindKey, bindValue.toString(), 30, TimeUnit.MINUTES);
                     } else {
                         // 自动注册新账号
-                        Account newAccount = createAccountFromThirdParty(provider, thirdPartyUser);
+                        Account newAccount = createAccountFromThirdParty(providerFromState, thirdPartyUser);
                         if (newAccount != null) {
                             StpUtil.login(newAccount.getId());
-                            StpUtil.getSession().set("role", newAccount.getRole());
-                            StpUtil.getSession().set("username", newAccount.getUsername());
-                            StpUtil.getSession().set("email", newAccount.getEmail());
+                            try {
+                                cn.dev33.satoken.session.SaSession session = StpUtil.getSession();
+                                if (session != null) {
+                                    session.set("role", newAccount.getRole());
+                                    session.set("username", newAccount.getUsername());
+                                    session.set("email", newAccount.getEmail());
+                                }
+                            } catch (Exception sessionEx) {
+                                log.warn("设置新账号会话属性失败: {}", sessionEx.getMessage());
+                            }
 
                             result.put("status", "register_success");
                             result.put("user_id", newAccount.getId());
                             result.put("username", newAccount.getUsername());
                             result.put("token", StpUtil.getTokenValue());
-                            result.put("provider", provider);
+                            result.put("provider", providerFromState);
                         } else {
                             return Result.error(ResultEnum.SYSTEM_ERROR, null);
                         }
                     }
                 } else {
                     result.put("status", "need_complete_info");
-                    result.put("provider", provider);
+                    result.put("provider", providerFromState);
                     result.put("third_party_id", thirdPartyIdForBinding);
                     result.put("username", username);
                     result.put("avatar", avatar);
@@ -371,7 +424,8 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
             switch (provider.toLowerCase()) {
                 case "wechat": {
                     String url = String.format(
-                            "https://api.weixin.qq.com/sns/oauth2/refresh_token?appid=%s&grant_type=refresh_token&refresh_token=%s",
+                            "%s?appid=%s&grant_type=refresh_token&refresh_token=%s",
+                            wechatRefreshTokenUrl,
                             URLEncoder.encode(wechatAppId, StandardCharsets.UTF_8),
                             URLEncoder.encode(account.getRefreshToken(), StandardCharsets.UTF_8)
                     );
@@ -405,7 +459,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                     break;
                 }
                 case "google": {
-                    String url = "https://oauth2.googleapis.com/token";
+                    String url = googleTokenUrl;
                     HttpResponse resp = HttpRequest.post(url)
                             .form(Map.of(
                                     "client_id", googleClientId,
@@ -441,7 +495,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                     break;
                 }
                 case "github": {
-                    String url = "https://github.com/login/oauth/access_token";
+                    String url = githubTokenUrl;
                     HttpResponse resp = HttpRequest.post(url)
                             .form(Map.of(
                                     "client_id", githubClientId,
@@ -514,10 +568,10 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
 
             switch (provider.toLowerCase()) {
                 case "github":
-                    userInfoUrl = "https://api.github.com/user";
+                    userInfoUrl = githubUserInfoUrl;
                     break;
                 case "google":
-                    userInfoUrl = "https://www.googleapis.com/oauth2/v2/userinfo";
+                    userInfoUrl = googleUserInfoUrl;
                     break;
                 case "wechat":
                     // 微信需要特殊处理
@@ -696,7 +750,6 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
             } else {
                 // 创建新的绑定关系
                 ThirdPartyAccount thirdPartyAccount = new ThirdPartyAccount();
-                thirdPartyAccount.setId(IdUtils.nextUserId());
                 thirdPartyAccount.setUserId(userId);
                 thirdPartyAccount.setProvider(provider);
                 thirdPartyAccount.setThirdPartyId(storeId);
@@ -735,7 +788,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
 
             switch (provider.toLowerCase()) {
                 case "github":
-                    tokenUrl = "https://github.com/login/oauth/access_token";
+                    tokenUrl = githubTokenUrl;
                     params.put("client_id", githubClientId);
                     params.put("client_secret", githubClientSecret);
                     params.put("code", code);
@@ -743,7 +796,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                     params.put("redirect_uri", redirectUri);
                     break;
                 case "google":
-                    tokenUrl = "https://oauth2.googleapis.com/token";
+                    tokenUrl = googleTokenUrl;
                     params.put("client_id", googleClientId);
                     params.put("client_secret", googleClientSecret);
                     params.put("code", code);
@@ -751,7 +804,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                     params.put("redirect_uri", redirectUri);
                     break;
                 case "wechat":
-                    tokenUrl = "https://api.weixin.qq.com/sns/oauth2/access_token";
+                    tokenUrl = wechatTokenUrl;
                     params.put("appid", wechatAppId);
                     params.put("secret", wechatAppSecret);
                     params.put("code", code);
@@ -910,7 +963,8 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
             }
 
             String userInfoUrl = String.format(
-                    "https://api.weixin.qq.com/sns/userinfo?access_token=%s&openid=%s&lang=zh_CN",
+                    "%s?access_token=%s&openid=%s&lang=zh_CN",
+                    wechatUserInfoUrl,
                     URLEncoder.encode(accessToken, StandardCharsets.UTF_8),
                     URLEncoder.encode(openId, StandardCharsets.UTF_8)
             );
@@ -984,24 +1038,24 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
      * 构建 GitHub 授权URL
      */
     private String buildGitHubAuthUrl(String redirectUri, String state) {
-        return String.format("https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&scope=user:email&state=%s",
-                githubClientId, URLEncoder.encode(redirectUri, StandardCharsets.UTF_8), state);
+        return String.format("%s?client_id=%s&redirect_uri=%s&scope=user:email&state=%s",
+                githubAuthUrl, githubClientId, URLEncoder.encode(redirectUri, StandardCharsets.UTF_8), state);
     }
 
     /**
      * 构建 Google 授权URL
      */
     private String buildGoogleAuthUrl(String redirectUri, String state) {
-        return String.format("https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&scope=openid email profile&response_type=code&state=%s",
-                googleClientId, URLEncoder.encode(redirectUri, StandardCharsets.UTF_8), state);
+        return String.format("%s?client_id=%s&redirect_uri=%s&scope=openid email profile&response_type=code&state=%s",
+                googleAuthUrl, googleClientId, URLEncoder.encode(redirectUri, StandardCharsets.UTF_8), state);
     }
 
     /**
      * 构建微信授权URL
      */
     private String buildWeChatAuthUrl(String redirectUri, String state) {
-        return String.format("https://open.weixin.qq.com/connect/qrconnect?appid=%s&redirect_uri=%s&response_type=code&scope=snsapi_login&state=%s",
-                wechatAppId, URLEncoder.encode(redirectUri, StandardCharsets.UTF_8), state);
+        return String.format("%s?appid=%s&redirect_uri=%s&response_type=code&scope=snsapi_login&state=%s",
+                wechatAuthUrl, wechatAppId, URLEncoder.encode(redirectUri, StandardCharsets.UTF_8), state);
     }
 
     /**

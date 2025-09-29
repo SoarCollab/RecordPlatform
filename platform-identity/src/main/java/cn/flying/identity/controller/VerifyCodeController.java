@@ -1,28 +1,35 @@
 package cn.flying.identity.controller;
 
+import cn.flying.identity.dto.*;
 import cn.flying.identity.service.VerifyCodeService;
 import cn.flying.identity.util.IdUtils;
 import cn.flying.identity.util.IpUtils;
+import cn.flying.identity.util.ResponseConverter;
+import cn.flying.identity.vo.RestResponse;
 import cn.flying.platformapi.constant.Result;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.Pattern;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
 /**
  * 验证码控制器
- * 提供邮件验证码、短信验证码、图形验证码等功能
+ * 提供符合RESTful规范的验证码服务API
  *
  * @author 王贝强
+ * @since 2025-01-16
  */
 @RestController
-@RequestMapping("/api/verify")
+@RequestMapping("/api/verification")
 @Tag(name = "验证码管理", description = "提供各种类型的验证码服务")
 public class VerifyCodeController {
 
@@ -31,219 +38,261 @@ public class VerifyCodeController {
 
     /**
      * 发送邮件验证码
-     *
-     * @param email   邮箱地址
-     * @param type    验证码类型
-     * @param request HTTP请求
-     * @return 发送结果
+     * POST /api/verification/email-codes - 发送邮件验证码
      */
-    @PostMapping("/email/send")
+    @PostMapping("/email-codes")
     @Operation(summary = "发送邮件验证码", description = "向指定邮箱发送验证码")
-    public Result<Void> sendEmailVerifyCode(
-            @Parameter(description = "邮箱地址") @RequestParam @Email String email,
-            @Parameter(description = "验证码类型") @RequestParam @Pattern(regexp = "(register|reset|modify|login)") String type,
-            HttpServletRequest request) {
+    @ApiResponses({
+            @ApiResponse(responseCode = "202", description = "验证码已发送"),
+            @ApiResponse(responseCode = "400", description = "参数无效"),
+            @ApiResponse(responseCode = "429", description = "请求过于频繁")
+    })
+    public ResponseEntity<RestResponse<Void>> sendEmailCode(
+            @Valid @RequestBody EmailCodeRequest request,
+            HttpServletRequest httpRequest) {
 
-        String clientIp = IpUtils.getClientIp(request);
-        return verifyCodeService.sendEmailVerifyCode(email, type, clientIp);
+        String clientIp = IpUtils.getClientIp(httpRequest);
+        Result<Void> result = verifyCodeService.sendEmailVerifyCode(
+                request.getEmail(), request.getType(), clientIp);
+
+        if (result.isSuccess()) {
+            return ResponseEntity.status(HttpStatus.ACCEPTED)
+                    .body(RestResponse.accepted());
+        } else {
+            RestResponse<Void> response = ResponseConverter.convert(result);
+            return ResponseEntity.status(response.getStatus()).body(response);
+        }
     }
 
     /**
      * 验证邮件验证码
-     *
-     * @param email 邮箱地址
-     * @param code  验证码
-     * @param type  验证码类型
-     * @return 验证结果
+     * POST /api/verification/email-codes/verify - 验证邮件验证码
      */
-    @PostMapping("/email/verify")
+    @PostMapping("/email-codes/verify")
     @Operation(summary = "验证邮件验证码", description = "验证邮件验证码是否正确")
-    public Result<Boolean> verifyEmailCode(
-            @Parameter(description = "邮箱地址") @RequestParam @Email String email,
-            @Parameter(description = "验证码") @RequestParam String code,
-            @Parameter(description = "验证码类型") @RequestParam @Pattern(regexp = "(register|reset|modify|login)") String type) {
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "验证结果"),
+            @ApiResponse(responseCode = "400", description = "参数无效")
+    })
+    public ResponseEntity<RestResponse<Boolean>> verifyEmailCode(
+            @Valid @RequestBody VerifyCodeRequest request) {
 
-        return verifyCodeService.verifyEmailCode(email, code, type);
+        Result<Boolean> result = verifyCodeService.verifyEmailCode(
+                request.getIdentifier(), request.getCode(), request.getType());
+        RestResponse<Boolean> response = ResponseConverter.convert(result);
+
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
      * 发送短信验证码
-     *
-     * @param phone   手机号码
-     * @param type    验证码类型
-     * @param request HTTP请求
-     * @return 发送结果
+     * POST /api/verification/sms-codes - 发送短信验证码
      */
-    @PostMapping("/sms/send")
+    @PostMapping("/sms-codes")
     @Operation(summary = "发送短信验证码", description = "向指定手机号发送验证码")
-    public Result<Void> sendSmsVerifyCode(
-            @Parameter(description = "手机号码") @RequestParam @Pattern(regexp = "^1[3-9]\\d{9}$") String phone,
-            @Parameter(description = "验证码类型") @RequestParam @Pattern(regexp = "(register|reset|modify|login)") String type,
-            HttpServletRequest request) {
+    @ApiResponses({
+            @ApiResponse(responseCode = "202", description = "验证码已发送"),
+            @ApiResponse(responseCode = "400", description = "参数无效"),
+            @ApiResponse(responseCode = "429", description = "请求过于频繁")
+    })
+    public ResponseEntity<RestResponse<Void>> sendSmsCode(
+            @Valid @RequestBody SmsCodeRequest request,
+            HttpServletRequest httpRequest) {
 
-        String clientIp = IpUtils.getClientIp(request);
-        return verifyCodeService.sendSmsVerifyCode(phone, type, clientIp);
+        String clientIp = IpUtils.getClientIp(httpRequest);
+        Result<Void> result = verifyCodeService.sendSmsVerifyCode(
+                request.getPhone(), request.getType(), clientIp);
+
+        if (result.isSuccess()) {
+            return ResponseEntity.status(HttpStatus.ACCEPTED)
+                    .body(RestResponse.accepted());
+        } else {
+            RestResponse<Void> response = ResponseConverter.convert(result);
+            return ResponseEntity.status(response.getStatus()).body(response);
+        }
     }
 
     /**
      * 验证短信验证码
-     *
-     * @param phone 手机号码
-     * @param code  验证码
-     * @param type  验证码类型
-     * @return 验证结果
+     * POST /api/verification/sms-codes/verify - 验证短信验证码
      */
-    @PostMapping("/sms/verify")
+    @PostMapping("/sms-codes/verify")
     @Operation(summary = "验证短信验证码", description = "验证短信验证码是否正确")
-    public Result<Boolean> verifySmsCode(
-            @Parameter(description = "手机号码") @RequestParam @Pattern(regexp = "^1[3-9]\\d{9}$") String phone,
-            @Parameter(description = "验证码") @RequestParam String code,
-            @Parameter(description = "验证码类型") @RequestParam @Pattern(regexp = "(register|reset|modify|login)") String type) {
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "验证结果"),
+            @ApiResponse(responseCode = "400", description = "参数无效")
+    })
+    public ResponseEntity<RestResponse<Boolean>> verifySmsCode(
+            @Valid @RequestBody VerifyCodeRequest request) {
 
-        return verifyCodeService.verifySmsCode(phone, code, type);
+        Result<Boolean> result = verifyCodeService.verifySmsCode(
+                request.getIdentifier(), request.getCode(), request.getType());
+        RestResponse<Boolean> response = ResponseConverter.convert(result);
+
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
-     * 生成图形验证码
-     *
-     * @param sessionId 会话ID（可选）
-     * @return 验证码图片数据
+     * 创建图形验证码
+     * POST /api/verification/image-captchas - 生成图形验证码
      */
-    @GetMapping("/image/generate")
-    @Operation(summary = "生成图形验证码", description = "生成图形验证码并返回Base64编码的图片")
-    public Result<Map<String, Object>> generateImageCaptcha(
-            @Parameter(description = "会话ID") @RequestParam(required = false) String sessionId) {
+    @PostMapping("/image-captchas")
+    @Operation(summary = "创建图形验证码", description = "生成图形验证码并返回Base64编码的图片")
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "验证码已生成"),
+            @ApiResponse(responseCode = "400", description = "参数无效")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> createImageCaptcha(
+            @Valid @RequestBody(required = false) CaptchaRequest request) {
 
-        if (sessionId == null) {
-            sessionId = IdUtils.nextIdWithPrefix("CAPTCHA");
+        String sessionId = (request != null && request.getSessionId() != null)
+                ? request.getSessionId()
+                : IdUtils.nextIdWithPrefix("CAPTCHA");
+
+        Result<Map<String, Object>> result = verifyCodeService.generateImageCaptcha(sessionId);
+
+        if (result.isSuccess()) {
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(RestResponse.created(result.getData()));
+        } else {
+            RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+            return ResponseEntity.status(response.getStatus()).body(response);
         }
-
-        return verifyCodeService.generateImageCaptcha(sessionId);
     }
 
     /**
      * 验证图形验证码
-     *
-     * @param sessionId 会话ID
-     * @param code      验证码
-     * @return 验证结果
+     * POST /api/verification/image-captchas/verify - 验证图形验证码
      */
-    @PostMapping("/image/verify")
+    @PostMapping("/image-captchas/verify")
     @Operation(summary = "验证图形验证码", description = "验证图形验证码是否正确")
-    public Result<Boolean> verifyImageCaptcha(
-            @Parameter(description = "会话ID") @RequestParam String sessionId,
-            @Parameter(description = "验证码") @RequestParam String code) {
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "验证结果"),
+            @ApiResponse(responseCode = "400", description = "参数无效")
+    })
+    public ResponseEntity<RestResponse<Boolean>> verifyImageCaptcha(
+            @Valid @RequestBody CaptchaVerifyRequest request) {
 
-        return verifyCodeService.verifyImageCaptcha(sessionId, code);
+        Result<Boolean> result = verifyCodeService.verifyImageCaptcha(
+                request.getSessionId(), request.getCode());
+        RestResponse<Boolean> response = ResponseConverter.convert(result);
+
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
-     * 清除验证码
-     *
-     * @param identifier 标识符（邮箱、手机号等）
-     * @param type       验证码类型
-     * @return 清除结果
+     * 删除验证码
+     * DELETE /api/verification/codes - 清除验证码
      */
-    @DeleteMapping("/clear")
-    @Operation(summary = "清除验证码", description = "清除指定标识符和类型的验证码")
-    public Result<Void> clearVerifyCode(
+    @DeleteMapping("/codes")
+    @Operation(summary = "删除验证码", description = "清除指定标识符和类型的验证码")
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "清除成功"),
+            @ApiResponse(responseCode = "400", description = "参数无效")
+    })
+    public ResponseEntity<Void> deleteCode(
             @Parameter(description = "标识符") @RequestParam String identifier,
             @Parameter(description = "验证码类型") @RequestParam String type) {
 
-        return verifyCodeService.clearVerifyCode(identifier, type);
+        Result<Void> result = verifyCodeService.clearVerifyCode(identifier, type);
+
+        if (result.isSuccess()) {
+            return ResponseEntity.noContent().build();
+        } else {
+            RestResponse<Void> response = ResponseConverter.convert(result);
+            return ResponseEntity.status(response.getStatus()).build();
+        }
     }
 
     /**
-     * 获取验证码发送统计
-     *
-     * @param identifier 标识符
-     * @param timeRange  时间范围（小时）
-     * @return 发送统计
+     * 获取验证码统计
+     * GET /api/verification/statistics - 获取验证码统计
      */
-    @GetMapping("/stats")
+    @GetMapping("/statistics")
     @Operation(summary = "获取验证码统计", description = "获取指定标识符的验证码发送统计")
-    public Result<Map<String, Object>> getVerifyCodeStats(
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> getStatistics(
             @Parameter(description = "标识符") @RequestParam String identifier,
             @Parameter(description = "时间范围（小时）") @RequestParam(defaultValue = "24") int timeRange) {
 
-        return verifyCodeService.getVerifyCodeStats(identifier, timeRange);
+        Result<Map<String, Object>> result = verifyCodeService.getVerifyCodeStats(identifier, timeRange);
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
-     * 检查验证码发送频率限制
-     *
-     * @param identifier 标识符
-     * @param type       验证码类型
-     * @param request    HTTP请求
-     * @return 是否允许发送
+     * 检查发送限制
+     * GET /api/verification/limits - 检查验证码发送频率限制
      */
-    @GetMapping("/check-limit")
+    @GetMapping("/limits")
     @Operation(summary = "检查发送限制", description = "检查是否可以发送验证码")
-    public Result<Boolean> checkSendLimit(
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "返回检查结果")
+    })
+    public ResponseEntity<RestResponse<Boolean>> checkLimit(
             @Parameter(description = "标识符") @RequestParam String identifier,
             @Parameter(description = "验证码类型") @RequestParam String type,
             HttpServletRequest request) {
 
         String clientIp = IpUtils.getClientIp(request);
-        return verifyCodeService.checkSendLimit(identifier, type, clientIp);
+        Result<Boolean> result = verifyCodeService.checkSendLimit(identifier, type, clientIp);
+        RestResponse<Boolean> response = ResponseConverter.convert(result);
+
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
-     * 获取验证码剩余有效时间
-     *
-     * @param identifier 标识符
-     * @param type       验证码类型
-     * @return 剩余时间（秒）
+     * 获取验证码TTL
+     * GET /api/verification/codes/ttl - 获取验证码剩余有效时间
      */
-    @GetMapping("/ttl")
+    @GetMapping("/codes/ttl")
     @Operation(summary = "获取验证码TTL", description = "获取验证码剩余有效时间")
-    public Result<Long> getVerifyCodeTtl(
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "返回剩余时间")
+    })
+    public ResponseEntity<RestResponse<Long>> getCodeTtl(
             @Parameter(description = "标识符") @RequestParam String identifier,
             @Parameter(description = "验证码类型") @RequestParam String type) {
 
-        return verifyCodeService.getVerifyCodeTtl(identifier, type);
+        Result<Long> result = verifyCodeService.getVerifyCodeTtl(identifier, type);
+        RestResponse<Long> response = ResponseConverter.convert(result);
+
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
-     * 获取验证码配置信息
-     *
-     * @return 配置信息
+     * 获取配置信息
+     * GET /api/verification/configurations - 获取验证码配置
      */
-    @GetMapping("/config")
+    @GetMapping("/configurations")
     @Operation(summary = "获取验证码配置", description = "获取验证码相关配置信息")
-    public Result<Map<String, Object>> getVerifyCodeConfig() {
-        return verifyCodeService.getVerifyCodeConfig();
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> getConfigurations() {
+        Result<Map<String, Object>> result = verifyCodeService.getVerifyCodeConfig();
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
-     * 批量清理过期验证码（管理员接口）
-     *
-     * @return 清理结果
+     * 清理过期验证码
+     * DELETE /api/verification/admin/cleanup - 批量清理过期验证码
      */
     @DeleteMapping("/admin/cleanup")
     @Operation(summary = "清理过期验证码", description = "批量清理过期的验证码（管理员功能）")
-    public Result<Map<String, Object>> cleanExpiredCodes() {
-        return verifyCodeService.cleanExpiredCodes();
-    }
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "清理成功"),
+            @ApiResponse(responseCode = "403", description = "无权限")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> cleanupExpiredCodes() {
+        Result<Map<String, Object>> result = verifyCodeService.cleanExpiredCodes();
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
 
-    // 兼容原有接口
-
-    /**
-     * 兼容原有的邮件验证码接口
-     *
-     * @param email   邮箱地址
-     * @param type    验证码类型
-     * @param request HTTP请求
-     * @return 发送结果
-     */
-    @GetMapping("/ask-code")
-    @Operation(summary = "请求邮件验证码（兼容接口）", description = "兼容原有的邮件验证码请求接口")
-    public Result<Void> askVerifyCode(
-            @Parameter(description = "邮箱地址") @RequestParam @Email String email,
-            @Parameter(description = "验证码类型") @RequestParam @Pattern(regexp = "(register|reset|modify)") String type,
-            HttpServletRequest request) {
-
-        String clientIp = IpUtils.getClientIp(request);
-        return verifyCodeService.sendEmailVerifyCode(email, type, clientIp);
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 }

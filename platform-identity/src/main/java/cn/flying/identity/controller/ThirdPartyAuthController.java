@@ -1,14 +1,24 @@
 package cn.flying.identity.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
+import cn.flying.identity.dto.BindAccountRequest;
+import cn.flying.identity.dto.CallbackRequest;
+import cn.flying.identity.dto.ValidateTokenRequest;
 import cn.flying.identity.service.ThirdPartyAuthService;
+import cn.flying.identity.util.ResponseConverter;
+import cn.flying.identity.vo.RestResponse;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
@@ -16,9 +26,10 @@ import java.util.Map;
 
 /**
  * 第三方认证控制器
- * 提供第三方登录相关功能
+ * 提供符合RESTful规范的第三方登录相关功能
  *
  * @author 王贝强
+ * @since 2025-01-16
  */
 @RestController
 @RequestMapping("/api/auth/third-party")
@@ -29,53 +40,61 @@ public class ThirdPartyAuthController {
     private ThirdPartyAuthService thirdPartyAuthService;
 
     /**
-     * 获取支持的第三方登录提供商列表
-     *
-     * @return 提供商列表
+     * 获取提供商列表
+     * GET /api/auth/third-party/providers - 获取支持的第三方登录提供商
      */
     @GetMapping("/providers")
-    @Operation(summary = "获取支持的第三方登录提供商", description = "获取系统支持的所有第三方登录提供商列表")
-    public Result<Map<String, Object>> getSupportedProviders() {
-        return thirdPartyAuthService.getSupportedProviders();
+    @Operation(summary = "获取第三方登录提供商", description = "获取系统支持的所有第三方登录提供商列表")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> getProviders() {
+        Result<Map<String, Object>> result = thirdPartyAuthService.getSupportedProviders();
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
-     * 获取第三方登录授权URL
-     *
-     * @param provider    第三方提供商
-     * @param redirectUri 回调地址
-     * @param state       状态参数
-     * @return 授权URL
+     * 获取授权URL
+     * GET /api/auth/third-party/providers/{provider}/authorization-url - 获取第三方登录授权URL
      */
-    @GetMapping("/{provider}/authorize")
+    @GetMapping("/providers/{provider}/authorization-url")
     @Operation(summary = "获取第三方登录授权URL", description = "获取指定第三方提供商的登录授权URL")
-    public Result<String> getAuthorizationUrl(
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功"),
+            @ApiResponse(responseCode = "400", description = "参数无效"),
+            @ApiResponse(responseCode = "404", description = "提供商不存在")
+    })
+    public ResponseEntity<RestResponse<String>> getAuthorizationUrl(
             @Parameter(description = "第三方提供商") @PathVariable String provider,
             @Parameter(description = "回调地址") @RequestParam String redirectUri,
             @Parameter(description = "状态参数") @RequestParam(required = false) String state) {
 
-        return thirdPartyAuthService.getAuthorizationUrl(provider, redirectUri, state);
+        Result<String> result = thirdPartyAuthService.getAuthorizationUrl(provider, redirectUri, state);
+        RestResponse<String> response = ResponseConverter.convert(result);
+
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
-     * 第三方登录授权重定向
-     *
-     * @param provider    第三方提供商
-     * @param redirectUri 回调地址
-     * @param state       状态参数
-     * @param response    HTTP响应
-     * @throws IOException IO异常
+     * 授权重定向
+     * GET /api/auth/third-party/providers/{provider}/redirect - 重定向到第三方登录页
      */
-    @GetMapping("/{provider}/login")
-    @Operation(summary = "第三方登录授权重定向", description = "重定向到第三方登录授权页面")
-    public void redirectToAuthorize(
+    @GetMapping("/providers/{provider}/redirect")
+    @Operation(summary = "第三方登录重定向", description = "重定向到第三方登录授权页面")
+    @ApiResponses({
+            @ApiResponse(responseCode = "302", description = "重定向成功"),
+            @ApiResponse(responseCode = "400", description = "获取授权URL失败")
+    })
+    public void redirectToProvider(
             @Parameter(description = "第三方提供商") @PathVariable String provider,
             @Parameter(description = "回调地址") @RequestParam String redirectUri,
             @Parameter(description = "状态参数") @RequestParam(required = false) String state,
             HttpServletResponse response) throws IOException {
 
         Result<String> result = thirdPartyAuthService.getAuthorizationUrl(provider, redirectUri, state);
-        if (result.getCode() == ResultEnum.SUCCESS.getCode() && result.getData() != null) {
+        if (result.isSuccess() && result.getData() != null) {
             response.sendRedirect(result.getData());
         } else {
             response.sendError(400, "获取授权URL失败");
@@ -83,137 +102,192 @@ public class ThirdPartyAuthController {
     }
 
     /**
-     * 处理第三方登录回调
-     *
-     * @param provider 第三方提供商
-     * @param code     授权码
-     * @param state    状态参数
-     * @param error    错误信息
-     * @return 登录结果
+     * 处理回调
+     * POST /api/auth/third-party/providers/{provider}/callback - 处理第三方登录回调
      */
-    @GetMapping("/{provider}/callback")
+    @PostMapping("/providers/{provider}/callback")
     @Operation(summary = "处理第三方登录回调", description = "处理第三方登录授权后的回调")
-    public Result<Map<String, Object>> handleCallback(
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "登录成功"),
+            @ApiResponse(responseCode = "400", description = "参数无效或登录失败"),
+            @ApiResponse(responseCode = "401", description = "认证失败")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> handleCallback(
             @Parameter(description = "第三方提供商") @PathVariable String provider,
-            @Parameter(description = "授权码") @RequestParam(required = false) String code,
-            @Parameter(description = "状态参数") @RequestParam(required = false) String state,
-            @Parameter(description = "错误信息") @RequestParam(required = false) String error) {
+            @Valid @RequestBody CallbackRequest request) {
 
-        if (error != null) {
-            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+        if (request.getError() != null) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(RestResponse.badRequest(ResultEnum.PARAM_IS_INVALID.getCode(),
+                            "第三方登录失败: " + request.getError()));
         }
 
-        if (code == null) {
-            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+        if (request.getCode() == null) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(RestResponse.badRequest(ResultEnum.PARAM_IS_INVALID.getCode(),
+                            "授权码不能为空"));
         }
 
-        return thirdPartyAuthService.handleCallback(provider, code, state);
+        Result<Map<String, Object>> result = thirdPartyAuthService.handleCallback(
+                provider, request.getCode(), request.getState());
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
-     * 绑定第三方账号
-     *
-     * @param provider 第三方提供商
-     * @param code     授权码
-     * @return 绑定结果
+     * 绑定账号
+     * POST /api/auth/third-party/providers/{provider}/bindings - 绑定第三方账号
      */
-    @PostMapping("/{provider}/bind")
+    @PostMapping("/providers/{provider}/bindings")
     @Operation(summary = "绑定第三方账号", description = "将第三方账号绑定到当前用户")
-    public Result<Void> bindThirdPartyAccount(
+    @ApiResponses({
+            @ApiResponse(responseCode = "201", description = "绑定成功"),
+            @ApiResponse(responseCode = "400", description = "参数无效"),
+            @ApiResponse(responseCode = "401", description = "未认证"),
+            @ApiResponse(responseCode = "409", description = "账号已绑定")
+    })
+    public ResponseEntity<RestResponse<Void>> bindAccount(
             @Parameter(description = "第三方提供商") @PathVariable String provider,
-            @Parameter(description = "授权码") @RequestParam String code) {
+            @Valid @RequestBody BindAccountRequest request) {
 
         if (!StpUtil.isLogin()) {
-            return Result.error(ResultEnum.USER_NOT_LOGGED_IN, null);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(RestResponse.unauthorized(ResultEnum.USER_NOT_LOGGED_IN.getCode(),
+                            "用户未登录"));
         }
 
         Long userId = StpUtil.getLoginIdAsLong();
-        return thirdPartyAuthService.bindThirdPartyAccount(userId, provider, code);
+        Result<Void> result = thirdPartyAuthService.bindThirdPartyAccount(
+                userId, provider, request.getCode());
+
+        if (result.isSuccess()) {
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(RestResponse.created(null));
+        } else {
+            RestResponse<Void> response = ResponseConverter.convert(result);
+            return ResponseEntity.status(response.getStatus()).body(response);
+        }
     }
 
     /**
-     * 解绑第三方账号
-     *
-     * @param provider 第三方提供商
-     * @return 解绑结果
+     * 解绑账号
+     * DELETE /api/auth/third-party/providers/{provider}/bindings - 解绑第三方账号
      */
-    @DeleteMapping("/{provider}/unbind")
+    @DeleteMapping("/providers/{provider}/bindings")
     @Operation(summary = "解绑第三方账号", description = "解除第三方账号与当前用户的绑定关系")
-    public Result<Void> unbindThirdPartyAccount(
+    @ApiResponses({
+            @ApiResponse(responseCode = "204", description = "解绑成功"),
+            @ApiResponse(responseCode = "401", description = "未认证"),
+            @ApiResponse(responseCode = "404", description = "绑定关系不存在")
+    })
+    public ResponseEntity<Void> unbindAccount(
             @Parameter(description = "第三方提供商") @PathVariable String provider) {
 
         if (!StpUtil.isLogin()) {
-            return Result.error(ResultEnum.USER_NOT_LOGGED_IN, null);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
 
         Long userId = StpUtil.getLoginIdAsLong();
-        return thirdPartyAuthService.unbindThirdPartyAccount(userId, provider);
+        Result<Void> result = thirdPartyAuthService.unbindThirdPartyAccount(userId, provider);
+
+        if (result.isSuccess()) {
+            return ResponseEntity.noContent().build();
+        } else {
+            RestResponse<Void> response = ResponseConverter.convert(result);
+            return ResponseEntity.status(response.getStatus()).build();
+        }
     }
 
     /**
-     * 获取用户绑定的第三方账号列表
-     *
-     * @return 第三方账号列表
+     * 获取绑定列表
+     * GET /api/auth/third-party/bindings - 获取用户绑定的第三方账号
      */
     @GetMapping("/bindings")
-    @Operation(summary = "获取用户绑定的第三方账号", description = "获取当前用户绑定的所有第三方账号列表")
-    public Result<Map<String, Object>> getUserThirdPartyAccounts() {
+    @Operation(summary = "获取绑定的第三方账号", description = "获取当前用户绑定的所有第三方账号列表")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功"),
+            @ApiResponse(responseCode = "401", description = "未认证")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> getBindings() {
         if (!StpUtil.isLogin()) {
-            return Result.error(ResultEnum.USER_NOT_LOGGED_IN, null);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(RestResponse.unauthorized(ResultEnum.USER_NOT_LOGGED_IN.getCode(),
+                            "用户未登录"));
         }
 
         Long userId = StpUtil.getLoginIdAsLong();
-        return thirdPartyAuthService.getUserThirdPartyAccounts(userId);
+        Result<Map<String, Object>> result = thirdPartyAuthService.getUserThirdPartyAccounts(userId);
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
-     * 验证第三方访问令牌
-     *
-     * @param provider    第三方提供商
-     * @param accessToken 访问令牌
-     * @return 验证结果
+     * 验证Token
+     * POST /api/auth/third-party/providers/{provider}/tokens/validate - 验证第三方访问令牌
      */
-    @PostMapping("/{provider}/validate")
+    @PostMapping("/providers/{provider}/tokens/validate")
     @Operation(summary = "验证第三方访问令牌", description = "验证第三方访问令牌的有效性")
-    public Result<Boolean> validateThirdPartyToken(
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "验证结果"),
+            @ApiResponse(responseCode = "400", description = "参数无效")
+    })
+    public ResponseEntity<RestResponse<Boolean>> validateToken(
             @Parameter(description = "第三方提供商") @PathVariable String provider,
-            @Parameter(description = "访问令牌") @RequestParam String accessToken) {
+            @Valid @RequestBody ValidateTokenRequest request) {
 
-        return thirdPartyAuthService.validateThirdPartyToken(provider, accessToken);
+        Result<Boolean> result = thirdPartyAuthService.validateThirdPartyToken(
+                provider, request.getAccessToken());
+        RestResponse<Boolean> response = ResponseConverter.convert(result);
+
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
-     * 获取第三方用户信息
-     *
-     * @param provider    第三方提供商
-     * @param accessToken 访问令牌
-     * @return 用户信息
+     * 获取用户信息
+     * GET /api/auth/third-party/providers/{provider}/users/me - 获取第三方用户信息
      */
-    @GetMapping("/{provider}/userinfo")
+    @GetMapping("/providers/{provider}/users/me")
     @Operation(summary = "获取第三方用户信息", description = "通过访问令牌获取第三方用户信息")
-    public Result<Map<String, Object>> getThirdPartyUserInfo(
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "获取成功"),
+            @ApiResponse(responseCode = "401", description = "令牌无效")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> getUserInfo(
             @Parameter(description = "第三方提供商") @PathVariable String provider,
             @Parameter(description = "访问令牌") @RequestParam String accessToken) {
 
-        return thirdPartyAuthService.getThirdPartyUserInfo(provider, accessToken);
+        Result<Map<String, Object>> result = thirdPartyAuthService.getThirdPartyUserInfo(
+                provider, accessToken);
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 
     /**
-     * 刷新第三方访问令牌
-     *
-     * @param provider 第三方提供商
-     * @return 刷新结果
+     * 刷新Token
+     * POST /api/auth/third-party/providers/{provider}/tokens/refresh - 刷新第三方访问令牌
      */
-    @PostMapping("/{provider}/refresh")
+    @PostMapping("/providers/{provider}/tokens/refresh")
     @Operation(summary = "刷新第三方访问令牌", description = "刷新指定第三方提供商的访问令牌")
-    public Result<Map<String, Object>> refreshThirdPartyToken(
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "刷新成功"),
+            @ApiResponse(responseCode = "401", description = "未认证或刷新失败")
+    })
+    public ResponseEntity<RestResponse<Map<String, Object>>> refreshToken(
             @Parameter(description = "第三方提供商") @PathVariable String provider) {
 
         if (!StpUtil.isLogin()) {
-            return Result.error(ResultEnum.USER_NOT_LOGGED_IN, null);
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(RestResponse.unauthorized(ResultEnum.USER_NOT_LOGGED_IN.getCode(),
+                            "用户未登录"));
         }
 
         Long userId = StpUtil.getLoginIdAsLong();
-        return thirdPartyAuthService.refreshThirdPartyToken(userId, provider);
+        Result<Map<String, Object>> result = thirdPartyAuthService.refreshThirdPartyToken(userId, provider);
+        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
+
+        return ResponseEntity.status(response.getStatus()).body(response);
     }
 }

@@ -16,6 +16,8 @@
     <description>存证平台后端服务</description>
     <properties>
         <java.version>21</java.version>
+        <jacoco.version>0.8.11</jacoco.version>
+        <coverage.minimum>0.80</coverage.minimum>
     </properties>
     <!--  设置打包方式pom  -->
     <packaging>pom</packaging>
@@ -87,7 +89,7 @@
         <profile>
             <id>local</id>
             <activation>
-                <activeByDefault>false</activeByDefault>
+                <activeByDefault>true</activeByDefault>
             </activation>
             <properties>
                 <environment>local</environment>
@@ -97,12 +99,24 @@
         <profile>
             <id>prod</id>
             <activation>
-                <activeByDefault>true</activeByDefault>
+                <activeByDefault>false</activeByDefault>
             </activation>
             <properties>
                 <environment>prod</environment>
             </properties>
         </profile>
     </profiles>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>${jacoco.version}</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
 
 </project>

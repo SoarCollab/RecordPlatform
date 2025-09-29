@@ -43,13 +43,19 @@ public enum ResultEnum implements Serializable {
     DATA_IS_WRONG(50002, "数据有误"),
     DATA_ALREADY_EXISTED(50003, "数据已存在"),
     AUTH_CODE_ERROR(50004, "验证码错误"),
-    File_UPLOAD_ERROR(50005, "文件上传失败"),
-    File_DOWNLOAD_ERROR(50006, "文件下载失败"),
+    FILE_UPLOAD_ERROR(50005, "文件上传失败"),
+    FILE_DOWNLOAD_ERROR(50006, "文件下载失败"),
     FILE_DELETE_ERROR(50007, "文件删除失败"),
     FILE_NOT_EXIST(50008, "文件不存在"),
     FILE_EMPTY(50009, "文件为空"),
     JSON_PARSE_ERROR(50010, "JSON格式化失败"),
     FILE_RECORD_ERROR(50011, "文件存证失败"),
+
+    /* 接口错误：60001-69999 */
+    INTERFACE_NOT_FOUND(60001, "接口不存在"),
+    INTERFACE_METHOD_NOT_ALLOWED(60002, "请求方法不支持"),
+    INTERFACE_REQUEST_TIMEOUT(60003, "接口请求超时"),
+    INTERFACE_EXCEED_LIMIT(60004, "接口访问频率超限"),
 
     /* 权限错误：70001-79999 */
     PERMISSION_UNAUTHENTICATED(70001, "此操作需要登陆系统!"),
@@ -58,7 +64,15 @@ public enum ResultEnum implements Serializable {
     PERMISSION_TOKEN_EXPIRED(70004, "token已过期"),
     PERMISSION_LIMIT(70005, "访问次数受限制"),
     PERMISSION_TOKEN_INVALID(70006, "无效token"),
-    PERMISSION_SIGNATURE_ERROR(70007, "签名失败");
+    PERMISSION_SIGNATURE_ERROR(70007, "签名失败"),
+
+    /* 业务错误：80001-89999 */
+    SYSTEM_ERROR(80001, "系统内部错误"),
+    DATABASE_ERROR(80002, "数据库操作异常"),
+    CACHE_ERROR(80003, "缓存操作异常"),
+    FILE_SERVICE_ERROR(80004, "文件服务异常"),
+    PARAM_TYPE_ERROR(80005, "参数类型错误"),
+    FILE_SIZE_EXCEED(80006, "文件大小超过限制");
 
     // 状态码
     @Schema(description = "状态码")
@@ -78,13 +92,5 @@ public enum ResultEnum implements Serializable {
 
     public String message() {
         return message;
-    }
-
-    public void setCode(int code) {
-        this.code = code;
-    }
-
-    public void setMessage(String message) {
-        this.message = message;
     }
 }

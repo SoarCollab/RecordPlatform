@@ -1,5 +1,6 @@
 package cn.flying.identity.service.impl;
 
+import cn.flying.identity.config.ApplicationProperties;
 import cn.flying.identity.service.EmailService;
 import jakarta.annotation.Resource;
 import jakarta.mail.internet.MimeMessage;
@@ -22,6 +23,9 @@ public class EmailServiceImpl implements EmailService {
 
     @Resource
     private JavaMailSender mailSender;
+
+    @Resource
+    private ApplicationProperties applicationProperties;
 
     @Value("${spring.mail.username}")
     private String fromEmail;
@@ -92,6 +96,7 @@ public class EmailServiceImpl implements EmailService {
      * 构建注册验证码邮件内容
      */
     private String buildRegisterEmailContent(String code) {
+        int expireMinutes = applicationProperties.getVerifyCode().getExpireMinutes();
         return String.format("""
                 <!DOCTYPE html>
                 <html>
@@ -107,20 +112,21 @@ public class EmailServiceImpl implements EmailService {
                         <div style="background-color: #f8f9fa; padding: 20px; text-align: center; margin: 20px 0; border-radius: 5px;">
                             <span style="font-size: 24px; font-weight: bold; color: #007bff; letter-spacing: 2px;">%s</span>
                         </div>
-                        <p style="color: #666;">验证码有效期为 3 分钟，请及时使用。</p>
+                        <p style="color: #666;">验证码有效期为 %d 分钟，请及时使用。</p>
                         <p style="color: #666;">如果这不是您的操作，请忽略此邮件。</p>
                         <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
                         <p style="color: #999; font-size: 12px;">此邮件由系统自动发送，请勿回复。</p>
                     </div>
                 </body>
                 </html>
-                """, code);
+                """, code, expireMinutes);
     }
 
     /**
      * 构建密码重置验证码邮件内容
      */
     private String buildResetEmailContent(String code) {
+        int expireMinutes = applicationProperties.getVerifyCode().getExpireMinutes();
         return String.format("""
                 <!DOCTYPE html>
                 <html>
@@ -136,20 +142,21 @@ public class EmailServiceImpl implements EmailService {
                         <div style="background-color: #fff5f5; padding: 20px; text-align: center; margin: 20px 0; border-radius: 5px; border: 1px solid #fed7d7;">
                             <span style="font-size: 24px; font-weight: bold; color: #e74c3c; letter-spacing: 2px;">%s</span>
                         </div>
-                        <p style="color: #666;">验证码有效期为 3 分钟，请及时使用。</p>
+                        <p style="color: #666;">验证码有效期为 %d 分钟，请及时使用。</p>
                         <p style="color: #e74c3c; font-weight: bold;">如果这不是您的操作，请立即联系客服或更改密码！</p>
                         <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
                         <p style="color: #999; font-size: 12px;">此邮件由系统自动发送，请勿回复。</p>
                     </div>
                 </body>
                 </html>
-                """, code);
+                """, code, expireMinutes);
     }
 
     /**
      * 构建默认验证码邮件内容
      */
     private String buildDefaultEmailContent(String code) {
+        int expireMinutes = applicationProperties.getVerifyCode().getExpireMinutes();
         return String.format("""
                 <!DOCTYPE html>
                 <html>
@@ -165,13 +172,13 @@ public class EmailServiceImpl implements EmailService {
                         <div style="background-color: #f8f9fa; padding: 20px; text-align: center; margin: 20px 0; border-radius: 5px;">
                             <span style="font-size: 24px; font-weight: bold; color: #28a745; letter-spacing: 2px;">%s</span>
                         </div>
-                        <p style="color: #666;">验证码有效期为 3 分钟，请及时使用。</p>
+                        <p style="color: #666;">验证码有效期为 %d 分钟，请及时使用。</p>
                         <p style="color: #666;">如果这不是您的操作，请忽略此邮件。</p>
                         <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
                         <p style="color: #999; font-size: 12px;">此邮件由系统自动发送，请勿回复。</p>
                     </div>
                 </body>
                 </html>
-                """, code);
+                """, code, expireMinutes);
     }
 }

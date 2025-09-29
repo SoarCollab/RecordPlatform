@@ -78,6 +78,15 @@ public interface AuthService {
     Account findAccountByNameOrEmail(String text);
 
     /**
+     * 根据用户名或邮箱查找用户（需要管理员权限）
+     * 返回脱敏后的用户信息
+     *
+     * @param text 用户名或邮箱
+     * @return 脱敏后的用户信息
+     */
+    Result<AccountVO> findUserWithMasking(String text);
+
+    /**
      * 检查登录状态
      *
      * @return 登录状态信息

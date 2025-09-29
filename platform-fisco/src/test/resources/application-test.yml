@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: platform-fisco
+  profiles:
+    active: test
+
+# FISCO BCOS SDK配置
+system:
+  peers: 127.0.0.1:20200
+  groupId: group0
+  hexPrivateKey: 0x12345678901234567890123456789012345678901234567890123456789012
+
+# Contract addresses for testing
+contract:
+  storageAddress: 0xabcdef1234567890abcdef1234567890abcdef12
+  sharingAddress: 0x1234567890abcdef1234567890abcdef12345678
+
+# Dubbo配置
+dubbo:
+  enabled: false
+
+# Logging配置
+logging:
+  level:
+    cn.flying: DEBUG
+    org.fisco: INFO

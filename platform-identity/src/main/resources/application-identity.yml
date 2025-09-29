@@ -1,0 +1,29 @@
+# Platform Identity 服务自定义配置
+platform:
+  identity:
+    # 应用信息配置
+    app-info:
+      name: 存证平台认证服务
+      version: 1.0.0
+      auth-framework: SA-Token
+      api-doc-url: http://localhost:8888/identity/doc.html
+    
+    # 启动检查配置
+    startup-check:
+      enabled: true
+      db-connection-timeout: 5
+      redis-test-key: "startup:check"
+      redis-test-value: "ok"
+    
+    # 密码配置
+    password:
+      strength: 12          # BCrypt 加密强度
+      min-length: 6         # 最小密码长度
+      max-length: 50        # 最大密码长度
+    
+    # 验证码配置
+    verify-code:
+      email-limit: 60       # 邮件验证码发送冷却时间（秒）
+      expire-minutes: 10    # 验证码有效期（分钟）
+      length: 6             # 验证码长度
+

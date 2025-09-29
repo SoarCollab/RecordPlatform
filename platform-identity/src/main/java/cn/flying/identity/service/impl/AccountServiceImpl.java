@@ -9,18 +9,18 @@ import cn.flying.identity.service.EmailService;
 import cn.flying.identity.service.PasswordService;
 import cn.flying.identity.util.FlowUtils;
 import cn.flying.identity.util.IdUtils;
+import cn.flying.identity.util.SecureLogger;
 import cn.flying.identity.vo.request.*;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.security.SecureRandom;
 import java.util.Objects;
-import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -29,7 +29,6 @@ import java.util.concurrent.TimeUnit;
  *
  * @author 王贝强
  */
-@Slf4j
 @Service
 public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> implements AccountService {
 
@@ -48,12 +47,14 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
     @Resource
     private FlowUtils flowUtils;
 
+    // 使用SecureRandom生成安全的随机数
+    private static final SecureRandom secureRandom = new SecureRandom();
+
     @Override
     public Account findAccountByNameOrEmail(String text) {
         return this.query()
                 .eq("username", text).or()
                 .eq("email", text)
-                .last("limit 1")
                 .one();
     }
 
@@ -70,8 +71,8 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
                 return Result.error(ResultEnum.PARAM_IS_INVALID, null);
             }
 
-            Random random = new Random();
-            int code = random.nextInt(899999) + 100000;
+            // 使用SecureRandom生成6位验证码
+            int code = 100000 + secureRandom.nextInt(900000);
             String codeStr = String.valueOf(code);
 
             // 发送邮件
@@ -95,17 +96,21 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
             String code = getEmailVerifyCode(email);
 
             if (code == null) {
+                SecureLogger.warn("注册失败 - 验证码不存在: email={}", email);
                 return Result.error(ResultEnum.AUTH_CODE_ERROR, null);
             }
             if (!code.equals(info.getCode())) {
+                SecureLogger.warn("注册失败 - 验证码错误: email={}", email);
                 return Result.error(ResultEnum.AUTH_CODE_ERROR, null);
             }
             if (existsAccountByEmail(email)) {
+                SecureLogger.warn("注册失败 - 邮箱已存在: email={}", email);
                 return Result.error(ResultEnum.USER_HAS_EXISTED, null);
             }
 
             String username = info.getUsername();
             if (existsAccountByUsername(username)) {
+                SecureLogger.warn("注册失败 - 用户名已存在: username={}", username);
                 return Result.error(ResultEnum.USER_HAS_EXISTED, null);
             }
 
@@ -114,13 +119,15 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
                     password, email, Const.ROLE_DEFAULT, null);
 
             if (!this.save(account)) {
+                SecureLogger.error("注册失败 - 数据库保存失败: username={}", username);
                 return Result.error(ResultEnum.SYSTEM_ERROR, null);
             } else {
                 deleteEmailVerifyCode(email);
+                SecureLogger.info("用户注册成功: username={}, email={}", username, email);
                 return Result.success(null);
             }
         } catch (Exception e) {
-            log.error("注册账户失败", e);
+            SecureLogger.error("注册账户失败", e);
             return Result.error(ResultEnum.SYSTEM_ERROR, null);
         }
     }
@@ -146,12 +153,14 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
 
             if (success) {
                 deleteEmailVerifyCode(email);
+                SecureLogger.info("密码重置成功: email={}", email);
                 return Result.success(null);
             } else {
+                SecureLogger.error("密码重置失败 - 数据库更新失败: email={}", email);
                 return Result.error(ResultEnum.SYSTEM_ERROR, null);
             }
         } catch (Exception e) {
-            log.error("重置密码失败", e);
+            SecureLogger.error("重置密码失败", e);
             return Result.error(ResultEnum.SYSTEM_ERROR, null);
         }
     }
@@ -172,7 +181,7 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
             // 验证码正确，可以进行密码重置
             return Result.success(null);
         } catch (Exception e) {
-            log.error("确认重置失败", e);
+            SecureLogger.error("确认重置失败", e);
             return Result.error(ResultEnum.SYSTEM_ERROR, null);
         }
     }
@@ -198,12 +207,14 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
 
             boolean update = this.update().eq("id", userId).set("email", email).update();
             if (update) {
+                SecureLogger.info("邮箱修改成功: userId={}, newEmail={}", userId, email);
                 return Result.success(null);
             } else {
+                SecureLogger.error("邮箱修改失败 - 数据库更新失败: userId={}", userId);
                 return Result.error(ResultEnum.SYSTEM_ERROR, null);
             }
         } catch (Exception e) {
-            log.error("修改邮箱失败", e);
+            SecureLogger.error("修改邮箱失败", e);
             return Result.error(ResultEnum.SYSTEM_ERROR, null);
         }
     }
@@ -224,9 +235,15 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
                     .set("password", encodePassword(changePasswordVO.getNewPassword()))
                     .update();
 
-            return success ? Result.success(null) : Result.error(ResultEnum.SYSTEM_ERROR, null);
+            if (success) {
+                SecureLogger.info("密码修改成功: userId={}", userId);
+                return Result.success(null);
+            } else {
+                SecureLogger.error("密码修改失败 - 数据库更新失败: userId={}", userId);
+                return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            }
         } catch (Exception e) {
-            log.error("修改密码失败", e);
+            SecureLogger.error("修改密码失败", e);
             return Result.error(ResultEnum.SYSTEM_ERROR, null);
         }
     }

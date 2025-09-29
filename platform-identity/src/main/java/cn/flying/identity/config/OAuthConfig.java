@@ -38,35 +38,10 @@ public class OAuthConfig {
     private int refreshTokenTimeout;
 
     /**
-     * 客户端令牌有效期（秒）
-     * 默认2小时
-     */
-    @Value("${oauth.client-token.timeout:7200}")
-    private int clientTokenTimeout;
-
-    /**
      * 默认授权范围
      */
     @Value("${oauth.default.scope:read}")
     private String defaultScope;
-
-    /**
-     * 是否启用刷新令牌
-     */
-    @Value("${oauth.refresh-token.enabled:true}")
-    private boolean refreshTokenEnabled;
-
-    /**
-     * 是否启用客户端凭证模式
-     */
-    @Value("${oauth.client-credentials.enabled:true}")
-    private boolean clientCredentialsEnabled;
-
-    /**
-     * 是否要求HTTPS重定向
-     */
-    @Value("${oauth.security.require-https:false}")
-    private boolean requireHttps;
 
     /**
      * 是否使用BCrypt加密客户端密钥
@@ -79,12 +54,6 @@ public class OAuthConfig {
      */
     @Value("${oauth.security.require-state:true}")
     private boolean requireState;
-
-    /**
-     * 授权码最大重试次数
-     */
-    @Value("${oauth.security.max-code-attempts:3}")
-    private int maxCodeAttempts;
 
     /**
      * Redis键前缀
@@ -152,11 +121,12 @@ public class OAuthConfig {
     }
 
     /**
-     * OAuth2.0 授权码状态常量
+     * OAuth2.0 授权码状态常量（与数据库一致）
+     * 1=有效，0=已使用，-1=已过期
      */
     public static class CodeStatus {
-        public static final int UNUSED = 0;
-        public static final int USED = 1;
-        public static final int EXPIRED = 2;
+        public static final int VALID = 1;
+        public static final int USED = 0;
+        public static final int EXPIRED = -1;
     }
 }

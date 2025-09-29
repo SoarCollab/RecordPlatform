@@ -1,0 +1,44 @@
+# 安全配置示例文件
+# 此文件展示如何使用环境变量和加密配置来管理敏感信息
+# 生产环境应该使用配置中心（如Nacos）或环境变量
+
+# 数据库配置（使用环境变量）
+spring:
+  datasource:
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:ENC(加密后的密码)}
+
+  # Redis配置（使用环境变量）
+  data:
+    redis:
+      username: ${REDIS_USERNAME:}
+      password: ${REDIS_PASSWORD:ENC(加密后的密码)}
+
+  # 邮件服务配置
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:ENC(加密后的密码)}
+
+  # RabbitMQ配置
+  rabbitmq:
+    addresses: ${RABBITMQ_ADDRESSES:localhost:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:ENC(加密后的密码)}
+
+# MinIO配置
+minio:
+  access-key: ${MINIO_ACCESS_KEY:ENC(加密后的密钥)}
+  secret-key: ${MINIO_SECRET_KEY:ENC(加密后的密钥)}
+
+# Nacos配置
+nacos:
+  username: ${NACOS_USERNAME:nacos}
+  password: ${NACOS_PASSWORD:ENC(加密后的密码)}
+
+# 加密配置（使用Jasypt）
+jasypt:
+  encryptor:
+    password: ${JASYPT_ENCRYPTOR_PASSWORD}  # 主密码必须通过环境变量提供
+    algorithm: PBEWITHHMACSHA512ANDAES_256
+    iv-generator-classname: org.jasypt.iv.RandomIvGenerator

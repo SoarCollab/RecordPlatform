@@ -96,3 +96,44 @@ management:
       exposure:
         include: '*'
     enabled-by-default: true
+
+# OAuth2 资源服务配置（授权码模式）
+# 通过 identity 的 OAuth2 API 验证访问令牌并获取用户信息
+# 部署到外网后请替换为 identity 实际地址
+oauth2:
+  resource:
+    # 修正：使用identity的标准OAuth2 userinfo端点
+    userinfo-url: http://localhost:8888/api/oauth/users/me
+  cache:
+    userinfo-ttl: 300        # 用户信息缓存时间（秒），默认5分钟
+    negative-ttl: 60         # 无效令牌缓存时间（秒），默认1分钟
+  filter:
+    circuit-breaker:
+      enabled: true          # 启用熔断器
+    cache:
+      enabled: true          # 启用缓存
+    fallback-on-error: true  # 错误时是否降级（继续处理但可能无认证）
+  # OAuth2客户端配置（用于SSO单点登录）
+  client:
+    client-id: backend-service
+    client-secret: ${OAUTH2_CLIENT_SECRET:default-secret-please-change-in-production}
+    redirect-uri: http://localhost:8000/record-platform/api/oauth2/callback
+    authorization-uri: http://localhost:8888/api/oauth/authorizations
+    token-uri: http://localhost:8888/api/oauth/tokens
+    scope: read,write
+
+# Resilience4j 熔断器配置
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-size: 10           # 滑动窗口大小
+        minimum-number-of-calls: 5        # 最少调用次数
+        failure-rate-threshold: 50        # 失败率阈值（%）
+        wait-duration-in-open-state: 30s  # 开启状态持续时间
+        slow-call-rate-threshold: 100     # 慢调用率阈值（%）
+        slow-call-duration-threshold: 3s  # 慢调用时间阈值
+        permitted-number-of-calls-in-half-open-state: 3 # 半开状态允许的调用次数
+    instances:
+      oauth2-userinfo:
+        base-config: default

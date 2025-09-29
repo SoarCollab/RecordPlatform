@@ -51,6 +51,9 @@ public class OperationLogAspect {
     @Resource
     private OperationLogMonitorConfig operationLogMonitorConfig;
 
+    @Resource
+    private OperationLogAsyncRecorder operationLogAsyncRecorder;
+
     /**
      * 定义切点：使用 @Log 注解的方法
      */
@@ -113,12 +116,20 @@ public class OperationLogAspect {
 
             // 记录操作日志
             if (request != null && log != null) {
-                if (log.async()) {
-                    // 异步记录日志
-                    recordOperationLogAsync(request, joinPoint, log, result, exception, executionTime);
-                } else {
-                    // 同步记录日志
-                    recordOperationLog(request, joinPoint, log, result, exception, executionTime);
+                OperationLog logEntity = null;
+                try {
+                    logEntity = buildOperationLogEntity(request, joinPoint, log, result, exception, executionTime);
+                } catch (Exception buildEx) {
+                    OperationLogAspect.log.error("构建操作日志实体失败", buildEx);
+                }
+                if (logEntity != null) {
+                    if (log.async()) {
+                        // 异步记录日志（通过独立组件，确保@Async生效）
+                        operationLogAsyncRecorder.saveAsync(logEntity);
+                    } else {
+                        // 同步记录日志
+                        operationLogService.saveOperationLog(logEntity);
+                    }
                 }
             }
 
@@ -180,7 +191,7 @@ public class OperationLogAspect {
                 );
 
                 if (operationLogMonitorConfig.getOperationLog().isAsyncEnabled()) {
-                    recordOperationLogAsync(logEntity);
+                    operationLogAsyncRecorder.saveAsync(logEntity);
                 } else {
                     operationLogService.saveOperationLog(logEntity);
                 }
@@ -216,12 +227,12 @@ public class OperationLogAspect {
             logEntity.setDescription(String.format("Service异常: %s.%s", className, methodName));
             logEntity.setClassName(className);
             logEntity.setMethodName(methodName);
-            logEntity.setStatus(0); // 失败
+            logEntity.setStatus(1); // 失败
             logEntity.setErrorMsg(exception.getMessage());
             logEntity.setRiskLevel(calculateRiskLevel(exception.getClass().getSimpleName()));
 
             // 异步记录
-            recordOperationLogAsync(logEntity);
+            operationLogAsyncRecorder.saveAsync(logEntity);
         } catch (Exception e) {
             log.error("记录Service异常日志失败", e);
         }
@@ -269,7 +280,9 @@ public class OperationLogAspect {
     @Async
     public void recordOperationLogAsync(HttpServletRequest request, ProceedingJoinPoint joinPoint,
                                         Log log, Object result, Exception exception, long executionTime) {
-        recordOperationLog(request, joinPoint, log, result, exception, executionTime);
+        // 废弃：改为通过 OperationLogAsyncRecorder 异步执行，避免自调用
+        OperationLog logEntity = buildOperationLogEntity(request, joinPoint, log, result, exception, executionTime);
+        operationLogAsyncRecorder.saveAsync(logEntity);
     }
 
     /**
@@ -492,10 +505,10 @@ public class OperationLogAspect {
 
         // 异常信息
         if (exception != null) {
-            logEntity.setStatus(0); // 失败
+            logEntity.setStatus(1); // 失败
             logEntity.setErrorMsg(exception.getMessage());
         } else {
-            logEntity.setStatus(1); // 成功
+            logEntity.setStatus(0); // 成功
         }
 
         // 敏感操作标记
@@ -621,10 +634,7 @@ public class OperationLogAspect {
      */
     @Async
     public void recordOperationLogAsync(OperationLog logEntity) {
-        try {
-            operationLogService.saveOperationLog(logEntity);
-        } catch (Exception e) {
-            log.error("异步记录操作日志异常", e);
-        }
+        // 废弃：改为通过 OperationLogAsyncRecorder 异步执行，避免自调用
+        operationLogAsyncRecorder.saveAsync(logEntity);
     }
 }

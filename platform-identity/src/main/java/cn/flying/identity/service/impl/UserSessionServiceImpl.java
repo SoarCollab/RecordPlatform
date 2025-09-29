@@ -4,8 +4,9 @@ import cn.flying.identity.dto.UserSession;
 import cn.flying.identity.mapper.UserSessionMapper;
 import cn.flying.identity.service.UserSessionService;
 import cn.flying.platformapi.constant.Result;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,10 +25,14 @@ import java.util.UUID;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class UserSessionServiceImpl extends ServiceImpl<UserSessionMapper, UserSession> implements UserSessionService {
 
     private final UserSessionMapper userSessionMapper;
+
+    public UserSessionServiceImpl(UserSessionMapper userSessionMapper) {
+        this.userSessionMapper = userSessionMapper;
+        super.baseMapper = userSessionMapper;
+    }
 
     /**
      * 创建用户会话
@@ -75,9 +80,9 @@ public class UserSessionServiceImpl extends ServiceImpl<UserSessionMapper, UserS
     @Override
     public Result<UserSession> findBySessionId(String sessionId) {
         try {
-            UserSession session = this.lambdaQuery()
-                    .eq(UserSession::getSessionId, sessionId)
-                    .one();
+            LambdaQueryWrapper<UserSession> queryWrapper = new LambdaQueryWrapper<>();
+            queryWrapper.eq(UserSession::getSessionId, sessionId);
+            UserSession session = userSessionMapper.selectOne(queryWrapper);
 
             if (session != null) {
                 return Result.success(session);
@@ -168,14 +173,14 @@ public class UserSessionServiceImpl extends ServiceImpl<UserSessionMapper, UserS
     @Transactional(rollbackFor = Exception.class)
     public Result<Void> logoutSession(String sessionId, UserSession.LogoutReason reason) {
         try {
-            UserSession session = this.lambdaQuery()
-                    .eq(UserSession::getSessionId, sessionId)
-                    .one();
+            LambdaQueryWrapper<UserSession> queryWrapper = new LambdaQueryWrapper<>();
+            queryWrapper.eq(UserSession::getSessionId, sessionId);
+            UserSession session = userSessionMapper.selectOne(queryWrapper);
 
             if (session != null) {
                 session.logout(reason);
-                boolean updated = this.updateById(session);
-                if (updated) {
+                int updated = userSessionMapper.updateById(session);
+                if (updated > 0) {
                     log.info("会话注销成功：sessionId={}, reason={}", sessionId, reason.getCode());
                     return Result.success();
                 } else {
@@ -228,9 +233,9 @@ public class UserSessionServiceImpl extends ServiceImpl<UserSessionMapper, UserS
     @Override
     public Result<Boolean> isSessionValid(String sessionId) {
         try {
-            UserSession session = this.lambdaQuery()
-                    .eq(UserSession::getSessionId, sessionId)
-                    .one();
+            LambdaQueryWrapper<UserSession> queryWrapper = new LambdaQueryWrapper<>();
+            queryWrapper.eq(UserSession::getSessionId, sessionId);
+            UserSession session = userSessionMapper.selectOne(queryWrapper);
 
             if (session != null) {
                 boolean isValid = session.isValid();
@@ -251,13 +256,14 @@ public class UserSessionServiceImpl extends ServiceImpl<UserSessionMapper, UserS
     @Transactional(rollbackFor = Exception.class)
     public Result<Void> extendSession(String sessionId, LocalDateTime expireTime) {
         try {
-            boolean updated = this.lambdaUpdate()
-                    .eq(UserSession::getSessionId, sessionId)
-                    .set(UserSession::getExpireTime, expireTime)
-                    .set(UserSession::getLastAccessTime, LocalDateTime.now())
-                    .update();
+            UpdateWrapper<UserSession> updateWrapper = new UpdateWrapper<>();
+            updateWrapper.eq("session_id", sessionId)
+                    .set("expire_time", expireTime)
+                    .set("last_access_time", LocalDateTime.now());
 
-            if (updated) {
+            int updated = userSessionMapper.update(null, updateWrapper);
+
+            if (updated > 0) {
                 log.info("会话有效期延长成功：sessionId={}, newExpireTime={}", sessionId, expireTime);
                 return Result.success();
             } else {

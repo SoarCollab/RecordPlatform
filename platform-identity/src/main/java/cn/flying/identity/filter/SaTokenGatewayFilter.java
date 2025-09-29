@@ -24,7 +24,8 @@ import java.util.List;
 
 /**
  * Sa-Token网关鉴权过滤器
- * 实现统一的Token验证和权限控制
+ * 实现统一的Token验证和权限控制。
+ * 注意：对 OAuth 与 SSO 相关端点采用放行或轻鉴权策略，避免与授权流程冲突。
  */
 @Component
 @Order(2)
@@ -42,6 +43,8 @@ public class SaTokenGatewayFilter implements Filter {
             "/api/auth/verify-code",
             "/api/auth/reset-password",
             "/api/auth/status",
+            "/oauth/**",           // OAuth 全量交由具体Controller/Service处理
+            "/api/sso/**",         // SSO 全量放行到具体逻辑
             "/doc.html",
             "/swagger-ui/**",
             "/swagger-resources/**",
@@ -109,7 +112,7 @@ public class SaTokenGatewayFilter implements Filter {
             validateToken(httpRequest);
 
             // 执行权限验证
-            validatePermission(requestURI, method);
+            validatePermission(url, method);
 
             // 验证通过，继续执行
             chain.doFilter(request, response);
@@ -133,17 +136,15 @@ public class SaTokenGatewayFilter implements Filter {
      * 检查是否为排除路径
      * 支持精确路径匹配和通配符前缀匹配（如"/doc/**"）
      *
-     * @param requestURI 请求URI
+     * @param requestURI 请求URI（已去除context-path的相对路径）
      * @return 是否为排除路径
      */
     private boolean isExcludePath(String requestURI) {
         return EXCLUDE_PATHS.stream().anyMatch(excludePath -> {
-            // 如果排除路径以"/**"结尾，则进行前缀匹配
             if (excludePath.endsWith("/**")) {
                 String prefix = excludePath.substring(0, excludePath.length() - 3);
                 return requestURI.startsWith(prefix);
             }
-            // 否则进行精确匹配
             return requestURI.equals(excludePath);
         });
     }
@@ -155,47 +156,32 @@ public class SaTokenGatewayFilter implements Filter {
      * @throws NotLoginException 未登录异常
      */
     private void validateToken(HttpServletRequest request) throws NotLoginException {
-        // 从请求头获取Token
         String token = request.getHeader("Authorization");
         if (token != null && token.startsWith("Bearer ")) {
             token = token.substring(7);
         }
-
-        // 如果请求头没有Token，尝试从参数获取
         if (token == null || token.trim().isEmpty()) {
             token = request.getParameter("satoken");
         }
-
-        // 验证Token
         if (token != null && !token.trim().isEmpty()) {
-            // 黑名单检查：若在黑名单中则视为未登录
             if (jwtBlacklistService != null && jwtBlacklistService.isBlacklisted(token)) {
                 throw new NotLoginException("token in blacklist", null, null);
             }
-            // 设置当前请求的Token
             StpUtil.setTokenValue(token);
         }
-
-        // 检查登录状态
         StpUtil.checkLogin();
     }
 
     /**
      * 验证权限
      *
-     * @param requestURI 请求URI
-     * @param method     HTTP方法
+     * @param cleanUri 已去除context-path的URI
+     * @param method   HTTP方法
      * @throws NotPermissionException 权限不足异常
      * @throws NotRoleException       角色不足异常
      */
-    private void validatePermission(String requestURI, String method)
+    private void validatePermission(String cleanUri, String method)
             throws NotPermissionException, NotRoleException {
-
-        // 移除前缀处理
-        String cleanUri = requestURI;
-        if (requestURI.startsWith(PREFIX)) {
-            cleanUri = requestURI.substring(PREFIX.length());
-        }
 
         // 管理员接口权限验证
         if (cleanUri.startsWith("/api/admin")) {
@@ -206,13 +192,12 @@ public class SaTokenGatewayFilter implements Filter {
         // Token监控接口权限验证
         if (cleanUri.startsWith("/api/token/monitor")) {
             StpUtil.checkRoleOr("admin", "monitor");
-            // 进一步细化权限检查
             if (cleanUri.contains("/record") || cleanUri.contains("/handle")) {
                 StpUtil.checkPermission("token:monitor:record");
             } else if (cleanUri.contains("/query") || cleanUri.contains("/stats")) {
                 StpUtil.checkPermission("token:monitor:query");
             } else if (cleanUri.contains("/export") || cleanUri.contains("/clean")) {
-                StpUtil.checkRole("admin"); // 仅管理员可以导出和清理
+                StpUtil.checkRole("admin");
             }
             return;
         }
@@ -221,41 +206,44 @@ public class SaTokenGatewayFilter implements Filter {
         if (cleanUri.startsWith("/api/audit")) {
             StpUtil.checkRoleOr("admin", "monitor");
             if (cleanUri.contains("/export") || cleanUri.contains("/cleanup")) {
-                StpUtil.checkRole("admin"); // 仅管理员可以导出和清理
+                StpUtil.checkRole("admin");
             }
             return;
         }
 
-        // OAuth接口权限验证
-        if (cleanUri.startsWith("/oauth")) {
-            // OAuth授权接口允许已登录用户访问
-            StpUtil.checkLogin();
-            if (cleanUri.contains("/client")) {
-                StpUtil.checkRole("admin"); // 客户端管理仅管理员可操作
+        // 网关监控接口
+        if (cleanUri.startsWith("/api/admin/gateway")) {
+            StpUtil.checkRole("admin");
+            return;
+        }
+
+        // 用户统计接口
+        if (cleanUri.startsWith("/api/admin/user-stats")) {
+            StpUtil.checkRoleOr("admin", "monitor");
+            return;
+        }
+
+        // 操作日志接口
+        if (cleanUri.startsWith("/api/admin/operation-logs")) {
+            StpUtil.checkRoleOr("admin", "monitor");
+            if (cleanUri.contains("/batch") || cleanUri.contains("/cleanup")) {
+                StpUtil.checkRole("admin");
             }
             return;
         }
 
-        // SSO接口权限验证
-        if (cleanUri.startsWith("/api/sso")) {
-            StpUtil.checkLogin();
-            return;
-        }
-
-        // 用户接口权限验证
+        // 用户接口（自身信息与少量变更）
         if (cleanUri.startsWith("/api/user")) {
             StpUtil.checkLogin();
-            // 用户管理相关接口需要额外权限检查
             if (cleanUri.contains("/admin/")) {
                 StpUtil.checkRole("admin");
             }
             return;
         }
 
-        // 验证码接口权限验证
+        // 验证码接口
         if (cleanUri.startsWith("/api/verify")) {
             StpUtil.checkLogin();
-            // 管理员功能需要管理员权限
             if (cleanUri.contains("/admin/")) {
                 StpUtil.checkRole("admin");
             }
@@ -268,43 +256,32 @@ public class SaTokenGatewayFilter implements Filter {
             return;
         }
 
-        // 网关监控接口权限验证
-        if (cleanUri.startsWith("/api/admin/gateway")) {
-            StpUtil.checkRole("admin");
-            return;
-        }
-
-        // 用户统计接口权限验证
-        if (cleanUri.startsWith("/api/admin/user-stats")) {
-            StpUtil.checkRoleOr("admin", "monitor");
-            return;
-        }
-
-        // 操作日志接口权限验证
-        if (cleanUri.startsWith("/api/admin/operation-logs")) {
-            StpUtil.checkRoleOr("admin", "monitor");
-            if (cleanUri.contains("/batch") || cleanUri.contains("/cleanup")) {
-                StpUtil.checkRole("admin"); // 批量操作仅管理员可操作
-            }
-            return;
-        }
-
         // 默认权限验证 - 需要登录
         StpUtil.checkLogin();
     }
 
     /**
      * 写入错误响应
+     * 根据业务错误码返回合适的HTTP状态码（401/403/429/500）。
      *
      * @param response 响应对象
      * @param result   错误结果
      * @throws IOException IO异常
      */
     private void writeErrorResponse(HttpServletResponse response, Result<?> result) throws IOException {
-        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        int status;
+        if (result.getCode() == ResultEnum.USER_NOT_LOGGED_IN.getCode()) {
+            status = HttpServletResponse.SC_UNAUTHORIZED;
+        } else if (result.getCode() == ResultEnum.PERMISSION_UNAUTHORIZED.getCode()) {
+            status = HttpServletResponse.SC_FORBIDDEN;
+        } else if (result.getCode() == ResultEnum.SYSTEM_BUSY.getCode()) {
+            status = 429;
+        } else {
+            status = HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+        }
+        response.setStatus(status);
         response.setContentType("application/json;charset=UTF-8");
         response.setCharacterEncoding("UTF-8");
-
         String jsonResponse = objectMapper.writeValueAsString(result);
         response.getWriter().write(jsonResponse);
         response.getWriter().flush();

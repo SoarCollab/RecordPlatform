@@ -1,5 +1,6 @@
 package cn.flying.identity.vo.request;
 
+import cn.flying.identity.validation.ValidPassword;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Pattern;
 import lombok.Getter;
@@ -24,7 +25,7 @@ public class EmailRegisterVO {
     /**
      * 密码
      */
-    @Length(min = 6, max = 20, message = "密码长度必须在6-20个字符之间")
+    @ValidPassword
     private String password;
     
     /**

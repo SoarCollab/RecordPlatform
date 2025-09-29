@@ -2,7 +2,7 @@
 
 ## 📖 项目概述
 
-RecordPlatform Identity Service 是基于区块链的分布式存证平台的身份认证微服务，提供完整的用户身份管理、OAuth2.0授权、SSO单点登录、第三方登录集成、操作审计、流量监控等企业级功能。
+RecordPlatform Identity Service 是基于区块链的分布式存证平台的身份认证微服务，提供完整的用户身份管理、OAuth2.0授权、SSO单点登录、第三方登录集成、API网关、操作审计、流量监控等企业级功能。
 
 ## 🌟 核心特性
 
@@ -23,6 +23,14 @@ RecordPlatform Identity Service 是基于区块链的分布式存证平台的身
 - **安全传输**: JWT令牌安全传输和验证
 - **统一注销**: 单点注销，全局会话清理
 - **客户端管理**: 已登录客户端列表和管理
+
+### 🚪 API Gateway 网关
+- **应用管理**: 第三方应用注册、审核、生命周期管理
+- **密钥管理**: API Key/Secret 生成、验证、轮换
+- **签名验证**: HMAC-SHA256 签名算法，防重放攻击
+- **权限控制**: 基于接口的细粒度权限管理
+- **路由管理**: 动态路由配置、负载均衡、熔断降级
+- **调用统计**: 实时统计、历史分析、趋势预测
 
 ### 🔗 第三方登录集成
 - **多平台支持**: GitHub、Google、微信、QQ、微博等
@@ -58,19 +66,25 @@ RecordPlatform Identity Service 是基于区块链的分布式存证平台的身
 
 ### 数据存储
 - **MySQL 8.0+**: 主数据库存储
-- **Redis 6.0+**: 缓存和会话存储
+- **Redis 7.0+**: 缓存和会话存储
 - **连接池**: Druid 1.2.23 高性能数据库连接池
+
+### 微服务通信
+- **Dubbo 3.3.3**: 高性能RPC框架
+- **Nacos**: 服务注册与配置中心
+- **Protocol**: Triple协议（基于gRPC）
 
 ### 开发工具
 - **Maven**: 项目构建和依赖管理
 - **Lombok**: 简化代码开发
-- **Knife4j**: API文档生成和测试
-- **HuTool**: Java工具类库
+- **Knife4j 4.4.0**: API文档生成和测试
+- **HuTool 5.8.32**: Java工具类库
 
 ### 监控集成
 - **Spring Actuator**: 应用健康检查和监控
 - **Prometheus**: 监控指标收集
-- **自定义监控**: 业务指标和安全监控
+- **Resilience4j 2.1.0**: 熔断器和限流
+- **Caffeine 3.1.8**: 本地缓存
 
 ## 🚀 快速开始
 
@@ -78,8 +92,10 @@ RecordPlatform Identity Service 是基于区块链的分布式存证平台的身
 ```bash
 Java: 21+
 MySQL: 8.0+
-Redis: 6.0+
+Redis: 7.0+
 Maven: 3.8+
+Nacos: 2.x+（可选）
+RabbitMQ: 3.x+（可选）
 ```
 
 ### 1. 克隆项目
@@ -99,14 +115,19 @@ mysql -u root -p < src/main/resources/sql/complete_init.sql
 # src/main/resources/application-dev.yml
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/platform_identity
-    username: your_username
-    password: your_password
+    druid:
+      url: jdbc:mysql://localhost:3306/platform_identity?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8
+      username: your_username
+      password: your_password
   data:
     redis:
       host: localhost
       port: 6379
       password: your_redis_password
+  mail:
+    host: smtp.163.com
+    username: your_email@163.com
+    password: your_mail_password
 ```
 
 ### 4. 启动服务
@@ -121,10 +142,11 @@ java -jar platform-identity-0.0.1-SNAPSHOT.jar --spring.profiles.active=dev
 ### 5. 验证服务
 ```bash
 # 健康检查
-curl http://localhost:8081/identity/actuator/health
+curl http://localhost:8888/identity/actuator/health
 
 # API文档
-http://localhost:8081/identity/doc.html
+http://localhost:8888/identity/doc.html
+# 默认账号: admin / 123456
 ```
 
 ## 📋 主要API接口
@@ -149,6 +171,16 @@ http://localhost:8081/identity/doc.html
 - `POST /api/sso/login` - SSO登录处理
 - `POST /api/sso/logout` - SSO单点注销
 - `GET /api/sso/userinfo` - 获取SSO用户信息
+
+### API Gateway 网关 `/api/gateway`
+- `POST /api/gateway/applications` - 注册应用
+- `GET /api/gateway/applications/my` - 获取我的应用列表
+- `POST /api/gateway/applications/{id}/approval` - 审核应用
+- `POST /api/gateway/keys` - 生成API密钥
+- `GET /api/gateway/keys/application/{appId}` - 获取应用密钥列表
+- `POST /api/gateway/keys/validation` - 验证API密钥
+- `POST /api/gateway/routes` - 创建路由规则
+- `GET /api/gateway/dashboard/overview` - 获取仪表板数据
 
 ### 第三方登录 `/api/auth/third-party`
 - `GET /api/auth/third-party/providers` - 获取支持的提供商
@@ -283,14 +315,34 @@ idx_traffic_monitor_ip_time  # 流量分析优化
 
 ### 核心配置项
 ```yaml
+# 服务配置
+server:
+  port: 8888                    # 服务端口
+  servlet:
+    context-path: /identity     # 应用上下文路径
+
 # Sa-Token配置
 sa-token:
-  token-name: Authorization
+  token-name: record-platform
   timeout: 2592000              # 30天
-  active-timeout: 1800          # 30分钟
+  active-timeout: -1
   is-concurrent: true
-  is-share: true
-  jwt-secret-key: RecordPlatform
+  is-share: false
+  jwt-secret-key: ${SA_TOKEN_JWT_SECRET_KEY:your-secret-key}
+
+# 雪花算法ID生成
+snowflake:
+  worker-id: 1
+  data-center-id: 20
+
+# ID安全配置
+id:
+  security:
+    key: ${ID_SECURITY_KEY:record-platform-secure-key-2025}
+  monitor:
+    threshold: 200              # 1分钟内单线程生成ID数量阈值
+  mapping:
+    expire-hours: 48            # ID映射缓存过期时间(小时)
 
 # 应用配置
 platform:
@@ -305,7 +357,8 @@ platform:
       max-length: 50
     verify-code:
       email-limit: 60           # 邮件发送间隔(秒)
-      expire-minutes: 10        # 过期时间(分钟)
+      expire-minutes: 3         # 过期时间(分钟)
+      length: 6                 # 验证码长度
 
 # OAuth配置
 oauth:
@@ -315,23 +368,71 @@ oauth:
     timeout: 3600             # 访问令牌过期时间(秒)
   refresh-token:
     timeout: 86400            # 刷新令牌过期时间(秒)
+  security:
+    use-bcrypt: false
+    require-state: true
+  redis:
+    key-prefix: "oauth2:"
 
-# 监控配置
+# 操作日志配置
 operation:
   log:
-    enabled: true
-    async-enabled: true
-    retention-days: 90
+    operation-log:
+      enabled: true
+      async-enabled: true
+      retention-days: 90
+      log-request-params: true
+      log-response-result: false
 
+# 网关流量监控配置
 gateway:
   traffic:
     monitor:
       enabled: true
+      async-enabled: true
       retention-days: 7
+      time-window: 60
+      sampling-rate: 1.0
     rate-limit:
       enabled: true
       global-requests-per-minute: 10000
       ip-requests-per-minute: 300
+      user-requests-per-minute: 600
+
+# API网关配置
+api:
+  gateway:
+    pool:
+      max-total: 500
+      max-per-route: 50
+      connect-timeout: 5000
+      socket-timeout: 30000
+    cache:
+      l1:
+        max-size: 10000
+        expire-seconds: 60
+      l2:
+        expire-seconds: 3600
+    circuit:
+      failure-rate-threshold: 50
+      slow-call-rate-threshold: 50
+      slow-call-duration-threshold: 1000
+      sliding-window-size: 100
+      minimum-number-of-calls: 10
+
+# Dubbo配置
+dubbo:
+  application:
+    name: RecordPlatform_identity
+    protocol: tri
+  protocol:
+    name: tri
+    port: 8091
+  registry:
+    address: nacos://localhost:8848
+  provider:
+    token: ${DUBBO_PROVIDER_TOKEN:record-platform-internal-token}
+    timeout: 5000
 ```
 
 ### 第三方登录配置
@@ -373,7 +474,7 @@ mvn spring-boot:run -Dspring.profiles.active=dev
 FROM openjdk:21-jre-slim
 VOLUME /tmp
 COPY platform-identity-0.0.1-SNAPSHOT.jar app.jar
-EXPOSE 8081
+EXPOSE 8888
 ENTRYPOINT ["java","-jar","/app.jar"]
 ```
 
@@ -384,7 +485,7 @@ services:
   platform-identity:
     image: platform-identity:latest
     ports:
-      - "8081:8081"
+      - "8888:8888"
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/platform_identity
@@ -402,7 +503,7 @@ services:
       - mysql_data:/var/lib/mysql
       
   redis:
-    image: redis:6.2-alpine
+    image: redis:7-alpine
     command: redis-server --requirepass your_password
     volumes:
       - redis_data:/data
@@ -538,13 +639,18 @@ docs(readme): 更新部署指南
 - **项目地址**: https://github.com/SoarCollab/RecordPlatform
 - **问题反馈**: 通过GitHub Issues提交问题
 - **技术讨论**: 查看项目Wiki获取更多信息
+- **在线文档**: 
+  - [API网关文档](docs/API-GATEWAY.md)
+  - [配置指南](docs/CONFIGURATION.md)
+  - [部署指南](docs/DEPLOYMENT.md)
+  - [开发指南](docs/DEVELOPMENT.md)
 
 ### 常见问题
 
 #### 1. 服务启动失败
 ```bash
 # 检查数据库连接
-spring.datasource.url=jdbc:mysql://localhost:3306/platform_identity?serverTimezone=UTC&useSSL=false
+spring.datasource.url=jdbc:mysql://localhost:3306/platform_identity?serverTimezone=Asia/Shanghai&useSSL=false
 
 # 检查Redis连接
 spring.data.redis.host=localhost
@@ -555,14 +661,15 @@ spring.data.redis.port=6379
 ```bash
 # 确认Sa-Token配置
 sa-token.jwt-secret-key=your_secret_key
-sa-token.token-name=Authorization
+sa-token.token-name=record-platform
+sa-token.token-prefix=Bearer
 ```
 
 #### 3. 第三方登录失败
 ```bash
 # 检查OAuth配置
-oauth.github.client-id=your_client_id
-oauth.github.client-secret=your_client_secret
+third-party.auth.github.client-id=your_client_id
+third-party.auth.github.client-secret=your_client_secret
 
 # 确认回调URL配置正确
 ```
@@ -570,9 +677,19 @@ oauth.github.client-secret=your_client_secret
 #### 4. 邮件发送失败
 ```bash
 # 检查邮件服务器配置
-spring.mail.host=smtp.gmail.com
-spring.mail.username=your_email@gmail.com
+spring.mail.host=smtp.163.com
+spring.mail.username=your_email@163.com
 spring.mail.password=your_app_password
+spring.mail.port=465
+```
+
+#### 5. Dubbo服务注册失败
+```bash
+# 检查Nacos配置
+dubbo.registry.address=nacos://localhost:8848
+
+# 检查服务提供者token
+dubbo.provider.token=your_token
 ```
 
 ### 性能优化建议
@@ -580,21 +697,51 @@ spring.mail.password=your_app_password
 #### 1. 数据库优化
 - 合理使用索引，避免全表扫描
 - 定期清理过期数据（日志、会话、令牌）
-- 配置数据库连接池参数
+- 配置数据库连接池参数（Druid）
+- 启用慢查询日志监控
 
 #### 2. Redis优化
 - 设置合适的过期时间
 - 使用Redis集群提高可用性
 - 监控内存使用情况
+- 合理设置连接池参数
 
 #### 3. 应用优化
 - 使用异步处理提高响应速度
-- 合理设置JVM参数
+- 合理设置JVM参数（G1GC推荐）
 - 启用HTTP/2和压缩
+- 使用本地缓存（Caffeine）减少Redis访问
+- 启用熔断降级保护下游服务
 
 ## 📋 更新日志
 
-### v1.0.0 (当前版本)
+### v2.0.0 (当前版本)
+**🎉 重大更新**
+- ✅ 新增 API Gateway 网关功能
+  - 应用管理和审核
+  - API密钥生成和验证
+  - 签名验证和防重放
+  - 动态路由和负载均衡
+  - 熔断降级和限流
+  - 调用统计和分析
+- ✅ 升级技术栈
+  - Java 21 支持
+  - Spring Boot 3.2.11
+  - Dubbo 3.3.3（Triple协议）
+  - Resilience4j 2.1.0
+  - Caffeine 3.1.8
+- ✅ 增强监控能力
+  - 流量异常检测
+  - DDoS防护
+  - 地理位置分析
+  - 设备指纹识别
+- ✅ 改进安全特性
+  - ID混淆机制
+  - 渐进式拦截
+  - 多层缓存策略
+  - OAuth客户端密钥加密
+
+### v1.0.0
 **🎉 首次发布**
 - ✅ 完整的身份认证体系
 - ✅ OAuth2.0授权服务
@@ -612,7 +759,7 @@ spring.mail.password=your_app_password
 - MyBatis Plus 3.5.9 数据访问
 - Redis 缓存和会话管理
 - MySQL 8.0 数据存储
-- Knife4j API文档
+- Knife4j 4.4.0 API文档
 
 **📈 性能指标**
 - 启动时间 < 30秒
@@ -622,5 +769,7 @@ spring.mail.password=your_app_password
 
 ---
 
-**文档版本**: v1.0.0  
+**服务端口**: 8888  
+**文档版本**: v2.0.0  
+**最后更新**: 2025-10-15  
 **维护团队**: RecordPlatform Team

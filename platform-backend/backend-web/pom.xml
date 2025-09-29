@@ -24,6 +24,12 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Spring Security测试支持 -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
@@ -63,6 +69,18 @@
             <version>5.2.5</version>
         </dependency>
 
+        <!-- Resilience4j 熔断器 -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+            <version>2.1.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-circuitbreaker</artifactId>
+            <version>2.1.0</version>
+        </dependency>
+
     </dependencies>
 
     <build>
@@ -82,6 +100,52 @@
                         </exclude>
                     </excludes>
                 </configuration>
+            </plugin>
+            <!-- JaCoCo聚合报告插件 -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <executions>
+                    <!-- 聚合所有模块的覆盖率报告 -->
+                    <execution>
+                        <id>report-aggregate</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report-aggregate</goal>
+                        </goals>
+                        <configuration>
+                            <dataFileIncludes>
+                                <dataFileInclude>**/jacoco.exec</dataFileInclude>
+                            </dataFileIncludes>
+                            <outputDirectory>${project.build.directory}/jacoco-aggregate</outputDirectory>
+                            <includes>
+                                <include>cn/flying/**</include>
+                            </includes>
+                            <excludes>
+                                <!-- 排除实体类 -->
+                                <exclude>**/dto/**</exclude>
+                                <exclude>**/vo/**</exclude>
+                                <exclude>**/entity/**</exclude>
+                                <!-- 排除配置类 -->
+                                <exclude>**/config/**</exclude>
+                                <exclude>**/*Config</exclude>
+                                <!-- 排除启动类 -->
+                                <exclude>**/*Application</exclude>
+                                <!-- 排除常量 -->
+                                <exclude>**/constant/**</exclude>
+                            </excludes>
+                        </configuration>
+                    </execution>
+                </executions>
+                <dependencies>
+                    <!-- 确保包含所有子模块 -->
+                    <dependency>
+                        <groupId>cn.flying</groupId>
+                        <artifactId>backend-service</artifactId>
+                        <version>0.0.1-SNAPSHOT</version>
+                    </dependency>
+                </dependencies>
             </plugin>
         </plugins>
         <resources>

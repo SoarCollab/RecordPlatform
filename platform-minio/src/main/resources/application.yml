@@ -20,6 +20,8 @@ dubbo:
   registry:
     register-mode: instance
     address: nacos://localhost:8848
+  provider:
+    token: ${DUBBO_PROVIDER_TOKEN:record-platform-internal-token}
 
 # 其他 Spring Boot 配置...
 logging:

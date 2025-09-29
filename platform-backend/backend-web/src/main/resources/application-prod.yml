@@ -60,9 +60,12 @@ dubbo:
   application:
     name: RecordPlatform_Main
     logger: slf4j
-    qos-port: 22330
-    check-serializable: false
     protocol: tri
+    qos-port: 22330
+    qos-enable: true
+    qos-accept-foreign-ip: false
+    check-serializable: false
+    serialize-check-status: DISABLE
   protocol: # Dubbo 协议配置
     name: tri   # 使用 Triple 协议
     payload: 104857600 # 将最大载荷大小设置为 100MB (100 * 1024 * 1024 bytes)
@@ -77,6 +80,18 @@ dubbo:
           - name: storeFile
             timeout: 60000 # 将 storeFile 方法的超时时间设置为 60000ms (60秒)
             retries: 0 # 文件存储操作通常不建议重试，除非有幂等性保证且业务允许
+          - name: initMultipartUpload
+            timeout: 10000 # 初始化分块上传，10秒超时
+            retries: 2 # 可以重试2次
+          - name: uploadPart
+            timeout: 30000 # 单个分块上传，30秒超时
+            retries: 1 # 重试1次
+          - name: completeMultipartUpload
+            timeout: 30000 # 完成分块上传，30秒超时
+            retries: 2 # 可以重试2次
+          - name: storeFileStreaming
+            timeout: 300000 # 流式存储，5分钟超时
+            retries: 0 # 不重试
 
 # 日志配置
 logging:

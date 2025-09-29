@@ -1,5 +1,6 @@
 package cn.flying.identity.service.impl;
 
+import cn.flying.identity.dto.Account;
 import cn.flying.identity.dto.OperationLog;
 import cn.flying.identity.mapper.OperationLogMapper;
 import cn.flying.identity.service.AccountService;
@@ -249,6 +250,16 @@ public class UserStatisticsServiceImpl implements UserStatisticsService {
 
     /**
      * 解析IP地址的地理位置（简化实现）
+     * <p>
+     * 注意：这是一个模拟实现，仅用于演示目的。
+     * 生产环境应该集成真实的IP地理位置查询服务，例如：
+     * - MaxMind GeoIP2
+     * - IP2Location
+     * - 百度地图IP定位API
+     * - 高德地图IP定位API
+     *
+     * @param ip IP地址
+     * @return 地理位置字符串（格式：国家-城市）
      */
     private String parseIpLocation(String ip) {
         if (ip == null || ip.isEmpty()) {
@@ -370,19 +381,92 @@ public class UserStatisticsServiceImpl implements UserStatisticsService {
         try {
             Map<String, Object> stats = new HashMap<>();
 
-            // 计算用户留存率
-            // 这里需要根据实际的用户活动数据来计算
-            // 目前简化处理
+            LocalDateTime now = LocalDateTime.now();
 
-            stats.put("day_1_retention", 0.0);
-            stats.put("day_7_retention", 0.0);
-            stats.put("day_30_retention", 0.0);
+            // 计算1日留存率
+            double day1Retention = calculateRetentionRate(1, now);
+            stats.put("day_1_retention", Math.round(day1Retention * 100.0) / 100.0);
+
+            // 计算7日留存率
+            double day7Retention = calculateRetentionRate(7, now);
+            stats.put("day_7_retention", Math.round(day7Retention * 100.0) / 100.0);
+
+            // 计算30日留存率
+            double day30Retention = calculateRetentionRate(30, now);
+            stats.put("day_30_retention", Math.round(day30Retention * 100.0) / 100.0);
+
+            // 计算自定义天数的留存率
+            if (days > 0 && days != 1 && days != 7 && days != 30) {
+                double customRetention = calculateRetentionRate(days, now);
+                stats.put("day_" + days + "_retention", Math.round(customRetention * 100.0) / 100.0);
+            }
+
             stats.put("days", days);
+            stats.put("calculation_time", now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
 
             return Result.success(stats);
         } catch (Exception e) {
             log.error("获取用户留存率失败", e);
             return Result.error(ResultEnum.SYSTEM_ERROR, null);
+        }
+    }
+
+    /**
+     * 计算特定天数的用户留存率
+     *
+     * @param retentionDays 留存天数
+     * @param now           当前时间
+     * @return 留存率（百分比）
+     */
+    private double calculateRetentionRate(int retentionDays, LocalDateTime now) {
+        try {
+            // 计算注册时间范围
+            LocalDateTime registerEndTime = now.minusDays(retentionDays);
+            LocalDateTime registerStartTime = registerEndTime.withHour(0).withMinute(0).withSecond(0);
+            registerEndTime = registerEndTime.withHour(23).withMinute(59).withSecond(59);
+
+            // 获取在指定日期注册的用户数
+            String startStr = registerStartTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+            String endStr = registerEndTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+
+            long registeredUsers = accountService.query()
+                    .ge("register_time", startStr)
+                    .le("register_time", endStr)
+                    .count();
+
+            if (registeredUsers == 0) {
+                return 0.0;
+            }
+
+            // 获取这些用户的ID列表
+            List<Long> userIds = accountService.query()
+                    .select("id")
+                    .ge("register_time", startStr)
+                    .le("register_time", endStr)
+                    .list()
+                    .stream()
+                    .map(Account::getId)
+                    .toList();
+
+            // 计算活跃时间范围（注册后第N天）
+            LocalDateTime activeStartTime = now.withHour(0).withMinute(0).withSecond(0);
+            LocalDateTime activeEndTime = now.withHour(23).withMinute(59).withSecond(59);
+
+            // 统计在留存日活跃的用户数（基于操作日志）
+            long activeUsers = 0;
+            for (Long userId : userIds) {
+                List<OperationLog> logs = operationLogMapper.findByUserIdAndTimeRange(
+                        userId, activeStartTime, activeEndTime);
+                if (!logs.isEmpty()) {
+                    activeUsers++;
+                }
+            }
+
+            // 计算留存率
+            return (double) activeUsers / registeredUsers * 100.0;
+        } catch (Exception e) {
+            log.error("计算{}日留存率失败", retentionDays, e);
+            return 0.0;
         }
     }
 
@@ -611,12 +695,13 @@ public class UserStatisticsServiceImpl implements UserStatisticsService {
             if (userAgent.contains("windows nt 6.2")) return "Windows 8";
             if (userAgent.contains("windows nt 6.1")) return "Windows 7";
             return "Windows";
-        } else if (userAgent.contains("mac os")) {
-            return "macOS";
+        } else if (userAgent.contains("iphone") || userAgent.contains("ipad")) {
+            // iOS检查必须在macOS之前，因为iPhone User-Agent包含"Mac OS X"
+            return "iOS";
         } else if (userAgent.contains("android")) {
             return "Android";
-        } else if (userAgent.contains("iphone") || userAgent.contains("ipad")) {
-            return "iOS";
+        } else if (userAgent.contains("mac os")) {
+            return "macOS";
         } else if (userAgent.contains("linux")) {
             return "Linux";
         } else {
