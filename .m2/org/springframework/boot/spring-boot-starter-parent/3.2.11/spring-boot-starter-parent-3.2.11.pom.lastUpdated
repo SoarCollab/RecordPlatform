@@ -1,4 +1,0 @@
-#NOTE: This is a Maven Resolver internal implementation file, its format can be changed without prior notice.
-#Tue Oct 14 00:58:21 CST 2025
-@default-aliyunmaven-https\://maven.aliyun.com/repository/public/.lastUpdated=1760374701893
-https\://maven.aliyun.com/repository/public/.error=Could not transfer artifact org.springframework.boot\:spring-boot-starter-parent\:pom\:3.2.11 from/to aliyunmaven (https\://maven.aliyun.com/repository/public)\: maven.aliyun.com\: nodename nor servname provided, or not known

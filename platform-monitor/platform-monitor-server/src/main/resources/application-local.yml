@@ -1,0 +1,133 @@
+# 本地开发环境配置
+server:
+  port: 8001
+
+springdoc:
+  paths-to-match: /api/**
+  swagger-ui:
+    operations-sorter: alpha
+
+spring:
+  application:
+    name: platform-monitor-server
+  influx:
+    url: http://localhost:8086
+    user: flying
+    password: your_influxdb_password
+    bucket: program
+    organization: flyingcoding
+  mail:
+    host: smtp.163.com
+    username: your_email@163.com
+    password: your_smtp_password
+    port: 465
+    properties:
+      from: your_email@163.com
+      mail:
+        smtp:
+          socketFactory:
+            class: javax.net.ssl.SSLSocketFactory
+  rabbitmq:
+    port: 5672
+    addresses: localhost
+    username: rabbitmq
+    password: rabbitmq
+    virtual-host: /
+  datasource:
+    druid:
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/monitor?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai
+      username: ${MYSQL_USERNAME:monitor}
+      password: ${MYSQL_PASSWORD}
+      initial-size: 5
+      min-idle: 5
+      max-active: 20
+      max-wait: 60000
+      test-while-idle: true
+      test-on-borrow: false
+      test-on-return: false
+      validation-query: SELECT 1
+      time-between-eviction-runs-millis: 60000
+      min-evictable-idle-time-millis: 300000
+      web-stat-filter:
+        enabled: true
+        url-pattern: /*
+        exclusions: "*.js,*.gif,*.jpg,*.png,*.css,*.ico,/druid/*"
+      stat-view-servlet:
+        enabled: true
+        url-pattern: /druid/*
+        login-username: admin
+        login-password: 123456
+        reset-enable: false
+  data:
+    redis:
+      database: 1
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      username: default
+      password: ${REDIS_PASSWORD}
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
+  security:
+    jwt:
+      key: 'monitor-key'
+      expire: 72
+      limit:
+        base: 1
+        upgrade: 30
+        frequency: 30
+    filter:
+      order: -100
+  web:
+    verify:
+      mail-limit: 60
+    flow:
+      period: 1
+      limit: 100
+      block: 30
+    cors:
+      origin: '*'
+      credentials: false
+      methods: '*'
+
+# Dubbo配置
+dubbo:
+  application:
+    name: platform-monitor-server
+  registry:
+    address: nacos://${NACOS_SERVER:localhost:8848}
+    username: ${NACOS_USERNAME:nacos}
+    password: ${NACOS_PASSWORD:nacos}
+  protocol:
+    name: tri
+    port: 8093
+  consumer:
+    check: false
+    timeout: 30000
+
+# Actuator配置
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+  server:
+    port: 8001
+
+# MyBatis Plus配置
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
