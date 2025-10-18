@@ -32,6 +32,9 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> implements AccountService {
 
+    // 使用SecureRandom生成安全的随机数
+    private static final SecureRandom secureRandom = new SecureRandom();
+
     @Resource
     private ApplicationProperties applicationProperties;
 
@@ -46,9 +49,6 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
 
     @Resource
     private FlowUtils flowUtils;
-
-    // 使用SecureRandom生成安全的随机数
-    private static final SecureRandom secureRandom = new SecureRandom();
 
     @Override
     public Account findAccountByNameOrEmail(String text) {
@@ -71,9 +71,13 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
                 return Result.error(ResultEnum.PARAM_IS_INVALID, null);
             }
 
-            // 使用SecureRandom生成6位验证码
-            int code = 100000 + secureRandom.nextInt(900000);
-            String codeStr = String.valueOf(code);
+            // 生成符合配置长度的数字验证码
+            int length = applicationProperties.getVerifyCode().getLength();
+            StringBuilder sb = new StringBuilder(length);
+            for (int i = 0; i < length; i++) {
+                sb.append(secureRandom.nextInt(10));
+            }
+            String codeStr = sb.toString();
 
             // 发送邮件
             boolean sent = emailService.sendVerifyCode(email, codeStr, type);
@@ -81,9 +85,10 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
                 return Result.error(ResultEnum.SYSTEM_ERROR, null);
             }
 
-            // 存储验证码到Redis
+            // 按配置的有效期写入 Redis
+            long expireMinutes = applicationProperties.getVerifyCode().getExpireMinutes();
             stringRedisTemplate.opsForValue()
-                    .set(Const.VERIFY_EMAIL_DATA + email, codeStr, 3, TimeUnit.MINUTES);
+                    .set(Const.VERIFY_EMAIL_DATA + email, codeStr, expireMinutes, TimeUnit.MINUTES);
 
             return Result.success(null);
         }

@@ -180,6 +180,17 @@ public class OAuthController {
             @ApiResponse(responseCode = "409", description = "客户端已存在")
     })
     public ResponseEntity<RestResponse<OAuthClient>> createClient(@Valid @RequestBody OAuthClient client) {
+        // 仅管理员可创建客户端
+        if (!StpUtil.isLogin()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(RestResponse.unauthorized(ResultEnum.USER_NOT_LOGGED_IN.getCode(), "用户未登录"));
+        }
+        String role = (String) StpUtil.getSession().get("role");
+        if (!"admin".equalsIgnoreCase(role)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(RestResponse.forbidden(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), "无权限"));
+        }
+
         Result<OAuthClient> result = oauthService.registerClient(client);
 
         if (result.isSuccess()) {
@@ -206,10 +217,28 @@ public class OAuthController {
             @Parameter(description = "客户端ID") @PathVariable String clientId,
             @Valid @RequestBody OAuthClient client) {
 
-        // clientId 是字符串，OAuthClient.clientId 是 Long，这里需要处理
-        // 但通常更新时会使用其他字段如 clientKey 来标识客户端
-        // 暂时注释掉这行，让服务层根据传入的 client 对象处理
-        // client.setClientId(clientId); 
+        // 仅管理员可更新客户端
+        if (!StpUtil.isLogin()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(RestResponse.unauthorized(ResultEnum.USER_NOT_LOGGED_IN.getCode(), "用户未登录"));
+        }
+        String role = (String) StpUtil.getSession().get("role");
+        if (!"admin".equalsIgnoreCase(role)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(RestResponse.forbidden(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), "无权限"));
+        }
+
+        // 先根据路径参数查询现有客户端，确保更新的是同一条记录
+        Result<OAuthClient> existing = oauthService.getClient(clientId);
+        if (!existing.isSuccess() || existing.getData() == null) {
+            RestResponse<OAuthClient> resp = ResponseConverter.convert(existing);
+            return ResponseEntity.status(resp.getStatus()).body(resp);
+        }
+        OAuthClient dbClient = existing.getData();
+        // 对齐主键与标识符，避免更新到错误记录
+        client.setClientId(dbClient.getClientId());
+        client.setClientKey(dbClient.getClientKey());
+
         Result<OAuthClient> result = oauthService.updateClient(client);
         RestResponse<OAuthClient> response = ResponseConverter.convert(result);
 
@@ -228,6 +257,15 @@ public class OAuthController {
     })
     public ResponseEntity<Void> deleteClient(
             @Parameter(description = "客户端ID") @PathVariable String clientId) {
+
+        // 仅管理员可删除客户端
+        if (!StpUtil.isLogin()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        String role = (String) StpUtil.getSession().get("role");
+        if (!"admin".equalsIgnoreCase(role)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
 
         Result<Void> result = oauthService.deleteClient(clientId);
 
@@ -252,9 +290,25 @@ public class OAuthController {
     public ResponseEntity<RestResponse<OAuthClient>> getClient(
             @Parameter(description = "客户端ID") @PathVariable String clientId) {
 
-        Result<OAuthClient> result = oauthService.getClient(clientId);
-        RestResponse<OAuthClient> response = ResponseConverter.convert(result);
+        // 仅管理员可查看客户端详情
+        if (!StpUtil.isLogin()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(RestResponse.unauthorized(ResultEnum.USER_NOT_LOGGED_IN.getCode(), "用户未登录"));
+        }
+        String role = (String) StpUtil.getSession().get("role");
+        if (!"admin".equalsIgnoreCase(role)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(RestResponse.forbidden(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), "无权限"));
+        }
 
+        Result<OAuthClient> result = oauthService.getClient(clientId);
+        if (result.isSuccess() && result.getData() != null) {
+            // 脱敏返回，避免泄露加密后的密钥
+            OAuthClient data = result.getData();
+            data.setClientSecret(null);
+            return ResponseEntity.ok(RestResponse.ok(result.getMessage(), data));
+        }
+        RestResponse<OAuthClient> response = ResponseConverter.convert(result);
         return ResponseEntity.status(response.getStatus()).body(response);
     }
 
