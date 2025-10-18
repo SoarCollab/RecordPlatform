@@ -49,15 +49,7 @@ public class AuthController {
         @ApiResponse(responseCode = "400", description = "参数无效")
     })
     public ResponseEntity<RestResponse<String>> createSession(@Valid @RequestBody LoginRequest request) {
-        // 输入验证
-        if (InputValidator.containsSqlInjection(request.getUsername()) || 
-            InputValidator.containsXss(request.getUsername())) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(RestResponse.badRequest(ResultEnum.PARAM_IS_INVALID.getCode(), 
-                    "用户名包含非法字符"));
-        }
-
-        // 限制输入长度
+        // 限制输入长度（JSR-303已校验，此处二次防御）
         if (request.getUsername().length() > 100 || request.getPassword().length() > 128) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(RestResponse.badRequest(ResultEnum.PARAM_IS_INVALID.getCode(), 
