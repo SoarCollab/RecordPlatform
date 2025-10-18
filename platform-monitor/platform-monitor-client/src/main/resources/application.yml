@@ -1,3 +1,37 @@
 spring:
   application:
     name: monitor-client
+  retry:
+    enabled: true
+
+monitor:
+  client:
+    id: ${CLIENT_ID:default-client}
+    server:
+      address: ${SERVER_ADDRESS:https://localhost:8080}
+    certificate:
+      keystore-path: ${KEYSTORE_PATH:./client-keystore.p12}
+      keystore-password: ${KEYSTORE_PASSWORD:changeit}
+      key-alias: ${KEY_ALIAS:client-key}
+      validity-days: ${CERT_VALIDITY_DAYS:365}
+      auto-rotation-days: ${CERT_ROTATION_DAYS:30}
+    network:
+      connection-timeout: ${CONNECTION_TIMEOUT:10000}
+      socket-timeout: ${SOCKET_TIMEOUT:30000}
+      max-connections: ${MAX_CONNECTIONS:20}
+      max-connections-per-route: ${MAX_CONNECTIONS_PER_ROUTE:10}
+      compression-enabled: ${COMPRESSION_ENABLED:true}
+      compression-threshold: ${COMPRESSION_THRESHOLD:1024}
+    metrics:
+      collection-interval: ${METRICS_INTERVAL:10}
+      batch-size: ${BATCH_SIZE:10}
+      enable-network-metrics: ${ENABLE_NETWORK_METRICS:true}
+      enable-process-metrics: ${ENABLE_PROCESS_METRICS:true}
+      custom-metrics-enabled: ${CUSTOM_METRICS_ENABLED:false}
+
+logging:
+  level:
+    cn.flying.monitor.client: INFO
+    org.apache.hc: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%X{clientId}] %logger{36} - %msg%n"

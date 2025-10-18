@@ -1,8 +1,10 @@
 package cn.flying.monitor.server.controller.exceptionController;
 
-import cn.flying.monitor.server.entity.RestBean;
+import cn.flying.monitor.common.entity.Result;
 import jakarta.validation.ValidationException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -13,15 +15,10 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class ValidationController {
 
-    /**
-     * 与SpringBoot保持一致，校验不通过打印警告信息，而不是直接抛出异常
-     *
-     * @param exception 验证异常
-     * @return 校验结果
-     */
     @ExceptionHandler(ValidationException.class)
-    public RestBean<Void> validateError(ValidationException exception) {
+    public ResponseEntity<Result<Void>> validateError(ValidationException exception) {
         log.warn("Resolved [{}: {}]", exception.getClass().getName(), exception.getMessage());
-        return RestBean.failure(400, "请求参数有误");
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Result.error("请求参数有误"));
     }
 }

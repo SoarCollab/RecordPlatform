@@ -1,0 +1,52 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: monitor-api-gateway-hpa
+spec:
+  minReplicas: 1
+  maxReplicas: 3
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: monitor-auth-service-hpa
+spec:
+  minReplicas: 1
+  maxReplicas: 2
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: monitor-data-service-hpa
+spec:
+  minReplicas: 1
+  maxReplicas: 3
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: monitor-notification-service-hpa
+spec:
+  minReplicas: 1
+  maxReplicas: 2
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: monitor-websocket-service-hpa
+spec:
+  minReplicas: 1
+  maxReplicas: 3
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: monitor-web-dashboard-hpa
+spec:
+  minReplicas: 1
+  maxReplicas: 2

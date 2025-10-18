@@ -1,0 +1,262 @@
+version: '3.8'
+
+services:
+  # Infrastructure Services
+  mysql:
+    image: mysql:8.0
+    container_name: monitor-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: monitor123
+      MYSQL_DATABASE: monitor_system
+      MYSQL_USER: monitor
+      MYSQL_PASSWORD: monitor123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - monitor-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: monitor-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - monitor-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  influxdb:
+    image: influxdb:2.7
+    container_name: monitor-influxdb
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: monitor123
+      DOCKER_INFLUXDB_INIT_ORG: monitor-org
+      DOCKER_INFLUXDB_INIT_BUCKET: monitor-metrics
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: monitor-token-123456789
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    networks:
+      - monitor-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8086/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: monitor-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: monitor
+      RABBITMQ_DEFAULT_PASS: monitor123
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - monitor-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  nacos:
+    image: nacos/nacos-server:v2.3.0
+    container_name: monitor-nacos
+    environment:
+      MODE: standalone
+      SPRING_DATASOURCE_PLATFORM: mysql
+      MYSQL_SERVICE_HOST: mysql
+      MYSQL_SERVICE_DB_NAME: nacos_config
+      MYSQL_SERVICE_PORT: 3306
+      MYSQL_SERVICE_USER: root
+      MYSQL_SERVICE_PASSWORD: monitor123
+      MYSQL_SERVICE_DB_PARAM: characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useSSL=false&allowPublicKeyRetrieval=true
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - monitor-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8848/nacos/v1/ns/operator/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Monitor Services
+  monitor-auth-service:
+    build:
+      context: ./monitor-auth-service
+      dockerfile: Dockerfile
+    container_name: monitor-auth-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/monitor_system?useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: monitor
+      SPRING_DATASOURCE_PASSWORD: monitor123
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      NACOS_SERVER_ADDR: nacos:8848
+    ports:
+      - "8081:8081"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_healthy
+    networks:
+      - monitor-network
+    restart: unless-stopped
+
+  monitor-data-service:
+    build:
+      context: ./monitor-data-service
+      dockerfile: Dockerfile
+    container_name: monitor-data-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/monitor_system?useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: monitor
+      SPRING_DATASOURCE_PASSWORD: monitor123
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_TOKEN: monitor-token-123456789
+      INFLUXDB_ORG: monitor-org
+      INFLUXDB_BUCKET: monitor-metrics
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: monitor
+      SPRING_RABBITMQ_PASSWORD: monitor123
+      NACOS_SERVER_ADDR: nacos:8848
+    ports:
+      - "8082:8082"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      nacos:
+        condition: service_healthy
+    networks:
+      - monitor-network
+    restart: unless-stopped
+
+  monitor-notification-service:
+    build:
+      context: ./monitor-notification-service
+      dockerfile: Dockerfile
+    container_name: monitor-notification-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/monitor_system?useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: monitor
+      SPRING_DATASOURCE_PASSWORD: monitor123
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: monitor
+      SPRING_RABBITMQ_PASSWORD: monitor123
+      NACOS_SERVER_ADDR: nacos:8848
+    ports:
+      - "8083:8083"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      nacos:
+        condition: service_healthy
+    networks:
+      - monitor-network
+    restart: unless-stopped
+
+  monitor-websocket-service:
+    build:
+      context: ./monitor-websocket-service
+      dockerfile: Dockerfile
+    container_name: monitor-websocket-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      NACOS_SERVER_ADDR: nacos:8848
+    ports:
+      - "8084:8084"
+    depends_on:
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_healthy
+    networks:
+      - monitor-network
+    restart: unless-stopped
+
+  monitor-api-gateway:
+    build:
+      context: ./monitor-api-gateway
+      dockerfile: Dockerfile
+    container_name: monitor-api-gateway
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      NACOS_SERVER_ADDR: nacos:8848
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+    ports:
+      - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_healthy
+      monitor-auth-service:
+        condition: service_started
+      monitor-data-service:
+        condition: service_started
+      monitor-notification-service:
+        condition: service_started
+      monitor-websocket-service:
+        condition: service_started
+    networks:
+      - monitor-network
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  redis_data:
+  influxdb_data:
+  rabbitmq_data:
+
+networks:
+  monitor-network:
+    driver: bridge

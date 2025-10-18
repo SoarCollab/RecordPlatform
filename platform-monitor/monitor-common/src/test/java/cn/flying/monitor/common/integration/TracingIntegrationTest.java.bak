@@ -1,0 +1,178 @@
+package cn.flying.monitor.common.integration;
+
+import cn.flying.monitor.common.service.CorrelationIdService;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.test.simple.SimpleTracer;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.TestPropertySource;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * 链路追踪集成测试
+ */
+@SpringBootTest(classes = {CorrelationIdService.class})
+@TestPropertySource(properties = {
+    "management.tracing.enabled=true",
+    "management.tracing.sampling.probability=1.0"
+})
+class TracingIntegrationTest {
+
+    private Tracer tracer;
+    private CorrelationIdService correlationIdService;
+
+    @BeforeEach
+    void setUp() {
+        tracer = new SimpleTracer();
+        correlationIdService = new CorrelationIdService(tracer);
+    }
+
+    @Test
+    void testEndToEndTracing() {
+        // Given - 创建根Span
+        Span rootSpan = correlationIdService.createSpan("root-operation",
+            "service", "test-service",
+            "operation", "integration-test"
+        );
+
+        try (Tracer.SpanInScope ws = tracer.withSpanInScope(rootSpan.start())) {
+            // When - 在Span上下文中执行操作
+            String correlationId = correlationIdService.getCurrentCorrelationId();
+            String traceId = correlationIdService.getCurrentTraceId();
+            String spanId = correlationIdService.getCurrentSpanId();
+
+            // Then - 验证追踪信息
+            assertThat(correlationId).isNotNull();
+            assertThat(traceId).isNotNull();
+            assertThat(spanId).isNotNull();
+            assertThat(correlationId).isEqualTo(traceId);
+
+            // When - 创建子Span
+            Span childSpan = correlationIdService.createSpan("child-operation",
+                "component", "database",
+                "operation", "query"
+            );
+
+            try (Tracer.SpanInScope childWs = tracer.withSpanInScope(childSpan.start())) {
+                // Then - 验证子Span有不同的SpanId但相同的TraceId
+                String childTraceId = correlationIdService.getCurrentTraceId();
+                String childSpanId = correlationIdService.getCurrentSpanId();
+
+                assertThat(childTraceId).isEqualTo(traceId);
+                assertThat(childSpanId).isNotEqualTo(spanId);
+
+                // When - 添加事件和标签
+                correlationIdService.addSpanEvent("database-query-start");
+                correlationIdService.addSpanTag("query.type", "SELECT");
+                correlationIdService.addSpanTag("query.table", "users");
+
+                // 模拟一些处理时间
+                Thread.sleep(10);
+
+                correlationIdService.addSpanEvent("database-query-end");
+
+            } finally {
+                childSpan.end();
+            }
+
+            // When - 添加根Span事件
+            correlationIdService.addSpanEvent("operation-completed");
+
+        } catch (Exception e) {
+            correlationIdService.recordSpanError(e);
+            throw e;
+        } finally {
+            rootSpan.end();
+        }
+    }
+
+    @Test
+    void testCorrelationIdPropagation() {
+        // Given
+        String customCorrelationId = "custom-correlation-123";
+        correlationIdService.setCorrelationId(customCorrelationId);
+
+        // When - 在没有活跃Span的情况下获取关联ID
+        String retrievedId = correlationIdService.getCurrentCorrelationId();
+
+        // Then
+        assertThat(retrievedId).isEqualTo(customCorrelationId);
+
+        // When - 清除关联ID
+        correlationIdService.clearCorrelationId();
+        String newId = correlationIdService.getCurrentCorrelationId();
+
+        // Then - 应该生成新的ID
+        assertThat(newId).isNotEqualTo(customCorrelationId);
+        assertThat(newId).hasSize(32);
+    }
+
+    @Test
+    void testSpanErrorHandling() {
+        // Given
+        Span span = correlationIdService.createSpan("error-test-operation");
+
+        try (Tracer.SpanInScope ws = tracer.withSpanInScope(span.start())) {
+            // When - 记录错误
+            RuntimeException testException = new RuntimeException("Test error for tracing");
+            correlationIdService.recordSpanError(testException);
+
+            // Then - Span应该包含错误信息
+            String traceId = correlationIdService.getCurrentTraceId();
+            assertThat(traceId).isNotNull();
+
+        } finally {
+            span.end();
+        }
+    }
+
+    @Test
+    void testMultipleSpanCreation() {
+        // Given & When - 创建多个并行Span
+        Span span1 = correlationIdService.createSpan("operation-1", "type", "service");
+        Span span2 = correlationIdService.createSpan("operation-2", "type", "database");
+        Span span3 = correlationIdService.createSpan("operation-3", "type", "cache");
+
+        // Then - 每个Span都应该有唯一的ID
+        assertThat(span1.context().spanId()).isNotEqualTo(span2.context().spanId());
+        assertThat(span2.context().spanId()).isNotEqualTo(span3.context().spanId());
+        assertThat(span1.context().spanId()).isNotEqualTo(span3.context().spanId());
+
+        // 清理
+        span1.end();
+        span2.end();
+        span3.end();
+    }
+
+    @Test
+    void testSpanTagsAndEvents() {
+        // Given
+        Span span = correlationIdService.createSpan("tagged-operation",
+            "service", "test-service",
+            "version", "1.0.0"
+        );
+
+        try (Tracer.SpanInScope ws = tracer.withSpanInScope(span.start())) {
+            // When - 添加更多标签和事件
+            correlationIdService.addSpanTag("user.id", "user123");
+            correlationIdService.addSpanTag("request.size", "1024");
+            
+            correlationIdService.addSpanEvent("validation-start");
+            correlationIdService.addSpanEvent("processing-start");
+            correlationIdService.addSpanEvent("processing-end");
+
+            // Then - 验证Span上下文仍然有效
+            String traceId = correlationIdService.getCurrentTraceId();
+            String spanId = correlationIdService.getCurrentSpanId();
+            
+            assertThat(traceId).isNotNull();
+            assertThat(spanId).isNotNull();
+
+        } finally {
+            span.end();
+        }
+    }
+}

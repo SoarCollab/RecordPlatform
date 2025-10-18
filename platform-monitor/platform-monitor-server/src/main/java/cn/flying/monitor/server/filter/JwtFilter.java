@@ -1,6 +1,6 @@
 package cn.flying.monitor.server.filter;
 
-import cn.flying.monitor.server.entity.RestBean;
+import cn.flying.monitor.common.entity.Result;
 import cn.flying.monitor.server.entity.dto.Account;
 import cn.flying.monitor.server.entity.dto.Client;
 import cn.flying.monitor.server.service.AccountService;
@@ -8,12 +8,15 @@ import cn.flying.monitor.server.service.ClientService;
 import cn.flying.monitor.server.utils.Const;
 import cn.flying.monitor.server.utils.JwtUtils;
 import com.auth0.jwt.interfaces.DecodedJWT;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.jetbrains.annotations.NotNull;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -22,6 +25,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 
 /**
@@ -37,6 +41,8 @@ public class JwtFilter extends OncePerRequestFilter {
     ClientService clientService;
     @Resource
     AccountService accountService;
+    @Resource
+    ObjectMapper objectMapper;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -48,9 +54,7 @@ public class JwtFilter extends OncePerRequestFilter {
             if (!uri.endsWith("/register")) {
                 Client client = clientService.findClientByToken(authorization);
                 if (client == null) {
-                    response.setStatus(401);
-                    response.setCharacterEncoding("utf-8");
-                    response.getWriter().write(RestBean.failure(401, "未注册").asJsonString());
+                    writeJson(response, HttpStatus.UNAUTHORIZED, Result.error("未注册"));
                     return;
                 } else {
                     request.setAttribute(Const.ATTR_CLIENT, client);
@@ -71,9 +75,7 @@ public class JwtFilter extends OncePerRequestFilter {
                         (int) request.getAttribute(Const.ATTR_USER_ID),
                         (String) request.getAttribute(Const.ATTR_USER_ROLE),
                         Integer.parseInt(request.getRequestURI().substring(10)))) {
-                    response.setStatus(401);
-                    response.setCharacterEncoding("utf-8");
-                    response.getWriter().write(RestBean.failure(401, "无权访问").asJsonString());
+                    writeJson(response, HttpStatus.UNAUTHORIZED, Result.error("无权访问"));
                     return;
                 }
             }
@@ -88,5 +90,12 @@ public class JwtFilter extends OncePerRequestFilter {
             Account account = accountService.getById(userId);
             return account.getClientList().contains(clientId);
         }
+    }
+
+    private void writeJson(HttpServletResponse response, HttpStatus status, Result<?> body) throws IOException {
+        response.setStatus(status.value());
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        objectMapper.writeValue(response.getWriter(), body);
     }
 }

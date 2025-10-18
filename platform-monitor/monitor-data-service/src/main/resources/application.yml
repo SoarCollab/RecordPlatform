@@ -1,0 +1,95 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: monitor-data-service
+    
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/monitor_data?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false
+    username: root
+    password: root
+    
+  redis:
+    host: localhost
+    port: 6379
+    database: 2
+    timeout: 2000ms
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 0
+        
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /
+
+spring:
+  influx:
+    url: http://localhost:8086
+    token: your-influxdb-token
+    organization: monitor-org
+    bucket: monitor-metrics
+    retention-policy: 30d
+    batch:
+      size: 1000
+      flush-interval: 5000
+      enabled: true
+    performance:
+      compression-enabled: true
+      connection-pool-size: 10
+      query-timeout: 30000
+      write-timeout: 10000
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+    metrics:
+      enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+        step: 10s
+      influx:
+        enabled: false
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        monitor.method.execution.time: true
+      percentiles:
+        http.server.requests: 0.5, 0.95, 0.99
+        monitor.method.execution.time: 0.5, 0.95, 0.99
+    tags:
+      application: monitor-data-service
+      service: data-service
+  tracing:
+    enabled: true
+    sampling:
+      probability: 0.1
+    zipkin:
+      endpoint: http://localhost:9411/api/v2/spans
+
+logging:
+  level:
+    cn.flying.monitor: DEBUG

@@ -1,0 +1,96 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitor-api-gateway
+  namespace: monitor-system
+  labels:
+    app: monitor-api-gateway
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitor-auth-service
+  namespace: monitor-system
+  labels:
+    app: monitor-auth-service
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitor-data-service
+  namespace: monitor-system
+  labels:
+    app: monitor-data-service
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitor-notification-service
+  namespace: monitor-system
+  labels:
+    app: monitor-notification-service
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitor-websocket-service
+  namespace: monitor-system
+  labels:
+    app: monitor-websocket-service
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitor-web-dashboard
+  namespace: monitor-system
+  labels:
+    app: monitor-web-dashboard
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: monitor-system
+  name: monitor-service-role
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: monitor-service-rolebinding
+  namespace: monitor-system
+subjects:
+- kind: ServiceAccount
+  name: monitor-api-gateway
+  namespace: monitor-system
+- kind: ServiceAccount
+  name: monitor-auth-service
+  namespace: monitor-system
+- kind: ServiceAccount
+  name: monitor-data-service
+  namespace: monitor-system
+- kind: ServiceAccount
+  name: monitor-notification-service
+  namespace: monitor-system
+- kind: ServiceAccount
+  name: monitor-websocket-service
+  namespace: monitor-system
+roleRef:
+  kind: Role
+  name: monitor-service-role
+  apiGroup: rbac.authorization.k8s.io

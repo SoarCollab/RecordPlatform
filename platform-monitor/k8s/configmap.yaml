@@ -1,0 +1,109 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitor-config
+  namespace: monitor-system
+data:
+  # Database Configuration
+  MYSQL_HOST: "mysql-service"
+  MYSQL_PORT: "3306"
+  MYSQL_DATABASE: "monitor_system"
+  MYSQL_USERNAME: "monitor"
+  
+  # Redis Configuration
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  
+  # InfluxDB Configuration
+  INFLUXDB_URL: "http://influxdb-service:8086"
+  INFLUXDB_ORG: "monitor-org"
+  INFLUXDB_BUCKET: "monitor-metrics"
+  
+  # RabbitMQ Configuration
+  RABBITMQ_HOST: "rabbitmq-service"
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_USERNAME: "monitor"
+  
+  # Nacos Configuration (Optional - can be replaced with Kubernetes service discovery)
+  NACOS_SERVER_ADDR: "nacos-service:8848"
+  
+  # Application Configuration
+  SPRING_PROFILES_ACTIVE: "k8s"
+  
+  # JVM Configuration
+  JAVA_OPTS: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+UseG1GC -XX:+UseStringDeduplication -Djava.security.egd=file:/dev/./urandom -XX:+UnlockExperimentalVMOptions -XX:+UseCGroupMemoryLimitForHeap"
+  
+  # Monitoring and Observability
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,metrics,prometheus"
+  MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: "always"
+  MANAGEMENT_METRICS_EXPORT_PROMETHEUS_ENABLED: "true"
+  
+  # Tracing Configuration
+  SPRING_SLEUTH_ZIPKIN_BASE_URL: "http://jaeger-collector:14268"
+  SPRING_SLEUTH_SAMPLER_PROBABILITY: "0.1"
+  SPRING_SLEUTH_JAEGER_HTTP_SENDER_URL: "http://jaeger-collector:14268/api/traces"
+  SPRING_SLEUTH_ENABLED: "true"
+  SPRING_SLEUTH_TRACE_ID128: "true"
+  
+  # Security Configuration
+  SECURITY_JWT_EXPIRATION: "3600"
+  SECURITY_CORS_ALLOWED_ORIGINS: "https://monitor.local,http://localhost:3000"
+  
+  # Performance Configuration
+  SERVER_TOMCAT_MAX_THREADS: "200"
+  SERVER_TOMCAT_MIN_SPARE_THREADS: "10"
+  SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "20"
+  SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: "5"
+  SPRING_REDIS_LETTUCE_POOL_MAX_ACTIVE: "20"
+  SPRING_REDIS_LETTUCE_POOL_MAX_IDLE: "10"
+  
+  # Certificate Authentication Configuration
+  CERTIFICATE_STORE_TYPE: "REDIS"
+  CERTIFICATE_VALIDATION_ENABLED: "true"
+  
+  # Cache Configuration
+  CACHE_TTL_SECONDS: "300"
+  QUERY_TIMEOUT_SECONDS: "30"
+  
+  # Gateway Configuration
+  GATEWAY_RATE_LIMIT_ENABLED: "true"
+  GATEWAY_CIRCUIT_BREAKER_ENABLED: "true"
+  
+  # WebSocket Configuration
+  WEBSOCKET_MAX_CONNECTIONS: "1000"
+  WEBSOCKET_HEARTBEAT_INTERVAL: "30"
+  
+  # Notification Configuration
+  NOTIFICATION_EMAIL_ENABLED: "true"
+  NOTIFICATION_SMS_ENABLED: "false"
+  
+  # Frontend Configuration
+  API_GATEWAY_URL: "http://monitor-api-gateway-service:8080"
+  WEBSOCKET_URL: "ws://monitor-websocket-service:8084"
+  ENVIRONMENT: "kubernetes"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: monitor-secrets
+  namespace: monitor-system
+type: Opaque
+data:
+  # Base64 encoded passwords and secrets
+  MYSQL_PASSWORD: bW9uaXRvcjEyMw==  # monitor123
+  REDIS_PASSWORD: ""  # No password for Redis in this setup
+  INFLUXDB_TOKEN: bW9uaXRvci10b2tlbi0xMjM0NTY3ODk=  # monitor-token-123456789
+  INFLUXDB_PASSWORD: bW9uaXRvcjEyMw==  # monitor123
+  RABBITMQ_PASSWORD: bW9uaXRvcjEyMw==  # monitor123
+  JWT_SECRET: bW9uaXRvci1qd3Qtc2VjcmV0LWtleS0xMjM0NTY3ODk=  # monitor-jwt-secret-key-123456789
+  
+  # TLS Certificates (base64 encoded)
+  TLS_CERT: ""  # To be populated with actual certificate
+  TLS_KEY: ""   # To be populated with actual private key
+  
+  # Database encryption key
+  DB_ENCRYPTION_KEY: bW9uaXRvci1kYi1lbmNyeXB0aW9uLWtleS0xMjM0NTY3ODk=  # monitor-db-encryption-key-123456789
+  
+  # Grafana admin password
+  GRAFANA_ADMIN_PASSWORD: YWRtaW4xMjM=  # admin123

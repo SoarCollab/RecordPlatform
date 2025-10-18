@@ -1,0 +1,74 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: monitor-auth-service
+    
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/monitor_auth?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false
+    username: root
+    password: root
+    
+  redis:
+    host: localhost
+    port: 6379
+    database: 1
+    timeout: 2000ms
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 0
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+    metrics:
+      enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+        step: 10s
+      influx:
+        enabled: false
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        monitor.method.execution.time: true
+      percentiles:
+        http.server.requests: 0.5, 0.95, 0.99
+        monitor.method.execution.time: 0.5, 0.95, 0.99
+    tags:
+      application: monitor-auth-service
+      service: auth-service
+  tracing:
+    enabled: true
+    sampling:
+      probability: 0.1
+    zipkin:
+      endpoint: http://localhost:9411/api/v2/spans
+
+logging:
+  level:
+    cn.flying.monitor: DEBUG

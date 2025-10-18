@@ -1,0 +1,233 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitor-data-service
+  namespace: monitor-system
+  labels:
+    app: monitor-data-service
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: monitor-data-service
+  template:
+    metadata:
+      labels:
+        app: monitor-data-service
+        version: v1
+      annotations:
+        sidecar.istio.io/inject: "true"
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8082"
+        prometheus.io/path: "/actuator/prometheus"
+    spec:
+      serviceAccountName: monitor-data-service
+      containers:
+      - name: data-service
+        image: monitor/data-service:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8082
+          name: http
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: SPRING_PROFILES_ACTIVE
+        - name: JAVA_OPTS
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: JAVA_OPTS
+        - name: SPRING_DATASOURCE_URL
+          value: "jdbc:mysql://mysql-service:3306/monitor_system?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+        - name: SPRING_DATASOURCE_USERNAME
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: MYSQL_USERNAME
+        - name: SPRING_DATASOURCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: monitor-secrets
+              key: MYSQL_PASSWORD
+        - name: SPRING_REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: REDIS_HOST
+        - name: SPRING_REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: REDIS_PORT
+        - name: INFLUXDB_URL
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: INFLUXDB_URL
+        - name: INFLUXDB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: monitor-secrets
+              key: INFLUXDB_TOKEN
+        - name: INFLUXDB_ORG
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: INFLUXDB_ORG
+        - name: INFLUXDB_BUCKET
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: INFLUXDB_BUCKET
+        - name: SPRING_RABBITMQ_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: RABBITMQ_HOST
+        - name: SPRING_RABBITMQ_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: RABBITMQ_PORT
+        - name: SPRING_RABBITMQ_USERNAME
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: RABBITMQ_USERNAME
+        - name: SPRING_RABBITMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: monitor-secrets
+              key: RABBITMQ_PASSWORD
+        - name: SPRING_SLEUTH_ZIPKIN_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: SPRING_SLEUTH_ZIPKIN_BASE_URL
+        - name: SPRING_SLEUTH_SAMPLER_PROBABILITY
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: SPRING_SLEUTH_SAMPLER_PROBABILITY
+        - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
+        - name: MANAGEMENT_METRICS_EXPORT_PROMETHEUS_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: MANAGEMENT_METRICS_EXPORT_PROMETHEUS_ENABLED
+        - name: CACHE_TTL_SECONDS
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: CACHE_TTL_SECONDS
+        - name: QUERY_TIMEOUT_SECONDS
+          valueFrom:
+            configMapKeyRef:
+              name: monitor-config
+              key: QUERY_TIMEOUT_SECONDS
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8082
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8082
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp-volume
+          mountPath: /tmp
+        - name: logs-volume
+          mountPath: /app/logs
+      volumes:
+      - name: tmp-volume
+        emptyDir: {}
+      - name: logs-volume
+        emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitor-data-service
+  namespace: monitor-system
+  labels:
+    app: monitor-data-service
+spec:
+  selector:
+    app: monitor-data-service
+  ports:
+  - port: 8082
+    targetPort: 8082
+    name: http
+  type: ClusterIP
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: monitor-data-service-hpa
+  namespace: monitor-system
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: monitor-data-service
+  minReplicas: 3
+  maxReplicas: 15
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30

@@ -1,0 +1,89 @@
+package cn.flying.monitor.common.service;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * Unit tests for BusinessMetricsService
+ */
+@ExtendWith(MockitoExtension.class)
+class BusinessMetricsServiceTest {
+    
+    @Mock
+    private CustomMetricsService customMetricsService;
+    
+    @InjectMocks
+    private BusinessMetricsService businessMetricsService;
+    
+    @BeforeEach
+    void setUp() {
+        // Setup common mock behaviors
+    }
+    
+    @Test
+    void testCalculateSlaMetrics_WithValidData_ReturnsCorrectSla() {
+        // Given
+        String serviceName = "test-service";
+        long totalRequests = 1000L;
+        long successfulRequests = 950L;
+        
+        // When
+        double slaScore = businessMetricsService.calculateSlaScore(serviceName, totalRequests, successfulRequests);
+        
+        // Then
+        assertEquals(95.0, slaScore, 0.01);
+    }
+    
+    @Test
+    void testCalculatePerformanceScore_WithValidMetrics_ReturnsScore() {
+        // Given
+        double avgResponseTime = 150.0; // ms
+        double errorRate = 2.0; // %
+        double throughput = 100.0; // requests/sec
+        
+        // When
+        double performanceScore = businessMetricsService.calculatePerformanceScore(
+            avgResponseTime, errorRate, throughput);
+        
+        // Then
+        assertTrue(performanceScore >= 0.0);
+        assertTrue(performanceScore <= 100.0);
+    }
+    
+    @Test
+    void testCollectBusinessMetrics_ReturnsValidMetrics() {
+        // When
+        Map<String, Object> result = businessMetricsService.collectBusinessMetrics();
+        
+        // Then
+        assertNotNull(result);
+        assertTrue(result.containsKey("timestamp"));
+        assertTrue(result.containsKey("serviceMetrics"));
+    }
+    
+    @Test
+    void testCalculateDataQualityScore_WithValidData_ReturnsScore() {
+        // Given
+        long totalRecords = 1000L;
+        long validRecords = 980L;
+        long duplicateRecords = 15L;
+        
+        // When
+        double qualityScore = businessMetricsService.calculateDataQualityScore(
+            totalRecords, validRecords, duplicateRecords);
+        
+        // Then
+        assertTrue(qualityScore >= 0.0);
+        assertTrue(qualityScore <= 100.0);
+    }
+}

@@ -1,0 +1,70 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: monitor-system-dev
+
+resources:
+- ../../namespace.yaml
+- ../../configmap.yaml
+- ../../rbac.yaml
+- ../../infrastructure/mysql.yaml
+- ../../infrastructure/redis.yaml
+- ../../infrastructure/influxdb.yaml
+- ../../infrastructure/rabbitmq.yaml
+- ../../services/api-gateway.yaml
+- ../../services/auth-service.yaml
+- ../../services/data-service.yaml
+- ../../services/notification-service.yaml
+- ../../services/websocket-service.yaml
+- ../../services/web-dashboard.yaml
+- ../../monitoring/prometheus.yaml
+
+patchesStrategicMerge:
+- namespace-patch.yaml
+- resource-limits-patch.yaml
+- replica-count-patch.yaml
+
+configMapGenerator:
+- name: monitor-config-dev
+  literals:
+  - SPRING_PROFILES_ACTIVE=dev
+  - LOG_LEVEL=DEBUG
+  - METRICS_ENABLED=true
+  - TRACING_SAMPLE_RATE=1.0
+
+secretGenerator:
+- name: monitor-secrets-dev
+  literals:
+  - MYSQL_PASSWORD=dev123
+  - REDIS_PASSWORD=""
+  - INFLUXDB_TOKEN=dev-token-123
+  - RABBITMQ_PASSWORD=dev123
+  - JWT_SECRET=dev-jwt-secret-key
+
+images:
+- name: monitor/api-gateway
+  newTag: dev-latest
+- name: monitor/auth-service
+  newTag: dev-latest
+- name: monitor/data-service
+  newTag: dev-latest
+- name: monitor/notification-service
+  newTag: dev-latest
+- name: monitor/websocket-service
+  newTag: dev-latest
+- name: monitor/web-dashboard
+  newTag: dev-latest
+
+replicas:
+- name: monitor-api-gateway
+  count: 1
+- name: monitor-auth-service
+  count: 1
+- name: monitor-data-service
+  count: 1
+- name: monitor-notification-service
+  count: 1
+- name: monitor-websocket-service
+  count: 1
+- name: monitor-web-dashboard
+  count: 1

@@ -1,0 +1,149 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jaeger
+  namespace: monitor-system
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  namespace: monitor-system
+  labels:
+    app: jaeger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jaeger
+  template:
+    metadata:
+      labels:
+        app: jaeger
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "14269"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: jaeger
+      containers:
+      - name: jaeger
+        image: jaegertracing/all-in-one:1.50
+        env:
+        - name: COLLECTOR_ZIPKIN_HOST_PORT
+          value: ":9411"
+        - name: COLLECTOR_OTLP_ENABLED
+          value: "true"
+        - name: METRICS_STORAGE_TYPE
+          value: "prometheus"
+        - name: PROMETHEUS_SERVER_URL
+          value: "http://prometheus-service:9090"
+        - name: PROMETHEUS_QUERY_SUPPORT_SPANMETRICS_CONNECTOR
+          value: "true"
+        - name: SPAN_STORAGE_TYPE
+          value: "memory"
+        - name: MEMORY_MAX_TRACES
+          value: "50000"
+        ports:
+        - containerPort: 16686
+          name: ui
+        - containerPort: 14268
+          name: collector-http
+        - containerPort: 14250
+          name: collector-grpc
+        - containerPort: 9411
+          name: zipkin
+        - containerPort: 14269
+          name: metrics
+        - containerPort: 4317
+          name: otlp-grpc
+        - containerPort: 4318
+          name: otlp-http
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 16686
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 16686
+          initialDelaySeconds: 10
+          periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger-service
+  namespace: monitor-system
+  labels:
+    app: jaeger
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "14269"
+    prometheus.io/path: "/metrics"
+spec:
+  selector:
+    app: jaeger
+  ports:
+  - port: 16686
+    targetPort: 16686
+    name: ui
+  - port: 14268
+    targetPort: 14268
+    name: collector-http
+  - port: 14250
+    targetPort: 14250
+    name: collector-grpc
+  - port: 9411
+    targetPort: 9411
+    name: zipkin
+  - port: 14269
+    targetPort: 14269
+    name: metrics
+  - port: 4317
+    targetPort: 4317
+    name: otlp-grpc
+  - port: 4318
+    targetPort: 4318
+    name: otlp-http
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger-collector
+  namespace: monitor-system
+  labels:
+    app: jaeger
+spec:
+  selector:
+    app: jaeger
+  ports:
+  - port: 14268
+    targetPort: 14268
+    name: collector-http
+  - port: 14250
+    targetPort: 14250
+    name: collector-grpc
+  - port: 9411
+    targetPort: 9411
+    name: zipkin
+  - port: 4317
+    targetPort: 4317
+    name: otlp-grpc
+  - port: 4318
+    targetPort: 4318
+    name: otlp-http
+  type: ClusterIP

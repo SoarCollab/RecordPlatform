@@ -1,0 +1,324 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: monitor-services
+  namespace: monitor-system
+  labels:
+    app: monitor-services
+spec:
+  selector:
+    matchLabels:
+      prometheus.io/scrape: "true"
+  endpoints:
+  - port: http
+    path: /actuator/prometheus
+    interval: 15s
+    scrapeTimeout: 10s
+    honorLabels: true
+  namespaceSelector:
+    matchNames:
+    - monitor-system
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: monitor-api-gateway
+  namespace: monitor-system
+  labels:
+    app: monitor-api-gateway
+spec:
+  selector:
+    matchLabels:
+      app: monitor-api-gateway
+  endpoints:
+  - port: http
+    path: /actuator/prometheus
+    interval: 10s
+    scrapeTimeout: 8s
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_service_name]
+      targetLabel: service
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+  namespaceSelector:
+    matchNames:
+    - monitor-system
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: monitor-data-service
+  namespace: monitor-system
+  labels:
+    app: monitor-data-service
+spec:
+  selector:
+    matchLabels:
+      app: monitor-data-service
+  endpoints:
+  - port: http
+    path: /actuator/prometheus
+    interval: 10s
+    scrapeTimeout: 8s
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_service_name]
+      targetLabel: service
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+  namespaceSelector:
+    matchNames:
+    - monitor-system
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: monitor-auth-service
+  namespace: monitor-system
+  labels:
+    app: monitor-auth-service
+spec:
+  selector:
+    matchLabels:
+      app: monitor-auth-service
+  endpoints:
+  - port: http
+    path: /actuator/prometheus
+    interval: 15s
+    scrapeTimeout: 10s
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_service_name]
+      targetLabel: service
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+  namespaceSelector:
+    matchNames:
+    - monitor-system
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: monitor-websocket-service
+  namespace: monitor-system
+  labels:
+    app: monitor-websocket-service
+spec:
+  selector:
+    matchLabels:
+      app: monitor-websocket-service
+  endpoints:
+  - port: http
+    path: /actuator/prometheus
+    interval: 15s
+    scrapeTimeout: 10s
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_service_name]
+      targetLabel: service
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+  namespaceSelector:
+    matchNames:
+    - monitor-system
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: monitor-notification-service
+  namespace: monitor-system
+  labels:
+    app: monitor-notification-service
+spec:
+  selector:
+    matchLabels:
+      app: monitor-notification-service
+  endpoints:
+  - port: http
+    path: /actuator/prometheus
+    interval: 15s
+    scrapeTimeout: 10s
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_service_name]
+      targetLabel: service
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+    - sourceLabels: [__meta_kubernetes_pod_name]
+      targetLabel: pod
+  namespaceSelector:
+    matchNames:
+    - monitor-system
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: infrastructure-services
+  namespace: monitor-system
+  labels:
+    app: infrastructure-services
+spec:
+  selector:
+    matchLabels:
+      component: infrastructure
+  endpoints:
+  - port: metrics
+    interval: 30s
+    scrapeTimeout: 15s
+    relabelings:
+    - sourceLabels: [__meta_kubernetes_service_name]
+      targetLabel: service
+    - sourceLabels: [__meta_kubernetes_namespace]
+      targetLabel: namespace
+  namespaceSelector:
+    matchNames:
+    - monitor-system
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: monitor-system-alerts
+  namespace: monitor-system
+  labels:
+    app: monitor-system
+spec:
+  groups:
+  - name: monitor-system.rules
+    interval: 30s
+    rules:
+    - alert: MonitorServiceDown
+      expr: up{job=~"monitor-.*"} == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: "{{ $labels.job }}"
+      annotations:
+        summary: "Monitor service {{ $labels.job }} is down"
+        description: "Monitor service {{ $labels.job }} has been down for more than 1 minute"
+        runbook_url: "https://monitor.local/runbooks/service-down"
+    
+    - alert: MonitorHighErrorRate
+      expr: |
+        (
+          rate(http_requests_total{job=~"monitor-.*",status=~"5.."}[5m]) /
+          rate(http_requests_total{job=~"monitor-.*"}[5m])
+        ) > 0.1
+      for: 2m
+      labels:
+        severity: warning
+        service: "{{ $labels.job }}"
+      annotations:
+        summary: "High error rate for {{ $labels.job }}"
+        description: "Error rate for {{ $labels.job }} is {{ $value | humanizePercentage }}"
+        runbook_url: "https://monitor.local/runbooks/high-error-rate"
+    
+    - alert: MonitorHighResponseTime
+      expr: |
+        histogram_quantile(0.95,
+          rate(http_request_duration_seconds_bucket{job=~"monitor-.*"}[5m])
+        ) > 1
+      for: 5m
+      labels:
+        severity: warning
+        service: "{{ $labels.job }}"
+      annotations:
+        summary: "High response time for {{ $labels.job }}"
+        description: "95th percentile response time for {{ $labels.job }} is {{ $value }}s"
+        runbook_url: "https://monitor.local/runbooks/high-response-time"
+    
+    - alert: MonitorDatabaseConnectionPoolHigh
+      expr: |
+        (
+          hikaricp_connections_active{job=~"monitor-.*"} /
+          hikaricp_connections_max{job=~"monitor-.*"}
+        ) > 0.8
+      for: 3m
+      labels:
+        severity: warning
+        service: "{{ $labels.job }}"
+      annotations:
+        summary: "Database connection pool usage high for {{ $labels.job }}"
+        description: "Database connection pool usage is {{ $value | humanizePercentage }} for {{ $labels.job }}"
+        runbook_url: "https://monitor.local/runbooks/db-pool-high"
+    
+    - alert: MonitorCertificateExpiringWarning
+      expr: certificate_expiry_days < 30
+      for: 1m
+      labels:
+        severity: warning
+        client: "{{ $labels.client_id }}"
+      annotations:
+        summary: "Certificate expiring for client {{ $labels.client_id }}"
+        description: "Certificate for client {{ $labels.client_id }} expires in {{ $value }} days"
+        runbook_url: "https://monitor.local/runbooks/certificate-expiry"
+    
+    - alert: MonitorCertificateExpiringCritical
+      expr: certificate_expiry_days < 7
+      for: 1m
+      labels:
+        severity: critical
+        client: "{{ $labels.client_id }}"
+      annotations:
+        summary: "Certificate expiring very soon for client {{ $labels.client_id }}"
+        description: "Certificate for client {{ $labels.client_id }} expires in {{ $value }} days"
+        runbook_url: "https://monitor.local/runbooks/certificate-expiry"
+    
+    - alert: MonitorInfluxDBWriteFailures
+      expr: rate(influxdb_write_errors_total[5m]) > 0
+      for: 2m
+      labels:
+        severity: warning
+        service: "{{ $labels.job }}"
+      annotations:
+        summary: "InfluxDB write failures for {{ $labels.job }}"
+        description: "InfluxDB write failure rate is {{ $value }} per second for {{ $labels.job }}"
+        runbook_url: "https://monitor.local/runbooks/influxdb-write-failures"
+    
+    - alert: MonitorRedisConnectionFailure
+      expr: redis_connected_clients == 0
+      for: 1m
+      labels:
+        severity: critical
+        service: "{{ $labels.job }}"
+      annotations:
+        summary: "Redis connection failure for {{ $labels.job }}"
+        description: "No Redis connections available for {{ $labels.job }}"
+        runbook_url: "https://monitor.local/runbooks/redis-connection-failure"
+    
+    - alert: MonitorHighMemoryUsage
+      expr: |
+        (
+          container_memory_usage_bytes{namespace="monitor-system"} /
+          container_spec_memory_limit_bytes{namespace="monitor-system"}
+        ) > 0.9
+      for: 5m
+      labels:
+        severity: warning
+        pod: "{{ $labels.pod }}"
+      annotations:
+        summary: "High memory usage for pod {{ $labels.pod }}"
+        description: "Memory usage is {{ $value | humanizePercentage }} for pod {{ $labels.pod }}"
+        runbook_url: "https://monitor.local/runbooks/high-memory-usage"
+    
+    - alert: MonitorHighCPUUsage
+      expr: |
+        rate(container_cpu_usage_seconds_total{namespace="monitor-system"}[5m]) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+        pod: "{{ $labels.pod }}"
+      annotations:
+        summary: "High CPU usage for pod {{ $labels.pod }}"
+        description: "CPU usage is {{ $value | humanizePercentage }} for pod {{ $labels.pod }}"
+        runbook_url: "https://monitor.local/runbooks/high-cpu-usage"

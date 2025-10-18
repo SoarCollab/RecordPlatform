@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>cn.flying</groupId>
+        <artifactId>platform-monitor</artifactId>
+        <version>0.0.1-SNAPSHOT</version>
+    </parent>
+    
+    <artifactId>performance-tests</artifactId>
+    <name>performance-tests</name>
+    <description>监控系统性能测试</description>
+    
+    <properties>
+        <jmeter.version>5.6.3</jmeter.version>
+        <jmeter-maven-plugin.version>3.8.0</jmeter-maven-plugin.version>
+    </properties>
+    
+    <dependencies>
+        <!-- JMeter Core -->
+        <dependency>
+            <groupId>org.apache.jmeter</groupId>
+            <artifactId>ApacheJMeter_core</artifactId>
+            <version>${jmeter.version}</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- JMeter HTTP -->
+        <dependency>
+            <groupId>org.apache.jmeter</groupId>
+            <artifactId>ApacheJMeter_http</artifactId>
+            <version>${jmeter.version}</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- JMeter Java -->
+        <dependency>
+            <groupId>org.apache.jmeter</groupId>
+            <artifactId>ApacheJMeter_java</artifactId>
+            <version>${jmeter.version}</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- Common Module for Test Utilities -->
+        <dependency>
+            <groupId>cn.flying</groupId>
+            <artifactId>monitor-common</artifactId>
+        </dependency>
+
+        <!-- Spring Boot Test -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Test Dependencies -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+    
+    <build>
+        <plugins>
+            <!-- JMeter Maven Plugin -->
+            <plugin>
+                <groupId>com.lazerycode.jmeter</groupId>
+                <artifactId>jmeter-maven-plugin</artifactId>
+                <version>${jmeter-maven-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>configuration</id>
+                        <goals>
+                            <goal>configure</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>jmeter-tests</id>
+                        <goals>
+                            <goal>jmeter</goal>
+                        </goals>
+                        <phase>integration-test</phase>
+                    </execution>
+                    <execution>
+                        <id>jmeter-check-results</id>
+                        <goals>
+                            <goal>results</goal>
+                        </goals>
+                        <phase>verify</phase>
+                    </execution>
+                </executions>
+                <configuration>
+                    <testFilesIncluded>
+                        <jMeterTestFile>*.jmx</jMeterTestFile>
+                    </testFilesIncluded>
+                    <resultsFileFormat>xml</resultsFileFormat>
+                    <generateReports>true</generateReports>
+                    <reportDir>${project.build.directory}/jmeter/reports</reportDir>
+                    <propertiesUser>
+                        <threads>10</threads>
+                        <rampup>30</rampup>
+                        <duration>60</duration>
+                        <target.host>localhost</target.host>
+                        <target.port>8080</target.port>
+                    </propertiesUser>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

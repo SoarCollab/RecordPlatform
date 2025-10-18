@@ -1,0 +1,148 @@
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: monitor-gateway
+  namespace: monitor-system
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - monitor.local
+    - "*.monitor.local"
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    tls:
+      mode: SIMPLE
+      credentialName: monitor-tls-secret
+    hosts:
+    - monitor.local
+    - "*.monitor.local"
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: monitor-virtualservice
+  namespace: monitor-system
+spec:
+  hosts:
+  - monitor.local
+  - "*.monitor.local"
+  gateways:
+  - monitor-gateway
+  http:
+  # Web Dashboard Routes
+  - match:
+    - uri:
+        prefix: /
+    - uri:
+        prefix: /dashboard
+    - uri:
+        prefix: /static
+    route:
+    - destination:
+        host: monitor-web-dashboard-service
+        port:
+          number: 80
+  # API Routes
+  - match:
+    - uri:
+        prefix: /api/
+    route:
+    - destination:
+        host: monitor-api-gateway-service
+        port:
+          number: 8080
+  # WebSocket Routes
+  - match:
+    - uri:
+        prefix: /ws/
+    - headers:
+        upgrade:
+          exact: websocket
+    route:
+    - destination:
+        host: monitor-websocket-service
+        port:
+          number: 8084
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: monitor-api-gateway-dr
+  namespace: monitor-system
+spec:
+  host: monitor-api-gateway-service
+  trafficPolicy:
+    loadBalancer:
+      simple: LEAST_CONN
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 50
+        maxRequestsPerConnection: 10
+        maxRetries: 3
+        consecutiveGatewayErrors: 5
+        interval: 30s
+        baseEjectionTime: 30s
+    outlierDetection:
+      consecutiveGatewayErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: monitor-data-service-dr
+  namespace: monitor-system
+spec:
+  host: monitor-data-service
+  trafficPolicy:
+    loadBalancer:
+      simple: ROUND_ROBIN
+    connectionPool:
+      tcp:
+        maxConnections: 200
+      http:
+        http1MaxPendingRequests: 100
+        maxRequestsPerConnection: 20
+        maxRetries: 3
+    outlierDetection:
+      consecutiveGatewayErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 30
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: monitor-websocket-service-dr
+  namespace: monitor-system
+spec:
+  host: monitor-websocket-service
+  trafficPolicy:
+    loadBalancer:
+      simple: LEAST_CONN
+    connectionPool:
+      tcp:
+        maxConnections: 500
+        connectTimeout: 30s
+        tcpKeepalive:
+          time: 7200s
+          interval: 75s
+      http:
+        http1MaxPendingRequests: 200
+        maxRequestsPerConnection: 1
+        h2UpgradePolicy: UPGRADE

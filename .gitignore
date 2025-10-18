@@ -52,3 +52,12 @@ App.java
 /platform-monitor/CLAUDE.md
 /.kiro/settings/mcp.json
 /.kiro/
+/.claude/context-summary-monitor-tests.md
+/.codex/context-question-1.json
+/.codex/context-question-2.json
+/.codex/context-scan.json
+/.codex/operations-log.md
+/.github/workflows/ci-cd-pipeline.yml
+/.github/workflows/rollback.yml
+/.github/workflows/security-scan.yml
+/.github/dependency-check-suppressions.xml

@@ -1,6 +1,6 @@
 package cn.flying.monitor.server.controller;
 
-import cn.flying.monitor.server.entity.RestBean;
+import cn.flying.monitor.common.entity.Result;
 import cn.flying.monitor.server.entity.vo.request.ChangePasswordVO;
 import cn.flying.monitor.server.entity.vo.request.CreateSubAccountVO;
 import cn.flying.monitor.server.entity.vo.request.ModifyEmailVO;
@@ -9,6 +9,8 @@ import cn.flying.monitor.server.service.AccountService;
 import cn.flying.monitor.server.utils.Const;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -16,8 +18,6 @@ import java.util.List;
 /**
  * @program: monitor
  * @description: 用户相关接口
- * @author: 王贝强
- * @create: 2024-07-24 17:05
  */
 @RestController
 @RequestMapping("/api/user")
@@ -26,36 +26,48 @@ public class UserController {
     AccountService service;
 
     @PostMapping("/change-password")
-    public RestBean<Void> changePassword(@RequestBody @Valid ChangePasswordVO vo,
-                                         @RequestAttribute(Const.ATTR_USER_ID) int clientId) {
-        return service.changePassword(clientId, vo.getPassword(), vo.getNew_password()) ?
-                RestBean.success() : RestBean.failure(401, "原始密码输入错误");
+    public ResponseEntity<Result<Void>> changePassword(@RequestBody @Valid ChangePasswordVO vo,
+                                                       @RequestAttribute(Const.ATTR_USER_ID) int clientId) {
+        if (service.changePassword(clientId, vo.getPassword(), vo.getNew_password())) {
+            return ResponseEntity.ok(Result.success((Void) null, "密码修改成功"));
+        }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Result.error("原始密码输入错误"));
     }
 
     @PostMapping("/modify-email")
-    public RestBean<Void> modifyEmail(@RequestAttribute(Const.ATTR_USER_ID) int userId,
-                                      @RequestBody @Valid ModifyEmailVO vo) {
+    public ResponseEntity<Result<Void>> modifyEmail(
+            @RequestAttribute(Const.ATTR_USER_ID) int userId,
+            @RequestBody @Valid ModifyEmailVO vo) {
         String result = service.modifyEmail(userId, vo);
-        return result == null ? RestBean.success() : RestBean.failure(401, result);
+        if (result == null) {
+            return ResponseEntity.ok(Result.success((Void) null, "邮箱修改成功"));
+        }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Result.error(result));
     }
 
     @PostMapping("/sub/create")
-    public RestBean<Void> createSubAccount(@RequestBody @Valid CreateSubAccountVO vo) {
+    public ResponseEntity<Result<Void>> createSubAccount(@RequestBody @Valid CreateSubAccountVO vo) {
         service.createSubAccount(vo);
-        return RestBean.success();
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(Result.success((Void) null, "子账户创建成功"));
     }
 
     @GetMapping("/sub/delete")
-    public RestBean<Void> deleteSubAccount(int uid,
-                                           @RequestAttribute(Const.ATTR_USER_ID) int userId) {
-        if (uid == userId)
-            return RestBean.failure(401, "非法参数");
+    public ResponseEntity<Result<Void>> deleteSubAccount(
+            int uid,
+            @RequestAttribute(Const.ATTR_USER_ID) int userId) {
+        if (uid == userId) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Result.error("非法参数"));
+        }
         service.deleteSubAccount(uid);
-        return RestBean.success();
+        return ResponseEntity.ok(Result.success((Void) null, "子账户删除成功"));
     }
 
     @GetMapping("/sub/list")
-    public RestBean<List<SubAccountVO>> subAccountList() {
-        return RestBean.success(service.listSubAccount());
+    public ResponseEntity<Result<List<SubAccountVO>>> subAccountList() {
+        return ResponseEntity.ok(Result.success(service.listSubAccount(), "获取成功"));
     }
 }

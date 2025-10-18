@@ -1,0 +1,65 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: monitor-system
+
+resources:
+- ../../namespace.yaml
+- ../../configmap.yaml
+- ../../rbac.yaml
+- ../../infrastructure/mysql.yaml
+- ../../infrastructure/redis.yaml
+- ../../infrastructure/influxdb.yaml
+- ../../infrastructure/rabbitmq.yaml
+- ../../services/api-gateway.yaml
+- ../../services/auth-service.yaml
+- ../../services/data-service.yaml
+- ../../services/notification-service.yaml
+- ../../services/websocket-service.yaml
+- ../../services/web-dashboard.yaml
+- ../../monitoring/prometheus.yaml
+- ../../istio/gateway.yaml
+- ../../istio/security.yaml
+
+patchesStrategicMerge:
+- resource-limits-patch.yaml
+- security-patch.yaml
+- storage-patch.yaml
+
+configMapGenerator:
+- name: monitor-config-prod
+  literals:
+  - SPRING_PROFILES_ACTIVE=prod
+  - LOG_LEVEL=INFO
+  - METRICS_ENABLED=true
+  - TRACING_SAMPLE_RATE=0.1
+  - SECURITY_AUDIT_ENABLED=true
+  - PERFORMANCE_MONITORING_ENABLED=true
+
+images:
+- name: monitor/api-gateway
+  newName: ghcr.io/your-org/monitor-api-gateway
+- name: monitor/auth-service
+  newName: ghcr.io/your-org/monitor-auth-service
+- name: monitor/data-service
+  newName: ghcr.io/your-org/monitor-data-service
+- name: monitor/notification-service
+  newName: ghcr.io/your-org/monitor-notification-service
+- name: monitor/websocket-service
+  newName: ghcr.io/your-org/monitor-websocket-service
+- name: monitor/web-dashboard
+  newName: ghcr.io/your-org/monitor-web-dashboard
+
+replicas:
+- name: monitor-api-gateway
+  count: 3
+- name: monitor-auth-service
+  count: 3
+- name: monitor-data-service
+  count: 5
+- name: monitor-notification-service
+  count: 3
+- name: monitor-websocket-service
+  count: 3
+- name: monitor-web-dashboard
+  count: 3

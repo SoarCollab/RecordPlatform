@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: monitor-client-test
+  retry:
+    enabled: true
+
+monitor:
+  client:
+    id: test-client
+    server:
+      address: http://localhost:8089
+    certificate:
+      keystore-path: ./test-keystore.p12
+      keystore-password: testpass
+      key-alias: test-key
+      validity-days: 365
+      auto-rotation-days: 30
+    network:
+      connection-timeout: 5000
+      socket-timeout: 10000
+      max-connections: 5
+      max-connections-per-route: 2
+      compression-enabled: true
+      compression-threshold: 100
+      max-retry-attempts: 3
+      initial-retry-delay: 100
+      max-retry-delay: 1000
+      retry-multiplier: 2.0
+    metrics:
+      collection-interval: 1
+      batch-size: 3
+      enable-network-metrics: true
+      enable-process-metrics: true
+      enable-jvm-metrics: true
+      custom-metrics-enabled: false
+      top-processes-count: 3
+      sampling-rate: 1.0
+      enable-scheduling: false
+
+logging:
+  level:
+    cn.flying.monitor.client: DEBUG
+    org.apache.hc: WARN
+    com.github.tomakehurst.wiremock: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%X{clientId}] %logger{36} - %msg%n"

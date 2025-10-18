@@ -38,6 +38,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <dependency>
+            <groupId>cn.flying</groupId>
+            <artifactId>monitor-common</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
         <!--    Redis交互模块    -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

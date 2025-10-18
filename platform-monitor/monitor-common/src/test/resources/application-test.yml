@@ -1,0 +1,57 @@
+spring:
+  datasource:
+    # 由Testcontainers动态配置
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    
+  redis:
+    # 由Testcontainers动态配置
+    database: 0
+    timeout: 2000ms
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+        min-idle: 0
+
+  rabbitmq:
+    # 由Testcontainers动态配置
+    virtual-host: /
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.nop.NopImpl  # 测试时关闭SQL日志
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# 测试专用配置
+monitor:
+  jwt:
+    secret: test-secret-key-for-testing-only
+    expiration: 3600
+    refresh-expiration: 86400
+  
+  security:
+    mfa:
+      enabled: true
+      backup-codes-count: 10
+    
+    certificate:
+      validation-enabled: true
+
+influxdb:
+  # 由Testcontainers动态配置
+  token: test-token
+  org: test-org
+  bucket: test-bucket
+
+logging:
+  level:
+    cn.flying.monitor: DEBUG
+    org.testcontainers: INFO
+    com.github.dockerjava: WARN
+    org.springframework.test: INFO

@@ -1,0 +1,80 @@
+# Test configuration for query performance tests
+spring:
+  profiles:
+    active: test
+  
+  # InfluxDB test configuration
+  influx:
+    url: http://localhost:8086
+    token: test-token
+    bucket: test-bucket
+    organization: test-org
+    
+  # Redis test configuration
+  redis:
+    host: localhost
+    port: 6379
+    database: 1
+    timeout: 2000ms
+    
+  # Cache configuration for testing
+  cache:
+    type: redis
+    redis:
+      time-to-live: 300000  # 5 minutes
+      key-prefix: "test:cache:"
+      
+  # Logging configuration for tests
+logging:
+  level:
+    cn.flying.monitor: DEBUG
+    org.springframework.cache: DEBUG
+    org.springframework.data.redis: INFO
+    com.influxdb: INFO
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
+# Test-specific properties
+test:
+  performance:
+    enabled: true
+    target-rps: 1000
+    test-duration-seconds: 60
+    concurrent-threads: 50
+    
+  cache:
+    warm-on-startup: false
+    ttl-seconds: 300
+    max-entries: 10000
+    
+  influxdb:
+    mock-data: true
+    batch-size: 1000
+    
+# Disable security for tests
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    health:
+      show-details: always
+
+# JVM settings for performance tests
+server:
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 10
+    max-connections: 8192
+    accept-count: 100
+    
+# Connection pool settings for tests
+spring.datasource:
+  hikari:
+    maximum-pool-size: 20
+    minimum-idle: 5
+    connection-timeout: 30000
+    idle-timeout: 600000
+    max-lifetime: 1800000

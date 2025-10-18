@@ -1,6 +1,6 @@
 package cn.flying.monitor.server.config;
 
-import cn.flying.monitor.server.entity.RestBean;
+import cn.flying.monitor.common.entity.Result;
 import cn.flying.monitor.server.entity.dto.Account;
 import cn.flying.monitor.server.entity.vo.response.AuthorizeVO;
 import cn.flying.monitor.server.filter.JwtFilter;
@@ -9,11 +9,14 @@ import cn.flying.monitor.server.handler.OAuth2LoginSuccessHandler;
 import cn.flying.monitor.server.service.AccountService;
 import cn.flying.monitor.server.utils.Const;
 import cn.flying.monitor.server.utils.JwtUtils;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -25,6 +28,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 
 /**
  * SpringSecurity相关配置
@@ -48,14 +52,9 @@ public class SecurityConfiguration {
     @Resource
     OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
 
-    /**
-     * 针对于 SpringSecurity 6 的新版配置方法
-     * 支持本地表单登录和OAuth2单点登录
-     *
-     * @param http 配置器
-     * @return 自动构建的内置过滤器链
-     * @throws Exception 可能的异常
-     */
+    @Resource
+    ObjectMapper objectMapper;
+
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         return http
@@ -64,19 +63,16 @@ public class SecurityConfiguration {
                         .requestMatchers("/api/auth/**", "/error").permitAll()
                         .requestMatchers("/monitor/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/doc.html/**", "/webjars/**", "/favicon.ico").permitAll()
-                        // 允许OAuth2登录相关路径
                         .requestMatchers("/oauth2/**", "/login/oauth2/**", "/login").permitAll()
                         .requestMatchers("/api/user/sub/**").hasRole(Const.ROLE_ADMIN)
                         .anyRequest().hasAnyRole(Const.ROLE_DEFAULT, Const.ROLE_ADMIN)
                 )
-                // 配置表单登录（本地登录）
                 .formLogin(conf -> conf
                         .loginProcessingUrl("/api/auth/login")
                         .failureHandler(this::handleProcess)
                         .successHandler(this::handleProcess)
                         .permitAll()
                 )
-                // 配置OAuth2登录（单点登录）
                 .oauth2Login(oauth2 -> oauth2
                         .loginPage("/login")
                         .successHandler(oAuth2LoginSuccessHandler)
@@ -92,7 +88,6 @@ public class SecurityConfiguration {
                         .authenticationEntryPoint(this::handleProcess)
                 )
                 .csrf(AbstractHttpConfigurer::disable)
-                // 修改session策略：IF_REQUIRED以支持OAuth2（需要session存储OAuth2信息）
                 .sessionManagement(conf -> conf
                         .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .addFilterBefore(requestLogFilter, UsernamePasswordAuthenticationFilter.class)
@@ -100,60 +95,45 @@ public class SecurityConfiguration {
                 .build();
     }
 
-    /**
-     * 将多种类型的Handler整合到同一个方法中，包含：
-     * - 登录成功
-     * - 登录失败
-     * - 未登录拦截/无权限拦截
-     *
-     * @param request                   请求
-     * @param response                  响应
-     * @param exceptionOrAuthentication 异常或是验证实体
-     * @throws IOException 可能的异常
-     */
     private void handleProcess(HttpServletRequest request,
                                HttpServletResponse response,
                                Object exceptionOrAuthentication) throws IOException {
-        response.setContentType("application/json;charset=utf-8");
-        PrintWriter writer = response.getWriter();
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         if (exceptionOrAuthentication instanceof AccessDeniedException exception) {
-            writer.write(RestBean
-                    .forbidden(exception.getMessage()).asJsonString());
+            writeJson(response, HttpStatus.FORBIDDEN, Result.error(exception.getMessage()));
         } else if (exceptionOrAuthentication instanceof Exception exception) {
-            writer.write(RestBean
-                    .unauthorized(exception.getMessage()).asJsonString());
+            writeJson(response, HttpStatus.UNAUTHORIZED, Result.error(exception.getMessage()));
         } else if (exceptionOrAuthentication instanceof Authentication authentication) {
             User user = (User) authentication.getPrincipal();
             Account account = service.findAccountByNameOrEmail(user.getUsername());
             String jwt = utils.createJwt(user, account.getUsername(), account.getId());
             if (jwt == null) {
-                writer.write(RestBean.forbidden("登录验证频繁，请稍后再试").asJsonString());
+                writeJson(response, HttpStatus.TOO_MANY_REQUESTS, Result.error("登录验证频繁，请稍后再试"));
             } else {
                 AuthorizeVO vo = account.asViewObject(AuthorizeVO.class, o -> o.setToken(jwt));
                 vo.setExpire(utils.expireTime());
-                writer.write(RestBean.success(vo).asJsonString());
+                writeJson(response, HttpStatus.OK, Result.success(vo, "登录成功"));
             }
         }
     }
 
-    /**
-     * 退出登录处理，将对应的Jwt令牌列入黑名单不再使用
-     *
-     * @param request        请求
-     * @param response       响应
-     * @param authentication 验证实体
-     * @throws IOException 可能的异常
-     */
     private void onLogoutSuccess(HttpServletRequest request,
                                  HttpServletResponse response,
                                  Authentication authentication) throws IOException {
-        response.setContentType("application/json;charset=utf-8");
-        PrintWriter writer = response.getWriter();
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         String authorization = request.getHeader("Authorization");
         if (utils.invalidateJwt(authorization)) {
-            writer.write(RestBean.success("退出登录成功").asJsonString());
+            writeJson(response, HttpStatus.OK, Result.success((Void) null, "退出登录成功"));
             return;
         }
-        writer.write(RestBean.failure(400, "退出登录失败").asJsonString());
+        writeJson(response, HttpStatus.BAD_REQUEST, Result.error("退出登录失败"));
+    }
+
+    private void writeJson(HttpServletResponse response, HttpStatus status, Result<?> body) throws IOException {
+        response.setStatus(status.value());
+        PrintWriter writer = response.getWriter();
+        objectMapper.writeValue(writer, body);
     }
 }

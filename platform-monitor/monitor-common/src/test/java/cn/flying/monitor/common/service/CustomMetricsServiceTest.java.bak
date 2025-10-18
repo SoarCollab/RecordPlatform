@@ -1,0 +1,283 @@
+package cn.flying.monitor.common.service;
+
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicLong;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * 自定义指标服务测试
+ */
+@ExtendWith(MockitoExtension.class)
+class CustomMetricsServiceTest {
+
+    private MeterRegistry meterRegistry;
+    private CustomMetricsService customMetricsService;
+
+    @BeforeEach
+    void setUp() {
+        meterRegistry = new SimpleMeterRegistry();
+        customMetricsService = new CustomMetricsService(meterRegistry);
+    }
+
+    @Test
+    void testRecordDataIngestion() {
+        // Given
+        String clientId = "test-client-1";
+        int recordCount = 100;
+        Duration processingTime = Duration.ofMillis(50);
+
+        // When
+        customMetricsService.recordDataIngestion(clientId, recordCount, processingTime);
+
+        // Then
+        Counter recordCounter = meterRegistry.find("monitor.data.ingestion.records")
+            .tag("client_id", clientId)
+            .counter();
+        assertThat(recordCounter).isNotNull();
+        assertThat(recordCounter.count()).isEqualTo(recordCount);
+
+        Timer processingTimer = meterRegistry.find("monitor.data.ingestion.processing.time")
+            .tag("client_id", clientId)
+            .timer();
+        assertThat(processingTimer).isNotNull();
+        assertThat(processingTimer.count()).isEqualTo(1);
+        assertThat(processingTimer.totalTime(java.util.concurrent.TimeUnit.MILLISECONDS))
+            .isEqualTo(processingTime.toMillis());
+    }
+
+    @Test
+    void testRecordQueryPerformance() {
+        // Given
+        String queryType = "time-series";
+        Duration executionTime = Duration.ofMillis(25);
+        boolean cacheHit = true;
+
+        // When
+        customMetricsService.recordQueryPerformance(queryType, executionTime, cacheHit);
+
+        // Then
+        Timer executionTimer = meterRegistry.find("monitor.query.execution.time")
+            .tag("query_type", queryType)
+            .tag("cache_hit", "true")
+            .timer();
+        assertThat(executionTimer).isNotNull();
+        assertThat(executionTimer.count()).isEqualTo(1);
+
+        Counter cacheCounter = meterRegistry.find("monitor.query.cache")
+            .tag("query_type", queryType)
+            .tag("result", "hit")
+            .counter();
+        assertThat(cacheCounter).isNotNull();
+        assertThat(cacheCounter.count()).isEqualTo(1);
+    }
+
+    @Test
+    void testRecordAlertProcessing() {
+        // Given
+        String alertType = "cpu-threshold";
+        String severity = "high";
+        Duration responseTime = Duration.ofSeconds(15);
+
+        // When
+        customMetricsService.recordAlertProcessing(alertType, severity, responseTime);
+
+        // Then
+        Counter alertCounter = meterRegistry.find("monitor.alert.processed")
+            .tag("alert_type", alertType)
+            .tag("severity", severity)
+            .counter();
+        assertThat(alertCounter).isNotNull();
+        assertThat(alertCounter.count()).isEqualTo(1);
+
+        Timer responseTimer = meterRegistry.find("monitor.alert.response.time")
+            .tag("alert_type", alertType)
+            .tag("severity", severity)
+            .timer();
+        assertThat(responseTimer).isNotNull();
+        assertThat(responseTimer.count()).isEqualTo(1);
+    }
+
+    @Test
+    void testRecordWebSocketConnection() {
+        // Given
+        String connectionType = "metrics";
+
+        // When - 连接
+        customMetricsService.recordWebSocketConnection(connectionType, true);
+
+        // Then
+        Counter connectionCounter = meterRegistry.find("monitor.websocket.connections")
+            .tag("connection_type", connectionType)
+            .tag("action", "connected")
+            .counter();
+        assertThat(connectionCounter).isNotNull();
+        assertThat(connectionCounter.count()).isEqualTo(1);
+
+        Gauge activeGauge = meterRegistry.find("monitor.websocket.active.connections")
+            .tag("connection_type", connectionType)
+            .gauge();
+        assertThat(activeGauge).isNotNull();
+        assertThat(activeGauge.value()).isEqualTo(1.0);
+
+        // When - 断开连接
+        customMetricsService.recordWebSocketConnection(connectionType, false);
+
+        // Then
+        Counter disconnectionCounter = meterRegistry.find("monitor.websocket.connections")
+            .tag("connection_type", connectionType)
+            .tag("action", "disconnected")
+            .counter();
+        assertThat(disconnectionCounter).isNotNull();
+        assertThat(disconnectionCounter.count()).isEqualTo(1);
+
+        assertThat(activeGauge.value()).isEqualTo(0.0);
+    }
+
+    @Test
+    void testRecordAuthentication() {
+        // Given
+        String authType = "jwt";
+        Duration processingTime = Duration.ofMillis(10);
+
+        // When - 成功认证
+        customMetricsService.recordAuthentication(authType, true, processingTime);
+
+        // Then
+        Counter successCounter = meterRegistry.find("monitor.authentication.attempts")
+            .tag("auth_type", authType)
+            .tag("result", "success")
+            .counter();
+        assertThat(successCounter).isNotNull();
+        assertThat(successCounter.count()).isEqualTo(1);
+
+        Timer authTimer = meterRegistry.find("monitor.authentication.processing.time")
+            .tag("auth_type", authType)
+            .tag("result", "success")
+            .timer();
+        assertThat(authTimer).isNotNull();
+        assertThat(authTimer.count()).isEqualTo(1);
+
+        // When - 失败认证
+        customMetricsService.recordAuthentication(authType, false, processingTime);
+
+        // Then
+        Counter failureCounter = meterRegistry.find("monitor.authentication.attempts")
+            .tag("auth_type", authType)
+            .tag("result", "failure")
+            .counter();
+        assertThat(failureCounter).isNotNull();
+        assertThat(failureCounter.count()).isEqualTo(1);
+    }
+
+    @Test
+    void testRecordDatabaseConnectionPool() {
+        // Given
+        String poolName = "primary";
+        int activeConnections = 5;
+        int idleConnections = 3;
+        int maxConnections = 10;
+
+        // When
+        customMetricsService.recordDatabaseConnectionPool(poolName, activeConnections, idleConnections, maxConnections);
+
+        // Then
+        Gauge activeGauge = meterRegistry.find("monitor.database.pool.active")
+            .tag("pool_name", poolName)
+            .gauge();
+        assertThat(activeGauge).isNotNull();
+        assertThat(activeGauge.value()).isEqualTo(activeConnections);
+
+        Gauge idleGauge = meterRegistry.find("monitor.database.pool.idle")
+            .tag("pool_name", poolName)
+            .gauge();
+        assertThat(idleGauge).isNotNull();
+        assertThat(idleGauge.value()).isEqualTo(idleConnections);
+
+        Gauge utilizationGauge = meterRegistry.find("monitor.database.pool.utilization")
+            .tag("pool_name", poolName)
+            .gauge();
+        assertThat(utilizationGauge).isNotNull();
+        assertThat(utilizationGauge.value()).isEqualTo(0.5); // 5/10 = 0.5
+    }
+
+    @Test
+    void testCreateCustomCounter() {
+        // Given
+        String name = "test.counter";
+        String description = "Test counter";
+        String[] tags = {"env", "test", "service", "monitor"};
+
+        // When
+        Counter counter = customMetricsService.createCounter(name, description, tags);
+
+        // Then
+        assertThat(counter).isNotNull();
+        counter.increment();
+        
+        Counter foundCounter = meterRegistry.find(name)
+            .tag("env", "test")
+            .tag("service", "monitor")
+            .counter();
+        assertThat(foundCounter).isNotNull();
+        assertThat(foundCounter.count()).isEqualTo(1);
+    }
+
+    @Test
+    void testCreateCustomTimer() {
+        // Given
+        String name = "test.timer";
+        String description = "Test timer";
+        String[] tags = {"operation", "test"};
+
+        // When
+        Timer timer = customMetricsService.createTimer(name, description, tags);
+
+        // Then
+        assertThat(timer).isNotNull();
+        timer.record(Duration.ofMillis(100));
+        
+        Timer foundTimer = meterRegistry.find(name)
+            .tag("operation", "test")
+            .timer();
+        assertThat(foundTimer).isNotNull();
+        assertThat(foundTimer.count()).isEqualTo(1);
+        assertThat(foundTimer.totalTime(java.util.concurrent.TimeUnit.MILLISECONDS)).isEqualTo(100);
+    }
+
+    @Test
+    void testCreateCustomGauge() {
+        // Given
+        String name = "test.gauge";
+        String description = "Test gauge";
+        AtomicLong value = new AtomicLong(42);
+        String[] tags = {"type", "test"};
+
+        // When
+        Gauge gauge = customMetricsService.createGauge(name, description, value, AtomicLong::get, tags);
+
+        // Then
+        assertThat(gauge).isNotNull();
+        assertThat(gauge.value()).isEqualTo(42);
+        
+        // 更新值
+        value.set(100);
+        assertThat(gauge.value()).isEqualTo(100);
+        
+        Gauge foundGauge = meterRegistry.find(name)
+            .tag("type", "test")
+            .gauge();
+        assertThat(foundGauge).isNotNull();
+        assertThat(foundGauge.value()).isEqualTo(100);
+    }
+}

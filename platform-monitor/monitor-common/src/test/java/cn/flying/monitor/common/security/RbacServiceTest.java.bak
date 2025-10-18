@@ -1,0 +1,165 @@
+package cn.flying.monitor.common.security;
+
+import cn.flying.monitor.common.test.BaseIntegrationTest;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
+
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * RBAC服务测试
+ */
+class RbacServiceTest extends BaseIntegrationTest {
+
+    @Autowired
+    private RbacService rbacService;
+
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
+
+    private final String testUserId = "test_user_123";
+
+    @BeforeEach
+    void setUp() {
+        // 清理测试数据
+        redisTemplate.delete("rbac:user:roles:" + testUserId);
+        redisTemplate.delete("rbac:user:permissions:" + testUserId);
+    }
+
+    @Test
+    void shouldAssignAndRemoveRoles() {
+        // When - 分配角色
+        rbacService.assignRoleToUser(testUserId, RbacService.ROLE_VIEWER);
+        rbacService.assignRoleToUser(testUserId, RbacService.ROLE_OPERATOR);
+
+        // Then
+        Set<String> userRoles = rbacService.getUserRoles(testUserId);
+        assertTrue(userRoles.contains(RbacService.ROLE_VIEWER));
+        assertTrue(userRoles.contains(RbacService.ROLE_OPERATOR));
+        assertEquals(2, userRoles.size());
+
+        // When - 移除角色
+        rbacService.removeRoleFromUser(testUserId, RbacService.ROLE_VIEWER);
+
+        // Then
+        userRoles = rbacService.getUserRoles(testUserId);
+        assertFalse(userRoles.contains(RbacService.ROLE_VIEWER));
+        assertTrue(userRoles.contains(RbacService.ROLE_OPERATOR));
+        assertEquals(1, userRoles.size());
+    }
+
+    @Test
+    void shouldCheckPermissionsCorrectly() {
+        // Given
+        rbacService.assignRoleToUser(testUserId, RbacService.ROLE_VIEWER);
+
+        // When & Then
+        assertTrue(rbacService.hasPermission(testUserId, Permission.MONITOR_DATA_READ));
+        assertFalse(rbacService.hasPermission(testUserId, Permission.MONITOR_DATA_WRITE));
+        assertTrue(rbacService.hasPermission(testUserId, Permission.MONITOR_DATA_READ.getCode()));
+    }
+
+    @Test
+    void shouldCheckMultiplePermissions() {
+        // Given
+        rbacService.assignRoleToUser(testUserId, RbacService.ROLE_MONITOR_ADMIN);
+
+        // When & Then
+        assertTrue(rbacService.hasAnyPermission(testUserId, 
+                Permission.MONITOR_DATA_READ.getCode(), 
+                Permission.SYSTEM_ADMIN.getCode()));
+        
+        assertTrue(rbacService.hasAllPermissions(testUserId,
+                Permission.MONITOR_DATA_READ.getCode(),
+                Permission.ALERT_CREATE.getCode()));
+        
+        assertFalse(rbacService.hasAllPermissions(testUserId,
+                Permission.MONITOR_DATA_READ.getCode(),
+                Permission.SYSTEM_ADMIN.getCode()));
+    }
+
+    @Test
+    void shouldCheckRolesCorrectly() {
+        // Given
+        rbacService.assignRoleToUser(testUserId, RbacService.ROLE_OPERATOR);
+
+        // When & Then
+        assertTrue(rbacService.hasRole(testUserId, RbacService.ROLE_OPERATOR));
+        assertFalse(rbacService.hasRole(testUserId, RbacService.ROLE_ADMIN));
+    }
+
+    @Test
+    void shouldGetUserPermissions() {
+        // Given
+        rbacService.assignRoleToUser(testUserId, RbacService.ROLE_VIEWER);
+        rbacService.assignRoleToUser(testUserId, RbacService.ROLE_OPERATOR);
+
+        // When
+        Set<String> permissions = rbacService.getUserPermissions(testUserId);
+
+        // Then
+        assertNotNull(permissions);
+        assertFalse(permissions.isEmpty());
+        assertTrue(permissions.contains(Permission.MONITOR_DATA_READ.getCode()));
+        assertTrue(permissions.contains(Permission.ALERT_READ.getCode()));
+    }
+
+    @Test
+    void shouldHandleSuperAdminRole() {
+        // Given
+        rbacService.assignRoleToUser(testUserId, RbacService.ROLE_SUPER_ADMIN);
+
+        // When & Then
+        assertTrue(rbacService.hasPermission(testUserId, Permission.SYSTEM_ADMIN));
+        assertTrue(rbacService.hasPermission(testUserId, Permission.MONITOR_DATA_DELETE));
+        assertTrue(rbacService.hasPermission(testUserId, Permission.USER_DELETE));
+        
+        Set<String> permissions = rbacService.getUserPermissions(testUserId);
+        assertTrue(permissions.size() > 20); // 超级管理员应该有很多权限
+    }
+
+    @Test
+    void shouldGetRolePermissions() {
+        // When
+        Set<String> viewerPermissions = rbacService.getRolePermissions(RbacService.ROLE_VIEWER);
+        Set<String> adminPermissions = rbacService.getRolePermissions(RbacService.ROLE_SYSTEM_ADMIN);
+
+        // Then
+        assertNotNull(viewerPermissions);
+        assertNotNull(adminPermissions);
+        assertTrue(viewerPermissions.contains(Permission.MONITOR_DATA_READ.getCode()));
+        assertTrue(adminPermissions.contains(Permission.USER_CREATE.getCode()));
+        assertTrue(adminPermissions.size() > viewerPermissions.size());
+    }
+
+    @Test
+    void shouldReturnEmptyForNonExistentUser() {
+        // Given
+        String nonExistentUserId = "non_existent_user";
+
+        // When & Then
+        assertTrue(rbacService.getUserRoles(nonExistentUserId).isEmpty());
+        assertTrue(rbacService.getUserPermissions(nonExistentUserId).isEmpty());
+        assertFalse(rbacService.hasRole(nonExistentUserId, RbacService.ROLE_VIEWER));
+        assertFalse(rbacService.hasPermission(nonExistentUserId, Permission.MONITOR_DATA_READ));
+    }
+
+    @Test
+    void shouldGetAllRolesAndPermissions() {
+        // When
+        Set<String> allRoles = rbacService.getAllRoles();
+        Set<String> allPermissions = rbacService.getAllPermissions();
+
+        // Then
+        assertNotNull(allRoles);
+        assertNotNull(allPermissions);
+        assertTrue(allRoles.contains(RbacService.ROLE_SUPER_ADMIN));
+        assertTrue(allRoles.contains(RbacService.ROLE_VIEWER));
+        assertTrue(allPermissions.contains(Permission.SYSTEM_ADMIN.getCode()));
+        assertTrue(allPermissions.contains(Permission.MONITOR_DATA_READ.getCode()));
+    }
+}

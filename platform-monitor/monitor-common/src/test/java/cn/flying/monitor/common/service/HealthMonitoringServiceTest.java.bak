@@ -1,0 +1,96 @@
+package cn.flying.monitor.common.service;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.actuator.health.Health;
+import org.springframework.boot.actuator.health.HealthEndpoint;
+import org.springframework.boot.actuator.health.Status;
+import org.springframework.data.redis.core.RedisTemplate;
+
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * Unit tests for HealthMonitoringService
+ */
+@ExtendWith(MockitoExtension.class)
+class HealthMonitoringServiceTest {
+    
+    @Mock
+    private HealthEndpoint healthEndpoint;
+    
+    @Mock
+    private RedisTemplate<String, Object> redisTemplate;
+    
+    @InjectMocks
+    private HealthMonitoringService healthMonitoringService;
+    
+    @BeforeEach
+    void setUp() {
+        // Setup common mock behaviors
+    }
+    
+    @Test
+    void testCheckSystemHealth_WithHealthySystem_ReturnsUp() {
+        // Given
+        Health mockHealth = Health.up()
+            .withDetail("database", "UP")
+            .withDetail("redis", "UP")
+            .build();
+        
+        when(healthEndpoint.health()).thenReturn(mockHealth);
+        
+        // When
+        Health result = healthMonitoringService.checkSystemHealth();
+        
+        // Then
+        assertNotNull(result);
+        assertEquals(Status.UP, result.getStatus());
+        verify(healthEndpoint).health();
+    }
+    
+    @Test
+    void testCheckSystemHealth_WithUnhealthySystem_ReturnsDown() {
+        // Given
+        Health mockHealth = Health.down()
+            .withDetail("database", "DOWN")
+            .withException(new RuntimeException("Database connection failed"))
+            .build();
+        
+        when(healthEndpoint.health()).thenReturn(mockHealth);
+        
+        // When
+        Health result = healthMonitoringService.checkSystemHealth();
+        
+        // Then
+        assertNotNull(result);
+        assertEquals(Status.DOWN, result.getStatus());
+        verify(healthEndpoint).health();
+    }
+    
+    @Test
+    void testCollectHealthMetrics_ReturnsValidMetrics() {
+        // Given
+        Health mockHealth = Health.up()
+            .withDetail("responseTime", 150L)
+            .withDetail("activeConnections", 25)
+            .build();
+        
+        when(healthEndpoint.health()).thenReturn(mockHealth);
+        
+        // When
+        Map<String, Object> result = healthMonitoringService.collectHealthMetrics();
+        
+        // Then
+        assertNotNull(result);
+        assertTrue(result.containsKey("status"));
+        assertTrue(result.containsKey("timestamp"));
+    }
+}

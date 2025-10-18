@@ -1,0 +1,1283 @@
+openapi: 3.0.3
+info:
+  title: Monitor System API
+  description: |
+    Comprehensive monitoring system API for managing clients, collecting metrics, and providing real-time monitoring capabilities.
+    
+    ## Features
+    - Client registration and management
+    - Real-time metrics collection
+    - Historical data querying
+    - Data export capabilities
+    - WebSocket real-time communication
+    - Certificate-based authentication
+    
+    ## Authentication
+    The API uses JWT tokens for authentication. Include the token in the Authorization header:
+    ```
+    Authorization: Bearer <jwt-token>
+    ```
+  version: 2.0.0
+  contact:
+    name: Monitor System Support
+    email: support@monitor.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://monitor.yourdomain.com
+    description: Production server
+  - url: https://monitor-staging.yourdomain.com
+    description: Staging server
+  - url: http://localhost:8080
+    description: Development server
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+paths:
+  # Authentication Endpoints
+  /api/auth/ask-code:
+    get:
+      tags:
+        - Authentication
+      summary: Request email verification code
+      description: Send verification code to email for registration or password reset
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+            format: email
+          example: user@example.com
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [register, reset]
+          example: reset
+      responses:
+        '200':
+          description: Verification code sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/reset-confirm:
+    post:
+      tags:
+        - Authentication
+      summary: Confirm password reset
+      description: Verify email and code for password reset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - code
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: user@example.com
+                code:
+                  type: string
+                  example: "123456"
+      responses:
+        '200':
+          description: Reset confirmation successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: Invalid code or email
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/reset-password:
+    post:
+      tags:
+        - Authentication
+      summary: Reset password
+      description: Reset user password with verification code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - code
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: user@example.com
+                code:
+                  type: string
+                  example: "123456"
+                password:
+                  type: string
+                  minLength: 8
+                  example: newpassword123
+      responses:
+        '200':
+          description: Password reset successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: Invalid request or weak password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/logout:
+    delete:
+      tags:
+        - Authentication
+      summary: User logout
+      description: Invalidate current JWT token
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # Monitor Management Endpoints
+  /api/monitor/list:
+    get:
+      tags:
+        - Monitor Management
+      summary: List all clients
+      description: Get list of all monitoring clients with details
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Client list retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ClientPreview'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/monitor/simple-list:
+    get:
+      tags:
+        - Monitor Management
+      summary: Get simple client list
+      description: Get simplified list of clients for dropdown/selection
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Simple client list retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ClientSimple'
+
+  /api/monitor/rename:
+    post:
+      tags:
+        - Monitor Management
+      summary: Rename client
+      description: Update client name and location
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - id
+                - name
+              properties:
+                id:
+                  type: integer
+                  example: 1
+                name:
+                  type: string
+                  example: "Web Server 01"
+                location:
+                  type: string
+                  example: "Beijing"
+      responses:
+        '200':
+          description: Client renamed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Client not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/monitor/details:
+    get:
+      tags:
+        - Monitor Management
+      summary: Get client details
+      description: Get detailed information about a specific client
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: clientId
+          in: query
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: Client details retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ClientDetails'
+        '404':
+          description: Client not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/monitor/runtime_history:
+    get:
+      tags:
+        - Monitor Management
+      summary: Get runtime history
+      description: Get historical runtime metrics for a client
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: clientId
+          in: query
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: Runtime history retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RuntimeHistory'
+
+  /api/monitor/runtime_now:
+    get:
+      tags:
+        - Monitor Management
+      summary: Get current runtime
+      description: Get current runtime metrics for a client
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: clientId
+          in: query
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: Current runtime retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/RuntimeDetail'
+
+  /api/monitor/register:
+    get:
+      tags:
+        - Monitor Management
+      summary: Generate registration token
+      description: Generate a token for client registration (admin only)
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Registration token generated successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: string
+                        example: "reg_token_abc123def456"
+        '403':
+          description: Forbidden - admin access required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/monitor/delete:
+    get:
+      tags:
+        - Monitor Management
+      summary: Delete client
+      description: Remove a client from monitoring (admin only)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: clientId
+          in: query
+          required: true
+          schema:
+            type: integer
+          example: 1
+      responses:
+        '200':
+          description: Client deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '403':
+          description: Forbidden - admin access required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Client not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # User Management Endpoints
+  /api/user/change-password:
+    post:
+      tags:
+        - User Management
+      summary: Change password
+      description: Change user password
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - password
+                - new_password
+              properties:
+                password:
+                  type: string
+                  example: currentpassword
+                new_password:
+                  type: string
+                  minLength: 8
+                  example: newpassword123
+      responses:
+        '200':
+          description: Password changed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: Invalid current password or weak new password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/user/modify-email:
+    post:
+      tags:
+        - User Management
+      summary: Modify email
+      description: Change user email address with verification
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - code
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: newemail@example.com
+                code:
+                  type: string
+                  example: "123456"
+      responses:
+        '200':
+          description: Email modified successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: Invalid verification code or email format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/user/sub/create:
+    post:
+      tags:
+        - User Management
+      summary: Create sub account
+      description: Create a sub-account with limited permissions
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - email
+                - password
+              properties:
+                username:
+                  type: string
+                  example: subuser
+                email:
+                  type: string
+                  format: email
+                  example: subuser@example.com
+                password:
+                  type: string
+                  minLength: 8
+                  example: password123
+                clients:
+                  type: array
+                  items:
+                    type: integer
+                  example: [1, 2, 3]
+      responses:
+        '200':
+          description: Sub account created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: Invalid request parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/user/sub/list:
+    get:
+      tags:
+        - User Management
+      summary: List sub accounts
+      description: Get list of all sub-accounts
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Sub accounts retrieved successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SubAccount'
+
+  # Data Ingestion Endpoints (v2)
+  /api/v2/data/metrics:
+    post:
+      tags:
+        - Data Ingestion
+      summary: Ingest single metrics
+      description: Submit individual metrics data point
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetricsData'
+      responses:
+        '200':
+          description: Metrics ingested successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: Invalid metrics data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v2/data/metrics/batch:
+    post:
+      tags:
+        - Data Ingestion
+      summary: Ingest batch metrics
+      description: Submit multiple metrics data points in batch
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - metrics
+              properties:
+                metrics:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/MetricsData'
+      responses:
+        '200':
+          description: Batch metrics ingested successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '400':
+          description: Invalid batch metrics data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v2/data/metrics/validate:
+    post:
+      tags:
+        - Data Ingestion
+      summary: Validate metrics
+      description: Validate metrics data without storing
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetricsData'
+      responses:
+        '200':
+          description: Metrics validation successful
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          valid:
+                            type: boolean
+                          errors:
+                            type: array
+                            items:
+                              type: string
+
+  # Data Export Endpoints
+  /api/v1/exports/sync:
+    post:
+      tags:
+        - Data Export
+      summary: Export data synchronously
+      description: Export data and return immediately (for small datasets)
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportRequest'
+      responses:
+        '200':
+          description: Data exported successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ExportResult'
+
+  /api/v1/exports/async:
+    post:
+      tags:
+        - Data Export
+      summary: Export data asynchronously
+      description: Start async export job for large datasets
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportRequest'
+      responses:
+        '202':
+          description: Export job started
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ExportResult'
+
+  /api/v1/exports/{exportId}/status:
+    get:
+      tags:
+        - Data Export
+      summary: Get export status
+      description: Check status of async export job
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: exportId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: export-123456
+      responses:
+        '200':
+          description: Export status retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ExportResult'
+
+  /api/v1/exports/{exportId}:
+    delete:
+      tags:
+        - Data Export
+      summary: Cancel export
+      description: Cancel running export job
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: exportId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: export-123456
+      responses:
+        '200':
+          description: Export cancelled successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /api/v1/exports:
+    get:
+      tags:
+        - Data Export
+      summary: List exports
+      description: Get list of export jobs with pagination
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+          example: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+          example: 20
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, PROCESSING, COMPLETED, FAILED, CANCELLED]
+          example: COMPLETED
+      responses:
+        '200':
+          description: Export list retrieved
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ExportResult'
+
+  # Client Registration Endpoints
+  /monitor/register:
+    get:
+      tags:
+        - Client Registration
+      summary: Register client
+      description: Register monitoring client with registration token
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Client registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+        '401':
+          description: Invalid registration token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /monitor/detail:
+    post:
+      tags:
+        - Client Registration
+      summary: Update client details
+      description: Update client system information
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientDetail'
+      responses:
+        '200':
+          description: Client details updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+  /monitor/runtime:
+    post:
+      tags:
+        - Client Registration
+      summary: Update runtime details
+      description: Submit current runtime metrics
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeDetail'
+      responses:
+        '200':
+          description: Runtime details updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "操作成功"
+        data:
+          type: object
+        timestamp:
+          type: string
+          format: date-time
+          example: "2024-10-17T10:30:00Z"
+        requestId:
+          type: string
+          example: "req-123456"
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+          example: "错误描述"
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: "ERROR_CODE"
+            details:
+              type: string
+              example: "详细错误信息"
+            timestamp:
+              type: string
+              format: date-time
+              example: "2024-10-17T10:30:00Z"
+            requestId:
+              type: string
+              example: "req-123456"
+
+    ClientPreview:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: "Web Server 01"
+        location:
+          type: string
+          example: "Beijing"
+        osName:
+          type: string
+          example: "Ubuntu"
+        osVersion:
+          type: string
+          example: "20.04.3 LTS"
+        ip:
+          type: string
+          example: "192.168.1.100"
+        cpuName:
+          type: string
+          example: "Intel Core i7-8700K"
+        cpuCore:
+          type: integer
+          example: 8
+        memory:
+          type: integer
+          example: 16384
+        disk:
+          type: integer
+          example: 512000
+        online:
+          type: boolean
+          example: true
+        registerTime:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00Z"
+
+    ClientSimple:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: "Web Server 01"
+        location:
+          type: string
+          example: "Beijing"
+        online:
+          type: boolean
+          example: true
+
+    ClientDetails:
+      allOf:
+        - $ref: '#/components/schemas/ClientPreview'
+        - type: object
+          properties:
+            lastHeartbeat:
+              type: string
+              format: date-time
+              example: "2024-10-17T10:30:00Z"
+            runtime:
+              $ref: '#/components/schemas/RuntimeDetail'
+
+    ClientDetail:
+      type: object
+      required:
+        - osName
+        - osVersion
+        - ip
+        - cpuName
+        - cpuCore
+        - memory
+        - disk
+      properties:
+        osName:
+          type: string
+          example: "Ubuntu"
+        osVersion:
+          type: string
+          example: "20.04.3 LTS"
+        ip:
+          type: string
+          example: "192.168.1.100"
+        cpuName:
+          type: string
+          example: "Intel Core i7-8700K"
+        cpuCore:
+          type: integer
+          example: 8
+        memory:
+          type: integer
+          example: 16384
+        disk:
+          type: integer
+          example: 512000
+
+    RuntimeDetail:
+      type: object
+      required:
+        - timestamp
+        - cpuUsage
+        - memoryUsage
+        - diskUsage
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          example: "2024-10-17T10:30:00Z"
+        cpuUsage:
+          type: number
+          format: double
+          example: 45.2
+        memoryUsage:
+          type: number
+          format: double
+          example: 68.5
+        diskUsage:
+          type: number
+          format: double
+          example: 78.3
+        networkUpload:
+          type: integer
+          example: 1024
+        networkDownload:
+          type: integer
+          example: 2048
+        diskRead:
+          type: integer
+          example: 512
+        diskWrite:
+          type: integer
+          example: 256
+
+    RuntimeHistory:
+      type: object
+      properties:
+        disk:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeSeriesPoint'
+        memory:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeSeriesPoint'
+        cpu:
+          type: array
+          items:
+            $ref: '#/components/schemas/TimeSeriesPoint'
+
+    TimeSeriesPoint:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          example: "2024-10-17T10:00:00Z"
+        value:
+          type: number
+          format: double
+          example: 75.2
+
+    SubAccount:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 2
+        username:
+          type: string
+          example: "subuser"
+        email:
+          type: string
+          format: email
+          example: "subuser@example.com"
+        role:
+          type: string
+          example: "USER"
+        createTime:
+          type: string
+          format: date-time
+          example: "2024-01-15T10:30:00Z"
+        clients:
+          type: array
+          items:
+            type: integer
+          example: [1, 2, 3]
+
+    MetricsData:
+      type: object
+      required:
+        - clientId
+        - timestamp
+        - metrics
+      properties:
+        clientId:
+          type: string
+          example: "client-001"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2024-10-17T10:30:00Z"
+        metrics:
+          type: object
+          additionalProperties:
+            type: number
+          example:
+            cpu.usage: 45.2
+            memory.usage: 68.5
+            disk.usage: 78.3
+        tags:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            environment: "production"
+            region: "us-east-1"
+
+    ExportRequest:
+      type: object
+      required:
+        - clientIds
+        - startTime
+        - endTime
+        - format
+      properties:
+        clientIds:
+          type: array
+          items:
+            type: string
+          example: ["client-001", "client-002"]
+        startTime:
+          type: string
+          format: date-time
+          example: "2024-10-17T00:00:00Z"
+        endTime:
+          type: string
+          format: date-time
+          example: "2024-10-17T23:59:59Z"
+        metrics:
+          type: array
+          items:
+            type: string
+          example: ["cpu.usage", "memory.usage"]
+        format:
+          type: string
+          enum: [CSV, JSON, EXCEL]
+          example: "CSV"
+        aggregation:
+          type: string
+          enum: [RAW, HOURLY, DAILY]
+          example: "HOURLY"
+        filters:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            environment: "production"
+        options:
+          type: object
+          properties:
+            includeHeaders:
+              type: boolean
+              example: true
+            compression:
+              type: string
+              enum: [NONE, GZIP, ZIP]
+              example: "GZIP"
+
+    ExportResult:
+      type: object
+      properties:
+        exportId:
+          type: string
+          example: "export-123456"
+        status:
+          type: string
+          enum: [PENDING, PROCESSING, COMPLETED, FAILED, CANCELLED]
+          example: "COMPLETED"
+        progress:
+          type: number
+          format: double
+          example: 100.0
+        downloadUrl:
+          type: string
+          example: "https://monitor.yourdomain.com/api/v1/exports/export-123456/download"
+        fileSize:
+          type: integer
+          example: 1048576
+        recordCount:
+          type: integer
+          example: 10000
+        createdAt:
+          type: string
+          format: date-time
+          example: "2024-10-17T10:30:00Z"
+        completedAt:
+          type: string
+          format: date-time
+          example: "2024-10-17T10:35:00Z"
+        estimatedCompletionTime:
+          type: string
+          format: date-time
+          example: "2024-10-17T10:35:00Z"
+        error:
+          type: string
+          example: "Export failed due to timeout"
+
+tags:
+  - name: Authentication
+    description: User authentication and authorization
+  - name: Monitor Management
+    description: Client monitoring and management operations
+  - name: User Management
+    description: User account and sub-account management
+  - name: Data Ingestion
+    description: Metrics data ingestion APIs
+  - name: Data Export
+    description: Data export and download operations
+  - name: Client Registration
+    description: Client registration and runtime reporting

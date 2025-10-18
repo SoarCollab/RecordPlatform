@@ -1,0 +1,227 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metrics-config
+  namespace: monitor-system
+data:
+  application-metrics.yml: |
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: health,info,metrics,prometheus,httptrace,loggers,env,configprops
+          base-path: /actuator
+      endpoint:
+        health:
+          show-details: always
+          show-components: always
+        metrics:
+          enabled: true
+        prometheus:
+          enabled: true
+      metrics:
+        export:
+          prometheus:
+            enabled: true
+            step: 10s
+            descriptions: true
+        distribution:
+          percentiles-histogram:
+            http.server.requests: true
+            resilience4j.circuitbreaker.calls: true
+          percentiles:
+            http.server.requests: 0.5, 0.95, 0.99
+            resilience4j.circuitbreaker.calls: 0.5, 0.95, 0.99
+        tags:
+          application: ${spring.application.name}
+          environment: ${spring.profiles.active}
+          version: ${info.app.version:unknown}
+        web:
+          server:
+            request:
+              autotime:
+                enabled: true
+                percentiles: 0.5, 0.95, 0.99
+      health:
+        circuitbreakers:
+          enabled: true
+        ratelimiters:
+          enabled: true
+        diskspace:
+          enabled: true
+        db:
+          enabled: true
+        redis:
+          enabled: true
+        rabbit:
+          enabled: true
+        influxdb:
+          enabled: true
+      info:
+        env:
+          enabled: true
+        java:
+          enabled: true
+        os:
+          enabled: true
+        git:
+          mode: full
+    
+    # Custom metrics configuration
+    monitor:
+      metrics:
+        custom:
+          enabled: true
+          certificate:
+            expiry-check-interval: 3600000  # 1 hour
+            expiry-warning-days: 30
+            expiry-critical-days: 7
+          connection-pool:
+            monitoring-interval: 30000  # 30 seconds
+          cache:
+            hit-rate-monitoring: true
+            eviction-monitoring: true
+          query:
+            performance-monitoring: true
+            slow-query-threshold: 1000  # 1 second
+          business:
+            sla-monitoring: true
+            availability-target: 99.9
+            response-time-target: 500  # 500ms
+    
+    # Logging configuration for structured logs
+    logging:
+      pattern:
+        console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId:-},%X{spanId:-}] %logger{36} - %msg%n"
+        file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId:-},%X{spanId:-}] %logger{36} - %msg%n"
+      level:
+        cn.flying.monitor: INFO
+        org.springframework.web: DEBUG
+        org.springframework.security: DEBUG
+        com.zaxxer.hikari: DEBUG
+        org.springframework.data.redis: DEBUG
+        org.influxdb: DEBUG
+        org.springframework.amqp: DEBUG
+    
+    # Distributed tracing configuration
+    spring:
+      sleuth:
+        enabled: true
+        sampler:
+          probability: ${SPRING_SLEUTH_SAMPLER_PROBABILITY:0.1}
+        zipkin:
+          base-url: ${SPRING_SLEUTH_ZIPKIN_BASE_URL:http://jaeger-collector:14268}
+          sender:
+            type: web
+        jaeger:
+          http:
+            sender:
+              url: ${SPRING_SLEUTH_JAEGER_HTTP_SENDER_URL:http://jaeger-collector:14268/api/traces}
+        trace-id128: ${SPRING_SLEUTH_TRACE_ID128:true}
+        web:
+          skip-pattern: "/actuator.*|/health.*|/info.*|/metrics.*|/prometheus.*"
+        baggage:
+          correlation-enabled: true
+          correlation-fields: user-id,client-id,request-id
+          remote-fields: user-id,client-id,request-id
+    
+    # Resilience4j configuration for circuit breakers
+    resilience4j:
+      circuitbreaker:
+        configs:
+          default:
+            registerHealthIndicator: true
+            slidingWindowSize: 10
+            minimumNumberOfCalls: 5
+            permittedNumberOfCallsInHalfOpenState: 3
+            automaticTransitionFromOpenToHalfOpenEnabled: true
+            waitDurationInOpenState: 5s
+            failureRateThreshold: 50
+            eventConsumerBufferSize: 10
+            recordExceptions:
+              - org.springframework.web.client.HttpServerErrorException
+              - java.util.concurrent.TimeoutException
+              - java.io.IOException
+        instances:
+          database:
+            baseConfig: default
+            waitDurationInOpenState: 10s
+          redis:
+            baseConfig: default
+            waitDurationInOpenState: 5s
+          influxdb:
+            baseConfig: default
+            waitDurationInOpenState: 15s
+          external-api:
+            baseConfig: default
+            slidingWindowSize: 20
+            failureRateThreshold: 30
+      
+      retry:
+        configs:
+          default:
+            maxAttempts: 3
+            waitDuration: 100ms
+            enableExponentialBackoff: true
+            exponentialBackoffMultiplier: 2
+            retryExceptions:
+              - org.springframework.web.client.HttpServerErrorException
+              - java.util.concurrent.TimeoutException
+              - java.io.IOException
+        instances:
+          database:
+            baseConfig: default
+            maxAttempts: 2
+          redis:
+            baseConfig: default
+            maxAttempts: 2
+          influxdb:
+            baseConfig: default
+            maxAttempts: 3
+            waitDuration: 500ms
+      
+      ratelimiter:
+        configs:
+          default:
+            registerHealthIndicator: true
+            limitForPeriod: 100
+            limitRefreshPeriod: 1s
+            timeoutDuration: 0
+            eventConsumerBufferSize: 100
+        instances:
+          api:
+            baseConfig: default
+            limitForPeriod: 50
+          auth:
+            baseConfig: default
+            limitForPeriod: 20
+          query:
+            baseConfig: default
+            limitForPeriod: 30
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: correlation-id-config
+  namespace: monitor-system
+data:
+  correlation-id-filter.properties: |
+    # Correlation ID configuration
+    correlation.id.header.name=X-Correlation-ID
+    correlation.id.mdc.key=correlationId
+    correlation.id.generate.if.missing=true
+    correlation.id.include.in.response=true
+    
+    # Request ID configuration
+    request.id.header.name=X-Request-ID
+    request.id.mdc.key=requestId
+    request.id.generate.if.missing=true
+    
+    # User context configuration
+    user.id.header.name=X-User-ID
+    user.id.mdc.key=userId
+    
+    # Client context configuration
+    client.id.header.name=X-Client-ID
+    client.id.mdc.key=clientId

@@ -1,0 +1,105 @@
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: monitor-system
+spec:
+  mtls:
+    mode: STRICT
+
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: monitor-auth-policy
+  namespace: monitor-system
+spec:
+  selector:
+    matchLabels:
+      app: monitor-api-gateway
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"]
+  - from:
+    - source:
+        namespaces: ["monitor-system"]
+
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: monitor-data-service-policy
+  namespace: monitor-system
+spec:
+  selector:
+    matchLabels:
+      app: monitor-data-service
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/monitor-system/sa/monitor-api-gateway"]
+        
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: monitor-auth-service-policy
+  namespace: monitor-system
+spec:
+  selector:
+    matchLabels:
+      app: monitor-auth-service
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/monitor-system/sa/monitor-api-gateway"]
+
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: monitor-notification-service-policy
+  namespace: monitor-system
+spec:
+  selector:
+    matchLabels:
+      app: monitor-notification-service
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/monitor-system/sa/monitor-api-gateway"]
+
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: monitor-websocket-service-policy
+  namespace: monitor-system
+spec:
+  selector:
+    matchLabels:
+      app: monitor-websocket-service
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"]
+  - from:
+    - source:
+        namespaces: ["monitor-system"]
+
+---
+apiVersion: security.istio.io/v1beta1
+kind: RequestAuthentication
+metadata:
+  name: jwt-auth
+  namespace: monitor-system
+spec:
+  selector:
+    matchLabels:
+      app: monitor-api-gateway
+  jwtRules:
+  - issuer: "monitor-system"
+    jwksUri: "http://monitor-auth-service:8081/.well-known/jwks.json"
+    audiences:
+    - "monitor-api"

@@ -1,7 +1,5 @@
 package cn.flying.monitor.server.config;
 
-import cn.flying.monitor.server.entity.RestBean;
-import cn.flying.monitor.server.entity.vo.response.AuthorizeVO;
 import io.swagger.v3.oas.annotations.OpenAPIDefinition;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeIn;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
@@ -34,11 +32,27 @@ import java.util.Map;
 @OpenAPIDefinition(security = {@SecurityRequirement(name = "Authorization")})
 public class SwaggerConfiguration {
 
-    /**
-     * 配置文档介绍以及详细信息
-     *
-     * @return OpenAPI
-     */
+    private static final String LOGIN_RESPONSE_EXAMPLE = """
+{
+  "success": true,
+  "message": "登录成功",
+  "data": {
+    "username": "admin",
+    "role": "admin",
+    "token": "sample-token",
+    "expire": "2024-10-17T10:30:00Z"
+  }
+}
+""";
+
+    private static final String LOGOUT_RESPONSE_EXAMPLE = """
+{
+  "success": true,
+  "message": "退出登录成功",
+  "data": null
+}
+""";
+
     @Bean
     public OpenAPI springShopOpenAPI() {
         return new OpenAPI()
@@ -50,27 +64,13 @@ public class SwaggerConfiguration {
                                 .url("https://github.com/flyingcoding/monitor")
                         )
                 );
-//                .externalDocs(new ExternalDocumentation()
-//                        .description("我们的官方网站")
-//                        .url("")
-//                );
     }
 
-    /**
-     * 配置自定义的OpenApi相关信息
-     *
-     * @return OpenApiCustomizer
-     */
     @Bean
     public OpenApiCustomizer customerGlobalHeaderOpenApiCustomizer() {
         return api -> this.authorizePathItems().forEach(api.getPaths()::addPathItem);
     }
 
-    /**
-     * 登录接口和退出登录接口手动添加一下
-     *
-     * @return PathItems
-     */
     private Map<String, PathItem> authorizePathItems() {
         Map<String, PathItem> map = new HashMap<>();
         map.put("/api/auth/login", new PathItem()
@@ -88,12 +88,11 @@ public class SwaggerConfiguration {
                         .responses(new ApiResponses()
                                 .addApiResponse("200", new ApiResponse()
                                         .description("OK")
-                                        .content(new Content().addMediaType("*/*", new MediaType()
-                                                .example(RestBean.success(new AuthorizeVO()).asJsonString())
+                                        .content(new Content().addMediaType("application/json", new MediaType()
+                                                .example(LOGIN_RESPONSE_EXAMPLE)
                                         ))
                                 )
                         )
-                )
         );
         map.put("/api/auth/logout", new PathItem()
                 .get(new Operation()
@@ -102,8 +101,8 @@ public class SwaggerConfiguration {
                         .responses(new ApiResponses()
                                 .addApiResponse("200", new ApiResponse()
                                         .description("OK")
-                                        .content(new Content().addMediaType("*/*", new MediaType()
-                                                .example(RestBean.success())
+                                        .content(new Content().addMediaType("application/json", new MediaType()
+                                                .example(LOGOUT_RESPONSE_EXAMPLE)
                                         ))
                                 )
                         )

@@ -1,0 +1,143 @@
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: monitor-api-gateway-destination
+  namespace: monitor-system
+spec:
+  host: monitor-api-gateway-service
+  trafficPolicy:
+    loadBalancer:
+      simple: LEAST_CONN
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http1MaxPendingRequests: 50
+        maxRequestsPerConnection: 10
+    circuitBreaker:
+      consecutiveErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: monitor-data-service-destination
+  namespace: monitor-system
+spec:
+  host: monitor-data-service
+  trafficPolicy:
+    loadBalancer:
+      simple: ROUND_ROBIN
+    connectionPool:
+      tcp:
+        maxConnections: 200
+      http:
+        http1MaxPendingRequests: 100
+        maxRequestsPerConnection: 20
+    circuitBreaker:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: monitor-auth-service-destination
+  namespace: monitor-system
+spec:
+  host: monitor-auth-service
+  trafficPolicy:
+    loadBalancer:
+      simple: LEAST_CONN
+    connectionPool:
+      tcp:
+        maxConnections: 50
+      http:
+        http1MaxPendingRequests: 25
+        maxRequestsPerConnection: 5
+    circuitBreaker:
+      consecutiveErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: monitor-websocket-service-destination
+  namespace: monitor-system
+spec:
+  host: monitor-websocket-service
+  trafficPolicy:
+    loadBalancer:
+      simple: PASSTHROUGH
+    connectionPool:
+      tcp:
+        maxConnections: 1000
+      http:
+        http1MaxPendingRequests: 500
+        maxRequestsPerConnection: 1
+        useClientProtocol: true
+    circuitBreaker:
+      consecutiveErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 30
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: monitor-notification-service-destination
+  namespace: monitor-system
+spec:
+  host: monitor-notification-service
+  trafficPolicy:
+    loadBalancer:
+      simple: ROUND_ROBIN
+    connectionPool:
+      tcp:
+        maxConnections: 50
+      http:
+        http1MaxPendingRequests: 25
+        maxRequestsPerConnection: 10
+    circuitBreaker:
+      consecutiveErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitor-service-discovery
+  namespace: monitor-system
+  labels:
+    app: monitor-service-discovery
+spec:
+  clusterIP: None
+  selector:
+    app: monitor-service-discovery
+  ports:
+  - port: 53
+    name: dns
+
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: monitor-service-discovery
+  namespace: monitor-system
+subsets:
+- addresses:
+  - ip: 10.96.0.10  # Kubernetes DNS service IP
+  ports:
+  - port: 53
+    name: dns
