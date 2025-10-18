@@ -113,20 +113,20 @@ public class DataExportService {
         return taskManager.findTask(exportId).map(ExportTaskRecord::getResult);
     }
 
-    public boolean cancelExport(String exportId) {
+    public cn.flying.monitor.data.service.export.CancelStatus cancelExport(String exportId) {
         Optional<ExportTaskRecord> recordOpt = taskManager.findTask(exportId);
         if (recordOpt.isEmpty()) {
-            return false;
+            return cn.flying.monitor.data.service.export.CancelStatus.NOT_FOUND;
         }
         ExportTaskRecord record = recordOpt.get();
         synchronized (record) {
             String status = record.getResult().getStatus();
             if ("COMPLETED".equals(status) || "FAILED".equals(status)) {
-                return false;
+                return cn.flying.monitor.data.service.export.CancelStatus.NOT_ALLOWED;
             }
             record.cancel();
+            return cn.flying.monitor.data.service.export.CancelStatus.CANCELLED;
         }
-        return true;
     }
 
     public cn.flying.monitor.data.service.export.PagedExports listExports(int page, int size, String statusFilter, String typeFilter) {
@@ -162,12 +162,24 @@ public class DataExportService {
 
     private void processAsyncExport(ExportTaskRecord record, ExportRequestDTO request) {
         try {
+            if (isCancelled(record)) {
+                return;
+            }
             record.updateProgress(20.0);
+            if (isCancelled(record)) {
+                return;
+            }
             List<QueryResultDTO> data = fetchDataForExport(request);
             record.updateProgress(60.0);
+            if (isCancelled(record)) {
+                return;
+            }
             byte[] exportedData = generateExportData(request, data);
             ExportResultDTO result = record.getResult();
             populateResultMetrics(result, request, data, exportedData);
+            if (isCancelled(record)) {
+                return;
+            }
             record.complete(exportedData);
             result.setDownloadUrl(buildDownloadUrl(result.getExportId()));
             result.setExpiresAt(Instant.now().plus(DEFAULT_EXPIRATION));
@@ -261,6 +273,10 @@ public class DataExportService {
             case "monthly" -> "30d";
             default -> aggregationLevel;
         };
+    }
+
+    private boolean isCancelled(ExportTaskRecord record) {
+        return "CANCELLED".equals(record.getResult().getStatus());
     }
 
     private byte[] generateExportData(ExportRequestDTO request, List<QueryResultDTO> data) throws IOException {

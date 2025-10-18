@@ -82,12 +82,14 @@ public class DataExportController {
 
     @DeleteMapping("/{exportId}")
     public ResponseEntity<Result<Void>> cancelExport(@PathVariable String exportId) {
-        boolean cancelled = dataExportService.cancelExport(exportId);
-        if (!cancelled) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Result.error("导出任务不存在或已完成"));
-        }
-        return ResponseEntity.ok(Result.success(null, "导出任务已取消"));
+        cn.flying.monitor.data.service.export.CancelStatus status = dataExportService.cancelExport(exportId);
+        return switch (status) {
+            case CANCELLED -> ResponseEntity.ok(Result.success(null, "导出任务已取消"));
+            case NOT_ALLOWED -> ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(Result.error("导出任务已完成或失败，无法取消"));
+            case NOT_FOUND -> ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Result.error("导出任务不存在"));
+        };
     }
 
     @GetMapping
@@ -109,7 +111,7 @@ public class DataExportController {
         PagedExports paged = dataExportService.listExports(page, size, status, exportType);
         PaginationInfo pagination = new PaginationInfo(page, size, paged.total());
         ExportListResponse responseBody = new ExportListResponse(paged.items(), pagination);
-        return ResponseEntity.ok(Result.success(responseBody, "获取成功"));
+        return ResponseEntity.ok(Result.success(responseBody.items(), "获取成功"));
     }
 
     @GetMapping("/{exportId}/download")

@@ -17,6 +17,10 @@ This document provides comprehensive API documentation for the Monitor System, i
 
 The Monitor System provides multiple API interfaces:
 
+> **Response Envelope**: All REST APIs now return a unified JSON structure `{ "success": boolean, "message": string, "data": any }`. When additional metadata (such as pagination) is required, it is placed in the `data` field.
+
+The Monitor System provides multiple API interfaces:
+
 - **REST API**: HTTP-based APIs for data operations, configuration, and management
 - **WebSocket API**: Real-time communication for live metrics and SSH terminal
 - **Certificate API**: X.509 certificate-based authentication for client registration
@@ -544,6 +548,16 @@ Authorization: Bearer <jwt-token>
 GET /api/v1/exports?page=0&size=20&status=COMPLETED
 Authorization: Bearer <jwt-token>
 ```
+
+
+#### Download Export File
+
+```http
+GET /api/v1/exports/{exportId}/download
+Authorization: Bearer <jwt-token>
+```
+
+**Response:** Binary file stream.
 
 ### Client Registration Endpoints
 
