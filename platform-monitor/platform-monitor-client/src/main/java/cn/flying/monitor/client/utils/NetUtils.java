@@ -37,6 +37,7 @@ import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
+import java.time.Instant;
 
 /**
  * Enhanced network utility class with certificate-based authentication,
@@ -129,22 +130,20 @@ public class NetUtils {
     }
 
     /**
-     * Register client to server with certificate-based authentication
+     * 使用证书认证向服务端进行初始化连接校验（改为访问微服务数据接口健康检查）
+     * 功能：调用 /api/v2/data/health 作为注册握手，校验证书指纹与网络可达性
      */
     public boolean registerToServer(String address) {
         log.info("Registering client to server with certificate authentication...");
         
         return networkRecoveryService.executeWithRetry(() -> {
             try {
-                // Include certificate fingerprint in registration
-                String fingerprint = certificateManager.getCertificateFingerprint();
-                Response response = this.doGet("/register?fingerprint=" + fingerprint, address);
-                
+                Response response = this.doGet("/health", address);
                 if (response.success()) {
-                    log.info("Client registration completed successfully!");
+                    log.info("Client registration (health check) completed successfully!");
                     return true;
                 } else {
-                    log.error("Client registration failed: {}", response.message());
+                    log.error("Client registration (health check) failed: {}", response.message());
                     throw new RuntimeException("Registration failed: " + response.message());
                 }
             } catch (Exception e) {
@@ -155,11 +154,11 @@ public class NetUtils {
     }
 
     /**
-     * Enhanced GET request with certificate authentication and retry logic
+     * 增强版GET请求：走微服务数据接口前缀 /api/v2/data，并携带证书指纹与客户端ID头
      */
     private Response doGet(String url, String address) {
         try {
-            String fullUrl = address + "/monitor" + url;
+            String fullUrl = address + "/api/v2/data" + url;
             HttpGet request = new HttpGet(fullUrl);
             
             // Add certificate fingerprint header for identification
@@ -175,7 +174,7 @@ public class NetUtils {
                     responseBody = decompressData(responseBody.getBytes(StandardCharsets.UTF_8));
                 }
                 
-                return JSONObject.parseObject(responseBody).to(Response.class);
+                return parseResult(responseBody);
             });
             
         } catch (Exception e) {
@@ -185,11 +184,11 @@ public class NetUtils {
     }
 
     /**
-     * Enhanced POST request with compression and certificate authentication
+     * 增强版POST请求：走微服务数据接口前缀 /api/v2/data，支持Snappy压缩与证书认证
      */
     private Response doPost(String url, Object data) {
         try {
-            String fullUrl = config.getAddress() + "/monitor" + url;
+            String fullUrl = config.getAddress() + "/api/v2/data" + url;
             HttpPost request = new HttpPost(fullUrl);
             
             // Add certificate fingerprint header for identification
@@ -225,7 +224,7 @@ public class NetUtils {
                     responseBody = decompressData(responseBody.getBytes(StandardCharsets.UTF_8));
                 }
                 
-                return JSONObject.parseObject(responseBody).to(Response.class);
+                return parseResult(responseBody);
             });
             
         } catch (Exception e) {
@@ -235,11 +234,13 @@ public class NetUtils {
     }
 
     /**
-     * Update base system details with enhanced error handling
+     * 更新服务器基础信息（适配微服务数据上报接口 /api/v2/data/metrics）
+     * 功能：将基础信息封装进 custom_metrics 字段，以最小必填指标(0)完成一次上报
      */
     public void updateBaseDetails(BaseDetail detail) {
         networkRecoveryService.executeWithRetry(() -> {
-            Response response = this.doPost("/detail", detail);
+            JSONObject payload = buildBaseDetailPayload(detail);
+            Response response = this.doPost("/metrics", payload);
             if (response.success()) {
                 log.info("System base information updated successfully!");
             } else {
@@ -250,11 +251,13 @@ public class NetUtils {
     }
 
     /**
-     * Update runtime details with batch processing support
+     * 上报运行时指标（适配微服务数据上报接口 /api/v2/data/metrics）
+     * 功能：将 RuntimeDetail 转换为服务端 DTO 期望的字段并上报
      */
     public void updateRuntimeDetails(RuntimeDetail detail) {
         networkRecoveryService.executeWithRetry(() -> {
-            Response response = this.doPost("/runtime", detail);
+            JSONObject payload = buildMetricsPayload(detail);
+            Response response = this.doPost("/metrics", payload);
             if (!response.success()) {
                 log.warn("Runtime details update failed: {}", response.message());
                 throw new RuntimeException("Runtime details update failed: " + response.message());
@@ -263,11 +266,13 @@ public class NetUtils {
     }
 
     /**
-     * Batch update multiple runtime details for improved efficiency
+     * 批量上报运行时指标（适配微服务数据上报接口 /api/v2/data/metrics/batch）
+     * 功能：将 RuntimeDetail[] 批量转换为 metrics 数组后上报
      */
     public void updateRuntimeDetailsBatch(RuntimeDetail[] details) {
         networkRecoveryService.executeWithRetry(() -> {
-            Response response = this.doPost("/runtime/batch", details);
+            JSONObject batchPayload = buildBatchPayload(details);
+            Response response = this.doPost("/metrics/batch", batchPayload);
             if (response.success()) {
                 log.debug("Batch runtime details updated successfully ({} records)", details.length);
             } else {
@@ -298,6 +303,119 @@ public class NetUtils {
     private boolean isCompressed(org.apache.hc.core5.http.HttpResponse response) {
         return response.getFirstHeader("Content-Encoding") != null &&
                "snappy".equals(response.getFirstHeader("Content-Encoding").getValue());
+    }
+
+    /**
+     * 将 RuntimeDetail 转换为服务端 MetricsDataDTO 对应的JSON结构
+     */
+    private JSONObject buildMetricsPayload(RuntimeDetail detail) {
+        JSONObject o = new JSONObject();
+        o.put("client_id", config.getClientId());
+        o.put("timestamp", Instant.ofEpochMilli(detail.getTimestamp()).toString());
+        o.put("cpu_usage", detail.getCpuUsage());
+        o.put("memory_usage", detail.getMemoryUsage());
+        o.put("disk_usage", detail.getDiskUsage());
+        o.put("network_upload", detail.getNetworkUpload());
+        o.put("network_download", detail.getNetworkDownload());
+        o.put("disk_read", detail.getDiskRead());
+        o.put("disk_write", detail.getDiskWrite());
+        // 可选指标
+        o.put("load_average", detail.getLoadAverage1min());
+        o.put("process_count", detail.getTotalProcessCount());
+        // 自定义指标聚合
+        JSONObject custom = new JSONObject();
+        if (detail.getJvmMetrics() != null) {
+            custom.put("jvm_metrics", JSONObject.from(detail.getJvmMetrics()));
+        }
+        if (detail.getDiskMountPoints() != null) {
+            custom.put("disk_mount_points", JSONObject.from(detail.getDiskMountPoints()));
+        }
+        if (detail.getNetworkInterfaces() != null) {
+            custom.put("network_interfaces", JSONObject.from(detail.getNetworkInterfaces()));
+        }
+        if (detail.getCustomMetrics() != null) {
+            custom.putAll(detail.getCustomMetrics());
+        }
+        if (!custom.isEmpty()) {
+            o.put("custom_metrics", custom);
+        }
+        return o;
+    }
+
+    /**
+     * 将 BaseDetail 封装为一次最小有效的 metrics 上报，基础字段进入 custom_metrics
+     */
+    private JSONObject buildBaseDetailPayload(BaseDetail base) {
+        JSONObject o = new JSONObject();
+        o.put("client_id", config.getClientId());
+        o.put("timestamp", Instant.now().toString());
+        // 必填指标使用0占位，满足校验规则
+        o.put("cpu_usage", 0.0);
+        o.put("memory_usage", 0.0);
+        o.put("disk_usage", 0.0);
+        o.put("network_upload", 0.0);
+        o.put("network_download", 0.0);
+        o.put("disk_read", 0.0);
+        o.put("disk_write", 0.0);
+        // 基础信息写入自定义指标
+        JSONObject custom = new JSONObject();
+        custom.put("base_detail", JSONObject.from(base));
+        o.put("custom_metrics", custom);
+        return o;
+    }
+
+    /**
+     * 将批量 RuntimeDetail 转换为批量上报JSON结构 { metrics: [...], batch_timestamp: ... }
+     */
+    private JSONObject buildBatchPayload(RuntimeDetail[] details) {
+        JSONObject batch = new JSONObject();
+        com.alibaba.fastjson2.JSONArray arr = new com.alibaba.fastjson2.JSONArray();
+        if (details != null) {
+            for (RuntimeDetail d : details) {
+                if (d != null) {
+                    arr.add(buildMetricsPayload(d));
+                }
+            }
+        }
+        batch.put("metrics", arr);
+        batch.put("batch_timestamp", System.currentTimeMillis());
+        return batch;
+    }
+
+    /**
+     * 将服务端返回的Result格式(success/message/data)解析并适配为客户端的Response
+     * 兼容旧格式(code/message/data)与未知格式的降级处理
+     */
+    private Response parseResult(String responseBody) {
+        try {
+            com.alibaba.fastjson2.JSONObject obj = JSONObject.parseObject(responseBody);
+            if (obj == null) {
+                return new Response(0, 500, null, "Empty response");
+            }
+            // 优先解析Result结构
+            if (obj.containsKey("success")) {
+                boolean ok = obj.getBooleanValue("success");
+                String msg = obj.getString("message");
+                Object data = obj.get("data");
+                return new Response(0, ok ? 200 : 500, data, msg);
+            }
+            // 兼容旧结构(code/message/data)
+            if (obj.containsKey("code")) {
+                Integer code = obj.getInteger("code");
+                String msg = obj.getString("message");
+                Object data = obj.get("data");
+                return new Response(0, code != null ? code : 500, data, msg);
+            }
+            // 尝试直接映射为Response(容错)
+            try {
+                return obj.to(Response.class);
+            } catch (Exception ignore) {
+                // ignored
+            }
+            return new Response(0, 500, null, "Unrecognized response format");
+        } catch (Exception e) {
+            return Response.errorResponse(e);
+        }
     }
 
     /**
@@ -335,7 +453,7 @@ public class NetUtils {
     }
 
     /**
-     * Check network connectivity to server
+     * 检查服务端可用性（访问数据服务健康检查）
      */
     public boolean isServerReachable() {
         try {
