@@ -5,6 +5,7 @@ import cn.flying.monitor.data.dto.QueryResultDTO;
 import cn.flying.monitor.data.dto.ExportRequestDTO;
 import cn.flying.monitor.data.service.DataExportService;
 import cn.flying.monitor.data.service.QueryService;
+import cn.flying.monitor.data.service.export.ExportTaskManager;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,7 +53,11 @@ public class DataExportServiceImpl extends DataExportService {
     // Export history storage key prefix
     private static final String EXPORT_HISTORY_PREFIX = "export:history:";
     private static final String EXPORT_JOB_PREFIX = "export:job:";
-    
+
+    public DataExportServiceImpl(QueryService queryService, ExportTaskManager taskManager, ObjectMapper objectMapper) {
+        super(queryService, taskManager, objectMapper);
+    }
+
     public byte[] exportMetricsData(QueryRequestDTO request, String format) {
         try {
             log.info("Exporting metrics data for client: {}, format: {}", request.getClientId(), format);

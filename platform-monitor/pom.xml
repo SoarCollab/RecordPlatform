@@ -46,7 +46,6 @@
         <module>monitor-websocket-service</module>
         <module>monitor-api-gateway</module>
         <module>platform-monitor-client</module>
-        <module>platform-monitor-server</module>
         <module>performance-tests</module>
     </modules>
 
