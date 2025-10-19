@@ -38,12 +38,11 @@ public class OAuth2LoginSuccessHandler extends SavedRequestAwareAuthenticationSu
      * @param response       HttpServletResponse对象
      * @param authentication 认证信息（OAuth2AuthenticationToken）
      * @throws IOException      IO异常
-     * @throws ServletException Servlet异常
      */
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request,
                                         HttpServletResponse response,
-                                        Authentication authentication) throws IOException, ServletException {
+                                        Authentication authentication) throws IOException {
 
         // 验证authentication类型
         if (!(authentication instanceof OAuth2AuthenticationToken oauthToken)) {
