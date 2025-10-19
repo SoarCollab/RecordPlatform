@@ -36,7 +36,7 @@ public class ServerConfiguration implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        log.info("正在向服务端更新基本信息。。。");
+        log.info("正在向服务端更新基本信息。。。。");
         net.updateBaseDetails(monitor.monitorBaseDetail());
     }
 
@@ -44,6 +44,9 @@ public class ServerConfiguration implements ApplicationRunner {
     ConnectionConfig connectionConfig() {
         log.info("正在读取服务端连接配置。。。");
         ConnectionConfig config = this.readFromLocalJSONFile();
+        if (config == null) {
+            config = this.readFromEnv();
+        }
         if (config == null) {
             config = this.readFromScreen();
         }
@@ -59,6 +62,22 @@ public class ServerConfiguration implements ApplicationRunner {
                 return JSONObject.parseObject(raw).to(ConnectionConfig.class);
             } catch (IOException e) {
                 log.error("读取配置文件出错", e);
+            }
+        }
+        return null;
+    }
+
+    private ConnectionConfig readFromEnv() {
+        String address = System.getenv("MONITOR_SERVER_ADDRESS");
+        String token = System.getenv("MONITOR_CLIENT_TOKEN");
+        if (address != null && token != null) {
+            log.info("检测到环境变量配置，尝试向服务端注册...");
+            if (net.registerToServer(address, token)) {
+                ConnectionConfig config = new ConnectionConfig(address, token);
+                this.saveConfigurationToFile(config);
+                return config;
+            } else {
+                log.warn("使用环境变量进行客户端注册失败，请检查MONITOR_SERVER_ADDRESS和MONITOR_CLIENT_TOKEN");
             }
         }
         return null;

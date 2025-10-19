@@ -78,7 +78,14 @@ public class RequestLogFilter extends OncePerRequestFilter {
         long reqId = generator.nextId();
         MDC.put("reqId", String.valueOf(reqId));
         JSONObject object = new JSONObject();
-        request.getParameterMap().forEach((k, v) -> object.put(k, v.length > 0 ? v[0] : null));
+        request.getParameterMap().forEach((k, v) -> {
+            String lower = k == null ? "" : k.toLowerCase();
+            Object value = (v.length > 0 ? v[0] : null);
+            if (lower.contains("password") || lower.contains("token") || lower.contains("secret")) {
+                value = "******";
+            }
+            object.put(k, value);
+        });
         Object id = request.getAttribute(Const.ATTR_USER_ID);
         if (id != null) {
             User user = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();

@@ -39,7 +39,8 @@ public class MonitorUtils {
         HardwareAbstractionLayer hardware = info.getHardware();
         double memory = hardware.getMemory().getTotal() / GB_TO_BYTES;
         double diskSize = Arrays.stream(File.listRoots()).mapToLong(File::getTotalSpace).sum() / GB_TO_BYTES;
-        String ip = Objects.requireNonNull(this.findNetworkInterface(hardware)).getIPv4addr()[0];
+        NetworkIF networkIF = this.findNetworkInterface(hardware);
+        String ip = (networkIF != null && networkIF.getIPv4addr().length > 0) ? networkIF.getIPv4addr()[0] : "0.0.0.0";
         return new BaseDetail()
                 .setOsArch(properties.getProperty("os.arch"))
                 .setOsName(os.getFamily())
@@ -55,10 +56,11 @@ public class MonitorUtils {
     private NetworkIF findNetworkInterface(HardwareAbstractionLayer hardware) {
         try {
             for (NetworkIF network : hardware.getNetworkIFs()) {
+                try { network.updateAttributes(); } catch (Exception ignored) {}
                 String[] ipv4Addr = network.getIPv4addr();
                 NetworkInterface ni = network.queryNetworkInterface();
+                if (ni == null) continue;
                 if (!ni.isLoopback() && !ni.isPointToPoint() && ni.isUp() && !ni.isVirtual()
-                        && (ni.getName().startsWith("eth") || ni.getName().startsWith("en"))
                         && ipv4Addr.length > 0) {
                     return network;
                 }
@@ -73,16 +75,25 @@ public class MonitorUtils {
         double statisticTime = 0.5;
         try {
             HardwareAbstractionLayer hardware = info.getHardware();
-            NetworkIF networkInterface = Objects.requireNonNull(this.findNetworkInterface(hardware));
+            NetworkIF networkInterface = this.findNetworkInterface(hardware);
             CentralProcessor processor = hardware.getProcessor();
-            double upload = networkInterface.getBytesSent(), download = networkInterface.getBytesRecv();
+            double upload = 0, download = 0;
+            if (networkInterface != null) {
+                upload = networkInterface.getBytesSent();
+                download = networkInterface.getBytesRecv();
+            }
             double read = hardware.getDiskStores().stream().mapToLong(HWDiskStore::getReadBytes).sum();
             double write = hardware.getDiskStores().stream().mapToLong(HWDiskStore::getWriteBytes).sum();
             long[] ticks = processor.getSystemCpuLoadTicks();
             Thread.sleep((long) (statisticTime * 1000));
-            networkInterface = Objects.requireNonNull(this.findNetworkInterface(hardware));
-            upload = (networkInterface.getBytesSent() - upload) / statisticTime;
-            download = (networkInterface.getBytesRecv() - download) / statisticTime;
+            networkInterface = this.findNetworkInterface(hardware);
+            if (networkInterface != null) {
+                upload = (networkInterface.getBytesSent() - upload) / statisticTime;
+                download = (networkInterface.getBytesRecv() - download) / statisticTime;
+            } else {
+                upload = 0;
+                download = 0;
+            }
             read = (hardware.getDiskStores().stream().mapToLong(HWDiskStore::getReadBytes).sum() - read) / statisticTime;
             write = (hardware.getDiskStores().stream().mapToLong(HWDiskStore::getWriteBytes).sum() - write) / statisticTime;
             double memory = (hardware.getMemory().getTotal() - hardware.getMemory().getAvailable()) / GB_TO_BYTES;

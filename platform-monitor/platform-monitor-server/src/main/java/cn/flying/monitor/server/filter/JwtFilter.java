@@ -17,6 +17,7 @@ import org.jetbrains.annotations.NotNull;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -66,6 +67,38 @@ public class JwtFilter extends OncePerRequestFilter {
                 SecurityContextHolder.getContext().setAuthentication(authentication);
                 request.setAttribute(Const.ATTR_USER_ID, utils.toId(jwt));
                 request.setAttribute(Const.ATTR_USER_ROLE, new ArrayList<>(user.getAuthorities()).getFirst().getAuthority());
+            } else {
+                // JWT 不存在时，尽可能从会话/已认证的上下文中提取并设置用户属性，兼容OAuth2登录
+                var auth = SecurityContextHolder.getContext().getAuthentication();
+                if (auth != null && auth.isAuthenticated()) {
+                    String role = null;
+                    var authorities = new ArrayList<>(auth.getAuthorities());
+                    if (!authorities.isEmpty()) role = authorities.getFirst().getAuthority();
+
+                    Integer uid = null;
+                    var session = request.getSession(false);
+                    if (session != null) {
+                        Object uidObj = session.getAttribute("userId");
+                        if (uidObj instanceof Integer i) uid = i;
+                    }
+                    if (uid == null) {
+                        String username = null;
+                        Object principal = auth.getPrincipal();
+                        if (principal instanceof org.springframework.security.core.userdetails.User u) {
+                            username = u.getUsername();
+                        } else if (principal instanceof OAuth2User ou) {
+                            username = ou.getName();
+                        }
+                        if (username != null) {
+                            Account acc = accountService.findAccountByNameOrEmail(username);
+                            if (acc != null) uid = acc.getId();
+                        }
+                    }
+                    if (uid != null && role != null) {
+                        request.setAttribute(Const.ATTR_USER_ID, uid);
+                        request.setAttribute(Const.ATTR_USER_ROLE, role);
+                    }
+                }
             }
             // WebSocket 终端访问控制：无论是否使用JWT，都需要校验访问权限
             if (request.getRequestURI().startsWith("/terminal/")) {
