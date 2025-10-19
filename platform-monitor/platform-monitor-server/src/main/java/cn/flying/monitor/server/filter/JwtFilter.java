@@ -66,11 +66,32 @@ public class JwtFilter extends OncePerRequestFilter {
                 SecurityContextHolder.getContext().setAuthentication(authentication);
                 request.setAttribute(Const.ATTR_USER_ID, utils.toId(jwt));
                 request.setAttribute(Const.ATTR_USER_ROLE, new ArrayList<>(user.getAuthorities()).getFirst().getAuthority());
+            }
+            // WebSocket 终端访问控制：无论是否使用JWT，都需要校验访问权限
+            if (request.getRequestURI().startsWith("/terminal/")) {
+                Integer uid = (Integer) request.getAttribute(Const.ATTR_USER_ID);
+                String role = (String) request.getAttribute(Const.ATTR_USER_ROLE);
 
-                if (request.getRequestURI().startsWith("/terminal/") && !accessShell(
-                        (int) request.getAttribute(Const.ATTR_USER_ID),
-                        (String) request.getAttribute(Const.ATTR_USER_ROLE),
-                        Integer.parseInt(request.getRequestURI().substring(10)))) {
+                // 如果未通过JWT设置，则尝试从会话认证中解析
+                if (uid == null || role == null) {
+                    var auth = SecurityContextHolder.getContext().getAuthentication();
+                    if (auth != null && auth.getPrincipal() instanceof org.springframework.security.core.userdetails.User u) {
+                        Account acc = accountService.findAccountByNameOrEmail(u.getUsername());
+                        if (acc != null) {
+                            uid = acc.getId();
+                            role = new ArrayList<>(u.getAuthorities()).getFirst().getAuthority();
+                            request.setAttribute(Const.ATTR_USER_ID, uid);
+                            request.setAttribute(Const.ATTR_USER_ROLE, role);
+                        }
+                    }
+                }
+
+                int clientId = 0;
+                try {
+                    clientId = Integer.parseInt(request.getRequestURI().substring(10));
+                } catch (Exception ignored) {}
+
+                if (uid == null || role == null || !accessShell(uid, role, clientId)) {
                     response.setStatus(401);
                     response.setCharacterEncoding("utf-8");
                     response.getWriter().write(RestBean.failure(401, "无权访问").asJsonString());

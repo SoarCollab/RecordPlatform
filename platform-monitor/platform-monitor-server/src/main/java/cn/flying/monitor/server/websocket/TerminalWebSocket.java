@@ -29,7 +29,6 @@ public class TerminalWebSocket {
 
     private static final Map<Session, Shell> sessionMap = new ConcurrentHashMap<>();
     private static ClientSshMapper sshMapper;
-    private final ExecutorService service = Executors.newSingleThreadExecutor();
 
     @Resource
     public void setSshMapper(ClientSshMapper sshMapper) {
@@ -180,6 +179,7 @@ public class TerminalWebSocket {
         private final ChannelShell channel;
         private final InputStream input;
         private final OutputStream output;
+        private final ExecutorService service = Executors.newSingleThreadExecutor();
 
         public Shell(Session session, com.jcraft.jsch.Session js, ChannelShell channel) throws IOException {
             this.js = js;
@@ -187,7 +187,7 @@ public class TerminalWebSocket {
             this.channel = channel;
             this.input = channel.getInputStream();
             this.output = channel.getOutputStream();
-            service.submit(this::read);
+            this.service.submit(this::read);
         }
 
         private void read() {
@@ -208,7 +208,7 @@ public class TerminalWebSocket {
             output.close();
             channel.disconnect();
             js.disconnect();
-            service.shutdown();
+            this.service.shutdown();
         }
     }
 }
