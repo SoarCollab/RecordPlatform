@@ -17,7 +17,7 @@ public interface AccountMapper extends BaseMapper<Account> {
      * @return 匹配的Account对象，如果不存在返回null
      */
     @Select("SELECT * FROM account WHERE oauth_provider = #{provider} " +
-            "AND oauth_user_id = #{oauthUserId} AND deleted = 0")
+            "AND oauth_user_id = #{oauthUserId}")
     Account findByOAuthUser(@Param("provider") String provider,
                             @Param("oauthUserId") Long oauthUserId);
 
@@ -29,7 +29,7 @@ public interface AccountMapper extends BaseMapper<Account> {
      * @return 匹配的Account对象，如果不存在返回null
      */
     @Select("SELECT * FROM account WHERE oauth_provider = #{provider} " +
-            "AND username = #{username} AND deleted = 0")
+            "AND username = #{username}")
     Account findByOAuthProviderAndUsername(@Param("provider") String provider,
                                            @Param("username") String username);
 }
