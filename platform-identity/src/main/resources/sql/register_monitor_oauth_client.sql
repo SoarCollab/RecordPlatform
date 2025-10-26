@@ -33,7 +33,7 @@ INSERT INTO oauth_client (
     '平台监控系统',
     '用于platform-monitor的OAuth2.0客户端接入，支持单点登录',
     -- 重定向URI列表（开发环境和生产环境）
-    'http://localhost:8001/login/oauth2/code/identity,http://localhost:8001/oauth/callback,https://monitor.example.com/login/oauth2/code/identity',
+    'http://localhost:8001/login/oauth2/code/identity,http://localhost:8001/oauth/callback',
     'read,write',
     'authorization_code,refresh_token',
     3600,    -- 访问令牌有效期：1小时

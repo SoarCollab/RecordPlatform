@@ -9,10 +9,13 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 
@@ -108,15 +111,27 @@ public class ApiGatewayConfig {
     }
 
     /**
+     * 配置RestTemplate
+     * 用于HTTP客户端调用
+     *
+     * @param builder RestTemplate构建器
+     * @return RestTemplate实例
+     */
+    @Bean
+    public RestTemplate restTemplate(RestTemplateBuilder builder) {
+        return builder
+                .setConnectTimeout(Duration.ofSeconds(5))
+                .setReadTimeout(Duration.ofSeconds(30))
+                .build();
+    }
+
+    /**
      * 配置服务发现定时任务
      * 定期从Nacos同步服务实例
      *
-     * @return Nacos服务发现组件
+     * 注意：NacosServiceDiscovery 已通过 @Component 注解自动注册，
+     * 此处不需要再使用 @Bean 手动创建实例
      */
-    @Bean
-    public NacosServiceDiscovery nacosServiceDiscovery() {
-        return new NacosServiceDiscovery();
-    }
 
     /**
      * HTTP连接池配置

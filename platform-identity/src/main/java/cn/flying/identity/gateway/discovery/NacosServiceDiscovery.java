@@ -12,6 +12,7 @@ import jakarta.annotation.PreDestroy;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -79,6 +80,7 @@ public class NacosServiceDiscovery {
     @Value("${api.gateway.discovery.auto-discover:true}")
     private boolean autoDiscover;
 
+    @Lazy
     @Resource
     private LoadBalanceManager loadBalanceManager;
 
@@ -490,8 +492,7 @@ public class NacosServiceDiscovery {
 
         @Override
         public void onEvent(com.alibaba.nacos.api.naming.listener.Event event) {
-            if (event instanceof NamingEvent) {
-                NamingEvent namingEvent = (NamingEvent) event;
+            if (event instanceof NamingEvent namingEvent) {
                 log.info("服务 {} 实例变更，新实例数: {}", serviceName, namingEvent.getInstances().size());
 
                 // 更新服务实例

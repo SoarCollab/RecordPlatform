@@ -1034,7 +1034,7 @@ public class OAuthServiceImpl implements OAuthService {
         SecureLogger.warn("OAuth2.0错误: error={}, description={}", error, errorDescription);
         
         // 使用统一的错误响应格式
-        return (Result<T>) Result.error("OAuth2.0 Error: " + error);
+        return (Result<T>) Result.error("OAuth2.0 Error: " + errorResponse);
     }
 
     /**

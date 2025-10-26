@@ -5,6 +5,7 @@ import cn.flying.identity.gateway.loadbalance.impl.*;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
@@ -61,6 +62,7 @@ public class LoadBalanceManager {
     @Resource
     private ResponseTimeStrategy responseTimeStrategy;
 
+    @Lazy
     @Resource
     private NacosServiceDiscovery nacosServiceDiscovery;
 

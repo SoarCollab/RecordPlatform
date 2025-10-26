@@ -57,6 +57,23 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 处理通用业务异常
+     */
+    @ExceptionHandler(cn.flying.common.exception.GeneralException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<?> handleGeneralException(cn.flying.common.exception.GeneralException e, HttpServletRequest request) {
+        log.error("通用业务异常 - 路径: {}, 消息: {}",
+                request.getRequestURI(), e.getMessage());
+
+        if (e.getData() != null) {
+            return Result.error(e.getResultEnum(), e.getData());
+        } else if (e.getResultEnum() != null) {
+            return Result.error(e.getResultEnum());
+        }
+        return Result.error(e.getMessage());
+    }
+
+    /**
      * 处理参数校验异常 - @RequestBody 参数校验
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -90,10 +107,9 @@ public class GlobalExceptionHandler {
                         ConstraintViolation::getMessage
                 ));
 
-        String message = "参数校验失败: " + errors.values().stream()
-                .collect(Collectors.joining(", "));
+        String message = "参数校验失败: " + String.join(", ", errors.values());
 
-        log.warn("参数校验失败 - 路径: {}, 错误: {}", request.getRequestURI(), errors);
+        log.warn("参数校验失败 - 路径: {}, 错误: {}", request.getRequestURI(), message);
         return Result.error(ResultEnum.PARAM_IS_INVALID, errors);
     }
 
@@ -131,8 +147,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     @ResponseStatus(HttpStatus.METHOD_NOT_ALLOWED)
     public Result<?> handleHttpRequestMethodNotSupportedException(HttpRequestMethodNotSupportedException e, HttpServletRequest request) {
-        String message = String.format("不支持的请求方法: %s, 支持的方法: %s",
-                e.getMethod(), String.join(", ", e.getSupportedMethods()));
+        String message = null;
+        if (e.getSupportedMethods() != null) {
+            message = String.format("不支持的请求方法: %s, 支持的方法: %s",
+                    e.getMethod(), String.join(", ", e.getSupportedMethods()));
+        }
         log.warn("请求方法不支持 - 路径: {}, 方法: {}", request.getRequestURI(), e.getMethod());
         return new Result<>(ResultEnum.INTERFACE_METHOD_NOT_ALLOWED.getCode(), message, null);
     }
