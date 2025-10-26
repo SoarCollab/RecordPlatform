@@ -236,6 +236,38 @@ CREATE TABLE IF NOT EXISTS `gateway_plugin` (
   KEY `idx_plugin_status` (`plugin_status`) USING BTREE COMMENT '插件状态索引'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='网关插件配置表';
 
+-- --------------------------------------------------------
+-- 10. 网关动态路由表
+-- 配置网关的动态路由
+-- --------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS `api_route` (
+                                           `id` bigint NOT NULL COMMENT '路由ID',
+                                           `route_name` varchar(100) NOT NULL COMMENT '路由名称',
+                                           `route_path` varchar(255) NOT NULL COMMENT '前端请求路径',
+                                           `target_service` varchar(100) NOT NULL COMMENT '目标服务名称',
+                                           `target_path` varchar(255) DEFAULT NULL COMMENT '转发目标路径',
+                                           `route_type` tinyint NOT NULL DEFAULT '1' COMMENT '路由类型:1-精确,2-前缀,3-正则',
+                                           `http_method` varchar(20) NOT NULL DEFAULT '*' COMMENT 'HTTP方法:* 表示全部',
+                                           `priority` int NOT NULL DEFAULT '100' COMMENT '路由优先级,数值越小优先级越高',
+                                           `route_status` tinyint NOT NULL DEFAULT '1' COMMENT '路由状态:0-禁用,1-启用',
+                                           `require_auth` tinyint NOT NULL DEFAULT '1' COMMENT '是否需要认证:0-否,1-是',
+                                           `enable_rate_limit` tinyint NOT NULL DEFAULT '1' COMMENT '是否启用限流:0-否,1-是',
+                                           `rate_limit` int NOT NULL DEFAULT '100' COMMENT '限流QPS',
+                                           `load_balance` tinyint NOT NULL DEFAULT '1' COMMENT '负载均衡策略:1-轮询,2-随机,3-最少连接,4-一致性哈希',
+                                           `timeout` int NOT NULL DEFAULT '30000' COMMENT '超时时间(毫秒)',
+                                           `retry_times` int NOT NULL DEFAULT '3' COMMENT '重试次数',
+                                           `metadata` text DEFAULT NULL COMMENT '路由元数据(JSON)',
+                                           `route_description` varchar(500) DEFAULT NULL COMMENT '路由描述',
+                                           `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                           `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                                           PRIMARY KEY (`id`) USING BTREE,
+                                           UNIQUE KEY `uk_route_path_method` (`route_path`,`http_method`) USING BTREE COMMENT '路径+方法唯一索引',
+                                           KEY `idx_route_status` (`route_status`) USING BTREE COMMENT '路由状态索引',
+                                           KEY `idx_priority` (`priority`) USING BTREE COMMENT '优先级索引'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='API路由配置表';
+
+
 -- ============================================================
 -- 初始化数据
 -- ============================================================
