@@ -12,6 +12,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
+import org.slf4j.MDC;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -42,6 +43,8 @@ public class TrafficMonitorFilter implements Filter {
         // 生成请求ID用于链路追踪
         String requestId = UUID.randomUUID().toString();
         httpRequest.setAttribute("requestId", requestId);
+        MDC.put("traceId", requestId);
+        httpResponse.setHeader("X-Request-Id", requestId);
 
         // 获取请求信息
         String clientIp = IpUtils.getClientIp(httpRequest);
@@ -54,34 +57,45 @@ public class TrafficMonitorFilter implements Filter {
         long startTime = System.currentTimeMillis();
 
         try {
-            // 记录流量信息
-            trafficMonitorService.recordTrafficInfo(requestId, clientIp, userId, 
-                                                   requestPath, requestMethod, userAgent);
+            try {
+                trafficMonitorService.recordTrafficInfo(requestId, clientIp, userId,
+                        requestPath, requestMethod, userAgent);
+            } catch (Exception monitorException) {
+                log.error("记录流量信息失败", monitorException);
+            }
 
-            // 检查是否需要拦截
-            Result<Map<String, Object>> blockResult = trafficMonitorService.checkTrafficBlock(
-                    clientIp, userId, requestPath, userAgent);
-            
-            if (blockResult.getCode() == 1 && blockResult.getData() != null) {
+            Result<Map<String, Object>> blockResult = null;
+            try {
+                blockResult = trafficMonitorService.checkTrafficBlock(clientIp, userId, requestPath, userAgent);
+            } catch (Exception blockException) {
+                log.error("流量拦截检测异常", blockException);
+            }
+
+            if (blockResult != null && blockResult.isSuccess() && blockResult.getData() != null) {
                 Map<String, Object> blockInfo = blockResult.getData();
                 Boolean blocked = (Boolean) blockInfo.get("blocked");
-                
+
                 if (Boolean.TRUE.equals(blocked)) {
                     handleBlockedRequest(httpResponse, blockInfo);
                     return;
                 }
             }
 
-            // 继续处理请求
             chain.doFilter(request, response);
 
         } catch (Exception e) {
             log.error("流量监控过滤器处理异常", e);
-            // 异常情况下也要继续处理请求，避免影响正常业务
-            chain.doFilter(request, response);
+            if (e instanceof ServletException servletException) {
+                throw servletException;
+            }
+            if (e instanceof IOException ioException) {
+                throw ioException;
+            }
+            throw new ServletException("流量监控过滤器执行失败", e);
         } finally {
             // 记录响应信息
             recordResponseInfo(requestId, httpResponse, startTime, clientIp, userId, requestPath);
+            MDC.remove("traceId");
         }
     }
 
@@ -112,6 +126,24 @@ public class TrafficMonitorFilter implements Filter {
                 break;
             default:
                 response.setStatus(429);
+        }
+
+        // 标准限流响应头（若提供）
+        Object limit = blockInfo.get("limit");
+        Object remaining = blockInfo.get("remaining");
+        Object reset = blockInfo.get("reset");
+        if (limit != null) {
+            response.setHeader("X-RateLimit-Limit", String.valueOf(limit));
+        }
+        if (remaining != null) {
+            response.setHeader("X-RateLimit-Remaining", String.valueOf(remaining));
+        }
+        if (reset != null) {
+            response.setHeader("X-RateLimit-Reset", String.valueOf(reset));
+        }
+
+        if (response.isCommitted()) {
+            return;
         }
 
         response.setContentType("application/json");

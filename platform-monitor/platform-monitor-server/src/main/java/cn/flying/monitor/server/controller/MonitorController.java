@@ -26,8 +26,10 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/monitor")
 public class MonitorController {
+
     @Resource
     ClientService clientService;
+
     @Resource
     AccountService accountService;
 
@@ -131,7 +133,7 @@ public class MonitorController {
             return RestBean.noPermission();
     }
 
-    @GetMapping("/delete")
+    @DeleteMapping("/delete")
     public RestBean<Void> deleteClient(@RequestParam int clientId,
                                        @RequestAttribute(Const.ATTR_USER_ROLE) String userRole) {
         if (this.isAdminAccount(userRole)) {

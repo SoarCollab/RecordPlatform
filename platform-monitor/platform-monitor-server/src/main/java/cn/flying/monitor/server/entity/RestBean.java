@@ -46,7 +46,7 @@ public record RestBean<T>(long id, int code, T data, String message) {
     }
 
     public static <T> RestBean<T> noPermission() {
-        return new RestBean<>(requestId(), 401, null, "权限不足，拒绝访问！");
+        return new RestBean<>(requestId(), 403, null, "权限不足，拒绝访问！");
     }
 
     /**

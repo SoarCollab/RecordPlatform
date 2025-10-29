@@ -37,7 +37,7 @@ public class TerminalWebSocket {
 
     @OnOpen
     public void onOpen(Session session,
-                       @PathParam(value = "clientId") String clientId) throws Exception {
+                       @PathParam(value = "clientId") int clientId) throws Exception {
         log.info("正在尝试建立WebSocket终端连接，客户端ID: {}, 会话ID: {}", clientId, session.getId());
         try {
             ClientSsh ssh = sshMapper.selectById(clientId);
@@ -60,10 +60,11 @@ public class TerminalWebSocket {
 
     private boolean createSshConnection(Session session, ClientSsh ssh, String ip) throws IOException {
         log.info("开始尝试SSH连接，用户: {}，IP: {}，端口: {}", ssh.getUsername(), ip, ssh.getPort());
+        JSch jSch = new JSch();
+        com.jcraft.jsch.Session js = null;
         try {
-            JSch jSch = new JSch();
             log.info("已创建JSch实例");
-            com.jcraft.jsch.Session js = jSch.getSession(ssh.getUsername(), ip, ssh.getPort());
+            js = jSch.getSession(ssh.getUsername(), ip, ssh.getPort());
             log.info("已获取JSch Session，准备进行连接配置");
             js.setPassword(ssh.getPassword());
             js.setConfig("StrictHostKeyChecking", "no");
@@ -74,7 +75,7 @@ public class TerminalWebSocket {
             ChannelShell channel = (ChannelShell) js.openChannel("shell");
             channel.setPtyType("xterm");
             log.info("Shell通道已创建，准备连接");
-            channel.connect(1000);
+            channel.connect(5000);
             log.info("Shell通道连接成功");
             sessionMap.put(session, new Shell(session, js, channel));
             return true;
@@ -82,6 +83,12 @@ public class TerminalWebSocket {
             String message = e.getMessage();
             log.error("SSH连接异常：{}", message, e);
             log.error("连接详情 - 主机: {}, 端口: {}, 用户名: {}", ip, ssh.getPort(), ssh.getUsername());
+            if (js != null && js.isConnected()) {
+                try {
+                    js.disconnect();
+                } catch (Exception ignore) {
+                }
+            }
             if (message.equals("Auth fail")) {
                 session.close(new CloseReason(CloseReason.CloseCodes.CANNOT_ACCEPT,
                         "登录SSH失败，用户名或密码错误"));
@@ -107,13 +114,11 @@ public class TerminalWebSocket {
             try {
                 log.info("正在执行网络诊断，检查与目标主机的连接...");
 
-                // 记录服务器信息
                 String serverInfo = String.format("服务器信息 - 主机名: %s, IP: %s",
                         java.net.InetAddress.getLocalHost().getHostName(),
                         java.net.InetAddress.getLocalHost().getHostAddress());
                 log.info(serverInfo);
 
-                // 尝试执行ping测试
                 boolean reachable = false;
                 try {
                     log.info("正在尝试ping目标主机 {} ...", ip);
@@ -123,7 +128,6 @@ public class TerminalWebSocket {
                     log.error("无法执行ping测试: {}", pingEx.getMessage(), pingEx);
                 }
 
-                // 尝试获取目标主机信息
                 try {
                     java.net.InetAddress addr = java.net.InetAddress.getByName(ip);
                     log.info("目标主机解析信息 - 主机名: {}, 规范主机名: {}, IP地址: {}",
@@ -132,7 +136,6 @@ public class TerminalWebSocket {
                     log.error("无法解析目标主机信息: {}", resolveEx.getMessage());
                 }
 
-                // 尝试使用Socket直接连接SSH端口
                 try {
                     log.info("尝试直接通过Socket连接 {}:{} ...", ip, ssh.getPort());
                     java.net.Socket socket = new java.net.Socket();

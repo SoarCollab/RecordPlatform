@@ -138,7 +138,7 @@ public class ApiPermissionServiceImpl extends BaseService implements ApiPermissi
                 } catch (Exception e) {
                     failedCount++;
                     errors.add("接口ID " + interfaceId + " 授权异常: " + e.getMessage());
-                    logError("批量授权异常: interfaceId={}", e, interfaceId);
+                    logError("批量授权异常: interfaceId={}", interfaceId, e);
                 }
             }
 
@@ -504,7 +504,7 @@ public class ApiPermissionServiceImpl extends BaseService implements ApiPermissi
             String cacheKey = APP_INTERFACES_PREFIX + appId;
             Boolean exists = redisTemplate.hasKey(cacheKey);
 
-            if (Boolean.FALSE.equals(exists)) {
+            if (!exists) {
                 return null; // 缓存未命中
             }
 

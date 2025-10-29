@@ -7,11 +7,13 @@ import cn.flying.monitor.server.filter.JwtFilter;
 import cn.flying.monitor.server.filter.RequestLogFilter;
 import cn.flying.monitor.server.handler.OAuth2LoginSuccessHandler;
 import cn.flying.monitor.server.service.AccountService;
+import cn.flying.monitor.server.service.OAuthTokenService;
 import cn.flying.monitor.server.utils.Const;
 import cn.flying.monitor.server.utils.JwtUtils;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.access.AccessDeniedException;
@@ -47,6 +49,9 @@ public class SecurityConfiguration {
 
     @Resource
     OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
+
+    @Resource
+    OAuthTokenService oAuthTokenService;
 
     /**
      * 针对于 SpringSecurity 6 的新版配置方法
@@ -149,6 +154,25 @@ public class SecurityConfiguration {
                                  Authentication authentication) throws IOException {
         response.setContentType("application/json;charset=utf-8");
         PrintWriter writer = response.getWriter();
+
+        // 清理 OAuth2 Token 与 Session
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            Object uidAttr = session.getAttribute("userId");
+            Object authType = session.getAttribute("authType");
+            if (uidAttr instanceof Integer userId && "oauth".equals(authType)) {
+                try {
+                    oAuthTokenService.removeToken(userId);
+                } catch (Exception ignore) {
+                }
+            }
+            try {
+                session.invalidate();
+            } catch (Exception ignore) {
+            }
+        }
+
+        // 使 JWT 失效
         String authorization = request.getHeader("Authorization");
         if (utils.invalidateJwt(authorization)) {
             writer.write(RestBean.success("退出登录成功").asJsonString());

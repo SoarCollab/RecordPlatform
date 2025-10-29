@@ -80,15 +80,14 @@ public abstract class BaseService {
     // ==================== 参数验证方法 ====================
 
     /**
-     * 记录错误日志
-     *
-     * @param message   日志信息
-     * @param throwable 异常信息
-     * @param args      参数
+     * 记录错误日志（支持参数与异常）
+     * 使用 SLF4J 参数占位符格式，throwable 必须作为最后一个参数传入
      */
     protected void logError(String message, Throwable throwable, Object... args) {
-        if (args.length > 0) {
-            log.error(String.format(message, args), throwable);
+        if (args != null && args.length > 0) {
+            Object[] merged = java.util.Arrays.copyOf(args, args.length + 1);
+            merged[args.length] = throwable;
+            log.error(message, merged);
         } else {
             log.error(message, throwable);
         }

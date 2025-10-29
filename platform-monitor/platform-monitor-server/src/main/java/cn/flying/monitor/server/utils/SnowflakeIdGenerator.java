@@ -1,5 +1,7 @@
 package cn.flying.monitor.server.utils;
 
+import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -21,10 +23,16 @@ public class SnowflakeIdGenerator {
     private static final long DATA_CENTER_ID_SHIFT = SEQUENCE_BITS + WORKER_ID_BITS;
     private static final long TIMESTAMP_SHIFT = SEQUENCE_BITS + WORKER_ID_BITS + DATA_CENTER_ID_BITS;
 
-    private final long dataCenterId;
-    private final long workerId;
+    private long dataCenterId;
+    private long workerId;
     private long lastTimestamp = -1L;
     private long sequence = 0L;
+
+    @Value("${id.snowflake.data-center:1}")
+    private long configuredDataCenterId;
+
+    @Value("${id.snowflake.worker:1}")
+    private long configuredWorkerId;
 
     public SnowflakeIdGenerator() {
         this(1, 1);
@@ -39,6 +47,23 @@ public class SnowflakeIdGenerator {
         }
         this.dataCenterId = dataCenterId;
         this.workerId = workerId;
+    }
+
+    /**
+     * 从Spring配置中加载dataCenterId与workerId，应用并校验范围
+     */
+    @PostConstruct
+    public void initFromConfig() {
+        long dc = this.configuredDataCenterId;
+        long wk = this.configuredWorkerId;
+        if (dc > MAX_DATA_CENTER_ID || dc < 0) {
+            throw new IllegalArgumentException("Data center ID out of range, must be 0-" + MAX_DATA_CENTER_ID);
+        }
+        if (wk > MAX_WORKER_ID || wk < 0) {
+            throw new IllegalArgumentException("Worker ID out of range, must be 0-" + MAX_WORKER_ID);
+        }
+        this.dataCenterId = dc;
+        this.workerId = wk;
     }
 
     /**

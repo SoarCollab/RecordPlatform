@@ -10,6 +10,7 @@ import cn.flying.monitor.server.mapper.AccountMapper;
 import cn.flying.monitor.server.service.AccountService;
 import cn.flying.monitor.server.utils.Const;
 import cn.flying.monitor.server.utils.FlowUtils;
+import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -159,7 +160,7 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
         if (account != null)
             throw new IllegalArgumentException("用户名已被使用！");
         account = new Account(null, vo.getUsername(), passwordEncoder.encode(vo.getPassword())
-                , vo.getEmail(), Const.ROLE_DEFAULT, JSONArray.copyOf(vo.getClients()).toString(), new Date(), "local", null, null);
+                , vo.getEmail(), Const.ROLE_DEFAULT, JSON.toJSONString(vo.getClients()), new Date(), "local", null, null);
         this.save(account);
     }
 

@@ -35,7 +35,6 @@ public class RequestLogFilter extends OncePerRequestFilter {
             "/favicon.ico",
             "/monitor/runtime",
             "/api/monitor/runtime_now",
-            "/api/monitor/runtime-now",
             "/api/monitor/list",
             "/api/monitor/runtime_history"
     );

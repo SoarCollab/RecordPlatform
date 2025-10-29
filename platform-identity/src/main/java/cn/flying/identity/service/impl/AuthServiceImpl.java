@@ -14,6 +14,7 @@ import cn.flying.identity.vo.request.EmailResetVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 
@@ -21,6 +22,7 @@ import org.springframework.stereotype.Service;
  * 认证服务实现类
  * 基于Sa-Token实现用户认证、注册、密码管理等功能
  */
+@Slf4j
 @Service
 public class AuthServiceImpl implements AuthService {
 
@@ -89,7 +91,8 @@ public class AuthServiceImpl implements AuthService {
                 if (StpUtil.isLogin()) {
                     username = (String) StpUtil.getSession().get("username");
                 }
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                log.debug("获取会话用户名失败，使用默认用户名: {}", e.getMessage());
             }
 
             // 将当前 Token 加入黑名单，确保登出后旧 Token 立即失效
@@ -98,7 +101,8 @@ public class AuthServiceImpl implements AuthService {
                 if (token != null && !token.isBlank()) {
                     jwtBlacklistService.blacklistToken(token, -1);
                 }
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                log.debug("添加Token到黑名单失败: {}", e.getMessage());
             }
             StpUtil.logout();
 

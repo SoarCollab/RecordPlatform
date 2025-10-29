@@ -25,7 +25,9 @@ public class QuartzConfiguration {
 
     @Bean
     public Trigger cronTriggerFactoryBean(JobDetail detail) {
-        CronScheduleBuilder cron = CronScheduleBuilder.cronSchedule("*/10 * * * * ?");
+        CronScheduleBuilder cron = CronScheduleBuilder
+                .cronSchedule("*/10 * * * * ?")
+                .withMisfireHandlingInstructionDoNothing();
         return TriggerBuilder.newTrigger()
                 .forJob(detail)
                 .withIdentity("monitor-trigger")

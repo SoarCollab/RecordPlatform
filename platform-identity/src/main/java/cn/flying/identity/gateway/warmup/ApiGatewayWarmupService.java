@@ -15,6 +15,9 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.annotation.Order;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import cn.flying.identity.constant.CacheKeyConstants;
+import cn.hutool.json.JSONUtil;
 
 import java.util.HashMap;
 import java.util.List;
@@ -23,6 +26,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import jakarta.annotation.PreDestroy;
 
 /**
  * API网关预热服务
@@ -64,6 +68,9 @@ public class ApiGatewayWarmupService implements ApplicationRunner {
 
     @Resource
     private ApiPermissionMapper permissionMapper;
+
+    @Resource(name = "stringRedisTemplate")
+    private StringRedisTemplate redisTemplate;
 
 
     /**
@@ -137,6 +144,14 @@ public class ApiGatewayWarmupService implements ApplicationRunner {
             // 批量预热到缓存
             cacheManager.warmup("route", cacheData);
 
+            // 额外：将完整路由列表写入统一的 ROUTE_LIST_KEY，供服务侧直接加载
+            try {
+                String routesJson = JSONUtil.toJsonStr(routes);
+                redisTemplate.opsForValue().set(CacheKeyConstants.ROUTE_LIST_KEY, routesJson, 1, TimeUnit.HOURS);
+            } catch (Exception ex) {
+                log.warn("写入路由列表缓存失败: {}", ex.getMessage());
+            }
+
             statistics.recordRouteWarmup(routes.size());
             log.info("路由数据预热完成，预热数量: {}", routes.size());
 
@@ -204,7 +219,7 @@ public class ApiGatewayWarmupService implements ApplicationRunner {
             Map<String, Object> cacheData = new HashMap<>();
             for (ApiPermission permission : permissions) {
                 String cacheKey = permission.getAppId() + ":" + permission.getInterfaceId();
-                cacheData.put(cacheKey, true);  // 简化处理，只缓存权限存在标识
+                cacheData.put(cacheKey, Boolean.TRUE);  // 权限存在性预热为 true，避免类型不匹配
             }
 
             // 批量预热到缓存
@@ -271,6 +286,27 @@ public class ApiGatewayWarmupService implements ApplicationRunner {
     }
 
     /**
+     * 服务销毁时关闭预热线程池，避免线程资源泄漏
+     */
+    @PreDestroy
+    public void shutdownWarmupExecutor() {
+        log.info("开始关闭API网关预热线程池");
+        warmupExecutor.shutdown();
+        try {
+            if (!warmupExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
+                warmupExecutor.shutdownNow();
+                if (!warmupExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    log.warn("预热线程池在超时后仍未退出");
+                }
+            }
+        } catch (InterruptedException e) {
+            warmupExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        log.info("API网关预热线程池关闭完成");
+    }
+
+    /**
      * 预热统计信息内部类
      */
     private static class WarmupStatistics {
@@ -304,7 +340,7 @@ public class ApiGatewayWarmupService implements ApplicationRunner {
             this.startTime = System.currentTimeMillis();
         }
 
-        public Map<String, Object> toMap() {
+        public synchronized Map<String, Object> toMap() {
             Map<String, Object> map = new HashMap<>();
             map.put("routeCount", routeCount);
             map.put("apiKeyCount", apiKeyCount);
@@ -316,7 +352,7 @@ public class ApiGatewayWarmupService implements ApplicationRunner {
         }
 
         @Override
-        public String toString() {
+        public synchronized String toString() {
             return String.format("routes=%d, apiKeys=%d, permissions=%d, errors=%d",
                     routeCount, apiKeyCount, permissionCount, errors.size());
         }

@@ -12,11 +12,9 @@ import oshi.hardware.NetworkIF;
 import oshi.software.os.OperatingSystem;
 
 import java.io.File;
-import java.io.IOException;
 import java.net.NetworkInterface;
 import java.util.Arrays;
 import java.util.Date;
-import java.util.Objects;
 import java.util.Properties;
 
 /**
@@ -39,7 +37,17 @@ public class MonitorUtils {
         HardwareAbstractionLayer hardware = info.getHardware();
         double memory = hardware.getMemory().getTotal() / GB_TO_BYTES;
         double diskSize = Arrays.stream(File.listRoots()).mapToLong(File::getTotalSpace).sum() / GB_TO_BYTES;
-        String ip = Objects.requireNonNull(this.findNetworkInterface(hardware)).getIPv4addr()[0];
+        NetworkIF nif = this.findNetworkInterface(hardware);
+        String ip = "127.0.0.1";
+        try {
+            if (nif != null && nif.getIPv4addr() != null && nif.getIPv4addr().length > 0) {
+                ip = nif.getIPv4addr()[0];
+            } else {
+                log.warn("未找到可用IPv4网络接口，使用回退地址 127.0.0.1");
+            }
+        } catch (Exception e) {
+            log.warn("解析网络接口地址失败，使用回退地址 127.0.0.1", e);
+        }
         return new BaseDetail()
                 .setOsArch(properties.getProperty("os.arch"))
                 .setOsName(os.getFamily())
@@ -57,14 +65,17 @@ public class MonitorUtils {
             for (NetworkIF network : hardware.getNetworkIFs()) {
                 String[] ipv4Addr = network.getIPv4addr();
                 NetworkInterface ni = network.queryNetworkInterface();
-                if (!ni.isLoopback() && !ni.isPointToPoint() && ni.isUp() && !ni.isVirtual()
-                        && (ni.getName().startsWith("eth") || ni.getName().startsWith("en"))
-                        && ipv4Addr.length > 0) {
+                if (ni != null && ni.isUp() && !ni.isLoopback() && ipv4Addr != null && ipv4Addr.length > 0) {
                     return network;
                 }
             }
-        } catch (IOException e) {
-            log.error("读取网络接口信息时出错", e);
+            // 退而求其次：仅按IPv4是否存在选择
+            for (NetworkIF network : hardware.getNetworkIFs()) {
+                String[] ipv4Addr = network.getIPv4addr();
+                if (ipv4Addr != null && ipv4Addr.length > 0) return network;
+            }
+        } catch (Exception e) {
+            log.warn("读取网络接口信息时出错，使用回退策略", e);
         }
         return null;
     }
@@ -73,18 +84,27 @@ public class MonitorUtils {
         double statisticTime = 0.5;
         try {
             HardwareAbstractionLayer hardware = info.getHardware();
-            NetworkIF networkInterface = Objects.requireNonNull(this.findNetworkInterface(hardware));
+            NetworkIF networkInterface = this.findNetworkInterface(hardware);
             CentralProcessor processor = hardware.getProcessor();
-            double upload = networkInterface.getBytesSent(), download = networkInterface.getBytesRecv();
+            double upload = 0, download = 0;
             double read = hardware.getDiskStores().stream().mapToLong(HWDiskStore::getReadBytes).sum();
             double write = hardware.getDiskStores().stream().mapToLong(HWDiskStore::getWriteBytes).sum();
             long[] ticks = processor.getSystemCpuLoadTicks();
+            if (networkInterface != null) {
+                upload = networkInterface.getBytesSent();
+                download = networkInterface.getBytesRecv();
+            }
             Thread.sleep((long) (statisticTime * 1000));
-            networkInterface = Objects.requireNonNull(this.findNetworkInterface(hardware));
-            upload = (networkInterface.getBytesSent() - upload) / statisticTime;
-            download = (networkInterface.getBytesRecv() - download) / statisticTime;
-            read = (hardware.getDiskStores().stream().mapToLong(HWDiskStore::getReadBytes).sum() - read) / statisticTime;
-            write = (hardware.getDiskStores().stream().mapToLong(HWDiskStore::getWriteBytes).sum() - write) / statisticTime;
+            if (networkInterface != null) {
+                networkInterface = this.findNetworkInterface(hardware);
+            }
+            double uploadNow = 0, downloadNow = 0;
+            if (networkInterface != null) {
+                uploadNow = networkInterface.getBytesSent();
+                downloadNow = networkInterface.getBytesRecv();
+            }
+            double readNow = hardware.getDiskStores().stream().mapToLong(HWDiskStore::getReadBytes).sum();
+            double writeNow = hardware.getDiskStores().stream().mapToLong(HWDiskStore::getWriteBytes).sum();
             double memory = (hardware.getMemory().getTotal() - hardware.getMemory().getAvailable()) / GB_TO_BYTES;
             double disk = Arrays.stream(File.listRoots())
                     .mapToLong(file -> file.getTotalSpace() - file.getFreeSpace()).sum() / GB_TO_BYTES;
@@ -92,10 +112,10 @@ public class MonitorUtils {
                     .setCpuUsage(this.calculateCpuUsage(processor, ticks))
                     .setMemoryUsage(memory)
                     .setDiskUsage(disk)
-                    .setNetworkUpload(upload / KB_TO_BYTES)
-                    .setNetworkDownload(download / KB_TO_BYTES)
-                    .setDiskRead(read / MB_TO_BYTES)
-                    .setDiskWrite(write / MB_TO_BYTES)
+                    .setNetworkUpload((uploadNow - upload) / statisticTime / KB_TO_BYTES)
+                    .setNetworkDownload((downloadNow - download) / statisticTime / KB_TO_BYTES)
+                    .setDiskRead((readNow - read) / statisticTime / MB_TO_BYTES)
+                    .setDiskWrite((writeNow - write) / statisticTime / MB_TO_BYTES)
                     .setTimestamp(new Date().getTime());
         } catch (Exception e) {
             log.error("读取运行时数据出现问题", e);

@@ -25,15 +25,20 @@ import java.util.List;
  * @create: 2024-07-16 16:54
  */
 @Component
-public class influxDBUtils {
+public class InfluxDBUtils {
+
     @Value("${spring.influx.url}")
     String url;
+
     @Value("${spring.influx.user}")
     String user;
+
     @Value("${spring.influx.password}")
     String password;
+
     @Value("${spring.influx.bucket}")
     String BUCKET;
+
     @Value("${spring.influx.organization}")
     String ORG;
 
@@ -55,25 +60,30 @@ public class influxDBUtils {
 
     public RuntimeHistoryVO readRuntimeHistory(int clientId) {
         RuntimeHistoryVO vo = new RuntimeHistoryVO();
-        String query = """
-                from(bucket: "%s")
-                |> range(start: %s)
-                |> filter(fn: (r) => r["_measurement"] == "runtime")
-                |> filter(fn: (r) => r["clientId"] == "%s")
+        String q = """
+                    from(bucket: "%s")
+                      |> range(start: -1h)
+                      |> filter(fn: (r) => r._measurement == "runtime")
+                      |> filter(fn: (r) => r.clientId == "%s")
+                      |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+                      |> keep(columns: ["_time","cpuUsage","memoryUsage","diskUsage","networkUpload","networkDownload","diskRead","diskWrite"]) 
                 """;
-        String format = String.format(query, BUCKET, "-1h", clientId);
+        String format = String.format(q, BUCKET, clientId);
         List<FluxTable> tables = client.getQueryApi().query(format, ORG);
-        int size = tables.size();
-        if (size == 0) return vo;
-        List<FluxRecord> records = tables.getFirst().getRecords();
-        for (int i = 0; i < records.size(); i++) {
-            JSONObject object = new JSONObject();
-            object.put("timestamp", records.get(i).getTime());
-            for (int j = 0; j < size; j++) {
-                FluxRecord record = tables.get(j).getRecords().get(i);
-                object.put(record.getField(), record.getValue());
+        if (tables == null || tables.isEmpty()) return vo;
+        for (FluxTable table : tables) {
+            for (FluxRecord rec : table.getRecords()) {
+                JSONObject object = new JSONObject();
+                object.put("timestamp", rec.getTime());
+                object.put("cpuUsage", rec.getValueByKey("cpuUsage"));
+                object.put("memoryUsage", rec.getValueByKey("memoryUsage"));
+                object.put("diskUsage", rec.getValueByKey("diskUsage"));
+                object.put("networkUpload", rec.getValueByKey("networkUpload"));
+                object.put("networkDownload", rec.getValueByKey("networkDownload"));
+                object.put("diskRead", rec.getValueByKey("diskRead"));
+                object.put("diskWrite", rec.getValueByKey("diskWrite"));
+                vo.getList().add(object);
             }
-            vo.getList().add(object);
         }
         return vo;
     }

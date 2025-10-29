@@ -103,7 +103,7 @@ public class AuthorizeController {
      * @param request HTTP请求对象
      * @return 登出结果
      */
-    @DeleteMapping("/logout")
+    @DeleteMapping("/logout/session")
     @Operation(summary = "用户登出")
     public RestBean<Void> logout(HttpServletRequest request) {
         HttpSession session = request.getSession(false);

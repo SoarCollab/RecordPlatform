@@ -6,6 +6,7 @@ import cn.dev33.satoken.exception.NotRoleException;
 import cn.flying.identity.vo.RestResponse;
 import cn.flying.platformapi.constant.ResultEnum;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -32,7 +33,7 @@ import java.util.stream.Collectors;
 /**
  * 全局异常处理器
  * 统一处理所有异常并返回符合RESTful规范的响应
- * 
+ *
  * @author 王贝强
  * @since 2025-01-16
  */
@@ -51,13 +52,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<RestResponse<Void>> handleNoHandlerFoundException(
             NoHandlerFoundException e, HttpServletRequest request) {
         logger.warn("404 - 资源未找到: {}", request.getRequestURI());
-        
+
         RestResponse<Void> response = RestResponse.notFound(
-            ResultEnum.RESULT_DATA_NONE.getCode(), 
-            "请求的资源不存在: " + request.getRequestURI()
+                ResultEnum.RESULT_DATA_NONE.getCode(),
+                "请求的资源不存在: " + request.getRequestURI()
         );
         response.withPath(request.getRequestURI());
-        
+
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
     }
 
@@ -90,7 +91,7 @@ public class GlobalExceptionHandler {
 
         response.withPath(request.getRequestURI());
         response.withTraceId(MDC.get("traceId"));
-        
+
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
     }
 
@@ -100,7 +101,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({NotPermissionException.class, NotRoleException.class})
     public ResponseEntity<RestResponse<Void>> handlePermissionException(
             Exception e, HttpServletRequest request) {
-        
+
         String message;
         if (e instanceof NotPermissionException npe) {
             logger.warn("403 - 权限不足: 缺少权限 [{}]", npe.getPermission());
@@ -112,8 +113,8 @@ public class GlobalExceptionHandler {
         }
 
         RestResponse<Void> response = RestResponse.forbidden(
-            ResultEnum.PERMISSION_UNAUTHORIZED.getCode(),
-            message
+                ResultEnum.PERMISSION_UNAUTHORIZED.getCode(),
+                message
         );
         response.withPath(request.getRequestURI());
         response.withTraceId(MDC.get("traceId"));
@@ -125,15 +126,16 @@ public class GlobalExceptionHandler {
      * 处理400 - 参数校验失败
      */
     @ExceptionHandler({
-        MethodArgumentNotValidException.class,
-        BindException.class,
-        MissingServletRequestParameterException.class,
-        MethodArgumentTypeMismatchException.class,
-        HttpMessageNotReadableException.class
+            MethodArgumentNotValidException.class,
+            BindException.class,
+            MissingServletRequestParameterException.class,
+            MethodArgumentTypeMismatchException.class,
+            HttpMessageNotReadableException.class,
+            ConstraintViolationException.class
     })
     public ResponseEntity<RestResponse<Void>> handleValidationException(
             Exception e, HttpServletRequest request) {
-        
+
         String message;
         int code = ResultEnum.PARAM_IS_INVALID.getCode();
 
@@ -158,19 +160,22 @@ public class GlobalExceptionHandler {
                 code = ResultEnum.PARAM_IS_BLANK.getCode();
             }
             case MethodArgumentTypeMismatchException ex -> message = "参数类型错误: " + ex.getName();
-            case null, default -> message = "请求参数格式错误";
+            case ConstraintViolationException ex -> {
+                message = ex.getConstraintViolations().stream()
+                        .map(cv -> cv.getPropertyPath() + ": " + cv.getMessage())
+                        .collect(Collectors.joining(", "));
+            }
+            default -> message = "请求参数格式错误: " + e.getMessage();
         }
 
         logger.warn("400 - 参数错误: {}", message);
-        
+
         RestResponse<Void> response = RestResponse.badRequest(code, message);
         response.withPath(request.getRequestURI());
         response.withTraceId(MDC.get("traceId"));
 
         if (!"prod".equals(activeProfile)) {
-            if (e != null) {
-                response.withError(e.getMessage());
-            }
+            response.withError(e.getMessage());
         }
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
@@ -182,17 +187,17 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<RestResponse<Void>> handleMethodNotSupportedException(
             HttpRequestMethodNotSupportedException e, HttpServletRequest request) {
-        
+
         logger.warn("405 - 请求方法不支持: {} {}", e.getMethod(), request.getRequestURI());
-        
+
         String message = String.format("不支持的请求方法: %s, 支持的方法: %s",
-            e.getMethod(), 
-            String.join(", ", e.getSupportedMethods() != null ? e.getSupportedMethods() : new String[0])
+                e.getMethod(),
+                String.join(", ", e.getSupportedMethods() != null ? e.getSupportedMethods() : new String[0])
         );
-        
+
         RestResponse<Void> response = RestResponse.methodNotAllowed(
-            ResultEnum.PARAM_IS_INVALID.getCode(),
-            message
+                ResultEnum.PARAM_IS_INVALID.getCode(),
+                message
         );
         response.withPath(request.getRequestURI());
         response.withTraceId(MDC.get("traceId"));
@@ -206,12 +211,14 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<RestResponse<Void>> handleMaxUploadSizeExceededException(
             MaxUploadSizeExceededException e, HttpServletRequest request) {
-        
+
         logger.warn("413 - 上传文件过大: {}", e.getMessage());
-        
-        RestResponse<Void> response = RestResponse.unprocessableEntity(
-            ResultEnum.FILE_MAX_SIZE_OVERFLOW.getCode(),
-            "上传文件大小超过限制"
+
+        RestResponse<Void> response = new RestResponse<>(
+                HttpStatus.PAYLOAD_TOO_LARGE,
+                ResultEnum.FILE_MAX_SIZE_OVERFLOW.getCode(),
+                "上传文件大小超过限制",
+                null
         );
         response.withPath(request.getRequestURI());
         response.withTraceId(MDC.get("traceId"));
@@ -225,12 +232,14 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
     public ResponseEntity<RestResponse<Void>> handleMediaTypeNotSupportedException(
             HttpMediaTypeNotSupportedException e, HttpServletRequest request) {
-        
+
         logger.warn("415 - 不支持的媒体类型: {}", e.getMessage());
-        
-        RestResponse<Void> response = RestResponse.unprocessableEntity(
-            ResultEnum.FILE_ACCEPT_NOT_SUPPORT.getCode(),
-            "不支持的内容类型: " + e.getContentType()
+
+        RestResponse<Void> response = new RestResponse<>(
+                HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+                ResultEnum.FILE_ACCEPT_NOT_SUPPORT.getCode(),
+                "不支持的内容类型: " + e.getContentType(),
+                null
         );
         response.withPath(request.getRequestURI());
         response.withTraceId(MDC.get("traceId"));
@@ -244,12 +253,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(RateLimitException.class)
     public ResponseEntity<RestResponse<Void>> handleRateLimitException(
             RateLimitException e, HttpServletRequest request) {
-        
+
         logger.warn("429 - 请求过于频繁: {}", e.getMessage());
-        
+
         RestResponse<Void> response = RestResponse.tooManyRequests(
-            ResultEnum.PERMISSION_LIMIT.getCode(),
-            "请求过于频繁，请稍后再试"
+                ResultEnum.PERMISSION_LIMIT.getCode(),
+                "请求过于频繁，请稍后再试"
         );
         response.withPath(request.getRequestURI());
         response.withTraceId(MDC.get("traceId"));
@@ -263,129 +272,22 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<RestResponse<Void>> handleBusinessException(
             BusinessException e, HttpServletRequest request) {
-        
+
         logger.warn("业务异常: {}", e.getMessage());
-        
+
         // 根据业务异常码映射到合适的HTTP状态码
         HttpStatus status = mapBusinessCodeToHttpStatus(e.getCode());
-        
+
         RestResponse<Void> response = new RestResponse<>(
-            status,
-            e.getCode(),
-            e.getMessage(),
-            null
+                status,
+                e.getCode(),
+                e.getMessage(),
+                null
         );
         response.withPath(request.getRequestURI());
         response.withTraceId(MDC.get("traceId"));
 
         return ResponseEntity.status(status).body(response);
-    }
-
-    /**
-     * 处理501 - 功能未实现
-     */
-    @ExceptionHandler(UnsupportedOperationException.class)
-    public ResponseEntity<RestResponse<Void>> handleNotImplementedException(
-            UnsupportedOperationException e, HttpServletRequest request) {
-        
-        logger.warn("501 - 功能未实现: {}", e.getMessage());
-        
-        RestResponse<Void> response = RestResponse.notImplemented(
-            ResultEnum.SYSTEM_ERROR.getCode(),
-            "该功能暂未实现"
-        );
-        response.withPath(request.getRequestURI());
-        response.withTraceId(MDC.get("traceId"));
-
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body(response);
-    }
-
-    /**
-     * 处理503 - 服务不可用
-     */
-    @ExceptionHandler(ServiceUnavailableException.class)
-    public ResponseEntity<RestResponse<Void>> handleServiceUnavailableException(
-            ServiceUnavailableException e, HttpServletRequest request) {
-        
-        logger.warn("503 - 服务不可用: {}", e.getMessage());
-        
-        RestResponse<Void> response = RestResponse.serviceUnavailable(
-            ResultEnum.SERVICE_UNAVAILABLE.getCode(),
-            "服务暂时不可用，请稍后再试"
-        );
-        response.withPath(request.getRequestURI());
-        response.withTraceId(MDC.get("traceId"));
-
-        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
-    }
-
-    /**
-     * 处理数据库异常
-     */
-    @ExceptionHandler(DataAccessException.class)
-    public ResponseEntity<RestResponse<Void>> handleDataAccessException(
-            DataAccessException e, HttpServletRequest request) {
-        
-        logger.error("数据库访问异常: ", e);
-        
-        RestResponse<Void> response = RestResponse.internalServerError(
-            ResultEnum.SYSTEM_ERROR.getCode(),
-            "数据库访问异常"
-        );
-        response.withPath(request.getRequestURI());
-        response.withTraceId(MDC.get("traceId"));
-
-        if (!"prod".equals(activeProfile)) {
-            response.withError(e.getMostSpecificCause().getMessage());
-        }
-
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
-    }
-
-    /**
-     * 处理500 - 其他运行时异常
-     */
-    @ExceptionHandler(RuntimeException.class)
-    public ResponseEntity<RestResponse<Void>> handleRuntimeException(
-            RuntimeException e, HttpServletRequest request) {
-        
-        logger.error("500 - 运行时异常: ", e);
-        
-        RestResponse<Void> response = RestResponse.internalServerError(
-            ResultEnum.SYSTEM_ERROR.getCode(),
-            "系统内部错误"
-        );
-        response.withPath(request.getRequestURI());
-        response.withTraceId(MDC.get("traceId"));
-
-        if (!"prod".equals(activeProfile)) {
-            response.withError(e.getMessage());
-        }
-
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
-    }
-
-    /**
-     * 处理所有未知异常
-     */
-    @ExceptionHandler(Exception.class)
-    public ResponseEntity<RestResponse<Void>> handleException(
-            Exception e, HttpServletRequest request) {
-        
-        logger.error("500 - 未知异常: ", e);
-        
-        RestResponse<Void> response = RestResponse.internalServerError(
-            ResultEnum.SYSTEM_ERROR.getCode(),
-            "系统繁忙，请稍后再试"
-        );
-        response.withPath(request.getRequestURI());
-        response.withTraceId(MDC.get("traceId"));
-
-        if (!"prod".equals(activeProfile)) {
-            response.withError(e.getMessage());
-        }
-
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
     }
 
     /**
@@ -425,5 +327,112 @@ public class GlobalExceptionHandler {
 
         // 默认500
         return HttpStatus.INTERNAL_SERVER_ERROR;
+    }
+
+    /**
+     * 处理501 - 功能未实现
+     */
+    @ExceptionHandler(UnsupportedOperationException.class)
+    public ResponseEntity<RestResponse<Void>> handleNotImplementedException(
+            UnsupportedOperationException e, HttpServletRequest request) {
+
+        logger.warn("501 - 功能未实现: {}", e.getMessage());
+
+        RestResponse<Void> response = RestResponse.notImplemented(
+                ResultEnum.SYSTEM_ERROR.getCode(),
+                "该功能暂未实现"
+        );
+        response.withPath(request.getRequestURI());
+        response.withTraceId(MDC.get("traceId"));
+
+        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body(response);
+    }
+
+    /**
+     * 处理503 - 服务不可用
+     */
+    @ExceptionHandler(ServiceUnavailableException.class)
+    public ResponseEntity<RestResponse<Void>> handleServiceUnavailableException(
+            ServiceUnavailableException e, HttpServletRequest request) {
+
+        logger.warn("503 - 服务不可用: {}", e.getMessage());
+
+        RestResponse<Void> response = RestResponse.serviceUnavailable(
+                ResultEnum.SERVICE_UNAVAILABLE.getCode(),
+                "服务暂时不可用，请稍后再试"
+        );
+        response.withPath(request.getRequestURI());
+        response.withTraceId(MDC.get("traceId"));
+
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
+    }
+
+    /**
+     * 处理数据库异常
+     */
+    @ExceptionHandler(DataAccessException.class)
+    public ResponseEntity<RestResponse<Void>> handleDataAccessException(
+            DataAccessException e, HttpServletRequest request) {
+
+        logger.error("数据库访问异常: ", e);
+
+        RestResponse<Void> response = RestResponse.internalServerError(
+                ResultEnum.SYSTEM_ERROR.getCode(),
+                "数据库访问异常"
+        );
+        response.withPath(request.getRequestURI());
+        response.withTraceId(MDC.get("traceId"));
+
+        if (!"prod".equals(activeProfile)) {
+            response.withError(e.getMostSpecificCause().getMessage());
+        }
+
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+    }
+
+    /**
+     * 处理500 - 其他运行时异常
+     */
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<RestResponse<Void>> handleRuntimeException(
+            RuntimeException e, HttpServletRequest request) {
+
+        logger.error("500 - 运行时异常: ", e);
+
+        RestResponse<Void> response = RestResponse.internalServerError(
+                ResultEnum.SYSTEM_ERROR.getCode(),
+                "系统内部错误"
+        );
+        response.withPath(request.getRequestURI());
+        response.withTraceId(MDC.get("traceId"));
+
+        if (!"prod".equals(activeProfile)) {
+            response.withError(e.getMessage());
+        }
+
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
+    }
+
+    /**
+     * 处理所有未知异常
+     */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<RestResponse<Void>> handleException(
+            Exception e, HttpServletRequest request) {
+
+        logger.error("500 - 未知异常: ", e);
+
+        RestResponse<Void> response = RestResponse.internalServerError(
+                ResultEnum.SYSTEM_ERROR.getCode(),
+                "系统繁忙，请稍后再试"
+        );
+        response.withPath(request.getRequestURI());
+        response.withTraceId(MDC.get("traceId"));
+
+        if (!"prod".equals(activeProfile)) {
+            response.withError(e.getMessage());
+        }
+
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
     }
 }

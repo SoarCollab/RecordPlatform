@@ -1,5 +1,6 @@
 package cn.flying.identity.service.impl.apigateway;
 
+import cn.flying.identity.constant.CacheKeyConstants;
 import cn.flying.identity.dto.apigateway.ApiRoute;
 import cn.flying.identity.mapper.apigateway.ApiRouteMapper;
 import cn.flying.identity.service.BaseService;
@@ -12,7 +13,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.AntPathMatcher;
@@ -20,9 +20,9 @@ import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 /**
  * 动态路由管理服务实现类
@@ -42,26 +42,40 @@ import java.util.stream.Collectors;
 @Service
 public class ApiRouteServiceImpl extends BaseService implements ApiRouteService {
 
-    @Resource
-    private ApiRouteMapper routeMapper;
-
-    @Resource(name = "stringRedisTemplate")
-    private StringRedisTemplate redisTemplate;
-
-    @Resource
-    private RestTemplate restTemplate;
-
-    /**
-     * Redis缓存键前缀
-     */
-    private static final String ROUTE_CACHE_PREFIX = "api:route:";
-    private static final String ROUTE_LIST_KEY = "api:route:list";
-    private static final String ROUTE_STATS_PREFIX = "api:route:stats:";
-
     /**
      * Ant路径匹配器（用于前缀匹配）
      */
     private final AntPathMatcher pathMatcher = new AntPathMatcher();
+    /**
+     * 路由匹配结果本地缓存（key=METHOD+空格+PATH），用于加速重复请求
+     */
+    private final Map<String, MatchCacheEntry> matchResultCache = new ConcurrentHashMap<>();
+    @Resource
+    private ApiRouteMapper routeMapper;
+    @Resource(name = "stringRedisTemplate")
+    private StringRedisTemplate redisTemplate;
+    @Resource
+    private RestTemplate restTemplate;
+    @Resource
+    private cn.flying.identity.gateway.discovery.NacosServiceDiscovery nacosServiceDiscovery;
+    @Resource
+    private cn.flying.identity.gateway.loadbalance.LoadBalanceManager loadBalanceManager;
+    /**
+     * 路由匹配缓存，按不同匹配方式构建索引用于加速匹配
+     */
+    private volatile Map<String, ApiRoute> exactRouteCache = new ConcurrentHashMap<>();
+    private volatile Map<String, List<ApiRoute>> prefixRouteCache = new ConcurrentHashMap<>();
+    private volatile Map<Long, Pattern> regexRouteCache = new ConcurrentHashMap<>();
+    private volatile Map<Long, ApiRoute> routeIdCache = new ConcurrentHashMap<>();
+    /**
+     * 正则路由按优先级排序后的列表，避免无序遍历
+     */
+    private volatile List<Long> orderedRegexRouteIds = new java.util.ArrayList<>();
+
+    /**
+     * 前缀路由分桶索引（method -> firstSegment -> routes），缩小候选集
+     */
+    private volatile Map<String, Map<String, List<ApiRoute>>> prefixBucketCache = new ConcurrentHashMap<>();
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -208,6 +222,7 @@ public class ApiRouteServiceImpl extends BaseService implements ApiRouteService 
             // 先从缓存获取
             List<ApiRoute> cachedRoutes = getRoutesFromCache();
             if (cachedRoutes != null && !cachedRoutes.isEmpty()) {
+                ensureRouteCacheInitialized(cachedRoutes);
                 return cachedRoutes;
             }
 
@@ -218,6 +233,7 @@ public class ApiRouteServiceImpl extends BaseService implements ApiRouteService 
                     .orderByDesc(ApiRoute::getCreateTime);
 
             List<ApiRoute> routes = routeMapper.selectList(wrapper);
+            rebuildRouteCaches(routes);
 
             // 缓存结果
             if (routes != null && !routes.isEmpty()) {
@@ -248,55 +264,58 @@ public class ApiRouteServiceImpl extends BaseService implements ApiRouteService 
             requireNonBlank(path, "请求路径不能为空");
             requireNonBlank(method, "HTTP方法不能为空");
 
-            // 获取所有活跃路由
-            Result<List<ApiRoute>> activeRoutesResult = getActiveRoutes();
-            if (!isSuccess(activeRoutesResult)) {
-                return null;
-            }
-
-            List<ApiRoute> routes = activeRoutesResult.getData();
-            if (routes == null || routes.isEmpty()) {
-                return null;
-            }
-
-            // 按优先级排序
-            routes.sort(Comparator.comparing(ApiRoute::getPriority));
-
-            // 遍历路由进行匹配
-            for (ApiRoute route : routes) {
-                // 检查HTTP方法
-                if (!"*".equals(route.getHttpMethod()) &&
-                        !route.getHttpMethod().contains(method.toUpperCase())) {
-                    continue;
-                }
-
-                // 根据路由类型进行匹配
-                boolean matched = false;
-                switch (route.getRouteType()) {
-                    case 1: // 精确匹配
-                        matched = path.equals(route.getRoutePath());
-                        break;
-                    case 2: // 前缀匹配
-                        matched = pathMatcher.match(route.getRoutePath(), path);
-                        break;
-                    case 3: // 正则匹配
-                        try {
-                            Pattern pattern = Pattern.compile(route.getRoutePath());
-                            matched = pattern.matcher(path).matches();
-                        } catch (Exception e) {
-                            logError("正则表达式匹配失败", e);
-                        }
-                        break;
-                }
-
-                if (matched) {
-                    // 记录匹配统计
-                    recordRouteMatch(route.getId());
-                    return route;
+            if (exactRouteCache.isEmpty() && prefixRouteCache.isEmpty() && regexRouteCache.isEmpty()) {
+                Result<List<ApiRoute>> activeRoutesResult = getActiveRoutes();
+                if (isSuccess(activeRoutesResult)) {
+                    ensureRouteCacheInitialized(activeRoutesResult.getData());
                 }
             }
 
-            logWarn("未找到匹配的路由: path={}, method={}", path, method);
+            String normalizedMethod = method.toUpperCase(Locale.ROOT);
+
+            // 0. 本地匹配缓存命中
+            ApiRoute cached = getCachedMatch(path, normalizedMethod);
+            if (cached != null) {
+                recordRouteMatch(cached.getId());
+                return cached;
+            }
+
+            // 1. 精确匹配命中
+            ApiRoute exactMatch = exactRouteCache.get(buildExactMatchKey(path, normalizedMethod));
+            if (exactMatch == null) {
+                exactMatch = exactRouteCache.get(buildExactMatchKey(path, "*"));
+            }
+            if (exactMatch != null) {
+                recordRouteMatch(exactMatch.getId());
+                return exactMatch;
+            }
+
+            // 2. 前缀匹配命中
+            List<ApiRoute> prefixCandidates = new ArrayList<>();
+            prefixCandidates.addAll(getPrefixCandidates(normalizedMethod, path));
+            prefixCandidates.addAll(getPrefixCandidates("*", path));
+            for (ApiRoute candidate : prefixCandidates) {
+                if (pathMatcher.match(candidate.getRoutePath(), path)) {
+                    recordRouteMatch(candidate.getId());
+                    cacheMatch(path, normalizedMethod, candidate);
+                    return candidate;
+                }
+            }
+
+            // 3. 正则匹配命中
+            for (Long routeId : orderedRegexRouteIds) {
+                Pattern pattern = regexRouteCache.get(routeId);
+                if (pattern != null && pattern.matcher(path).matches()) {
+                    ApiRoute route = routeIdCache.get(routeId);
+                    if (route != null && isHttpMethodMatch(route.getHttpMethod(), normalizedMethod)) {
+                        recordRouteMatch(route.getId());
+                        cacheMatch(path, normalizedMethod, route);
+                        return route;
+                    }
+                }
+            }
+
+            logDebug("未找到匹配的路由: path={}, method={}", path, method);
             return null;
         }, "匹配路由失败");
     }
@@ -367,14 +386,18 @@ public class ApiRouteServiceImpl extends BaseService implements ApiRouteService 
                     .orderByAsc(ApiRoute::getPriority);
 
             List<ApiRoute> routes = routeMapper.selectList(wrapper);
+            rebuildRouteCaches(routes);
 
             // 缓存路由列表
             if (routes != null && !routes.isEmpty()) {
                 cacheRoutes(routes);
             } else {
                 // 清除缓存
-                redisTemplate.delete(ROUTE_LIST_KEY);
+                redisTemplate.delete(CacheKeyConstants.ROUTE_LIST_KEY);
             }
+
+            // 清空匹配结果本地缓存
+            matchResultCache.clear();
 
             logInfo("刷新路由缓存成功: count={}", routes != null ? routes.size() : 0);
         }, "刷新路由缓存失败");
@@ -398,7 +421,7 @@ public class ApiRouteServiceImpl extends BaseService implements ApiRouteService 
             stats.put("target_service", route.getTargetService());
 
             // 从Redis获取统计数据
-            String statsKey = ROUTE_STATS_PREFIX + routeId;
+            String statsKey = CacheKeyConstants.buildRouteStatsKey(routeId);
             Map<Object, Object> redisStats = redisTemplate.opsForHash().entries(statsKey);
 
             long totalRequests = 0;
@@ -535,7 +558,7 @@ public class ApiRouteServiceImpl extends BaseService implements ApiRouteService 
             health.put("check_time", LocalDateTime.now());
 
             // 获取最近的统计信息
-            String statsKey = ROUTE_STATS_PREFIX + routeId;
+            String statsKey = CacheKeyConstants.buildRouteStatsKey(routeId);
             String errorCount = (String) redisTemplate.opsForHash().get(statsKey, "error_count");
             health.put("recent_errors", getOrElse(errorCount, "0"));
 
@@ -545,90 +568,6 @@ public class ApiRouteServiceImpl extends BaseService implements ApiRouteService 
 
             return health;
         }, "获取路由健康状态失败");
-    }
-
-    /**
-     * 检查路由路径是否已存在
-     *
-     * @param routePath  路由路径
-     * @param httpMethod HTTP方法
-     * @return 是否存在
-     */
-    private boolean isRoutePathExists(String routePath, String httpMethod) {
-        LambdaQueryWrapper<ApiRoute> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ApiRoute::getRoutePath, routePath);
-
-        if (!"*".equals(httpMethod)) {
-            wrapper.and(w -> w.eq(ApiRoute::getHttpMethod, "*")
-                    .or()
-                    .eq(ApiRoute::getHttpMethod, httpMethod));
-        }
-
-        return routeMapper.selectCount(wrapper) > 0;
-    }
-
-    /**
-     * 缓存路由列表
-     *
-     * @param routes 路由列表
-     */
-    private void cacheRoutes(List<ApiRoute> routes) {
-        try {
-            String routesJson = JSONUtil.toJsonStr(routes);
-            redisTemplate.opsForValue().set(ROUTE_LIST_KEY, routesJson, 1, TimeUnit.HOURS);
-        } catch (Exception e) {
-            logError("缓存路由列表失败", e);
-        }
-    }
-
-    /**
-     * 从缓存获取路由列表
-     *
-     * @return 路由列表
-     */
-    private List<ApiRoute> getRoutesFromCache() {
-        try {
-            String routesJson = redisTemplate.opsForValue().get(ROUTE_LIST_KEY);
-            if (StrUtil.isNotBlank(routesJson)) {
-                return JSONUtil.toList(routesJson, ApiRoute.class);
-            }
-        } catch (Exception e) {
-            logError("从缓存获取路由列表失败", e);
-        }
-        return null;
-    }
-
-    /**
-     * 记录路由匹配统计
-     *
-     * @param routeId 路由ID
-     */
-    private void recordRouteMatch(Long routeId) {
-        try {
-            String statsKey = ROUTE_STATS_PREFIX + routeId;
-            redisTemplate.opsForHash().increment(statsKey, "matches", 1);
-            redisTemplate.expire(statsKey, 24, TimeUnit.HOURS);
-        } catch (Exception e) {
-            logError("记录路由匹配统计失败", e);
-        }
-    }
-
-    /**
-     * 构建测试URL
-     *
-     * @param route 路由配置
-     * @return 测试URL
-     */
-    private String buildTestUrl(ApiRoute route) {
-        // 这里简化处理，实际应该从服务注册中心获取服务地址
-        String serviceHost = "http://" + route.getTargetService();
-        String targetPath = getOrElse(route.getTargetPath(), route.getRoutePath());
-
-        if (!targetPath.startsWith("/")) {
-            targetPath = "/" + targetPath;
-        }
-
-        return serviceHost + targetPath;
     }
 
     /**
@@ -654,6 +593,395 @@ public class ApiRouteServiceImpl extends BaseService implements ApiRouteService 
             return 40;
         } else {
             return 20;
+        }
+    }
+
+    /**
+     * 构建测试URL
+     * 从Nacos服务注册中心获取健康的服务实例地址
+     *
+     * @param route 路由配置
+     * @return 测试URL,如果无可用实例则返回降级URL
+     */
+    private String buildTestUrl(ApiRoute route) {
+        String targetPath = getOrElse(route.getTargetPath(), route.getRoutePath());
+        if (!targetPath.startsWith("/")) {
+            targetPath = "/" + targetPath;
+        }
+
+        try {
+            // 从Nacos获取服务实例列表
+            List<cn.flying.identity.gateway.discovery.NacosServiceDiscovery.ServiceInstance> instances =
+                    nacosServiceDiscovery.getServiceInstances(route.getTargetService());
+
+            if (instances != null && !instances.isEmpty()) {
+                // 从健康实例中随机选择一个(避免固定选择第一个造成压力不均)
+                List<cn.flying.identity.gateway.discovery.NacosServiceDiscovery.ServiceInstance> healthyInstances =
+                        instances.stream()
+                                .filter(cn.flying.identity.gateway.discovery.NacosServiceDiscovery.ServiceInstance::isHealthy)
+                                .toList();
+
+                if (!healthyInstances.isEmpty()) {
+                    // 使用随机策略选择实例,分散测试压力
+                    cn.flying.identity.gateway.discovery.NacosServiceDiscovery.ServiceInstance selectedInstance =
+                            healthyInstances.get(java.util.concurrent.ThreadLocalRandom.current().nextInt(healthyInstances.size()));
+
+                    // 构建完整URL: http(s)://host:port/path
+                    String protocol = "http"; // 默认HTTP,如果实例元数据中包含protocol则使用
+                    if (selectedInstance.getMetadata() != null &&
+                            "https".equalsIgnoreCase(selectedInstance.getMetadata().get("protocol"))) {
+                        protocol = "https";
+                    }
+
+                    String testUrl = String.format("%s://%s:%d%s",
+                            protocol,
+                            selectedInstance.getHost(),
+                            selectedInstance.getPort(),
+                            targetPath);
+
+                    logDebug("从Nacos获取到测试URL: service={}, instance={}:{}, url={}",
+                            route.getTargetService(),
+                            selectedInstance.getHost(),
+                            selectedInstance.getPort(),
+                            testUrl);
+
+                    return testUrl;
+                } else {
+                    logWarn("服务 {} 没有健康的实例,使用降级URL", route.getTargetService());
+                }
+            } else {
+                logWarn("从Nacos未找到服务 {} 的实例,使用降级URL", route.getTargetService());
+            }
+        } catch (Exception e) {
+            logError("从Nacos获取服务实例失败,使用降级URL: service={}", route.getTargetService(), e);
+        }
+
+        // 降级处理: Nacos不可用或无健康实例时,使用服务名作为host(依赖DNS或K8s Service)
+        String fallbackUrl = "http://" + route.getTargetService() + targetPath;
+        logWarn("使用降级测试URL: {}", fallbackUrl);
+        return fallbackUrl;
+    }
+
+    /**
+     * 检查路由路径是否已存在
+     *
+     * @param routePath  路由路径
+     * @param httpMethod HTTP方法
+     * @return 是否存在
+     */
+    private boolean isRoutePathExists(String routePath, String httpMethod) {
+        LambdaQueryWrapper<ApiRoute> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ApiRoute::getRoutePath, routePath);
+
+        if (!"*".equals(httpMethod)) {
+            wrapper.and(w -> w.eq(ApiRoute::getHttpMethod, "*")
+                    .or()
+                    .eq(ApiRoute::getHttpMethod, httpMethod));
+        }
+
+        return routeMapper.selectCount(wrapper) > 0;
+    }
+
+    /**
+     * 重建内存中的路由匹配缓存，提高路由匹配性能
+     *
+     * @param routes 当前有效路由集合
+     */
+    private synchronized void rebuildRouteCaches(List<ApiRoute> routes) {
+        Map<String, ApiRoute> newExactCache = new ConcurrentHashMap<>();
+        Map<String, List<ApiRoute>> newPrefixCache = new ConcurrentHashMap<>();
+        Map<Long, Pattern> newRegexCache = new ConcurrentHashMap<>();
+        Map<Long, ApiRoute> newRouteIdCache = new ConcurrentHashMap<>();
+        Map<String, Map<String, List<ApiRoute>>> newPrefixBuckets = new ConcurrentHashMap<>();
+        List<Long> newOrderedRegexIds = new ArrayList<>();
+
+        if (routes != null) {
+            for (ApiRoute route : routes) {
+                if (route == null || StrUtil.isBlank(route.getRoutePath())) {
+                    continue;
+                }
+                Long routeId = route.getId();
+                if (routeId != null) {
+                    newRouteIdCache.put(routeId, route);
+                }
+
+                Integer routeType = route.getRouteType();
+                List<String> methodKeys = resolveMethodKeys(route.getHttpMethod());
+
+                if (routeType == null) {
+                    methodKeys.forEach(method -> newExactCache.put(buildExactMatchKey(route.getRoutePath(), method), route));
+                    continue;
+                }
+
+                switch (routeType) {
+                    case 1 -> methodKeys.forEach(method ->
+                            newExactCache.put(buildExactMatchKey(route.getRoutePath(), method), route));
+                    case 2 -> {
+                        methodKeys.forEach(method ->
+                                newPrefixCache.computeIfAbsent(method, key -> new ArrayList<>()).add(route));
+                        // 分桶：按首段分组
+                        String first = extractFirstSegment(route.getRoutePath());
+                        methodKeys.forEach(method ->
+                                newPrefixBuckets
+                                        .computeIfAbsent(method, m -> new ConcurrentHashMap<>())
+                                        .computeIfAbsent(first, f -> new ArrayList<>())
+                                        .add(route));
+                    }
+                    case 3 -> {
+                        if (routeId != null) {
+                            try {
+                                newRegexCache.put(routeId, Pattern.compile(route.getRoutePath()));
+                                newOrderedRegexIds.add(routeId);
+                            } catch (Exception e) {
+                                logError("编译路由正则失败", e);
+                            }
+                        }
+                    }
+                    default -> methodKeys.forEach(method ->
+                            newExactCache.put(buildExactMatchKey(route.getRoutePath(), method), route));
+                }
+            }
+        }
+
+        Map<String, List<ApiRoute>> normalizedPrefixCache = new ConcurrentHashMap<>();
+        newPrefixCache.forEach((key, value) -> {
+            List<ApiRoute> sortedList = value.stream()
+                    .sorted(
+                            Comparator
+                                    .comparing((ApiRoute route) -> Optional.ofNullable(route.getPriority()).orElse(Integer.MAX_VALUE))
+                                    .thenComparing(
+                                            (ApiRoute route) -> Optional.ofNullable(route.getRoutePath()).map(String::length).orElse(0),
+                                            Comparator.reverseOrder()
+                                    )
+                    )
+                    .toList();
+            normalizedPrefixCache.put(key, sortedList);
+        });
+
+        // 归一化分桶：同样按优先级+路径长度排序
+        Map<String, Map<String, List<ApiRoute>>> normalizedBuckets = new ConcurrentHashMap<>();
+        newPrefixBuckets.forEach((method, bucket) -> {
+            Map<String, List<ApiRoute>> sortedBucket = new ConcurrentHashMap<>();
+            bucket.forEach((segment, list) -> {
+                List<ApiRoute> sorted = list.stream()
+                        .sorted(
+                                Comparator
+                                        .comparing((ApiRoute route) -> Optional.ofNullable(route.getPriority()).orElse(Integer.MAX_VALUE))
+                                        .thenComparing(
+                                                (ApiRoute route) -> Optional.ofNullable(route.getRoutePath()).map(String::length).orElse(0),
+                                                Comparator.reverseOrder()
+                                        )
+                        )
+                        .toList();
+                sortedBucket.put(segment, sorted);
+            });
+            normalizedBuckets.put(method, sortedBucket);
+        });
+
+        // 正则路由排序：按优先级（小到大）+ 路径长度（长到短）
+        newOrderedRegexIds = newOrderedRegexIds.stream()
+                .sorted(
+                        Comparator
+                                .comparing((Long id) -> Optional.ofNullable(newRouteIdCache.get(id)).map(ApiRoute::getPriority).orElse(Integer.MAX_VALUE))
+                                .thenComparing(
+                                        (Long id) -> Optional.ofNullable(newRouteIdCache.get(id)).map(ApiRoute::getRoutePath).map(String::length).orElse(0),
+                                        Comparator.reverseOrder()
+                                )
+                )
+                .toList();
+
+        this.exactRouteCache = newExactCache;
+        this.prefixRouteCache = normalizedPrefixCache;
+        this.regexRouteCache = newRegexCache;
+        this.routeIdCache = newRouteIdCache;
+        this.prefixBucketCache = normalizedBuckets;
+        this.orderedRegexRouteIds = newOrderedRegexIds;
+    }
+
+    /**
+     * 缓存路由列表
+     *
+     * @param routes 路由列表
+     */
+    private void cacheRoutes(List<ApiRoute> routes) {
+        try {
+            String routesJson = JSONUtil.toJsonStr(routes);
+            redisTemplate.opsForValue().set(CacheKeyConstants.ROUTE_LIST_KEY, routesJson, 1, TimeUnit.HOURS);
+        } catch (Exception e) {
+            logError("缓存路由列表失败", e);
+        }
+    }
+
+    /**
+     * 解析 HTTP 方法配置，拆分为标准方法列表
+     *
+     * @param methodValue HTTP 方法字符串
+     * @return 方法列表
+     */
+    private List<String> resolveMethodKeys(String methodValue) {
+        if (StrUtil.isBlank(methodValue) || "*".equals(methodValue.trim())) {
+            return Collections.singletonList("*");
+        }
+        String[] methods = methodValue.split(",");
+        List<String> result = new ArrayList<>();
+        for (String item : methods) {
+            String trimmed = item.trim();
+            if (StrUtil.isBlank(trimmed)) {
+                continue;
+            }
+            result.add(trimmed.toUpperCase(Locale.ROOT));
+        }
+        if (result.isEmpty()) {
+            result.add("*");
+        }
+        return result;
+    }
+
+    /**
+     * 构建精确匹配缓存键
+     *
+     * @param routePath 路由路径
+     * @param method    HTTP 方法
+     * @return 精确匹配键
+     */
+    private String buildExactMatchKey(String routePath, String method) {
+        return routePath + ":" + method;
+    }
+
+    /**
+     * 根据请求路径提取首段（用于分桶），示例：/api/user/1 -> api
+     */
+    private String extractFirstSegment(String path) {
+        if (StrUtil.isBlank(path)) {
+            return "*";
+        }
+        String normalized = path.startsWith("/") ? path.substring(1) : path;
+        int idx = normalized.indexOf('/');
+        return idx < 0 ? normalized : normalized.substring(0, idx);
+    }
+
+    /**
+     * 从缓存获取路由列表
+     *
+     * @return 路由列表
+     */
+    private List<ApiRoute> getRoutesFromCache() {
+        try {
+            String routesJson = redisTemplate.opsForValue().get(CacheKeyConstants.ROUTE_LIST_KEY);
+            if (StrUtil.isNotBlank(routesJson)) {
+                return JSONUtil.toList(routesJson, ApiRoute.class);
+            }
+        } catch (Exception e) {
+            logError("从缓存获取路由列表失败", e);
+        }
+        return null;
+    }
+
+    /**
+     * 记录路由匹配统计
+     *
+     * @param routeId 路由ID
+     */
+    private void recordRouteMatch(Long routeId) {
+        try {
+            String statsKey = CacheKeyConstants.buildRouteStatsKey(routeId);
+            redisTemplate.opsForHash().increment(statsKey, "matches", 1);
+            redisTemplate.expire(statsKey, 24, TimeUnit.HOURS);
+        } catch (Exception e) {
+            logError("记录路由匹配统计失败", e);
+        }
+    }
+
+    /**
+     * 判断指定 HTTP 方法是否与路由配置匹配
+     *
+     * @param configuredMethod 路由配置的方法
+     * @param requestMethod    请求的方法（大写）
+     * @return 是否匹配
+     */
+    private boolean isHttpMethodMatch(String configuredMethod, String requestMethod) {
+        List<String> methodKeys = resolveMethodKeys(Optional.ofNullable(configuredMethod).orElse("*"));
+        return methodKeys.contains("*") || methodKeys.contains(requestMethod);
+    }
+
+    /**
+     * 确保内存路由缓存已初始化，避免首次访问命中空缓存
+     *
+     * @param routes 当前路由数据
+     */
+    private void ensureRouteCacheInitialized(List<ApiRoute> routes) {
+        if (routes == null || routes.isEmpty()) {
+            return;
+        }
+        if (exactRouteCache.isEmpty() && prefixRouteCache.isEmpty() && regexRouteCache.isEmpty()) {
+            rebuildRouteCaches(routes);
+        }
+    }
+
+    /**
+     * 获取前缀匹配候选集（按 method 与首段分桶）
+     */
+    private List<ApiRoute> getPrefixCandidates(String method, String requestPath) {
+        Map<String, List<ApiRoute>> bucket = prefixBucketCache.get(method);
+        if (bucket == null || bucket.isEmpty()) {
+            // 退化为原有列表
+            return Optional.ofNullable(prefixRouteCache.get(method)).orElse(Collections.emptyList());
+        }
+        String first = extractFirstSegment(requestPath);
+        List<ApiRoute> list = new ArrayList<>();
+        List<ApiRoute> exactBucket = bucket.get(first);
+        if (exactBucket != null) {
+            list.addAll(exactBucket);
+        }
+        List<ApiRoute> wildcardBucket = bucket.get("*");
+        if (wildcardBucket != null) {
+            list.addAll(wildcardBucket);
+        }
+        return list.isEmpty() ? Optional.ofNullable(prefixRouteCache.get(method)).orElse(Collections.emptyList()) : list;
+    }
+
+    /**
+     * 从本地匹配缓存获取（命中且未过期时返回）
+     */
+    private ApiRoute getCachedMatch(String path, String method) {
+        String key = buildMatchCacheKey(path, method);
+        MatchCacheEntry entry = matchResultCache.get(key);
+        if (entry != null && !entry.isExpired()) {
+            return routeIdCache.get(entry.routeId);
+        }
+        return null;
+    }
+
+    /**
+     * 写入本地匹配缓存
+     */
+    private void cacheMatch(String path, String method, ApiRoute route) {
+        if (route == null || route.getId() == null) {
+            return;
+        }
+        String key = buildMatchCacheKey(path, method);
+        matchResultCache.put(key, new MatchCacheEntry(route.getId()));
+    }
+
+    private String buildMatchCacheKey(String path, String method) {
+        return method + " " + path;
+    }
+
+    /**
+     * 匹配结果缓存条目
+     */
+    private static class MatchCacheEntry {
+        private static final long TTL_MS = 60_000L;
+        private final long timestamp;
+        private final Long routeId;
+
+        MatchCacheEntry(Long routeId) {
+            this.routeId = routeId;
+            this.timestamp = System.currentTimeMillis();
+        }
+
+        boolean isExpired() {
+            return System.currentTimeMillis() - timestamp > TTL_MS;
         }
     }
 }

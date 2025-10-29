@@ -9,18 +9,21 @@ import cn.flying.monitor.server.mapper.ClientDetailMapper;
 import cn.flying.monitor.server.mapper.ClientMapper;
 import cn.flying.monitor.server.mapper.ClientSshMapper;
 import cn.flying.monitor.server.service.ClientService;
-import cn.flying.monitor.server.utils.influxDBUtils;
+import cn.flying.monitor.server.utils.Const;
+import cn.flying.monitor.server.utils.InfluxDBUtils;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @program: monitor
@@ -35,32 +38,61 @@ public class ClientServiceImpl extends ServiceImpl<ClientMapper, Client> impleme
     private final Map<Integer, Client> clientIdCache = new ConcurrentHashMap<>();
     private final Map<String, Client> clientTokenCache = new ConcurrentHashMap<>();
     private final Map<Integer, RuntimeDetailVO> currentRuntime = new ConcurrentHashMap<>();
+
     @Resource
-    influxDBUtils influx;
+    InfluxDBUtils influx;
+
+    @Resource
+    StringRedisTemplate stringRedisTemplate;
+
     private String registerToken = this.createNewToken();
+
     @Resource
     private ClientDetailMapper clientDetailMapper;
+
     @Resource
     private ClientSshMapper clientSshMapper;
 
     @Override
     public String getToken() {
-        return registerToken;
+        String key = Const.REGISTER_TOKEN_KEY;
+        String token = stringRedisTemplate.opsForValue().get(key);
+        if (token == null || token.isBlank()) {
+            synchronized (this) {
+                token = stringRedisTemplate.opsForValue().get(key);
+                if (token == null || token.isBlank()) {
+                    token = this.createNewToken();
+                    stringRedisTemplate.opsForValue().set(key, token, Const.REGISTER_TOKEN_TTL_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
+                    this.registerToken = token;
+                }
+            }
+        }
+        return token;
     }
 
     @Override
     public boolean registerClient(String token) {
-        if (this.registerToken.equals(token)) {
-            int id = this.randomClientId();
+        synchronized (this) {
+            String key = Const.REGISTER_TOKEN_KEY;
+            String current = stringRedisTemplate.opsForValue().get(key);
+            if (current == null || !current.equals(token)) {
+                return false;
+            }
+            int id;
+            do {
+                id = this.randomClientId();
+            } while (this.getById(id) != null);
             Client client = new Client(id, "未命名主机", token, "cn", "未命名节点", new Date());
             if (this.save(client)) {
-                this.registerToken = this.createNewToken();
+                String newToken = this.createNewToken();
+                stringRedisTemplate.opsForValue().set(key, newToken, Const.REGISTER_TOKEN_TTL_SECONDS, TimeUnit.SECONDS);
+                this.registerToken = newToken;
                 this.addClientCache(client);
                 log.info("主机注册成功，Id：{}", id);
                 return true;
             }
+            return false;
         }
-        return false;
     }
 
     @Override
@@ -174,9 +206,8 @@ public class ClientServiceImpl extends ServiceImpl<ClientMapper, Client> impleme
     @Override
     public void deleteClient(int clientId) {
         this.removeById(clientId);
-        baseMapper.deleteById(clientId);
-        this.initClientCache();
         currentRuntime.remove(clientId);
+        this.initClientCache();
     }
 
     @Override
@@ -211,16 +242,6 @@ public class ClientServiceImpl extends ServiceImpl<ClientMapper, Client> impleme
         return new Random().nextInt(90000000) + 10000000;
     }
 
-    private String createNewToken() {
-        String CHARACTERS = "abcdefghijhlmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        SecureRandom random = new SecureRandom();
-        StringBuilder builder = new StringBuilder(24);
-        for (int i = 0; i < 24; i++) {
-            builder.append(CHARACTERS.charAt(random.nextInt(CHARACTERS.length())));
-        }
-        return builder.toString();
-    }
-
     private void addClientCache(Client client) {
         // 防御性检查：避免 null token 污染缓存
         if (client == null) {
@@ -237,5 +258,15 @@ public class ClientServiceImpl extends ServiceImpl<ClientMapper, Client> impleme
         clientTokenCache.put(client.getToken(), client);
         log.debug("客户端 {} 已加载到缓存，Token: {}...", client.getId(),
                 client.getToken().substring(0, Math.min(8, client.getToken().length())));
+    }
+
+    private String createNewToken() {
+        String CHARACTERS = "abcdefghijhlmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        SecureRandom random = new SecureRandom();
+        StringBuilder builder = new StringBuilder(24);
+        for (int i = 0; i < 24; i++) {
+            builder.append(CHARACTERS.charAt(random.nextInt(CHARACTERS.length())));
+        }
+        return builder.toString();
     }
 }

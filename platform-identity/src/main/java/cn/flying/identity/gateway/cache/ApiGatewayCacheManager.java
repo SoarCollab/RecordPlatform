@@ -1,5 +1,6 @@
 package cn.flying.identity.gateway.cache;
 
+import cn.flying.identity.constant.CacheKeyConstants;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -45,7 +46,8 @@ public class ApiGatewayCacheManager {
     /**
      * JSON序列化器
      */
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    @Resource
+    private ObjectMapper objectMapper;
     /**
      * 通用缓存映射
      */
@@ -82,21 +84,6 @@ public class ApiGatewayCacheManager {
     private boolean enableStats;
 
     /**
-     * 路由缓存
-     */
-    private Cache<String, Object> routeCache;
-
-    /**
-     * API密钥缓存
-     */
-    private Cache<String, Object> apiKeyCache;
-
-    /**
-     * 权限缓存
-     */
-    private Cache<String, Object> permissionCache;
-
-    /**
      * 初始化缓存
      */
     @PostConstruct
@@ -104,15 +91,15 @@ public class ApiGatewayCacheManager {
         log.info("初始化API网关多级缓存管理器...");
 
         // 创建路由缓存
-        routeCache = createCache("route", l1MaxSize * 2, l1ExpireSeconds);
+        Cache<String, Object> routeCache = createCache("route", l1MaxSize * 2, l1ExpireSeconds);
         cacheMap.put("route", routeCache);
 
         // 创建API密钥缓存
-        apiKeyCache = createCache("apiKey", l1MaxSize, l1ExpireSeconds * 2);
+        Cache<String, Object> apiKeyCache = createCache("apiKey", l1MaxSize, l1ExpireSeconds * 2);
         cacheMap.put("apiKey", apiKeyCache);
 
         // 创建权限缓存
-        permissionCache = createCache("permission", l1MaxSize, l1ExpireSeconds);
+        Cache<String, Object> permissionCache = createCache("permission", l1MaxSize, l1ExpireSeconds);
         cacheMap.put("permission", permissionCache);
 
         log.info("API网关多级缓存管理器初始化完成");
@@ -178,6 +165,30 @@ public class ApiGatewayCacheManager {
     }
 
     /**
+     * 获取缓存值(支持loader回调的简化版)
+     * 组合键格式: cacheName:key,缓存未命中时自动调用loader加载数据并写入缓存
+     *
+     * @param cacheKey 缓存键,格式: cacheName:key
+     * @param loader   数据加载器,缓存未命中时调用(可选)
+     * @param <T>      返回值类型
+     * @return 缓存值或loader加载的值
+     */
+    public <T> T get(String cacheKey, Supplier<T> loader) {
+        // 解析缓存键,格式: cacheName:key
+        int index = cacheKey.indexOf(':');
+        if (index <= 0) {
+            log.warn("缓存键格式错误: {}, 期望格式: cacheName:key", cacheKey);
+            return loader != null ? loader.get() : null;
+        }
+
+        String cacheName = cacheKey.substring(0, index);
+        String key = cacheKey.substring(index + 1);
+
+        // 委托给增强版get方法处理
+        return get(cacheName, key, loader);
+    }
+
+    /**
      * 构建Redis缓存键
      *
      * @param cacheName 缓存名称
@@ -185,7 +196,7 @@ public class ApiGatewayCacheManager {
      * @return Redis键
      */
     private String buildRedisKey(String cacheName, String key) {
-        return "api:gateway:cache:" + cacheName + ":" + key;
+        return CacheKeyConstants.buildGatewayCacheKey(cacheName, key);
     }
 
     /**
@@ -208,7 +219,7 @@ public class ApiGatewayCacheManager {
 
     /**
      * 清空指定缓存
-     * 修复：使用SCAN命令替代keys命令，避免阻塞Redis
+     * 使用SCAN命令替代keys命令，避免阻塞Redis
      *
      * @param cacheName 缓存名称
      */
@@ -218,36 +229,30 @@ public class ApiGatewayCacheManager {
             cache.invalidateAll();
         }
 
-        // 使用SCAN命令批量删除，避免keys命令阻塞
-        String pattern = buildRedisKey(cacheName, "*");
-        Set<String> keysToDelete = new HashSet<>();
+        final int batchSize = 100;
+        final String pattern = buildRedisKey(cacheName, "*");
 
-        // 使用SCAN命令分批获取keys
         redisTemplate.execute((RedisCallback<Void>) connection -> {
+            Set<String> keysToDelete = new HashSet<>(batchSize);
             try (Cursor<byte[]> cursor = connection.scan(
                     ScanOptions.scanOptions()
                             .match(pattern)
-                            .count(100)
+                            .count(batchSize)
                             .build())) {
                 cursor.forEachRemaining(key -> {
-                    String keyStr = new String(key, StandardCharsets.UTF_8);
-                    keysToDelete.add(keyStr);
-
-                    // 批量删除，每100个key删除一次
-                    if (keysToDelete.size() >= 100) {
+                    keysToDelete.add(new String(key, StandardCharsets.UTF_8));
+                    if (keysToDelete.size() >= batchSize) {
                         redisTemplate.delete(keysToDelete);
                         keysToDelete.clear();
                     }
                 });
+                if (!keysToDelete.isEmpty()) {
+                    redisTemplate.delete(keysToDelete);
+                }
             } catch (Exception e) {
                 log.error("扫描Redis键失败: pattern={}", pattern, e);
+                throw new RuntimeException("清理缓存失败", e);
             }
-
-            // 删除剩余的keys
-            if (!keysToDelete.isEmpty()) {
-                redisTemplate.delete(keysToDelete);
-            }
-
             return null;
         });
 
@@ -321,6 +326,59 @@ public class ApiGatewayCacheManager {
         }
 
         return value;
+    }
+
+    /**
+     * 获取缓存值（带类型，支持多级缓存）
+     * 优先从 L1 命中；未命中则从 Redis 命中并按指定类型反序列化；都未命中则通过 loader 加载并回填缓存
+     *
+     * @param cacheName 缓存名称
+     * @param key       缓存键
+     * @param type      目标类型
+     * @param loader    未命中时的数据加载器
+     * @param <T>       值类型
+     * @return 期望类型的缓存值
+     */
+    public <T> T get(String cacheName, String key, Class<T> type, Supplier<T> loader) {
+        Cache<String, Object> cache = cacheMap.get(cacheName);
+        if (cache == null) {
+            log.warn("缓存不存在: cacheName={}", cacheName);
+            return loader != null ? loader.get() : null;
+        }
+
+        Object cached = cache.getIfPresent(key);
+        if (cached != null) {
+            recordHit(cacheName, true);
+            log.debug("L1缓存命中: cacheName={}, key={}", cacheName, key);
+            try {
+                return type.cast(cached);
+            } catch (ClassCastException ex) {
+                // 类型不匹配时回退重新加载
+                log.warn("L1缓存类型不匹配: key={}, expect={}, actual={}", key, type.getName(), cached.getClass().getName());
+            }
+        }
+
+        String redisKey = buildRedisKey(cacheName, key);
+        String redisValue = redisTemplate.opsForValue().get(redisKey);
+        if (redisValue != null) {
+            recordHit(cacheName, false);
+            log.debug("L2缓存命中: cacheName={}, key={}", cacheName, key);
+            try {
+                T value = type == String.class ? type.cast(redisValue) : objectMapper.readValue(redisValue, type);
+                cache.put(key, value);
+                return value;
+            } catch (Exception ex) {
+                log.error("Redis反序列化失败: cacheName={}, key={}, type={}", cacheName, key, type.getName(), ex);
+            }
+        }
+
+        recordMiss(cacheName);
+        log.debug("缓存未命中: cacheName={}, key={}", cacheName, key);
+        T loaded = loader != null ? loader.get() : null;
+        if (loaded != null) {
+            put(cacheName, key, loaded);
+        }
+        return loaded;
     }
 
     /**
@@ -415,7 +473,7 @@ public class ApiGatewayCacheManager {
      */
     public Boolean getPermission(Long appId, Long interfaceId, Supplier<Boolean> loader) {
         String key = appId + ":" + interfaceId;
-        return get("permission", key, loader);
+        return get("permission", key, Boolean.class, loader);
     }
 
     /**

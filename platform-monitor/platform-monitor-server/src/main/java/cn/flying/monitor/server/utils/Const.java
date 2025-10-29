@@ -24,6 +24,9 @@ public final class Const {
     public final static String ATTR_USER_ROLE = "userRole";
     //消息队列
     public final static String MQ_MAIL = "mail";
+    //客户端注册Token（Redis Key）
+    public final static String REGISTER_TOKEN_KEY = "monitor:register:token";
+    public final static int REGISTER_TOKEN_TTL_SECONDS = 600;
     //用户角色
     public final static String ROLE_DEFAULT = "user";
     public final static String ROLE_ADMIN = "admin";

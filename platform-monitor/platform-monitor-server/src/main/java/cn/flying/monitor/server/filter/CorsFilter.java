@@ -31,6 +31,10 @@ public class CorsFilter extends HttpFilter {
     @Override
     protected void doFilter(HttpServletRequest request, HttpServletResponse response, FilterChain chain) throws IOException, ServletException {
         this.addCorsHeader(request, response);
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            response.setStatus(HttpServletResponse.SC_OK);
+            return;
+        }
         chain.doFilter(request, response);
     }
 
@@ -43,7 +47,8 @@ public class CorsFilter extends HttpFilter {
     private void addCorsHeader(HttpServletRequest request, HttpServletResponse response) {
         response.addHeader("Access-Control-Allow-Origin", this.resolveOrigin(request));
         response.addHeader("Access-Control-Allow-Methods", this.resolveMethod());
-        response.addHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+        response.addHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Requested-With");
+        response.addHeader("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers");
         if (credentials) {
             response.addHeader("Access-Control-Allow-Credentials", "true");
         }

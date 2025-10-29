@@ -1,10 +1,11 @@
 package cn.flying.monitor.client.task;
 
-import jakarta.annotation.Nonnull;
-import jakarta.annotation.Resource;
 import cn.flying.monitor.client.entity.RuntimeDetail;
 import cn.flying.monitor.client.utils.MonitorUtils;
 import cn.flying.monitor.client.utils.NetUtils;
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Resource;
+import org.quartz.DisallowConcurrentExecution;
 import org.quartz.JobExecutionContext;
 import org.springframework.scheduling.quartz.QuartzJobBean;
 import org.springframework.stereotype.Component;
@@ -16,14 +17,20 @@ import org.springframework.stereotype.Component;
  * @create: 2024-07-15 18:28
  */
 @Component
+@DisallowConcurrentExecution
 public class MonitorJobBean extends QuartzJobBean {
+
     @Resource
     MonitorUtils monitor;
+
     @Resource
     NetUtils net;
+
     @Override
     protected void executeInternal(@Nonnull JobExecutionContext context) {
-        RuntimeDetail runtimeDetail=monitor.monitorRuntimeDetail();
-        net.updateRuntimeDetails(runtimeDetail);
+        RuntimeDetail runtimeDetail = monitor.monitorRuntimeDetail();
+        if (runtimeDetail != null) {
+            net.updateRuntimeDetails(runtimeDetail);
+        }
     }
 }
