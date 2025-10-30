@@ -2,10 +2,7 @@ package cn.flying.identity.controller;
 
 import cn.dev33.satoken.annotation.SaCheckRole;
 import cn.flying.identity.service.GatewayMonitorService;
-import cn.flying.identity.util.ResponseConverter;
 import cn.flying.identity.vo.RestResponse;
-import cn.flying.platformapi.constant.Result;
-import cn.flying.platformapi.constant.ResultEnum;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -15,6 +12,7 @@ import jakarta.annotation.Resource;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -47,9 +45,8 @@ public class GatewayMonitorController {
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getRealTimeTrafficStats(
             @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange) {
-        Result<Map<String, Object>> result = gatewayMonitorService.getRealTimeTrafficStats(timeRange);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = gatewayMonitorService.getRealTimeTrafficStats(timeRange);
+        return ResponseEntity.ok(RestResponse.ok("获取实时流量统计成功", data));
     }
 
     /**
@@ -66,9 +63,8 @@ public class GatewayMonitorController {
     public ResponseEntity<RestResponse<Map<String, Object>>> getApiCallStats(
             @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange,
             @Parameter(description = "返回条数限制") @RequestParam(defaultValue = "20") int limit) {
-        Result<Map<String, Object>> result = gatewayMonitorService.getApiCallStats(timeRange, limit);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = gatewayMonitorService.getApiCallStats(timeRange, limit);
+        return ResponseEntity.ok(RestResponse.ok("获取API调用统计成功", data));
     }
 
     /**
@@ -84,9 +80,8 @@ public class GatewayMonitorController {
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getErrorStats(
             @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange) {
-        Result<Map<String, Object>> result = gatewayMonitorService.getErrorStats(timeRange);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = gatewayMonitorService.getErrorStats(timeRange);
+        return ResponseEntity.ok(RestResponse.ok("获取错误统计成功", data));
     }
 
     /**
@@ -102,9 +97,8 @@ public class GatewayMonitorController {
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getPerformanceStats(
             @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange) {
-        Result<Map<String, Object>> result = gatewayMonitorService.getPerformanceStats(timeRange);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = gatewayMonitorService.getPerformanceStats(timeRange);
+        return ResponseEntity.ok(RestResponse.ok("获取性能统计成功", data));
     }
 
     /**
@@ -120,9 +114,8 @@ public class GatewayMonitorController {
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getUserActivityStats(
             @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange) {
-        Result<Map<String, Object>> result = gatewayMonitorService.getUserActivityStats(timeRange);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = gatewayMonitorService.getUserActivityStats(timeRange);
+        return ResponseEntity.ok(RestResponse.ok("获取用户活跃度统计成功", data));
     }
 
     /**
@@ -140,9 +133,8 @@ public class GatewayMonitorController {
     public ResponseEntity<RestResponse<Map<String, Object>>> detectAbnormalTraffic(
             @Parameter(description = "客户端IP") @RequestParam String clientIp,
             @Parameter(description = "用户ID") @RequestParam(required = false) Long userId) {
-        Result<Map<String, Object>> result = gatewayMonitorService.detectAbnormalTraffic(clientIp, userId);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = gatewayMonitorService.detectAbnormalTraffic(clientIp, userId);
+        return ResponseEntity.ok(RestResponse.ok("检测成功", data));
     }
 
     /**
@@ -156,9 +148,8 @@ public class GatewayMonitorController {
         @ApiResponse(responseCode = "503", description = "服务不可用")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getSystemHealth() {
-        Result<Map<String, Object>> result = gatewayMonitorService.getSystemHealth();
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = gatewayMonitorService.getSystemHealth();
+        return ResponseEntity.ok(RestResponse.ok("获取系统健康状态成功", data));
     }
 
     /**
@@ -175,9 +166,8 @@ public class GatewayMonitorController {
     public ResponseEntity<RestResponse<Map<String, Object>>> getHotApiRanking(
             @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange,
             @Parameter(description = "返回条数限制") @RequestParam(defaultValue = "10") int limit) {
-        Result<Map<String, Object>> result = gatewayMonitorService.getHotApiRanking(timeRange, limit);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = gatewayMonitorService.getHotApiRanking(timeRange, limit);
+        return ResponseEntity.ok(RestResponse.ok("获取热点API排行成功", data));
     }
 
     /**
@@ -194,9 +184,8 @@ public class GatewayMonitorController {
     public ResponseEntity<RestResponse<Map<String, Object>>> getSlowQueryStats(
             @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange,
             @Parameter(description = "慢查询阈值（毫秒）") @RequestParam(defaultValue = "1000") long threshold) {
-        Result<Map<String, Object>> result = gatewayMonitorService.getSlowQueryStats(timeRange, threshold);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = gatewayMonitorService.getSlowQueryStats(timeRange, threshold);
+        return ResponseEntity.ok(RestResponse.ok("获取慢查询统计成功", data));
     }
 
     /**
@@ -212,9 +201,8 @@ public class GatewayMonitorController {
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getGeographicStats(
             @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange) {
-        Result<Map<String, Object>> result = gatewayMonitorService.getGeographicStats(timeRange);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = gatewayMonitorService.getGeographicStats(timeRange);
+        return ResponseEntity.ok(RestResponse.ok("获取地理位置统计成功", data));
     }
 
     /**
@@ -230,9 +218,8 @@ public class GatewayMonitorController {
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> cleanExpiredData(
             @Parameter(description = "保留天数") @RequestParam(defaultValue = "30") int retentionDays) {
-        Result<Map<String, Object>> result = gatewayMonitorService.cleanExpiredData(retentionDays);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = gatewayMonitorService.cleanExpiredData(retentionDays);
+        return ResponseEntity.ok(RestResponse.ok("清理成功", data));
     }
 
     /**
@@ -250,45 +237,16 @@ public class GatewayMonitorController {
     public ResponseEntity<RestResponse<Map<String, Object>>> getDashboardData(
             @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange) {
 
-        try {
-            Map<String, Object> dashboard = new java.util.HashMap<>();
+        Map<String, Object> dashboard = new HashMap<>();
+        dashboard.put("traffic", gatewayMonitorService.getRealTimeTrafficStats(timeRange));
+        dashboard.put("apiStats", gatewayMonitorService.getApiCallStats(timeRange, 10));
+        dashboard.put("errorStats", gatewayMonitorService.getErrorStats(timeRange));
+        dashboard.put("performance", gatewayMonitorService.getPerformanceStats(timeRange));
+        dashboard.put("userActivity", gatewayMonitorService.getUserActivityStats(timeRange));
+        dashboard.put("systemHealth", gatewayMonitorService.getSystemHealth());
+        dashboard.put("timeRange", timeRange);
+        dashboard.put("lastUpdated", System.currentTimeMillis());
 
-            // 获取各项统计数据
-            Result<Map<String, Object>> trafficStats = gatewayMonitorService.getRealTimeTrafficStats(timeRange);
-            Result<Map<String, Object>> apiStats = gatewayMonitorService.getApiCallStats(timeRange, 10);
-            Result<Map<String, Object>> errorStats = gatewayMonitorService.getErrorStats(timeRange);
-            Result<Map<String, Object>> performanceStats = gatewayMonitorService.getPerformanceStats(timeRange);
-            Result<Map<String, Object>> userStats = gatewayMonitorService.getUserActivityStats(timeRange);
-            Result<Map<String, Object>> healthStats = gatewayMonitorService.getSystemHealth();
-
-            // 组装仪表板数据
-            if (trafficStats.isSuccess()) {
-                dashboard.put("traffic", trafficStats.getData());
-            }
-            if (apiStats.isSuccess()) {
-                dashboard.put("apiStats", apiStats.getData());
-            }
-            if (errorStats.isSuccess()) {
-                dashboard.put("errorStats", errorStats.getData());
-            }
-            if (performanceStats.isSuccess()) {
-                dashboard.put("performance", performanceStats.getData());
-            }
-            if (userStats.isSuccess()) {
-                dashboard.put("userActivity", userStats.getData());
-            }
-            if (healthStats.isSuccess()) {
-                dashboard.put("systemHealth", healthStats.getData());
-            }
-
-            dashboard.put("timeRange", timeRange);
-            dashboard.put("lastUpdated", System.currentTimeMillis());
-
-            return ResponseEntity.ok(RestResponse.ok(dashboard));
-        } catch (Exception e) {
-            return ResponseEntity.status(500)
-                    .body(RestResponse.internalServerError(ResultEnum.SYSTEM_ERROR.getCode(), 
-                        "获取仪表板数据失败"));
-        }
+        return ResponseEntity.ok(RestResponse.ok("获取仪表板数据成功", dashboard));
     }
 }

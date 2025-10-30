@@ -5,18 +5,18 @@ import cn.flying.identity.config.OAuthConfig;
 import cn.flying.identity.dto.Account;
 import cn.flying.identity.dto.OAuthClient;
 import cn.flying.identity.dto.OAuthCode;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.mapper.AccountMapper;
 import cn.flying.identity.mapper.OAuthClientMapper;
 import cn.flying.identity.mapper.OAuthCodeMapper;
 import cn.flying.identity.service.OAuthClientSecretService;
 import cn.flying.identity.service.OAuthService;
-import cn.flying.identity.util.SecureLogger;
-import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit;
  * OAuth2.0服务实现类
  * 实现SSO单点登录和第三方应用接入的具体逻辑
  */
+@Slf4j
 @Service
 public class OAuthServiceImpl implements OAuthService {
 
@@ -65,50 +66,46 @@ public class OAuthServiceImpl implements OAuthService {
      * @return 授权页面信息
      */
     @Override
-    public Result<Map<String, Object>> getAuthorizeInfo(String clientId, String redirectUri, String scope, String state) {
+    public Map<String, Object> getAuthorizeInfo(String clientId, String redirectUri, String scope, String state) {
         try {
-            // 验证客户端
             OAuthClient client = oauthClientMapper.findByClientKey(clientId);
             if (client == null || client.getStatus() != 1) {
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "客户端不存在或已禁用");
             }
 
-            // 验证重定向URI
             if (!isValidRedirectUri(client, redirectUri)) {
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+                log.warn("无效的重定向URI: clientId={}, redirectUri={}", clientId, redirectUri);
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "重定向URI不合法");
             }
-            
-            // 强制验证状态参数（防CSRF攻击）
+
             if (oauthConfig.isRequireState() && StrUtil.isBlank(state)) {
-                SecureLogger.warn("缺少必需的状态参数: clientId={}", clientId);
-                return createOAuthError("invalid_request", "Missing required state parameter");
+                log.warn("缺少必需的状态参数: clientId={}", clientId);
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "缺少必需的state参数");
             }
 
-            // 验证授权范围
             if (!isValidScope(client, scope)) {
-                SecureLogger.warn("无效的授权范围: clientId={}, requestScope={}",
-                        clientId, scope);
-                return createOAuthError("invalid_scope",
-                    "The requested scope is invalid, unknown, or malformed");
+                log.warn("无效的授权范围: clientId={}, requestScope={}", clientId, scope);
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "授权范围不合法");
             }
 
-            // 检查用户登录状态
             if (!StpUtil.isLogin()) {
-                return createOAuthError("access_denied", "User not logged in");
+                throw new BusinessException(ResultEnum.USER_NOT_LOGGED_IN, "用户未登录");
             }
 
-            // 构建授权页面信息
             Map<String, Object> info = new HashMap<>();
             info.put("clientName", client.getClientName());
             info.put("description", client.getDescription());
-            info.put("scope", scope);
+            info.put("scope", StrUtil.isNotBlank(scope) ? scope : oauthConfig.getDefaultScope());
             info.put("redirectUri", redirectUri);
             info.put("state", state);
             info.put("autoApprove", client.getAutoApprove() == 1);
 
-            return Result.success(info);
+            return info;
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            log.error("获取授权页面信息失败", e);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "获取授权信息失败");
         }
     }
 
@@ -123,60 +120,55 @@ public class OAuthServiceImpl implements OAuthService {
      * @return 授权结果（包含授权码或错误信息）
      */
     @Override
-    public Result<String> authorize(String clientId, String redirectUri, String scope, String state, boolean approved) {
+    public String authorize(String clientId, String redirectUri, String scope, String state, boolean approved) {
         try {
-            // 验证客户端
             OAuthClient client = oauthClientMapper.findByClientKey(clientId);
             if (client == null || client.getStatus() != 1) {
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "客户端不存在或已禁用");
             }
 
-            // 验证重定向URI
             if (!isValidRedirectUri(client, redirectUri)) {
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+                log.warn("无效的重定向URI: clientId={}, redirectUri={}", clientId, redirectUri);
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "重定向URI不合法");
             }
-            
-            // 强制验证状态参数（防CSRF攻击）
+
             if (oauthConfig.isRequireState() && StrUtil.isBlank(state)) {
-                SecureLogger.warn("缺少必需的状态参数: clientId={}", clientId);
-                String errorUrl = redirectUri + "?error=invalid_request&error_description=missing_state_parameter";
-                return Result.success(errorUrl);
+                log.warn("缺少必需的状态参数: clientId={}", clientId);
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "缺少必需的state参数");
             }
-            
-            // 验证授权范围
+
             if (!isValidScope(client, scope)) {
-                SecureLogger.warn("无效的授权范围: clientId={}, requestScope={}, clientScope={}", 
+                log.warn("无效的授权范围: clientId={}, requestScope={}, clientScope={}",
                         clientId, scope, client.getScopes());
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "授权范围不合法");
             }
 
-            // 检查用户登录状态
             if (!StpUtil.isLogin()) {
-                return Result.error(ResultEnum.USER_NOT_LOGGED_IN, null);
+                throw new BusinessException(ResultEnum.USER_NOT_LOGGED_IN, "用户未登录");
             }
 
-            // 如果用户拒绝授权
             if (!approved) {
                 String errorUrl = redirectUri + "?error=access_denied";
                 if (StrUtil.isNotBlank(state)) {
                     errorUrl += "&state=" + state;
                 }
-                return Result.success(errorUrl);
+                return errorUrl;
             }
 
-            // 生成授权码
             Long userId = StpUtil.getLoginIdAsLong();
             OAuthCode authCode = generateAuthorizationCode(clientId, userId, redirectUri, scope, state);
 
-            // 构建重定向URL
             String redirectUrl = redirectUri + "?code=" + authCode.getCode();
             if (StrUtil.isNotBlank(state)) {
                 redirectUrl += "&state=" + state;
             }
 
-            return Result.success(redirectUrl);
+            return redirectUrl;
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            log.error("处理用户授权失败", e);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "用户授权失败");
         }
     }
 
@@ -191,52 +183,39 @@ public class OAuthServiceImpl implements OAuthService {
      * @return 访问令牌信息
      */
     @Override
-    public Result<Map<String, Object>> getAccessToken(String grantType, String code, String redirectUri,
-                                                      String clientId, String clientSecret) {
+    public Map<String, Object> getAccessToken(String grantType, String code, String redirectUri,
+                                              String clientId, String clientSecret) {
         try {
-            // 参数验证
             if (StrUtil.isBlank(grantType)) {
-                return createOAuthError("invalid_request", "Missing grant_type parameter");
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "grant_type不能为空");
             }
             if (StrUtil.isBlank(code)) {
-                return createOAuthError("invalid_request", "Missing code parameter");
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "授权码不能为空");
             }
             if (StrUtil.isBlank(redirectUri)) {
-                return createOAuthError("invalid_request", "Missing redirect_uri parameter");
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "redirect_uri不能为空");
             }
-            if (StrUtil.isBlank(clientId)) {
-                return createOAuthError("invalid_client", "Missing client_id parameter");
-            }
-            if (StrUtil.isBlank(clientSecret)) {
-                return createOAuthError("invalid_client", "Missing client_secret parameter");
+            if (StrUtil.isBlank(clientId) || StrUtil.isBlank(clientSecret)) {
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "客户端凭证不能为空");
             }
 
-            // 验证授权类型
             if (!"authorization_code".equals(grantType)) {
-                return createOAuthError("unsupported_grant_type", 
-                    "Grant type '" + grantType + "' is not supported. Only 'authorization_code' is supported.");
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "暂不支持的授权类型: " + grantType);
             }
 
-            // 验证客户端
             OAuthClient client = validateClient(clientId, clientSecret);
-            if (client == null) {
-                return createOAuthError("invalid_client", "Client authentication failed");
-            }
-            if (client.getStatus() != 1) {
-                return createOAuthError("invalid_client", "Client is disabled");
+            if (client == null || client.getStatus() != 1) {
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "客户端认证失败或已禁用");
             }
 
-            // 验证授权码并原子性标记为已使用
             OAuthCode authCode = validateAndUseAuthorizationCode(code, clientId, redirectUri);
             if (authCode == null) {
-                return createOAuthError("invalid_grant", "Invalid or expired authorization code");
+                throw new BusinessException(ResultEnum.OAUTH_CODE_INVALID, "授权码无效或已过期");
             }
 
-            // 生成访问令牌
             String accessToken = generateAccessToken(authCode.getUserId(), clientId, authCode.getScope());
             String refreshToken = generateRefreshToken(authCode.getUserId(), clientId);
 
-            // 构建响应
             Map<String, Object> tokenInfo = new HashMap<>();
             tokenInfo.put("access_token", accessToken);
             tokenInfo.put("token_type", "Bearer");
@@ -244,10 +223,12 @@ public class OAuthServiceImpl implements OAuthService {
             tokenInfo.put("refresh_token", refreshToken);
             tokenInfo.put("scope", authCode.getScope());
 
-            return Result.success(tokenInfo);
+            return tokenInfo;
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            SecureLogger.error("获取访问令牌失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            log.error("获取访问令牌失败", e);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "获取访问令牌失败");
         }
     }
 
@@ -261,71 +242,54 @@ public class OAuthServiceImpl implements OAuthService {
      * @return 新的访问令牌信息
      */
     @Override
-    public Result<Map<String, Object>> refreshAccessToken(String grantType, String refreshToken,
-                                                          String clientId, String clientSecret) {
+    public Map<String, Object> refreshAccessToken(String grantType, String refreshToken,
+                                                  String clientId, String clientSecret) {
         try {
-            // 参数验证
             if (StrUtil.isBlank(grantType)) {
-                return createOAuthError("invalid_request", "Missing grant_type parameter");
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "grant_type不能为空");
             }
             if (StrUtil.isBlank(refreshToken)) {
-                return createOAuthError("invalid_request", "Missing refresh_token parameter");
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "refresh_token不能为空");
             }
-            if (StrUtil.isBlank(clientId)) {
-                return createOAuthError("invalid_client", "Missing client_id parameter");
-            }
-            if (StrUtil.isBlank(clientSecret)) {
-                return createOAuthError("invalid_client", "Missing client_secret parameter");
+            if (StrUtil.isBlank(clientId) || StrUtil.isBlank(clientSecret)) {
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "客户端凭证不能为空");
             }
 
-            // 验证授权类型
             if (!"refresh_token".equals(grantType)) {
-                return createOAuthError("unsupported_grant_type", 
-                    "Grant type '" + grantType + "' is not supported. Only 'refresh_token' is supported.");
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "暂不支持的授权类型: " + grantType);
             }
 
-            // 验证客户端
             OAuthClient client = validateClient(clientId, clientSecret);
-            if (client == null) {
-                return createOAuthError("invalid_client", "Client authentication failed");
-            }
-            if (client.getStatus() != 1) {
-                return createOAuthError("invalid_client", "Client is disabled");
+            if (client == null || client.getStatus() != 1) {
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "客户端认证失败或已禁用");
             }
 
-            // 验证刷新令牌
             String tokenKey = oauthConfig.getRefreshTokenPrefix() + refreshToken;
             Map<Object, Object> tokenData = redisTemplate.opsForHash().entries(tokenKey);
-
             if (tokenData.isEmpty()) {
-                SecureLogger.warn("刷新令牌不存在或已过期: {}", refreshToken);
-                return createOAuthError("invalid_grant", "Invalid or expired refresh token");
+                log.warn("刷新令牌不存在或已过期: {}", refreshToken);
+                throw new BusinessException(ResultEnum.OAUTH_TOKEN_INVALID, "刷新令牌不存在或已过期");
             }
 
-            // 提取令牌信息
             String userIdStr = (String) tokenData.get("user_id");
             String tokenClientId = (String) tokenData.get("client_id");
             String oldAccessToken = (String) tokenData.get("access_token");
 
-            // 验证客户端匹配
             if (!clientId.equals(tokenClientId)) {
-                SecureLogger.warn("刷新令牌客户端不匹配: expected={}, actual={}", clientId, tokenClientId);
-                return createOAuthError("invalid_grant", "Refresh token was issued to a different client");
+                log.warn("刷新令牌客户端不匹配: expected={}, actual={}", clientId, tokenClientId);
+                throw new BusinessException(ResultEnum.OAUTH_TOKEN_INVALID, "刷新令牌与客户端不匹配");
             }
 
             Long userId = null;
             if (StrUtil.isNotBlank(userIdStr)) {
                 userId = Long.valueOf(userIdStr);
-
-                // 验证用户是否存在且有效
                 Account account = accountMapper.selectById(userId);
                 if (account == null || account.getDeleted() == 1) {
-                    SecureLogger.warn("用户不存在或已删除: {}", userId);
-                    return createOAuthError("invalid_grant", "User associated with refresh token no longer exists");
+                    log.warn("用户不存在或已删除: {}", userId);
+                    throw new BusinessException(ResultEnum.USER_NOT_EXIST, "刷新令牌关联的用户不存在");
                 }
             }
 
-            // 生成新的访问令牌
             String scope = (String) tokenData.get("scope");
             if (StrUtil.isBlank(scope)) {
                 scope = oauthConfig.getDefaultScope();
@@ -334,19 +298,12 @@ public class OAuthServiceImpl implements OAuthService {
             String newAccessToken = generateAccessToken(userId, clientId, scope);
             String newRefreshToken = generateRefreshToken(userId, clientId);
 
-            // 删除旧的刷新令牌和访问令牌
             redisTemplate.delete(tokenKey);
             if (StrUtil.isNotBlank(oldAccessToken)) {
                 String oldAccessTokenKey = oauthConfig.getAccessTokenPrefix() + oldAccessToken;
                 redisTemplate.delete(oldAccessTokenKey);
             }
 
-            // 注意：新的访问令牌和刷新令牌已经在generateAccessToken和generateRefreshToken方法中自动存储
-            // 这里不需要重复存储
-
-            // 注意：新的刷新令牌已经在generateRefreshToken方法中自动存储
-
-            // 构建响应
             Map<String, Object> response = new HashMap<>();
             response.put("access_token", newAccessToken);
             response.put("token_type", "Bearer");
@@ -355,10 +312,12 @@ public class OAuthServiceImpl implements OAuthService {
             response.put("refresh_token_expires_in", oauthConfig.getRefreshTokenTimeout());
             response.put("scope", scope);
 
-            return Result.success(response);
+            return response;
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            SecureLogger.error("刷新访问令牌失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            log.error("刷新访问令牌失败", e);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "刷新访问令牌失败");
         }
     }
 
@@ -372,33 +331,33 @@ public class OAuthServiceImpl implements OAuthService {
      * @return 访问令牌信息
      */
     @Override
-    public Result<Map<String, Object>> getClientCredentialsToken(String grantType, String scope,
-                                                                 String clientId, String clientSecret) {
+    public Map<String, Object> getClientCredentialsToken(String grantType, String scope,
+                                                         String clientId, String clientSecret) {
         try {
-            // 验证授权类型
             if (!"client_credentials".equals(grantType)) {
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "仅支持 client_credentials 授权类型");
             }
 
-            // 验证客户端
             OAuthClient client = validateClient(clientId, clientSecret);
-            if (client == null) {
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+            if (client == null || client.getStatus() != 1) {
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "客户端认证失败或已禁用");
             }
 
-            // 生成访问令牌（客户端凭证模式不需要用户ID）
-            String accessToken = generateAccessToken(null, clientId, scope);
+            String effectiveScope = StrUtil.isNotBlank(scope) ? scope : oauthConfig.getDefaultScope();
+            String accessToken = generateAccessToken(null, clientId, effectiveScope);
 
-            // 构建响应
             Map<String, Object> tokenInfo = new HashMap<>();
             tokenInfo.put("access_token", accessToken);
             tokenInfo.put("token_type", "Bearer");
             tokenInfo.put("expires_in", client.getAccessTokenValidity());
-            tokenInfo.put("scope", scope);
+            tokenInfo.put("scope", effectiveScope);
 
-            return Result.success(tokenInfo);
+            return tokenInfo;
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            log.error("客户端凭证模式获取访问令牌失败", e);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "客户端凭证模式获取访问令牌失败");
         }
     }
 
@@ -409,28 +368,25 @@ public class OAuthServiceImpl implements OAuthService {
      * @return 用户信息
      */
     @Override
-    public Result<Map<String, Object>> getUserInfo(String accessToken) {
+    public Map<String, Object> getUserInfo(String accessToken) {
         try {
-            // 验证访问令牌 - 使用统一的Hash格式
             String tokenKey = oauthConfig.getAccessTokenPrefix() + accessToken;
             Map<Object, Object> tokenData = redisTemplate.opsForHash().entries(tokenKey);
             if (tokenData.isEmpty()) {
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+                throw new BusinessException(ResultEnum.OAUTH_TOKEN_INVALID, "访问令牌无效或已过期");
             }
 
-            // 获取用户ID
             String userIdStr = (String) tokenData.get("user_id");
             if (StrUtil.isBlank(userIdStr)) {
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+                throw new BusinessException(ResultEnum.OAUTH_TOKEN_INVALID, "访问令牌缺少用户信息");
             }
 
             Long userId = Long.valueOf(userIdStr);
             Account account = accountMapper.selectById(userId);
             if (account == null) {
-                return Result.error(ResultEnum.USER_NOT_EXIST, null);
+                throw new BusinessException(ResultEnum.USER_NOT_EXIST, "用户不存在");
             }
 
-            // 构建用户信息响应
             Map<String, Object> userInfo = new HashMap<>();
             userInfo.put("id", account.getId());
             userInfo.put("username", account.getUsername());
@@ -439,10 +395,12 @@ public class OAuthServiceImpl implements OAuthService {
             userInfo.put("avatar", account.getAvatar());
             userInfo.put("registerTime", account.getRegisterTime());
 
-            return Result.success(userInfo);
+            return userInfo;
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            SecureLogger.error("获取用户信息失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            log.error("获取用户信息失败", e);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "获取OAuth用户信息失败");
         }
     }
 
@@ -456,38 +414,35 @@ public class OAuthServiceImpl implements OAuthService {
      * @return 撤销结果
      */
     @Override
-    public Result<Void> revokeToken(String token, String tokenTypeHint, String clientId, String clientSecret) {
+    public void revokeToken(String token, String tokenTypeHint, String clientId, String clientSecret) {
         try {
-            // 验证客户端
             OAuthClient client = validateClient(clientId, clientSecret);
-            if (client == null) {
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+            if (client == null || client.getStatus() != 1) {
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "客户端认证失败或已禁用");
             }
 
-            // 根据令牌类型提示删除相应的令牌
             boolean deleted = false;
-            if ("access_token".equals(tokenTypeHint) || tokenTypeHint == null) {
+            if (tokenTypeHint == null || "access_token".equals(tokenTypeHint)) {
                 String accessTokenKey = oauthConfig.getAccessTokenPrefix() + token;
-                deleted = redisTemplate.delete(accessTokenKey);
+                deleted = Boolean.TRUE.equals(redisTemplate.delete(accessTokenKey));
             }
-            
-            if ("refresh_token".equals(tokenTypeHint) || tokenTypeHint == null) {
+
+            if (tokenTypeHint == null || "refresh_token".equals(tokenTypeHint)) {
                 String refreshTokenKey = oauthConfig.getRefreshTokenPrefix() + token;
                 Boolean refreshDeleted = redisTemplate.delete(refreshTokenKey);
-                deleted = deleted || refreshDeleted;
+                deleted = deleted || Boolean.TRUE.equals(refreshDeleted);
             }
 
-            // 同步清理第三方access/refresh映射，保持一致性
             clearThirdPartyMappings(token, tokenTypeHint);
 
             if (!deleted) {
-                SecureLogger.warn("令牌撤销失败，令牌可能不存在: token={}, hint={}", token, tokenTypeHint);
+            log.warn("令牌撤销失败，令牌可能不存在: token={}, hint={}", token, tokenTypeHint);
             }
-
-            return Result.success(null);
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            SecureLogger.error("撤销令牌失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            log.error("撤销令牌失败", e);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "撤销令牌失败");
         }
     }
 
@@ -518,7 +473,7 @@ public class OAuthServiceImpl implements OAuthService {
                 }
             }
         } catch (Exception e) {
-            SecureLogger.warn("清理第三方映射时发生异常: token={}, hint={}", token, tokenTypeHint, e);
+            log.warn("清理第三方映射时发生异常: token={}, hint={}", token, tokenTypeHint, e);
         }
     }
 
@@ -532,7 +487,7 @@ public class OAuthServiceImpl implements OAuthService {
     @Override
     public OAuthClient validateClient(String clientId, String clientSecret) {
         if (StrUtil.isBlank(clientId) || StrUtil.isBlank(clientSecret)) {
-            SecureLogger.warn("客户端验证参数为空: clientId={}, clientSecret={}", 
+            log.warn("客户端验证参数为空: clientId={}, clientSecret={}", 
                     StrUtil.isBlank(clientId) ? "blank" : "present",
                     StrUtil.isBlank(clientSecret) ? "blank" : "present");
             return null;
@@ -542,26 +497,28 @@ public class OAuthServiceImpl implements OAuthService {
             // 先根据clientId查找客户端
             OAuthClient client = oauthClientMapper.findByClientKey(clientId);
             if (client == null) {
-                SecureLogger.warn("客户端不存在: clientId={}", clientId);
+                log.warn("客户端不存在: clientId={}", clientId);
                 return null;
             }
             
             if (client.getStatus() != 1) {
-                SecureLogger.warn("客户端已禁用: clientId={}, status={}", clientId, client.getStatus());
+                log.warn("客户端已禁用: clientId={}, status={}", clientId, client.getStatus());
                 return null;
             }
             
             // 使用专门的密钥服务验证客户端密钥
             if (!oauthClientSecretService.matches(clientSecret, client.getClientSecret())) {
-                SecureLogger.warn("客户端密钥验证失败: clientId={}, secretIsEncrypted={}", 
+                log.warn("客户端密钥验证失败: clientId={}, secretIsEncrypted={}", 
                         clientId, oauthClientSecretService.isEncrypted(client.getClientSecret()));
                 return null;
             }
             
-            SecureLogger.debug("客户端验证成功: clientId={}, clientName={}", clientId, client.getClientName());
+            if (log.isDebugEnabled()) {
+                log.debug("客户端验证成功: clientId={}, clientName={}", clientId, client.getClientName());
+            }
             return client;
         } catch (Exception e) {
-            SecureLogger.error("客户端验证过程中发生异常: clientId={}", clientId, e);
+            log.error("客户端验证过程中发生异常: clientId={}", clientId, e);
             return null;
         }
     }
@@ -637,41 +594,34 @@ public class OAuthServiceImpl implements OAuthService {
      * @return 注册结果
      */
     @Override
-    public Result<OAuthClient> registerClient(OAuthClient client) {
+    public OAuthClient registerClient(OAuthClient client) {
         try {
-            // 验证必要参数
-            if (StrUtil.isBlank(client.getClientKey())) {
-                SecureLogger.warn("客户端注册失败: clientId为空");
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+            if (client == null || StrUtil.isBlank(client.getClientKey())) {
+                log.warn("客户端注册失败: clientId为空");
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "客户端标识不能为空");
             }
 
-            // 检查客户端标识符是否已存在
             if (oauthClientMapper.findByClientKey(client.getClientKey()) != null) {
-                SecureLogger.warn("客户端注册失败: clientId已存在: {}", client.getClientKey());
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+                log.warn("客户端注册失败: clientId已存在: {}", client.getClientKey());
+                throw new BusinessException(ResultEnum.DATA_ALREADY_EXISTED, "客户端已存在");
             }
 
-            // 处理客户端密钥
             String rawSecret;
             if (StrUtil.isBlank(client.getClientSecret())) {
-                // 生成新的客户端密钥
                 rawSecret = oauthClientSecretService.generateClientSecret();
-                SecureLogger.info("为客户端生成新密钥: clientId={}, secretLength={}", 
+                log.info("为客户端生成新密钥: clientId={}, secretLength={}", 
                         client.getClientKey(), rawSecret.length());
             } else {
-                // 使用提供的密钥，但需要验证强度
                 rawSecret = client.getClientSecret();
                 if (!oauthClientSecretService.validateSecretStrength(rawSecret)) {
-                    SecureLogger.warn("客户端注册失败: 提供的密钥强度不足: clientId={}", client.getClientKey());
-                    return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+                    log.warn("客户端注册失败: 密钥强度不足: clientId={}", client.getClientKey());
+                    throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "客户端密钥强度不足");
                 }
             }
 
-            // 加密密钥并存储
             String encodedSecret = oauthClientSecretService.encodeClientSecret(rawSecret);
             client.setClientSecret(encodedSecret);
 
-            // 设置默认值
             if (client.getStatus() == null) {
                 client.setStatus(1);
             }
@@ -691,14 +641,12 @@ public class OAuthServiceImpl implements OAuthService {
                 client.setGrantTypes("authorization_code,refresh_token");
             }
 
-            // 保存到数据库
             oauthClientMapper.insert(client);
 
-            // 返回时不包含加密后的密钥，而是返回原始密钥供客户端使用
             OAuthClient responseClient = new OAuthClient();
             responseClient.setClientId(client.getClientId());
             responseClient.setClientKey(client.getClientKey());
-            responseClient.setClientSecret(rawSecret); // 返回明文密钥给客户端保存
+            responseClient.setClientSecret(rawSecret);
             responseClient.setClientName(client.getClientName());
             responseClient.setDescription(client.getDescription());
             responseClient.setRedirectUris(client.getRedirectUris());
@@ -710,15 +658,16 @@ public class OAuthServiceImpl implements OAuthService {
             responseClient.setStatus(client.getStatus());
             responseClient.setCreateTime(client.getCreateTime());
 
-            SecureLogger.info("客户端注册成功: clientId={}, clientName={}, secretEncrypted={}", 
-                    client.getClientKey(), client.getClientName(), 
-                    oauthClientSecretService.isEncrypted(encodedSecret));
+            log.info("客户端注册成功: clientId={}, clientName={}",
+                    client.getClientKey(), client.getClientName());
 
-            return Result.success(responseClient);
+            return responseClient;
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            SecureLogger.error("客户端注册失败: clientId={}", 
+            log.error("客户端注册失败: clientId={}",
                     client != null ? client.getClientKey() : "unknown", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "客户端注册失败");
         }
     }
 
@@ -729,12 +678,18 @@ public class OAuthServiceImpl implements OAuthService {
      * @return 更新结果
      */
     @Override
-    public Result<OAuthClient> updateClient(OAuthClient client) {
+    public OAuthClient updateClient(OAuthClient client) {
         try {
+            if (client == null || StrUtil.isBlank(client.getClientKey())) {
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "客户端信息不能为空");
+            }
             oauthClientMapper.updateById(client);
-            return Result.success(client);
+            return client;
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            log.error("更新客户端失败: clientId={}", client != null ? client.getClientKey() : "unknown", e);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "更新客户端失败");
         }
     }
 
@@ -745,15 +700,15 @@ public class OAuthServiceImpl implements OAuthService {
      * @return 删除结果
      */
     @Override
-    public Result<Void> deleteClient(String clientId) {
+    public void deleteClient(String clientId) {
         try {
             OAuthClient client = oauthClientMapper.findByClientKey(clientId);
             if (client != null) {
                 oauthClientMapper.deleteById(client.getClientId());
             }
-            return Result.success(null);
         } catch (Exception e) {
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            log.error("删除客户端失败: clientId={}", clientId, e);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "删除客户端失败");
         }
     }
 
@@ -764,15 +719,18 @@ public class OAuthServiceImpl implements OAuthService {
      * @return 客户端信息
      */
     @Override
-    public Result<OAuthClient> getClient(String clientId) {
+    public OAuthClient getClient(String clientId) {
         try {
             OAuthClient client = oauthClientMapper.findByClientKey(clientId);
             if (client == null) {
-                return Result.error(ResultEnum.RESULT_DATA_NONE, null);
+                throw new BusinessException(ResultEnum.RESULT_DATA_NONE, "客户端不存在");
             }
-            return Result.success(client);
+            return client;
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            log.error("获取客户端信息失败: clientId={}", clientId, e);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "获取客户端信息失败");
         }
     }
 
@@ -816,8 +774,10 @@ public class OAuthServiceImpl implements OAuthService {
         redisTemplate.opsForHash().putAll(tokenKey, tokenInfo);
         redisTemplate.expire(tokenKey, oauthConfig.getAccessTokenTimeout(), TimeUnit.SECONDS);
 
-        SecureLogger.debug("生成访问令牌成功: clientId={}, userId={}, scope={}, expiresIn={}", 
-                 clientId, userId, scope, oauthConfig.getAccessTokenTimeout());
+        if (log.isDebugEnabled()) {
+            log.debug("生成访问令牌成功: clientId={}, userId={}, scope={}, expiresIn={}",
+                    clientId, userId, scope, oauthConfig.getAccessTokenTimeout());
+        }
 
         return token;
     }
@@ -860,8 +820,10 @@ public class OAuthServiceImpl implements OAuthService {
         redisTemplate.opsForHash().putAll(tokenKey, tokenInfo);
         redisTemplate.expire(tokenKey, oauthConfig.getRefreshTokenTimeout(), TimeUnit.SECONDS);
 
-        SecureLogger.debug("生成刷新令牌成功: clientId={}, userId={}, expiresIn={}", 
-                 clientId, userId, oauthConfig.getRefreshTokenTimeout());
+        if (log.isDebugEnabled()) {
+            log.debug("生成刷新令牌成功: clientId={}, userId={}, expiresIn={}",
+                    clientId, userId, oauthConfig.getRefreshTokenTimeout());
+        }
 
         return token;
     }
@@ -877,7 +839,7 @@ public class OAuthServiceImpl implements OAuthService {
      */
     private boolean isValidRedirectUri(OAuthClient client, String redirectUri) {
         if (StrUtil.isBlank(client.getRedirectUris()) || StrUtil.isBlank(redirectUri)) {
-            SecureLogger.warn("重定向URI验证失败: 配置或请求URI为空");
+            log.warn("重定向URI验证失败: 配置或请求URI为空");
             return false;
         }
 
@@ -902,11 +864,11 @@ public class OAuthServiceImpl implements OAuthService {
                 }
             }
             
-            SecureLogger.warn("重定向URI不在允许列表中: requestUri={}, configuredUris={}", 
+            log.warn("重定向URI不在允许列表中: requestUri={}, configuredUris={}", 
                     redirectUri, client.getRedirectUris());
             return false;
         } catch (Exception e) {
-            SecureLogger.error("解析重定向URI配置失败: {}", client.getRedirectUris(), e);
+            log.error("解析重定向URI配置失败: {}", client.getRedirectUris(), e);
             return false;
         }
     }
@@ -923,13 +885,15 @@ public class OAuthServiceImpl implements OAuthService {
     private boolean isValidScope(OAuthClient client, String requestScope) {
         // 如果请求的scope为空，使用默认scope（这是有效的）
         if (StrUtil.isBlank(requestScope)) {
-            SecureLogger.debug("请求scope为空，将使用默认scope: {}", oauthConfig.getDefaultScope());
+        if (log.isDebugEnabled()) {
+            log.debug("请求scope为空，将使用默认scope: {}", oauthConfig.getDefaultScope());
+        }
             return true;
         }
         
         // 如果客户端没有配置scope，只允许默认scope
         if (StrUtil.isBlank(client.getScopes())) {
-            SecureLogger.warn("客户端未配置授权范围: clientId={}", client.getClientKey());
+            log.warn("客户端未配置授权范围: clientId={}", client.getClientKey());
             return requestScope.equals(oauthConfig.getDefaultScope());
         }
         
@@ -940,13 +904,15 @@ public class OAuthServiceImpl implements OAuthService {
         // 验证请求的所有scope都在客户端配置的范围内
         for (String scope : requestScopes) {
             if (!clientScopes.contains(scope)) {
-                SecureLogger.warn("请求的scope不在客户端允许范围内: requestScope={}, clientScopes={}", 
+                log.warn("请求的scope不在客户端允许范围内: requestScope={}, clientScopes={}", 
                         scope, clientScopes);
                 return false;
             }
         }
         
-        SecureLogger.debug("scope验证通过: requestScopes={}, clientScopes={}", requestScopes, clientScopes);
+        if (log.isDebugEnabled()) {
+            log.debug("scope验证通过: requestScopes={}, clientScopes={}", requestScopes, clientScopes);
+        }
         return true;
     }
     
@@ -1014,41 +980,6 @@ public class OAuthServiceImpl implements OAuthService {
     }
 
     /**
-     * 生成符合OAuth2.0规范的错误响应
-     * 根据RFC 6749标准格式化错误信息
-     *
-     * @param error           错误代码
-     * @param errorDescription 错误描述
-     * @param errorUri         错误详情URI（可选）
-     * @return 标准错误响应
-     */
-    @SuppressWarnings("unchecked")
-    private <T> Result<T> createOAuthError(String error, String errorDescription, String errorUri) {
-        Map<String, Object> errorResponse = new HashMap<>();
-        errorResponse.put("error", error);
-        errorResponse.put("error_description", errorDescription);
-        if (StrUtil.isNotBlank(errorUri)) {
-            errorResponse.put("error_uri", errorUri);
-        }
-        
-        SecureLogger.warn("OAuth2.0错误: error={}, description={}", error, errorDescription);
-        
-        // 使用统一的错误响应格式
-        return (Result<T>) Result.error("OAuth2.0 Error: " + errorResponse);
-    }
-
-    /**
-     * 生成符合OAuth2.0规范的错误响应（无错误详情URI）
-     *
-     * @param error           错误代码
-     * @param errorDescription 错误描述
-     * @return 标准错误响应
-     */
-    private <T> Result<T> createOAuthError(String error, String errorDescription) {
-        return createOAuthError(error, errorDescription, null);
-    }
-
-    /**
      * 验证授权码并原子性标记为已使用
      * 防止授权码重复使用的安全漏洞
      *
@@ -1061,27 +992,27 @@ public class OAuthServiceImpl implements OAuthService {
         // 先查找授权码
         OAuthCode authCode = oauthCodeMapper.findByCodeAndClientKey(code, clientId);
         if (authCode == null || authCode.getStatus() != OAuthConfig.CodeStatus.VALID) {
-            SecureLogger.warn("授权码不存在或已失效: code={}, clientId={}, status={}", 
+            log.warn("授权码不存在或已失效: code={}, clientId={}, status={}", 
                     code, clientId, authCode != null ? authCode.getStatus() : "null");
             return null;
         }
 
         // 检查是否过期
         if (authCode.getExpireTime().isBefore(LocalDateTime.now())) {
-            SecureLogger.warn("授权码已过期: code={}, expireTime={}", code, authCode.getExpireTime());
+            log.warn("授权码已过期: code={}, expireTime={}", code, authCode.getExpireTime());
             return null;
         }
 
         // 检查重定向URI
         if (!authCode.getRedirectUri().equals(redirectUri)) {
-            SecureLogger.warn("重定向URI不匹配: expected={}, actual={}", authCode.getRedirectUri(), redirectUri);
+            log.warn("重定向URI不匹配: expected={}, actual={}", authCode.getRedirectUri(), redirectUri);
             return null;
         }
 
         // 原子性标记为已使用，防止并发使用
         int updateCount = oauthCodeMapper.markCodeAsUsed(code);
         if (updateCount == 0) {
-            SecureLogger.warn("授权码可能已被使用: code={}", code);
+            log.warn("授权码可能已被使用: code={}", code);
             return null;
         }
 

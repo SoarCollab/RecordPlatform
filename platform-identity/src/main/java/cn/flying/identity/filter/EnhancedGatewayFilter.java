@@ -113,8 +113,8 @@ public class EnhancedGatewayFilter implements Filter {
                     clientIp, userAgent, userId);
 
             // 检查流量限制
-            Result<Boolean> rateLimitResult = gatewayMonitorService.checkRateLimit(clientIp, userId, requestURI);
-            if (rateLimitResult.getCode() == ResultEnum.SUCCESS.getCode() && !rateLimitResult.getData()) {
+            boolean rateLimitAllowed = gatewayMonitorService.checkRateLimit(clientIp, userId, requestURI);
+            if (!rateLimitAllowed) {
                 writeErrorResponse(httpResponse, Result.error(ResultEnum.SYSTEM_BUSY, null));
                 recordRequestEnd(requestId, 429, 0, System.currentTimeMillis() - startTime, "Rate limit exceeded");
                 return;

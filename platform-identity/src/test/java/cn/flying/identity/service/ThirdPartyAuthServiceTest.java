@@ -3,10 +3,10 @@ package cn.flying.identity.service;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.flying.identity.dto.Account;
 import cn.flying.identity.dto.ThirdPartyAccount;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.mapper.ThirdPartyAccountMapper;
 import cn.flying.identity.service.impl.ThirdPartyAuthServiceImpl;
 import cn.flying.identity.util.IdUtils;
-import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.hutool.http.HttpRequest;
 import cn.hutool.http.HttpResponse;
@@ -17,7 +17,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.MockedStatic;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -98,13 +97,12 @@ class ThirdPartyAuthServiceTest {
             doNothing().when(valueOperations).set(anyString(), anyString(), anyLong(), any(TimeUnit.class));
 
             // 执行测试
-            Result<String> result = thirdPartyAuthService.getAuthorizationUrl("github", TEST_REDIRECT_URI, null);
+            String url = thirdPartyAuthService.getAuthorizationUrl("github", TEST_REDIRECT_URI, null);
 
             // 验证结果
-            assertTrue(result.isSuccess());
-            assertNotNull(result.getData());
-            assertTrue(result.getData().contains("github.com"));
-            assertTrue(result.getData().contains("client_id=github_client_id"));
+            assertNotNull(url);
+            assertTrue(url.contains("github.com"));
+            assertTrue(url.contains("client_id=github_client_id"));
             verify(valueOperations, times(1)).set(eq("third_party:state:" + TEST_STATE),
                     eq("github:" + TEST_REDIRECT_URI), eq(10L), eq(TimeUnit.MINUTES));
         }
@@ -113,11 +111,9 @@ class ThirdPartyAuthServiceTest {
     @Test
     void testGetAuthorizationUrl_InvalidProvider() {
         // 执行测试
-        Result<String> result = thirdPartyAuthService.getAuthorizationUrl("invalid", TEST_REDIRECT_URI, TEST_STATE);
-
-        // 验证结果
-        assertFalse(result.isSuccess());
-        assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), result.getCode());
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> thirdPartyAuthService.getAuthorizationUrl("invalid", TEST_REDIRECT_URI, TEST_STATE));
+        assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), ex.getCode());
     }
 
     @Test
@@ -144,11 +140,9 @@ class ThirdPartyAuthServiceTest {
             stpUtil.when(StpUtil::getSession).thenReturn(null);
 
             // 执行测试
-            Result<Map<String, Object>> result = thirdPartyAuthService.handleCallback("github", TEST_CODE, TEST_STATE);
+            Map<String, Object> data = thirdPartyAuthService.handleCallback("github", TEST_CODE, TEST_STATE);
 
             // 验证结果
-            assertTrue(result.isSuccess());
-            Map<String, Object> data = result.getData();
             assertEquals("login_success", data.get("status"));
             assertEquals(TEST_USER_ID, data.get("user_id"));
             assertEquals(TEST_USERNAME, data.get("username"));
@@ -162,11 +156,9 @@ class ThirdPartyAuthServiceTest {
         when(valueOperations.get("third_party:state:" + TEST_STATE)).thenReturn(null);
 
         // 执行测试
-        Result<Map<String, Object>> result = thirdPartyAuthService.handleCallback("github", TEST_CODE, TEST_STATE);
-
-        // 验证结果
-        assertFalse(result.isSuccess());
-        assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), result.getCode());
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> thirdPartyAuthService.handleCallback("github", TEST_CODE, TEST_STATE));
+        assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), ex.getCode());
     }
 
     @Test
@@ -182,10 +174,7 @@ class ThirdPartyAuthServiceTest {
         when(thirdPartyAccountMapper.insert(any(ThirdPartyAccount.class))).thenReturn(1);
 
         // 执行测试
-        Result<Void> result = thirdPartyAuthService.bindThirdPartyAccount(TEST_USER_ID, "github", TEST_CODE);
-
-        // 验证结果
-        assertTrue(result.isSuccess());
+        assertDoesNotThrow(() -> thirdPartyAuthService.bindThirdPartyAccount(TEST_USER_ID, "github", TEST_CODE));
         verify(thirdPartyAccountMapper, times(1)).insert(any(ThirdPartyAccount.class));
         verify(redisTemplate, times(1)).delete(bindKey);
     }
@@ -199,10 +188,7 @@ class ThirdPartyAuthServiceTest {
         when(thirdPartyAccountMapper.deleteByUserIdAndProvider(TEST_USER_ID, "github")).thenReturn(1);
 
         // 执行测试
-        Result<Void> result = thirdPartyAuthService.unbindThirdPartyAccount(TEST_USER_ID, "github");
-
-        // 验证结果
-        assertTrue(result.isSuccess());
+        assertDoesNotThrow(() -> thirdPartyAuthService.unbindThirdPartyAccount(TEST_USER_ID, "github"));
         verify(thirdPartyAccountMapper, times(1)).deleteByUserIdAndProvider(TEST_USER_ID, "github");
     }
 
@@ -216,11 +202,9 @@ class ThirdPartyAuthServiceTest {
         when(thirdPartyAccountMapper.findByUserId(TEST_USER_ID)).thenReturn(accounts);
 
         // 执行测试
-        Result<Map<String, Object>> result = thirdPartyAuthService.getUserThirdPartyAccounts(TEST_USER_ID);
+        Map<String, Object> data = thirdPartyAuthService.getUserThirdPartyAccounts(TEST_USER_ID);
 
         // 验证结果
-        assertTrue(result.isSuccess());
-        Map<String, Object> data = result.getData();
         assertEquals(TEST_USER_ID, data.get("user_id"));
         assertEquals(2, data.get("total"));
         assertNotNull(data.get("bindings"));
@@ -231,11 +215,9 @@ class ThirdPartyAuthServiceTest {
     @Test
     void testGetSupportedProviders_Success() {
         // 执行测试
-        Result<Map<String, Object>> result = thirdPartyAuthService.getSupportedProviders();
+        Map<String, Object> data = thirdPartyAuthService.getSupportedProviders();
 
         // 验证结果
-        assertTrue(result.isSuccess());
-        Map<String, Object> data = result.getData();
         assertNotNull(data.get("providers"));
         Map<String, Object> providers = (Map<String, Object>) data.get("providers");
         assertTrue(providers.containsKey("github"));
@@ -250,11 +232,9 @@ class ThirdPartyAuthServiceTest {
             mockHttpUserInfoRequest(httpRequest);
 
             // 执行测试
-            Result<Map<String, Object>> result = thirdPartyAuthService.getThirdPartyUserInfo("github", TEST_ACCESS_TOKEN);
+            Map<String, Object> userInfo = thirdPartyAuthService.getThirdPartyUserInfo("github", TEST_ACCESS_TOKEN);
 
             // 验证结果
-            assertTrue(result.isSuccess());
-            Map<String, Object> userInfo = result.getData();
             assertEquals(123456, userInfo.get("id"));
             assertEquals(TEST_USERNAME, userInfo.get("login"));
             assertEquals("https://avatars.githubusercontent.com/u/123456", userInfo.get("avatar_url"));
@@ -269,11 +249,10 @@ class ThirdPartyAuthServiceTest {
             mockHttpUserInfoRequest(httpRequest);
 
             // 执行测试
-            Result<Boolean> result = thirdPartyAuthService.validateThirdPartyToken("github", TEST_ACCESS_TOKEN);
+            boolean result = thirdPartyAuthService.validateThirdPartyToken("github", TEST_ACCESS_TOKEN);
 
             // 验证结果
-            assertTrue(result.isSuccess());
-            assertTrue(result.getData());
+            assertTrue(result);
         }
     }
 
@@ -292,11 +271,10 @@ class ThirdPartyAuthServiceTest {
             when(mockResponse.getStatus()).thenReturn(401);
 
             // 执行测试
-            Result<Boolean> result = thirdPartyAuthService.validateThirdPartyToken("github", "invalid_token");
+            boolean result = thirdPartyAuthService.validateThirdPartyToken("github", "invalid_token");
 
             // 验证结果
-            assertTrue(result.isSuccess());
-            assertFalse(result.getData());
+            assertFalse(result);
         }
     }
 

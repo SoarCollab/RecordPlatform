@@ -1,11 +1,12 @@
 package cn.flying.identity.service.impl.apigateway;
 
 import cn.flying.identity.dto.apigateway.ApiCallLog;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.mapper.apigateway.ApiCallLogMapper;
 import cn.flying.identity.service.BaseService;
 import cn.flying.identity.service.apigateway.ApiCallLogService;
 import cn.flying.identity.util.IdUtils;
-import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.constant.ResultEnum;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import jakarta.annotation.PostConstruct;
@@ -188,8 +189,9 @@ public class ApiCallLogServiceImpl extends BaseService implements ApiCallLogServ
     }
 
     @Override
-    public Result<Void> recordCallLog(ApiCallLog log) {
-        return safeExecuteAction(() -> {
+    public void recordCallLog(ApiCallLog log) {
+        final String errorMessage = "记录调用日志失败";
+        try {
             requireNonNull(log, "调用日志不能为空");
 
             if (log.getId() == null) {
@@ -197,14 +199,18 @@ public class ApiCallLogServiceImpl extends BaseService implements ApiCallLogServ
             }
 
             int inserted = callLogMapper.insert(log);
-            requireCondition(inserted, count -> count > 0, "记录调用日志失败");
+            requireCondition(inserted, count -> count > 0, errorMessage);
 
-            // 更新实时统计
             updateRealtimeStats(log);
 
             logDebug("记录API调用日志: requestId={}, appId={}, path={}, responseCode={}",
                     log.getRequestId(), log.getAppId(), log.getInterfacePath(), log.getResponseCode());
-        }, "记录调用日志失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError(errorMessage, e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, errorMessage);
+        }
     }
 
     @Async
@@ -248,61 +254,65 @@ public class ApiCallLogServiceImpl extends BaseService implements ApiCallLogServ
     }
 
     @Override
-    public Result<ApiCallLog> getCallLogById(Long logId) {
-        return safeExecuteData(() -> {
+    public ApiCallLog getCallLogById(Long logId) {
+        final String errorMessage = "查询调用日志失败";
+        try {
             requireNonNull(logId, "日志ID不能为空");
 
             ApiCallLog log = callLogMapper.selectById(logId);
             requireNonNull(log, "调用日志不存在");
-
             return log;
-        }, "查询调用日志失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError(errorMessage, e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, errorMessage);
+        }
     }
 
     @Override
-    public Result<Page<ApiCallLog>> getCallLogsPage(int pageNum, int pageSize,
-                                                    Long appId, String apiKey,
-                                                    LocalDateTime startTime, LocalDateTime endTime,
-                                                    Integer responseCode) {
-        return safeExecuteData(() -> {
+    public Page<ApiCallLog> getCallLogsPage(int pageNum, int pageSize,
+                                            Long appId, String apiKey,
+                                            LocalDateTime startTime, LocalDateTime endTime,
+                                            Integer responseCode) {
+        final String errorMessage = "查询调用日志分页列表失败";
+        try {
             requireCondition(pageNum, num -> num > 0, "页码必须大于0");
             requireCondition(pageSize, size -> size > 0 && size <= 100, "每页大小必须在1-100之间");
 
             Page<ApiCallLog> page = new Page<>(pageNum, pageSize);
             LambdaQueryWrapper<ApiCallLog> wrapper = new LambdaQueryWrapper<>();
 
-            // 应用ID过滤
             if (appId != null) {
                 wrapper.eq(ApiCallLog::getAppId, appId);
             }
-
-            // API密钥过滤
             if (isNotBlank(apiKey)) {
                 wrapper.eq(ApiCallLog::getApiKey, apiKey);
             }
-
-            // 时间范围过滤
             if (startTime != null) {
                 wrapper.ge(ApiCallLog::getRequestTime, startTime);
             }
             if (endTime != null) {
                 wrapper.le(ApiCallLog::getRequestTime, endTime);
             }
-
-            // 响应状态码过滤
             if (responseCode != null) {
                 wrapper.eq(ApiCallLog::getResponseCode, responseCode);
             }
 
             wrapper.orderByDesc(ApiCallLog::getRequestTime);
-
             return callLogMapper.selectPage(page, wrapper);
-        }, "查询调用日志分页列表失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError(errorMessage, e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, errorMessage);
+        }
     }
 
     @Override
-    public Result<Page<ApiCallLog>> getCallLogsByAppId(Long appId, int days, int pageNum, int pageSize) {
-        return safeExecuteData(() -> {
+    public Page<ApiCallLog> getCallLogsByAppId(Long appId, int days, int pageNum, int pageSize) {
+        final String errorMessage = "查询应用调用日志失败";
+        try {
             requireNonNull(appId, "应用ID不能为空");
             requireCondition(days, d -> d > 0 && d <= 90, "查询天数必须在1-90之间");
             requireCondition(pageNum, num -> num > 0, "页码必须大于0");
@@ -317,12 +327,18 @@ public class ApiCallLogServiceImpl extends BaseService implements ApiCallLogServ
                     .orderByDesc(ApiCallLog::getRequestTime);
 
             return callLogMapper.selectPage(page, wrapper);
-        }, "查询应用调用日志失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError(errorMessage, e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, errorMessage);
+        }
     }
 
     @Override
-    public Result<Page<ApiCallLog>> getCallLogsByApiKey(String apiKey, int days, int pageNum, int pageSize) {
-        return safeExecuteData(() -> {
+    public Page<ApiCallLog> getCallLogsByApiKey(String apiKey, int days, int pageNum, int pageSize) {
+        final String errorMessage = "查询API密钥调用日志失败";
+        try {
             requireNonBlank(apiKey, "API密钥不能为空");
             requireCondition(days, d -> d > 0 && d <= 90, "查询天数必须在1-90之间");
             requireCondition(pageNum, num -> num > 0, "页码必须大于0");
@@ -337,16 +353,21 @@ public class ApiCallLogServiceImpl extends BaseService implements ApiCallLogServ
                     .orderByDesc(ApiCallLog::getRequestTime);
 
             return callLogMapper.selectPage(page, wrapper);
-        }, "查询API密钥调用日志失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError(errorMessage, e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, errorMessage);
+        }
     }
 
     @Override
-    public Result<Map<String, Object>> getAppCallStatistics(Long appId, int days) {
-        return safeExecuteData(() -> {
+    public Map<String, Object> getAppCallStatistics(Long appId, int days) {
+        final String errorMessage = "获取应用调用统计失败";
+        try {
             requireNonNull(appId, "应用ID不能为空");
             requireCondition(days, d -> d > 0 && d <= 90, "统计天数必须在1-90之间");
 
-            // 尝试从缓存获取
             String cacheKey = STATS_CACHE_PREFIX + "app:" + appId + ":" + days;
             String cachedStats = redisTemplate.opsForValue().get(cacheKey);
             if (isNotBlank(cachedStats)) {
@@ -366,16 +387,20 @@ public class ApiCallLogServiceImpl extends BaseService implements ApiCallLogServ
             stats.put("stat_days", days);
             stats.put("stat_time", LocalDateTime.now());
 
-            // 缓存统计结果(5分钟)
             cacheStatistics(cacheKey, stats, 300);
-
             return stats;
-        }, "获取应用调用统计失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError(errorMessage, e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, errorMessage);
+        }
     }
 
     @Override
-    public Result<Map<String, Object>> getApiKeyCallStatistics(String apiKey, int days) {
-        return safeExecuteData(() -> {
+    public Map<String, Object> getApiKeyCallStatistics(String apiKey, int days) {
+        final String errorMessage = "获取API密钥调用统计失败";
+        try {
             requireNonBlank(apiKey, "API密钥不能为空");
             requireCondition(days, d -> d > 0 && d <= 90, "统计天数必须在1-90之间");
 
@@ -393,12 +418,18 @@ public class ApiCallLogServiceImpl extends BaseService implements ApiCallLogServ
             stats.put("stat_time", LocalDateTime.now());
 
             return stats;
-        }, "获取API密钥调用统计失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError(errorMessage, e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, errorMessage);
+        }
     }
 
     @Override
-    public Result<Map<String, Object>> getInterfaceCallStatistics(Long interfaceId, int days) {
-        return safeExecuteData(() -> {
+    public Map<String, Object> getInterfaceCallStatistics(Long interfaceId, int days) {
+        final String errorMessage = "获取接口调用统计失败";
+        try {
             requireNonNull(interfaceId, "接口ID不能为空");
             requireCondition(days, d -> d > 0 && d <= 90, "统计天数必须在1-90之间");
 
@@ -416,12 +447,18 @@ public class ApiCallLogServiceImpl extends BaseService implements ApiCallLogServ
             stats.put("stat_time", LocalDateTime.now());
 
             return stats;
-        }, "获取接口调用统计失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError(errorMessage, e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, errorMessage);
+        }
     }
 
     @Override
-    public Result<Integer> cleanExpiredLogs(int days) {
-        return safeExecuteData(() -> {
+    public int cleanExpiredLogs(int days) {
+        final String errorMessage = "清理过期日志失败";
+        try {
             requireCondition(days, d -> d > 0, "保留天数必须大于0");
 
             LocalDateTime expireTime = LocalDateTime.now().minusDays(days);
@@ -430,33 +467,41 @@ public class ApiCallLogServiceImpl extends BaseService implements ApiCallLogServ
             wrapper.lt(ApiCallLog::getCreateTime, expireTime);
 
             int deleted = callLogMapper.delete(wrapper);
-
             logInfo("清理过期调用日志: 保留{}天, 清理{}条", days, deleted);
             return deleted;
-        }, "清理过期日志失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError(errorMessage, e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, errorMessage);
+        }
     }
 
     @Override
-    public Result<Map<String, Object>> getRealtimeStatistics() {
-        return safeExecuteData(() -> {
-            Map<String, Object> stats = new HashMap<>();
-
-            // 从Redis获取实时统计
+    public Map<String, Object> getRealtimeStatistics() {
+        final String errorMessage = "获取实时统计失败";
+        try {
             Map<Object, Object> realtimeData = redisTemplate.opsForHash().entries(REALTIME_STATS_KEY);
 
+            Map<String, Object> stats = new HashMap<>();
             stats.put("total_requests", getLongValue(realtimeData, "total_requests"));
             stats.put("success_requests", getLongValue(realtimeData, "success_requests"));
             stats.put("failed_requests", getLongValue(realtimeData, "failed_requests"));
             stats.put("avg_response_time", getDoubleValue(realtimeData, "avg_response_time"));
             stats.put("last_update_time", realtimeData.get("last_update_time"));
-
             return stats;
-        }, "获取实时统计失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError(errorMessage, e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, errorMessage);
+        }
     }
 
     @Override
-    public Result<Page<ApiCallLog>> getErrorLogs(int pageNum, int pageSize, int hours) {
-        return safeExecuteData(() -> {
+    public Page<ApiCallLog> getErrorLogs(int pageNum, int pageSize, int hours) {
+        final String errorMessage = "查询错误日志失败";
+        try {
             requireCondition(pageNum, num -> num > 0, "页码必须大于0");
             requireCondition(pageSize, size -> size > 0 && size <= 100, "每页大小必须在1-100之间");
             requireCondition(hours, h -> h > 0 && h <= 72, "查询小时数必须在1-72之间");
@@ -465,12 +510,17 @@ public class ApiCallLogServiceImpl extends BaseService implements ApiCallLogServ
 
             Page<ApiCallLog> page = new Page<>(pageNum, pageSize);
             LambdaQueryWrapper<ApiCallLog> wrapper = new LambdaQueryWrapper<>();
-            wrapper.ge(ApiCallLog::getResponseCode, 400) // 4xx和5xx错误
+            wrapper.ge(ApiCallLog::getResponseCode, 400)
                     .ge(ApiCallLog::getRequestTime, startTime)
                     .orderByDesc(ApiCallLog::getRequestTime);
 
             return callLogMapper.selectPage(page, wrapper);
-        }, "查询错误日志失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError(errorMessage, e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, errorMessage);
+        }
     }
 
     /**

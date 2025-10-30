@@ -3,11 +3,11 @@ package cn.flying.identity.service.impl;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.flying.identity.dto.Account;
 import cn.flying.identity.dto.ThirdPartyAccount;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.mapper.ThirdPartyAccountMapper;
 import cn.flying.identity.service.AccountService;
 import cn.flying.identity.service.ThirdPartyAuthService;
 import cn.flying.identity.util.IdUtils;
-import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.http.HttpRequest;
@@ -97,7 +97,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
     private String wechatUserInfoUrl;
 
     @Override
-    public Result<String> getAuthorizationUrl(String provider, String redirectUri, String state) {
+    public String getAuthorizationUrl(String provider, String redirectUri, String state) {
         try {
             String authUrl;
             String stateParam = state != null ? state : IdUtils.nextIdWithPrefix("STATE");
@@ -117,24 +117,26 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                     authUrl = buildWeChatAuthUrl(redirectUri, stateParam);
                     break;
                 default:
-                    return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+                    throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "不支持的第三方提供商: " + provider);
             }
 
-            return Result.success(authUrl);
+            return authUrl;
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("获取第三方登录授权URL失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "获取第三方登录授权URL失败");
         }
     }
 
     @Override
-    public Result<Map<String, Object>> handleCallback(String provider, String code, String state) {
+    public Map<String, Object> handleCallback(String provider, String code, String state) {
         try {
             // 验证状态参数
             String stateKey = THIRD_PARTY_STATE_PREFIX + state;
             String stateValue = redisTemplate.opsForValue().get(stateKey);
             if (stateValue == null) {
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "state已失效，请重新发起授权");
             }
 
             // 清除状态参数
@@ -144,7 +146,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
             int separatorIndex = stateValue.indexOf(":");
             if (separatorIndex <= 0 || separatorIndex >= stateValue.length() - 1) {
                 log.warn("state参数格式不正确: {}", stateValue);
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+                throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "state格式不正确");
             }
 
             String providerFromState = stateValue.substring(0, separatorIndex);
@@ -155,17 +157,12 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
             }
 
             String accessToken = getAccessTokenFromProvider(providerFromState, code, redirectUri);
-            if (accessToken == null) {
-                return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            if (StrUtil.isBlank(accessToken)) {
+                throw new BusinessException(ResultEnum.SYSTEM_ERROR, "获取第三方访问令牌失败");
             }
 
             // 获取第三方用户信息
-            Result<Map<String, Object>> userInfoResult = getThirdPartyUserInfo(providerFromState, accessToken);
-            if (userInfoResult.getCode() != ResultEnum.SUCCESS.getCode()) {
-                return userInfoResult;
-            }
-
-            Map<String, Object> thirdPartyUser = userInfoResult.getData();
+            Map<String, Object> thirdPartyUser = getThirdPartyUserInfo(providerFromState, accessToken);
             String normalizedId = String.valueOf(thirdPartyUser.get("id"));
             String email = (String) thirdPartyUser.get("email");
             String username = (String) thirdPartyUser.get("login");
@@ -276,7 +273,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                             result.put("token", StpUtil.getTokenValue());
                             result.put("provider", providerFromState);
                         } else {
-                            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+                            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "自动注册账号失败");
                         }
                     }
                 } else {
@@ -288,15 +285,17 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                 }
             }
 
-            return Result.success(result);
+            return result;
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("处理第三方登录回调失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "处理第三方登录回调失败");
         }
     }
 
     @Override
-    public Result<Void> bindThirdPartyAccount(Long userId, String provider, String code) {
+    public void bindThirdPartyAccount(Long userId, String provider, String code) {
         try {
             // 从Redis获取临时存储的绑定信息（JSON）
             String bindKey = THIRD_PARTY_BIND_PREFIX + userId + ":" + provider;
@@ -319,32 +318,34 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                 clearAccessMapping(provider, accessToken);
                 // 同步清理refresh映射（如果存在）
                 clearRefreshMapping(provider, refreshToken);
-
-                return Result.success(null);
+                return;
             }
 
             // 未找到临时绑定信息
-            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+            throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "未找到可绑定的第三方账号信息");
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("绑定第三方账号失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "绑定第三方账号失败");
         }
     }
 
     @Override
-    public Result<Void> unbindThirdPartyAccount(Long userId, String provider) {
+    public void unbindThirdPartyAccount(Long userId, String provider) {
         try {
             // 删除绑定关系
             removeThirdPartyBinding(userId, provider);
-            return Result.success(null);
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("解绑第三方账号失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "解绑第三方账号失败");
         }
     }
 
     @Override
-    public Result<Map<String, Object>> getUserThirdPartyAccounts(Long userId) {
+    public Map<String, Object> getUserThirdPartyAccounts(Long userId) {
         try {
             // 获取用户绑定的第三方账号列表
             List<Map<String, Object>> bindings = getThirdPartyBindings(userId);
@@ -354,15 +355,17 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
             result.put("bindings", bindings);
             result.put("total", bindings.size());
 
-            return Result.success(result);
+            return result;
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("获取用户第三方账号列表失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "获取用户第三方账号列表失败");
         }
     }
 
     @Override
-    public Result<Map<String, Object>> getSupportedProviders() {
+    public Map<String, Object> getSupportedProviders() {
         Map<String, Object> providers = new HashMap<>();
 
         // GitHub
@@ -396,7 +399,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
         result.put("providers", providers);
         result.put("total", providers.size());
 
-        return Result.success(result);
+        return result;
     }
 
     /**
@@ -407,12 +410,12 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
      * - GitHub: login/oauth/access_token (grant_type=refresh_token)
      */
     @Override
-    public Result<Map<String, Object>> refreshThirdPartyToken(Long userId, String provider) {
+    public Map<String, Object> refreshThirdPartyToken(Long userId, String provider) {
         try {
             ThirdPartyAccount account = thirdPartyAccountMapper.findByUserIdAndProvider(userId, provider);
             if (account == null || org.apache.commons.lang3.StringUtils.isBlank(account.getRefreshToken())) {
                 log.warn("未找到可刷新令牌的第三方账号: userId={}, provider={}", userId, provider);
-                return Result.error(ResultEnum.RESULT_DATA_NONE, null);
+                throw new BusinessException(ResultEnum.RESULT_DATA_NONE, "未找到可刷新令牌的第三方账号");
             }
 
             String newAccessToken = null;
@@ -435,11 +438,11 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                             .timeout(10000)
                             .execute();
                     if (!resp.isOk()) {
-                        return Result.error(mapHttpStatusToEnum(resp.getStatus()), null);
+                        throw new BusinessException(mapHttpStatusToEnum(resp.getStatus()), "微信刷新访问令牌失败");
                     }
                     JSONObject obj = JSONUtil.parseObj(resp.body());
                     if (obj.containsKey("errcode") && obj.getInt("errcode", 0) != 0) {
-                        return Result.error(mapWeChatErr(obj.getInt("errcode")), null);
+                        throw new BusinessException(mapWeChatErr(obj.getInt("errcode")), "微信刷新访问令牌失败");
                     }
                     newAccessToken = obj.getStr("access_token");
                     newRefreshToken = obj.getStr("refresh_token", newRefreshToken);
@@ -471,11 +474,11 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                             .timeout(10000)
                             .execute();
                     if (!resp.isOk()) {
-                        return Result.error(mapHttpStatusToEnum(resp.getStatus()), null);
+                        throw new BusinessException(mapHttpStatusToEnum(resp.getStatus()), "Google 刷新访问令牌失败");
                     }
                     JSONObject obj = JSONUtil.parseObj(resp.body());
                     if (obj.containsKey("error")) {
-                        return Result.error(mapOAuthError(obj.getStr("error")), null);
+                        throw new BusinessException(mapOAuthError(obj.getStr("error")), "Google 刷新访问令牌失败");
                     }
                     newAccessToken = obj.getStr("access_token");
                     newRefreshToken = obj.getStr("refresh_token", newRefreshToken);
@@ -507,11 +510,11 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                             .timeout(10000)
                             .execute();
                     if (!resp.isOk()) {
-                        return Result.error(mapHttpStatusToEnum(resp.getStatus()), null);
+                        throw new BusinessException(mapHttpStatusToEnum(resp.getStatus()), "GitHub 刷新访问令牌失败");
                     }
                     JSONObject obj = JSONUtil.parseObj(resp.body());
                     if (obj.containsKey("error")) {
-                        return Result.error(mapOAuthError(obj.getStr("error")), null);
+                        throw new BusinessException(mapOAuthError(obj.getStr("error")), "GitHub 刷新访问令牌失败");
                     }
                     newAccessToken = obj.getStr("access_token");
                     newRefreshToken = obj.getStr("refresh_token", newRefreshToken);
@@ -530,7 +533,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                     break;
                 }
                 default:
-                    return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+                    throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "不支持的第三方提供商: " + provider);
             }
 
             // 清理旧的 access/refresh 映射缓存键
@@ -551,15 +554,17 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                 res.put("extra", extra);
             }
 
-            return Result.success(res);
+            return res;
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("刷新第三方令牌失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "刷新第三方令牌失败");
         }
     }
 
     @Override
-    public Result<Map<String, Object>> getThirdPartyUserInfo(String provider, String accessToken) {
+    public Map<String, Object> getThirdPartyUserInfo(String provider, String accessToken) {
         try {
             String userInfoUrl;
             Map<String, String> headers = new HashMap<>();
@@ -577,7 +582,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                     // 微信需要特殊处理
                     return getWeChatUserInfo(accessToken);
                 default:
-                    return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+                    throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "不支持的第三方提供商: " + provider);
             }
 
             HttpResponse response = HttpRequest.get(userInfoUrl)
@@ -592,7 +597,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                 // Google在用户信息也可能返回error字段
                 if ("google".equalsIgnoreCase(provider) && userInfo.containsKey("error")) {
                     String errorCode = userInfo.getByPath("error.errors[0].reason", String.class);
-                    return Result.error(mapOAuthError(errorCode), null);
+                    throw new BusinessException(mapOAuthError(errorCode), "获取Google用户信息失败");
                 }
 
                 // 规范化不同提供商的字段，统一给上层：id / login / avatar_url / email
@@ -613,25 +618,33 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                 }
                 normalized.set("raw", userInfo);
 
-                return Result.success(normalized);
+                return normalized;
             } else {
                 // 根据HTTP状态码映射平台错误
-                return Result.error(mapHttpStatusToEnum(response.getStatus()), null);
+                throw new BusinessException(mapHttpStatusToEnum(response.getStatus()), "获取第三方用户信息失败");
             }
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("获取第三方用户信息失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "获取第三方用户信息失败");
         }
     }
 
     @Override
-    public Result<Boolean> validateThirdPartyToken(String provider, String accessToken) {
+    public boolean validateThirdPartyToken(String provider, String accessToken) {
         try {
-            Result<Map<String, Object>> userInfoResult = getThirdPartyUserInfo(provider, accessToken);
-            return Result.success(userInfoResult.getCode() == ResultEnum.SUCCESS.getCode());
+            getThirdPartyUserInfo(provider, accessToken);
+            return true;
+        } catch (BusinessException ex) {
+            if (ex.getCode() == ResultEnum.OAUTH_TOKEN_INVALID.getCode()
+                    || ex.getCode() == ResultEnum.PERMISSION_UNAUTHORIZED.getCode()) {
+                return false;
+            }
+            throw ex;
         } catch (Exception e) {
             log.error("验证第三方令牌失败", e);
-            return Result.success(false);
+            return false;
         }
     }
 
@@ -948,18 +961,18 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
     /**
      * 获取微信用户信息
      */
-    private Result<Map<String, Object>> getWeChatUserInfo(String accessToken) {
+    private Map<String, Object> getWeChatUserInfo(String accessToken) {
         try {
             // 从缓存恢复 openid 映射
             String mappingKey = THIRD_PARTY_TOKEN_PREFIX + "wechat:access:" + accessToken;
             String mappingJson = redisTemplate.opsForValue().get(mappingKey);
             if (StrUtil.isBlank(mappingJson)) {
-                return Result.error(ResultEnum.OAUTH_TOKEN_INVALID, null);
+                throw new BusinessException(ResultEnum.OAUTH_TOKEN_INVALID, "微信令牌无效或已过期");
             }
             JSONObject mapping = JSONUtil.parseObj(mappingJson);
             String openId = mapping.getStr("openid");
             if (StrUtil.isBlank(openId)) {
-                return Result.error(ResultEnum.OAUTH_TOKEN_INVALID, null);
+                throw new BusinessException(ResultEnum.OAUTH_TOKEN_INVALID, "微信令牌无效或已过期");
             }
 
             String userInfoUrl = String.format(
@@ -980,7 +993,7 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
 
                 // 错误码处理
                 if (wx.containsKey("errcode") && wx.getInt("errcode", 0) != 0) {
-                    return Result.error(mapWeChatErr(wx.getInt("errcode")), null);
+                    throw new BusinessException(mapWeChatErr(wx.getInt("errcode")), "获取微信用户信息失败");
                 }
 
                 // 规范化字段，兼容上层使用（id/login/avatar_url/email）
@@ -993,13 +1006,15 @@ public class ThirdPartyAuthServiceImpl implements ThirdPartyAuthService {
                 normalized.set("unionid", unionId);
                 normalized.set("raw", wx);
 
-                return Result.success(normalized);
+                return normalized;
             } else {
-                return Result.error(mapHttpStatusToEnum(response.getStatus()), null);
+                throw new BusinessException(mapHttpStatusToEnum(response.getStatus()), "获取微信用户信息失败");
             }
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("获取微信用户信息异常", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "获取微信用户信息异常");
         }
     }
 

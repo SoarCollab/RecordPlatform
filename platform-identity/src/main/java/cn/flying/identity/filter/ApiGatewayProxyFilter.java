@@ -4,6 +4,7 @@ import cn.flying.identity.dto.apigateway.ApiCallLog;
 import cn.flying.identity.dto.apigateway.ApiKey;
 import cn.flying.identity.dto.apigateway.ApiRoute;
 import cn.flying.identity.gateway.alert.AlertService;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.gateway.cache.ApiGatewayCacheManager;
 import cn.flying.identity.gateway.circuitbreaker.CircuitBreakerService;
 import cn.flying.identity.gateway.circuitbreaker.FallbackStrategyManager;
@@ -12,6 +13,7 @@ import cn.flying.identity.gateway.loadbalance.LoadBalanceStrategy;
 import cn.flying.identity.gateway.pool.ApiGatewayConnectionPoolManager;
 import cn.flying.identity.service.apigateway.*;
 import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.constant.ResultEnum;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import jakarta.annotation.Resource;
@@ -162,26 +164,29 @@ public class ApiGatewayProxyFilter implements Filter {
             // 1. 验证API密钥（如果需要）
             String apiKey = extractApiKey(httpRequest);
             if (StrUtil.isNotBlank(apiKey)) {
-                Result<Void> keyResult = apiKeyService.validateApiKey(apiKey);
-                if (!keyResult.isSuccess()) {
-                    recordFailedCallLog(requestId, appId, null, requestURI, method, clientIp, 401, "Invalid API key", startTime);
+                try {
+                    apiKeyService.validateApiKey(apiKey);
+                    ApiKey keyInfo = apiKeyService.getKeyInfoByApiKey(apiKey);
+                    if (keyInfo != null) {
+                        appId = keyInfo.getAppId();
+                        log.debug("从ApiKey获取到appId: {}", appId);
+                    }
+                } catch (BusinessException ex) {
+                    recordFailedCallLog(requestId, appId, null, requestURI, method, clientIp, 401,
+                            "Invalid API key", startTime);
                     writeErrorResponse(httpResponse, HttpServletResponse.SC_UNAUTHORIZED,
-                            "Invalid API key: " + keyResult.getMessage());
+                            "Invalid API key: " + ex.getMessage());
                     return;
-                }
-
-                // 获取ApiKey完整信息，包含appId
-                Result<ApiKey> keyInfoResult = apiKeyService.getKeyInfoByApiKey(apiKey);
-                if (keyInfoResult.isSuccess() && keyInfoResult.getData() != null) {
-                    appId = keyInfoResult.getData().getAppId();
-                    log.debug("从ApiKey获取到appId: {}", appId);
                 }
             }
 
+            // 预处理路由路径
+            String cleanPath = extractCleanPath(requestURI);
+
             // 2. 配额检查
             if (appId != null) {
-                Result<Boolean> quotaResult = apiQuotaService.checkQuotaExceeded(appId, null);
-                if (quotaResult.isSuccess() && quotaResult.getData()) {
+                boolean quotaExceeded = apiQuotaService.checkQuotaExceeded(appId, null);
+                if (quotaExceeded) {
                     recordFailedCallLog(requestId, appId, apiKey, requestURI, method, clientIp, 429, "Quota exceeded", startTime);
                     writeErrorResponse(httpResponse, 429,
                             "API quota exceeded");
@@ -190,34 +195,38 @@ public class ApiGatewayProxyFilter implements Filter {
             }
 
             // 3. 验证权限（基于路径）
-            Result<Boolean> permResult = apiPermissionService.hasPermissionByPath(
-                    Long.valueOf(requestURI), method, apiKey);
-            if (!permResult.isSuccess() || !permResult.getData()) {
-                writeErrorResponse(httpResponse, HttpServletResponse.SC_FORBIDDEN,
-                        "Permission denied for path: " + requestURI);
-                return;
+            if (appId != null) {
+                boolean hasPermission = apiPermissionService.hasPermissionByPath(appId, cleanPath, method);
+                if (!hasPermission) {
+                    writeErrorResponse(httpResponse, HttpServletResponse.SC_FORBIDDEN,
+                            "Permission denied for path: " + cleanPath);
+                    return;
+                }
             }
 
-            // 3. 匹配路由
-            String cleanPath = extractCleanPath(requestURI);
-            Result<ApiRoute> routeResult = apiRouteService.matchRoute(cleanPath, method);
-            if (!routeResult.isSuccess()) {
-                writeErrorResponse(httpResponse, HttpServletResponse.SC_NOT_FOUND,
-                        "No route found for: " + cleanPath);
+            // 4. 匹配路由
+            ApiRoute route;
+            try {
+                route = apiRouteService.matchRoute(cleanPath, method);
+            } catch (BusinessException ex) {
+                if (ex.getCode() == ResultEnum.RESULT_DATA_NONE.getCode()) {
+                    writeErrorResponse(httpResponse, HttpServletResponse.SC_NOT_FOUND,
+                            "No route found for: " + cleanPath);
+                } else {
+                    writeErrorResponse(httpResponse, HttpServletResponse.SC_BAD_GATEWAY, ex.getMessage());
+                }
                 return;
             }
-
-            ApiRoute route = routeResult.getData();
             log.info("匹配到路由: {} -> {}", cleanPath, route.getServiceName());
 
-            // 4. 检查路由是否启用
+            // 5. 检查路由是否启用
             if (route.getRouteStatus() != 1) {
                 writeErrorResponse(httpResponse, HttpServletResponse.SC_SERVICE_UNAVAILABLE,
                         "Route is disabled");
                 return;
             }
 
-            // 5. 检查缓存（GET请求）
+            // 6. 检查缓存（GET请求）
             String cacheKey = buildCacheKey(route.getId(), requestURI, method, httpRequest.getQueryString());
             if ("GET".equalsIgnoreCase(method)) {
                 Object cachedResponse = cacheManager.get(cacheKey);
@@ -228,11 +237,11 @@ public class ApiGatewayProxyFilter implements Filter {
                 }
             }
 
-            // 6. 选择负载均衡策略
+            // 7. 选择负载均衡策略
             String loadBalanceStrategy = getLoadBalanceStrategy(route);
             String requestKey = clientIp + ":" + requestURI;
 
-            // 7. 选择目标实例
+            // 8. 选择目标实例
             LoadBalanceStrategy.ServiceInstance instance = loadBalanceManager.selectInstance(
                     route.getServiceName(), loadBalanceStrategy, requestKey);
             if (instance == null) {
@@ -248,11 +257,11 @@ public class ApiGatewayProxyFilter implements Filter {
                 return;
             }
 
-            // 8. 构建目标URL
+            // 9. 构建目标URL
             String targetUrl = buildTargetUrl(instance, route, requestURI, httpRequest.getQueryString());
             log.info("转发请求: {} -> {}", requestURI, targetUrl);
 
-            // 9. 使用熔断器执行请求（异步包装支持超时控制）
+            // 10. 使用熔断器执行请求（异步包装支持超时控制）
             String circuitBreakerName = "route-" + route.getId();
             CompletableFuture<ProxyResponse> future = CompletableFuture.supplyAsync(() ->
                     circuitBreakerService.executeAsync(
@@ -262,7 +271,7 @@ public class ApiGatewayProxyFilter implements Filter {
                     )
             );
 
-            // 10. 等待结果（带超时）
+            // 11. 等待结果（带超时）
             long timeout = route.getTimeout() != null ? route.getTimeout() : defaultTimeout;
             ProxyResponse proxyResponse;
             try {
@@ -304,7 +313,7 @@ public class ApiGatewayProxyFilter implements Filter {
                 throw e;
             }
 
-            // 11. 处理响应
+            // 12. 处理响应
             if (proxyResponse.isSuccess()) {
                 // 写入响应
                 writeProxyResponse(httpResponse, proxyResponse);

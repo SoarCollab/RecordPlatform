@@ -1,6 +1,7 @@
 package cn.flying.identity.service;
 
 import cn.flying.identity.dto.apigateway.ApiInterface;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.mapper.apigateway.ApiInterfaceMapper;
 import cn.flying.identity.service.impl.apigateway.ApiInterfaceServiceImpl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -12,7 +13,6 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -44,7 +44,6 @@ class ApiInterfaceServiceTest {
         testInterface = new ApiInterface();
         testInterface.setId(1L);
         testInterface.setInterfaceName("测试接口");
-        testInterface.setInterfaceCode("TEST_API");
         testInterface.setInterfacePath("/api/test");
         testInterface.setInterfaceMethod("GET");
         testInterface.setInterfaceDescription("测试接口描述");
@@ -52,73 +51,130 @@ class ApiInterfaceServiceTest {
     }
 
     @Test
-    void testSelectById_Success() {
+    void createInterface_shouldPersistAndReturnEntity() {
+        when(apiInterfaceMapper.insert(any(ApiInterface.class))).thenReturn(1);
+
+        ApiInterface created = apiInterfaceService.createInterface(testInterface);
+
+        assertSame(testInterface, created);
+        verify(apiInterfaceMapper).insert(testInterface);
+    }
+
+    @Test
+    void createInterface_shouldFailWhenMapperInsertReturnsZero() {
+        when(apiInterfaceMapper.insert(any(ApiInterface.class))).thenReturn(0);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> apiInterfaceService.createInterface(testInterface));
+        assertEquals("创建接口失败", ex.getMessage());
+        verify(apiInterfaceMapper).insert(testInterface);
+    }
+
+    @Test
+    void updateInterface_shouldUpdateSuccessfully() {
+        when(apiInterfaceMapper.updateById(any(ApiInterface.class))).thenReturn(1);
+
+        assertDoesNotThrow(() -> apiInterfaceService.updateInterface(testInterface));
+        verify(apiInterfaceMapper).updateById(testInterface);
+    }
+
+    @Test
+    void updateInterface_shouldThrowWhenNoRecordUpdated() {
+        when(apiInterfaceMapper.updateById(any(ApiInterface.class))).thenReturn(0);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> apiInterfaceService.updateInterface(testInterface));
+        assertEquals("更新接口失败", ex.getMessage());
+    }
+
+    @Test
+    void deleteInterface_shouldRemoveRecord() {
+        when(apiInterfaceMapper.deleteById(1L)).thenReturn(1);
+
+        assertDoesNotThrow(() -> apiInterfaceService.deleteInterface(1L));
+        verify(apiInterfaceMapper).deleteById(1L);
+    }
+
+    @Test
+    void getInterfaceById_shouldReturnEntity() {
         when(apiInterfaceMapper.selectById(1L)).thenReturn(testInterface);
-        
-        ApiInterface result = apiInterfaceMapper.selectById(1L);
-        
+
+        ApiInterface result = apiInterfaceService.getInterfaceById(1L);
+
         assertNotNull(result);
         assertEquals("测试接口", result.getInterfaceName());
         verify(apiInterfaceMapper).selectById(1L);
     }
 
     @Test
-    void testInsert_Success() {
-        when(apiInterfaceMapper.insert(any(ApiInterface.class))).thenReturn(1);
-        
-        int result = apiInterfaceMapper.insert(testInterface);
-        
-        assertEquals(1, result);
-        verify(apiInterfaceMapper).insert(any(ApiInterface.class));
+    void getInterfaceById_shouldThrowWhenMissing() {
+        when(apiInterfaceMapper.selectById(1L)).thenReturn(null);
+
+        assertThrows(BusinessException.class, () -> apiInterfaceService.getInterfaceById(1L));
     }
 
     @Test
-    void testSelectList_Success() {
-        List<ApiInterface> interfaces = Arrays.asList(testInterface);
-        when(apiInterfaceMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(interfaces);
-        
-        List<ApiInterface> result = apiInterfaceMapper.selectList(new LambdaQueryWrapper<>());
-        
+    void getInterfaceByPathAndMethod_shouldReturnOnlineInterface() {
+        when(apiInterfaceMapper.selectOne(any(LambdaQueryWrapper.class))).thenReturn(testInterface);
+
+        ApiInterface result = apiInterfaceService.getInterfaceByPathAndMethod("/api/test", "GET");
+
         assertNotNull(result);
+        assertEquals("/api/test", result.getInterfacePath());
+        verify(apiInterfaceMapper).selectOne(any(LambdaQueryWrapper.class));
+    }
+
+    @Test
+    void getInterfacesPage_shouldReturnPagedResult() {
+        Page<ApiInterface> resultPage = new Page<>(1, 10);
+        resultPage.setRecords(List.of(testInterface));
+        resultPage.setTotal(1);
+
+        when(apiInterfaceMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(resultPage);
+
+        Page<ApiInterface> page = apiInterfaceService.getInterfacesPage(1, 10, null, null, null);
+
+        assertEquals(1, page.getTotal());
+        assertEquals(1, page.getRecords().size());
+    }
+
+    @Test
+    void getOnlineInterfaces_shouldReturnList() {
+        when(apiInterfaceMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(testInterface));
+
+        List<ApiInterface> result = apiInterfaceService.getOnlineInterfaces();
+
         assertEquals(1, result.size());
         verify(apiInterfaceMapper).selectList(any(LambdaQueryWrapper.class));
     }
 
     @Test
-    void testUpdateById_Success() {
+    void onlineInterface_shouldUpdateStatus() {
         when(apiInterfaceMapper.updateById(any(ApiInterface.class))).thenReturn(1);
-        
-        testInterface.setInterfaceDescription("更新后的描述");
-        int result = apiInterfaceMapper.updateById(testInterface);
-        
-        assertEquals(1, result);
+
+        assertDoesNotThrow(() -> apiInterfaceService.onlineInterface(1L));
         verify(apiInterfaceMapper).updateById(any(ApiInterface.class));
     }
 
     @Test
-    void testDeleteById_Success() {
-        when(apiInterfaceMapper.deleteById(1L)).thenReturn(1);
-        
-        int result = apiInterfaceMapper.deleteById(1L);
-        
-        assertEquals(1, result);
-        verify(apiInterfaceMapper).deleteById(1L);
+    void onlineInterface_shouldThrowWhenUpdateFails() {
+        when(apiInterfaceMapper.updateById(any(ApiInterface.class))).thenReturn(0);
+
+        assertThrows(BusinessException.class, () -> apiInterfaceService.onlineInterface(1L));
     }
 
     @Test
-    void testSelectPage_Success() {
-        Page<ApiInterface> page = new Page<>(1, 10);
-        Page<ApiInterface> resultPage = new Page<>(1, 10);
-        resultPage.setRecords(Arrays.asList(testInterface));
-        resultPage.setTotal(1);
-        
-        when(apiInterfaceMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class)))
-            .thenReturn(resultPage);
-        
-        Page<ApiInterface> result = apiInterfaceMapper.selectPage(page, new LambdaQueryWrapper<>());
-        
-        assertNotNull(result);
-        assertEquals(1, result.getTotal());
-        assertEquals(1, result.getRecords().size());
+    void offlineInterface_shouldUpdateStatusWithReason() {
+        when(apiInterfaceMapper.updateById(any(ApiInterface.class))).thenReturn(1);
+
+        assertDoesNotThrow(() -> apiInterfaceService.offlineInterface(1L, "弃用"));
+        verify(apiInterfaceMapper).updateById(any(ApiInterface.class));
+    }
+
+    @Test
+    void offlineInterface_shouldThrowWhenUpdateFails() {
+        when(apiInterfaceMapper.updateById(any(ApiInterface.class))).thenReturn(0);
+
+        assertThrows(BusinessException.class, () -> apiInterfaceService.offlineInterface(1L, "弃用"));
     }
 }

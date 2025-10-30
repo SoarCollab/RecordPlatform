@@ -2,11 +2,11 @@ package cn.flying.identity.gateway.scheduled;
 
 import cn.flying.identity.dto.apigateway.ApiKey;
 import cn.flying.identity.dto.apigateway.ApiQuota;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.gateway.alert.AlertService;
 import cn.flying.identity.mapper.apigateway.ApiKeyMapper;
 import cn.flying.identity.service.apigateway.ApiCallLogService;
 import cn.flying.identity.service.apigateway.ApiQuotaService;
-import cn.flying.platformapi.constant.Result;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -65,28 +65,22 @@ public class ApiGatewayScheduledTasks {
         long startTime = System.currentTimeMillis();
 
         try {
-            // 清理90天前的日志
             int retentionDays = 90;
-            Result<Integer> result = apiCallLogService.cleanExpiredLogs(retentionDays);
+            int deletedCount = apiCallLogService.cleanExpiredLogs(retentionDays);
+            long duration = System.currentTimeMillis() - startTime;
 
-            if (result.isSuccess()) {
-                int deletedCount = result.getData();
-                long duration = System.currentTimeMillis() - startTime;
+            log.info("清理过期API调用日志完成: 删除{}条记录, 耗时{}ms", deletedCount, duration);
 
-                log.info("清理过期API调用日志完成: 删除{}条记录, 耗时{}ms", deletedCount, duration);
-
-                // 如果删除数量过多，发送告警
-                if (deletedCount > 100000) {
-                    alertService.sendAlert("LOG_CLEANUP",
-                            String.format("API调用日志清理删除了大量数据: %d条记录", deletedCount),
-                            "MEDIUM");
-                }
-            } else {
-                log.error("清理过期API调用日志失败: {}", result.getMessage());
-                alertService.sendAlert("LOG_CLEANUP_FAILED",
-                        "API调用日志清理任务失败: " + result.getMessage(),
-                        "HIGH");
+            if (deletedCount > 100000) {
+                alertService.sendAlert("LOG_CLEANUP",
+                        String.format("API调用日志清理删除了大量数据: %d条记录", deletedCount),
+                        "MEDIUM");
             }
+        } catch (BusinessException ex) {
+            log.error("清理过期API调用日志失败: {}", ex.getMessage());
+            alertService.sendAlert("LOG_CLEANUP_FAILED",
+                    "API调用日志清理任务失败: " + ex.getMessage(),
+                    "HIGH");
         } catch (Exception e) {
             log.error("定时清理API调用日志异常", e);
             alertService.sendAlert("LOG_CLEANUP_ERROR",
@@ -111,19 +105,13 @@ public class ApiGatewayScheduledTasks {
         long startTime = System.currentTimeMillis();
 
         try {
-            Result<Integer> result = apiQuotaService.resetExpiredQuotas();
+            int resetCount = apiQuotaService.resetExpiredQuotas();
+            long duration = System.currentTimeMillis() - startTime;
 
-            if (result.isSuccess()) {
-                int resetCount = result.getData();
-                long duration = System.currentTimeMillis() - startTime;
-
-                if (resetCount > 0) {
-                    log.info("重置过期配额完成: 重置{}个配额, 耗时{}ms", resetCount, duration);
-                } else {
-                    log.debug("本次无需重置配额");
-                }
+            if (resetCount > 0) {
+                log.info("重置过期配额完成: 重置{}个配额, 耗时{}ms", resetCount, duration);
             } else {
-                log.error("重置过期配额失败: {}", result.getMessage());
+                log.debug("本次无需重置配额");
             }
         } catch (Exception e) {
             log.error("定时重置配额异常", e);
@@ -269,15 +257,11 @@ public class ApiGatewayScheduledTasks {
         int alertCount = 0;
 
         try {
-            // 查询所有启用的配额
-            Result<List<ApiQuota>> quotaResult = apiQuotaService.getAllActiveQuotas();
-
-            if (!quotaResult.isSuccess() || quotaResult.getData() == null) {
+            List<ApiQuota> quotas = apiQuotaService.getAllActiveQuotas();
+            if (quotas == null || quotas.isEmpty()) {
                 log.debug("没有需要检查的配额");
                 return;
             }
-
-            List<ApiQuota> quotas = quotaResult.getData();
 
             // 遍历每个配额，检查是否需要告警
             for (ApiQuota quota : quotas) {

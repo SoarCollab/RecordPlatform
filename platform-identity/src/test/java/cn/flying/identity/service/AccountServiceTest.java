@@ -15,6 +15,7 @@ import cn.flying.platformapi.constant.ResultEnum;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.conditions.query.QueryChainWrapper;
+import com.baomidou.mybatisplus.extension.conditions.update.UpdateChainWrapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -91,6 +92,8 @@ class AccountServiceTest {
         // 配置ApplicationProperties Mock
         when(applicationProperties.getVerifyCode()).thenReturn(verifyCodeConfig);
         when(verifyCodeConfig.getEmailLimit()).thenReturn(TEST_VERIFY_LIMIT);
+        when(verifyCodeConfig.getExpireMinutes()).thenReturn(3);
+        when(verifyCodeConfig.getLength()).thenReturn(6);
 
         // 注入baseMapper以支持MyBatis Plus的query()方法
         ReflectionTestUtils.setField(accountService, "baseMapper", accountMapper);
@@ -299,8 +302,11 @@ class AccountServiceTest {
         when(valueOperations.get(Const.VERIFY_EMAIL_DATA + "newemail@example.com"))
                 .thenReturn(TEST_CODE);
 
-        // Mock新邮箱已被其他用户使用 - 使用正确的spy Mock方式
-        doReturn(otherAccount).when(accountService).findAccountByNameOrEmail("newemail@example.com");
+        // Mock新邮箱已被其他用户使用
+        QueryChainWrapper<Account> queryChain = mock(QueryChainWrapper.class);
+        when(accountService.query()).thenReturn(queryChain);
+        when(queryChain.eq("email", "newemail@example.com")).thenReturn(queryChain);
+        when(queryChain.one()).thenReturn(otherAccount);
 
         // 执行测试
         Result<Void> result = accountService.modifyEmail(TEST_USER_ID, modifyEmailVO);
@@ -312,6 +318,33 @@ class AccountServiceTest {
         // 验证Mapper的update未被调用
         verify(accountMapper, never()).update(any(), any(LambdaQueryWrapper.class));
         verify(stringRedisTemplate).delete(Const.VERIFY_EMAIL_DATA + "newemail@example.com");
+    }
+
+    @Test
+    void testModifyEmail_Success() {
+        ModifyEmailVO modifyEmailVO = new ModifyEmailVO();
+        modifyEmailVO.setEmail("newemail@example.com");
+        modifyEmailVO.setCode(TEST_CODE);
+
+        when(valueOperations.get(Const.VERIFY_EMAIL_DATA + "newemail@example.com"))
+                .thenReturn(TEST_CODE);
+
+        QueryChainWrapper<Account> queryChain = mock(QueryChainWrapper.class);
+        when(accountService.query()).thenReturn(queryChain);
+        when(queryChain.eq("email", "newemail@example.com")).thenReturn(queryChain);
+        when(queryChain.one()).thenReturn(null);
+
+        UpdateChainWrapper<Account> updateChain = mock(UpdateChainWrapper.class);
+        when(accountService.update()).thenReturn(updateChain);
+        when(updateChain.eq("id", TEST_USER_ID)).thenReturn(updateChain);
+        when(updateChain.set("email", "newemail@example.com")).thenReturn(updateChain);
+        when(updateChain.update()).thenReturn(true);
+
+        Result<Void> result = accountService.modifyEmail(TEST_USER_ID, modifyEmailVO);
+
+        assertTrue(result.isSuccess());
+        verify(stringRedisTemplate).delete(Const.VERIFY_EMAIL_DATA + "newemail@example.com");
+        verify(updateChain).update();
     }
 
     // 辅助方法：创建模拟的账户

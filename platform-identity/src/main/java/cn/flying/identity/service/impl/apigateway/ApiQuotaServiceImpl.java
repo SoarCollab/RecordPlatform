@@ -1,12 +1,13 @@
 package cn.flying.identity.service.impl.apigateway;
 
 import cn.flying.identity.dto.apigateway.ApiQuota;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.gateway.alert.AlertService;
 import cn.flying.identity.mapper.apigateway.ApiQuotaMapper;
 import cn.flying.identity.service.BaseService;
 import cn.flying.identity.service.apigateway.ApiQuotaService;
 import cn.flying.identity.util.IdUtils;
-import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.constant.ResultEnum;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import jakarta.annotation.Resource;
@@ -49,16 +50,15 @@ public class ApiQuotaServiceImpl extends BaseService implements ApiQuotaService 
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Result<ApiQuota> createQuota(Long appId, Long interfaceId, Integer quotaType,
-                                        Long quotaLimit, Integer alertThreshold) {
-        return safeExecuteData(() -> {
-            requireNonNull(appId, "应用ID不能为空");
-            requireNonNull(quotaType, "配额类型不能为空");
-            requireCondition(quotaType, type -> type >= 1 && type <= 4, "配额类型必须在1-4之间");
-            requireNonNull(quotaLimit, "配额限制不能为空");
-            requireCondition(quotaLimit, limit -> limit > 0, "配额限制必须大于0");
+    public ApiQuota createQuota(Long appId, Long interfaceId, Integer quotaType,
+                                Long quotaLimit, Integer alertThreshold) {
+        requireNonNull(appId, "应用ID不能为空");
+        requireNonNull(quotaType, "配额类型不能为空");
+        requireCondition(quotaType, type -> type >= 1 && type <= 4, "配额类型必须在1-4之间");
+        requireNonNull(quotaLimit, "配额限制不能为空");
+        requireCondition(quotaLimit, limit -> limit > 0, "配额限制必须大于0");
 
-            // 检查是否已存在相同的配额设置
+        try {
             LambdaQueryWrapper<ApiQuota> wrapper = new LambdaQueryWrapper<>();
             wrapper.eq(ApiQuota::getAppId, appId)
                     .eq(ApiQuota::getQuotaType, quotaType);
@@ -70,10 +70,9 @@ public class ApiQuotaServiceImpl extends BaseService implements ApiQuotaService 
 
             ApiQuota existingQuota = quotaMapper.selectOne(wrapper);
             if (existingQuota != null) {
-                throw new RuntimeException("该应用的配额设置已存在");
+                throw businessException(ResultEnum.PARAM_IS_INVALID, "该应用的配额设置已存在");
             }
 
-            // 创建新配额
             ApiQuota quota = new ApiQuota();
             quota.setId(IdUtils.nextEntityId());
             quota.setAppId(appId);
@@ -81,100 +80,119 @@ public class ApiQuotaServiceImpl extends BaseService implements ApiQuotaService 
             quota.setQuotaType(quotaType);
             quota.setQuotaLimit(quotaLimit);
             quota.setQuotaUsed(0L);
-            quota.setAlertThreshold(alertThreshold != null ? alertThreshold : 80); // 默认80%
+            quota.setAlertThreshold(alertThreshold != null ? alertThreshold : 80);
             quota.setIsAlerted(0);
             quota.setResetTime(calculateNextResetTime(quotaType));
 
             int inserted = quotaMapper.insert(quota);
             requireCondition(inserted, count -> count > 0, "创建配额失败");
 
-            // 缓存配额信息
             cacheQuota(quota);
 
             logInfo("创建API配额: appId={}, interfaceId={}, quotaType={}, limit={}",
                     appId, interfaceId, quotaType, quotaLimit);
             return quota;
-        }, "创建配额失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError("创建配额失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "创建配额失败: " + e.getMessage());
+        }
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Result<Void> updateQuota(ApiQuota quota) {
-        return safeExecuteAction(() -> {
-            requireNonNull(quota, "配额信息不能为空");
-            requireNonNull(quota.getId(), "配额ID不能为空");
+    public void updateQuota(ApiQuota quota) {
+        requireNonNull(quota, "配额信息不能为空");
+        requireNonNull(quota.getId(), "配额ID不能为空");
 
+        try {
             ApiQuota existingQuota = quotaMapper.selectById(quota.getId());
             requireNonNull(existingQuota, "配额不存在");
 
             int updated = quotaMapper.updateById(quota);
             requireCondition(updated, count -> count > 0, "更新配额失败");
 
-            // 清除缓存
             clearQuotaCache(quota.getAppId(), quota.getInterfaceId(), quota.getQuotaType());
 
             logInfo("更新API配额: quotaId={}", quota.getId());
-        }, "更新配额失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError("更新配额失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "更新配额失败: " + e.getMessage());
+        }
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Result<Void> deleteQuota(Long quotaId) {
-        return safeExecuteAction(() -> {
-            requireNonNull(quotaId, "配额ID不能为空");
+    public void deleteQuota(Long quotaId) {
+        requireNonNull(quotaId, "配额ID不能为空");
 
+        try {
             ApiQuota quota = quotaMapper.selectById(quotaId);
             requireNonNull(quota, "配额不存在");
 
             int deleted = quotaMapper.deleteById(quotaId);
             requireCondition(deleted, count -> count > 0, "删除配额失败");
 
-            // 清除缓存
             clearQuotaCache(quota.getAppId(), quota.getInterfaceId(), quota.getQuotaType());
 
             logInfo("删除API配额: quotaId={}", quotaId);
-        }, "删除配额失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError("删除配额失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "删除配额失败: " + e.getMessage());
+        }
     }
 
     @Override
-    public Result<ApiQuota> getQuotaById(Long quotaId) {
-        return safeExecuteData(() -> {
-            requireNonNull(quotaId, "配额ID不能为空");
+    public ApiQuota getQuotaById(Long quotaId) {
+        requireNonNull(quotaId, "配额ID不能为空");
 
+        try {
             ApiQuota quota = quotaMapper.selectById(quotaId);
             requireNonNull(quota, "配额不存在");
-
             return quota;
-        }, "查询配额失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError("查询配额失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "查询配额失败: " + e.getMessage());
+        }
     }
 
     @Override
-    public Result<List<ApiQuota>> getQuotasByAppId(Long appId) {
-        return safeExecuteData(() -> {
-            requireNonNull(appId, "应用ID不能为空");
+    public List<ApiQuota> getQuotasByAppId(Long appId) {
+        requireNonNull(appId, "应用ID不能为空");
 
+        try {
             LambdaQueryWrapper<ApiQuota> wrapper = new LambdaQueryWrapper<>();
             wrapper.eq(ApiQuota::getAppId, appId)
                     .orderByAsc(ApiQuota::getQuotaType);
 
             List<ApiQuota> quotas = quotaMapper.selectList(wrapper);
-            return quotas;
-        }, "查询应用配额列表失败");
+            return quotas != null ? quotas : List.of();
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError("查询应用配额列表失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "查询应用配额列表失败: " + e.getMessage());
+        }
     }
 
     @Override
-    public Result<ApiQuota> getQuotaByAppAndInterface(Long appId, Long interfaceId, Integer quotaType) {
-        return safeExecuteData(() -> {
-            requireNonNull(appId, "应用ID不能为空");
-            requireNonNull(quotaType, "配额类型不能为空");
+    public ApiQuota getQuotaByAppAndInterface(Long appId, Long interfaceId, Integer quotaType) {
+        requireNonNull(appId, "应用ID不能为空");
+        requireNonNull(quotaType, "配额类型不能为空");
 
-            // 先从缓存获取
+        try {
             ApiQuota cachedQuota = getQuotaFromCache(appId, interfaceId, quotaType);
             if (cachedQuota != null) {
                 return cachedQuota;
             }
 
-            // 从数据库查询
             LambdaQueryWrapper<ApiQuota> wrapper = new LambdaQueryWrapper<>();
             wrapper.eq(ApiQuota::getAppId, appId)
                     .eq(ApiQuota::getQuotaType, quotaType);
@@ -188,112 +206,127 @@ public class ApiQuotaServiceImpl extends BaseService implements ApiQuotaService 
             if (quota != null) {
                 cacheQuota(quota);
             }
-
             return quota;
-        }, "查询配额失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError("查询配额失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "查询配额失败: " + e.getMessage());
+        }
     }
 
     @Override
-    public Result<Boolean> checkQuotaExceeded(Long appId, Long interfaceId) {
-        return safeExecuteData(() -> {
-            requireNonNull(appId, "应用ID不能为空");
+    public boolean checkQuotaExceeded(Long appId, Long interfaceId) {
+        requireNonNull(appId, "应用ID不能为空");
 
-            // 检查每分钟配额
-            ApiQuota minuteQuota = getQuotaByAppAndInterface(appId, interfaceId, 1).getData();
-            if (minuteQuota != null && minuteQuota.getQuotaUsed() >= minuteQuota.getQuotaLimit()) {
+        try {
+            ApiQuota minuteQuota = getQuotaByAppAndInterface(appId, interfaceId, 1);
+            if (minuteQuota != null && quotaExceeded(minuteQuota)) {
                 logWarn("应用超出每分钟配额: appId={}, interfaceId={}, used={}, limit={}",
                         appId, interfaceId, minuteQuota.getQuotaUsed(), minuteQuota.getQuotaLimit());
                 return true;
             }
 
-            // 检查每小时配额
-            ApiQuota hourQuota = getQuotaByAppAndInterface(appId, interfaceId, 2).getData();
-            if (hourQuota != null && hourQuota.getQuotaUsed() >= hourQuota.getQuotaLimit()) {
+            ApiQuota hourQuota = getQuotaByAppAndInterface(appId, interfaceId, 2);
+            if (hourQuota != null && quotaExceeded(hourQuota)) {
                 logWarn("应用超出每小时配额: appId={}, interfaceId={}, used={}, limit={}",
                         appId, interfaceId, hourQuota.getQuotaUsed(), hourQuota.getQuotaLimit());
                 return true;
             }
 
-            // 检查每天配额
-            ApiQuota dayQuota = getQuotaByAppAndInterface(appId, interfaceId, 3).getData();
-            if (dayQuota != null && dayQuota.getQuotaUsed() >= dayQuota.getQuotaLimit()) {
+            ApiQuota dayQuota = getQuotaByAppAndInterface(appId, interfaceId, 3);
+            if (dayQuota != null && quotaExceeded(dayQuota)) {
                 logWarn("应用超出每天配额: appId={}, interfaceId={}, used={}, limit={}",
                         appId, interfaceId, dayQuota.getQuotaUsed(), dayQuota.getQuotaLimit());
                 return true;
             }
 
-            // 检查每月配额
-            ApiQuota monthQuota = getQuotaByAppAndInterface(appId, interfaceId, 4).getData();
-            if (monthQuota != null && monthQuota.getQuotaUsed() >= monthQuota.getQuotaLimit()) {
+            ApiQuota monthQuota = getQuotaByAppAndInterface(appId, interfaceId, 4);
+            if (monthQuota != null && quotaExceeded(monthQuota)) {
                 logWarn("应用超出每月配额: appId={}, interfaceId={}, used={}, limit={}",
                         appId, interfaceId, monthQuota.getQuotaUsed(), monthQuota.getQuotaLimit());
                 return true;
             }
 
             return false;
-        }, "检查配额失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError("检查配额失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "检查配额失败: " + e.getMessage());
+        }
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Result<Void> incrementQuotaUsage(Long appId, Long interfaceId, int count) {
-        return safeExecuteAction(() -> {
-            requireNonNull(appId, "应用ID不能为空");
-            requireCondition(count, c -> c > 0, "增加数量必须大于0");
+    public void incrementQuotaUsage(Long appId, Long interfaceId, int count) {
+        requireNonNull(appId, "应用ID不能为空");
+        requireCondition(count, c -> c > 0, "增加数量必须大于0");
 
-            // 增加所有类型的配额使用量
+        try {
             for (int quotaType = 1; quotaType <= 4; quotaType++) {
                 incrementQuotaUsageByType(appId, interfaceId, quotaType, count);
             }
-
             logDebug("增加配额使用量: appId={}, interfaceId={}, count={}", appId, interfaceId, count);
-        }, "增加配额使用量失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError("增加配额使用量失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "增加配额使用量失败: " + e.getMessage());
+        }
     }
 
     /**
      * 按类型增加配额使用量
      */
     private void incrementQuotaUsageByType(Long appId, Long interfaceId, Integer quotaType, int count) {
-        LambdaQueryWrapper<ApiQuota> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ApiQuota::getAppId, appId)
-                .eq(ApiQuota::getQuotaType, quotaType);
-        if (interfaceId != null) {
-            wrapper.eq(ApiQuota::getInterfaceId, interfaceId);
-        } else {
-            wrapper.isNull(ApiQuota::getInterfaceId);
-        }
-
-        ApiQuota quota = quotaMapper.selectOne(wrapper);
-        if (quota != null) {
-            // 使用Redis原子操作增加使用量
-            String usageKey = buildQuotaUsageKey(appId, interfaceId, quotaType);
-            Long newUsage = redisTemplate.opsForValue().increment(usageKey, count);
-
-            // 定期同步到数据库（每100次）
-            if (newUsage % 100 == 0) {
-                LambdaUpdateWrapper<ApiQuota> updateWrapper = new LambdaUpdateWrapper<>();
-                updateWrapper.eq(ApiQuota::getId, quota.getId())
-                        .set(ApiQuota::getQuotaUsed, newUsage);
-                quotaMapper.update(null, updateWrapper);
+        try {
+            LambdaQueryWrapper<ApiQuota> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(ApiQuota::getAppId, appId)
+                    .eq(ApiQuota::getQuotaType, quotaType);
+            if (interfaceId != null) {
+                wrapper.eq(ApiQuota::getInterfaceId, interfaceId);
+            } else {
+                wrapper.isNull(ApiQuota::getInterfaceId);
             }
 
-            // 检查是否需要告警
-            if (newUsage >= quota.getQuotaLimit() * quota.getAlertThreshold() / 100) {
-                checkAndSendAlert(quota.getId());
+            ApiQuota quota = quotaMapper.selectOne(wrapper);
+            if (quota != null) {
+                String usageKey = buildQuotaUsageKey(appId, interfaceId, quotaType);
+                Long newUsage = redisTemplate.opsForValue().increment(usageKey, count);
+
+                if (newUsage != null && newUsage % 100 == 0) {
+                    LambdaUpdateWrapper<ApiQuota> updateWrapper = new LambdaUpdateWrapper<>();
+                    updateWrapper.eq(ApiQuota::getId, quota.getId())
+                            .set(ApiQuota::getQuotaUsed, newUsage);
+                    quotaMapper.update(null, updateWrapper);
+                }
+
+                if (newUsage != null
+                        && quota.getQuotaLimit() != null
+                        && quota.getQuotaLimit() > 0
+                        && quota.getAlertThreshold() != null
+                        && newUsage >= quota.getQuotaLimit() * quota.getAlertThreshold() / 100) {
+                    checkAndSendAlert(quota.getId());
+                }
             }
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError("增加指定类型配额使用量失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "增加指定类型配额使用量失败: " + e.getMessage());
         }
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Result<Void> resetQuota(Long quotaId) {
-        return safeExecuteAction(() -> {
-            requireNonNull(quotaId, "配额ID不能为空");
+    public void resetQuota(Long quotaId) {
+        requireNonNull(quotaId, "配额ID不能为空");
 
+        try {
             ApiQuota quota = quotaMapper.selectById(quotaId);
             requireNonNull(quota, "配额不存在");
 
-            // 重置使用量和告警状态
             LambdaUpdateWrapper<ApiQuota> wrapper = new LambdaUpdateWrapper<>();
             wrapper.eq(ApiQuota::getId, quotaId)
                     .set(ApiQuota::getQuotaUsed, 0)
@@ -303,44 +336,57 @@ public class ApiQuotaServiceImpl extends BaseService implements ApiQuotaService 
             int updated = quotaMapper.update(null, wrapper);
             requireCondition(updated, count -> count > 0, "重置配额失败");
 
-            // 清除Redis缓存
             String usageKey = buildQuotaUsageKey(quota.getAppId(), quota.getInterfaceId(), quota.getQuotaType());
             redisTemplate.delete(usageKey);
             clearQuotaCache(quota.getAppId(), quota.getInterfaceId(), quota.getQuotaType());
 
             logInfo("重置配额: quotaId={}", quotaId);
-        }, "重置配额失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError("重置配额失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "重置配额失败: " + e.getMessage());
+        }
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Result<Integer> resetExpiredQuotas() {
-        return safeExecuteData(() -> {
+    public int resetExpiredQuotas() {
+        try {
             LocalDateTime now = LocalDateTime.now();
 
             LambdaQueryWrapper<ApiQuota> wrapper = new LambdaQueryWrapper<>();
             wrapper.le(ApiQuota::getResetTime, now);
 
             List<ApiQuota> expiredQuotas = quotaMapper.selectList(wrapper);
-
             int resetCount = 0;
+
             for (ApiQuota quota : expiredQuotas) {
-                Result<Void> result = resetQuota(quota.getId());
-                if (result.isSuccess()) {
+                try {
+                    resetQuota(quota.getId());
                     resetCount++;
+                } catch (BusinessException ex) {
+                    logWarn("重置配额失败，略过 quotaId={}: {}", quota.getId(), ex.getMessage());
+                } catch (Exception inner) {
+                    logError("重置配额异常: quotaId={}", quota.getId(), inner);
                 }
             }
 
             logInfo("重置过期配额: 总数={}, 成功={}", expiredQuotas.size(), resetCount);
             return resetCount;
-        }, "重置过期配额失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError("重置过期配额失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "重置过期配额失败: " + e.getMessage());
+        }
     }
 
     @Override
-    public Result<Map<String, Object>> getQuotaStatistics(Long appId) {
-        return safeExecuteData(() -> {
-            requireNonNull(appId, "应用ID不能为空");
+    public Map<String, Object> getQuotaStatistics(Long appId) {
+        requireNonNull(appId, "应用ID不能为空");
 
+        try {
             Map<String, Object> stats = new HashMap<>();
 
             LambdaQueryWrapper<ApiQuota> wrapper = new LambdaQueryWrapper<>();
@@ -351,10 +397,15 @@ public class ApiQuotaServiceImpl extends BaseService implements ApiQuotaService 
             stats.put("total_quotas", quotas.size());
             stats.put("quotas", quotas);
 
-            // 计算总使用率
             if (!quotas.isEmpty()) {
                 double totalUsageRate = quotas.stream()
-                        .mapToDouble(q -> (double) q.getQuotaUsed() / q.getQuotaLimit() * 100)
+                        .mapToDouble(q -> {
+                            Long limit = q.getQuotaLimit();
+                            if (limit == null || limit <= 0) {
+                                return 0.0;
+                            }
+                            return (double) q.getQuotaUsed() / limit * 100;
+                        })
                         .average()
                         .orElse(0.0);
                 stats.put("avg_usage_rate", Math.round(totalUsageRate * 100) / 100.0);
@@ -363,57 +414,75 @@ public class ApiQuotaServiceImpl extends BaseService implements ApiQuotaService 
             }
 
             stats.put("stat_time", LocalDateTime.now());
-
             return stats;
-        }, "获取配额统计失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError("获取配额统计失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "获取配额统计失败: " + e.getMessage());
+        }
     }
 
     @Override
-    public Result<Void> checkAndSendAlert(Long quotaId) {
-        return safeExecuteAction(() -> {
+    public void checkAndSendAlert(Long quotaId) {
+        try {
             ApiQuota quota = quotaMapper.selectById(quotaId);
             if (quota == null || quota.getIsAlerted() == 1) {
-                return; // 已告警过，不再重复告警
+                return;
             }
 
-            double usageRate = (double) quota.getQuotaUsed() / quota.getQuotaLimit() * 100;
+            Long quotaLimit = quota.getQuotaLimit();
+            if (quotaLimit == null || quotaLimit <= 0) {
+                return;
+            }
+
+            double usageRate = (double) quota.getQuotaUsed() / quotaLimit * 100;
             if (usageRate >= quota.getAlertThreshold()) {
-                // 发送告警
                 String alertMessage = String.format(
                         "应用ID %d 的API配额即将超限：已使用 %.2f%%（%d/%d）",
-                        quota.getAppId(), usageRate, quota.getQuotaUsed(), quota.getQuotaLimit()
+                        quota.getAppId(), usageRate, quota.getQuotaUsed(), quotaLimit
                 );
                 alertService.sendAlert("QUOTA_WARNING", alertMessage, "MEDIUM");
 
-                // 标记为已告警
                 LambdaUpdateWrapper<ApiQuota> wrapper = new LambdaUpdateWrapper<>();
                 wrapper.eq(ApiQuota::getId, quotaId)
                         .set(ApiQuota::getIsAlerted, 1);
                 quotaMapper.update(null, wrapper);
 
-                logWarn("发送配额告警: quotaId={}, usageRate={}%", quotaId, usageRate);
+                logWarn("发送配额告警: quotaId={}, usageRate={}%", quotaId, String.format("%.2f", usageRate));
             }
-        }, "检查并发送告警失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError("检查并发送告警失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "检查并发送告警失败: " + e.getMessage());
+        }
     }
 
     @Override
-    public Result<List<ApiQuota>> getQuotasNearLimit(int threshold) {
-        return safeExecuteData(() -> {
-            requireCondition(threshold, t -> t > 0 && t <= 100, "阈值必须在1-100之间");
+    public List<ApiQuota> getQuotasNearLimit(int threshold) {
+        requireCondition(threshold, t -> t > 0 && t <= 100, "阈值必须在1-100之间");
 
+        try {
             LambdaQueryWrapper<ApiQuota> wrapper = new LambdaQueryWrapper<>();
             List<ApiQuota> allQuotas = quotaMapper.selectList(wrapper);
 
-            // 过滤出超过阈值的配额
-            List<ApiQuota> nearLimitQuotas = allQuotas.stream()
+            return allQuotas.stream()
                     .filter(quota -> {
-                        double usageRate = (double) quota.getQuotaUsed() / quota.getQuotaLimit() * 100;
+                        Long limit = quota.getQuotaLimit();
+                        if (limit == null || limit <= 0) {
+                            return false;
+                        }
+                        double usageRate = (double) quota.getQuotaUsed() / limit * 100;
                         return usageRate >= threshold;
                     })
                     .toList();
-
-            return nearLimitQuotas;
-        }, "查询即将超限的配额失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError("查询即将超限的配额失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "查询即将超限的配额失败: " + e.getMessage());
+        }
     }
 
     /**
@@ -431,6 +500,18 @@ public class ApiQuotaServiceImpl extends BaseService implements ApiQuotaService 
             case 4 -> now.plusMonths(1).withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0).withNano(0); // 每月
             default -> now.plusDays(1);
         };
+    }
+
+    private boolean quotaExceeded(ApiQuota quota) {
+        if (quota == null) {
+            return false;
+        }
+        Long limit = quota.getQuotaLimit();
+        if (limit == null || limit <= 0) {
+            return false;
+        }
+        Long used = quota.getQuotaUsed();
+        return used != null && used >= limit;
     }
 
     /**
@@ -506,14 +587,18 @@ public class ApiQuotaServiceImpl extends BaseService implements ApiQuotaService 
     }
 
     @Override
-    public Result<List<ApiQuota>> getAllActiveQuotas() {
-        return safeExecuteData(() -> {
-            // 查询所有配额（不过滤状态，因为ApiQuota没有status字段）
+    public List<ApiQuota> getAllActiveQuotas() {
+        try {
             LambdaQueryWrapper<ApiQuota> wrapper = new LambdaQueryWrapper<>();
             wrapper.orderByAsc(ApiQuota::getAppId, ApiQuota::getQuotaType);
 
             List<ApiQuota> quotas = quotaMapper.selectList(wrapper);
             return quotas != null ? quotas : List.of();
-        }, "获取所有启用的配额失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception e) {
+            logError("获取所有启用的配额失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "获取所有启用的配额失败: " + e.getMessage());
+        }
     }
 }

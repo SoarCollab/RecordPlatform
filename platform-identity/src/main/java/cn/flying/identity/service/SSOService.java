@@ -1,7 +1,5 @@
 package cn.flying.identity.service;
 
-import cn.flying.platformapi.constant.Result;
-
 import java.util.Map;
 
 /**
@@ -21,7 +19,7 @@ public interface SSOService {
      * @param state       状态参数
      * @return 登录页面信息或重定向信息
      */
-    Result<Map<String, Object>> getSSOLoginInfo(String clientId, String redirectUri, String scope, String state);
+    Map<String, Object> getSSOLoginInfo(String clientId, String redirectUri, String scope, String state);
 
     /**
      * 处理 SSO 登录
@@ -34,8 +32,8 @@ public interface SSOService {
      * @param state       状态参数
      * @return 登录结果
      */
-    Result<Map<String, Object>> processSSOLogin(String username, String password, String clientId,
-                                                String redirectUri, String scope, String state);
+    Map<String, Object> processSSOLogin(String username, String password, String clientId,
+                                        String redirectUri, String scope, String state);
 
     /**
      * 检查 SSO 登录状态
@@ -46,7 +44,7 @@ public interface SSOService {
      * @param state       状态参数
      * @return 登录状态信息
      */
-    Result<Map<String, Object>> checkSSOLoginStatus(String clientId, String redirectUri, String scope, String state);
+    Map<String, Object> checkSSOLoginStatus(String clientId, String redirectUri, String scope, String state);
 
     /**
      * SSO 单点注销
@@ -55,7 +53,7 @@ public interface SSOService {
      * @param clientId    客户端ID
      * @return 注销结果
      */
-    Result<Map<String, Object>> ssoLogout(String redirectUri, String clientId);
+    Map<String, Object> ssoLogout(String redirectUri, String clientId);
 
     /**
      * 获取 SSO 用户信息
@@ -63,7 +61,7 @@ public interface SSOService {
      * @param token SSO Token
      * @return 用户信息
      */
-    Result<Map<String, Object>> getSSOUserInfo(String token);
+    Map<String, Object> getSSOUserInfo(String token);
 
     /**
      * 验证 SSO Token
@@ -71,7 +69,7 @@ public interface SSOService {
      * @param token SSO Token
      * @return 验证结果
      */
-    Result<Map<String, Object>> validateSSOToken(String token);
+    Map<String, Object> validateSSOToken(String token);
 
     /**
      * 刷新 SSO Token
@@ -80,14 +78,14 @@ public interface SSOService {
      * @param clientId     客户端ID
      * @return 新的 Token 信息
      */
-    Result<Map<String, Object>> refreshSSOToken(String refreshToken, String clientId);
+    Map<String, Object> refreshSSOToken(String refreshToken, String clientId);
 
     /**
      * 获取所有已登录的客户端列表
      *
      * @return 客户端列表
      */
-    Result<Map<String, Object>> getLoggedInClients();
+    Map<String, Object> getLoggedInClients();
 
     /**
      * 从指定客户端注销
@@ -95,5 +93,5 @@ public interface SSOService {
      * @param clientId 客户端ID
      * @return 注销结果
      */
-    Result<Void> logoutFromClient(String clientId);
+    void logoutFromClient(String clientId);
 }

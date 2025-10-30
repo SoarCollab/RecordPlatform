@@ -1,8 +1,6 @@
 package cn.flying.identity.service.apigateway;
 
 import cn.flying.identity.dto.apigateway.ApiKey;
-import cn.flying.platformapi.constant.Result;
-
 import java.util.List;
 import java.util.Map;
 
@@ -25,7 +23,7 @@ public interface ApiKeyService {
      * @param expireDays 过期天数(NULL表示永久)
      * @return 生成的密钥信息
      */
-    Result<Map<String, Object>> generateApiKey(Long appId, String keyName, Integer keyType, Integer expireDays);
+    Map<String, Object> generateApiKey(Long appId, String keyName, Integer keyType, Integer expireDays);
 
     /**
      * 验证API密钥
@@ -38,8 +36,8 @@ public interface ApiKeyService {
      * @param requestData 请求数据
      * @return 验证结果,包含应用ID和密钥信息
      */
-    Result<Map<String, Object>> validateApiKey(String apiKey, Long timestamp, String nonce,
-                                               String signature, String requestData);
+    Map<String, Object> validateApiKey(String apiKey, Long timestamp, String nonce,
+                                       String signature, String requestData);
 
     /**
      * 启用密钥
@@ -47,7 +45,7 @@ public interface ApiKeyService {
      * @param keyId 密钥ID
      * @return 操作结果
      */
-    Result<Void> enableKey(Long keyId);
+    void enableKey(Long keyId);
 
     /**
      * 禁用密钥
@@ -55,7 +53,7 @@ public interface ApiKeyService {
      * @param keyId 密钥ID
      * @return 操作结果
      */
-    Result<Void> disableKey(Long keyId);
+    void disableKey(Long keyId);
 
     /**
      * 删除密钥
@@ -63,7 +61,7 @@ public interface ApiKeyService {
      * @param keyId 密钥ID
      * @return 操作结果
      */
-    Result<Void> deleteKey(Long keyId);
+    void deleteKey(Long keyId);
 
     /**
      * 轮换密钥
@@ -72,7 +70,7 @@ public interface ApiKeyService {
      * @param oldKeyId 旧密钥ID
      * @return 新密钥信息
      */
-    Result<Map<String, Object>> rotateKey(Long oldKeyId);
+    Map<String, Object> rotateKey(Long oldKeyId);
 
     /**
      * 获取应用的所有密钥列表
@@ -80,7 +78,7 @@ public interface ApiKeyService {
      * @param appId 应用ID
      * @return 密钥列表
      */
-    Result<List<ApiKey>> getKeysByAppId(Long appId);
+    List<ApiKey> getKeysByAppId(Long appId);
 
     /**
      * 获取密钥详情
@@ -88,7 +86,7 @@ public interface ApiKeyService {
      * @param keyId 密钥ID
      * @return 密钥详情
      */
-    Result<ApiKey> getKeyById(Long keyId);
+    ApiKey getKeyById(Long keyId);
 
     /**
      * 更新密钥最后使用时间
@@ -97,7 +95,7 @@ public interface ApiKeyService {
      * @param keyId 密钥ID
      * @return 操作结果
      */
-    Result<Void> updateLastUsedTime(Long keyId);
+    void updateLastUsedTime(Long keyId);
 
     /**
      * 检查密钥是否即将过期
@@ -106,7 +104,7 @@ public interface ApiKeyService {
      * @param days 提前天数
      * @return 即将过期的密钥列表
      */
-    Result<List<ApiKey>> getExpiringKeys(int days);
+    List<ApiKey> getExpiringKeys(int days);
 
     /**
      * 简化版API密钥验证
@@ -116,7 +114,7 @@ public interface ApiKeyService {
      * @param apiKey API密钥
      * @return 验证结果
      */
-    Result<Void> validateApiKey(String apiKey);
+    void validateApiKey(String apiKey);
 
     /**
      * 根据ApiKey获取完整的密钥信息
@@ -125,5 +123,5 @@ public interface ApiKeyService {
      * @param apiKey API密钥
      * @return 密钥完整信息（包含appId、keyStatus等）
      */
-    Result<ApiKey> getKeyInfoByApiKey(String apiKey);
+    ApiKey getKeyInfoByApiKey(String apiKey);
 }

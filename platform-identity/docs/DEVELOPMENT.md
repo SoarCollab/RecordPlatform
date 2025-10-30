@@ -201,17 +201,20 @@ public class ApiApplicationService {
 
 ```java
 // 使用自定义业务异常
-throw new BusinessException(ApiGatewayConstants.ErrorCode.APP_NOT_FOUND,
-                          ApiGatewayConstants.ErrorMessage.APP_NOT_FOUND);
+throw businessException(ResultEnum.RESULT_DATA_NONE, "应用不存在");
 
-// 使用Result包装返回值
-return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+// 成功时直接返回业务数据
+return data;
 
-// 使用safeExecute处理异常
-return safeExecuteData(() -> {
+// 捕获底层异常后转换为业务异常
+try {
     // 业务逻辑
-    return data;
-}, "操作失败");
+} catch (BusinessException ex) {
+    throw ex;
+} catch (Exception ex) {
+    logError("操作失败", ex);
+    throw businessException(ResultEnum.SYSTEM_ERROR, "操作失败");
+}
 ```
 
 ## 核心组件开发
@@ -262,33 +265,33 @@ public class DemoServiceImpl extends BaseService implements DemoService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Result<DemoEntity> create(DemoVO vo, Long userId) {
-        return safeExecuteData(() -> {
-            // 参数验证
-            requireNonBlank(vo.getName(), "名称不能为空");
-            requireCondition(vo.getType(),
-                           ApiGatewayConstants.DemoType::isValid,
-                           "类型无效");
+    public DemoEntity create(DemoVO vo, Long userId) {
+        // 参数验证
+        requireNonBlank(vo.getName(), "名称不能为空");
+        requireCondition(vo.getType(),
+                ApiGatewayConstants.DemoType::isValid,
+                "类型无效");
 
-            // 构建实体
+        try {
             DemoEntity entity = new DemoEntity();
             entity.setId(IdUtils.nextEntityId());
             entity.setName(vo.getName());
             entity.setType(vo.getType());
             entity.setCreatedBy(userId);
 
-            // 保存到数据库
             int rows = demoMapper.insert(entity);
             requireCondition(rows, r -> r > 0, "保存失败");
 
-            // 缓存到Redis
             cacheEntity(entity);
 
-            // 记录日志
             logInfo("创建示例成功: id={}, name={}", entity.getId(), entity.getName());
-
             return entity;
-        }, "创建示例失败");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            logError("创建示例失败", ex);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "创建示例失败");
+        }
     }
 
     /**

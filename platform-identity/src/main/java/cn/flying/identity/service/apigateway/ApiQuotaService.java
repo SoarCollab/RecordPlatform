@@ -1,8 +1,6 @@
 package cn.flying.identity.service.apigateway;
 
 import cn.flying.identity.dto.apigateway.ApiQuota;
-import cn.flying.platformapi.constant.Result;
-
 import java.util.List;
 import java.util.Map;
 
@@ -25,8 +23,8 @@ public interface ApiQuotaService {
      * @param alertThreshold 告警阈值（百分比）
      * @return 操作结果
      */
-    Result<ApiQuota> createQuota(Long appId, Long interfaceId, Integer quotaType,
-                                 Long quotaLimit, Integer alertThreshold);
+    ApiQuota createQuota(Long appId, Long interfaceId, Integer quotaType,
+                         Long quotaLimit, Integer alertThreshold);
 
     /**
      * 更新配额限制
@@ -34,7 +32,7 @@ public interface ApiQuotaService {
      * @param quota 配额信息
      * @return 操作结果
      */
-    Result<Void> updateQuota(ApiQuota quota);
+    void updateQuota(ApiQuota quota);
 
     /**
      * 删除配额
@@ -42,7 +40,7 @@ public interface ApiQuotaService {
      * @param quotaId 配额ID
      * @return 操作结果
      */
-    Result<Void> deleteQuota(Long quotaId);
+    void deleteQuota(Long quotaId);
 
     /**
      * 根据ID查询配额
@@ -50,7 +48,7 @@ public interface ApiQuotaService {
      * @param quotaId 配额ID
      * @return 配额信息
      */
-    Result<ApiQuota> getQuotaById(Long quotaId);
+    ApiQuota getQuotaById(Long quotaId);
 
     /**
      * 根据应用ID查询配额列表
@@ -58,7 +56,7 @@ public interface ApiQuotaService {
      * @param appId 应用ID
      * @return 配额列表
      */
-    Result<List<ApiQuota>> getQuotasByAppId(Long appId);
+    List<ApiQuota> getQuotasByAppId(Long appId);
 
     /**
      * 根据应用ID和接口ID查询配额
@@ -68,7 +66,7 @@ public interface ApiQuotaService {
      * @param quotaType 配额类型
      * @return 配额信息
      */
-    Result<ApiQuota> getQuotaByAppAndInterface(Long appId, Long interfaceId, Integer quotaType);
+    ApiQuota getQuotaByAppAndInterface(Long appId, Long interfaceId, Integer quotaType);
 
     /**
      * 检查是否超出配额
@@ -77,7 +75,7 @@ public interface ApiQuotaService {
      * @param interfaceId 接口ID（可选）
      * @return true-已超限，false-未超限
      */
-    Result<Boolean> checkQuotaExceeded(Long appId, Long interfaceId);
+    boolean checkQuotaExceeded(Long appId, Long interfaceId);
 
     /**
      * 增加配额使用量
@@ -87,7 +85,7 @@ public interface ApiQuotaService {
      * @param count 增加数量
      * @return 操作结果
      */
-    Result<Void> incrementQuotaUsage(Long appId, Long interfaceId, int count);
+    void incrementQuotaUsage(Long appId, Long interfaceId, int count);
 
     /**
      * 重置配额使用量
@@ -95,14 +93,14 @@ public interface ApiQuotaService {
      * @param quotaId 配额ID
      * @return 操作结果
      */
-    Result<Void> resetQuota(Long quotaId);
+    void resetQuota(Long quotaId);
 
     /**
      * 重置所有过期的配额
      *
      * @return 重置数量
      */
-    Result<Integer> resetExpiredQuotas();
+    int resetExpiredQuotas();
 
     /**
      * 获取配额使用统计
@@ -110,7 +108,7 @@ public interface ApiQuotaService {
      * @param appId 应用ID
      * @return 统计信息
      */
-    Result<Map<String, Object>> getQuotaStatistics(Long appId);
+    Map<String, Object> getQuotaStatistics(Long appId);
 
     /**
      * 检查并发送配额告警
@@ -118,7 +116,7 @@ public interface ApiQuotaService {
      * @param quotaId 配额ID
      * @return 操作结果
      */
-    Result<Void> checkAndSendAlert(Long quotaId);
+    void checkAndSendAlert(Long quotaId);
 
     /**
      * 获取即将超限的配额列表
@@ -126,7 +124,7 @@ public interface ApiQuotaService {
      * @param threshold 阈值百分比
      * @return 配额列表
      */
-    Result<List<ApiQuota>> getQuotasNearLimit(int threshold);
+    List<ApiQuota> getQuotasNearLimit(int threshold);
 
     /**
      * 获取所有启用的配额列表
@@ -134,5 +132,5 @@ public interface ApiQuotaService {
      *
      * @return 配额列表
      */
-    Result<List<ApiQuota>> getAllActiveQuotas();
+    List<ApiQuota> getAllActiveQuotas();
 }

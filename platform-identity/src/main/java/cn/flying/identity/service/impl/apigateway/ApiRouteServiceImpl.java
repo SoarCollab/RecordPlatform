@@ -6,7 +6,7 @@ import cn.flying.identity.mapper.apigateway.ApiRouteMapper;
 import cn.flying.identity.service.BaseService;
 import cn.flying.identity.service.apigateway.ApiRouteService;
 import cn.flying.identity.util.IdUtils;
-import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.constant.ResultEnum;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -79,495 +79,427 @@ public class ApiRouteServiceImpl extends BaseService implements ApiRouteService 
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Result<ApiRoute> createRoute(ApiRoute route) {
-        return safeExecuteData(() -> {
-            // 参数验证
-            requireNonBlank(route.getRouteName(), "路由名称不能为空");
-            requireNonBlank(route.getRoutePath(), "路由路径不能为空");
-            requireNonBlank(route.getTargetService(), "目标服务不能为空");
-            requireNonNull(route.getRouteType(), "路由类型不能为空");
+    public ApiRoute createRoute(ApiRoute route) {
+        requireNonBlank(route.getRouteName(), "路由名称不能为空");
+        requireNonBlank(route.getRoutePath(), "路由路径不能为空");
+        requireNonBlank(route.getTargetService(), "目标服务不能为空");
+        requireNonNull(route.getRouteType(), "路由类型不能为空");
 
-            // 检查路由路径是否已存在
+        if (isRoutePathExists(route.getRoutePath(), route.getHttpMethod())) {
+            throw businessException(ResultEnum.DATA_ALREADY_EXISTED, "路由路径已存在");
+        }
+
+        route.setId(IdUtils.nextEntityId());
+        route.setRouteStatus(getOrElse(route.getRouteStatus(), 1));
+        route.setPriority(getOrElse(route.getPriority(), 100));
+        route.setHttpMethod(getOrElse(route.getHttpMethod(), "*"));
+        route.setRequireAuth(getOrElse(route.getRequireAuth(), 1));
+        route.setEnableRateLimit(getOrElse(route.getEnableRateLimit(), 1));
+        route.setRateLimit(getOrElse(route.getRateLimit(), 100));
+        route.setLoadBalance(getOrElse(route.getLoadBalance(), 1));
+        route.setTimeout(getOrElse(route.getTimeout(), 30000));
+        route.setRetryTimes(getOrElse(route.getRetryTimes(), 3));
+        route.setCreateTime(LocalDateTime.now());
+        route.setUpdateTime(LocalDateTime.now());
+
+        int inserted = routeMapper.insert(route);
+        if (inserted <= 0) {
+            throw businessException(ResultEnum.SYSTEM_ERROR, "创建路由失败");
+        }
+
+        refreshRouteCache();
+        logInfo("创建路由成功: routeId={}, path={}", route.getId(), route.getRoutePath());
+        return route;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateRoute(ApiRoute route) {
+        requireNonNull(route.getId(), "路由ID不能为空");
+
+        ApiRoute existingRoute = routeMapper.selectById(route.getId());
+        requireNonNull(existingRoute, "路由不存在");
+
+        if (!Objects.equals(existingRoute.getRoutePath(), route.getRoutePath())) {
             if (isRoutePathExists(route.getRoutePath(), route.getHttpMethod())) {
-                throw new RuntimeException("路由路径已存在");
+                throw businessException(ResultEnum.DATA_ALREADY_EXISTED, "新的路由路径已存在");
             }
+        }
 
-            // 设置默认值
-            route.setId(IdUtils.nextEntityId());
-            route.setRouteStatus(getOrElse(route.getRouteStatus(), 1));
-            route.setPriority(getOrElse(route.getPriority(), 100));
-            route.setHttpMethod(getOrElse(route.getHttpMethod(), "*"));
-            route.setRequireAuth(getOrElse(route.getRequireAuth(), 1));
-            route.setEnableRateLimit(getOrElse(route.getEnableRateLimit(), 1));
-            route.setRateLimit(getOrElse(route.getRateLimit(), 100));
-            route.setLoadBalance(getOrElse(route.getLoadBalance(), 1));
-            route.setTimeout(getOrElse(route.getTimeout(), 30000));
-            route.setRetryTimes(getOrElse(route.getRetryTimes(), 3));
-            route.setCreateTime(LocalDateTime.now());
-            route.setUpdateTime(LocalDateTime.now());
+        route.setUpdateTime(LocalDateTime.now());
+        int updated = routeMapper.updateById(route);
+        if (updated <= 0) {
+            throw businessException(ResultEnum.SYSTEM_ERROR, "更新路由失败");
+        }
 
-            // 保存到数据库
-            int inserted = routeMapper.insert(route);
-            requireCondition(inserted, count -> count > 0, "创建路由失败");
-
-            // 刷新缓存
-            refreshRouteCache();
-
-            logInfo("创建路由成功: routeId={}, path={}", route.getId(), route.getRoutePath());
-            return route;
-        }, "创建路由失败");
+        refreshRouteCache();
+        logInfo("更新路由成功: routeId={}", route.getId());
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Result<Void> updateRoute(ApiRoute route) {
-        return safeExecuteAction(() -> {
-            requireNonNull(route.getId(), "路由ID不能为空");
+    public void deleteRoute(Long routeId) {
+        requireNonNull(routeId, "路由ID不能为空");
 
-            // 检查路由是否存在
-            ApiRoute existingRoute = routeMapper.selectById(route.getId());
-            requireNonNull(existingRoute, "路由不存在");
+        int deleted = routeMapper.deleteById(routeId);
+        if (deleted <= 0) {
+            throw businessException(ResultEnum.SYSTEM_ERROR, "删除路由失败");
+        }
 
-            // 如果修改了路径，检查新路径是否冲突
-            if (!existingRoute.getRoutePath().equals(route.getRoutePath())) {
-                if (isRoutePathExists(route.getRoutePath(), route.getHttpMethod())) {
-                    throw new RuntimeException("新的路由路径已存在");
-                }
-            }
-
-            route.setUpdateTime(LocalDateTime.now());
-            int updated = routeMapper.updateById(route);
-            requireCondition(updated, count -> count > 0, "更新路由失败");
-
-            // 刷新缓存
-            refreshRouteCache();
-
-            logInfo("更新路由成功: routeId={}", route.getId());
-        }, "更新路由失败");
+        refreshRouteCache();
+        logInfo("删除路由成功: routeId={}", routeId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Result<Void> deleteRoute(Long routeId) {
-        return safeExecuteAction(() -> {
-            requireNonNull(routeId, "路由ID不能为空");
+    public void enableRoute(Long routeId) {
+        requireNonNull(routeId, "路由ID不能为空");
 
-            int deleted = routeMapper.deleteById(routeId);
-            requireCondition(deleted, count -> count > 0, "删除路由失败");
+        ApiRoute route = new ApiRoute();
+        route.setId(routeId);
+        route.setRouteStatus(1);
+        route.setUpdateTime(LocalDateTime.now());
 
-            // 刷新缓存
-            refreshRouteCache();
+        int updated = routeMapper.updateById(route);
+        if (updated <= 0) {
+            throw businessException(ResultEnum.SYSTEM_ERROR, "启用路由失败");
+        }
 
-            logInfo("删除路由成功: routeId={}", routeId);
-        }, "删除路由失败");
+        refreshRouteCache();
+        logInfo("启用路由成功: routeId={}", routeId);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Result<Void> enableRoute(Long routeId) {
-        return safeExecuteAction(() -> {
-            requireNonNull(routeId, "路由ID不能为空");
+    public void disableRoute(Long routeId) {
+        requireNonNull(routeId, "路由ID不能为空");
 
-            ApiRoute route = new ApiRoute();
-            route.setId(routeId);
-            route.setRouteStatus(1);
-            route.setUpdateTime(LocalDateTime.now());
+        ApiRoute route = new ApiRoute();
+        route.setId(routeId);
+        route.setRouteStatus(0);
+        route.setUpdateTime(LocalDateTime.now());
 
-            int updated = routeMapper.updateById(route);
-            requireCondition(updated, count -> count > 0, "启用路由失败");
+        int updated = routeMapper.updateById(route);
+        if (updated <= 0) {
+            throw businessException(ResultEnum.SYSTEM_ERROR, "禁用路由失败");
+        }
 
-            // 刷新缓存
-            refreshRouteCache();
+        refreshRouteCache();
+        logInfo("禁用路由成功: routeId={}", routeId);
+    }
 
-            logInfo("启用路由成功: routeId={}", routeId);
-        }, "启用路由失败");
+    @Override
+    public ApiRoute getRouteById(Long routeId) {
+        requireNonNull(routeId, "路由ID不能为空");
+
+        ApiRoute route = routeMapper.selectById(routeId);
+        requireNonNull(route, "路由不存在");
+        return route;
+    }
+
+    @Override
+    public List<ApiRoute> getActiveRoutes() {
+        List<ApiRoute> cachedRoutes = getRoutesFromCache();
+        if (cachedRoutes != null && !cachedRoutes.isEmpty()) {
+            ensureRouteCacheInitialized(cachedRoutes);
+            return cachedRoutes;
+        }
+
+        LambdaQueryWrapper<ApiRoute> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ApiRoute::getRouteStatus, 1)
+                .orderByAsc(ApiRoute::getPriority)
+                .orderByDesc(ApiRoute::getCreateTime);
+
+        List<ApiRoute> routes = routeMapper.selectList(wrapper);
+        rebuildRouteCaches(routes);
+
+        if (routes != null && !routes.isEmpty()) {
+            cacheRoutes(routes);
+            return routes;
+        }
+        return new ArrayList<>();
+    }
+
+    @Override
+    public List<ApiRoute> getRoutesByService(String serviceName) {
+        requireNonBlank(serviceName, "服务名称不能为空");
+
+        LambdaQueryWrapper<ApiRoute> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ApiRoute::getTargetService, serviceName)
+                .orderByAsc(ApiRoute::getPriority);
+
+        List<ApiRoute> routes = routeMapper.selectList(wrapper);
+        return routes != null ? routes : new ArrayList<>();
+    }
+
+    @Override
+    public ApiRoute matchRoute(String path, String method) {
+        requireNonBlank(path, "请求路径不能为空");
+        requireNonBlank(method, "HTTP方法不能为空");
+
+        if (exactRouteCache.isEmpty() && prefixRouteCache.isEmpty() && regexRouteCache.isEmpty()) {
+            ensureRouteCacheInitialized(getActiveRoutes());
+        }
+
+        String normalizedMethod = method.toUpperCase(Locale.ROOT);
+
+        ApiRoute cached = getCachedMatch(path, normalizedMethod);
+        if (cached != null) {
+            recordRouteMatch(cached.getId());
+            return cached;
+        }
+
+        ApiRoute exactMatch = exactRouteCache.get(buildExactMatchKey(path, normalizedMethod));
+        if (exactMatch == null) {
+            exactMatch = exactRouteCache.get(buildExactMatchKey(path, "*"));
+        }
+        if (exactMatch != null) {
+            recordRouteMatch(exactMatch.getId());
+            return exactMatch;
+        }
+
+        List<ApiRoute> prefixCandidates = new ArrayList<>();
+        prefixCandidates.addAll(getPrefixCandidates(normalizedMethod, path));
+        prefixCandidates.addAll(getPrefixCandidates("*", path));
+        for (ApiRoute candidate : prefixCandidates) {
+            if (pathMatcher.match(candidate.getRoutePath(), path)) {
+                recordRouteMatch(candidate.getId());
+                cacheMatch(path, normalizedMethod, candidate);
+                return candidate;
+            }
+        }
+
+        for (Long routeId : orderedRegexRouteIds) {
+            Pattern pattern = regexRouteCache.get(routeId);
+            if (pattern != null && pattern.matcher(path).matches()) {
+                ApiRoute route = routeIdCache.get(routeId);
+                if (route != null && isHttpMethodMatch(route.getHttpMethod(), normalizedMethod)) {
+                    recordRouteMatch(route.getId());
+                    cacheMatch(path, normalizedMethod, route);
+                    return route;
+                }
+            }
+        }
+
+        logDebug("未找到匹配的路由: path={}, method={}", path, method);
+        throw businessException(ResultEnum.RESULT_DATA_NONE, "未找到匹配的路由");
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Result<Void> disableRoute(Long routeId) {
-        return safeExecuteAction(() -> {
-            requireNonNull(routeId, "路由ID不能为空");
+    public Map<String, Object> batchImportRoutes(List<ApiRoute> routes) {
+        requireNonEmpty(routes, "路由列表不能为空");
 
-            ApiRoute route = new ApiRoute();
-            route.setId(routeId);
-            route.setRouteStatus(0);
-            route.setUpdateTime(LocalDateTime.now());
+        int successCount = 0;
+        int failedCount = 0;
+        List<String> errors = new ArrayList<>();
 
-            int updated = routeMapper.updateById(route);
-            requireCondition(updated, count -> count > 0, "禁用路由失败");
-
-            // 刷新缓存
-            refreshRouteCache();
-
-            logInfo("禁用路由成功: routeId={}", routeId);
-        }, "禁用路由失败");
-    }
-
-    @Override
-    public Result<ApiRoute> getRouteById(Long routeId) {
-        return safeExecuteData(() -> {
-            requireNonNull(routeId, "路由ID不能为空");
-
-            ApiRoute route = routeMapper.selectById(routeId);
-            requireNonNull(route, "路由不存在");
-
-            return route;
-        }, "查询路由失败");
-    }
-
-    @Override
-    public Result<List<ApiRoute>> getActiveRoutes() {
-        return safeExecuteData(() -> {
-            // 先从缓存获取
-            List<ApiRoute> cachedRoutes = getRoutesFromCache();
-            if (cachedRoutes != null && !cachedRoutes.isEmpty()) {
-                ensureRouteCacheInitialized(cachedRoutes);
-                return cachedRoutes;
-            }
-
-            // 缓存未命中，从数据库查询
-            LambdaQueryWrapper<ApiRoute> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(ApiRoute::getRouteStatus, 1)
-                    .orderByAsc(ApiRoute::getPriority)
-                    .orderByDesc(ApiRoute::getCreateTime);
-
-            List<ApiRoute> routes = routeMapper.selectList(wrapper);
-            rebuildRouteCaches(routes);
-
-            // 缓存结果
-            if (routes != null && !routes.isEmpty()) {
-                cacheRoutes(routes);
-            }
-
-            return routes != null ? routes : new ArrayList<>();
-        }, "查询活跃路由失败");
-    }
-
-    @Override
-    public Result<List<ApiRoute>> getRoutesByService(String serviceName) {
-        return safeExecuteData(() -> {
-            requireNonBlank(serviceName, "服务名称不能为空");
-
-            LambdaQueryWrapper<ApiRoute> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(ApiRoute::getTargetService, serviceName)
-                    .orderByAsc(ApiRoute::getPriority);
-
-            List<ApiRoute> routes = routeMapper.selectList(wrapper);
-            return routes != null ? routes : new ArrayList<>();
-        }, "查询服务路由失败");
-    }
-
-    @Override
-    public Result<ApiRoute> matchRoute(String path, String method) {
-        return safeExecuteData(() -> {
-            requireNonBlank(path, "请求路径不能为空");
-            requireNonBlank(method, "HTTP方法不能为空");
-
-            if (exactRouteCache.isEmpty() && prefixRouteCache.isEmpty() && regexRouteCache.isEmpty()) {
-                Result<List<ApiRoute>> activeRoutesResult = getActiveRoutes();
-                if (isSuccess(activeRoutesResult)) {
-                    ensureRouteCacheInitialized(activeRoutesResult.getData());
-                }
-            }
-
-            String normalizedMethod = method.toUpperCase(Locale.ROOT);
-
-            // 0. 本地匹配缓存命中
-            ApiRoute cached = getCachedMatch(path, normalizedMethod);
-            if (cached != null) {
-                recordRouteMatch(cached.getId());
-                return cached;
-            }
-
-            // 1. 精确匹配命中
-            ApiRoute exactMatch = exactRouteCache.get(buildExactMatchKey(path, normalizedMethod));
-            if (exactMatch == null) {
-                exactMatch = exactRouteCache.get(buildExactMatchKey(path, "*"));
-            }
-            if (exactMatch != null) {
-                recordRouteMatch(exactMatch.getId());
-                return exactMatch;
-            }
-
-            // 2. 前缀匹配命中
-            List<ApiRoute> prefixCandidates = new ArrayList<>();
-            prefixCandidates.addAll(getPrefixCandidates(normalizedMethod, path));
-            prefixCandidates.addAll(getPrefixCandidates("*", path));
-            for (ApiRoute candidate : prefixCandidates) {
-                if (pathMatcher.match(candidate.getRoutePath(), path)) {
-                    recordRouteMatch(candidate.getId());
-                    cacheMatch(path, normalizedMethod, candidate);
-                    return candidate;
-                }
-            }
-
-            // 3. 正则匹配命中
-            for (Long routeId : orderedRegexRouteIds) {
-                Pattern pattern = regexRouteCache.get(routeId);
-                if (pattern != null && pattern.matcher(path).matches()) {
-                    ApiRoute route = routeIdCache.get(routeId);
-                    if (route != null && isHttpMethodMatch(route.getHttpMethod(), normalizedMethod)) {
-                        recordRouteMatch(route.getId());
-                        cacheMatch(path, normalizedMethod, route);
-                        return route;
-                    }
-                }
-            }
-
-            logDebug("未找到匹配的路由: path={}, method={}", path, method);
-            return null;
-        }, "匹配路由失败");
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public Result<Map<String, Object>> batchImportRoutes(List<ApiRoute> routes) {
-        return safeExecuteData(() -> {
-            requireNonEmpty(routes, "路由列表不能为空");
-
-            int successCount = 0;
-            int failedCount = 0;
-            List<String> errors = new ArrayList<>();
-
-            for (ApiRoute route : routes) {
-                try {
-                    // 设置默认值
-                    route.setId(IdUtils.nextEntityId());
-                    route.setCreateTime(LocalDateTime.now());
-                    route.setUpdateTime(LocalDateTime.now());
-
-                    // 检查路径是否已存在
-                    if (isRoutePathExists(route.getRoutePath(), route.getHttpMethod())) {
-                        failedCount++;
-                        errors.add("路径已存在: " + route.getRoutePath());
-                        continue;
-                    }
-
-                    routeMapper.insert(route);
-                    successCount++;
-                } catch (Exception e) {
-                    failedCount++;
-                    errors.add("导入失败: " + route.getRouteName() + " - " + e.getMessage());
-                    logError("批量导入路由异常", e);
-                }
-            }
-
-            // 刷新缓存
-            refreshRouteCache();
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("total", routes.size());
-            result.put("success", successCount);
-            result.put("failed", failedCount);
-            result.put("errors", errors);
-
-            logInfo("批量导入路由完成: total={}, success={}, failed={}",
-                    routes.size(), successCount, failedCount);
-
-            return result;
-        }, "批量导入路由失败");
-    }
-
-    @Override
-    public Result<List<ApiRoute>> exportRoutes() {
-        return safeExecuteData(() -> {
-            List<ApiRoute> routes = routeMapper.selectList(null);
-            return routes != null ? routes : new ArrayList<>();
-        }, "导出路由失败");
-    }
-
-    @Override
-    public Result<Void> refreshRouteCache() {
-        return safeExecuteAction(() -> {
-            // 查询所有启用的路由
-            LambdaQueryWrapper<ApiRoute> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(ApiRoute::getRouteStatus, 1)
-                    .orderByAsc(ApiRoute::getPriority);
-
-            List<ApiRoute> routes = routeMapper.selectList(wrapper);
-            rebuildRouteCaches(routes);
-
-            // 缓存路由列表
-            if (routes != null && !routes.isEmpty()) {
-                cacheRoutes(routes);
-            } else {
-                // 清除缓存
-                redisTemplate.delete(CacheKeyConstants.ROUTE_LIST_KEY);
-            }
-
-            // 清空匹配结果本地缓存
-            matchResultCache.clear();
-
-            logInfo("刷新路由缓存成功: count={}", routes != null ? routes.size() : 0);
-        }, "刷新路由缓存失败");
-    }
-
-    @Override
-    public Result<Map<String, Object>> getRouteStatistics(Long routeId, int days) {
-        return safeExecuteData(() -> {
-            requireNonNull(routeId, "路由ID不能为空");
-            requireCondition(days, d -> d > 0 && d <= 90, "统计天数必须在1-90之间");
-
-            Map<String, Object> stats = new HashMap<>();
-
-            // 获取路由基本信息
-            ApiRoute route = routeMapper.selectById(routeId);
-            requireNonNull(route, "路由不存在");
-
-            stats.put("route_id", routeId);
-            stats.put("route_name", route.getRouteName());
-            stats.put("route_path", route.getRoutePath());
-            stats.put("target_service", route.getTargetService());
-
-            // 从Redis获取统计数据
-            String statsKey = CacheKeyConstants.buildRouteStatsKey(routeId);
-            Map<Object, Object> redisStats = redisTemplate.opsForHash().entries(statsKey);
-
-            long totalRequests = 0;
-            long successRequests = 0;
-            long failedRequests = 0;
-            double avgResponseTime = 0;
-
-            if (!redisStats.isEmpty()) {
-                totalRequests = Long.parseLong(getOrElse(redisStats.get("total"), "0").toString());
-                successRequests = Long.parseLong(getOrElse(redisStats.get("success"), "0").toString());
-                failedRequests = Long.parseLong(getOrElse(redisStats.get("failed"), "0").toString());
-                avgResponseTime = Double.parseDouble(getOrElse(redisStats.get("avg_time"), "0").toString());
-            }
-
-            stats.put("total_requests", totalRequests);
-            stats.put("success_requests", successRequests);
-            stats.put("failed_requests", failedRequests);
-            stats.put("avg_response_time", avgResponseTime);
-            stats.put("success_rate", totalRequests > 0 ? (successRequests * 100.0 / totalRequests) : 0);
-            stats.put("stat_days", days);
-            stats.put("stat_time", LocalDateTime.now());
-
-            return stats;
-        }, "获取路由统计信息失败");
-    }
-
-    @Override
-    public Result<Map<String, Object>> testRoute(Long routeId) {
-        return safeExecuteData(() -> {
-            requireNonNull(routeId, "路由ID不能为空");
-
-            ApiRoute route = routeMapper.selectById(routeId);
-            requireNonNull(route, "路由不存在");
-
-            Map<String, Object> result = new HashMap<>();
-            result.put("route_id", routeId);
-            result.put("route_path", route.getRoutePath());
-            result.put("target_service", route.getTargetService());
-
-            // 构建测试URL
-            String testUrl = buildTestUrl(route);
-            result.put("test_url", testUrl);
-
-            // 执行测试请求
-            long startTime = System.currentTimeMillis();
-            boolean success = false;
-            String errorMsg = null;
-
+        for (ApiRoute route : routes) {
             try {
-                // 发送HEAD请求测试连通性
-                restTemplate.headForHeaders(testUrl);
-                success = true;
+                route.setId(IdUtils.nextEntityId());
+                route.setCreateTime(LocalDateTime.now());
+                route.setUpdateTime(LocalDateTime.now());
+
+                if (isRoutePathExists(route.getRoutePath(), route.getHttpMethod())) {
+                    failedCount++;
+                    errors.add("路径已存在: " + route.getRoutePath());
+                    continue;
+                }
+
+                routeMapper.insert(route);
+                successCount++;
             } catch (Exception e) {
-                errorMsg = e.getMessage();
-                logWarn("路由测试失败: routeId={}, error={}", routeId, errorMsg);
+                failedCount++;
+                errors.add("导入失败: " + route.getRouteName() + " - " + e.getMessage());
+                logError("批量导入路由异常", e);
             }
+        }
 
-            long responseTime = System.currentTimeMillis() - startTime;
+        refreshRouteCache();
 
-            result.put("success", success);
-            result.put("response_time", responseTime);
-            result.put("error_message", errorMsg);
-            result.put("test_time", LocalDateTime.now());
+        Map<String, Object> result = new HashMap<>();
+        result.put("total", routes.size());
+        result.put("success", successCount);
+        result.put("failed", failedCount);
+        result.put("errors", errors);
 
-            return result;
-        }, "测试路由失败");
+        logInfo("批量导入路由完成: total={}, success={}, failed={}",
+                routes.size(), successCount, failedCount);
+
+        return result;
+    }
+
+    @Override
+    public List<ApiRoute> exportRoutes() {
+        List<ApiRoute> routes = routeMapper.selectList(null);
+        return routes != null ? routes : new ArrayList<>();
+    }
+
+    @Override
+    public void refreshRouteCache() {
+        LambdaQueryWrapper<ApiRoute> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ApiRoute::getRouteStatus, 1)
+                .orderByAsc(ApiRoute::getPriority);
+
+        List<ApiRoute> routes = routeMapper.selectList(wrapper);
+        rebuildRouteCaches(routes);
+
+        if (routes != null && !routes.isEmpty()) {
+            cacheRoutes(routes);
+        } else {
+            redisTemplate.delete(CacheKeyConstants.ROUTE_LIST_KEY);
+        }
+
+        matchResultCache.clear();
+        logInfo("刷新路由缓存成功: count={}", routes != null ? routes.size() : 0);
+    }
+
+    @Override
+    public Map<String, Object> getRouteStatistics(Long routeId, int days) {
+        requireNonNull(routeId, "路由ID不能为空");
+        requireCondition(days, d -> d > 0 && d <= 90, "统计天数必须在1-90之间");
+
+        Map<String, Object> stats = new HashMap<>();
+
+        ApiRoute route = routeMapper.selectById(routeId);
+        requireNonNull(route, "路由不存在");
+
+        stats.put("route_id", routeId);
+        stats.put("route_name", route.getRouteName());
+        stats.put("route_path", route.getRoutePath());
+        stats.put("target_service", route.getTargetService());
+
+        String statsKey = CacheKeyConstants.buildRouteStatsKey(routeId);
+        Map<Object, Object> redisStats = redisTemplate.opsForHash().entries(statsKey);
+
+        long totalRequests = 0;
+        long successRequests = 0;
+        long failedRequests = 0;
+        double avgResponseTime = 0;
+
+        if (!redisStats.isEmpty()) {
+            totalRequests = Long.parseLong(getOrElse(redisStats.get("total"), "0").toString());
+            successRequests = Long.parseLong(getOrElse(redisStats.get("success"), "0").toString());
+            failedRequests = Long.parseLong(getOrElse(redisStats.get("failed"), "0").toString());
+            avgResponseTime = Double.parseDouble(getOrElse(redisStats.get("avg_time"), "0").toString());
+        }
+
+        stats.put("total_requests", totalRequests);
+        stats.put("success_requests", successRequests);
+        stats.put("failed_requests", failedRequests);
+        stats.put("avg_response_time", avgResponseTime);
+        stats.put("success_rate", totalRequests > 0 ? (successRequests * 100.0 / totalRequests) : 0);
+        stats.put("stat_days", days);
+        stats.put("stat_time", LocalDateTime.now());
+
+        return stats;
+    }
+
+    @Override
+    public Map<String, Object> testRoute(Long routeId) {
+        requireNonNull(routeId, "路由ID不能为空");
+
+        ApiRoute route = routeMapper.selectById(routeId);
+        requireNonNull(route, "路由不存在");
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("route_id", routeId);
+        result.put("route_path", route.getRoutePath());
+        result.put("target_service", route.getTargetService());
+
+        String testUrl = buildTestUrl(route);
+        result.put("test_url", testUrl);
+
+        long startTime = System.currentTimeMillis();
+        boolean success = false;
+        String errorMsg = null;
+
+        try {
+            restTemplate.headForHeaders(testUrl);
+            success = true;
+        } catch (Exception e) {
+            errorMsg = e.getMessage();
+            logWarn("路由测试失败: routeId={}, error={}", routeId, errorMsg);
+        }
+
+        long responseTime = System.currentTimeMillis() - startTime;
+
+        result.put("success", success);
+        result.put("response_time", responseTime);
+        result.put("error_message", errorMsg);
+        result.put("test_time", LocalDateTime.now());
+
+        return result;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Result<Void> updateRoutePriority(Long routeId, Integer priority) {
-        return safeExecuteAction(() -> {
-            requireNonNull(routeId, "路由ID不能为空");
-            requireNonNull(priority, "优先级不能为空");
-            requireCondition(priority, p -> p >= 0, "优先级必须大于等于0");
+    public void updateRoutePriority(Long routeId, Integer priority) {
+        requireNonNull(routeId, "路由ID不能为空");
+        requireNonNull(priority, "优先级不能为空");
+        requireCondition(priority, p -> p >= 0, "优先级必须大于等于0");
 
-            ApiRoute route = new ApiRoute();
-            route.setId(routeId);
-            route.setPriority(priority);
-            route.setUpdateTime(LocalDateTime.now());
+        ApiRoute route = new ApiRoute();
+        route.setId(routeId);
+        route.setPriority(priority);
+        route.setUpdateTime(LocalDateTime.now());
 
-            int updated = routeMapper.updateById(route);
-            requireCondition(updated, count -> count > 0, "更新路由优先级失败");
+        int updated = routeMapper.updateById(route);
+        requireCondition(updated, count -> count > 0, "更新路由优先级失败");
 
-            // 刷新缓存
-            refreshRouteCache();
-
-            logInfo("更新路由优先级成功: routeId={}, priority={}", routeId, priority);
-        }, "更新路由优先级失败");
+        refreshRouteCache();
+        logInfo("更新路由优先级成功: routeId={}, priority={}", routeId, priority);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Result<Void> updateRouteRateLimit(Long routeId, Integer rateLimit) {
-        return safeExecuteAction(() -> {
-            requireNonNull(routeId, "路由ID不能为空");
-            requireNonNull(rateLimit, "限流QPS不能为空");
-            requireCondition(rateLimit, limit -> limit > 0, "限流QPS必须大于0");
+    public void updateRouteRateLimit(Long routeId, Integer rateLimit) {
+        requireNonNull(routeId, "路由ID不能为空");
+        requireNonNull(rateLimit, "限流QPS不能为空");
+        requireCondition(rateLimit, limit -> limit > 0, "限流QPS必须大于0");
 
-            ApiRoute route = new ApiRoute();
-            route.setId(routeId);
-            route.setRateLimit(rateLimit);
-            route.setUpdateTime(LocalDateTime.now());
+        ApiRoute route = new ApiRoute();
+        route.setId(routeId);
+        route.setRateLimit(rateLimit);
+        route.setUpdateTime(LocalDateTime.now());
 
-            int updated = routeMapper.updateById(route);
-            requireCondition(updated, count -> count > 0, "更新路由限流配置失败");
+        int updated = routeMapper.updateById(route);
+        requireCondition(updated, count -> count > 0, "更新路由限流配置失败");
 
-            // 刷新缓存
-            refreshRouteCache();
-
-            logInfo("更新路由限流配置成功: routeId={}, rateLimit={}", routeId, rateLimit);
-        }, "更新路由限流配置失败");
+        refreshRouteCache();
+        logInfo("更新路由限流配置成功: routeId={}, rateLimit={}", routeId, rateLimit);
     }
 
     @Override
-    public Result<Map<String, Object>> getRouteHealth(Long routeId) {
-        return safeExecuteData(() -> {
-            requireNonNull(routeId, "路由ID不能为空");
+    public Map<String, Object> getRouteHealth(Long routeId) {
+        requireNonNull(routeId, "路由ID不能为空");
 
-            ApiRoute route = routeMapper.selectById(routeId);
-            requireNonNull(route, "路由不存在");
+        ApiRoute route = routeMapper.selectById(routeId);
+        requireNonNull(route, "路由不存在");
 
-            Map<String, Object> health = new HashMap<>();
-            health.put("route_id", routeId);
-            health.put("route_name", route.getRouteName());
-            health.put("route_status", route.getRouteStatus());
+        Map<String, Object> health = new HashMap<>();
+        health.put("route_id", routeId);
+        health.put("route_name", route.getRouteName());
+        health.put("route_status", route.getRouteStatus());
 
-            // 执行健康检查
-            Result<Map<String, Object>> testResult = testRoute(routeId);
-            boolean isHealthy = isSuccess(testResult) &&
-                    Boolean.TRUE.equals(testResult.getData().get("success"));
+        Map<String, Object> testResult = testRoute(routeId);
+        boolean isHealthy = Boolean.TRUE.equals(testResult.get("success"));
 
-            health.put("is_healthy", isHealthy);
-            health.put("check_time", LocalDateTime.now());
+        health.put("is_healthy", isHealthy);
+        health.put("check_time", LocalDateTime.now());
 
-            // 获取最近的统计信息
-            String statsKey = CacheKeyConstants.buildRouteStatsKey(routeId);
-            String errorCount = (String) redisTemplate.opsForHash().get(statsKey, "error_count");
-            health.put("recent_errors", getOrElse(errorCount, "0"));
+        String statsKey = CacheKeyConstants.buildRouteStatsKey(routeId);
+        Object errorCountValue = redisTemplate.opsForHash().get(statsKey, "error_count");
+        String errorCount = getOrElse(
+                errorCountValue != null ? errorCountValue.toString() : null,
+                "0"
+        );
+        health.put("recent_errors", errorCount);
 
-            // 计算健康分数（0-100）
-            int healthScore = calculateHealthScore(isHealthy, errorCount);
-            health.put("health_score", healthScore);
+        int healthScore = calculateHealthScore(isHealthy, errorCount);
+        health.put("health_score", healthScore);
 
-            return health;
-        }, "获取路由健康状态失败");
+        return health;
     }
 
     /**

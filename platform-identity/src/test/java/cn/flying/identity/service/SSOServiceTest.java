@@ -4,9 +4,9 @@ import cn.dev33.satoken.session.SaSession;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.flying.identity.dto.Account;
 import cn.flying.identity.dto.OAuthClient;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.util.IdUtils;
 import cn.flying.identity.service.impl.SSOServiceImpl;
-import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -88,23 +88,21 @@ class SSOServiceTest {
         // 准备测试数据
         OAuthClient mockClient = createMockOAuthClient();
         when(oauthService.getClient(TEST_CLIENT_ID_STR))
-                .thenReturn(Result.success(mockClient));
+                .thenReturn(mockClient);
 
         // 模拟用户未登录
         try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
             stpUtil.when(StpUtil::isLogin).thenReturn(false);
 
             // 执行测试
-            Result<Map<String, Object>> result = ssoService.getSSOLoginInfo(
+            Map<String, Object> result = ssoService.getSSOLoginInfo(
                     TEST_CLIENT_ID_STR, TEST_REDIRECT_URI, "read", "state123"
             );
 
             // 验证结果
-            assertTrue(result.isSuccess());
-            Map<String, Object> data = result.getData();
-            assertEquals("need_login", data.get("status"));
-            assertEquals(TEST_CLIENT_ID_STR, data.get("client_id"));
-            assertEquals(TEST_REDIRECT_URI, data.get("redirect_uri"));
+            assertEquals("need_login", result.get("status"));
+            assertEquals(TEST_CLIENT_ID_STR, result.get("client_id"));
+            assertEquals(TEST_REDIRECT_URI, result.get("redirect_uri"));
         }
     }
 
@@ -115,7 +113,7 @@ class SSOServiceTest {
         Account mockAccount = createMockAccount();
 
         when(oauthService.getClient(TEST_CLIENT_ID_STR))
-                .thenReturn(Result.success(mockClient));
+                .thenReturn(mockClient);
         when(accountService.findAccountById(TEST_USER_ID))
                 .thenReturn(mockAccount);
 
@@ -146,17 +144,15 @@ class SSOServiceTest {
             when(redisTemplate.expire(eq("sso:user:" + TEST_USER_ID), eq(7200L), eq(TimeUnit.SECONDS))).thenReturn(true);
 
             // 执行测试
-            Result<Map<String, Object>> result = ssoService.getSSOLoginInfo(
+            Map<String, Object> result = ssoService.getSSOLoginInfo(
                     TEST_CLIENT_ID_STR, TEST_REDIRECT_URI, "read", "state123"
             );
 
             // 验证结果
-            assertTrue(result.isSuccess());
-            Map<String, Object> data = result.getData();
-            assertEquals("logged_in", data.get("status"));
-            assertEquals(TEST_USER_ID, data.get("user_id"));
-            assertEquals(TEST_USERNAME, data.get("username"));
-            assertNotNull(data.get("sso_token"));
+            assertEquals("logged_in", result.get("status"));
+            assertEquals(TEST_USER_ID, result.get("user_id"));
+            assertEquals(TEST_USERNAME, result.get("username"));
+            assertNotNull(result.get("sso_token"));
         }
     }
 
@@ -167,14 +163,11 @@ class SSOServiceTest {
                 .thenReturn(null);
 
         // 执行测试
-        Result<Map<String, Object>> result = ssoService.processSSOLogin(
+        BusinessException ex = assertThrows(BusinessException.class, () -> ssoService.processSSOLogin(
                 TEST_USERNAME, TEST_PASSWORD, TEST_CLIENT_ID_STR,
                 TEST_REDIRECT_URI, "read", "state123"
-        );
-
-        // 验证结果
-        assertFalse(result.isSuccess());
-        assertEquals(ResultEnum.USER_NOT_EXIST.getCode(), result.getCode());
+        ));
+        assertEquals(ResultEnum.USER_NOT_EXIST.getCode(), ex.getCode());
     }
 
     @Test
@@ -188,7 +181,7 @@ class SSOServiceTest {
         when(accountService.matchesPassword(TEST_PASSWORD, mockAccount.getPassword()))
                 .thenReturn(true);
         when(oauthService.getClient(TEST_CLIENT_ID_STR))
-                .thenReturn(Result.success(mockClient));
+                .thenReturn(mockClient);
 
         // 模拟StpUtil登录
         try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class);
@@ -217,18 +210,16 @@ class SSOServiceTest {
             when(redisTemplate.expire(eq("sso:user:" + TEST_USER_ID), eq(7200L), eq(TimeUnit.SECONDS))).thenReturn(true);
 
             // 执行测试
-            Result<Map<String, Object>> result = ssoService.processSSOLogin(
+            Map<String, Object> result = ssoService.processSSOLogin(
                     TEST_USERNAME, TEST_PASSWORD, TEST_CLIENT_ID_STR,
                     TEST_REDIRECT_URI, "read", "state123"
             );
 
             // 验证结果
-            assertTrue(result.isSuccess());
-            Map<String, Object> data = result.getData();
-            assertEquals("success", data.get("status"));
-            assertEquals(TEST_USER_ID, data.get("user_id"));
-            assertEquals(TEST_USERNAME, data.get("username"));
-            assertNotNull(data.get("sso_token"));
+            assertEquals("success", result.get("status"));
+            assertEquals(TEST_USER_ID, result.get("user_id"));
+            assertEquals(TEST_USERNAME, result.get("username"));
+            assertNotNull(result.get("sso_token"));
         }
     }
 
@@ -244,11 +235,9 @@ class SSOServiceTest {
                 .thenReturn(3600L);
 
         // 执行测试
-        Result<Map<String, Object>> result = ssoService.validateSSOToken(testToken);
+        Map<String, Object> data = ssoService.validateSSOToken(testToken);
 
         // 验证结果
-        assertTrue(result.isSuccess());
-        Map<String, Object> data = result.getData();
         assertTrue((Boolean) data.get("valid"));
         assertEquals(TEST_USER_ID, data.get("user_id"));
         assertEquals(TEST_CLIENT_ID_STR, data.get("client_id"));
@@ -263,11 +252,9 @@ class SSOServiceTest {
                 .thenReturn(null);
 
         // 执行测试
-        Result<Map<String, Object>> result = ssoService.validateSSOToken(testToken);
+        Map<String, Object> data = ssoService.validateSSOToken(testToken);
 
         // 验证结果
-        assertTrue(result.isSuccess());
-        Map<String, Object> data = result.getData();
         assertFalse((Boolean) data.get("valid"));
     }
 
@@ -281,11 +268,9 @@ class SSOServiceTest {
             stpUtil.when(StpUtil::logout).then(invocation -> null);
 
             // 执行测试
-            Result<Map<String, Object>> result = ssoService.ssoLogout(TEST_REDIRECT_URI, null);
+            Map<String, Object> data = ssoService.ssoLogout(TEST_REDIRECT_URI, null);
 
             // 验证结果
-            assertTrue(result.isSuccess());
-            Map<String, Object> data = result.getData();
             assertEquals("global_logout_success", data.get("status"));
             assertEquals(TEST_USER_ID, data.get("user_id"));
 
@@ -308,11 +293,9 @@ class SSOServiceTest {
                 .thenReturn(mockAccount);
 
         // 执行测试
-        Result<Map<String, Object>> result = ssoService.getSSOUserInfo(testToken);
+        Map<String, Object> data = ssoService.getSSOUserInfo(testToken);
 
         // 验证结果
-        assertTrue(result.isSuccess());
-        Map<String, Object> data = result.getData();
         assertEquals(TEST_USER_ID, data.get("user_id"));
         assertEquals(TEST_USERNAME, data.get("username"));
         assertEquals("test@example.com", data.get("email"));
@@ -324,15 +307,13 @@ class SSOServiceTest {
     void testGetSSOLoginInfo_InvalidClient() {
         // Mock客户端不存在
         when(oauthService.getClient(TEST_CLIENT_ID_STR))
-                .thenReturn(Result.error(ResultEnum.RESULT_DATA_NONE, null));
+                .thenThrow(new BusinessException(ResultEnum.RESULT_DATA_NONE, "not found"));
 
         // 执行测试
-        Result<Map<String, Object>> result = ssoService.getSSOLoginInfo(
+        BusinessException ex = assertThrows(BusinessException.class, () -> ssoService.getSSOLoginInfo(
                 TEST_CLIENT_ID_STR, TEST_REDIRECT_URI, "read", "state123"
-        );
-
-        // 验证结果：应该返回错误
-        assertFalse(result.isSuccess());
+        ));
+        assertEquals(ResultEnum.SSO_ERROR.getCode(), ex.getCode());
 
         // 验证oauthService被调用
         verify(oauthService).getClient(eq(TEST_CLIENT_ID_STR));
@@ -345,15 +326,13 @@ class SSOServiceTest {
         disabledClient.setStatus(0); // 状态为0表示禁用
 
         when(oauthService.getClient(TEST_CLIENT_ID_STR))
-                .thenReturn(Result.success(disabledClient));
+                .thenReturn(disabledClient);
 
         // 执行测试
-        Result<Map<String, Object>> result = ssoService.getSSOLoginInfo(
+        BusinessException ex = assertThrows(BusinessException.class, () -> ssoService.getSSOLoginInfo(
                 TEST_CLIENT_ID_STR, TEST_REDIRECT_URI, "read", "state123"
-        );
-
-        // 验证结果：应该返回错误（客户端已禁用）
-        assertFalse(result.isSuccess());
+        ));
+        assertEquals(ResultEnum.SSO_ERROR.getCode(), ex.getCode());
     }
 
     @Test
@@ -369,12 +348,9 @@ class SSOServiceTest {
                 .thenReturn(-1L);
 
         // 执行测试
-        Result<Map<String, Object>> result = ssoService.validateSSOToken(testToken);
+        Map<String, Object> data = ssoService.validateSSOToken(testToken);
 
         // 验证结果
-        assertTrue(result.isSuccess());
-        Map<String, Object> data = result.getData();
-        // 过期的Token应该返回有效但过期时间为负
         assertTrue((Boolean) data.get("valid"));
         assertEquals(-1L, data.get("expires_in"));
     }
@@ -391,11 +367,9 @@ class SSOServiceTest {
             stpUtil.when(StpUtil::getTokenValue).thenReturn("test-token");
 
             // 执行测试：传入ssoToken进行特定客户端登出
-            Result<Map<String, Object>> result = ssoService.ssoLogout(TEST_REDIRECT_URI, ssoToken);
+            Map<String, Object> data = ssoService.ssoLogout(TEST_REDIRECT_URI, ssoToken);
 
             // 验证结果
-            assertTrue(result.isSuccess());
-            Map<String, Object> data = result.getData();
             assertEquals("client_logout_success", data.get("status"));
 
             // 验证SSO Token被删除（实际删除的key格式为sso:client:{userId}:{ssoToken}）
@@ -415,12 +389,9 @@ class SSOServiceTest {
                 .thenReturn(null);
 
         // 执行测试
-        Result<Map<String, Object>> result = ssoService.getSSOUserInfo(testToken);
+        BusinessException ex = assertThrows(BusinessException.class, () -> ssoService.getSSOUserInfo(testToken));
+        assertEquals(ResultEnum.PERMISSION_TOKEN_INVALID.getCode(), ex.getCode());
 
-        // 验证结果：应该返回错误
-        assertFalse(result.isSuccess());
-
-        // 验证accountService未被调用（因为Token不存在）
         verify(accountService, never()).findAccountById(anyLong());
     }
 

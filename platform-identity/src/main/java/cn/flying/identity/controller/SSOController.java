@@ -3,9 +3,7 @@ package cn.flying.identity.controller;
 import cn.flying.identity.dto.SSOLoginRequest;
 import cn.flying.identity.dto.TokenValidationRequest;
 import cn.flying.identity.service.SSOService;
-import cn.flying.identity.util.ResponseConverter;
 import cn.flying.identity.vo.RestResponse;
-import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -54,10 +52,8 @@ public class SSOController {
             @Parameter(description = "授权范围") @RequestParam(defaultValue = "read") String scope,
             @Parameter(description = "状态参数") @RequestParam(required = false) String state) {
 
-        Result<Map<String, Object>> result = ssoService.getSSOLoginInfo(clientId, redirectUri, scope, state);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = ssoService.getSSOLoginInfo(clientId, redirectUri, scope, state);
+        return ResponseEntity.ok(RestResponse.ok("获取成功", data));
     }
 
     /**
@@ -74,7 +70,7 @@ public class SSOController {
     public ResponseEntity<RestResponse<Map<String, Object>>> createSession(
             @Valid @RequestBody SSOLoginRequest request) {
 
-        Result<Map<String, Object>> result = ssoService.processSSOLogin(
+        Map<String, Object> data = ssoService.processSSOLogin(
                 request.getUsername(),
                 request.getPassword(),
                 request.getClientId(),
@@ -83,13 +79,8 @@ public class SSOController {
                 request.getState()
         );
 
-        if (result.isSuccess()) {
-            RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-            return ResponseEntity.status(HttpStatus.CREATED).body(response);
-        } else {
-            RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-            return ResponseEntity.status(response.getStatus()).body(response);
-        }
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(RestResponse.created(data));
     }
 
     /**
@@ -108,10 +99,8 @@ public class SSOController {
             @Parameter(description = "授权范围") @RequestParam(defaultValue = "read") String scope,
             @Parameter(description = "状态参数") @RequestParam(required = false) String state) {
 
-        Result<Map<String, Object>> result = ssoService.checkSSOLoginStatus(clientId, redirectUri, scope, state);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = ssoService.checkSSOLoginStatus(clientId, redirectUri, scope, state);
+        return ResponseEntity.ok(RestResponse.ok("获取成功", data));
     }
 
     /**
@@ -128,13 +117,12 @@ public class SSOController {
             @Parameter(description = "注销后重定向URI") @RequestParam(required = false) String redirectUri,
             @Parameter(description = "客户端ID") @RequestParam(required = false) String clientId) {
 
-        Result<Map<String, Object>> result = ssoService.ssoLogout(redirectUri, clientId);
-
-        if (result.isSuccess()) {
+        Map<String, Object> result = ssoService.ssoLogout(redirectUri, clientId);
+        String status = (String) result.get("status");
+        if ("client_logout_success".equals(status) || "global_logout_success".equals(status)) {
             return ResponseEntity.noContent().build();
-        } else {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
         }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
     }
 
     /**
@@ -151,10 +139,8 @@ public class SSOController {
     public ResponseEntity<RestResponse<Map<String, Object>>> getUserInfo(
             @Parameter(description = "SSO Token") @RequestParam String token) {
 
-        Result<Map<String, Object>> result = ssoService.getSSOUserInfo(token);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = ssoService.getSSOUserInfo(token);
+        return ResponseEntity.ok(RestResponse.ok("获取成功", data));
     }
 
     /**
@@ -170,10 +156,8 @@ public class SSOController {
     public ResponseEntity<RestResponse<Map<String, Object>>> validateToken(
             @Valid @RequestBody TokenValidationRequest request) {
 
-        Result<Map<String, Object>> result = ssoService.validateSSOToken(request.getToken());
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = ssoService.validateSSOToken(request.getToken());
+        return ResponseEntity.ok(RestResponse.ok("验证完成", data));
     }
 
     /**
@@ -187,10 +171,8 @@ public class SSOController {
             @ApiResponse(responseCode = "401", description = "未认证")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getClients() {
-        Result<Map<String, Object>> result = ssoService.getLoggedInClients();
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = ssoService.getLoggedInClients();
+        return ResponseEntity.ok(RestResponse.ok("获取成功", data));
     }
 
     /**
@@ -207,14 +189,8 @@ public class SSOController {
     public ResponseEntity<Void> deleteClientSession(
             @Parameter(description = "客户端ID") @PathVariable String clientId) {
 
-        Result<Void> result = ssoService.logoutFromClient(clientId);
-
-        if (result.isSuccess()) {
-            return ResponseEntity.noContent().build();
-        } else {
-            RestResponse<Void> response = ResponseConverter.convert(result);
-            return ResponseEntity.status(response.getStatus()).build();
-        }
+        ssoService.logoutFromClient(clientId);
+        return ResponseEntity.noContent().build();
     }
 
     /**

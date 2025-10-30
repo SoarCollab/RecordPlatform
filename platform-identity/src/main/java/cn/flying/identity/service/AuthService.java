@@ -2,10 +2,12 @@ package cn.flying.identity.service;
 
 import cn.flying.identity.dto.Account;
 import cn.flying.identity.vo.AccountVO;
+import cn.flying.identity.vo.LoginStatusVO;
 import cn.flying.identity.vo.request.ChangePasswordVO;
 import cn.flying.identity.vo.request.EmailRegisterVO;
 import cn.flying.identity.vo.request.EmailResetVO;
-import cn.flying.platformapi.constant.Result;
+
+import java.util.Map;
 
 /**
  * 认证服务接口
@@ -20,14 +22,14 @@ public interface AuthService {
      * @param password 密码
      * @return 登录结果，包含Token信息
      */
-    Result<String> login(String username, String password);
+    String login(String username, String password);
 
     /**
      * 用户注销
      *
      * @return 注销结果
      */
-    Result<Void> logout();
+    void logout();
 
     /**
      * 用户注册
@@ -35,7 +37,7 @@ public interface AuthService {
      * @param vo 注册信息
      * @return 注册结果
      */
-    Result<Void> register(EmailRegisterVO vo);
+    void register(EmailRegisterVO vo);
 
     /**
      * 发送邮箱验证码
@@ -44,7 +46,7 @@ public interface AuthService {
      * @param type  验证码类型（register/reset）
      * @return 发送结果
      */
-    Result<Void> askVerifyCode(String email, String type);
+    void askVerifyCode(String email, String type);
 
     /**
      * 重置密码确认
@@ -52,7 +54,7 @@ public interface AuthService {
      * @param vo 重置密码信息
      * @return 重置结果
      */
-    Result<Void> resetConfirm(EmailResetVO vo);
+    void resetConfirm(EmailResetVO vo);
 
     /**
      * 修改密码
@@ -60,14 +62,14 @@ public interface AuthService {
      * @param vo 修改密码信息
      * @return 修改结果
      */
-    Result<Void> changePassword(ChangePasswordVO vo);
+    void changePassword(ChangePasswordVO vo);
 
     /**
      * 获取当前登录用户信息
      *
      * @return 用户信息
      */
-    Result<AccountVO> getUserInfo();
+    AccountVO getUserInfo();
 
     /**
      * 根据用户名或邮箱查找用户
@@ -84,19 +86,19 @@ public interface AuthService {
      * @param text 用户名或邮箱
      * @return 脱敏后的用户信息
      */
-    Result<AccountVO> findUserWithMasking(String text);
+    AccountVO findUserWithMasking(String text);
 
     /**
      * 检查登录状态
      *
      * @return 登录状态信息
      */
-    Result<Object> checkLoginStatus();
+    LoginStatusVO checkLoginStatus();
 
     /**
      * 获取Token信息
      *
      * @return Token详细信息
      */
-    Result<Object> getTokenInfo();
+    Map<String, Object> getTokenInfo();
 }

@@ -8,8 +8,8 @@ import cn.flying.identity.dto.OAuthCode;
 import cn.flying.identity.mapper.AccountMapper;
 import cn.flying.identity.mapper.OAuthClientMapper;
 import cn.flying.identity.mapper.OAuthCodeMapper;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.service.impl.OAuthServiceImpl;
-import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -106,17 +106,15 @@ class OAuthServiceTest {
             stpUtil.when(StpUtil::isLogin).thenReturn(true);
 
             // 执行测试
-            Result<Map<String, Object>> result = oauthService.getAuthorizeInfo(
+            Map<String, Object> result = oauthService.getAuthorizeInfo(
                 TEST_CLIENT_KEY, TEST_REDIRECT_URI, TEST_SCOPE, TEST_STATE
             );
 
             // 验证结果
-            assertTrue(result.isSuccess());
-            Map<String, Object> data = result.getData();
-            assertEquals("Test Client", data.get("clientName"));
-            assertEquals(TEST_SCOPE, data.get("scope"));
-            assertEquals(TEST_REDIRECT_URI, data.get("redirectUri"));
-            assertEquals(TEST_STATE, data.get("state"));
+            assertEquals("Test Client", result.get("clientName"));
+            assertEquals(TEST_SCOPE, result.get("scope"));
+            assertEquals(TEST_REDIRECT_URI, result.get("redirectUri"));
+            assertEquals(TEST_STATE, result.get("state"));
         }
     }
 
@@ -127,13 +125,10 @@ class OAuthServiceTest {
                 .thenReturn(null);
 
         // 执行测试
-        Result<Map<String, Object>> result = oauthService.getAuthorizeInfo(
+        BusinessException ex = assertThrows(BusinessException.class, () -> oauthService.getAuthorizeInfo(
             TEST_CLIENT_KEY, TEST_REDIRECT_URI, TEST_SCOPE, TEST_STATE
-        );
-
-        // 验证结果
-        assertFalse(result.isSuccess());
-        assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), result.getCode());
+        ));
+        assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), ex.getCode());
     }
 
     @Test
@@ -148,12 +143,10 @@ class OAuthServiceTest {
             stpUtil.when(StpUtil::isLogin).thenReturn(false);
 
             // 执行测试
-            Result<Map<String, Object>> result = oauthService.getAuthorizeInfo(
+            BusinessException ex = assertThrows(BusinessException.class, () -> oauthService.getAuthorizeInfo(
                 TEST_CLIENT_KEY, TEST_REDIRECT_URI, TEST_SCOPE, TEST_STATE
-            );
-
-            // 验证结果：应该返回错误（用户未登录）
-            assertFalse(result.isSuccess());
+            ));
+            assertEquals(ResultEnum.USER_NOT_LOGGED_IN.getCode(), ex.getCode());
         }
     }
 
@@ -169,12 +162,10 @@ class OAuthServiceTest {
             stpUtil.when(StpUtil::isLogin).thenReturn(true);
 
             // 执行测试（state为空）
-            Result<Map<String, Object>> result = oauthService.getAuthorizeInfo(
-                TEST_CLIENT_KEY, TEST_REDIRECT_URI, TEST_SCOPE, null
-            );
-
-            // 验证结果：应该返回错误（缺少state参数）
-            assertFalse(result.isSuccess());
+            BusinessException ex = assertThrows(BusinessException.class, () -> oauthService.getAuthorizeInfo(
+                    TEST_CLIENT_KEY, TEST_REDIRECT_URI, TEST_SCOPE, null
+            ));
+            assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), ex.getCode());
         }
     }
 
@@ -196,13 +187,12 @@ class OAuthServiceTest {
             stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(TEST_USER_ID);
 
             // 执行测试（用户同意授权）
-            Result<String> result = oauthService.authorize(
-                TEST_CLIENT_KEY, TEST_REDIRECT_URI, TEST_SCOPE, TEST_STATE, true
+            String redirectUrl = oauthService.authorize(
+                    TEST_CLIENT_KEY, TEST_REDIRECT_URI, TEST_SCOPE, TEST_STATE, true
             );
 
             // 验证结果
-            assertTrue(result.isSuccess());
-            String redirectUrl = result.getData();
+            assertNotNull(redirectUrl);
             assertTrue(redirectUrl.contains("code="));
             assertTrue(redirectUrl.contains("state=" + TEST_STATE));
 
@@ -223,13 +213,12 @@ class OAuthServiceTest {
             stpUtil.when(StpUtil::isLogin).thenReturn(true);
 
             // 执行测试（用户拒绝授权）
-            Result<String> result = oauthService.authorize(
-                TEST_CLIENT_KEY, TEST_REDIRECT_URI, TEST_SCOPE, TEST_STATE, false
+            String redirectUrl = oauthService.authorize(
+                    TEST_CLIENT_KEY, TEST_REDIRECT_URI, TEST_SCOPE, TEST_STATE, false
             );
 
             // 验证结果
-            assertTrue(result.isSuccess());
-            String redirectUrl = result.getData();
+            assertNotNull(redirectUrl);
             assertTrue(redirectUrl.contains("error=access_denied"));
 
             // 验证授权码未被保存
@@ -249,12 +238,9 @@ class OAuthServiceTest {
             stpUtil.when(StpUtil::isLogin).thenReturn(true);
 
             // 执行测试（使用无效的重定向URI）
-            Result<String> result = oauthService.authorize(
-                TEST_CLIENT_KEY, "https://malicious.com/callback", TEST_SCOPE, TEST_STATE, true
-            );
-
-            // 验证结果：应该返回错误
-            assertFalse(result.isSuccess());
+            assertThrows(BusinessException.class, () -> oauthService.authorize(
+                    TEST_CLIENT_KEY, "https://malicious.com/callback", TEST_SCOPE, TEST_STATE, true
+            ));
         }
     }
 
@@ -270,12 +256,9 @@ class OAuthServiceTest {
             stpUtil.when(StpUtil::isLogin).thenReturn(true);
 
             // 执行测试（使用无效的授权范围）
-            Result<String> result = oauthService.authorize(
-                TEST_CLIENT_KEY, TEST_REDIRECT_URI, "admin delete", TEST_STATE, true
-            );
-
-            // 验证结果：应该返回错误
-            assertFalse(result.isSuccess());
+            assertThrows(BusinessException.class, () -> oauthService.authorize(
+                    TEST_CLIENT_KEY, TEST_REDIRECT_URI, "admin delete", TEST_STATE, true
+            ));
         }
     }
 
@@ -308,13 +291,11 @@ class OAuthServiceTest {
                 .thenReturn(true);
 
         // 执行测试
-        Result<Map<String, Object>> result = oauthService.getAccessToken(
-            "authorization_code", TEST_CODE, TEST_REDIRECT_URI, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
+        Map<String, Object> tokenInfo = oauthService.getAccessToken(
+                "authorization_code", TEST_CODE, TEST_REDIRECT_URI, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
         );
 
         // 验证结果
-        assertTrue(result.isSuccess());
-        Map<String, Object> tokenInfo = result.getData();
         assertNotNull(tokenInfo.get("access_token"));
         assertEquals("Bearer", tokenInfo.get("token_type"));
         assertNotNull(tokenInfo.get("refresh_token"));
@@ -340,12 +321,10 @@ class OAuthServiceTest {
                 .thenReturn(null);
 
         // 执行测试
-        Result<Map<String, Object>> result = oauthService.getAccessToken(
-            "authorization_code", TEST_CODE, TEST_REDIRECT_URI, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
-        );
-
-        // 验证结果：应该返回错误
-        assertFalse(result.isSuccess());
+        BusinessException ex = assertThrows(BusinessException.class, () -> oauthService.getAccessToken(
+                "authorization_code", TEST_CODE, TEST_REDIRECT_URI, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
+        ));
+        assertEquals(ResultEnum.OAUTH_CODE_INVALID.getCode(), ex.getCode());
     }
 
     @Test
@@ -365,13 +344,10 @@ class OAuthServiceTest {
         when(oauthCodeMapper.findByCodeAndClientKey(TEST_CODE, TEST_CLIENT_KEY))
                 .thenReturn(expiredCode);
 
-        // 执行测试
-        Result<Map<String, Object>> result = oauthService.getAccessToken(
-            "authorization_code", TEST_CODE, TEST_REDIRECT_URI, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
-        );
-
-        // 验证结果：应该返回错误（授权码过期）
-        assertFalse(result.isSuccess());
+        BusinessException ex = assertThrows(BusinessException.class, () -> oauthService.getAccessToken(
+                "authorization_code", TEST_CODE, TEST_REDIRECT_URI, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
+        ));
+        assertEquals(ResultEnum.OAUTH_CODE_INVALID.getCode(), ex.getCode());
     }
 
     @Test
@@ -391,13 +367,10 @@ class OAuthServiceTest {
         when(oauthCodeMapper.findByCodeAndClientKey(TEST_CODE, TEST_CLIENT_KEY))
                 .thenReturn(usedCode);
 
-        // 执行测试
-        Result<Map<String, Object>> result = oauthService.getAccessToken(
-            "authorization_code", TEST_CODE, TEST_REDIRECT_URI, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
-        );
-
-        // 验证结果：应该返回错误（授权码已使用）
-        assertFalse(result.isSuccess());
+        BusinessException usedEx = assertThrows(BusinessException.class, () -> oauthService.getAccessToken(
+                "authorization_code", TEST_CODE, TEST_REDIRECT_URI, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
+        ));
+        assertEquals(ResultEnum.OAUTH_CODE_INVALID.getCode(), usedEx.getCode());
     }
 
     @Test
@@ -407,12 +380,10 @@ class OAuthServiceTest {
                 .thenReturn(null);
 
         // 执行测试
-        Result<Map<String, Object>> result = oauthService.getAccessToken(
-            "authorization_code", TEST_CODE, TEST_REDIRECT_URI, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
-        );
-
-        // 验证结果：应该返回错误
-        assertFalse(result.isSuccess());
+        BusinessException ex = assertThrows(BusinessException.class, () -> oauthService.getAccessToken(
+                "authorization_code", TEST_CODE, TEST_REDIRECT_URI, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
+        ));
+        assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), ex.getCode());
     }
 
     @Test
@@ -447,14 +418,11 @@ class OAuthServiceTest {
         when(redisTemplate.delete(anyString()))
                 .thenReturn(true);
 
-        // 执行测试
-        Result<Map<String, Object>> result = oauthService.refreshAccessToken(
-            "refresh_token", TEST_REFRESH_TOKEN, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
+        Map<String, Object> tokenInfo = oauthService.refreshAccessToken(
+                "refresh_token", TEST_REFRESH_TOKEN, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
         );
 
         // 验证结果
-        assertTrue(result.isSuccess());
-        Map<String, Object> tokenInfo = result.getData();
         assertNotNull(tokenInfo.get("access_token"));
         assertEquals("Bearer", tokenInfo.get("token_type"));
         assertNotNull(tokenInfo.get("refresh_token"));
@@ -478,13 +446,10 @@ class OAuthServiceTest {
         when(hashOperations.entries("oauth:refresh:" + TEST_REFRESH_TOKEN))
                 .thenReturn(new HashMap<>());
 
-        // 执行测试
-        Result<Map<String, Object>> result = oauthService.refreshAccessToken(
-            "refresh_token", TEST_REFRESH_TOKEN, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
-        );
-
-        // 验证结果：应该返回错误
-        assertFalse(result.isSuccess());
+        BusinessException ex = assertThrows(BusinessException.class, () -> oauthService.refreshAccessToken(
+                "refresh_token", TEST_REFRESH_TOKEN, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
+        ));
+        assertEquals(ResultEnum.OAUTH_TOKEN_INVALID.getCode(), ex.getCode());
     }
 
     @Test
@@ -506,13 +471,10 @@ class OAuthServiceTest {
         when(hashOperations.entries("oauth:refresh:" + TEST_REFRESH_TOKEN))
                 .thenReturn(tokenData);
 
-        // 执行测试
-        Result<Map<String, Object>> result = oauthService.refreshAccessToken(
-            "refresh_token", TEST_REFRESH_TOKEN, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
-        );
-
-        // 验证结果：应该返回错误（客户端不匹配）
-        assertFalse(result.isSuccess());
+        BusinessException ex = assertThrows(BusinessException.class, () -> oauthService.refreshAccessToken(
+                "refresh_token", TEST_REFRESH_TOKEN, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
+        ));
+        assertEquals(ResultEnum.OAUTH_TOKEN_INVALID.getCode(), ex.getCode());
     }
 
     @Test
@@ -529,12 +491,9 @@ class OAuthServiceTest {
         when(accountMapper.selectById(TEST_USER_ID))
                 .thenReturn(mockAccount);
 
-        // 执行测试
-        Result<Map<String, Object>> result = oauthService.getUserInfo(TEST_ACCESS_TOKEN);
+        Map<String, Object> userInfo = oauthService.getUserInfo(TEST_ACCESS_TOKEN);
 
         // 验证结果
-        assertTrue(result.isSuccess());
-        Map<String, Object> userInfo = result.getData();
         assertEquals(TEST_USER_ID, userInfo.get("id"));
         assertEquals("testuser", userInfo.get("username"));
         assertEquals("test@example.com", userInfo.get("email"));
@@ -546,11 +505,8 @@ class OAuthServiceTest {
         when(hashOperations.entries("oauth:access:" + TEST_ACCESS_TOKEN))
                 .thenReturn(new HashMap<>());
 
-        // 执行测试
-        Result<Map<String, Object>> result = oauthService.getUserInfo(TEST_ACCESS_TOKEN);
-
-        // 验证结果：应该返回错误
-        assertFalse(result.isSuccess());
+        BusinessException ex = assertThrows(BusinessException.class, () -> oauthService.getUserInfo(TEST_ACCESS_TOKEN));
+        assertEquals(ResultEnum.OAUTH_TOKEN_INVALID.getCode(), ex.getCode());
     }
 
     @Test
@@ -569,12 +525,9 @@ class OAuthServiceTest {
                 .thenReturn(true);
 
         // 执行测试
-        Result<Void> result = oauthService.revokeToken(
-            TEST_ACCESS_TOKEN, "access_token", TEST_CLIENT_KEY, TEST_CLIENT_SECRET
-        );
-
-        // 验证结果
-        assertTrue(result.isSuccess());
+        assertDoesNotThrow(() -> oauthService.revokeToken(
+                TEST_ACCESS_TOKEN, "access_token", TEST_CLIENT_KEY, TEST_CLIENT_SECRET
+        ));
 
         // 验证Redis删除被调用
         verify(redisTemplate, atLeastOnce()).delete(anyString());
@@ -597,13 +550,11 @@ class OAuthServiceTest {
                 .thenReturn(true);
 
         // 执行测试
-        Result<Map<String, Object>> result = oauthService.getClientCredentialsToken(
-            "client_credentials", TEST_SCOPE, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
+        Map<String, Object> tokenInfo = oauthService.getClientCredentialsToken(
+                "client_credentials", TEST_SCOPE, TEST_CLIENT_KEY, TEST_CLIENT_SECRET
         );
 
         // 验证结果
-        assertTrue(result.isSuccess());
-        Map<String, Object> tokenInfo = result.getData();
         assertNotNull(tokenInfo.get("access_token"));
         assertEquals("Bearer", tokenInfo.get("token_type"));
         assertNull(tokenInfo.get("refresh_token")); // 客户端凭证模式不返回刷新令牌

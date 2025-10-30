@@ -5,11 +5,10 @@ import cn.flying.identity.dto.AuthorizationRequest;
 import cn.flying.identity.dto.OAuthClient;
 import cn.flying.identity.dto.RevokeTokenRequest;
 import cn.flying.identity.dto.TokenRequest;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.service.OAuthService;
 import cn.flying.identity.service.SSOService;
-import cn.flying.identity.util.ResponseConverter;
 import cn.flying.identity.vo.RestResponse;
-import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -55,7 +54,7 @@ public class OAuthController {
             @ApiResponse(responseCode = "403", description = "授权被拒绝")
     })
     public ResponseEntity<RestResponse<String>> createAuthorization(@Valid @RequestBody AuthorizationRequest request) {
-        Result<String> result = oauthService.authorize(
+        String redirectUrl = oauthService.authorize(
                 request.getClientId(),
                 request.getRedirectUri(),
                 request.getScope() != null ? request.getScope() : "read",
@@ -63,13 +62,8 @@ public class OAuthController {
                 request.isApproved()
         );
 
-        if (result.isSuccess()) {
-            return ResponseEntity.status(HttpStatus.CREATED)
-                    .body(RestResponse.created(result.getData()));
-        } else {
-            RestResponse<String> response = ResponseConverter.convert(result);
-            return ResponseEntity.status(response.getStatus()).body(response);
-        }
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(RestResponse.created(redirectUrl));
     }
 
     /**
@@ -84,7 +78,7 @@ public class OAuthController {
             @ApiResponse(responseCode = "401", description = "认证失败")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> createToken(@Valid @RequestBody TokenRequest request) {
-        Result<Map<String, Object>> result = switch (request.getGrantType()) {
+        Map<String, Object> tokenResponse = switch (request.getGrantType()) {
             case "authorization_code" -> oauthService.getAccessToken(
                     request.getGrantType(),
                     request.getCode(),
@@ -104,11 +98,10 @@ public class OAuthController {
                     request.getClientId(),
                     request.getClientSecret()
             );
-            default -> Result.error(ResultEnum.PARAM_IS_INVALID, null);
+            default -> throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "不支持的授权类型");
         };
 
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-        return ResponseEntity.status(response.getStatus()).body(response);
+        return ResponseEntity.ok(RestResponse.ok("获取成功", tokenResponse));
     }
 
     /**
@@ -139,10 +132,8 @@ public class OAuthController {
                             "访问令牌不能为空"));
         }
 
-        Result<Map<String, Object>> result = oauthService.getUserInfo(accessToken);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = oauthService.getUserInfo(accessToken);
+        return ResponseEntity.ok(RestResponse.ok("获取成功", data));
     }
 
     /**
@@ -157,15 +148,14 @@ public class OAuthController {
             @ApiResponse(responseCode = "401", description = "客户端认证失败")
     })
     public ResponseEntity<RestResponse<Void>> revokeToken(@Valid @RequestBody RevokeTokenRequest request) {
-        Result<Void> result = oauthService.revokeToken(
+        oauthService.revokeToken(
                 request.getToken(),
                 request.getTokenTypeHint(),
                 request.getClientId(),
                 request.getClientSecret()
         );
 
-        RestResponse<Void> response = ResponseConverter.convert(result);
-        return ResponseEntity.status(response.getStatus()).body(response);
+        return ResponseEntity.ok(RestResponse.ok("撤销成功", null));
     }
 
     /**
@@ -191,15 +181,9 @@ public class OAuthController {
                     .body(RestResponse.forbidden(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), "无权限"));
         }
 
-        Result<OAuthClient> result = oauthService.registerClient(client);
-
-        if (result.isSuccess()) {
-            return ResponseEntity.status(HttpStatus.CREATED)
-                    .body(RestResponse.created(result.getData()));
-        } else {
-            RestResponse<OAuthClient> response = ResponseConverter.convert(result);
-            return ResponseEntity.status(response.getStatus()).body(response);
-        }
+        OAuthClient created = oauthService.registerClient(client);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(RestResponse.created(created));
     }
 
     /**
@@ -228,21 +212,12 @@ public class OAuthController {
                     .body(RestResponse.forbidden(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), "无权限"));
         }
 
-        // 先根据路径参数查询现有客户端，确保更新的是同一条记录
-        Result<OAuthClient> existing = oauthService.getClient(clientId);
-        if (!existing.isSuccess() || existing.getData() == null) {
-            RestResponse<OAuthClient> resp = ResponseConverter.convert(existing);
-            return ResponseEntity.status(resp.getStatus()).body(resp);
-        }
-        OAuthClient dbClient = existing.getData();
-        // 对齐主键与标识符，避免更新到错误记录
+        OAuthClient dbClient = oauthService.getClient(clientId);
         client.setClientId(dbClient.getClientId());
         client.setClientKey(dbClient.getClientKey());
 
-        Result<OAuthClient> result = oauthService.updateClient(client);
-        RestResponse<OAuthClient> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        OAuthClient updated = oauthService.updateClient(client);
+        return ResponseEntity.ok(RestResponse.ok("更新成功", updated));
     }
 
     /**
@@ -267,14 +242,8 @@ public class OAuthController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
-        Result<Void> result = oauthService.deleteClient(clientId);
-
-        if (result.isSuccess()) {
-            return ResponseEntity.noContent().build();
-        } else {
-            RestResponse<Void> response = ResponseConverter.convert(result);
-            return ResponseEntity.status(response.getStatus()).build();
-        }
+        oauthService.deleteClient(clientId);
+        return ResponseEntity.noContent().build();
     }
 
     /**
@@ -301,15 +270,9 @@ public class OAuthController {
                     .body(RestResponse.forbidden(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), "无权限"));
         }
 
-        Result<OAuthClient> result = oauthService.getClient(clientId);
-        if (result.isSuccess() && result.getData() != null) {
-            // 脱敏返回，避免泄露加密后的密钥
-            OAuthClient data = result.getData();
-            data.setClientSecret(null);
-            return ResponseEntity.ok(RestResponse.ok(result.getMessage(), data));
-        }
-        RestResponse<OAuthClient> response = ResponseConverter.convert(result);
-        return ResponseEntity.status(response.getStatus()).body(response);
+        OAuthClient data = oauthService.getClient(clientId);
+        data.setClientSecret(null);
+        return ResponseEntity.ok(RestResponse.ok("获取成功", data));
     }
 
     /**
@@ -331,9 +294,8 @@ public class OAuthController {
         // 检查用户是否已登录
         if (StpUtil.isLogin()) {
             // 已登录，返回授权页面信息
-            Result<Map<String, Object>> result = oauthService.getAuthorizeInfo(clientId, redirectUri, scope, state);
-            RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-            return ResponseEntity.status(response.getStatus()).body(response);
+            Map<String, Object> data = oauthService.getAuthorizeInfo(clientId, redirectUri, scope, state);
+            return ResponseEntity.ok(RestResponse.ok("获取成功", data));
         } else {
             // 未登录，返回401
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -359,10 +321,8 @@ public class OAuthController {
             @Parameter(description = "授权范围") @RequestParam(value = "scope", defaultValue = "read") String scope,
             @Parameter(description = "状态参数") @RequestParam(value = "state", required = false) String state) {
 
-        Result<Map<String, Object>> result = oauthService.getAuthorizeInfo(clientId, redirectUri, scope, state);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = oauthService.getAuthorizeInfo(clientId, redirectUri, scope, state);
+        return ResponseEntity.ok(RestResponse.ok("获取成功", data));
     }
 
     /**
@@ -379,12 +339,11 @@ public class OAuthController {
             @Parameter(description = "注销后重定向URI") @RequestParam(value = "redirect_uri", required = false) String redirectUri,
             @Parameter(description = "客户端ID") @RequestParam(value = "client_id", required = false) String clientId) {
 
-        Result<Map<String, Object>> result = ssoService.ssoLogout(redirectUri, clientId);
-
-        if (result.isSuccess()) {
+        Map<String, Object> result = ssoService.ssoLogout(redirectUri, clientId);
+        String status = (String) result.get("status");
+        if ("client_logout_success".equals(status) || "global_logout_success".equals(status)) {
             return ResponseEntity.noContent().build();
-        } else {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
         }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
     }
 }

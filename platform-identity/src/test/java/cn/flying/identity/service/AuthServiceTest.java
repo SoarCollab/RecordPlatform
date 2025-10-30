@@ -1,9 +1,13 @@
 package cn.flying.identity.service;
 
+import cn.dev33.satoken.session.SaSession;
+import cn.dev33.satoken.stp.SaTokenInfo;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.flying.identity.dto.Account;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.service.impl.AuthServiceImpl;
 import cn.flying.identity.vo.AccountVO;
+import cn.flying.identity.vo.LoginStatusVO;
 import cn.flying.identity.vo.request.ChangePasswordVO;
 import cn.flying.identity.vo.request.EmailRegisterVO;
 import cn.flying.identity.vo.request.EmailResetVO;
@@ -19,16 +23,15 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
  * 认证服务单元测试
- * 测试范围：登录、注销、注册、密码管理、用户信息获取
- *
- * @author 王贝强
- * @create 2025-01-13
+ * 覆盖登录、注销、账号管理与登录态查询
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -43,7 +46,6 @@ class AuthServiceTest {
     @Mock
     private JwtBlacklistService jwtBlacklistService;
 
-    // 测试数据常量
     private static final Long TEST_USER_ID = 123L;
     private static final String TEST_USERNAME = "testuser";
     private static final String TEST_EMAIL = "test@example.com";
@@ -53,283 +55,305 @@ class AuthServiceTest {
 
     @BeforeEach
     void setUp() {
-        // 预配置通用Mock行为可在此处设置
+        // 預先配置可復用的mock邏輯
     }
 
     @Test
     void testLogin_Success() {
-        // 准备测试数据
         Account mockAccount = createMockAccount();
-        when(accountService.findAccountByNameOrEmail(TEST_USERNAME))
-                .thenReturn(mockAccount);
-        when(accountService.matchesPassword(TEST_PASSWORD, TEST_PASSWORD_ENCODED))
-                .thenReturn(true);
+        when(accountService.findAccountByNameOrEmail(TEST_USERNAME)).thenReturn(mockAccount);
+        when(accountService.matchesPassword(TEST_PASSWORD, TEST_PASSWORD_ENCODED)).thenReturn(true);
 
-        // 模拟Sa-Token登录
         try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-            // Mock登录操作
+            SaSession mockSession = mock(SaSession.class);
+            when(mockSession.set(anyString(), any())).thenReturn(mockSession);
+
             stpUtil.when(() -> StpUtil.login(TEST_USER_ID)).then(invocation -> null);
-            stpUtil.when(StpUtil::getSession).thenReturn(mock(cn.dev33.satoken.session.SaSession.class));
+            stpUtil.when(StpUtil::getSession).thenReturn(mockSession);
             stpUtil.when(StpUtil::getTokenValue).thenReturn(TEST_TOKEN);
 
-            // 执行测试
-            Result<String> result = authService.login(TEST_USERNAME, TEST_PASSWORD);
+            String token = authService.login(TEST_USERNAME, TEST_PASSWORD);
 
-            // 验证结果
-            assertTrue(result.isSuccess());
-            assertEquals(TEST_TOKEN, result.getData());
-
-            // 验证StpUtil.login被调用
+            assertEquals(TEST_TOKEN, token);
             stpUtil.verify(() -> StpUtil.login(eq(TEST_USER_ID)));
         }
     }
 
     @Test
     void testLogin_UserNotExist() {
-        // 模拟用户不存在
-        when(accountService.findAccountByNameOrEmail(TEST_USERNAME))
-                .thenReturn(null);
+        when(accountService.findAccountByNameOrEmail(TEST_USERNAME)).thenReturn(null);
 
-        // 执行测试
-        Result<String> result = authService.login(TEST_USERNAME, TEST_PASSWORD);
-
-        // 验证结果
-        assertFalse(result.isSuccess());
-        assertEquals(ResultEnum.USER_NOT_EXIST.getCode(), result.getCode());
-
-        // 验证accountService被调用
-        verify(accountService).findAccountByNameOrEmail(eq(TEST_USERNAME));
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.login(TEST_USERNAME, TEST_PASSWORD));
+        assertEquals(ResultEnum.USER_NOT_EXIST.getCode(), ex.getCode());
+        verify(accountService).findAccountByNameOrEmail(TEST_USERNAME);
     }
 
     @Test
     void testLogin_WrongPassword() {
-        // 准备测试数据
         Account mockAccount = createMockAccount();
-        when(accountService.findAccountByNameOrEmail(TEST_USERNAME))
-                .thenReturn(mockAccount);
-        when(accountService.matchesPassword(TEST_PASSWORD, TEST_PASSWORD_ENCODED))
-                .thenReturn(false);
+        when(accountService.findAccountByNameOrEmail(TEST_USERNAME)).thenReturn(mockAccount);
+        when(accountService.matchesPassword(TEST_PASSWORD, TEST_PASSWORD_ENCODED)).thenReturn(false);
 
-        // 执行测试
-        Result<String> result = authService.login(TEST_USERNAME, TEST_PASSWORD);
-
-        // 验证结果
-        assertFalse(result.isSuccess());
-        assertEquals(ResultEnum.USER_LOGIN_ERROR.getCode(), result.getCode());
-
-        // 验证密码匹配被调用
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.login(TEST_USERNAME, TEST_PASSWORD));
+        assertEquals(ResultEnum.USER_LOGIN_ERROR.getCode(), ex.getCode());
         verify(accountService).matchesPassword(eq(TEST_PASSWORD), eq(TEST_PASSWORD_ENCODED));
     }
 
     @Test
-    void testLogout_Success() {
-        // 模拟用户已登录
+    void testLogout_WhenLoggedIn() {
         try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+            SaSession mockSession = mock(SaSession.class);
+            when(mockSession.get("username")).thenReturn(TEST_USERNAME);
+
             stpUtil.when(StpUtil::isLogin).thenReturn(true);
-            stpUtil.when(StpUtil::getSession).thenReturn(mock(cn.dev33.satoken.session.SaSession.class));
+            stpUtil.when(StpUtil::getSession).thenReturn(mockSession);
             stpUtil.when(StpUtil::getTokenValue).thenReturn(TEST_TOKEN);
             stpUtil.when(StpUtil::logout).then(invocation -> null);
 
-            // 执行测试
-            Result<Void> result = authService.logout();
+            authService.logout();
 
-            // 验证结果
-            assertTrue(result.isSuccess());
-
-            // 验证Token被加入黑名单
-            verify(jwtBlacklistService).blacklistToken(eq(TEST_TOKEN), eq(-1L));
-
-            // 验证StpUtil.logout被调用
+            verify(jwtBlacklistService).blacklistToken(TEST_TOKEN, -1L);
             stpUtil.verify(StpUtil::logout);
         }
     }
 
     @Test
-    void testLogout_WithTokenBlacklist() {
-        // 模拟用户已登录，验证Token被正确加入黑名单
+    void testLogout_WhenNotLoggedIn() {
         try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-            stpUtil.when(StpUtil::isLogin).thenReturn(true);
-            stpUtil.when(StpUtil::getSession).thenReturn(mock(cn.dev33.satoken.session.SaSession.class));
-            stpUtil.when(StpUtil::getTokenValue).thenReturn(TEST_TOKEN);
-            stpUtil.when(StpUtil::logout).then(invocation -> null);
+            stpUtil.when(StpUtil::isLogin).thenReturn(false);
 
-            // 执行测试
-            Result<Void> result = authService.logout();
+            authService.logout();
 
-            // 验证结果
-            assertTrue(result.isSuccess());
-
-            // 验证Token被加入黑名单，ttl为-1表示使用Token自身的过期时间
-            verify(jwtBlacklistService, times(1)).blacklistToken(eq(TEST_TOKEN), eq(-1L));
+            verifyNoInteractions(jwtBlacklistService);
+            stpUtil.verify(StpUtil::isLogin);
         }
     }
 
     @Test
     void testRegister_Success() {
-        // 准备测试数据
-        EmailRegisterVO registerVO = new EmailRegisterVO();
-        registerVO.setUsername(TEST_USERNAME);
-        registerVO.setEmail(TEST_EMAIL);
-        registerVO.setPassword(TEST_PASSWORD);
-        registerVO.setCode("123456");
+        EmailRegisterVO vo = new EmailRegisterVO();
+        vo.setUsername(TEST_USERNAME);
+        vo.setEmail(TEST_EMAIL);
+        vo.setPassword(TEST_PASSWORD);
+        vo.setCode("123456");
 
-        // Mock AccountService的注册方法
-        when(accountService.registerEmailAccount(any(EmailRegisterVO.class)))
+        when(accountService.registerEmailAccount(vo)).thenReturn(Result.success(null));
+
+        assertDoesNotThrow(() -> authService.register(vo));
+        verify(accountService).registerEmailAccount(vo);
+    }
+
+    @Test
+    void testRegister_Failure() {
+        EmailRegisterVO vo = new EmailRegisterVO();
+        vo.setUsername(TEST_USERNAME);
+        vo.setEmail(TEST_EMAIL);
+        vo.setPassword(TEST_PASSWORD);
+        vo.setCode("123456");
+
+        when(accountService.registerEmailAccount(vo))
+                .thenReturn(Result.error(ResultEnum.USER_HAS_EXISTED));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> authService.register(vo));
+        assertEquals(ResultEnum.USER_HAS_EXISTED.getCode(), ex.getCode());
+    }
+
+    @Test
+    void testAskVerifyCode_Success() {
+        when(accountService.registerEmailVerifyCode(eq("register"), eq(TEST_EMAIL), anyString()))
                 .thenReturn(Result.success(null));
 
-        // 执行测试
-        Result<Void> result = authService.register(registerVO);
-
-        // 验证结果
-        assertTrue(result.isSuccess());
-
-        // 验证AccountService的registerEmailAccount被调用
-        verify(accountService).registerEmailAccount(eq(registerVO));
+        assertDoesNotThrow(() -> authService.askVerifyCode(TEST_EMAIL, "register"));
+        verify(accountService).registerEmailVerifyCode(eq("register"), eq(TEST_EMAIL), anyString());
     }
 
     @Test
-    void testGetUserInfo_Success() {
-        // 准备测试数据
-        Account mockAccount = createMockAccount();
-        when(accountService.findAccountById(TEST_USER_ID))
-                .thenReturn(mockAccount);
+    void testAskVerifyCode_Failure() {
+        when(accountService.registerEmailVerifyCode(eq("reset"), eq(TEST_EMAIL), anyString()))
+                .thenReturn(Result.error(ResultEnum.AUTH_CODE_ERROR));
 
-        // 模拟用户已登录
-        try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-            stpUtil.when(StpUtil::isLogin).thenReturn(true);
-            stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(TEST_USER_ID);
-
-            // 执行测试
-            Result<AccountVO> result = authService.getUserInfo();
-
-            // 验证结果
-            assertTrue(result.isSuccess());
-            assertNotNull(result.getData());
-            assertEquals(TEST_USERNAME, result.getData().getUsername());
-            assertEquals(TEST_EMAIL, result.getData().getEmail());
-        }
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.askVerifyCode(TEST_EMAIL, "reset"));
+        assertEquals(ResultEnum.AUTH_CODE_ERROR.getCode(), ex.getCode());
     }
 
     @Test
-    void testGetUserInfo_NotLoggedIn() {
-        // 模拟用户未登录
-        try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-            stpUtil.when(StpUtil::isLogin).thenReturn(false);
+    void testResetConfirm_Success() {
+        EmailResetVO vo = new EmailResetVO();
+        vo.setEmail(TEST_EMAIL);
+        vo.setCode("123456");
+        vo.setPassword("NewPass123");
+        when(accountService.resetEmailAccountPassword(vo)).thenReturn(Result.success(null));
 
-            // 执行测试
-            Result<AccountVO> result = authService.getUserInfo();
+        assertDoesNotThrow(() -> authService.resetConfirm(vo));
+        verify(accountService).resetEmailAccountPassword(vo);
+    }
 
-            // 验证结果
-            assertFalse(result.isSuccess());
-            assertEquals(ResultEnum.USER_NOT_LOGGED_IN.getCode(), result.getCode());
-        }
+    @Test
+    void testResetConfirm_Failure() {
+        EmailResetVO vo = new EmailResetVO();
+        vo.setEmail(TEST_EMAIL);
+        vo.setCode("123456");
+        vo.setPassword("NewPass123");
+        when(accountService.resetEmailAccountPassword(vo))
+                .thenReturn(Result.error(ResultEnum.AUTH_CODE_ERROR));
+
+        BusinessException ex = assertThrows(BusinessException.class, () -> authService.resetConfirm(vo));
+        assertEquals(ResultEnum.AUTH_CODE_ERROR.getCode(), ex.getCode());
     }
 
     @Test
     void testChangePassword_Success() {
-        // 准备测试数据
         ChangePasswordVO changePasswordVO = new ChangePasswordVO();
         changePasswordVO.setPassword("OldPassword123");
         changePasswordVO.setNewPassword("NewPassword123");
 
-        // Mock AccountService的修改密码方法
         when(accountService.changePassword(eq(TEST_USER_ID), any(ChangePasswordVO.class)))
                 .thenReturn(Result.success(null));
 
-        // 模拟用户已登录
         try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
             stpUtil.when(StpUtil::isLogin).thenReturn(true);
             stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(TEST_USER_ID);
 
-            // 执行测试
-            Result<Void> result = authService.changePassword(changePasswordVO);
-
-            // 验证结果
-            assertTrue(result.isSuccess());
-
-            // 验证AccountService的changePassword被调用
+            assertDoesNotThrow(() -> authService.changePassword(changePasswordVO));
             verify(accountService).changePassword(eq(TEST_USER_ID), eq(changePasswordVO));
         }
     }
 
     @Test
     void testChangePassword_NotLoggedIn() {
-        // 准备测试数据
         ChangePasswordVO changePasswordVO = new ChangePasswordVO();
         changePasswordVO.setPassword("OldPassword123");
         changePasswordVO.setNewPassword("NewPassword123");
 
-        // 模拟用户未登录
         try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
             stpUtil.when(StpUtil::isLogin).thenReturn(false);
 
-            // 执行测试
-            Result<Void> result = authService.changePassword(changePasswordVO);
-
-            // 验证结果
-            assertFalse(result.isSuccess());
-            assertEquals(ResultEnum.USER_NOT_LOGGED_IN.getCode(), result.getCode());
-
-            // 验证AccountService的changePassword未被调用
+            BusinessException ex = assertThrows(BusinessException.class,
+                    () -> authService.changePassword(changePasswordVO));
+            assertEquals(ResultEnum.USER_NOT_LOGGED_IN.getCode(), ex.getCode());
             verify(accountService, never()).changePassword(anyLong(), any(ChangePasswordVO.class));
         }
     }
 
     @Test
-    void testFindUserWithMasking_AdminAccess() {
-        // 准备测试数据
+    void testGetUserInfo_Success() {
         Account mockAccount = createMockAccount();
-        when(accountService.findAccountByNameOrEmail(TEST_USERNAME))
-                .thenReturn(mockAccount);
+        when(accountService.findAccountById(TEST_USER_ID)).thenReturn(mockAccount);
 
-        // 模拟管理员已登录
         try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-            cn.dev33.satoken.session.SaSession mockSession = mock(cn.dev33.satoken.session.SaSession.class);
+            stpUtil.when(StpUtil::isLogin).thenReturn(true);
+            stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(TEST_USER_ID);
+
+            AccountVO vo = authService.getUserInfo();
+            assertEquals(TEST_USERNAME, vo.getUsername());
+            assertEquals(TEST_EMAIL, vo.getEmail());
+        }
+    }
+
+    @Test
+    void testGetUserInfo_NotLoggedIn() {
+        try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+            stpUtil.when(StpUtil::isLogin).thenReturn(false);
+
+            BusinessException ex = assertThrows(BusinessException.class, () -> authService.getUserInfo());
+            assertEquals(ResultEnum.USER_NOT_LOGGED_IN.getCode(), ex.getCode());
+        }
+    }
+
+    @Test
+    void testFindUserWithMasking_AdminAccess() {
+        Account mockAccount = createMockAccount();
+        when(accountService.findAccountByNameOrEmail(TEST_USERNAME)).thenReturn(mockAccount);
+
+        try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+            SaSession mockSession = mock(SaSession.class);
             when(mockSession.get("role")).thenReturn("admin");
             when(mockSession.get("username")).thenReturn("admin");
 
             stpUtil.when(StpUtil::isLogin).thenReturn(true);
             stpUtil.when(StpUtil::getSession).thenReturn(mockSession);
 
-            // 执行测试
-            Result<AccountVO> result = authService.findUserWithMasking(TEST_USERNAME);
-
-            // 验证结果
-            assertTrue(result.isSuccess());
-            assertNotNull(result.getData());
-            assertEquals(TEST_USERNAME, result.getData().getUsername());
-
-            // 验证邮箱已脱敏
-            String maskedEmail = result.getData().getEmail();
-            assertTrue(maskedEmail.contains("***"));
-            assertTrue(maskedEmail.contains("@example.com"));
+            AccountVO vo = authService.findUserWithMasking(TEST_USERNAME);
+            assertTrue(vo.getEmail().contains("***"));
+            assertEquals(TEST_USERNAME, vo.getUsername());
         }
     }
 
     @Test
     void testFindUserWithMasking_NonAdminDenied() {
-        // 模拟普通用户已登录
         try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
-            cn.dev33.satoken.session.SaSession mockSession = mock(cn.dev33.satoken.session.SaSession.class);
+            SaSession mockSession = mock(SaSession.class);
             when(mockSession.get("role")).thenReturn("user");
             when(mockSession.get("username")).thenReturn(TEST_USERNAME);
 
             stpUtil.when(StpUtil::isLogin).thenReturn(true);
             stpUtil.when(StpUtil::getSession).thenReturn(mockSession);
 
-            // 执行测试
-            Result<AccountVO> result = authService.findUserWithMasking(TEST_USERNAME);
-
-            // 验证结果：非管理员应该被拒绝访问
-            assertFalse(result.isSuccess());
-            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), result.getCode());
-
-            // 验证AccountService的findAccountByNameOrEmail未被调用
+            BusinessException ex = assertThrows(BusinessException.class,
+                    () -> authService.findUserWithMasking(TEST_USERNAME));
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), ex.getCode());
             verify(accountService, never()).findAccountByNameOrEmail(anyString());
         }
     }
 
-    // 辅助方法：创建模拟的账户
+    @Test
+    void testCheckLoginStatus_WhenLoggedIn() {
+        try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+            stpUtil.when(StpUtil::isLogin).thenReturn(true);
+            stpUtil.when(StpUtil::getLoginIdAsLong).thenReturn(TEST_USER_ID);
+
+            LoginStatusVO status = authService.checkLoginStatus();
+            assertTrue(status.isLoggedIn());
+            assertEquals(TEST_USER_ID, status.getUserId());
+        }
+    }
+
+    @Test
+    void testCheckLoginStatus_WhenNotLoggedIn() {
+        try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+            stpUtil.when(StpUtil::isLogin).thenReturn(false);
+
+            LoginStatusVO status = authService.checkLoginStatus();
+            assertFalse(status.isLoggedIn());
+            assertNull(status.getUserId());
+        }
+    }
+
+    @Test
+    void testGetTokenInfo_NotLoggedIn() {
+        try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+            stpUtil.when(StpUtil::isLogin).thenReturn(false);
+
+            BusinessException ex = assertThrows(BusinessException.class, () -> authService.getTokenInfo());
+            assertEquals(ResultEnum.USER_NOT_LOGGED_IN.getCode(), ex.getCode());
+        }
+    }
+
+    @Test
+    void testGetTokenInfo_Success() {
+        try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+            SaTokenInfo info = mock(SaTokenInfo.class);
+            when(info.getTokenName()).thenReturn("satoken");
+            when(info.getTokenValue()).thenReturn(TEST_TOKEN);
+            when(info.getLoginId()).thenReturn(TEST_USER_ID);
+            when(info.getLoginType()).thenReturn("default");
+            when(info.getIsLogin()).thenReturn(true);
+            when(info.getTokenTimeout()).thenReturn(3600L);
+            when(info.getSessionTimeout()).thenReturn(3600L);
+            when(info.getTokenSessionTimeout()).thenReturn(3600L);
+
+            stpUtil.when(StpUtil::isLogin).thenReturn(true);
+            stpUtil.when(StpUtil::getTokenInfo).thenReturn(info);
+
+            Map<String, Object> tokenInfo = authService.getTokenInfo();
+            assertEquals(TEST_TOKEN, tokenInfo.get("tokenValue"));
+            assertEquals(TEST_USER_ID, tokenInfo.get("loginId"));
+        }
+    }
+
     private Account createMockAccount() {
         Account account = new Account();
         account.setId(TEST_USER_ID);

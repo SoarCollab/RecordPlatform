@@ -1,7 +1,6 @@
 package cn.flying.identity.service.apigateway;
 
 import cn.flying.identity.dto.apigateway.ApiApplication;
-import cn.flying.platformapi.constant.Result;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 
 import java.util.List;
@@ -28,9 +27,9 @@ public interface ApiApplicationService {
      * @param callbackUrl    回调URL(多个用逗号分隔)
      * @return 注册结果,包含应用ID和应用标识码
      */
-    Result<Map<String, Object>> registerApplication(String appName, String appDescription,
-                                                    Long ownerId, Integer appType,
-                                                    String appWebsite, String callbackUrl);
+    Map<String, Object> registerApplication(String appName, String appDescription,
+                                            Long ownerId, Integer appType,
+                                            String appWebsite, String callbackUrl);
 
     /**
      * 审核应用
@@ -42,7 +41,7 @@ public interface ApiApplicationService {
      * @param rejectReason 拒绝原因(审核不通过时必填)
      * @return 审核结果
      */
-    Result<Void> approveApplication(Long appId, boolean approved, Long approveBy, String rejectReason);
+    void approveApplication(Long appId, boolean approved, Long approveBy, String rejectReason);
 
     /**
      * 启用应用
@@ -50,7 +49,7 @@ public interface ApiApplicationService {
      * @param appId 应用ID
      * @return 操作结果
      */
-    Result<Void> enableApplication(Long appId);
+    void enableApplication(Long appId);
 
     /**
      * 禁用应用
@@ -60,7 +59,7 @@ public interface ApiApplicationService {
      * @param reason 禁用原因
      * @return 操作结果
      */
-    Result<Void> disableApplication(Long appId, String reason);
+    void disableApplication(Long appId, String reason);
 
     /**
      * 删除应用
@@ -69,7 +68,7 @@ public interface ApiApplicationService {
      * @param appId 应用ID
      * @return 操作结果
      */
-    Result<Void> deleteApplication(Long appId);
+    void deleteApplication(Long appId);
 
     /**
      * 更新应用信息
@@ -77,7 +76,7 @@ public interface ApiApplicationService {
      * @param application 应用信息
      * @return 更新结果
      */
-    Result<Void> updateApplication(ApiApplication application);
+    void updateApplication(ApiApplication application);
 
     /**
      * 获取应用详情
@@ -85,7 +84,7 @@ public interface ApiApplicationService {
      * @param appId 应用ID
      * @return 应用详情
      */
-    Result<ApiApplication> getApplicationById(Long appId);
+    ApiApplication getApplicationById(Long appId);
 
     /**
      * 根据应用标识码获取应用
@@ -93,7 +92,7 @@ public interface ApiApplicationService {
      * @param appCode 应用标识码
      * @return 应用信息
      */
-    Result<ApiApplication> getApplicationByCode(String appCode);
+    ApiApplication getApplicationByCode(String appCode);
 
     /**
      * 获取用户的所有应用
@@ -101,7 +100,7 @@ public interface ApiApplicationService {
      * @param ownerId 用户ID
      * @return 应用列表
      */
-    Result<List<ApiApplication>> getApplicationsByOwner(Long ownerId);
+    List<ApiApplication> getApplicationsByOwner(Long ownerId);
 
     /**
      * 分页查询应用列表
@@ -112,8 +111,8 @@ public interface ApiApplicationService {
      * @param keyword   搜索关键词(可选,搜索应用名称或标识码)
      * @return 分页结果
      */
-    Result<Page<ApiApplication>> getApplicationsPage(int pageNum, int pageSize,
-                                                     Integer appStatus, String keyword);
+    Page<ApiApplication> getApplicationsPage(int pageNum, int pageSize,
+                                             Integer appStatus, String keyword);
 
     /**
      * 更新应用IP白名单
@@ -122,7 +121,7 @@ public interface ApiApplicationService {
      * @param ipWhitelist IP白名单列表(JSON数组字符串)
      * @return 更新结果
      */
-    Result<Void> updateIpWhitelist(Long appId, String ipWhitelist);
+    void updateIpWhitelist(Long appId, String ipWhitelist);
 
     /**
      * 验证IP是否在应用白名单中
@@ -131,7 +130,7 @@ public interface ApiApplicationService {
      * @param clientIp 客户端IP
      * @return 是否允许访问
      */
-    Result<Boolean> validateIpWhitelist(Long appId, String clientIp);
+    boolean validateIpWhitelist(Long appId, String clientIp);
 
     /**
      * 获取应用统计信息
@@ -141,14 +140,14 @@ public interface ApiApplicationService {
      * @param days  统计天数
      * @return 统计信息
      */
-    Result<Map<String, Object>> getApplicationStatistics(Long appId, int days);
+    Map<String, Object> getApplicationStatistics(Long appId, int days);
 
     /**
      * 获取待审核应用列表
      *
      * @return 待审核应用列表
      */
-    Result<List<ApiApplication>> getPendingApplications();
+    List<ApiApplication> getPendingApplications();
 
     /**
      * 验证回调URL格式
@@ -156,5 +155,5 @@ public interface ApiApplicationService {
      * @param callbackUrls 回调URL列表(逗号分隔)
      * @return 验证结果
      */
-    Result<Boolean> validateCallbackUrls(String callbackUrls);
+    boolean validateCallbackUrls(String callbackUrls);
 }

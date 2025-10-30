@@ -4,10 +4,9 @@ import cn.dev33.satoken.stp.StpUtil;
 import cn.flying.identity.dto.BindAccountRequest;
 import cn.flying.identity.dto.CallbackRequest;
 import cn.flying.identity.dto.ValidateTokenRequest;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.service.ThirdPartyAuthService;
-import cn.flying.identity.util.ResponseConverter;
 import cn.flying.identity.vo.RestResponse;
-import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -49,10 +48,8 @@ public class ThirdPartyAuthController {
             @ApiResponse(responseCode = "200", description = "获取成功")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getProviders() {
-        Result<Map<String, Object>> result = thirdPartyAuthService.getSupportedProviders();
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = thirdPartyAuthService.getSupportedProviders();
+        return ResponseEntity.ok(RestResponse.ok("获取成功", data));
     }
 
     /**
@@ -71,10 +68,8 @@ public class ThirdPartyAuthController {
             @Parameter(description = "回调地址") @RequestParam String redirectUri,
             @Parameter(description = "状态参数") @RequestParam(required = false) String state) {
 
-        Result<String> result = thirdPartyAuthService.getAuthorizationUrl(provider, redirectUri, state);
-        RestResponse<String> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        String url = thirdPartyAuthService.getAuthorizationUrl(provider, redirectUri, state);
+        return ResponseEntity.ok(RestResponse.ok("获取成功", url));
     }
 
     /**
@@ -93,12 +88,8 @@ public class ThirdPartyAuthController {
             @Parameter(description = "状态参数") @RequestParam(required = false) String state,
             HttpServletResponse response) throws IOException {
 
-        Result<String> result = thirdPartyAuthService.getAuthorizationUrl(provider, redirectUri, state);
-        if (result.isSuccess() && result.getData() != null) {
-            response.sendRedirect(result.getData());
-        } else {
-            response.sendError(400, "获取授权URL失败");
-        }
+        String url = thirdPartyAuthService.getAuthorizationUrl(provider, redirectUri, state);
+        response.sendRedirect(url);
     }
 
     /**
@@ -117,22 +108,16 @@ public class ThirdPartyAuthController {
             @Valid @RequestBody CallbackRequest request) {
 
         if (request.getError() != null) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(RestResponse.badRequest(ResultEnum.PARAM_IS_INVALID.getCode(),
-                            "第三方登录失败: " + request.getError()));
+            throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "第三方登录失败: " + request.getError());
         }
 
         if (request.getCode() == null) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(RestResponse.badRequest(ResultEnum.PARAM_IS_INVALID.getCode(),
-                            "授权码不能为空"));
+            throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "授权码不能为空");
         }
 
-        Result<Map<String, Object>> result = thirdPartyAuthService.handleCallback(
+        Map<String, Object> data = thirdPartyAuthService.handleCallback(
                 provider, request.getCode(), request.getState());
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        return ResponseEntity.ok(RestResponse.ok("登录流程完成", data));
     }
 
     /**
@@ -152,22 +137,14 @@ public class ThirdPartyAuthController {
             @Valid @RequestBody BindAccountRequest request) {
 
         if (!StpUtil.isLogin()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(RestResponse.unauthorized(ResultEnum.USER_NOT_LOGGED_IN.getCode(),
-                            "用户未登录"));
+            throw new BusinessException(ResultEnum.USER_NOT_LOGGED_IN, "用户未登录");
         }
 
         Long userId = StpUtil.getLoginIdAsLong();
-        Result<Void> result = thirdPartyAuthService.bindThirdPartyAccount(
-                userId, provider, request.getCode());
+        thirdPartyAuthService.bindThirdPartyAccount(userId, provider, request.getCode());
 
-        if (result.isSuccess()) {
-            return ResponseEntity.status(HttpStatus.CREATED)
-                    .body(RestResponse.created(null));
-        } else {
-            RestResponse<Void> response = ResponseConverter.convert(result);
-            return ResponseEntity.status(response.getStatus()).body(response);
-        }
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(RestResponse.created(null));
     }
 
     /**
@@ -185,18 +162,12 @@ public class ThirdPartyAuthController {
             @Parameter(description = "第三方提供商") @PathVariable String provider) {
 
         if (!StpUtil.isLogin()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+            throw new BusinessException(ResultEnum.USER_NOT_LOGGED_IN, "用户未登录");
         }
 
         Long userId = StpUtil.getLoginIdAsLong();
-        Result<Void> result = thirdPartyAuthService.unbindThirdPartyAccount(userId, provider);
-
-        if (result.isSuccess()) {
-            return ResponseEntity.noContent().build();
-        } else {
-            RestResponse<Void> response = ResponseConverter.convert(result);
-            return ResponseEntity.status(response.getStatus()).build();
-        }
+        thirdPartyAuthService.unbindThirdPartyAccount(userId, provider);
+        return ResponseEntity.noContent().build();
     }
 
     /**
@@ -211,16 +182,12 @@ public class ThirdPartyAuthController {
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getBindings() {
         if (!StpUtil.isLogin()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(RestResponse.unauthorized(ResultEnum.USER_NOT_LOGGED_IN.getCode(),
-                            "用户未登录"));
+            throw new BusinessException(ResultEnum.USER_NOT_LOGGED_IN, "用户未登录");
         }
 
         Long userId = StpUtil.getLoginIdAsLong();
-        Result<Map<String, Object>> result = thirdPartyAuthService.getUserThirdPartyAccounts(userId);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> bindings = thirdPartyAuthService.getUserThirdPartyAccounts(userId);
+        return ResponseEntity.ok(RestResponse.ok("获取成功", bindings));
     }
 
     /**
@@ -237,11 +204,9 @@ public class ThirdPartyAuthController {
             @Parameter(description = "第三方提供商") @PathVariable String provider,
             @Valid @RequestBody ValidateTokenRequest request) {
 
-        Result<Boolean> result = thirdPartyAuthService.validateThirdPartyToken(
+        boolean valid = thirdPartyAuthService.validateThirdPartyToken(
                 provider, request.getAccessToken());
-        RestResponse<Boolean> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        return ResponseEntity.ok(RestResponse.ok("验证完成", valid));
     }
 
     /**
@@ -258,11 +223,9 @@ public class ThirdPartyAuthController {
             @Parameter(description = "第三方提供商") @PathVariable String provider,
             @Parameter(description = "访问令牌") @RequestParam String accessToken) {
 
-        Result<Map<String, Object>> result = thirdPartyAuthService.getThirdPartyUserInfo(
+        Map<String, Object> data = thirdPartyAuthService.getThirdPartyUserInfo(
                 provider, accessToken);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        return ResponseEntity.ok(RestResponse.ok("获取成功", data));
     }
 
     /**
@@ -279,15 +242,11 @@ public class ThirdPartyAuthController {
             @Parameter(description = "第三方提供商") @PathVariable String provider) {
 
         if (!StpUtil.isLogin()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(RestResponse.unauthorized(ResultEnum.USER_NOT_LOGGED_IN.getCode(),
-                            "用户未登录"));
+            throw new BusinessException(ResultEnum.USER_NOT_LOGGED_IN, "用户未登录");
         }
 
         Long userId = StpUtil.getLoginIdAsLong();
-        Result<Map<String, Object>> result = thirdPartyAuthService.refreshThirdPartyToken(userId, provider);
-        RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        Map<String, Object> data = thirdPartyAuthService.refreshThirdPartyToken(userId, provider);
+        return ResponseEntity.ok(RestResponse.ok("刷新成功", data));
     }
 }

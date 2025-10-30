@@ -1,5 +1,8 @@
 package cn.flying.identity.gateway.loadbalance;
 
+import lombok.Getter;
+import lombok.Setter;
+
 import java.util.List;
 
 /**
@@ -30,7 +33,10 @@ public interface LoadBalanceStrategy {
     /**
      * 服务实例定义
      */
+    @Setter
+    @Getter
     class ServiceInstance {
+        // Getters and Setters
         private String instanceId;
         private String host;
         private int port;
@@ -57,79 +63,6 @@ public interface LoadBalanceStrategy {
             this.instanceId = instanceId;
             this.host = host;
             this.port = port;
-        }
-
-        // Getters and Setters
-        public String getInstanceId() {
-            return instanceId;
-        }
-
-        public void setInstanceId(String instanceId) {
-            this.instanceId = instanceId;
-        }
-
-        public String getHost() {
-            return host;
-        }
-
-        public void setHost(String host) {
-            this.host = host;
-        }
-
-        public int getPort() {
-            return port;
-        }
-
-        public void setPort(int port) {
-            this.port = port;
-        }
-
-        public int getWeight() {
-            return weight;
-        }
-
-        public void setWeight(int weight) {
-            this.weight = weight;
-        }
-
-        public boolean isHealthy() {
-            return healthy;
-        }
-
-        public void setHealthy(boolean healthy) {
-            this.healthy = healthy;
-        }
-
-        public long getActiveConnections() {
-            return activeConnections;
-        }
-
-        public void setActiveConnections(long activeConnections) {
-            this.activeConnections = activeConnections;
-        }
-
-        public double getAvgResponseTime() {
-            return avgResponseTime;
-        }
-
-        public void setAvgResponseTime(double avgResponseTime) {
-            this.avgResponseTime = avgResponseTime;
-        }
-
-        public long getLastUpdateTime() {
-            return lastUpdateTime;
-        }
-
-        public void setLastUpdateTime(long lastUpdateTime) {
-            this.lastUpdateTime = lastUpdateTime;
-        }
-
-        public java.util.Map<String, String> getMetadata() {
-            return metadata;
-        }
-
-        public void setMetadata(java.util.Map<String, String> metadata) {
-            this.metadata = metadata;
         }
 
         @Override

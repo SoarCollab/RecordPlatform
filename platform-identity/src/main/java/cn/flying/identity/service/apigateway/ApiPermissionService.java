@@ -1,8 +1,6 @@
 package cn.flying.identity.service.apigateway;
 
 import cn.flying.identity.dto.apigateway.ApiPermission;
-import cn.flying.platformapi.constant.Result;
-
 import java.util.List;
 import java.util.Map;
 
@@ -24,7 +22,7 @@ public interface ApiPermissionService {
      * @param expireDays 权限有效天数(NULL表示永久)
      * @return 授权结果
      */
-    Result<Void> grantPermission(Long appId, Long interfaceId, Long grantBy, Integer expireDays);
+    void grantPermission(Long appId, Long interfaceId, Long grantBy, Integer expireDays);
 
     /**
      * 批量授予权限
@@ -35,8 +33,8 @@ public interface ApiPermissionService {
      * @param expireDays 权限有效天数
      * @return 授权结果
      */
-    Result<Map<String, Object>> grantBatchPermissions(Long appId, List<Long> interfaceIds,
-                                                       Long grantBy, Integer expireDays);
+    Map<String, Object> grantBatchPermissions(Long appId, List<Long> interfaceIds,
+                                              Long grantBy, Integer expireDays);
 
     /**
      * 撤销应用访问接口的权限
@@ -45,7 +43,7 @@ public interface ApiPermissionService {
      * @param interfaceId 接口ID
      * @return 撤销结果
      */
-    Result<Void> revokePermission(Long appId, Long interfaceId);
+    void revokePermission(Long appId, Long interfaceId);
 
     /**
      * 启用权限
@@ -53,7 +51,7 @@ public interface ApiPermissionService {
      * @param permissionId 权限ID
      * @return 操作结果
      */
-    Result<Void> enablePermission(Long permissionId);
+    void enablePermission(Long permissionId);
 
     /**
      * 禁用权限
@@ -61,7 +59,7 @@ public interface ApiPermissionService {
      * @param permissionId 权限ID
      * @return 操作结果
      */
-    Result<Void> disablePermission(Long permissionId);
+    void disablePermission(Long permissionId);
 
     /**
      * 检查应用是否有访问接口的权限
@@ -70,7 +68,7 @@ public interface ApiPermissionService {
      * @param interfaceId 接口ID
      * @return 是否有权限
      */
-    Result<Boolean> hasPermission(Long appId, Long interfaceId);
+    boolean hasPermission(Long appId, Long interfaceId);
 
     /**
      * 检查应用是否有访问接口路径的权限
@@ -81,7 +79,7 @@ public interface ApiPermissionService {
      * @param interfaceMethod 接口方法
      * @return 是否有权限
      */
-    Result<Boolean> hasPermissionByPath(Long appId, String interfacePath, String interfaceMethod);
+    boolean hasPermissionByPath(Long appId, String interfacePath, String interfaceMethod);
 
     /**
      * 获取应用的所有权限列表
@@ -89,7 +87,7 @@ public interface ApiPermissionService {
      * @param appId 应用ID
      * @return 权限列表
      */
-    Result<List<ApiPermission>> getPermissionsByApp(Long appId);
+    List<ApiPermission> getPermissionsByApp(Long appId);
 
     /**
      * 获取接口的所有授权应用列表
@@ -97,7 +95,7 @@ public interface ApiPermissionService {
      * @param interfaceId 接口ID
      * @return 权限列表
      */
-    Result<List<ApiPermission>> getPermissionsByInterface(Long interfaceId);
+    List<ApiPermission> getPermissionsByInterface(Long interfaceId);
 
     /**
      * 获取应用可访问的接口列表
@@ -106,7 +104,7 @@ public interface ApiPermissionService {
      * @param appId 应用ID
      * @return 接口列表
      */
-    Result<List<Map<String, Object>>> getAccessibleInterfaces(Long appId);
+    List<Map<String, Object>> getAccessibleInterfaces(Long appId);
 
     /**
      * 更新权限过期时间
@@ -115,7 +113,7 @@ public interface ApiPermissionService {
      * @param expireDays 延长天数
      * @return 更新结果
      */
-    Result<Void> extendPermission(Long permissionId, int expireDays);
+    void extendPermission(Long permissionId, int expireDays);
 
     /**
      * 获取即将过期的权限列表
@@ -123,7 +121,7 @@ public interface ApiPermissionService {
      * @param days 提前天数
      * @return 即将过期的权限列表
      */
-    Result<List<ApiPermission>> getExpiringPermissions(int days);
+    List<ApiPermission> getExpiringPermissions(int days);
 
     /**
      * 清理过期权限
@@ -131,7 +129,7 @@ public interface ApiPermissionService {
      *
      * @return 清理数量
      */
-    Result<Integer> cleanExpiredPermissions();
+    int cleanExpiredPermissions();
 
     /**
      * 同步应用权限到缓存
@@ -140,5 +138,5 @@ public interface ApiPermissionService {
      * @param appId 应用ID
      * @return 同步结果
      */
-    Result<Void> syncPermissionsToCache(Long appId);
+    void syncPermissionsToCache(Long appId);
 }

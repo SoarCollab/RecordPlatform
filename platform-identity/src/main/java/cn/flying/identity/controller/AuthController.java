@@ -2,15 +2,15 @@ package cn.flying.identity.controller;
 
 import cn.flying.identity.dto.LoginRequest;
 import cn.flying.identity.dto.VerificationCodeRequest;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.service.AuthService;
 import cn.flying.identity.util.InputValidator;
-import cn.flying.identity.util.ResponseConverter;
 import cn.flying.identity.vo.AccountVO;
+import cn.flying.identity.vo.LoginStatusVO;
 import cn.flying.identity.vo.RestResponse;
 import cn.flying.identity.vo.request.ChangePasswordVO;
 import cn.flying.identity.vo.request.EmailRegisterVO;
 import cn.flying.identity.vo.request.EmailResetVO;
-import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -21,6 +21,8 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 /**
  * 认证控制器
@@ -50,17 +52,13 @@ public class AuthController {
             @ApiResponse(responseCode = "400", description = "参数无效")
     })
     public ResponseEntity<RestResponse<String>> createSession(@Valid @RequestBody LoginRequest request) {
-        // 限制输入长度
         if (request.getUsername().length() > 100 || request.getPassword().length() > 128) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(RestResponse.badRequest(ResultEnum.PARAM_IS_INVALID.getCode(),
-                            "用户名或密码长度超出限制"));
+            throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "用户名或密码长度超出限制");
         }
 
-        Result<String> result = authService.login(request.getUsername(), request.getPassword());
-        RestResponse<String> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        String token = authService.login(request.getUsername(), request.getPassword());
+        RestResponse<String> response = RestResponse.ok("登录成功", token);
+        return ResponseEntity.ok(response);
     }
 
     /**
@@ -74,14 +72,8 @@ public class AuthController {
             @ApiResponse(responseCode = "401", description = "未认证")
     })
     public ResponseEntity<Void> destroySession() {
-        Result<Void> result = authService.logout();
-
-        if (result.isSuccess()) {
-            return ResponseEntity.noContent().build();
-        } else {
-            RestResponse<Void> response = ResponseConverter.convert(result);
-            return ResponseEntity.status(response.getStatus()).build();
-        }
+        authService.logout();
+        return ResponseEntity.noContent().build();
     }
 
     /**
@@ -96,15 +88,9 @@ public class AuthController {
             @ApiResponse(responseCode = "409", description = "用户已存在")
     })
     public ResponseEntity<RestResponse<Void>> createUser(@Valid @RequestBody EmailRegisterVO vo) {
-        Result<Void> result = authService.register(vo);
-
-        if (result.isSuccess()) {
-            return ResponseEntity.status(HttpStatus.CREATED)
-                    .body(RestResponse.created(null));
-        } else {
-            RestResponse<Void> response = ResponseConverter.convert(result);
-            return ResponseEntity.status(response.getStatus()).body(response);
-        }
+        authService.register(vo);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(RestResponse.created(null));
     }
 
     /**
@@ -121,27 +107,18 @@ public class AuthController {
     public ResponseEntity<RestResponse<Void>> sendVerificationCode(@Valid @RequestBody VerificationCodeRequest request) {
         // 验证邮箱格式
         if (!InputValidator.isValidEmail(request.getEmail())) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(RestResponse.badRequest(ResultEnum.PARAM_IS_INVALID.getCode(),
-                            "邮箱格式不正确"));
+            throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "邮箱格式不正确");
         }
 
         // 验证type参数
         if (!"register".equals(request.getType()) && !"reset".equals(request.getType())) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(RestResponse.badRequest(ResultEnum.PARAM_IS_INVALID.getCode(),
-                            "验证码类型无效"));
+            throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "验证码类型无效");
         }
 
-        Result<Void> result = authService.askVerifyCode(request.getEmail(), request.getType());
+        authService.askVerifyCode(request.getEmail(), request.getType());
 
-        if (result.isSuccess()) {
-            return ResponseEntity.status(HttpStatus.ACCEPTED)
-                    .body(RestResponse.accepted());
-        } else {
-            RestResponse<Void> response = ResponseConverter.convert(result);
-            return ResponseEntity.status(response.getStatus()).body(response);
-        }
+        return ResponseEntity.status(HttpStatus.ACCEPTED)
+                .body(RestResponse.accepted());
     }
 
     /**
@@ -156,10 +133,8 @@ public class AuthController {
             @ApiResponse(responseCode = "404", description = "用户不存在")
     })
     public ResponseEntity<RestResponse<Void>> resetPassword(@Valid @RequestBody EmailResetVO vo) {
-        Result<Void> result = authService.resetConfirm(vo);
-        RestResponse<Void> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        authService.resetConfirm(vo);
+        return ResponseEntity.ok(RestResponse.ok("密码重置成功", null));
     }
 
     /**
@@ -174,10 +149,8 @@ public class AuthController {
             @ApiResponse(responseCode = "401", description = "未认证")
     })
     public ResponseEntity<RestResponse<Void>> changePassword(@Valid @RequestBody ChangePasswordVO vo) {
-        Result<Void> result = authService.changePassword(vo);
-        RestResponse<Void> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        authService.changePassword(vo);
+        return ResponseEntity.ok(RestResponse.ok("密码修改成功", null));
     }
 
     /**
@@ -191,10 +164,8 @@ public class AuthController {
             @ApiResponse(responseCode = "401", description = "未认证")
     })
     public ResponseEntity<RestResponse<AccountVO>> getCurrentUser() {
-        Result<AccountVO> result = authService.getUserInfo();
-        RestResponse<AccountVO> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        AccountVO account = authService.getUserInfo();
+        return ResponseEntity.ok(RestResponse.ok("获取成功", account));
     }
 
     /**
@@ -210,10 +181,8 @@ public class AuthController {
             @ApiResponse(responseCode = "404", description = "用户未找到")
     })
     public ResponseEntity<RestResponse<AccountVO>> searchUser(@RequestParam String query) {
-        Result<AccountVO> result = authService.findUserWithMasking(query);
-        RestResponse<AccountVO> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+        AccountVO accountVO = authService.findUserWithMasking(query);
+        return ResponseEntity.ok(RestResponse.ok("查找成功", accountVO));
     }
 
     /**
@@ -226,11 +195,9 @@ public class AuthController {
             @ApiResponse(responseCode = "200", description = "会话有效"),
             @ApiResponse(responseCode = "401", description = "会话无效或已过期")
     })
-    public ResponseEntity<RestResponse<Object>> getSessionStatus() {
-        Result<Object> result = authService.checkLoginStatus();
-        RestResponse<Object> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+    public ResponseEntity<RestResponse<LoginStatusVO>> getSessionStatus() {
+        LoginStatusVO status = authService.checkLoginStatus();
+        return ResponseEntity.ok(RestResponse.ok("会话状态获取成功", status));
     }
 
     /**
@@ -243,10 +210,8 @@ public class AuthController {
             @ApiResponse(responseCode = "200", description = "获取成功"),
             @ApiResponse(responseCode = "401", description = "未认证")
     })
-    public ResponseEntity<RestResponse<Object>> getTokenInfo() {
-        Result<Object> result = authService.getTokenInfo();
-        RestResponse<Object> response = ResponseConverter.convert(result);
-
-        return ResponseEntity.status(response.getStatus()).body(response);
+    public ResponseEntity<RestResponse<Map<String, Object>>> getTokenInfo() {
+        Map<String, Object> tokenInfo = authService.getTokenInfo();
+        return ResponseEntity.ok(RestResponse.ok("获取成功", tokenInfo));
     }
 }

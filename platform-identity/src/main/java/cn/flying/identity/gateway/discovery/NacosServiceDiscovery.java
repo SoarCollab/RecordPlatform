@@ -10,6 +10,8 @@ import com.alibaba.nacos.api.naming.pojo.Instance;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.annotation.Resource;
+import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
@@ -395,7 +397,10 @@ public class NacosServiceDiscovery {
     /**
      * 服务实例内部表示
      */
+    @Setter
+    @Getter
     public static class ServiceInstance {
+        // getters and setters
         private String serviceName;
         private String instanceId;
         private String host;
@@ -406,78 +411,6 @@ public class NacosServiceDiscovery {
         private String clusterName;
         private boolean enabled;
 
-        // getters and setters
-        public String getServiceName() {
-            return serviceName;
-        }
-
-        public void setServiceName(String serviceName) {
-            this.serviceName = serviceName;
-        }
-
-        public String getInstanceId() {
-            return instanceId;
-        }
-
-        public void setInstanceId(String instanceId) {
-            this.instanceId = instanceId;
-        }
-
-        public String getHost() {
-            return host;
-        }
-
-        public void setHost(String host) {
-            this.host = host;
-        }
-
-        public int getPort() {
-            return port;
-        }
-
-        public void setPort(int port) {
-            this.port = port;
-        }
-
-        public boolean isHealthy() {
-            return healthy;
-        }
-
-        public void setHealthy(boolean healthy) {
-            this.healthy = healthy;
-        }
-
-        public double getWeight() {
-            return weight;
-        }
-
-        public void setWeight(double weight) {
-            this.weight = weight;
-        }
-
-        public Map<String, String> getMetadata() {
-            return metadata;
-        }
-
-        public void setMetadata(Map<String, String> metadata) {
-            this.metadata = metadata;
-        }
-
-        public String getClusterName() {
-            return clusterName;
-        }
-
-        public void setClusterName(String clusterName) {
-            this.clusterName = clusterName;
-        }
-
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
     }
 
     /**

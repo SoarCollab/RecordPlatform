@@ -1,10 +1,9 @@
 package cn.flying.identity.service.impl;
 
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.service.BaseService;
 import cn.flying.identity.service.GatewayMonitorService;
 import cn.flying.identity.util.FlowUtils;
-import cn.flying.identity.util.ValidationUtils;
-import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -73,23 +72,18 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
     private int blockTime;
 
     @Override
-    public Result<Void> recordRequestStart(String requestId, String method, String uri,
-                                           String clientIp, String userAgent, Long userId) {
-        try {
-            // 参数验证
-            Result<?> validation = ValidationUtils.validateAll(
-                    requireNonBlank(requestId, "请求ID不能为空"),
-                    requireNonBlank(method, "请求方法不能为空"),
-                    requireNonBlank(uri, "请求URI不能为空"),
-                    requireNonBlank(clientIp, "客户端IP不能为空")
-            );
-            if (!validation.isSuccess()) {
-                return new Result<>(ResultEnum.PARAM_IS_INVALID.getCode(), validation.getMessage(), null);
-            }
+    public void recordRequestStart(String requestId, String method, String uri,
+                                   String clientIp, String userAgent, Long userId) {
+        validateAll(
+                () -> requireNonBlank(requestId, "请求ID不能为空"),
+                () -> requireNonBlank(method, "请求方法不能为空"),
+                () -> requireNonBlank(uri, "请求URI不能为空"),
+                () -> requireNonBlank(clientIp, "客户端IP不能为空")
+        );
 
+        try {
             String timestamp = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm:ss");
 
-            // 记录请求基本信息
             Map<String, String> requestInfo = new HashMap<>();
             requestInfo.put("method", method);
             requestInfo.put("uri", uri);
@@ -103,21 +97,16 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
             redisTemplate.opsForHash().putAll(requestKey, requestInfo);
             redisTemplate.expire(requestKey, 1, TimeUnit.HOURS);
 
-            // 更新实时流量统计
-            updateTrafficStats(method, uri, clientIp, userId);
-
-            // 更新API调用统计
+            updateTrafficStats(method, clientIp, userId);
             updateApiStats(method, uri);
 
-            // 更新用户活跃度统计
             if (userId != null) {
                 updateUserActivityStats(userId);
             }
-
-            return Result.success();
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (Exception e) {
             logError("记录请求开始失败", e);
-            return new Result<>(ResultEnum.SYSTEM_ERROR.getCode(), "记录请求开始失败: " + e.getMessage(), null);
         }
     }
 
@@ -130,64 +119,63 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
      * 更新流量统计
      * 记录总请求数、IP统计、用户统计等详细信息
      */
-    private void updateTrafficStats(String method, String uri, String clientIp, Long userId) {
-        safeExecuteAction(() -> {
+    private void updateTrafficStats(String method, String clientIp, Long userId) {
+        try {
             String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
             String trafficKey = getTrafficPrefix() + timeKey;
 
-            // 更新总请求数
             redisTemplate.opsForHash().increment(trafficKey, "total", 1);
 
-            // 更新IP统计
             if (isNotBlank(clientIp)) {
                 redisTemplate.opsForHash().increment(trafficKey, "ip:" + clientIp, 1);
-                // 记录独立IP数量
                 String ipSetKey = trafficKey + ":unique_ips";
                 redisTemplate.opsForSet().add(ipSetKey, clientIp);
                 redisTemplate.expire(ipSetKey, 24, TimeUnit.HOURS);
             }
 
-            // 更新用户统计
             if (userId != null) {
                 redisTemplate.opsForHash().increment(trafficKey, "user:" + userId, 1);
-                // 记录独立用户数量
                 String userSetKey = trafficKey + ":unique_users";
                 redisTemplate.opsForSet().add(userSetKey, userId.toString());
                 redisTemplate.expire(userSetKey, 24, TimeUnit.HOURS);
             }
 
-            // 更新方法统计
             redisTemplate.opsForHash().increment(trafficKey, "method:" + method, 1);
-
             redisTemplate.expire(trafficKey, dataRetentionHours, TimeUnit.HOURS);
-        }, "更新流量统计失败");
+        } catch (Exception e) {
+            logError("更新流量统计失败", e);
+        }
     }
 
     /**
      * 更新API统计
      */
     private void updateApiStats(String method, String uri) {
-        safeExecuteAction(() -> {
+        try {
             String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
             String apiStatsKey = getApiStatsPrefix() + timeKey;
             String apiKey = method + " " + uri;
 
             redisTemplate.opsForHash().increment(apiStatsKey, apiKey, 1);
             redisTemplate.expire(apiStatsKey, dataRetentionHours, TimeUnit.HOURS);
-        }, "更新API统计失败");
+        } catch (Exception e) {
+            logError("更新API统计失败", e);
+        }
     }
 
     /**
      * 更新用户活跃度统计
      */
     private void updateUserActivityStats(Long userId) {
-        safeExecuteAction(() -> {
+        try {
             String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
             String userActivityKey = getUserActivityPrefix() + timeKey;
 
             redisTemplate.opsForSet().add(userActivityKey, userId.toString());
             redisTemplate.expire(userActivityKey, dataRetentionHours, TimeUnit.HOURS);
-        }, "更新用户活跃度统计失败");
+        } catch (Exception e) {
+            logError("更新用户活跃度统计失败", e);
+        }
     }
 
     private String getTrafficPrefix() {
@@ -203,23 +191,18 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
     }
 
     @Override
-    public Result<Void> recordRequestEnd(String requestId, int statusCode, long responseSize,
-                                         long executionTime, String errorMessage) {
-        try {
-            // 参数验证
-            Result<?> validation = ValidationUtils.validateAll(
-                    requireNonBlank(requestId, "请求ID不能为空"),
-                    requireCondition(statusCode, code -> code >= 100 && code < 600, "状态码必须在100-599之间"),
-                    requireCondition(responseSize, size -> size >= 0, "响应大小不能为负数"),
-                    requireCondition(executionTime, time -> time >= 0, "执行时间不能为负数")
-            );
-            if (!validation.isSuccess()) {
-                return new Result<>(ResultEnum.PARAM_IS_INVALID.getCode(), validation.getMessage(), null);
-            }
+    public void recordRequestEnd(String requestId, int statusCode, long responseSize,
+                                 long executionTime, String errorMessage) {
+        validateAll(
+                () -> requireNonBlank(requestId, "请求ID不能为空"),
+                () -> requireCondition(statusCode, code -> code >= 100 && code < 600, "状态码必须在100-599之间"),
+                () -> requireCondition(responseSize, size -> size >= 0, "响应大小不能为负数"),
+                () -> requireCondition(executionTime, time -> time >= 0, "执行时间不能为负数")
+        );
 
+        try {
             String requestKey = getRequestPrefix() + requestId;
 
-            // 更新请求信息
             Map<String, String> updateInfo = new HashMap<>();
             updateInfo.put("status_code", String.valueOf(statusCode));
             updateInfo.put("response_size", String.valueOf(responseSize));
@@ -233,104 +216,90 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
 
             redisTemplate.opsForHash().putAll(requestKey, updateInfo);
 
-            // 获取请求信息用于统计
             Map<Object, Object> requestInfo = redisTemplate.opsForHash().entries(requestKey);
             String method = (String) requestInfo.get("method");
             String uri = (String) requestInfo.get("uri");
 
-            // 更新性能统计
             updatePerformanceStats(method, uri, executionTime);
 
-            // 更新错误统计或成功统计
             if (statusCode >= 400) {
                 updateErrorStats(method, uri, statusCode, errorMessage);
             } else {
-                // 更新成功请求统计
                 String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
                 String trafficKey = getTrafficPrefix() + timeKey;
                 redisTemplate.opsForHash().increment(trafficKey, "success", 1);
             }
-
-            return Result.success();
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (Exception e) {
             logError("记录请求结束失败", e);
-            return new Result<>(ResultEnum.SYSTEM_ERROR.getCode(), "记录请求结束失败: " + e.getMessage(), null);
         }
     }
 
     @Override
-    public Result<Boolean> checkRateLimit(String clientIp, Long userId, String uri) {
-        try {
-            // 参数验证
-            if (isBlank(clientIp)) {
-                logWarn("客户端IP为空，拒绝请求");
-                return success(false);
-            }
+    public boolean checkRateLimit(String clientIp, Long userId, String uri) {
+        if (isBlank(clientIp)) {
+            logWarn("客户端IP为空，拒绝请求");
+            return false;
+        }
 
-            // 检查IP是否在黑名单中
+        try {
             String blacklistKey = getRateLimitPrefix() + "blacklist:" + clientIp;
             if (existsCache(blacklistKey)) {
                 logWarn("IP {} 在黑名单中，拒绝请求", clientIp);
-                return success(false);
+                return false;
             }
 
-            // IP级别限流 - 使用滑动窗口算法
             String ipMinuteKey = getRateLimitPrefix() + "ip:minute:" + clientIp;
             String ipHourKey = getRateLimitPrefix() + "ip:hour:" + clientIp;
 
-            // 检查是否超过每分钟限制
             if (!flowUtils.limitPeriodCountCheck(ipMinuteKey, requestsPerMinute, 60)) {
                 logWarn("IP {} 超出每分钟请求限制 {}", clientIp, requestsPerMinute);
-                // 触发临时封禁机制
                 String tempBanKey = getRateLimitPrefix() + "temp_ban:" + clientIp;
                 setCache(tempBanKey, "1", blockTime);
-                return success(false);
+                return false;
             }
 
-            // 检查是否超过每小时限制
             if (!flowUtils.limitPeriodCountCheck(ipHourKey, requestsPerHour, 3600)) {
                 logWarn("IP {} 超出每小时请求限制 {}", clientIp, requestsPerHour);
-                // 触发长期封禁机制
                 String longBanKey = getRateLimitPrefix() + "long_ban:" + clientIp;
                 setCache(longBanKey, "1", blockTime * 4L);
-                return success(false);
+                return false;
             }
 
-            // 检查是否处于临时封禁状态
             String tempBanKey = getRateLimitPrefix() + "temp_ban:" + clientIp;
             if (existsCache(tempBanKey)) {
                 logWarn("IP {} 处于临时封禁状态", clientIp);
-                return success(false);
+                return false;
             }
 
-            // 用户级别限流
             if (userId != null) {
                 String userMinuteKey = getRateLimitPrefix() + "user:minute:" + userId;
                 String userHourKey = getRateLimitPrefix() + "user:hour:" + userId;
 
                 if (!flowUtils.limitPeriodCountCheck(userMinuteKey, requestsPerMinute * 2, 60)) {
                     logWarn("用户 {} 超出每分钟请求限制", userId);
-                    return success(false);
+                    return false;
                 }
 
                 if (!flowUtils.limitPeriodCountCheck(userHourKey, requestsPerHour * 2, 3600)) {
                     logWarn("用户 {} 超出每小时请求限制", userId);
-                    return success(false);
+                    return false;
                 }
             }
 
-            // API级别限流
             String apiKey = getRateLimitPrefix() + "api:minute:" + uri;
             if (!flowUtils.limitPeriodCountCheck(apiKey, requestsPerMinute * 10, 60)) {
                 logWarn("API {} 超出每分钟请求限制", uri);
-                return success(false);
+                return false;
             }
 
-            return success(true);
+            return true;
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (Exception e) {
             logError("检查流量限制失败", e);
-            // 异常情况下允许通过，避免影响正常业务
-            return success(true);
+            return true;
         }
     }
 
@@ -339,15 +308,13 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
     }
 
     @Override
-    public Result<Map<String, Object>> getRealTimeTrafficStats(int timeRange) {
+    public Map<String, Object> getRealTimeTrafficStats(int timeRange) {
         try {
             Map<String, Object> stats = new HashMap<>();
-
-            // 获取指定时间范围内的流量数据
             String currentMinute = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(LocalDateTime.now());
 
             long totalRequests = 0;
-            long successRequests = 0;
+            long successRequests;
             long errorRequests = 0;
             Set<String> uniqueIps = new HashSet<>();
             Set<String> uniqueUsers = new HashSet<>();
@@ -371,7 +338,6 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                     totalRequests += minuteTotal;
                     errorRequests += minuteError;
 
-                    // 统计方法分布
                     for (Map.Entry<Object, Object> entry : trafficData.entrySet()) {
                         String key = (String) entry.getKey();
                         if (key.startsWith("method:")) {
@@ -381,18 +347,20 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                         }
                     }
 
-                    // 获取独立IP和用户数
                     String ipSetKey = trafficKey + ":unique_ips";
                     String userSetKey = trafficKey + ":unique_users";
 
                     Set<String> ips = redisTemplate.opsForSet().members(ipSetKey);
                     Set<String> users = redisTemplate.opsForSet().members(userSetKey);
 
-                    if (ips != null) uniqueIps.addAll(ips);
-                    if (users != null) uniqueUsers.addAll(users);
+                    if (ips != null) {
+                        uniqueIps.addAll(ips);
+                    }
+                    if (users != null) {
+                        uniqueUsers.addAll(users);
+                    }
                 }
 
-                // 构建时间序列数据
                 Map<String, Object> timePoint = new HashMap<>();
                 timePoint.put("time", timeKey);
                 timePoint.put("total", minuteTotal);
@@ -416,15 +384,17 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
             stats.put("current_time", currentMinute);
             stats.put("avg_requests_per_minute", timeRange > 0 ? (double) totalRequests / timeRange : 0);
 
-            return Result.success(stats);
+            return stats;
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (Exception e) {
-            log.error("获取实时流量统计失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            logError("获取实时流量统计失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "获取实时流量统计失败: " + e.getMessage());
         }
     }
 
     @Override
-    public Result<Map<String, Object>> getApiCallStats(int timeRange, int limit) {
+    public Map<String, Object> getApiCallStats(int timeRange, int limit) {
         try {
             Map<String, Object> stats = new HashMap<>();
             Map<String, Long> apiCounts = new HashMap<>();
@@ -443,7 +413,6 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                 }
             }
 
-            // 排序并限制返回数量
             List<Map<String, Object>> topApis = apiCounts.entrySet().stream()
                     .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                     .limit(limit)
@@ -459,15 +428,17 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
             stats.put("total_apis", apiCounts.size());
             stats.put("time_range", timeRange);
 
-            return Result.success(stats);
+            return stats;
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (Exception e) {
-            log.error("获取API调用统计失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            logError("获取API调用统计失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "获取API调用统计失败: " + e.getMessage());
         }
     }
 
     @Override
-    public Result<Map<String, Object>> getErrorStats(int timeRange) {
+    public Map<String, Object> getErrorStats(int timeRange) {
         try {
             Map<String, Object> stats = new HashMap<>();
             Map<String, Long> errorCounts = new HashMap<>();
@@ -487,25 +458,21 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                     Long count = Long.parseLong((String) entry.getValue());
 
                     if (key.startsWith("api:")) {
-                        // API错误统计
                         String api = key.substring(4);
                         apiErrorCounts.merge(api, count, Long::sum);
                     } else {
-                        // 错误类型统计
                         errorCounts.merge(key, count, Long::sum);
                     }
                     totalErrors += count;
                 }
 
-                // 获取错误详情
                 String errorDetailsKey = errorStatsKey + ":details";
-                List<String> details = redisTemplate.opsForList().range(errorDetailsKey, 0, 19); // 获取最近20条
+                List<String> details = redisTemplate.opsForList().range(errorDetailsKey, 0, 19);
                 if (details != null && !details.isEmpty()) {
                     recentErrors.addAll(details);
                 }
             }
 
-            // 按错误数量排序API错误统计
             List<Map<String, Object>> topErrorApis = apiErrorCounts.entrySet().stream()
                     .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
                     .limit(10)
@@ -523,15 +490,17 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
             stats.put("total_errors", totalErrors);
             stats.put("time_range", timeRange);
 
-            return Result.success(stats);
+            return stats;
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (Exception e) {
-            log.error("获取错误统计失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            logError("获取错误统计失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "获取错误统计失败: " + e.getMessage());
         }
     }
 
     @Override
-    public Result<Map<String, Object>> getPerformanceStats(int timeRange) {
+    public Map<String, Object> getPerformanceStats(int timeRange) {
         try {
             Map<String, Object> stats = new HashMap<>();
             List<Long> responseTimes = new ArrayList<>();
@@ -575,15 +544,17 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
 
             stats.put("time_range", timeRange);
 
-            return Result.success(stats);
+            return stats;
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (Exception e) {
-            log.error("获取性能统计失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            logError("获取性能统计失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "获取性能统计失败: " + e.getMessage());
         }
     }
 
     @Override
-    public Result<Map<String, Object>> getUserActivityStats(int timeRange) {
+    public Map<String, Object> getUserActivityStats(int timeRange) {
         try {
             Map<String, Object> stats = new HashMap<>();
             Set<String> activeUsers = new HashSet<>();
@@ -602,21 +573,22 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
             stats.put("active_users", activeUsers.size());
             stats.put("time_range", timeRange);
 
-            return Result.success(stats);
+            return stats;
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (Exception e) {
-            log.error("获取用户活跃度统计失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            logError("获取用户活跃度统计失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "获取用户活跃度统计失败: " + e.getMessage());
         }
     }
 
     @Override
-    public Result<Map<String, Object>> detectAbnormalTraffic(String clientIp, Long userId) {
+    public Map<String, Object> detectAbnormalTraffic(String clientIp, Long userId) {
         try {
             Map<String, Object> result = new HashMap<>();
             boolean isAbnormal = false;
             List<String> reasons = new ArrayList<>();
 
-            // 检查IP请求频率
             String ipKey = getRateLimitPrefix() + "ip:minute:" + clientIp;
             String ipCount = redisTemplate.opsForValue().get(ipKey);
             if (ipCount != null && Integer.parseInt(ipCount) > requestsPerMinute * 0.8) {
@@ -624,7 +596,6 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                 reasons.add("IP请求频率过高");
             }
 
-            // 检查用户请求频率
             if (userId != null) {
                 String userKey = getRateLimitPrefix() + "user:minute:" + userId;
                 String userCount = redisTemplate.opsForValue().get(userKey);
@@ -639,19 +610,20 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
             result.put("client_ip", clientIp);
             result.put("user_id", userId);
 
-            return Result.success(result);
+            return result;
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (Exception e) {
-            log.error("检测异常流量失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            logError("检测异常流量失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "检测异常流量失败: " + e.getMessage());
         }
     }
 
     @Override
-    public Result<Map<String, Object>> getSystemHealth() {
+    public Map<String, Object> getSystemHealth() {
         try {
             Map<String, Object> health = new HashMap<>();
 
-            // 检查Redis连接
             try {
                 redisTemplate.opsForValue().get("health_check");
                 health.put("redis_status", "healthy");
@@ -660,7 +632,6 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                 health.put("redis_error", e.getMessage());
             }
 
-            // 获取系统负载信息
             Runtime runtime = Runtime.getRuntime();
             long totalMemory = runtime.totalMemory();
             long freeMemory = runtime.freeMemory();
@@ -671,33 +642,31 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
             health.put("memory_free", freeMemory);
             health.put("memory_usage_percent", (double) usedMemory / totalMemory * 100);
 
-            // 获取当前时间
             health.put("current_time", LocalDateTime.now().toString());
             health.put("status", "healthy");
 
-            return Result.success(health);
+            return health;
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (Exception e) {
-            log.error("获取系统健康状态失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            logError("获取系统健康状态失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "获取系统健康状态失败: " + e.getMessage());
         }
     }
 
     @Override
-    public Result<Map<String, Object>> cleanExpiredData(int retentionDays) {
+    public Map<String, Object> cleanExpiredData(int retentionDays) {
         try {
             Map<String, Object> result = new HashMap<>();
             int cleanedCount = 0;
 
-            // 清理过期的请求记录
             LocalDateTime cutoffTime = LocalDateTime.now().minusDays(retentionDays);
             String cutoffTimeStr = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(cutoffTime);
 
-            // 清理过期的流量统计数据
             for (int i = retentionDays * 24 * 60; i < retentionDays * 24 * 60 + 1440; i++) {
                 LocalDateTime expiredTime = LocalDateTime.now().minusMinutes(i);
                 String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(expiredTime);
 
-                // 清理各类统计数据
                 String[] prefixes = {getTrafficPrefix(), getApiStatsPrefix(), getErrorStatsPrefix(),
                         getPerformancePrefix(), getUserActivityPrefix()};
 
@@ -708,7 +677,6 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                         cleanedCount++;
                     }
 
-                    // 清理相关的详细数据
                     String detailKey = key + ":details";
                     if (redisTemplate.hasKey(detailKey)) {
                         redisTemplate.delete(detailKey);
@@ -729,21 +697,19 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                 }
             }
 
-            // 清理过期的请求详情
             Set<String> requestKeys = redisTemplate.keys(getRequestPrefix() + "*");
             for (String requestKey : requestKeys) {
                 Long ttl = redisTemplate.getExpire(requestKey);
-                if (ttl <= 0) {
+                if (ttl != null && ttl <= 0) {
                     redisTemplate.delete(requestKey);
                     cleanedCount++;
                 }
             }
 
-            // 清理过期的限流数据
             Set<String> rateLimitKeys = redisTemplate.keys(getRateLimitPrefix() + "*");
             for (String rateLimitKey : rateLimitKeys) {
                 Long ttl = redisTemplate.getExpire(rateLimitKey);
-                if (ttl <= 0) {
+                if (ttl != null && ttl <= 0) {
                     redisTemplate.delete(rateLimitKey);
                     cleanedCount++;
                 }
@@ -755,21 +721,22 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
             result.put("cleanup_time", LocalDateTime.now().toString());
 
             log.info("清理过期数据完成，清理了 {} 个键", cleanedCount);
-            return Result.success(result);
+            return result;
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (Exception e) {
-            log.error("清理过期数据失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            logError("清理过期数据失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "清理过期数据失败: " + e.getMessage());
         }
     }
 
     @Override
-    public Result<Map<String, Object>> getHotApiRanking(int timeRange, int limit) {
-        // 复用 getApiCallStats 方法
+    public Map<String, Object> getHotApiRanking(int timeRange, int limit) {
         return getApiCallStats(timeRange, limit);
     }
 
     @Override
-    public Result<Map<String, Object>> getSlowQueryStats(int timeRange, long threshold) {
+    public Map<String, Object> getSlowQueryStats(int timeRange, long threshold) {
         try {
             Map<String, Object> stats = new HashMap<>();
             List<Map<String, Object>> slowQueries = new ArrayList<>();
@@ -795,7 +762,6 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                 }
             }
 
-            // 按响应时间排序
             slowQueries.sort((a, b) -> Long.compare((Long) b.get("response_time"), (Long) a.get("response_time")));
 
             stats.put("slow_queries", slowQueries);
@@ -803,15 +769,17 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
             stats.put("threshold", threshold);
             stats.put("time_range", timeRange);
 
-            return Result.success(stats);
+            return stats;
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (Exception e) {
-            log.error("获取慢查询统计失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            logError("获取慢查询统计失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "获取慢查询统计失败: " + e.getMessage());
         }
     }
 
     @Override
-    public Result<Map<String, Object>> getGeographicStats(int timeRange) {
+    public Map<String, Object> getGeographicStats(int timeRange) {
         try {
             Map<String, Object> stats = new HashMap<>();
             Map<String, Integer> countryStats = new HashMap<>();
@@ -819,7 +787,6 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
             Map<String, Integer> ipStats = new HashMap<>();
             Set<String> allIps = new HashSet<>();
 
-            // 收集所有IP地址
             for (int i = 0; i < timeRange; i++) {
                 LocalDateTime time = LocalDateTime.now().minusMinutes(i);
                 String timeKey = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").format(time);
@@ -837,11 +804,8 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                 }
             }
 
-            // 简化的地理位置解析（基于IP地址模式）
             for (String ip : allIps) {
                 Integer count = ipStats.get(ip);
-
-                // 简单的地理位置推断（实际应用中应使用专业的IP地理位置数据库）
                 String country = getCountryByIp(ip);
                 String city = getCityByIp(ip);
 
@@ -849,7 +813,6 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
                 cityStats.merge(city, count, Integer::sum);
             }
 
-            // 按访问量排序
             List<Map<String, Object>> topCountries = countryStats.entrySet().stream()
                     .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
                     .limit(10)
@@ -877,10 +840,12 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
             stats.put("total_ips", allIps.size());
             stats.put("time_range", timeRange);
 
-            return Result.success(stats);
+            return stats;
+        } catch (BusinessException ex) {
+            throw ex;
         } catch (Exception e) {
-            log.error("获取地理位置统计失败", e);
-            return Result.error(ResultEnum.SYSTEM_ERROR, null);
+            logError("获取地理位置统计失败", e);
+            throw businessException(ResultEnum.SYSTEM_ERROR, "获取地理位置统计失败: " + e.getMessage());
         }
     }
 
@@ -888,14 +853,16 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
      * 更新性能统计
      */
     private void updatePerformanceStats(String method, String uri, long executionTime) {
-        safeExecuteAction(() -> {
+        try {
             String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
             String performanceKey = getPerformancePrefix() + timeKey;
             String apiKey = method + " " + uri;
 
             redisTemplate.opsForHash().put(performanceKey, apiKey, String.valueOf(executionTime));
             redisTemplate.expire(performanceKey, dataRetentionHours, TimeUnit.HOURS);
-        }, "更新性能统计失败");
+        } catch (Exception e) {
+            logError("更新性能统计失败", e);
+        }
     }
 
     /**
@@ -903,33 +870,30 @@ public class GatewayMonitorServiceImpl extends BaseService implements GatewayMon
      * 记录错误类型、API错误统计等详细信息
      */
     private void updateErrorStats(String method, String uri, int statusCode, String errorMessage) {
-        safeExecuteAction(() -> {
+        try {
             String timeKey = formatDateTime(LocalDateTime.now(), "yyyy-MM-dd HH:mm");
             String errorStatsKey = getErrorStatsPrefix() + timeKey;
             String errorType = "HTTP_" + statusCode;
             String apiKey = method + " " + uri;
 
-            // 更新错误类型统计
             redisTemplate.opsForHash().increment(errorStatsKey, errorType, 1);
-
-            // 更新API错误统计
             redisTemplate.opsForHash().increment(errorStatsKey, "api:" + apiKey, 1);
 
-            // 记录具体错误信息（如果有）
             if (isNotBlank(errorMessage)) {
                 String errorKey = errorStatsKey + ":details";
                 String errorDetail = apiKey + ":" + statusCode + ":" + errorMessage;
                 redisTemplate.opsForList().leftPush(errorKey, errorDetail);
-                redisTemplate.opsForList().trim(errorKey, 0, maxErrorDetails - 1); // 保留配置数量的错误详情
+                redisTemplate.opsForList().trim(errorKey, 0, maxErrorDetails - 1);
                 redisTemplate.expire(errorKey, dataRetentionHours, TimeUnit.HOURS);
             }
 
             redisTemplate.expire(errorStatsKey, dataRetentionHours, TimeUnit.HOURS);
 
-            // 更新流量统计中的错误计数
             String trafficKey = getTrafficPrefix() + timeKey;
             redisTemplate.opsForHash().increment(trafficKey, "error", 1);
-        }, "更新错误统计失败");
+        } catch (Exception e) {
+            logError("更新错误统计失败", e);
+        }
     }
 
     private String getPerformancePrefix() {

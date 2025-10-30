@@ -9,10 +9,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Instant;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -53,6 +56,13 @@ class JwtBlacklistServiceTest {
         // 注入配置值
         ReflectionTestUtils.setField(jwtBlacklistService, "jwtBlacklistPrefix", JWT_BLACKLIST_PREFIX);
         ReflectionTestUtils.setField(jwtBlacklistService, "jwtBlacklistTtlSeconds", DEFAULT_TTL);
+
+        // 清理本地黑名單，避免測試之間相互影響
+        @SuppressWarnings("unchecked")
+        Map<String, Long> localCache = (Map<String, Long>) ReflectionTestUtils.getField(jwtBlacklistService, "localBlacklist");
+        if (localCache != null) {
+            localCache.clear();
+        }
     }
 
     @Test
@@ -90,20 +100,23 @@ class JwtBlacklistServiceTest {
     }
 
     @Test
-    void testBlacklistToken_AutoExpiry() {
+    void testBlacklistToken_PermanentBanWhenTtlZero() {
         // Mock Redis操作
-        doNothing().when(valueOperations).set(anyString(), anyString(), anyLong(), any(TimeUnit.class));
+        doNothing().when(valueOperations).set(anyString(), anyString());
 
-        // 执行测试：传入0应该使用默认过期时间
+        // 执行测试：传入0表示永久封禁
         jwtBlacklistService.blacklistToken(TEST_TOKEN, 0);
 
-        // 验证Redis的set操作被调用，使用默认TTL（因为0 <= 0）
+        // 验证Redis的set操作被调用，且不帶TTL
         verify(valueOperations).set(
-            eq(JWT_BLACKLIST_PREFIX + TEST_TOKEN),
-            eq("1"),
-            eq(DEFAULT_TTL),
-            eq(TimeUnit.SECONDS)
+                eq(JWT_BLACKLIST_PREFIX + TEST_TOKEN),
+                eq("1")
         );
+
+        @SuppressWarnings("unchecked")
+        Map<String, Long> localCache = (Map<String, Long>) ReflectionTestUtils.getField(jwtBlacklistService, "localBlacklist");
+        assertNotNull(localCache);
+        assertEquals(Long.MAX_VALUE, localCache.get(TEST_TOKEN));
     }
 
     @Test
@@ -123,6 +136,24 @@ class JwtBlacklistServiceTest {
 
         // 验证Redis操作未被调用
         verify(valueOperations, never()).set(anyString(), anyString(), anyLong(), any(TimeUnit.class));
+    }
+
+    @Test
+    void testBlacklistToken_RedisFailureFallsBackToLocal() {
+        doThrow(new DataAccessException("redis down") {}).when(valueOperations)
+                .set(eq(JWT_BLACKLIST_PREFIX + TEST_TOKEN), eq("1"), eq(CUSTOM_TTL), eq(TimeUnit.SECONDS));
+
+        assertDoesNotThrow(() -> jwtBlacklistService.blacklistToken(TEST_TOKEN, CUSTOM_TTL));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Long> localCache = (Map<String, Long>) ReflectionTestUtils.getField(jwtBlacklistService, "localBlacklist");
+        assertNotNull(localCache);
+        Long expiresAt = localCache.get(TEST_TOKEN);
+        assertNotNull(expiresAt);
+        long now = Instant.now().toEpochMilli();
+        long lowerBound = now + TimeUnit.SECONDS.toMillis(CUSTOM_TTL) - 1000;
+        long upperBound = now + TimeUnit.SECONDS.toMillis(CUSTOM_TTL) + 1000;
+        assertTrue(expiresAt >= lowerBound && expiresAt <= upperBound);
     }
 
     @Test
@@ -177,5 +208,30 @@ class JwtBlacklistServiceTest {
 
         // 验证Redis操作未被调用
         verify(redisTemplate, never()).hasKey(anyString());
+    }
+
+    @Test
+    void testIsBlacklisted_UsesLocalCacheWhenRedisFails() {
+        doThrow(new DataAccessException("redis fail") {}).when(redisTemplate).hasKey(anyString());
+        jwtBlacklistService.blacklistToken(TEST_TOKEN, CUSTOM_TTL);
+
+        boolean result = jwtBlacklistService.isBlacklisted(TEST_TOKEN);
+
+        assertTrue(result);
+    }
+
+    @Test
+    void testIsBlacklisted_CleanupExpiredLocalEntries() {
+        @SuppressWarnings("unchecked")
+        Map<String, Long> localCache = (Map<String, Long>) ReflectionTestUtils.getField(jwtBlacklistService, "localBlacklist");
+        assertNotNull(localCache);
+        localCache.put("expired_token", Instant.now().minusSeconds(5).toEpochMilli());
+
+        when(redisTemplate.hasKey(anyString())).thenReturn(false);
+
+        boolean result = jwtBlacklistService.isBlacklisted("expired_token");
+
+        assertFalse(result);
+        assertFalse(localCache.containsKey("expired_token"));
     }
 }

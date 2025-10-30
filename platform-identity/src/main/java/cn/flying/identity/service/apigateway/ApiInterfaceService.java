@@ -1,7 +1,6 @@
 package cn.flying.identity.service.apigateway;
 
 import cn.flying.identity.dto.apigateway.ApiInterface;
-import cn.flying.platformapi.constant.Result;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 
 import java.util.List;
@@ -19,25 +18,23 @@ public interface ApiInterfaceService {
      * 创建API接口
      *
      * @param apiInterface 接口信息
-     * @return 操作结果
+     * @return 创建完成的接口資訊
      */
-    Result<ApiInterface> createInterface(ApiInterface apiInterface);
+    ApiInterface createInterface(ApiInterface apiInterface);
 
     /**
      * 更新API接口
      *
      * @param apiInterface 接口信息
-     * @return 操作结果
      */
-    Result<Void> updateInterface(ApiInterface apiInterface);
+    void updateInterface(ApiInterface apiInterface);
 
     /**
      * 删除API接口
      *
      * @param interfaceId 接口ID
-     * @return 操作结果
      */
-    Result<Void> deleteInterface(Long interfaceId);
+    void deleteInterface(Long interfaceId);
 
     /**
      * 根据ID查询接口
@@ -45,16 +42,15 @@ public interface ApiInterfaceService {
      * @param interfaceId 接口ID
      * @return 接口信息
      */
-    Result<ApiInterface> getInterfaceById(Long interfaceId);
+    ApiInterface getInterfaceById(Long interfaceId);
 
     /**
      * 根据路径和方法查询接口
      *
      * @param path 接口路径
      * @param method HTTP方法
-     * @return 接口信息
      */
-    Result<ApiInterface> getInterfaceByPathAndMethod(String path, String method);
+    ApiInterface getInterfaceByPathAndMethod(String path, String method);
 
     /**
      * 分页查询接口列表
@@ -66,30 +62,28 @@ public interface ApiInterfaceService {
      * @param keyword 关键词（可选）
      * @return 分页结果
      */
-    Result<Page<ApiInterface>> getInterfacesPage(int pageNum, int pageSize,
-                                                  String category, Integer status, String keyword);
+    Page<ApiInterface> getInterfacesPage(int pageNum, int pageSize,
+                                         String category, Integer status, String keyword);
 
     /**
      * 获取所有已上线的接口
      *
      * @return 接口列表
      */
-    Result<List<ApiInterface>> getOnlineInterfaces();
+    List<ApiInterface> getOnlineInterfaces();
 
     /**
      * 上线接口
      *
      * @param interfaceId 接口ID
-     * @return 操作结果
      */
-    Result<Void> onlineInterface(Long interfaceId);
+    void onlineInterface(Long interfaceId);
 
     /**
      * 下线接口
      *
      * @param interfaceId 接口ID
      * @param reason 下线原因
-     * @return 操作结果
      */
-    Result<Void> offlineInterface(Long interfaceId, String reason);
+    void offlineInterface(Long interfaceId, String reason);
 }

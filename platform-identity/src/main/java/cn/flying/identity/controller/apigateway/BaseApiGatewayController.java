@@ -1,11 +1,9 @@
 package cn.flying.identity.controller.apigateway;
 
 import cn.dev33.satoken.stp.StpUtil;
-import cn.flying.platformapi.constant.Result;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.platformapi.constant.ResultEnum;
 import lombok.extern.slf4j.Slf4j;
-
-import java.util.concurrent.Callable;
 
 /**
  * API网关基础控制器
@@ -39,40 +37,9 @@ public abstract class BaseApiGatewayController {
     protected Long requireCurrentUserId() {
         Long userId = getCurrentUserId();
         if (userId == null) {
-            throw new RuntimeException("用户未登录");
+            throw new BusinessException(ResultEnum.USER_NOT_LOGGED_IN, "用户未登录");
         }
         return userId;
-    }
-
-    /**
-     * 安全执行操作并处理异常
-     * @param action 要执行的操作
-     * @return 执行结果
-     */
-    protected Result<Void> safeExecute(Callable<Void> action) {
-        try {
-            action.call();
-            return Result.success();
-        } catch (Exception e) {
-            log.error("操作执行失败", e);
-            return Result.errorWithMessage(ResultEnum.OPERATION_FAILED, e.getMessage());
-        }
-    }
-
-    /**
-     * 安全执行操作并返回数据
-     * @param action 要执行的操作
-     * @param <T> 返回数据类型
-     * @return 执行结果
-     */
-    protected <T> Result<T> safeExecuteData(Callable<T> action) {
-        try {
-            T data = action.call();
-            return Result.success(data);
-        } catch (Exception e) {
-            log.error("操作执行失败", e);
-            return Result.errorWithMessage(ResultEnum.OPERATION_FAILED, e.getMessage());
-        }
     }
 
     /**
@@ -121,11 +88,11 @@ public abstract class BaseApiGatewayController {
      * 验证参数非空
      * @param value 参数值
      * @param paramName 参数名称
-     * @throws IllegalArgumentException 如果参数为空
+     * @throws BusinessException 如果参数为空
      */
     protected void requireNonNull(Object value, String paramName) {
         if (value == null) {
-            throw new IllegalArgumentException(paramName + "不能为空");
+            throw new BusinessException(ResultEnum.PARAM_IS_INVALID, paramName + "不能为空");
         }
     }
 
@@ -133,11 +100,11 @@ public abstract class BaseApiGatewayController {
      * 验证字符串非空
      * @param value 字符串值
      * @param paramName 参数名称
-     * @throws IllegalArgumentException 如果字符串为空
+     * @throws BusinessException 如果字符串为空
      */
     protected void requireNonBlank(String value, String paramName) {
         if (value == null || value.trim().isEmpty()) {
-            throw new IllegalArgumentException(paramName + "不能为空");
+            throw new BusinessException(ResultEnum.PARAM_IS_INVALID, paramName + "不能为空");
         }
     }
 }
