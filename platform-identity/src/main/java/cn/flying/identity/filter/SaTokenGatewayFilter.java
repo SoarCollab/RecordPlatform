@@ -4,6 +4,7 @@ import cn.dev33.satoken.exception.NotLoginException;
 import cn.dev33.satoken.exception.NotPermissionException;
 import cn.dev33.satoken.exception.NotRoleException;
 import cn.dev33.satoken.stp.StpUtil;
+import cn.flying.identity.config.AuthWhitelistProperties;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,7 +20,6 @@ import jakarta.annotation.Resource;
 import cn.flying.identity.service.JwtBlacklistService;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -32,37 +32,20 @@ import java.util.List;
 public class SaTokenGatewayFilter implements Filter {
 
     private static final Logger logger = LoggerFactory.getLogger(SaTokenGatewayFilter.class);
-    /**
-     * 不需要鉴权的路径列表
-     */
-    private static final List<String> EXCLUDE_PATHS = Arrays.asList(
-            "/api/auth/login",
-            "/api/auth/signin",
-            "/api/auth/register",
-            "/api/auth/signup",
-            "/api/auth/verify-code",
-            "/api/auth/reset-password",
-            "/api/auth/status",
-            "/oauth/**",           // OAuth 全量交由具体Controller/Service处理
-            "/api/sso/**",         // SSO 全量放行到具体逻辑
-            "/doc.html",
-            "/swagger-ui/**",
-            "/swagger-resources/**",
-            "/v3/api-docs/**",
-            "/webjars/**",
-            "/druid/**",
-            "/static/**",
-            "/favicon.ico",
-            "/actuator/**",
-            "/docs/**"
-    );
+
+    private final AuthWhitelistProperties authWhitelistProperties;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    @Value("${server.servlet.context-path}")
+    @Value("${server.servlet.context-path:}")
     String PREFIX;
 
     @Resource
     private JwtBlacklistService jwtBlacklistService;
+
+    public SaTokenGatewayFilter(AuthWhitelistProperties authWhitelistProperties) {
+        this.authWhitelistProperties = authWhitelistProperties;
+    }
 
     /**
      * 过滤器初始化
@@ -140,7 +123,8 @@ public class SaTokenGatewayFilter implements Filter {
      * @return 是否为排除路径
      */
     private boolean isExcludePath(String requestURI) {
-        return EXCLUDE_PATHS.stream().anyMatch(excludePath -> {
+        List<String> excludePaths = authWhitelistProperties.getAllPublicPatterns();
+        return excludePaths.stream().anyMatch(excludePath -> {
             if (excludePath.endsWith("/**")) {
                 String prefix = excludePath.substring(0, excludePath.length() - 3);
                 return requestURI.startsWith(prefix);

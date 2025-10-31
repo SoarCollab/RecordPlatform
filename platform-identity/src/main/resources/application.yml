@@ -28,8 +28,16 @@ spring:
         deny:
         reset-enable: false
         # 使用环境变量配置监控页面的用户名和密码
-        login-username: ${DRUID_USERNAME:admin}
-        login-password: ${DRUID_PASSWORD:123456}
+        login-username: ${DRUID_USERNAME:}
+        login-password: ${DRUID_PASSWORD:}
+
+platform:
+  identity:
+    security:
+      allowed-origins: []
+      allowed-origin-patterns: []
+      allow-credentials: false
+      max-age: 3600
 
 
 # actuator
@@ -68,7 +76,7 @@ snowflake:
 # ID生成器安全配置
 id:
   security:
-    key: "${ID_SECURITY_KEY:record-platform-secure-key-2025}"  # ID混淆密钥，可通过环境变量配置
+    key: ${ID_SECURITY_KEY:}  # ID混淆密钥，可通过环境变量配置
   monitor:
     threshold: 200  # 1分钟内单线程生成ID数量阈值，超过触发告警
   mapping:
@@ -156,8 +164,8 @@ gateway:
 sa-token:
   # token 名称（同时也是 cookie 名称）
   token-name: record-platform
-  # jwt秘钥 - 使用环境变量配置，提供默认值仅用于开发环境
-  jwt-secret-key: ${SA_TOKEN_JWT_SECRET_KEY:record-platform-jwt-secret-key-dev-only}
+  # jwt秘钥 - 必须通过环境变量配置
+  jwt-secret-key: ${SA_TOKEN_JWT_SECRET_KEY:}
   # token 有效期（单位：秒） 默认30天，-1 代表永久有效
   timeout: 2592000
   # token 最低活跃频率（单位：秒），如果 token 超过此时间没有访问系统就会被冻结，默认-1 代表不限制，永不冻结
@@ -181,8 +189,8 @@ knife4j:
   production: false
   basic:
     enable: true
-    username: admin
-    password: 123456
+    username: ${KNIFE4J_BASIC_USERNAME:}
+    password: ${KNIFE4J_BASIC_PASSWORD:}
   setting:
     language: zh-CN
     enable-home-custom: true
@@ -211,7 +219,7 @@ dubbo:
     address: nacos://localhost:8848
   provider:
     # 开启内置 token 校验，防止未授权的消费者调用
-    token: ${DUBBO_PROVIDER_TOKEN:record-platform-internal-token}
+    token: ${DUBBO_PROVIDER_TOKEN:}
     # 显式启用鉴权过滤器
     filter: authFilter
     # 可按需配置超时与线程池

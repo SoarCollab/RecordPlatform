@@ -8,7 +8,6 @@ import cn.flying.identity.service.impl.AccountServiceImpl;
 import cn.flying.identity.util.FlowUtils;
 import cn.flying.identity.vo.request.ChangePasswordVO;
 import cn.flying.identity.vo.request.EmailRegisterVO;
-import cn.flying.identity.vo.request.EmailResetVO;
 import cn.flying.identity.vo.request.ModifyEmailVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
@@ -46,34 +45,6 @@ import static org.mockito.Mockito.*;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class AccountServiceTest {
 
-    @Spy
-    @InjectMocks
-    private AccountServiceImpl accountService;
-
-    @Mock
-    private AccountMapper accountMapper;
-
-    @Mock
-    private EmailService emailService;
-
-    @Mock
-    private PasswordService passwordService;
-
-    @Mock
-    private FlowUtils flowUtils;
-
-    @Mock
-    private StringRedisTemplate stringRedisTemplate;
-
-    @Mock
-    private ValueOperations<String, String> valueOperations;
-
-    @Mock
-    private ApplicationProperties applicationProperties;
-
-    @Mock
-    private ApplicationProperties.VerifyCode verifyCodeConfig;
-
     // 测试数据常量
     private static final Long TEST_USER_ID = 123L;
     private static final String TEST_USERNAME = "testuser";
@@ -83,6 +54,25 @@ class AccountServiceTest {
     private static final String TEST_CODE = "123456";
     private static final String TEST_IP = "192.168.1.100";
     private static final int TEST_VERIFY_LIMIT = 60;
+    @Spy
+    @InjectMocks
+    private AccountServiceImpl accountService;
+    @Mock
+    private AccountMapper accountMapper;
+    @Mock
+    private EmailService emailService;
+    @Mock
+    private PasswordService passwordService;
+    @Mock
+    private FlowUtils flowUtils;
+    @Mock
+    private StringRedisTemplate stringRedisTemplate;
+    @Mock
+    private ValueOperations<String, String> valueOperations;
+    @Mock
+    private ApplicationProperties applicationProperties;
+    @Mock
+    private ApplicationProperties.VerifyCode verifyCodeConfig;
 
     @BeforeEach
     void setUp() {
@@ -129,10 +119,10 @@ class AccountServiceTest {
 
         // 验证验证码存储到Redis
         verify(valueOperations).set(
-            eq(Const.VERIFY_EMAIL_DATA + TEST_EMAIL),
-            anyString(),
-            eq(3L),
-            eq(TimeUnit.MINUTES)
+                eq(Const.VERIFY_EMAIL_DATA + TEST_EMAIL),
+                anyString(),
+                eq(3L),
+                eq(TimeUnit.MINUTES)
         );
     }
 
@@ -147,7 +137,8 @@ class AccountServiceTest {
 
         // 验证结果：应该返回失败
         assertFalse(result.isSuccess());
-        assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), result.getCode());
+        assertEquals(ResultEnum.PERMISSION_LIMIT.getCode(), result.getCode());
+        assertEquals("请求过于频繁，请稍后再试", result.getMessage());
 
         // 验证邮件未被发送
         verify(emailService, never()).sendVerifyCode(anyString(), anyString(), anyString());
@@ -288,6 +279,18 @@ class AccountServiceTest {
         verify(accountMapper, never()).update(any(), any(LambdaQueryWrapper.class));
     }
 
+    // 辅助方法：创建模拟的账户
+    private Account createMockAccount() {
+        Account account = new Account();
+        account.setId(TEST_USER_ID);
+        account.setUsername(TEST_USERNAME);
+        account.setEmail(TEST_EMAIL);
+        account.setPassword(TEST_PASSWORD_ENCODED);
+        account.setRole(Const.ROLE_DEFAULT);
+        account.setDeleted(0);
+        return account;
+    }
+
     @Test
     void testModifyEmail_AlreadyUsed() {
         // 准备测试数据
@@ -345,17 +348,5 @@ class AccountServiceTest {
         assertTrue(result.isSuccess());
         verify(stringRedisTemplate).delete(Const.VERIFY_EMAIL_DATA + "newemail@example.com");
         verify(updateChain).update();
-    }
-
-    // 辅助方法：创建模拟的账户
-    private Account createMockAccount() {
-        Account account = new Account();
-        account.setId(TEST_USER_ID);
-        account.setUsername(TEST_USERNAME);
-        account.setEmail(TEST_EMAIL);
-        account.setPassword(TEST_PASSWORD_ENCODED);
-        account.setRole(Const.ROLE_DEFAULT);
-        account.setDeleted(0);
-        return account;
     }
 }

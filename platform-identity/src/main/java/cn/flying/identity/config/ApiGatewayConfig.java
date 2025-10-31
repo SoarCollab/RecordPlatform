@@ -14,10 +14,12 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
+import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * API网关配置类
@@ -30,6 +32,12 @@ import java.util.List;
 @EnableAsync
 @EnableScheduling
 public class ApiGatewayConfig {
+
+    private final IdentitySecurityProperties identitySecurityProperties;
+
+    public ApiGatewayConfig(IdentitySecurityProperties identitySecurityProperties) {
+        this.identitySecurityProperties = identitySecurityProperties;
+    }
 
     /**
      * 注册EnhancedGatewayFilter
@@ -82,14 +90,36 @@ public class ApiGatewayConfig {
     @Bean
     public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();
-        // 允许的域名，生产环境应该配置具体的域名
-        config.setAllowedOriginPatterns(List.of("*"));
-        // 允许的请求头
-        config.setAllowedHeaders(List.of("*"));
-        // 允许的方法
+        List<String> allowedOrigins = identitySecurityProperties.getAllowedOrigins().stream()
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toList());
+        List<String> allowedOriginPatterns = identitySecurityProperties.getAllowedOriginPatterns().stream()
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toList());
+        boolean hasExplicitOrigins = !allowedOrigins.isEmpty();
+        boolean hasExplicitPatterns = !allowedOriginPatterns.isEmpty();
+
+        if (hasExplicitOrigins) {
+            config.setAllowedOrigins(allowedOrigins);
+        }
+        if (hasExplicitPatterns) {
+            config.setAllowedOriginPatterns(allowedOriginPatterns);
+        }
+
+        boolean allowCredentials = identitySecurityProperties.isAllowCredentials()
+                && (hasExplicitOrigins || hasExplicitPatterns);
+        config.setAllowCredentials(allowCredentials);
+        config.setMaxAge(identitySecurityProperties.getMaxAge());
+
+        config.setAllowedHeaders(List.of(
+                "Authorization",
+                "Content-Type",
+                "X-Requested-With",
+                "X-Trace-Id",
+                "X-Request-Id"
+        ));
         config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"));
-        // 是否允许携带Cookie
-        config.setAllowCredentials(true);
+        config.setAllowCredentials(hasExplicitOrigins);
         // 预检请求的缓存时间（秒）
         config.setMaxAge(3600L);
         // 暴露的响应头
@@ -123,221 +153,5 @@ public class ApiGatewayConfig {
                 .setConnectTimeout(Duration.ofSeconds(5))
                 .setReadTimeout(Duration.ofSeconds(30))
                 .build();
-    }
-
-    /**
-     * 配置服务发现定时任务
-     * 定期从Nacos同步服务实例
-     *
-     * 注意：NacosServiceDiscovery 已通过 @Component 注解自动注册，
-     * 此处不需要再使用 @Bean 手动创建实例
-     */
-
-    /**
-     * HTTP连接池配置
-     * 用于配置API网关的HTTP客户端连接池参数
-     * @deprecated 已被 ApiGatewayProperties 替代，请使用配置文件方式
-     */
-    @Deprecated
-    public static class HttpPoolConfig {
-        /**
-         * 最大连接数
-         */
-        public static final int MAX_TOTAL = 200;
-
-        /**
-         * 每个路由的最大连接数
-         */
-        public static final int MAX_PER_ROUTE = 50;
-
-        /**
-         * 连接超时时间（毫秒）
-         */
-        public static final int CONNECT_TIMEOUT = 5000;
-
-        /**
-         * 套接字超时时间（毫秒）
-         */
-        public static final int SOCKET_TIMEOUT = 30000;
-
-        /**
-         * 连接请求超时时间（毫秒）
-         */
-        public static final int REQUEST_TIMEOUT = 5000;
-
-        /**
-         * 连接存活时间（秒）
-         */
-        public static final int TIME_TO_LIVE = 60;
-
-        /**
-         * 空闲连接超时时间（秒）
-         */
-        public static final int IDLE_TIMEOUT = 30;
-    }
-
-    /**
-     * 熔断器配置
-     * 用于配置熔断器的默认参数
-     * @deprecated 已被 ApiGatewayProperties 替代，请使用配置文件方式
-     */
-    @Deprecated
-    public static class CircuitBreakerConfig {
-        /**
-         * 失败率阈值（百分比）
-         */
-        public static final float FAILURE_RATE_THRESHOLD = 50.0f;
-
-        /**
-         * 慢调用率阈值（百分比）
-         */
-        public static final float SLOW_CALL_RATE_THRESHOLD = 50.0f;
-
-        /**
-         * 慢调用时长阈值（毫秒）
-         */
-        public static final long SLOW_CALL_DURATION_THRESHOLD = 1000L;
-
-        /**
-         * 滑动窗口大小
-         */
-        public static final int SLIDING_WINDOW_SIZE = 100;
-
-        /**
-         * 最小调用次数
-         */
-        public static final int MINIMUM_NUMBER_OF_CALLS = 10;
-
-        /**
-         * 熔断器打开时长（秒）
-         */
-        public static final long WAIT_DURATION_IN_OPEN_STATE = 60L;
-
-        /**
-         * 半开状态允许的调用次数
-         */
-        public static final int PERMITTED_CALLS_IN_HALF_OPEN = 10;
-    }
-
-    /**
-     * 缓存配置
-     * 用于配置API网关的缓存参数
-     * @deprecated 已被 ApiGatewayProperties 替代，请使用配置文件方式
-     */
-    @Deprecated
-    public static class CacheConfig {
-        /**
-         * 本地缓存最大条目数
-         */
-        public static final int LOCAL_CACHE_MAX_SIZE = 10000;
-
-        /**
-         * 本地缓存过期时间（秒）
-         */
-        public static final int LOCAL_CACHE_TTL = 300;
-
-        /**
-         * Redis缓存过期时间（秒）
-         */
-        public static final int REDIS_CACHE_TTL = 600;
-
-        /**
-         * 缓存预热批次大小
-         */
-        public static final int WARMUP_BATCH_SIZE = 100;
-    }
-
-    /**
-     * 限流配置
-     * 用于配置API网关的限流参数
-     * @deprecated 已被 ApiGatewayProperties 替代，请使用配置文件方式
-     */
-    @Deprecated
-    public static class RateLimitConfig {
-        /**
-         * 默认QPS限制
-         */
-        public static final int DEFAULT_QPS = 100;
-
-        /**
-         * 突发流量系数
-         */
-        public static final double BURST_FACTOR = 1.5;
-
-        /**
-         * IP维度限流（QPS）
-         */
-        public static final int IP_RATE_LIMIT = 50;
-
-        /**
-         * 用户维度限流（QPS）
-         */
-        public static final int USER_RATE_LIMIT = 100;
-
-        /**
-         * API密钥维度限流（QPS）
-         */
-        public static final int API_KEY_RATE_LIMIT = 1000;
-    }
-
-    /**
-     * 负载均衡配置
-     * 用于配置负载均衡策略参数
-     * @deprecated 已被 ApiGatewayProperties 替代，请使用配置文件方式
-     */
-    @Deprecated
-    public static class LoadBalanceConfig {
-        /**
-         * 健康检查间隔（秒）
-         */
-        public static final int HEALTH_CHECK_INTERVAL = 10;
-
-        /**
-         * 健康检查超时时间（毫秒）
-         */
-        public static final int HEALTH_CHECK_TIMEOUT = 3000;
-
-        /**
-         * 失败次数阈值（标记为不健康）
-         */
-        public static final int FAILURE_THRESHOLD = 3;
-
-        /**
-         * 成功次数阈值（标记为健康）
-         */
-        public static final int SUCCESS_THRESHOLD = 2;
-
-        /**
-         * 权重更新间隔（秒）
-         */
-        public static final int WEIGHT_UPDATE_INTERVAL = 30;
-    }
-
-    /**
-     * 告警配置
-     * 用于配置告警通知参数
-     * @deprecated 已被 ApiGatewayProperties 替代，请使用配置文件方式
-     */
-    @Deprecated
-    public static class AlertConfig {
-        /**
-         * 告警聚合窗口（秒）
-         */
-        public static final int AGGREGATION_WINDOW = 60;
-
-        /**
-         * 告警阈值（同一类型告警数）
-         */
-        public static final int ALERT_THRESHOLD = 10;
-
-        /**
-         * 告警冷却时间（秒）
-         */
-        public static final int COOL_DOWN_PERIOD = 300;
-
-        /**
-         * 告警通知方式
-         */
-        public static final String ALERT_CHANNEL = "email,sms,webhook";
     }
 }

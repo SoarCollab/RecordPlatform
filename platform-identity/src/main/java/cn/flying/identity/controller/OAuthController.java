@@ -1,6 +1,7 @@
 package cn.flying.identity.controller;
 
-import cn.dev33.satoken.stp.StpUtil;
+import cn.dev33.satoken.annotation.SaCheckLogin;
+import cn.dev33.satoken.annotation.SaCheckPermission;
 import cn.flying.identity.dto.AuthorizationRequest;
 import cn.flying.identity.dto.OAuthClient;
 import cn.flying.identity.dto.RevokeTokenRequest;
@@ -17,8 +18,10 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -33,6 +36,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/oauth")
 @Tag(name = "OAuth2.0认证", description = "OAuth2.0标准认证授权接口")
+@Validated
 public class OAuthController {
 
     @Resource
@@ -40,6 +44,14 @@ public class OAuthController {
 
     @Resource
     private SSOService ssoService;
+
+    private static final String PERMISSION_CLIENT_REGISTER = "oauth:client:register";
+    private static final String PERMISSION_CLIENT_UPDATE = "oauth:client:update";
+    private static final String PERMISSION_CLIENT_DELETE = "oauth:client:delete";
+    private static final String PERMISSION_CLIENT_VIEW = "oauth:client:view";
+    private static final String PERMISSION_TOKEN_REVOKE_USER = "oauth:token:revoke:user";
+    private static final String PERMISSION_TOKEN_REVOKE_CLIENT = "oauth:token:revoke:client";
+    private static final String PERMISSION_TOKEN_REVOKE_ALL = "oauth:token:revoke:all";
 
     /**
      * 创建授权
@@ -116,7 +128,7 @@ public class OAuthController {
             @ApiResponse(responseCode = "404", description = "用户不存在")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getUserInfo(
-            @RequestHeader("Authorization") String authorization) {
+            @RequestHeader("Authorization") @NotBlank(message = "Authorization头不能为空") String authorization) {
 
         // 验证Authorization头格式
         if (authorization == null || !authorization.startsWith("Bearer ")) {
@@ -159,6 +171,57 @@ public class OAuthController {
     }
 
     /**
+     * 按用户批量撤销令牌
+     */
+    @PostMapping("/tokens/revoke/users/{userId}")
+    @Operation(summary = "按用户批量撤销令牌", description = "管理员按用户清理 OAuth/SSO 令牌")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "撤销成功"),
+            @ApiResponse(responseCode = "400", description = "参数无效"),
+            @ApiResponse(responseCode = "404", description = "用户不存在")
+    })
+    @SaCheckPermission(PERMISSION_TOKEN_REVOKE_USER)
+    public ResponseEntity<RestResponse<Void>> revokeTokensByUser(
+            @Parameter(description = "用户ID") @PathVariable Long userId) {
+        oauthService.revokeTokensByUser(userId);
+        ssoService.revokeUserSessions(userId);
+        return ResponseEntity.ok(RestResponse.ok("批量撤销用户令牌成功", null));
+    }
+
+    /**
+     * 按客户端批量撤销令牌
+     */
+    @PostMapping("/tokens/revoke/clients/{clientId}")
+    @Operation(summary = "按客户端批量撤销令牌", description = "管理员按客户端清理 OAuth/SSO 令牌")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "撤销成功"),
+            @ApiResponse(responseCode = "400", description = "参数无效"),
+            @ApiResponse(responseCode = "404", description = "客户端不存在")
+    })
+    @SaCheckPermission(PERMISSION_TOKEN_REVOKE_CLIENT)
+    public ResponseEntity<RestResponse<Void>> revokeTokensByClient(
+            @Parameter(description = "客户端标识") @PathVariable String clientId) {
+        oauthService.revokeTokensByClient(clientId);
+        ssoService.revokeClientSessions(clientId);
+        return ResponseEntity.ok(RestResponse.ok("批量撤销客户端令牌成功", null));
+    }
+
+    /**
+     * 全量撤销令牌
+     */
+    @PostMapping("/tokens/revoke/all")
+    @Operation(summary = "撤销所有令牌", description = "清理系统内所有 OAuth 访问与刷新令牌")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "撤销成功"),
+            @ApiResponse(responseCode = "403", description = "无权限执行")
+    })
+    @SaCheckPermission(PERMISSION_TOKEN_REVOKE_ALL)
+    public ResponseEntity<RestResponse<Void>> revokeAllTokens() {
+        oauthService.revokeAllTokens();
+        return ResponseEntity.ok(RestResponse.ok("已撤销全部令牌", null));
+    }
+
+    /**
      * 创建客户端
      * POST /api/oauth/clients - 注册新的OAuth客户端
      */
@@ -169,18 +232,8 @@ public class OAuthController {
             @ApiResponse(responseCode = "400", description = "参数无效"),
             @ApiResponse(responseCode = "409", description = "客户端已存在")
     })
+    @SaCheckPermission(PERMISSION_CLIENT_REGISTER)
     public ResponseEntity<RestResponse<OAuthClient>> createClient(@Valid @RequestBody OAuthClient client) {
-        // 仅管理员可创建客户端
-        if (!StpUtil.isLogin()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(RestResponse.unauthorized(ResultEnum.USER_NOT_LOGGED_IN.getCode(), "用户未登录"));
-        }
-        String role = (String) StpUtil.getSession().get("role");
-        if (!"admin".equalsIgnoreCase(role)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(RestResponse.forbidden(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), "无权限"));
-        }
-
         OAuthClient created = oauthService.registerClient(client);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(RestResponse.created(created));
@@ -197,21 +250,10 @@ public class OAuthController {
             @ApiResponse(responseCode = "400", description = "参数无效"),
             @ApiResponse(responseCode = "404", description = "客户端不存在")
     })
+    @SaCheckPermission(PERMISSION_CLIENT_UPDATE)
     public ResponseEntity<RestResponse<OAuthClient>> updateClient(
-            @Parameter(description = "客户端ID") @PathVariable String clientId,
+            @Parameter(description = "客户端ID") @PathVariable @NotBlank(message = "客户端ID不能为空") String clientId,
             @Valid @RequestBody OAuthClient client) {
-
-        // 仅管理员可更新客户端
-        if (!StpUtil.isLogin()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(RestResponse.unauthorized(ResultEnum.USER_NOT_LOGGED_IN.getCode(), "用户未登录"));
-        }
-        String role = (String) StpUtil.getSession().get("role");
-        if (!"admin".equalsIgnoreCase(role)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(RestResponse.forbidden(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), "无权限"));
-        }
-
         OAuthClient dbClient = oauthService.getClient(clientId);
         client.setClientId(dbClient.getClientId());
         client.setClientKey(dbClient.getClientKey());
@@ -230,18 +272,9 @@ public class OAuthController {
             @ApiResponse(responseCode = "204", description = "删除成功"),
             @ApiResponse(responseCode = "404", description = "客户端不存在")
     })
+    @SaCheckPermission(PERMISSION_CLIENT_DELETE)
     public ResponseEntity<Void> deleteClient(
-            @Parameter(description = "客户端ID") @PathVariable String clientId) {
-
-        // 仅管理员可删除客户端
-        if (!StpUtil.isLogin()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-        }
-        String role = (String) StpUtil.getSession().get("role");
-        if (!"admin".equalsIgnoreCase(role)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
-        }
-
+            @Parameter(description = "客户端ID") @PathVariable @NotBlank(message = "客户端ID不能为空") String clientId) {
         oauthService.deleteClient(clientId);
         return ResponseEntity.noContent().build();
     }
@@ -256,20 +289,9 @@ public class OAuthController {
             @ApiResponse(responseCode = "200", description = "获取成功"),
             @ApiResponse(responseCode = "404", description = "客户端不存在")
     })
+    @SaCheckPermission(PERMISSION_CLIENT_VIEW)
     public ResponseEntity<RestResponse<OAuthClient>> getClient(
-            @Parameter(description = "客户端ID") @PathVariable String clientId) {
-
-        // 仅管理员可查看客户端详情
-        if (!StpUtil.isLogin()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(RestResponse.unauthorized(ResultEnum.USER_NOT_LOGGED_IN.getCode(), "用户未登录"));
-        }
-        String role = (String) StpUtil.getSession().get("role");
-        if (!"admin".equalsIgnoreCase(role)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(RestResponse.forbidden(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), "无权限"));
-        }
-
+            @Parameter(description = "客户端ID") @PathVariable @NotBlank(message = "客户端ID不能为空") String clientId) {
         OAuthClient data = oauthService.getClient(clientId);
         data.setClientSecret(null);
         return ResponseEntity.ok(RestResponse.ok("获取成功", data));
@@ -279,29 +301,22 @@ public class OAuthController {
      * 获取SSO登录信息
      * GET /api/oauth/sso/sessions - 获取SSO登录页面信息
      */
+    @Deprecated(forRemoval = true, since = "2025.10")
     @GetMapping("/sso/sessions")
     @Operation(summary = "获取SSO登录信息", description = "获取SSO登录或授权页面信息")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "获取成功"),
             @ApiResponse(responseCode = "401", description = "需要登录")
     })
+    @SaCheckLogin
     public ResponseEntity<RestResponse<Map<String, Object>>> getSSOSession(
-            @Parameter(description = "客户端ID") @RequestParam("client_id") String clientId,
-            @Parameter(description = "重定向URI") @RequestParam("redirect_uri") String redirectUri,
-            @Parameter(description = "授权范围") @RequestParam(value = "scope", defaultValue = "read") String scope,
+            @Parameter(description = "客户端ID") @RequestParam("client_id") @NotBlank(message = "client_id不能为空") String clientId,
+            @Parameter(description = "重定向URI") @RequestParam("redirect_uri") @NotBlank(message = "redirect_uri不能为空") String redirectUri,
+            @Parameter(description = "授权范围") @RequestParam(value = "scope", defaultValue = "read") @NotBlank(message = "scope不能为空") String scope,
             @Parameter(description = "状态参数") @RequestParam(value = "state", required = false) String state) {
 
-        // 检查用户是否已登录
-        if (StpUtil.isLogin()) {
-            // 已登录，返回授权页面信息
-            Map<String, Object> data = oauthService.getAuthorizeInfo(clientId, redirectUri, scope, state);
-            return ResponseEntity.ok(RestResponse.ok("获取成功", data));
-        } else {
-            // 未登录，返回401
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(RestResponse.unauthorized(ResultEnum.USER_NOT_LOGGED_IN.getCode(),
-                            "用户未登录"));
-        }
+        Map<String, Object> data = oauthService.getAuthorizeInfo(clientId, redirectUri, scope, state);
+        return ResponseEntity.ok(RestResponse.ok("获取成功", data));
     }
 
     /**
@@ -316,9 +331,9 @@ public class OAuthController {
             @ApiResponse(responseCode = "401", description = "未认证")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getAuthorization(
-            @Parameter(description = "客户端ID") @RequestParam("client_id") String clientId,
-            @Parameter(description = "重定向URI") @RequestParam("redirect_uri") String redirectUri,
-            @Parameter(description = "授权范围") @RequestParam(value = "scope", defaultValue = "read") String scope,
+            @Parameter(description = "客户端ID") @RequestParam("client_id") @NotBlank(message = "client_id不能为空") String clientId,
+            @Parameter(description = "重定向URI") @RequestParam("redirect_uri") @NotBlank(message = "redirect_uri不能为空") String redirectUri,
+            @Parameter(description = "授权范围") @RequestParam(value = "scope", defaultValue = "read") @NotBlank(message = "scope不能为空") String scope,
             @Parameter(description = "状态参数") @RequestParam(value = "state", required = false) String state) {
 
         Map<String, Object> data = oauthService.getAuthorizeInfo(clientId, redirectUri, scope, state);
@@ -335,6 +350,7 @@ public class OAuthController {
             @ApiResponse(responseCode = "204", description = "注销成功"),
             @ApiResponse(responseCode = "400", description = "注销失败")
     })
+    @Deprecated(forRemoval = true, since = "2025.10")
     public ResponseEntity<Void> destroySSOSession(
             @Parameter(description = "注销后重定向URI") @RequestParam(value = "redirect_uri", required = false) String redirectUri,
             @Parameter(description = "客户端ID") @RequestParam(value = "client_id", required = false) String clientId) {

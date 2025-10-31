@@ -28,7 +28,7 @@ oauth:
   # 安全配置
   security:
     # 客户端密钥是否使用BCrypt加密存储
-    use-bcrypt: true     # TODO: 生产环境应设为true
+    use-bcrypt: true
     # 是否启用状态参数验证（防CSRF攻击）
     require-state: true
   

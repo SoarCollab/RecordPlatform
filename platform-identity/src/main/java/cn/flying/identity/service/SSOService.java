@@ -94,4 +94,26 @@ public interface SSOService {
      * @return 注销结果
      */
     void logoutFromClient(String clientId);
+
+    /**
+     * 撤销指定用户的所有 SSO 会话
+     *
+     * @param userId 用户ID
+     */
+    void revokeUserSessions(Long userId);
+
+    /**
+     * 按客户端撤销所有用户的 SSO 会话
+     *
+     * @param clientId 客户端标识符
+     */
+    void revokeClientSessions(String clientId);
+
+    /**
+     * 撤销某个用户在指定客户端的会话
+     *
+     * @param userId   用户ID
+     * @param clientId 客户端标识符
+     */
+    void revokeUserClientSession(Long userId, String clientId);
 }

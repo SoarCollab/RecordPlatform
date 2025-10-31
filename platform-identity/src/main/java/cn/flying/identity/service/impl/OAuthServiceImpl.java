@@ -17,6 +17,9 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.RedisCallback;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -55,6 +58,8 @@ public class OAuthServiceImpl implements OAuthService {
      * 用于在revoke时同步清理第三方access/refresh映射
      */
     private static final String THIRD_PARTY_TOKEN_PREFIX = "third_party:token:";
+    private static final String ACCESS_TOKEN_HINT = "access_token";
+    private static final String REFRESH_TOKEN_HINT = "refresh_token";
 
     /**
      * 获取授权页面信息
@@ -214,7 +219,7 @@ public class OAuthServiceImpl implements OAuthService {
             }
 
             String accessToken = generateAccessToken(authCode.getUserId(), clientId, authCode.getScope());
-            String refreshToken = generateRefreshToken(authCode.getUserId(), clientId);
+            String refreshToken = generateRefreshToken(authCode.getUserId(), clientId, accessToken);
 
             Map<String, Object> tokenInfo = new HashMap<>();
             tokenInfo.put("access_token", accessToken);
@@ -273,8 +278,6 @@ public class OAuthServiceImpl implements OAuthService {
 
             String userIdStr = (String) tokenData.get("user_id");
             String tokenClientId = (String) tokenData.get("client_id");
-            String oldAccessToken = (String) tokenData.get("access_token");
-
             if (!clientId.equals(tokenClientId)) {
                 log.warn("刷新令牌客户端不匹配: expected={}, actual={}", clientId, tokenClientId);
                 throw new BusinessException(ResultEnum.OAUTH_TOKEN_INVALID, "刷新令牌与客户端不匹配");
@@ -296,13 +299,9 @@ public class OAuthServiceImpl implements OAuthService {
             }
 
             String newAccessToken = generateAccessToken(userId, clientId, scope);
-            String newRefreshToken = generateRefreshToken(userId, clientId);
+            String newRefreshToken = generateRefreshToken(userId, clientId, newAccessToken);
 
-            redisTemplate.delete(tokenKey);
-            if (StrUtil.isNotBlank(oldAccessToken)) {
-                String oldAccessTokenKey = oauthConfig.getAccessTokenPrefix() + oldAccessToken;
-                redisTemplate.delete(oldAccessTokenKey);
-            }
+            removeRefreshToken(refreshToken, tokenData, true);
 
             Map<String, Object> response = new HashMap<>();
             response.put("access_token", newAccessToken);
@@ -422,27 +421,120 @@ public class OAuthServiceImpl implements OAuthService {
             }
 
             boolean deleted = false;
-            if (tokenTypeHint == null || "access_token".equals(tokenTypeHint)) {
-                String accessTokenKey = oauthConfig.getAccessTokenPrefix() + token;
-                deleted = Boolean.TRUE.equals(redisTemplate.delete(accessTokenKey));
+            if (tokenTypeHint == null || ACCESS_TOKEN_HINT.equalsIgnoreCase(tokenTypeHint)) {
+                deleted = removeAccessToken(token, null, true) || deleted;
             }
 
-            if (tokenTypeHint == null || "refresh_token".equals(tokenTypeHint)) {
-                String refreshTokenKey = oauthConfig.getRefreshTokenPrefix() + token;
-                Boolean refreshDeleted = redisTemplate.delete(refreshTokenKey);
-                deleted = deleted || Boolean.TRUE.equals(refreshDeleted);
+            if (tokenTypeHint == null || REFRESH_TOKEN_HINT.equalsIgnoreCase(tokenTypeHint)) {
+                deleted = removeRefreshToken(token, null, true) || deleted;
             }
-
-            clearThirdPartyMappings(token, tokenTypeHint);
 
             if (!deleted) {
-            log.warn("令牌撤销失败，令牌可能不存在: token={}, hint={}", token, tokenTypeHint);
+                log.warn("令牌撤销失败，令牌可能不存在: token={}, hint={}", token, tokenTypeHint);
             }
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
             log.error("撤销令牌失败", e);
             throw new BusinessException(ResultEnum.SYSTEM_ERROR, "撤销令牌失败");
+        }
+    }
+
+    @Override
+    public void revokeTokensByUser(Long userId) {
+        if (userId == null) {
+            throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "用户ID不能为空");
+        }
+        try {
+            Set<String> accessTokens = Optional.ofNullable(
+                    redisTemplate.opsForSet().members(buildUserAccessIndexKey(userId)))
+                    .orElse(Collections.emptySet());
+            Set<String> refreshTokens = Optional.ofNullable(
+                    redisTemplate.opsForSet().members(buildUserRefreshIndexKey(userId)))
+                    .orElse(Collections.emptySet());
+
+            for (String accessToken : accessTokens) {
+                removeAccessToken(accessToken, null, true);
+            }
+            for (String refreshToken : refreshTokens) {
+                removeRefreshToken(refreshToken, null, true);
+            }
+
+            redisTemplate.delete(buildUserAccessIndexKey(userId));
+            redisTemplate.delete(buildUserRefreshIndexKey(userId));
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("按用户批量撤销令牌失败: userId={}", userId, e);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "按用户撤销令牌失败");
+        }
+    }
+
+    @Override
+    public void revokeTokensByClient(String clientKey) {
+        if (StrUtil.isBlank(clientKey)) {
+            throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "客户端标识不能为空");
+        }
+        try {
+            Set<String> accessTokens = Optional.ofNullable(
+                    redisTemplate.opsForSet().members(buildClientAccessIndexKey(clientKey)))
+                    .orElse(Collections.emptySet());
+            Set<String> refreshTokens = Optional.ofNullable(
+                    redisTemplate.opsForSet().members(buildClientRefreshIndexKey(clientKey)))
+                    .orElse(Collections.emptySet());
+
+            for (String accessToken : accessTokens) {
+                removeAccessToken(accessToken, null, true);
+            }
+            for (String refreshToken : refreshTokens) {
+                removeRefreshToken(refreshToken, null, true);
+            }
+
+            redisTemplate.delete(buildClientAccessIndexKey(clientKey));
+            redisTemplate.delete(buildClientRefreshIndexKey(clientKey));
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("按客户端批量撤销令牌失败: clientKey={}", clientKey, e);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "按客户端撤销令牌失败");
+        }
+    }
+
+    @Override
+    public void revokeAllTokens() {
+        try {
+            Set<String> refreshKeys = scanKeys(oauthConfig.getRefreshTokenPrefix() + "*");
+            for (String refreshKey : refreshKeys) {
+                String token = extractToken(refreshKey, oauthConfig.getRefreshTokenPrefix());
+                if (StrUtil.isBlank(token)) {
+                    continue;
+                }
+                removeRefreshToken(token, null, true);
+            }
+
+            Set<String> accessKeys = scanKeys(oauthConfig.getAccessTokenPrefix() + "*");
+            for (String accessKey : accessKeys) {
+                String token = extractToken(accessKey, oauthConfig.getAccessTokenPrefix());
+                if (StrUtil.isBlank(token)) {
+                    continue;
+                }
+                removeAccessToken(token, null, true);
+            }
+
+            // 清理索引集合
+            Set<String> userIndexKeys = scanKeys(oauthConfig.getUserTokenPrefix() + "*");
+            for (String key : userIndexKeys) {
+                redisTemplate.delete(key);
+            }
+            Set<String> clientIndexKeys = scanKeys(oauthConfig.getClientTokenPrefix() + "*");
+            for (String key : clientIndexKeys) {
+                redisTemplate.delete(key);
+            }
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("批量撤销所有 OAuth 令牌失败", e);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "批量撤销所有令牌失败");
         }
     }
 
@@ -458,17 +550,24 @@ public class OAuthServiceImpl implements OAuthService {
             if (cn.hutool.core.util.StrUtil.isBlank(token)) {
                 return;
             }
-            String[] providers = {"wechat", "google", "github"};
-            boolean clearAccess = tokenTypeHint == null || "access_token".equalsIgnoreCase(tokenTypeHint);
-            boolean clearRefresh = tokenTypeHint == null || "refresh_token".equalsIgnoreCase(tokenTypeHint);
+            List<String> providers = oauthConfig.getThirdPartyProviders();
+            if (providers.isEmpty()) {
+                return;
+            }
+            boolean clearAccess = tokenTypeHint == null || ACCESS_TOKEN_HINT.equalsIgnoreCase(tokenTypeHint);
+            boolean clearRefresh = tokenTypeHint == null || REFRESH_TOKEN_HINT.equalsIgnoreCase(tokenTypeHint);
 
             for (String provider : providers) {
+                if (StrUtil.isBlank(provider)) {
+                    continue;
+                }
+                String normalized = provider.trim().toLowerCase(java.util.Locale.ROOT);
                 if (clearAccess) {
-                    String accessKey = THIRD_PARTY_TOKEN_PREFIX + provider + ":access:" + token;
+                    String accessKey = THIRD_PARTY_TOKEN_PREFIX + normalized + ":access:" + token;
                     redisTemplate.delete(accessKey);
                 }
                 if (clearRefresh) {
-                    String refreshKey = THIRD_PARTY_TOKEN_PREFIX + provider + ":refresh:" + token;
+                    String refreshKey = THIRD_PARTY_TOKEN_PREFIX + normalized + ":refresh:" + token;
                     redisTemplate.delete(refreshKey);
                 }
             }
@@ -507,10 +606,25 @@ public class OAuthServiceImpl implements OAuthService {
             }
             
             // 使用专门的密钥服务验证客户端密钥
-            if (!oauthClientSecretService.matches(clientSecret, client.getClientSecret())) {
+            String storedSecret = client.getClientSecret();
+            if (!oauthClientSecretService.matches(clientSecret, storedSecret)) {
                 log.warn("客户端密钥验证失败: clientId={}, secretIsEncrypted={}", 
-                        clientId, oauthClientSecretService.isEncrypted(client.getClientSecret()));
+                        clientId, oauthClientSecretService.isEncrypted(storedSecret));
                 return null;
+            }
+
+            try {
+                if (oauthConfig.isUseBcrypt() && !oauthClientSecretService.isEncrypted(storedSecret)) {
+                    String upgradedSecret = oauthClientSecretService.encodeClientSecret(clientSecret);
+                    OAuthClient updateEntity = new OAuthClient();
+                    updateEntity.setClientId(client.getClientId());
+                    updateEntity.setClientSecret(upgradedSecret);
+                    oauthClientMapper.updateById(updateEntity);
+                    client.setClientSecret(upgradedSecret);
+                    log.info("客户端密钥已自动升级为BCrypt: clientId={}", clientId);
+                }
+            } catch (Exception upgradeEx) {
+                log.warn("客户端密钥升级失败，将保持原状态: clientId={}", clientId, upgradeEx);
             }
             
             if (log.isDebugEnabled()) {
@@ -773,6 +887,7 @@ public class OAuthServiceImpl implements OAuthService {
         String tokenKey = oauthConfig.getAccessTokenPrefix() + token;
         redisTemplate.opsForHash().putAll(tokenKey, tokenInfo);
         redisTemplate.expire(tokenKey, oauthConfig.getAccessTokenTimeout(), TimeUnit.SECONDS);
+        recordAccessTokenIndexes(userId, clientId, token);
 
         if (log.isDebugEnabled()) {
             log.debug("生成访问令牌成功: clientId={}, userId={}, scope={}, expiresIn={}",
@@ -780,6 +895,148 @@ public class OAuthServiceImpl implements OAuthService {
         }
 
         return token;
+    }
+
+    private void recordAccessTokenIndexes(Long userId, String clientId, String token) {
+        if (StrUtil.isBlank(token)) {
+            return;
+        }
+        long ttl = getIndexTtlSeconds();
+        if (userId != null) {
+            String key = buildUserAccessIndexKey(userId);
+            redisTemplate.opsForSet().add(key, token);
+            redisTemplate.expire(key, ttl, TimeUnit.SECONDS);
+        }
+        if (StrUtil.isNotBlank(clientId)) {
+            String key = buildClientAccessIndexKey(clientId);
+            redisTemplate.opsForSet().add(key, token);
+            redisTemplate.expire(key, ttl, TimeUnit.SECONDS);
+        }
+    }
+
+    private void recordRefreshTokenIndexes(Long userId, String clientId, String token) {
+        if (StrUtil.isBlank(token)) {
+            return;
+        }
+        long ttl = getIndexTtlSeconds();
+        if (userId != null) {
+            String key = buildUserRefreshIndexKey(userId);
+            redisTemplate.opsForSet().add(key, token);
+            redisTemplate.expire(key, ttl, TimeUnit.SECONDS);
+        }
+        if (StrUtil.isNotBlank(clientId)) {
+            String key = buildClientRefreshIndexKey(clientId);
+            redisTemplate.opsForSet().add(key, token);
+            redisTemplate.expire(key, ttl, TimeUnit.SECONDS);
+        }
+    }
+
+    private long getIndexTtlSeconds() {
+        return Math.max(oauthConfig.getAccessTokenTimeout(), oauthConfig.getRefreshTokenTimeout());
+    }
+
+    private String buildUserAccessIndexKey(Long userId) {
+        return oauthConfig.getUserTokenPrefix() + userId + ":access";
+    }
+
+    private String buildUserRefreshIndexKey(Long userId) {
+        return oauthConfig.getUserTokenPrefix() + userId + ":refresh";
+    }
+
+    private String buildClientAccessIndexKey(String clientId) {
+        return oauthConfig.getClientTokenPrefix() + clientId + ":access";
+    }
+
+    private String buildClientRefreshIndexKey(String clientId) {
+        return oauthConfig.getClientTokenPrefix() + clientId + ":refresh";
+    }
+
+    private boolean removeAccessToken(String token, Map<Object, Object> tokenData, boolean clearThirdParty) {
+        if (StrUtil.isBlank(token)) {
+            return false;
+        }
+        String tokenKey = oauthConfig.getAccessTokenPrefix() + token;
+        Map<Object, Object> data = tokenData != null ? tokenData : redisTemplate.opsForHash().entries(tokenKey);
+        String userIdStr = data != null ? (String) data.get("user_id") : null;
+        String clientId = data != null ? (String) data.get("client_id") : null;
+        boolean existed = data != null && !data.isEmpty();
+
+        boolean removed = Boolean.TRUE.equals(redisTemplate.delete(tokenKey));
+        removeTokenFromIndexes(token, userIdStr, clientId, true);
+
+        if (clearThirdParty) {
+            clearThirdPartyMappings(token, ACCESS_TOKEN_HINT);
+        }
+        return existed || removed;
+    }
+
+    private boolean removeRefreshToken(String token, Map<Object, Object> tokenData, boolean clearThirdParty) {
+        if (StrUtil.isBlank(token)) {
+            return false;
+        }
+        String tokenKey = oauthConfig.getRefreshTokenPrefix() + token;
+        Map<Object, Object> data = tokenData != null ? tokenData : redisTemplate.opsForHash().entries(tokenKey);
+        String userIdStr = data != null ? (String) data.get("user_id") : null;
+        String clientId = data != null ? (String) data.get("client_id") : null;
+        String linkedAccessToken = data != null ? (String) data.get("access_token") : null;
+        boolean existed = data != null && !data.isEmpty();
+
+        boolean removed = Boolean.TRUE.equals(redisTemplate.delete(tokenKey));
+        removeTokenFromIndexes(token, userIdStr, clientId, false);
+
+        if (clearThirdParty) {
+            clearThirdPartyMappings(token, REFRESH_TOKEN_HINT);
+        }
+        if (StrUtil.isNotBlank(linkedAccessToken)) {
+            removeAccessToken(linkedAccessToken, null, clearThirdParty);
+        }
+        return existed || removed;
+    }
+
+    private void removeTokenFromIndexes(String token, String userIdStr, String clientId, boolean accessToken) {
+        if (StrUtil.isNotBlank(userIdStr)) {
+            try {
+                Long userId = Long.valueOf(userIdStr);
+                String key = accessToken ? buildUserAccessIndexKey(userId) : buildUserRefreshIndexKey(userId);
+                redisTemplate.opsForSet().remove(key, token);
+            } catch (NumberFormatException ex) {
+                log.warn("无法解析用户ID，跳过索引清理: userId={}", userIdStr, ex);
+            }
+        }
+        if (StrUtil.isNotBlank(clientId)) {
+            String key = accessToken ? buildClientAccessIndexKey(clientId) : buildClientRefreshIndexKey(clientId);
+            redisTemplate.opsForSet().remove(key, token);
+        }
+    }
+
+    private String extractToken(String redisKey, String prefix) {
+        if (redisKey == null || prefix == null || !redisKey.startsWith(prefix)) {
+            return redisKey;
+        }
+        return redisKey.substring(prefix.length());
+    }
+
+    private Set<String> scanKeys(String pattern) {
+        Set<String> keys = new HashSet<>();
+        try {
+            redisTemplate.execute((RedisCallback<Void>) connection -> {
+                try (Cursor<byte[]> cursor = connection.scan(
+                        ScanOptions.scanOptions()
+                                .match(pattern)
+                                .count(200)
+                                .build())) {
+                    while (cursor.hasNext()) {
+                        keys.add(new String(cursor.next(), java.nio.charset.StandardCharsets.UTF_8));
+                    }
+                } catch (Exception e) {
+                    log.error("扫描Redis键失败: pattern={}", pattern, e);
+                }
+                return null;
+            });
+        } catch (Exception e) {
+            log.error("执行Redis SCAN命令失败: pattern={}", pattern, e);
+        }
+        return keys;
     }
 
     /**
@@ -791,7 +1048,7 @@ public class OAuthServiceImpl implements OAuthService {
      * @param clientId 客户端标识符
      * @return 刷新令牌字符串
      */
-    private String generateRefreshToken(Long userId, String clientId) {
+    private String generateRefreshToken(Long userId, String clientId, String associatedAccessToken) {
         // 生成UUID格式的刷新令牌
         String token = IdUtil.fastSimpleUUID();
 
@@ -803,6 +1060,9 @@ public class OAuthServiceImpl implements OAuthService {
         tokenInfo.put("issued_at", String.valueOf(System.currentTimeMillis()));
         tokenInfo.put("expires_in", String.valueOf(oauthConfig.getRefreshTokenTimeout()));
         tokenInfo.put("expires_at", String.valueOf(System.currentTimeMillis() + (oauthConfig.getRefreshTokenTimeout() * 1000L)));
+        if (StrUtil.isNotBlank(associatedAccessToken)) {
+            tokenInfo.put("access_token", associatedAccessToken);
+        }
         
         // 用户相关信息（仅当用户ID不为空时）
         if (userId != null) {
@@ -819,6 +1079,7 @@ public class OAuthServiceImpl implements OAuthService {
         String tokenKey = oauthConfig.getRefreshTokenPrefix() + token;
         redisTemplate.opsForHash().putAll(tokenKey, tokenInfo);
         redisTemplate.expire(tokenKey, oauthConfig.getRefreshTokenTimeout(), TimeUnit.SECONDS);
+        recordRefreshTokenIndexes(userId, clientId, token);
 
         if (log.isDebugEnabled()) {
             log.debug("生成刷新令牌成功: clientId={}, userId={}, expiresIn={}",

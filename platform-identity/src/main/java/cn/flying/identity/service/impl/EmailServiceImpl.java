@@ -27,7 +27,7 @@ public class EmailServiceImpl implements EmailService {
     @Resource
     private ApplicationProperties applicationProperties;
 
-    @Value("${spring.mail.username}")
+    @Value("${spring.mail.username:}")
     private String fromEmail;
 
     @Override
@@ -57,6 +57,11 @@ public class EmailServiceImpl implements EmailService {
     @Override
     public boolean sendSimpleMail(String to, String subject, String content) {
         try {
+            if (!isMailConfigured()) {
+                log.warn("未配置发件邮箱，跳过简单邮件发送。收件人: {}, 主题: {}", to, subject);
+                return false;
+            }
+
             SimpleMailMessage message = new SimpleMailMessage();
             message.setFrom(fromEmail);
             message.setTo(to);
@@ -75,6 +80,11 @@ public class EmailServiceImpl implements EmailService {
     @Override
     public boolean sendHtmlMail(String to, String subject, String htmlContent) {
         try {
+            if (!isMailConfigured()) {
+                log.warn("未配置发件邮箱，跳过HTML邮件发送。收件人: {}, 主题: {}", to, subject);
+                return false;
+            }
+
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
 
@@ -180,5 +190,9 @@ public class EmailServiceImpl implements EmailService {
                 </body>
                 </html>
                 """, code, expireMinutes);
+    }
+
+    private boolean isMailConfigured() {
+        return fromEmail != null && !fromEmail.isBlank();
     }
 }

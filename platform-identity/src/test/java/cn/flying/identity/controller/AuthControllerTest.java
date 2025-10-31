@@ -203,6 +203,17 @@ class AuthControllerTest {
     }
 
     @Test
+    void testSearchUser_BlankQuery_ShouldReturnBadRequest() throws Exception {
+        mockMvc.perform(get(API_USERS_SEARCH)
+                        .param("query", " "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.code").value(ResultEnum.PARAM_IS_INVALID.getCode()));
+
+        verify(authService, never()).findUserWithMasking(anyString());
+    }
+
+    @Test
     void testRegister_Success() throws Exception {
         EmailRegisterVO vo = new EmailRegisterVO();
         vo.setUsername(TEST_USERNAME);

@@ -19,10 +19,13 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Positive;
 import org.springframework.beans.BeanUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.validation.annotation.Validated;
 
 import java.util.List;
 import java.util.Map;
@@ -39,6 +42,7 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/users")
 @Tag(name = "用户管理", description = "用户信息管理、密码修改、邮箱修改等功能")
 @SaCheckLogin
+@Validated
 public class UserController {
 
     @Resource
@@ -90,7 +94,7 @@ public class UserController {
             @ApiResponse(responseCode = "401", description = "未认证"),
             @ApiResponse(responseCode = "404", description = "用户不存在")
     })
-    public ResponseEntity<RestResponse<AccountVO>> updateCurrentUser(@RequestBody UserUpdateRequest request) {
+    public ResponseEntity<RestResponse<AccountVO>> updateCurrentUser(@RequestBody @Valid UserUpdateRequest request) {
         try {
             Long userId = StpUtil.getLoginIdAsLong();
 
@@ -184,7 +188,7 @@ public class UserController {
             @ApiResponse(responseCode = "404", description = "用户不存在")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getUserProfile(
-            @Parameter(description = "用户ID") @PathVariable Long userId) {
+            @Parameter(description = "用户ID") @PathVariable @Positive(message = "用户ID必须为正数") Long userId) {
 
         try {
             Account account = accountService.findAccountById(userId);
@@ -223,7 +227,7 @@ public class UserController {
             @ApiResponse(responseCode = "401", description = "未认证"),
             @ApiResponse(responseCode = "404", description = "用户不存在")
     })
-    public ResponseEntity<Void> deactivateAccount(@RequestBody DeactivateRequest request) {
+    public ResponseEntity<Void> deactivateAccount(@RequestBody @Valid DeactivateRequest request) {
         try {
             Long userId = StpUtil.getLoginIdAsLong();
             Account account = accountService.findAccountById(userId);
@@ -270,8 +274,8 @@ public class UserController {
     })
     @SaCheckRole("admin")
     public ResponseEntity<RestResponse<UserListResponse>> getUserList(
-            @Parameter(description = "页码，从0开始") @RequestParam(defaultValue = "0") int page,
-            @Parameter(description = "页大小") @RequestParam(defaultValue = "20") int size,
+            @Parameter(description = "页码，从0开始") @RequestParam(defaultValue = "0") @Min(value = 0, message = "页码不能为负数") int page,
+            @Parameter(description = "页大小") @RequestParam(defaultValue = "20") @Positive(message = "页大小必须为正数") int size,
             @Parameter(description = "搜索关键词") @RequestParam(required = false) String q) {
 
         try {
@@ -329,8 +333,8 @@ public class UserController {
     })
     @SaCheckRole("admin")
     public ResponseEntity<RestResponse<Void>> updateUserStatus(
-            @Parameter(description = "用户ID") @PathVariable Long userId,
-            @RequestBody UserStatusRequest request) {
+            @Parameter(description = "用户ID") @PathVariable @Positive(message = "用户ID必须为正数") Long userId,
+            @RequestBody @Valid UserStatusRequest request) {
 
         try {
             boolean success = accountService.update()
@@ -366,8 +370,8 @@ public class UserController {
     })
     @SaCheckRole("admin")
     public ResponseEntity<RestResponse<Void>> resetUserPassword(
-            @Parameter(description = "用户ID") @PathVariable Long userId,
-            @RequestBody PasswordResetRequest request) {
+            @Parameter(description = "用户ID") @PathVariable @Positive(message = "用户ID必须为正数") Long userId,
+            @RequestBody @Valid PasswordResetRequest request) {
 
         try {
             String encodedPassword = accountService.encodePassword(request.getNewPassword());

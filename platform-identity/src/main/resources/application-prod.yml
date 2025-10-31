@@ -26,12 +26,22 @@ spring:
       port: 5672
     username: ${RABBITMQ_USERNAME}
     password: ${RABBITMQ_PASSWORD}
-    virtual-host: /
+    virtual-host: ${RABBITMQ_VIRTUAL_HOST:/}
   data:
     redis:
       database: 0
       host: ${REDIS_HOST}
       port: 6379
       timeout: 5000
-      username: default
+      username: ${REDIS_USERNAME:default}
       password: ${REDIS_PASSWORD}
+
+platform:
+  identity:
+    security:
+      allowed-origins:
+        - ${IDENTITY_ALLOWED_ORIGIN_PRIMARY:https://identity.example.com}
+      allowed-origin-patterns:
+        - ${IDENTITY_ALLOWED_ORIGIN_PATTERN:}
+      allow-credentials: ${IDENTITY_CORS_ALLOW_CREDENTIALS:true}
+      max-age: ${IDENTITY_CORS_MAX_AGE:600}

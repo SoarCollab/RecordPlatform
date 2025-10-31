@@ -14,6 +14,8 @@ src/main/resources/
 └── application-template.yml # 配置模板文件
 ```
 
+> ⚠️ **敏感提示**：所有数据库、缓存、消息队列、文档认证等凭证必须通过环境变量或安全配置中心注入。文档中的占位符均为示例，部署时请务必替换为实际值。
+
 ## 核心配置项
 
 ### 1. 基础配置
@@ -49,8 +51,8 @@ spring:
       type: com.alibaba.druid.pool.DruidDataSource
       driver-class-name: com.mysql.cj.jdbc.Driver
       url: jdbc:mysql://${DB_HOST:192.168.5.100}:${DB_PORT:3306}/platform_identity?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8&useSSL=false&allowPublicKeyRetrieval=true
-      username: ${DB_USERNAME:platform_identity}
-      password: ${DB_PASSWORD:your_password}
+      username: ${DB_USERNAME:}
+      password: ${DB_PASSWORD:}
       
       # Druid 连接池配置
       initialSize: 5              # 初始化连接数
@@ -66,8 +68,8 @@ spring:
       stat-view-servlet:
         enabled: true
         url-pattern: /druid/*
-        login-username: ${DRUID_USERNAME:admin}  # 监控页面用户名
-        login-password: ${DRUID_PASSWORD:123456}  # 监控页面密码
+        login-username: ${DRUID_USERNAME:}  # 监控页面用户名（必须由环境变量显式提供）
+        login-password: ${DRUID_PASSWORD:}  # 监控页面密码（必须由环境变量显式提供）
         reset-enable: false
 ```
 
@@ -132,7 +134,65 @@ sa-token:
   is-log: false
   # 是否写入响应头
   is-write-header: true
+
+platform:
+  identity:
+    login-security:
+      max-attempts-per-account: 5   # 单个账号在窗口内允许的最大失败次数
+      max-attempts-per-ip: 30       # 单个IP在窗口内允许的最大失败次数
+      window-seconds: 600           # 登录失败统计窗口(秒)
+      lock-minutes: 15              # 达到阈值后的锁定提示时长(分钟)
+    security:
+      allowed-origins:
+        - http://localhost:3000     # 默认前端调试域，生产请替换
+      public-api-patterns:          # 可选：追加自定义免鉴权路径
+        - /api/custom/public/**
+      documentation-patterns:       # 可选：文档及工具链白名单
+        - /swagger-ui/**
+        - /v3/api-docs/**
+      gateway-bypass-patterns:      # 可选：旁路API网关的路径
+        - /api/gateway/proxy/**
+
+### 6. OAuth 批量撤销与第三方映射配置
+
+#### 6.1 第三方 Provider 列表
+
+```yaml
+oauth:
+  third-party:
+    providers: wechat,google,github   # 默认支持的第三方 provider，可按需扩展/调整
 ```
+
+- `oauth.third-party.providers` 使用逗号分隔 provider 编码，列表由 `OAuthConfig#getThirdPartyProviders()` 自动读取。
+- 新增第三方接入时，只需在环境变量中覆盖，例如：
+  ```bash
+  export OAUTH_THIRD_PARTY_PROVIDERS=wechat,google,github,dingtalk
+  ```
+  重启服务后批量撤销逻辑会自动按新 provider 清理映射。
+- 每个 provider 的 Redis 前缀来源于 `application-redis.yml` 中的 `redis.prefix.third-party.token`（默认 `third_party:token:`），若有多环境区分可按需调整。
+
+#### 6.2 Redis 索引对照表
+
+OAuth/SSO 批量撤销依赖预先维护的 Redis 索引集合，下表列出默认键模式与用途：
+
+| Key/Pattern（默认前缀） | 类型 | 配置来源 | TTL 策略 | 作用说明 |
+| --- | --- | --- | --- | --- |
+| `oauth:user_token:{userId}:access` | Set | `redis.prefix.oauth.user-token` + `:access` | 取 `max(oauth.access-token.timeout, oauth.refresh-token.timeout)` | 记录用户持有的所有访问令牌，支持 `revokeTokensByUser` 定位。 |
+| `oauth:user_token:{userId}:refresh` | Set | `redis.prefix.oauth.user-token` + `:refresh` | 同上 | 记录用户持有的刷新令牌，批量撤销时同步清理。 |
+| `oauth:client_token:{clientId}:access` | Set | `redis.prefix.oauth.client-token` + `:access` | 同上 | 记录某客户端签发的访问令牌，供 `revokeTokensByClient` 使用。 |
+| `oauth:client_token:{clientId}:refresh` | Set | `redis.prefix.oauth.client-token` + `:refresh` | 同上 | 记录某客户端签发的刷新令牌。 |
+| `third_party:token:{provider}:access:{token}` | String | `redis.prefix.third-party.token` | 跟随第三方令牌生命周期 | 映射第三方 access token 与本地 OAuth token，用于批量撤销时同步删除。 |
+| `third_party:token:{provider}:refresh:{token}` | String | `redis.prefix.third-party.token` | 跟随第三方刷新令牌生命周期 | 记录第三方刷新令牌与本地映射。 |
+| `sso:user:{userId}` | Set | `redis.prefix.sso.user` | 取 `cache.expire.sso.token` | 存储用户登录过的客户端标识，用于批量下线。 |
+| `sso:client:users:{clientId}` | Set | `redis.prefix.sso.client` + `users:` | 取 `cache.expire.sso.token` | 记录客户端所关联的用户列表，支持客户端级批量撤销。 |
+| `sso:token:{token}` | String | `redis.prefix.sso.token` | `cache.expire.sso.token` | 持久化单个 SSO 会话，批量清理时用于回收残留 token。 |
+
+> 说明：以上键名均会自动追加环境前缀，具体 prefix 可在 `platform-identity/src/main/resources/application-redis.yml` 中查看或覆盖。若需要手动排查批量撤销效果，可通过 Redis `SMEMBERS`/`TTL` 命令查看对应集合是否已清空。
+
+### Swagger 权限说明
+
+- Swagger 会自动识别控制器上的 `@SaCheckPermission`、`@SaCheckRole`、`@SaCheckLogin` 注解，在接口说明中追加 **权限说明**，并通过 `x-required-permissions`、`x-required-roles`、`x-requires-login` 扩展字段暴露给前端。
+- 标记为 `@Deprecated` 的接口会自动从 Swagger 文档中移除，避免废弃路径继续暴露。例如：`/api/oauth/sso/sessions` 相关旧版 SSO 接口已被隐藏，统一使用 `/api/sso/**` 路径。
 
 ## API Gateway 专属配置
 
@@ -293,8 +353,8 @@ knife4j:
   production: false
   basic:
     enable: true
-    username: admin
-    password: 123456
+    username: ${KNIFE4J_BASIC_USERNAME:}
+    password: ${KNIFE4J_BASIC_PASSWORD:}
   setting:
     language: zh-CN
     enable-home-custom: true
@@ -325,7 +385,7 @@ dubbo:
     register-mode: instance
     address: nacos://localhost:8848
   provider:
-    token: ${DUBBO_PROVIDER_TOKEN:record-platform-internal-token}
+    token: ${DUBBO_PROVIDER_TOKEN:}
     filter: authFilter
     timeout: 5000
 ```
@@ -336,12 +396,12 @@ dubbo:
 spring:
   mail:
     host: ${MAIL_HOST:smtp.163.com}
-    username: ${MAIL_USERNAME:your_email@163.com}
-    password: ${MAIL_PASSWORD:your_password}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
     default-encoding: UTF-8
     port: 465
     properties:
-      from: ${MAIL_FROM:your_email@163.com}
+      from: ${MAIL_FROM_ADDRESS:}
       mail:
         smtp:
           auth: true
@@ -362,12 +422,12 @@ spring:
 ```yaml
 spring:
   rabbitmq:
-    addresses: ${RABBITMQ_HOST:192.168.5.100}
+    addresses: ${RABBITMQ_ADDRESSES:127.0.0.1}
     stream:
       port: 5672
-    username: ${RABBITMQ_USERNAME:rabbitmq}
-    password: ${RABBITMQ_PASSWORD:rabbitmq}
-    virtual-host: /
+    username: ${RABBITMQ_USERNAME:}
+    password: ${RABBITMQ_PASSWORD:}
+    virtual-host: ${RABBITMQ_VIRTUAL_HOST:/}
 ```
 
 ### 11. OAuth2 配置
@@ -383,7 +443,7 @@ oauth:
   default:
     scope: read                 # 默认作用域
   security:
-    use-bcrypt: false           # 是否使用BCrypt加密
+    use-bcrypt: true            # 是否使用BCrypt加密（默认启用）
     require-state: true         # 是否要求state参数
   redis:
     key-prefix: "oauth2:"       # Redis键前缀
@@ -459,13 +519,13 @@ spring:
   datasource:
     druid:
       url: jdbc:mysql://${DB_HOST:192.168.5.100}:${DB_PORT:3306}/platform_identity?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8&useSSL=false&allowPublicKeyRetrieval=true
-      username: ${DB_USERNAME:platform_identity}
-      password: ${DB_PASSWORD:your_password}
+      username: ${DB_USERNAME:}
+      password: ${DB_PASSWORD:}
   
   mail:
     host: ${MAIL_HOST:smtp.163.com}
-    username: ${MAIL_USERNAME:your_email@163.com}
-    password: ${MAIL_PASSWORD:your_password}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
     port: 465
     properties:
       mail:
@@ -477,10 +537,10 @@ spring:
             enable: true
   
   rabbitmq:
-    addresses: ${RABBITMQ_HOST:192.168.5.100}
+    addresses: ${RABBITMQ_ADDRESSES:127.0.0.1}
     port: 5672
-    username: ${RABBITMQ_USERNAME:rabbitmq}
-    password: ${RABBITMQ_PASSWORD:rabbitmq}
+    username: ${RABBITMQ_USERNAME:}
+    password: ${RABBITMQ_PASSWORD:}
     virtual-host: /
 ```
 
@@ -492,18 +552,19 @@ spring:
   datasource:
     druid:
       url: jdbc:mysql://${DB_HOST:192.168.5.100}:${DB_PORT:3306}/platform_identity?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8&useSSL=false&allowPublicKeyRetrieval=true
-      username: ${DB_USERNAME:platform_identity}
-      password: ${DB_PASSWORD:your_password}
+      username: ${DB_USERNAME:}
+      password: ${DB_PASSWORD:}
   
   mail:
     host: ${MAIL_HOST:smtp.163.com}
-    username: ${MAIL_USERNAME:your_email@163.com}
-    password: ${MAIL_PASSWORD:your_password}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
     
   rabbitmq:
-    addresses: ${RABBITMQ_HOST:192.168.5.100}
-    username: ${RABBITMQ_USERNAME:rabbitmq}
-    password: ${RABBITMQ_PASSWORD:rabbitmq}
+    addresses: ${RABBITMQ_ADDRESSES:127.0.0.1}
+    username: ${RABBITMQ_USERNAME:}
+    password: ${RABBITMQ_PASSWORD:}
+    virtual-host: ${RABBITMQ_VIRTUAL_HOST:/}
 ```
 
 ### 测试环境 (application-test.yml)
@@ -512,9 +573,9 @@ spring:
 # 测试环境配置
 spring:
   datasource:
-    url: jdbc:mysql://test-mysql.example.com:3306/platform_identity
-    username: test_user
-    password: ${DB_PASSWORD}
+    url: jdbc:mysql://${TEST_DB_HOST:}/platform_identity
+    username: ${TEST_DB_USERNAME:}
+    password: ${TEST_DB_PASSWORD:}
 
 api:
   monitor:
@@ -529,9 +590,9 @@ api:
 # 生产环境配置
 spring:
   datasource:
-    url: jdbc:mysql://prod-mysql.example.com:3306/platform_identity
-    username: prod_user
-    password: ${DB_PASSWORD}
+    url: jdbc:mysql://${PROD_DB_HOST:}/platform_identity
+    username: ${PROD_DB_USERNAME:}
+    password: ${PROD_DB_PASSWORD:}
     hikari:
       maximum-pool-size: 50  # 生产环境增加连接池大小
 
@@ -697,8 +758,8 @@ serverTimezone=Asia/Shanghai
 
 2. **Redis连接失败**
 ```yaml
-# 检查密码配置
-password: your_password  # 空密码不要配置此项
+# 检查密码配置（如需认证请使用环境变量提供）
+password: ${REDIS_PASSWORD:}  # 空密码請移除整行
 
 # 检查超时设置
 timeout: 5000ms  # 注意单位

@@ -362,6 +362,71 @@ public class SSOServiceImpl implements SSOService {
         }
     }
 
+    @Override
+    public void revokeUserSessions(Long userId) {
+        if (userId == null) {
+            throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "用户ID不能为空");
+        }
+        try {
+            clearAllClientLogins(userId);
+            try {
+                StpUtil.kickout(userId);
+            } catch (Exception ex) {
+                log.debug("强制踢出用户会话失败但忽略: userId={}, error={}", userId, ex.getMessage());
+            }
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("批量撤销用户SSO会话失败: userId={}", userId, e);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "批量撤销用户SSO会话失败");
+        }
+    }
+
+    @Override
+    public void revokeClientSessions(String clientId) {
+        if (StrUtil.isBlank(clientId)) {
+            throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "客户端标识不能为空");
+        }
+        try {
+            String clientUsersKey = buildClientUsersIndexKey(clientId);
+            Set<String> userIds = redisTemplate.opsForSet().members(clientUsersKey);
+            if (userIds != null) {
+                for (String userIdStr : userIds) {
+                    if (StrUtil.isBlank(userIdStr)) {
+                        continue;
+                    }
+                    try {
+                        Long userId = Long.valueOf(userIdStr);
+                        removeClientLogin(userId, clientId);
+                    } catch (NumberFormatException ex) {
+                        log.warn("客户端索引中存在非法用户ID，已忽略: clientId={}, userId={}", clientId, userIdStr, ex);
+                    }
+                }
+            }
+            redisTemplate.delete(clientUsersKey);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("批量撤销客户端SSO会话失败: clientId={}", clientId, e);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "批量撤销客户端SSO会话失败");
+        }
+    }
+
+    @Override
+    public void revokeUserClientSession(Long userId, String clientId) {
+        if (userId == null || StrUtil.isBlank(clientId)) {
+            throw new BusinessException(ResultEnum.PARAM_IS_INVALID, "用户ID与客户端标识不能为空");
+        }
+        try {
+            removeClientLogin(userId, clientId);
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("撤销单个用户客户端会话失败: userId={}, clientId={}", userId, clientId, e);
+            throw new BusinessException(ResultEnum.SYSTEM_ERROR, "撤销用户会话失败");
+        }
+    }
+
     /**
      * 移除客户端登录状态
      */
@@ -371,6 +436,9 @@ public class SSOServiceImpl implements SSOService {
 
         String userKey = ssoUserPrefix + userId;
         redisTemplate.opsForSet().remove(userKey, clientId);
+        cleanupSetIfEmpty(userKey);
+        removeUserFromClientIndex(userId, clientId);
+        removeTokensByPredicate(userId, clientId);
     }
 
     /**
@@ -385,21 +453,15 @@ public class SSOServiceImpl implements SSOService {
             for (String clientId : clientIds) {
                 String clientKey = ssoClientPrefix + userId + ":" + clientId;
                 redisTemplate.delete(clientKey);
+                removeUserFromClientIndex(userId, clientId);
             }
         }
 
         // 清除用户客户端列表
         redisTemplate.delete(userKey);
 
-        // 清除相关的 SSO Token - 使用SCAN替代KEYS
-        String pattern = ssoTokenPrefix + "*";
-        Set<String> tokenKeys = scanKeys(pattern);
-        for (String tokenKey : tokenKeys) {
-            String userInfo = redisTemplate.opsForValue().get(tokenKey);
-            if (userInfo != null && userInfo.startsWith(userId + ":")) {
-                redisTemplate.delete(tokenKey);
-            }
-        }
+        // 清除相关的 SSO Token
+        removeTokensByPredicate(userId, null);
     }
 
     /**
@@ -487,6 +549,71 @@ public class SSOServiceImpl implements SSOService {
         String userKey = ssoUserPrefix + userId;
         redisTemplate.opsForSet().add(userKey, clientId);
         redisTemplate.expire(userKey, ssoTokenTimeout, TimeUnit.SECONDS);
+        addUserToClientIndex(userId, clientId);
+    }
+
+    private void addUserToClientIndex(Long userId, String clientId) {
+        if (userId == null || StrUtil.isBlank(clientId)) {
+            return;
+        }
+        String key = buildClientUsersIndexKey(clientId);
+        redisTemplate.opsForSet().add(key, String.valueOf(userId));
+        redisTemplate.expire(key, ssoTokenTimeout, TimeUnit.SECONDS);
+    }
+
+    private void removeUserFromClientIndex(Long userId, String clientId) {
+        if (userId == null || StrUtil.isBlank(clientId)) {
+            return;
+        }
+        String key = buildClientUsersIndexKey(clientId);
+        redisTemplate.opsForSet().remove(key, String.valueOf(userId));
+        cleanupSetIfEmpty(key);
+    }
+
+    private void cleanupSetIfEmpty(String key) {
+        if (StrUtil.isBlank(key)) {
+            return;
+        }
+        try {
+            Long size = redisTemplate.opsForSet().size(key);
+            if (size == null || size <= 0) {
+                redisTemplate.delete(key);
+            }
+        } catch (Exception ex) {
+            log.debug("清理Redis集合失败但忽略: key={}, error={}", key, ex.getMessage());
+        }
+    }
+
+    private String buildClientUsersIndexKey(String clientId) {
+        return ssoClientPrefix + "users:" + clientId;
+    }
+
+    private void removeTokensByPredicate(Long userId, String clientId) {
+        try {
+            String pattern = ssoTokenPrefix + "*";
+            Set<String> tokenKeys = scanKeys(pattern);
+            if (tokenKeys.isEmpty()) {
+                return;
+            }
+            String userIdText = userId != null ? String.valueOf(userId) : null;
+            for (String tokenKey : tokenKeys) {
+                String userInfo = redisTemplate.opsForValue().get(tokenKey);
+                if (StrUtil.isBlank(userInfo)) {
+                    continue;
+                }
+                String[] parts = userInfo.split(":");
+                if (parts.length < 2) {
+                    continue;
+                }
+                boolean matchUser = userIdText == null || userIdText.equals(parts[0]);
+                boolean matchClient = clientId == null || clientId.equals(parts[1]);
+                if (matchUser && matchClient) {
+                    redisTemplate.delete(tokenKey);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("清理SSO Token时发生异常: userId={}, clientId={}", userId, clientId, e);
+        }
     }
 
     /**

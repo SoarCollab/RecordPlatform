@@ -9,8 +9,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.validation.annotation.Validated;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -26,6 +29,7 @@ import java.util.Map;
 @RequestMapping("/api/admin/gateway")
 @Tag(name = "网关监控", description = "网关流量监控和性能统计管理")
 @SaCheckRole("admin")
+@Validated
 public class GatewayMonitorController {
 
     @Resource
@@ -44,7 +48,7 @@ public class GatewayMonitorController {
         @ApiResponse(responseCode = "500", description = "系统错误")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getRealTimeTrafficStats(
-            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange) {
+            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") @Positive(message = "时间范围必须为正数") int timeRange) {
         Map<String, Object> data = gatewayMonitorService.getRealTimeTrafficStats(timeRange);
         return ResponseEntity.ok(RestResponse.ok("获取实时流量统计成功", data));
     }
@@ -61,8 +65,8 @@ public class GatewayMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getApiCallStats(
-            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange,
-            @Parameter(description = "返回条数限制") @RequestParam(defaultValue = "20") int limit) {
+            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") @Positive(message = "时间范围必须为正数") int timeRange,
+            @Parameter(description = "返回条数限制") @RequestParam(defaultValue = "20") @Positive(message = "返回条数必须为正数") int limit) {
         Map<String, Object> data = gatewayMonitorService.getApiCallStats(timeRange, limit);
         return ResponseEntity.ok(RestResponse.ok("获取API调用统计成功", data));
     }
@@ -79,7 +83,7 @@ public class GatewayMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getErrorStats(
-            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange) {
+            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") @Positive(message = "时间范围必须为正数") int timeRange) {
         Map<String, Object> data = gatewayMonitorService.getErrorStats(timeRange);
         return ResponseEntity.ok(RestResponse.ok("获取错误统计成功", data));
     }
@@ -96,7 +100,7 @@ public class GatewayMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getPerformanceStats(
-            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange) {
+            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") @Positive(message = "时间范围必须为正数") int timeRange) {
         Map<String, Object> data = gatewayMonitorService.getPerformanceStats(timeRange);
         return ResponseEntity.ok(RestResponse.ok("获取性能统计成功", data));
     }
@@ -113,7 +117,7 @@ public class GatewayMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getUserActivityStats(
-            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange) {
+            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") @Positive(message = "时间范围必须为正数") int timeRange) {
         Map<String, Object> data = gatewayMonitorService.getUserActivityStats(timeRange);
         return ResponseEntity.ok(RestResponse.ok("获取用户活跃度统计成功", data));
     }
@@ -131,8 +135,8 @@ public class GatewayMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> detectAbnormalTraffic(
-            @Parameter(description = "客户端IP") @RequestParam String clientIp,
-            @Parameter(description = "用户ID") @RequestParam(required = false) Long userId) {
+            @Parameter(description = "客户端IP") @RequestParam @NotBlank(message = "客户端IP不能为空") String clientIp,
+            @Parameter(description = "用户ID") @RequestParam(required = false) @Positive(message = "用户ID必须为正数") Long userId) {
         Map<String, Object> data = gatewayMonitorService.detectAbnormalTraffic(clientIp, userId);
         return ResponseEntity.ok(RestResponse.ok("检测成功", data));
     }
@@ -164,8 +168,8 @@ public class GatewayMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getHotApiRanking(
-            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange,
-            @Parameter(description = "返回条数限制") @RequestParam(defaultValue = "10") int limit) {
+            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") @Positive(message = "时间范围必须为正数") int timeRange,
+            @Parameter(description = "返回条数限制") @RequestParam(defaultValue = "10") @Positive(message = "返回条数必须为正数") int limit) {
         Map<String, Object> data = gatewayMonitorService.getHotApiRanking(timeRange, limit);
         return ResponseEntity.ok(RestResponse.ok("获取热点API排行成功", data));
     }
@@ -182,8 +186,8 @@ public class GatewayMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getSlowQueryStats(
-            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRange,
-            @Parameter(description = "慢查询阈值（毫秒）") @RequestParam(defaultValue = "1000") long threshold) {
+            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") @Positive(message = "时间范围必须为正数") int timeRange,
+            @Parameter(description = "慢查询阈值（毫秒）") @RequestParam(defaultValue = "1000") @Positive(message = "阈值必须为正数") long threshold) {
         Map<String, Object> data = gatewayMonitorService.getSlowQueryStats(timeRange, threshold);
         return ResponseEntity.ok(RestResponse.ok("获取慢查询统计成功", data));
     }

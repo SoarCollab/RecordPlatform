@@ -13,9 +13,12 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Positive;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.validation.annotation.Validated;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -32,6 +35,7 @@ import java.util.Map;
 @RequestMapping("/api/admin/operation-logs")
 @Tag(name = "操作日志管理", description = "操作日志的查询、统计、管理功能（管理员专用）")
 @SaCheckRole("admin")
+@Validated
 public class OperationLogController {
 
     @Resource
@@ -50,9 +54,9 @@ public class OperationLogController {
             @ApiResponse(responseCode = "400", description = "参数错误")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getOperationLogs(
-            @Parameter(description = "页码") @RequestParam(defaultValue = "1") int page,
-            @Parameter(description = "页大小") @RequestParam(defaultValue = "20") int size,
-            @Parameter(description = "用户ID") @RequestParam(required = false) Long userId,
+            @Parameter(description = "页码") @RequestParam(defaultValue = "1") @Min(value = 1, message = "页码必须大于等于1") int page,
+            @Parameter(description = "页大小") @RequestParam(defaultValue = "20") @Positive(message = "页大小必须为正数") int size,
+            @Parameter(description = "用户ID") @RequestParam(required = false) @Positive(message = "用户ID必须为正数") Long userId,
             @Parameter(description = "模块") @RequestParam(required = false) String module,
             @Parameter(description = "操作类型") @RequestParam(required = false) String operationType,
             @Parameter(description = "开始时间") @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
@@ -75,7 +79,7 @@ public class OperationLogController {
             @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getOperationLogStats(
-            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") int days) {
+            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") @Positive(message = "统计天数必须为正数") int days) {
 
         Result<Map<String, Object>> result = operationLogService.getOperationLogStats(days);
         RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
@@ -95,8 +99,8 @@ public class OperationLogController {
             @ApiResponse(responseCode = "404", description = "用户不存在")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getUserOperationStats(
-            @Parameter(description = "用户ID") @PathVariable Long userId,
-            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") int days) {
+            @Parameter(description = "用户ID") @PathVariable @Positive(message = "用户ID必须为正数") Long userId,
+            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") @Positive(message = "统计天数必须为正数") int days) {
 
         Result<Map<String, Object>> result = operationLogService.getUserOperationStats(userId, days);
         RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
@@ -114,7 +118,7 @@ public class OperationLogController {
             @ApiResponse(responseCode = "401", description = "未认证")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getMyOperationStats(
-            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") int days) {
+            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") @Positive(message = "统计天数必须为正数") int days) {
 
         Long userId = cn.dev33.satoken.stp.StpUtil.getLoginIdAsLong();
         Result<Map<String, Object>> result = operationLogService.getUserOperationStats(userId, days);
@@ -134,7 +138,7 @@ public class OperationLogController {
             @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getHighRiskOperations(
-            @Parameter(description = "查询天数") @RequestParam(defaultValue = "7") int days) {
+            @Parameter(description = "查询天数") @RequestParam(defaultValue = "7") @Positive(message = "查询天数必须为正数") int days) {
 
         Result<Map<String, Object>> result = operationLogService.getHighRiskOperations(days);
         RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
@@ -154,7 +158,7 @@ public class OperationLogController {
             @ApiResponse(responseCode = "404", description = "日志不存在")
     })
     public ResponseEntity<RestResponse<OperationLog>> getOperationLogDetail(
-            @Parameter(description = "日志ID") @PathVariable Long logId) {
+            @Parameter(description = "日志ID") @PathVariable @Positive(message = "日志ID必须为正数") Long logId) {
 
         Result<OperationLog> result = operationLogService.getOperationLogDetail(logId);
         RestResponse<OperationLog> response = ResponseConverter.convert(result);
@@ -174,7 +178,7 @@ public class OperationLogController {
             @ApiResponse(responseCode = "400", description = "参数错误")
     })
     public ResponseEntity<RestResponse<String>> exportOperationLogs(
-            @Parameter(description = "用户ID") @RequestParam(required = false) Long userId,
+            @Parameter(description = "用户ID") @RequestParam(required = false) @Positive(message = "用户ID必须为正数") Long userId,
             @Parameter(description = "模块") @RequestParam(required = false) String module,
             @Parameter(description = "开始时间") @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime startTime,
             @Parameter(description = "结束时间") @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss") LocalDateTime endTime) {
@@ -216,7 +220,7 @@ public class OperationLogController {
             @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> cleanExpiredLogs(
-            @Parameter(description = "保留天数") @RequestParam(defaultValue = "90") int retentionDays) {
+            @Parameter(description = "保留天数") @RequestParam(defaultValue = "90") @Positive(message = "保留天数必须为正数") int retentionDays) {
 
         Result<Map<String, Object>> result = operationLogService.cleanExpiredLogs(retentionDays);
         RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);

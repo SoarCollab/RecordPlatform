@@ -11,10 +11,13 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.validation.annotation.Validated;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -29,6 +32,7 @@ import java.util.Map;
 @RequestMapping("/api/admin/traffic-monitor")
 @Tag(name = "流量监控管理", description = "网关流量监控、异常检测和拦截管理（管理员专用）")
 @SaCheckRole("admin")
+@Validated
 public class TrafficMonitorController {
 
     @Resource
@@ -45,7 +49,7 @@ public class TrafficMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getRealTimeTrafficStats(
-            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRangeMinutes) {
+            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") @Positive(message = "时间范围必须为正数") int timeRangeMinutes) {
         
         Result<Map<String, Object>> result = trafficMonitorService.getRealTimeTrafficStats(timeRangeMinutes);
         RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
@@ -63,7 +67,7 @@ public class TrafficMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getAnomalousTrafficStats(
-            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRangeMinutes) {
+            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") @Positive(message = "时间范围必须为正数") int timeRangeMinutes) {
         
         Result<Map<String, Object>> result = trafficMonitorService.getAnomalousTrafficStats(timeRangeMinutes);
         RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
@@ -81,8 +85,8 @@ public class TrafficMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<List<Map<String, Object>>>> getTopTrafficIps(
-            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRangeMinutes,
-            @Parameter(description = "返回数量限制") @RequestParam(defaultValue = "20") int limit) {
+            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") @Positive(message = "时间范围必须为正数") int timeRangeMinutes,
+            @Parameter(description = "返回数量限制") @RequestParam(defaultValue = "20") @Positive(message = "返回数量必须为正数") int limit) {
         
         Result<List<Map<String, Object>>> result = trafficMonitorService.getTopTrafficIps(timeRangeMinutes, limit);
         RestResponse<List<Map<String, Object>>> response = ResponseConverter.convert(result);
@@ -100,8 +104,8 @@ public class TrafficMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<List<Map<String, Object>>>> getTopApis(
-            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") int timeRangeMinutes,
-            @Parameter(description = "返回数量限制") @RequestParam(defaultValue = "20") int limit) {
+            @Parameter(description = "时间范围（分钟）") @RequestParam(defaultValue = "60") @Positive(message = "时间范围必须为正数") int timeRangeMinutes,
+            @Parameter(description = "返回数量限制") @RequestParam(defaultValue = "20") @Positive(message = "返回数量必须为正数") int limit) {
         
         Result<List<Map<String, Object>>> result = trafficMonitorService.getTopApis(timeRangeMinutes, limit);
         RestResponse<List<Map<String, Object>>> response = ResponseConverter.convert(result);
@@ -136,9 +140,9 @@ public class TrafficMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Void>> addToBlacklist(
-            @Parameter(description = "客户端IP") @RequestParam String clientIp,
-            @Parameter(description = "拉黑原因") @RequestParam String reason,
-            @Parameter(description = "持续时间（小时）") @RequestParam(defaultValue = "24") int durationHours) {
+            @Parameter(description = "客户端IP") @RequestParam @NotBlank(message = "客户端IP不能为空") String clientIp,
+            @Parameter(description = "拉黑原因") @RequestParam @NotBlank(message = "拉黑原因不能为空") String reason,
+            @Parameter(description = "持续时间（小时）") @RequestParam(defaultValue = "24") @Positive(message = "持续时间必须为正数") int durationHours) {
         
         Result<Void> result = trafficMonitorService.addToBlacklist(clientIp, reason, durationHours);
         RestResponse<Void> response = ResponseConverter.convert(result);
@@ -157,7 +161,7 @@ public class TrafficMonitorController {
         @ApiResponse(responseCode = "404", description = "IP不在黑名单中")
     })
     public ResponseEntity<RestResponse<Void>> removeFromBlacklist(
-            @Parameter(description = "客户端IP") @PathVariable String clientIp) {
+            @Parameter(description = "客户端IP") @PathVariable @NotBlank(message = "客户端IP不能为空") String clientIp) {
         
         Result<Void> result = trafficMonitorService.removeFromBlacklist(clientIp);
         RestResponse<Void> response = ResponseConverter.convert(result);
@@ -175,7 +179,7 @@ public class TrafficMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Boolean>> isBlacklisted(
-            @Parameter(description = "客户端IP") @RequestParam String clientIp) {
+            @Parameter(description = "客户端IP") @RequestParam @NotBlank(message = "客户端IP不能为空") String clientIp) {
         
         Result<Boolean> result = trafficMonitorService.isBlacklisted(clientIp);
         RestResponse<Boolean> response = ResponseConverter.convert(result);
@@ -211,8 +215,8 @@ public class TrafficMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> checkTrafficBlock(
-            @Parameter(description = "客户端IP") @RequestParam String clientIp,
-            @Parameter(description = "用户ID") @RequestParam(required = false) Long userId,
+            @Parameter(description = "客户端IP") @RequestParam @NotBlank(message = "客户端IP不能为空") String clientIp,
+            @Parameter(description = "用户ID") @RequestParam(required = false) @Positive(message = "用户ID必须为正数") Long userId,
             @Parameter(description = "请求路径") @RequestParam(required = false) String requestPath,
             @Parameter(description = "用户代理") @RequestParam(required = false) String userAgent) {
         
@@ -264,7 +268,7 @@ public class TrafficMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> cleanExpiredData(
-            @Parameter(description = "保留天数") @RequestParam(defaultValue = "7") int retentionDays) {
+            @Parameter(description = "保留天数") @RequestParam(defaultValue = "7") @Positive(message = "保留天数必须为正数") int retentionDays) {
         
         Result<Map<String, Object>> result = trafficMonitorService.cleanExpiredData(retentionDays);
         RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
@@ -304,8 +308,8 @@ public class TrafficMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Void>> updateBlockingRule(
-            @Parameter(description = "规则类型") @RequestParam String ruleType,
-            @Parameter(description = "规则值") @RequestParam String ruleValue) {
+            @Parameter(description = "规则类型") @RequestParam @NotBlank(message = "规则类型不能为空") String ruleType,
+            @Parameter(description = "规则值") @RequestParam @NotBlank(message = "规则值不能为空") String ruleValue) {
         
         Result<Void> result = trafficMonitorService.updateBlockingRule(ruleType, ruleValue);
         RestResponse<Void> response = ResponseConverter.convert(result);
@@ -323,7 +327,7 @@ public class TrafficMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getTrafficTrend(
-            @Parameter(description = "时间范围（小时）") @RequestParam(defaultValue = "24") int timeRangeHours) {
+            @Parameter(description = "时间范围（小时）") @RequestParam(defaultValue = "24") @Positive(message = "时间范围必须为正数") int timeRangeHours) {
         
         // 转换小时为分钟
         Result<Map<String, Object>> result = trafficMonitorService.getRealTimeTrafficStats(timeRangeHours * 60);
@@ -360,10 +364,10 @@ public class TrafficMonitorController {
         @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> batchBlacklistOperation(
-            @Parameter(description = "操作类型（add/remove）") @RequestParam String operation,
+            @Parameter(description = "操作类型（add/remove）") @RequestParam @NotBlank(message = "操作类型不能为空") String operation,
             @Parameter(description = "IP列表") @RequestBody List<String> ipList,
             @Parameter(description = "操作原因") @RequestParam(required = false) String reason,
-            @Parameter(description = "持续时间（小时）") @RequestParam(defaultValue = "24") int durationHours) {
+            @Parameter(description = "持续时间（小时）") @RequestParam(defaultValue = "24") @Positive(message = "持续时间必须为正数") int durationHours) {
         
         int successCount = 0;
         int failedCount = 0;

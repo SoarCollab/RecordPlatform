@@ -18,9 +18,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.validation.annotation.Validated;
 
 import java.util.Map;
 
@@ -34,6 +36,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/auth")
 @Tag(name = "认证管理", description = "用户认证、注册、密码管理相关接口")
+@Validated
 public class AuthController {
 
     @Resource
@@ -180,7 +183,7 @@ public class AuthController {
             @ApiResponse(responseCode = "403", description = "无权限"),
             @ApiResponse(responseCode = "404", description = "用户未找到")
     })
-    public ResponseEntity<RestResponse<AccountVO>> searchUser(@RequestParam String query) {
+    public ResponseEntity<RestResponse<AccountVO>> searchUser(@RequestParam @NotBlank(message = "查询条件不能为空") String query) {
         AccountVO accountVO = authService.findUserWithMasking(query);
         return ResponseEntity.ok(RestResponse.ok("查找成功", accountVO));
     }

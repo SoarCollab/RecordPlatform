@@ -25,7 +25,7 @@ API 调用需要使用签名认证，请求头包含：
 ```http
 X-API-Key: ak_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 X-Timestamp: 1697001600
-X-Nonce: random_string_123456
+X-Nonce: random_string_XYZ789
 X-Signature: sha256_signature_here
 ```
 
@@ -180,6 +180,109 @@ Authorization: Bearer {token}
 }
 ```
 
+### OAuth 管理接口
+
+#### 1. 按用户批量撤销令牌
+
+- **接口地址**: `POST /api/oauth/tokens/revoke/users/{userId}`
+- **权限要求**: `oauth:token:revoke:user`
+- **说明**: 清理指定用户的所有 OAuth 访问/刷新令牌，同时强制注销其 SSO 会话。
+- **路径参数**:
+
+  | 参数名 | 类型 | 说明 |
+  | ------ | ---- | ---- |
+  | `userId` | Long | 业务用户 ID，需与 OAuth/SSO 索引一致 |
+
+- **可能的错误响应**:
+  - `400 PARAM_IS_INVALID`：`userId` 为空或不是有效数字。
+  - `403 NO_PERMISSION`：当前会话缺少 `oauth:token:revoke:user` 权限。
+  - `500 SYSTEM_ERROR`：Redis/数据库访问异常。
+
+> 对应 RPC：`AuthFacadeService.revokeTokensByUser`，可用于内部系统联调。若用户暂无任何令牌，接口仍返回 200。
+
+**示例请求**:
+```http
+POST /identity/api/oauth/tokens/revoke/users/123
+Authorization: Bearer {admin_token}
+```
+
+**成功响应**:
+```json
+{
+  "status": 200,
+  "message": "批量撤销用户令牌成功",
+  "data": null,
+  "timestamp": "2025-10-31T13:30:00Z"
+}
+```
+
+> 执行后可通过 `SMEMBERS oauth:user_token:{userId}:access` 验证索引是否为空，并结合 SSO API 确认会话已下线。
+
+#### 2. 按客户端批量撤销令牌
+
+- **接口地址**: `POST /api/oauth/tokens/revoke/clients/{clientId}`
+- **权限要求**: `oauth:token:revoke:client`
+- **说明**: 清理指定客户端生成的所有 OAuth 访问/刷新令牌，并移除该客户端在 SSO 中的登录记录。
+- **路径参数**:
+
+  | 参数名 | 类型 | 说明 |
+  | ------ | ---- | ---- |
+  | `clientId` | String | OAuth 客户端标识（例如 `demo-client`） |
+
+- **可能的错误响应**:
+  - `400 PARAM_IS_INVALID`：`clientId` 为空。
+  - `403 NO_PERMISSION`：缺少 `oauth:token:revoke:client` 权限。
+  - `500 SYSTEM_ERROR`：索引清理或 SSO 下线异常。
+
+> 对应 RPC：`AuthFacadeService.revokeTokensByClient`。若客户端未产生任何令牌，接口同样返回 200。
+
+**示例请求**:
+```http
+POST /identity/api/oauth/tokens/revoke/clients/demo-client
+Authorization: Bearer {admin_token}
+```
+
+**成功响应**:
+```json
+{
+  "status": 200,
+  "message": "批量撤销客户端令牌成功",
+  "data": null,
+  "timestamp": "2025-10-31T13:31:00Z"
+}
+```
+
+> 建议同步检查 `oauth:client_token:{clientId}:access` 集合与 `sso:client:users:{clientId}` 是否被清空。
+
+#### 3. 全量撤销令牌
+
+- **接口地址**: `POST /api/oauth/tokens/revoke/all`
+- **权限要求**: `oauth:token:revoke:all`
+- **说明**: 清空系统内所有 OAuth 访问/刷新令牌，常用于紧急安全响应。执行前请确保已通知各业务系统。
+- **可能的错误响应**:
+  - `403 NO_PERMISSION`：缺少 `oauth:token:revoke:all` 权限。
+  - `500 SYSTEM_ERROR`：Redis 扫描或删除过程中出现异常。
+
+> 此操作会遍历所有 `oauth:access_token:*` 与 `oauth:refresh_token:*` 键并触发第三方映射/SSO 会话清理，请在低峰时段执行。
+
+**示例请求**:
+```http
+POST /identity/api/oauth/tokens/revoke/all
+Authorization: Bearer {admin_token}
+```
+
+**成功响应**:
+```json
+{
+  "status": 200,
+  "message": "已撤销全部令牌",
+  "data": null,
+  "timestamp": "2025-10-31T13:32:00Z"
+}
+```
+
+> 建议执行后重新发布客户端凭证或通知第三方系统重新登录，避免业务中断。
+
 ### 密钥管理接口
 
 #### 1. 生成 API 密钥
@@ -298,7 +401,7 @@ const signature = generateSignature(apiKey, apiSecret, timestamp, nonce, request
 POST /identity/api/gateway/keys/validation
 Content-Type: application/x-www-form-urlencoded
 
-apiKey=ak_xY3kL9mN2pQ8rS5tU6vW7xA1bC2dE3f&timestamp=1697001600&nonce=unique_random_string_123456&signature=2a9f3d8b7e5c1a6d9e2f7b4c8a3e6d9f1b5c7a3e8d2f9a4b6c7e1d3f5a8b2c4e
+apiKey=ak_xY3kL9mN2pQ8rS5tU6vW7xA1bC2dE3f&timestamp=1697001600&nonce=unique_random_string_XYZ789&signature=2a9f3d8b7e5c1a6d9e2f7b4c8a3e6d9f1b5c7a3e8d2f9a4b6c7e1d3f5a8b2c4e
 ```
 
 **响应示例**:

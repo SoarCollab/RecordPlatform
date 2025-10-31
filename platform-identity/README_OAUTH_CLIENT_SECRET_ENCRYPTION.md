@@ -7,6 +7,8 @@
 - 🔐 **BCrypt加密**：新注册的客户端密钥自动使用BCrypt加密存储
 - 💪 **密钥强度验证**：确保客户端密钥满足安全要求
 
+> 自 2025-10-31 起，`oauth.security.use-bcrypt` 默认开启，无需手动配置即可启用加密。只有在本地排查历史数据时才建议临时关闭，并在调试完成后立即恢复。
+
 ## ⚙️ 配置说明
 
 ### 1. 启用BCrypt加密
@@ -16,7 +18,7 @@
 ```yaml
 oauth:
   security:
-    # 启用BCrypt加密客户端密钥（推荐在生产环境启用）
+    # 启用BCrypt加密客户端密钥（默认已开启，生产环境禁止关闭）
     use-bcrypt: true
     # 要求HTTPS重定向（推荐在生产环境启用）
     require-https: true
@@ -28,10 +30,20 @@ oauth:
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
-| `oauth.security.use-bcrypt` | `false` | 是否使用BCrypt加密客户端密钥 |
+| `oauth.security.use-bcrypt` | `true` | 是否使用BCrypt加密客户端密钥 |
 | `oauth.security.require-https` | `false` | 是否要求HTTPS重定向 |
 | `oauth.security.require-state` | `true` | 是否要求状态参数 |
 | `oauth.security.max-code-attempts` | `3` | 授权码最大重试次数 |
+
+**环境变量覆盖示例**
+
+```bash
+# 仅限本地排查时临时关闭（重启后请立即恢复为 true）
+export OAUTH_SECURITY_USE_BCRYPT=false
+
+# 恢复默认值
+unset OAUTH_SECURITY_USE_BCRYPT
+```
 
 ## 🚀 使用方法
 
@@ -70,26 +82,32 @@ Content-Type: application/json
 
 
 
-## 🔧 开发环境配置
+## 🔧 环境配置建议
 
-### 开发环境（明文模式）
+- **生产 / 测试环境**：保持默认配置，使用 BCrypt 加密 (`use-bcrypt: true`)。
+- **本地开发调试**：如须排查历史明文数据，可仅在本地 profile 中临时设置 `use-bcrypt: false`，调试结束后务必恢复。
 
 ```yaml
+# application-dev.yml（可选，仅限本地调试）
 oauth:
   security:
-    use-bcrypt: false  # 开发环境可以使用明文以便调试
+    use-bcrypt: false
     require-https: false
 ```
 
-### 生产环境（加密模式）
-
 ```yaml
+# application-prod.yml
 oauth:
   security:
-    use-bcrypt: true   # 生产环境必须启用
+    use-bcrypt: true
     require-https: true
     require-state: true
 ```
+
+## ♻️ 自动密钥轮换
+
+- 当 `use-bcrypt` 为 `true` 且客户端仍使用明文密钥时，系统会在首次认证成功后自动将该密钥升级为 BCrypt 并更新数据库。
+- 建议通过运营后台通知旧客户端重新生成密钥，以加快淘汰明文密钥的进度。
 
 ## 🛡️ 安全最佳实践
 

@@ -3,9 +3,11 @@ package cn.flying.identity.service;
 import cn.dev33.satoken.session.SaSession;
 import cn.dev33.satoken.stp.SaTokenInfo;
 import cn.dev33.satoken.stp.StpUtil;
+import cn.flying.identity.config.ApplicationProperties;
 import cn.flying.identity.dto.Account;
 import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.service.impl.AuthServiceImpl;
+import cn.flying.identity.util.FlowUtils;
 import cn.flying.identity.vo.AccountVO;
 import cn.flying.identity.vo.LoginStatusVO;
 import cn.flying.identity.vo.request.ChangePasswordVO;
@@ -46,6 +48,14 @@ class AuthServiceTest {
     @Mock
     private JwtBlacklistService jwtBlacklistService;
 
+    @Mock
+    private FlowUtils flowUtils;
+
+    @Mock
+    private ApplicationProperties applicationProperties;
+
+    private ApplicationProperties.LoginSecurity loginSecurity;
+
     private static final Long TEST_USER_ID = 123L;
     private static final String TEST_USERNAME = "testuser";
     private static final String TEST_EMAIL = "test@example.com";
@@ -55,7 +65,9 @@ class AuthServiceTest {
 
     @BeforeEach
     void setUp() {
-        // 預先配置可復用的mock邏輯
+        loginSecurity = new ApplicationProperties.LoginSecurity();
+        when(applicationProperties.getLoginSecurity()).thenReturn(loginSecurity);
+        when(flowUtils.recordLoginFailure(anyString(), anyInt())).thenReturn(1);
     }
 
     @Test
@@ -85,8 +97,9 @@ class AuthServiceTest {
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> authService.login(TEST_USERNAME, TEST_PASSWORD));
-        assertEquals(ResultEnum.USER_NOT_EXIST.getCode(), ex.getCode());
+        assertEquals(ResultEnum.USER_LOGIN_ERROR.getCode(), ex.getCode());
         verify(accountService).findAccountByNameOrEmail(TEST_USERNAME);
+        verify(flowUtils, atLeastOnce()).recordLoginFailure(anyString(), anyInt());
     }
 
     @Test
@@ -99,6 +112,36 @@ class AuthServiceTest {
                 () -> authService.login(TEST_USERNAME, TEST_PASSWORD));
         assertEquals(ResultEnum.USER_LOGIN_ERROR.getCode(), ex.getCode());
         verify(accountService).matchesPassword(eq(TEST_PASSWORD), eq(TEST_PASSWORD_ENCODED));
+        verify(flowUtils, atLeastOnce()).recordLoginFailure(anyString(), anyInt());
+    }
+
+    @Test
+    void testLogin_TooManyAttemptsForAccount() {
+        loginSecurity.setMaxAttemptsPerAccount(3);
+        loginSecurity.setLockMinutes(5);
+        when(flowUtils.getLoginFailureCount(anyString())).thenReturn(3, 0, 0);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.login(TEST_USERNAME, TEST_PASSWORD));
+
+        assertEquals(ResultEnum.PERMISSION_LIMIT.getCode(), ex.getCode());
+        verify(accountService, never()).findAccountByNameOrEmail(anyString());
+        verify(flowUtils, never()).recordLoginFailure(anyString(), anyInt());
+    }
+
+    @Test
+    void testLogin_TooManyAttemptsForIp() {
+        loginSecurity.setMaxAttemptsPerIp(2);
+        loginSecurity.setLockMinutes(5);
+        when(flowUtils.getLoginFailureCount(argThat(id -> id.startsWith("acct:")))).thenReturn(0);
+        when(flowUtils.getLoginFailureCount(argThat(id -> id.startsWith("ip:")))).thenReturn(2);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> authService.login(TEST_USERNAME, TEST_PASSWORD));
+
+        assertEquals(ResultEnum.PERMISSION_LIMIT.getCode(), ex.getCode());
+        verify(accountService, never()).findAccountByNameOrEmail(anyString());
+        verify(flowUtils, never()).recordLoginFailure(anyString(), anyInt());
     }
 
     @Test

@@ -9,7 +9,7 @@ RecordPlatform Identity Service 是基于区块链的分布式存证平台的身
 ### 🔐 身份认证管理
 - **多种登录方式**: 用户名/邮箱登录、第三方OAuth登录
 - **用户生命周期**: 注册、激活、密码管理、账号注销
-- **密码安全**: BCrypt加密，强度可配置，防暴力破解
+- **密码安全**: BCrypt加密，强度可配置，并提供账号/IP 登录尝试限流防护
 - **会话管理**: 基于Sa-Token的无状态JWT会话管理
 
 ### 🔑 OAuth2.0 授权服务
@@ -17,12 +17,14 @@ RecordPlatform Identity Service 是基于区块链的分布式存证平台的身
 - **客户端管理**: 动态注册、更新、删除OAuth客户端
 - **细粒度权限**: 基于scope的权限控制
 - **令牌生命周期**: 自动过期、主动撤销、安全刷新
+- **批量撤销能力**: 支持按用户、客户端或全量清理令牌，并自动更新 Redis 索引与第三方映射
 
 ### 🌐 SSO单点登录
 - **跨应用登录**: 一次登录，多应用访问
 - **安全传输**: JWT令牌安全传输和验证
 - **统一注销**: 单点注销，全局会话清理
 - **客户端管理**: 已登录客户端列表和管理
+- **批量会话管理**: 支持按用户、客户端批量下线并同步清除 SSO Token 索引
 
 ### 🚪 API Gateway 网关
 - **应用管理**: 第三方应用注册、审核、生命周期管理
@@ -110,6 +112,15 @@ cd RecordPlatform/platform-identity
 mysql -u root -p < src/main/resources/sql/complete_init.sql
 ```
 
+#### 2.1 升级至最新数据库结构
+
+- 服务启用了 Flyway，启动时会自动执行 `platform-identity/db/migration` 目录下的脚本。请确认 `V2.1__add_third_party_unique_and_session_index.sql` 已成功落库。
+- 如需手动升级，可在维护窗口执行：
+  ```bash
+  mysql -u ${DB_USERNAME} -p platform_identity < platform-identity/db/migration/V2.1__add_third_party_unique_and_session_index.sql
+  ```
+- 索引与唯一约束调整的背景与回滚建议参见 `platform-identity/db/INDEX_OPTIMIZATION_DESIGN.md`。
+
 ### 3. 配置文件设置
 ```yaml
 # src/main/resources/application-dev.yml
@@ -117,18 +128,20 @@ spring:
   datasource:
     druid:
       url: jdbc:mysql://localhost:3306/platform_identity?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8
-      username: your_username
-      password: your_password
+      username: ${DB_USERNAME:}
+      password: ${DB_PASSWORD:}
   data:
     redis:
       host: localhost
       port: 6379
-      password: your_redis_password
+      password: ${REDIS_PASSWORD:}
   mail:
     host: smtp.163.com
-    username: your_email@163.com
-    password: your_mail_password
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
 ```
+
+> ⚠️ 所有敏感凭证需通过环境变量或安全配置中心提供，示例中占位符仅用于说明，部署时必须替换为实际值。
 
 ### 4. 启动服务
 ```bash
@@ -146,18 +159,25 @@ curl http://localhost:8888/identity/actuator/health
 
 # API文档
 http://localhost:8888/identity/doc.html
-# 默认账号: admin / 123456
+# 首次启动需按部署流程创建管理员账号，系统不再提供默认凭证
 ```
 
 ## 📋 主要API接口
 
 ### 认证管理 `/api/auth`
-- `POST /api/auth/login` - 用户登录
-- `POST /api/auth/logout` - 用户注销
-- `POST /api/auth/register` - 用户注册
-- `POST /api/auth/verify-code` - 发送验证码
-- `POST /api/auth/reset-password` - 重置密码
-- `GET /api/auth/user-info` - 获取用户信息
+- `POST /api/auth/sessions` - 创建会话（登录）
+- `DELETE /api/auth/sessions/current` - 销毁当前会话（登出）
+- `GET /api/auth/sessions/status` - 查询当前会话状态
+- `POST /api/auth/users` - 创建新用户
+- `POST /api/auth/verification-codes` - 发送邮箱验证码
+- `PUT /api/auth/passwords/reset` - 重置密码
+
+### OAuth 管理 `/api/oauth/tokens`
+- `POST /api/oauth/tokens/revoke` - 撤销指定访问或刷新令牌（权限：`oauth:token:revoke`）
+- `POST /api/oauth/tokens/revoke/users/{userId}` - 批量撤销指定用户的所有令牌（权限：`oauth:token:revoke:user`）
+- `POST /api/oauth/tokens/revoke/clients/{clientId}` - 批量撤销指定客户端签发的令牌（权限：`oauth:token:revoke:client`）
+- `POST /api/oauth/tokens/revoke/all` - 撤销平台内全部 OAuth 令牌（紧急场景，权限：`oauth:token:revoke:all`）
+- `GET /api/auth/me` - 获取当前用户信息
 
 ### OAuth2.0 `/oauth`
 - `GET /oauth/authorize` - 获取授权页面
@@ -369,7 +389,7 @@ oauth:
   refresh-token:
     timeout: 86400            # 刷新令牌过期时间(秒)
   security:
-    use-bcrypt: false
+    use-bcrypt: true
     require-state: true
   redis:
     key-prefix: "oauth2:"
@@ -497,14 +517,14 @@ services:
   mysql:
     image: mysql:8.0
     environment:
-      MYSQL_ROOT_PASSWORD: your_password
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set-root-password}
       MYSQL_DATABASE: platform_identity
     volumes:
       - mysql_data:/var/lib/mysql
       
   redis:
     image: redis:7-alpine
-    command: redis-server --requirepass your_password
+    command: redis-server --requirepass ${REDIS_PASSWORD:?set-redis-password}
     volumes:
       - redis_data:/data
 
@@ -512,6 +532,8 @@ volumes:
   mysql_data:
   redis_data:
 ```
+
+> 提示：上述 Compose 片段依赖外部环境变量 `MYSQL_ROOT_PASSWORD`、`REDIS_PASSWORD`，请在部署环境中安全地注入实际值。
 
 ### 生产环境部署
 ```bash
@@ -612,6 +634,17 @@ class AuthServiceTest {
     }
 }
 ```
+
+### 批量撤销验证步骤
+
+1. 执行定向单元测试，覆盖 OAuth 与 SSO 索引清理：
+   ```bash
+   mvn -pl platform-identity -Dtest=OAuthServiceTest,SSOServiceTest test
+   ```
+2. 若需验证第三方映射清理，可在测试后检查 Redis 前缀 `third_party:token:*` 是否被清空。
+3. 历史 `FlowUtilsTest` 依赖真实 Redis 实例，暂未纳入默认执行，可按需在本地准备环境后运行全量 `mvn test`。
+
+> 完整的测试记录与输出请同步更新 `verification.md`、`.codex/testing.md`。
 
 ### 提交规范
 ```bash

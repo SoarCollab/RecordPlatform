@@ -11,9 +11,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
+import jakarta.validation.constraints.Positive;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.validation.annotation.Validated;
 
 import java.util.Map;
 
@@ -26,6 +28,7 @@ import java.util.Map;
 @RequestMapping("/api/admin/user-stats")
 @Tag(name = "用户统计", description = "用户相关的统计分析功能（管理员专用）")
 @SaCheckRole("admin")
+@Validated
 public class UserStatisticsController {
 
     @Resource
@@ -58,7 +61,7 @@ public class UserStatisticsController {
             @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getRegistrationTrend(
-            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") int days) {
+            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") @Positive(message = "统计天数必须为正数") int days) {
 
         Result<Map<String, Object>> result = userStatisticsService.getRegistrationTrend(days);
         RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
@@ -76,7 +79,7 @@ public class UserStatisticsController {
             @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getUserActivityStats(
-            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") int days) {
+            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") @Positive(message = "统计天数必须为正数") int days) {
 
         Result<Map<String, Object>> result = userStatisticsService.getUserActivityStats(days);
         RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
@@ -126,7 +129,7 @@ public class UserStatisticsController {
             @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getUserLoginStats(
-            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") int days) {
+            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") @Positive(message = "统计天数必须为正数") int days) {
 
         Result<Map<String, Object>> result = userStatisticsService.getUserLoginStats(days);
         RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
@@ -144,7 +147,7 @@ public class UserStatisticsController {
             @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getUserRetentionRate(
-            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") int days) {
+            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") @Positive(message = "统计天数必须为正数") int days) {
 
         Result<Map<String, Object>> result = userStatisticsService.getUserRetentionRate(days);
         RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
@@ -162,7 +165,7 @@ public class UserStatisticsController {
             @ApiResponse(responseCode = "403", description = "无权限")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getUserGrowthRate(
-            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") int days) {
+            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") @Positive(message = "统计天数必须为正数") int days) {
 
         Result<Map<String, Object>> result = userStatisticsService.getUserGrowthRate(days);
         RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);
@@ -181,8 +184,8 @@ public class UserStatisticsController {
             @ApiResponse(responseCode = "404", description = "用户不存在")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getUserBehaviorStats(
-            @Parameter(description = "用户ID") @PathVariable Long userId,
-            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") int days) {
+            @Parameter(description = "用户ID") @PathVariable @Positive(message = "用户ID必须为正数") Long userId,
+            @Parameter(description = "统计天数") @RequestParam(defaultValue = "30") @Positive(message = "统计天数必须为正数") int days) {
 
         Result<Map<String, Object>> result = userStatisticsService.getUserBehaviorStats(userId, days);
         RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);

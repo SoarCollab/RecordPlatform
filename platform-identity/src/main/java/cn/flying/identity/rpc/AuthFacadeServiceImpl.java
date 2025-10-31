@@ -2,8 +2,10 @@ package cn.flying.identity.rpc;
 
 import cn.dev33.satoken.stp.StpInterface;
 import cn.flying.identity.config.OAuthConfig;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.mapper.AccountMapper;
 import cn.flying.identity.service.JwtBlacklistService;
+import cn.flying.identity.service.OAuthService;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.identity.AuthFacadeService;
@@ -55,6 +57,9 @@ public class AuthFacadeServiceImpl implements AuthFacadeService {
 
     @Resource
     private AccountMapper accountMapper;
+
+    @Resource
+    private OAuthService oauthService;
 
     /**
      * 令牌自省 - 获取令牌详细信息
@@ -464,6 +469,62 @@ public class AuthFacadeServiceImpl implements AuthFacadeService {
             errorCount.incrementAndGet();
             log.error("撤销令牌发生异常: token={}", maskToken(token), e);
             return Result.errorWithMessage(ResultEnum.SYSTEM_ERROR, "撤销令牌失败");
+        }
+    }
+
+    @Override
+    public Result<Void> revokeTokensByUser(Long userId) {
+        revokeCount.incrementAndGet();
+        if (userId == null) {
+            log.warn("批量撤销用户令牌失败：userId 为空");
+            return Result.errorWithMessage(ResultEnum.PARAMETER_ERROR, "用户ID不能为空");
+        }
+        try {
+            oauthService.revokeTokensByUser(userId);
+            return Result.success(null);
+        } catch (BusinessException e) {
+            log.error("批量撤销用户令牌发生业务异常: userId={}, code={}, message={}", userId, e.getCode(), e.getMessage());
+            return Result.errorWithMessage(ResultEnum.SYSTEM_ERROR, e.getMessage());
+        } catch (Exception e) {
+            errorCount.incrementAndGet();
+            log.error("批量撤销用户令牌失败: userId={}", userId, e);
+            return Result.errorWithMessage(ResultEnum.SYSTEM_ERROR, "批量撤销用户令牌失败");
+        }
+    }
+
+    @Override
+    public Result<Void> revokeTokensByClient(String clientId) {
+        revokeCount.incrementAndGet();
+        if (clientId == null || clientId.trim().isEmpty()) {
+            log.warn("批量撤销客户端令牌失败：clientId 为空");
+            return Result.errorWithMessage(ResultEnum.PARAMETER_ERROR, "客户端标识不能为空");
+        }
+        try {
+            oauthService.revokeTokensByClient(clientId);
+            return Result.success(null);
+        } catch (BusinessException e) {
+            log.error("批量撤销客户端令牌发生业务异常: clientId={}, code={}, message={}", clientId, e.getCode(), e.getMessage());
+            return Result.errorWithMessage(ResultEnum.SYSTEM_ERROR, e.getMessage());
+        } catch (Exception e) {
+            errorCount.incrementAndGet();
+            log.error("批量撤销客户端令牌失败: clientId={}", clientId, e);
+            return Result.errorWithMessage(ResultEnum.SYSTEM_ERROR, "批量撤销客户端令牌失败");
+        }
+    }
+
+    @Override
+    public Result<Void> revokeAllTokens() {
+        revokeCount.incrementAndGet();
+        try {
+            oauthService.revokeAllTokens();
+            return Result.success(null);
+        } catch (BusinessException e) {
+            log.error("批量撤销所有令牌发生业务异常: code={}, message={}", e.getCode(), e.getMessage());
+            return Result.errorWithMessage(ResultEnum.SYSTEM_ERROR, e.getMessage());
+        } catch (Exception e) {
+            errorCount.incrementAndGet();
+            log.error("批量撤销所有令牌失败", e);
+            return Result.errorWithMessage(ResultEnum.SYSTEM_ERROR, "批量撤销所有令牌失败");
         }
     }
 

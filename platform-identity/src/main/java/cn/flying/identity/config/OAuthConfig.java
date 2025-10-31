@@ -46,7 +46,7 @@ public class OAuthConfig {
     /**
      * 是否使用BCrypt加密客户端密钥
      */
-    @Value("${oauth.security.use-bcrypt:false}")
+    @Value("${oauth.security.use-bcrypt:true}")
     private boolean useBcrypt;
 
     /**
@@ -60,6 +60,12 @@ public class OAuthConfig {
      */
     @Value("${oauth.redis.key-prefix:oauth2:}")
     private String redisKeyPrefix;
+
+    /**
+     * 第三方 provider 列表，逗号分隔
+     */
+    @Value("${oauth.third-party.providers:wechat,google,github}")
+    private String thirdPartyProviders;
 
     /**
      * 获取Redis键前缀配置
@@ -83,6 +89,27 @@ public class OAuthConfig {
 
     public String getUserTokenPrefix() {
         return redisKeyPrefix + "user_token:";
+    }
+
+    public String getRedisKeyPrefix() {
+        return redisKeyPrefix;
+    }
+
+    /**
+     * 获取第三方 provider 列表，基于配置逗号拆分
+     */
+    public java.util.List<String> getThirdPartyProviders() {
+        java.util.List<String> providers = new java.util.ArrayList<>();
+        if (thirdPartyProviders == null) {
+            return providers;
+        }
+        for (String raw : thirdPartyProviders.split(",")) {
+            String trimmed = raw.trim();
+            if (!trimmed.isEmpty()) {
+                providers.add(trimmed);
+            }
+        }
+        return providers;
     }
 
     /**

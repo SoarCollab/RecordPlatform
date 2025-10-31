@@ -319,7 +319,10 @@ public class GlobalExceptionHandler {
 
         // 权限错误
         if (code >= 70001 && code <= 79999) {
-            if (code == 70002 || code == 70005) {
+            if (code == 70005) {
+                return HttpStatus.TOO_MANY_REQUESTS;
+            }
+            if (code == 70002) {
                 return HttpStatus.FORBIDDEN;
             }
             return HttpStatus.UNAUTHORIZED;

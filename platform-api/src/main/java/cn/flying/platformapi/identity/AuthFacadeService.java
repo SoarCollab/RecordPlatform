@@ -48,6 +48,21 @@ public interface AuthFacadeService {
     Result<Void> revokeToken(String token);
 
     /**
+     * 按用户批量撤销令牌
+     */
+    Result<Void> revokeTokensByUser(Long userId);
+
+    /**
+     * 按客户端批量撤销令牌
+     */
+    Result<Void> revokeTokensByClient(String clientId);
+
+    /**
+     * 撤销所有 OAuth 令牌
+     */
+    Result<Void> revokeAllTokens();
+
+    /**
      * 判断令牌是否在黑名单
      */
     Result<Boolean> isBlacklisted(String token);

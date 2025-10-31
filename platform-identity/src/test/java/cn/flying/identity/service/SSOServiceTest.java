@@ -22,7 +22,10 @@ import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -75,12 +78,63 @@ class SSOServiceTest {
         doNothing().when(valueOperations).set(anyString(), anyString(), anyLong(), any(TimeUnit.class));
         when(setOperations.add(anyString(), anyString())).thenReturn(1L);
         when(redisTemplate.expire(anyString(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+        when(redisTemplate.opsForSet().size(anyString())).thenReturn(0L);
 
         // 注入配置值
         ReflectionTestUtils.setField(ssoService, "ssoTokenPrefix", "sso:token:");
         ReflectionTestUtils.setField(ssoService, "ssoClientPrefix", "sso:client:");
         ReflectionTestUtils.setField(ssoService, "ssoUserPrefix", "sso:user:");
         ReflectionTestUtils.setField(ssoService, "ssoTokenTimeout", 7200);
+    }
+
+    @Test
+    void testRevokeUserSessionsClearsClientAndUserIndexes() {
+        Long userId = TEST_USER_ID;
+        when(redisTemplate.opsForSet().members("sso:user:" + userId))
+                .thenReturn(new HashSet<>(Collections.singletonList(TEST_CLIENT_ID_STR)));
+        when(redisTemplate.delete(anyString())).thenReturn(true);
+
+        try (MockedStatic<StpUtil> stpUtil = mockStatic(StpUtil.class)) {
+            stpUtil.when(() -> StpUtil.kickout(userId)).then(invocation -> null);
+
+            ssoService.revokeUserSessions(userId);
+
+        verify(redisTemplate, atLeastOnce()).delete("sso:client:" + userId + ":" + TEST_CLIENT_ID_STR);
+        verify(setOperations, atLeastOnce()).remove("sso:client:users:" + TEST_CLIENT_ID_STR, String.valueOf(userId));
+        verify(redisTemplate, atLeastOnce()).delete("sso:user:" + userId);
+            stpUtil.verify(() -> StpUtil.kickout(userId));
+        }
+    }
+
+    @Test
+    void testRevokeClientSessionsRemovesClientMappings() {
+        String clientId = TEST_CLIENT_ID_STR;
+        Set<String> userIds = new HashSet<>();
+        userIds.add(String.valueOf(TEST_USER_ID));
+        userIds.add("456");
+
+        when(setOperations.members("sso:client:users:" + clientId)).thenReturn(userIds);
+        when(redisTemplate.delete(anyString())).thenReturn(true);
+
+        ssoService.revokeClientSessions(clientId);
+
+        verify(setOperations).members("sso:client:users:" + clientId);
+        verify(redisTemplate, atLeastOnce()).delete("sso:client:" + TEST_USER_ID + ":" + clientId);
+        verify(redisTemplate, atLeastOnce()).delete("sso:client:456:" + clientId);
+        verify(setOperations, atLeastOnce()).remove("sso:user:" + TEST_USER_ID, clientId);
+        verify(setOperations, atLeastOnce()).remove("sso:user:456", clientId);
+        verify(redisTemplate, atLeastOnce()).delete("sso:client:users:" + clientId);
+    }
+
+    @Test
+    void testRevokeUserClientSessionRemovesSingleBinding() {
+        when(redisTemplate.delete(anyString())).thenReturn(true);
+
+        ssoService.revokeUserClientSession(TEST_USER_ID, TEST_CLIENT_ID_STR);
+
+        verify(redisTemplate, atLeastOnce()).delete("sso:client:" + TEST_USER_ID + ":" + TEST_CLIENT_ID_STR);
+        verify(setOperations, atLeastOnce()).remove("sso:user:" + TEST_USER_ID, TEST_CLIENT_ID_STR);
+        verify(setOperations, atLeastOnce()).remove("sso:client:users:" + TEST_CLIENT_ID_STR, String.valueOf(TEST_USER_ID));
     }
 
     @Test

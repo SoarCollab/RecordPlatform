@@ -36,6 +36,11 @@ public class ApplicationProperties {
     private VerifyCode verifyCode = new VerifyCode();
 
     /**
+     * 登录安全配置
+     */
+    private LoginSecurity loginSecurity = new LoginSecurity();
+
+    /**
      * 应用信息配置
      */
     @Data
@@ -127,5 +132,31 @@ public class ApplicationProperties {
          * 验证码长度
          */
         private int length = 6;
+    }
+
+    /**
+     * 登录安全配置
+     */
+    @Data
+    public static class LoginSecurity {
+        /**
+         * 单个账号在时间窗口内允许的最大失败次数
+         */
+        private int maxAttemptsPerAccount = 5;
+
+        /**
+         * 单个IP在时间窗口内允许的最大失败次数
+         */
+        private int maxAttemptsPerIp = 30;
+
+        /**
+         * 登录失败统计窗口（秒）
+         */
+        private int windowSeconds = 600;
+
+        /**
+         * 失败次数达到阈值后的锁定时长（分钟），主要用于提示信息
+         */
+        private int lockMinutes = 15;
     }
 }

@@ -17,16 +17,21 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.data.redis.core.HashOperations;
+import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -65,6 +70,9 @@ class OAuthServiceTest {
     private HashOperations<String, Object, Object> hashOperations;
 
     @Mock
+    private SetOperations<String, String> setOperations;
+
+    @Mock
     private OAuthClientSecretService oauthClientSecretService;
 
     // 测试数据常量
@@ -83,6 +91,7 @@ class OAuthServiceTest {
     void setUp() {
         // 配置Redis Mock
         when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(redisTemplate.opsForSet()).thenReturn(setOperations);
 
         // 配置OAuthConfig默认值
         when(oauthConfig.getDefaultScope()).thenReturn("read");
@@ -91,7 +100,71 @@ class OAuthServiceTest {
         when(oauthConfig.getCodeTimeout()).thenReturn(300);
         when(oauthConfig.getAccessTokenPrefix()).thenReturn("oauth:access:");
         when(oauthConfig.getRefreshTokenPrefix()).thenReturn("oauth:refresh:");
+        when(oauthConfig.getUserTokenPrefix()).thenReturn("oauth:user_token:");
+        when(oauthConfig.getClientTokenPrefix()).thenReturn("oauth:client_token:");
+        when(oauthConfig.getThirdPartyProviders()).thenReturn(Collections.singletonList("wechat"));
         when(oauthConfig.isRequireState()).thenReturn(true);
+        when(oauthConfig.isUseBcrypt()).thenReturn(true);
+        when(oauthClientSecretService.isEncrypted(anyString())).thenAnswer(invocation -> {
+            String secret = invocation.getArgument(0);
+            return secret != null && secret.startsWith("$2");
+        });
+    }
+
+    @Test
+    void testValidateClient_UpgradePlainSecretWhenUseBcrypt() {
+        OAuthClient client = createMockOAuthClient();
+        client.setClientSecret("plainSecret");
+
+        when(oauthClientMapper.findByClientKey(TEST_CLIENT_KEY)).thenReturn(client);
+        when(oauthClientSecretService.matches(TEST_CLIENT_SECRET, "plainSecret")).thenReturn(true);
+        when(oauthClientSecretService.isEncrypted("plainSecret")).thenReturn(false);
+
+        String upgradedSecret = "$2a$10$rotatedsecretvalueforunittest12345";
+        when(oauthClientSecretService.encodeClientSecret(TEST_CLIENT_SECRET)).thenReturn(upgradedSecret);
+
+        OAuthClient result = oauthService.validateClient(TEST_CLIENT_KEY, TEST_CLIENT_SECRET);
+
+        assertNotNull(result);
+        assertEquals(upgradedSecret, client.getClientSecret());
+        verify(oauthClientMapper).updateById(Mockito.<OAuthClient>argThat(updated ->
+                updated.getClientId().equals(TEST_CLIENT_ID)
+                        && upgradedSecret.equals(updated.getClientSecret())));
+        verify(oauthClientSecretService).encodeClientSecret(TEST_CLIENT_SECRET);
+    }
+
+    @Test
+    void testValidateClient_NoUpgradeWhenAlreadyEncrypted() {
+        OAuthClient client = createMockOAuthClient();
+        when(oauthClientMapper.findByClientKey(TEST_CLIENT_KEY)).thenReturn(client);
+        when(oauthClientSecretService.matches(TEST_CLIENT_SECRET, client.getClientSecret())).thenReturn(true);
+        when(oauthClientSecretService.isEncrypted(client.getClientSecret())).thenReturn(true);
+
+        OAuthClient result = oauthService.validateClient(TEST_CLIENT_KEY, TEST_CLIENT_SECRET);
+
+        assertNotNull(result);
+        verify(oauthClientMapper, never()).updateById(any(OAuthClient.class));
+        verify(oauthClientSecretService, never()).encodeClientSecret(anyString());
+    }
+
+    @Test
+    void testValidateClient_NoUpgradeWhenUseBcryptDisabled() {
+        when(oauthConfig.isUseBcrypt()).thenReturn(false);
+
+        OAuthClient client = createMockOAuthClient();
+        client.setClientSecret("legacySecret");
+        when(oauthClientMapper.findByClientKey(TEST_CLIENT_KEY)).thenReturn(client);
+        when(oauthClientSecretService.matches(TEST_CLIENT_SECRET, "legacySecret")).thenReturn(true);
+        when(oauthClientSecretService.isEncrypted("legacySecret")).thenReturn(false);
+
+        OAuthClient result = oauthService.validateClient(TEST_CLIENT_KEY, TEST_CLIENT_SECRET);
+
+        assertNotNull(result);
+        verify(oauthClientMapper, never()).updateById(any(OAuthClient.class));
+        verify(oauthClientSecretService, never()).encodeClientSecret(anyString());
+
+        // 恢复默认配置，避免影响其他测试
+        when(oauthConfig.isUseBcrypt()).thenReturn(true);
     }
 
     @Test
@@ -148,6 +221,84 @@ class OAuthServiceTest {
             ));
             assertEquals(ResultEnum.USER_NOT_LOGGED_IN.getCode(), ex.getCode());
         }
+    }
+
+    @Test
+    void testRevokeTokensByUserRemovesIndexesAndHashes() {
+        Long userId = TEST_USER_ID;
+        String accessToken = "user_access_1";
+        String refreshToken = "user_refresh_1";
+
+        Set<String> accessTokens = new HashSet<>();
+        accessTokens.add(accessToken);
+        Set<String> refreshTokens = new HashSet<>();
+        refreshTokens.add(refreshToken);
+
+        when(setOperations.members("oauth:user_token:" + userId + ":access")).thenReturn(accessTokens);
+        when(setOperations.members("oauth:user_token:" + userId + ":refresh")).thenReturn(refreshTokens);
+
+        Map<Object, Object> accessData = new HashMap<>();
+        accessData.put("user_id", String.valueOf(userId));
+        accessData.put("client_id", TEST_CLIENT_KEY);
+        when(hashOperations.entries("oauth:access:" + accessToken)).thenReturn(accessData);
+
+        Map<Object, Object> refreshData = new HashMap<>();
+        refreshData.put("user_id", String.valueOf(userId));
+        refreshData.put("client_id", TEST_CLIENT_KEY);
+        refreshData.put("access_token", accessToken);
+        when(hashOperations.entries("oauth:refresh:" + refreshToken)).thenReturn(refreshData);
+
+        when(redisTemplate.delete(anyString())).thenReturn(true);
+
+        oauthService.revokeTokensByUser(userId);
+
+        verify(setOperations).members("oauth:user_token:" + userId + ":access");
+        verify(setOperations).members("oauth:user_token:" + userId + ":refresh");
+        verify(setOperations, atLeastOnce()).remove("oauth:user_token:" + userId + ":access", accessToken);
+        verify(setOperations, atLeastOnce()).remove("oauth:client_token:" + TEST_CLIENT_KEY + ":access", accessToken);
+        verify(setOperations, atLeastOnce()).remove("oauth:user_token:" + userId + ":refresh", refreshToken);
+        verify(setOperations, atLeastOnce()).remove("oauth:client_token:" + TEST_CLIENT_KEY + ":refresh", refreshToken);
+        verify(redisTemplate, atLeastOnce()).delete("oauth:user_token:" + userId + ":access");
+        verify(redisTemplate, atLeastOnce()).delete("oauth:user_token:" + userId + ":refresh");
+        verify(redisTemplate, atLeastOnce()).delete("oauth:access:" + accessToken);
+        verify(redisTemplate, atLeastOnce()).delete("oauth:refresh:" + refreshToken);
+        verify(redisTemplate, atLeastOnce()).delete("third_party:token:wechat:access:" + accessToken);
+        verify(redisTemplate, atLeastOnce()).delete("third_party:token:wechat:refresh:" + refreshToken);
+    }
+
+    @Test
+    void testRevokeTokensByClientClearsClientIndexes() {
+        String clientId = TEST_CLIENT_KEY;
+        String accessToken = "client_access_1";
+        String refreshToken = "client_refresh_1";
+
+        Set<String> accessTokens = new HashSet<>();
+        accessTokens.add(accessToken);
+        Set<String> refreshTokens = new HashSet<>();
+        refreshTokens.add(refreshToken);
+
+        when(setOperations.members("oauth:client_token:" + clientId + ":access")).thenReturn(accessTokens);
+        when(setOperations.members("oauth:client_token:" + clientId + ":refresh")).thenReturn(refreshTokens);
+
+        Map<Object, Object> accessData = new HashMap<>();
+        accessData.put("client_id", clientId);
+        when(hashOperations.entries("oauth:access:" + accessToken)).thenReturn(accessData);
+
+        Map<Object, Object> refreshData = new HashMap<>();
+        refreshData.put("client_id", clientId);
+        refreshData.put("access_token", accessToken);
+        when(hashOperations.entries("oauth:refresh:" + refreshToken)).thenReturn(refreshData);
+
+        when(redisTemplate.delete(anyString())).thenReturn(true);
+
+        oauthService.revokeTokensByClient(clientId);
+
+        verify(setOperations).members("oauth:client_token:" + clientId + ":access");
+        verify(setOperations).members("oauth:client_token:" + clientId + ":refresh");
+        verify(setOperations, atLeastOnce()).remove("oauth:client_token:" + clientId + ":access", accessToken);
+        verify(setOperations, atLeastOnce()).remove("oauth:client_token:" + clientId + ":refresh", refreshToken);
+        verify(redisTemplate, atLeastOnce()).delete("oauth:client_token:" + clientId + ":access");
+        verify(redisTemplate, atLeastOnce()).delete("oauth:client_token:" + clientId + ":refresh");
     }
 
     @Test

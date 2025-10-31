@@ -15,9 +15,11 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.validation.annotation.Validated;
 
 import java.util.Map;
 
@@ -31,6 +33,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/verification")
 @Tag(name = "验证码管理", description = "提供各种类型的验证码服务")
+@Validated
 public class VerifyCodeController {
 
     @Resource
@@ -191,8 +194,8 @@ public class VerifyCodeController {
             @ApiResponse(responseCode = "400", description = "参数无效")
     })
     public ResponseEntity<Void> deleteCode(
-            @Parameter(description = "标识符") @RequestParam String identifier,
-            @Parameter(description = "验证码类型") @RequestParam String type) {
+            @Parameter(description = "标识符") @RequestParam @NotBlank(message = "标识符不能为空") String identifier,
+            @Parameter(description = "验证码类型") @RequestParam @NotBlank(message = "验证码类型不能为空") String type) {
 
         Result<Void> result = verifyCodeService.clearVerifyCode(identifier, type);
 

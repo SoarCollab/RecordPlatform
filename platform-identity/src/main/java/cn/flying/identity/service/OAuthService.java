@@ -90,6 +90,25 @@ public interface OAuthService {
     void revokeToken(String token, String tokenTypeHint, String clientId, String clientSecret);
 
     /**
+     * 按用户批量撤销令牌
+     *
+     * @param userId 用户ID
+     */
+    void revokeTokensByUser(Long userId);
+
+    /**
+     * 按客户端批量撤销令牌
+     *
+     * @param clientKey 客户端标识符
+     */
+    void revokeTokensByClient(String clientKey);
+
+    /**
+     * 撤销所有 OAuth 令牌
+     */
+    void revokeAllTokens();
+
+    /**
      * 验证客户端
      *
      * @param clientId     客户端标识符

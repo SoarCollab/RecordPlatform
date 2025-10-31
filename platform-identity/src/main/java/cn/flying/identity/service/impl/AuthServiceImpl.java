@@ -3,11 +3,13 @@ package cn.flying.identity.service.impl;
 import cn.dev33.satoken.session.SaSession;
 import cn.dev33.satoken.stp.SaTokenInfo;
 import cn.dev33.satoken.stp.StpUtil;
+import cn.flying.identity.config.ApplicationProperties;
 import cn.flying.identity.dto.Account;
 import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.service.AccountService;
 import cn.flying.identity.service.AuthService;
 import cn.flying.identity.service.JwtBlacklistService;
+import cn.flying.identity.util.FlowUtils;
 import cn.flying.identity.util.WebContextUtils;
 import cn.flying.identity.vo.AccountVO;
 import cn.flying.identity.vo.LoginStatusVO;
@@ -16,12 +18,15 @@ import cn.flying.identity.vo.request.EmailRegisterVO;
 import cn.flying.identity.vo.request.EmailResetVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
+import cn.hutool.crypto.SecureUtil;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -38,20 +43,35 @@ public class AuthServiceImpl implements AuthService {
     @Resource
     private JwtBlacklistService jwtBlacklistService;
 
+    @Resource
+    private FlowUtils flowUtils;
+
+    @Resource
+    private ApplicationProperties applicationProperties;
+
     @Override
     public String login(String username, String password) {
+        String clientIp = WebContextUtils.getCurrentClientIp();
+        ApplicationProperties.LoginSecurity loginSecurity = applicationProperties.getLoginSecurity();
+        String accountIdentifier = buildAccountIdentifier(username);
+        String ipIdentifier = buildIpIdentifier(clientIp);
+
+        enforceLoginRateLimit(loginSecurity, username, clientIp, accountIdentifier, ipIdentifier);
+
         Account account = accountService.findAccountByNameOrEmail(username);
         if (account == null) {
-            String clientIp = WebContextUtils.getCurrentClientIp();
+            recordLoginFailure(loginSecurity, username, clientIp, accountIdentifier, ipIdentifier);
             logAuthenticationFailure(username, clientIp, "用户不存在");
-            throw new BusinessException(ResultEnum.USER_NOT_EXIST);
+            throw new BusinessException(ResultEnum.USER_LOGIN_ERROR, "账号或密码错误");
         }
 
         if (!accountService.matchesPassword(password, account.getPassword())) {
-            String clientIp = WebContextUtils.getCurrentClientIp();
+            recordLoginFailure(loginSecurity, username, clientIp, accountIdentifier, ipIdentifier);
             logAuthenticationFailure(username, clientIp, "密码错误");
             throw new BusinessException(ResultEnum.USER_LOGIN_ERROR);
         }
+
+        clearLoginFailureCounters(loginSecurity, accountIdentifier, ipIdentifier);
 
         StpUtil.login(account.getId());
 
@@ -64,7 +84,6 @@ public class AuthServiceImpl implements AuthService {
 
         String token = StpUtil.getTokenValue();
 
-        String clientIp = WebContextUtils.getCurrentClientIp();
         logAuthenticationSuccess(username, clientIp);
 
         return token;
@@ -104,6 +123,7 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void register(EmailRegisterVO vo) {
         Result<Void> result = accountService.registerEmailAccount(vo);
         ensureResultSuccess(result, ResultEnum.FAIL);
@@ -117,12 +137,14 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void resetConfirm(EmailResetVO vo) {
         Result<Void> result = accountService.resetEmailAccountPassword(vo);
         ensureResultSuccess(result, ResultEnum.FAIL);
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void changePassword(ChangePasswordVO vo) {
         if (!StpUtil.isLogin()) {
             throw new BusinessException(ResultEnum.USER_NOT_LOGGED_IN);
@@ -219,42 +241,9 @@ public class AuthServiceImpl implements AuthService {
         return tokenInfo;
     }
 
-    private void logAuthenticationFailure(String username, String ipAddress, String reason) {
-        log.warn("Authentication failed - User: {}, IP: {}, Reason: {}",
-                maskUsername(username), ipAddress, reason);
-    }
-
-    private void logAuthenticationSuccess(String username, String ipAddress) {
-        log.info("Authentication successful - User: {}, IP: {}",
-                maskUsername(username), ipAddress);
-    }
-
     private void logAccessDenied(String resource, String username, String reason) {
         log.warn("Access denied - Resource: {}, User: {}, Reason: {}",
                 resource, maskUsername(username), reason);
-    }
-
-    private String maskUsername(String username) {
-        if (username == null || username.isBlank()) {
-            return "***";
-        }
-        if (username.length() <= 2) {
-            return username.charAt(0) + "*";
-        }
-        return username.substring(0, 1) + "***" + username.substring(username.length() - 1);
-    }
-
-    private void ensureResultSuccess(Result<?> result, ResultEnum fallbackEnum) {
-        if (result == null) {
-            throw new BusinessException(fallbackEnum);
-        }
-        if (!result.isSuccess()) {
-            int code = result.getCode() != null ? result.getCode() : fallbackEnum.getCode();
-            String message = result.getMessage() != null && !result.getMessage().isBlank()
-                    ? result.getMessage()
-                    : fallbackEnum.getMessage();
-            throw new BusinessException(code, message);
-        }
     }
 
     private void maskEmail(AccountVO target, String email) {
@@ -270,5 +259,135 @@ public class AuthServiceImpl implements AuthService {
             String domain = email.substring(atIndex);
             target.setEmail("***" + domain);
         }
+    }
+
+    private void ensureResultSuccess(Result<?> result, ResultEnum fallbackEnum) {
+        if (result == null) {
+            throw new BusinessException(fallbackEnum);
+        }
+        if (!result.isSuccess()) {
+            int code = result.getCode() != null ? result.getCode() : fallbackEnum.getCode();
+            String message = result.getMessage() != null && !result.getMessage().isBlank()
+                    ? result.getMessage()
+                    : fallbackEnum.getMessage();
+            throw new BusinessException(code, message);
+        }
+    }
+
+    private String buildAccountIdentifier(String username) {
+        if (username == null || username.isBlank()) {
+            return "acct:unknown";
+        }
+        String normalized = username.trim().toLowerCase(Locale.ROOT);
+        return "acct:" + SecureUtil.sha256(normalized);
+    }
+
+    private String buildIpIdentifier(String clientIp) {
+        if (clientIp == null || clientIp.isBlank()) {
+            return null;
+        }
+        return "ip:" + SecureUtil.sha256(clientIp);
+    }
+
+    private void enforceLoginRateLimit(ApplicationProperties.LoginSecurity loginSecurity,
+                                       String username,
+                                       String clientIp,
+                                       String accountIdentifier,
+                                       String ipIdentifier) {
+        if (loginSecurity == null) {
+            return;
+        }
+
+        if (loginSecurity.getMaxAttemptsPerAccount() > 0) {
+            int accountFailures = flowUtils.getLoginFailureCount(accountIdentifier);
+            if (accountFailures >= loginSecurity.getMaxAttemptsPerAccount()) {
+                log.warn("账号登录尝试次数过多 - User: {}, IP: {}",
+                        maskUsername(username), clientIp);
+                throw buildTooManyAttemptsException(loginSecurity, "该账号");
+            }
+        }
+
+        if (ipIdentifier != null && loginSecurity.getMaxAttemptsPerIp() > 0) {
+            int ipFailures = flowUtils.getLoginFailureCount(ipIdentifier);
+            if (ipFailures >= loginSecurity.getMaxAttemptsPerIp()) {
+                log.warn("IP 登录尝试次数过多 - IP: {}", clientIp);
+                throw buildTooManyAttemptsException(loginSecurity, "当前IP");
+            }
+        }
+    }
+
+    private void recordLoginFailure(ApplicationProperties.LoginSecurity loginSecurity,
+                                    String username,
+                                    String clientIp,
+                                    String accountIdentifier,
+                                    String ipIdentifier) {
+        if (loginSecurity == null) {
+            return;
+        }
+
+        int windowSeconds = Math.max(60, loginSecurity.getWindowSeconds());
+        int accountFailures = flowUtils.recordLoginFailure(accountIdentifier, windowSeconds);
+        if (loginSecurity.getMaxAttemptsPerAccount() > 0
+                && accountFailures >= loginSecurity.getMaxAttemptsPerAccount()) {
+            log.warn("账号登录失败次数达到阈值 - User: {}, IP: {}, Failures: {}",
+                    maskUsername(username), clientIp, accountFailures);
+        }
+
+        if (ipIdentifier != null && loginSecurity.getMaxAttemptsPerIp() > 0) {
+            int ipFailures = flowUtils.recordLoginFailure(ipIdentifier, windowSeconds);
+            if (ipFailures >= loginSecurity.getMaxAttemptsPerIp()) {
+                log.warn("IP 登录失败次数达到阈值 - IP: {}, Failures: {}",
+                        clientIp, ipFailures);
+            }
+        }
+    }
+
+    private void logAuthenticationFailure(String username, String ipAddress, String reason) {
+        log.warn("Authentication failed - User: {}, IP: {}, Reason: {}",
+                maskUsername(username), ipAddress, reason);
+    }
+
+    private void clearLoginFailureCounters(ApplicationProperties.LoginSecurity loginSecurity,
+                                           String accountIdentifier,
+                                           String ipIdentifier) {
+        if (loginSecurity == null) {
+            return;
+        }
+
+        try {
+            flowUtils.clearLoginFailure(accountIdentifier);
+        } catch (Exception e) {
+            log.debug("清除账号登录失败计数失败: {}", e.getMessage());
+        }
+
+        if (ipIdentifier != null) {
+            try {
+                flowUtils.clearLoginFailure(ipIdentifier);
+            } catch (Exception e) {
+                log.debug("清除IP登录失败计数失败: {}", e.getMessage());
+            }
+        }
+    }
+
+    private void logAuthenticationSuccess(String username, String ipAddress) {
+        log.info("Authentication successful - User: {}, IP: {}",
+                maskUsername(username), ipAddress);
+    }
+
+    private String maskUsername(String username) {
+        if (username == null || username.isBlank()) {
+            return "***";
+        }
+        if (username.length() <= 2) {
+            return username.charAt(0) + "*";
+        }
+        return username.charAt(0) + "***" + username.substring(username.length() - 1);
+    }
+
+    private BusinessException buildTooManyAttemptsException(ApplicationProperties.LoginSecurity loginSecurity,
+                                                            String scope) {
+        int lockMinutes = Math.max(1, loginSecurity.getLockMinutes());
+        String message = scope + "登录尝试次数过多，请在" + lockMinutes + "分钟后重试";
+        return new BusinessException(ResultEnum.PERMISSION_LIMIT.getCode(), message);
     }
 }

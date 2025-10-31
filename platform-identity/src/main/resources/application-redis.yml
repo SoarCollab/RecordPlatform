@@ -34,6 +34,7 @@ redis:
       token: "${redis.prefix.base}sso:token:"
       client: "${redis.prefix.base}sso:client:"
       user: "${redis.prefix.base}sso:user:"
+      # 服务内部会基于 client 前缀生成 sso:client:users:{clientId} 索引集合
     
     # OAuth相关
     oauth:
@@ -41,6 +42,7 @@ redis:
       refresh-token: "${redis.prefix.base}oauth:refresh_token:"
       client-token: "${redis.prefix.base}oauth:client_token:"
       auth-code: "${redis.prefix.base}oauth:code:"
+      # user-token/client-token 将在服务内部追加 :access/:refresh 后缀，用于批量撤销索引集合
       user-token: "${redis.prefix.base}oauth:user_token:"
     
     # 网关监控相关

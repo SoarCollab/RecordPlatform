@@ -13,9 +13,11 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.validation.annotation.Validated;
 
 import java.io.IOException;
 import java.util.Map;
@@ -30,6 +32,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/sso")
 @Tag(name = "SSO单点登录", description = "提供单点登录相关功能")
+@Validated
 public class SSOController {
 
     @Resource
@@ -47,9 +50,9 @@ public class SSOController {
             @ApiResponse(responseCode = "401", description = "未认证")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getAuthorization(
-            @Parameter(description = "客户端ID") @RequestParam String clientId,
-            @Parameter(description = "重定向URI") @RequestParam String redirectUri,
-            @Parameter(description = "授权范围") @RequestParam(defaultValue = "read") String scope,
+            @Parameter(description = "客户端ID") @RequestParam @NotBlank(message = "clientId不能为空") String clientId,
+            @Parameter(description = "重定向URI") @RequestParam @NotBlank(message = "redirectUri不能为空") String redirectUri,
+            @Parameter(description = "授权范围") @RequestParam(defaultValue = "read") @NotBlank(message = "scope不能为空") String scope,
             @Parameter(description = "状态参数") @RequestParam(required = false) String state) {
 
         Map<String, Object> data = ssoService.getSSOLoginInfo(clientId, redirectUri, scope, state);
@@ -94,9 +97,9 @@ public class SSOController {
             @ApiResponse(responseCode = "401", description = "未认证")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getSessionStatus(
-            @Parameter(description = "客户端ID") @RequestParam String clientId,
-            @Parameter(description = "重定向URI") @RequestParam String redirectUri,
-            @Parameter(description = "授权范围") @RequestParam(defaultValue = "read") String scope,
+            @Parameter(description = "客户端ID") @RequestParam @NotBlank(message = "clientId不能为空") String clientId,
+            @Parameter(description = "重定向URI") @RequestParam @NotBlank(message = "redirectUri不能为空") String redirectUri,
+            @Parameter(description = "授权范围") @RequestParam(defaultValue = "read") @NotBlank(message = "scope不能为空") String scope,
             @Parameter(description = "状态参数") @RequestParam(required = false) String state) {
 
         Map<String, Object> data = ssoService.checkSSOLoginStatus(clientId, redirectUri, scope, state);
@@ -137,7 +140,7 @@ public class SSOController {
             @ApiResponse(responseCode = "404", description = "用户不存在")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getUserInfo(
-            @Parameter(description = "SSO Token") @RequestParam String token) {
+            @Parameter(description = "SSO Token") @RequestParam @NotBlank(message = "token不能为空") String token) {
 
         Map<String, Object> data = ssoService.getSSOUserInfo(token);
         return ResponseEntity.ok(RestResponse.ok("获取成功", data));
@@ -187,7 +190,7 @@ public class SSOController {
             @ApiResponse(responseCode = "401", description = "未认证")
     })
     public ResponseEntity<Void> deleteClientSession(
-            @Parameter(description = "客户端ID") @PathVariable String clientId) {
+            @Parameter(description = "客户端ID") @PathVariable @NotBlank(message = "clientId不能为空") String clientId) {
 
         ssoService.logoutFromClient(clientId);
         return ResponseEntity.noContent().build();

@@ -4,6 +4,7 @@ import cn.dev33.satoken.exception.NotLoginException;
 import cn.dev33.satoken.exception.NotPermissionException;
 import cn.dev33.satoken.exception.NotRoleException;
 import cn.dev33.satoken.stp.StpUtil;
+import cn.flying.identity.config.AuthWhitelistProperties;
 import cn.flying.identity.service.GatewayMonitorService;
 import cn.flying.identity.service.JwtBlacklistService;
 import cn.flying.identity.util.IdUtils;
@@ -26,7 +27,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -38,40 +38,9 @@ import java.util.List;
 @Order(1)
 public class EnhancedGatewayFilter implements Filter {
 
-    /**
-     * 不需要鉴权的路径列表
-     * 注意：API网关代理路径由ApiGatewayProxyFilter处理认证和权限验证
-     */
-    private static final List<String> EXCLUDE_PATHS = Arrays.asList(
-            "/api/auth/login",
-            "/api/auth/signin",
-            "/api/auth/register",
-            "/api/auth/signup",
-            "/api/auth/verify-code",
-            "/api/auth/reset-password",
-            "/api/auth/status",
-            "/api/auth/third-party",
-            "/oauth/**",
-            "/api/sso/**",
-            "/doc.html",
-            "/swagger-ui/**",
-            "/swagger-resources/**",
-            "/v3/api-docs/**",
-            "/webjars/**",
-            "/druid/**",
-            "/static/**",
-            "/favicon.ico",
-            "/actuator/**",
-            "/error",
-            "/docs/**",
-            // API网关代理路径，由ApiGatewayProxyFilter专门处理
-            "/api/gateway/proxy/**",
-            "/api/v1/**",
-            "/api/v2/**",
-            "/gateway/**"
-    );
+    private final AuthWhitelistProperties authWhitelistProperties;
 
-    @Value("${server.servlet.context-path}")
+    @Value("${server.servlet.context-path:}")
     String PREFIX;
 
     @Resource
@@ -79,6 +48,10 @@ public class EnhancedGatewayFilter implements Filter {
 
     @Resource
     private JwtBlacklistService jwtBlacklistService;
+
+    public EnhancedGatewayFilter(AuthWhitelistProperties authWhitelistProperties) {
+        this.authWhitelistProperties = authWhitelistProperties;
+    }
 
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
@@ -206,7 +179,8 @@ public class EnhancedGatewayFilter implements Filter {
      * 支持通配符后缀 /** 的前缀匹配与精确匹配。
      */
     private boolean isExcludePath(String requestURI) {
-        return EXCLUDE_PATHS.stream().anyMatch(excludePath -> {
+        List<String> excludePaths = authWhitelistProperties.getAllPublicPatterns();
+        return excludePaths.stream().anyMatch(excludePath -> {
             if (excludePath.endsWith("/**")) {
                 String prefix = excludePath.substring(0, excludePath.length() - 3);
                 return requestURI.startsWith(prefix);

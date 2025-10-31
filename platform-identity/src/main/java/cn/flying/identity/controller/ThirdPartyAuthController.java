@@ -1,5 +1,6 @@
 package cn.flying.identity.controller;
 
+import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.flying.identity.dto.BindAccountRequest;
 import cn.flying.identity.dto.CallbackRequest;
@@ -16,8 +17,10 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
@@ -33,6 +36,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/auth/third-party")
 @Tag(name = "第三方登录", description = "提供GitHub、Google、微信等第三方登录功能")
+@Validated
 public class ThirdPartyAuthController {
 
     @Resource
@@ -64,8 +68,8 @@ public class ThirdPartyAuthController {
             @ApiResponse(responseCode = "404", description = "提供商不存在")
     })
     public ResponseEntity<RestResponse<String>> getAuthorizationUrl(
-            @Parameter(description = "第三方提供商") @PathVariable String provider,
-            @Parameter(description = "回调地址") @RequestParam String redirectUri,
+            @Parameter(description = "第三方提供商") @PathVariable @NotBlank(message = "provider不能为空") String provider,
+            @Parameter(description = "回调地址") @RequestParam @NotBlank(message = "redirectUri不能为空") String redirectUri,
             @Parameter(description = "状态参数") @RequestParam(required = false) String state) {
 
         String url = thirdPartyAuthService.getAuthorizationUrl(provider, redirectUri, state);
@@ -83,8 +87,8 @@ public class ThirdPartyAuthController {
             @ApiResponse(responseCode = "400", description = "获取授权URL失败")
     })
     public void redirectToProvider(
-            @Parameter(description = "第三方提供商") @PathVariable String provider,
-            @Parameter(description = "回调地址") @RequestParam String redirectUri,
+            @Parameter(description = "第三方提供商") @PathVariable @NotBlank(message = "provider不能为空") String provider,
+            @Parameter(description = "回调地址") @RequestParam @NotBlank(message = "redirectUri不能为空") String redirectUri,
             @Parameter(description = "状态参数") @RequestParam(required = false) String state,
             HttpServletResponse response) throws IOException {
 
@@ -104,7 +108,7 @@ public class ThirdPartyAuthController {
             @ApiResponse(responseCode = "401", description = "认证失败")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> handleCallback(
-            @Parameter(description = "第三方提供商") @PathVariable String provider,
+            @Parameter(description = "第三方提供商") @PathVariable @NotBlank(message = "provider不能为空") String provider,
             @Valid @RequestBody CallbackRequest request) {
 
         if (request.getError() != null) {
@@ -132,13 +136,10 @@ public class ThirdPartyAuthController {
             @ApiResponse(responseCode = "401", description = "未认证"),
             @ApiResponse(responseCode = "409", description = "账号已绑定")
     })
+    @SaCheckLogin
     public ResponseEntity<RestResponse<Void>> bindAccount(
-            @Parameter(description = "第三方提供商") @PathVariable String provider,
+            @Parameter(description = "第三方提供商") @PathVariable @NotBlank(message = "provider不能为空") String provider,
             @Valid @RequestBody BindAccountRequest request) {
-
-        if (!StpUtil.isLogin()) {
-            throw new BusinessException(ResultEnum.USER_NOT_LOGGED_IN, "用户未登录");
-        }
 
         Long userId = StpUtil.getLoginIdAsLong();
         thirdPartyAuthService.bindThirdPartyAccount(userId, provider, request.getCode());
@@ -158,12 +159,9 @@ public class ThirdPartyAuthController {
             @ApiResponse(responseCode = "401", description = "未认证"),
             @ApiResponse(responseCode = "404", description = "绑定关系不存在")
     })
+    @SaCheckLogin
     public ResponseEntity<Void> unbindAccount(
-            @Parameter(description = "第三方提供商") @PathVariable String provider) {
-
-        if (!StpUtil.isLogin()) {
-            throw new BusinessException(ResultEnum.USER_NOT_LOGGED_IN, "用户未登录");
-        }
+            @Parameter(description = "第三方提供商") @PathVariable @NotBlank(message = "provider不能为空") String provider) {
 
         Long userId = StpUtil.getLoginIdAsLong();
         thirdPartyAuthService.unbindThirdPartyAccount(userId, provider);
@@ -180,11 +178,8 @@ public class ThirdPartyAuthController {
             @ApiResponse(responseCode = "200", description = "获取成功"),
             @ApiResponse(responseCode = "401", description = "未认证")
     })
+    @SaCheckLogin
     public ResponseEntity<RestResponse<Map<String, Object>>> getBindings() {
-        if (!StpUtil.isLogin()) {
-            throw new BusinessException(ResultEnum.USER_NOT_LOGGED_IN, "用户未登录");
-        }
-
         Long userId = StpUtil.getLoginIdAsLong();
         Map<String, Object> bindings = thirdPartyAuthService.getUserThirdPartyAccounts(userId);
         return ResponseEntity.ok(RestResponse.ok("获取成功", bindings));
@@ -201,7 +196,7 @@ public class ThirdPartyAuthController {
             @ApiResponse(responseCode = "400", description = "参数无效")
     })
     public ResponseEntity<RestResponse<Boolean>> validateToken(
-            @Parameter(description = "第三方提供商") @PathVariable String provider,
+            @Parameter(description = "第三方提供商") @PathVariable @NotBlank(message = "provider不能为空") String provider,
             @Valid @RequestBody ValidateTokenRequest request) {
 
         boolean valid = thirdPartyAuthService.validateThirdPartyToken(
@@ -220,8 +215,8 @@ public class ThirdPartyAuthController {
             @ApiResponse(responseCode = "401", description = "令牌无效")
     })
     public ResponseEntity<RestResponse<Map<String, Object>>> getUserInfo(
-            @Parameter(description = "第三方提供商") @PathVariable String provider,
-            @Parameter(description = "访问令牌") @RequestParam String accessToken) {
+            @Parameter(description = "第三方提供商") @PathVariable @NotBlank(message = "provider不能为空") String provider,
+            @Parameter(description = "访问令牌") @RequestParam @NotBlank(message = "accessToken不能为空") String accessToken) {
 
         Map<String, Object> data = thirdPartyAuthService.getThirdPartyUserInfo(
                 provider, accessToken);
@@ -238,12 +233,9 @@ public class ThirdPartyAuthController {
             @ApiResponse(responseCode = "200", description = "刷新成功"),
             @ApiResponse(responseCode = "401", description = "未认证或刷新失败")
     })
+    @SaCheckLogin
     public ResponseEntity<RestResponse<Map<String, Object>>> refreshToken(
-            @Parameter(description = "第三方提供商") @PathVariable String provider) {
-
-        if (!StpUtil.isLogin()) {
-            throw new BusinessException(ResultEnum.USER_NOT_LOGGED_IN, "用户未登录");
-        }
+            @Parameter(description = "第三方提供商") @PathVariable @NotBlank(message = "provider不能为空") String provider) {
 
         Long userId = StpUtil.getLoginIdAsLong();
         Map<String, Object> data = thirdPartyAuthService.refreshThirdPartyToken(userId, provider);

@@ -214,6 +214,7 @@ CREATE TABLE `third_party_account` (
     `deleted` TINYINT DEFAULT 0 COMMENT '逻辑删除：0-未删除，1-已删除',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_provider_third_party_id` (`provider`, `third_party_id`),
+    UNIQUE KEY `uk_user_provider_deleted` (`user_id`, `provider`, `deleted`),
     KEY `idx_user_id` (`user_id`),
     KEY `idx_provider` (`provider`),
     KEY `idx_status` (`status`),
@@ -276,13 +277,14 @@ CREATE INDEX `idx_operation_log_module_type` ON `operation_log` (`module`, `oper
 CREATE INDEX `idx_operation_log_status_time` ON `operation_log` (`status`, `operation_time`);
 
 -- 第三方登录表相关复合索引
-CREATE INDEX `idx_third_party_user_provider` ON `third_party_account` (`user_id`, `provider`);
+CREATE UNIQUE INDEX `uk_third_party_user_provider_deleted` ON `third_party_account` (`user_id`, `provider`, `deleted`);
 CREATE INDEX `idx_third_party_status_deleted` ON `third_party_account` (`status`, `deleted`);
 
 -- 用户会话表相关复合索引
 CREATE INDEX `idx_user_session_user_status` ON `user_session` (`user_id`, `status`);
 CREATE INDEX `idx_user_session_ip_time` ON `user_session` (`client_ip`, `login_time`);
 CREATE INDEX `idx_user_session_cleanup` ON `user_session` (`status`, `expire_time`);
+CREATE INDEX `idx_user_session_user_device_status` ON `user_session` (`user_id`, `device_fingerprint`, `status`);
 
 -- ==================== 存储过程 ====================
 
