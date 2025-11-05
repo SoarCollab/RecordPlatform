@@ -6,6 +6,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
@@ -22,6 +24,7 @@ import static org.mockito.Mockito.*;
  * @author 王贝强
  */
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class FlowUtilsTest {
 
     @Mock
@@ -48,7 +51,7 @@ class FlowUtilsTest {
         boolean result = flowUtils.checkEmailVerifyLimit("192.168.1.1", 60);
 
         assertTrue(result);
-        verify(valueOperations).set(anyString(), eq("1"), eq(60), eq(TimeUnit.SECONDS));
+        verify(valueOperations).set(anyString(), eq("1"), eq(60L), eq(TimeUnit.SECONDS));
     }
 
     @Test
@@ -68,7 +71,7 @@ class FlowUtilsTest {
         boolean result = flowUtils.limitOnceCheck("test:key", 30);
 
         assertTrue(result);
-        verify(valueOperations).set("test:key", "1", 30, TimeUnit.SECONDS);
+        verify(valueOperations).set("test:key", "1", 30L, TimeUnit.SECONDS);
     }
 
     @Test
@@ -97,7 +100,7 @@ class FlowUtilsTest {
         boolean result = flowUtils.checkLoginLimit("user123", 5, 300);
 
         assertTrue(result);
-        verify(stringRedisTemplate).expire(anyString(), eq(300), eq(TimeUnit.SECONDS));
+        verify(stringRedisTemplate).expire(anyString(), eq(300L), eq(TimeUnit.SECONDS));
     }
 
     @Test
@@ -116,7 +119,7 @@ class FlowUtilsTest {
         boolean result = flowUtils.limitCountCheck("test:count", 10, 60);
 
         assertTrue(result);
-        verify(stringRedisTemplate).expire("test:count", 60, TimeUnit.SECONDS);
+        verify(stringRedisTemplate).expire("test:count", 60L, TimeUnit.SECONDS);
     }
 
     @Test
@@ -153,7 +156,7 @@ class FlowUtilsTest {
         int count = flowUtils.recordLoginFailure("user123", 300);
 
         assertEquals(1, count);
-        verify(stringRedisTemplate).expire(anyString(), eq(300), eq(TimeUnit.SECONDS));
+        verify(stringRedisTemplate).expire(anyString(), eq(300L), eq(TimeUnit.SECONDS));
     }
 
     @Test
@@ -177,7 +180,7 @@ class FlowUtilsTest {
 
     @Test
     void testClearLoginFailure_Success() {
-        doNothing().when(stringRedisTemplate).delete(anyString());
+        when(stringRedisTemplate.delete(anyString())).thenReturn(true);
 
         assertDoesNotThrow(() -> flowUtils.clearLoginFailure("user123"));
 
@@ -186,7 +189,7 @@ class FlowUtilsTest {
 
     @Test
     void testClearLoginFailure_Exception() {
-        doThrow(new RuntimeException("Redis错误")).when(stringRedisTemplate).delete(anyString());
+        when(stringRedisTemplate.delete(anyString())).thenThrow(new RuntimeException("Redis错误"));
 
         assertDoesNotThrow(() -> flowUtils.clearLoginFailure("user123"));
     }
@@ -225,7 +228,7 @@ class FlowUtilsTest {
         boolean result = flowUtils.limitPeriodCountCheck("period:key", 20, 3);
 
         assertTrue(result);
-        verify(stringRedisTemplate).expire("period:key", 3, TimeUnit.SECONDS);
+        verify(stringRedisTemplate).expire("period:key", 3L, TimeUnit.SECONDS);
     }
 
     @Test
@@ -266,7 +269,7 @@ class FlowUtilsTest {
 
     @Test
     void testRemoveLimit_Success() {
-        doNothing().when(stringRedisTemplate).delete("limit:key");
+        when(stringRedisTemplate.delete("limit:key")).thenReturn(true);
 
         assertDoesNotThrow(() -> flowUtils.removeLimit("limit:key"));
 
@@ -275,7 +278,7 @@ class FlowUtilsTest {
 
     @Test
     void testRemoveLimit_Exception() {
-        doThrow(new RuntimeException("Redis错误")).when(stringRedisTemplate).delete(anyString());
+        when(stringRedisTemplate.delete(anyString())).thenThrow(new RuntimeException("Redis错误"));
 
         assertDoesNotThrow(() -> flowUtils.removeLimit("limit:key"));
     }

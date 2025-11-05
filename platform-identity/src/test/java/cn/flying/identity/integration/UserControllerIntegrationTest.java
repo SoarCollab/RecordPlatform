@@ -23,7 +23,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DisplayName("用户管理集成测试")
 public class UserControllerIntegrationTest extends BaseIntegrationTest {
 
-    private static final String API_BASE = "/identity/api/users";
+    private static final String API_BASE = "/api/users";
 
     @Test
     @DisplayName("获取当前用户信息 - 成功")

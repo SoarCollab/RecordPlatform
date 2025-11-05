@@ -74,18 +74,14 @@ public class SaTokenGatewayFilter implements Filter {
 
         String requestURI = httpRequest.getRequestURI();
         String method = httpRequest.getMethod();
+        String normalizedUri = normalizePath(requestURI);
 
         logger.debug("网关鉴权过滤器处理请求: {} {}", method, requestURI);
 
         try {
 
-            String url = requestURI;
-            if (requestURI.startsWith(PREFIX)) {
-                url = requestURI.substring(PREFIX.length());
-            }
-
             // 检查是否为排除路径
-            if (isExcludePath(url)) {
+            if (isExcludePath(normalizedUri)) {
                 logger.debug("请求路径 {} 在排除列表中，跳过鉴权", requestURI);
                 chain.doFilter(request, response);
                 return;
@@ -95,7 +91,7 @@ public class SaTokenGatewayFilter implements Filter {
             validateToken(httpRequest);
 
             // 执行权限验证
-            validatePermission(url, method);
+            validatePermission(normalizedUri, method);
 
             // 验证通过，继续执行
             chain.doFilter(request, response);
@@ -131,6 +127,23 @@ public class SaTokenGatewayFilter implements Filter {
             }
             return requestURI.equals(excludePath);
         });
+    }
+
+    private String normalizePath(String requestURI) {
+        String normalized = requestURI;
+        if (PREFIX != null && !PREFIX.isEmpty()) {
+            while (normalized.startsWith(PREFIX)) {
+                normalized = normalized.substring(PREFIX.length());
+            }
+        }
+        final String defaultContext = "/identity";
+        if (normalized.startsWith(defaultContext)) {
+            normalized = normalized.substring(defaultContext.length());
+        }
+        if (!normalized.startsWith("/")) {
+            normalized = "/" + normalized;
+        }
+        return normalized.isEmpty() ? "/" : normalized;
     }
 
     /**

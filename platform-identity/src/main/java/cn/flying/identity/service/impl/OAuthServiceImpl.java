@@ -35,24 +35,6 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class OAuthServiceImpl implements OAuthService {
 
-    @Resource
-    private OAuthConfig oauthConfig;
-
-    @Resource
-    private OAuthClientMapper oauthClientMapper;
-
-    @Resource
-    private OAuthCodeMapper oauthCodeMapper;
-
-    @Resource
-    private AccountMapper accountMapper;
-
-    @Resource(name = "stringRedisTemplate")
-    private StringRedisTemplate redisTemplate;
-
-    @Resource
-    private OAuthClientSecretService oauthClientSecretService;
-
     /**
      * 第三方令牌Redis键前缀
      * 用于在revoke时同步清理第三方access/refresh映射
@@ -60,11 +42,23 @@ public class OAuthServiceImpl implements OAuthService {
     private static final String THIRD_PARTY_TOKEN_PREFIX = "third_party:token:";
     private static final String ACCESS_TOKEN_HINT = "access_token";
     private static final String REFRESH_TOKEN_HINT = "refresh_token";
+    @Resource
+    private OAuthConfig oauthConfig;
+    @Resource
+    private OAuthClientMapper oauthClientMapper;
+    @Resource
+    private OAuthCodeMapper oauthCodeMapper;
+    @Resource
+    private AccountMapper accountMapper;
+    @Resource(name = "stringRedisTemplate")
+    private StringRedisTemplate redisTemplate;
+    @Resource
+    private OAuthClientSecretService oauthClientSecretService;
 
     /**
      * 获取授权页面信息
      *
-     * @param clientId   客户端标识符
+     * @param clientId    客户端标识符
      * @param redirectUri 重定向URI
      * @param scope       授权范围
      * @param state       状态参数
@@ -117,7 +111,7 @@ public class OAuthServiceImpl implements OAuthService {
     /**
      * 用户授权确认
      *
-     * @param clientId   客户端标识符
+     * @param clientId    客户端标识符
      * @param redirectUri 重定向URI
      * @param scope       授权范围
      * @param state       状态参数
@@ -183,7 +177,7 @@ public class OAuthServiceImpl implements OAuthService {
      * @param grantType    授权类型
      * @param code         授权码
      * @param redirectUri  重定向URI
-     * @param clientId    客户端标识符
+     * @param clientId     客户端标识符
      * @param clientSecret 客户端密钥
      * @return 访问令牌信息
      */
@@ -242,7 +236,7 @@ public class OAuthServiceImpl implements OAuthService {
      *
      * @param grantType    授权类型
      * @param refreshToken 刷新令牌
-     * @param clientId    客户端标识符
+     * @param clientId     客户端标识符
      * @param clientSecret 客户端密钥
      * @return 新的访问令牌信息
      */
@@ -325,7 +319,7 @@ public class OAuthServiceImpl implements OAuthService {
      *
      * @param grantType    授权类型
      * @param scope        授权范围
-     * @param clientId    客户端标识符
+     * @param clientId     客户端标识符
      * @param clientSecret 客户端密钥
      * @return 访问令牌信息
      */
@@ -408,9 +402,8 @@ public class OAuthServiceImpl implements OAuthService {
      *
      * @param token         令牌
      * @param tokenTypeHint 令牌类型提示
-     * @param clientId     客户端标识符
+     * @param clientId      客户端标识符
      * @param clientSecret  客户端密钥
-     * @return 撤销结果
      */
     @Override
     public void revokeToken(String token, String tokenTypeHint, String clientId, String clientSecret) {
@@ -422,7 +415,7 @@ public class OAuthServiceImpl implements OAuthService {
 
             boolean deleted = false;
             if (tokenTypeHint == null || ACCESS_TOKEN_HINT.equalsIgnoreCase(tokenTypeHint)) {
-                deleted = removeAccessToken(token, null, true) || deleted;
+                deleted = removeAccessToken(token, null, true);
             }
 
             if (tokenTypeHint == null || REFRESH_TOKEN_HINT.equalsIgnoreCase(tokenTypeHint)) {
@@ -447,10 +440,10 @@ public class OAuthServiceImpl implements OAuthService {
         }
         try {
             Set<String> accessTokens = Optional.ofNullable(
-                    redisTemplate.opsForSet().members(buildUserAccessIndexKey(userId)))
+                            redisTemplate.opsForSet().members(buildUserAccessIndexKey(userId)))
                     .orElse(Collections.emptySet());
             Set<String> refreshTokens = Optional.ofNullable(
-                    redisTemplate.opsForSet().members(buildUserRefreshIndexKey(userId)))
+                            redisTemplate.opsForSet().members(buildUserRefreshIndexKey(userId)))
                     .orElse(Collections.emptySet());
 
             for (String accessToken : accessTokens) {
@@ -477,10 +470,10 @@ public class OAuthServiceImpl implements OAuthService {
         }
         try {
             Set<String> accessTokens = Optional.ofNullable(
-                    redisTemplate.opsForSet().members(buildClientAccessIndexKey(clientKey)))
+                            redisTemplate.opsForSet().members(buildClientAccessIndexKey(clientKey)))
                     .orElse(Collections.emptySet());
             Set<String> refreshTokens = Optional.ofNullable(
-                    redisTemplate.opsForSet().members(buildClientRefreshIndexKey(clientKey)))
+                            redisTemplate.opsForSet().members(buildClientRefreshIndexKey(clientKey)))
                     .orElse(Collections.emptySet());
 
             for (String accessToken : accessTokens) {
@@ -539,59 +532,21 @@ public class OAuthServiceImpl implements OAuthService {
     }
 
     /**
-     * 清理第三方令牌映射
-     * 根据token与类型提示，尝试删除所有已知提供商(wechat/google/github)的access/refresh映射键
-     *
-     * @param token 要清理的令牌值
-     * @param tokenTypeHint 令牌类型提示（access_token/refresh_token/null）
-     */
-    private void clearThirdPartyMappings(String token, String tokenTypeHint) {
-        try {
-            if (cn.hutool.core.util.StrUtil.isBlank(token)) {
-                return;
-            }
-            List<String> providers = oauthConfig.getThirdPartyProviders();
-            if (providers.isEmpty()) {
-                return;
-            }
-            boolean clearAccess = tokenTypeHint == null || ACCESS_TOKEN_HINT.equalsIgnoreCase(tokenTypeHint);
-            boolean clearRefresh = tokenTypeHint == null || REFRESH_TOKEN_HINT.equalsIgnoreCase(tokenTypeHint);
-
-            for (String provider : providers) {
-                if (StrUtil.isBlank(provider)) {
-                    continue;
-                }
-                String normalized = provider.trim().toLowerCase(java.util.Locale.ROOT);
-                if (clearAccess) {
-                    String accessKey = THIRD_PARTY_TOKEN_PREFIX + normalized + ":access:" + token;
-                    redisTemplate.delete(accessKey);
-                }
-                if (clearRefresh) {
-                    String refreshKey = THIRD_PARTY_TOKEN_PREFIX + normalized + ":refresh:" + token;
-                    redisTemplate.delete(refreshKey);
-                }
-            }
-        } catch (Exception e) {
-            log.warn("清理第三方映射时发生异常: token={}, hint={}", token, tokenTypeHint, e);
-        }
-    }
-
-    /**
      * 验证客户端
      *
-     * @param clientId    客户端标识符
+     * @param clientId     客户端标识符
      * @param clientSecret 客户端密钥
      * @return 客户端信息
      */
     @Override
     public OAuthClient validateClient(String clientId, String clientSecret) {
         if (StrUtil.isBlank(clientId) || StrUtil.isBlank(clientSecret)) {
-            log.warn("客户端验证参数为空: clientId={}, clientSecret={}", 
+            log.warn("客户端验证参数为空: clientId={}, clientSecret={}",
                     StrUtil.isBlank(clientId) ? "blank" : "present",
                     StrUtil.isBlank(clientSecret) ? "blank" : "present");
             return null;
         }
-        
+
         try {
             // 先根据clientId查找客户端
             OAuthClient client = oauthClientMapper.findByClientKey(clientId);
@@ -599,16 +554,16 @@ public class OAuthServiceImpl implements OAuthService {
                 log.warn("客户端不存在: clientId={}", clientId);
                 return null;
             }
-            
+
             if (client.getStatus() != 1) {
                 log.warn("客户端已禁用: clientId={}, status={}", clientId, client.getStatus());
                 return null;
             }
-            
+
             // 使用专门的密钥服务验证客户端密钥
             String storedSecret = client.getClientSecret();
             if (!oauthClientSecretService.matches(clientSecret, storedSecret)) {
-                log.warn("客户端密钥验证失败: clientId={}, secretIsEncrypted={}", 
+                log.warn("客户端密钥验证失败: clientId={}, secretIsEncrypted={}",
                         clientId, oauthClientSecretService.isEncrypted(storedSecret));
                 return null;
             }
@@ -626,7 +581,7 @@ public class OAuthServiceImpl implements OAuthService {
             } catch (Exception upgradeEx) {
                 log.warn("客户端密钥升级失败，将保持原状态: clientId={}", clientId, upgradeEx);
             }
-            
+
             if (log.isDebugEnabled()) {
                 log.debug("客户端验证成功: clientId={}, clientName={}", clientId, client.getClientName());
             }
@@ -640,7 +595,7 @@ public class OAuthServiceImpl implements OAuthService {
     /**
      * 生成授权码
      *
-     * @param clientId   客户端标识符
+     * @param clientId    客户端标识符
      * @param userId      用户ID
      * @param redirectUri 重定向URI
      * @param scope       授权范围
@@ -667,7 +622,7 @@ public class OAuthServiceImpl implements OAuthService {
      * 验证授权码
      *
      * @param code        授权码
-     * @param clientId   客户端标识符
+     * @param clientId    客户端标识符
      * @param redirectUri 重定向URI
      * @return 授权码记录
      */
@@ -723,7 +678,7 @@ public class OAuthServiceImpl implements OAuthService {
             String rawSecret;
             if (StrUtil.isBlank(client.getClientSecret())) {
                 rawSecret = oauthClientSecretService.generateClientSecret();
-                log.info("为客户端生成新密钥: clientId={}, secretLength={}", 
+                log.info("为客户端生成新密钥: clientId={}, secretLength={}",
                         client.getClientKey(), rawSecret.length());
             } else {
                 rawSecret = client.getClientSecret();
@@ -811,7 +766,6 @@ public class OAuthServiceImpl implements OAuthService {
      * 删除OAuth客户端
      *
      * @param clientId 客户端标识符
-     * @return 删除结果
      */
     @Override
     public void deleteClient(String clientId) {
@@ -848,14 +802,150 @@ public class OAuthServiceImpl implements OAuthService {
         }
     }
 
+    private boolean removeRefreshToken(String token, Map<Object, Object> tokenData, boolean clearThirdParty) {
+        if (StrUtil.isBlank(token)) {
+            return false;
+        }
+        String tokenKey = oauthConfig.getRefreshTokenPrefix() + token;
+        Map<Object, Object> data = tokenData != null ? tokenData : redisTemplate.opsForHash().entries(tokenKey);
+        String userIdStr = (String) data.get("user_id");
+        String clientId = (String) data.get("client_id");
+        String linkedAccessToken = (String) data.get("access_token");
+        boolean existed = !data.isEmpty();
+
+        boolean removed = redisTemplate.delete(tokenKey);
+        removeTokenFromIndexes(token, userIdStr, clientId, false);
+
+        if (clearThirdParty) {
+            clearThirdPartyMappings(token, REFRESH_TOKEN_HINT);
+        }
+        if (StrUtil.isNotBlank(linkedAccessToken)) {
+            removeAccessToken(linkedAccessToken, null, clearThirdParty);
+        }
+        return existed || removed;
+    }
+
+    private void removeTokenFromIndexes(String token, String userIdStr, String clientId, boolean accessToken) {
+        if (StrUtil.isNotBlank(userIdStr)) {
+            try {
+                Long userId = Long.valueOf(userIdStr);
+                String key = accessToken ? buildUserAccessIndexKey(userId) : buildUserRefreshIndexKey(userId);
+                redisTemplate.opsForSet().remove(key, token);
+            } catch (NumberFormatException ex) {
+                log.warn("无法解析用户ID，跳过索引清理: userId={}", userIdStr, ex);
+            }
+        }
+        if (StrUtil.isNotBlank(clientId)) {
+            String key = accessToken ? buildClientAccessIndexKey(clientId) : buildClientRefreshIndexKey(clientId);
+            redisTemplate.opsForSet().remove(key, token);
+        }
+    }
+
+    /**
+     * 清理第三方令牌映射
+     * 根据token与类型提示，尝试删除所有已知提供商(wechat/google/github)的access/refresh映射键
+     *
+     * @param token         要清理的令牌值
+     * @param tokenTypeHint 令牌类型提示（access_token/refresh_token/null）
+     */
+    private void clearThirdPartyMappings(String token, String tokenTypeHint) {
+        try {
+            if (cn.hutool.core.util.StrUtil.isBlank(token)) {
+                return;
+            }
+            List<String> providers = oauthConfig.getThirdPartyProviders();
+            if (providers.isEmpty()) {
+                return;
+            }
+            boolean clearAccess = tokenTypeHint == null || ACCESS_TOKEN_HINT.equalsIgnoreCase(tokenTypeHint);
+            boolean clearRefresh = tokenTypeHint == null || REFRESH_TOKEN_HINT.equalsIgnoreCase(tokenTypeHint);
+
+            for (String provider : providers) {
+                if (StrUtil.isBlank(provider)) {
+                    continue;
+                }
+                String normalized = provider.trim().toLowerCase(java.util.Locale.ROOT);
+                if (clearAccess) {
+                    String accessKey = THIRD_PARTY_TOKEN_PREFIX + normalized + ":access:" + token;
+                    redisTemplate.delete(accessKey);
+                }
+                if (clearRefresh) {
+                    String refreshKey = THIRD_PARTY_TOKEN_PREFIX + normalized + ":refresh:" + token;
+                    redisTemplate.delete(refreshKey);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("清理第三方映射时发生异常: token={}, hint={}", token, tokenTypeHint, e);
+        }
+    }
+
+    private boolean removeAccessToken(String token, Map<Object, Object> tokenData, boolean clearThirdParty) {
+        if (StrUtil.isBlank(token)) {
+            return false;
+        }
+        String tokenKey = oauthConfig.getAccessTokenPrefix() + token;
+        Map<Object, Object> data = tokenData != null ? tokenData : redisTemplate.opsForHash().entries(tokenKey);
+        String userIdStr = (String) data.get("user_id");
+        String clientId = (String) data.get("client_id");
+        boolean existed = !data.isEmpty();
+
+        boolean removed = redisTemplate.delete(tokenKey);
+        removeTokenFromIndexes(token, userIdStr, clientId, true);
+
+        if (clearThirdParty) {
+            clearThirdPartyMappings(token, ACCESS_TOKEN_HINT);
+        }
+        return existed || removed;
+    }
+
+    /**
+     * 验证授权码并原子性标记为已使用
+     * 防止授权码重复使用的安全漏洞
+     *
+     * @param code        授权码
+     * @param clientId    客户端标识符
+     * @param redirectUri 重定向URI
+     * @return 授权码记录，如果无效或已使用则返回null
+     */
+    private OAuthCode validateAndUseAuthorizationCode(String code, String clientId, String redirectUri) {
+        // 先查找授权码
+        OAuthCode authCode = oauthCodeMapper.findByCodeAndClientKey(code, clientId);
+        if (authCode == null || authCode.getStatus() != OAuthConfig.CodeStatus.VALID) {
+            log.warn("授权码不存在或已失效: code={}, clientId={}, status={}",
+                    code, clientId, authCode != null ? authCode.getStatus() : "null");
+            return null;
+        }
+
+        // 检查是否过期
+        if (authCode.getExpireTime().isBefore(LocalDateTime.now())) {
+            log.warn("授权码已过期: code={}, expireTime={}", code, authCode.getExpireTime());
+            return null;
+        }
+
+        // 检查重定向URI
+        if (!authCode.getRedirectUri().equals(redirectUri)) {
+            log.warn("重定向URI不匹配: expected={}, actual={}", authCode.getRedirectUri(), redirectUri);
+            return null;
+        }
+
+        // 原子性标记为已使用，防止并发使用
+        int updateCount = oauthCodeMapper.markCodeAsUsed(code);
+        if (updateCount == 0) {
+            log.warn("授权码可能已被使用: code={}", code);
+            return null;
+        }
+
+        return authCode;
+    }
+
     /**
      * 生成访问令牌
      * 创建UUID格式的访问令牌，并将令牌信息存储到Redis中
      * 令牌信息包含用户ID、客户端标识、授权范围和创建时间
      *
-     * @param userId    用户ID（客户端凭证模式时可为null）
+     * @param userId   用户ID（客户端凭证模式时可为null）
      * @param clientId 客户端标识符
-     * @param scope     授权范围
+     * @param scope    授权范围
      * @return 访问令牌字符串
      */
     private String generateAccessToken(Long userId, String clientId, String scope) {
@@ -871,7 +961,7 @@ public class OAuthServiceImpl implements OAuthService {
         tokenInfo.put("issued_at", String.valueOf(System.currentTimeMillis()));
         tokenInfo.put("expires_in", String.valueOf(oauthConfig.getAccessTokenTimeout()));
         tokenInfo.put("expires_at", String.valueOf(System.currentTimeMillis() + (oauthConfig.getAccessTokenTimeout() * 1000L)));
-        
+
         // 用户相关信息（仅当用户ID不为空时）
         if (userId != null) {
             tokenInfo.put("user_id", userId.toString());
@@ -895,6 +985,71 @@ public class OAuthServiceImpl implements OAuthService {
         }
 
         return token;
+    }
+
+    /**
+     * 生成刷新令牌
+     * 创建UUID格式的刷新令牌，用于获取新的访问令牌
+     * 刷新令牌的有效期比访问令牌更长，通常为30天
+     *
+     * @param userId   用户ID
+     * @param clientId 客户端标识符
+     * @return 刷新令牌字符串
+     */
+    private String generateRefreshToken(Long userId, String clientId, String associatedAccessToken) {
+        // 生成UUID格式的刷新令牌
+        String token = IdUtil.fastSimpleUUID();
+
+        // 构建统一的令牌信息格式 - 符合OAuth2.0标准
+        Map<String, String> tokenInfo = new HashMap<>();
+        tokenInfo.put("token_type", "refresh_token");
+        tokenInfo.put("token_value", token);
+        tokenInfo.put("client_id", clientId);
+        tokenInfo.put("issued_at", String.valueOf(System.currentTimeMillis()));
+        tokenInfo.put("expires_in", String.valueOf(oauthConfig.getRefreshTokenTimeout()));
+        tokenInfo.put("expires_at", String.valueOf(System.currentTimeMillis() + (oauthConfig.getRefreshTokenTimeout() * 1000L)));
+        if (StrUtil.isNotBlank(associatedAccessToken)) {
+            tokenInfo.put("access_token", associatedAccessToken);
+        }
+
+        // 用户相关信息（仅当用户ID不为空时）
+        if (userId != null) {
+            tokenInfo.put("user_id", userId.toString());
+            // 获取用户详细信息
+            Account account = accountMapper.selectById(userId);
+            if (account != null) {
+                tokenInfo.put("username", account.getUsername());
+                tokenInfo.put("user_role", account.getRole());
+            }
+        }
+
+        // 使用配置的键前缀
+        String tokenKey = oauthConfig.getRefreshTokenPrefix() + token;
+        redisTemplate.opsForHash().putAll(tokenKey, tokenInfo);
+        redisTemplate.expire(tokenKey, oauthConfig.getRefreshTokenTimeout(), TimeUnit.SECONDS);
+        recordRefreshTokenIndexes(userId, clientId, token);
+
+        if (log.isDebugEnabled()) {
+            log.debug("生成刷新令牌成功: clientId={}, userId={}, expiresIn={}",
+                    clientId, userId, oauthConfig.getRefreshTokenTimeout());
+        }
+
+        return token;
+    }
+
+    /**
+     * 规范化scope字符串（基于字符串输入）
+     * 将scope字符串转换为标准的空格分隔格式
+     *
+     * @param scopeString scope字符串
+     * @return 规范化的scope字符串
+     */
+    private String normalizeScope(String scopeString) {
+        if (StrUtil.isBlank(scopeString)) {
+            return oauthConfig.getDefaultScope();
+        }
+        Set<String> scopes = parseScopes(scopeString);
+        return normalizeScope(scopes);
     }
 
     private void recordAccessTokenIndexes(Long userId, String clientId, String token) {
@@ -931,6 +1086,20 @@ public class OAuthServiceImpl implements OAuthService {
         }
     }
 
+    /**
+     * 规范化scope字符串
+     * 将scope集合转换为标准的空格分隔格式
+     *
+     * @param scopes scope集合
+     * @return 规范化的scope字符串
+     */
+    private String normalizeScope(Set<String> scopes) {
+        if (scopes == null || scopes.isEmpty()) {
+            return oauthConfig.getDefaultScope();
+        }
+        return String.join(" ", scopes);
+    }
+
     private long getIndexTtlSeconds() {
         return Math.max(oauthConfig.getAccessTokenTimeout(), oauthConfig.getRefreshTokenTimeout());
     }
@@ -939,74 +1108,138 @@ public class OAuthServiceImpl implements OAuthService {
         return oauthConfig.getUserTokenPrefix() + userId + ":access";
     }
 
-    private String buildUserRefreshIndexKey(Long userId) {
-        return oauthConfig.getUserTokenPrefix() + userId + ":refresh";
-    }
-
     private String buildClientAccessIndexKey(String clientId) {
         return oauthConfig.getClientTokenPrefix() + clientId + ":access";
+    }
+
+    private String buildUserRefreshIndexKey(Long userId) {
+        return oauthConfig.getUserTokenPrefix() + userId + ":refresh";
     }
 
     private String buildClientRefreshIndexKey(String clientId) {
         return oauthConfig.getClientTokenPrefix() + clientId + ":refresh";
     }
 
-    private boolean removeAccessToken(String token, Map<Object, Object> tokenData, boolean clearThirdParty) {
-        if (StrUtil.isBlank(token)) {
+    /**
+     * 验证重定向URI是否有效
+     * 检查重定向URI是否在客户端注册的URI列表中
+     * 支持JSON数组格式和逗号分隔格式
+     *
+     * @param client      客户端信息
+     * @param redirectUri 重定向URI
+     * @return 是否有效
+     */
+    private boolean isValidRedirectUri(OAuthClient client, String redirectUri) {
+        if (StrUtil.isBlank(client.getRedirectUris()) || StrUtil.isBlank(redirectUri)) {
+            log.warn("重定向URI验证失败: 配置或请求URI为空");
             return false;
         }
-        String tokenKey = oauthConfig.getAccessTokenPrefix() + token;
-        Map<Object, Object> data = tokenData != null ? tokenData : redisTemplate.opsForHash().entries(tokenKey);
-        String userIdStr = data != null ? (String) data.get("user_id") : null;
-        String clientId = data != null ? (String) data.get("client_id") : null;
-        boolean existed = data != null && !data.isEmpty();
 
-        boolean removed = Boolean.TRUE.equals(redisTemplate.delete(tokenKey));
-        removeTokenFromIndexes(token, userIdStr, clientId, true);
+        try {
+            // 支持JSON数组格式和逗号分隔格式
+            List<String> validUris;
+            String configuredUris = client.getRedirectUris().trim();
 
-        if (clearThirdParty) {
-            clearThirdPartyMappings(token, ACCESS_TOKEN_HINT);
-        }
-        return existed || removed;
-    }
+            if (configuredUris.startsWith("[") && configuredUris.endsWith("]")) {
+                // JSON数组格式：["http://example.com/callback", "https://app.example.com/auth"]
+                validUris = JSONUtil.toList(configuredUris, String.class);
+            } else {
+                // 逗号分隔格式：http://example.com/callback,https://app.example.com/auth
+                validUris = Arrays.asList(configuredUris.split(","));
+            }
 
-    private boolean removeRefreshToken(String token, Map<Object, Object> tokenData, boolean clearThirdParty) {
-        if (StrUtil.isBlank(token)) {
+            // 清理URI并验证
+            for (String validUri : validUris) {
+                String cleanUri = validUri.trim();
+                if (redirectUri.equals(cleanUri)) {
+                    return true;
+                }
+            }
+
+            log.warn("重定向URI不在允许列表中: requestUri={}, configuredUris={}",
+                    redirectUri, client.getRedirectUris());
+            return false;
+        } catch (Exception e) {
+            log.error("解析重定向URI配置失败: {}", client.getRedirectUris(), e);
             return false;
         }
-        String tokenKey = oauthConfig.getRefreshTokenPrefix() + token;
-        Map<Object, Object> data = tokenData != null ? tokenData : redisTemplate.opsForHash().entries(tokenKey);
-        String userIdStr = data != null ? (String) data.get("user_id") : null;
-        String clientId = data != null ? (String) data.get("client_id") : null;
-        String linkedAccessToken = data != null ? (String) data.get("access_token") : null;
-        boolean existed = data != null && !data.isEmpty();
-
-        boolean removed = Boolean.TRUE.equals(redisTemplate.delete(tokenKey));
-        removeTokenFromIndexes(token, userIdStr, clientId, false);
-
-        if (clearThirdParty) {
-            clearThirdPartyMappings(token, REFRESH_TOKEN_HINT);
-        }
-        if (StrUtil.isNotBlank(linkedAccessToken)) {
-            removeAccessToken(linkedAccessToken, null, clearThirdParty);
-        }
-        return existed || removed;
     }
 
-    private void removeTokenFromIndexes(String token, String userIdStr, String clientId, boolean accessToken) {
-        if (StrUtil.isNotBlank(userIdStr)) {
-            try {
-                Long userId = Long.valueOf(userIdStr);
-                String key = accessToken ? buildUserAccessIndexKey(userId) : buildUserRefreshIndexKey(userId);
-                redisTemplate.opsForSet().remove(key, token);
-            } catch (NumberFormatException ex) {
-                log.warn("无法解析用户ID，跳过索引清理: userId={}", userIdStr, ex);
+    /**
+     * 验证授权范围是否有效
+     * 检查请求的scope是否在客户端允许的范围内
+     * 支持scope子集验证和空scope的默认处理
+     *
+     * @param client       客户端信息
+     * @param requestScope 请求的授权范围
+     * @return 是否有效
+     */
+    private boolean isValidScope(OAuthClient client, String requestScope) {
+        // 如果请求的scope为空，使用默认scope（这是有效的）
+        if (StrUtil.isBlank(requestScope)) {
+            if (log.isDebugEnabled()) {
+                log.debug("请求scope为空，将使用默认scope: {}", oauthConfig.getDefaultScope());
+            }
+            return true;
+        }
+
+        // 如果客户端没有配置scope，只允许默认scope
+        if (StrUtil.isBlank(client.getScopes())) {
+            log.warn("客户端未配置授权范围: clientId={}", client.getClientKey());
+            return requestScope.equals(oauthConfig.getDefaultScope());
+        }
+
+        // 解析客户端配置的scope
+        Set<String> clientScopes = parseScopes(client.getScopes());
+        Set<String> requestScopes = parseScopes(requestScope);
+
+        // 验证请求的所有scope都在客户端配置的范围内
+        for (String scope : requestScopes) {
+            if (!clientScopes.contains(scope)) {
+                log.warn("请求的scope不在客户端允许范围内: requestScope={}, clientScopes={}",
+                        scope, clientScopes);
+                return false;
             }
         }
-        if (StrUtil.isNotBlank(clientId)) {
-            String key = accessToken ? buildClientAccessIndexKey(clientId) : buildClientRefreshIndexKey(clientId);
-            redisTemplate.opsForSet().remove(key, token);
+
+        if (log.isDebugEnabled()) {
+            log.debug("scope验证通过: requestScopes={}, clientScopes={}", requestScopes, clientScopes);
         }
+        return true;
+    }
+
+    /**
+     * 解析scope字符串为Set集合
+     * 支持空格分隔和逗号分隔格式
+     *
+     * @param scopeString scope字符串
+     * @return scope集合
+     */
+    private Set<String> parseScopes(String scopeString) {
+        if (StrUtil.isBlank(scopeString)) {
+            return Collections.emptySet();
+        }
+
+        Set<String> scopes = new HashSet<>();
+
+        // 支持空格分隔（OAuth2.0标准）和逗号分隔
+        String[] scopeArray;
+        if (scopeString.contains(" ")) {
+            scopeArray = scopeString.split("\\s+");
+        } else if (scopeString.contains(",")) {
+            scopeArray = scopeString.split(",");
+        } else {
+            scopeArray = new String[]{scopeString};
+        }
+
+        for (String scope : scopeArray) {
+            String trimmedScope = scope.trim();
+            if (StrUtil.isNotBlank(trimmedScope)) {
+                scopes.add(trimmedScope);
+            }
+        }
+
+        return scopes;
     }
 
     private String extractToken(String redisKey, String prefix) {
@@ -1036,247 +1269,15 @@ public class OAuthServiceImpl implements OAuthService {
         } catch (Exception e) {
             log.error("执行Redis SCAN命令失败: pattern={}", pattern, e);
         }
+        if (keys.isEmpty()) {
+            try {
+                // 在测试环境内存实现中回退至 KEYS 匹配，确保批量撤销逻辑可用
+                Set<String> fallback = redisTemplate.keys(pattern);
+                keys.addAll(fallback);
+            } catch (Exception fallbackEx) {
+                log.warn("Redis KEYS 回退失败: pattern={}", pattern, fallbackEx);
+            }
+        }
         return keys;
-    }
-
-    /**
-     * 生成刷新令牌
-     * 创建UUID格式的刷新令牌，用于获取新的访问令牌
-     * 刷新令牌的有效期比访问令牌更长，通常为30天
-     *
-     * @param userId    用户ID
-     * @param clientId 客户端标识符
-     * @return 刷新令牌字符串
-     */
-    private String generateRefreshToken(Long userId, String clientId, String associatedAccessToken) {
-        // 生成UUID格式的刷新令牌
-        String token = IdUtil.fastSimpleUUID();
-
-        // 构建统一的令牌信息格式 - 符合OAuth2.0标准
-        Map<String, String> tokenInfo = new HashMap<>();
-        tokenInfo.put("token_type", "refresh_token");
-        tokenInfo.put("token_value", token);
-        tokenInfo.put("client_id", clientId);
-        tokenInfo.put("issued_at", String.valueOf(System.currentTimeMillis()));
-        tokenInfo.put("expires_in", String.valueOf(oauthConfig.getRefreshTokenTimeout()));
-        tokenInfo.put("expires_at", String.valueOf(System.currentTimeMillis() + (oauthConfig.getRefreshTokenTimeout() * 1000L)));
-        if (StrUtil.isNotBlank(associatedAccessToken)) {
-            tokenInfo.put("access_token", associatedAccessToken);
-        }
-        
-        // 用户相关信息（仅当用户ID不为空时）
-        if (userId != null) {
-            tokenInfo.put("user_id", userId.toString());
-            // 获取用户详细信息
-            Account account = accountMapper.selectById(userId);
-            if (account != null) {
-                tokenInfo.put("username", account.getUsername());
-                tokenInfo.put("user_role", account.getRole());
-            }
-        }
-
-        // 使用配置的键前缀
-        String tokenKey = oauthConfig.getRefreshTokenPrefix() + token;
-        redisTemplate.opsForHash().putAll(tokenKey, tokenInfo);
-        redisTemplate.expire(tokenKey, oauthConfig.getRefreshTokenTimeout(), TimeUnit.SECONDS);
-        recordRefreshTokenIndexes(userId, clientId, token);
-
-        if (log.isDebugEnabled()) {
-            log.debug("生成刷新令牌成功: clientId={}, userId={}, expiresIn={}",
-                    clientId, userId, oauthConfig.getRefreshTokenTimeout());
-        }
-
-        return token;
-    }
-
-    /**
-     * 验证重定向URI是否有效
-     * 检查重定向URI是否在客户端注册的URI列表中
-     * 支持JSON数组格式和逗号分隔格式
-     *
-     * @param client      客户端信息
-     * @param redirectUri 重定向URI
-     * @return 是否有效
-     */
-    private boolean isValidRedirectUri(OAuthClient client, String redirectUri) {
-        if (StrUtil.isBlank(client.getRedirectUris()) || StrUtil.isBlank(redirectUri)) {
-            log.warn("重定向URI验证失败: 配置或请求URI为空");
-            return false;
-        }
-
-        try {
-            // 支持JSON数组格式和逗号分隔格式
-            List<String> validUris;
-            String configuredUris = client.getRedirectUris().trim();
-            
-            if (configuredUris.startsWith("[") && configuredUris.endsWith("]")) {
-                // JSON数组格式：["http://example.com/callback", "https://app.example.com/auth"]
-                validUris = JSONUtil.toList(configuredUris, String.class);
-            } else {
-                // 逗号分隔格式：http://example.com/callback,https://app.example.com/auth
-                validUris = Arrays.asList(configuredUris.split(","));
-            }
-            
-            // 清理URI并验证
-            for (String validUri : validUris) {
-                String cleanUri = validUri.trim();
-                if (redirectUri.equals(cleanUri)) {
-                    return true;
-                }
-            }
-            
-            log.warn("重定向URI不在允许列表中: requestUri={}, configuredUris={}", 
-                    redirectUri, client.getRedirectUris());
-            return false;
-        } catch (Exception e) {
-            log.error("解析重定向URI配置失败: {}", client.getRedirectUris(), e);
-            return false;
-        }
-    }
-    
-    /**
-     * 验证授权范围是否有效
-     * 检查请求的scope是否在客户端允许的范围内
-     * 支持scope子集验证和空scope的默认处理
-     *
-     * @param client       客户端信息
-     * @param requestScope 请求的授权范围
-     * @return 是否有效
-     */
-    private boolean isValidScope(OAuthClient client, String requestScope) {
-        // 如果请求的scope为空，使用默认scope（这是有效的）
-        if (StrUtil.isBlank(requestScope)) {
-        if (log.isDebugEnabled()) {
-            log.debug("请求scope为空，将使用默认scope: {}", oauthConfig.getDefaultScope());
-        }
-            return true;
-        }
-        
-        // 如果客户端没有配置scope，只允许默认scope
-        if (StrUtil.isBlank(client.getScopes())) {
-            log.warn("客户端未配置授权范围: clientId={}", client.getClientKey());
-            return requestScope.equals(oauthConfig.getDefaultScope());
-        }
-        
-        // 解析客户端配置的scope
-        Set<String> clientScopes = parseScopes(client.getScopes());
-        Set<String> requestScopes = parseScopes(requestScope);
-        
-        // 验证请求的所有scope都在客户端配置的范围内
-        for (String scope : requestScopes) {
-            if (!clientScopes.contains(scope)) {
-                log.warn("请求的scope不在客户端允许范围内: requestScope={}, clientScopes={}", 
-                        scope, clientScopes);
-                return false;
-            }
-        }
-        
-        if (log.isDebugEnabled()) {
-            log.debug("scope验证通过: requestScopes={}, clientScopes={}", requestScopes, clientScopes);
-        }
-        return true;
-    }
-    
-    /**
-     * 解析scope字符串为Set集合
-     * 支持空格分隔和逗号分隔格式
-     *
-     * @param scopeString scope字符串
-     * @return scope集合
-     */
-    private Set<String> parseScopes(String scopeString) {
-        if (StrUtil.isBlank(scopeString)) {
-            return Collections.emptySet();
-        }
-        
-        Set<String> scopes = new HashSet<>();
-        
-        // 支持空格分隔（OAuth2.0标准）和逗号分隔
-        String[] scopeArray;
-        if (scopeString.contains(" ")) {
-            scopeArray = scopeString.split("\\s+");
-        } else if (scopeString.contains(",")) {
-            scopeArray = scopeString.split(",");
-        } else {
-            scopeArray = new String[]{scopeString};
-        }
-        
-        for (String scope : scopeArray) {
-            String trimmedScope = scope.trim();
-            if (StrUtil.isNotBlank(trimmedScope)) {
-                scopes.add(trimmedScope);
-            }
-        }
-        
-        return scopes;
-    }
-    
-    /**
-     * 规范化scope字符串
-     * 将scope集合转换为标准的空格分隔格式
-     *
-     * @param scopes scope集合
-     * @return 规范化的scope字符串
-     */
-    private String normalizeScope(Set<String> scopes) {
-        if (scopes == null || scopes.isEmpty()) {
-            return oauthConfig.getDefaultScope();
-        }
-        return String.join(" ", scopes);
-    }
-    
-    /**
-     * 规范化scope字符串（基于字符串输入）
-     * 将scope字符串转换为标准的空格分隔格式
-     *
-     * @param scopeString scope字符串
-     * @return 规范化的scope字符串
-     */
-    private String normalizeScope(String scopeString) {
-        if (StrUtil.isBlank(scopeString)) {
-            return oauthConfig.getDefaultScope();
-        }
-        Set<String> scopes = parseScopes(scopeString);
-        return normalizeScope(scopes);
-    }
-
-    /**
-     * 验证授权码并原子性标记为已使用
-     * 防止授权码重复使用的安全漏洞
-     *
-     * @param code        授权码
-     * @param clientId   客户端标识符
-     * @param redirectUri 重定向URI
-     * @return 授权码记录，如果无效或已使用则返回null
-     */
-    private OAuthCode validateAndUseAuthorizationCode(String code, String clientId, String redirectUri) {
-        // 先查找授权码
-        OAuthCode authCode = oauthCodeMapper.findByCodeAndClientKey(code, clientId);
-        if (authCode == null || authCode.getStatus() != OAuthConfig.CodeStatus.VALID) {
-            log.warn("授权码不存在或已失效: code={}, clientId={}, status={}", 
-                    code, clientId, authCode != null ? authCode.getStatus() : "null");
-            return null;
-        }
-
-        // 检查是否过期
-        if (authCode.getExpireTime().isBefore(LocalDateTime.now())) {
-            log.warn("授权码已过期: code={}, expireTime={}", code, authCode.getExpireTime());
-            return null;
-        }
-
-        // 检查重定向URI
-        if (!authCode.getRedirectUri().equals(redirectUri)) {
-            log.warn("重定向URI不匹配: expected={}, actual={}", authCode.getRedirectUri(), redirectUri);
-            return null;
-        }
-
-        // 原子性标记为已使用，防止并发使用
-        int updateCount = oauthCodeMapper.markCodeAsUsed(code);
-        if (updateCount == 0) {
-            log.warn("授权码可能已被使用: code={}", code);
-            return null;
-        }
-
-        return authCode;
     }
 }

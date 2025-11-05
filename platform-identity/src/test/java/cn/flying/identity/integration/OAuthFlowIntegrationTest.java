@@ -1,17 +1,26 @@
 package cn.flying.identity.integration;
 
+import cn.flying.identity.dto.Account;
 import cn.flying.identity.dto.OAuthClient;
 import cn.flying.identity.mapper.OAuthClientMapper;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.io.UnsupportedEncodingException;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -28,7 +37,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DisplayName("OAuth 2.0授权流程集成测试")
 public class OAuthFlowIntegrationTest extends BaseIntegrationTest {
 
-    private static final String API_BASE = "/identity/api/oauth";
+    private static final String API_BASE = "/api/oauth";
     private static final String TEST_CLIENT_ID = "test-client-id";
     private static final String TEST_CLIENT_SECRET = "test-client-secret";
     private static final String TEST_REDIRECT_URI = "http://localhost:8080/callback";
@@ -69,16 +78,34 @@ public class OAuthFlowIntegrationTest extends BaseIntegrationTest {
         authRequest.put("state", "random-state-123");
         authRequest.put("approved", true);
 
-        MvcResult authResult = mockMvc.perform(post(API_BASE + "/authorizations")
-                        .header("Authorization", "Bearer " + token)
+        MvcResult authResult = mockMvc.perform(withToken(post(API_BASE + "/authorizations"), token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(toJson(authRequest)))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.data").isString())
                 .andReturn();
+        Assertions.assertEquals(201, authResult.getResponse().getStatus(), () -> {
+            Exception resolved = authResult.getResolvedException();
+            if (resolved != null) {
+                StringWriter sw = new StringWriter();
+                resolved.printStackTrace(new PrintWriter(sw));
+                return sw.toString();
+            }
+            try {
+                return authResult.getResponse().getContentAsString();
+            } catch (UnsupportedEncodingException e) {
+                return e.toString();
+            }
+        });
+        Assertions.assertTrue(
+                objectMapper.readTree(authResult.getResponse().getContentAsString()).get("data").isTextual(),
+                authResult.getResponse().getContentAsString());
 
-        String authCode = objectMapper.readTree(authResult.getResponse().getContentAsString())
+        String redirectUrl = objectMapper.readTree(authResult.getResponse().getContentAsString())
                 .get("data").asText();
+        String authCode = UriComponentsBuilder.fromUriString(redirectUrl)
+                .build()
+                .getQueryParams()
+                .getFirst("code");
+        Assertions.assertNotNull(authCode, () -> "授权码解析失败: " + redirectUrl);
 
         // 3. 使用授权码获取访问令牌
         Map<String, Object> tokenRequest = new HashMap<>();
@@ -88,18 +115,21 @@ public class OAuthFlowIntegrationTest extends BaseIntegrationTest {
         tokenRequest.put("clientId", TEST_CLIENT_ID);
         tokenRequest.put("clientSecret", TEST_CLIENT_SECRET);
 
-        MvcResult tokenResult = mockMvc.perform(post(API_BASE + "/tokens")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(toJson(tokenRequest)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.access_token").exists())
-                .andExpect(jsonPath("$.data.refresh_token").exists())
-                .andExpect(jsonPath("$.data.token_type").value("Bearer"))
-                .andExpect(jsonPath("$.data.expires_in").isNumber())
-                .andReturn();
+        ResultActions tokenAction = mockMvc.perform(post(API_BASE + "/tokens")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(toJson(tokenRequest)));
+        MvcResult tokenResult = tokenAction.andReturn();
+        Assertions.assertEquals(200, tokenResult.getResponse().getStatus(), () -> responseBody(tokenResult));
+        JsonNode tokenData = objectMapper.readTree(responseBody(tokenResult)).get("data");
+        Assertions.assertNotNull(tokenData, () -> responseBody(tokenResult));
+        Assertions.assertAll(
+                () -> Assertions.assertTrue(tokenData.has("access_token"), () -> responseBody(tokenResult)),
+                () -> Assertions.assertTrue(tokenData.has("refresh_token"), () -> responseBody(tokenResult)),
+                () -> Assertions.assertEquals("Bearer", tokenData.get("token_type").asText()),
+                () -> Assertions.assertTrue(tokenData.has("expires_in"), () -> responseBody(tokenResult))
+        );
 
-        String refreshToken = objectMapper.readTree(tokenResult.getResponse().getContentAsString())
-                .get("data").get("refresh_token").asText();
+        String refreshToken = tokenData.get("refresh_token").asText();
 
         // 4. 使用刷新令牌获取新的访问令牌
         Map<String, Object> refreshRequest = new HashMap<>();
@@ -108,12 +138,15 @@ public class OAuthFlowIntegrationTest extends BaseIntegrationTest {
         refreshRequest.put("clientId", TEST_CLIENT_ID);
         refreshRequest.put("clientSecret", TEST_CLIENT_SECRET);
 
-        mockMvc.perform(post(API_BASE + "/tokens")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(toJson(refreshRequest)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.access_token").exists())
-                .andExpect(jsonPath("$.data.refresh_token").exists());
+        ResultActions refreshAction = mockMvc.perform(post(API_BASE + "/tokens")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(toJson(refreshRequest)));
+        MvcResult refreshResult = refreshAction.andReturn();
+        Assertions.assertEquals(200, refreshResult.getResponse().getStatus(), () -> responseBody(refreshResult));
+        JsonNode refreshData = objectMapper.readTree(responseBody(refreshResult)).get("data");
+        Assertions.assertNotNull(refreshData, () -> responseBody(refreshResult));
+        Assertions.assertTrue(refreshData.has("access_token"), () -> responseBody(refreshResult));
+        Assertions.assertTrue(refreshData.has("refresh_token"), () -> responseBody(refreshResult));
     }
 
     @Test
@@ -129,8 +162,7 @@ public class OAuthFlowIntegrationTest extends BaseIntegrationTest {
         authRequest.put("state", "random-state-123");
         authRequest.put("approved", false);  // 用户拒绝授权
 
-        mockMvc.perform(post(API_BASE + "/authorizations")
-                        .header("Authorization", "Bearer " + token)
+        mockMvc.perform(withToken(post(API_BASE + "/authorizations"), token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(toJson(authRequest)))
                 .andExpect(status().isForbidden());
@@ -148,8 +180,7 @@ public class OAuthFlowIntegrationTest extends BaseIntegrationTest {
         authRequest.put("scope", "read");
         authRequest.put("approved", true);
 
-        mockMvc.perform(post(API_BASE + "/authorizations")
-                        .header("Authorization", "Bearer " + token)
+        mockMvc.perform(withToken(post(API_BASE + "/authorizations"), token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(toJson(authRequest)))
                 .andExpect(status().isBadRequest());
@@ -167,8 +198,7 @@ public class OAuthFlowIntegrationTest extends BaseIntegrationTest {
         authRequest.put("scope", "read");
         authRequest.put("approved", true);
 
-        mockMvc.perform(post(API_BASE + "/authorizations")
-                        .header("Authorization", "Bearer " + token)
+        mockMvc.perform(withToken(post(API_BASE + "/authorizations"), token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(toJson(authRequest)))
                 .andExpect(status().isBadRequest());
@@ -203,8 +233,7 @@ public class OAuthFlowIntegrationTest extends BaseIntegrationTest {
         authRequest.put("scope", "read");
         authRequest.put("approved", true);
 
-        MvcResult authResult = mockMvc.perform(post(API_BASE + "/authorizations")
-                        .header("Authorization", "Bearer " + token)
+        MvcResult authResult = mockMvc.perform(withToken(post(API_BASE + "/authorizations"), token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(toJson(authRequest)))
                 .andExpect(status().isCreated())
@@ -240,8 +269,7 @@ public class OAuthFlowIntegrationTest extends BaseIntegrationTest {
         authRequest.put("scope", "read");
         authRequest.put("approved", true);
 
-        MvcResult authResult = mockMvc.perform(post(API_BASE + "/authorizations")
-                        .header("Authorization", "Bearer " + token)
+        MvcResult authResult = mockMvc.perform(withToken(post(API_BASE + "/authorizations"), token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(toJson(authRequest)))
                 .andExpect(status().isCreated())
@@ -293,8 +321,7 @@ public class OAuthFlowIntegrationTest extends BaseIntegrationTest {
         authRequest.put("scope", "read");
         authRequest.put("approved", true);
 
-        MvcResult authResult = mockMvc.perform(post(API_BASE + "/authorizations")
-                        .header("Authorization", "Bearer " + token)
+        MvcResult authResult = mockMvc.perform(withToken(post(API_BASE + "/authorizations"), token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(toJson(authRequest)))
                 .andExpect(status().isCreated())
@@ -334,7 +361,10 @@ public class OAuthFlowIntegrationTest extends BaseIntegrationTest {
     @Test
     @DisplayName("获取OAuth客户端信息")
     public void testGetClientInfo() throws Exception {
-        mockMvc.perform(get(API_BASE + "/clients/" + TEST_CLIENT_ID))
+        Account admin = createAdminAccount("admin-client-" + UUID.randomUUID().toString().substring(0, 8),
+                "admin-client-" + UUID.randomUUID().toString().substring(0, 8) + "@example.com");
+        String adminToken = getAuthToken(admin.getId());
+        mockMvc.perform(withToken(get(API_BASE + "/clients/" + TEST_CLIENT_ID), adminToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.clientId").value(TEST_CLIENT_ID))
                 .andExpect(jsonPath("$.data.clientName").value("Test OAuth Client"))
@@ -344,7 +374,10 @@ public class OAuthFlowIntegrationTest extends BaseIntegrationTest {
     @Test
     @DisplayName("获取不存在的客户端信息")
     public void testGetClientInfo_NotFound() throws Exception {
-        mockMvc.perform(get(API_BASE + "/clients/non-existent-client"))
+        Account admin = createAdminAccount("admin-client-miss-" + UUID.randomUUID().toString().substring(0, 8),
+                "admin-client-miss-" + UUID.randomUUID().toString().substring(0, 8) + "@example.com");
+        String adminToken = getAuthToken(admin.getId());
+        mockMvc.perform(withToken(get(API_BASE + "/clients/non-existent-client"), adminToken))
                 .andExpect(status().isNotFound());
     }
 }

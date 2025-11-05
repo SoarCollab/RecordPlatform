@@ -153,6 +153,41 @@ platform:
       gateway-bypass-patterns:      # 可选：旁路API网关的路径
         - /api/gateway/proxy/**
 
+#### 鉴权白名单（platform.identity.whitelist）
+
+`SaTokenGatewayFilter` 会统一读取 `platform.identity.whitelist` 下的多段列表，将公共 API、OAuth/SSO 联邦流程、文档、基础设施、静态资源和网关旁路路径聚合成最终白名单。各子列表均可在不同 profile 中覆写或追加：
+
+```yaml
+platform:
+  identity:
+    whitelist:
+      public-api-patterns:
+        - /api/auth/login
+        - /api/auth/register
+      federation-patterns:
+        - /oauth/**
+        - /api/sso/**
+      documentation-patterns:
+        - /doc.html
+        - /swagger-ui/**
+        - /v3/api-docs/**
+      infrastructure-patterns:
+        - /actuator/**
+        - /druid/**
+      static-asset-patterns:
+        - /static/**
+        - /docs/**
+      gateway-bypass-patterns:
+        - /api/gateway/proxy/**
+        - /api/v1/**
+      error-page-patterns:
+        - /error
+```
+
+- 列表值支持精确路径或 `/**` 通配前缀，配置项最终通过 `AuthWhitelistProperties#getAllPublicPatterns()` 去重；`AuthWhitelistPropertiesTest` 会持续校验去重与覆盖逻辑。
+- 在 `application-dev.yml`/`application-prod.yml` 中可根据网络环境额外加入调试工具端点或自建健康检查路径，避免手工修改过滤器。
+- 线上环境建议将 `documentation-patterns`、`infrastructure-patterns` 收窄到仅限运维专用网段或直接关闭，防止 Swagger、Druid 在外网暴露。
+
 ### 6. OAuth 批量撤销与第三方映射配置
 
 #### 6.1 第三方 Provider 列表
@@ -303,47 +338,89 @@ gateway:
       block-response-message: "Request blocked due to suspicious activity"
 ```
 
+> Redis 键说明：
+> - `gateway:traffic:rate_limit:ip:{ip}` / `gateway:traffic:rate_limit:user:{userId}`：对应 IP/用户层面的 1 分钟滑窗计数，超出阈值后写入 `blocked=true`，TTL 固定 60 秒。
+> - `gateway:traffic:blacklist:{ip}`：自动或手动加入黑名单后生成的键，过期时间取决于 `blocking.blacklist-expire-hours`。
+> - `gateway:traffic:stats:*`：用于 `getRecentRequestCount`、响应时间统计与异常检测的临时键，TTL 由 `monitor.time-window` 控制。
+>
+> `TrafficMonitorServiceTest` 已覆盖白名单、永久黑名单、IP/用户限流、禁用限流以及 Redis 故障降级等分支，新增限流配置后建议同步扩展该用例，确保限流逻辑与配置保持一致。
+
 ### 6. API Gateway 网关配置
+
+#### 6.1 ApiGatewayProperties（前缀：`api-gateway`）
+
+```yaml
+api-gateway:
+  protocol: https
+  http-pool:
+    max-total: 400
+    max-per-route: 80
+    connect-timeout: 8000
+    socket-timeout: 30000
+    request-timeout: 5000
+    time-to-live: 120
+    idle-timeout: 30
+  cache:
+    local-cache-max-size: 20000
+    local-cache-ttl: 120
+    redis-cache-ttl: 900
+    warmup-batch-size: 200
+  rate-limit:
+    default-qps: 200
+    burst-factor: 1.5
+    ip-rate-limit: 60
+    user-rate-limit: 120
+    api-key-rate-limit: 1200
+  circuit-breaker:
+    failure-rate-threshold: 60
+    slow-call-rate-threshold: 60
+    slow-call-duration-threshold: 1500
+    sliding-window-size: 50
+    minimum-number-of-calls: 5
+    wait-duration-in-open-state: 30
+    permitted-calls-in-half-open: 5
+  load-balance:
+    health-check-interval: 5
+    health-check-timeout: 3000
+    failure-threshold: 2
+    success-threshold: 2
+  alert:
+    email:
+      enabled: true
+    dingtalk:
+      enabled: false
+    suppress-window: 300
+```
+
+- 上述配置由 `ApiGatewayProperties` 直接绑定；`ApiGatewayPropertiesTest` 覆盖了 MapConfigurationPropertySource 绑定与默认值回退，可放心在不同 profile 中覆写。
+- `rate-limit` 与 `circuit-breaker` 字段将同步给路由管理、限流策略和监控界面，测试环境可以将 `default-qps`/`ip-rate-limit` 调低至个位数便于复现限流（对应 `CircuitBreakerServiceTest` 的 fallback 校验）。
+
+#### 6.2 兼容旧版 `api.gateway.*`（`CircuitBreakerService`）
+
+`CircuitBreakerService` 仍通过 `api.gateway.circuit.*` / `api.gateway.pool.*` 注入运行期参数，可在迁移完成前继续保留：
 
 ```yaml
 api:
   gateway:
-    # 连接池配置
     pool:
-      max-total: 500          # 最大连接数
-      max-per-route: 50       # 每个路由的最大连接数
-      connect-timeout: 5000   # 连接超时（毫秒）
-      socket-timeout: 30000   # Socket超时（毫秒）
-    
-    # 缓存配置
-    cache:
-      l1:
-        max-size: 10000           # L1缓存最大条目数
-        expire-seconds: 60        # L1缓存过期时间（秒）
-      l2:
-        expire-seconds: 3600      # L2缓存过期时间（秒）
-      enable-stats: true          # 启用缓存统计
-    
-    # 熔断器配置
+      max-total: 500
+      max-per-route: 50
+      connect-timeout: 5000
+      socket-timeout: 30000
     circuit:
-      failure-rate-threshold: 50              # 失败率阈值（%）
-      slow-call-rate-threshold: 50            # 慢调用率阈值（%）
-      slow-call-duration-threshold: 1000      # 慢调用时长阈值（毫秒）
-      sliding-window-size: 100                # 滑动窗口大小
-      minimum-number-of-calls: 10             # 最小调用次数
-      wait-duration-in-open-state: 60         # 开路状态等待时长（秒）
-      rate-limit-qps: 100                     # QPS限流
-      max-retry-attempts: 3                   # 最大重试次数
-    
-    # 告警配置
-    alert:
-      email:
-        enabled: true         # 启用邮件告警
-      dingtalk:
-        enabled: true         # 启用钉钉告警
-      suppress-window: 300    # 告警抑制窗口（秒）
-      aggregate-threshold: 10 # 聚合阈值
+      failure-rate-threshold: 50
+      slow-call-rate-threshold: 50
+      slow-call-duration-threshold: 1000
+      sliding-window-size: 100
+      minimum-number-of-calls: 10
+      wait-duration-in-open-state: 60
+      permitted-calls-in-half-open: 10
+      rate-limit-qps: 100
+      max-retry-attempts: 3
+      retry-interval: 500
 ```
+
+> 建议逐步以 `api-gateway` 统一配置来源，减少同一模块存在双前缀的维护成本；迁移完成后即可删除 `api.gateway.*` 的兼容段。
 
 ### 7. Knife4j API 文档配置
 

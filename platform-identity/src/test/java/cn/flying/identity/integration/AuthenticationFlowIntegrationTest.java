@@ -24,7 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DisplayName("完整认证流程集成测试")
 public class AuthenticationFlowIntegrationTest extends BaseIntegrationTest {
 
-    private static final String AUTH_API = "/identity/api/auth";
+    private static final String AUTH_API = "/api/auth";
 
     @Test
     @DisplayName("完整用户注册流程")

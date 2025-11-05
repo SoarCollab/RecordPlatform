@@ -27,7 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DisplayName("SSO单点登录集成测试")
 public class SSOFlowIntegrationTest extends BaseIntegrationTest {
 
-    private static final String API_BASE = "/identity/api/sso";
+    private static final String API_BASE = "/api/sso";
     private static final String TEST_CLIENT_ID = "sso-test-client";
     private static final String TEST_CLIENT_SECRET = "sso-test-secret";
     private static final String TEST_REDIRECT_URI = "http://localhost:8080/sso/callback";
@@ -153,8 +153,7 @@ public class SSOFlowIntegrationTest extends BaseIntegrationTest {
         loginAsTestUser();
         String token = getAuthToken(testAccount.getId());
 
-        mockMvc.perform(get(API_BASE + "/sessions/status")
-                        .header("Authorization", "Bearer " + token)
+        mockMvc.perform(withToken(get(API_BASE + "/sessions/status"), token)
                         .param("clientId", TEST_CLIENT_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.logged_in").value(true))

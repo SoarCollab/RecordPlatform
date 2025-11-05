@@ -269,7 +269,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             }
 
             // 选择一个物理节点进行分块上传（通常选择主节点）
-            String nodeName = physicalNodes.get(0);
+            String nodeName = physicalNodes.getFirst();
 
             // 获取S3客户端
             AmazonS3 s3Client = s3ClientFactory.getS3Client(nodeName);
@@ -765,7 +765,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                         }
 
                         // 获取主节点的MinIO客户端
-                        String primaryNode = physicalNodePair.get(0);
+                        String primaryNode = physicalNodePair.getFirst();
                         MinioClient client = clientManager.getClient(primaryNode);
                         if (client == null) {
                             log.error("无法获取节点 {} 的MinIO客户端", primaryNode);

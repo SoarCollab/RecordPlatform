@@ -317,6 +317,15 @@ public class GlobalExceptionHandler {
             return HttpStatus.BAD_REQUEST;
         }
 
+        // SSO/OAuth 错误
+        if (code >= 60001 && code <= 69999) {
+            return switch (code) {
+                case 60004 -> HttpStatus.BAD_REQUEST;
+                case 60002 -> HttpStatus.INTERNAL_SERVER_ERROR;
+                default -> HttpStatus.UNAUTHORIZED;
+            };
+        }
+
         // 权限错误
         if (code >= 70001 && code <= 79999) {
             if (code == 70005) {
@@ -326,6 +335,14 @@ public class GlobalExceptionHandler {
                 return HttpStatus.FORBIDDEN;
             }
             return HttpStatus.UNAUTHORIZED;
+        }
+
+        // 网关错误
+        if (code >= 80001 && code <= 89999) {
+            if (code == 80002) {
+                return HttpStatus.SERVICE_UNAVAILABLE;
+            }
+            return HttpStatus.BAD_GATEWAY;
         }
 
         // 默认500

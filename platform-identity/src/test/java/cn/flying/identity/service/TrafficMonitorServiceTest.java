@@ -386,6 +386,54 @@ class TrafficMonitorServiceTest {
     }
 
     @Test
+    void testCheckTrafficBlock_UserRateLimitExceeded() {
+        when(valueOperations.increment(startsWith(TrafficMonitorConfig.Constants.RATE_LIMIT_PREFIX + "ip:")))
+                .thenReturn(1L);
+        when(valueOperations.increment(startsWith(TrafficMonitorConfig.Constants.RATE_LIMIT_PREFIX + "user:")))
+                .thenReturn(700L);
+
+        Result<Map<String, Object>> result = trafficMonitorService.checkTrafficBlock(
+                TEST_CLIENT_IP, TEST_USER_ID, TEST_REQUEST_PATH, TEST_USER_AGENT
+        );
+
+        assertTrue(result.isSuccess());
+        Map<String, Object> data = result.getData();
+        assertTrue((Boolean) data.get("blocked"), "用户维度限流命中后应阻断请求");
+        assertEquals(TrafficMonitorConfig.Constants.BLOCK_LEVEL_RATE_LIMIT, data.get("blockLevel"));
+        verify(redisTemplate).expire(startsWith(TrafficMonitorConfig.Constants.RATE_LIMIT_PREFIX + "ip:"),
+                eq(1L), eq(TimeUnit.MINUTES));
+        verify(redisTemplate).expire(startsWith(TrafficMonitorConfig.Constants.RATE_LIMIT_PREFIX + "user:"),
+                eq(1L), eq(TimeUnit.MINUTES));
+    }
+
+    @Test
+    void testCheckTrafficBlock_RateLimitDisabledSkipsCounters() {
+        when(rateLimit.isEnabled()).thenReturn(false);
+
+        Result<Map<String, Object>> result = trafficMonitorService.checkTrafficBlock(
+                TEST_CLIENT_IP, TEST_USER_ID, TEST_REQUEST_PATH, TEST_USER_AGENT
+        );
+
+        assertTrue(result.isSuccess());
+        Map<String, Object> data = result.getData();
+        assertFalse((Boolean) data.get("blocked"), "禁用限流后不应阻断请求");
+        verify(valueOperations, never()).increment(anyString());
+        verify(redisTemplate, never()).expire(anyString(), anyLong(), any(TimeUnit.class));
+    }
+
+    @Test
+    void testCheckTrafficBlock_RedisFailureDoesNotBlock() {
+        when(valueOperations.increment(anyString())).thenThrow(new RuntimeException("redis down"));
+
+        Result<Map<String, Object>> result = trafficMonitorService.checkTrafficBlock(
+                TEST_CLIENT_IP, TEST_USER_ID, TEST_REQUEST_PATH, TEST_USER_AGENT
+        );
+
+        assertTrue(result.isSuccess());
+        assertFalse((Boolean) result.getData().get("blocked"), "Redis 计数异常时应默认放行请求");
+    }
+
+    @Test
     void testCheckTrafficBlock_AnomalyDetected() {
         // Mock限流正常
         when(valueOperations.increment(anyString())).thenReturn(30L);

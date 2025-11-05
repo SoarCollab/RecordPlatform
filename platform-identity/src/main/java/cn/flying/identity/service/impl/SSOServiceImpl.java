@@ -183,7 +183,7 @@ public class SSOServiceImpl implements SSOService {
                     result.put("role", account.getRole());
 
                     String clientKey = ssoClientPrefix + userId + ":" + clientId;
-                    result.put("client_logged_in", Boolean.TRUE.equals(redisTemplate.hasKey(clientKey)));
+                    result.put("client_logged_in", redisTemplate.hasKey(clientKey));
                     return result;
                 }
             }
@@ -216,8 +216,8 @@ public class SSOServiceImpl implements SSOService {
                     if (StrUtil.isNotBlank(token)) {
                         jwtBlacklistService.blacklistToken(token, -1);
                     }
-                } catch (Exception ignored) {
-                    log.debug("加入黑名单时发生异常但忽略: {}", ignored.getMessage());
+                } catch (Exception exception) {
+                    log.debug("加入黑名单时发生异常但忽略: {}", exception.getMessage());
                 }
                 StpUtil.logout();
                 result.put("status", "global_logout_success");
@@ -428,20 +428,6 @@ public class SSOServiceImpl implements SSOService {
     }
 
     /**
-     * 移除客户端登录状态
-     */
-    private void removeClientLogin(Long userId, String clientId) {
-        String clientKey = ssoClientPrefix + userId + ":" + clientId;
-        redisTemplate.delete(clientKey);
-
-        String userKey = ssoUserPrefix + userId;
-        redisTemplate.opsForSet().remove(userKey, clientId);
-        cleanupSetIfEmpty(userKey);
-        removeUserFromClientIndex(userId, clientId);
-        removeTokensByPredicate(userId, clientId);
-    }
-
-    /**
      * 清除所有客户端登录状态
      */
     private void clearAllClientLogins(Long userId) {
@@ -462,6 +448,110 @@ public class SSOServiceImpl implements SSOService {
 
         // 清除相关的 SSO Token
         removeTokensByPredicate(userId, null);
+    }
+
+    /**
+     * 移除客户端登录状态
+     */
+    private void removeClientLogin(Long userId, String clientId) {
+        String clientKey = ssoClientPrefix + userId + ":" + clientId;
+        redisTemplate.delete(clientKey);
+
+        String userKey = ssoUserPrefix + userId;
+        redisTemplate.opsForSet().remove(userKey, clientId);
+        cleanupSetIfEmpty(userKey);
+        removeUserFromClientIndex(userId, clientId);
+        removeTokensByPredicate(userId, clientId);
+    }
+
+    private void cleanupSetIfEmpty(String key) {
+        if (StrUtil.isBlank(key)) {
+            return;
+        }
+        try {
+            Long size = redisTemplate.opsForSet().size(key);
+            if (size == null || size <= 0) {
+                redisTemplate.delete(key);
+            }
+        } catch (Exception ex) {
+            log.debug("清理Redis集合失败但忽略: key={}, error={}", key, ex.getMessage());
+        }
+    }
+
+    private void removeUserFromClientIndex(Long userId, String clientId) {
+        if (userId == null || StrUtil.isBlank(clientId)) {
+            return;
+        }
+        String key = buildClientUsersIndexKey(clientId);
+        redisTemplate.opsForSet().remove(key, String.valueOf(userId));
+        cleanupSetIfEmpty(key);
+    }
+
+    private void removeTokensByPredicate(Long userId, String clientId) {
+        try {
+            String pattern = ssoTokenPrefix + "*";
+            Set<String> tokenKeys = scanKeys(pattern);
+            if (tokenKeys.isEmpty()) {
+                return;
+            }
+            String userIdText = userId != null ? String.valueOf(userId) : null;
+            for (String tokenKey : tokenKeys) {
+                String userInfo = redisTemplate.opsForValue().get(tokenKey);
+                if (StrUtil.isBlank(userInfo)) {
+                    continue;
+                }
+                String[] parts = userInfo.split(":");
+                if (parts.length < 2) {
+                    continue;
+                }
+                boolean matchUser = userIdText == null || userIdText.equals(parts[0]);
+                boolean matchClient = clientId == null || clientId.equals(parts[1]);
+                if (matchUser && matchClient) {
+                    redisTemplate.delete(tokenKey);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("清理SSO Token时发生异常: userId={}, clientId={}", userId, clientId, e);
+        }
+    }
+
+    /**
+     * 使用SCAN命令扫描Redis键
+     * 替代阻塞的KEYS命令
+     *
+     * @param pattern 匹配模式
+     * @return 匹配的键集合
+     */
+    private Set<String> scanKeys(String pattern) {
+        Set<String> keys = new HashSet<>();
+
+        try {
+            redisTemplate.execute((RedisCallback<Set<String>>) connection -> {
+                try (Cursor<byte[]> cursor = connection.scan(
+                        ScanOptions.scanOptions()
+                                .match(pattern)
+                                .count(100)
+                                .build())) {
+                    while (cursor.hasNext()) {
+                        keys.add(new String(cursor.next()));
+                    }
+                } catch (Exception e) {
+                    log.error("扫描Redis键失败: pattern={}", pattern, e);
+                }
+                return keys;
+            });
+        } catch (UnsupportedOperationException unsupported) {
+            try {
+                Set<String> fallback = redisTemplate.keys(pattern);
+                keys.addAll(fallback);
+            } catch (Exception e) {
+                log.error("使用 keys({}) 回退扫描失败", pattern, e);
+            }
+        } catch (Exception e) {
+            log.error("执行Redis SCAN命令失败: pattern={}", pattern, e);
+        }
+
+        return keys;
     }
 
     /**
@@ -561,91 +651,7 @@ public class SSOServiceImpl implements SSOService {
         redisTemplate.expire(key, ssoTokenTimeout, TimeUnit.SECONDS);
     }
 
-    private void removeUserFromClientIndex(Long userId, String clientId) {
-        if (userId == null || StrUtil.isBlank(clientId)) {
-            return;
-        }
-        String key = buildClientUsersIndexKey(clientId);
-        redisTemplate.opsForSet().remove(key, String.valueOf(userId));
-        cleanupSetIfEmpty(key);
-    }
-
-    private void cleanupSetIfEmpty(String key) {
-        if (StrUtil.isBlank(key)) {
-            return;
-        }
-        try {
-            Long size = redisTemplate.opsForSet().size(key);
-            if (size == null || size <= 0) {
-                redisTemplate.delete(key);
-            }
-        } catch (Exception ex) {
-            log.debug("清理Redis集合失败但忽略: key={}, error={}", key, ex.getMessage());
-        }
-    }
-
     private String buildClientUsersIndexKey(String clientId) {
         return ssoClientPrefix + "users:" + clientId;
-    }
-
-    private void removeTokensByPredicate(Long userId, String clientId) {
-        try {
-            String pattern = ssoTokenPrefix + "*";
-            Set<String> tokenKeys = scanKeys(pattern);
-            if (tokenKeys.isEmpty()) {
-                return;
-            }
-            String userIdText = userId != null ? String.valueOf(userId) : null;
-            for (String tokenKey : tokenKeys) {
-                String userInfo = redisTemplate.opsForValue().get(tokenKey);
-                if (StrUtil.isBlank(userInfo)) {
-                    continue;
-                }
-                String[] parts = userInfo.split(":");
-                if (parts.length < 2) {
-                    continue;
-                }
-                boolean matchUser = userIdText == null || userIdText.equals(parts[0]);
-                boolean matchClient = clientId == null || clientId.equals(parts[1]);
-                if (matchUser && matchClient) {
-                    redisTemplate.delete(tokenKey);
-                }
-            }
-        } catch (Exception e) {
-            log.warn("清理SSO Token时发生异常: userId={}, clientId={}", userId, clientId, e);
-        }
-    }
-
-    /**
-     * 使用SCAN命令扫描Redis键
-     * 替代阻塞的KEYS命令
-     *
-     * @param pattern 匹配模式
-     * @return 匹配的键集合
-     */
-    private Set<String> scanKeys(String pattern) {
-        Set<String> keys = new HashSet<>();
-
-        try {
-            // 使用SCAN命令迭代扫描
-            redisTemplate.execute((RedisCallback<Set<String>>) connection -> {
-                try (Cursor<byte[]> cursor = connection.scan(
-                        ScanOptions.scanOptions()
-                                .match(pattern)
-                                .count(100)  // 每次扫描100个键
-                                .build())) {
-                    while (cursor.hasNext()) {
-                        keys.add(new String(cursor.next()));
-                    }
-                } catch (Exception e) {
-                    log.error("扫描Redis键失败: pattern={}", pattern, e);
-                }
-                return keys;
-            });
-        } catch (Exception e) {
-            log.error("执行Redis SCAN命令失败: pattern={}", pattern, e);
-        }
-
-        return keys;
     }
 }

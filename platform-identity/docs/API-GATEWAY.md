@@ -29,6 +29,25 @@ X-Nonce: random_string_XYZ789
 X-Signature: sha256_signature_here
 ```
 
+## 网关安全与权限矩阵
+
+`SaTokenGatewayFilter` 会在进入控制器前依次执行：白名单（`platform.identity.whitelist`）→ JWT 黑名单 → 登录校验 → 角色/权限匹配。下表总结核心路径与所需角色/权限：
+
+| 路径前缀 / 匹配规则 | 角色要求 | 额外权限 | 说明 |
+| --- | --- | --- | --- |
+| `/api/admin/**` | admin | - | 所有管理端接口仅限管理员调用。 |
+| `/api/admin/user-stats/**` | admin / monitor | - | 监控角色可读，写操作依然只允许 admin。 |
+| `/api/admin/operation-logs/**` | admin / monitor | `/batch`、`/cleanup` 仅 admin | 批量导出、清理操作需管理员。 |
+| `/api/token/monitor/*record|*handle` | admin / monitor | `token:monitor:record` | 记录或处理限流事件需额外权限。 |
+| `/api/token/monitor/*query|*stats` | admin / monitor | `token:monitor:query` | 查询/统计接口。 |
+| `/api/token/monitor/*export|*clean` | admin | - | 数据导出与清空操作强制管理员。 |
+| `/api/audit/**` | admin / monitor | `/export`、`/cleanup` 仅 admin | 审计接口遵循同样的角色控制。 |
+| `/api/user/**`、`/api/verify/**` | 已登录 | `/admin/` 子路径需 admin | 用户自助接口只需登录，少量管理员视图需 admin。 |
+| `/api/auth/third-party/**` | 已登录 | - | 第三方账号绑定/解绑需登录但不受角色限制。 |
+
+- 所有白名单路径（例如 `/oauth/**`、`/swagger-ui/**`）在进入权限矩阵前即被放行，可通过 `platform.identity.whitelist` 覆盖；详见《CONFIGURATION.md》中的示例。
+- 行为矩阵由 `SaTokenGatewayFilterTest` 覆盖，若新增后台接口，请同步补充过滤器条件与测试，避免遗漏权限声明。
+
 ## API 接口列表
 
 ### 应用管理接口
@@ -44,6 +63,7 @@ Content-Type: application/x-www-form-urlencoded
 ```
 
 **请求参数**:
+
 | 参数名 | 类型 | 必填 | 说明 |
 |-------|------|-----|------|
 | appName | String | 是 | 应用名称 |
@@ -85,6 +105,7 @@ appName=示例应用&appDescription=这是一个测试应用&appType=1&appWebsit
 **权限要求**: `api:app:approve`
 
 **请求参数**:
+
 | 参数名 | 类型 | 必填 | 说明 |
 |-------|------|-----|------|
 | appId | Long | 是 | 应用ID（路径参数） |
@@ -292,6 +313,7 @@ Authorization: Bearer {admin_token}
 **权限要求**: `api:key:generate`
 
 **请求参数**:
+
 | 参数名 | 类型 | 必填 | 说明 |
 |-------|------|-----|------|
 | appId | Long | 是 | 应用ID |
@@ -360,6 +382,7 @@ appId=1845123456789012&keyName=生产环境主密钥&keyType=1&expireDays=365
 **接口地址**: `POST /api/gateway/keys/validation`
 
 **请求参数**:
+
 | 参数名 | 类型 | 必填 | 说明 |
 |-------|------|-----|------|
 | apiKey | String | 是 | API密钥 |
@@ -530,6 +553,7 @@ apiKey=ak_xY3kL9mN2pQ8rS5tU6vW7xA1bC2dE3f&timestamp=1697001600&nonce=unique_rand
 **接口地址**: `GET /api/gateway/applications/{appId}/statistics`
 
 **请求参数**:
+
 | 参数名 | 类型 | 必填 | 说明 |
 |-------|------|-----|------|
 | appId | Long | 是 | 应用ID |
@@ -572,6 +596,7 @@ apiKey=ak_xY3kL9mN2pQ8rS5tU6vW7xA1bC2dE3f&timestamp=1697001600&nonce=unique_rand
 **接口地址**: `GET /api/gateway/logs/calls`
 
 **请求参数**:
+
 | 参数名 | 类型 | 必填 | 说明 |
 |-------|------|-----|------|
 | appId | Long | 否 | 应用ID |
@@ -705,6 +730,13 @@ async function apiCall(url, options) {
   }
 }
 ```
+
+## 限流与熔断说明
+
+- **网关限流 (gateway.traffic.rate-limit)**：当 IP 或用户在 60 秒窗口内超过阈值（`ip-requests-per-minute` / `user-requests-per-minute`）时，`TrafficMonitorService` 会返回 `blocked=true` 并写入 `gateway:traffic:rate_limit:{scope}` 计数键；最终响应 HTTP 429，响应体会携带 `retryAfter` 字段。可以在测试环境中将阈值降到个位数，配合新的 `TrafficMonitorServiceTest` 场景快速验证。
+- **异常/黑名单**：命中 `gateway:traffic:blacklist:{ip}` 或异常检测后会自动将 IP 加入临时黑名单，阻断级别由 `TrafficMonitorConfig.Constants` 决定，清理命令可通过后台管理接口触发。
+- **熔断与重试 (`api-gateway.circuit.*` / `api-gateway.rate-limit.*`)**：`CircuitBreakerService` 基于 Resilience4j 将限流、熔断、重试串联，`rate-limit-qps`、`failure-rate-threshold` 等参数可在配置文件中调优；`CircuitBreakerServiceTest` 验证了限流 fallback 与异常降级路径。
+- **监控与调试**：`SaTokenGatewayFilterTest`、`TrafficMonitorServiceTest`、`CircuitBreakerServiceTest` 已覆盖最常见的权限、限流和熔断分支，建议在修改相关配置或控制器时同步扩展测试，确保 429/403/401 行为与文档一致。
 
 ## SDK 使用示例
 

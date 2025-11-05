@@ -115,6 +115,7 @@ mysql -u root -p < src/main/resources/sql/complete_init.sql
 #### 2.1 升级至最新数据库结构
 
 - 服务启用了 Flyway，启动时会自动执行 `platform-identity/db/migration` 目录下的脚本。请确认 `V2.1__add_third_party_unique_and_session_index.sql` 已成功落库。
+- 测试环境可通过 `spring.profiles.active=test` 启动，系统会在启动阶段执行 Flyway 的 `clean()+migrate()`，请预先创建空数据库并配置 `DB_TEST_HOST/DB_TEST_PORT/DB_TEST_USERNAME/DB_TEST_PASSWORD` 环境变量。
 - 如需手动升级，可在维护窗口执行：
   ```bash
   mysql -u ${DB_USERNAME} -p platform_identity < platform-identity/db/migration/V2.1__add_third_party_unique_and_session_index.sql
@@ -147,6 +148,9 @@ spring:
 ```bash
 # 开发环境启动
 mvn spring-boot:run -Dspring.profiles.active=dev
+
+# 测试环境启动（将自动重建库表）
+mvn spring-boot:run -Dspring.profiles.active=test
 
 # 或者
 java -jar platform-identity-0.0.1-SNAPSHOT.jar --spring.profiles.active=dev

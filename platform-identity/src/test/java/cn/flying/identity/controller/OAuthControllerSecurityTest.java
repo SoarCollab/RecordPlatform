@@ -57,4 +57,31 @@ class OAuthControllerSecurityTest {
         SaCheckLogin annotation = method.getAnnotation(SaCheckLogin.class);
         Assertions.assertNotNull(annotation, "getSSOSession 缺少 SaCheckLogin 注解");
     }
+
+    @Test
+    void revokeTokensByUserRequiresPermission() throws NoSuchMethodException {
+        Method method = OAuthController.class.getDeclaredMethod("revokeTokensByUser", Long.class);
+        SaCheckPermission annotation = method.getAnnotation(SaCheckPermission.class);
+        Assertions.assertNotNull(annotation, "revokeTokensByUser 缺少 SaCheckPermission 注解");
+        Assertions.assertArrayEquals(new String[]{"oauth:token:revoke:user"}, annotation.value(),
+                "revokeTokensByUser 权限配置不正确");
+    }
+
+    @Test
+    void revokeTokensByClientRequiresPermission() throws NoSuchMethodException {
+        Method method = OAuthController.class.getDeclaredMethod("revokeTokensByClient", String.class);
+        SaCheckPermission annotation = method.getAnnotation(SaCheckPermission.class);
+        Assertions.assertNotNull(annotation, "revokeTokensByClient 缺少 SaCheckPermission 注解");
+        Assertions.assertArrayEquals(new String[]{"oauth:token:revoke:client"}, annotation.value(),
+                "revokeTokensByClient 权限配置不正确");
+    }
+
+    @Test
+    void revokeAllTokensRequiresPermission() throws NoSuchMethodException {
+        Method method = OAuthController.class.getDeclaredMethod("revokeAllTokens");
+        SaCheckPermission annotation = method.getAnnotation(SaCheckPermission.class);
+        Assertions.assertNotNull(annotation, "revokeAllTokens 缺少 SaCheckPermission 注解");
+        Assertions.assertArrayEquals(new String[]{"oauth:token:revoke:all"}, annotation.value(),
+                "revokeAllTokens 权限配置不正确");
+    }
 }

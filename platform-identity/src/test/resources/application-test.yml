@@ -1,29 +1,41 @@
 spring:
+  main:
+    allow-bean-definition-overriding: true
   application:
     name: platform-identity-test
-  profiles:
-    active: test
-  
-  # 使用H2内存数据库进行测试
+
+  # 使用 H2 内存数据库进行测试，禁用 Druid，确保与生产配置解耦
   datasource:
+    type: com.zaxxer.hikari.HikariDataSource
     driver-class-name: org.h2.Driver
-    url: jdbc:h2:mem:testdb;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    url: jdbc:h2:mem:identity_test;MODE=MySQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
     username: sa
-    password: 
+    password:
     hikari:
       maximum-pool-size: 10
-  
-  # H2数据库配置
+      minimum-idle: 1
+    druid:
+      enabled: false
+
+  # H2 数据库配置
   h2:
     console:
-      enabled: true
-      path: /h2-console
-  
-  # Redis配置 - 使用嵌入式Redis或Mock
+      enabled: false
+
+  # 集成测试使用自定义 schema，不执行 Flyway
+  flyway:
+    enabled: false
+
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema-h2.sql
+
+  # Redis 配置 - 后续由嵌入式 Redis 在 6370 端口提供实例
   data:
     redis:
-      host: localhost
-      port: 6370  # 测试端口，避免冲突
+      host: 127.0.0.1
+      port: 6370
       database: 0
       timeout: 3000
       lettuce:
@@ -31,22 +43,24 @@ spring:
           max-active: 8
           max-idle: 8
           min-idle: 0
-  
-  # RabbitMQ配置 - 测试环境可以禁用
+
+  # RabbitMQ 测试环境禁用
   rabbitmq:
     host: localhost
-    port: 5672
+    port: -1
     username: guest
     password: guest
     virtual-host: /
 
 server:
   port: 0  # 随机端口，避免冲突
+  servlet:
+    context-path: /identity
 
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.nop.NopLoggingImpl  # 关闭SQL日志
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl  # 关闭SQL日志
   global-config:
     banner: false
     db-config:

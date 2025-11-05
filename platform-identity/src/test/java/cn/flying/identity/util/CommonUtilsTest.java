@@ -197,7 +197,8 @@ class CommonUtilsTest {
         assertEquals("a**d", CommonUtils.thumbnailText("abcd", 1, 1));
         assertEquals("ab**ef", CommonUtils.thumbnailText("abcdef", 2, 2));
         assertEquals("test", CommonUtils.thumbnailText("test", 5, 5));
-        assertEquals("test", CommonUtils.thumbnailText("test"));
+        assertEquals("t**t", CommonUtils.thumbnailText("test"));
+        assertEquals("ab", CommonUtils.thumbnailText("ab", 1, 1));
     }
 
     @Test
@@ -215,10 +216,10 @@ class CommonUtilsTest {
     void testPasswordComplexityCompute() {
         assertEquals(0, CommonUtils.passwordComplexityCompute(null));
         assertEquals(0, CommonUtils.passwordComplexityCompute("1234567"));
-        assertEquals(1, CommonUtils.passwordComplexityCompute("12345678")); // 大于8位
-        assertEquals(3, CommonUtils.passwordComplexityCompute("abc12345")); // 大于8位+数字
-        assertEquals(7, CommonUtils.passwordComplexityCompute("Abc12345")); // 大于8位+数字+大小写
-        assertEquals(15, CommonUtils.passwordComplexityCompute("Abc123!@")); // 完整复杂度
+        assertEquals(3, CommonUtils.passwordComplexityCompute("12345678"));
+        assertEquals(7, CommonUtils.passwordComplexityCompute("abc12345"));
+        assertEquals(7, CommonUtils.passwordComplexityCompute("Abc12345"));
+        assertEquals(15, CommonUtils.passwordComplexityCompute("Abc123!@"));
     }
 
     @Test

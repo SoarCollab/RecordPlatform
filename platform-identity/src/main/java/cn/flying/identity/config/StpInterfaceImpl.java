@@ -61,7 +61,8 @@ public class StpInterfaceImpl implements StpInterface {
                         "token:monitor:export",
                         // OAuth管理权限
                         "oauth:client:register", "oauth:client:update", "oauth:client:delete",
-                        "oauth:client:view", "oauth:token:revoke",
+                        "oauth:client:view",
+                        "oauth:token:revoke:user", "oauth:token:revoke:client", "oauth:token:revoke:all",
                         // 文件管理权限
                         "file:upload", "file:download", "file:delete", "file:manage",
                         // 统计分析权限

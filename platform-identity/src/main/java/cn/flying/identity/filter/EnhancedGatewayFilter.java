@@ -66,6 +66,7 @@ public class EnhancedGatewayFilter implements Filter {
 
         String requestURI = httpRequest.getRequestURI();
         String method = httpRequest.getMethod();
+        String normalizedUri = normalizePath(requestURI);
         String clientIp = IpUtils.getClientIp(httpRequest);
         String userAgent = httpRequest.getHeader("User-Agent");
 
@@ -93,13 +94,8 @@ public class EnhancedGatewayFilter implements Filter {
                 return;
             }
 
-            String url = requestURI;
-            if (requestURI.startsWith(PREFIX)) {
-                url = requestURI.substring(PREFIX.length());
-            }
-
             // 检查是否为排除路径
-            if (isExcludePath(url)) {
+            if (isExcludePath(normalizedUri)) {
                 log.debug("请求路径 {} 在排除列表中，跳过鉴权", requestURI);
 
                 ContentCachingResponseWrapper responseWrapper = new ContentCachingResponseWrapper(httpResponse);
@@ -117,7 +113,7 @@ public class EnhancedGatewayFilter implements Filter {
             validateToken(httpRequest);
 
             // 执行权限验证（按路径与方法细分）
-            validatePermission(requestURI, method);
+            validatePermission(normalizedUri, method);
 
             ContentCachingResponseWrapper responseWrapper = new ContentCachingResponseWrapper(httpResponse);
             chain.doFilter(request, responseWrapper);
@@ -187,6 +183,23 @@ public class EnhancedGatewayFilter implements Filter {
             }
             return requestURI.equals(excludePath);
         });
+    }
+
+    private String normalizePath(String requestURI) {
+        String normalized = requestURI;
+        if (PREFIX != null && !PREFIX.isEmpty()) {
+            while (normalized.startsWith(PREFIX)) {
+                normalized = normalized.substring(PREFIX.length());
+            }
+        }
+        final String defaultContext = "/identity";
+        if (normalized.startsWith(defaultContext)) {
+            normalized = normalized.substring(defaultContext.length());
+        }
+        if (!normalized.startsWith("/")) {
+            normalized = "/" + normalized;
+        }
+        return normalized.isEmpty() ? "/" : normalized;
     }
 
     /**
