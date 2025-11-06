@@ -5,10 +5,10 @@ import cn.flying.identity.config.OAuthConfig;
 import cn.flying.identity.dto.Account;
 import cn.flying.identity.dto.OAuthClient;
 import cn.flying.identity.dto.OAuthCode;
+import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.mapper.AccountMapper;
 import cn.flying.identity.mapper.OAuthClientMapper;
 import cn.flying.identity.mapper.OAuthCodeMapper;
-import cn.flying.identity.exception.BusinessException;
 import cn.flying.identity.service.impl.OAuthServiceImpl;
 import cn.flying.platformapi.constant.ResultEnum;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,14 +24,9 @@ import org.mockito.quality.Strictness;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;

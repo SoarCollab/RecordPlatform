@@ -6,7 +6,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 
 /**
  * 加权轮询负载均衡策略

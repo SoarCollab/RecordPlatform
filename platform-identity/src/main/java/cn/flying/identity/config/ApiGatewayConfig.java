@@ -2,19 +2,18 @@ package cn.flying.identity.config;
 
 import cn.flying.identity.filter.ApiGatewayProxyFilter;
 import cn.flying.identity.filter.EnhancedGatewayFilter;
-import cn.flying.identity.gateway.discovery.NacosServiceDiscovery;
+import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
-import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
-import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 import java.util.Arrays;

@@ -26,9 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockStatic;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 /**
  * SaTokenGatewayFilter 单元测试

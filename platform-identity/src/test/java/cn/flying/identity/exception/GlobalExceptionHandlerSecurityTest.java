@@ -3,13 +3,12 @@ package cn.flying.identity.exception;
 import cn.dev33.satoken.exception.NotLoginException;
 import cn.dev33.satoken.exception.NotPermissionException;
 import cn.dev33.satoken.exception.NotRoleException;
+import cn.flying.identity.vo.RestResponse;
 import cn.flying.platformapi.constant.ResultEnum;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
-
-import cn.flying.identity.vo.RestResponse;
 
 /**
  * 验证全局异常处理对 Sa-Token 异常的统一响应

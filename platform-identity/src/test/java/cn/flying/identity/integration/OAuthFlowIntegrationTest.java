@@ -3,6 +3,7 @@ package cn.flying.identity.integration;
 import cn.flying.identity.dto.Account;
 import cn.flying.identity.dto.OAuthClient;
 import cn.flying.identity.mapper.OAuthClientMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -13,7 +14,6 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.web.util.UriComponentsBuilder;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.io.UnsupportedEncodingException;

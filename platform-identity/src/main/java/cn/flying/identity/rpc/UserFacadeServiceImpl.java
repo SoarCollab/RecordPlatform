@@ -1,20 +1,22 @@
 package cn.flying.identity.rpc;
 
+import cn.dev33.satoken.stp.StpInterface;
+import cn.flying.identity.dto.Account;
+import cn.flying.identity.dto.UserSession;
+import cn.flying.identity.mapper.AccountMapper;
+import cn.flying.identity.service.UserSessionService;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.identity.UserFacadeService;
 import cn.flying.platformapi.identity.dto.SessionInfo;
 import cn.flying.platformapi.identity.dto.UserInfo;
-import cn.flying.identity.dto.UserSession;
-import cn.flying.identity.mapper.AccountMapper;
-import cn.flying.identity.service.UserSessionService;
-import cn.flying.identity.dto.Account;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
-import cn.dev33.satoken.stp.StpInterface;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 @Slf4j
 @DubboService(protocol = "tri")

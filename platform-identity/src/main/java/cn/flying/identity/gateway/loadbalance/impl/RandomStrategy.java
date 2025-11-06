@@ -6,7 +6,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Random;
-import java.util.stream.Collectors;
 
 /**
  * 加权随机负载均衡策略

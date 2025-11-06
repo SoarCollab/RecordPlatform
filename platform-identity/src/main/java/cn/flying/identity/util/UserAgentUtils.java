@@ -1,7 +1,7 @@
 package cn.flying.identity.util;
 
-import jakarta.servlet.http.HttpServletRequest;
 import cn.hutool.core.util.StrUtil;
+import jakarta.servlet.http.HttpServletRequest;
 
 /**
  * User-Agent工具类

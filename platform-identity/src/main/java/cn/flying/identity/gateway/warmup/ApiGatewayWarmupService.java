@@ -1,5 +1,6 @@
 package cn.flying.identity.gateway.warmup;
 
+import cn.flying.identity.constant.CacheKeyConstants;
 import cn.flying.identity.dto.apigateway.ApiKey;
 import cn.flying.identity.dto.apigateway.ApiPermission;
 import cn.flying.identity.dto.apigateway.ApiRoute;
@@ -7,17 +8,17 @@ import cn.flying.identity.gateway.cache.ApiGatewayCacheManager;
 import cn.flying.identity.mapper.apigateway.ApiKeyMapper;
 import cn.flying.identity.mapper.apigateway.ApiPermissionMapper;
 import cn.flying.identity.mapper.apigateway.ApiRouteMapper;
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import jakarta.annotation.PreDestroy;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.annotation.Order;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import cn.flying.identity.constant.CacheKeyConstants;
-import cn.hutool.json.JSONUtil;
 
 import java.util.HashMap;
 import java.util.List;
@@ -26,7 +27,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import jakarta.annotation.PreDestroy;
 
 /**
  * API网关预热服务

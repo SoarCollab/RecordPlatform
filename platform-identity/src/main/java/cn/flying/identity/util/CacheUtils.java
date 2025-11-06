@@ -1,10 +1,10 @@
 package cn.flying.identity.util;
 
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-import jakarta.annotation.Resource;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
