@@ -1,5 +1,7 @@
 package cn.flying.identity.controller;
 
+import cn.dev33.satoken.annotation.SaCheckLogin;
+import cn.dev33.satoken.annotation.SaCheckRole;
 import cn.flying.identity.dto.*;
 import cn.flying.identity.service.VerifyCodeService;
 import cn.flying.identity.util.IdUtils;
@@ -292,6 +294,8 @@ public class VerifyCodeController {
             @ApiResponse(responseCode = "200", description = "清理成功"),
             @ApiResponse(responseCode = "403", description = "无权限")
     })
+    @SaCheckLogin
+    @SaCheckRole("admin")
     public ResponseEntity<RestResponse<Map<String, Object>>> cleanupExpiredCodes() {
         Result<Map<String, Object>> result = verifyCodeService.cleanExpiredCodes();
         RestResponse<Map<String, Object>> response = ResponseConverter.convert(result);

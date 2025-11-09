@@ -42,14 +42,17 @@ public class FlowUtils {
      */
     public boolean limitOnceCheck(String key, int blockTime) {
         try {
-            // 检查是否存在限流键
-            if (stringRedisTemplate.hasKey(key)) {
-                return false; // 已被限流
+            Boolean acquired;
+            if (blockTime > 0) {
+                acquired = stringRedisTemplate.opsForValue()
+                        .setIfAbsent(key, "1", blockTime, TimeUnit.SECONDS);
+            } else {
+                acquired = stringRedisTemplate.opsForValue().setIfAbsent(key, "1");
+                if (Boolean.TRUE.equals(acquired)) {
+                    stringRedisTemplate.expire(key, 1, TimeUnit.SECONDS);
+                }
             }
-
-            // 设置限流键，过期时间为阻塞时间
-            stringRedisTemplate.opsForValue().set(key, "1", blockTime, TimeUnit.SECONDS);
-            return true; // 通过限流检查
+            return Boolean.TRUE.equals(acquired);
         } catch (Exception e) {
             log.error("限流检查异常，键: {}", key, e);
             // 异常情况下允许通过，避免影响正常业务
@@ -94,11 +97,8 @@ public class FlowUtils {
             }
             
             // 检查是否超过最大计数
-            if (currentCount > maxCount) {
-                return false; // 超过最大计数，被限流
-            }
-
-            return true; // 通过限流检查
+            return currentCount <= maxCount; // 超过最大计数，被限流
+// 通过限流检查
         } catch (Exception e) {
             log.error("计数限流检查异常，键: {}", key, e);
             // 异常情况下允许通过，避免影响正常业务

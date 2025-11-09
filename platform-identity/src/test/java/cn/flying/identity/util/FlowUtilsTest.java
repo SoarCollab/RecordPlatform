@@ -46,37 +46,41 @@ class FlowUtilsTest {
 
     @Test
     void testCheckEmailVerifyLimit_Pass() {
-        when(stringRedisTemplate.hasKey(anyString())).thenReturn(false);
+        when(valueOperations.setIfAbsent(anyString(), eq("1"), eq(60L), eq(TimeUnit.SECONDS)))
+                .thenReturn(true);
 
         boolean result = flowUtils.checkEmailVerifyLimit("192.168.1.1", 60);
 
         assertTrue(result);
-        verify(valueOperations).set(anyString(), eq("1"), eq(60L), eq(TimeUnit.SECONDS));
+        verify(valueOperations).setIfAbsent(anyString(), eq("1"), eq(60L), eq(TimeUnit.SECONDS));
     }
 
     @Test
     void testCheckEmailVerifyLimit_Blocked() {
-        when(stringRedisTemplate.hasKey(anyString())).thenReturn(true);
+        when(valueOperations.setIfAbsent(anyString(), eq("1"), eq(60L), eq(TimeUnit.SECONDS)))
+                .thenReturn(false);
 
         boolean result = flowUtils.checkEmailVerifyLimit("192.168.1.1", 60);
 
         assertFalse(result);
-        verify(valueOperations, never()).set(anyString(), anyString(), anyLong(), any(TimeUnit.class));
+        verify(valueOperations).setIfAbsent(anyString(), eq("1"), eq(60L), eq(TimeUnit.SECONDS));
     }
 
     @Test
     void testLimitOnceCheck_Pass() {
-        when(stringRedisTemplate.hasKey("test:key")).thenReturn(false);
+        when(valueOperations.setIfAbsent("test:key", "1", 30L, TimeUnit.SECONDS))
+                .thenReturn(true);
 
         boolean result = flowUtils.limitOnceCheck("test:key", 30);
 
         assertTrue(result);
-        verify(valueOperations).set("test:key", "1", 30L, TimeUnit.SECONDS);
+        verify(valueOperations).setIfAbsent("test:key", "1", 30L, TimeUnit.SECONDS);
     }
 
     @Test
     void testLimitOnceCheck_Blocked() {
-        when(stringRedisTemplate.hasKey("test:key")).thenReturn(true);
+        when(valueOperations.setIfAbsent("test:key", "1", 30L, TimeUnit.SECONDS))
+                .thenReturn(false);
 
         boolean result = flowUtils.limitOnceCheck("test:key", 30);
 
@@ -85,7 +89,8 @@ class FlowUtilsTest {
 
     @Test
     void testLimitOnceCheck_Exception() {
-        when(stringRedisTemplate.hasKey(anyString())).thenThrow(new RuntimeException("Redis连接失败"));
+        when(valueOperations.setIfAbsent(anyString(), anyString(), anyLong(), any(TimeUnit.class)))
+                .thenThrow(new RuntimeException("Redis连接失败"));
 
         boolean result = flowUtils.limitOnceCheck("test:key", 30);
 
