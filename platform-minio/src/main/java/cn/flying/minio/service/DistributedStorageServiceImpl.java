@@ -8,17 +8,19 @@ import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.DistributedStorageService;
 import io.minio.*;
-import io.minio.errors.MinioException;
 import io.minio.errors.ErrorResponseException;
+import io.minio.errors.MinioException;
 import io.minio.http.Method;
 import jakarta.annotation.Resource;
-import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.io.IOUtils;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.slf4j.Logger;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.InputStream;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -32,8 +34,8 @@ import java.util.stream.Collectors;
  * @create: 2025-04-07 00:07
  */
 @DubboService(methods = {@org.apache.dubbo.config.annotation.Method(name = "storeFile", timeout = 60000)})
-@Slf4j
 public class DistributedStorageServiceImpl implements DistributedStorageService {
+    private static final Logger log = org.slf4j.LoggerFactory.getLogger(DistributedStorageServiceImpl.class);
     @Resource
     private MinioClientManager clientManager;
 
@@ -57,7 +59,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
         if (filePathList.size() != fileHashList.size()) {
             log.error("filePathList 和 fileHashList 必须具有相同的大小。");
-            return Result.error(ResultEnum.PARAM_IS_INVALID,null);
+            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
         }
 
         List<byte[]> result = new ArrayList<>();
@@ -87,7 +89,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             //在部分成功时抛出异常并记录日志
             log.warn("getFileListByHash获取文件时仅部分成功，出现 {} 错误：{}", errors.size(), errors);
             //返回失败消息
-            return Result.error(ResultEnum.FILE_SERVICE_ERROR,result);
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR, result);
         }
         return Result.success(result);
     }
@@ -96,7 +98,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     public Result<List<String>> getFileUrlListByHash(List<String> filePathList, List<String> fileHashList) {
         if (CollectionUtils.isEmpty(filePathList) || CollectionUtils.isEmpty(fileHashList)) {
             log.warn("获取文件列表时传入Hash列表为空");
-            return Result.error(ResultEnum.PARAM_IS_INVALID,null);
+            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
         }
         if (filePathList.size() != fileHashList.size()) {
             log.error("filePathList 和 fileHashList 必须具有相同的大小。");
@@ -111,24 +113,24 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             try {
                 Optional<String> urlOpt = getPresignedUrlInternal(filePath, fileHash);
                 urlOpt.ifPresent(result::add);
-                 if (urlOpt.isEmpty()) {
-                     log.warn("未找到路径:[{}],哈希[{}]的文件", filePath, fileHash);
-                     errors.add(filePath + ": URL 生成失败");
-                 }
+                if (urlOpt.isEmpty()) {
+                    log.warn("未找到路径:[{}],哈希[{}]的文件", filePath, fileHash);
+                    errors.add(filePath + ": URL 生成失败");
+                }
             } catch (Exception e) {
                 log.error("获取路径:[{}],哈希[{}]的文件时出现意外错误", filePath, fileHash, e);
                 errors.add(filePath + ": Unexpected error - " + e.getMessage());
             }
         }
-         if (!errors.isEmpty()) {
-             log.warn("getFileUrlListByHash获取文件时仅部分成功，出现 {} 错误：{}", errors.size(), errors);
-             //返回失败消息
-             return Result.error(ResultEnum.FILE_SERVICE_ERROR, result);
-         }
+        if (!errors.isEmpty()) {
+            log.warn("getFileUrlListByHash获取文件时仅部分成功，出现 {} 错误：{}", errors.size(), errors);
+            //返回失败消息
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR, result);
+        }
         return Result.success(result);
     }
 
-    public Result<Map<String,String>> storeFile(List<byte[]> fileList, List<String> fileHashList) {
+    public Result<Map<String, String>> storeFile(List<byte[]> fileList, List<String> fileHashList) {
         if (CollectionUtils.isEmpty(fileList) || CollectionUtils.isEmpty(fileHashList)) {
             log.warn("storeFile调用时列表参数为空");
             return Result.error(ResultEnum.PARAM_IS_INVALID, null);
@@ -238,15 +240,15 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
 
         return mappings.stream()
-                .filter(mapping -> {
-                    List<String> pair = mapping.getPhysicalNodePair();
-                    // 必须配置了两个物理节点，且这两个节点都必须在线
-                    return pair != null && pair.size() == 2 &&
-                           minioMonitor.isNodeOnline(pair.get(0)) &&
-                           minioMonitor.isNodeOnline(pair.get(1));
-                })
-                .map(LogicNodeMapping::getLogicNodeName)
-                .collect(Collectors.toList());
+            .filter(mapping -> {
+                List<String> pair = mapping.getPhysicalNodePair();
+                // 必须配置了两个物理节点，且这两个节点都必须在线
+                return pair != null && pair.size() == 2 &&
+                    minioMonitor.isNodeOnline(pair.get(0)) &&
+                    minioMonitor.isNodeOnline(pair.get(1));
+            })
+            .map(LogicNodeMapping::getLogicNodeName)
+            .collect(Collectors.toList());
     }
 
     /**
@@ -258,10 +260,10 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             return null;
         }
         return mappings.stream()
-                .filter(m -> logicNodeName.equals(m.getLogicNodeName()))
-                .findFirst()
-                .map(LogicNodeMapping::getPhysicalNodePair)
-                .orElse(null);
+            .filter(m -> logicNodeName.equals(m.getLogicNodeName()))
+            .findFirst()
+            .map(LogicNodeMapping::getPhysicalNodePair)
+            .orElse(null);
     }
 
     /**
@@ -284,7 +286,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             double score2 = minioMonitor.getNodeLoadScore(physicalPair.get(1));
             // 如果任一物理节点分数无效，则跳过此逻辑节点
             if (score1 == Double.MAX_VALUE || score2 == Double.MAX_VALUE) continue;
-            
+
             double averageScore = (score1 + score2) / 2.0;
 
             if (averageScore < minScore) {
@@ -296,9 +298,9 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         if (bestNode == null) {
             log.warn("无法从 available：{} 中确定最佳逻辑节点,回退到随机选择", availableLogicNodes);
             //回退策略:随机选择一个
-             if (!availableLogicNodes.isEmpty()){
-                 return availableLogicNodes.get(new Random().nextInt(availableLogicNodes.size()));
-             }
+            if (!availableLogicNodes.isEmpty()) {
+                return availableLogicNodes.get(new Random().nextInt(availableLogicNodes.size()));
+            }
         }
 
         log.debug("选择得分为 {} 的最佳逻辑节点 '{}'", bestNode, minScore);
@@ -307,6 +309,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
 
     /**
      * 内部实现：根据文件路径和哈希获取文件
+     *
      * @return Optional<File> 如果成功获取文件；Optional.empty() 如果尝试后未找到或节点不可用；
      * @throws RuntimeException 如果发生不可恢复的存储错误
      */
@@ -334,7 +337,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
 
         // 主节点失败，尝试从备用节点获取
         log.warn("无法从主节点“{}”获取文件“{}”。正在尝试辅助节点 '{}'...",
-                 parsedPath.objectName, primaryNode, secondaryNode);
+            parsedPath.objectName, primaryNode, secondaryNode);
         fileOpt = tryGetObjectFromNode(secondaryNode, parsedPath.objectName);
         if (fileOpt.isPresent()) {
             return fileOpt;
@@ -342,13 +345,14 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
 
         // 两个节点都失败
         log.error("无法从逻辑节点“{}”的两个物理节点（{}、{}）获取文件“{}”",
-                  parsedPath.objectName, primaryNode, secondaryNode, parsedPath.logicNodeName);
+            parsedPath.objectName, primaryNode, secondaryNode, parsedPath.logicNodeName);
         //返回空
         return Optional.empty();
     }
 
     /**
      * 内部实现：获取文件的预签名下载 URL
+     *
      * @return Optional<String> 如果成功；Optional.empty() 如果失败
      */
     private Optional<String> getPresignedUrlInternal(String filePath, String fileHash) {
@@ -375,19 +379,20 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
 
         // 主节点失败，尝试从备用节点获取
         log.warn("无法从主节点“{}”获取“{}”的预签名 URL。正在尝试辅助节点'{}'...",
-                 parsedPath.objectName, primaryNode, secondaryNode);
+            parsedPath.objectName, primaryNode, secondaryNode);
         urlOpt = tryGetResignedUrlFromNode(secondaryNode, parsedPath.objectName);
         if (urlOpt.isPresent()) {
             return urlOpt;
         }
 
         log.error("无法从逻辑节点“{}”的两个物理节点（{}、{}）获取“{}”的预签名 URL",
-                  parsedPath.objectName, primaryNode, secondaryNode, parsedPath.logicNodeName);
+            parsedPath.objectName, primaryNode, secondaryNode, parsedPath.logicNodeName);
         return Optional.empty();
     }
 
     /**
      * 解析逻辑路径，格式: minio/node/{logic_node_name}/{object_name}
+     *
      * @return ParsedPath 对象，如果解析失败则返回 null
      */
     private ParsedPath parseLogicalPath(String filePath, String fileHash) {
@@ -421,7 +426,8 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     /**
      * 内部记录类，用于存储解析后的路径信息
      */
-    private record ParsedPath(String logicNodeName, String objectName) {}
+    private record ParsedPath(String logicNodeName, String objectName) {
+    }
 
     /**
      * 根据负载选择读取操作的主节点
@@ -461,9 +467,9 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             // 使用节点名称作为桶名
 
             GetObjectArgs args = GetObjectArgs.builder()
-                    .bucket(nodeName)
-                    .object(objectName)
-                    .build();
+                .bucket(nodeName)
+                .object(objectName)
+                .build();
             try (InputStream inputStream = client.getObject(args)) {
                 byte[] fileBytes = IOUtils.toByteArray(inputStream);
                 log.info("已成功将对象“{}”从节点“{}”读取到服务器", objectName, nodeName);
@@ -472,9 +478,9 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         } catch (MinioException e) {
             // 特别处理对象不存在的错误
             if (e instanceof ErrorResponseException && ((ErrorResponseException) e).errorResponse().code().equals("NoSuchKey")) {
-                 log.warn("在节点'{}'上找不到对象'{}'（NoSuchKey）", objectName, nodeName);
-                 // 不认为是严重错误，返回 empty
-                 return Optional.empty();
+                log.warn("在节点'{}'上找不到对象'{}'（NoSuchKey）", objectName, nodeName);
+                // 不认为是严重错误，返回 empty
+                return Optional.empty();
             } else {
                 log.error("从节点'{}'获取对象'{}'时出现MinIO错误：{}", objectName, nodeName, e.getMessage(), e);
             }
@@ -503,24 +509,24 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             // 检查对象是否存在（可选，但可以避免为不存在的对象生成URL）
             try {
                 StatObjectArgs statArgs = StatObjectArgs.builder()
-                                          .bucket(nodeName)
-                                          .object(objectName).build();
+                    .bucket(nodeName)
+                    .object(objectName).build();
                 client.statObject(statArgs);
             } catch (ErrorResponseException e) {
-                 if (e.errorResponse().code().equals("NoSuchKey")) {
+                if (e.errorResponse().code().equals("NoSuchKey")) {
                     log.warn("在节点“{}”上找不到对象“{}”，无法生成预签名URL", objectName, nodeName);
                     return Optional.empty();
-                 } else {
-                     throw e; // 重新抛出其他 MinIO 错误
-                 }
+                } else {
+                    throw e; // 重新抛出其他 MinIO 错误
+                }
             }
 
             GetPresignedObjectUrlArgs args = GetPresignedObjectUrlArgs.builder()
-                    .method(Method.GET)
-                    .bucket(nodeName)
-                    .object(objectName)
-                    .expiry(DistributedStorageServiceImpl.EXPIRY_HOURS, TimeUnit.HOURS)
-                    .build();
+                .method(Method.GET)
+                .bucket(nodeName)
+                .object(objectName)
+                .expiry(DistributedStorageServiceImpl.EXPIRY_HOURS, TimeUnit.HOURS)
+                .build();
             String url = client.getPresignedObjectUrl(args);
             log.info("从节点“{}”为对象“{}”成功生成预签名 URL", nodeName, objectName);
             return Optional.of(url);
@@ -551,10 +557,10 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 // 使用 FileInputStream 读取文件内容
                 try (InputStream inputStream = new ByteArrayInputStream(file)) {
                     PutObjectArgs args = PutObjectArgs.builder()
-                            .bucket(nodeName)
-                            .object(objectName)
-                            .stream(inputStream, file.length, -1) // 使用文件长度
-                            .build();
+                        .bucket(nodeName)
+                        .object(objectName)
+                        .stream(inputStream, file.length, -1) // 使用文件长度
+                        .build();
                     client.putObject(args);
                     log.debug("已成功将'{}'上传到节点'{}'", objectName, nodeName);
                 } // try-with-resources 会自动关闭 inputStream

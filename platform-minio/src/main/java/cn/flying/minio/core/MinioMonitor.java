@@ -7,11 +7,11 @@ import io.minio.errors.MinioException;
 import io.prometheus.client.Counter;
 import io.prometheus.client.Gauge;
 import jakarta.annotation.Resource;
-import lombok.extern.slf4j.Slf4j;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
+import org.slf4j.Logger;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -35,10 +35,10 @@ import java.util.stream.Collectors;
 /**
  * 定期监控 MinIO 物理节点的在线状态和负载情况
  */
-@Slf4j
 @Component
 public class MinioMonitor {
 
+    private static final Logger log = org.slf4j.LoggerFactory.getLogger(MinioMonitor.class);
     // 存储当前在线的物理节点名称
     private final Set<String> onlineNodes = ConcurrentHashMap.newKeySet();
     // 指标缓存
