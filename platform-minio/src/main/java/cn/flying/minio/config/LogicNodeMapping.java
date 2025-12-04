@@ -1,6 +1,7 @@
 package cn.flying.minio.config;
 
 import lombok.Data;
+
 import java.util.List;
 
 /**

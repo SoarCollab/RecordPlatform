@@ -42,3 +42,6 @@ App.java
 .DS_Store
 /platform-frontend/node_modules/**/**/
 /platform-frontend/node_modules/.package-lock.json
+/AGENTS.md
+/CLAUDE.md
+/GEMINI.md
