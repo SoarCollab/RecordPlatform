@@ -109,7 +109,7 @@ public class FileStorageEventListener {
      * 异步通知用户存证完成
      * 可以通过消息系统、邮件、推送等方式通知用户
      */
-    private CompletableFuture<Void> notifyUser(String uid, String fileName, String fileHash) {
+    private CompletableFuture<Void> notifyUser(Long uid, String fileName, String fileHash) {
         return CompletableFuture.runAsync(() -> {
             //todo 实现实际的用户通知逻辑
             log.info("通知用户文件存证完成: 用户={}, 文件名={}, 文件哈希={}", uid, fileName, fileHash);

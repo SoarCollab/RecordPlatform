@@ -251,8 +251,8 @@ public class FileUploadRedisStateManager {
      * @param uid      用户ID
      * @param fileName 文件名
      */
-    public void removeSessionByFileName(String uid, String fileName) {
-        String SUID = UidEncoder.encodeUid(uid);
+    public void removeSessionByFileName(Long uid, String fileName) {
+        String SUID = UidEncoder.encodeUid(String.valueOf(uid));
         String sessionId = getSessionIdByFileClientKey(fileName, SUID);
 
         if (sessionId != null) {

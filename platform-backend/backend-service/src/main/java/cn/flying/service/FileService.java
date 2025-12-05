@@ -17,67 +17,66 @@ public interface FileService extends IService<File> {
 
     /**
      * 在完成分片上传后预存储文件（此时设置文件状态为）
-     * @param Uid 用户ID
+     * @param userId 用户ID
      * @param OriginFileName 原始文件名
-     * @return
      */
-    void prepareStoreFile(String Uid,String OriginFileName);
+    void prepareStoreFile(Long userId, String OriginFileName);
     /**
      * 存储文件
-     * @param Uid 用户ID
+     * @param userId 用户ID
      * @param fileList 加密后的文件分片列表
      * @param fileHashList 文件分片对应的哈希列表
      * @param fileParam 文件参数(JSON)
      * @return
      */
-    File storeFile(String Uid, String OriginFileName, List<java.io.File> fileList,List<String> fileHashList, String fileParam);
+    File storeFile(Long userId, String OriginFileName, List<java.io.File> fileList, List<String> fileHashList, String fileParam);
 
     /**
      * 修改文件状态
-     * @param Uid
+     * @param userId
      * @param fileName
      * @param fileStatus
      */
-    void changeFileStatusByName(String Uid, String fileName, Integer fileStatus);
+    void changeFileStatusByName(Long userId, String fileName, Integer fileStatus);
 
     /**
      * 修改文件状态
-     * @param Uid
+     * @param userId
      * @param fileHash
      * @param fileStatus
      */
-    void changeFileStatusByHash(String Uid, String fileHash, Integer fileStatus);
+    void changeFileStatusByHash(Long userId, String fileHash, Integer fileStatus);
 
     /**
      * 删除文件
-     * @param Uid 用户ID
+     * @param userId 用户ID
      * @param fileHashList 文件哈希
      * @return
      */
-    void deleteFile(String Uid, List<String> fileHashList);
+    void deleteFile(Long userId, List<String> fileHashList);
 
     /**
      * 根据用户Id获取用户文件列表（只包含文件元信息，没有实际的文件数据）
-     * @param Uid 用户ID
+     * @param userId 用户ID
      * @return 文件元信息列表
      */
-    List<File> getUserFilesList(String Uid);
+    List<File> getUserFilesList(Long userId);
 
     /**
      * 获取用户文件分页（只包含文件元信息，没有实际的文件数据）
      *
-     * @param Uid
+     * @param userId
      * @param page
      */
-    void getUserFilesPage(String Uid, Page<File> page);
+    void getUserFilesPage(Long userId, Page<File> page);
 
     /**
      * 获取文件分片地址
-     * @param Uid 用户ID
+     * @param userId 用户ID
      * @param fileHash 文件哈希
      * @return 文件分片地址
      */
-    List<String> getFileAddress(String Uid, String fileHash);
+    List<String> getFileAddress(Long userId, String fileHash);
 
     /**
      * 根据交易哈希获取文件交易信息
@@ -88,20 +87,20 @@ public interface FileService extends IService<File> {
 
     /**
      * 获取文件分片
-     * @param Uid 用户ID
+     * @param userId 用户ID
      * @param fileHash 文件哈希
      * @return 文件分片列表
      */
-    List<byte[]> getFile(String Uid, String fileHash);
+    List<byte[]> getFile(Long userId, String fileHash);
 
     /**
      * 分享文件给其它用户
-     * @param Uid 用户ID
+     * @param userId 用户ID
      * @param fileHash 待分享的文件哈希
      * @param maxAccesses 最大访问次数
      * @return 分享码
      */
-    String generateSharingCode(String Uid, List<String> fileHash, Integer maxAccesses);
+    String generateSharingCode(Long userId, List<String> fileHash, Integer maxAccesses);
 
     /**
      * 获取根据分享码获取他人分享的文件

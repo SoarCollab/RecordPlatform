@@ -42,7 +42,7 @@ public class ImageServiceImpl extends ServiceImpl<ImageStoreMapper, ImageStore> 
     FlowUtils flowUtils;
     private final SimpleDateFormat format= new SimpleDateFormat("yyyyMMdd");
     @Override
-    public String uploadAvatar(MultipartFile file, String userId) throws IOException {
+    public String uploadAvatar(MultipartFile file, Long userId) throws IOException {
         String imageName= "/avatar/"+UUID.randomUUID().toString().replace("-","");
         PutObjectArgs objectArgs= PutObjectArgs.builder()
                 .bucket(bucketName)
@@ -66,7 +66,7 @@ public class ImageServiceImpl extends ServiceImpl<ImageStoreMapper, ImageStore> 
     }
 
     @Override
-    public String uploadImage(MultipartFile file, String userId) throws IOException {
+    public String uploadImage(MultipartFile file, Long userId) throws IOException {
         String key= Const.IMAGE_COUNTER +userId;
         if(!flowUtils.limitPeriodCountCheck(key,20,3600))
             return null;

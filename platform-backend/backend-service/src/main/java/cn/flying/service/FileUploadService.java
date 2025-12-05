@@ -25,7 +25,7 @@ public interface FileUploadService {
      * @param totalChunks 分片总数
      * @return
      */
-    StartUploadVO startUpload(String uid, String fileName, long fileSize, String contentType,String clientId, int chunkSize, int totalChunks);
+    StartUploadVO startUpload(Long userId, String fileName, long fileSize, String contentType, String clientId, int chunkSize, int totalChunks);
     /**
      * 上传分片
      * @param uid 用户ID
@@ -33,7 +33,7 @@ public interface FileUploadService {
      * @param chunkNumber 分片序号
      * @param file 文件
      */
-    void uploadChunk(String uid, String clientId, int chunkNumber, MultipartFile file);
+    void uploadChunk(Long userId, String clientId, int chunkNumber, MultipartFile file);
     /**
      * 获取上传进度
      * @param clientId 上传客户端ID
@@ -46,13 +46,13 @@ public interface FileUploadService {
      * @param clientId 上传客户端ID
      * @return 是否取消成功
      */
-    boolean cancelUpload(String uid,String clientId);
+    boolean cancelUpload(Long userId, String clientId);
     /**
      * 完成上传
      * @param uid 用户ID
      * @param clientId 上传客户端ID
      */
-    void completeUpload(String uid,String clientId);
+    void completeUpload(Long userId, String clientId);
     /**
      * 暂停上传
      * @param clientId 上传客户端ID

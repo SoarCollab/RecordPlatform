@@ -173,10 +173,11 @@ public class FileUploadServiceImpl implements FileUploadService {
      * @throws GeneralException IO 操作失败
      */
     @Override
-    public StartUploadVO startUpload(String uid,String fileName, long fileSize, String contentType, String clientId, int chunkIndex, int totalChunks) {
+    public StartUploadVO startUpload(Long userId, String fileName, long fileSize, String contentType, String clientId, int chunkIndex, int totalChunks) {
 
         //获取加密后的uid，防止数据泄漏
-        String SUID = UidEncoder.encodeUid(uid);
+        String uidStr = String.valueOf(userId);
+        String SUID = UidEncoder.encodeUid(uidStr);
 
         // 如果未提供，则生成一个新的客户端ID（随机生成，作为客户端凭证）
         if(CommonUtils.isBlank(clientId)){
@@ -247,9 +248,9 @@ public class FileUploadServiceImpl implements FileUploadService {
      * @throws GeneralException IO 操作失败
      * @throws GeneralException 安全相关操作失败 (如哈希)
      */
-    public void uploadChunk(String uid,String clientId, int chunkNumber, MultipartFile file) {
+    public void uploadChunk(Long userId, String clientId, int chunkNumber, MultipartFile file) {
         //获取加密后的uid，防止数据泄漏
-        String SUID = UidEncoder.encodeUid(uid);
+        String SUID = UidEncoder.encodeUid(String.valueOf(userId));
 
         FileUploadState state = redisStateManager.getState(clientId);
         if (state == null) {
@@ -342,9 +343,10 @@ public class FileUploadServiceImpl implements FileUploadService {
      * @throws GeneralException 上传未完成（分片未处理完）
      * @throws GeneralException IO 操作失败
      */
-    public void completeUpload(String uid,String clientId){
+    public void completeUpload(Long userId, String clientId){
 
-        String SUID = UidEncoder.encodeUid(uid);
+        String uidStr = String.valueOf(userId);
+        String SUID = UidEncoder.encodeUid(uidStr);
 
         FileUploadState state = redisStateManager.getState(clientId);
         if (state == null) {
@@ -381,7 +383,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             log.info("原始上传分片目录已清理: {}", uploadSessionDir);
 
             // 调用文件服务初始化文件元信息
-            fileService.prepareStoreFile(uid, state.getFileName());
+            fileService.prepareStoreFile(userId, state.getFileName());
 
             log.info("文件上传和处理流程完成: 客户端ID={}, 文件名={}", clientId, state.getFileName());
 
@@ -390,7 +392,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             if (processedFiles == null) {
                 log.error("收集处理后的文件失败，无法继续存证流程: 客户端ID={}, 文件名={}", clientId, state.getFileName());
                 // 更新文件状态为失败
-                fileService.changeFileStatusByName(uid, state.getFileName(), FileUploadStatus.FAIL.getCode());
+                fileService.changeFileStatusByName(userId, state.getFileName(), FileUploadStatus.FAIL.getCode());
                 // 清理Redis状态
                 redisStateManager.removeSession(state.getClientId(), SUID);
                 throw new GeneralException("收集处理后的文件失败，文件存证中止");
@@ -400,7 +402,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             if (fileHashes == null) {
                 log.error("收集文件哈希值失败，无法继续存证流程: 客户端ID={}, 文件名={}", clientId, state.getFileName());
                 // 更新文件状态为失败
-                fileService.changeFileStatusByName(uid, state.getFileName(), FileUploadStatus.FAIL.getCode());
+                fileService.changeFileStatusByName(userId, state.getFileName(), FileUploadStatus.FAIL.getCode());
                 // 清理Redis状态
                 redisStateManager.removeSession(state.getClientId(), SUID);
                 throw new GeneralException("收集文件哈希值失败，文件存证中止");
@@ -411,7 +413,7 @@ public class FileUploadServiceImpl implements FileUploadService {
                 log.error("处理后的文件数量({})与哈希值数量({})不匹配: 客户端ID={}, 文件名={}",
                          processedFiles.size(), fileHashes.size(), clientId, state.getFileName());
                 // 更新文件状态为失败
-                fileService.changeFileStatusByName(uid, state.getFileName(), FileUploadStatus.FAIL.getCode());
+                fileService.changeFileStatusByName(userId, state.getFileName(), FileUploadStatus.FAIL.getCode());
                 // 清理Redis状态
                 redisStateManager.removeSession(state.getClientId(), SUID);
                 throw new GeneralException("文件数量与哈希数量不匹配，文件存证中止");
@@ -424,7 +426,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             if (CommonUtils.isNotEmpty(eventPublisher)) {
                 eventPublisher.publishEvent(new FileStorageEvent(
                         this,
-                        uid,
+                        userId,
                         state.getFileName(),
                         SUID,
                         state.getClientId(),
@@ -433,7 +435,7 @@ public class FileUploadServiceImpl implements FileUploadService {
                         generateFileParam(state) // 生成文件参数
                 ));
 
-                log.info("已发布文件存证事件: 用户={}, 文件名={}, 分片数量={}", uid, state.getFileName(), processedFiles.size());
+                log.info("已发布文件存证事件: 用户={}, 文件名={}, 分片数量={}", userId, state.getFileName(), processedFiles.size());
 
                 // 立即清理Redis上传状态
                 try {
@@ -445,7 +447,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             } else {
                 log.error("事件发布器未初始化，无法发送文件存证事件: 客户端ID={}, 文件名={}", clientId, state.getFileName());
                 // 更新文件状态为失败
-                fileService.changeFileStatusByName(uid, state.getFileName(), FileUploadStatus.FAIL.getCode());
+                fileService.changeFileStatusByName(userId, state.getFileName(), FileUploadStatus.FAIL.getCode());
                 // 事件发布器未初始化时也清理Redis状态
                 redisStateManager.removeSession(state.getClientId(), SUID);
                 throw new GeneralException("事件发布器未初始化，文件存证中止");
@@ -520,8 +522,8 @@ public class FileUploadServiceImpl implements FileUploadService {
      * 取消上传并清理资源
      * @return 如果找到并清理了会话则返回 true，否则返回 false
      */
-    public boolean cancelUpload(String uid,String clientId) {
-        String SUID = UidEncoder.encodeCid(uid);
+    public boolean cancelUpload(Long userId, String clientId) {
+        String SUID = UidEncoder.encodeCid(String.valueOf(userId));
         log.info("收到取消上传请求: 客户端ID={}", clientId);
         return cleanupUploadSessionInternal(SUID, clientId); // 内部方法处理查找和清理
     }

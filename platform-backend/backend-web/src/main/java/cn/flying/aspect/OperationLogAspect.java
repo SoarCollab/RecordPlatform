@@ -24,6 +24,8 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.lang.reflect.Method;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -37,8 +39,8 @@ public class OperationLogAspect {
     @Resource
     private SysOperationLogService operationLogService;
     
-    // 忽略记录的URL前缀，与RequestLogFilter保持一致
-    private final Set<String> ignores = Set.of("/favicon.ico","/webjars","/doc.html","/swagger-ui", "/v3/api-docs", "/api/file");
+    // 忽略的非业务URL前缀（保留 /api/file 等核心接口的审计记录）
+    private final Set<String> ignores = Set.of("/favicon.ico","/webjars","/doc.html","/swagger-ui", "/v3/api-docs", "/api/system/logs");
 
     /**
      * 设置操作日志切入点 记录操作日志 在注解的位置切入代码
@@ -265,7 +267,16 @@ public class OperationLogAspect {
      */
     private String getRequestParams(JoinPoint joinPoint) {
         Object[] args = joinPoint.getArgs();
-        return args.length > 0 ?JsonConverter.toJsonWithPretty(args) : "";
+        List<Object> logArgs = new ArrayList<>();
+        for (Object arg : args) {
+            if (arg instanceof org.springframework.web.multipart.MultipartFile
+                || arg instanceof HttpServletRequest
+                || arg instanceof jakarta.servlet.http.HttpServletResponse) {
+                continue;
+            }
+            logArgs.add(arg);
+        }
+        return logArgs.isEmpty() ? "" : JsonConverter.toJsonWithPretty(logArgs);
     }
 
     /**

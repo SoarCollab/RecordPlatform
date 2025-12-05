@@ -1,7 +1,8 @@
 package cn.flying.fisco_bcos.utils;
 
-import java.text.SimpleDateFormat;
-import java.util.Date;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 
 /**
  * @program: fisco_bcos
@@ -10,6 +11,11 @@ import java.util.Date;
  * @create: 2025-01-12 19:41
  */
 public class Convert {
+
+    private static final DateTimeFormatter DATE_FORMATTER =
+        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+            .withZone(ZoneId.systemDefault());
+
     public static Byte[] hexToByte(String hexString) {
         // 去掉0x前缀
         if (hexString.startsWith("0x")) {
@@ -71,13 +77,9 @@ public class Convert {
     }
 
     public static String timeStampToDate(Long uploadTimeMilli) {
-        String date = "";
-        if (null != uploadTimeMilli) {
-            long uploadTime = uploadTimeMilli;
-            Date uploadDate = new Date(uploadTime);
-            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-            date = sdf.format(uploadDate);
+        if (uploadTimeMilli == null) {
+            return "";
         }
-        return date;
+        return DATE_FORMATTER.format(Instant.ofEpochMilli(uploadTimeMilli));
     }
 }

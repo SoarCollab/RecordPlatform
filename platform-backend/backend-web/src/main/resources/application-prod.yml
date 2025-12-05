@@ -7,7 +7,7 @@ spring:
     druid:
       type: com.alibaba.druid.pool.DruidDataSource
       driver-class-name: com.mysql.cj.jdbc.Driver
-      url: jdbc:mysql://localhost:3306/RecordPlatform?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8&useSSL=false
+      url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:RecordPlatform}?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8&useSSL=false
       username: ${spring.datasource.username}
       password: ${spring.datasource.password}
       initialSize: 5
@@ -23,8 +23,8 @@ spring:
         allow:
         deny:
         reset-enable: false
-        login-username: admin
-        login-password: 123456
+        login-username: ${DRUID_USERNAME:admin}
+        login-password: ${DRUID_PASSWORD}
 
   mail:
     host: ${spring.mail.host}
@@ -44,13 +44,13 @@ spring:
   data:
     redis:
       database: 0
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
       timeout: 5000
       username: ${spring.data.redis.username}
       password: ${spring.data.redis.password}
 minio:
-  endpoint: http://localhost:9000
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
   access-key: ${minio.access-key}
   secret-key: ${minio.secret-key}
   bucket-name: forum

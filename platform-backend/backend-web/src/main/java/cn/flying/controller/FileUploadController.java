@@ -36,7 +36,7 @@ public class FileUploadController {
     @Operation(summary = "开始上传")
     @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "开始上传文件")
     public Result<StartUploadVO> startUpload(
-            @RequestAttribute(Const.ATTR_USER_ID) String userId,
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Schema(description = "文件名") @RequestParam("fileName") String fileName,
             @Schema(description = "文件大小") @RequestParam("fileSize") long fileSize,
             @Schema(description = "文件类型") @RequestParam(value = "contentType") String contentType,
@@ -51,7 +51,7 @@ public class FileUploadController {
     @PostMapping("/upload/chunk")
     @Operation(summary = "上传分片文件")
     public Result<String> uploadChunk(
-            @RequestAttribute(Const.ATTR_USER_ID) String userId,
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Schema(description = "上传的文件") @RequestParam("file") MultipartFile file,
             @Schema(description = "客户端ID") @RequestParam("clientId") String clientId,
             @Schema(description = "分片序号") @RequestParam("chunkNumber") int chunkNumber) {
@@ -65,7 +65,7 @@ public class FileUploadController {
     @Operation(summary = "完成文件上传处理")
     @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "完成文件上传处理")
     public Result<String> completeUpload(
-            @RequestAttribute(Const.ATTR_USER_ID) String userId,
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Schema(description = "客户端ID") @RequestParam("clientId") String clientId) {
 
         fileUploadService.completeUpload(userId,clientId);
@@ -95,7 +95,7 @@ public class FileUploadController {
     @Operation(summary = "取消上传")
     @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "取消文件上传")
     public Result<String> cancelUpload(
-            @RequestAttribute(Const.ATTR_USER_ID) String userId,
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Schema(description = "客户端ID") @RequestParam("clientId") String clientId) {
         boolean cancelled = fileUploadService.cancelUpload(userId,clientId);
         if (cancelled) {

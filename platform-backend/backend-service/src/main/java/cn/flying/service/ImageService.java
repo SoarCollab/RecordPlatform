@@ -15,7 +15,7 @@ import java.io.OutputStream;
  */
 
 public interface ImageService extends IService<ImageStore> {
-    String uploadAvatar(MultipartFile file,String userId) throws IOException;
-    String uploadImage(MultipartFile file,String userId) throws IOException;
-    void fetchImage(OutputStream outputStream,String imagePath) throws Exception;
+    String uploadAvatar(MultipartFile file, Long userId) throws IOException;
+    String uploadImage(MultipartFile file, Long userId) throws IOException;
+    void fetchImage(OutputStream outputStream, String imagePath) throws Exception;
 }

@@ -12,7 +12,7 @@ spring:
 
   security:
     jwt:
-      key: 'record-platform-key'
+      key: ${JWT_KEY:dev-only-record-platform-key}
       expire: 72
       limit:
         base: 10
