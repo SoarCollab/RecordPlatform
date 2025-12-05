@@ -11,9 +11,8 @@ import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.platformapi.constant.Result;
-import cn.flying.platformapi.external.BlockChainService;
-import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.response.FileDetailVO;
+import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.platformapi.response.SharingVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FileService;
@@ -21,7 +20,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import org.apache.dubbo.config.annotation.DubboReference;
+import jakarta.annotation.Resource;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,11 +39,9 @@ import java.util.Map;
 @Service
 @Transactional(rollbackFor = Exception.class)
 public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements FileService {
-    @DubboReference
-    private BlockChainService blockChainService;
 
-    @DubboReference
-    private DistributedStorageService storageService;
+    @Resource
+    private FileRemoteClient fileRemoteClient;
 
     @Override
     public void prepareStoreFile(Long userId, String OriginFileName) {
@@ -71,10 +68,10 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             }
         }).toList();
 
-        Result<Map<String, String>> storeedResult = storageService.storeFile(fileByteList, fileHashList);
+        Result<Map<String, String>> storeedResult = fileRemoteClient.storeFile(fileByteList, fileHashList);
         //最终得到的文件存储位置（JSON）
         String fileContent = JsonConverter.toJsonWithPretty(ResultUtils.getData(storeedResult));
-        Result<List<String>> recordResult = blockChainService.storeFile(userIdStr, OriginFileName, fileParam, fileContent);
+        Result<List<String>> recordResult = fileRemoteClient.storeFileOnChain(userIdStr, OriginFileName, fileParam, fileContent);
         //获取存储到区块链上的文件的哈希值
         List<String> res = ResultUtils.getData(recordResult);
         //判断是不是正常返回
@@ -160,40 +157,40 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     @Override
     public List<String> getFileAddress(Long userId, String fileHash) {
         String userIdStr = String.valueOf(userId);
-        Result<FileDetailVO> filePointer = blockChainService.getFile(userIdStr, fileHash);
+        Result<FileDetailVO> filePointer = fileRemoteClient.getFile(userIdStr, fileHash);
         FileDetailVO detailVO = ResultUtils.getData(filePointer);
         String fileContent = detailVO.getContent();
         Map<String,String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
-        Result<List<String>> urlListResult = storageService.getFileUrlListByHash(fileContentMap.values().stream().toList(), fileContentMap.keySet().stream().toList());
+        Result<List<String>> urlListResult = fileRemoteClient.getFileUrlListByHash(fileContentMap.values().stream().toList(), fileContentMap.keySet().stream().toList());
         return ResultUtils.getData(urlListResult);
     }
 
     @Override
     public TransactionVO getTransactionByHash(String transactionHash) {
-        Result<TransactionVO> result = blockChainService.getTransactionByHash(transactionHash);
+        Result<TransactionVO> result = fileRemoteClient.getTransactionByHash(transactionHash);
         return ResultUtils.getData(result);
     }
 
     @Override
     public List<byte[]> getFile(Long userId, String fileHash) {
         String userIdStr = String.valueOf(userId);
-        Result<FileDetailVO> filePointer = blockChainService.getFile(userIdStr, fileHash);
+        Result<FileDetailVO> filePointer = fileRemoteClient.getFile(userIdStr, fileHash);
         FileDetailVO detailVO = ResultUtils.getData(filePointer);
         String fileContent = detailVO.getContent();
         Map<String,String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
-        Result<List<byte[]>> fileListResult = storageService.getFileListByHash(fileContentMap.values().stream().toList(), fileContentMap.keySet().stream().toList());
+        Result<List<byte[]>> fileListResult = fileRemoteClient.getFileListByHash(fileContentMap.values().stream().toList(), fileContentMap.keySet().stream().toList());
         return ResultUtils.getData(fileListResult);
     }
 
     @Override
     public String generateSharingCode(Long userId, List<String> fileHash, Integer maxAccesses) {
-        Result<String> result = blockChainService.shareFiles(String.valueOf(userId), fileHash, maxAccesses);
+        Result<String> result = fileRemoteClient.shareFiles(String.valueOf(userId), fileHash, maxAccesses);
         return ResultUtils.getData(result);
     }
 
     @Override
     public List<File> getShareFile(String sharingCode) {
-        Result<SharingVO> result = blockChainService.getSharedFiles(sharingCode);
+        Result<SharingVO> result = fileRemoteClient.getSharedFiles(sharingCode);
         if(ResultUtils.isSuccess(result)){
             SharingVO sharingFiles = ResultUtils.getData(result);
             String uploader = sharingFiles.getUploader();

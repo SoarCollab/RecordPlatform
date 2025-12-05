@@ -22,13 +22,17 @@ import org.springframework.stereotype.Service;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 账户信息处理相关服务
  */
 @Service
 public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> implements AccountService {
+
+    private static final ConcurrentHashMap<String, ReentrantLock> ADDRESS_LOCKS = new ConcurrentHashMap<>();
 
     //验证邮件发送冷却时间限制，秒为单位
     @Value("${spring.web.verify.mail-limit}")
@@ -72,7 +76,9 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
      * @return 操作结果，null表示正常，否则为错误原因
      */
     public String registerEmailVerifyCode(String type, String email, String address){
-        synchronized (address.intern()) {
+        ReentrantLock lock = ADDRESS_LOCKS.computeIfAbsent(address, k -> new ReentrantLock());
+        lock.lock();
+        try {
             if(!this.verifyLimit(address))
                 return "请求频繁，请稍后再试";
             Random random = new Random();
@@ -82,6 +88,8 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
             stringRedisTemplate.opsForValue()
                     .set(Const.VERIFY_EMAIL_DATA + email, String.valueOf(code), 3, TimeUnit.MINUTES);
             return null;
+        } finally {
+            lock.unlock();
         }
     }
 

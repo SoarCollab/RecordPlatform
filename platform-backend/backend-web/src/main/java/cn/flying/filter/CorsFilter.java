@@ -1,6 +1,7 @@
 package cn.flying.filter;
 
 import cn.flying.common.util.Const;
+import jakarta.annotation.PostConstruct;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpFilter;
@@ -11,22 +12,32 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Set;
+import java.util.stream.Collectors;
 
-/**
- * 跨域配置过滤器，仅处理跨域，添加跨域响应头
- */
 @Component
 @Order(Const.ORDER_CORS)
 public class CorsFilter extends HttpFilter {
 
     @Value("${spring.web.cors.origin}")
-    String origin;
+    private String origin;
 
     @Value("${spring.web.cors.credentials}")
-    boolean credentials;
+    private boolean credentials;
 
     @Value("${spring.web.cors.methods}")
-    String methods;
+    private String methods;
+
+    private Set<String> allowedOrigins;
+
+    @PostConstruct
+    public void init() {
+        allowedOrigins = Arrays.stream(origin.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toSet());
+    }
 
     @Override
     protected void doFilter(HttpServletRequest request, HttpServletResponse response, FilterChain chain) throws IOException, ServletException {
@@ -34,34 +45,24 @@ public class CorsFilter extends HttpFilter {
         chain.doFilter(request, response);
     }
 
-    /**
-     * 添加所有跨域相关响应头
-     * @param request 请求
-     * @param response 响应
-     */
     private void addCorsHeader(HttpServletRequest request, HttpServletResponse response) {
-        response.addHeader("Access-Control-Allow-Origin", this.resolveOrigin(request));
-        response.addHeader("Access-Control-Allow-Methods", this.resolveMethod());
-        response.addHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
-        if(credentials) {
-            response.addHeader("Access-Control-Allow-Credentials", "true");
+        String requestOrigin = request.getHeader("Origin");
+        String resolvedOrigin = resolveOrigin(requestOrigin);
+        if (resolvedOrigin != null) {
+            response.addHeader("Access-Control-Allow-Origin", resolvedOrigin);
+            response.addHeader("Access-Control-Allow-Methods", methods);
+            response.addHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+            if (credentials) {
+                response.addHeader("Access-Control-Allow-Credentials", "true");
+            }
         }
     }
 
-    /**
-     * 解析配置文件中的请求方法
-     * @return 解析得到的请求头值
-     */
-    private String resolveMethod(){
-        return "*".equals(methods) ? "GET, HEAD, POST, PUT, DELETE, OPTIONS, TRACE, PATCH" : methods;
-    }
-
-    /**
-     * 解析配置文件中的请求原始站点
-     * @param request 请求
-     * @return 解析得到的请求头值
-     */
-    private String resolveOrigin(HttpServletRequest request){
-        return "*".equals(origin) ? request.getHeader("Origin") : origin;
+    private String resolveOrigin(String requestOrigin) {
+        if (requestOrigin == null) return null;
+        if (allowedOrigins.contains("*") || allowedOrigins.contains(requestOrigin)) {
+            return requestOrigin;
+        }
+        return null;
     }
 }
