@@ -171,7 +171,7 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
      * @return 操作结果，null表示正常，否则为错误原因
      */
     @Override
-    public String changePassword(String userId, ChangePasswordVO changePasswordVO){
+    public String changePassword(Long userId, ChangePasswordVO changePasswordVO){
         String password = this.query().eq("id", userId).one().getPassword();
         if(!passwordEncoder.matches(changePasswordVO.getPassword(), password))
             return "原密码错误，请重新输入";
@@ -230,7 +230,7 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
      * @return 账户实体
      */
     @Override
-    public Account findAccountById(String id) {
+    public Account findAccountById(Long id) {
         return this.query().eq("id", id).one();
     }
 

@@ -31,7 +31,7 @@ public class File implements Serializable {
     private Long id;
 
     @Schema(description = "用户ID")
-    private String uid;
+    private Long uid;
 
     /**
      * 来源文件Id(标识分享文件原始来源)

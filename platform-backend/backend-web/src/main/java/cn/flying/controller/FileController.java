@@ -42,7 +42,7 @@ public class FileController {
     @GetMapping("/list")
     @Operation(summary = "获取用户文件列表（只包含文件元信息，没有实际的文件数据内容）")
     @OperationLog(module = "文件操作", operationType = "查询", description = "获取用户文件列表")
-    public Result<List<File>> getUserFiles(@RequestAttribute(Const.ATTR_USER_ID) String userId) {
+    public Result<List<File>> getUserFiles(@RequestAttribute(Const.ATTR_USER_ID) Long userId) {
         List<File> files = fileService.getUserFilesList(userId);
         return Result.success(files);
     }
@@ -55,7 +55,7 @@ public class FileController {
     @GetMapping("/page")
     @Operation(summary = "获取用户文件分页（只包含文件元信息，没有实际的文件数据内容）")
     @OperationLog(module = "文件操作", operationType = "查询", description = "获取用户文件分页")
-    public Result<Page<File>> getUserFiles(@RequestAttribute(Const.ATTR_USER_ID) String userId,
+    public Result<Page<File>> getUserFiles(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
                                           @Schema(description = "当前分页") Integer pageNum,
                                           @Schema(description = "分页大小") Integer pageSize) {
         Page<File> page = new Page<>(pageNum, pageSize);
@@ -73,7 +73,7 @@ public class FileController {
     @Operation(summary = "根据文件hash列表批量删除文件")
     @OperationLog(module = "文件操作", operationType = "删除", description = "删除文件")
     public Result<String> deleteFile(
-            @RequestAttribute(Const.ATTR_USER_ID) String userId,
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Schema(description = "待删除文件hash列表") @RequestParam("hashList") List<String> fileHashList) {
         fileService.deleteFile(userId, fileHashList);
         return Result.success("文件删除成功");
@@ -104,7 +104,7 @@ public class FileController {
     @Operation(summary = "获取文件下载地址（Minio预签名下载地址【包含多个文件加密分片】）")
     @OperationLog(module = "文件操作", operationType = "下载", description = "获取文件下载地址")
     public Result<List<String>> getFileAddress(
-            @RequestAttribute(Const.ATTR_USER_ID) String userId,
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Schema(description = "待下载文件哈希") @RequestParam("fileHash") String fileHash) {
         List<String> addresses = fileService.getFileAddress(userId, fileHash);
         return Result.success(addresses);
@@ -128,7 +128,7 @@ public class FileController {
     @Operation(summary = "下载文件（包含多个文件加密分片）")
     @OperationLog(module = "文件操作", operationType = "下载", description = "下载文件内容")
     public Result<List<byte[]>> getFile(
-            @RequestAttribute(Const.ATTR_USER_ID) String userId,
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
            @Schema(description = "待下载文件哈希") @RequestParam("fileHash") String fileHash) {
         List<byte[]> files = fileService.getFile(userId, fileHash);
         return Result.success(files);
@@ -138,7 +138,7 @@ public class FileController {
     @Operation(summary = "生成文件分享码")
     @OperationLog(module = "文件操作", operationType = "分享", description = "生成文件分享码")
     public Result<String> generateSharingCode(
-            @RequestAttribute(Const.ATTR_USER_ID) String userId, fileSharingVO fileSharingVO) {
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId, fileSharingVO fileSharingVO) {
         String sharingCode = fileService.generateSharingCode(userId,fileSharingVO.getFileHash(),fileSharingVO.getMaxAccesses());
         return Result.success(sharingCode);
     }

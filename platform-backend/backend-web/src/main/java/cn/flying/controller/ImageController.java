@@ -44,7 +44,7 @@ public class ImageController {
     @Operation(summary = "上传头像")
     @OperationLog(module = "图片上传模块", operationType = "上传", description = "上传头像")
     public Result<String> uploadAvatar(@Schema(description = "头像文件") @RequestParam("file") MultipartFile file,
-                                       @RequestAttribute(Const.ATTR_USER_ID) String userId) throws IOException {
+                                       @RequestAttribute(Const.ATTR_USER_ID) Long userId) throws IOException {
         if (file.isEmpty()) {
             return Result.error(ResultEnum.FILE_EMPTY);
         } else if (file.getSize() > 100 * 1024) {
@@ -70,7 +70,7 @@ public class ImageController {
     @Operation(summary = "上传图片")
     @OperationLog(module = "图片上传模块", operationType = "上传", description = "上传图片")
     public Result<String> uploadImage(@Schema(description = "图片文件") @RequestParam("file") MultipartFile file,
-                                        @RequestAttribute(Const.ATTR_USER_ID) String userId,
+                                        @RequestAttribute(Const.ATTR_USER_ID) Long userId,
                                         HttpServletResponse response) throws IOException {
         if (file.isEmpty()) {
             return Result.error(ResultEnum.FILE_EMPTY);

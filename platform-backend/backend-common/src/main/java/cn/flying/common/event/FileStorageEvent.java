@@ -12,7 +12,7 @@ import java.util.List;
  */
 @Getter
 public class FileStorageEvent extends ApplicationEvent {
-    private final String uid;              // 用户ID
+    private final Long uid;              // 用户ID
     private final String fileName;         // 文件名
     private final String sessionId;        // 上传会话ID
     private final String clientId;         // 客户端ID
@@ -20,7 +20,7 @@ public class FileStorageEvent extends ApplicationEvent {
     private final List<String> fileHashes;   // 文件哈希值列表
     private final String fileParam;          // 文件参数
 
-    public FileStorageEvent(Object source, String uid, String fileName,
+    public FileStorageEvent(Object source, Long uid, String fileName,
                             String sessionId, String clientId,
                             List<File> processedFiles, List<String> fileHashes,
                             String fileParam) {

@@ -47,19 +47,21 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     private DistributedStorageService storageService;
 
     @Override
-    public void prepareStoreFile(String Uid, String OriginFileName) {
+    public void prepareStoreFile(Long userId, String OriginFileName) {
         File file = new File()
-                .setUid(Uid)
+                .setUid(userId)
                 .setFileName(OriginFileName)
                 .setStatus(FileUploadStatus.PREPARE.getCode());
         this.saveOrUpdate(file);
     }
 
     @Override
-    public File storeFile(String Uid, String OriginFileName, List<java.io.File> fileList,List<String> fileHashList, String fileParam) {
+    public File storeFile(Long userId, String OriginFileName, List<java.io.File> fileList, List<String> fileHashList, String fileParam) {
 
         if(CommonUtils.isEmpty(fileList)) return null;
         //todo 这里暂时不做失败重试，后续优化
+
+        String userIdStr = String.valueOf(userId);
 
         List<byte[]> fileByteList = fileList.stream().map(file -> {
             try {
@@ -72,7 +74,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         Result<Map<String, String>> storeedResult = storageService.storeFile(fileByteList, fileHashList);
         //最终得到的文件存储位置（JSON）
         String fileContent = JsonConverter.toJsonWithPretty(ResultUtils.getData(storeedResult));
-        Result<List<String>> recordResult = blockChainService.storeFile(Uid, OriginFileName, fileParam, fileContent);
+        Result<List<String>> recordResult = blockChainService.storeFile(userIdStr, OriginFileName, fileParam, fileContent);
         //获取存储到区块链上的文件的哈希值
         List<String> res = ResultUtils.getData(recordResult);
         //判断是不是正常返回
@@ -85,11 +87,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         if(CommonUtils.isNotEmpty(fileHash)&&CommonUtils.isNotEmpty(transactionHash)){
             //根据用户名及对应的文件名查找文件元信息（即要求用户所文件名不能重复）
             LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
-                    .eq(File::getUid, Uid)
+                    .eq(File::getUid, userId)
                     .eq(File::getFileName, OriginFileName);
 
             File file = new File()
-                .setUid(Uid)
+                .setUid(userId)
                 .setFileName(OriginFileName)
                 .setFileHash(fileHash)
                 .setTransactionHash(transactionHash)
@@ -104,30 +106,30 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
-    public void changeFileStatusByName(String Uid, String fileName, Integer fileStatus) {
+    public void changeFileStatusByName(Long userId, String fileName, Integer fileStatus) {
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getFileName, fileName)
-                .eq(File::getUid, Uid);
+                .eq(File::getUid, userId);
         File file = new File()
                 .setStatus(fileStatus);
         this.update(file,wrapper);
     }
 
     @Override
-    public void changeFileStatusByHash(String Uid, String fileHash, Integer fileStatus) {
+    public void changeFileStatusByHash(Long userId, String fileHash, Integer fileStatus) {
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getFileHash, fileHash)
-                .eq(File::getUid, Uid);
+                .eq(File::getUid, userId);
         File file = new File()
                 .setStatus(fileStatus);
         this.update(file,wrapper);
     }
 
     @Override
-    public void deleteFile(String Uid, List<String> fileHashList) {
+    public void deleteFile(Long userId, List<String> fileHashList) {
         if(CommonUtils.isEmpty(fileHashList)) return;
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
-                .eq(File::getUid, Uid)
+                .eq(File::getUid, userId)
                 .in(File::getFileHash, fileHashList);
         //此处不执行实际的文件删除操作，仅更新文件元信息（实际操作使用定时任务批量执行，将文件删除或移入冷数据存储器）
         //todo 后续实现定时任务
@@ -135,29 +137,30 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
-    public List<File> getUserFilesList(String Uid) {
+    public List<File> getUserFilesList(Long userId) {
         LambdaQueryWrapper<File> wrapper= new LambdaQueryWrapper<>();
         //超管账号可查看所有文件
         if(!SecurityUtils.isAdmin()){
-            wrapper.eq(File::getUid, Uid);
+            wrapper.eq(File::getUid, userId);
         }
 
         return this.list(wrapper);
     }
 
     @Override
-    public void getUserFilesPage(String Uid, Page<File> page) {
+    public void getUserFilesPage(Long userId, Page<File> page) {
         LambdaQueryWrapper<File> wrapper= new LambdaQueryWrapper<>();
         //超管账号可查看所有文件
         if(!SecurityUtils.isAdmin()){
-            wrapper.eq(File::getUid, Uid);
+            wrapper.eq(File::getUid, userId);
         }
         this.page(page, wrapper);
     }
 
     @Override
-    public List<String> getFileAddress(String Uid, String fileHash) {
-        Result<FileDetailVO> filePointer = blockChainService.getFile(Uid, fileHash);
+    public List<String> getFileAddress(Long userId, String fileHash) {
+        String userIdStr = String.valueOf(userId);
+        Result<FileDetailVO> filePointer = blockChainService.getFile(userIdStr, fileHash);
         FileDetailVO detailVO = ResultUtils.getData(filePointer);
         String fileContent = detailVO.getContent();
         Map<String,String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
@@ -172,8 +175,9 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
-    public List<byte[]> getFile(String Uid, String fileHash) {
-        Result<FileDetailVO> filePointer = blockChainService.getFile(Uid, fileHash);
+    public List<byte[]> getFile(Long userId, String fileHash) {
+        String userIdStr = String.valueOf(userId);
+        Result<FileDetailVO> filePointer = blockChainService.getFile(userIdStr, fileHash);
         FileDetailVO detailVO = ResultUtils.getData(filePointer);
         String fileContent = detailVO.getContent();
         Map<String,String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
@@ -182,8 +186,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
-    public String generateSharingCode(String Uid, List<String> fileHash, Integer maxAccesses) {
-        Result<String> result = blockChainService.shareFiles(Uid, fileHash, maxAccesses);
+    public String generateSharingCode(Long userId, List<String> fileHash, Integer maxAccesses) {
+        Result<String> result = blockChainService.shareFiles(String.valueOf(userId), fileHash, maxAccesses);
         return ResultUtils.getData(result);
     }
 
@@ -192,13 +196,18 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         Result<SharingVO> result = blockChainService.getSharedFiles(sharingCode);
         if(ResultUtils.isSuccess(result)){
             SharingVO sharingFiles = ResultUtils.getData(result);
-            String uid= sharingFiles.getUploader();
+            String uploader = sharingFiles.getUploader();
             List<String> fileHashList = sharingFiles.getFileHashList();
             if(CommonUtils.isNotEmpty(fileHashList)){
-                LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                        .eq(File::getUid, uid)
-                        .in(File::getFileHash, fileHashList);
-                return this.list(wrapper);
+                try {
+                    Long uploaderId = Long.valueOf(uploader);
+                    LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                            .eq(File::getUid, uploaderId)
+                            .in(File::getFileHash, fileHashList);
+                    return this.list(wrapper);
+                } catch (NumberFormatException e) {
+                    log.warn("分享文件的上传者ID格式不正确: " + uploader);
+                }
             }
         }
         return List.of();
@@ -211,22 +220,27 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                     .in(File::getId, sharingFileIdList);
             List<File> FileList = this.list(wrapper);
             //获取当前登录用户Id
-            String Uid = MDC.get(Const.ATTR_USER_ID);
-            if(CommonUtils.isNotEmpty(FileList)){
-                //拷贝其它用户分享文件对应的信息，修改文件所有人并增加文件来源
-                FileList.forEach(file -> {
-                    //如果源文件已经有来源，则保留最初的文件所有人
-                    if(CommonUtils.isEmpty(file.getOrigin())){
-                        file.setOrigin(file.getId());
-                    }
-                    //重置文件ID和创建时间
+            String userIdStr = MDC.get(Const.ATTR_USER_ID);
+            if(CommonUtils.isNotEmpty(FileList) && CommonUtils.isNotEmpty(userIdStr)){
+                try {
+                    Long userId = Long.valueOf(userIdStr);
+                    //拷贝其它用户分享文件对应的信息，修改文件所有人并增加文件来源
+                    FileList.forEach(file -> {
+                        //如果源文件已经有来源，则保留最初的文件所有人
+                        if(CommonUtils.isEmpty(file.getOrigin())){
+                            file.setOrigin(file.getId());
+                        }
+                        //重置文件ID和创建时间
                         file
-                            .setUid(Uid)
+                            .setUid(userId)
                             .setId(null)
                             .setCreateTime(null);
-                });
-                //批量保存文件信息
-                this.saveBatch(FileList);
+                    });
+                    //批量保存文件信息
+                    this.saveBatch(FileList);
+                } catch (NumberFormatException ex) {
+                    log.warn("MDC中的用户ID格式非法，无法保存分享文件: " + userIdStr);
+                }
             }
         }
     }

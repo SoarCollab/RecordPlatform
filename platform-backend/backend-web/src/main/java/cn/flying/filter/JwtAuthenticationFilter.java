@@ -48,14 +48,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // 从JWT中获取用户Id与Role
             Long userId = utils.toId(jwt);
             String userRole = utils.toRole(jwt);
-            
-            // 将用户ID与Role存入请求属性
+
+            // 将用户ID与Role存入请求属性，保持Long类型一致性
             request.setAttribute(Const.ATTR_USER_ID, userId);
             request.setAttribute(Const.ATTR_USER_ROLE, userRole);
 
             // 将用户ID放入MDC上下文，便于日志记录
-            if (userId != null) {
-                MDC.put(Const.ATTR_USER_ID, userId.toString());
+            String userIdStr = userId != null ? userId.toString() : null;
+            if (userIdStr != null) {
+                MDC.put(Const.ATTR_USER_ID, userIdStr);
             }
             // 将用户Role放入MDC上下文，便于后续获取用户角色
             if (userRole != null) {

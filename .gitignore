@@ -45,3 +45,11 @@ App.java
 /AGENTS.md
 /CLAUDE.md
 /GEMINI.md
+
+#########敏感文件排除#########
+*.key
+*.pem
+.env
+.env.*
+!.env.example
+**/conf/sdk.*

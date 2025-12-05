@@ -38,7 +38,7 @@ public class AccountController {
     @GetMapping("/info")
     @Operation(summary = "获取用户信息")
     @OperationLog(module = "用户模块", operationType = "查询", description = "获取用户信息")
-    public Result<AccountVO> getAccountInfo(@RequestAttribute(Const.ATTR_USER_ID) String userId) {
+    public Result<AccountVO> getAccountInfo(@RequestAttribute(Const.ATTR_USER_ID) Long userId) {
         Account account = accountService.findAccountById(userId);
         return Result.success(account.asViewObject(AccountVO.class));
     }
@@ -64,7 +64,7 @@ public class AccountController {
     @PostMapping("/change-password")
     @Operation(summary = "修改密码")
     @OperationLog(module = "用户模块", operationType = "修改", description = "修改密码")
-    public Result<String> changePassword(@RequestAttribute(Const.ATTR_USER_ID) String userId, @RequestBody @Valid ChangePasswordVO changePasswordVO) {
+    public Result<String> changePassword(@RequestAttribute(Const.ATTR_USER_ID) Long userId, @RequestBody @Valid ChangePasswordVO changePasswordVO) {
         return utils.messageHandle(() ->
                 accountService.changePassword(userId, changePasswordVO));
     }
