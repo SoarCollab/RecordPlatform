@@ -18,6 +18,8 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 限流控制过滤器
@@ -27,6 +29,9 @@ import java.io.PrintWriter;
 @Component
 @Order(Const.ORDER_FLOW_LIMIT)
 public class FlowLimitingFilter extends HttpFilter {
+
+    private static final ConcurrentHashMap<String, ReentrantLock> ADDRESS_LOCKS = new ConcurrentHashMap<>();
+
     @Resource
     StringRedisTemplate template;
     //指定时间内最大请求次数限制
@@ -58,13 +63,17 @@ public class FlowLimitingFilter extends HttpFilter {
      * @return 是否操作成功
      */
     private boolean tryCount(String address) {
-        synchronized (address.intern()) {
-            if(template.hasKey(Const.FLOW_LIMIT_BLOCK + address)) {
+        ReentrantLock lock = ADDRESS_LOCKS.computeIfAbsent(address, k -> new ReentrantLock());
+        lock.lock();
+        try {
+            if(Boolean.TRUE.equals(template.hasKey(Const.FLOW_LIMIT_BLOCK + address))) {
                 return false;
             }
             String counterKey = Const.FLOW_LIMIT_COUNTER + address;
             String blockKey = Const.FLOW_LIMIT_BLOCK + address;
             return utils.limitPeriodCheck(counterKey, blockKey, BLOCK, LIMIT, PERIOD);
+        } finally {
+            lock.unlock();
         }
     }
 

@@ -223,6 +223,46 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     }
 
     @Override
+    public Result<String> storeFileChunk(byte[] fileData, String fileHash) {
+        if (fileData == null || fileData.length == 0 || fileHash == null || fileHash.isEmpty()) {
+            log.warn("storeFileChunk参数无效: fileData={}, fileHash={}",
+                fileData == null ? "null" : fileData.length, fileHash);
+            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+        }
+
+        List<String> availableLogicNodes = getAvailableLogicNodes();
+        if (CollectionUtils.isEmpty(availableLogicNodes)) {
+            log.error("无法存储文件块：没有运行状况良好的逻辑节点可用。");
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
+        }
+
+        String targetLogicNode = selectBestLogicNode(availableLogicNodes);
+        if (targetLogicNode == null) {
+            log.error("无法选择合适的逻辑节点存储文件块: {}", fileHash);
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
+        }
+
+        List<String> physicalNodePair = getPhysicalNodePair(targetLogicNode);
+        if (physicalNodePair == null || physicalNodePair.size() != 2) {
+            log.error("逻辑节点的物理节点对无效: {}", targetLogicNode);
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
+        }
+
+        try {
+            CompletableFuture<Void> upload1 = uploadToNodeAsync(physicalNodePair.get(0), fileHash, fileData);
+            CompletableFuture<Void> upload2 = uploadToNodeAsync(physicalNodePair.get(1), fileHash, fileData);
+            CompletableFuture.allOf(upload1, upload2).join();
+
+            String logicalPath = "minio/node/" + targetLogicNode + "/" + fileHash;
+            log.info("已成功将文件块 '{}' 存储到逻辑节点 '{}' (路径: {})", fileHash, targetLogicNode, logicalPath);
+            return Result.success(logicalPath);
+        } catch (Exception e) {
+            log.error("存储文件块 '{}' 失败: {}", fileHash, e.getMessage(), e);
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
+        }
+    }
+
+    @Override
     public Result<Boolean> deleteFile(Map<String, String> fileContent) {
         return null;
     }

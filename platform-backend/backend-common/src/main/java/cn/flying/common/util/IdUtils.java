@@ -6,12 +6,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
-import java.util.Base64;
 import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -27,26 +24,20 @@ public class IdUtils {
     
     // 监控配置
     private static final String MONITOR_KEY_PREFIX = "id:monitor:";
-    private static final int DEFAULT_THRESHOLD = 100;  // 默认阈值
-    private static int monitorThreshold = DEFAULT_THRESHOLD;  // 可配置阈值
-    
-    // 混淆密钥
-    private static String obfuscationKey = "default_security_key";
-    
+    private static final int DEFAULT_THRESHOLD = 100;
+    private static int monitorThreshold = DEFAULT_THRESHOLD;
+
     // ID映射缓存配置
-    private static int idMappingExpireHours = 24;  // 默认24小时过期
-    private static final String ID_MAPPING_PREFIX = "id:mapping:";
+    private static int idMappingExpireHours = 24;
+    private static final String ID_EXTERNAL_PREFIX = "id:ext:";
+    private static final String ID_INTERNAL_PREFIX = "id:int:";
+    private static final int UUID_COLLISION_RETRY = 3;
 
     @Value("${id.monitor.threshold:100}")
     public void setMonitorThreshold(int threshold) {
         IdUtils.monitorThreshold = threshold;
     }
-    
-    @Value("${id.security.key:RecordPlatform}")
-    public void setObfuscationKey(String key) {
-        IdUtils.obfuscationKey = key;
-    }
-    
+
     @Value("${id.mapping.expire-hours:24}")
     public void setIdMappingExpireHours(int hours) {
         IdUtils.idMappingExpireHours = hours;
@@ -91,146 +82,71 @@ public class IdUtils {
     }
     
     /**
-     * 生成API响应中的外部ID (隐藏实际ID)
-     * @param internalId 内部实体ID
-     * @return 混淆后的外部ID字符串
+     * 生成API响应中的外部ID (使用UUID确保不可预测性)
      */
     public static String toExternalId(Long internalId) {
-        if (internalId == null) return null;
-        try {
-            // 将ID与密钥组合后进行SHA-256哈希，然后Base64编码
-            String input = internalId + ":" + obfuscationKey;
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
-            // 取前12字节进行Base64编码
-            byte[] shortened = new byte[12];
-            System.arraycopy(hash, 0, shortened, 0, 12);
-            String externalId = Base64.getUrlEncoder().withoutPadding().encodeToString(shortened);
-            
-            // 在Redis中存储映射关系，设置24小时过期
-            try {
-                String cacheKey = ID_MAPPING_PREFIX + externalId;
-                redisTemplate.opsForValue().set(cacheKey, String.valueOf(internalId), idMappingExpireHours, TimeUnit.HOURS);
-            } catch (Exception e) {
-                // 缓存操作失败不应影响主流程
-                log.warn("存储ID映射关系到Redis失败: {}", e.getMessage());
-            }
-            
-            return externalId;
-        } catch (NoSuchAlgorithmException e) {
-            log.error("生成外部ID时发生错误", e);
-            // 降级策略：使用简单混淆
-            String fallbackId = "EX" + (internalId ^ 0x3A3A3A3AL);
-            
-            // 存储降级映射
-            try {
-                String cacheKey = ID_MAPPING_PREFIX + fallbackId;
-                redisTemplate.opsForValue().set(cacheKey, String.valueOf(internalId), idMappingExpireHours, TimeUnit.HOURS);
-            } catch (Exception ex) {
-                log.warn("存储降级ID映射关系到Redis失败", ex);
-            }
-            
-            return fallbackId;
-        }
+        return generateExternalId(internalId, "E");
     }
-    
+
     /**
-     * 生成用户ID的外部表示（专用于用户ID的混淆）
-     * @param userId 内部用户ID
-     * @return 混淆后的用户ID字符串
+     * 生成用户ID的外部表示
      */
     public static String toExternalUserId(Long userId) {
-        if (userId == null) return null;
-        try {
-            // 用户ID使用专门的混淆方法，确保安全性
-            String input = "USER:" + userId + ":" + obfuscationKey;
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
-            // 使用较短地表示，但仍确保唯一性
-            byte[] shortened = new byte[10];
-            System.arraycopy(hash, 0, shortened, 0, 10);
-            String externalId = "U" + Base64.getUrlEncoder().withoutPadding().encodeToString(shortened);
-            
-            // 在Redis中存储映射关系，设置24小时过期
-            try {
-                String cacheKey = ID_MAPPING_PREFIX + externalId;
-                redisTemplate.opsForValue().set(cacheKey, String.valueOf(userId), idMappingExpireHours, TimeUnit.HOURS);
-            } catch (Exception e) {
-                // 缓存操作失败不应影响主流程
-                log.warn("存储用户ID映射关系到Redis失败: {}", e.getMessage());
-            }
-            
-            return externalId;
-        } catch (NoSuchAlgorithmException e) {
-            log.error("生成外部用户ID时发生错误", e);
-            // 降级策略：使用简单混淆，但与普通实体使用不同的混淆值
-            String fallbackId = "U" + (userId ^ 0x5A5A5A5A5A5AL);
-            
-            // 存储降级映射
-            try {
-                String cacheKey = ID_MAPPING_PREFIX + fallbackId;
-                redisTemplate.opsForValue().set(cacheKey, String.valueOf(userId), idMappingExpireHours, TimeUnit.HOURS);
-            } catch (Exception ex) {
-                log.warn("存储降级用户ID映射关系到Redis失败", ex);
-            }
-            
-            return fallbackId;
-        }
+        return generateExternalId(userId, "U");
     }
-    
+
+    private static String generateExternalId(Long internalId, String prefix) {
+        if (internalId == null) return null;
+        try {
+            String internalKey = ID_INTERNAL_PREFIX + prefix + internalId;
+            String existingExternalId = redisTemplate.opsForValue().get(internalKey);
+            if (existingExternalId != null) return existingExternalId;
+
+            for (int i = 0; i < UUID_COLLISION_RETRY; i++) {
+                String externalId = prefix + UUID.randomUUID().toString().replace("-", "");
+                if (storeIdMapping(internalId, externalId, prefix)) return externalId;
+            }
+            log.error("生成外部ID失败，超过最大重试次数，internalId: {}", internalId);
+        } catch (Exception e) {
+            log.error("生成外部ID异常，internalId: {}", internalId, e);
+        }
+        return null;
+    }
+
+    private static boolean storeIdMapping(Long internalId, String externalId, String prefix) {
+        String externalKey = ID_EXTERNAL_PREFIX + externalId;
+        String internalKey = ID_INTERNAL_PREFIX + prefix + internalId;
+        String internalIdStr = String.valueOf(internalId);
+        Boolean stored = redisTemplate.opsForValue()
+                .setIfAbsent(externalKey, internalIdStr, idMappingExpireHours, TimeUnit.HOURS);
+        if (Boolean.TRUE.equals(stored)) {
+            redisTemplate.opsForValue().set(internalKey, externalId, idMappingExpireHours, TimeUnit.HOURS);
+            return true;
+        }
+        String existingInternalId = redisTemplate.opsForValue().get(externalKey);
+        if (internalIdStr.equals(existingInternalId)) {
+            redisTemplate.opsForValue().set(internalKey, externalId, idMappingExpireHours, TimeUnit.HOURS);
+            return true;
+        }
+        return false;
+    }
+
     /**
-     * 从外部ID还原内部ID (需要在安全上下文中使用)
-     * 使用Redis存储映射关系实现双向转换
-     * @param externalId 外部ID
-     * @return 内部ID，如果无法解析则返回null
+     * 从外部ID还原内部ID
      */
     public static Long fromExternalId(String externalId) {
-        if (externalId == null || externalId.isEmpty()) {
-            return null;
-        }
-        
+        if (externalId == null || externalId.isEmpty()) return null;
         try {
-            // 1. 尝试从Redis获取映射关系
-            String cacheKey = ID_MAPPING_PREFIX + externalId;
+            String cacheKey = ID_EXTERNAL_PREFIX + externalId;
             String cachedInternalId = redisTemplate.opsForValue().get(cacheKey);
-            
-            if (cachedInternalId != null) {
-                // 缓存命中，直接返回内部ID
-                try {
-                    return Long.parseLong(cachedInternalId);
-                } catch (NumberFormatException e) {
-                    log.error("Redis中存储的内部ID格式错误: {}", cachedInternalId, e);
-                    return null;
-                }
-            }
-            
-            // 2. 处理简单混淆情况 (针对降级策略使用的异或运算)
-            if (externalId.startsWith("EX")) {
-                try {
-                    long encodedId = Long.parseLong(externalId.substring(2));
-                    return encodedId ^ 0x3A3A3A3AL; // 与toExternalId中相同的异或值
-                } catch (NumberFormatException e) {
-                    log.debug("外部ID不是简单混淆格式: {}", externalId);
-                }
-            }
-            
-            // 3. 处理用户ID特定的简单混淆情况
-            if (externalId.startsWith("U")) {
-                try {
-                    long encodedId = Long.parseLong(externalId.substring(1));
-                    return encodedId ^ 0x5A5A5A5A5A5AL; // 与toExternalUserId中相同的异或值
-                } catch (NumberFormatException e) {
-                    log.debug("外部用户ID不是简单混淆格式: {}", externalId);
-                }
-            }
-            
-            // 4. 如果是加密ID，需要通过映射表或其他方式查找
-            // 此处可以实现更复杂的查找逻辑，如数据库查询
-            log.warn("无法解析复杂格式的外部ID: {}，可能需要更复杂的映射机制", externalId);
+            if (cachedInternalId != null) return Long.parseLong(cachedInternalId);
+            log.warn("未找到外部ID映射: {}", externalId);
             return null;
-            
+        } catch (NumberFormatException e) {
+            log.error("内部ID格式错误: externalId={}", externalId, e);
+            return null;
         } catch (Exception e) {
-            log.error("将外部ID转换为内部ID时发生错误: {}", externalId, e);
+            log.error("解析外部ID异常: {}", externalId, e);
             return null;
         }
     }

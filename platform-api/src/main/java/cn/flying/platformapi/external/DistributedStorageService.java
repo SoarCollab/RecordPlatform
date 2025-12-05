@@ -17,7 +17,12 @@ public interface DistributedStorageService {
 
     Result<List<byte[]>> getFileListByHash(List<String> filePathList, List<String> fileHashList);
     Result<List<String>> getFileUrlListByHash(List<String> filePathList, List<String> fileHashList);
+
+    @Deprecated
     Result<Map<String, String>> storeFile(List<byte[]> fileList, List<String> FileHashList);
+
+    Result<String> storeFileChunk(byte[] fileData, String fileHash);
+
     Result<Boolean> deleteFile(Map<String, String> fileContent);
 
 }
