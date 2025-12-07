@@ -1,27 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <!-- 引入Spring Boot默认的基础配置 -->
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
 
+    <property name="SERVICE_NAME" value="record-platform"/>
     <property name="CONSOLE_LOG_PATTERN"
-              value="%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p})  %clr([%15.15t]){faint} %clr(\(%X{reqId:-system}\)){faint} %clr(--){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
+              value="%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p})  %clr([%15.15t]){faint} %clr([tid=%tid req=%X{reqId:-system} mdc=%X{traceId:-}]){faint} %clr(--){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
     <property name="FILE_LOG_PATTERN"
-              value="%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} ${PID:- } --- [%t] \(%X{reqId:-system}\) %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
+              value="%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} ${PID:- } --- [%t] [tid=%tid req=%X{reqId:-system} mdc=%X{traceId:-}] %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
 
-
-    <!-- 控制台输出 -->
+    <!-- Console Appender - for all environments -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder>
-            <pattern>${CONSOLE_LOG_PATTERN}</pattern>
-            <charset>${CONSOLE_LOG_CHARSET}</charset>
+        <encoder class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">
+            <layout class="org.apache.skywalking.apm.toolkit.log.logback.v1.x.TraceIdPatternLogbackLayout">
+                <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+            </layout>
         </encoder>
     </appender>
 
-    <!-- 定义文件输出 -->
+    <!-- Rolling File Appender with PatternLayout - for local/dev -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <encoder>
-            <pattern>${FILE_LOG_PATTERN}</pattern>
-            <charset>${FILE_LOG_CHARSET}</charset>
+        <encoder class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">
+            <layout class="org.apache.skywalking.apm.toolkit.log.logback.v1.x.TraceIdPatternLogbackLayout">
+                <pattern>${FILE_LOG_PATTERN}</pattern>
+            </layout>
         </encoder>
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
             <FileNamePattern>log/%d{yyyy-MM-dd}-spring-%i.log</FileNamePattern>
@@ -31,34 +32,64 @@
         </rollingPolicy>
     </appender>
 
-    <!-- 根据环境设置不同的日志级别 -->
+    <!-- JSON File Appender with LogstashEncoder - for production -->
+    <appender name="JSON_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"service":"${SERVICE_NAME}"}</customFields>
+            <includeMdcKeyName>traceId</includeMdcKeyName>
+            <includeMdcKeyName>spanId</includeMdcKeyName>
+            <includeMdcKeyName>tid</includeMdcKeyName>
+            <includeMdcKeyName>userId</includeMdcKeyName>
+            <includeMdcKeyName>reqId</includeMdcKeyName>
+            <includeMdcKeyName>fileHash</includeMdcKeyName>
+            <timeZone>Asia/Shanghai</timeZone>
+            <timestampPattern>yyyy-MM-dd'T'HH:mm:ss.SSSZ</timestampPattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <FileNamePattern>log/%d{yyyy-MM-dd}-spring-%i.json</FileNamePattern>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+            <maxHistory>30</maxHistory>
+            <maxFileSize>50MB</maxFileSize>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Async wrapper for JSON_FILE to avoid blocking -->
+    <appender name="ASYNC_JSON" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>512</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <includeCallerData>false</includeCallerData>
+        <appender-ref ref="JSON_FILE"/>
+    </appender>
+
+    <!-- Production: JSON logs + Console -->
     <springProfile name="prod">
-        <!-- 生产环境：只输出重要日志 -->
-        <logger name="cn.flying.common.aspect" level="WARN" />
-        <logger name="org.springframework.aop" level="WARN" />
+        <logger name="cn.flying.common.aspect" level="WARN"/>
+        <logger name="org.springframework.aop" level="WARN"/>
+        <logger name="org.apache.dubbo" level="WARN"/>
         <root level="INFO">
-            <appender-ref ref="CONSOLE" />
-            <appender-ref ref="FILE" />
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="ASYNC_JSON"/>
         </root>
     </springProfile>
 
+    <!-- Development: Text file logs + Console -->
     <springProfile name="dev">
-        <!-- 开发环境：输出重要信息，但不包括debug -->
-        <logger name="cn.flying.common.aspect" level="INFO" />
-        <logger name="org.springframework.aop" level="INFO" />
+        <logger name="cn.flying.common.aspect" level="INFO"/>
+        <logger name="org.springframework.aop" level="INFO"/>
         <root level="INFO">
-            <appender-ref ref="CONSOLE" />
-            <appender-ref ref="FILE" />
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="FILE"/>
         </root>
     </springProfile>
 
+    <!-- Local: Console only -->
     <springProfile name="local">
-        <!-- 开发环境：输出重要信息，但不包括debug -->
-        <logger name="cn.flying.common.aspect" level="INFO" />
-        <logger name="org.springframework.aop" level="INFO" />
+        <logger name="cn.flying.common.aspect" level="DEBUG"/>
+        <logger name="org.springframework.aop" level="INFO"/>
+        <logger name="org.apache.dubbo" level="INFO"/>
         <root level="INFO">
-            <appender-ref ref="CONSOLE" />
-            <appender-ref ref="FILE" />
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="FILE"/>
         </root>
     </springProfile>
 
