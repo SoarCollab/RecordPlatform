@@ -1,5 +1,6 @@
 package cn.flying.filter;
 
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.JwtUtils;
 import com.auth0.jwt.interfaces.DecodedJWT;
@@ -19,11 +20,12 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.UUID;
 
 /**
- * 用于对请求头中Jwt令牌进行校验的工具，为当前请求添加用户验证信息
- * 并将用户的ID存放在请求对象属性中，方便后续使用
- * 同时将用户ID放入MDC上下文，便于日志记录
+ * JWT authentication filter with multi-tenant context support.
+ * Validates JWT tokens, sets security context, tenant context and MDC for logging.
+ * Also initializes traceId for distributed tracing.
  */
 @Component
 @Order(Const.SECURITY_ORDER)
@@ -36,6 +38,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request,
                                     @NotNull HttpServletResponse response,
                                     @NotNull FilterChain filterChain) throws ServletException, IOException {
+        // 初始化 traceId，用于分布式追踪
+        String traceId = MDC.get(Const.TRACE_ID);
+        if (traceId == null || traceId.isEmpty()) {
+            traceId = UUID.randomUUID().toString().replace("-", "");
+            MDC.put(Const.TRACE_ID, traceId);
+        }
+        request.setAttribute(Const.TRACE_ID, traceId);
+
         String authorization = request.getHeader("Authorization");
         DecodedJWT jwt = utils.resolveJwt(authorization);
         if(jwt != null) {
@@ -44,32 +54,43 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
             authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
             SecurityContextHolder.getContext().setAuthentication(authentication);
-            
-            // 从JWT中获取用户Id与Role
+
+            // Extract user info from JWT
             Long userId = utils.toId(jwt);
             String userRole = utils.toRole(jwt);
+            Long tenantId = utils.toTenantId(jwt);
 
-            // 将用户ID与Role存入请求属性，保持Long类型一致性
+            // Store in request attributes
             request.setAttribute(Const.ATTR_USER_ID, userId);
             request.setAttribute(Const.ATTR_USER_ROLE, userRole);
+            request.setAttribute(Const.ATTR_TENANT_ID, tenantId);
 
-            // 将用户ID放入MDC上下文，便于日志记录
-            String userIdStr = userId != null ? userId.toString() : null;
-            if (userIdStr != null) {
-                MDC.put(Const.ATTR_USER_ID, userIdStr);
+            // Set tenant context for MyBatis-Plus multi-tenant interceptor
+            if (tenantId != null) {
+                TenantContext.setTenantId(tenantId);
             }
-            // 将用户Role放入MDC上下文，便于后续获取用户角色
+
+            // Set MDC for logging
+            if (userId != null) {
+                MDC.put(Const.ATTR_USER_ID, userId.toString());
+            }
             if (userRole != null) {
                 MDC.put(Const.ATTR_USER_ROLE, userRole);
             }
+            if (tenantId != null) {
+                MDC.put(Const.ATTR_TENANT_ID, tenantId.toString());
+            }
         }
-        
+
         try {
             filterChain.doFilter(request, response);
         } finally {
-            // 请求结束后清理MDC上下文
-            MDC.remove("userId");
-            MDC.remove("userRole");
+            // Cleanup MDC and tenant context
+            MDC.remove(Const.TRACE_ID);
+            MDC.remove(Const.ATTR_USER_ID);
+            MDC.remove(Const.ATTR_USER_ROLE);
+            MDC.remove(Const.ATTR_TENANT_ID);
+            TenantContext.clear();
         }
     }
 }

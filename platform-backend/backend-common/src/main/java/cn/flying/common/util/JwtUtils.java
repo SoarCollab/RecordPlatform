@@ -6,9 +6,11 @@ import com.auth0.jwt.algorithms.Algorithm;
 import com.auth0.jwt.exceptions.JWTVerificationException;
 import com.auth0.jwt.interfaces.Claim;
 import com.auth0.jwt.interfaces.DecodedJWT;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.util.StringUtils;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -48,6 +50,17 @@ public class JwtUtils {
     @Resource
     FlowUtils utils;
 
+    private static final int MIN_KEY_LENGTH = 32;
+
+    @PostConstruct
+    void validateKey() {
+        if (!StringUtils.hasText(KEY) || KEY.length() < MIN_KEY_LENGTH) {
+            throw new IllegalStateException(
+                "JWT key must be provided via JWT_KEY environment variable and be at least "
+                + MIN_KEY_LENGTH + " characters long");
+        }
+    }
+
     /**
      * 让指定Jwt令牌失效
      * @param headerToken 请求头中携带的令牌
@@ -80,13 +93,14 @@ public class JwtUtils {
      * @param user 用户信息
      * @return 令牌
      */
-    public String createJwt(UserDetails user, String username, Long userId) {
+    public String createJwt(UserDetails user, String username, Long userId, Long tenantId) {
         if(this.frequencyCheck(userId)) {
             Algorithm algorithm = Algorithm.HMAC256(KEY);
             Date expire = this.expireTime();
             return JWT.create()
                     .withJWTId(UUID.randomUUID().toString())
                     .withClaim("id", userId)
+                    .withClaim("tenantId", tenantId)
                     .withClaim("name", username)
                     .withClaim("authorities", user.getAuthorities()
                             .stream()
@@ -155,6 +169,17 @@ public class JwtUtils {
     public String toRole(DecodedJWT jwt) {
         Map<String, Claim> claims = jwt.getClaims();
         return claims.get("authorities").toString();
+    }
+
+    /**
+     * 将jwt对象中的租户ID提取出来
+     * @param jwt 已解析的Jwt对象
+     * @return 租户ID
+     */
+    public Long toTenantId(DecodedJWT jwt) {
+        Map<String, Claim> claims = jwt.getClaims();
+        Claim tenantClaim = claims.get("tenantId");
+        return tenantClaim == null ? null : tenantClaim.asLong();
     }
 
     /**

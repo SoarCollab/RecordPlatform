@@ -30,6 +30,10 @@ public class File implements Serializable {
     @Schema(description = "主键ID")
     private Long id;
 
+    @TableField(fill = FieldFill.INSERT)
+    @Schema(description = "租户ID")
+    private Long tenantId;
+
     @Schema(description = "用户ID")
     private Long uid;
 
