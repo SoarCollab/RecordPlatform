@@ -6,6 +6,7 @@ import io.minio.MinioClient;
 import io.minio.errors.MinioException;
 import io.prometheus.client.Counter;
 import io.prometheus.client.Gauge;
+import jakarta.annotation.PreDestroy;
 import jakarta.annotation.Resource;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -408,5 +409,33 @@ public class MinioMonitor {
         log.trace("节点 '{}'：计算的负载分数：{}(正在进行的：{}，等待中：{}，DiskUsage：{}%)",
                 nodeName, score, apiInflight, apiWaiting, diskUsage);
         return score;
+    }
+
+    /**
+     * 应用关闭时释放 OkHttpClient 资源
+     */
+    @PreDestroy
+    public void cleanup() {
+        log.info("正在关闭 MinioMonitor 资源...");
+        try {
+            // 关闭 OkHttpClient 的连接池和调度器
+            httpClient.dispatcher().executorService().shutdown();
+            httpClient.connectionPool().evictAll();
+            if (httpClient.cache() != null) {
+                httpClient.cache().close();
+            }
+            log.info("OkHttpClient 资源已释放");
+        } catch (Exception e) {
+            log.warn("关闭 OkHttpClient 时出错: {}", e.getMessage());
+        }
+
+        // 清理 Prometheus 指标（避免重复注册问题）
+        try {
+            onlineNodes.clear();
+            nodeMetricsCache.clear();
+            log.info("MinioMonitor 指标缓存已清理");
+        } catch (Exception e) {
+            log.warn("清理指标缓存时出错: {}", e.getMessage());
+        }
     }
 } 

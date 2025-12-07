@@ -13,7 +13,6 @@ import io.minio.errors.ErrorResponseException;
 import io.minio.errors.MinioException;
 import io.minio.http.Method;
 import jakarta.annotation.Resource;
-import org.apache.commons.io.IOUtils;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.slf4j.Logger;
 import org.springframework.util.CollectionUtils;
@@ -23,19 +22,22 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.InputStream;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /**
- * 分布式存储实现类（MinIO）v1.0.0
+ * 分布式存储实现类（MinIO）v2.0.0
  * 支持 Nacos 动态配置、负载均衡和租户隔离。
  */
-@DubboService(version = DistributedStorageService.VERSION, methods = {@org.apache.dubbo.config.annotation.Method(name = "storeFile", timeout = 60000)})
+@DubboService(version = DistributedStorageService.VERSION)
 public class DistributedStorageServiceImpl implements DistributedStorageService {
     private static final Logger log = org.slf4j.LoggerFactory.getLogger(DistributedStorageServiceImpl.class);
     @Resource
@@ -49,6 +51,15 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
 
     //预签名链接有效期
     private final static Integer EXPIRY_HOURS = 24;
+
+    // 最大允许直接加载到内存的文件大小（100MB）
+    private static final long MAX_IN_MEMORY_FILE_SIZE = 100 * 1024 * 1024L;
+
+    // 文件操作超时时间（秒）
+    private static final int FILE_OPERATION_TIMEOUT_SECONDS = 300;
+
+    // 分块读取缓冲区大小（8KB）
+    private static final int BUFFER_SIZE = 8192;
 
     // 缓存 Bucket 是否存在，减少重复检查开销（带TTL自动过期）
     private final Cache<String, Boolean> bucketExistenceCache = Caffeine.newBuilder()
@@ -135,100 +146,6 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         return Result.success(result);
     }
 
-    public Result<Map<String, String>> storeFile(List<byte[]> fileList, List<String> fileHashList) {
-        if (CollectionUtils.isEmpty(fileList) || CollectionUtils.isEmpty(fileHashList)) {
-            log.warn("storeFile调用时列表参数为空");
-            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
-        }
-        if (fileList.size() != fileHashList.size()) {
-            log.error("fileList 和 fileHashList 必须具有相同的大小。");
-            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
-        }
-
-        // 1. 获取当前有效且健康的逻辑节点列表
-        List<String> availableLogicNodes = getAvailableLogicNodes();
-        if (CollectionUtils.isEmpty(availableLogicNodes)) {
-            log.error("无法存储文件：没有运行状况良好的逻辑节点可用。");
-            // 返回空 Map 表示全部失败
-            return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
-        }
-
-        // 使用 ConcurrentHashMap 临时存储并发处理结果
-        Map<String, String> tempSuccessResults = new ConcurrentHashMap<>();
-        Map<String, String> tempFailedResults = new ConcurrentHashMap<>();
-
-        // 使用 CompletableFuture 并发处理每个文件
-        List<CompletableFuture<Void>> futures = new ArrayList<>();
-        for (int i = 0; i < fileList.size(); i++) {
-            byte[] file = fileList.get(i);
-            String fileHash = fileHashList.get(i);
-
-            int finalI = i;
-            futures.add(CompletableFuture.runAsync(() -> {
-                try {
-                    // 2. 按顺序选择逻辑节点
-                    String targetLogicNode = availableLogicNodes.get(finalI % availableLogicNodes.size());
-                    if (targetLogicNode == null) {
-                        tempFailedResults.put(fileHash, "无法选择合适的 logic node");
-                        return;
-                    }
-
-                    // 3. 获取该逻辑节点对应的物理节点对
-                    List<String> physicalNodePair = getPhysicalNodePair(targetLogicNode);
-                    if (physicalNodePair == null || physicalNodePair.size() != 2) {
-                        tempFailedResults.put(fileHash, "逻辑节点的物理节点对无效:" + targetLogicNode);
-                        return;
-                    }
-
-                    // 4. 并发上传到两个物理节点(冗余存储)
-                    // 使用带租户隔离的对象路径
-                    String tenantObjectPath = TenantContextUtil.buildTenantObjectPath(fileHash);
-                    CompletableFuture<Void> upload1 = uploadToNodeAsync(physicalNodePair.get(0), tenantObjectPath, file);
-                    CompletableFuture<Void> upload2 = uploadToNodeAsync(physicalNodePair.get(1), tenantObjectPath, file);
-
-                    // 等待两个上传都完成（或任一失败）
-                    CompletableFuture.allOf(upload1, upload2).join(); // join 会在异常时抛出 CompletionException
-
-                    // 5. 构建并记录成功结果（使用租户隔离的逻辑路径）
-                    String logicalPath = TenantContextUtil.buildTenantPath(targetLogicNode, fileHash);
-                    tempSuccessResults.put(fileHash, logicalPath);
-                    log.info("已成功将文件 '{}' 存储到逻辑节点 '{}' （路径： {}）", fileHash, targetLogicNode, logicalPath);
-
-                } catch (Exception e) {
-                    // 捕获 join 抛出的 CompletionException 或其他异常
-                    log.error("无法存储文件'{}'：{}", fileHash, e.getMessage(), e);
-                    tempFailedResults.put(fileHash, "上传失败：" + e.getMessage());
-                }
-            }));
-        }
-
-        // 等待所有文件的处理完成
-        try {
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-        } catch (Exception e) {
-            // 通常这里的异常已被内部捕获，但以防万一
-            log.warn("某些文件存储任务可能意外失败：{}", e.getMessage());
-        }
-
-        //按照原始输入顺序重新组织结果，确保分片顺序正确
-        Map<String, String> orderedSuccessResults = new LinkedHashMap<>();
-
-        // 按照 fileHashList 的原始顺序重新组织结果
-        for (String fileHash : fileHashList) {
-            if (tempSuccessResults.containsKey(fileHash)) {
-                orderedSuccessResults.put(fileHash, tempSuccessResults.get(fileHash));
-            }
-        }
-
-        if (!tempFailedResults.isEmpty()) {
-            log.warn("存储过程中发生错误：{}", tempFailedResults);
-            return Result.error(ResultEnum.FILE_SERVICE_ERROR, tempFailedResults);
-        }
-
-        log.info("文件上传完成，成功：{}", orderedSuccessResults.size());
-        return Result.success(orderedSuccessResults);
-    }
-
     @Override
     public Result<String> storeFileChunk(byte[] fileData, String fileHash) {
         if (fileData == null || fileData.length == 0 || fileHash == null || fileHash.isEmpty()) {
@@ -260,12 +177,24 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             String tenantObjectPath = TenantContextUtil.buildTenantObjectPath(fileHash);
             CompletableFuture<Void> upload1 = uploadToNodeAsync(physicalNodePair.get(0), tenantObjectPath, fileData);
             CompletableFuture<Void> upload2 = uploadToNodeAsync(physicalNodePair.get(1), tenantObjectPath, fileData);
-            CompletableFuture.allOf(upload1, upload2).join();
+
+            CompletableFuture.allOf(upload1, upload2)
+                .get(FILE_OPERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             // 使用租户隔离的逻辑路径
             String logicalPath = TenantContextUtil.buildTenantPath(targetLogicNode, fileHash);
             log.info("已成功将文件块 '{}' 存储到逻辑节点 '{}' (路径: {})", fileHash, targetLogicNode, logicalPath);
             return Result.success(logicalPath);
+        } catch (TimeoutException e) {
+            log.error("存储文件块超时（>{}s）: hash={}, logicNode={}", FILE_OPERATION_TIMEOUT_SECONDS, fileHash, targetLogicNode, e);
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("存储文件块被中断: hash={}, logicNode={}", fileHash, targetLogicNode, e);
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
+        } catch (ExecutionException e) {
+            log.error("存储文件块失败: hash={}, logicNode={}, cause={}", fileHash, targetLogicNode, e.getCause() != null ? e.getCause().getMessage() : e.getMessage(), e);
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
         } catch (Exception e) {
             log.error("存储文件块 '{}' 失败: {}", fileHash, e.getMessage(), e);
             return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
@@ -571,24 +500,50 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             return Optional.empty();
         }
 
-        File tempFile = null;
         try {
-            // 使用节点名称作为桶名
+            // 先获取对象大小，检查是否超过内存限制
+            StatObjectArgs statArgs = StatObjectArgs.builder()
+                .bucket(nodeName)
+                .object(objectName)
+                .build();
+            StatObjectResponse stat = client.statObject(statArgs);
+            long objectSize = stat.size();
+
+            if (objectSize > MAX_IN_MEMORY_FILE_SIZE) {
+                log.error("对象 '{}' 大小 ({} bytes) 超过内存限制 ({} bytes)，拒绝加载",
+                    objectName, objectSize, MAX_IN_MEMORY_FILE_SIZE);
+                throw new RuntimeException("文件过大，无法直接加载到内存");
+            }
 
             GetObjectArgs args = GetObjectArgs.builder()
                 .bucket(nodeName)
                 .object(objectName)
                 .build();
-            try (InputStream inputStream = client.getObject(args)) {
-                byte[] fileBytes = IOUtils.toByteArray(inputStream);
-                log.info("已成功将对象“{}”从节点“{}”读取到服务器", objectName, nodeName);
+
+            // 使用分块读取避免一次性加载大文件
+            try (InputStream inputStream = client.getObject(args);
+                 ByteArrayOutputStream outputStream = new ByteArrayOutputStream((int) objectSize)) {
+                byte[] buffer = new byte[BUFFER_SIZE];
+                int bytesRead;
+                long totalRead = 0;
+                while ((bytesRead = inputStream.read(buffer)) != -1) {
+                    outputStream.write(buffer, 0, bytesRead);
+                    totalRead += bytesRead;
+                    // 防止读取超过预期大小（安全检查）
+                    if (totalRead > MAX_IN_MEMORY_FILE_SIZE) {
+                        log.error("读取对象 '{}' 时超过内存限制，已读取 {} bytes", objectName, totalRead);
+                        throw new RuntimeException("文件读取过程中超过内存限制");
+                    }
+                }
+                byte[] fileBytes = outputStream.toByteArray();
+                log.info("已成功将对象 '{}' ({} bytes) 从节点 '{}' 读取到服务器",
+                    objectName, fileBytes.length, nodeName);
                 return Optional.of(fileBytes);
-            } // try-with-resources 会自动关闭 inputStream
+            }
         } catch (MinioException e) {
             // 特别处理对象不存在的错误
             if (e instanceof ErrorResponseException && ((ErrorResponseException) e).errorResponse().code().equals("NoSuchKey")) {
                 log.warn("在节点'{}'上找不到对象'{}'（NoSuchKey）", objectName, nodeName);
-                // 不认为是严重错误，返回 empty
                 return Optional.empty();
             } else {
                 log.error("从节点'{}'获取对象'{}'时出现MinIO错误：{}", objectName, nodeName, e.getMessage(), e);
@@ -596,7 +551,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         } catch (Exception e) {
             log.error("从节点'{}'获取对象'{}'时出现意外错误：{}", objectName, nodeName, e.getMessage(), e);
         }
-        return Optional.empty(); // 获取失败
+        return Optional.empty();
     }
 
     /**
