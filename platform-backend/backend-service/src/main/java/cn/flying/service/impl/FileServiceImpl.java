@@ -16,19 +16,24 @@ import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.platformapi.response.SharingVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FileService;
+import cn.flying.service.saga.FileSagaOrchestrator;
+import cn.flying.service.saga.FileUploadCommand;
+import cn.flying.service.saga.FileUploadResult;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.IOException;
-import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * @program: RecordPlatform
@@ -36,12 +41,16 @@ import java.util.Map;
  * @author: flyingcoding
  * @create: 2025-03-12 21:22
  */
+@Slf4j
 @Service
 @Transactional(rollbackFor = Exception.class)
 public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements FileService {
 
     @Resource
     private FileRemoteClient fileRemoteClient;
+
+    @Resource
+    private FileSagaOrchestrator sagaOrchestrator;
 
     @Override
     public void prepareStoreFile(Long userId, String OriginFileName) {
@@ -53,56 +62,58 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
+    @CacheEvict(cacheNames = "userFiles", key = "#userId")
     public File storeFile(Long userId, String OriginFileName, List<java.io.File> fileList, List<String> fileHashList, String fileParam) {
+        if (CommonUtils.isEmpty(fileList)) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "File list cannot be empty");
+        }
 
-        if(CommonUtils.isEmpty(fileList)) return null;
-        //todo 这里暂时不做失败重试，后续优化
+        LambdaQueryWrapper<File> fileQuery = new LambdaQueryWrapper<File>()
+                .eq(File::getUid, userId)
+                .eq(File::getFileName, OriginFileName)
+                .last("LIMIT 1");
+        File existingFile = this.getOne(fileQuery);
+        if (existingFile == null) {
+            throw new GeneralException(ResultEnum.FAIL, "File metadata not initialized for upload");
+        }
 
-        String userIdStr = String.valueOf(userId);
+        String requestId = UUID.randomUUID().toString();
+        FileUploadCommand cmd = FileUploadCommand.builder()
+                .requestId(requestId)
+                .fileId(existingFile.getId())
+                .userId(userId)
+                .tenantId(existingFile.getTenantId())
+                .fileName(OriginFileName)
+                .fileParam(fileParam)
+                .fileList(fileList)
+                .fileHashList(fileHashList)
+                .build();
 
-        List<byte[]> fileByteList = fileList.stream().map(file -> {
-            try {
-                return Files.readAllBytes(file.toPath());
-            } catch (IOException e) {
-                throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
-            }
-        }).toList();
+        FileUploadResult result = sagaOrchestrator.executeUpload(cmd);
 
-        Result<Map<String, String>> storeedResult = fileRemoteClient.storeFile(fileByteList, fileHashList);
-        //最终得到的文件存储位置（JSON）
-        String fileContent = JsonConverter.toJsonWithPretty(ResultUtils.getData(storeedResult));
-        Result<List<String>> recordResult = fileRemoteClient.storeFileOnChain(userIdStr, OriginFileName, fileParam, fileContent);
-        //获取存储到区块链上的文件的哈希值
-        List<String> res = ResultUtils.getData(recordResult);
-        //判断是不是正常返回
-        if(CommonUtils.isEmpty(res)||res.size()!=2) return null;
-        //交易hash
-        String transactionHash = res.get(0);
-        //文件hash
-        String fileHash=res.get(1);
-        //完成上传后更新文件元信息
-        if(CommonUtils.isNotEmpty(fileHash)&&CommonUtils.isNotEmpty(transactionHash)){
-            //根据用户名及对应的文件名查找文件元信息（即要求用户所文件名不能重复）
-            LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
-                    .eq(File::getUid, userId)
-                    .eq(File::getFileName, OriginFileName);
+        if (!result.isSuccess()) {
+            String errorMsg = result.getErrorMessage();
+            throw new GeneralException(ResultEnum.FAIL, errorMsg != null ? errorMsg : "File upload failed");
+        }
 
-            File file = new File()
+        LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
+                .eq(File::getUid, userId)
+                .eq(File::getFileName, OriginFileName);
+
+        File file = new File()
                 .setUid(userId)
                 .setFileName(OriginFileName)
-                .setFileHash(fileHash)
-                .setTransactionHash(transactionHash)
+                .setFileHash(result.getFileHash())
+                .setTransactionHash(result.getTransactionHash())
                 .setFileParam(fileParam)
                 .setStatus(FileUploadStatus.SUCCESS.getCode());
 
-            this.update(file,wrapper);
-            //返回更新后的文件元信息
-            return file;
-        }
-        return null;
+        this.update(file, wrapper);
+        return file;
     }
 
     @Override
+    @CacheEvict(cacheNames = "userFiles", key = "#userId")
     public void changeFileStatusByName(Long userId, String fileName, Integer fileStatus) {
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getFileName, fileName)
@@ -113,6 +124,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
+    @CacheEvict(cacheNames = "userFiles", key = "#userId")
     public void changeFileStatusByHash(Long userId, String fileHash, Integer fileStatus) {
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getFileHash, fileHash)
@@ -123,17 +135,18 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
+    @CacheEvict(cacheNames = "userFiles", key = "#userId")
     public void deleteFile(Long userId, List<String> fileHashList) {
         if(CommonUtils.isEmpty(fileHashList)) return;
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getUid, userId)
                 .in(File::getFileHash, fileHashList);
-        //此处不执行实际的文件删除操作，仅更新文件元信息（实际操作使用定时任务批量执行，将文件删除或移入冷数据存储器）
-        //todo 后续实现定时任务
+        // Logical delete only - physical cleanup is handled by FileCleanupTask scheduled job
         this.remove(wrapper);
     }
 
     @Override
+    @Cacheable(cacheNames = "userFiles", key = "#userId", unless = "#result == null || #result.isEmpty()")
     public List<File> getUserFilesList(Long userId) {
         LambdaQueryWrapper<File> wrapper= new LambdaQueryWrapper<>();
         //超管账号可查看所有文件

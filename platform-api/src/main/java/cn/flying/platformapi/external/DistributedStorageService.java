@@ -25,5 +25,10 @@ public interface DistributedStorageService {
 
     Result<Boolean> deleteFile(Map<String, String> fileContent);
 
+    /**
+     * Get cluster health status: node name -> online status
+     */
+    Result<Map<String, Boolean>> getClusterHealth();
+
 }
 
