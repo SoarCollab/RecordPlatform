@@ -155,6 +155,13 @@ outbox:
     batch-size: 100
     max-retries: 5
     poll-interval-ms: 2000
+  health:
+    pending-threshold: 500    # 待发送事件超过此值标记为 DEGRADED
+    failed-threshold: 20      # 失败事件超过此值标记为 DOWN
+  cleanup:
+    sent-retention-days: 7    # 已发送事件保留天数
+    failed-retention-days: 30 # 永久失败事件保留天数
+    cron: 0 0 3 * * ?         # 每天凌晨3点清理
 
 # Processed message cleanup
 processed-message:
@@ -169,15 +176,9 @@ saga:
     batch-size: 50
     poll-interval-ms: 30000
   health:
-    running-threshold: 100
-    failed-threshold: 10
-    pending-compensation-threshold: 50
-
-# Outbox health configuration
-outbox:
-  health:
-    pending-threshold: 500
-    failed-threshold: 20
+    running-threshold: 100              # 运行中 Saga 超过此值标记为 DEGRADED
+    failed-threshold: 10                # 失败 Saga 超过此值标记为 DOWN
+    pending-compensation-threshold: 50  # 待补偿 Saga 超过此值标记为 DEGRADED
 
 # Actuator 管理端点配置
 management:

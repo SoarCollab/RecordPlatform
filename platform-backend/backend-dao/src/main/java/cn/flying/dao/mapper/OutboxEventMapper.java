@@ -2,6 +2,7 @@ package cn.flying.dao.mapper;
 
 import cn.flying.dao.entity.OutboxEvent;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -36,4 +37,16 @@ public interface OutboxEventMapper extends BaseMapper<OutboxEvent> {
      */
     @Select("SELECT COUNT(*) FROM outbox_event WHERE status = 'FAILED' AND retry_count >= #{maxRetries}")
     long countExhaustedRetries(@Param("maxRetries") int maxRetries);
+
+    /**
+     * 删除已发送且超过保留期的事件
+     */
+    @Delete("DELETE FROM outbox_event WHERE status = 'SENT' AND sent_time < #{cutoffDate}")
+    int cleanupSentEvents(@Param("cutoffDate") Date cutoffDate);
+
+    /**
+     * 删除永久失败的事件（可选清理）
+     */
+    @Delete("DELETE FROM outbox_event WHERE status = 'FAILED' AND retry_count >= #{maxRetries} AND create_time < #{cutoffDate}")
+    int cleanupFailedEvents(@Param("maxRetries") int maxRetries, @Param("cutoffDate") Date cutoffDate);
 }
