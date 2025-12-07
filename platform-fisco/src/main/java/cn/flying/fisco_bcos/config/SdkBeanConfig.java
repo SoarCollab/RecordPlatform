@@ -1,5 +1,6 @@
 package cn.flying.fisco_bcos.config;
 
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.fisco.bcos.sdk.v3.BcosSDK;
 import org.fisco.bcos.sdk.v3.client.Client;
@@ -18,6 +19,9 @@ public class SdkBeanConfig {
     private final SystemConfig systemConfig;
     private final BcosConfig bcosConfig;
 
+    // 保存 BcosSDK 实例以便后续关闭
+    private BcosSDK bcosSDK;
+
     public SdkBeanConfig(SystemConfig systemConfig, BcosConfig bcosConfig) {
         this.systemConfig = systemConfig;
         this.bcosConfig = bcosConfig;
@@ -30,7 +34,8 @@ public class SdkBeanConfig {
         configCryptoMaterial(property);
 
         ConfigOption configOption = new ConfigOption(property);
-        Client client = new BcosSDK(configOption).getClient(systemConfig.getGroupId());
+        this.bcosSDK = new BcosSDK(configOption);
+        Client client = bcosSDK.getClient(systemConfig.getGroupId());
 
         BigInteger blockNumber = client.getBlockNumber().getBlockNumber();
         log.info("Chain connect successful. Current block number {}", blockNumber);
@@ -38,6 +43,22 @@ public class SdkBeanConfig {
         configCryptoKeyPair(client);
         log.info("is Gm:{}, address:{}", client.getCryptoSuite().cryptoTypeConfig == 1, client.getCryptoSuite().getCryptoKeyPair().getAddress());
         return client;
+    }
+
+    /**
+     * 应用关闭时释放 BcosSDK 资源
+     */
+    @PreDestroy
+    public void cleanup() {
+        log.info("正在关闭 FISCO BCOS SDK 资源...");
+        if (bcosSDK != null) {
+            try {
+                bcosSDK.stopAll();
+                log.info("BcosSDK 资源已释放");
+            } catch (Exception e) {
+                log.warn("关闭 BcosSDK 时出错: {}", e.getMessage());
+            }
+        }
     }
 
     public void configNetwork(ConfigProperty configProperty){
