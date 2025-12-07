@@ -51,7 +51,13 @@ public class FiscoHealthIndicator implements HealthIndicator {
             }
 
             BlockChainMessage message = result.getData();
-            BigInteger blockNumber = new BigInteger(message.getBlockNumber());
+            if (message.getBlockNumber() == null || message.getTransactionCount() == null || message.getFailedTransactionCount() == null) {
+                return Health.down()
+                        .withDetail("reason", "Blockchain status incomplete")
+                        .build();
+            }
+
+            BigInteger blockNumber = BigInteger.valueOf(message.getBlockNumber());
 
             Health.Builder builder = Health.up()
                     .withDetail("blockNumber", message.getBlockNumber())

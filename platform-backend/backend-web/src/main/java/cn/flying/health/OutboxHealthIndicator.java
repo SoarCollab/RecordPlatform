@@ -19,10 +19,10 @@ public class OutboxHealthIndicator implements HealthIndicator {
 
     private final OutboxEventMapper outboxEventMapper;
 
-    @Value("${outbox.health.pending-threshold:500}")
+    @Value("${outbox.health.pending-threshold:50}")
     private long pendingThreshold;
 
-    @Value("${outbox.health.failed-threshold:20}")
+    @Value("${outbox.health.failed-threshold:5}")
     private long failedThreshold;
 
     @Value("${outbox.publisher.max-retries:5}")
