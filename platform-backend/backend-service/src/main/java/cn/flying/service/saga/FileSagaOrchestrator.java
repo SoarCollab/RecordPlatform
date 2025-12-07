@@ -274,7 +274,7 @@ public class FileSagaOrchestrator {
         log.info("开始补偿 MinIO 上传: sagaId={}, 文件数量={}", saga.getId(), storedPaths.size());
 
         Result<Boolean> result = fileRemoteClient.deleteStorageFile(storedPaths);
-        if (result != null && result.isSuccess()) {
+        if (ResultUtils.isSuccess(result)) {
             log.info("MinIO 补偿完成: sagaId={}", saga.getId());
         } else {
             // 区分"文件已不存在"（幂等成功）和真正的删除失败

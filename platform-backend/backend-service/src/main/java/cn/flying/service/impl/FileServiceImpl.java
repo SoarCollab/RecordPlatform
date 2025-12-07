@@ -232,7 +232,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         // 获取当前登录用户ID，未登录时抛出异常
         String userIdStr = MDC.get(Const.ATTR_USER_ID);
         if (CommonUtils.isEmpty(userIdStr)) {
-            throw new GeneralException(ResultEnum.USER_NOT_LOGIN, "用户未登录，无法保存分享文件");
+            throw new GeneralException(ResultEnum.USER_NOT_LOGGED_IN, "用户未登录，无法保存分享文件");
         }
 
         Long userId;
