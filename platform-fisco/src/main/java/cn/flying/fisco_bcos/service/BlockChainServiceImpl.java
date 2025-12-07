@@ -23,6 +23,7 @@ import org.springframework.beans.BeanUtils;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * 区块链综合服务实现 v1.0.0
@@ -83,9 +84,16 @@ public class BlockChainServiceImpl implements BlockChainService{
                         if (returnList.getLast() instanceof List<?> files) {
                             for (Object file : files) {
                                 if (file instanceof List<?> fileInfo && fileInfo.size() == 6) {
-                                    String hexHash = Convert.bytesToHex((byte[]) fileInfo.get(4));
-                                    hexHash = hexHash.startsWith("0x") ? hexHash.substring(2) : hexHash;
-                                    fileList.add(hexHash);
+                                    // 安全类型转换：使用 Optional + instanceof 避免 ClassCastException
+                                    String hexHash = Optional.ofNullable(fileInfo.get(4))
+                                            .filter(byte[].class::isInstance)
+                                            .map(byte[].class::cast)
+                                            .map(Convert::bytesToHex)
+                                            .map(hash -> hash.startsWith("0x") ? hash.substring(2) : hash)
+                                            .orElse("");
+                                    if (!hexHash.isEmpty()) {
+                                        fileList.add(hexHash);
+                                    }
                                 }
                             }
                         }
@@ -150,12 +158,19 @@ public class BlockChainServiceImpl implements BlockChainService{
                 if (firstElement instanceof List<?> filesList) {
                     for (Object file : filesList) {
                         if (file instanceof List<?> fileInfo && fileInfo.size() == 2) {
-                            String hexHash = Convert.bytesToHex((byte[]) fileInfo.get(1));
-                            hexHash = hexHash.startsWith("0x") ? hexHash.substring(2) : hexHash;
-                            fileList.add(new FileVO(
-                                    String.valueOf(fileInfo.get(0)),
-                                    hexHash
-                            ));
+                            // 安全类型转换：使用 Optional + instanceof 避免 ClassCastException
+                            String hexHash = Optional.ofNullable(fileInfo.get(1))
+                                    .filter(byte[].class::isInstance)
+                                    .map(byte[].class::cast)
+                                    .map(Convert::bytesToHex)
+                                    .map(hash -> hash.startsWith("0x") ? hash.substring(2) : hash)
+                                    .orElse("");
+                            if (!hexHash.isEmpty()) {
+                                fileList.add(new FileVO(
+                                        String.valueOf(fileInfo.get(0)),
+                                        hexHash
+                                ));
+                            }
                         }
                     }
                 }
