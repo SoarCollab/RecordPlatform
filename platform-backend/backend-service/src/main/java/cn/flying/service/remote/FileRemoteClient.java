@@ -20,10 +20,10 @@ import java.util.Map;
 @Component
 public class FileRemoteClient {
 
-    @DubboReference
+    @DubboReference(version = BlockChainService.VERSION)
     private BlockChainService blockChainService;
 
-    @DubboReference
+    @DubboReference(version = DistributedStorageService.VERSION)
     private DistributedStorageService storageService;
 
     @Deprecated
