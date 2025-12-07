@@ -4,6 +4,7 @@ import cn.flying.minio.config.LogicNodeMapping;
 import cn.flying.minio.config.MinioProperties;
 import cn.flying.minio.core.MinioClientManager;
 import cn.flying.minio.core.MinioMonitor;
+import cn.flying.minio.tenant.TenantContextUtil;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.DistributedStorageService;
@@ -31,12 +32,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
- * @program: RecordPlatform
- * @description: 分布式存储实现类（MinIO），支持 Nacos 动态配置和基本负载均衡
- * @author: flyingcoding
- * @create: 2025-04-07 00:07
+ * 分布式存储实现类（MinIO）v1.0.0
+ * 支持 Nacos 动态配置、负载均衡和租户隔离。
  */
-@DubboService(methods = {@org.apache.dubbo.config.annotation.Method(name = "storeFile", timeout = 60000)})
+@DubboService(version = DistributedStorageService.VERSION, methods = {@org.apache.dubbo.config.annotation.Method(name = "storeFile", timeout = 60000)})
 public class DistributedStorageServiceImpl implements DistributedStorageService {
     private static final Logger log = org.slf4j.LoggerFactory.getLogger(DistributedStorageServiceImpl.class);
     @Resource
@@ -182,14 +181,16 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                     }
 
                     // 4. 并发上传到两个物理节点(冗余存储)
-                    CompletableFuture<Void> upload1 = uploadToNodeAsync(physicalNodePair.get(0), fileHash, file);
-                    CompletableFuture<Void> upload2 = uploadToNodeAsync(physicalNodePair.get(1), fileHash, file);
+                    // 使用带租户隔离的对象路径
+                    String tenantObjectPath = TenantContextUtil.buildTenantObjectPath(fileHash);
+                    CompletableFuture<Void> upload1 = uploadToNodeAsync(physicalNodePair.get(0), tenantObjectPath, file);
+                    CompletableFuture<Void> upload2 = uploadToNodeAsync(physicalNodePair.get(1), tenantObjectPath, file);
 
                     // 等待两个上传都完成（或任一失败）
                     CompletableFuture.allOf(upload1, upload2).join(); // join 会在异常时抛出 CompletionException
 
-                    // 5. 构建并记录成功结果
-                    String logicalPath = "minio/node/" + targetLogicNode + "/" + fileHash;
+                    // 5. 构建并记录成功结果（使用租户隔离的逻辑路径）
+                    String logicalPath = TenantContextUtil.buildTenantPath(targetLogicNode, fileHash);
                     tempSuccessResults.put(fileHash, logicalPath);
                     log.info("已成功将文件 '{}' 存储到逻辑节点 '{}' （路径： {}）", fileHash, targetLogicNode, logicalPath);
 
@@ -255,11 +256,14 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
 
         try {
-            CompletableFuture<Void> upload1 = uploadToNodeAsync(physicalNodePair.get(0), fileHash, fileData);
-            CompletableFuture<Void> upload2 = uploadToNodeAsync(physicalNodePair.get(1), fileHash, fileData);
+            // 使用带租户隔离的对象路径
+            String tenantObjectPath = TenantContextUtil.buildTenantObjectPath(fileHash);
+            CompletableFuture<Void> upload1 = uploadToNodeAsync(physicalNodePair.get(0), tenantObjectPath, fileData);
+            CompletableFuture<Void> upload2 = uploadToNodeAsync(physicalNodePair.get(1), tenantObjectPath, fileData);
             CompletableFuture.allOf(upload1, upload2).join();
 
-            String logicalPath = "minio/node/" + targetLogicNode + "/" + fileHash;
+            // 使用租户隔离的逻辑路径
+            String logicalPath = TenantContextUtil.buildTenantPath(targetLogicNode, fileHash);
             log.info("已成功将文件块 '{}' 存储到逻辑节点 '{}' (路径: {})", fileHash, targetLogicNode, logicalPath);
             return Result.success(logicalPath);
         } catch (Exception e) {
@@ -498,7 +502,9 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     }
 
     /**
-     * 解析逻辑路径，格式: minio/node/{logic_node_name}/{object_name}
+     * 解析逻辑路径，支持新旧两种格式：
+     * 新格式: minio/tenant/{tenantId}/node/{logic_node_name}/{object_name}
+     * 旧格式: minio/node/{logic_node_name}/{object_name}
      *
      * @return ParsedPath 对象，如果解析失败则返回 null
      */
@@ -507,27 +513,23 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             log.error("无法解析 null 或空 filePath/fileHash。");
             return null;
         }
-        String prefix = "minio/node/";
-        if (!filePath.startsWith(prefix)) {
-            log.error("无效的逻辑路径格式 {}，预期格式：minio/node/logic_node_name/object_name", filePath);
-            return null;
-        }
-        String remainingPath = filePath.substring(prefix.length());
-        int lastSlashIndex = remainingPath.lastIndexOf('/');
-        if (lastSlashIndex <= 0 || lastSlashIndex == remainingPath.length() - 1) {
-            log.error("无效的逻辑路径格式 {}，无法提取逻辑节点名称和文件名称", filePath);
-            return null;
-        }
-        String logicNodeName = remainingPath.substring(0, lastSlashIndex);
-        String objectName = remainingPath.substring(lastSlashIndex + 1);
 
-        // 校验 objectName 是否与传入的 fileHash 匹配
-        if (!fileHash.equals(objectName)) {
-            log.error("路径[{}]中的fileHash'{}'和objectName'{}'不匹配", fileHash, objectName, filePath);
+        // 使用 TenantContextUtil 解析（支持新旧格式）
+        TenantContextUtil.ParsedTenantPath parsed = TenantContextUtil.parseTenantPath(filePath);
+        if (parsed == null) {
+            log.error("无效的逻辑路径格式 {}，预期格式：minio/tenant/{tenantId}/node/{logicNode}/{objectName} 或 minio/node/{logicNode}/{objectName}", filePath);
             return null;
         }
 
-        return new ParsedPath(logicNodeName, objectName);
+        // 校验 objectName 是否与传入的 fileHash 匹配
+        if (!fileHash.equals(parsed.objectName())) {
+            log.error("路径[{}]中的fileHash'{}'和objectName'{}'不匹配", filePath, fileHash, parsed.objectName());
+            return null;
+        }
+
+        // 构建带租户隔离的对象路径（用于在物理节点中查找）
+        String tenantObjectPath = String.format("tenant/%d/%s", parsed.tenantId(), parsed.objectName());
+        return new ParsedPath(parsed.logicNodeName(), tenantObjectPath);
     }
 
     /**
