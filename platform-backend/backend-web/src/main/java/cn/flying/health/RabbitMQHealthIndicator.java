@@ -47,7 +47,7 @@ public class RabbitMQHealthIndicator implements HealthIndicator {
     private Health checkRabbitHealth() {
         try {
             return rabbitTemplate.execute((Channel channel) -> {
-                if (channel == null || !channel.isOpen()) {
+                if (!channel.isOpen()) {
                     return Health.down()
                             .withDetail("reason", "Channel not available or closed")
                             .build();

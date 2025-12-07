@@ -10,9 +10,25 @@ spring:
   jackson:
     time-zone: GMT+8
 
+  # RabbitMQ backpressure configuration
+  rabbitmq:
+    listener:
+      simple:
+        prefetch: 10
+        concurrency: 2
+        max-concurrency: 5
+        acknowledge-mode: auto
+        retry:
+          enabled: true
+          initial-interval: 1000
+          max-attempts: 3
+          multiplier: 2.0
+    health:
+      queue: file.stored
+
   security:
     jwt:
-      key: ${JWT_KEY:dev-only-record-platform-key}
+      key: ${JWT_KEY}
       expire: 72
       limit:
         base: 10
@@ -124,3 +140,41 @@ resilience4j:
         base-config: default
       storageService:
         base-config: default
+
+# File cleanup task configuration
+file:
+  cleanup:
+    retention-days: 30
+    batch-size: 100
+    cron: 0 0 3 * * ?
+
+# Outbox publisher configuration
+outbox:
+  publisher:
+    batch-size: 100
+    max-retries: 5
+    poll-interval-ms: 2000
+
+# Processed message cleanup
+processed-message:
+  cleanup:
+    retention-days: 7
+    cron: 0 30 3 * * ?
+
+# Actuator 管理端点配置
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  health:
+    livenessState:
+      enabled: true
+    readinessState:
+      enabled: true
