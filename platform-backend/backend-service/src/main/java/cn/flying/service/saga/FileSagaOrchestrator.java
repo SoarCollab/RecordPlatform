@@ -1,6 +1,7 @@
 package cn.flying.service.saga;
 
 import cn.flying.api.utils.ResultUtils;
+import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.lock.DistributedLock;
@@ -9,7 +10,11 @@ import cn.flying.dao.entity.FileSaga;
 import cn.flying.dao.entity.FileSagaStatus;
 import cn.flying.dao.entity.FileSagaStep;
 import cn.flying.dao.mapper.FileSagaMapper;
+import cn.flying.dao.dto.File;
+import cn.flying.dao.mapper.FileMapper;
 import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.request.StoreFileRequest;
+import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.service.outbox.OutboxService;
 import cn.flying.service.remote.FileRemoteClient;
 import lombok.RequiredArgsConstructor;
@@ -37,12 +42,19 @@ public class FileSagaOrchestrator {
     private final FileSagaMapper sagaMapper;
     private final FileRemoteClient fileRemoteClient;
     private final OutboxService outboxService;
+    private final FileMapper fileMapper;
 
     @Value("${saga.compensation.max-retries:5}")
     private int maxCompensationRetries;
 
     @Value("${saga.compensation.batch-size:50}")
     private int compensationBatchSize;
+
+    @Value("${saga.dead-letter.enabled:true}")
+    private boolean deadLetterEnabled;
+
+    private static final String COMP_STEP_MINIO = "MINIO_DELETED";
+    private static final String COMP_STEP_DB = "DB_ROLLBACK";
 
     /**
      * 执行文件上传 Saga。
@@ -54,12 +66,12 @@ public class FileSagaOrchestrator {
 
         try {
             Map<String, String> storedPaths = executeMinioUpload(saga, cmd);
-            List<String> chainResult = executeBlockchainStore(saga, cmd, storedPaths);
+            StoreFileResponse chainResult = executeBlockchainStore(saga, cmd, storedPaths);
 
             publishSuccessEvent(saga, cmd, chainResult);
             completeSaga(saga);
 
-            return FileUploadResult.success(chainResult.get(0), chainResult.get(1));
+            return FileUploadResult.success(chainResult.getTransactionHash(), chainResult.getFileHash());
 
         } catch (Exception ex) {
             log.error("Saga 执行失败: requestId={}", cmd.getRequestId(), ex);
@@ -106,7 +118,7 @@ public class FileSagaOrchestrator {
         sagaMapper.updateById(saga);
 
         try {
-            compensate(saga);
+            compensate(saga, loadPayloadContext(saga));
             saga.markStatus(FileSagaStatus.COMPENSATED);
             log.info("Saga 补偿成功: id={}", saga.getId());
         } catch (Exception e) {
@@ -116,6 +128,8 @@ public class FileSagaOrchestrator {
                 saga.markStatus(FileSagaStatus.FAILED);
                 log.error("Saga 补偿超过最大重试次数，标记为失败: id={}, retryCount={}",
                         saga.getId(), saga.getRetryCount());
+                // 发布死信事件，便于人工介入处理
+                publishDeadLetterEvent(saga, e);
             } else {
                 saga.scheduleNextRetry()
                     .markStatus(FileSagaStatus.PENDING_COMPENSATION);
@@ -155,8 +169,9 @@ public class FileSagaOrchestrator {
     }
 
     private Map<String, String> executeMinioUpload(FileSaga saga, FileUploadCommand cmd) {
-        if (saga.reachedStep(FileSagaStep.MINIO_UPLOADED)) {
-            return JsonConverter.parse(saga.getPayload(), Map.class);
+        SagaPayloadContext context = loadPayloadContext(saga);
+        if (saga.reachedStep(FileSagaStep.MINIO_UPLOADED) && context.getStoredPaths() != null) {
+            return new LinkedHashMap<>(context.getStoredPaths());
         }
 
         saga.advanceTo(FileSagaStep.MINIO_UPLOADING);
@@ -187,14 +202,16 @@ public class FileSagaOrchestrator {
             storedPaths.put(chunkHash, logicalPath);
         }
 
-        saga.advanceTo(FileSagaStep.MINIO_UPLOADED)
-            .setPayload(JsonConverter.toJsonWithPretty(storedPaths));
-        sagaMapper.updateById(saga);
+        context.setStoredPaths(storedPaths);
+        context.resetCompensatedSteps();
 
-        return storedPaths;
+        saga.advanceTo(FileSagaStep.MINIO_UPLOADED);
+        persistPayload(saga, context);
+
+        return new LinkedHashMap<>(storedPaths);
     }
 
-    private List<String> executeBlockchainStore(FileSaga saga, FileUploadCommand cmd,
+    private StoreFileResponse executeBlockchainStore(FileSaga saga, FileUploadCommand cmd,
                                                  Map<String, String> storedPaths) {
         saga.advanceTo(FileSagaStep.CHAIN_STORING);
         sagaMapper.updateById(saga);
@@ -202,11 +219,15 @@ public class FileSagaOrchestrator {
         String fileContent = JsonConverter.toJsonWithPretty(storedPaths);
         String userIdStr = String.valueOf(cmd.getUserId());
 
-        Result<List<String>> result = fileRemoteClient.storeFileOnChain(
-                userIdStr, cmd.getFileName(), cmd.getFileParam(), fileContent);
+        Result<StoreFileResponse> result = fileRemoteClient.storeFileOnChain(StoreFileRequest.builder()
+                .uploader(userIdStr)
+                .fileName(cmd.getFileName())
+                .param(cmd.getFileParam())
+                .content(fileContent)
+                .build());
 
-        List<String> res = ResultUtils.getData(result);
-        if (res == null || res.size() != 2) {
+        StoreFileResponse res = ResultUtils.getData(result);
+        if (res == null || res.getTransactionHash() == null || res.getFileHash() == null) {
             throw new GeneralException(ResultEnum.FISCO_SERVICE_ERROR, "区块链存储返回无效结果");
         }
 
@@ -219,12 +240,12 @@ public class FileSagaOrchestrator {
         sagaMapper.updateById(saga);
     }
 
-    private void publishSuccessEvent(FileSaga saga, FileUploadCommand cmd, List<String> chainResult) {
+    private void publishSuccessEvent(FileSaga saga, FileUploadCommand cmd, StoreFileResponse chainResult) {
         Map<String, Object> eventData = new HashMap<>();
         eventData.put("userId", cmd.getUserId());
         eventData.put("fileName", cmd.getFileName());
-        eventData.put("transactionHash", chainResult.get(0));
-        eventData.put("fileHash", chainResult.get(1));
+        eventData.put("transactionHash", chainResult.getTransactionHash());
+        eventData.put("fileHash", chainResult.getFileHash());
         eventData.put("requestId", cmd.getRequestId());
 
         outboxService.appendEvent("FILE", saga.getFileId(), "file.stored",
@@ -236,7 +257,7 @@ public class FileSagaOrchestrator {
         sagaMapper.updateById(saga);
 
         try {
-            compensate(saga);
+            compensate(saga, loadPayloadContext(saga));
             saga.markStatus(FileSagaStatus.COMPENSATED);
         } catch (Exception compEx) {
             log.error("补偿失败: saga={}", saga.getId(), compEx);
@@ -252,23 +273,39 @@ public class FileSagaOrchestrator {
      * 补偿操作：删除已上传到 MinIO 的文件
      * 设计为幂等操作，重复调用不会产生副作用
      */
-    private void compensate(FileSaga saga) {
+    private void compensate(FileSaga saga, SagaPayloadContext context) {
+        // 检查是否已经补偿过（幂等性保证）
+        if (FileSagaStatus.COMPENSATED.name().equals(saga.getStatus())) {
+            log.info("Saga 已经补偿完成，跳过: sagaId={}", saga.getId());
+            return;
+        }
+
+        boolean minioCompensated = compensateMinioUpload(saga, context);
+        boolean dbCompensated = compensateDatabaseState(saga, context);
+
+        if (!minioCompensated || !dbCompensated) {
+            throw new RuntimeException("补偿未完全成功: minioCompensated=" + minioCompensated
+                    + ", dbCompensated=" + dbCompensated);
+        }
+    }
+
+    /**
+     * 补偿 MinIO 上传
+     */
+    private boolean compensateMinioUpload(FileSaga saga, SagaPayloadContext context) {
+        if (context.isStepDone(COMP_STEP_MINIO)) {
+            log.info("MinIO 补偿已完成（幂等跳过）：sagaId={}", saga.getId());
+            return true;
+        }
         if (!saga.reachedStep(FileSagaStep.MINIO_UPLOADED)) {
             log.info("无需补偿 MinIO 数据（未到达 MINIO_UPLOADED 步骤）: sagaId={}", saga.getId());
-            return;
+            return true;
         }
 
-        String payloadJson = saga.getPayload();
-        if (payloadJson == null || payloadJson.isBlank()) {
-            log.info("Saga payload 为空，跳过补偿: sagaId={}", saga.getId());
-            return;
-        }
-
-        @SuppressWarnings("unchecked")
-        Map<String, String> storedPaths = JsonConverter.parse(payloadJson, Map.class);
+        Map<String, String> storedPaths = context.getStoredPaths();
         if (storedPaths == null || storedPaths.isEmpty()) {
-            log.info("存储路径为空，跳过补偿: sagaId={}", saga.getId());
-            return;
+            log.info("存储路径为空，跳过 MinIO 补偿: sagaId={}", saga.getId());
+            return true;
         }
 
         log.info("开始补偿 MinIO 上传: sagaId={}, 文件数量={}", saga.getId(), storedPaths.size());
@@ -276,11 +313,165 @@ public class FileSagaOrchestrator {
         Result<Boolean> result = fileRemoteClient.deleteStorageFile(storedPaths);
         if (ResultUtils.isSuccess(result)) {
             log.info("MinIO 补偿完成: sagaId={}", saga.getId());
+            context.markStepDone(COMP_STEP_MINIO);
+            persistPayload(saga, context);
+            return true;
         } else {
             // 区分"文件已不存在"（幂等成功）和真正的删除失败
-            // 不抛出异常，因为文件可能在之前的补偿尝试中已被删除
             log.warn("MinIO 补偿结果: sagaId={}, result={}", saga.getId(),
                     result != null ? result.getCode() + ":" + result.getMessage() : "null");
+            // 如果是文件不存在的错误，视为补偿成功（幂等）
+            if (result != null && result.getCode() == ResultEnum.FILE_NOT_EXIST.getCode()) {
+                context.markStepDone(COMP_STEP_MINIO);
+                persistPayload(saga, context);
+                return true;
+            }
+            return false;
+        }
+    }
+
+    /**
+     * 补偿数据库状态（如果需要）
+     * 当前场景下数据库状态由 Saga 表自身管理，无需额外补偿
+     * 此方法预留用于扩展，如需回滚业务表数据时使用
+     */
+    private boolean compensateDatabaseState(FileSaga saga, SagaPayloadContext context) {
+        if (context.isStepDone(COMP_STEP_DB)) {
+            log.debug("数据库状态补偿已完成（幂等跳过）：sagaId={}", saga.getId());
+            return true;
+        }
+
+        if (saga.getFileId() == null) {
+            log.debug("Saga 未关联业务文件记录，跳过数据库补偿: sagaId={}", saga.getId());
+            context.markStepDone(COMP_STEP_DB);
+            persistPayload(saga, context);
+            return true;
+        }
+
+        try {
+            File file = new File()
+                    .setId(saga.getFileId())
+                    .setStatus(FileUploadStatus.FAIL.getCode())
+                    .setFileHash(null)
+                    .setTransactionHash(null);
+            int updated = fileMapper.updateById(file);
+            log.info("数据库补偿结果: sagaId={}, fileId={}, updated={}", saga.getId(), saga.getFileId(), updated);
+            context.markStepDone(COMP_STEP_DB);
+            persistPayload(saga, context);
+            return true;
+        } catch (Exception e) {
+            log.error("数据库状态补偿失败: sagaId={}, fileId={}, error={}", saga.getId(), saga.getFileId(), e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /**
+     * 发布死信事件，用于补偿失败后的人工介入
+     */
+    private void publishDeadLetterEvent(FileSaga saga, Exception error) {
+        if (!deadLetterEnabled) {
+            log.warn("死信事件发布已禁用，跳过: sagaId={}", saga.getId());
+            return;
+        }
+
+        try {
+            Map<String, Object> deadLetterData = new HashMap<>();
+            deadLetterData.put("sagaId", saga.getId());
+            deadLetterData.put("requestId", saga.getRequestId());
+            deadLetterData.put("userId", saga.getUserId());
+            deadLetterData.put("fileName", saga.getFileName());
+            deadLetterData.put("currentStep", saga.getCurrentStep());
+            deadLetterData.put("retryCount", saga.getRetryCount());
+            deadLetterData.put("lastError", error != null ? error.getMessage() : "unknown");
+            deadLetterData.put("payload", saga.getPayload());
+            deadLetterData.put("failedAt", System.currentTimeMillis());
+
+            outboxService.appendEvent("SAGA_DEAD_LETTER", saga.getId(), "saga.compensation.failed",
+                    JsonConverter.toJson(deadLetterData));
+
+            log.warn("已发布 Saga 死信事件: sagaId={}, requestId={}", saga.getId(), saga.getRequestId());
+        } catch (Exception e) {
+            // 死信事件发布失败不应影响主流程
+            log.error("发布死信事件失败: sagaId={}", saga.getId(), e);
+        }
+    }
+
+    private SagaPayloadContext loadPayloadContext(FileSaga saga) {
+        String payloadJson = saga.getPayload();
+        SagaPayloadContext context = null;
+        if (payloadJson != null && !payloadJson.isBlank()) {
+            try {
+                context = JsonConverter.parse(payloadJson, SagaPayloadContext.class);
+            } catch (Exception ignore) {
+                // 继续尝试使用旧格式解析
+            }
+        }
+        if (context == null || context.getStoredPaths() == null || context.getStoredPaths().isEmpty()) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, String> legacy = JsonConverter.parse(payloadJson, Map.class);
+                if (legacy != null && !legacy.isEmpty()) {
+                    if (context == null) {
+                        context = new SagaPayloadContext();
+                    }
+                    context.setStoredPaths(new LinkedHashMap<>(legacy));
+                }
+            } catch (Exception ignore) {
+                // ignore legacy parse errors
+            }
+        }
+        if (context == null) {
+            context = new SagaPayloadContext();
+        }
+        if (context.getStoredPaths() == null) {
+            context.setStoredPaths(new LinkedHashMap<>());
+        }
+        if (context.getCompensatedSteps() == null) {
+            context.setCompensatedSteps(new HashSet<>());
+        }
+        return context;
+    }
+
+    private void persistPayload(FileSaga saga, SagaPayloadContext context) {
+        saga.setPayload(JsonConverter.toJsonWithPretty(context));
+        sagaMapper.updateById(saga);
+    }
+
+    private static class SagaPayloadContext {
+        private Map<String, String> storedPaths;
+        private Set<String> compensatedSteps;
+
+        public Map<String, String> getStoredPaths() {
+            return storedPaths;
+        }
+
+        public void setStoredPaths(Map<String, String> storedPaths) {
+            this.storedPaths = storedPaths;
+        }
+
+        public Set<String> getCompensatedSteps() {
+            return compensatedSteps;
+        }
+
+        public void setCompensatedSteps(Set<String> compensatedSteps) {
+            this.compensatedSteps = compensatedSteps;
+        }
+
+        public boolean isStepDone(String step) {
+            return compensatedSteps != null && compensatedSteps.contains(step);
+        }
+
+        public void markStepDone(String step) {
+            if (compensatedSteps == null) {
+                compensatedSteps = new HashSet<>();
+            }
+            compensatedSteps.add(step);
+        }
+
+        public void resetCompensatedSteps() {
+            if (compensatedSteps != null) {
+                compensatedSteps.clear();
+            }
         }
     }
 }
