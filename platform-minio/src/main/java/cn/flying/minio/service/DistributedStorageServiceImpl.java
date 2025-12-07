@@ -18,6 +18,9 @@ import org.slf4j.Logger;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.InputStream;
@@ -48,8 +51,11 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     //预签名链接有效期
     private final static Integer EXPIRY_HOURS = 24;
 
-    // 缓存 Bucket 是否存在，减少重复检查开销
-    private final ConcurrentHashMap<String, Boolean> bucketExistenceCache = new ConcurrentHashMap<>();
+    // 缓存 Bucket 是否存在，减少重复检查开销（带TTL自动过期）
+    private final Cache<String, Boolean> bucketExistenceCache = Caffeine.newBuilder()
+        .expireAfterWrite(30, TimeUnit.MINUTES)
+        .maximumSize(256)
+        .build();
 
 
     public Result<List<byte[]>> getFileListByHash(List<String> filePathList, List<String> fileHashList) {
@@ -264,7 +270,68 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
 
     @Override
     public Result<Boolean> deleteFile(Map<String, String> fileContent) {
-        return null;
+        if (CollectionUtils.isEmpty(fileContent)) {
+            log.warn("deleteFile called with empty fileContent");
+            return Result.success(true);
+        }
+
+        List<String> errors = new ArrayList<>();
+        for (Map.Entry<String, String> entry : fileContent.entrySet()) {
+            String fileHash = entry.getKey();
+            String filePath = entry.getValue();
+
+            try {
+                ParsedPath parsedPath = parseLogicalPath(filePath, fileHash);
+                if (parsedPath == null) {
+                    errors.add(fileHash + ": invalid path format");
+                    continue;
+                }
+
+                List<String> physicalNodes = getPhysicalNodePair(parsedPath.logicNodeName);
+                if (physicalNodes == null || physicalNodes.size() != 2) {
+                    errors.add(fileHash + ": invalid physical node pair");
+                    continue;
+                }
+
+                // Delete from both physical nodes
+                for (String nodeName : physicalNodes) {
+                    try {
+                        deleteFromNode(nodeName, parsedPath.objectName);
+                    } catch (Exception e) {
+                        log.warn("Failed to delete {} from node {}: {}", parsedPath.objectName, nodeName, e.getMessage());
+                    }
+                }
+                log.info("Deleted file {} from logical node {}", fileHash, parsedPath.logicNodeName);
+            } catch (Exception e) {
+                log.error("Failed to delete file {}: {}", fileHash, e.getMessage());
+                errors.add(fileHash + ": " + e.getMessage());
+            }
+        }
+
+        if (!errors.isEmpty()) {
+            log.warn("Some files failed to delete: {}", errors);
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR, false);
+        }
+        return Result.success(true);
+    }
+
+    private void deleteFromNode(String nodeName, String objectName) throws Exception {
+        if (!minioMonitor.isNodeOnline(nodeName)) {
+            log.warn("Node '{}' is offline, skipping delete for '{}'", nodeName, objectName);
+            return;
+        }
+        MinioClient client = clientManager.getClient(nodeName);
+        if (client == null) {
+            log.warn("Cannot get MinioClient for node {}", nodeName);
+            return;
+        }
+
+        RemoveObjectArgs args = RemoveObjectArgs.builder()
+            .bucket(nodeName)
+            .object(objectName)
+            .build();
+        client.removeObject(args);
+        log.debug("Deleted object '{}' from node '{}'", objectName, nodeName);
     }
 
     // --- 内部辅助方法 ---
@@ -618,7 +685,8 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      */
     private void ensureBucketExists(MinioClient client, String nodeName, String bucketName) throws RuntimeException {
         String cacheKey = nodeName + ":" + bucketName;
-        if (Boolean.TRUE.equals(bucketExistenceCache.get(cacheKey))) {
+        Boolean cached = bucketExistenceCache.getIfPresent(cacheKey);
+        if (Boolean.TRUE.equals(cached)) {
             return;
         }
 
@@ -642,9 +710,29 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 bucketExistenceCache.put(cacheKey, true);
             }
         } catch (Exception checkError) {
-            log.error("检查节点“{}”上“{}”的存储桶是否存在时出错：{}", bucketName, nodeName, checkError.getMessage());
+            log.error("检查节点'{}'上的存储桶'{}'是否存在时出错：{}", nodeName, bucketName, checkError.getMessage());
             // 无法检查或创建 Bucket 是严重问题
             throw new RuntimeException("Failed to check/ensure bucket '" + bucketName + "' on node '" + nodeName + "': " + checkError.getMessage(), checkError);
         }
+    }
+
+    @Override
+    public Result<Map<String, Boolean>> getClusterHealth() {
+        Set<String> onlineNodes = minioMonitor.getOnlineNodes();
+        Map<String, Boolean> nodeStatus = new LinkedHashMap<>();
+
+        List<LogicNodeMapping> mappings = minioProperties.getLogicalMapping();
+        if (!CollectionUtils.isEmpty(mappings)) {
+            for (LogicNodeMapping mapping : mappings) {
+                List<String> pair = mapping.getPhysicalNodePair();
+                if (pair != null) {
+                    for (String nodeName : pair) {
+                        nodeStatus.put(nodeName, onlineNodes.contains(nodeName));
+                    }
+                }
+            }
+        }
+
+        return Result.success(nodeStatus);
     }
 }

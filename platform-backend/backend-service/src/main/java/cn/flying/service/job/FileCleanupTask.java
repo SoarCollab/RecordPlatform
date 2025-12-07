@@ -9,14 +9,18 @@ import cn.flying.service.remote.FileRemoteClient;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Scheduled task for cleaning up soft-deleted files from storage and blockchain.
@@ -31,6 +35,9 @@ public class FileCleanupTask {
 
     @Resource
     private FileRemoteClient fileRemoteClient;
+
+    @Resource(name = "cacheManager")
+    private CacheManager cacheManager;
 
     @Value("${file.cleanup.retention-days:30}")
     private int retentionDays;
@@ -60,10 +67,12 @@ public class FileCleanupTask {
         log.info("Found {} files pending cleanup", pendingFiles.size());
         int successCount = 0;
         int failCount = 0;
+        Set<Long> affectedUserIds = new HashSet<>();
 
         for (File file : pendingFiles) {
             try {
                 cleanupSingleFile(file);
+                affectedUserIds.add(file.getUid());
                 successCount++;
             } catch (Exception e) {
                 failCount++;
@@ -72,7 +81,18 @@ public class FileCleanupTask {
             }
         }
 
+        evictCachesForUsers(affectedUserIds);
         log.info("File cleanup completed: success={}, failed={}", successCount, failCount);
+    }
+
+    private void evictCachesForUsers(Set<Long> userIds) {
+        Cache userFilesCache = cacheManager.getCache("userFiles");
+        if (userFilesCache != null && !userIds.isEmpty()) {
+            for (Long userId : userIds) {
+                userFilesCache.evict(userId);
+            }
+            log.debug("Evicted cache for {} users", userIds.size());
+        }
     }
 
     private void cleanupSingleFile(File file) {

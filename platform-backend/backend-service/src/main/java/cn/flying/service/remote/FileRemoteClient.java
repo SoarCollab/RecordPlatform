@@ -125,4 +125,26 @@ public class FileRemoteClient {
         log.error("BlockChain service getSharedFiles failed, code={}", sharingCode, t);
         return new Result<>(ResultEnum.GET_USER_SHARE_FILE_ERROR, null);
     }
+
+    @CircuitBreaker(name = "blockChainService", fallbackMethod = "deleteFilesFallback")
+    @Retry(name = "blockChainService")
+    public Result<Boolean> deleteFiles(String userId, List<String> fileHashList) {
+        return blockChainService.deleteFiles(userId, fileHashList);
+    }
+
+    private Result<Boolean> deleteFilesFallback(String userId, List<String> fileHashList, Throwable t) {
+        log.error("BlockChain service deleteFiles failed, userId={}", userId, t);
+        return new Result<>(ResultEnum.BLOCKCHAIN_ERROR, false);
+    }
+
+    @CircuitBreaker(name = "storageService", fallbackMethod = "deleteStorageFileFallback")
+    @Retry(name = "storageService")
+    public Result<Boolean> deleteStorageFile(Map<String, String> fileContent) {
+        return storageService.deleteFile(fileContent);
+    }
+
+    private Result<Boolean> deleteStorageFileFallback(Map<String, String> fileContent, Throwable t) {
+        log.error("Storage service deleteFile failed", t);
+        return new Result<>(ResultEnum.FILE_SERVICE_ERROR, false);
+    }
 }
