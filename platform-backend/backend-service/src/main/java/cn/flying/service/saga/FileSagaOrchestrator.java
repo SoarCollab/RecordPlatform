@@ -3,6 +3,7 @@ package cn.flying.service.saga;
 import cn.flying.api.utils.ResultUtils;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.lock.DistributedLock;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.entity.FileSaga;
 import cn.flying.dao.entity.FileSagaStatus;
@@ -13,6 +14,8 @@ import cn.flying.service.outbox.OutboxService;
 import cn.flying.service.remote.FileRemoteClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -22,8 +25,9 @@ import java.nio.file.Files;
 import java.util.*;
 
 /**
- * Saga orchestrator for file upload distributed transactions.
- * Coordinates MinIO upload + blockchain storage with compensation on failure.
+ * 文件上传 Saga 编排器。
+ * 协调 MinIO 上传 + 区块链存储的分布式事务，失败时自动补偿。
+ * 支持指数退避重试策略。
  */
 @Slf4j
 @Service
@@ -34,11 +38,15 @@ public class FileSagaOrchestrator {
     private final FileRemoteClient fileRemoteClient;
     private final OutboxService outboxService;
 
-    private static final int MAX_COMPENSATION_RETRIES = 3;
+    @Value("${saga.compensation.max-retries:5}")
+    private int maxCompensationRetries;
+
+    @Value("${saga.compensation.batch-size:50}")
+    private int compensationBatchSize;
 
     /**
-     * Execute file upload with saga pattern.
-     * If blockchain storage fails, automatically compensates by deleting MinIO data.
+     * 执行文件上传 Saga。
+     * 区块链存储失败时自动补偿删除 MinIO 数据。
      */
     @Transactional(rollbackFor = Exception.class)
     public FileUploadResult executeUpload(FileUploadCommand cmd) {
@@ -54,10 +62,68 @@ public class FileSagaOrchestrator {
             return FileUploadResult.success(chainResult.get(0), chainResult.get(1));
 
         } catch (Exception ex) {
-            log.error("Saga execution failed for requestId={}", cmd.getRequestId(), ex);
+            log.error("Saga 执行失败: requestId={}", cmd.getRequestId(), ex);
             handleFailure(saga, cmd, ex);
             throw ex;
         }
+    }
+
+    /**
+     * 定时处理待补偿重试的 Saga。
+     * 使用分布式锁防止多实例重复执行。
+     */
+    @Scheduled(fixedDelayString = "${saga.compensation.poll-interval-ms:30000}")
+    @DistributedLock(key = "saga:compensation:retry", leaseTime = 300)
+    public void processRetriableSagas() {
+        List<FileSaga> pendingSagas = sagaMapper.selectPendingCompensation(compensationBatchSize);
+        if (pendingSagas.isEmpty()) {
+            return;
+        }
+
+        log.info("发现 {} 个待重试补偿的 Saga", pendingSagas.size());
+
+        for (FileSaga saga : pendingSagas) {
+            if (!saga.isRetryDue()) {
+                continue;
+            }
+
+            try {
+                retryCompensation(saga);
+            } catch (Exception e) {
+                log.error("Saga 补偿重试失败: id={}", saga.getId(), e);
+            }
+        }
+    }
+
+    /**
+     * 重试单个 Saga 的补偿操作
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void retryCompensation(FileSaga saga) {
+        log.info("开始重试 Saga 补偿: id={}, retryCount={}", saga.getId(), saga.getRetryCount());
+
+        saga.markStatus(FileSagaStatus.COMPENSATING);
+        sagaMapper.updateById(saga);
+
+        try {
+            compensate(saga);
+            saga.markStatus(FileSagaStatus.COMPENSATED);
+            log.info("Saga 补偿成功: id={}", saga.getId());
+        } catch (Exception e) {
+            saga.recordError(e);
+
+            if (saga.isMaxRetriesExceeded(maxCompensationRetries)) {
+                saga.markStatus(FileSagaStatus.FAILED);
+                log.error("Saga 补偿超过最大重试次数，标记为失败: id={}, retryCount={}",
+                        saga.getId(), saga.getRetryCount());
+            } else {
+                saga.scheduleNextRetry()
+                    .markStatus(FileSagaStatus.PENDING_COMPENSATION);
+                log.warn("Saga 补偿失败，安排下次重试: id={}, nextRetryAt={}",
+                        saga.getId(), saga.getNextRetryAt());
+            }
+        }
+        sagaMapper.updateById(saga);
     }
 
     private FileSaga startOrResumeSaga(FileUploadCommand cmd) {
@@ -68,10 +134,10 @@ public class FileSagaOrchestrator {
                 sagaMapper.updateById(existing);
             }
             if (FileSagaStatus.SUCCEEDED.name().equals(existing.getStatus())) {
-                throw new GeneralException(ResultEnum.FAIL, "Upload already completed");
+                throw new GeneralException(ResultEnum.FAIL, "上传已完成");
             }
             if (FileSagaStatus.RUNNING.name().equals(existing.getStatus())) {
-                log.info("Resuming saga for requestId={}", cmd.getRequestId());
+                log.info("恢复 Saga: requestId={}", cmd.getRequestId());
                 return existing;
             }
         }
@@ -108,15 +174,15 @@ public class FileSagaOrchestrator {
             try (InputStream in = Files.newInputStream(chunkFile.toPath())) {
                 chunkData = in.readAllBytes();
             } catch (IOException e) {
-                log.error("Failed to read chunk: index={}, path={}", i, chunkFile.getPath(), e);
+                log.error("读取文件块失败: index={}, path={}", i, chunkFile.getPath(), e);
                 throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
             }
 
             Result<String> result = fileRemoteClient.storeFileChunk(chunkData, chunkHash);
             String logicalPath = ResultUtils.getData(result);
             if (logicalPath == null) {
-                log.error("MinIO upload failed: index={}, hash={}", i, chunkHash);
-                throw new GeneralException(ResultEnum.File_UPLOAD_ERROR);
+                log.error("MinIO 上传失败: index={}, hash={}", i, chunkHash);
+                throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR);
             }
             storedPaths.put(chunkHash, logicalPath);
         }
@@ -141,7 +207,7 @@ public class FileSagaOrchestrator {
 
         List<String> res = ResultUtils.getData(result);
         if (res == null || res.size() != 2) {
-            throw new GeneralException(ResultEnum.FISCO_SERVICE_ERROR, "Blockchain store returned invalid result");
+            throw new GeneralException(ResultEnum.FISCO_SERVICE_ERROR, "区块链存储返回无效结果");
         }
 
         return res;
@@ -170,38 +236,34 @@ public class FileSagaOrchestrator {
         sagaMapper.updateById(saga);
 
         try {
-            compensate(saga, cmd);
+            compensate(saga);
             saga.markStatus(FileSagaStatus.COMPENSATED);
         } catch (Exception compEx) {
-            log.error("Compensation failed for saga={}", saga.getId(), compEx);
-            if (saga.getRetryCount() >= MAX_COMPENSATION_RETRIES) {
-                saga.markStatus(FileSagaStatus.FAILED);
-            }
+            log.error("补偿失败: saga={}", saga.getId(), compEx);
+            // 使用指数退避安排下次重试
+            saga.scheduleNextRetry()
+                .markStatus(FileSagaStatus.PENDING_COMPENSATION);
+            log.info("安排补偿重试: id={}, nextRetryAt={}", saga.getId(), saga.getNextRetryAt());
         }
         sagaMapper.updateById(saga);
     }
 
-    private void compensate(FileSaga saga, FileUploadCommand cmd) {
+    private void compensate(FileSaga saga) {
         if (!saga.reachedStep(FileSagaStep.MINIO_UPLOADED)) {
-            log.info("No MinIO data to compensate for saga={}", saga.getId());
+            log.info("无需补偿 MinIO 数据: saga={}", saga.getId());
             return;
         }
 
-        log.info("Compensating MinIO uploads for saga={}", saga.getId());
+        log.info("开始补偿 MinIO 上传: saga={}", saga.getId());
 
-        try {
-            String payloadJson = saga.getPayload();
-            if (payloadJson != null) {
-                @SuppressWarnings("unchecked")
-                Map<String, String> storedPaths = JsonConverter.parse(payloadJson, Map.class);
-                if (storedPaths != null && !storedPaths.isEmpty()) {
-                    fileRemoteClient.deleteStorageFile(storedPaths);
-                }
+        String payloadJson = saga.getPayload();
+        if (payloadJson != null) {
+            @SuppressWarnings("unchecked")
+            Map<String, String> storedPaths = JsonConverter.parse(payloadJson, Map.class);
+            if (storedPaths != null && !storedPaths.isEmpty()) {
+                fileRemoteClient.deleteStorageFile(storedPaths);
             }
-            log.info("MinIO compensation completed for saga={}", saga.getId());
-        } catch (Exception e) {
-            log.error("MinIO compensation failed for saga={}", saga.getId(), e);
-            throw e;
         }
+        log.info("MinIO 补偿完成: saga={}", saga.getId());
     }
 }
