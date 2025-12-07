@@ -189,7 +189,8 @@ public class JwtUtils {
      * @return 是否通过频率检测
      */
     private boolean frequencyCheck(Long userId){
-        String key = Const.JWT_FREQUENCY + userId;
+        // 使用租户隔离的 Key
+        String key = TenantKeyUtils.tenantKey(Const.JWT_FREQUENCY + userId);
         return utils.limitOnceUpgradeCheck(key, LIMIT_FREQUENCY, LIMIT_BASE, LIMIT_UPGRADE);
     }
 
@@ -217,7 +218,9 @@ public class JwtUtils {
         }
         Date now = new Date();
         long expire = Math.max(time.getTime() - now.getTime(), 0);
-        template.opsForValue().set(Const.JWT_BLACK_LIST + uuid, "", expire, TimeUnit.MILLISECONDS);
+        // 使用租户隔离的 Key
+        String key = TenantKeyUtils.tenantKey(Const.JWT_BLACK_LIST + uuid);
+        template.opsForValue().set(key, "", expire, TimeUnit.MILLISECONDS);
         return true;
     }
 
@@ -227,6 +230,8 @@ public class JwtUtils {
      * @return 是否操作成功
      */
     private boolean isInvalidToken(String uuid){
-        return template.hasKey(Const.JWT_BLACK_LIST + uuid);
+        // 使用租户隔离的 Key
+        String key = TenantKeyUtils.tenantKey(Const.JWT_BLACK_LIST + uuid);
+        return Boolean.TRUE.equals(template.hasKey(key));
     }
 }
