@@ -5,11 +5,16 @@ import cn.flying.fisco_bcos.model.bo.*;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.BlockChainService;
+import cn.flying.platformapi.request.DeleteFilesRequest;
+import cn.flying.platformapi.request.ShareFilesRequest;
+import cn.flying.platformapi.request.StoreFileRequest;
+import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.*;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.apidocs.annotations.ApiDoc;
 import org.apache.dubbo.config.annotation.DubboService;
+import io.github.resilience4j.retry.annotation.Retry;
 import org.fisco.bcos.sdk.v3.client.protocol.model.JsonTransactionResponse;
 import org.fisco.bcos.sdk.v3.client.protocol.response.BcosTransaction;
 import org.fisco.bcos.sdk.v3.client.protocol.response.BcosTransactionReceipt;
@@ -18,31 +23,31 @@ import org.fisco.bcos.sdk.v3.model.TransactionReceipt;
 import org.fisco.bcos.sdk.v3.transaction.model.dto.CallResponse;
 import org.fisco.bcos.sdk.v3.transaction.model.dto.TransactionResponse;
 import cn.flying.fisco_bcos.utils.Convert;
-import org.springframework.beans.BeanUtils;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 /**
- * 区块链综合服务实现 v1.0.0
+ * 区块链综合服务实现 v2.0.0
  * 提供文件存证、查询、删除、分享等区块链操作。
  */
 @Slf4j
 @DubboService(version = BlockChainService.VERSION)
-public class BlockChainServiceImpl implements BlockChainService{
+public class BlockChainServiceImpl implements BlockChainService {
 
     @Resource
     private SharingService sharingService;
 
+    @Override
+    @Retry(name = "blockchain")
     @ApiDoc(value = "分享文件")
-    public Result<String> shareFiles(String uploader, List<String> fileHash, Integer maxAccesses) {
+    public Result<String> shareFiles(ShareFilesRequest request) {
         try {
             List<byte[]> fileHashArr = new ArrayList<>();
-            fileHash.forEach(hash -> fileHashArr.add(Convert.hexTobyte(hash)));
+            request.getFileHashList().forEach(hash -> fileHashArr.add(Convert.hexTobyte(hash)));
             TransactionResponse response = sharingService.shareFiles(
-                    new SharingShareFilesInputBO(uploader, fileHashArr, maxAccesses)
+                    new SharingShareFilesInputBO(request.getUploader(), fileHashArr, request.getMaxAccesses())
             );
 
             if (response != null) {
@@ -64,15 +69,15 @@ public class BlockChainServiceImpl implements BlockChainService{
         }
     }
 
+    @Override
+    @Retry(name = "blockchain")
     @ApiDoc(value = "获取分享文件")
     public Result<SharingVO> getSharedFiles(String shareCode) {
         try {
             TransactionResponse response = sharingService.getSharedFiles(new SharingGetSharedFilesInputBO(shareCode));
             if (response != null) {
-                // 检查合约执行是否成功
                 if (response.getReturnCode() != 0) {
-                    // 返回合约的错误信息
-                    return Result.error(ResultEnum.GET_USER_SHARE_FILE_ERROR,null);
+                    return Result.error(ResultEnum.GET_USER_SHARE_FILE_ERROR, null);
                 }
 
                 if (response.getReturnObject() instanceof List<?> returnList) {
@@ -80,11 +85,9 @@ public class BlockChainServiceImpl implements BlockChainService{
                         String uploader = String.valueOf(returnList.getFirst());
                         List<String> fileList = new ArrayList<>();
 
-                        // 处理文件列表
                         if (returnList.getLast() instanceof List<?> files) {
                             for (Object file : files) {
                                 if (file instanceof List<?> fileInfo && fileInfo.size() == 6) {
-                                    // 安全类型转换：使用 Optional + instanceof 避免 ClassCastException
                                     String hexHash = Optional.ofNullable(fileInfo.get(4))
                                             .filter(byte[].class::isInstance)
                                             .map(byte[].class::cast)
@@ -98,55 +101,64 @@ public class BlockChainServiceImpl implements BlockChainService{
                             }
                         }
 
-                        return Result.success(new SharingVO(
-                                uploader,
-                                fileList
-                        ));
+                        return Result.success(SharingVO.builder()
+                                .uploader(uploader)
+                                .fileHashList(fileList)
+                                .build());
                     }
-                    return Result.error(ResultEnum.INVALID_RETURN_VALUE,null);
+                    return Result.error(ResultEnum.INVALID_RETURN_VALUE, null);
                 }
-                return Result.error(ResultEnum.INVALID_RETURN_VALUE,null);
+                return Result.error(ResultEnum.INVALID_RETURN_VALUE, null);
             }
-            return Result.error(ResultEnum.INVALID_RETURN_VALUE,null);
+            return Result.error(ResultEnum.INVALID_RETURN_VALUE, null);
         } catch (Exception e) {
             log.error("getSharedFiles error:", e);
-            return Result.error(ResultEnum.GET_USER_SHARE_FILE_ERROR,null);
+            return Result.error(ResultEnum.GET_USER_SHARE_FILE_ERROR, null);
         }
     }
 
+    @Override
+    @Retry(name = "blockchain")
     @ApiDoc(value = "保存文件")
-    public Result<List<String>> storeFile(String uploader, String fileName, String param, String content) {
+    public Result<StoreFileResponse> storeFile(StoreFileRequest request) {
         try {
-            List<String> res=new ArrayList<>();
-            TransactionResponse response = sharingService.storeFile(new SharingStoreFileInputBO(fileName, uploader, content, param));
+            TransactionResponse response = sharingService.storeFile(
+                    new SharingStoreFileInputBO(request.getFileName(), request.getUploader(),
+                            request.getContent(), request.getParam()));
             if (response != null) {
                 TransactionReceipt receipt = response.getTransactionReceipt();
-                if (receipt == null|| receipt.getTransactionHash() == null) {
-                    return Result.error(ResultEnum.BLOCKCHAIN_ERROR,null);
+                if (receipt == null || receipt.getTransactionHash() == null) {
+                    return Result.error(ResultEnum.BLOCKCHAIN_ERROR, null);
                 }
                 String transactionHash = receipt.getTransactionHash();
-                res.add(transactionHash.startsWith("0x") ? transactionHash.substring(2) : transactionHash);
+                transactionHash = transactionHash.startsWith("0x") ? transactionHash.substring(2) : transactionHash;
+
                 if (response.getReturnCode() == 0) {
                     Object returnValue = response.getReturnObject();
                     if (returnValue instanceof List<?> returnList && !returnList.isEmpty()) {
                         Object firstValue = returnList.getFirst();
                         if (firstValue instanceof byte[]) {
                             String hexHash = Convert.bytesToHex((byte[]) firstValue);
-                            res.add(hexHash.startsWith("0x") ? hexHash.substring(2) : hexHash);
-                            return Result.success(res);
+                            hexHash = hexHash.startsWith("0x") ? hexHash.substring(2) : hexHash;
 
+                            return Result.success(StoreFileResponse.builder()
+                                    .transactionHash(transactionHash)
+                                    .fileHash(hexHash)
+                                    .build());
                         }
                     }
-                    return Result.error(ResultEnum.INVALID_RETURN_VALUE,null);
+                    return Result.error(ResultEnum.INVALID_RETURN_VALUE, null);
                 }
             }
-            return Result.error(ResultEnum.CONTRACT_ERROR,null);
+            return Result.error(ResultEnum.CONTRACT_ERROR, null);
         } catch (Exception e) {
             log.error("storeFile error:", e);
-            return Result.error(ResultEnum.GET_USER_FILE_ERROR,null);
+            return Result.error(ResultEnum.GET_USER_FILE_ERROR, null);
         }
     }
 
+    @Override
+    @Retry(name = "blockchain")
     @ApiDoc(value = "获取用户所有文件列表")
     public Result<List<FileVO>> getUserFiles(String uploader) {
         try {
@@ -158,7 +170,6 @@ public class BlockChainServiceImpl implements BlockChainService{
                 if (firstElement instanceof List<?> filesList) {
                     for (Object file : filesList) {
                         if (file instanceof List<?> fileInfo && fileInfo.size() == 2) {
-                            // 安全类型转换：使用 Optional + instanceof 避免 ClassCastException
                             String hexHash = Optional.ofNullable(fileInfo.get(1))
                                     .filter(byte[].class::isInstance)
                                     .map(byte[].class::cast)
@@ -166,10 +177,10 @@ public class BlockChainServiceImpl implements BlockChainService{
                                     .map(hash -> hash.startsWith("0x") ? hash.substring(2) : hash)
                                     .orElse("");
                             if (!hexHash.isEmpty()) {
-                                fileList.add(new FileVO(
-                                        String.valueOf(fileInfo.get(0)),
-                                        hexHash
-                                ));
+                                fileList.add(FileVO.builder()
+                                        .fileName(String.valueOf(fileInfo.get(0)))
+                                        .fileHash(hexHash)
+                                        .build());
                             }
                         }
                     }
@@ -179,10 +190,12 @@ public class BlockChainServiceImpl implements BlockChainService{
             return Result.success(fileList);
         } catch (Exception e) {
             log.error("getUserFiles error:", e);
-            return Result.error(ResultEnum.GET_USER_FILE_ERROR,null);
+            return Result.error(ResultEnum.GET_USER_FILE_ERROR, null);
         }
     }
 
+    @Override
+    @Retry(name = "blockchain")
     @ApiDoc(value = "获取单个文件")
     public Result<FileDetailVO> getFile(String uploader, String fileHash) {
         try {
@@ -190,7 +203,6 @@ public class BlockChainServiceImpl implements BlockChainService{
             if (response != null && response.getReturnObject() instanceof List<?> returnList && !returnList.isEmpty()) {
                 Object returnValue = returnList.getFirst();
                 if (returnValue instanceof List<?> fileInfo && fileInfo.size() == 6) {
-                    // 获取时间戳
                     long uploadTimeNanos = Long.parseLong(String.valueOf(fileInfo.get(5)));
                     String formattedUploadTime = Convert.timeStampToDate(uploadTimeNanos);
 
@@ -201,82 +213,84 @@ public class BlockChainServiceImpl implements BlockChainService{
                             .content(String.valueOf(fileInfo.get(3)))
                             .fileHash(fileHash)
                             .uploadTime(formattedUploadTime)
-                            .uploadTimestamp(uploadTimeNanos / 1_000_000) // 纳秒转毫秒
+                            .uploadTimestamp(uploadTimeNanos / 1_000_000)
                             .build();
                     return Result.success(fileDetailVO);
                 }
             }
-            return Result.error(ResultEnum.GET_USER_FILE_ERROR,null);
+            return Result.error(ResultEnum.GET_USER_FILE_ERROR, null);
         } catch (Exception e) {
             log.error("getFile error:", e);
-            return Result.error(ResultEnum.GET_USER_FILE_ERROR,null);
+            return Result.error(ResultEnum.GET_USER_FILE_ERROR, null);
         }
     }
 
-    @ApiDoc(value = "删除多个文件")
-    public Result<Boolean> deleteFiles(String uploader, List<String> fileHashList) {
+    @Override
+    @Retry(name = "blockchain")
+    @ApiDoc(value = "批量删除文件")
+    public Result<Boolean> deleteFiles(DeleteFilesRequest request) {
         try {
             List<byte[]> fileHashArr = new ArrayList<>();
-            fileHashList.forEach(hash -> fileHashArr.add(Convert.hexTobyte(hash)));
-            TransactionResponse response = sharingService.deleteFiles(new SharingDeleteFilesInputBO(uploader, fileHashArr));
+            request.getFileHashList().forEach(hash -> fileHashArr.add(Convert.hexTobyte(hash)));
+            TransactionResponse response = sharingService.deleteFiles(
+                    new SharingDeleteFilesInputBO(request.getUploader(), fileHashArr));
 
             if (response != null && response.getReturnCode() == 0) {
                 return Result.success(true);
             }
-            return Result.error(ResultEnum.GET_USER_FILE_ERROR,null);
+            return Result.error(ResultEnum.GET_USER_FILE_ERROR, null);
         } catch (Exception e) {
             log.error("deleteFiles error:", e);
-            return Result.error(ResultEnum.DELETE_USER_FILE_ERROR,null);
+            return Result.error(ResultEnum.DELETE_USER_FILE_ERROR, null);
         }
     }
 
-    @ApiDoc(value = "删除文件")
-    public Result<Boolean> deleteFile(String uploader, String fileHash) {
-        try {
-            TransactionResponse response =  sharingService.deleteFile(new SharingDeleteFileInputBO(uploader, Convert.hexTobyte(fileHash)));
-            if (response != null && response.getReturnCode() == 0) {
-                return Result.success(true);
-            }
-            return Result.error(ResultEnum.DELETE_USER_FILE_ERROR,null);
-        } catch (Exception e) {
-            log.error("deleteFiles error:", e);
-            return Result.error(ResultEnum.DELETE_USER_FILE_ERROR,null);
-        }
-    }
-
+    @Override
+    @Retry(name = "blockchain")
     @ApiDoc(value = "获取当前区块链状态")
     public Result<BlockChainMessage> getCurrentBlockChainMessage() {
         try {
             TotalTransactionCount totalTransactionCount = sharingService.getCurrentBlockChainMessage();
-            BlockChainMessage message=new BlockChainMessage();
-            BeanUtils.copyProperties(totalTransactionCount,message);
+            BlockChainMessage message = new BlockChainMessage();
+            if (totalTransactionCount != null) {
+                TotalTransactionCount.TransactionCountInfo info = totalTransactionCount.getTotalTransactionCount();
+                if (info != null) {
+                    if (info.getBlockNumber() != null) {
+                        message.setBlockNumber(new java.math.BigInteger(info.getBlockNumber()).longValue());
+                    }
+                    if (info.getTransactionCount() != null) {
+                        message.setTransactionCount(new java.math.BigInteger(info.getTransactionCount()).longValue());
+                    }
+                    if (info.getFailedTransactionCount() != null) {
+                        message.setFailedTransactionCount(new java.math.BigInteger(info.getFailedTransactionCount()).longValue());
+                    }
+                }
+            }
             return Result.success(message);
-        }catch (Exception e){
+        } catch (Exception e) {
             log.error("getCurrentBlockChainMessage error:", e);
-            return Result.error(ResultEnum.BLOCKCHAIN_ERROR,null);
+            return Result.error(ResultEnum.BLOCKCHAIN_ERROR, null);
         }
     }
-    
+
+    @Override
+    @Retry(name = "blockchain")
     @ApiDoc(value = "根据交易哈希获取交易详情")
     public Result<TransactionVO> getTransactionByHash(String transactionHash) {
         try {
-            // 获取交易信息
             BcosTransaction transaction = sharingService.getTransactionByHash(transactionHash);
             if (transaction == null || transaction.getResult() == null) {
                 return Result.error(ResultEnum.TRANSACTION_NOT_FOUND, null);
             }
-            
-            // 获取交易回执
+
             BcosTransactionReceipt receipt = sharingService.getTransactionReceipt(transactionHash);
             if (receipt == null || receipt.getResult() == null) {
                 return Result.error(ResultEnum.TRANSACTION_RECEIPT_NOT_FOUND, null);
             }
-            
-            // 解析交易信息
+
             JsonTransactionResponse result = transaction.getResult();
             result.setAbi(ContractConstants.SharingAbi);
-            
-            // 构建响应VO对象
+
             TransactionVO transactionVO = new TransactionVO(
                     result.getHash(),
                     result.getChainID(),
@@ -288,7 +302,7 @@ public class BlockChainServiceImpl implements BlockChainService{
                     result.getSignature(),
                     result.getImportTime()
             );
-            
+
             return Result.success(transactionVO);
         } catch (Exception e) {
             log.error("getTransactionByHash error:", e);
