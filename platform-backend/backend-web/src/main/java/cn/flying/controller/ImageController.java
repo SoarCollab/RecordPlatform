@@ -29,7 +29,7 @@ import java.io.IOException;
 @Slf4j
 @RestController
 @Tag(name = "图片上传下载相关", description = "包括头像、图片等文件的上传下载操作。")
-@RequestMapping("/api/image")
+@RequestMapping("/api/v1/images")
 public class ImageController {
     @Resource
     ImageService imageService;
@@ -107,7 +107,8 @@ public class ImageController {
      * @throws Exception 异常
      */
     private void fetchImage(HttpServletRequest request, HttpServletResponse response) throws Exception {
-        String imagePath = request.getServletPath().substring(25);
+        // 路径格式: /api/v1/images/download/images/{imagePath}
+        String imagePath = request.getServletPath().substring(28);
 
         try (ServletOutputStream outputStream = response.getOutputStream()) {
             if (imagePath.length() <= 13) {

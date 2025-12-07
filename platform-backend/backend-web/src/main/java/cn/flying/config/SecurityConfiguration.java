@@ -57,19 +57,20 @@ public class SecurityConfiguration {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         return http
                 .authorizeHttpRequests(conf -> conf
-                        .requestMatchers("/api/auth/**", "/error").permitAll()
-                        .requestMatchers("/api/file/download/images/**").permitAll()
+                        .requestMatchers("/api/v1/auth/**", "/error").permitAll()
+                        .requestMatchers("/api/v1/images/download/images/**").permitAll()
+                        .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/doc.html/**","/webjars/**","/favicon.ico").permitAll()
                         .anyRequest().hasAnyRole(Const.ROLE_DEFAULT,Const.ROLE_ADMINISTER,Const.ROLE_MONITOR)
                 )
                 .formLogin(conf -> conf
-                        .loginProcessingUrl("/api/auth/login")
+                        .loginProcessingUrl("/api/v1/auth/login")
                         .failureHandler(this::handleProcess)
                         .successHandler(this::handleProcess)
                         .permitAll()
                 )
                 .logout(conf -> conf
-                        .logoutUrl("/api/auth/logout")
+                        .logoutUrl("/api/v1/auth/logout")
                         .logoutSuccessHandler(this::onLogoutSuccess)
                 )
                 .exceptionHandling(conf -> conf
@@ -111,7 +112,7 @@ public class SecurityConfiguration {
             
             // 确保使用Long类型的用户ID
             Long userId = account.getId();
-            String jwt = utils.createJwt(user, account.getUsername(), userId);
+            String jwt = utils.createJwt(user, account.getUsername(), userId, account.getTenantId());
             
             if(jwt == null) {
                 writer.write(Result.error(ResultEnum.PERMISSION_LIMIT).toJson());

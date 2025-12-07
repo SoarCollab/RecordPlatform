@@ -25,7 +25,7 @@ import org.springframework.web.multipart.MultipartFile;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/file/uploader")
+@RequestMapping("/api/v1/files/upload")
 @Tag(name = "文件分片上传相关接口", description = "包括文件开始上传、检查上传状态、暂停上传、取消上传等操作。")
 public class FileUploadController {
 
