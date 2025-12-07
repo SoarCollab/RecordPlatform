@@ -40,6 +40,10 @@ public class Account implements BaseData {
     private String avatar;
 
     @TableField(fill = FieldFill.INSERT)
+    @Schema(description = "租户ID")
+    private Long tenantId;
+
+    @TableField(fill = FieldFill.INSERT)
     @Schema(description = "注册时间")
     Date registerTime;
 
