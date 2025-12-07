@@ -4,9 +4,9 @@
 
     <property name="SERVICE_NAME" value="record-platform"/>
     <property name="CONSOLE_LOG_PATTERN"
-              value="%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p})  %clr([%15.15t]){faint} %clr([tid=%tid req=%X{reqId:-system} mdc=%X{traceId:-}]){faint} %clr(--){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
+              value="%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p})  %clr([%15.15t]){faint} %clr([tid=%tid tenant=%X{tenantId:-0} trace=%X{traceId:-}]){faint} %clr(--){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
     <property name="FILE_LOG_PATTERN"
-              value="%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} ${PID:- } --- [%t] [tid=%tid req=%X{reqId:-system} mdc=%X{traceId:-}] %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
+              value="%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} ${PID:- } --- [%t] [tid=%tid tenant=%X{tenantId:-0} trace=%X{traceId:-}] %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
 
     <!-- Console Appender - for all environments -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
@@ -35,15 +35,36 @@
     <!-- JSON File Appender with LogstashEncoder - for production -->
     <appender name="JSON_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-            <customFields>{"service":"${SERVICE_NAME}"}</customFields>
+            <customFields>{"service":"${SERVICE_NAME}","env":"${spring.profiles.active:-unknown}"}</customFields>
+            <!-- MDC fields for tracing and multi-tenancy -->
             <includeMdcKeyName>traceId</includeMdcKeyName>
             <includeMdcKeyName>spanId</includeMdcKeyName>
             <includeMdcKeyName>tid</includeMdcKeyName>
             <includeMdcKeyName>userId</includeMdcKeyName>
+            <includeMdcKeyName>userRole</includeMdcKeyName>
+            <includeMdcKeyName>tenantId</includeMdcKeyName>
             <includeMdcKeyName>reqId</includeMdcKeyName>
             <includeMdcKeyName>fileHash</includeMdcKeyName>
+            <includeMdcKeyName>sagaId</includeMdcKeyName>
+            <!-- Field naming for ELK compatibility -->
+            <fieldNames>
+                <timestamp>@timestamp</timestamp>
+                <message>msg</message>
+                <thread>thread</thread>
+                <level>level</level>
+                <logger>logger</logger>
+                <stackTrace>stack_trace</stackTrace>
+            </fieldNames>
             <timeZone>Asia/Shanghai</timeZone>
             <timestampPattern>yyyy-MM-dd'T'HH:mm:ss.SSSZ</timestampPattern>
+            <throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter">
+                <maxDepthPerThrowable>30</maxDepthPerThrowable>
+                <maxLength>2048</maxLength>
+                <shortenedClassNameLength>20</shortenedClassNameLength>
+                <exclude>sun\.reflect\..*\.invoke.*</exclude>
+                <exclude>net\.sf\.cglib\.proxy\.MethodProxy\.invoke</exclude>
+                <rootCauseFirst>true</rootCauseFirst>
+            </throwableConverter>
         </encoder>
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
             <FileNamePattern>log/%d{yyyy-MM-dd}-spring-%i.json</FileNamePattern>
@@ -64,8 +85,11 @@
     <!-- Production: JSON logs + Console -->
     <springProfile name="prod">
         <logger name="cn.flying.common.aspect" level="WARN"/>
+        <logger name="cn.flying.common.lock" level="INFO"/>
         <logger name="org.springframework.aop" level="WARN"/>
         <logger name="org.apache.dubbo" level="WARN"/>
+        <logger name="org.redisson" level="WARN"/>
+        <logger name="io.netty" level="WARN"/>
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="ASYNC_JSON"/>
@@ -75,6 +99,7 @@
     <!-- Development: Text file logs + Console -->
     <springProfile name="dev">
         <logger name="cn.flying.common.aspect" level="INFO"/>
+        <logger name="cn.flying.common.lock" level="DEBUG"/>
         <logger name="org.springframework.aop" level="INFO"/>
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
@@ -82,11 +107,15 @@
         </root>
     </springProfile>
 
-    <!-- Local: Console only -->
+    <!-- Local: Console + File with debug -->
     <springProfile name="local">
         <logger name="cn.flying.common.aspect" level="DEBUG"/>
+        <logger name="cn.flying.common.lock" level="DEBUG"/>
+        <logger name="cn.flying.service.saga" level="DEBUG"/>
+        <logger name="cn.flying.health" level="DEBUG"/>
         <logger name="org.springframework.aop" level="INFO"/>
         <logger name="org.apache.dubbo" level="INFO"/>
+        <logger name="org.redisson" level="INFO"/>
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="FILE"/>
