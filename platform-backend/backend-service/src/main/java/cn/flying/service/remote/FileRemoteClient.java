@@ -4,6 +4,10 @@ import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.external.DistributedStorageService;
+import cn.flying.platformapi.request.DeleteFilesRequest;
+import cn.flying.platformapi.request.ShareFilesRequest;
+import cn.flying.platformapi.request.StoreFileRequest;
+import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.SharingVO;
 import cn.flying.platformapi.response.TransactionVO;
@@ -26,18 +30,6 @@ public class FileRemoteClient {
     @DubboReference(version = DistributedStorageService.VERSION)
     private DistributedStorageService storageService;
 
-    @Deprecated
-    @CircuitBreaker(name = "storageService", fallbackMethod = "storeFileFallback")
-    @Retry(name = "storageService")
-    public Result<Map<String, String>> storeFile(List<byte[]> fileByteList, List<String> fileHashList) {
-        return storageService.storeFile(fileByteList, fileHashList);
-    }
-
-    private Result<Map<String, String>> storeFileFallback(List<byte[]> fileByteList, List<String> fileHashList, Throwable t) {
-        log.error("Storage service storeFile failed", t);
-        return new Result<>(ResultEnum.FILE_SERVICE_ERROR, null);
-    }
-
     @CircuitBreaker(name = "storageService", fallbackMethod = "storeFileChunkFallback")
     @Retry(name = "storageService")
     public Result<String> storeFileChunk(byte[] fileData, String fileHash) {
@@ -51,12 +43,12 @@ public class FileRemoteClient {
 
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "storeFileOnChainFallback")
     @Retry(name = "blockChainService")
-    public Result<List<String>> storeFileOnChain(String userId, String fileName, String fileParam, String fileContent) {
-        return blockChainService.storeFile(userId, fileName, fileParam, fileContent);
+    public Result<StoreFileResponse> storeFileOnChain(StoreFileRequest request) {
+        return blockChainService.storeFile(request);
     }
 
-    private Result<List<String>> storeFileOnChainFallback(String userId, String fileName, String fileParam, String fileContent, Throwable t) {
-        log.error("BlockChain service storeFile failed, userId={}", userId, t);
+    private Result<StoreFileResponse> storeFileOnChainFallback(StoreFileRequest request, Throwable t) {
+        log.error("BlockChain service storeFile failed, uploader={}", request.getUploader(), t);
         return new Result<>(ResultEnum.BLOCKCHAIN_ERROR, null);
     }
 
@@ -106,12 +98,12 @@ public class FileRemoteClient {
 
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "shareFilesFallback")
     @Retry(name = "blockChainService")
-    public Result<String> shareFiles(String userId, List<String> fileHash, Integer maxAccesses) {
-        return blockChainService.shareFiles(userId, fileHash, maxAccesses);
+    public Result<String> shareFiles(ShareFilesRequest request) {
+        return blockChainService.shareFiles(request);
     }
 
-    private Result<String> shareFilesFallback(String userId, List<String> fileHash, Integer maxAccesses, Throwable t) {
-        log.error("BlockChain service shareFiles failed, userId={}", userId, t);
+    private Result<String> shareFilesFallback(ShareFilesRequest request, Throwable t) {
+        log.error("BlockChain service shareFiles failed, uploader={}", request.getUploader(), t);
         return new Result<>(ResultEnum.GET_USER_SHARE_FILE_ERROR, null);
     }
 
@@ -128,12 +120,12 @@ public class FileRemoteClient {
 
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "deleteFilesFallback")
     @Retry(name = "blockChainService")
-    public Result<Boolean> deleteFiles(String userId, List<String> fileHashList) {
-        return blockChainService.deleteFiles(userId, fileHashList);
+    public Result<Boolean> deleteFiles(DeleteFilesRequest request) {
+        return blockChainService.deleteFiles(request);
     }
 
-    private Result<Boolean> deleteFilesFallback(String userId, List<String> fileHashList, Throwable t) {
-        log.error("BlockChain service deleteFiles failed, userId={}", userId, t);
+    private Result<Boolean> deleteFilesFallback(DeleteFilesRequest request, Throwable t) {
+        log.error("BlockChain service deleteFiles failed, uploader={}", request.getUploader(), t);
         return new Result<>(ResultEnum.BLOCKCHAIN_ERROR, false);
     }
 

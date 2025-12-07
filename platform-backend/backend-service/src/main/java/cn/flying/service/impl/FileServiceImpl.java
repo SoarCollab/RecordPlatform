@@ -11,6 +11,7 @@ import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.request.ShareFilesRequest;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.platformapi.response.SharingVO;
@@ -43,7 +44,6 @@ import java.util.UUID;
  */
 @Slf4j
 @Service
-@Transactional(rollbackFor = Exception.class)
 public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements FileService {
 
     @Resource
@@ -53,6 +53,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     private FileSagaOrchestrator sagaOrchestrator;
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void prepareStoreFile(Long userId, String OriginFileName) {
         File file = new File()
                 .setUid(userId)
@@ -61,6 +62,10 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         this.saveOrUpdate(file);
     }
 
+    /**
+     * 存储文件：执行 Saga 流程（MinIO + 区块链）
+     * 注意：此方法不使用类级别事务，Saga 编排器内部管理自己的事务
+     */
     @Override
     @CacheEvict(cacheNames = "userFiles", key = "#userId")
     public File storeFile(Long userId, String OriginFileName, List<java.io.File> fileList, List<String> fileHashList, String fileParam) {
@@ -113,6 +118,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     @CacheEvict(cacheNames = "userFiles", key = "#userId")
     public void changeFileStatusByName(Long userId, String fileName, Integer fileStatus) {
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
@@ -124,6 +130,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     @CacheEvict(cacheNames = "userFiles", key = "#userId")
     public void changeFileStatusByHash(Long userId, String fileHash, Integer fileStatus) {
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
@@ -135,6 +142,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     @CacheEvict(cacheNames = "userFiles", key = "#userId")
     public void deleteFile(Long userId, List<String> fileHashList) {
         if(CommonUtils.isEmpty(fileHashList)) return;
@@ -197,7 +205,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     public String generateSharingCode(Long userId, List<String> fileHash, Integer maxAccesses) {
-        Result<String> result = fileRemoteClient.shareFiles(String.valueOf(userId), fileHash, maxAccesses);
+        Result<String> result = fileRemoteClient.shareFiles(ShareFilesRequest.builder()
+                .uploader(String.valueOf(userId))
+                .fileHashList(fileHash)
+                .maxAccesses(maxAccesses)
+                .build());
         return ResultUtils.getData(result);
     }
 
@@ -224,6 +236,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void saveShareFile(List<String> sharingFileIdList) {
         if (CommonUtils.isEmpty(sharingFileIdList)) {
             return;

@@ -6,6 +6,7 @@ import cn.flying.common.event.FileStorageEvent;
 import cn.flying.common.util.*;
 import cn.flying.service.assistant.FileUploadRedisStateManager;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.exception.RetryableException;
 import cn.flying.dao.vo.file.*;
 import cn.flying.service.FileService;
 import cn.flying.service.FileUploadService;
@@ -360,18 +361,19 @@ public class FileUploadServiceImpl implements FileUploadService {
         int expectedChunks = state.getTotalChunks();
         boolean allProcessed = state.getProcessedChunks().size() == expectedChunks;
 
-        if (!allProcessed) {
-            log.warn("请求完成上传时，并非所有分片都已处理: 客户端ID={}, 已处理={}, 总数={}",
-                    clientId, state.getProcessedChunks().size(), expectedChunks);
-
-            // 使用非阻塞方式等待异步处理完成
-            allProcessed = waitForChunkProcessingCompletionNonBlocking(clientId, expectedChunks);
             if (!allProcessed) {
-                log.error("等待超时，仍有分片未处理完成: 客户端ID={}, 已处理={}, 总数={}",
-                         clientId, state.getProcessedChunks().size(), expectedChunks);
-                throw new GeneralException("部分分片未处理完成，请稍后重试或检查状态");
+                log.warn("请求完成上传时，并非所有分片都已处理: 客户端ID={}, 已处理={}, 总数={}",
+                        clientId, state.getProcessedChunks().size(), expectedChunks);
+
+                // 使用非阻塞方式等待异步处理完成
+                allProcessed = waitForChunkProcessingCompletionNonBlocking(clientId, expectedChunks);
+                if (!allProcessed) {
+                    log.error("等待超时，仍有分片未处理完成: 客户端ID={}, 已处理={}, 总数={}",
+                             clientId, state.getProcessedChunks().size(), expectedChunks);
+                    throw new RetryableException(ResultEnum.SERVICE_UNAVAILABLE,
+                            Map.of("processed", state.getProcessedChunks().size(), "expected", expectedChunks));
+                }
             }
-        }
 
         try {
             // --- 执行最终步骤 (追加下一个分片的密钥) ---

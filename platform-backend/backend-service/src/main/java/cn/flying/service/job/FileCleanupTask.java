@@ -5,6 +5,7 @@ import cn.flying.common.lock.DistributedLock;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.mapper.FileMapper;
+import cn.flying.platformapi.request.DeleteFilesRequest;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.service.remote.FileRemoteClient;
 import jakarta.annotation.Resource;
@@ -123,7 +124,10 @@ public class FileCleanupTask {
 
             // 3. 从区块链删除
             try {
-                fileRemoteClient.deleteFiles(userId, List.of(fileHash));
+                fileRemoteClient.deleteFiles(DeleteFilesRequest.builder()
+                        .uploader(userId)
+                        .fileHashList(List.of(fileHash))
+                        .build());
             } catch (Exception e) {
                 log.warn("区块链删除失败: file={}, error={}", fileHash, e.getMessage());
             }

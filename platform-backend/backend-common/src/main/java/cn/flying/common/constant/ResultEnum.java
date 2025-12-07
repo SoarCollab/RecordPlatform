@@ -91,6 +91,8 @@ public enum ResultEnum implements Serializable {
     SYSTEM_BUSY(40003, "系统繁忙，请稍后重试"),
     /** 请求限流 */
     RATE_LIMIT_EXCEEDED(40004, "请求过于频繁，请稍后重试"),
+    /** 服务不可用（可重试） */
+    SERVICE_UNAVAILABLE(40005, "服务暂时不可用，请稍后重试"),
 
     /* ==================== 数据错误：50000-59999 ==================== */
     /** 数据未找到 */
