@@ -1,649 +1,542 @@
-# RecordPlatform 系统演进规划 v2.0
+# RecordPlatform 系统演进规划 v4.0
 
-> 更新日期: 2025-12-06
-> 基于代码深度分析与现有改动整合
+> 更新日期: 2025-12-07
+> 基于代码全面深度分析
 
 ---
 
-## 一、现状总结
+## 一、现状评估
 
-### 1.1 架构概览
+### 1.1 模块评分总览
 
-```
-                         基础设施层
-    ┌────────┐  ┌───────┐  ┌──────────┐  ┌───────┐  ┌────────────┐
-    │ Nacos  │  │ MySQL │  │ RabbitMQ │  │ Redis │  │ MinIO 集群 │
-    │ :8848  │  │ :3306 │  │  :5672   │  │ :6379 │  │   :9000    │
-    └────┬───┘  └───┬───┘  └────┬─────┘  └───┬───┘  └─────┬──────┘
-         │          │           │            │            │
-         │    ┌─────┴───────────┴────────────┴────────────┘
-         │    │
-    ┌────┴────┴──────────────────────────────────────────────────┐
-    │                    platform-api                            │
-    │              (Dubbo 接口契约层)                             │
-    │   BlockChainService, DistributedStorageService             │
-    └──────────────────────────┬─────────────────────────────────┘
-                               │ implements
-         ┌─────────────────────┼─────────────────────┐
-         │                     │                     │
-         ▼                     │                     ▼
-┌─────────────────┐            │            ┌─────────────────┐
-│ platform-fisco  │            │            │  platform-minio │
-│ (Dubbo Provider)│            │            │ (Dubbo Provider)│
-│ FISCO BCOS SDK  │            │            │ MinIO 客户端    │
-│ Port 8091       │            │            │ Port 8092       │
-└────────┬────────┘            │            └────────┬────────┘
-         │                     │                     │
-         │      Dubbo RPC      ▼      Dubbo RPC      │
-         │            ┌─────────────────┐            │
-         └───────────►│ platform-backend│◄───────────┘
-                      │ (Dubbo Consumer)│
-                      │ REST API :8000  │
-                      └─────────────────┘
-                               │
-                      ┌────────┴────────┐
-                      │ FISCO BCOS Node │
-                      │ Peer :20200     │
-                      └─────────────────┘
-```
+| 模块 | 评分 | 核心优势 | 主要短板 |
+|------|------|----------|----------|
+| **backend** | 7.1/10 | Saga+Outbox架构先进、多租户完整 | MDC传递问题、测试覆盖不足 |
+| **fisco** | 5.6/10 | 功能完整、Dubbo集成 | 合约设计缺陷、返回值解析脆弱 |
+| **minio** | 6.5/10 | 2副本冗余、负载均衡 | 配置变更一致性、副本修复缺失 |
+| **api** | 6.5/10 | 统一Result封装、接口清晰 | 无版本控制、DTO不完整 |
 
-**技术栈**: Java 21, Spring Boot 3.2.11, Dubbo 3.3.3 (Triple), MyBatis Plus 3.5.9, FISCO BCOS 3.8.0, MinIO 8.5.9
+**整体成熟度**：`6.5/10` - 基础架构完善，生产环境需强化可靠性和可观测性
 
-### 1.2 代码质量评估: 7.5/10
+### 1.2 已完成的基础建设
 
-| 维度 | 评分 | 说明 |
+| 维度 | 状态 | 说明 |
 |------|------|------|
-| 架构设计 | 8/10 | 分层清晰，Dubbo 集成规范 |
-| 安全性 | 6/10 | 存在密钥泄露和 ID 可预测问题 |
-| 容错能力 | 5/10 | 缺少重试、熔断机制 |
-| 可观测性 | 6/10 | 日志基础完善，缺少分布式追踪 |
-| 代码规范 | 8/10 | 命名规范，注释适度 |
+| **安全性** | 8/10 | JWT无默认密钥、ID混淆(UUID+Redis)、CORS白名单、限流 |
+| **容错能力** | 8/10 | Resilience4j熔断+重试、Saga补偿事务、Outbox可靠消息 |
+| **可观测性** | 6/10 | MDC传播+结构化日志完成，SkyWalking待完善 |
+| **数据一致性** | 8/10 | FileSagaOrchestrator + OutboxPublisher实现 |
+| **架构设计** | 8/10 | 分层清晰，Dubbo Triple协议 |
+
+### 1.3 核心技术栈
+
+- Java 21 + Spring Boot 3.2.11 + Dubbo 3.3.3 (Triple)
+- FISCO BCOS 3.8.0 + Solidity ^0.8.11
+- MinIO 8.5.9 (2副本) + Nacos动态配置
+- MySQL + MyBatis-Plus + Redis + RabbitMQ
 
 ---
 
-## 二、已完成修复 (Current Changes)
+## 二、演进路线图
 
-以下问题已在当前代码改动中修复：
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          演进路线时序图                                  │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  P0 (立即)     P1 (2周)      P2 (1月)      P3 (2月)      P4 (长期)      │
+│     │            │             │             │             │            │
+│     ▼            ▼             ▼             ▼             ▼            │
+│  ┌──────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐     │
+│  │ 稳定性 │   │ 可观测性 │   │ 多租户  │   │ API版本 │   │ 架构升级│     │
+│  │ 修复  │   │ 增强    │   │ 完善    │   │ 化      │   │         │     │
+│  └──────┘   └─────────┘   └─────────┘   └─────────┘   └─────────┘     │
+│                                                                         │
+│  • MDC传递     • SkyWalking   • 存储路径     • v1/v2接口   • 事件溯源   │
+│  • 分布式锁    • 结构化日志    • Redis隔离    • 契约测试    • CQRS分离   │
+│  • 副本修复    • 健康检查完善  • Dubbo传播    • 灰度发布    • 虚拟线程   │
+│  • 熔断优化    • Prometheus   • 租户管理     • OpenAPI    • 区块链HA   │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
-### 2.1 类型一致性修复 ✅
+---
 
-**问题**: `userId` 类型在系统中不一致 (String vs Long)
+## 三、P0：稳定性修复（立即执行）
 
-**修复范围**:
-- `FileStorageEvent.java:15` - uid 字段改为 Long
-- `File.java:33` - uid 字段改为 Long
-- `FileServiceImpl.java` - 所有方法签名统一使用 Long
-- `FileController.java`, `AccountController.java` 等控制器层
+### 3.1 MDC 异步传递问题
 
-### 2.2 操作日志覆盖修复 ✅
+**问题**：`TenantContext` 和 `traceId` 在异步任务中丢失
 
-**问题**: `OperationLogAspect` 忽略 `/api/file` 端点，核心业务无审计
+**影响文件**：
+- `backend-web/src/main/java/cn/flying/filter/JwtAuthenticationFilter.java:89-95`
+- `backend-service/src/main/java/cn/flying/service/listener/FileEventRabbitListener.java:97-109`
 
-**修复** (`OperationLogAspect.java:42`):
+**解决方案**：新增 `AsyncConfiguration.java`
 ```java
-// Before: ignores 包含 "/api/file"
-// After: 移除 "/api/file"，改为仅忽略 "/api/system/logs"
-private final Set<String> ignores = Set.of(
-    "/favicon.ico", "/webjars", "/doc.html",
-    "/swagger-ui", "/v3/api-docs", "/api/system/logs"
-);
+@Configuration
+@EnableAsync
+public class AsyncConfiguration {
+    @Bean
+    public Executor taskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setTaskDecorator(runnable -> {
+            Map<String, String> context = MDC.getCopyOfContextMap();
+            Long tenantId = TenantContext.getTenantId();
+            return () -> {
+                try {
+                    if (context != null) MDC.setContextMap(context);
+                    if (tenantId != null) TenantContext.setTenantId(tenantId);
+                    runnable.run();
+                } finally {
+                    MDC.clear();
+                    TenantContext.clear();
+                }
+            };
+        });
+        return executor;
+    }
+}
 ```
 
-**额外改进** (`OperationLogAspect.java:268-279`):
-- 过滤不可序列化参数 (MultipartFile, HttpServletRequest/Response)
+### 3.2 定时任务分布式锁
 
-### 2.3 线程安全修复 ✅
+**问题**：`FileCleanupTask`、`ProcessedMessageCleanupTask` 多实例重复执行
 
-**问题**: `SimpleDateFormat` 非线程安全
+**影响文件**：
+- `backend-service/src/main/java/cn/flying/service/job/FileCleanupTask.java`
+- `backend-service/src/main/java/cn/flying/service/job/ProcessedMessageCleanupTask.java`
 
-**修复** (`Convert.java:15-17`):
+**解决方案**：集成 Redisson 分布式锁
 ```java
-private static final DateTimeFormatter DATE_FORMATTER =
-    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-        .withZone(ZoneId.systemDefault());
+@Scheduled(cron = "${file.cleanup.cron}")
+public void cleanDeletedFiles() {
+    RLock lock = redissonClient.getLock("file:cleanup:lock");
+    if (lock.tryLock(0, 3600, TimeUnit.SECONDS)) {
+        try { performCleanup(); }
+        finally { lock.unlock(); }
+    }
+}
 ```
 
-### 2.4 MDC 常量使用 ✅
+### 3.3 MinIO 副本一致性补偿
 
-**问题**: `JwtAuthenticationFilter` 使用硬编码字符串
+**问题**：上传一成一失导致单副本风险
 
-**修复** (`JwtAuthenticationFilter.java:48-64`):
-- 统一使用 `Const.ATTR_USER_ID` 和 `Const.ATTR_USER_ROLE`
+**影响文件**：
+- `platform-minio/src/main/java/cn/flying/minio/service/DistributedStorageServiceImpl.java:156`
+
+**解决方案**：新增 `ConsistencyRepairService.java`
+```java
+@Scheduled(fixedRate = 300000) // 5分钟
+public void repairInconsistentReplicas() {
+    List<InconsistentRecord> records = findInconsistentRecords();
+    for (var record : records) {
+        copyToMissingNode(record.fileHash, record.presentNode, record.missingNode);
+        markRepaired(record.id);
+    }
+}
+```
+
+### 3.4 Saga 补偿指数退避
+
+**问题**：固定3次重试，网络波动易失败
+
+**影响文件**：
+- `backend-service/src/main/java/cn/flying/service/saga/FileSagaOrchestrator.java:177`
+
+**改进**：
+```java
+private static final int[] BACKOFF_SECONDS = {5, 30, 120, 600, 3600};
+
+private void scheduleRetry(FileSaga saga) {
+    int index = Math.min(saga.getRetryCount(), BACKOFF_SECONDS.length - 1);
+    saga.setNextRetryAt(Instant.now().plusSeconds(BACKOFF_SECONDS[index]));
+    saga.setStatus(FileSagaStatus.PENDING_COMPENSATION);
+}
+```
 
 ---
 
-## 三、待修复问题清单
+## 四、P1：可观测性增强（2周内）
 
-### 3.1 P0 - 安全漏洞 (必须立即修复)
+### 4.1 SkyWalking 完整集成
 
-| 编号 | 问题 | 位置 | 影响 |
-|------|------|------|------|
-| P0-1 | sdk.key 私钥提交到 Git | `platform-fisco/src/main/resources/conf/sdk.key` | 区块链账户可被盗用 |
-| P0-2 | 默认 JWT 密钥暴露 | `application-*.yml` | 任何人可伪造 Token |
-| P0-3 | ID 混淆算法可预测 | `IdUtils.java:60-117` | 用户 ID 可被枚举 |
-| P0-4 | CORS 允许所有来源 | `application.yml` origin: '*' | CSRF 攻击风险 |
+**当前状态**：已添加依赖，需完善 Agent 配置
 
-### 3.2 P1 - 稳定性问题 (1-2周内修复)
-
-| 编号 | 问题 | 位置 | 影响 |
-|------|------|------|------|
-| P1-1 | 无重试机制 | `FileServiceImpl.java:61` TODO | Dubbo 调用失败即丢失 |
-| P1-2 | 大文件 OOM | `FileServiceImpl.java:66-75` | 4GB 文件需 4GB+ 内存 |
-| P1-3 | String.intern() 同步 | `AccountServiceImpl` | String 池污染，性能下降 |
-| P1-4 | 无熔断器 | 全局 | 级联故障风险 |
-
-### 3.3 P2 - 运维问题 (1个月内修复)
-
-| 编号 | 问题 | 位置 | 影响 |
-|------|------|------|------|
-| P2-1 | 软删除文件未清理 | `FileServiceImpl.java:134` TODO | 存储泄漏 |
-| P2-2 | Bucket 缓存无失效 | `MinioMonitor.java:52` | 操作失败 |
-| P2-3 | 无分布式追踪 | 全局 | 故障定位困难 |
-
----
-
-## 四、演进路线图
-
-### Phase 0: 紧急安全修复 (本周)
-
-```
-优先级: ████████████ 最高
-预计工时: 8-12小时
-```
-
-#### 0.1 密钥泄露处理
-
+**实施步骤**：
 ```bash
-# 1. 从 Git 历史中彻底移除私钥
-git filter-repo --path platform-fisco/src/main/resources/conf/sdk.key --invert-paths
-
-# 2. 轮换所有已暴露凭证
-- FISCO 私钥: 重新生成并部署
-- JWT 密钥: 生成新的强随机密钥
-- 数据库密码: 更换并迁移至 Nacos 加密配置
+# 启动脚本添加
+java -javaagent:skywalking-agent.jar \
+     -Dskywalking.agent.service_name=backend-web \
+     -Dskywalking.collector.backend_service=oap:11800 \
+     -jar backend-web.jar
 ```
 
-#### 0.2 ID 混淆算法重构
+**涉及文件**：
+- `scripts/skywalking-env.sh` (已存在)
+- `scripts/start-with-skywalking.sh` (已存在)
+- `platform-fisco/scripts/` (需新增)
+- `platform-minio/scripts/` (需新增)
 
-**当前问题** (`IdUtils.java:98-135`):
+### 4.2 健康检查完善
+
+**现有指标**：Database、MinIO、RabbitMQ、Redis、FISCO
+
+**缺失指标**：
+
+| 指标 | 实现位置 | 说明 |
+|------|----------|------|
+| Saga 积压 | backend-service | 添加 `SagaHealthIndicator` |
+| Outbox 积压 | backend-service | 添加 `OutboxHealthIndicator` |
+| 熔断器状态 | backend-service | 暴露 Resilience4j actuator |
+
+**示例实现**：
 ```java
-// 确定性哈希，相同输入永远产生相同输出
-String hash = DigestUtils.sha256Hex(internalId + salt);
-```
+@Component("saga")
+public class SagaHealthIndicator implements HealthIndicator {
+    @Override
+    public Health health() {
+        long pendingCount = sagaMapper.countByStatus("RUNNING");
+        long failedCount = sagaMapper.countByStatus("FAILED");
 
-**修复方案**:
-```java
-// 方案A: UUID + 映射表（推荐）
-public String toExternalId(Long internalId) {
-    String cached = redisTemplate.opsForValue().get(INTERNAL_TO_EXTERNAL + internalId);
-    if (cached != null) return cached;
-
-    String externalId = UUID.randomUUID().toString().replace("-", "");
-    redisTemplate.opsForValue().set(INTERNAL_TO_EXTERNAL + internalId, externalId);
-    redisTemplate.opsForValue().set(EXTERNAL_TO_INTERNAL + externalId, internalId);
-    return externalId;
-}
-
-// 方案B: HMAC + 时间戳（可轮换）
-public String toExternalId(Long internalId) {
-    long timestamp = System.currentTimeMillis() / 86400000; // 按天轮换
-    String input = internalId + ":" + timestamp;
-    return HmacUtils.hmacSha256Hex(secretKey, input).substring(0, 16);
-}
-```
-
-#### 0.3 CORS 配置收紧
-
-```yaml
-# application.yml
-spring:
-  web:
-    cors:
-      allowed-origins:
-        - https://your-frontend-domain.com
-      allowed-methods: GET,POST,PUT,DELETE
-      allowed-headers: Authorization,Content-Type
-```
-
----
-
-### Phase 1: 容错与弹性 (第2-3周)
-
-```
-优先级: ████████░░░░ 高
-预计工时: 20-30小时
-```
-
-#### 1.1 引入 Resilience4j
-
-```xml
-<!-- pom.xml -->
-<dependency>
-    <groupId>io.github.resilience4j</groupId>
-    <artifactId>resilience4j-spring-boot3</artifactId>
-    <version>2.2.0</version>
-</dependency>
-```
-
-**熔断器配置**:
-```yaml
-resilience4j:
-  circuitbreaker:
-    instances:
-      fiscoService:
-        slidingWindowSize: 10
-        failureRateThreshold: 50
-        waitDurationInOpenState: 30s
-      minioService:
-        slidingWindowSize: 20
-        failureRateThreshold: 60
-        waitDurationInOpenState: 20s
-  retry:
-    instances:
-      dubboRetry:
-        maxAttempts: 3
-        waitDuration: 500ms
-        retryExceptions:
-          - java.io.IOException
-          - org.apache.dubbo.rpc.RpcException
-```
-
-**应用到 FileServiceImpl**:
-```java
-@CircuitBreaker(name = "fiscoService", fallbackMethod = "storeFileFallback")
-@Retry(name = "dubboRetry")
-public File storeFile(Long userId, String fileName, ...) {
-    // 现有逻辑
-}
-
-private File storeFileFallback(Long userId, String fileName, ..., Exception e) {
-    log.error("区块链存证失败，进入降级流程", e);
-    // 写入本地队列待重试
-    pendingTaskQueue.offer(new PendingStoreTask(userId, fileName, ...));
-    throw new GeneralException(ResultEnum.SERVICE_DEGRADED);
-}
-```
-
-#### 1.2 流式文件处理
-
-**问题代码** (`FileServiceImpl.java:66-75`):
-```java
-// 所有分片一次性加载到内存
-List<byte[]> fileByteList = fileList.stream()
-    .map(file -> Files.readAllBytes(file.toPath()))
-    .toList();
-```
-
-**重构方案**:
-```java
-public File storeFile(Long userId, String fileName, List<java.io.File> fileList, ...) {
-    List<String> storedPaths = new ArrayList<>();
-
-    for (int i = 0; i < fileList.size(); i++) {
-        java.io.File chunk = fileList.get(i);
-        String hash = fileHashList.get(i);
-
-        // 流式上传单个分片
-        try (InputStream is = new BufferedInputStream(new FileInputStream(chunk))) {
-            Result<String> result = storageService.storeFileStream(is, chunk.length(), hash);
-            storedPaths.add(ResultUtils.getData(result));
-        }
-    }
-    // 后续逻辑...
-}
-```
-
-#### 1.3 同步锁重构
-
-**问题代码** (`AccountServiceImpl.java`):
-```java
-synchronized (address.intern()) {  // 反模式
-    // ...
-}
-```
-
-**修复方案**:
-```java
-private final ConcurrentHashMap<String, ReentrantLock> addressLocks = new ConcurrentHashMap<>();
-
-public void registerEmailVerifyCode(String address, ...) {
-    ReentrantLock lock = addressLocks.computeIfAbsent(address, k -> new ReentrantLock());
-    lock.lock();
-    try {
-        // 业务逻辑
-    } finally {
-        lock.unlock();
-        // 可选: 定期清理不再使用的锁
+        if (failedCount > 10) return Health.down()
+            .withDetail("failed", failedCount).build();
+        if (pendingCount > 100) return Health.status("DEGRADED")
+            .withDetail("pending", pendingCount).build();
+        return Health.up().build();
     }
 }
 ```
 
----
+### 4.3 结构化日志标准化
 
-### Phase 2: 可观测性建设 (第4-5周)
+**问题**：日志语言混用（中英文）、格式不统一
 
-```
-优先级: ███████░░░░░ 中高
-预计工时: 15-20小时
-```
+**涉及文件**：
+- `backend-web/src/main/resources/logback-spring.xml`
 
-#### 2.1 分布式追踪集成
-
+**标准化配置**：
 ```xml
-<!-- 推荐 SkyWalking，与 Dubbo 生态契合 -->
-<dependency>
-    <groupId>org.apache.skywalking</groupId>
-    <artifactId>apm-toolkit-trace</artifactId>
-    <version>9.1.0</version>
-</dependency>
-```
-
-#### 2.2 结构化日志
-
-```xml
-<!-- logback-spring.xml -->
 <encoder class="net.logstash.logback.encoder.LogstashEncoder">
-    <customFields>{"service":"record-platform"}</customFields>
+    <customFields>{"service":"backend-web","env":"${ENV}"}</customFields>
+    <fieldNames>
+        <timestamp>@timestamp</timestamp>
+        <message>msg</message>
+    </fieldNames>
 </encoder>
 ```
 
-#### 2.3 健康检查标准化
+---
 
+## 五、P2：多租户完善（1个月内）
+
+### 5.1 存储路径隔离
+
+**当前**：`minio/node/{logicNode}/{objectName}`
+
+**改进**：`minio/tenant/{tenantId}/node/{logicNode}/{objectName}`
+
+**涉及文件**：
+- `platform-minio/src/main/java/cn/flying/minio/service/DistributedStorageServiceImpl.java:245`
+- `backend-service/src/main/java/cn/flying/service/impl/FileServiceImpl.java`
+
+### 5.2 Redis Key 隔离
+
+**当前**：`jwt:blacklist:{jwtId}`
+
+**改进**：`tenant:{tenantId}:jwt:blacklist:{jwtId}`
+
+**涉及文件**：
+- `backend-common/src/main/java/cn/flying/common/util/JwtUtils.java:67`
+- `backend-common/src/main/java/cn/flying/common/util/Const.java`
+
+### 5.3 Dubbo 租户上下文传播
+
+**问题**：Dubbo 调用不自动传播 tenantId
+
+**涉及文件**：
+- `backend-service/src/main/java/cn/flying/service/filter/MdcDubboFilter.java`
+
+**解决方案**：
 ```java
-@Component
-public class FiscoHealthIndicator implements HealthIndicator {
-    @Override
-    public Health health() {
-        try {
-            // 检查 FISCO 节点连通性
-            boolean connected = fiscoClient.isConnected();
-            return connected ? Health.up().build()
-                            : Health.down().withDetail("reason", "Node unreachable").build();
-        } catch (Exception e) {
-            return Health.down().withException(e).build();
-        }
+@Override
+public Result invoke(Invoker<?> invoker, Invocation invocation) {
+    // 消费者端：设置 attachment
+    Long tenantId = TenantContext.getTenantId();
+    if (tenantId != null) {
+        RpcContext.getContext().setAttachment("tenantId", tenantId.toString());
+    }
+    // 提供者端：从 attachment 恢复
+    String tenantIdStr = RpcContext.getContext().getAttachment("tenantId");
+    if (tenantIdStr != null) {
+        TenantContext.setTenantId(Long.parseLong(tenantIdStr));
+    }
+    try {
+        return invoker.invoke(invocation);
+    } finally {
+        TenantContext.clear();
     }
 }
 ```
 
 ---
 
-### Phase 3: 数据一致性 (第6-8周)
+## 六、P3：API版本化（2个月内）
+
+### 6.1 接口版本策略
 
 ```
-优先级: ██████░░░░░░ 中
-预计工时: 25-35小时
+当前：/record-platform/file/list
+v1：  /record-platform/api/v1/file/list  (冻结)
+v2：  /record-platform/api/v2/file/list  (新功能)
 ```
 
-#### 3.1 Saga 补偿事务
+### 6.2 Dubbo 服务版本
 
-```
-当前问题:
-上传 → MinIO成功 → 区块链失败 → MinIO数据成为孤立数据
-
-解决方案: 引入状态机
-```
+**涉及文件**：
+- `platform-api/src/main/java/cn/flying/platformapi/external/BlockChainService.java`
+- `platform-api/src/main/java/cn/flying/platformapi/external/DistributedStorageService.java`
 
 ```java
-public enum FileUploadState {
-    PENDING,        // 初始状态
-    STORING,        // MinIO 写入中
-    STORED,         // MinIO 写入完成
-    CHAINING,       // 区块链写入中
-    COMPLETED,      // 全部完成
-    ROLLBACK,       // 回滚中
-    FAILED          // 最终失败
-}
+// platform-api 冻结 v1
+@DubboService(version = "1.0.0")
+public interface BlockChainService { ... }
 
-@Service
-public class FileUploadSaga {
-
-    @Transactional
-    public void processUpload(FileUploadContext ctx) {
-        try {
-            ctx.setState(FileUploadState.STORING);
-            storeToMinio(ctx);
-
-            ctx.setState(FileUploadState.CHAINING);
-            storeToBlockchain(ctx);
-
-            ctx.setState(FileUploadState.COMPLETED);
-        } catch (MinioException e) {
-            ctx.setState(FileUploadState.FAILED);
-            throw e;
-        } catch (BlockchainException e) {
-            ctx.setState(FileUploadState.ROLLBACK);
-            compensateMinio(ctx);  // 回滚 MinIO
-            ctx.setState(FileUploadState.FAILED);
-            throw e;
-        }
-    }
+// 新建 v2 接口
+@DubboService(version = "2.0.0")
+public interface BlockChainServiceV2 {
+    // 流式上传、分页查询等新功能
 }
 ```
 
-#### 3.2 定时清理任务
+### 6.3 DTO 补全
+
+**问题**：`FileDetailVO` 缺失关键字段
+
+**涉及文件**：
+- `platform-api/src/main/java/cn/flying/platformapi/response/FileDetailVO.java`
+
+**改进**：
+```java
+public class FileDetailVO {
+    private String fileHash;      // 当前被注释，需恢复
+    private Long fileSize;        // 新增
+    private String mimeType;      // 新增
+    private Long uploadTimestamp; // 替代 String uploadTime
+}
+```
+
+### 6.4 契约测试
+
+**工具选择**：Spring Cloud Contract 或 Pact
+
+**实施**：
+- 在 CI 中加入契约测试
+- 生成 OpenAPI 文档
+- 支持灰度发布
+
+---
+
+## 七、P4：长期架构演进
+
+### 7.1 区块链高可用
+
+**当前问题**：单节点 FISCO Peer 是 SPOF
+
+**涉及文件**：
+- `platform-fisco/src/main/resources/application.yml`
+- `platform-fisco/src/main/java/cn/flying/fisco_bcos/config/SdkBeanConfig.java`
+
+**解决方案**：
+```yaml
+bcos:
+  network:
+    peers:
+      - 127.0.0.1:20200
+      - 127.0.0.2:20200
+      - 127.0.0.3:20200
+```
+
+### 7.2 智能合约优化
+
+**当前问题**：
+1. 文件内容直接存储在链上，极其浪费
+2. 分享码随机数生成不安全
+3. 缺少事件发射
+
+**涉及文件**：
+- `platform-fisco/src/main/contracts/Storage.sol`
+- `platform-fisco/src/main/contracts/Sharing.sol`
+
+**改进方向**：
+```solidity
+// 1. 仅存储哈希和元数据
+struct File {
+    string fileName;
+    string uploader;
+    bytes32 contentHash;  // 仅存哈希，内容由 MinIO 存储
+    string param;
+    uint256 uploadTime;
+}
+
+// 2. 添加事件发射
+event FileStored(bytes32 indexed fileHash, string uploader, uint256 timestamp);
+event FileDeleted(bytes32 indexed fileHash, string uploader, uint256 timestamp);
+
+// 3. 修复分享码生成安全问题
+```
+
+### 7.3 CQRS 读写分离
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         CQRS 架构演进                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   Command Side                    Query Side                    │
+│   ┌─────────────┐                ┌─────────────┐               │
+│   │ FileService │                │ FileQuery   │               │
+│   │ (写入)      │                │ (只读)      │               │
+│   └──────┬──────┘                └──────┬──────┘               │
+│          │                              │                       │
+│          ▼                              ▼                       │
+│   ┌─────────────┐                ┌─────────────┐               │
+│   │ MySQL       │───────────────▶│ Redis/ES    │               │
+│   │ (主库)      │   CDC/Event    │ (读库)      │               │
+│   └─────────────┘                └─────────────┘               │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**实施阶段**：
+1. 当前: Outbox + 消费者 (已完成)
+2. 中期: 添加物化视图服务，消费事件重建查询模型
+3. 长期: 完整 CQRS，读写库分离
+
+### 7.4 Java 21 虚拟线程
 
 ```java
-@Scheduled(cron = "0 0 3 * * ?")  // 每天凌晨3点
-public void purgeDeletedFiles() {
-    // 1. 查询待清理文件
-    List<File> toDelete = fileMapper.selectList(
-        new LambdaQueryWrapper<File>()
-            .eq(File::getDeleted, 1)
-            .lt(File::getUpdateTime, LocalDateTime.now().minusDays(30))
-    );
-
-    for (File file : toDelete) {
-        try {
-            // 2. 删除 MinIO 对象
-            storageService.deleteFile(file.getFileHash());
-            // 3. 标记区块链记录作废
-            blockChainService.markFileDeleted(file.getFileHash());
-            // 4. 物理删除数据库记录
-            fileMapper.deleteById(file.getId());
-        } catch (Exception e) {
-            log.error("清理文件失败: {}", file.getFileHash(), e);
-        }
-    }
+// 替换传统线程池
+@Bean
+public Executor virtualThreadExecutor() {
+    return Executors.newVirtualThreadPerTaskExecutor();
 }
 ```
 
 ---
 
-### Phase 4: 性能优化 (第9-10周)
+## 八、关键行动项汇总
 
-```
-优先级: █████░░░░░░░ 中
-预计工时: 15-20小时
-```
-
-#### 4.1 MinIO 智能路由
-
-```java
-// 从轮询改为延迟感知选择
-public MinioClient selectOptimalClient() {
-    return clientCache.values().stream()
-        .filter(MinioClientWrapper::isHealthy)
-        .min(Comparator.comparingLong(MinioClientWrapper::getAvgLatency))
-        .map(MinioClientWrapper::getClient)
-        .orElseThrow(() -> new GeneralException(ResultEnum.NO_AVAILABLE_STORAGE));
-}
-```
-
-#### 4.2 缓存策略
-
-```java
-@Cacheable(value = "fileMetadata", key = "#fileHash", unless = "#result == null")
-public File getFileMetadata(String fileHash) {
-    return fileMapper.selectOne(
-        new LambdaQueryWrapper<File>().eq(File::getFileHash, fileHash)
-    );
-}
-
-@CacheEvict(value = "fileMetadata", key = "#fileHash")
-public void updateFileMetadata(String fileHash, File file) {
-    // 更新逻辑
-}
-```
-
-#### 4.3 Bucket 缓存失效
-
-```java
-private final Cache<String, Boolean> bucketExistenceCache = Caffeine.newBuilder()
-    .expireAfterWrite(30, TimeUnit.MINUTES)
-    .maximumSize(1000)
-    .build();
-
-public boolean bucketExists(String bucketName) {
-    return bucketExistenceCache.get(bucketName, k -> {
-        try {
-            return minioClient.bucketExists(BucketExistsArgs.builder().bucket(k).build());
-        } catch (Exception e) {
-            return false;
-        }
-    });
-}
-```
+| 优先级 | 任务 | 预估工时 | 涉及模块 |
+|--------|------|----------|----------|
+| **P0-1** | MDC/TenantContext 异步传递 | 2天 | backend-web |
+| **P0-2** | 定时任务分布式锁 | 1天 | backend-service |
+| **P0-3** | MinIO 副本一致性补偿 | 3天 | platform-minio |
+| **P0-4** | Saga 指数退避重试 | 1天 | backend-service |
+| **P1-1** | SkyWalking Agent 全面部署 | 2天 | 全部 |
+| **P1-2** | 健康检查指标补全 | 2天 | backend-web |
+| **P1-3** | 日志规范化 | 1天 | 全部 |
+| **P2-1** | 存储路径租户隔离 | 3天 | minio, backend |
+| **P2-2** | Dubbo 租户传播 | 2天 | backend-service |
+| **P3-1** | API 版本化框架 | 5天 | api, backend |
+| **P3-2** | DTO 字段补全 | 2天 | api |
+| **P4-1** | 区块链多节点 | 5天 | platform-fisco |
+| **P4-2** | 合约优化（内容下链） | 10天 | platform-fisco |
 
 ---
 
-### Phase 5: 架构演进 (长期)
+## 九、技术债务清单
 
-```
-优先级: ████░░░░░░░░ 规划中
-时间框架: Q2-Q3 2025
-```
-
-#### 5.1 事件驱动架构
-
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ 业务服务     │────►│  Outbox 表  │────►│ CDC/轮询    │
-│ (写入事务)   │     │             │     │ 事件发布    │
-└─────────────┘     └─────────────┘     └──────┬──────┘
-                                               │
-                    ┌──────────────────────────┼──────────────────────────┐
-                    │                          │                          │
-                    ▼                          ▼                          ▼
-           ┌─────────────┐            ┌─────────────┐            ┌─────────────┐
-           │ MinIO Worker│            │ FISCO Worker│            │ 通知 Worker │
-           │ (存储处理)   │            │ (区块链存证) │            │ (用户通知)  │
-           └─────────────┘            └─────────────┘            └─────────────┘
-```
-
-#### 5.2 API 版本化
-
-```java
-@RestController
-@RequestMapping("/api/v1/files")
-public class FileControllerV1 { ... }
-
-@RestController
-@RequestMapping("/api/v2/files")
-public class FileControllerV2 { ... }  // 新版本，支持流式上传
-```
-
-#### 5.3 多租户支持
-
-```java
-@Schema(description = "租户ID")
-@TableField("tenant_id")
-private Long tenantId;
-
-// 自动填充租户上下文
-@Component
-public class TenantMetaObjectHandler implements MetaObjectHandler {
-    @Override
-    public void insertFill(MetaObject metaObject) {
-        this.setFieldValByName("tenantId", TenantContext.getCurrentTenantId(), metaObject);
-    }
-}
-```
+| 债务项 | 严重度 | 位置 | 建议 |
+|--------|--------|------|------|
+| 测试覆盖率 <10% | 高 | 全部模块 | 补充核心路径单测 |
+| FileDetailVO 缺 fileHash | 高 | api/response | 恢复注释字段 |
+| 智能合约内容上链 | 高 | Storage.sol | 迁移到 MinIO |
+| 返回值魔数索引 | 中 | BlockChainServiceImpl | 使用 Map/VO |
+| 日志语言混用 | 中 | 全部 | 统一中文 |
+| ResultEnum 编码混乱 | 中 | api/constant | 重新规划分段 |
+| Caffeine 无预热 | 低 | backend-web | 启动时预热 |
+| OkHttpClient 未关闭 | 低 | MinioMonitor | PreDestroy 清理 |
 
 ---
 
-## 五、优先级矩阵
+## 十、关键文件索引
 
-```
-紧急度 ↑
-    │
-    │  ┌─────────────┐     ┌─────────────┐
-    │  │  Phase 0    │     │  Phase 1    │
-    │  │ 安全修复    │     │ 容错弹性    │
-    │  │ P0-1~P0-4   │     │ P1-1~P1-4   │
-    │  └─────────────┘     └─────────────┘
-    │
-    │  ┌─────────────┐     ┌─────────────┐
-    │  │  Phase 2    │     │  Phase 3    │
-    │  │ 可观测性    │     │ 数据一致性  │
-    │  │ P2-3        │     │ P2-1,P2-2   │
-    │  └─────────────┘     └─────────────┘
-    │
-    │  ┌─────────────┐     ┌─────────────┐
-    │  │  Phase 4    │     │  Phase 5    │
-    │  │ 性能优化    │     │ 架构演进    │
-    │  └─────────────┘     └─────────────┘
-    │
-    └─────────────────────────────────────────► 重要度
-```
+| 模块 | 关键文件 | 改动类型 |
+|------|----------|----------|
+| **P0-稳定性** | `JwtAuthenticationFilter.java`, `FileCleanupTask.java` | 修改 |
+| **P0-稳定性** | `AsyncConfiguration.java`, `ConsistencyRepairService.java` | 新增 |
+| **P1-追踪** | `MdcDubboFilter.java`, `logback-spring.xml` | 增强 |
+| **P1-健康** | `SagaHealthIndicator.java`, `OutboxHealthIndicator.java` | 新增 |
+| **P2-多租户** | `DistributedStorageServiceImpl.java`, `JwtUtils.java` | 修改 |
+| **P3-API** | `BlockChainService.java`, `FileDetailVO.java` | 修改 |
+| **P4-区块链** | `Storage.sol`, `Sharing.sol`, `SdkBeanConfig.java` | 修改 |
 
 ---
 
-## 六、技术选型建议
+## 十一、模块详细分析摘要
 
-| 领域 | 推荐方案 | 理由 |
-|------|----------|------|
-| 熔断限流 | Resilience4j | 轻量级，与 Spring Boot 3 集成好 |
-| 分布式追踪 | SkyWalking | 对 Dubbo 原生支持，Agent 无侵入 |
-| 密钥管理 | Nacos 加密配置 | 复用现有基础设施 |
-| 本地缓存 | Caffeine | 高性能，支持 TTL |
-| 消息队列 | RabbitMQ (已有) | 复用现有基础设施 |
+### 11.1 platform-backend (7.1/10)
+
+**架构设计**：8.5/10 - Saga + Outbox 模式先进
+**安全性**：7/10 - JWT + RBAC 完善
+**可维护性**：7.5/10 - 代码结构清晰
+**测试覆盖**：4/10 - 严重不足
+
+**关键问题**：
+1. MDC ThreadLocal 在异步任务中丢失
+2. 多实例部署下定时任务重复执行
+3. Saga 补偿重试次数有限
+4. 缓存雪崩风险
+
+### 11.2 platform-fisco (5.6/10)
+
+**代码质量**：65/100 - 基础功能完整
+**架构设计**：60/100 - 合约设计存在根本性缺陷
+**错误处理**：55/100 - 缺乏统一的异常映射
+**测试覆盖**：40/100 - 仅有密钥生成测试
+
+**关键问题**：
+1. 文件内容直接存储在链上，极其浪费
+2. 返回值解析使用魔数索引，维护困难
+3. 私钥从配置文件明文读取
+4. FileDetailVO 缺少 fileHash 字段
+
+### 11.3 platform-minio (6.5/10)
+
+**架构清晰度**：8/10 - 分层明确
+**并发控制**：7/10 - 使用 ConcurrentHashMap + CompletableFuture
+**故障转移**：7/10 - 实现了主备降级
+**测试覆盖**：2/10 - 无单元测试
+
+**关键问题**：
+1. 配置变更时的路由不一致风险
+2. 上传一成一失导致单副本
+3. Prometheus 指标采集单点
+4. 日志语言混用
+
+### 11.4 platform-api (6.5/10)
+
+**设计合理性**：6.5/10 - 接口清晰但缺乏版本控制
+**扩展性**：5.5/10 - 无 API 版本协商机制
+
+**关键问题**：
+1. 无版本控制机制
+2. DTO 字段设计不规范
+3. transactionHash 职责混乱
+4. 参数验证责任不清
 
 ---
 
-## 七、风险提示
+## 十二、总结
 
-1. **Phase 0 必须本周完成** - 私钥泄露是 P0 安全事故，每拖延一天风险增加
-2. **ID 混淆重构需数据迁移** - 需要同时维护新旧映射，制定迁移计划
-3. **流式处理改造影响接口契约** - 需要评估前端和 Dubbo 接口兼容性
-4. **Saga 模式增加复杂度** - 建议先用简单的重试队列，再考虑完整 Saga
+**系统演进的核心方向**：
 
----
+1. **稳定性优先**：修复 P0 级问题，确保分布式场景下的数据一致性
+2. **可观测性增强**：完善 SkyWalking 链路追踪，实现全链路问题定位
+3. **多租户深化**：从数据库隔离扩展到存储、缓存、消息队列全面隔离
+4. **API 演进**：引入版本化机制，支持平滑升级和灰度发布
+5. **架构升级**：长期向 CQRS、事件溯源、虚拟线程等现代架构演进
 
-## 八、下一步行动
-
-### 本周 (Week 1)
-- [ ] 执行 Git 历史清理，移除 sdk.key
-- [ ] 轮换所有已暴露密钥
-- [ ] 实现 ID 混淆算法 v2
-- [ ] 收紧 CORS 配置
-
-### 下周 (Week 2)
-- [ ] 引入 Resilience4j
-- [ ] 实现 Dubbo 调用重试
-- [ ] 修复 String.intern() 同步问题
-
-### 第三周 (Week 3)
-- [ ] 流式文件处理重构
-- [ ] 熔断器配置与测试
-
----
-
-## 九、附录
-
-### A. 关键文件索引
-
-| 文件 | 行号 | 问题/改动 |
-|------|------|----------|
-| `IdUtils.java` | 60-117 | ID 混淆算法 (待重构) |
-| `FileServiceImpl.java` | 61, 66-75, 134 | 重试TODO, OOM风险, 清理TODO |
-| `AccountServiceImpl.java` | - | String.intern() 同步 (待修复) |
-| `OperationLogAspect.java` | 42, 268-279 | 已修复: 覆盖/api/file |
-| `Convert.java` | 15-17 | 已修复: DateTimeFormatter |
-| `JwtAuthenticationFilter.java` | 48-64 | 已修复: 常量使用 |
-
-### B. 参考资源
-
-- [Resilience4j 官方文档](https://resilience4j.readme.io/)
-- [SkyWalking Dubbo 插件](https://skywalking.apache.org/docs/)
-- [FISCO BCOS 密钥管理最佳实践](https://fisco-bcos-documentation.readthedocs.io/)
+项目整体架构设计合理，Saga + Outbox 模式是业界最佳实践。当前的核心工作应聚焦于**稳定性修复**和**可观测性增强**，为后续的多租户商业化和高可用部署奠定基础。
