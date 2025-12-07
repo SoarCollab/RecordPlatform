@@ -26,4 +26,24 @@ public interface FileSagaMapper extends BaseMapper<FileSaga> {
     int updateStatusWithCas(@Param("id") Long id,
                            @Param("expectedStatus") String expectedStatus,
                            @Param("newStatus") String newStatus);
+
+    /**
+     * 查询待重试补偿的 Saga（状态为 PENDING_COMPENSATION 且已到重试时间）
+     */
+    @Select("SELECT * FROM file_saga WHERE status = 'PENDING_COMPENSATION' " +
+            "AND (next_retry_at IS NULL OR next_retry_at <= NOW()) " +
+            "ORDER BY next_retry_at ASC LIMIT #{limit}")
+    List<FileSaga> selectPendingCompensation(@Param("limit") int limit);
+
+    /**
+     * 统计指定状态的 Saga 数量
+     */
+    @Select("SELECT COUNT(*) FROM file_saga WHERE status = #{status}")
+    long countByStatus(@Param("status") String status);
+
+    /**
+     * 统计失败且超过最大重试次数的 Saga 数量
+     */
+    @Select("SELECT COUNT(*) FROM file_saga WHERE status = 'FAILED' AND retry_count >= #{maxRetries}")
+    long countExhaustedRetries(@Param("maxRetries") int maxRetries);
 }

@@ -1,5 +1,6 @@
 package cn.flying.service.job;
 
+import cn.flying.common.lock.DistributedLock;
 import cn.flying.dao.mapper.ProcessedMessageMapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -12,8 +13,9 @@ import java.time.ZoneId;
 import java.util.Date;
 
 /**
- * Scheduled task for cleaning up old processed messages.
- * Prevents the processed_message table from growing indefinitely.
+ * 定时清理已处理消息任务。
+ * 防止 processed_message 表无限增长。
+ * 使用分布式锁防止多实例重复执行。
  */
 @Component
 @Slf4j
@@ -25,19 +27,25 @@ public class ProcessedMessageCleanupTask {
     @Value("${processed-message.cleanup.retention-days:7}")
     private int retentionDays;
 
+    /**
+     * 清理过期的已处理消息记录。
+     * 默认每天凌晨 3:30 执行。
+     * 使用分布式锁（租约 30 分钟）防止多实例重复执行。
+     */
     @Scheduled(cron = "${processed-message.cleanup.cron:0 30 3 * * ?}")
+    @DistributedLock(key = "processed-message:cleanup", leaseTime = 1800)
     public void cleanupOldMessages() {
-        log.info("Starting processed message cleanup task...");
+        log.info("开始执行已处理消息清理任务...");
 
         LocalDateTime cutoffTime = LocalDateTime.now().minusDays(retentionDays);
         Date cutoffDate = Date.from(cutoffTime.atZone(ZoneId.systemDefault()).toInstant());
 
         try {
             int deletedCount = processedMessageMapper.cleanupOldMessages(cutoffDate);
-            log.info("Processed message cleanup completed: deleted {} messages older than {} days",
+            log.info("已处理消息清理完成: 删除 {} 条超过 {} 天的记录",
                     deletedCount, retentionDays);
         } catch (Exception e) {
-            log.error("Failed to cleanup processed messages", e);
+            log.error("清理已处理消息失败", e);
         }
     }
 }

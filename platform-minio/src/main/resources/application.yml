@@ -28,6 +28,15 @@ dubbo:
     register-mode: instance
     address: nacos://localhost:8848
 
+# MinIO 副本一致性修复配置
+minio:
+  consistency:
+    repair:
+      enabled: true
+      cron: 0 0 * * * ?  # 每小时执行一次
+      batch-size: 100
+      lock-timeout-seconds: 600  # 分布式锁超时时间（10分钟）
+
 # 其他 Spring Boot 配置...
 logging:
   level:
