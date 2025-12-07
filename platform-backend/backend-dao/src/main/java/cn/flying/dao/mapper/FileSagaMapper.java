@@ -29,10 +29,12 @@ public interface FileSagaMapper extends BaseMapper<FileSaga> {
 
     /**
      * 查询待重试补偿的 Saga（状态为 PENDING_COMPENSATION 且已到重试时间）
+     * 使用 FOR UPDATE SKIP LOCKED 避免多实例重复处理同一记录
      */
     @Select("SELECT * FROM file_saga WHERE status = 'PENDING_COMPENSATION' " +
             "AND (next_retry_at IS NULL OR next_retry_at <= NOW()) " +
-            "ORDER BY next_retry_at ASC LIMIT #{limit}")
+            "ORDER BY next_retry_at ASC LIMIT #{limit} " +
+            "FOR UPDATE SKIP LOCKED")
     List<FileSaga> selectPendingCompensation(@Param("limit") int limit);
 
     /**

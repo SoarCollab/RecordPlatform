@@ -225,33 +225,47 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     public void saveShareFile(List<String> sharingFileIdList) {
-        if(CommonUtils.isNotEmpty(sharingFileIdList)){
-            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                    .in(File::getId, sharingFileIdList);
-            List<File> FileList = this.list(wrapper);
-            //获取当前登录用户Id
-            String userIdStr = MDC.get(Const.ATTR_USER_ID);
-            if(CommonUtils.isNotEmpty(FileList) && CommonUtils.isNotEmpty(userIdStr)){
-                try {
-                    Long userId = Long.valueOf(userIdStr);
-                    //拷贝其它用户分享文件对应的信息，修改文件所有人并增加文件来源
-                    FileList.forEach(file -> {
-                        //如果源文件已经有来源，则保留最初的文件所有人
-                        if(CommonUtils.isEmpty(file.getOrigin())){
-                            file.setOrigin(file.getId());
-                        }
-                        //重置文件ID和创建时间
-                        file
-                            .setUid(userId)
-                            .setId(null)
-                            .setCreateTime(null);
-                    });
-                    //批量保存文件信息
-                    this.saveBatch(FileList);
-                } catch (NumberFormatException ex) {
-                    log.warn("MDC中的用户ID格式非法，无法保存分享文件: " + userIdStr);
-                }
-            }
+        if (CommonUtils.isEmpty(sharingFileIdList)) {
+            return;
         }
+
+        // 获取当前登录用户ID，未登录时抛出异常
+        String userIdStr = MDC.get(Const.ATTR_USER_ID);
+        if (CommonUtils.isEmpty(userIdStr)) {
+            throw new GeneralException(ResultEnum.USER_NOT_LOGIN, "用户未登录，无法保存分享文件");
+        }
+
+        Long userId;
+        try {
+            userId = Long.valueOf(userIdStr);
+        } catch (NumberFormatException e) {
+            log.error("MDC 中的用户ID格式非法: {}", userIdStr);
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "用户ID格式非法");
+        }
+
+        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                .in(File::getId, sharingFileIdList);
+        List<File> fileList = this.list(wrapper);
+
+        if (CommonUtils.isEmpty(fileList)) {
+            log.warn("未找到指定的分享文件: ids={}", sharingFileIdList);
+            return;
+        }
+
+        // 拷贝其它用户分享文件对应的信息，修改文件所有人并增加文件来源
+        fileList.forEach(file -> {
+            // 如果源文件已经有来源，则保留最初的文件所有人
+            if (CommonUtils.isEmpty(file.getOrigin())) {
+                file.setOrigin(file.getId());
+            }
+            // 重置文件ID和创建时间
+            file.setUid(userId)
+                .setId(null)
+                .setCreateTime(null);
+        });
+
+        // 批量保存文件信息
+        this.saveBatch(fileList);
+        log.info("成功保存分享文件: userId={}, 文件数量={}", userId, fileList.size());
     }
 }

@@ -84,7 +84,7 @@ public class FileUploadController {
 
     @PostMapping("/upload/resume")
     @Operation(summary = "恢复上传")
-    public Result<ResumeUploadVO> resumeUpload(@Schema(description = "客户端ID") @RequestParam("客户端ID") String clientId) {
+    public Result<ResumeUploadVO> resumeUpload(@Schema(description = "客户端ID") @RequestParam("clientId") String clientId) {
         
         ResumeUploadVO response = fileUploadService.resumeUpload(clientId);
         return Result.success(response);

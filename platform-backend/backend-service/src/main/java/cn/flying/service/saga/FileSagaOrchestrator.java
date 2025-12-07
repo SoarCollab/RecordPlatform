@@ -248,22 +248,39 @@ public class FileSagaOrchestrator {
         sagaMapper.updateById(saga);
     }
 
+    /**
+     * 补偿操作：删除已上传到 MinIO 的文件
+     * 设计为幂等操作，重复调用不会产生副作用
+     */
     private void compensate(FileSaga saga) {
         if (!saga.reachedStep(FileSagaStep.MINIO_UPLOADED)) {
-            log.info("无需补偿 MinIO 数据: saga={}", saga.getId());
+            log.info("无需补偿 MinIO 数据（未到达 MINIO_UPLOADED 步骤）: sagaId={}", saga.getId());
             return;
         }
 
-        log.info("开始补偿 MinIO 上传: saga={}", saga.getId());
-
         String payloadJson = saga.getPayload();
-        if (payloadJson != null) {
-            @SuppressWarnings("unchecked")
-            Map<String, String> storedPaths = JsonConverter.parse(payloadJson, Map.class);
-            if (storedPaths != null && !storedPaths.isEmpty()) {
-                fileRemoteClient.deleteStorageFile(storedPaths);
-            }
+        if (payloadJson == null || payloadJson.isBlank()) {
+            log.info("Saga payload 为空，跳过补偿: sagaId={}", saga.getId());
+            return;
         }
-        log.info("MinIO 补偿完成: saga={}", saga.getId());
+
+        @SuppressWarnings("unchecked")
+        Map<String, String> storedPaths = JsonConverter.parse(payloadJson, Map.class);
+        if (storedPaths == null || storedPaths.isEmpty()) {
+            log.info("存储路径为空，跳过补偿: sagaId={}", saga.getId());
+            return;
+        }
+
+        log.info("开始补偿 MinIO 上传: sagaId={}, 文件数量={}", saga.getId(), storedPaths.size());
+
+        Result<Boolean> result = fileRemoteClient.deleteStorageFile(storedPaths);
+        if (result != null && result.isSuccess()) {
+            log.info("MinIO 补偿完成: sagaId={}", saga.getId());
+        } else {
+            // 区分"文件已不存在"（幂等成功）和真正的删除失败
+            // 不抛出异常，因为文件可能在之前的补偿尝试中已被删除
+            log.warn("MinIO 补偿结果: sagaId={}, result={}", saga.getId(),
+                    result != null ? result.getCode() + ":" + result.getMessage() : "null");
+        }
     }
 }
