@@ -108,6 +108,7 @@ resilience4j:
   circuitbreaker:
     configs:
       default:
+        register-health-indicator: true
         sliding-window-type: count_based
         sliding-window-size: 50
         minimum-number-of-calls: 10
@@ -161,12 +162,29 @@ processed-message:
     retention-days: 7
     cron: 0 30 3 * * ?
 
+# Saga compensation configuration
+saga:
+  compensation:
+    max-retries: 5
+    batch-size: 50
+    poll-interval-ms: 30000
+  health:
+    running-threshold: 100
+    failed-threshold: 10
+    pending-compensation-threshold: 50
+
+# Outbox health configuration
+outbox:
+  health:
+    pending-threshold: 500
+    failed-threshold: 20
+
 # Actuator 管理端点配置
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,metrics,prometheus,circuitbreakers,circuitbreakerevents,retries,retryevents
       base-path: /actuator
   endpoint:
     health:
@@ -177,4 +195,6 @@ management:
     livenessState:
       enabled: true
     readinessState:
+      enabled: true
+    circuitbreakers:
       enabled: true

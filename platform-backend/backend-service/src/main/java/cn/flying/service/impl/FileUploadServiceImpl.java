@@ -297,7 +297,7 @@ public class FileUploadServiceImpl implements FileUploadService {
                 log.warn("写入字节数 ({}) 与文件大小 ({}) 不符: 分片={}, 客户端ID={}",
                         bytesWritten, file.getSize(), chunkNumber, clientId);
                 // 可以考虑是否需要抛异常
-                throw new GeneralException(ResultEnum.File_UPLOAD_ERROR);
+                throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR);
             }
 
             byte[] hashBytes = digest.digest();

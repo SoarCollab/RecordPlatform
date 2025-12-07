@@ -56,7 +56,7 @@ public class ImageController {
             log.info("头像文件上传成功，大小:{}", file.getSize());
             return Result.success(fileName);
         } else {
-             return Result.error(ResultEnum.File_UPLOAD_ERROR);
+             return Result.error(ResultEnum.FILE_UPLOAD_ERROR);
         }
     }
     /**
@@ -84,7 +84,7 @@ public class ImageController {
             return Result.success(fileName);
         } else {
             response.setStatus(400);
-            return Result.error(ResultEnum.File_UPLOAD_ERROR);
+            return Result.error(ResultEnum.FILE_UPLOAD_ERROR);
         }
     }
     /**
