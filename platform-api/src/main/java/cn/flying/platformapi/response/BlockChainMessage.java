@@ -17,7 +17,7 @@ public class BlockChainMessage implements Serializable {
     @Serial
     private static final long serialVersionUID = 1L;
 
-    private String blockNumber;
-    private String transactionCount;
-    private String failedTransactionCount;
+    private Long blockNumber;
+    private Long transactionCount;
+    private Long failedTransactionCount;
 }

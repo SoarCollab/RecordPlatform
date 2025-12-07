@@ -1,5 +1,6 @@
 package cn.flying.platformapi.response;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -26,9 +27,11 @@ public class TransactionVO implements Serializable {
     @Schema(description = "合约abi")
     private String contractABI;
     @Schema(description = "合约发起方")
-    private String From;
+    @JsonProperty("from")
+    private String fromAddress;
     @Schema(description = "合约接收方")
-    private String To;
+    @JsonProperty("to")
+    private String toAddress;
     @Schema(description = "交易输入参数")
     private String input;
     @Schema(description = "交易签名")
