@@ -22,7 +22,7 @@ import org.springframework.web.bind.annotation.*;
  * @create: 2024-06-07 20:55
  */
 @RestController
-@RequestMapping("/api/user")
+@RequestMapping("/api/v1/users")
 @Tag(name = "用户信息、隐私设置相关", description = "包括用户信息、详细信息、隐私设置等操作。")
 public class AccountController {
     @Resource

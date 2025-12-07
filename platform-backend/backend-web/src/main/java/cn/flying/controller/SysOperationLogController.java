@@ -18,7 +18,7 @@ import java.util.List;
  * 系统操作日志控制器
  */
 @RestController
-@RequestMapping("/api/system/logs")
+@RequestMapping("/api/v1/system/logs")
 @PreAuthorize("hasRole('admin')") // 仅允许管理员访问
 @Tag(name = "系统操作日志", description = "包括操作日志的查询、导出、清空等操作。")
 public class SysOperationLogController {

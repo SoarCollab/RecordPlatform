@@ -22,6 +22,7 @@ public enum ResultEnum implements Serializable {
     FAIL(0, "服务器内部错误，请联系管理员!"),
 
     /* 参数错误：10001-19999 */
+    PARAM_ERROR(10000, "参数错误"),
     PARAM_IS_INVALID(10001, "参数无效"),
     PARAM_IS_BLANK(10002, "参数为空"),
     PARAM_TYPE_BIND_ERROR(10003, "参数格式错误"),
@@ -33,6 +34,9 @@ public enum ResultEnum implements Serializable {
     USER_ACCOUNT_FORBIDDEN(20003, "账号已被禁用"),
     USER_NOT_EXIST(20004, "用户不存在"),
     USER_HAS_EXISTED(20005, "用户已存在"),
+
+    /* 区块链/外部服务错误：30001-39999 */
+    FISCO_SERVICE_ERROR(30010, "区块链服务异常"),
 
     /* 系统错误：40001-49999 */
     FILE_MAX_SIZE_OVERFLOW(40003, "上传尺寸过大"),
