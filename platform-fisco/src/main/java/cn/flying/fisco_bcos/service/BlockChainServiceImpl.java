@@ -25,13 +25,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * @program: RecordPlatform
- * @description: 区块链综合接口
- * @author: flyingcoding
- * @create: 2025-03-19 21:30
+ * 区块链综合服务实现 v1.0.0
+ * 提供文件存证、查询、删除、分享等区块链操作。
  */
 @Slf4j
-@DubboService
+@DubboService(version = BlockChainService.VERSION)
 public class BlockChainServiceImpl implements BlockChainService{
 
     @Resource
@@ -177,27 +175,20 @@ public class BlockChainServiceImpl implements BlockChainService{
             if (response != null && response.getReturnObject() instanceof List<?> returnList && !returnList.isEmpty()) {
                 Object returnValue = returnList.getFirst();
                 if (returnValue instanceof List<?> fileInfo && fileInfo.size() == 6) {
-//                    String hexHash = Convert.bytesToHex((byte[]) fileInfo.get(4));
-//                    hexHash = hexHash.startsWith("0x") ? hexHash.substring(2) : hexHash;
-
                     // 获取时间戳
                     long uploadTimeNanos = Long.parseLong(String.valueOf(fileInfo.get(5)));
                     String formattedUploadTime = Convert.timeStampToDate(uploadTimeNanos);
 
-                    return Result.success(new FileDetailVO(
-                            // fileName
-                            String.valueOf(fileInfo.get(1)),
-                            // uploader
-                            String.valueOf(fileInfo.get(0)),
-                            // content
-                            String.valueOf(fileInfo.get(3)),
-                            // param
-                            String.valueOf(fileInfo.get(2)),
-                            // fileHash
-//                          hexHash,
-                            // uploadTime
-                            formattedUploadTime
-                    ));
+                    FileDetailVO fileDetailVO = FileDetailVO.builder()
+                            .uploader(String.valueOf(fileInfo.get(0)))
+                            .fileName(String.valueOf(fileInfo.get(1)))
+                            .param(String.valueOf(fileInfo.get(2)))
+                            .content(String.valueOf(fileInfo.get(3)))
+                            .fileHash(fileHash)
+                            .uploadTime(formattedUploadTime)
+                            .uploadTimestamp(uploadTimeNanos / 1_000_000) // 纳秒转毫秒
+                            .build();
+                    return Result.success(fileDetailVO);
                 }
             }
             return Result.error(ResultEnum.GET_USER_FILE_ERROR,null);

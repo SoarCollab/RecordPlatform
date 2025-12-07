@@ -7,13 +7,14 @@ import org.apache.dubbo.config.annotation.DubboService;
 import java.util.List;
 
 /**
- * @program: RecordPlatform
- * @description: 区块链调用接口
- * @author: flyingcoding
- * @create: 2025-03-10 09:40
+ * 区块链调用接口 v1.0.0
+ * 提供文件存证、查询、删除、分享等区块链操作。
  */
-@DubboService
 public interface BlockChainService {
+
+    /** Dubbo 服务版本号 */
+    String VERSION = "1.0.0";
+
     Result<List<String>> storeFile(String uploader, String fileName, String param, String content);
     Result<List<FileVO>> getUserFiles(String uploader);
     Result<FileDetailVO> getFile(String uploader, String fileHash);
