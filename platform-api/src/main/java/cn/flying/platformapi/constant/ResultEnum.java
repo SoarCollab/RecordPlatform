@@ -49,6 +49,8 @@ public enum ResultEnum implements Serializable {
     USER_NOT_EXIST(20004, "用户不存在"),
     /** 用户已存在 */
     USER_HAS_EXISTED(20005, "用户已存在"),
+    /** 账户已锁定 */
+    USER_ACCOUNT_LOCKED(20006, "登录失败次数过多，账户已被临时锁定，请稍后重试"),
 
     /* ==================== 外部服务错误：30000-39999 ==================== */
     /** 合约调用失败 */
@@ -63,6 +65,10 @@ public enum ResultEnum implements Serializable {
     GET_USER_SHARE_FILE_ERROR(30005, "获取分享文件失败，文件不存在或访问次数受限"),
     /** 区块链服务异常 */
     BLOCKCHAIN_ERROR(30006, "区块链服务请求失败"),
+    /** 区块链服务超时 */
+    BLOCKCHAIN_TIMEOUT(30012, "区块链服务响应超时"),
+    /** 区块链节点不可达 */
+    BLOCKCHAIN_UNREACHABLE(30013, "区块链节点连接失败"),
     /** 交易记录未找到 */
     TRANSACTION_NOT_FOUND(30007, "交易记录未找到"),
     /** 交易回执未找到 */

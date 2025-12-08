@@ -14,11 +14,16 @@ public final class Const {
     public final static String VERIFY_EMAIL_LIMIT = "verify:email:limit:";
     public final static String VERIFY_EMAIL_DATA = "verify:email:data:";
     //过滤器优先级
+    public final static int ORDER_SECURITY_HEADER = -105;
     public final static int ORDER_FLOW_LIMIT = -101;
     public final static int ORDER_CORS = -102;
     public final static int SECURITY_ORDER = -99;
     public final static int LOG_ORDER = -100;
     public final static int ORDER_ID_SECURITY = 100;
+    //登录安全
+    public final static String LOGIN_FAIL_COUNT = "login:fail:";
+    public final static int LOGIN_MAX_ATTEMPTS = 5;
+    public final static long LOGIN_LOCK_DURATION = 15 * 60;  // 15分钟
     //请求自定义属性
     public final static String ATTR_USER_ID = "userId";
     public final static String ATTR_USER_ROLE = "userRole";
