@@ -206,8 +206,13 @@ public class JwtUtils {
         return headerToken.substring(7);
     }
 
+    // 黑名单冗余时间（1小时），防止边界问题
+    private static final long BLACKLIST_BUFFER_MS = 3600_000L;
+
     /**
      * 将Token列入Redis黑名单中
+     * 增加1小时冗余时间，确保即使存在时钟偏差或 Redis 重启恢复延迟，
+     * 令牌仍然能被正确识别为无效
      * @param uuid 令牌ID
      * @param time 过期时间
      * @return 是否操作成功
@@ -217,7 +222,8 @@ public class JwtUtils {
             return false;
         }
         Date now = new Date();
-        long expire = Math.max(time.getTime() - now.getTime(), 0);
+        // 计算过期时间并添加冗余缓冲
+        long expire = Math.max(time.getTime() - now.getTime() + BLACKLIST_BUFFER_MS, 0);
         // 使用租户隔离的 Key
         String key = TenantKeyUtils.tenantKey(Const.JWT_BLACK_LIST + uuid);
         template.opsForValue().set(key, "", expire, TimeUnit.MILLISECONDS);

@@ -9,9 +9,12 @@ import cn.flying.dao.vo.auth.AuthorizeVO;
 import cn.flying.filter.JwtAuthenticationFilter;
 import cn.flying.filter.RequestLogFilter;
 import cn.flying.service.AccountService;
+import cn.flying.service.LoginSecurityService;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.access.AccessDeniedException;
@@ -19,6 +22,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
@@ -35,6 +39,8 @@ import java.io.PrintWriter;
 @Configuration
 public class SecurityConfiguration {
 
+    private static final Logger log = LoggerFactory.getLogger(SecurityConfiguration.class);
+
     @Resource
     JwtAuthenticationFilter jwtAuthenticationFilter;
 
@@ -46,6 +52,9 @@ public class SecurityConfiguration {
 
     @Resource
     AccountService service;
+
+    @Resource
+    LoginSecurityService loginSecurityService;
 
     /**
      * 针对于 SpringSecurity 6 的新版配置方法
@@ -100,27 +109,74 @@ public class SecurityConfiguration {
                                Object exceptionOrAuthentication) throws IOException {
         response.setContentType("application/json;charset=utf-8");
         PrintWriter writer = response.getWriter();
+
+        // 获取用户名（用于登录安全检查）
+        String username = request.getParameter("username");
+
         if(exceptionOrAuthentication instanceof AccessDeniedException exception) {
             writer.write(Result
                     .error(exception.getMessage()).toJson());
+        } else if(exceptionOrAuthentication instanceof AuthenticationException) {
+            // 登录失败处理
+            handleLoginFailure(username, writer);
         } else if(exceptionOrAuthentication instanceof Exception exception) {
             writer.write(Result
                     .error(exception.getMessage()).toJson());
         } else if(exceptionOrAuthentication instanceof Authentication authentication){
-            User user = (User) authentication.getPrincipal();
-            Account account = service.findAccountByNameOrEmail(user.getUsername());
-            
-            // 确保使用Long类型的用户ID
-            Long userId = account.getId();
-            String jwt = utils.createJwt(user, account.getUsername(), userId, account.getTenantId());
-            
-            if(jwt == null) {
-                writer.write(Result.error(ResultEnum.PERMISSION_LIMIT).toJson());
-            } else {
-                AuthorizeVO vo = account.asViewObject(AuthorizeVO.class, o -> o.setToken(jwt));
-                vo.setExpire(utils.expireTime());
-                writer.write(Result.success(vo).toJson());
+            // 登录成功处理
+            handleLoginSuccess(username, authentication, writer);
+        }
+    }
+
+    /**
+     * 处理登录失败
+     */
+    private void handleLoginFailure(String username, PrintWriter writer) {
+        if (username != null && !username.isEmpty()) {
+            // 检查是否已被锁定
+            if (loginSecurityService.isAccountLocked(username)) {
+                long remainingTime = loginSecurityService.getRemainingLockTime(username);
+                log.warn("账户 [{}] 已被锁定，剩余锁定时间: {}秒", username, remainingTime);
+                writer.write(Result.error(ResultEnum.USER_ACCOUNT_LOCKED).toJson());
+                return;
             }
+
+            // 记录登录失败
+            int failCount = loginSecurityService.recordLoginFailure(username);
+            int remaining = loginSecurityService.getRemainingAttempts(username);
+            log.warn("账户 [{}] 登录失败，当前失败次数: {}, 剩余尝试次数: {}", username, failCount, remaining);
+
+            if (remaining <= 0) {
+                writer.write(Result.error(ResultEnum.USER_ACCOUNT_LOCKED).toJson());
+                return;
+            }
+        }
+
+        writer.write(Result.error(ResultEnum.USER_LOGIN_ERROR).toJson());
+    }
+
+    /**
+     * 处理登录成功
+     */
+    private void handleLoginSuccess(String username, Authentication authentication, PrintWriter writer) throws IOException {
+        User user = (User) authentication.getPrincipal();
+        Account account = service.findAccountByNameOrEmail(user.getUsername());
+
+        // 清除登录失败记录
+        if (username != null && !username.isEmpty()) {
+            loginSecurityService.clearLoginFailure(username);
+        }
+
+        // 确保使用Long类型的用户ID
+        Long userId = account.getId();
+        String jwt = utils.createJwt(user, account.getUsername(), userId, account.getTenantId());
+
+        if(jwt == null) {
+            writer.write(Result.error(ResultEnum.PERMISSION_LIMIT).toJson());
+        } else {
+            AuthorizeVO vo = account.asViewObject(AuthorizeVO.class, o -> o.setToken(jwt));
+            vo.setExpire(utils.expireTime());
+            writer.write(Result.success(vo).toJson());
         }
     }
 
