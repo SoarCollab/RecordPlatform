@@ -18,7 +18,7 @@ spring:
         url-pattern: /*
         exclusions: /druid/*,*.js,*.css,*.gif,*.jpg,*.bmp,*.png,*.ico
       stat-view-servlet:
-        enabled: true
+        enabled: false  # 生产环境禁用 Druid 监控页面
         url-pattern: /druid/*
         allow:
         deny:
@@ -82,3 +82,7 @@ dubbo:
 logging:
   level:
     root: WARN  # 全局日志级别保持为WARN
+
+# 生产环境禁用 API 文档
+knife4j:
+  production: true  # 生产环境屏蔽所有 Swagger 相关资源

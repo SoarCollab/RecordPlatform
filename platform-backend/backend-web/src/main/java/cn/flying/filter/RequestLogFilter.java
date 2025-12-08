@@ -31,6 +31,17 @@ public class RequestLogFilter extends OncePerRequestFilter {
 
     private final Set<String> ignores = Set.of("/favicon.ico","/webjars","/doc.html","/swagger-ui","/v3/api-docs","/api/system/logs");
 
+    /**
+     * 敏感参数列表，这些参数在日志中会被脱敏处理
+     */
+    private static final Set<String> SENSITIVE_PARAMS = Set.of(
+            "password", "pwd", "oldPassword", "newPassword", "new_password", "old_password",
+            "token", "secret", "secretKey", "accessKey", "apiKey", "privateKey",
+            "creditCard", "cardNumber", "cvv", "ssn"
+    );
+
+    private static final String MASK = "***";
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, @NotNull HttpServletResponse response, @NotNull FilterChain filterChain) throws ServletException, IOException {
         if(this.isIgnoreUrl(request.getServletPath())) {
@@ -91,13 +102,20 @@ public class RequestLogFilter extends OncePerRequestFilter {
 
     /**
      * 请求开始时的日志打印，包含请求全部信息，以及对应用户角色
+     * 敏感参数会被脱敏处理
      * @param request 请求
      */
     public void logRequestStart(HttpServletRequest request){
-        // 将请求参数转换为JSON
+        // 将请求参数转换为JSON，敏感参数脱敏处理
         JSONObject object = new JSONObject();
-        request.getParameterMap().forEach((k, v) -> object.set(k, v.length > 0 ? v[0] : null));
-        
+        request.getParameterMap().forEach((k, v) -> {
+            if (isSensitiveParam(k)) {
+                object.set(k, MASK);
+            } else {
+                object.set(k, v.length > 0 ? v[0] : null);
+            }
+        });
+
         // 获取用户信息
         Object id = request.getAttribute(Const.ATTR_USER_ID);
         if(id != null) {
@@ -109,5 +127,17 @@ public class RequestLogFilter extends OncePerRequestFilter {
             log.info("请求URL: \"{}\" ({}) | 远程IP地址: {} │ 身份: 未验证 | 请求参数列表: {}",
                     request.getServletPath(), request.getMethod(), request.getRemoteAddr(), object);
         }
+    }
+
+    /**
+     * 判断参数是否为敏感参数（大小写不敏感）
+     * @param paramName 参数名
+     * @return 是否敏感
+     */
+    private boolean isSensitiveParam(String paramName) {
+        if (paramName == null) return false;
+        String lowerName = paramName.toLowerCase();
+        return SENSITIVE_PARAMS.stream()
+                .anyMatch(sensitive -> lowerName.contains(sensitive.toLowerCase()));
     }
 }
