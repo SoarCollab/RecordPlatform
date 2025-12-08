@@ -71,16 +71,40 @@ public class SysOperationLogVO {
      */
     @Schema(description = "操作用户名")
     private String username;
-    
+
+    /**
+     * 操作用户ID
+     */
+    @Schema(description = "操作用户ID")
+    private String userId;
+
     /**
      * 操作时间
      */
     @Schema(description = "操作时间")
     private LocalDateTime operationTime;
-    
+
     /**
      * 执行时长（毫秒）
      */
     @Schema(description = "执行时长（毫秒）")
     private Long executionTime;
+
+    /**
+     * 请求参数
+     */
+    @Schema(description = "请求参数")
+    private String requestParam;
+
+    /**
+     * 响应结果
+     */
+    @Schema(description = "响应结果")
+    private String responseResult;
+
+    /**
+     * 错误信息
+     */
+    @Schema(description = "错误信息")
+    private String errorMsg;
 } 

@@ -33,10 +33,6 @@ public final class Const {
     public final static String TRACE_ID = "traceId";
     //消息队列
     public final static String MQ_MAIL = "mail";
-    //用户角色
-    public final static String ROLE_DEFAULT = "user";
-    public final static String ROLE_ADMINISTER = "admin";
-    public final static String ROLE_MONITOR  = "monitor";
     //文件
     public final static String IMAGE_COUNTER = "image:";
 

@@ -123,8 +123,6 @@ public enum ResultEnum implements Serializable {
     PERMISSION_UNAUTHENTICATED(70001, "此操作需要登录系统"),
     /** 权限不足 */
     PERMISSION_UNAUTHORIZED(70002, "权限不足，无权操作"),
-    /** 登录过期 */
-    PERMISSION_EXPIRE(70003, "登录状态过期"),
     /** Token过期 */
     PERMISSION_TOKEN_EXPIRED(70004, "Token已过期"),
     /** 访问受限 */
