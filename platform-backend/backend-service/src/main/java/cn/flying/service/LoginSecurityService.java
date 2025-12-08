@@ -1,6 +1,7 @@
 package cn.flying.service;
 
 import cn.flying.common.util.Const;
+import cn.flying.common.util.TenantKeyUtils;
 import jakarta.annotation.Resource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -10,6 +11,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * 登录安全服务
  * 提供登录失败计数、账户锁定、解锁等功能
+ * 注：登录失败计数 Key 不进行租户隔离（登录时租户上下文未建立）
  */
 @Service
 public class LoginSecurityService {
@@ -18,13 +20,20 @@ public class LoginSecurityService {
     private StringRedisTemplate stringRedisTemplate;
 
     /**
+     * 构建登录失败计数的 Redis Key
+     */
+    private String buildKey(String username) {
+        return TenantKeyUtils.smartKey(Const.LOGIN_FAIL_COUNT + username);
+    }
+
+    /**
      * 检查账户是否被锁定
      *
      * @param username 用户名或邮箱
      * @return true 如果账户被锁定
      */
     public boolean isAccountLocked(String username) {
-        String key = Const.LOGIN_FAIL_COUNT + username;
+        String key = buildKey(username);
         String countStr = stringRedisTemplate.opsForValue().get(key);
         if (countStr == null) {
             return false;
@@ -44,7 +53,7 @@ public class LoginSecurityService {
      * @return 剩余锁定时间，-1 表示未锁定或已过期
      */
     public long getRemainingLockTime(String username) {
-        String key = Const.LOGIN_FAIL_COUNT + username;
+        String key = buildKey(username);
         Long ttl = stringRedisTemplate.getExpire(key, TimeUnit.SECONDS);
         if (ttl == null || ttl < 0) {
             return -1;
@@ -70,7 +79,7 @@ public class LoginSecurityService {
      * @return 当前失败次数
      */
     public int recordLoginFailure(String username) {
-        String key = Const.LOGIN_FAIL_COUNT + username;
+        String key = buildKey(username);
         Long count = stringRedisTemplate.opsForValue().increment(key);
         if (count == null) {
             count = 1L;
@@ -86,7 +95,7 @@ public class LoginSecurityService {
      * @param username 用户名或邮箱
      */
     public void clearLoginFailure(String username) {
-        String key = Const.LOGIN_FAIL_COUNT + username;
+        String key = buildKey(username);
         stringRedisTemplate.delete(key);
     }
 
@@ -97,7 +106,7 @@ public class LoginSecurityService {
      * @return 剩余尝试次数
      */
     public int getRemainingAttempts(String username) {
-        String key = Const.LOGIN_FAIL_COUNT + username;
+        String key = buildKey(username);
         String countStr = stringRedisTemplate.opsForValue().get(key);
         if (countStr == null) {
             return Const.LOGIN_MAX_ATTEMPTS;
