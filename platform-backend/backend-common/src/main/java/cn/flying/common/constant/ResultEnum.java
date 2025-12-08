@@ -118,6 +118,26 @@ public enum ResultEnum implements Serializable {
     /** 文件存证失败 */
     FILE_RECORD_ERROR(50010, "文件存证失败"),
 
+    /* ==================== 消息服务错误：60000-69999 ==================== */
+    /** 消息不存在 */
+    MESSAGE_NOT_FOUND(60001, "消息不存在"),
+    /** 会话不存在 */
+    CONVERSATION_NOT_FOUND(60002, "会话不存在"),
+    /** 不能给自己发送消息 */
+    CANNOT_MESSAGE_SELF(60003, "不能给自己发送消息"),
+    /** 公告不存在 */
+    ANNOUNCEMENT_NOT_FOUND(60004, "公告不存在"),
+    /** 工单不存在 */
+    TICKET_NOT_FOUND(60005, "工单不存在"),
+    /** 工单已关闭 */
+    TICKET_ALREADY_CLOSED(60006, "工单已关闭，无法操作"),
+    /** 无权操作工单 */
+    TICKET_NOT_OWNER(60007, "无权操作此工单"),
+    /** 工单状态无效 */
+    INVALID_TICKET_STATUS(60008, "工单状态无效"),
+    /** 附件数量超限 */
+    ATTACHMENT_LIMIT_EXCEEDED(60009, "附件数量超过限制"),
+
     /* ==================== 权限错误：70000-79999 ==================== */
     /** 需要登录 */
     PERMISSION_UNAUTHENTICATED(70001, "此操作需要登录系统"),
