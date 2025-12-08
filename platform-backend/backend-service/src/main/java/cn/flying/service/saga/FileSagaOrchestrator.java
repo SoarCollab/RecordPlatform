@@ -15,8 +15,10 @@ import cn.flying.dao.mapper.FileMapper;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
+import cn.flying.service.monitor.SagaMetrics;
 import cn.flying.service.outbox.OutboxService;
 import cn.flying.service.remote.FileRemoteClient;
+import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,6 +35,7 @@ import java.util.*;
  * 文件上传 Saga 编排器。
  * 协调 MinIO 上传 + 区块链存储的分布式事务，失败时自动补偿。
  * 支持指数退避重试策略。
+ * 集成 Prometheus 监控指标。
  */
 @Slf4j
 @Service
@@ -43,6 +46,7 @@ public class FileSagaOrchestrator {
     private final FileRemoteClient fileRemoteClient;
     private final OutboxService outboxService;
     private final FileMapper fileMapper;
+    private final SagaMetrics sagaMetrics;
 
     @Value("${saga.compensation.max-retries:5}")
     private int maxCompensationRetries;
@@ -62,6 +66,9 @@ public class FileSagaOrchestrator {
      */
     @Transactional(rollbackFor = Exception.class)
     public FileUploadResult executeUpload(FileUploadCommand cmd) {
+        Timer.Sample timerSample = sagaMetrics.startSagaTimer();
+        sagaMetrics.recordSagaStarted();
+
         FileSaga saga = startOrResumeSaga(cmd);
 
         try {
@@ -71,12 +78,15 @@ public class FileSagaOrchestrator {
             publishSuccessEvent(saga, cmd, chainResult);
             completeSaga(saga);
 
+            sagaMetrics.recordSagaCompleted();
             return FileUploadResult.success(chainResult.getTransactionHash(), chainResult.getFileHash());
 
         } catch (Exception ex) {
             log.error("Saga 执行失败: requestId={}", cmd.getRequestId(), ex);
             handleFailure(saga, cmd, ex);
             throw ex;
+        } finally {
+            sagaMetrics.stopSagaTimer(timerSample);
         }
     }
 
@@ -112,6 +122,7 @@ public class FileSagaOrchestrator {
      */
     @Transactional(rollbackFor = Exception.class)
     public void retryCompensation(FileSaga saga) {
+        Timer.Sample timerSample = sagaMetrics.startCompensationTimer();
         log.info("开始重试 Saga 补偿: id={}, retryCount={}", saga.getId(), saga.getRetryCount());
 
         saga.markStatus(FileSagaStatus.COMPENSATING);
@@ -120,12 +131,14 @@ public class FileSagaOrchestrator {
         try {
             compensate(saga, loadPayloadContext(saga));
             saga.markStatus(FileSagaStatus.COMPENSATED);
+            sagaMetrics.recordSagaCompensated();
             log.info("Saga 补偿成功: id={}", saga.getId());
         } catch (Exception e) {
             saga.recordError(e);
 
             if (saga.isMaxRetriesExceeded(maxCompensationRetries)) {
                 saga.markStatus(FileSagaStatus.FAILED);
+                sagaMetrics.recordSagaFailed();
                 log.error("Saga 补偿超过最大重试次数，标记为失败: id={}, retryCount={}",
                         saga.getId(), saga.getRetryCount());
                 // 发布死信事件，便于人工介入处理
@@ -136,6 +149,8 @@ public class FileSagaOrchestrator {
                 log.warn("Saga 补偿失败，安排下次重试: id={}, nextRetryAt={}",
                         saga.getId(), saga.getNextRetryAt());
             }
+        } finally {
+            sagaMetrics.stopCompensationTimer(timerSample);
         }
         sagaMapper.updateById(saga);
     }
