@@ -39,7 +39,7 @@ public final class TenantKeyUtils {
 
     /**
      * 检查 Key 是否应该进行租户隔离。
-     * 某些全局 Key（如限流计数器）不应隔离。
+     * 某些全局 Key（如限流计数器、登录安全计数器）不应隔离。
      *
      * @param baseKey 原始 Key 前缀
      * @return 是否需要租户隔离
@@ -48,6 +48,10 @@ public final class TenantKeyUtils {
         // 流量限制相关 Key 基于 IP，不需要租户隔离
         if (baseKey.startsWith(Const.FLOW_LIMIT_COUNTER) ||
             baseKey.startsWith(Const.FLOW_LIMIT_BLOCK)) {
+            return false;
+        }
+        // 登录安全相关 Key 基于用户名，不需要租户隔离（登录时租户上下文未建立）
+        if (baseKey.startsWith(Const.LOGIN_FAIL_COUNT)) {
             return false;
         }
         // 其他 Key 默认需要租户隔离
