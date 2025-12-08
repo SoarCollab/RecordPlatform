@@ -83,29 +83,34 @@ public class RequestLogFilter extends OncePerRequestFilter {
 
     /**
      * 请求结束时的日志打印，包含处理耗时以及响应结果
+     * 使用DEBUG级别，避免与OperationLogAspect的INFO级别日志重复
      * @param wrapper 用于读取响应结果的包装类
      * @param startTime 起始时间
      */
     public void logRequestEnd(ContentCachingResponseWrapper wrapper, long startTime){
         long time = System.currentTimeMillis() - startTime;
         int status = wrapper.getStatus();
-        
-        // 仅在DEBUG级别打印完整响应内容
+
+        // 使用DEBUG级别打印响应日志，避免与OperationLogAspect重复
         if (log.isDebugEnabled()) {
             String content = status != 200 ?
                     status + " 错误" : new String(wrapper.getContentAsByteArray());
             log.debug("请求处理耗时: {}ms | 响应状态: {} | 响应结果: {}", time, status, content);
-        } else {
-            log.info("请求处理耗时: {}ms | 响应状态: {}", time, status);
         }
     }
 
     /**
      * 请求开始时的日志打印，包含请求全部信息，以及对应用户角色
+     * 使用DEBUG级别，避免与OperationLogAspect的INFO级别日志重复
      * 敏感参数会被脱敏处理
      * @param request 请求
      */
     public void logRequestStart(HttpServletRequest request){
+        // 仅在DEBUG级别打印
+        if (!log.isDebugEnabled()) {
+            return;
+        }
+
         // 将请求参数转换为JSON，敏感参数脱敏处理
         JSONObject object = new JSONObject();
         request.getParameterMap().forEach((k, v) -> {
@@ -120,11 +125,11 @@ public class RequestLogFilter extends OncePerRequestFilter {
         Object id = request.getAttribute(Const.ATTR_USER_ID);
         if(id != null) {
             User user = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-            log.info("请求URL: \"{}\" ({}) | 远程IP地址: {} │ 身份: {} (UID: {}) | 角色: {} | 请求参数列表: {}",
+            log.debug("请求URL: \"{}\" ({}) | 远程IP地址: {} │ 身份: {} (UID: {}) | 角色: {} | 请求参数列表: {}",
                     request.getServletPath(), request.getMethod(), request.getRemoteAddr(),
                     user.getUsername(), id, user.getAuthorities(), object);
         } else {
-            log.info("请求URL: \"{}\" ({}) | 远程IP地址: {} │ 身份: 未验证 | 请求参数列表: {}",
+            log.debug("请求URL: \"{}\" ({}) | 远程IP地址: {} │ 身份: 未验证 | 请求参数列表: {}",
                     request.getServletPath(), request.getMethod(), request.getRemoteAddr(), object);
         }
     }
