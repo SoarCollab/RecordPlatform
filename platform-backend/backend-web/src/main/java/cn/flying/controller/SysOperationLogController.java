@@ -2,10 +2,10 @@ package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.dao.dto.SysOperationLog;
-import cn.flying.dao.vo.SysOperationLogVO;
+import cn.flying.dao.vo.audit.AuditLogQueryVO;
+import cn.flying.service.SysAuditService;
 import cn.flying.service.SysOperationLogService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
@@ -16,6 +16,7 @@ import java.util.List;
 
 /**
  * 系统操作日志控制器
+ * 注：查询和导出功能使用 SysAuditService，避免代码重复
  */
 @RestController
 @RequestMapping("/api/v1/system/logs")
@@ -25,6 +26,9 @@ public class SysOperationLogController {
 
     @Resource
     private SysOperationLogService operationLogService;
+
+    @Resource
+    private SysAuditService auditService;
 
     /**
      * 分页查询操作日志
@@ -41,7 +45,7 @@ public class SysOperationLogController {
     @GetMapping("/page")
     @Operation(summary = "分页查询操作日志")
     @OperationLog(module = "系统管理", operationType = "查询", description = "分页查询操作日志")
-    public IPage<SysOperationLogVO> page(
+    public IPage<SysOperationLog> page(
             @RequestParam(defaultValue = "1") Integer pageNum,
             @RequestParam(defaultValue = "10") Integer pageSize,
             @RequestParam(required = false) String module,
@@ -49,9 +53,17 @@ public class SysOperationLogController {
             @RequestParam(required = false) Integer status,
             @RequestParam(required = false) String startTime,
             @RequestParam(required = false) String endTime) {
-        
-        Page<SysOperationLogVO> page = new Page<>(pageNum, pageSize);
-        return operationLogService.queryOperationLogs(page, module, username, status, startTime, endTime);
+
+        AuditLogQueryVO queryVO = new AuditLogQueryVO();
+        queryVO.setPageNum(pageNum);
+        queryVO.setPageSize(pageSize);
+        queryVO.setModule(module);
+        queryVO.setUsername(username);
+        queryVO.setStatus(status);
+        queryVO.setStartTime(startTime);
+        queryVO.setEndTime(endTime);
+
+        return auditService.queryOperationLogs(queryVO);
     }
 
     /**
@@ -80,14 +92,21 @@ public class SysOperationLogController {
     @GetMapping("/export")
     @Operation(summary = "导出操作日志")
     @OperationLog(module = "系统管理", operationType = "导出", description = "导出操作日志")
-    public List<SysOperationLogVO> export(
+    public List<SysOperationLog> export(
             @RequestParam(required = false) String module,
             @RequestParam(required = false) String username,
             @RequestParam(required = false) Integer status,
             @RequestParam(required = false) String startTime,
             @RequestParam(required = false) String endTime) {
-        
-        return operationLogService.exportOperationLogs(module, username, status, startTime, endTime);
+
+        AuditLogQueryVO queryVO = new AuditLogQueryVO();
+        queryVO.setModule(module);
+        queryVO.setUsername(username);
+        queryVO.setStatus(status);
+        queryVO.setStartTime(startTime);
+        queryVO.setEndTime(endTime);
+
+        return auditService.exportOperationLogs(queryVO);
     }
 
     /**

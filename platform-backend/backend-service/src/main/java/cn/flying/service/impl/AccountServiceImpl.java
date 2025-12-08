@@ -1,5 +1,6 @@
 package cn.flying.service.impl;
 
+import cn.flying.common.constant.UserRole;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.FlowUtils;
 import cn.flying.common.util.IdUtils;
@@ -108,7 +109,7 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
         if(this.existsAccountByUsername(username)) return "该用户名已被他人使用，请重新更换";
         String password = passwordEncoder.encode(info.getPassword());
         Account account = new Account(IdUtils.nextUserId(),info.getUsername(),
-                password, email, Const.ROLE_DEFAULT,null);
+                password, email, UserRole.ROLE_DEFAULT.getRole(),null);
         if(!this.save(account)) {
             return "内部错误，注册失败";
         } else {

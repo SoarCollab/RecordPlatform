@@ -2,6 +2,7 @@ package cn.flying.config;
 
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.constant.UserRole;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.JwtUtils;
 import cn.flying.dao.dto.Account;
@@ -70,7 +71,10 @@ public class SecurityConfiguration {
                         .requestMatchers("/api/v1/images/download/images/**").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/doc.html/**","/webjars/**","/favicon.ico").permitAll()
-                        .anyRequest().hasAnyRole(Const.ROLE_DEFAULT,Const.ROLE_ADMINISTER,Const.ROLE_MONITOR)
+                        .anyRequest().hasAnyRole(
+                                UserRole.ROLE_DEFAULT.getRole(),
+                                UserRole.ROLE_ADMINISTER.getRole(),
+                                UserRole.ROLE_MONITOR.getRole())
                 )
                 .formLogin(conf -> conf
                         .loginProcessingUrl("/api/v1/auth/login")
