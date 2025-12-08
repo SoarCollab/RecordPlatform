@@ -1,10 +1,10 @@
 package cn.flying.service.impl;
 
 import cn.flying.common.constant.AnnouncementStatus;
-import cn.flying.common.constant.MessagePriority;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.IdUtils;
+import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.entity.Announcement;
 import cn.flying.dao.entity.AnnouncementRead;
 import cn.flying.dao.mapper.AnnouncementMapper;
@@ -48,9 +48,13 @@ public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Ann
     @Resource
     private SseEmitterManager sseEmitterManager;
 
+    /**
+     * 发布或保存公告，并设置对应租户信息
+     */
     @Override
     @Transactional
     public Announcement publish(Long publisherId, AnnouncementCreateVO vo) {
+        Long tenantId = currentTenantId();
         Announcement announcement = new Announcement()
                 .setTitle(vo.getTitle())
                 .setContent(vo.getContent())
@@ -58,6 +62,7 @@ public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Ann
                 .setIsPinned(vo.getIsPinned())
                 .setPublishTime(vo.getPublishTime())
                 .setExpireTime(vo.getExpireTime())
+                .setTenantId(tenantId)
                 .setPublisherId(publisherId);
 
         // 根据发布时间判断状态
@@ -87,7 +92,8 @@ public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Ann
     @Override
     @Transactional
     public Announcement update(Long announcementId, AnnouncementCreateVO vo) {
-        Announcement announcement = this.getById(announcementId);
+        Long tenantId = currentTenantId();
+        Announcement announcement = findAnnouncementInTenant(announcementId, tenantId);
         if (announcement == null) {
             throw new GeneralException(ResultEnum.ANNOUNCEMENT_NOT_FOUND);
         }
@@ -116,8 +122,10 @@ public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Ann
 
     @Override
     public IPage<AnnouncementVO> getPublishedList(Long userId, Page<Announcement> page) {
+        Long tenantId = currentTenantId();
         // 查询已发布的公告
         LambdaQueryWrapper<Announcement> wrapper = new LambdaQueryWrapper<Announcement>()
+                .eq(Announcement::getTenantId, tenantId)
                 .eq(Announcement::getStatus, AnnouncementStatus.PUBLISHED.getCode())
                 .orderByDesc(Announcement::getIsPinned)
                 .orderByDesc(Announcement::getPublishTime);
@@ -125,7 +133,7 @@ public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Ann
         IPage<Announcement> announcementPage = this.page(page, wrapper);
 
         // 获取用户已读公告ID集合
-        Set<Long> readIds = announcementReadMapper.selectReadAnnouncementIds(userId);
+        Set<Long> readIds = announcementReadMapper.selectReadAnnouncementIds(tenantId, userId);
 
         // 转换为 VO
         return announcementPage.convert(announcement -> convertToVO(announcement, readIds.contains(announcement.getId())));
@@ -133,7 +141,9 @@ public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Ann
 
     @Override
     public IPage<AnnouncementVO> getAdminList(Page<Announcement> page) {
+        Long tenantId = currentTenantId();
         LambdaQueryWrapper<Announcement> wrapper = new LambdaQueryWrapper<Announcement>()
+                .eq(Announcement::getTenantId, tenantId)
                 .orderByDesc(Announcement::getCreateTime);
 
         IPage<Announcement> announcementPage = this.page(page, wrapper);
@@ -142,7 +152,8 @@ public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Ann
 
     @Override
     public AnnouncementVO getDetail(Long userId, Long announcementId) {
-        Announcement announcement = this.getById(announcementId);
+        Long tenantId = currentTenantId();
+        Announcement announcement = findAnnouncementInTenant(announcementId, tenantId);
         if (announcement == null) {
             throw new GeneralException(ResultEnum.ANNOUNCEMENT_NOT_FOUND);
         }
@@ -153,6 +164,7 @@ public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Ann
             Long count = announcementReadMapper.selectCount(
                     new LambdaQueryWrapper<AnnouncementRead>()
                             .eq(AnnouncementRead::getAnnouncementId, announcementId)
+                            .eq(AnnouncementRead::getTenantId, tenantId)
                             .eq(AnnouncementRead::getUserId, userId)
             );
             isRead = count > 0;
@@ -163,16 +175,19 @@ public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Ann
 
     @Override
     public int getUnreadCount(Long userId) {
-        return announcementReadMapper.countUnreadAnnouncements(userId);
+        Long tenantId = currentTenantId();
+        return announcementReadMapper.countUnreadAnnouncements(tenantId, userId);
     }
 
     @Override
     @Transactional
     public void markAsRead(Long userId, Long announcementId) {
+        Long tenantId = currentTenantId();
         // 检查是否已存在已读记录
         Long count = announcementReadMapper.selectCount(
                 new LambdaQueryWrapper<AnnouncementRead>()
                         .eq(AnnouncementRead::getAnnouncementId, announcementId)
+                        .eq(AnnouncementRead::getTenantId, tenantId)
                         .eq(AnnouncementRead::getUserId, userId)
         );
 
@@ -180,6 +195,7 @@ public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Ann
             AnnouncementRead read = new AnnouncementRead()
                     .setAnnouncementId(announcementId)
                     .setUserId(userId)
+                    .setTenantId(tenantId)
                     .setReadTime(new Date());
             announcementReadMapper.insert(read);
         }
@@ -188,11 +204,13 @@ public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Ann
     @Override
     @Transactional
     public void markAllAsRead(Long userId) {
+        Long tenantId = currentTenantId();
         // 获取所有已发布且未读的公告
-        Set<Long> readIds = announcementReadMapper.selectReadAnnouncementIds(userId);
+        Set<Long> readIds = announcementReadMapper.selectReadAnnouncementIds(tenantId, userId);
 
         List<Announcement> unreadAnnouncements = this.list(
                 new LambdaQueryWrapper<Announcement>()
+                        .eq(Announcement::getTenantId, tenantId)
                         .eq(Announcement::getStatus, AnnouncementStatus.PUBLISHED.getCode())
                         .notIn(!readIds.isEmpty(), Announcement::getId, readIds)
         );
@@ -203,6 +221,7 @@ public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Ann
             AnnouncementRead read = new AnnouncementRead()
                     .setAnnouncementId(announcement.getId())
                     .setUserId(userId)
+                    .setTenantId(tenantId)
                     .setReadTime(now);
             announcementReadMapper.insert(read);
         }
@@ -213,7 +232,10 @@ public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Ann
     @Override
     @Transactional
     public void deleteAnnouncement(Long announcementId) {
-        this.removeById(announcementId);
+        Long tenantId = currentTenantId();
+        this.remove(new LambdaQueryWrapper<Announcement>()
+                .eq(Announcement::getId, announcementId)
+                .eq(Announcement::getTenantId, tenantId));
         log.info("公告删除成功: id={}", announcementId);
     }
 
@@ -288,5 +310,25 @@ public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Ann
                 "priority", announcement.getPriority(),
                 "isPinned", announcement.getIsPinned() == 1
         )));
+    }
+
+    /**
+     * 获取当前请求关联的租户ID
+     */
+    private Long currentTenantId() {
+        return SecurityUtils.getTenantId();
+    }
+
+    /**
+     * 按租户范围查询公告
+     *
+     * @param announcementId 公告ID
+     * @param tenantId       租户ID
+     * @return 当前租户下的公告，未找到则返回 null
+     */
+    private Announcement findAnnouncementInTenant(Long announcementId, Long tenantId) {
+        return this.getOne(new LambdaQueryWrapper<Announcement>()
+                .eq(Announcement::getId, announcementId)
+                .eq(Announcement::getTenantId, tenantId));
     }
 }
