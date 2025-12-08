@@ -59,7 +59,6 @@ fi
 # JVM options
 JVM_OPTS="-Xms512m -Xmx1024m"
 JVM_OPTS="${JVM_OPTS} -XX:+UseG1GC"
-JVM_OPTS="${JVM_OPTS} --enable-preview"
 
 echo "Starting ${SERVICE_NAME} with profile: ${PROFILE}"
 exec java ${JAVA_AGENT_OPTS} ${JVM_OPTS} -jar "${JAR_PATH}" --spring.profiles.active="${PROFILE}"
