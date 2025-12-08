@@ -16,6 +16,8 @@
     <description>存证平台后端服务</description>
     <properties>
         <java.version>21</java.version>
+        <hutool.version>5.8.32</hutool.version>
+        <mybatis-plus-bom.version>3.5.9</mybatis-plus-bom.version>
     </properties>
     <!--  设置打包方式pom  -->
     <packaging>pom</packaging>
@@ -60,12 +62,12 @@
             <dependency>
                 <groupId>cn.hutool</groupId>
                 <artifactId>hutool-all</artifactId>
-                <version>5.8.32</version>
+                <version>${hutool.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.baomidou</groupId>
                 <artifactId>mybatis-plus-bom</artifactId>
-                <version>3.5.9</version>
+                <version>${mybatis-plus-bom.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
