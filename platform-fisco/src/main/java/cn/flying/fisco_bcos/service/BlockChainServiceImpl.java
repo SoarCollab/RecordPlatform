@@ -4,7 +4,6 @@ import cn.flying.fisco_bcos.constants.ContractConstants;
 import cn.flying.fisco_bcos.exception.BlockChainExceptionHandler;
 import cn.flying.fisco_bcos.model.bo.*;
 import cn.flying.fisco_bcos.monitor.FiscoMetrics;
-import cn.flying.fisco_bcos.parser.ContractResponseParser;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.BlockChainService;

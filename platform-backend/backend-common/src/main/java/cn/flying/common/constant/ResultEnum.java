@@ -55,6 +55,8 @@ public enum ResultEnum implements Serializable {
     USER_NOT_EXIST(20004, "用户不存在"),
     /** 用户已存在 */
     USER_HAS_EXISTED(20005, "用户已存在"),
+    /** 账户已锁定 */
+    USER_ACCOUNT_LOCKED(20006, "登录失败次数过多，账户已被临时锁定，请稍后重试"),
 
     /* ==================== 外部服务错误：30000-39999 ==================== */
     /** 合约调用失败 */

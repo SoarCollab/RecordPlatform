@@ -7,6 +7,7 @@ import lombok.Setter;
 
 import java.io.Serial;
 import java.io.Serializable;
+import java.util.Objects;
 
 /**
  * @program: RecordPlatform
@@ -14,7 +15,6 @@ import java.io.Serializable;
  * @author: flyingcoding
  * @create: 2025-01-15 15:38
  */
-
 @Getter
 @Setter
 public class Result<T> implements Serializable {
@@ -57,6 +57,13 @@ public class Result<T> implements Serializable {
     }
     public Result(String message) {
         this.message = message;
+    }
+
+    /**
+     * 判断是否为成功结果
+     */
+    public boolean isSuccess() {
+        return Objects.equals(this.code, ResultEnum.SUCCESS.getCode());
     }
     //成功返回封装-无数据
     public static Result<String> success() {
