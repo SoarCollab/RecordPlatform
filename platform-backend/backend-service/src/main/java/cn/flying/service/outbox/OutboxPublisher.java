@@ -2,6 +2,8 @@ package cn.flying.service.outbox;
 
 import cn.flying.dao.entity.OutboxEvent;
 import cn.flying.dao.mapper.OutboxEventMapper;
+import cn.flying.service.monitor.SagaMetrics;
+import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.core.Message;
@@ -21,6 +23,7 @@ import java.util.List;
  * Outbox 事件定时发布器
  * 轮询 outbox 表并将事件发布到 RabbitMQ。
  * 每条记录独立事务，避免长时间锁定。
+ * 集成 Prometheus 监控指标。
  */
 @Slf4j
 @Component
@@ -31,6 +34,9 @@ public class OutboxPublisher {
 
     @Resource
     private RabbitTemplate rabbitTemplate;
+
+    @Resource
+    private SagaMetrics sagaMetrics;
 
     // 自注入，用于在同类中调用事务方法（解决 Spring AOP 代理问题）
     @Lazy
@@ -74,12 +80,15 @@ public class OutboxPublisher {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void publishSingleEvent(OutboxEvent event) {
+        Timer.Sample timerSample = sagaMetrics.startOutboxTimer();
         try {
             publishToRabbitMQ(event);
             outboxMapper.markSent(event.getId());
+            sagaMetrics.recordOutboxPublished();
             log.debug("事件发布成功: type={}, id={}", event.getEventType(), event.getId());
         } catch (Exception ex) {
             log.error("发布事件到 RabbitMQ 失败: id={}", event.getId(), ex);
+            sagaMetrics.recordOutboxFailed();
             Date nextAttempt = calculateBackoff(event.getRetryCount());
             outboxMapper.markFailed(event.getId(), nextAttempt);
 
@@ -88,6 +97,8 @@ public class OutboxPublisher {
             }
             // 抛出异常让事务回滚 markFailed 的更新（如果需要）
             // 注意：这里不抛出异常，因为 markFailed 本身就是预期的失败处理
+        } finally {
+            sagaMetrics.stopOutboxTimer(timerSample);
         }
     }
 
