@@ -3,6 +3,12 @@ server:
   servlet:
     context-path: /record-platform
 spring:
+  # Flyway 生产环境配置
+  flyway:
+    enabled: true
+    baseline-on-migrate: false
+    clean-disabled: true
+
   datasource:
     druid:
       type: com.alibaba.druid.pool.DruidDataSource
