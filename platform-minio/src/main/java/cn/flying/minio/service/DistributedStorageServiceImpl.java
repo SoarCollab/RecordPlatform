@@ -29,13 +29,20 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 /**
- * 分布式存储实现类（MinIO）v2.0.0
+ * 分布式存储实现类（MinIO）v2.3.0
  * 支持 Nacos 动态配置、负载均衡和租户隔离。
+ * 使用 firstSuccessOf 容错模式，任一副本写入成功即返回，异步修复失败副本。
  */
 @DubboService(version = DistributedStorageService.VERSION)
 public class DistributedStorageServiceImpl implements DistributedStorageService {
@@ -49,6 +56,9 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     @Resource
     private MinioProperties minioProperties;
 
+    @Resource
+    private ConsistencyRepairService consistencyRepairService;
+
     //预签名链接有效期
     private final static Integer EXPIRY_HOURS = 24;
 
@@ -60,6 +70,12 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
 
     // 分块读取缓冲区大小（8KB）
     private static final int BUFFER_SIZE = 8192;
+
+    // 修复检查并发限制信号量
+    private static final Semaphore REPAIR_CHECK_SEMAPHORE = new Semaphore(10);
+
+    // 专用 I/O 线程池，用于文件上传操作（避免阻塞 ForkJoinPool.commonPool）
+    private static final ExecutorService UPLOAD_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
 
     // 缓存 Bucket 是否存在，减少重复检查开销（带TTL自动过期）
     private final Cache<String, Boolean> bucketExistenceCache = Caffeine.newBuilder()
@@ -175,30 +191,129 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         try {
             // 使用带租户隔离的对象路径
             String tenantObjectPath = TenantContextUtil.buildTenantObjectPath(fileHash);
-            CompletableFuture<Void> upload1 = uploadToNodeAsync(physicalNodePair.get(0), tenantObjectPath, fileData);
-            CompletableFuture<Void> upload2 = uploadToNodeAsync(physicalNodePair.get(1), tenantObjectPath, fileData);
+            String node1 = physicalNodePair.get(0);
+            String node2 = physicalNodePair.get(1);
 
-            CompletableFuture.allOf(upload1, upload2)
-                .get(FILE_OPERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            CompletableFuture<String> upload1 = uploadToNodeAsyncWithResult(node1, tenantObjectPath, fileData);
+            CompletableFuture<String> upload2 = uploadToNodeAsyncWithResult(node2, tenantObjectPath, fileData);
 
-            // 使用租户隔离的逻辑路径
-            String logicalPath = TenantContextUtil.buildTenantPath(targetLogicNode, fileHash);
-            log.info("已成功将文件块 '{}' 存储到逻辑节点 '{}' (路径: {})", fileHash, targetLogicNode, logicalPath);
-            return Result.success(logicalPath);
-        } catch (TimeoutException e) {
-            log.error("存储文件块超时（>{}s）: hash={}, logicNode={}", FILE_OPERATION_TIMEOUT_SECONDS, fileHash, targetLogicNode, e);
-            return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
+            // 使用 firstSuccessOf 模式：任一成功即返回，两个都失败才返回错误
+            CompletableFuture<String> firstSuccess = firstSuccessOf(upload1, upload2);
+
+            try {
+                // 等待任一上传成功
+                String successNode = firstSuccess.get(FILE_OPERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+                // 使用租户隔离的逻辑路径
+                String logicalPath = TenantContextUtil.buildTenantPath(targetLogicNode, fileHash);
+                log.info("已成功将文件块 '{}' 存储到节点 '{}' (路径: {})", fileHash, successNode, logicalPath);
+
+                // 异步检查另一个上传任务的状态，失败则触发修复
+                scheduleRepairIfNeeded(upload1, upload2, successNode, node1, node2, targetLogicNode, tenantObjectPath);
+
+                return Result.success(logicalPath);
+
+            } catch (TimeoutException e) {
+                // 超时时取消未完成的上传任务，避免资源浪费和数据不一致
+                cancelIfNotDone(upload1, "upload1");
+                cancelIfNotDone(upload2, "upload2");
+                log.error("存储文件块超时（>{}s）: hash={}, logicNode={}", FILE_OPERATION_TIMEOUT_SECONDS, fileHash, targetLogicNode, e);
+                return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
+            }
+
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("存储文件块被中断: hash={}, logicNode={}", fileHash, targetLogicNode, e);
             return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
         } catch (ExecutionException e) {
-            log.error("存储文件块失败: hash={}, logicNode={}, cause={}", fileHash, targetLogicNode, e.getCause() != null ? e.getCause().getMessage() : e.getMessage(), e);
+            // 两个副本都失败了
+            log.error("存储文件块失败（两个副本都失败）: hash={}, logicNode={}, cause={}", fileHash, targetLogicNode, e.getCause() != null ? e.getCause().getMessage() : e.getMessage(), e);
             return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
         } catch (Exception e) {
             log.error("存储文件块 '{}' 失败: {}", fileHash, e.getMessage(), e);
             return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
         }
+    }
+
+    /**
+     * 取消未完成的 Future，避免超时后任务继续执行
+     */
+    private void cancelIfNotDone(CompletableFuture<?> future, String name) {
+        if (!future.isDone()) {
+            boolean cancelled = future.cancel(true);
+            log.debug("取消未完成任务 {}: cancelled={}", name, cancelled);
+        }
+    }
+
+    /**
+     * 检查另一个上传任务的状态，如果失败则触发修复。
+     * 使用 whenComplete 回调，等两个任务都完成后再判断。
+     */
+    private void scheduleRepairIfNeeded(CompletableFuture<String> upload1, CompletableFuture<String> upload2,
+                                         String successNode, String node1, String node2,
+                                         String logicNodeName, String objectPath) {
+        // 等待两个任务都完成后再检查（无论成功或失败）
+        CompletableFuture.allOf(upload1, upload2).whenComplete((v, ex) -> {
+            // 使用信号量限制并发修复检查数量
+            if (!REPAIR_CHECK_SEMAPHORE.tryAcquire()) {
+                log.warn("修复检查队列已满，跳过本次修复检查: object={}", objectPath);
+                return;
+            }
+
+            try {
+                boolean upload1Failed = upload1.isCompletedExceptionally();
+                boolean upload2Failed = upload2.isCompletedExceptionally();
+
+                if (upload1Failed && !upload2Failed) {
+                    log.warn("节点 {} 上传失败，触发修复任务", node1);
+                    consistencyRepairService.scheduleImmediateRepair(logicNodeName, objectPath, node2, node1);
+                } else if (upload2Failed && !upload1Failed) {
+                    log.warn("节点 {} 上传失败，触发修复任务", node2);
+                    consistencyRepairService.scheduleImmediateRepair(logicNodeName, objectPath, node1, node2);
+                } else if (!upload1Failed && !upload2Failed) {
+                    log.debug("两个副本都成功写入，无需修复");
+                }
+                // 如果两个都失败，不会走到这里（firstSuccessOf 会抛出异常）
+            } finally {
+                REPAIR_CHECK_SEMAPHORE.release();
+            }
+        });
+    }
+
+    /**
+     * 异步上传并返回成功的节点名称
+     */
+    private CompletableFuture<String> uploadToNodeAsyncWithResult(String nodeName, String objectName, byte[] file) {
+        return CompletableFuture.supplyAsync(() -> {
+            if (!minioMonitor.isNodeOnline(nodeName)) {
+                throw new RuntimeException("Node '" + nodeName + "' is offline, cannot upload file '" + objectName + "'.");
+            }
+            MinioClient client = clientManager.getClient(nodeName);
+            if (client == null) {
+                throw new RuntimeException("Cannot get MinioClient for online node: " + nodeName);
+            }
+
+            try {
+                // 确保 Bucket 存在
+                ensureBucketExists(client, nodeName, nodeName);
+
+                // 使用 ByteArrayInputStream 读取文件内容
+                try (InputStream inputStream = new ByteArrayInputStream(file)) {
+                    PutObjectArgs args = PutObjectArgs.builder()
+                        .bucket(nodeName)
+                        .object(objectName)
+                        .stream(inputStream, file.length, -1)
+                        .build();
+                    client.putObject(args);
+                    log.debug("已成功将'{}'上传到节点'{}'", objectName, nodeName);
+                    return nodeName; // 返回成功的节点名称
+                }
+
+            } catch (Exception e) {
+                log.error("将'{}'上传到节点'{}'时出错：{}", objectName, nodeName, e.getMessage());
+                throw new RuntimeException("Upload of '" + objectName + "' to node '" + nodeName + "' failed: " + e.getMessage(), e);
+            }
+        }, UPLOAD_EXECUTOR);
     }
 
     @Override
@@ -376,16 +491,16 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
 
         // 主节点失败，尝试从备用节点获取
-        log.warn("无法从主节点“{}”获取文件“{}”。正在尝试辅助节点 '{}'...",
-            parsedPath.objectName, primaryNode, secondaryNode);
+        log.warn("无法从主节点 '{}' 获取文件 '{}'。正在尝试辅助节点 '{}'...",
+            primaryNode, parsedPath.objectName, secondaryNode);
         fileOpt = tryGetObjectFromNode(secondaryNode, parsedPath.objectName);
         if (fileOpt.isPresent()) {
             return fileOpt;
         }
 
         // 两个节点都失败
-        log.error("无法从逻辑节点“{}”的两个物理节点（{}、{}）获取文件“{}”",
-            parsedPath.objectName, primaryNode, secondaryNode, parsedPath.logicNodeName);
+        log.error("无法从逻辑节点 '{}' 的两个物理节点（{}、{}）获取文件 '{}'",
+            parsedPath.logicNodeName, primaryNode, secondaryNode, parsedPath.objectName);
         //返回空
         return Optional.empty();
     }
@@ -418,15 +533,15 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
 
         // 主节点失败，尝试从备用节点获取
-        log.warn("无法从主节点“{}”获取“{}”的预签名 URL。正在尝试辅助节点'{}'...",
-            parsedPath.objectName, primaryNode, secondaryNode);
+        log.warn("无法从主节点 '{}' 获取 '{}' 的预签名 URL。正在尝试辅助节点 '{}'...",
+            primaryNode, parsedPath.objectName, secondaryNode);
         urlOpt = tryGetResignedUrlFromNode(secondaryNode, parsedPath.objectName);
         if (urlOpt.isPresent()) {
             return urlOpt;
         }
 
-        log.error("无法从逻辑节点“{}”的两个物理节点（{}、{}）获取“{}”的预签名 URL",
-            parsedPath.objectName, primaryNode, secondaryNode, parsedPath.logicNodeName);
+        log.error("无法从逻辑节点 '{}' 的两个物理节点（{}、{}）获取 '{}' 的预签名 URL",
+            parsedPath.logicNodeName, primaryNode, secondaryNode, parsedPath.objectName);
         return Optional.empty();
     }
 
@@ -543,13 +658,13 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         } catch (MinioException e) {
             // 特别处理对象不存在的错误
             if (e instanceof ErrorResponseException && ((ErrorResponseException) e).errorResponse().code().equals("NoSuchKey")) {
-                log.warn("在节点'{}'上找不到对象'{}'（NoSuchKey）", objectName, nodeName);
+                log.warn("在节点'{}'上找不到对象'{}'（NoSuchKey）", nodeName, objectName);
                 return Optional.empty();
             } else {
-                log.error("从节点'{}'获取对象'{}'时出现MinIO错误：{}", objectName, nodeName, e.getMessage(), e);
+                log.error("从节点'{}'获取对象'{}'时出现MinIO错误：{}", nodeName, objectName, e.getMessage(), e);
             }
         } catch (Exception e) {
-            log.error("从节点'{}'获取对象'{}'时出现意外错误：{}", objectName, nodeName, e.getMessage(), e);
+            log.error("从节点'{}'获取对象'{}'时出现意外错误：{}", nodeName, objectName, e.getMessage(), e);
         }
         return Optional.empty();
     }
@@ -559,12 +674,12 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      */
     private Optional<String> tryGetResignedUrlFromNode(String nodeName, String objectName) {
         if (!minioMonitor.isNodeOnline(nodeName)) {
-            log.warn("节点“{}”处于离线状态，无法获取“{}”的预签名URL", nodeName, objectName);
+            log.warn("节点 '{}' 处于离线状态，无法获取 '{}' 的预签名URL", nodeName, objectName);
             return Optional.empty();
         }
         MinioClient client = clientManager.getClient(nodeName);
         if (client == null) {
-            log.error("无法获取在线节点‘{}’的MinioClient", nodeName);
+            log.error("无法获取在线节点 '{}' 的MinioClient", nodeName);
             return Optional.empty();
         }
 
@@ -578,7 +693,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 client.statObject(statArgs);
             } catch (ErrorResponseException e) {
                 if (e.errorResponse().code().equals("NoSuchKey")) {
-                    log.warn("在节点“{}”上找不到对象“{}”，无法生成预签名URL", objectName, nodeName);
+                    log.warn("在节点 '{}' 上找不到对象 '{}'，无法生成预签名URL", nodeName, objectName);
                     return Optional.empty();
                 } else {
                     throw e; // 重新抛出其他 MinIO 错误
@@ -592,10 +707,10 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 .expiry(DistributedStorageServiceImpl.EXPIRY_HOURS, TimeUnit.HOURS)
                 .build();
             String url = client.getPresignedObjectUrl(args);
-            log.info("从节点“{}”为对象“{}”成功生成预签名 URL", nodeName, objectName);
+            log.info("从节点 '{}' 为对象 '{}' 成功生成预签名 URL", nodeName, objectName);
             return Optional.of(url);
         } catch (Exception e) {
-            log.error("无法从节点“{}”为对象“{}”生成预签名 URL：{}", nodeName, objectName, e.getMessage(), e);
+            log.error("无法从节点 '{}' 为对象 '{}' 生成预签名 URL：{}", nodeName, objectName, e.getMessage(), e);
             return Optional.empty();
         }
     }
@@ -691,5 +806,47 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
 
         return Result.success(nodeStatus);
+    }
+
+    /**
+     * 实现真正的"任一成功即返回"语义。
+     * 与 CompletableFuture.anyOf 不同，此方法只有在两个都失败时才返回失败。
+     * 当两个都失败时，使用 addSuppressed 保留两个异常信息。
+     *
+     * @param f1 第一个 Future
+     * @param f2 第二个 Future
+     * @return 第一个成功的结果，或者两个都失败时抛出异常（包含所有失败原因）
+     */
+    private CompletableFuture<String> firstSuccessOf(CompletableFuture<String> f1, CompletableFuture<String> f2) {
+        CompletableFuture<String> result = new CompletableFuture<>();
+        AtomicInteger failureCount = new AtomicInteger(0);
+        AtomicReference<Throwable> firstFailure = new AtomicReference<>();
+
+        BiConsumer<String, Throwable> handler = (success, failure) -> {
+            if (failure == null && success != null) {
+                // 任一成功立即返回（使用 complete 而非 completeExceptionally 确保幂等）
+                result.complete(success);
+            } else if (failure != null) {
+                // 保存第一个失败的异常
+                Throwable previous = firstFailure.getAndSet(failure);
+                if (failureCount.incrementAndGet() == 2) {
+                    // 两个都失败，合并异常信息
+                    RuntimeException combined = new RuntimeException(
+                            "Both upload tasks failed: [1] " + (previous != null ? previous.getMessage() : "unknown")
+                            + " [2] " + failure.getMessage());
+                    if (previous != null) {
+                        combined.addSuppressed(previous);
+                    }
+                    combined.addSuppressed(failure);
+                    result.completeExceptionally(combined);
+                }
+            }
+            // 如果只有一个失败，等待另一个的结果
+        };
+
+        f1.whenComplete(handler);
+        f2.whenComplete(handler);
+
+        return result;
     }
 }

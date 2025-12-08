@@ -131,6 +131,12 @@ public class MinioClientManager {
                 .collect(Collectors.toSet());
         if (!nodesToRemove.isEmpty()) {
             log.info("以下节点已从配置中移除: {}", nodesToRemove);
+            // 注意：MinioClient 没有提供 close() 方法，它内部使用的 OkHttpClient
+            // 是设计为可复用和线程安全的，不需要显式关闭。
+            // 旧客户端将在下面的原子替换后被 GC 回收。
+            nodesToRemove.forEach(name -> {
+                log.debug("移除节点 [{}] 的客户端引用", name);
+            });
         }
 
         // 原子替换：一次性替换整个缓存，避免 clear+putAll 的竞态条件
@@ -142,12 +148,15 @@ public class MinioClientManager {
 
     /**
      * 应用关闭前清理资源
+     * 注意：MinioClient 基于 OkHttpClient，不需要显式关闭。
+     * 清空缓存引用以帮助 GC 及时回收资源。
      */
     @PreDestroy
     public void cleanup() {
-        log.info("关闭 MinioClientManager...");
+        log.info("关闭 MinioClientManager，清理 {} 个客户端缓存...", clientCacheRef.get().size());
         clientCacheRef.set(new ConcurrentHashMap<>());
         nodeConfigCacheRef.set(new ConcurrentHashMap<>());
+        log.info("MinioClientManager 资源已清理");
     }
 
     /**
