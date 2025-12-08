@@ -33,10 +33,13 @@ public interface ConversationMapper extends BaseMapper<Conversation> {
     @Select("""
         SELECT COUNT(DISTINCT c.id) FROM conversation c
         INNER JOIN message m ON c.id = m.conversation_id
-        WHERE (c.participant_a = #{userId} OR c.participant_b = #{userId})
+        WHERE c.tenant_id = #{tenantId}
+          AND m.tenant_id = #{tenantId}
+          AND (c.participant_a = #{userId} OR c.participant_b = #{userId})
           AND m.receiver_id = #{userId}
           AND m.is_read = 0
           AND m.deleted = 0
         """)
-    int countUnreadConversations(@Param("userId") Long userId);
+    int countUnreadConversations(@Param("tenantId") Long tenantId,
+                                 @Param("userId") Long userId);
 }

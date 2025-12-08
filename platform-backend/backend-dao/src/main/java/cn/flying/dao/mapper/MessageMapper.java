@@ -20,23 +20,27 @@ public interface MessageMapper extends BaseMapper<Message> {
      */
     @Select("""
         SELECT COUNT(*) FROM message
-        WHERE receiver_id = #{userId}
+        WHERE tenant_id = #{tenantId}
+          AND receiver_id = #{userId}
           AND is_read = 0
           AND deleted = 0
         """)
-    int countUnreadMessages(@Param("userId") Long userId);
+    int countUnreadMessages(@Param("tenantId") Long tenantId,
+                            @Param("userId") Long userId);
 
     /**
      * 统计会话中的未读消息数
      */
     @Select("""
         SELECT COUNT(*) FROM message
-        WHERE conversation_id = #{conversationId}
+        WHERE tenant_id = #{tenantId}
+          AND conversation_id = #{conversationId}
           AND receiver_id = #{userId}
           AND is_read = 0
           AND deleted = 0
         """)
     int countUnreadInConversation(
+            @Param("tenantId") Long tenantId,
             @Param("conversationId") Long conversationId,
             @Param("userId") Long userId
     );
@@ -47,11 +51,13 @@ public interface MessageMapper extends BaseMapper<Message> {
     @Update("""
         UPDATE message
         SET is_read = 1, read_time = #{readTime}
-        WHERE conversation_id = #{conversationId}
+        WHERE tenant_id = #{tenantId}
+          AND conversation_id = #{conversationId}
           AND receiver_id = #{userId}
           AND is_read = 0
         """)
     int markConversationAsRead(
+            @Param("tenantId") Long tenantId,
             @Param("conversationId") Long conversationId,
             @Param("userId") Long userId,
             @Param("readTime") Date readTime

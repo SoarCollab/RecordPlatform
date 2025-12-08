@@ -19,21 +19,27 @@ public interface AnnouncementReadMapper extends BaseMapper<AnnouncementRead> {
      */
     @Select("""
         SELECT announcement_id FROM announcement_read
-        WHERE user_id = #{userId}
+        WHERE tenant_id = #{tenantId}
+          AND user_id = #{userId}
         """)
-    Set<Long> selectReadAnnouncementIds(@Param("userId") Long userId);
+    Set<Long> selectReadAnnouncementIds(@Param("tenantId") Long tenantId,
+                                        @Param("userId") Long userId);
 
     /**
      * 统计用户未读公告数量
      */
     @Select("""
         SELECT COUNT(*) FROM announcement a
-        WHERE a.status = 1
+        WHERE a.tenant_id = #{tenantId}
+          AND a.status = 1
           AND a.deleted = 0
           AND NOT EXISTS (
             SELECT 1 FROM announcement_read ar
-            WHERE ar.announcement_id = a.id AND ar.user_id = #{userId}
+            WHERE ar.tenant_id = #{tenantId}
+              AND ar.announcement_id = a.id
+              AND ar.user_id = #{userId}
           )
         """)
-    int countUnreadAnnouncements(@Param("userId") Long userId);
+    int countUnreadAnnouncements(@Param("tenantId") Long tenantId,
+                                 @Param("userId") Long userId);
 }
