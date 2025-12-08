@@ -3,6 +3,7 @@ package cn.flying.service.impl;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.IdUtils;
+import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.entity.Conversation;
 import cn.flying.dao.entity.Message;
@@ -46,9 +47,13 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
     @Resource
     private SseEmitterManager sseEmitterManager;
 
+    /**
+     * 发送私信消息，确保会话和消息带上租户信息
+     */
     @Override
     @Transactional
     public Message sendMessage(Long senderId, SendMessageVO vo) {
+        Long tenantId = currentTenantId();
         Long receiverId = IdUtils.fromExternalId(vo.getReceiverId());
 
         // 不能给自己发消息
@@ -67,6 +72,7 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
 
         // 创建消息
         Message message = new Message()
+                .setTenantId(tenantId)
                 .setConversationId(conversation.getId())
                 .setSenderId(senderId)
                 .setReceiverId(receiverId)
@@ -97,8 +103,10 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
 
     @Override
     public IPage<MessageVO> getMessages(Long userId, Long conversationId, Page<Message> page) {
+        Long tenantId = currentTenantId();
         // 查询会话中的消息，按时间倒序
         LambdaQueryWrapper<Message> wrapper = new LambdaQueryWrapper<Message>()
+                .eq(Message::getTenantId, tenantId)
                 .eq(Message::getConversationId, conversationId)
                 .orderByDesc(Message::getCreateTime);
 
@@ -110,7 +118,8 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
     @Override
     @Transactional
     public void markAsRead(Long userId, Long conversationId) {
-        int updated = baseMapper.markConversationAsRead(conversationId, userId, new Date());
+        Long tenantId = currentTenantId();
+        int updated = baseMapper.markConversationAsRead(tenantId, conversationId, userId, new Date());
         if (updated > 0) {
             log.info("标记 {} 条消息为已读, conversationId={}, userId={}", updated, conversationId, userId);
         }
@@ -118,12 +127,14 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
 
     @Override
     public int getTotalUnreadCount(Long userId) {
-        return baseMapper.countUnreadMessages(userId);
+        Long tenantId = currentTenantId();
+        return baseMapper.countUnreadMessages(tenantId, userId);
     }
 
     @Override
     public int getUnreadCountInConversation(Long conversationId, Long userId) {
-        return baseMapper.countUnreadInConversation(conversationId, userId);
+        Long tenantId = currentTenantId();
+        return baseMapper.countUnreadInConversation(tenantId, conversationId, userId);
     }
 
     /**
@@ -147,5 +158,12 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
         }
 
         return vo;
+    }
+
+    /**
+     * 获取当前租户ID，确保消息查询隔离
+     */
+    private Long currentTenantId() {
+        return SecurityUtils.getTenantId();
     }
 }

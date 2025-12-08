@@ -46,6 +46,9 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
     @Resource
     private MessageService messageService;
 
+    /**
+     * 获取或创建会话，按租户隔离并保证参与者有序
+     */
     @Override
     @Transactional
     public Conversation getOrCreateConversation(Long userA, Long userB) {
@@ -63,6 +66,7 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
 
         // 创建新会话
         Conversation conversation = new Conversation()
+                .setTenantId(tenantId)
                 .setParticipantA(participantA)
                 .setParticipantB(participantB);
 
@@ -73,11 +77,13 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
 
     @Override
     public IPage<ConversationVO> getConversationList(Long userId, Page<Conversation> page) {
+        Long tenantId = SecurityUtils.getTenantId();
         // 查询用户参与的所有会话
         LambdaQueryWrapper<Conversation> wrapper = new LambdaQueryWrapper<Conversation>()
-                .eq(Conversation::getParticipantA, userId)
-                .or()
-                .eq(Conversation::getParticipantB, userId)
+                .eq(Conversation::getTenantId, tenantId)
+                .and(query -> query.eq(Conversation::getParticipantA, userId)
+                        .or()
+                        .eq(Conversation::getParticipantB, userId))
                 .orderByDesc(Conversation::getLastMessageAt);
 
         IPage<Conversation> conversationPage = this.page(page, wrapper);
@@ -87,7 +93,8 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
 
     @Override
     public ConversationDetailVO getConversationDetail(Long userId, Long conversationId, Integer pageNum, Integer pageSize) {
-        Conversation conversation = this.getById(conversationId);
+        Long tenantId = SecurityUtils.getTenantId();
+        Conversation conversation = findConversationInTenant(conversationId, tenantId);
         if (conversation == null) {
             throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
         }
@@ -122,13 +129,15 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
 
     @Override
     public int getUnreadConversationCount(Long userId) {
-        return baseMapper.countUnreadConversations(userId);
+        Long tenantId = SecurityUtils.getTenantId();
+        return baseMapper.countUnreadConversations(tenantId, userId);
     }
 
     @Override
     @Transactional
     public void deleteConversation(Long userId, Long conversationId) {
-        Conversation conversation = this.getById(conversationId);
+        Long tenantId = SecurityUtils.getTenantId();
+        Conversation conversation = findConversationInTenant(conversationId, tenantId);
         if (conversation == null) {
             return;
         }
@@ -146,7 +155,8 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
     @Override
     @Transactional
     public void updateLastMessage(Long conversationId, Long messageId) {
-        Conversation conversation = this.getById(conversationId);
+        Long tenantId = SecurityUtils.getTenantId();
+        Conversation conversation = findConversationInTenant(conversationId, tenantId);
         if (conversation != null) {
             conversation.setLastMessageId(messageId)
                     .setLastMessageAt(new Date());
@@ -182,5 +192,18 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
         }
 
         return vo;
+    }
+
+    /**
+     * 按租户范围查询会话
+     *
+     * @param conversationId 会话ID
+     * @param tenantId       租户ID
+     * @return 当前租户下的会话，不存在时返回 null
+     */
+    private Conversation findConversationInTenant(Long conversationId, Long tenantId) {
+        return this.getOne(new LambdaQueryWrapper<Conversation>()
+                .eq(Conversation::getId, conversationId)
+                .eq(Conversation::getTenantId, tenantId));
     }
 }
