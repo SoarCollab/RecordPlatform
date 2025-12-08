@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS `account` (
     `role`          VARCHAR(20)  DEFAULT 'user' COMMENT '角色：user/admin',
     `avatar`        VARCHAR(255) DEFAULT NULL COMMENT '头像URL',
     `register_time` DATETIME     DEFAULT CURRENT_TIMESTAMP COMMENT '注册时间',
+    `update_time`   DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `deleted`       TINYINT      DEFAULT 0 COMMENT '软删除标记：0-正常，1-已删除',
     PRIMARY KEY (`id`) USING BTREE,
     UNIQUE KEY `uk_username` (`username`) USING BTREE COMMENT '用户名唯一索引',

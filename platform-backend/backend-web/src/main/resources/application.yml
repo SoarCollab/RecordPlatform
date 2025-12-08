@@ -10,6 +10,16 @@ spring:
   jackson:
     time-zone: GMT+8
 
+  # Flyway 数据库迁移配置
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: '0'
+    out-of-order: false
+    validate-on-migrate: true
+    clean-disabled: true
+
   # RabbitMQ backpressure configuration
   rabbitmq:
     listener:
