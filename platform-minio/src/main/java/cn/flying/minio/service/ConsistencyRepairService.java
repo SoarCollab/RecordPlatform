@@ -17,6 +17,7 @@ import org.springframework.util.CollectionUtils;
 
 import java.io.InputStream;
 import java.util.*;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
@@ -31,6 +32,15 @@ import java.util.stream.StreamSupport;
 public class ConsistencyRepairService {
 
     private static final String LOCK_KEY = "minio:consistency:repair";
+
+    // 立即修复任务的并发限制
+    private static final Semaphore IMMEDIATE_REPAIR_SEMAPHORE = new Semaphore(10);
+
+    // 立即修复任务的最大重试次数
+    private static final int IMMEDIATE_REPAIR_MAX_RETRIES = 3;
+
+    // 重试基础退避时间（毫秒）
+    private static final long RETRY_BASE_BACKOFF_MS = 1000;
 
     @Resource
     private MinioClientManager clientManager;
@@ -306,6 +316,102 @@ public class ConsistencyRepairService {
     public RepairStatistics triggerManualRepair() {
         log.info("手动触发副本一致性修复...");
         return repairAllLogicNodes();
+    }
+
+    /**
+     * 立即修复指定逻辑节点的单个对象。
+     * 当 firstSuccessOf 上传策略中有一个节点失败时调用此方法。
+     * 具备重试机制和并发限制。
+     *
+     * @param logicNodeName 逻辑节点名称
+     * @param objectName    对象名称
+     * @param sourceNode    成功上传的源节点
+     * @param targetNode    需要修复的目标节点
+     */
+    public void scheduleImmediateRepair(String logicNodeName, String objectName,
+                                         String sourceNode, String targetNode) {
+        // 使用信号量限制并发修复任务数量
+        if (!IMMEDIATE_REPAIR_SEMAPHORE.tryAcquire()) {
+            log.warn("立即修复任务队列已满，跳过修复: object={}, source={}, target={}",
+                    objectName, sourceNode, targetNode);
+            return;
+        }
+
+        // 异步执行修复，不阻塞主流程
+        Thread.startVirtualThread(() -> {
+            try {
+                executeRepairWithRetry(logicNodeName, objectName, sourceNode, targetNode);
+            } finally {
+                IMMEDIATE_REPAIR_SEMAPHORE.release();
+            }
+        });
+    }
+
+    /**
+     * 执行带重试的修复操作
+     */
+    private void executeRepairWithRetry(String logicNodeName, String objectName,
+                                          String sourceNode, String targetNode) {
+        for (int attempt = 1; attempt <= IMMEDIATE_REPAIR_MAX_RETRIES; attempt++) {
+            try {
+                log.info("开始修复对象 {} 从 {} 到 {} (逻辑节点: {}, 尝试 {}/{})",
+                        objectName, sourceNode, targetNode, logicNodeName, attempt, IMMEDIATE_REPAIR_MAX_RETRIES);
+
+                // 检查节点在线状态
+                if (!minioMonitor.isNodeOnline(sourceNode)) {
+                    log.warn("源节点 {} 不在线，无法修复逻辑节点 {} 的对象 {}", sourceNode, logicNodeName, objectName);
+                    return; // 源节点不在线，无法修复，不再重试
+                }
+                if (!minioMonitor.isNodeOnline(targetNode)) {
+                    log.warn("目标节点 {} 不在线，等待后重试修复逻辑节点 {} 的对象 {}", targetNode, logicNodeName, objectName);
+                    // 目标节点不在线，可以等待后重试（使用指数退避）
+                    if (attempt < IMMEDIATE_REPAIR_MAX_RETRIES) {
+                        long backoffMs = RETRY_BASE_BACKOFF_MS * (1L << (attempt - 1));
+                        Thread.sleep(backoffMs);
+                        continue;
+                    }
+                    return;
+                }
+
+                MinioClient sourceClient = clientManager.getClient(sourceNode);
+                MinioClient targetClient = clientManager.getClient(targetNode);
+
+                if (sourceClient == null || targetClient == null) {
+                    log.error("无法获取 MinIO 客户端进行修复：逻辑节点={}, source={}, target={}",
+                            logicNodeName, sourceNode, targetNode);
+                    return; // 客户端获取失败，不再重试
+                }
+
+                copyObject(sourceClient, sourceNode, targetClient, targetNode, objectName);
+                log.info("成功修复对象 {} 从 {} 到 {} (逻辑节点: {}, 尝试 {}/{})",
+                        objectName, sourceNode, targetNode, logicNodeName, attempt, IMMEDIATE_REPAIR_MAX_RETRIES);
+                return; // 成功，退出
+
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("修复任务被中断: 逻辑节点={}, object={}", logicNodeName, objectName);
+                return;
+            } catch (Exception e) {
+                log.warn("修复对象 {} 从 {} 到 {} 失败 (逻辑节点: {}, 尝试 {}/{}): {}",
+                        objectName, sourceNode, targetNode, logicNodeName, attempt, IMMEDIATE_REPAIR_MAX_RETRIES, e.getMessage());
+
+                if (attempt < IMMEDIATE_REPAIR_MAX_RETRIES) {
+                    try {
+                        // 指数退避
+                        long backoffMs = RETRY_BASE_BACKOFF_MS * (1L << (attempt - 1));
+                        log.debug("等待 {}ms 后重试", backoffMs);
+                        Thread.sleep(backoffMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                } else {
+                    log.error("修复对象 {} 从 {} 到 {} 最终失败（逻辑节点: {}），已达最大重试次数 {}",
+                            objectName, sourceNode, targetNode, logicNodeName, IMMEDIATE_REPAIR_MAX_RETRIES);
+                    // 可选：此处可以将失败任务记录到数据库，供后续人工或定时任务处理
+                }
+            }
+        }
     }
 
     /**
