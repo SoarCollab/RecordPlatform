@@ -4,8 +4,8 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.constant.TicketPriority;
 import cn.flying.common.constant.TicketStatus;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.IdUtils;
-import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.entity.Ticket;
 import cn.flying.dao.entity.TicketAttachment;
@@ -34,9 +34,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-/**
- * 工单服务实现
- */
 @Slf4j
 @Service
 public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
@@ -57,9 +54,7 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
     @Override
     @Transactional
     public Ticket createTicket(Long userId, TicketCreateVO vo) {
-        Long tenantId = currentTenantId();
         Ticket ticket = new Ticket()
-                .setTenantId(tenantId)
                 .setTicketNo(Ticket.generateTicketNo())
                 .setTitle(vo.getTitle())
                 .setContent(vo.getContent())
@@ -69,7 +64,6 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
 
         this.save(ticket);
 
-        // 处理附件
         if (vo.getAttachmentIds() != null && !vo.getAttachmentIds().isEmpty()) {
             for (String fileIdStr : vo.getAttachmentIds()) {
                 Long fileId = IdUtils.fromExternalId(fileIdStr);
@@ -83,9 +77,7 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
 
     @Override
     public IPage<TicketVO> getUserTickets(Long userId, TicketQueryVO query, Page<Ticket> page) {
-        Long tenantId = currentTenantId();
         LambdaQueryWrapper<Ticket> wrapper = new LambdaQueryWrapper<Ticket>()
-                .eq(Ticket::getTenantId, tenantId)
                 .eq(Ticket::getCreatorId, userId)
                 .eq(query.getStatus() != null, Ticket::getStatus, query.getStatus())
                 .eq(query.getPriority() != null, Ticket::getPriority, query.getPriority())
@@ -102,9 +94,7 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
 
     @Override
     public IPage<TicketVO> getAdminTickets(TicketQueryVO query, Page<Ticket> page) {
-        Long tenantId = currentTenantId();
         LambdaQueryWrapper<Ticket> wrapper = new LambdaQueryWrapper<Ticket>()
-                .eq(Ticket::getTenantId, tenantId)
                 .eq(query.getStatus() != null, Ticket::getStatus, query.getStatus())
                 .eq(query.getPriority() != null, Ticket::getPriority, query.getPriority())
                 .like(StringUtils.hasText(query.getTicketNo()), Ticket::getTicketNo, query.getTicketNo())
@@ -120,13 +110,11 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
 
     @Override
     public TicketDetailVO getTicketDetail(Long userId, Long ticketId, boolean isAdmin) {
-        Long tenantId = currentTenantId();
-        Ticket ticket = findTicketInTenant(ticketId, tenantId);
+        Ticket ticket = getById(ticketId);
         if (ticket == null) {
             throw new GeneralException(ResultEnum.TICKET_NOT_FOUND);
         }
 
-        // 非管理员只能查看自己的工单
         if (!isAdmin && !ticket.getCreatorId().equals(userId)) {
             throw new GeneralException(ResultEnum.TICKET_NOT_OWNER);
         }
@@ -137,26 +125,21 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
     @Override
     @Transactional
     public TicketReply replyTicket(Long replierId, Long ticketId, TicketReplyVO vo, boolean isAdmin) {
-        Long tenantId = currentTenantId();
-        Ticket ticket = findTicketInTenant(ticketId, tenantId);
+        Ticket ticket = getById(ticketId);
         if (ticket == null) {
             throw new GeneralException(ResultEnum.TICKET_NOT_FOUND);
         }
 
-        // 检查工单状态
         TicketStatus status = TicketStatus.fromCode(ticket.getStatus());
         if (status == TicketStatus.CLOSED) {
             throw new GeneralException(ResultEnum.TICKET_ALREADY_CLOSED);
         }
 
-        // 非管理员只能回复自己的工单
         if (!isAdmin && !ticket.getCreatorId().equals(replierId)) {
             throw new GeneralException(ResultEnum.TICKET_NOT_OWNER);
         }
 
-        // 创建回复
         TicketReply reply = new TicketReply()
-                .setTenantId(tenantId)
                 .setTicketId(ticketId)
                 .setReplierId(replierId)
                 .setContent(vo.getContent())
@@ -164,7 +147,6 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
 
         ticketReplyMapper.insert(reply);
 
-        // 处理附件
         if (vo.getAttachmentIds() != null && !vo.getAttachmentIds().isEmpty()) {
             for (String fileIdStr : vo.getAttachmentIds()) {
                 Long fileId = IdUtils.fromExternalId(fileIdStr);
@@ -172,7 +154,6 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
             }
         }
 
-        // 管理员回复后，工单状态变为处理中
         if (isAdmin && status == TicketStatus.PENDING) {
             ticket.setStatus(TicketStatus.PROCESSING.getCode());
             if (ticket.getAssigneeId() == null) {
@@ -183,12 +164,12 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
 
         log.info("工单回复成功: ticketNo={}, replierId={}, isInternal={}", ticket.getTicketNo(), replierId, reply.getIsInternal());
 
-        // SSE 推送：非内部备注时通知对方
         if (reply.getIsInternal() == 0) {
             Long notifyUserId = isAdmin ? ticket.getCreatorId() : ticket.getAssigneeId();
             if (notifyUserId != null) {
                 Account replier = accountService.findAccountById(replierId);
-                sseEmitterManager.sendToUser(notifyUserId, SseEvent.of(SseEventType.TICKET_REPLY, Map.of(
+                Long tenantId = TenantContext.requireTenantId();
+                sseEmitterManager.sendToUser(tenantId, notifyUserId, SseEvent.of(SseEventType.TICKET_REPLY, Map.of(
                         "ticketId", IdUtils.toExternalId(ticketId),
                         "ticketNo", ticket.getTicketNo(),
                         "replierName", replier != null ? replier.getUsername() : "未知用户",
@@ -205,8 +186,7 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
     @Override
     @Transactional
     public void updateStatus(Long operatorId, Long ticketId, TicketStatus newStatus) {
-        Long tenantId = currentTenantId();
-        Ticket ticket = findTicketInTenant(ticketId, tenantId);
+        Ticket ticket = getById(ticketId);
         if (ticket == null) {
             throw new GeneralException(ResultEnum.TICKET_NOT_FOUND);
         }
@@ -224,8 +204,8 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
         this.updateById(ticket);
         log.info("工单状态更新: ticketNo={}, {} -> {}", ticket.getTicketNo(), currentStatus, newStatus);
 
-        // SSE 推送通知工单创建者
-        sseEmitterManager.sendToUser(ticket.getCreatorId(), SseEvent.of(SseEventType.TICKET_UPDATE, Map.of(
+        Long tenantId = TenantContext.requireTenantId();
+        sseEmitterManager.sendToUser(tenantId, ticket.getCreatorId(), SseEvent.of(SseEventType.TICKET_UPDATE, Map.of(
                 "ticketId", IdUtils.toExternalId(ticketId),
                 "ticketNo", ticket.getTicketNo(),
                 "oldStatus", currentStatus.getDescription(),
@@ -236,8 +216,7 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
     @Override
     @Transactional
     public void assignTicket(Long adminId, Long ticketId, Long assigneeId) {
-        Long tenantId = currentTenantId();
-        Ticket ticket = findTicketInTenant(ticketId, tenantId);
+        Ticket ticket = getById(ticketId);
         if (ticket == null) {
             throw new GeneralException(ResultEnum.TICKET_NOT_FOUND);
         }
@@ -254,13 +233,11 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
     @Override
     @Transactional
     public void closeTicket(Long userId, Long ticketId) {
-        Long tenantId = currentTenantId();
-        Ticket ticket = findTicketInTenant(ticketId, tenantId);
+        Ticket ticket = getById(ticketId);
         if (ticket == null) {
             throw new GeneralException(ResultEnum.TICKET_NOT_FOUND);
         }
 
-        // 只有创建者可以关闭自己的工单
         if (!ticket.getCreatorId().equals(userId)) {
             throw new GeneralException(ResultEnum.TICKET_NOT_OWNER);
         }
@@ -275,8 +252,7 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
     @Override
     @Transactional
     public void confirmTicket(Long userId, Long ticketId) {
-        Long tenantId = currentTenantId();
-        Ticket ticket = findTicketInTenant(ticketId, tenantId);
+        Ticket ticket = getById(ticketId);
         if (ticket == null) {
             throw new GeneralException(ResultEnum.TICKET_NOT_FOUND);
         }
@@ -301,7 +277,6 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
     @Transactional
     public void addAttachment(Long ticketId, Long replyId, Long fileId, String fileName, Long fileSize) {
         TicketAttachment attachment = new TicketAttachment()
-                .setTenantId(currentTenantId())
                 .setTicketId(ticketId)
                 .setReplyId(replyId)
                 .setFileId(fileId)
@@ -313,21 +288,15 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
 
     @Override
     public int getUserPendingCount(Long userId) {
-        Long tenantId = currentTenantId();
-        return baseMapper.countUserPendingTickets(tenantId, userId);
+        return baseMapper.countUserPendingTickets(userId);
     }
 
     @Override
     public int getAdminPendingCount(Long adminId) {
-        Long tenantId = currentTenantId();
-        return baseMapper.countAdminPendingTickets(tenantId, adminId);
+        return baseMapper.countAdminPendingTickets(adminId);
     }
 
-    /**
-     * 转换为列表 VO
-     */
     private TicketVO convertToVO(Ticket ticket) {
-        Long tenantId = ticket.getTenantId();
         TicketVO vo = new TicketVO()
                 .setId(IdUtils.toExternalId(ticket.getId()))
                 .setTicketNo(ticket.getTicketNo())
@@ -339,13 +308,11 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
                 .setUpdateTime(ticket.getUpdateTime())
                 .setCloseTime(ticket.getCloseTime());
 
-        // 获取创建者名称
         Account creator = accountService.findAccountById(ticket.getCreatorId());
         if (creator != null) {
             vo.setCreatorName(creator.getUsername());
         }
 
-        // 获取处理人名称
         if (ticket.getAssigneeId() != null) {
             vo.setAssigneeId(IdUtils.toExternalId(ticket.getAssigneeId()));
             Account assignee = accountService.findAccountById(ticket.getAssigneeId());
@@ -354,22 +321,16 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
             }
         }
 
-        // 获取回复数量
         Long replyCount = ticketReplyMapper.selectCount(
                 new LambdaQueryWrapper<TicketReply>()
                         .eq(TicketReply::getTicketId, ticket.getId())
-                        .eq(TicketReply::getTenantId, tenantId)
         );
         vo.setReplyCount(replyCount.intValue());
 
         return vo;
     }
 
-    /**
-     * 转换为详情 VO
-     */
     private TicketDetailVO convertToDetailVO(Ticket ticket, boolean isAdmin) {
-        Long tenantId = ticket.getTenantId();
         TicketDetailVO vo = new TicketDetailVO()
                 .setId(IdUtils.toExternalId(ticket.getId()))
                 .setTicketNo(ticket.getTicketNo())
@@ -384,13 +345,11 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
                 .setUpdateTime(ticket.getUpdateTime())
                 .setCloseTime(ticket.getCloseTime());
 
-        // 获取创建者名称
         Account creator = accountService.findAccountById(ticket.getCreatorId());
         if (creator != null) {
             vo.setCreatorName(creator.getUsername());
         }
 
-        // 获取处理人名称
         if (ticket.getAssigneeId() != null) {
             vo.setAssigneeId(IdUtils.toExternalId(ticket.getAssigneeId()));
             Account assignee = accountService.findAccountById(ticket.getAssigneeId());
@@ -399,21 +358,16 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
             }
         }
 
-        // 获取工单附件
         List<TicketAttachment> attachments = ticketAttachmentMapper.selectList(
                 new LambdaQueryWrapper<TicketAttachment>()
                         .eq(TicketAttachment::getTicketId, ticket.getId())
-                        .eq(TicketAttachment::getTenantId, tenantId)
                         .isNull(TicketAttachment::getReplyId)
         );
         vo.setAttachments(attachments.stream().map(this::convertAttachmentToVO).collect(Collectors.toList()));
 
-        // 获取回复列表
         LambdaQueryWrapper<TicketReply> replyWrapper = new LambdaQueryWrapper<TicketReply>()
-                .eq(TicketReply::getTicketId, ticket.getId())
-                .eq(TicketReply::getTenantId, tenantId);
+                .eq(TicketReply::getTicketId, ticket.getId());
 
-        // 非管理员不能看内部备注
         if (!isAdmin) {
             replyWrapper.eq(TicketReply::getIsInternal, 0);
         }
@@ -426,9 +380,6 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
         return vo;
     }
 
-    /**
-     * 转换回复为 VO
-     */
     private TicketReplyDetailVO convertReplyToVO(TicketReply reply, Ticket ticket) {
         TicketReplyDetailVO vo = new TicketReplyDetailVO()
                 .setId(IdUtils.toExternalId(reply.getId()))
@@ -438,48 +389,26 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
                 .setIsAdmin(!reply.getReplierId().equals(ticket.getCreatorId()))
                 .setCreateTime(reply.getCreateTime());
 
-        // 获取回复者信息
         Account replier = accountService.findAccountById(reply.getReplierId());
         if (replier != null) {
             vo.setReplierName(replier.getUsername())
                     .setReplierAvatar(replier.getAvatar());
         }
 
-        // 获取回复附件
         List<TicketAttachment> attachments = ticketAttachmentMapper.selectList(
                 new LambdaQueryWrapper<TicketAttachment>()
                         .eq(TicketAttachment::getReplyId, reply.getId())
-                        .eq(TicketAttachment::getTenantId, ticket.getTenantId())
         );
         vo.setAttachments(attachments.stream().map(this::convertAttachmentToVO).collect(Collectors.toList()));
 
         return vo;
     }
 
-    /**
-     * 转换附件为 VO
-     */
     private TicketAttachmentVO convertAttachmentToVO(TicketAttachment attachment) {
         return new TicketAttachmentVO()
                 .setId(IdUtils.toExternalId(attachment.getId()))
                 .setFileId(IdUtils.toExternalId(attachment.getFileId()))
                 .setFileName(attachment.getFileName())
                 .setFileSizeWithReadable(attachment.getFileSize());
-    }
-
-    /**
-     * 获取当前租户ID，确保工单操作具备租户隔离
-     */
-    private Long currentTenantId() {
-        return SecurityUtils.getTenantId();
-    }
-
-    /**
-     * 按租户查询工单，未找到返回 null
-     */
-    private Ticket findTicketInTenant(Long ticketId, Long tenantId) {
-        return this.getOne(new LambdaQueryWrapper<Ticket>()
-                .eq(Ticket::getId, ticketId)
-                .eq(Ticket::getTenantId, tenantId));
     }
 }
