@@ -2,195 +2,161 @@ package cn.flying.common.util;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
 import java.util.Random;
-import java.util.UUID;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * ID生成工具类，提供多种ID生成策略和安全措施
+ * ID生成工具类，提供多种ID生成策略
+ *
+ * <h3>功能：</h3>
+ * <ul>
+ *   <li>雪花算法生成内部ID</li>
+ *   <li>AES加密转换内外ID（无需Redis缓存）</li>
+ *   <li>日志ID生成</li>
+ * </ul>
  */
 @Slf4j
 @Component
 public class IdUtils {
 
     private static SnowflakeIdGenerator snowflakeIdGenerator;
-    private static StringRedisTemplate redisTemplate;
+    private static SecureIdCodec secureIdCodec;
     private static final Random RANDOM = new Random();
-    
-    // 监控配置
-    private static final String MONITOR_KEY_PREFIX = "id:monitor:";
-    private static final int DEFAULT_THRESHOLD = 100;
-    private static int monitorThreshold = DEFAULT_THRESHOLD;
 
-    // ID映射缓存配置
-    private static int idMappingExpireHours = 24;
-    private static final String ID_EXTERNAL_PREFIX = "id:ext:";
-    private static final String ID_INTERNAL_PREFIX = "id:int:";
-    private static final int UUID_COLLISION_RETRY = 3;
-
-    @Value("${id.monitor.threshold:100}")
-    public void setMonitorThreshold(int threshold) {
-        IdUtils.monitorThreshold = threshold;
-    }
-
-    @Value("${id.mapping.expire-hours:24}")
-    public void setIdMappingExpireHours(int hours) {
-        IdUtils.idMappingExpireHours = hours;
-    }
+    // ID生成频率监控（本地计数，无Redis依赖）
+    private static final AtomicLong entityIdCounter = new AtomicLong(0);
+    private static final AtomicLong userIdCounter = new AtomicLong(0);
+    private static volatile long lastResetTime = System.currentTimeMillis();
+    private static final long MONITOR_WINDOW_MS = 60_000; // 1分钟窗口
 
     @Autowired
-    public IdUtils(SnowflakeIdGenerator snowflakeIdGenerator, StringRedisTemplate redisTemplate) {
+    public IdUtils(SnowflakeIdGenerator snowflakeIdGenerator, SecureIdCodec secureIdCodec) {
         IdUtils.snowflakeIdGenerator = snowflakeIdGenerator;
-        IdUtils.redisTemplate = redisTemplate;
-        log.info("ID Utils Initialization completed");
+        IdUtils.secureIdCodec = secureIdCodec;
+        log.info("IdUtils initialized with SecureIdCodec (stateless ID encryption)");
     }
 
     /**
      * 生成实体ID (数据库实体通用ID)
+     *
      * @return 雪花算法生成的ID
      */
     public static Long nextEntityId() {
         long id = snowflakeIdGenerator.nextId();
-        monitorIdGeneration("entity"); // 监控ID生成
+        monitorIdGeneration(entityIdCounter, "entity");
         return id;
     }
 
     /**
      * 生成用户ID (适用于用户账号等敏感实体)
-     * @return 原始雪花ID（未混淆）
+     *
+     * @return 雪花算法生成的ID
      */
     public static Long nextUserId() {
         long id = snowflakeIdGenerator.nextId();
-        monitorIdGeneration("user"); // 监控ID生成
-        return id; // 返回原始ID
+        monitorIdGeneration(userIdCounter, "user");
+        return id;
     }
-    
+
     /**
      * 生成日志ID (适用于日志记录)
-     * 使用不同于实体ID的生成策略
-     * @return 日志ID
+     *
+     * @return 日志ID (格式: L + 时间戳 + 随机数)
      */
     public static String nextLogId() {
-        // 生成策略：时间戳+随机数
-        return "L" + System.currentTimeMillis() + 
+        return "L" + System.currentTimeMillis() +
                String.format("%04d", RANDOM.nextInt(10000));
     }
-    
+
     /**
-     * 生成API响应中的外部ID (使用UUID确保不可预测性)
+     * 将内部ID转换为外部ID
+     *
+     * <p>使用 AES 加密，无需 Redis 缓存，确定性转换。</p>
+     *
+     * @param internalId 内部数据库ID
+     * @return 外部ID (格式: E + Base62编码，约25字符)
      */
     public static String toExternalId(Long internalId) {
-        return generateExternalId(internalId, "E");
+        if (internalId == null) {
+            return null;
+        }
+        return secureIdCodec.toExternalId(internalId);
     }
 
     /**
-     * 生成用户ID的外部表示
+     * 将用户ID转换为外部ID
+     *
+     * @param userId 内部用户ID
+     * @return 外部用户ID (格式: U + Base62编码，约25字符)
      */
     public static String toExternalUserId(Long userId) {
-        return generateExternalId(userId, "U");
-    }
-
-    private static String generateExternalId(Long internalId, String prefix) {
-        if (internalId == null) return null;
-        try {
-            String internalKey = ID_INTERNAL_PREFIX + prefix + internalId;
-            String existingExternalId = redisTemplate.opsForValue().get(internalKey);
-            if (existingExternalId != null) return existingExternalId;
-
-            for (int i = 0; i < UUID_COLLISION_RETRY; i++) {
-                String externalId = prefix + UUID.randomUUID().toString().replace("-", "");
-                if (storeIdMapping(internalId, externalId, prefix)) return externalId;
-            }
-            log.error("生成外部ID失败，超过最大重试次数，internalId: {}", internalId);
-        } catch (Exception e) {
-            log.error("生成外部ID异常，internalId: {}", internalId, e);
+        if (userId == null) {
+            return null;
         }
-        return null;
-    }
-
-    private static boolean storeIdMapping(Long internalId, String externalId, String prefix) {
-        String externalKey = ID_EXTERNAL_PREFIX + externalId;
-        String internalKey = ID_INTERNAL_PREFIX + prefix + internalId;
-        String internalIdStr = String.valueOf(internalId);
-        Boolean stored = redisTemplate.opsForValue()
-                .setIfAbsent(externalKey, internalIdStr, idMappingExpireHours, TimeUnit.HOURS);
-        if (Boolean.TRUE.equals(stored)) {
-            redisTemplate.opsForValue().set(internalKey, externalId, idMappingExpireHours, TimeUnit.HOURS);
-            return true;
-        }
-        String existingInternalId = redisTemplate.opsForValue().get(externalKey);
-        if (internalIdStr.equals(existingInternalId)) {
-            redisTemplate.opsForValue().set(internalKey, externalId, idMappingExpireHours, TimeUnit.HOURS);
-            return true;
-        }
-        return false;
+        return secureIdCodec.toExternalUserId(userId);
     }
 
     /**
      * 从外部ID还原内部ID
+     *
+     * <p>使用 AES 解密，无需 Redis 查询。</p>
+     *
+     * @param externalId 外部ID
+     * @return 内部ID，如果解密失败返回null
      */
     public static Long fromExternalId(String externalId) {
-        if (externalId == null || externalId.isEmpty()) return null;
-        try {
-            String cacheKey = ID_EXTERNAL_PREFIX + externalId;
-            String cachedInternalId = redisTemplate.opsForValue().get(cacheKey);
-            if (cachedInternalId != null) return Long.parseLong(cachedInternalId);
-            log.warn("未找到外部ID映射: {}", externalId);
-            return null;
-        } catch (NumberFormatException e) {
-            log.error("内部ID格式错误: externalId={}", externalId, e);
-            return null;
-        } catch (Exception e) {
-            log.error("解析外部ID异常: {}", externalId, e);
+        if (externalId == null || externalId.isEmpty()) {
             return null;
         }
+        return secureIdCodec.fromExternalId(externalId);
     }
 
     /**
      * 生成带前缀的ID
+     *
      * @param prefix ID前缀
      * @return 带前缀的ID字符串
      */
     public static String nextIdWithPrefix(String prefix) {
         return prefix + nextEntityId();
     }
-    
+
     /**
      * 生成字符串形式的实体ID
+     *
      * @return 字符串形式的ID
      */
     public static String nextEntityIdStr() {
         return String.valueOf(nextEntityId());
     }
-    
+
     /**
-     * 监控ID生成频率，防止枚举攻击
+     * 监控ID生成频率（本地监控，无Redis依赖）
+     *
+     * @param counter 计数器
      * @param type ID类型
      */
-    private static void monitorIdGeneration(String type) {
-        try {
-            String key = MONITOR_KEY_PREFIX + type + ":" + Thread.currentThread().threadId();
-            Long count = redisTemplate.opsForValue().increment(key);
-            
-            // 首次设置过期时间
-            if (count != null && count == 1) {
-                redisTemplate.expire(key, Duration.ofMinutes(1));
+    private static void monitorIdGeneration(AtomicLong counter, String type) {
+        long now = System.currentTimeMillis();
+
+        // 检查是否需要重置计数器（每分钟重置）
+        if (now - lastResetTime > MONITOR_WINDOW_MS) {
+            synchronized (IdUtils.class) {
+                if (now - lastResetTime > MONITOR_WINDOW_MS) {
+                    entityIdCounter.set(0);
+                    userIdCounter.set(0);
+                    lastResetTime = now;
+                }
             }
-            
-            // 检查是否超过阈值
-            if (count != null && count > monitorThreshold) {
-                log.warn("检测到可能的ID枚举攻击! 线程ID: {}, ID类型: {}, 1分钟内生成数量: {}",
-                        Thread.currentThread().threadId(), type, count);
-                // 可以在这里添加额外的安全措施，如限流、告警等
-            }
-        } catch (Exception e) {
-            // 确保监控失败不影响正常ID生成
-            log.error("ID生成监控失败", e);
+        }
+
+        long count = counter.incrementAndGet();
+
+        // 超过阈值时警告（默认 1000/分钟）
+        if (count == 1000) {
+            log.warn("ID生成频率较高: type={}, count={}/min", type, count);
         }
     }
-} 
+}

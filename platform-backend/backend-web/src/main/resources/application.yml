@@ -106,12 +106,7 @@ snowflake:
   worker-id: 1
   data-center-id: 20
 
-# ID生成器配置
-id:
-  monitor:
-    threshold: 200
-  mapping:
-    expire-hours: 48
+# 雪花ID生成器配置（ID加密使用JWT密钥派生，无需额外配置）
 
 # Resilience4j 熔断与重试配置
 resilience4j:
