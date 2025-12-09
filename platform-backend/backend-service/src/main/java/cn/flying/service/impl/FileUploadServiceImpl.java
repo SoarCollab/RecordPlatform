@@ -10,6 +10,7 @@ import cn.flying.common.exception.RetryableException;
 import cn.flying.dao.vo.file.*;
 import cn.flying.service.FileService;
 import cn.flying.service.FileUploadService;
+import cn.flying.service.encryption.*;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.annotation.Resource;
@@ -21,17 +22,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.crypto.Cipher;
-import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
-import javax.crypto.spec.GCMParameterSpec;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
@@ -66,13 +63,6 @@ public class FileUploadServiceImpl implements FileUploadService {
     private static final String HASH_SEPARATOR = "\n--HASH--\n"; // 哈希值前的分隔符
     private static final String KEY_SEPARATOR = "\n--NEXT_KEY--\n"; // 下一个密钥前的分隔符
 
-    // --- 加密常量 ---
-    private static final String ENCRYPTION_ALGORITHM = "AES/GCM/NoPadding"; // 加密算法/模式/填充
-    private static final String KEY_ALGORITHM = "AES"; // 密钥生成算法
-    private static final int IV_SIZE_BYTES = 12; // IV 大小 (GCM推荐12字节)
-    private static final int KEY_SIZE_BITS = 256; // 密钥大小 (256位)
-    private static final int TAG_BIT_LENGTH = 128; // GCM 认证标签长度 (128位)
-
     // --- 允许的文件类型 ---
     private static final Set<String> ALLOWED_FILE_EXTENSIONS = Set.of(
             "jpg", "jpeg", "png", "gif", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "zip", "rar", "7z"
@@ -96,6 +86,10 @@ public class FileUploadServiceImpl implements FileUploadService {
     // Redis状态管理器
     @Resource
     private FileUploadRedisStateManager redisStateManager;
+
+    // 加密策略工厂
+    @Resource
+    private EncryptionStrategyFactory encryptionStrategyFactory;
 
     @Resource
     private FileService fileService;
@@ -592,39 +586,42 @@ public class FileUploadServiceImpl implements FileUploadService {
 
     /**
      * 异步处理已上传的分片：对其进行加密，并在末尾附加其原始哈希值。
+     * <p>使用可配置的加密策略（AES-GCM 或 ChaCha20-Poly1305）</p>
      */
     private void processChunkImmediately(String SUID,FileUploadState state, int chunkNumber, Path chunkPath, String chunkHashBase64) {
         CompletableFuture.runAsync(() -> {
             String clientId = state.getClientId();
             Path processedChunkPath = getChunkProcessedPath(SUID, clientId, chunkNumber);
-            log.debug("-------------开始异步处理分片 {}: 原始路径={} -------------", chunkNumber, chunkPath);
+            log.debug("-------------开始异步处理分片 {}: 原始路径={}, 加密算法={} -------------",
+                    chunkNumber, chunkPath, encryptionStrategyFactory.getCurrentAlgorithmName());
 
             try {
+                // 获取当前加密策略
+                ChunkEncryptionStrategy strategy = encryptionStrategyFactory.getStrategy();
+
                 // 1. 生成密钥和 IV
-                SecretKey chunkSecretKey = generateChunkKey();
-                byte[] iv = generateIV();
-                GCMParameterSpec gcmSpec = new GCMParameterSpec(TAG_BIT_LENGTH, iv);
+                SecretKey chunkSecretKey = strategy.generateKey();
+                byte[] iv = strategy.generateIv();
                 // 将密钥存储到Redis中
                 redisStateManager.addChunkKey(clientId, chunkNumber, chunkSecretKey.getEncoded());
 
-                // 2. 初始化密码器
-                Cipher cipher = Cipher.getInstance(ENCRYPTION_ALGORITHM);
-                cipher.init(Cipher.ENCRYPT_MODE, chunkSecretKey, gcmSpec);
+                // 2. 创建加密上下文（流式加密）
+                EncryptionContext encryptionContext = strategy.createEncryptionContext(chunkSecretKey, iv);
 
                 // 3. 加密并写入
                 Files.createDirectories(processedChunkPath.getParent());
                 try (InputStream fis = Files.newInputStream(chunkPath);
                      OutputStream fos = Files.newOutputStream(processedChunkPath, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
 
-                    fos.write(iv); // 写入 IV
+                    fos.write(iv); // 写入 IV/Nonce
                     byte[] buffer = new byte[BUFFER_SIZE];
                     int bytesRead;
                     while ((bytesRead = fis.read(buffer)) != -1) {
-                        byte[] encryptedBytes = cipher.update(buffer, 0, bytesRead);
-                        if (encryptedBytes != null) fos.write(encryptedBytes);
+                        byte[] encryptedBytes = strategy.encryptUpdate(encryptionContext, buffer, 0, bytesRead);
+                        if (encryptedBytes.length > 0) fos.write(encryptedBytes);
                     }
-                    byte[] finalBytes = cipher.doFinal();
-                    if (finalBytes != null) fos.write(finalBytes);
+                    byte[] finalBytes = strategy.encryptFinal(encryptionContext);
+                    if (finalBytes.length > 0) fos.write(finalBytes);
 
                     // 追加哈希
                     fos.write(HASH_SEPARATOR.getBytes(StandardCharsets.UTF_8));
@@ -637,13 +634,16 @@ public class FileUploadServiceImpl implements FileUploadService {
                 if (updatedState != null) {
                     updateUploadProgress(updatedState, "处理完分片 " + chunkNumber);
                 }
-                log.info("分片 {} 处理成功: 客户端ID={}, 处理后路径={}",
-                        chunkNumber, clientId, processedChunkPath);
+                log.info("分片 {} 处理成功: 客户端ID={}, 处理后路径={}, 算法={}",
+                        chunkNumber, clientId, processedChunkPath, strategy.getAlgorithmName());
 
+            } catch (EncryptionException e) {
+                log.error("分片 {} 加密失败: 客户端ID={}, 算法={}", chunkNumber, clientId,
+                        encryptionStrategyFactory.getCurrentAlgorithmName(), e);
+                tryDelete(processedChunkPath);
             } catch (Exception e) {
                 log.error("异步处理分片 {} 失败: 客户端ID={}", chunkNumber, clientId, e);
                 tryDelete(processedChunkPath);
-                // 可以在这里考虑通知机制或记录失败状态
             }
         }, fileProcessingExecutor);
     }
@@ -702,20 +702,6 @@ public class FileUploadServiceImpl implements FileUploadService {
             log.error("处理后的分片文件未找到，无法追加密钥: {}", filePath);
             throw new FileNotFoundException("处理后的分片文件未找到: " + filePath.getFileName());
         }
-    }
-
-    /** 生成一个新的 AES 密钥 */
-    private SecretKey generateChunkKey() throws NoSuchAlgorithmException {
-        KeyGenerator keyGen = KeyGenerator.getInstance(KEY_ALGORITHM);
-        keyGen.init(KEY_SIZE_BITS);
-        return keyGen.generateKey();
-    }
-
-    /** 生成一个随机的 IV */
-    private byte[] generateIV() {
-        byte[] iv = new byte[IV_SIZE_BYTES];
-        new SecureRandom().nextBytes(iv);
-        return iv;
     }
 
     /**

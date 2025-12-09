@@ -153,6 +153,16 @@ file:
     retention-days: 30
     batch-size: 100
     cron: 0 0 3 * * ?
+  # Chunk encryption configuration
+  encryption:
+    # Algorithm: aes-gcm (recommended for servers with AES-NI), chacha20 (recommended for containers/mixed environments), auto
+    algorithm: chacha20
+    # Run benchmark on startup to auto-select optimal algorithm (only for 'auto' mode)
+    benchmark-on-startup: false
+    # Benchmark data size in bytes (default 1MB)
+    benchmark-data-size: 1048576
+    # Benchmark iterations
+    benchmark-iterations: 3
 
 # Outbox publisher configuration
 outbox:
