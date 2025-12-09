@@ -53,3 +53,4 @@ App.java
 .env.*
 !.env.example
 **/conf/sdk.*
+docs/frontend-chunk-decryption-guide.md
