@@ -22,7 +22,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 /**
- * MinIO 副本一致性修复服务。
+ * S3 副本一致性修复服务。
  * 定期扫描逻辑节点下的物理节点对，检测并修复单副本风险。
  * 当文件仅存在于一个物理节点时，自动复制到另一个节点。
  */
@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class ConsistencyRepairService {
 
-    private static final String LOCK_KEY = "minio:consistency:repair";
+    private static final String LOCK_KEY = "storage:consistency:repair";
 
     // 立即修复任务的并发限制
     private static final Semaphore IMMEDIATE_REPAIR_SEMAPHORE = new Semaphore(10);
@@ -45,28 +45,28 @@ public class ConsistencyRepairService {
     private S3ClientManager clientManager;
 
     @Resource
-    private S3Monitor minioMonitor;
+    private S3Monitor s3Monitor;
 
     @Resource
-    private StorageProperties minioProperties;
+    private StorageProperties storageProperties;
 
     @Resource
     private RedissonClient redissonClient;
 
-    @Value("${minio.consistency.repair.batch-size:100}")
+    @Value("${storage.consistency.repair.batch-size:100}")
     private int batchSize;
 
-    @Value("${minio.consistency.repair.lock-timeout-seconds:600}")
+    @Value("${storage.consistency.repair.lock-timeout-seconds:600}")
     private long lockTimeoutSeconds;
 
-    @Value("${minio.consistency.repair.enabled:true}")
+    @Value("${storage.consistency.repair.enabled:true}")
     private boolean repairEnabled;
 
     /**
      * 定时执行副本一致性修复任务。
      * 每小时执行一次（可通过配置调整）。
      */
-    @Scheduled(cron = "${minio.consistency.repair.cron:0 0 * * * ?}")
+    @Scheduled(cron = "${storage.consistency.repair.cron:0 0 * * * ?}")
     public void scheduledRepair() {
         if (!repairEnabled) {
             log.debug("副本一致性修复任务已禁用");
@@ -110,7 +110,7 @@ public class ConsistencyRepairService {
     public RepairStatistics repairAllLogicNodes() {
         RepairStatistics stats = new RepairStatistics();
 
-        List<LogicNodeMapping> mappings = minioProperties.getLogicalMapping();
+        List<LogicNodeMapping> mappings = storageProperties.getLogicalMapping();
         if (CollectionUtils.isEmpty(mappings)) {
             log.warn("未配置逻辑节点映射，跳过副本一致性修复");
             return stats;
@@ -129,8 +129,8 @@ public class ConsistencyRepairService {
             String node2 = physicalPair.get(1);
 
             // 检查两个物理节点是否都在线
-            boolean node1Online = minioMonitor.isNodeOnline(node1);
-            boolean node2Online = minioMonitor.isNodeOnline(node2);
+            boolean node1Online = s3Monitor.isNodeOnline(node1);
+            boolean node2Online = s3Monitor.isNodeOnline(node2);
 
             if (!node1Online || !node2Online) {
                 log.info("逻辑节点 {} 的物理节点不全在线（{}={}, {}={}），跳过修复",
@@ -362,11 +362,11 @@ public class ConsistencyRepairService {
                         objectName, sourceNode, targetNode, logicNodeName, attempt, IMMEDIATE_REPAIR_MAX_RETRIES);
 
                 // 检查节点在线状态
-                if (!minioMonitor.isNodeOnline(sourceNode)) {
+                if (!s3Monitor.isNodeOnline(sourceNode)) {
                     log.warn("源节点 {} 不在线，无法修复逻辑节点 {} 的对象 {}", sourceNode, logicNodeName, objectName);
                     return; // 源节点不在线，无法修复，不再重试
                 }
-                if (!minioMonitor.isNodeOnline(targetNode)) {
+                if (!s3Monitor.isNodeOnline(targetNode)) {
                     log.warn("目标节点 {} 不在线，等待后重试修复逻辑节点 {} 的对象 {}", targetNode, logicNodeName, objectName);
                     // 目标节点不在线，可以等待后重试（使用指数退避）
                     if (attempt < IMMEDIATE_REPAIR_MAX_RETRIES) {
