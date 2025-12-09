@@ -5,8 +5,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * MinIO 模块的租户上下文工具类。
+ * S3 兼容存储模块的租户上下文工具类。
  * 从 Dubbo RPC 上下文中读取租户 ID，用于存储路径隔离。
+ *
+ * 注意：路径前缀 "minio/" 为历史遗留格式，保留以兼容已有数据。
  */
 public final class TenantContextUtil {
 
@@ -47,6 +49,8 @@ public final class TenantContextUtil {
     /**
      * 构建包含租户隔离的存储路径。
      * 格式: minio/tenant/{tenantId}/node/{logicNode}/{objectName}
+     *
+     * 注意：保留 "minio/" 前缀以兼容已有数据。
      *
      * @param logicNodeName 逻辑节点名称
      * @param objectName    对象名称（通常是 fileHash）

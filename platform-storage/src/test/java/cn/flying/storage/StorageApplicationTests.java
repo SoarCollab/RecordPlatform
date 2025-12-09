@@ -1,10 +1,10 @@
-package cn.flying.minio;
+package cn.flying.storage;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class MinioApplicationTests {
+class StorageApplicationTests {
 
     @Test
     void contextLoads() {
