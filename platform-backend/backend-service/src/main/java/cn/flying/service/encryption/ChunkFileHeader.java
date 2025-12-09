@@ -20,8 +20,7 @@ import java.nio.ByteOrder;
  * [Header: 4B] [IV/Nonce: 12B] [加密数据] [认证标签] [--HASH--\n] [hash] [--NEXT_KEY--\n] [key]
  * </pre>
  *
- * <h3>后向兼容：</h3>
- * <p>旧版本文件（无头部）以 IV 字节开头，不会以 0x52 0x50 开头，因此可以区分。</p>
+ * <p><b>注意</b>：所有加密文件必须包含版本头，不支持无头部的旧格式。</p>
  *
  * @author Claude Code
  * @since 2.0.0
@@ -42,9 +41,6 @@ public final class ChunkFileHeader {
 
     /** 文件头大小 */
     public static final int HEADER_SIZE = 4;
-
-    /** 旧版本（无头部）的默认算法 - AES-GCM */
-    public static final byte LEGACY_ALGORITHM = ALGORITHM_AES_GCM;
 
     private ChunkFileHeader() {
         // 工具类禁止实例化
@@ -123,11 +119,12 @@ public final class ChunkFileHeader {
      * 解析文件头获取算法标识
      *
      * @param data 数据字节数组（至少 4 字节）
-     * @return 算法标识字节，如果无有效头部返回 {@link #LEGACY_ALGORITHM}
+     * @return 算法标识字节
+     * @throws IllegalArgumentException 如果数据没有有效的版本头
      */
     public static byte parseAlgorithm(byte[] data) {
         if (!hasValidHeader(data)) {
-            return LEGACY_ALGORITHM;
+            throw new IllegalArgumentException("Invalid file format: missing version header (magic bytes 'RP')");
         }
         return data[3];
     }
@@ -137,11 +134,12 @@ public final class ChunkFileHeader {
      *
      * @param data   数据字节数组
      * @param offset 起始偏移
-     * @return 算法标识字节，如果无有效头部返回 {@link #LEGACY_ALGORITHM}
+     * @return 算法标识字节
+     * @throws IllegalArgumentException 如果数据没有有效的版本头
      */
     public static byte parseAlgorithm(byte[] data, int offset) {
         if (!hasValidHeader(data, offset)) {
-            return LEGACY_ALGORITHM;
+            throw new IllegalArgumentException("Invalid file format: missing version header (magic bytes 'RP')");
         }
         return data[offset + 3];
     }
@@ -163,10 +161,14 @@ public final class ChunkFileHeader {
      * 获取加密数据的起始偏移（跳过头部）
      *
      * @param data 数据字节数组
-     * @return 加密数据起始偏移（有头部返回 4，无头部返回 0）
+     * @return 加密数据起始偏移（固定为 4）
+     * @throws IllegalArgumentException 如果数据没有有效的版本头
      */
     public static int getDataOffset(byte[] data) {
-        return hasValidHeader(data) ? HEADER_SIZE : 0;
+        if (!hasValidHeader(data)) {
+            throw new IllegalArgumentException("Invalid file format: missing version header (magic bytes 'RP')");
+        }
+        return HEADER_SIZE;
     }
 
     /**
@@ -188,10 +190,11 @@ public final class ChunkFileHeader {
      *
      * @param algorithmName 算法名称（如 "AES-256-GCM" 或 "ChaCha20-Poly1305"）
      * @return 算法标识字节
+     * @throws IllegalArgumentException 如果算法名称无法识别
      */
     public static byte fromAlgorithmName(String algorithmName) {
         if (algorithmName == null) {
-            return LEGACY_ALGORITHM;
+            throw new IllegalArgumentException("Algorithm name cannot be null");
         }
         String normalized = algorithmName.toLowerCase().replaceAll("[^a-z0-9]", "");
         if (normalized.contains("aes") || normalized.contains("gcm")) {
@@ -200,6 +203,6 @@ public final class ChunkFileHeader {
         if (normalized.contains("chacha") || normalized.contains("poly1305")) {
             return ALGORITHM_CHACHA20;
         }
-        return LEGACY_ALGORITHM;
+        throw new IllegalArgumentException("Unknown algorithm: " + algorithmName);
     }
 }

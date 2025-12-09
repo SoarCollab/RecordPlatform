@@ -11,13 +11,14 @@ import java.util.Arrays;
 /**
  * 分片解密服务
  *
- * <p>提供向后兼容的分片文件解密功能，自动检测加密算法。</p>
+ * <p>提供分片文件解密功能，根据文件头自动识别加密算法。</p>
  *
  * <h3>支持的文件格式：</h3>
  * <ul>
  *   <li><b>v1 格式</b>: [Header:4B][IV:12B][加密数据][Tag] - 带版本头</li>
- *   <li><b>Legacy 格式</b>: [IV:12B][加密数据][Tag] - 无版本头（AES-GCM）</li>
  * </ul>
+ *
+ * <p><b>注意</b>：所有加密文件必须包含版本头 (magic bytes 'RP')。</p>
  *
  * <h3>使用示例：</h3>
  * <pre>
@@ -119,38 +120,34 @@ public class ChunkDecryptionService {
      *
      * @param encryptedData 加密的分片数据
      * @return 算法名称（如 "AES-256-GCM" 或 "ChaCha20-Poly1305"）
+     * @throws IllegalArgumentException 如果数据没有有效的版本头
      */
     public String detectAlgorithm(byte[] encryptedData) {
         if (encryptedData == null || encryptedData.length == 0) {
-            return "Unknown (empty data)";
+            throw new IllegalArgumentException("Encrypted data is empty");
         }
         byte algorithmId = ChunkFileHeader.parseAlgorithm(encryptedData);
-        boolean hasHeader = ChunkFileHeader.hasValidHeader(encryptedData);
-        String algorithmName = ChunkFileHeader.getAlgorithmName(algorithmId);
-        return hasHeader ? algorithmName : algorithmName + " (legacy)";
+        return ChunkFileHeader.getAlgorithmName(algorithmId);
     }
 
     /**
-     * 检查分片数据是否是新格式（带版本头）
+     * 检查分片数据是否是有效格式（带版本头）
      *
      * @param encryptedData 加密的分片数据
-     * @return 如果是新格式返回 true
+     * @return 如果是有效格式返回 true
      */
-    public boolean isVersionedFormat(byte[] encryptedData) {
+    public boolean isValidFormat(byte[] encryptedData) {
         return ChunkFileHeader.hasValidHeader(encryptedData);
     }
 
     /**
      * 根据算法 ID 获取对应的加密策略
      */
-    private ChunkEncryptionStrategy getStrategyById(byte algorithmId) {
+    private ChunkEncryptionStrategy getStrategyById(byte algorithmId) throws EncryptionException {
         return switch (algorithmId) {
             case ChunkFileHeader.ALGORITHM_AES_GCM -> new AesGcmEncryptionStrategy();
             case ChunkFileHeader.ALGORITHM_CHACHA20 -> new ChaCha20EncryptionStrategy();
-            default -> {
-                log.warn("Unknown algorithm ID: {}, falling back to AES-GCM", algorithmId);
-                yield new AesGcmEncryptionStrategy();
-            }
+            default -> throw new EncryptionException("Unknown algorithm ID: " + algorithmId);
         };
     }
 
