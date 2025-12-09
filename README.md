@@ -214,12 +214,19 @@ RecordPlatform/
 ```
 
 **技术实现**
-- 加密算法：AES-128-ECB + HMAC-SHA256（SIV 风格）
-- 输出格式：前缀 + Base62 编码（约 25 字符）
+- 加密算法：AES-256-CTR + HMAC-SHA256（SIV 风格）
+- 输出格式：前缀 + Base62 编码（约 40 字符）
   - `E` 前缀：实体 ID（文件、记录等）
   - `U` 前缀：用户 ID
-- 密钥派生：从 `JWT_KEY` 自动派生，无需额外配置
-- 安全特性：HMAC 完整性校验，防篡改
+- 密钥派生：HKDF 从 `JWT_KEY` 派生独立的加密密钥和 MAC 密钥
+- 安全特性：16 字节 SIV + 10 字节 HMAC 完整性校验，防篡改
+
+**数据结构**
+```
+明文 (16 bytes): [version:1][type:1][id:8][padding:6]
+密文 (42 bytes): [SIV:16][AES-CTR(plaintext):16][HMAC:10]
+输出: prefix + Base62(密文) ≈ 40 chars
+```
 
 ### 文件加密策略
 分片文件加密支持两种算法，可通过配置切换：
@@ -242,8 +249,8 @@ file:
 ```
 [Header: 4B] [IV/Nonce: 12B] [加密数据] [认证标签] [--HASH--\n] [hash] [--NEXT_KEY--\n] [key]
 ```
-- Header: 魔数 `RP` + 版本号 + 算法标识
-- 旧版本文件（无 Header）自动识别为 AES-GCM，保证向后兼容
+- Header: 魔数 `RP` (0x52 0x50) + 版本号 (0x01) + 算法标识 (0x01=AES-GCM, 0x02=ChaCha20)
+- **重要**：v2.0 不再支持无头部的旧格式，所有加密文件必须包含版本头
 
 ## 弹性容错
 
@@ -337,6 +344,23 @@ CREATE DATABASE RecordPlatform CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 - `outbox_publish_latency`: Outbox 发布延迟
 - `outbox_pending`: 待发送 Outbox 事件数
 - `outbox_exhausted`: 超过最大重试次数的 Outbox 事件数
+
+### 加密健康检查
+`/actuator/health` 端点包含加密策略状态：
+```json
+{
+  "encryption": {
+    "status": "UP",
+    "details": {
+      "algorithm": "ChaCha20-Poly1305",
+      "selectionReason": "explicitly configured",
+      "ivSize": 12,
+      "tagBitLength": 128,
+      "likelyHasAesNi": true
+    }
+  }
+}
+```
 
 ## API 模块
 
@@ -470,6 +494,12 @@ A: 检查 `file_saga` 表状态，查看 `outbox_event` 是否有积压。可通
 
 **Q: 区块链存证延迟**
 A: 检查 FISCO 节点连接和熔断器状态：`/actuator/circuitbreakers`。
+
+**Q: 解密旧版本文件失败**
+A: v2.0 不再支持无版本头的旧格式文件。如需迁移旧数据，需重新加密或使用数据迁移工具。
+
+**Q: 如何选择加密算法**
+A: 如果服务器有 AES-NI 指令集支持，推荐 `aes-gcm`；容器/ARM 环境推荐 `chacha20`。可设置 `algorithm: auto` + `benchmark-on-startup: true` 让系统自动选择。
 
 ## 许可证
 
