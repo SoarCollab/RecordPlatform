@@ -21,26 +21,26 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * MinIO 副本一致性健康指标。
+ * S3 副本一致性健康指标。
  * 检查各逻辑节点的物理节点对之间的数据一致性。
  */
 @Slf4j
-@Component("minioConsistency")
+@Component("storageConsistency")
 public class ConsistencyRepairHealthIndicator implements HealthIndicator {
 
     @Resource
     private S3ClientManager clientManager;
 
     @Resource
-    private S3Monitor minioMonitor;
+    private S3Monitor s3Monitor;
 
     @Resource
-    private StorageProperties minioProperties;
+    private StorageProperties storageProperties;
 
     @Override
     public Health health() {
         try {
-            List<LogicNodeMapping> mappings = minioProperties.getLogicalMapping();
+            List<LogicNodeMapping> mappings = storageProperties.getLogicalMapping();
             if (CollectionUtils.isEmpty(mappings)) {
                 return Health.unknown()
                         .withDetail("reason", "未配置逻辑节点映射")
@@ -66,8 +66,8 @@ public class ConsistencyRepairHealthIndicator implements HealthIndicator {
                 String node2 = physicalPair.get(1);
 
                 // 检查节点在线状态
-                boolean node1Online = minioMonitor.isNodeOnline(node1);
-                boolean node2Online = minioMonitor.isNodeOnline(node2);
+                boolean node1Online = s3Monitor.isNodeOnline(node1);
+                boolean node2Online = s3Monitor.isNodeOnline(node2);
 
                 if (!node1Online || !node2Online) {
                     Map<String, Object> nodeDetails = new HashMap<>();
@@ -127,7 +127,7 @@ public class ConsistencyRepairHealthIndicator implements HealthIndicator {
             return builder.withDetails(details).build();
 
         } catch (Exception e) {
-            log.error("MinIO 一致性健康检查失败", e);
+            log.error("S3 一致性健康检查失败", e);
             return Health.down()
                     .withDetail("reason", "健康检查失败")
                     .withException(e)

@@ -84,7 +84,7 @@ public class ConsistencyRepairService {
                 return;
             }
 
-            log.info("开始执行 MinIO 副本一致性修复任务...");
+            log.info("开始执行存储副本一致性修复任务...");
             RepairStatistics stats = repairAllLogicNodes();
             log.info("副本一致性修复任务完成：检查逻辑节点数={}, 检查文件数={}, 修复文件数={}, 失败数={}",
                     stats.logicNodesChecked, stats.filesChecked, stats.filesRepaired, stats.failureCount);

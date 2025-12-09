@@ -8,10 +8,10 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication
 @EnableDubbo
 @EnableScheduling
-public class MinioApplication {
+public class StorageApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(MinioApplication.class, args);
+        SpringApplication.run(StorageApplication.class, args);
     }
 
 }

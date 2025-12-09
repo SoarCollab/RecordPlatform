@@ -726,7 +726,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     }
 
     /**
-     * 异步上传文件到单个 MinIO 节点 (从 File 对象读取)
+     * 异步上传文件到单个 S3 兼容存储节点 (byte[] 数据)
      */
     private CompletableFuture<Void> uploadToNodeAsync(String nodeName, String objectName, byte[] file) {
         return CompletableFuture.runAsync(() -> {
@@ -753,7 +753,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 log.debug("已成功将'{}'上传到节点'{}'", objectName, nodeName);
 
             } catch (Exception e) {
-                log.error("将{}'上传到节点{}时出错：{}", objectName, nodeName, e.getMessage());
+                log.error("将 '{}' 上传到节点 '{}' 时出错：{}", objectName, nodeName, e.getMessage());
                 // 包装成自定义异常，携带更多上下文信息
                 throw new RuntimeException("Upload of '" + objectName + "' to node '" + nodeName + "' failed: " + e.getMessage(), e);
             }
@@ -761,7 +761,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     }
 
     /**
-     * 确保指定的 Bucket 在给定的 MinIO 节点上存在
+     * 确保指定的 Bucket 在给定的 S3 兼容存储节点上存在
      */
     private void ensureBucketExists(S3Client client, String nodeName, String bucketName) throws RuntimeException {
         String cacheKey = nodeName + ":" + bucketName;
