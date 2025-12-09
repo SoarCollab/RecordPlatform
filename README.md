@@ -7,7 +7,7 @@
 **业务特性**
 - 区块链存证：文件元数据上链，保证不可篡改和可追溯
 - 分布式存储：MinIO 双副本冗余，任一副本可读
-- 分片上传：大文件断点续传，AES-GCM 加密存储
+- 分片上传：大文件断点续传，支持 AES-GCM / ChaCha20-Poly1305 可配置加密
 - 文件分享：生成带访问次数限制的分享码
 - 协作通知：站内消息、公告广播、工单系统、会话管理
 - SSE 实时推送：文件状态变更、消息通知实时送达
@@ -85,7 +85,7 @@ Client                Backend               MinIO              Blockchain
 
 **关键步骤说明**
 1. **start**: 创建上传会话，返回 uploadId 和分片参数
-2. **chunk**: 分片上传，每片 AES-GCM 加密后双写 MinIO
+2. **chunk**: 分片上传，每片使用配置的算法（AES-GCM/ChaCha20）加密后双写 MinIO
 3. **complete**: 触发 Saga 事务，合并分片、计算哈希、上链存证
 4. **SSE**: 实时推送上传进度和存证结果
 
@@ -208,10 +208,42 @@ RecordPlatform/
 - 验证码：登录失败 3 次后强制验证码
 
 ### ID 混淆
-外部 API 使用 UUID 映射，内部使用雪花 ID，映射关系存储于 Redis：
+外部 API 使用加密 ID，内部使用雪花 ID。采用无状态 AES 加密，无需 Redis 缓存：
 ```
-外部请求 → UUID → Redis 查询 → 内部 Snowflake ID → 数据库查询
+外部请求 → AES 解密 → 内部 Snowflake ID → 数据库查询
 ```
+
+**技术实现**
+- 加密算法：AES-128-ECB + HMAC-SHA256（SIV 风格）
+- 输出格式：前缀 + Base62 编码（约 25 字符）
+  - `E` 前缀：实体 ID（文件、记录等）
+  - `U` 前缀：用户 ID
+- 密钥派生：从 `JWT_KEY` 自动派生，无需额外配置
+- 安全特性：HMAC 完整性校验，防篡改
+
+### 文件加密策略
+分片文件加密支持两种算法，可通过配置切换：
+
+| 算法 | 特点 | 适用场景 |
+|------|------|---------|
+| AES-256-GCM | 有 AES-NI 硬件加速时极快（1000+ MB/s） | 物理服务器、有 AES-NI 的 x86 主机 |
+| ChaCha20-Poly1305 | 软件实现稳定，抗侧信道攻击 | 容器环境、ARM 设备、混合云 |
+
+**配置项**
+```yaml
+file:
+  encryption:
+    # aes-gcm, chacha20, auto
+    algorithm: chacha20          # 默认 ChaCha20（安全默认值）
+    benchmark-on-startup: false  # auto 模式时启动时运行基准测试
+```
+
+**分片文件格式** (v2.0+)
+```
+[Header: 4B] [IV/Nonce: 12B] [加密数据] [认证标签] [--HASH--\n] [hash] [--NEXT_KEY--\n] [key]
+```
+- Header: 魔数 `RP` + 版本号 + 算法标识
+- 旧版本文件（无 Header）自动识别为 AES-GCM，保证向后兼容
 
 ## 弹性容错
 
@@ -282,14 +314,16 @@ CREATE DATABASE RecordPlatform CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 | Nacos | `NACOS_HOST`, `NACOS_USERNAME`, `NACOS_PASSWORD` | 配置中心 |
 | MinIO | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | 对象存储 |
 | RabbitMQ | `RABBITMQ_ADDRESSES`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD` | 消息队列 |
-| 安全 | `JWT_KEY`, `ID_SECURITY_KEY` | 签名密钥 |
+| 安全 | `JWT_KEY` | JWT 签名 + ID 加密密钥派生（至少 32 字符） |
 | 区块链 | `FISCO_PEER_ADDRESS`, `FISCO_STORAGE_CONTRACT`, `FISCO_SHARING_CONTRACT` | 合约配置 |
+
+> 注：`ID_SECURITY_KEY` 在 v2.0 后不再需要，ID 加密密钥从 `JWT_KEY` 自动派生
 
 ## 监控端点
 
 | 端点 | 说明 |
 |------|------|
-| `/actuator/health` | 健康状态 (DB/Redis/RabbitMQ/MinIO/Saga/Outbox) |
+| `/actuator/health` | 健康状态 (DB/Redis/RabbitMQ/MinIO/Saga/Outbox/Encryption) |
 | `/actuator/prometheus` | Prometheus 指标 |
 | `/actuator/circuitbreakers` | 熔断器状态 |
 | `/actuator/retries` | 重试统计 |
