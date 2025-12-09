@@ -587,6 +587,11 @@ public class FileUploadServiceImpl implements FileUploadService {
     /**
      * 异步处理已上传的分片：对其进行加密，并在末尾附加其原始哈希值。
      * <p>使用可配置的加密策略（AES-GCM 或 ChaCha20-Poly1305）</p>
+     *
+     * <h3>加密分片文件结构（v1）：</h3>
+     * <pre>
+     * [版本头: 4B] [IV/Nonce: 12B] [加密数据] [认证标签] [--HASH--\n] [hash] [--NEXT_KEY--\n] [key]
+     * </pre>
      */
     private void processChunkImmediately(String SUID,FileUploadState state, int chunkNumber, Path chunkPath, String chunkHashBase64) {
         CompletableFuture.runAsync(() -> {
@@ -612,6 +617,10 @@ public class FileUploadServiceImpl implements FileUploadService {
                 Files.createDirectories(processedChunkPath.getParent());
                 try (InputStream fis = Files.newInputStream(chunkPath);
                      OutputStream fos = Files.newOutputStream(processedChunkPath, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+
+                    // 写入版本头（标识加密算法，支持后向兼容）
+                    byte[] header = ChunkFileHeader.createHeader(strategy);
+                    fos.write(header);
 
                     fos.write(iv); // 写入 IV/Nonce
                     byte[] buffer = new byte[BUFFER_SIZE];
