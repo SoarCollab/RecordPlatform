@@ -86,7 +86,7 @@ public class FileController {
      */
     @DeleteMapping("/deleteById")
     @Operation(summary = "根据文件id列表批量删除文件（管理员专用）")
-    @PreAuthorize("hasRole('admin')") // 仅允许管理员使用
+    @PreAuthorize("hasPerm('file:admin')") // 需要文件管理权限
     @OperationLog(module = "文件操作", operationType = "删除", description = "删除文件")
     public Result<String> deleteFileById(
             @Schema(description = "待删除文件Id列表") @RequestParam("idList") List<String> fileIdList) {

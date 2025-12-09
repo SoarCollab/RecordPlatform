@@ -118,7 +118,7 @@ public class TicketController {
 
     @GetMapping("/admin/list")
     @Operation(summary = "获取所有工单列表（管理员）")
-    @PreAuthorize("hasRole('admin')")
+    @PreAuthorize("hasPerm('ticket:admin')")
     @OperationLog(module = "工单模块", operationType = "查询", description = "管理员获取工单列表")
     public Result<IPage<TicketVO>> getAdminList(
             TicketQueryVO query,
@@ -131,7 +131,7 @@ public class TicketController {
 
     @PutMapping("/admin/{id}/assign")
     @Operation(summary = "分配处理人（管理员）")
-    @PreAuthorize("hasRole('admin')")
+    @PreAuthorize("hasPerm('ticket:admin')")
     @OperationLog(module = "工单模块", operationType = "修改", description = "分配工单处理人")
     public Result<String> assign(
             @RequestAttribute(Const.ATTR_USER_ID) Long adminId,
@@ -145,7 +145,7 @@ public class TicketController {
 
     @PutMapping("/admin/{id}/status")
     @Operation(summary = "更新工单状态（管理员）")
-    @PreAuthorize("hasRole('admin')")
+    @PreAuthorize("hasPerm('ticket:admin')")
     @OperationLog(module = "工单模块", operationType = "修改", description = "更新工单状态")
     public Result<String> updateStatus(
             @RequestAttribute(Const.ATTR_USER_ID) Long adminId,
@@ -159,7 +159,7 @@ public class TicketController {
 
     @GetMapping("/admin/pending-count")
     @Operation(summary = "获取管理员待处理工单数")
-    @PreAuthorize("hasRole('admin')")
+    @PreAuthorize("hasPerm('ticket:admin')")
     public Result<Map<String, Integer>> getAdminPendingCount(
             @RequestAttribute(Const.ATTR_USER_ID) Long adminId) {
         int count = ticketService.getAdminPendingCount(adminId);
