@@ -1,6 +1,6 @@
 spring:
   application:
-    name: platform-minio # 应用名称
+    name: platform-storage # 应用名称
   data:
     redis:
       host: localhost
@@ -12,7 +12,7 @@ spring:
 ## dubbo config
 dubbo:
   application:
-    name: RecordPlatform_minio
+    name: RecordPlatform_storage
     logger: slf4j
     protocol: tri
     qos-port: 22332  # 使用 23333 端口
@@ -28,8 +28,8 @@ dubbo:
     register-mode: instance
     address: nacos://localhost:8848
 
-# MinIO 副本一致性修复配置
-minio:
+# Storage 副本一致性修复配置
+storage:
   consistency:
     repair:
       enabled: true
@@ -40,7 +40,7 @@ minio:
 # 其他 Spring Boot 配置...
 logging:
   level:
-    cn.flying.minio: DEBUG # 保持或根据需要调整
+    cn.flying.storage: DEBUG # 保持或根据需要调整
     com.alibaba.cloud.nacos: DEBUG # Nacos 相关日志
     org.springframework.boot.context.properties.bind: TRACE # Spring Boot 属性绑定详细日志
     root: INFO

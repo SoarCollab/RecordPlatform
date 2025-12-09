@@ -1,4 +1,4 @@
-package cn.flying.minio.config;
+package cn.flying.storage.config;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -8,17 +8,17 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * MinIO 相关配置属性 - 从 Nacos 加载并支持动态刷新
+ * Storage 相关配置属性 - 从 Nacos 加载并支持动态刷新
  */
 @Data
 @Component
 @RefreshScope
-@ConfigurationProperties(prefix = "minio")
-public class MinioProperties {
+@ConfigurationProperties(prefix = "storage")
+public class StorageProperties {
 
     /**
      * 配置的所有物理节点列表
-     * 注意: 每个节点的name字段将直接用作该节点的MinIO桶名
+     * 注意: 每个节点的name字段将直接用作该节点的S3桶名
      */
     private List<NodeConfig> nodes;
 

@@ -1,26 +1,24 @@
-package cn.flying.minio.health;
+package cn.flying.storage.health;
 
-import cn.flying.minio.config.LogicNodeMapping;
-import cn.flying.minio.config.MinioProperties;
-import cn.flying.minio.core.MinioClientManager;
-import cn.flying.minio.core.MinioMonitor;
-import io.minio.BucketExistsArgs;
-import io.minio.ListObjectsArgs;
-import io.minio.MinioClient;
-import io.minio.Result;
-import io.minio.messages.Item;
+import cn.flying.storage.config.LogicNodeMapping;
+import cn.flying.storage.config.StorageProperties;
+import cn.flying.storage.core.S3ClientManager;
+import cn.flying.storage.core.S3Monitor;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
+import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
+import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * MinIO 副本一致性健康指标。
@@ -31,13 +29,13 @@ import java.util.Set;
 public class ConsistencyRepairHealthIndicator implements HealthIndicator {
 
     @Resource
-    private MinioClientManager clientManager;
+    private S3ClientManager clientManager;
 
     @Resource
-    private MinioMonitor minioMonitor;
+    private S3Monitor minioMonitor;
 
     @Resource
-    private MinioProperties minioProperties;
+    private StorageProperties minioProperties;
 
     @Override
     public Health health() {
@@ -140,30 +138,33 @@ public class ConsistencyRepairHealthIndicator implements HealthIndicator {
     /**
      * 快速统计桶中的对象数量。
      */
-    private int countObjects(MinioClient client, String bucketName) throws Exception {
+    private int countObjects(S3Client client, String bucketName) throws Exception {
         if (client == null) {
             return 0;
         }
 
-        boolean exists = client.bucketExists(BucketExistsArgs.builder().bucket(bucketName).build());
-        if (!exists) {
+        // Check if bucket exists using headBucket
+        try {
+            client.headBucket(request -> request.bucket(bucketName));
+        } catch (NoSuchBucketException e) {
             return 0;
         }
 
         int count = 0;
-        Iterable<Result<Item>> results = client.listObjects(
-                ListObjectsArgs.builder()
-                        .bucket(bucketName)
-                        .recursive(true)
-                        .build()
-        );
+        ListObjectsV2Request request = ListObjectsV2Request.builder()
+                .bucket(bucketName)
+                .build();
 
-        for (Result<Item> result : results) {
-            Item item = result.get();
-            if (!item.isDir()) {
-                count++;
-            }
+        ListObjectsV2Response response = client.listObjectsV2(request);
+
+        if (response.contents() != null) {
+            // AWS SDK v2 returns S3Object which don't have isDir() method
+            // Count all objects as files (AWS S3 doesn't have directories, only key prefixes)
+            count = (int) response.contents().stream()
+                    .filter(obj -> !obj.key().endsWith("/"))
+                    .count();
         }
+
         return count;
     }
 }

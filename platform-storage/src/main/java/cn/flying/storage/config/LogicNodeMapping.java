@@ -1,4 +1,4 @@
-package cn.flying.minio.config;
+package cn.flying.storage.config;
 
 import lombok.Data;
 
