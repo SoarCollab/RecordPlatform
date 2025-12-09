@@ -1,11 +1,9 @@
-package cn.flying.minio.service;
+package cn.flying.storage.service;
 
-import cn.flying.minio.config.LogicNodeMapping;
-import cn.flying.minio.config.MinioProperties;
-import cn.flying.minio.core.MinioClientManager;
-import cn.flying.minio.core.MinioMonitor;
-import io.minio.*;
-import io.minio.messages.Item;
+import cn.flying.storage.config.LogicNodeMapping;
+import cn.flying.storage.config.StorageProperties;
+import cn.flying.storage.core.S3ClientManager;
+import cn.flying.storage.core.S3Monitor;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
@@ -14,13 +12,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.*;
 
-import java.io.InputStream;
 import java.util.*;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 /**
  * MinIO 副本一致性修复服务。
@@ -43,13 +42,13 @@ public class ConsistencyRepairService {
     private static final long RETRY_BASE_BACKOFF_MS = 1000;
 
     @Resource
-    private MinioClientManager clientManager;
+    private S3ClientManager clientManager;
 
     @Resource
-    private MinioMonitor minioMonitor;
+    private S3Monitor minioMonitor;
 
     @Resource
-    private MinioProperties minioProperties;
+    private StorageProperties minioProperties;
 
     @Resource
     private RedissonClient redissonClient;
@@ -164,11 +163,11 @@ public class ConsistencyRepairService {
         RepairStatistics stats = new RepairStatistics();
         log.debug("开始检查逻辑节点 {} 的副本一致性（物理节点：{}, {}）", logicNodeName, node1, node2);
 
-        MinioClient client1 = clientManager.getClient(node1);
-        MinioClient client2 = clientManager.getClient(node2);
+        S3Client client1 = clientManager.getClient(node1);
+        S3Client client2 = clientManager.getClient(node2);
 
         if (client1 == null || client2 == null) {
-            log.error("无法获取物理节点的 MinIO 客户端：{} 或 {}", node1, node2);
+            log.error("无法获取物理节点的 S3 客户端：{} 或 {}", node1, node2);
             stats.failureCount++;
             return stats;
         }
@@ -231,33 +230,38 @@ public class ConsistencyRepairService {
     /**
      * 列出节点（桶）中的所有对象。
      *
-     * @param client   MinIO 客户端
+     * @param client   S3 客户端
      * @param nodeName 节点名称（同时也是桶名）
      * @return 对象名称集合
      */
-    private Set<String> listAllObjects(MinioClient client, String nodeName) throws Exception {
+    private Set<String> listAllObjects(S3Client client, String nodeName) throws Exception {
         Set<String> objects = new HashSet<>();
 
         // 检查桶是否存在
-        boolean exists = client.bucketExists(BucketExistsArgs.builder().bucket(nodeName).build());
-        if (!exists) {
+        try {
+            client.headBucket(HeadBucketRequest.builder().bucket(nodeName).build());
+        } catch (NoSuchBucketException e) {
             log.debug("节点 {} 的桶不存在，返回空集合", nodeName);
             return objects;
         }
 
-        Iterable<io.minio.Result<Item>> results = client.listObjects(
-                ListObjectsArgs.builder()
-                        .bucket(nodeName)
-                        .recursive(true)
-                        .build()
-        );
+        ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
+                .bucket(nodeName)
+                .build();
 
-        for (io.minio.Result<Item> result : results) {
-            Item item = result.get();
-            if (!item.isDir()) {
-                objects.add(item.objectName());
+        ListObjectsV2Response listResponse;
+        do {
+            listResponse = client.listObjectsV2(listRequest);
+            for (S3Object s3Object : listResponse.contents()) {
+                if (!s3Object.key().endsWith("/")) {
+                    objects.add(s3Object.key());
+                }
             }
-        }
+
+            listRequest = listRequest.toBuilder()
+                    .continuationToken(listResponse.nextContinuationToken())
+                    .build();
+        } while (listResponse.isTruncated());
 
         log.debug("节点 {} 中共有 {} 个对象", nodeName, objects.size());
         return objects;
@@ -266,45 +270,45 @@ public class ConsistencyRepairService {
     /**
      * 将对象从源节点复制到目标节点。
      *
-     * @param sourceClient 源 MinIO 客户端
+     * @param sourceClient 源 S3 客户端
      * @param sourceBucket 源桶名（节点名）
-     * @param targetClient 目标 MinIO 客户端
+     * @param targetClient 目标 S3 客户端
      * @param targetBucket 目标桶名（节点名）
      * @param objectName   对象名称
      */
-    private void copyObject(MinioClient sourceClient, String sourceBucket,
-                            MinioClient targetClient, String targetBucket,
+    private void copyObject(S3Client sourceClient, String sourceBucket,
+                            S3Client targetClient, String targetBucket,
                             String objectName) throws Exception {
         // 确保目标桶存在
-        boolean targetExists = targetClient.bucketExists(
-                BucketExistsArgs.builder().bucket(targetBucket).build());
-        if (!targetExists) {
-            targetClient.makeBucket(MakeBucketArgs.builder().bucket(targetBucket).build());
+        try {
+            targetClient.headBucket(HeadBucketRequest.builder().bucket(targetBucket).build());
+        } catch (NoSuchBucketException e) {
+            targetClient.createBucket(CreateBucketRequest.builder().bucket(targetBucket).build());
             log.info("在节点 {} 上创建了桶 {}", targetBucket, targetBucket);
         }
 
-        // 获取源对象
-        try (InputStream inputStream = sourceClient.getObject(
-                GetObjectArgs.builder()
-                        .bucket(sourceBucket)
-                        .object(objectName)
-                        .build())) {
+        // 获取源对象元数据
+        HeadObjectRequest headRequest = HeadObjectRequest.builder()
+                .bucket(sourceBucket)
+                .key(objectName)
+                .build();
+        HeadObjectResponse headResponse = sourceClient.headObject(headRequest);
 
-            // 获取源对象的大小
-            StatObjectResponse stat = sourceClient.statObject(
-                    StatObjectArgs.builder()
-                            .bucket(sourceBucket)
-                            .object(objectName)
-                            .build());
+        // 下载并上传对象
+        GetObjectRequest getRequest = GetObjectRequest.builder()
+                .bucket(sourceBucket)
+                .key(objectName)
+                .build();
 
-            // 上传到目标节点
-            targetClient.putObject(
-                    PutObjectArgs.builder()
-                            .bucket(targetBucket)
-                            .object(objectName)
-                            .stream(inputStream, stat.size(), -1)
-                            .contentType(stat.contentType())
-                            .build());
+        try (ResponseInputStream<GetObjectResponse> inputStream = sourceClient.getObject(getRequest)) {
+            PutObjectRequest putRequest = PutObjectRequest.builder()
+                    .bucket(targetBucket)
+                    .key(objectName)
+                    .contentLength(headResponse.contentLength())
+                    .contentType(headResponse.contentType())
+                    .build();
+
+            targetClient.putObject(putRequest, RequestBody.fromInputStream(inputStream, headResponse.contentLength()));
         }
     }
 
@@ -373,11 +377,11 @@ public class ConsistencyRepairService {
                     return;
                 }
 
-                MinioClient sourceClient = clientManager.getClient(sourceNode);
-                MinioClient targetClient = clientManager.getClient(targetNode);
+                S3Client sourceClient = clientManager.getClient(sourceNode);
+                S3Client targetClient = clientManager.getClient(targetNode);
 
                 if (sourceClient == null || targetClient == null) {
-                    log.error("无法获取 MinIO 客户端进行修复：逻辑节点={}, source={}, target={}",
+                    log.error("无法获取 S3 客户端进行修复：逻辑节点={}, source={}, target={}",
                             logicNodeName, sourceNode, targetNode);
                     return; // 客户端获取失败，不再重试
                 }

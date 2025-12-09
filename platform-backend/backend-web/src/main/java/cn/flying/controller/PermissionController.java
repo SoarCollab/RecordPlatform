@@ -2,6 +2,7 @@ package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
+import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.entity.SysPermission;
@@ -112,7 +113,7 @@ public class PermissionController {
         Long permissionId = IdUtils.fromExternalId(id);
         SysPermission permission = permissionMapper.selectById(permissionId);
         if (permission == null) {
-            return Result.error("权限不存在");
+            return Result.error(ResultEnum.RESULT_DATA_NONE, null);
         }
 
         if (vo.getName() != null) {

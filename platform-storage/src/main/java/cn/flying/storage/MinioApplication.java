@@ -1,4 +1,4 @@
-package cn.flying.minio;
+package cn.flying.storage;
 
 import org.apache.dubbo.config.spring.context.annotation.EnableDubbo;
 import org.springframework.boot.SpringApplication;

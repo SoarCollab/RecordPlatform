@@ -1,17 +1,13 @@
-package cn.flying.minio.service;
+package cn.flying.storage.service;
 
-import cn.flying.minio.config.LogicNodeMapping;
-import cn.flying.minio.config.MinioProperties;
-import cn.flying.minio.core.MinioClientManager;
-import cn.flying.minio.core.MinioMonitor;
-import cn.flying.minio.tenant.TenantContextUtil;
+import cn.flying.storage.config.LogicNodeMapping;
+import cn.flying.storage.config.StorageProperties;
+import cn.flying.storage.core.S3ClientManager;
+import cn.flying.storage.core.S3Monitor;
+import cn.flying.storage.tenant.TenantContextUtil;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.DistributedStorageService;
-import io.minio.*;
-import io.minio.errors.ErrorResponseException;
-import io.minio.errors.MinioException;
-import io.minio.http.Method;
 import jakarta.annotation.Resource;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.slf4j.Logger;
@@ -21,13 +17,18 @@ import org.springframework.util.StringUtils;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 
-import java.io.ByteArrayInputStream;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.*;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
+
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.InputStream;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -48,13 +49,13 @@ import java.util.stream.Collectors;
 public class DistributedStorageServiceImpl implements DistributedStorageService {
     private static final Logger log = org.slf4j.LoggerFactory.getLogger(DistributedStorageServiceImpl.class);
     @Resource
-    private MinioClientManager clientManager;
+    private S3ClientManager clientManager;
 
     @Resource
-    private MinioMonitor minioMonitor;
+    private S3Monitor minioMonitor;
 
     @Resource
-    private MinioProperties minioProperties;
+    private StorageProperties minioProperties;
 
     @Resource
     private ConsistencyRepairService consistencyRepairService;
@@ -288,26 +289,24 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             if (!minioMonitor.isNodeOnline(nodeName)) {
                 throw new RuntimeException("Node '" + nodeName + "' is offline, cannot upload file '" + objectName + "'.");
             }
-            MinioClient client = clientManager.getClient(nodeName);
+            S3Client client = clientManager.getClient(nodeName);
             if (client == null) {
-                throw new RuntimeException("Cannot get MinioClient for online node: " + nodeName);
+                throw new RuntimeException("Cannot get S3Client for online node: " + nodeName);
             }
 
             try {
                 // 确保 Bucket 存在
                 ensureBucketExists(client, nodeName, nodeName);
 
-                // 使用 ByteArrayInputStream 读取文件内容
-                try (InputStream inputStream = new ByteArrayInputStream(file)) {
-                    PutObjectArgs args = PutObjectArgs.builder()
-                        .bucket(nodeName)
-                        .object(objectName)
-                        .stream(inputStream, file.length, -1)
-                        .build();
-                    client.putObject(args);
-                    log.debug("已成功将'{}'上传到节点'{}'", objectName, nodeName);
-                    return nodeName; // 返回成功的节点名称
-                }
+                // 使用 AWS SDK v2 的 PutObjectRequest 和 RequestBody
+                PutObjectRequest request = PutObjectRequest.builder()
+                    .bucket(nodeName)
+                    .key(objectName)
+                    .contentLength((long) file.length)
+                    .build();
+                client.putObject(request, RequestBody.fromBytes(file));
+                log.debug("已成功将'{}'上传到节点'{}'", objectName, nodeName);
+                return nodeName; // 返回成功的节点名称
 
             } catch (Exception e) {
                 log.error("将'{}'上传到节点'{}'时出错：{}", objectName, nodeName, e.getMessage());
@@ -368,17 +367,17 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             log.warn("Node '{}' is offline, skipping delete for '{}'", nodeName, objectName);
             return;
         }
-        MinioClient client = clientManager.getClient(nodeName);
+        S3Client client = clientManager.getClient(nodeName);
         if (client == null) {
-            log.warn("Cannot get MinioClient for node {}", nodeName);
+            log.warn("Cannot get S3Client for node {}", nodeName);
             return;
         }
 
-        RemoveObjectArgs args = RemoveObjectArgs.builder()
+        DeleteObjectRequest request = DeleteObjectRequest.builder()
             .bucket(nodeName)
-            .object(objectName)
+            .key(objectName)
             .build();
-        client.removeObject(args);
+        client.deleteObject(request);
         log.debug("Deleted object '{}' from node '{}'", objectName, nodeName);
     }
 
@@ -390,7 +389,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     private List<String> getAvailableLogicNodes() {
         List<LogicNodeMapping> mappings = minioProperties.getLogicalMapping();
         if (CollectionUtils.isEmpty(mappings)) {
-            log.warn("未在 MinioProperties 中配置逻辑节点映射");
+            log.warn("未在 StorageProperties 中配置逻辑节点映射");
             return List.of();
         }
 
@@ -609,20 +608,20 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             log.warn("节点'{}'处于离线状态，无法获取对象'{}'", nodeName, objectName);
             return Optional.empty();
         }
-        MinioClient client = clientManager.getClient(nodeName);
+        S3Client client = clientManager.getClient(nodeName);
         if (client == null) {
-            log.error("无法获取在线节点 {} 的 MinioClient", nodeName);
+            log.error("无法获取在线节点 {} 的 S3Client", nodeName);
             return Optional.empty();
         }
 
         try {
             // 先获取对象大小，检查是否超过内存限制
-            StatObjectArgs statArgs = StatObjectArgs.builder()
+            HeadObjectRequest headRequest = HeadObjectRequest.builder()
                 .bucket(nodeName)
-                .object(objectName)
+                .key(objectName)
                 .build();
-            StatObjectResponse stat = client.statObject(statArgs);
-            long objectSize = stat.size();
+            HeadObjectResponse headResponse = client.headObject(headRequest);
+            long objectSize = headResponse.contentLength();
 
             if (objectSize > MAX_IN_MEMORY_FILE_SIZE) {
                 log.error("对象 '{}' 大小 ({} bytes) 超过内存限制 ({} bytes)，拒绝加载",
@@ -630,18 +629,18 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 throw new RuntimeException("文件过大，无法直接加载到内存");
             }
 
-            GetObjectArgs args = GetObjectArgs.builder()
+            GetObjectRequest getRequest = GetObjectRequest.builder()
                 .bucket(nodeName)
-                .object(objectName)
+                .key(objectName)
                 .build();
 
             // 使用分块读取避免一次性加载大文件
-            try (InputStream inputStream = client.getObject(args);
+            try (ResponseInputStream<GetObjectResponse> responseStream = client.getObject(getRequest);
                  ByteArrayOutputStream outputStream = new ByteArrayOutputStream((int) objectSize)) {
                 byte[] buffer = new byte[BUFFER_SIZE];
                 int bytesRead;
                 long totalRead = 0;
-                while ((bytesRead = inputStream.read(buffer)) != -1) {
+                while ((bytesRead = responseStream.read(buffer)) != -1) {
                     outputStream.write(buffer, 0, bytesRead);
                     totalRead += bytesRead;
                     // 防止读取超过预期大小（安全检查）
@@ -655,14 +654,15 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                     objectName, fileBytes.length, nodeName);
                 return Optional.of(fileBytes);
             }
-        } catch (MinioException e) {
+        } catch (NoSuchKeyException e) {
             // 特别处理对象不存在的错误
-            if (e instanceof ErrorResponseException && ((ErrorResponseException) e).errorResponse().code().equals("NoSuchKey")) {
-                log.warn("在节点'{}'上找不到对象'{}'（NoSuchKey）", nodeName, objectName);
-                return Optional.empty();
-            } else {
-                log.error("从节点'{}'获取对象'{}'时出现MinIO错误：{}", nodeName, objectName, e.getMessage(), e);
-            }
+            log.warn("在节点'{}'上找不到对象'{}'（NoSuchKey）", nodeName, objectName);
+            return Optional.empty();
+        } catch (S3Exception e) {
+            log.error("从节点'{}'获取对象'{}'时出现S3错误：{} (errorCode: {})",
+                nodeName, objectName, e.awsErrorDetails().errorMessage(),
+                e.awsErrorDetails().errorCode(), e);
+            return Optional.empty();
         } catch (Exception e) {
             log.error("从节点'{}'获取对象'{}'时出现意外错误：{}", nodeName, objectName, e.getMessage(), e);
         }
@@ -677,9 +677,9 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             log.warn("节点 '{}' 处于离线状态，无法获取 '{}' 的预签名URL", nodeName, objectName);
             return Optional.empty();
         }
-        MinioClient client = clientManager.getClient(nodeName);
+        S3Client client = clientManager.getClient(nodeName);
         if (client == null) {
-            log.error("无法获取在线节点 '{}' 的MinioClient", nodeName);
+            log.error("无法获取在线节点 '{}' 的S3Client", nodeName);
             return Optional.empty();
         }
 
@@ -687,26 +687,36 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             // 使用节点名称作为桶名
             // 检查对象是否存在（可选，但可以避免为不存在的对象生成URL）
             try {
-                StatObjectArgs statArgs = StatObjectArgs.builder()
+                HeadObjectRequest headRequest = HeadObjectRequest.builder()
                     .bucket(nodeName)
-                    .object(objectName).build();
-                client.statObject(statArgs);
-            } catch (ErrorResponseException e) {
-                if (e.errorResponse().code().equals("NoSuchKey")) {
-                    log.warn("在节点 '{}' 上找不到对象 '{}'，无法生成预签名URL", nodeName, objectName);
-                    return Optional.empty();
-                } else {
-                    throw e; // 重新抛出其他 MinIO 错误
-                }
+                    .key(objectName)
+                    .build();
+                client.headObject(headRequest);
+            } catch (NoSuchKeyException e) {
+                log.warn("在节点 '{}' 上找不到对象 '{}'，无法生成预签名URL", nodeName, objectName);
+                return Optional.empty();
             }
 
-            GetPresignedObjectUrlArgs args = GetPresignedObjectUrlArgs.builder()
-                .method(Method.GET)
+            // 获取 S3Presigner 来生成预签名 URL
+            S3Presigner presigner = clientManager.getPresigner(nodeName);
+            if (presigner == null) {
+                log.error("无法获取节点 '{}' 的S3Presigner", nodeName);
+                return Optional.empty();
+            }
+
+            GetObjectRequest getObjectRequest = GetObjectRequest.builder()
                 .bucket(nodeName)
-                .object(objectName)
-                .expiry(DistributedStorageServiceImpl.EXPIRY_HOURS, TimeUnit.HOURS)
+                .key(objectName)
                 .build();
-            String url = client.getPresignedObjectUrl(args);
+
+            GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofHours(EXPIRY_HOURS))
+                .getObjectRequest(getObjectRequest)
+                .build();
+
+            PresignedGetObjectRequest presignedRequest = presigner.presignGetObject(presignRequest);
+            String url = presignedRequest.url().toString();
+
             log.info("从节点 '{}' 为对象 '{}' 成功生成预签名 URL", nodeName, objectName);
             return Optional.of(url);
         } catch (Exception e) {
@@ -723,9 +733,9 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             if (!minioMonitor.isNodeOnline(nodeName)) {
                 throw new RuntimeException("Node '" + nodeName + "' is offline, cannot upload file '" + objectName + "'.");
             }
-            MinioClient client = clientManager.getClient(nodeName);
+            S3Client client = clientManager.getClient(nodeName);
             if (client == null) {
-                throw new RuntimeException("Cannot get MinioClient for online node: " + nodeName);
+                throw new RuntimeException("Cannot get S3Client for online node: " + nodeName);
             }
 
             try {
@@ -733,16 +743,14 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 // 确保 Bucket 存在
                 ensureBucketExists(client, nodeName, nodeName);
 
-                // 使用 FileInputStream 读取文件内容
-                try (InputStream inputStream = new ByteArrayInputStream(file)) {
-                    PutObjectArgs args = PutObjectArgs.builder()
-                        .bucket(nodeName)
-                        .object(objectName)
-                        .stream(inputStream, file.length, -1) // 使用文件长度
-                        .build();
-                    client.putObject(args);
-                    log.debug("已成功将'{}'上传到节点'{}'", objectName, nodeName);
-                } // try-with-resources 会自动关闭 inputStream
+                // 使用 AWS SDK v2 的 PutObjectRequest 和 RequestBody
+                PutObjectRequest request = PutObjectRequest.builder()
+                    .bucket(nodeName)
+                    .key(objectName)
+                    .contentLength((long) file.length)
+                    .build();
+                client.putObject(request, RequestBody.fromBytes(file));
+                log.debug("已成功将'{}'上传到节点'{}'", objectName, nodeName);
 
             } catch (Exception e) {
                 log.error("将{}'上传到节点{}时出错：{}", objectName, nodeName, e.getMessage());
@@ -755,7 +763,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     /**
      * 确保指定的 Bucket 在给定的 MinIO 节点上存在
      */
-    private void ensureBucketExists(MinioClient client, String nodeName, String bucketName) throws RuntimeException {
+    private void ensureBucketExists(S3Client client, String nodeName, String bucketName) throws RuntimeException {
         String cacheKey = nodeName + ":" + bucketName;
         Boolean cached = bucketExistenceCache.getIfPresent(cacheKey);
         if (Boolean.TRUE.equals(cached)) {
@@ -763,23 +771,25 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
 
         try {
-            BucketExistsArgs existsArgs = BucketExistsArgs.builder().bucket(bucketName).build();
-            boolean exists = client.bucketExists(existsArgs);
-
-            if (!exists) {
-                log.warn("存储桶'{}'在节点'{}'上不存在,正在尝试创建...", bucketName, nodeName);
-                try {
-                    MakeBucketArgs makeArgs = MakeBucketArgs.builder().bucket(bucketName).build();
-                    client.makeBucket(makeArgs);
-                    log.info("在节点'{}'上成功创建存储桶'{}'", bucketName, nodeName);
-                    bucketExistenceCache.put(cacheKey, true);
-                } catch (Exception createError) {
-                    log.error("无法在节点'{}'上创建存储桶'{}'：{}", bucketName, nodeName, createError.getMessage());
-                    bucketExistenceCache.put(cacheKey, false);
-                    throw new RuntimeException("Failed to create bucket '" + bucketName + "' on node '" + nodeName + "': " + createError.getMessage(), createError);
-                }
-            } else {
+            HeadBucketRequest headRequest = HeadBucketRequest.builder()
+                .bucket(bucketName)
+                .build();
+            client.headBucket(headRequest);
+            // Bucket exists
+            bucketExistenceCache.put(cacheKey, true);
+        } catch (NoSuchBucketException e) {
+            log.warn("存储桶'{}'在节点'{}'上不存在,正在尝试创建...", bucketName, nodeName);
+            try {
+                CreateBucketRequest createRequest = CreateBucketRequest.builder()
+                    .bucket(bucketName)
+                    .build();
+                client.createBucket(createRequest);
+                log.info("在节点'{}'上成功创建存储桶'{}'", bucketName, nodeName);
                 bucketExistenceCache.put(cacheKey, true);
+            } catch (Exception createError) {
+                log.error("无法在节点'{}'上创建存储桶'{}'：{}", bucketName, nodeName, createError.getMessage());
+                bucketExistenceCache.put(cacheKey, false);
+                throw new RuntimeException("Failed to create bucket '" + bucketName + "' on node '" + nodeName + "': " + createError.getMessage(), createError);
             }
         } catch (Exception checkError) {
             log.error("检查节点'{}'上的存储桶'{}'是否存在时出错：{}", nodeName, bucketName, checkError.getMessage());

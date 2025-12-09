@@ -1,4 +1,4 @@
-package cn.flying.minio.tenant;
+package cn.flying.storage.tenant;
 
 import org.apache.dubbo.rpc.RpcContext;
 import org.slf4j.Logger;

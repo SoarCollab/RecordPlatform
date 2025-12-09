@@ -1,12 +1,12 @@
 # RecordPlatform
 
-基于 FISCO BCOS 区块链和 MinIO 分布式存储的企业级文件存证平台。
+基于 FISCO BCOS 区块链和 S3兼容存储 分布式存储的企业级文件存证平台。
 
 ## 核心能力
 
 **业务特性**
 - 区块链存证：文件元数据上链，保证不可篡改和可追溯
-- 分布式存储：MinIO 双副本冗余，任一副本可读
+- 分布式存储：S3兼容存储 双副本冗余，任一副本可读
 - 分片上传：大文件断点续传，支持 AES-GCM / ChaCha20-Poly1305 可配置加密
 - 文件分享：生成带访问次数限制的分享码
 - 协作通知：站内消息、公告广播、工单系统、会话管理
@@ -17,7 +17,7 @@
 - 弹性容错：Resilience4j 熔断、重试、限流
 - 权限控制：RBAC 细粒度权限、资源所有权校验、分级限流
 - 安全机制：JWT 认证（HMAC512）、ID 混淆、CORS 白名单
-- 多租户隔离：数据库/Redis/MinIO 路径租户隔离
+- 多租户隔离：数据库/Redis/S3兼容存储 路径租户隔离
 - 审计追踪：完整的操作日志和审计记录
 
 ## 系统架构
@@ -25,7 +25,7 @@
 ```
                          Infrastructure
     ┌────────┐  ┌───────┐  ┌──────────┐  ┌───────┐  ┌────────────┐
-    │ Nacos  │  │ MySQL │  │ RabbitMQ │  │ Redis │  │ MinIO 集群  │
+    │ Nacos  │  │ MySQL │  │ RabbitMQ │  │ Redis │  │ S3兼容存储 集群  │
     │ :8848  │  │ :3306 │  │  :5672   │  │ :6379 │  │   :9000    │
     └────┬───┘  └───┬───┘  └────┬─────┘  └───┬───┘  └─────┬──────┘
          │          │           │            │            │
@@ -40,7 +40,7 @@
          │                     │                     │
          ▼                     │                     ▼
 ┌─────────────────┐            │            ┌─────────────────┐
-│ platform-fisco  │            │            │  platform-minio │
+│ platform-fisco  │            │            │  platform-storage │
 │ Dubbo Provider  │            │            │ Dubbo Provider  │
 │ Port 8091       │            │            │ Port 8092       │
 └────────┬────────┘            │            └────────┬────────┘
@@ -63,7 +63,7 @@
 ### 文件上传存证流程
 
 ```
-Client                Backend               MinIO              Blockchain
+Client                Backend               S3兼容存储              Blockchain
   │                      │                    │                    │
   │── 1. start upload ──►│                    │                    │
   │◄─── upload session ──│                    │                    │
@@ -86,7 +86,7 @@ Client                Backend               MinIO              Blockchain
 
 **关键步骤说明**
 1. **start**: 创建上传会话，返回 uploadId 和分片参数
-2. **chunk**: 分片上传，每片使用配置的算法（AES-GCM/ChaCha20）加密后双写 MinIO
+2. **chunk**: 分片上传，每片使用配置的算法（AES-GCM/ChaCha20）加密后双写 S3兼容存储
 3. **complete**: 触发 Saga 事务，合并分片、计算哈希、上链存证
 4. **SSE**: 实时推送上传进度和存证结果
 
@@ -95,8 +95,8 @@ Client                Backend               MinIO              Blockchain
 | 步骤 | 正向操作 | 补偿操作 |
 |------|---------|---------|
 | PENDING | 初始化 | - |
-| MINIO_UPLOADING | MinIO 存储分片 | 清理已存储分片 |
-| MINIO_UPLOADED | 分片存储完成 | 删除 MinIO 文件 |
+| MINIO_UPLOADING | S3兼容存储 存储分片 | 清理已存储分片 |
+| MINIO_UPLOADED | 分片存储完成 | 删除 S3兼容存储 文件 |
 | CHAIN_STORING | 区块链存证 | 标记链上记录删除 |
 | COMPLETED | 提交成功 | - |
 
@@ -109,7 +109,7 @@ Client                Backend               MinIO              Blockchain
 | 语言/框架 | Java, Spring Boot | 21, 3.2.11 |
 | 微服务 | Apache Dubbo (Triple), Nacos | 3.3.3 |
 | 区块链 | FISCO BCOS, Solidity | 3.8.0, ^0.8.11 |
-| 存储 | MinIO, MySQL, Redis | 8.5.9, 8.0+, 6.0+ |
+| 存储 | S3兼容存储, MySQL, Redis | 8.5.9, 8.0+, 6.0+ |
 | ORM | MyBatis Plus, Druid | 3.5.9, 1.2.23 |
 | 消息队列 | RabbitMQ | 3.8+ |
 | 弹性设计 | Resilience4j | 2.2.0 |
@@ -127,7 +127,7 @@ Client                Backend               MinIO              Blockchain
 | MySQL | 3306 | 数据库 |
 | Redis | 6379 | 缓存和分布式锁 |
 | RabbitMQ | 5672 | 消息队列 |
-| MinIO | 9000 | 对象存储（建议双节点） |
+| S3兼容存储 | 9000 | 对象存储（建议双节点） |
 | FISCO BCOS | 20200 | 区块链节点 |
 
 ### 环境配置
@@ -146,7 +146,7 @@ mvn -f platform-api/pom.xml clean install
 # 2. 构建各模块
 mvn -f platform-backend/pom.xml clean package -DskipTests
 mvn -f platform-fisco/pom.xml clean package -DskipTests
-mvn -f platform-minio/pom.xml clean package -DskipTests
+mvn -f platform-storage/pom.xml clean package -DskipTests
 ```
 
 ### 启动
@@ -157,7 +157,7 @@ mvn -f platform-minio/pom.xml clean package -DskipTests
 
 # 或手动启动（按顺序）
 source .env
-java -jar platform-minio/target/platform-minio-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
+java -jar platform-storage/target/platform-storage-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 java -jar platform-fisco/target/platform-fisco-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 java -jar platform-backend/backend-web/target/backend-web-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 ```
@@ -194,7 +194,7 @@ RecordPlatform/
 ├── platform-fisco/               # 区块链服务 (Dubbo Provider)
 │   └── contract/                 # Solidity 智能合约
 │
-├── platform-minio/               # 存储服务 (Dubbo Provider)
+├── platform-storage/               # 存储服务 (Dubbo Provider)
 │
 └── scripts/                      # 启动脚本
 ```
@@ -352,7 +352,7 @@ resilience4j:
 |------|---------|
 | 数据库 | `tenant_id` 字段，MyBatis 自动注入 |
 | Redis | Key 前缀 `tenant:{tenantId}:` |
-| MinIO | 路径 `/{tenantId}/{userId}/` |
+| S3兼容存储 | 路径 `/{tenantId}/{userId}/` |
 | Dubbo | Context 透传 `TenantContext` |
 
 ### 租户标识来源
@@ -386,7 +386,7 @@ CREATE DATABASE RecordPlatform CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 | 数据库 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD` | MySQL 连接 |
 | Redis | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | Redis 连接 |
 | Nacos | `NACOS_HOST`, `NACOS_USERNAME`, `NACOS_PASSWORD` | 配置中心 |
-| MinIO | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | 对象存储 |
+| S3兼容存储 | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | 对象存储 |
 | RabbitMQ | `RABBITMQ_ADDRESSES`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD` | 消息队列 |
 | 安全 | `JWT_KEY` | JWT 签名 + ID 加密密钥派生（至少 32 字符） |
 | 区块链 | `FISCO_PEER_ADDRESS`, `FISCO_STORAGE_CONTRACT`, `FISCO_SHARING_CONTRACT` | 合约配置 |
@@ -397,7 +397,7 @@ CREATE DATABASE RecordPlatform CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 
 | 端点 | 说明 |
 |------|------|
-| `/actuator/health` | 健康状态 (DB/Redis/RabbitMQ/MinIO/Saga/Outbox/Encryption) |
+| `/actuator/health` | 健康状态 (DB/Redis/RabbitMQ/S3兼容存储/Saga/Outbox/Encryption) |
 | `/actuator/prometheus` | Prometheus 指标 |
 | `/actuator/circuitbreakers` | 熔断器状态 |
 | `/actuator/retries` | 重试统计 |
@@ -565,8 +565,8 @@ SSE 事件类型：`NEW_MESSAGE`, `NEW_ANNOUNCEMENT`, `TICKET_UPDATE`, `TICKET_R
 **Q: 启动报 Nacos 连接失败**
 A: 确认 Nacos 已启动，检查 `NACOS_HOST` 配置。
 
-**Q: MinIO 上传失败**
-A: 检查 MinIO 集群健康：`/actuator/health` 中 `minio` 状态。双节点至少一个在线即可写入。
+**Q: S3兼容存储 上传失败**
+A: 检查 S3兼容存储 集群健康：`/actuator/health` 中 `minio` 状态。双节点至少一个在线即可写入。
 
 **Q: Saga 事务卡在 PENDING**
 A: 检查 `file_saga` 表状态，查看 `outbox_event` 是否有积压。可通过 `/actuator/health` 查看 Saga/Outbox 健康指标。
