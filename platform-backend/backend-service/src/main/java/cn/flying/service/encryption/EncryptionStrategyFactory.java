@@ -161,14 +161,16 @@ public class EncryptionStrategyFactory {
 
     /**
      * 对单个算法进行基准测试
+     * 注意：每次加密都使用新的 IV，符合 AEAD 安全要求
      */
     private long benchmarkAlgorithm(ChunkEncryptionStrategy strategy, byte[] data, int iterations) {
         try {
             SecretKey key = strategy.generateKey();
-            byte[] iv = strategy.generateIv();
 
             long startTime = System.currentTimeMillis();
             for (int i = 0; i < iterations; i++) {
+                // 每次迭代生成新的 IV，符合 AEAD 安全要求
+                byte[] iv = strategy.generateIv();
                 byte[] encrypted = strategy.encrypt(data, key, iv);
                 strategy.decrypt(encrypted, key, iv);
             }
@@ -212,16 +214,17 @@ public class EncryptionStrategyFactory {
 
             AesGcmEncryptionStrategy aes = new AesGcmEncryptionStrategy();
             SecretKey key = aes.generateKey();
-            byte[] iv = aes.generateIv();
 
-            // 预热
+            // 预热 - 每次使用新 IV
             for (int i = 0; i < 10; i++) {
+                byte[] iv = aes.generateIv();
                 aes.encrypt(testData, key, iv);
             }
 
-            // 测量
+            // 测量 - 每次使用新 IV，符合 AEAD 安全要求
             long start = System.nanoTime();
             for (int i = 0; i < 100; i++) {
+                byte[] iv = aes.generateIv();
                 aes.encrypt(testData, key, iv);
             }
             long elapsed = System.nanoTime() - start;
@@ -232,7 +235,8 @@ public class EncryptionStrategyFactory {
             // 有 AES-NI 时通常 > 1000 MB/s，软件实现约 100-300 MB/s
             boolean hasHardwareAccel = throughputMBps > 500;
 
-            log.debug("AES-GCM throughput: {:.1f} MB/s, hardware acceleration: {}", throughputMBps, hasHardwareAccel);
+            log.debug("AES-GCM throughput: {} MB/s, hardware acceleration: {}",
+                    String.format("%.1f", throughputMBps), hasHardwareAccel);
             return hasHardwareAccel;
 
         } catch (Exception e) {
