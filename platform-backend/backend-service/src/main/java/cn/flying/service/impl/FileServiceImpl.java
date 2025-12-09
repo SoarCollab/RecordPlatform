@@ -177,6 +177,16 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     public List<String> getFileAddress(Long userId, String fileHash) {
+        // 校验文件所有权：用户只能获取自己的文件地址，管理员可获取所有
+        if (!SecurityUtils.isAdmin()) {
+            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                    .eq(File::getUid, userId)
+                    .eq(File::getFileHash, fileHash);
+            if (this.count(wrapper) == 0) {
+                throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
+            }
+        }
+
         String userIdStr = String.valueOf(userId);
         Result<FileDetailVO> filePointer = fileRemoteClient.getFile(userIdStr, fileHash);
         FileDetailVO detailVO = ResultUtils.getData(filePointer);
@@ -194,6 +204,16 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     public List<byte[]> getFile(Long userId, String fileHash) {
+        // 校验文件所有权：用户只能获取自己的文件，管理员可获取所有
+        if (!SecurityUtils.isAdmin()) {
+            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                    .eq(File::getUid, userId)
+                    .eq(File::getFileHash, fileHash);
+            if (this.count(wrapper) == 0) {
+                throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
+            }
+        }
+
         String userIdStr = String.valueOf(userId);
         Result<FileDetailVO> filePointer = fileRemoteClient.getFile(userIdStr, fileHash);
         FileDetailVO detailVO = ResultUtils.getData(filePointer);
