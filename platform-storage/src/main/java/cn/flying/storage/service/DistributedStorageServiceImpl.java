@@ -41,7 +41,7 @@ import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 /**
- * 分布式存储实现类（MinIO）v2.3.0
+ * 分布式存储实现类（S3 兼容）v2.4.0
  * 支持 Nacos 动态配置、负载均衡和租户隔离。
  * 使用 firstSuccessOf 容错模式，任一副本写入成功即返回，异步修复失败副本。
  */
@@ -52,10 +52,10 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     private S3ClientManager clientManager;
 
     @Resource
-    private S3Monitor minioMonitor;
+    private S3Monitor s3Monitor;
 
     @Resource
-    private StorageProperties minioProperties;
+    private StorageProperties storageProperties;
 
     @Resource
     private ConsistencyRepairService consistencyRepairService;
@@ -271,7 +271,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 } else if (upload2Failed && !upload1Failed) {
                     log.warn("节点 {} 上传失败，触发修复任务", node2);
                     consistencyRepairService.scheduleImmediateRepair(logicNodeName, objectPath, node1, node2);
-                } else if (!upload1Failed && !upload2Failed) {
+                } else if (!upload1Failed) {
                     log.debug("两个副本都成功写入，无需修复");
                 }
                 // 如果两个都失败，不会走到这里（firstSuccessOf 会抛出异常）
@@ -286,7 +286,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      */
     private CompletableFuture<String> uploadToNodeAsyncWithResult(String nodeName, String objectName, byte[] file) {
         return CompletableFuture.supplyAsync(() -> {
-            if (!minioMonitor.isNodeOnline(nodeName)) {
+            if (!s3Monitor.isNodeOnline(nodeName)) {
                 throw new RuntimeException("Node '" + nodeName + "' is offline, cannot upload file '" + objectName + "'.");
             }
             S3Client client = clientManager.getClient(nodeName);
@@ -363,7 +363,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     }
 
     private void deleteFromNode(String nodeName, String objectName) throws Exception {
-        if (!minioMonitor.isNodeOnline(nodeName)) {
+        if (!s3Monitor.isNodeOnline(nodeName)) {
             log.warn("Node '{}' is offline, skipping delete for '{}'", nodeName, objectName);
             return;
         }
@@ -387,7 +387,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      * 获取当前所有配置的、且对应物理节点对都健康的逻辑节点名称列表
      */
     private List<String> getAvailableLogicNodes() {
-        List<LogicNodeMapping> mappings = minioProperties.getLogicalMapping();
+        List<LogicNodeMapping> mappings = storageProperties.getLogicalMapping();
         if (CollectionUtils.isEmpty(mappings)) {
             log.warn("未在 StorageProperties 中配置逻辑节点映射");
             return List.of();
@@ -398,8 +398,8 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 List<String> pair = mapping.getPhysicalNodePair();
                 // 必须配置了两个物理节点，且这两个节点都必须在线
                 return pair != null && pair.size() == 2 &&
-                    minioMonitor.isNodeOnline(pair.get(0)) &&
-                    minioMonitor.isNodeOnline(pair.get(1));
+                    s3Monitor.isNodeOnline(pair.get(0)) &&
+                    s3Monitor.isNodeOnline(pair.get(1));
             })
             .map(LogicNodeMapping::getLogicNodeName)
             .collect(Collectors.toList());
@@ -409,7 +409,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      * 根据逻辑节点名称从配置中获取物理节点对
      */
     private List<String> getPhysicalNodePair(String logicNodeName) {
-        List<LogicNodeMapping> mappings = minioProperties.getLogicalMapping();
+        List<LogicNodeMapping> mappings = storageProperties.getLogicalMapping();
         if (CollectionUtils.isEmpty(mappings)) {
             return null;
         }
@@ -436,8 +436,8 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             if (physicalPair == null || physicalPair.size() != 2) continue;
 
             // 计算逻辑节点的平均负载（或取最大值，取决于策略）
-            double score1 = minioMonitor.getNodeLoadScore(physicalPair.get(0));
-            double score2 = minioMonitor.getNodeLoadScore(physicalPair.get(1));
+            double score1 = s3Monitor.getNodeLoadScore(physicalPair.get(0));
+            double score2 = s3Monitor.getNodeLoadScore(physicalPair.get(1));
             // 如果任一物理节点分数无效，则跳过此逻辑节点
             if (score1 == Double.MAX_VALUE || score2 == Double.MAX_VALUE) continue;
 
@@ -585,8 +585,8 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      * 根据负载选择读取操作的主节点
      */
     private String selectPrimaryNodeForRead(String node1, String node2) {
-        double score1 = minioMonitor.getNodeLoadScore(node1);
-        double score2 = minioMonitor.getNodeLoadScore(node2);
+        double score1 = s3Monitor.getNodeLoadScore(node1);
+        double score2 = s3Monitor.getNodeLoadScore(node2);
 
         // 优先选择分数低的 (负载低)。如果分数相同或都无效，随机选一个
         if (score1 != Double.MAX_VALUE && (score1 < score2 || score2 == Double.MAX_VALUE)) {
@@ -604,7 +604,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      * 尝试从指定节点获取对象并写入临时文件
      */
     private Optional<byte[]> tryGetObjectFromNode(String nodeName, String objectName) {
-        if (!minioMonitor.isNodeOnline(nodeName)) {
+        if (!s3Monitor.isNodeOnline(nodeName)) {
             log.warn("节点'{}'处于离线状态，无法获取对象'{}'", nodeName, objectName);
             return Optional.empty();
         }
@@ -673,7 +673,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      * 尝试从指定节点获取预签名 URL
      */
     private Optional<String> tryGetResignedUrlFromNode(String nodeName, String objectName) {
-        if (!minioMonitor.isNodeOnline(nodeName)) {
+        if (!s3Monitor.isNodeOnline(nodeName)) {
             log.warn("节点 '{}' 处于离线状态，无法获取 '{}' 的预签名URL", nodeName, objectName);
             return Optional.empty();
         }
@@ -730,7 +730,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      */
     private CompletableFuture<Void> uploadToNodeAsync(String nodeName, String objectName, byte[] file) {
         return CompletableFuture.runAsync(() -> {
-            if (!minioMonitor.isNodeOnline(nodeName)) {
+            if (!s3Monitor.isNodeOnline(nodeName)) {
                 throw new RuntimeException("Node '" + nodeName + "' is offline, cannot upload file '" + objectName + "'.");
             }
             S3Client client = clientManager.getClient(nodeName);
@@ -800,10 +800,10 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
 
     @Override
     public Result<Map<String, Boolean>> getClusterHealth() {
-        Set<String> onlineNodes = minioMonitor.getOnlineNodes();
+        Set<String> onlineNodes = s3Monitor.getOnlineNodes();
         Map<String, Boolean> nodeStatus = new LinkedHashMap<>();
 
-        List<LogicNodeMapping> mappings = minioProperties.getLogicalMapping();
+        List<LogicNodeMapping> mappings = storageProperties.getLogicalMapping();
         if (!CollectionUtils.isEmpty(mappings)) {
             for (LogicNodeMapping mapping : mappings) {
                 List<String> pair = mapping.getPhysicalNodePair();
