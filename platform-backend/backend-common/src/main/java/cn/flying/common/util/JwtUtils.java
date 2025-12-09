@@ -8,6 +8,7 @@ import com.auth0.jwt.interfaces.Claim;
 import com.auth0.jwt.interfaces.DecodedJWT;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.util.StringUtils;
@@ -16,6 +17,9 @@ import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.Map;
@@ -25,6 +29,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * 用于处理Jwt令牌的工具类
  */
+@Slf4j
 @Component
 public class JwtUtils {
 
@@ -51,14 +56,95 @@ public class JwtUtils {
     FlowUtils utils;
 
     private static final int MIN_KEY_LENGTH = 32;
+    private static final double MIN_ENTROPY_BITS = 128.0;
+    private static final String ISSUER = "record-platform";
+    private static final String AUDIENCE = "record-platform-api";
+
+    private Algorithm algorithm;
+    private JWTVerifier verifier;
 
     @PostConstruct
-    void validateKey() {
-        if (!StringUtils.hasText(KEY) || KEY.length() < MIN_KEY_LENGTH) {
+    void init() {
+        validateKey();
+        // 初始化算法和验证器（使用 HMAC512 更安全）
+        this.algorithm = Algorithm.HMAC512(KEY);
+        this.verifier = JWT.require(algorithm)
+                .withIssuer(ISSUER)
+                .withAudience(AUDIENCE)
+                .build();
+        log.info("JWT security initialized: issuer={}, audience={}", ISSUER, AUDIENCE);
+    }
+
+    /**
+     * 验证 JWT 密钥强度
+     */
+    private void validateKey() {
+        if (!StringUtils.hasText(KEY)) {
             throw new IllegalStateException(
-                "JWT key must be provided via JWT_KEY environment variable and be at least "
-                + MIN_KEY_LENGTH + " characters long");
+                    "JWT key must be provided via JWT_KEY environment variable");
         }
+
+        if (KEY.length() < MIN_KEY_LENGTH) {
+            throw new IllegalStateException(
+                    "JWT key must be at least " + MIN_KEY_LENGTH + " characters long, got " + KEY.length());
+        }
+
+        // 检查密钥熵值
+        double entropy = calculateEntropy(KEY);
+        if (entropy < MIN_ENTROPY_BITS) {
+            log.warn("JWT key entropy ({} bits) is below recommended minimum ({} bits). " +
+                    "Consider using a more random key.", String.format("%.2f", entropy), MIN_ENTROPY_BITS);
+        }
+
+        // 检查是否为常见弱密钥
+        if (isWeakKey(KEY)) {
+            throw new IllegalStateException(
+                    "JWT key appears to be a weak/default key. Please use a strong random key.");
+        }
+
+        log.info("JWT key validation passed: length={}, entropy={} bits",
+                KEY.length(), String.format("%.2f", entropy));
+    }
+
+    /**
+     * 计算字符串的熵值（比特）
+     */
+    private double calculateEntropy(String str) {
+        int[] freq = new int[256];
+        for (char c : str.toCharArray()) {
+            freq[c]++;
+        }
+
+        double entropy = 0.0;
+        int len = str.length();
+        for (int f : freq) {
+            if (f > 0) {
+                double p = (double) f / len;
+                entropy -= p * (Math.log(p) / Math.log(2));
+            }
+        }
+        return entropy * len;
+    }
+
+    /**
+     * 检查是否为弱密钥
+     */
+    private boolean isWeakKey(String key) {
+        String lower = key.toLowerCase();
+        String[] weakPatterns = {
+                "secret", "password", "123456", "qwerty",
+                "default", "changeme", "admin", "test"
+        };
+        for (String pattern : weakPatterns) {
+            if (lower.contains(pattern)) {
+                return true;
+            }
+        }
+        // 检查是否全是相同字符
+        if (key.chars().distinct().count() < 10) {
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -68,10 +154,8 @@ public class JwtUtils {
      */
     public boolean invalidateJwt(String headerToken){
         String token = this.convertToken(headerToken);
-        Algorithm algorithm = Algorithm.HMAC256(KEY);
-        JWTVerifier jwtVerifier = JWT.require(algorithm).build();
         try {
-            DecodedJWT verify = jwtVerifier.verify(token);
+            DecodedJWT verify = verifier.verify(token);
             return deleteToken(verify.getId(), verify.getExpiresAt());
         } catch (JWTVerificationException e) {
             return false;
@@ -95,10 +179,11 @@ public class JwtUtils {
      */
     public String createJwt(UserDetails user, String username, Long userId, Long tenantId) {
         if(this.frequencyCheck(userId)) {
-            Algorithm algorithm = Algorithm.HMAC256(KEY);
             Date expire = this.expireTime();
             return JWT.create()
                     .withJWTId(UUID.randomUUID().toString())
+                    .withIssuer(ISSUER)
+                    .withAudience(AUDIENCE)
                     .withClaim("id", userId)
                     .withClaim("tenantId", tenantId)
                     .withClaim("name", username)
@@ -123,16 +208,15 @@ public class JwtUtils {
         if(token == null) {
             return null;
         }
-        Algorithm algorithm = Algorithm.HMAC256(KEY);
-        JWTVerifier jwtVerifier = JWT.require(algorithm).build();
         try {
-            DecodedJWT verify = jwtVerifier.verify(token);
+            DecodedJWT verify = verifier.verify(token);
             if(this.isInvalidToken(verify.getId())) {
                 return null;
             }
             Map<String, Claim> claims = verify.getClaims();
             return new Date().after(claims.get("exp").asDate()) ? null : verify;
         } catch (JWTVerificationException e) {
+            log.debug("JWT verification failed: {}", e.getMessage());
             return null;
         }
     }
