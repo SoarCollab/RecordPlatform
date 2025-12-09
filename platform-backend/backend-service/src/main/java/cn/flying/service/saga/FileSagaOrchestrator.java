@@ -415,25 +415,7 @@ public class FileSagaOrchestrator {
         String payloadJson = saga.getPayload();
         SagaPayloadContext context = null;
         if (payloadJson != null && !payloadJson.isBlank()) {
-            try {
-                context = JsonConverter.parse(payloadJson, SagaPayloadContext.class);
-            } catch (Exception ignore) {
-                // 继续尝试使用旧格式解析
-            }
-        }
-        if (context == null || context.getStoredPaths() == null || context.getStoredPaths().isEmpty()) {
-            try {
-                @SuppressWarnings("unchecked")
-                Map<String, String> legacy = JsonConverter.parse(payloadJson, Map.class);
-                if (legacy != null && !legacy.isEmpty()) {
-                    if (context == null) {
-                        context = new SagaPayloadContext();
-                    }
-                    context.setStoredPaths(new LinkedHashMap<>(legacy));
-                }
-            } catch (Exception ignore) {
-                // ignore legacy parse errors
-            }
+            context = JsonConverter.parse(payloadJson, SagaPayloadContext.class);
         }
         if (context == null) {
             context = new SagaPayloadContext();
