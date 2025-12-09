@@ -15,7 +15,8 @@
 **平台能力**
 - 分布式事务：Saga + Outbox 模式保证跨服务数据一致性
 - 弹性容错：Resilience4j 熔断、重试、限流
-- 安全机制：JWT 认证、ID 混淆、CORS 白名单、登录限流
+- 权限控制：RBAC 细粒度权限、资源所有权校验、分级限流
+- 安全机制：JWT 认证（HMAC512）、ID 混淆、CORS 白名单
 - 多租户隔离：数据库/Redis/MinIO 路径租户隔离
 - 审计追踪：完整的操作日志和审计记录
 
@@ -182,10 +183,13 @@ RecordPlatform/
 │
 ├── platform-backend/             # 后端主服务 (Dubbo Consumer)
 │   ├── backend-web/              # REST 控制器、过滤器、配置
+│   │   ├── controller/           # API 端点
+│   │   ├── aspect/               # AOP 切面 (权限、限流)
+│   │   ├── security/             # 自定义 SpEL 表达式
 │   │   └── resources/db/migration/  # Flyway 迁移脚本
-│   ├── backend-service/          # 业务逻辑、Saga、Outbox
+│   ├── backend-service/          # 业务逻辑、Saga、Outbox、权限服务
 │   ├── backend-dao/              # MyBatis Plus Mapper、实体
-│   └── backend-common/           # 工具类、常量、分布式锁
+│   └── backend-common/           # 工具类、常量、注解、分布式锁
 │
 ├── platform-fisco/               # 区块链服务 (Dubbo Provider)
 │   └── contract/                 # Solidity 智能合约
@@ -198,14 +202,76 @@ RecordPlatform/
 ## 安全机制
 
 ### JWT 认证
-- 签发：登录成功后签发 Token，有效期配置化
-- 刷新：临近过期自动刷新，无感续期
+- 算法：HMAC512（升级自 HMAC256）
+- 签发：登录成功后签发 Token，包含 issuer/audience 声明
+- 校验：启动时验证密钥强度（长度 ≥32、熵值 ≥128 bits、弱密钥检测）
 - 黑名单：退出登录后 Token 加入 Redis 黑名单
 
 ### 登录安全
 - IP 限流：单 IP 5 分钟内最多 10 次失败尝试
-- 账号锁定：同账号连续失败 5 次锁定 30 分钟
+- 账号锁定：同账号连续失败 5 次锁定 15 分钟
 - 验证码：登录失败 3 次后强制验证码
+
+### RBAC 权限控制
+
+**角色定义**
+| 角色 | 说明 | 默认权限 |
+|------|------|---------|
+| `user` | 普通用户 | 文件读写删除分享、工单创建、消息收发 |
+| `admin` | 管理员 | 所有权限 |
+| `monitor` | 监控员 | 只读权限 + 审计日志查看 |
+
+**权限码格式**
+```
+module:action
+```
+示例：`file:read`, `file:admin`, `ticket:write`, `system:audit`
+
+**使用方式**
+```java
+// 权限码检查
+@PreAuthorize("hasPerm('file:admin')")
+
+// 多权限（任一满足）
+@PreAuthorize("hasAnyPerm('file:read', 'file:admin')")
+
+// 角色检查
+@PreAuthorize("isAdmin()")
+@PreAuthorize("isAdminOrMonitor()")
+
+// 资源所有权检查
+@PreAuthorize("isOwner(#file.uid)")
+@PreAuthorize("isOwner(#userId) or hasPerm('file:admin')")
+```
+
+**资源所有权注解**
+```java
+@RequireOwnership(
+    resourceIdParam = "id",        // 参数名
+    ownerIdField = "uid",          // 实体中所有者字段
+    resourceClass = File.class,    // 实体类
+    adminBypass = true             // 管理员跳过校验
+)
+public Result<File> getFile(@PathVariable Long id) { ... }
+```
+
+### 分级限流
+
+支持按角色设置不同的限流阈值：
+
+```java
+@RateLimit(
+    limit = 10,           // 普通用户：10次/分钟
+    period = 60,          // 时间窗口（秒）
+    adminLimit = 100,     // 管理员：100次/分钟
+    type = LimitType.USER // 限流维度：USER/IP/API
+)
+```
+
+限流维度：
+- `USER`：按用户 ID 限流（默认）
+- `IP`：按 IP 地址限流
+- `API`：全局限流（所有请求共享配额）
 
 ### ID 混淆
 外部 API 使用加密 ID，内部使用雪花 ID。采用无状态 AES 加密，无需 Redis 缓存：
@@ -294,7 +360,7 @@ JWT Token 中的 `tenantId` 字段，由 `JwtAuthenticationFilter` 解析后写�
 
 ## 数据库迁移
 
-Flyway 脚本位于 `platform-backend/backend-web/src/main/resources/db/migration/`：
+Flyway 脚本位于 `platform-backend/backend-web/src/main/resources/db/migration/`，Schema 定义位于 `platform-backend/db/schema/`：
 
 | 版本 | 说明 |
 |------|------|
@@ -304,6 +370,7 @@ Flyway 脚本位于 `platform-backend/backend-web/src/main/resources/db/migratio
 | V1.0.3 | 审计日志表 |
 | V1.0.4 | 多租户支持 |
 | V1.1.0 | 消息服务表 (message, announcement, ticket, conversation) |
+| 06_permission | 权限控制表 (sys_permission, sys_role_permission, account_role_audit) |
 
 启动时自动执行，或手动初始化：
 ```sql
@@ -469,6 +536,18 @@ SSE 事件类型：`NEW_MESSAGE`, `NEW_ANNOUNCEMENT`, `TICKET_UPDATE`, `TICKET_R
 | GET | `/overview` | 审计概览 |
 | GET | `/logs/page` | 审计日志 |
 | POST | `/logs/export` | 导出日志 |
+
+### 权限管理 `/api/v1/system/permissions`
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/list` | 权限列表（分页） |
+| GET | `/modules` | 获取所有模块名 |
+| POST | `/` | 创建权限定义 |
+| PUT | `/{id}` | 更新权限定义 |
+| DELETE | `/{id}` | 删除权限定义 |
+| GET | `/roles/{role}` | 获取角色权限列表 |
+| POST | `/roles/{role}/grant` | 为角色授予权限 |
+| DELETE | `/roles/{role}/revoke` | 撤销角色权限 |
 
 详细 API 文档请访问 Swagger UI。
 
