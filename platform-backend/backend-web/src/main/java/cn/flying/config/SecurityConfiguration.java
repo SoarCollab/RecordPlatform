@@ -67,10 +67,21 @@ public class SecurityConfiguration {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         return http
                 .authorizeHttpRequests(conf -> conf
+                        // 公开端点
                         .requestMatchers("/api/v1/auth/**", "/error").permitAll()
                         .requestMatchers("/api/v1/images/download/images/**").permitAll()
-                        .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/doc.html/**","/webjars/**","/favicon.ico").permitAll()
+                        // 健康检查端点公开
+                        .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        // 监控端点需要管理员或监控员角色
+                        .requestMatchers("/actuator/**").hasAnyRole(
+                                UserRole.ROLE_ADMINISTER.getRole(),
+                                UserRole.ROLE_MONITOR.getRole())
+                        // 系统日志和审计端点需要管理员或监控员角色
+                        .requestMatchers("/api/v1/system/logs/**", "/api/v1/audit/**").hasAnyRole(
+                                UserRole.ROLE_ADMINISTER.getRole(),
+                                UserRole.ROLE_MONITOR.getRole())
+                        // 其他所有请求需要任意角色
                         .anyRequest().hasAnyRole(
                                 UserRole.ROLE_DEFAULT.getRole(),
                                 UserRole.ROLE_ADMINISTER.getRole(),

@@ -32,7 +32,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/system/audit")
 @Tag(name = "系统审计", description = "系统审计相关接口，包括操作日志查询、高频操作监控、敏感操作审计等")
-@PreAuthorize("hasRole('admin')")  // 只有管理员可以访问审计功能
+@PreAuthorize("isAdminOrMonitor()")  // 管理员和监控员可以访问审计功能
 public class SysAuditController {
 
     @Resource

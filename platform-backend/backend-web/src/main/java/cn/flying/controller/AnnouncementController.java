@@ -88,7 +88,7 @@ public class AnnouncementController {
 
     @GetMapping("/admin/list")
     @Operation(summary = "获取所有公告列表（管理员）")
-    @PreAuthorize("hasRole('admin')")
+    @PreAuthorize("hasPerm('announcement:admin')")
     @OperationLog(module = "公告模块", operationType = "查询", description = "管理员获取公告列表")
     public Result<IPage<AnnouncementVO>> getAdminList(
             @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer pageNum,
@@ -100,7 +100,7 @@ public class AnnouncementController {
 
     @PostMapping
     @Operation(summary = "发布/保存公告（管理员）")
-    @PreAuthorize("hasRole('admin')")
+    @PreAuthorize("hasPerm('announcement:admin')")
     @OperationLog(module = "公告模块", operationType = "新增", description = "发布公告")
     public Result<AnnouncementVO> publish(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
@@ -112,7 +112,7 @@ public class AnnouncementController {
 
     @PutMapping("/{id}")
     @Operation(summary = "编辑公告（管理员）")
-    @PreAuthorize("hasRole('admin')")
+    @PreAuthorize("hasPerm('announcement:admin')")
     @OperationLog(module = "公告模块", operationType = "修改", description = "编辑公告")
     public Result<AnnouncementVO> update(
             @Parameter(description = "公告ID") @PathVariable String id,
@@ -125,7 +125,7 @@ public class AnnouncementController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "删除公告（管理员）")
-    @PreAuthorize("hasRole('admin')")
+    @PreAuthorize("hasPerm('announcement:admin')")
     @OperationLog(module = "公告模块", operationType = "删除", description = "删除公告")
     public Result<String> delete(
             @Parameter(description = "公告ID") @PathVariable String id) {
