@@ -39,4 +39,8 @@ public final class Const {
     //用户相关实体类(用于AOP判断是否混淆ID)
     public final static String USER_ENTITY = "user";
     public final static String ACCOUNT_ENTITY = "account";
+
+    //权限缓存
+    public final static String PERMISSION_CACHE_PREFIX = "perm:role:";
+    public final static long PERMISSION_CACHE_TTL = 30 * 60;  // 30分钟
 }
