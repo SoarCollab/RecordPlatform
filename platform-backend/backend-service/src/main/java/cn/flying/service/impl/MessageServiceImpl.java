@@ -2,8 +2,8 @@ package cn.flying.service.impl;
 
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.IdUtils;
-import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.entity.Conversation;
 import cn.flying.dao.entity.Message;
@@ -29,9 +29,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Date;
 import java.util.Map;
 
-/**
- * 私信消息服务实现
- */
 @Slf4j
 @Service
 public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
@@ -47,32 +44,23 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
     @Resource
     private SseEmitterManager sseEmitterManager;
 
-    /**
-     * 发送私信消息，确保会话和消息带上租户信息
-     */
     @Override
     @Transactional
     public Message sendMessage(Long senderId, SendMessageVO vo) {
-        Long tenantId = currentTenantId();
         Long receiverId = IdUtils.fromExternalId(vo.getReceiverId());
 
-        // 不能给自己发消息
         if (senderId.equals(receiverId)) {
             throw new GeneralException(ResultEnum.CANNOT_MESSAGE_SELF);
         }
 
-        // 检查接收者是否存在
         Account receiver = accountService.findAccountById(receiverId);
         if (receiver == null) {
             throw new GeneralException(ResultEnum.USER_NOT_EXIST);
         }
 
-        // 获取或创建会话
         Conversation conversation = conversationService.getOrCreateConversation(senderId, receiverId);
 
-        // 创建消息
         Message message = new Message()
-                .setTenantId(tenantId)
                 .setConversationId(conversation.getId())
                 .setSenderId(senderId)
                 .setReceiverId(receiverId)
@@ -81,15 +69,13 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
                 .setIsRead(0);
 
         this.save(message);
-
-        // 更新会话的最后消息信息
         conversationService.updateLastMessage(conversation.getId(), message.getId());
 
         log.info("发送私信成功: messageId={}, senderId={}, receiverId={}", message.getId(), senderId, receiverId);
 
-        // SSE 推送给接收者
         Account sender = accountService.findAccountById(senderId);
-        sseEmitterManager.sendToUser(receiverId, SseEvent.of(SseEventType.NEW_MESSAGE, Map.of(
+        Long tenantId = TenantContext.requireTenantId();
+        sseEmitterManager.sendToUser(tenantId, receiverId, SseEvent.of(SseEventType.NEW_MESSAGE, Map.of(
                 "messageId", IdUtils.toExternalId(message.getId()),
                 "conversationId", IdUtils.toExternalId(conversation.getId()),
                 "senderName", sender != null ? sender.getUsername() : "未知用户",
@@ -103,23 +89,18 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
 
     @Override
     public IPage<MessageVO> getMessages(Long userId, Long conversationId, Page<Message> page) {
-        Long tenantId = currentTenantId();
-        // 查询会话中的消息，按时间倒序
         LambdaQueryWrapper<Message> wrapper = new LambdaQueryWrapper<Message>()
-                .eq(Message::getTenantId, tenantId)
                 .eq(Message::getConversationId, conversationId)
                 .orderByDesc(Message::getCreateTime);
 
         IPage<Message> messagePage = this.page(page, wrapper);
-
         return messagePage.convert(message -> convertToVO(message, userId));
     }
 
     @Override
     @Transactional
     public void markAsRead(Long userId, Long conversationId) {
-        Long tenantId = currentTenantId();
-        int updated = baseMapper.markConversationAsRead(tenantId, conversationId, userId, new Date());
+        int updated = baseMapper.markConversationAsRead(conversationId, userId, new Date());
         if (updated > 0) {
             log.info("标记 {} 条消息为已读, conversationId={}, userId={}", updated, conversationId, userId);
         }
@@ -127,19 +108,14 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
 
     @Override
     public int getTotalUnreadCount(Long userId) {
-        Long tenantId = currentTenantId();
-        return baseMapper.countUnreadMessages(tenantId, userId);
+        return baseMapper.countUnreadMessages(userId);
     }
 
     @Override
     public int getUnreadCountInConversation(Long conversationId, Long userId) {
-        Long tenantId = currentTenantId();
-        return baseMapper.countUnreadInConversation(tenantId, conversationId, userId);
+        return baseMapper.countUnreadInConversation(conversationId, userId);
     }
 
-    /**
-     * 转换为 VO
-     */
     private MessageVO convertToVO(Message message, Long currentUserId) {
         Account sender = accountService.findAccountById(message.getSenderId());
 
@@ -158,12 +134,5 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
         }
 
         return vo;
-    }
-
-    /**
-     * 获取当前租户ID，确保消息查询隔离
-     */
-    private Long currentTenantId() {
-        return SecurityUtils.getTenantId();
     }
 }

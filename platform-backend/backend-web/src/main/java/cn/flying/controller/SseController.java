@@ -24,34 +24,28 @@ public class SseController {
     @Resource
     private SseEmitterManager sseEmitterManager;
 
-    /**
-     * 建立 SSE 连接
-     */
     @GetMapping(value = "/connect", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(summary = "建立SSE连接", description = "客户端通过此端点建立SSE长连接，接收实时消息推送")
-    public SseEmitter connect(@RequestAttribute(Const.ATTR_USER_ID) Long userId) {
-        log.info("SSE 连接请求: userId={}", userId);
-        return sseEmitterManager.createConnection(userId);
+    public SseEmitter connect(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
+                              @RequestAttribute(Const.ATTR_TENANT_ID) Long tenantId) {
+        log.info("SSE 连接请求: tenantId={}, userId={}", tenantId, userId);
+        return sseEmitterManager.createConnection(tenantId, userId);
     }
 
-    /**
-     * 断开 SSE 连接
-     */
     @DeleteMapping("/disconnect")
     @Operation(summary = "断开SSE连接")
-    public void disconnect(@RequestAttribute(Const.ATTR_USER_ID) Long userId) {
-        log.info("SSE 断开请求: userId={}", userId);
-        sseEmitterManager.removeConnection(userId);
+    public void disconnect(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
+                           @RequestAttribute(Const.ATTR_TENANT_ID) Long tenantId) {
+        log.info("SSE 断开请求: tenantId={}, userId={}", tenantId, userId);
+        sseEmitterManager.removeConnection(tenantId, userId);
     }
 
-    /**
-     * 获取连接状态
-     */
     @GetMapping("/status")
     @Operation(summary = "获取SSE连接状态")
-    public Map<String, Object> getStatus(@RequestAttribute(Const.ATTR_USER_ID) Long userId) {
-        boolean online = sseEmitterManager.isOnline(userId);
-        int totalOnline = sseEmitterManager.getOnlineCount();
+    public Map<String, Object> getStatus(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
+                                         @RequestAttribute(Const.ATTR_TENANT_ID) Long tenantId) {
+        boolean online = sseEmitterManager.isOnline(tenantId, userId);
+        int totalOnline = sseEmitterManager.getOnlineCount(tenantId);
         return Map.of(
                 "connected", online,
                 "onlineCount", totalOnline
