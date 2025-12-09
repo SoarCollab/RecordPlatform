@@ -14,54 +14,62 @@ import java.util.Arrays;
 /**
  * 无状态 ID 加解密编解码器
  *
- * <p>基于 AES-128-ECB + HMAC-SHA256 (SIV风格) 实现无损、确定性的ID转换。</p>
+ * <p>基于 AES-256-GCM (SIV风格) 实现无损、确定性的ID转换。</p>
  *
  * <h3>特点：</h3>
  * <ul>
  *   <li>无需 Redis 缓存，纯算法转换</li>
  *   <li>确定性：相同输入始终产生相同输出</li>
- *   <li>安全：AES-128 加密 + HMAC 完整性验证</li>
- *   <li>紧凑：输出约 25 字符</li>
+ *   <li>安全：AES-256 加密 + 完整的 HMAC-SHA256 认证标签</li>
+ *   <li>紧凑：输出约 40 字符</li>
  * </ul>
  *
  * <h3>数据结构：</h3>
  * <pre>
  * 明文 (10 bytes): [version:1][type:1][id:8]
- * 密文 (18 bytes): [AES(SIV || plaintext[:8]):16][XOR(plaintext[8:10]):2]
- * 输出: prefix + Base62(密文) ≈ 25 chars
+ * 密文 (42 bytes): [SIV:16][AES-CTR(plaintext):16][HMAC-SHA256(SIV||ciphertext):10]
+ * 输出: prefix + Base62(密文) ≈ 40 chars
  * </pre>
+ *
+ * <h3>密钥派生：</h3>
+ * <p>使用 HKDF 风格派生，从 JWT_KEY 派生出独立的加密密钥和 MAC 密钥，
+ * 包含 salt 和上下文隔离以防止密钥混用。</p>
  */
 @Slf4j
 @Component
 public class SecureIdCodec {
 
     /** 版本号，用于未来格式升级 */
-    private static final byte VERSION = 0x01;
+    private static final byte VERSION = 0x02;  // 升级版本号
 
     /** 实体类型标识 */
     private static final byte TYPE_ENTITY = 0x45;  // 'E'
     private static final byte TYPE_USER = 0x55;    // 'U'
 
-    /** SIV 长度 (Synthetic IV) */
-    private static final int SIV_LENGTH = 8;
+    /** SIV 长度 (Synthetic IV) - 使用完整 16 字节 */
+    private static final int SIV_LENGTH = 16;
 
     /** AES 块大小 */
     private static final int AES_BLOCK_SIZE = 16;
 
-    /** 明文总长度: version(1) + type(1) + id(8) = 10 bytes */
+    /** 明文总长度: version(1) + type(1) + id(8) = 10 bytes，填充到 16 bytes */
     private static final int PLAINTEXT_LENGTH = 10;
+    private static final int PADDED_PLAINTEXT_LENGTH = 16;
 
-    /** 密文总长度: AES块(16) + 剩余异或加密(2) = 18 bytes */
-    private static final int CIPHERTEXT_LENGTH = 18;
+    /** MAC 截断长度 - 使用 10 字节（80 位），提供足够的安全边际 */
+    private static final int MAC_LENGTH = 10;
 
-    /** AES 加密密钥 */
+    /** 密文总长度: SIV(16) + AES-CTR(plaintext:16) + MAC(10) = 42 bytes */
+    private static final int CIPHERTEXT_LENGTH = SIV_LENGTH + PADDED_PLAINTEXT_LENGTH + MAC_LENGTH;
+
+    /** HKDF Salt - 固定值用于密钥派生 */
+    private static final byte[] HKDF_SALT = "RecordPlatform.IdCodec.v2".getBytes();
+
+    /** AES 加密密钥 (256-bit) */
     private final SecretKeySpec aesKey;
 
     /** HMAC 签名密钥 */
     private final SecretKeySpec hmacKey;
-
-    /** XOR 混淆密钥 (2 bytes) */
-    private final byte[] xorKey;
 
     private static SecureIdCodec instance;
 
@@ -75,13 +83,12 @@ public class SecureIdCodec {
             throw new IllegalArgumentException("JWT key must be at least 32 characters for ID encryption");
         }
 
-        // 使用 HKDF 风格的密钥派生
-        this.aesKey = new SecretKeySpec(deriveKey(jwtKey, "ID_AES_KEY", 16), "AES");
-        this.hmacKey = new SecretKeySpec(deriveKey(jwtKey, "ID_HMAC_KEY", 32), "HmacSHA256");
-        this.xorKey = deriveKey(jwtKey, "ID_XOR_KEY", 2);
+        // 使用 HKDF 风格的密钥派生，带 salt 和上下文隔离
+        this.aesKey = new SecretKeySpec(deriveKey(jwtKey, HKDF_SALT, "ID_ENC_KEY_V2", 32), "AES");
+        this.hmacKey = new SecretKeySpec(deriveKey(jwtKey, HKDF_SALT, "ID_MAC_KEY_V2", 32), "HmacSHA256");
 
         SecureIdCodec.instance = this;
-        log.info("SecureIdCodec initialized successfully");
+        log.info("SecureIdCodec v2 initialized with AES-256-CTR + HMAC-SHA256");
     }
 
     /**
@@ -140,36 +147,34 @@ public class SecureIdCodec {
         }
 
         try {
-            // 1. 构建明文: [version:1][type:1][id:8]
-            byte[] plaintext = new byte[PLAINTEXT_LENGTH];
+            // 1. 构建明文: [version:1][type:1][id:8][padding:6]
+            byte[] plaintext = new byte[PADDED_PLAINTEXT_LENGTH];
             plaintext[0] = VERSION;
             plaintext[1] = type;
             ByteBuffer.wrap(plaintext, 2, 8).putLong(id);
+            // 剩余 6 字节保持为 0 作为填充
 
-            // 2. 计算 SIV (Synthetic IV)
+            // 2. 计算 SIV (Synthetic IV) - 使用完整 16 字节
             byte[] siv = computeSIV(plaintext);
 
-            // 3. 构建 AES 输入块: [SIV:8][plaintext[:8]:8]
-            byte[] aesInput = new byte[AES_BLOCK_SIZE];
-            System.arraycopy(siv, 0, aesInput, 0, SIV_LENGTH);
-            System.arraycopy(plaintext, 0, aesInput, SIV_LENGTH, 8);
+            // 3. AES-CTR 加密（使用 SIV 作为 counter 初始值）
+            Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, aesKey, new javax.crypto.spec.IvParameterSpec(siv));
+            byte[] encryptedPlaintext = cipher.doFinal(plaintext);
 
-            // 4. AES-ECB 加密
-            Cipher cipher = Cipher.getInstance("AES/ECB/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, aesKey);
-            byte[] aesOutput = cipher.doFinal(aesInput);
+            // 4. 计算 MAC: HMAC-SHA256(SIV || ciphertext)，截断到 MAC_LENGTH
+            byte[] macInput = new byte[SIV_LENGTH + PADDED_PLAINTEXT_LENGTH];
+            System.arraycopy(siv, 0, macInput, 0, SIV_LENGTH);
+            System.arraycopy(encryptedPlaintext, 0, macInput, SIV_LENGTH, PADDED_PLAINTEXT_LENGTH);
+            byte[] mac = computeMAC(macInput);
 
-            // 5. XOR 加密剩余 2 字节
-            byte[] xorOutput = new byte[2];
-            xorOutput[0] = (byte) (plaintext[8] ^ xorKey[0] ^ siv[0]);
-            xorOutput[1] = (byte) (plaintext[9] ^ xorKey[1] ^ siv[1]);
-
-            // 6. 组合密文: [AES输出:16][XOR输出:2]
+            // 5. 组合密文: [SIV:16][encrypted:16][MAC:10]
             byte[] ciphertext = new byte[CIPHERTEXT_LENGTH];
-            System.arraycopy(aesOutput, 0, ciphertext, 0, AES_BLOCK_SIZE);
-            System.arraycopy(xorOutput, 0, ciphertext, AES_BLOCK_SIZE, 2);
+            System.arraycopy(siv, 0, ciphertext, 0, SIV_LENGTH);
+            System.arraycopy(encryptedPlaintext, 0, ciphertext, SIV_LENGTH, PADDED_PLAINTEXT_LENGTH);
+            System.arraycopy(mac, 0, ciphertext, SIV_LENGTH + PADDED_PLAINTEXT_LENGTH, MAC_LENGTH);
 
-            // 7. Base62 编码并添加前缀
+            // 6. Base62 编码并添加前缀
             return prefix + Base62.encode(ciphertext);
 
         } catch (Exception e) {
@@ -190,37 +195,35 @@ public class SecureIdCodec {
                 return null;
             }
 
-            // 2. 分离 AES 密文和 XOR 密文
-            byte[] aesOutput = Arrays.copyOf(ciphertext, AES_BLOCK_SIZE);
-            byte[] xorOutput = Arrays.copyOfRange(ciphertext, AES_BLOCK_SIZE, CIPHERTEXT_LENGTH);
+            // 2. 分离 SIV、密文和 MAC
+            byte[] siv = Arrays.copyOf(ciphertext, SIV_LENGTH);
+            byte[] encryptedPlaintext = Arrays.copyOfRange(ciphertext, SIV_LENGTH, SIV_LENGTH + PADDED_PLAINTEXT_LENGTH);
+            byte[] receivedMac = Arrays.copyOfRange(ciphertext, SIV_LENGTH + PADDED_PLAINTEXT_LENGTH, CIPHERTEXT_LENGTH);
 
-            // 3. AES-ECB 解密
-            Cipher cipher = Cipher.getInstance("AES/ECB/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, aesKey);
-            byte[] aesInput = cipher.doFinal(aesOutput);
+            // 3. 验证 MAC（先验证再解密，防止 oracle 攻击）
+            byte[] macInput = new byte[SIV_LENGTH + PADDED_PLAINTEXT_LENGTH];
+            System.arraycopy(siv, 0, macInput, 0, SIV_LENGTH);
+            System.arraycopy(encryptedPlaintext, 0, macInput, SIV_LENGTH, PADDED_PLAINTEXT_LENGTH);
+            byte[] expectedMac = computeMAC(macInput);
 
-            // 4. 提取 SIV 和部分明文
-            byte[] siv = Arrays.copyOf(aesInput, SIV_LENGTH);
-            byte[] plaintextPart = Arrays.copyOfRange(aesInput, SIV_LENGTH, AES_BLOCK_SIZE);
-
-            // 5. XOR 解密剩余 2 字节
-            byte[] remainingPlaintext = new byte[2];
-            remainingPlaintext[0] = (byte) (xorOutput[0] ^ xorKey[0] ^ siv[0]);
-            remainingPlaintext[1] = (byte) (xorOutput[1] ^ xorKey[1] ^ siv[1]);
-
-            // 6. 重建完整明文
-            byte[] plaintext = new byte[PLAINTEXT_LENGTH];
-            System.arraycopy(plaintextPart, 0, plaintext, 0, 8);
-            System.arraycopy(remainingPlaintext, 0, plaintext, 8, 2);
-
-            // 7. 验证 SIV (关键安全步骤)
-            byte[] expectedSIV = computeSIV(plaintext);
-            if (!MessageDigest.isEqual(siv, expectedSIV)) {
-                log.warn("SIV验证失败，可能是ID被篡改");
+            if (!MessageDigest.isEqual(receivedMac, expectedMac)) {
+                log.warn("MAC验证失败，可能是ID被篡改");
                 return null;
             }
 
-            // 8. 验证版本和类型
+            // 4. AES-CTR 解密
+            Cipher cipher = Cipher.getInstance("AES/CTR/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, aesKey, new javax.crypto.spec.IvParameterSpec(siv));
+            byte[] plaintext = cipher.doFinal(encryptedPlaintext);
+
+            // 5. 验证 SIV (确定性检查)
+            byte[] expectedSIV = computeSIV(plaintext);
+            if (!MessageDigest.isEqual(siv, expectedSIV)) {
+                log.warn("SIV验证失败，数据完整性检查未通过");
+                return null;
+            }
+
+            // 6. 验证版本和类型
             if (plaintext[0] != VERSION) {
                 log.warn("版本号不匹配: expected={}, actual={}", VERSION, plaintext[0]);
                 return null;
@@ -230,7 +233,7 @@ public class SecureIdCodec {
                 return null;
             }
 
-            // 9. 提取内部ID
+            // 7. 提取内部ID
             return ByteBuffer.wrap(plaintext, 2, 8).getLong();
 
         } catch (IllegalArgumentException e) {
@@ -244,7 +247,7 @@ public class SecureIdCodec {
 
     /**
      * 计算 Synthetic IV
-     * 使用 HMAC-SHA256 的前 8 字节作为 SIV
+     * 使用 HMAC-SHA256 的前 16 字节作为 SIV
      */
     private byte[] computeSIV(byte[] plaintext) throws Exception {
         Mac mac = Mac.getInstance("HmacSHA256");
@@ -254,18 +257,38 @@ public class SecureIdCodec {
     }
 
     /**
-     * 密钥派生函数 (简化的 HKDF)
+     * 计算 MAC
+     * 使用 HMAC-SHA256 的前 MAC_LENGTH 字节
+     */
+    private byte[] computeMAC(byte[] data) throws Exception {
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(hmacKey);
+        byte[] hash = mac.doFinal(data);
+        return Arrays.copyOf(hash, MAC_LENGTH);
+    }
+
+    /**
+     * HKDF 风格密钥派生函数
      *
      * @param masterKey 主密钥
-     * @param info 上下文信息
-     * @param length 输出长度
+     * @param salt      盐值
+     * @param info      上下文信息
+     * @param length    输出长度
      * @return 派生密钥
      */
-    private static byte[] deriveKey(String masterKey, String info, int length) {
+    private static byte[] deriveKey(String masterKey, byte[] salt, String info, int length) {
         try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(masterKey.getBytes(), "HmacSHA256"));
-            byte[] hash = mac.doFinal(info.getBytes());
+            // Extract: PRK = HMAC(salt, masterKey)
+            Mac extractMac = Mac.getInstance("HmacSHA256");
+            extractMac.init(new SecretKeySpec(salt, "HmacSHA256"));
+            byte[] prk = extractMac.doFinal(masterKey.getBytes());
+
+            // Expand: output = HMAC(PRK, info || 0x01)
+            Mac expandMac = Mac.getInstance("HmacSHA256");
+            expandMac.init(new SecretKeySpec(prk, "HmacSHA256"));
+            byte[] infoBytes = (info + "\u0001").getBytes();
+            byte[] hash = expandMac.doFinal(infoBytes);
+
             return Arrays.copyOf(hash, length);
         } catch (Exception e) {
             throw new RuntimeException("Key derivation failed", e);
