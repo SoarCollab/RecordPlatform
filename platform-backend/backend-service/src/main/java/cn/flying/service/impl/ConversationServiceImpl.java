@@ -2,6 +2,7 @@ package cn.flying.service.impl;
 
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.entity.Conversation;
@@ -47,7 +48,7 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
         Long participantA = Math.min(userA, userB);
         Long participantB = Math.max(userA, userB);
 
-        Conversation existing = baseMapper.selectByParticipants(participantA, participantB);
+        Conversation existing = baseMapper.selectByParticipants(participantA, participantB, TenantContext.getTenantId());
         if (existing != null) {
             return existing;
         }
@@ -107,7 +108,7 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
 
     @Override
     public int getUnreadConversationCount(Long userId) {
-        return baseMapper.countUnreadConversations(userId);
+        return baseMapper.countUnreadConversations(userId, TenantContext.getTenantId());
     }
 
     @Override
