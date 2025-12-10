@@ -100,7 +100,7 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
     @Override
     @Transactional
     public void markAsRead(Long userId, Long conversationId) {
-        int updated = baseMapper.markConversationAsRead(conversationId, userId, new Date());
+        int updated = baseMapper.markConversationAsRead(conversationId, userId, new Date(), TenantContext.getTenantId());
         if (updated > 0) {
             log.info("标记 {} 条消息为已读, conversationId={}, userId={}", updated, conversationId, userId);
         }
@@ -108,12 +108,12 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
 
     @Override
     public int getTotalUnreadCount(Long userId) {
-        return baseMapper.countUnreadMessages(userId);
+        return baseMapper.countUnreadMessages(userId, TenantContext.getTenantId());
     }
 
     @Override
     public int getUnreadCountInConversation(Long conversationId, Long userId) {
-        return baseMapper.countUnreadInConversation(conversationId, userId);
+        return baseMapper.countUnreadInConversation(conversationId, userId, TenantContext.getTenantId());
     }
 
     private MessageVO convertToVO(Message message, Long currentUserId) {
