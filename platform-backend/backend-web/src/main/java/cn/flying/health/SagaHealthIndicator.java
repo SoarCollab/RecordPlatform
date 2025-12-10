@@ -1,5 +1,6 @@
 package cn.flying.health;
 
+import cn.flying.common.annotation.TenantScope;
 import cn.flying.dao.entity.FileSagaStatus;
 import cn.flying.dao.mapper.FileSagaMapper;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Component;
 /**
  * Saga 分布式事务健康指标。
  * 监控 Saga 的运行状态、失败数量和积压情况。
+ * 跨租户统计所有租户的 Saga 状态。
  */
 @Slf4j
 @Component("saga")
@@ -30,6 +32,7 @@ public class SagaHealthIndicator implements HealthIndicator {
     private long pendingCompensationThreshold;
 
     @Override
+    @TenantScope(ignoreIsolation = true)
     public Health health() {
         try {
             long runningCount = sagaMapper.countByStatus(FileSagaStatus.RUNNING.name());

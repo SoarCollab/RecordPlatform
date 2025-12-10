@@ -1,5 +1,6 @@
 package cn.flying.service.monitor;
 
+import cn.flying.common.annotation.TenantScope;
 import cn.flying.dao.entity.FileSagaStatus;
 import cn.flying.dao.mapper.FileSagaMapper;
 import cn.flying.dao.mapper.OutboxEventMapper;
@@ -214,7 +215,9 @@ public class SagaMetrics {
     /**
      * 刷新 Saga/Outbox 状态指标。
      * 建议定时调用（如每分钟一次）。
+     * 跨租户统计，需要忽略租户隔离。
      */
+    @TenantScope(ignoreIsolation = true)
     public void refreshStatus() {
         try {
             // Saga 状态

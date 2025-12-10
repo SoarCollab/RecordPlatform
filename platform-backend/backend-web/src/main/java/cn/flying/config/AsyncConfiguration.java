@@ -25,7 +25,8 @@ public class AsyncConfiguration {
 
     /**
      * MDC 和租户上下文传递装饰器。
-     * 捕获父线程的 MDC 和 TenantContext，在子线程执行前恢复，执行后清理。
+     * 捕获父线程的 MDC 和 TenantContext（包括 tenantId 和 ignoreIsolation），
+     * 在子线程执行前恢复，执行后清理。
      */
     @Bean
     public TaskDecorator contextPropagatingDecorator() {
@@ -36,6 +37,7 @@ public class AsyncConfiguration {
                 // 捕获父线程上下文
                 Map<String, String> mdcContext = MDC.getCopyOfContextMap();
                 Long tenantId = TenantContext.getTenantId();
+                boolean ignoreIsolation = TenantContext.isIgnoreIsolation();
 
                 return () -> {
                     try {
@@ -46,6 +48,7 @@ public class AsyncConfiguration {
                         if (tenantId != null) {
                             TenantContext.setTenantId(tenantId);
                         }
+                        TenantContext.setIgnoreIsolation(ignoreIsolation);
                         runnable.run();
                     } finally {
                         // 清理子线程上下文，防止线程复用时污染
