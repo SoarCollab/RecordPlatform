@@ -8,20 +8,29 @@ import org.apache.ibatis.annotations.Select;
 
 /**
  * 私信会话 Mapper 接口
+ * 带租户隔离：确保私信功能在租户内部使用
  */
 @Mapper
 public interface ConversationMapper extends BaseMapper<Conversation> {
 
+    /**
+     * 根据参与者查询会话（带租户隔离）
+     */
     @Select("""
         SELECT * FROM conversation
         WHERE participant_a = #{participantA}
           AND participant_b = #{participantB}
+          AND tenant_id = #{tenantId}
         """)
     Conversation selectByParticipants(
             @Param("participantA") Long participantA,
-            @Param("participantB") Long participantB
+            @Param("participantB") Long participantB,
+            @Param("tenantId") Long tenantId
     );
 
+    /**
+     * 统计用户未读会话数（带租户隔离）
+     */
     @Select("""
         SELECT COUNT(DISTINCT c.id) FROM conversation c
         INNER JOIN message m ON c.id = m.conversation_id
@@ -29,6 +38,8 @@ public interface ConversationMapper extends BaseMapper<Conversation> {
           AND m.receiver_id = #{userId}
           AND m.is_read = 0
           AND m.deleted = 0
+          AND c.tenant_id = #{tenantId}
+          AND m.tenant_id = #{tenantId}
         """)
-    int countUnreadConversations(@Param("userId") Long userId);
+    int countUnreadConversations(@Param("userId") Long userId, @Param("tenantId") Long tenantId);
 }

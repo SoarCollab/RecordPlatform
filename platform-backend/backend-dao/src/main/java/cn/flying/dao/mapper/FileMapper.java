@@ -20,14 +20,27 @@ import java.util.List;
 public interface FileMapper extends BaseMapper<File> {
 
     /**
-     * Select soft-deleted files for cleanup (bypasses MyBatis-Plus logical delete interceptor)
+     * Select soft-deleted files for cleanup (bypasses MyBatis-Plus logical delete interceptor).
+     * Must specify tenantId for tenant isolation in scheduled tasks.
+     *
+     * @param tenantId tenant ID for isolation
+     * @param cutoffDate files deleted before this date
+     * @param limit max number of files to return
+     * @return list of files pending cleanup
      */
-    @Select("SELECT * FROM file WHERE deleted = 1 AND create_time < #{cutoffDate} LIMIT #{limit}")
-    List<File> selectDeletedFilesForCleanup(@Param("cutoffDate") Date cutoffDate, @Param("limit") int limit);
+    @Select("SELECT * FROM file WHERE deleted = 1 AND tenant_id = #{tenantId} AND create_time < #{cutoffDate} LIMIT #{limit}")
+    List<File> selectDeletedFilesForCleanup(@Param("tenantId") Long tenantId,
+                                            @Param("cutoffDate") Date cutoffDate,
+                                            @Param("limit") int limit);
 
     /**
-     * Physically delete a file record (bypasses MyBatis-Plus logical delete)
+     * Physically delete a file record (bypasses MyBatis-Plus logical delete).
+     * Must specify tenantId for tenant isolation to prevent cross-tenant deletion.
+     *
+     * @param id file ID
+     * @param tenantId tenant ID for isolation
+     * @return number of rows affected
      */
-    @Delete("DELETE FROM file WHERE id = #{id}")
-    int physicalDeleteById(@Param("id") Long id);
+    @Delete("DELETE FROM file WHERE id = #{id} AND tenant_id = #{tenantId}")
+    int physicalDeleteById(@Param("id") Long id, @Param("tenantId") Long tenantId);
 }
