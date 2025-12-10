@@ -5,6 +5,7 @@ import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.lock.DistributedLock;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.entity.FileSaga;
 import cn.flying.dao.entity.FileSagaStatus;
@@ -12,6 +13,7 @@ import cn.flying.dao.entity.FileSagaStep;
 import cn.flying.dao.mapper.FileSagaMapper;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.mapper.FileMapper;
+import cn.flying.dao.mapper.TenantMapper;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
@@ -36,6 +38,7 @@ import java.util.*;
  * 协调 MinIO 上传 + 区块链存储的分布式事务，失败时自动补偿。
  * 支持指数退避重试策略。
  * 集成 Prometheus 监控指标。
+ * 多租户隔离：按租户分别执行补偿任务。
  */
 @Slf4j
 @Service
@@ -47,6 +50,7 @@ public class FileSagaOrchestrator {
     private final OutboxService outboxService;
     private final FileMapper fileMapper;
     private final SagaMetrics sagaMetrics;
+    private final TenantMapper tenantMapper;
 
     @Value("${saga.compensation.max-retries:5}")
     private int maxCompensationRetries;
@@ -93,16 +97,36 @@ public class FileSagaOrchestrator {
     /**
      * 定时处理待补偿重试的 Saga。
      * 使用分布式锁防止多实例重复执行。
+     * 按租户分别处理，确保多租户隔离。
      */
     @Scheduled(fixedDelayString = "${saga.compensation.poll-interval-ms:30000}")
     @DistributedLock(key = "saga:compensation:retry", leaseTime = 300)
     public void processRetriableSagas() {
-        List<FileSaga> pendingSagas = sagaMapper.selectPendingCompensation(compensationBatchSize);
+        // 获取所有活跃租户
+        List<Long> activeTenantIds = tenantMapper.selectActiveTenantIds();
+        if (activeTenantIds == null || activeTenantIds.isEmpty()) {
+            return;
+        }
+
+        for (Long tenantId : activeTenantIds) {
+            try {
+                TenantContext.runWithTenant(tenantId, () -> processRetriableSagasForTenant(tenantId));
+            } catch (Exception e) {
+                log.error("租户 {} Saga 补偿处理失败: {}", tenantId, e.getMessage(), e);
+            }
+        }
+    }
+
+    /**
+     * 处理指定租户的待补偿 Saga
+     */
+    private void processRetriableSagasForTenant(Long tenantId) {
+        List<FileSaga> pendingSagas = sagaMapper.selectPendingCompensation(tenantId, compensationBatchSize);
         if (pendingSagas.isEmpty()) {
             return;
         }
 
-        log.info("发现 {} 个待重试补偿的 Saga", pendingSagas.size());
+        log.info("租户 {} 发现 {} 个待重试补偿的 Saga", tenantId, pendingSagas.size());
 
         for (FileSaga saga : pendingSagas) {
             if (!saga.isRetryDue()) {
@@ -112,7 +136,7 @@ public class FileSagaOrchestrator {
             try {
                 retryCompensation(saga);
             } catch (Exception e) {
-                log.error("Saga 补偿重试失败: id={}", saga.getId(), e);
+                log.error("租户 {} Saga 补偿重试失败: id={}", tenantId, saga.getId(), e);
             }
         }
     }
@@ -156,7 +180,8 @@ public class FileSagaOrchestrator {
     }
 
     private FileSaga startOrResumeSaga(FileUploadCommand cmd) {
-        FileSaga existing = sagaMapper.selectByRequestId(cmd.getRequestId());
+        Long tenantId = TenantContext.requireTenantId();
+        FileSaga existing = sagaMapper.selectByRequestId(cmd.getRequestId(), tenantId);
         if (existing != null) {
             if (existing.getFileId() == null && cmd.getFileId() != null) {
                 existing.setFileId(cmd.getFileId());

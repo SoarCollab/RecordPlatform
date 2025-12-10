@@ -2,9 +2,11 @@ package cn.flying.service.job;
 
 import cn.flying.api.utils.ResultUtils;
 import cn.flying.common.lock.DistributedLock;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.mapper.FileMapper;
+import cn.flying.dao.mapper.TenantMapper;
 import cn.flying.platformapi.request.DeleteFilesRequest;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.service.remote.FileRemoteClient;
@@ -28,6 +30,7 @@ import java.util.Set;
  * 定时清理软删除文件任务。
  * 从存储和区块链中清除已标记删除的文件记录。
  * 使用分布式锁防止多实例重复执行。
+ * 按租户分别执行，确保多租户隔离。
  */
 @Component
 @Slf4j
@@ -35,6 +38,9 @@ public class FileCleanupTask {
 
     @Resource
     private FileMapper fileMapper;
+
+    @Resource
+    private TenantMapper tenantMapper;
 
     @Resource
     private FileRemoteClient fileRemoteClient;
@@ -52,41 +58,76 @@ public class FileCleanupTask {
      * 清理超过保留期的软删除文件。
      * 默认每天凌晨 3:00 执行。
      * 使用分布式锁（租约 1 小时）防止多实例重复执行。
+     * 按租户分别执行，确保多租户数据隔离。
      */
     @Scheduled(cron = "${file.cleanup.cron:0 0 3 * * ?}")
     @DistributedLock(key = "file:cleanup", leaseTime = 3600)
     public void cleanDeletedFiles() {
         log.info("开始执行文件清理任务...");
 
-        LocalDateTime cutoffTime = LocalDateTime.now().minusDays(retentionDays);
-        Date cutoffDate = Date.from(cutoffTime.atZone(ZoneId.systemDefault()).toInstant());
-
-        List<File> pendingFiles = fileMapper.selectDeletedFilesForCleanup(cutoffDate, batchSize);
-
-        if (pendingFiles == null || pendingFiles.isEmpty()) {
-            log.info("没有待清理的文件");
+        // 获取所有活跃租户
+        List<Long> activeTenantIds = tenantMapper.selectActiveTenantIds();
+        if (activeTenantIds == null || activeTenantIds.isEmpty()) {
+            log.warn("没有活跃租户，跳过文件清理");
             return;
         }
 
-        log.info("发现 {} 个待清理文件", pendingFiles.size());
+        log.info("发现 {} 个活跃租户，开始按租户清理文件", activeTenantIds.size());
+
+        int totalSuccess = 0;
+        int totalFail = 0;
+
+        for (Long tenantId : activeTenantIds) {
+            try {
+                // 在租户上下文中执行清理
+                int[] result = TenantContext.callWithTenant(tenantId, () -> cleanFilesForTenant(tenantId));
+                totalSuccess += result[0];
+                totalFail += result[1];
+            } catch (Exception e) {
+                log.error("租户 {} 文件清理失败: {}", tenantId, e.getMessage(), e);
+            }
+        }
+
+        log.info("文件清理任务完成: 总成功={}, 总失败={}", totalSuccess, totalFail);
+    }
+
+    /**
+     * 清理指定租户的软删除文件
+     *
+     * @param tenantId 租户ID
+     * @return [成功数, 失败数]
+     */
+    private int[] cleanFilesForTenant(Long tenantId) {
+        LocalDateTime cutoffTime = LocalDateTime.now().minusDays(retentionDays);
+        Date cutoffDate = Date.from(cutoffTime.atZone(ZoneId.systemDefault()).toInstant());
+
+        List<File> pendingFiles = fileMapper.selectDeletedFilesForCleanup(tenantId, cutoffDate, batchSize);
+
+        if (pendingFiles == null || pendingFiles.isEmpty()) {
+            log.debug("租户 {} 没有待清理的文件", tenantId);
+            return new int[]{0, 0};
+        }
+
+        log.info("租户 {} 发现 {} 个待清理文件", tenantId, pendingFiles.size());
         int successCount = 0;
         int failCount = 0;
         Set<Long> affectedUserIds = new HashSet<>();
 
         for (File file : pendingFiles) {
             try {
-                cleanupSingleFile(file);
+                cleanupSingleFile(file, tenantId);
                 affectedUserIds.add(file.getUid());
                 successCount++;
             } catch (Exception e) {
                 failCount++;
-                log.warn("清理文件失败: id={}, hash={}, error={}",
-                    file.getId(), file.getFileHash(), e.getMessage());
+                log.warn("租户 {} 清理文件失败: id={}, hash={}, error={}",
+                    tenantId, file.getId(), file.getFileHash(), e.getMessage());
             }
         }
 
         evictCachesForUsers(affectedUserIds);
-        log.info("文件清理完成: 成功={}, 失败={}", successCount, failCount);
+        log.info("租户 {} 文件清理完成: 成功={}, 失败={}", tenantId, successCount, failCount);
+        return new int[]{successCount, failCount};
     }
 
     private void evictCachesForUsers(Set<Long> userIds) {
@@ -99,7 +140,7 @@ public class FileCleanupTask {
         }
     }
 
-    private void cleanupSingleFile(File file) {
+    private void cleanupSingleFile(File file, Long tenantId) {
         String userId = String.valueOf(file.getUid());
         String fileHash = file.getFileHash();
 
@@ -135,9 +176,9 @@ public class FileCleanupTask {
             log.warn("获取文件详情失败: {}, 继续数据库清理: {}", fileHash, e.getMessage());
         }
 
-        // 4. 物理删除数据库记录
-        fileMapper.physicalDeleteById(file.getId());
+        // 4. 物理删除数据库记录（带租户隔离）
+        fileMapper.physicalDeleteById(file.getId(), tenantId);
 
-        log.debug("文件清理成功: id={}, hash={}", file.getId(), fileHash);
+        log.debug("文件清理成功: tenantId={}, id={}, hash={}", tenantId, file.getId(), fileHash);
     }
 }

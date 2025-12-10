@@ -1,7 +1,9 @@
 package cn.flying.service.outbox;
 
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.dao.entity.OutboxEvent;
 import cn.flying.dao.mapper.OutboxEventMapper;
+import cn.flying.dao.mapper.TenantMapper;
 import cn.flying.service.monitor.SagaMetrics;
 import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.Resource;
@@ -24,6 +26,7 @@ import java.util.List;
  * 轮询 outbox 表并将事件发布到 RabbitMQ。
  * 每条记录独立事务，避免长时间锁定。
  * 集成 Prometheus 监控指标。
+ * 多租户隔离：按租户分别发布事件。
  */
 @Slf4j
 @Component
@@ -31,6 +34,9 @@ public class OutboxPublisher {
 
     @Resource
     private OutboxEventMapper outboxMapper;
+
+    @Resource
+    private TenantMapper tenantMapper;
 
     @Resource
     private RabbitTemplate rabbitTemplate;
@@ -51,17 +57,36 @@ public class OutboxPublisher {
 
     /**
      * 定时发布待处理事件
-     * 注意：不再使用事务注解，每条记录由 publishSingleEvent 独立处理
+     * 按租户分别处理，确保多租户隔离。
      */
     @Scheduled(fixedDelay = 2000)
     public void publishPendingEvents() {
-        List<OutboxEvent> events = outboxMapper.fetchPendingEvents(new Date(), BATCH_SIZE);
+        // 获取所有活跃租户
+        List<Long> activeTenantIds = tenantMapper.selectActiveTenantIds();
+        if (activeTenantIds == null || activeTenantIds.isEmpty()) {
+            return;
+        }
+
+        for (Long tenantId : activeTenantIds) {
+            try {
+                TenantContext.runWithTenant(tenantId, () -> publishPendingEventsForTenant(tenantId));
+            } catch (Exception e) {
+                log.error("租户 {} Outbox 事件发布失败: {}", tenantId, e.getMessage(), e);
+            }
+        }
+    }
+
+    /**
+     * 发布指定租户的待处理事件
+     */
+    private void publishPendingEventsForTenant(Long tenantId) {
+        List<OutboxEvent> events = outboxMapper.fetchPendingEvents(tenantId, new Date(), BATCH_SIZE);
 
         if (events.isEmpty()) {
             return;
         }
 
-        log.debug("开始发布 {} 条 outbox 事件", events.size());
+        log.debug("租户 {} 开始发布 {} 条 outbox 事件", tenantId, events.size());
 
         for (OutboxEvent event : events) {
             try {
@@ -69,7 +94,7 @@ public class OutboxPublisher {
                 self.publishSingleEvent(event);
             } catch (Exception ex) {
                 // 单条记录失败不影响其他记录的处理
-                log.error("发布事件失败: id={}, type={}", event.getId(), event.getEventType(), ex);
+                log.error("租户 {} 发布事件失败: id={}, type={}", tenantId, event.getId(), event.getEventType(), ex);
             }
         }
     }
