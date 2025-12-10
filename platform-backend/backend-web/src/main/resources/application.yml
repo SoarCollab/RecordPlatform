@@ -68,24 +68,30 @@ springdoc:
   api-docs:
     path: /v3/api-docs
   group-configs:
-    - group: 'default'
-      paths-to-match: '/**'
-      #生成文档所需的扫包路径，一般为启动类目录
+    - group: '用户认证服务'
+      paths-to-match: '/api/v1/auth/**,/api/v1/users/**,/api/auth/**'
+      packages-to-scan: cn.flying.controller
+    - group: '文件存储服务'
+      paths-to-match: '/api/v1/files/**,/api/v1/images/**'
+      packages-to-scan: cn.flying.controller
+    - group: '消息通信服务'
+      paths-to-match: '/api/v1/conversations/**,/api/v1/messages/**,/api/v1/sse/**'
+      packages-to-scan: cn.flying.controller
+    - group: '系统管理服务'
+      paths-to-match: '/api/v1/system/**,/api/v1/announcements/**,/api/v1/tickets/**'
       packages-to-scan: cn.flying.controller
 
-#knife4j配置
+# knife4j配置
 knife4j:
-  #是否启用增强设置
   enable: true
-  #开启生产环境屏蔽
   production: false
-  #是否启用登录认证
   basic:
     enable: true
     username: admin
     password: 123456
   setting:
     language: zh_cn
+    enable-group: true
 
 mybatis-plus:
   configuration:

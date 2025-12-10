@@ -48,7 +48,19 @@ public class SwaggerConfiguration {
         return new OpenAPI()
                 .info(new Info()
                         .title("RecordPlatform 项目 API 文档")
-                        .description("欢迎来到本项目API测试文档，在这里可以快速进行接口调试")
+                        .description("""
+                                RecordPlatform API文档，按服务分组展示。
+
+                                ## 服务架构
+                                - **用户认证服务**: 用户注册、登录、密码管理
+                                - **文件存储服务**: 文件上传/下载/分享（底层调用区块链存证+分布式存储）
+                                - **消息通信服务**: 私信会话、消息管理、SSE推送
+                                - **系统管理服务**: 审计日志、权限管理、公告、工单
+
+                                ## 底层服务说明
+                                - **区块链服务 (FISCO BCOS)**: 文件存证、交易记录查询
+                                - **分布式存储服务 (S3-compatible)**: 文件分片加密存储
+                                """)
                         .version("1.0")
                         .contact( new Contact()
                                 .name("flying")

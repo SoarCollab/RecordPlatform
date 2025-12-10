@@ -1,5 +1,6 @@
 package cn.flying.health;
 
+import cn.flying.common.annotation.TenantScope;
 import cn.flying.dao.mapper.OutboxEventMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Component;
 /**
  * Outbox 事件发布健康指标。
  * 监控 Outbox 待发送事件的积压和失败情况。
+ * 跨租户统计所有租户的 Outbox 状态。
  */
 @Slf4j
 @Component("outbox")
@@ -29,6 +31,7 @@ public class OutboxHealthIndicator implements HealthIndicator {
     private int maxRetries;
 
     @Override
+    @TenantScope(ignoreIsolation = true)
     public Health health() {
         try {
             long pendingCount = outboxEventMapper.countByStatus("PENDING");
