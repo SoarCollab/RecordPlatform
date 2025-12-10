@@ -25,7 +25,7 @@
 ```
                          Infrastructure
     ┌────────┐  ┌───────┐  ┌──────────┐  ┌───────┐  ┌────────────┐
-    │ Nacos  │  │ MySQL │  │ RabbitMQ │  │ Redis │  │ S3兼容存储 集群  │
+    │ Nacos  │  │ MySQL │  │ RabbitMQ │  │ Redis │  │ S3存储集群  │
     │ :8848  │  │ :3306 │  │  :5672   │  │ :6379 │  │   :9000    │
     └────┬───┘  └───┬───┘  └────┬─────┘  └───┬───┘  └─────┬──────┘
          │          │           │            │            │
@@ -33,14 +33,14 @@
                                │
     ┌──────────────────────────┴──────────────────────────┐
     │                    platform-api                     │
-    │         BlockChainService, DistributedStorageService│
+    │      FiscoExternalService, StorageExternalService   │
     └──────────────────────────┬──────────────────────────┘
                                │ implements
          ┌─────────────────────┼─────────────────────┐
          │                     │                     │
          ▼                     │                     ▼
 ┌─────────────────┐            │            ┌─────────────────┐
-│ platform-fisco  │            │            │  platform-storage │
+│ platform-fisco  │            │            │ platform-storage│
 │ Dubbo Provider  │            │            │ Dubbo Provider  │
 │ Port 8091       │            │            │ Port 8092       │
 └────────┬────────┘            │            └────────┬────────┘
@@ -358,6 +358,48 @@ resilience4j:
 ### 租户标识来源
 JWT Token 中的 `tenantId` 字段，由 `JwtAuthenticationFilter` 解析后写入 `TenantContext`。
 
+### 声明式租户上下文控制
+
+`@TenantScope` 注解用于声明式控制方法执行时的租户隔离行为：
+
+| 属性 | 默认值 | 说明 |
+|------|--------|------|
+| `ignoreIsolation` | false | 忽略租户隔离，跨租户查询 |
+| `tenantId` | -1 | 切换到指定租户执行 |
+
+**使用示例**
+```java
+// 定时任务跨租户查询
+@TenantScope(ignoreIsolation = true)
+@Scheduled(cron = "0 0 3 * * ?")
+public void cleanupDeletedFiles() { ... }
+
+// 健康检查跨租户统计
+@TenantScope(ignoreIsolation = true)
+public Health health() {
+    long totalPending = mapper.countByStatus("PENDING");
+}
+
+// 切换到指定租户执行
+@TenantScope(tenantId = 1)
+public void migrateDataForTenant() { ... }
+```
+
+**程序化租户切换**
+```java
+// 按租户循环处理
+for (Long tenantId : tenantIds) {
+    TenantContext.callWithTenant(tenantId, () -> {
+        return processForTenant(tenantId);
+    });
+}
+
+// 临时跨租户查询
+TenantContext.runWithoutIsolation(() -> {
+    // 跳过租户过滤的查询
+});
+```
+
 ## 数据库迁移
 
 Flyway 脚本位于 `platform-backend/backend-web/src/main/resources/db/migration/`，Schema 定义位于 `platform-backend/db/schema/`：
@@ -376,6 +418,49 @@ Flyway 脚本位于 `platform-backend/backend-web/src/main/resources/db/migratio
 ```sql
 CREATE DATABASE RecordPlatform CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 ```
+
+## 定时任务
+
+### 任务清单
+
+| 任务 | Cron / 间隔 | 说明 |
+|------|-------------|------|
+| 文件清理 | `0 0 3 * * ?` | 清理软删除超过 30 天的文件 |
+| Outbox 清理 | `0 0 3 * * ?` | 清理已发送/失败事件 |
+| Saga 补偿 | 30s 间隔 | 处理待补偿的 Saga 事务 |
+| Outbox 发布 | 2s 间隔 | 发布待发送的 Outbox 事件 |
+
+### 配置示例
+
+```yaml
+# 文件清理
+file:
+  cleanup:
+    retention-days: 30      # 保留天数
+    batch-size: 100         # 单次处理数量
+    cron: 0 0 3 * * ?
+
+# Outbox 清理
+outbox:
+  cleanup:
+    sent-retention-days: 7     # 已发送保留 7 天
+    failed-retention-days: 30  # 失败保留 30 天
+    cron: 0 0 3 * * ?
+
+# Saga 补偿
+saga:
+  compensation:
+    max-retries: 5
+    batch-size: 50
+    poll-interval-ms: 30000
+```
+
+### 租户隔离模式
+
+所有定时任务按租户分别执行，确保：
+- 单租户失败不影响其他租户
+- 使用分布式锁防止多实例重复处理
+- 自动恢复租户上下文
 
 ## 环境变量
 
@@ -428,6 +513,25 @@ CREATE DATABASE RecordPlatform CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
   }
 }
 ```
+
+### 健康检查阈值配置
+
+```yaml
+# Outbox 健康阈值
+outbox:
+  health:
+    pending-threshold: 500    # 待发送 >500 → DEGRADED
+    failed-threshold: 20      # 失败 >20 → DOWN
+
+# Saga 健康阈值
+saga:
+  health:
+    running-threshold: 100              # 运行中 >100 → DEGRADED
+    failed-threshold: 10                # 失败 >10 → DOWN
+    pending-compensation-threshold: 50  # 待补偿 >50 → DEGRADED
+```
+
+健康检查使用 `@TenantScope(ignoreIsolation = true)` 进行跨租户统计，返回全局健康状态。
 
 ## API 模块
 
