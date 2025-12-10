@@ -7,11 +7,17 @@ import java.util.function.Supplier;
 
 /**
  * Thread-local tenant context for multi-tenant isolation.
+ * <p>
+ * Supports:
+ * - Tenant ID management via ThreadLocal
+ * - Ignore isolation flag for cross-tenant operations
+ * - Context switching utilities for async tasks and scheduled jobs
  */
 public final class TenantContext {
 
     private static final Logger log = LoggerFactory.getLogger(TenantContext.class);
     private static final ThreadLocal<Long> TENANT_HOLDER = new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> IGNORE_ISOLATION = ThreadLocal.withInitial(() -> false);
     private static final long DEFAULT_TENANT_ID = 0L;
 
     private TenantContext() {}
@@ -38,6 +44,31 @@ public final class TenantContext {
 
     public static void clear() {
         TENANT_HOLDER.remove();
+        IGNORE_ISOLATION.remove();
+    }
+
+    // ========== Ignore Isolation Support ==========
+
+    /**
+     * Set ignore isolation flag. When true, TenantLineInterceptor will skip tenant filtering.
+     * Use this for cross-tenant operations like scheduled cleanup tasks.
+     */
+    public static void setIgnoreIsolation(boolean ignore) {
+        IGNORE_ISOLATION.set(ignore);
+    }
+
+    /**
+     * Check if tenant isolation should be ignored.
+     */
+    public static boolean isIgnoreIsolation() {
+        return Boolean.TRUE.equals(IGNORE_ISOLATION.get());
+    }
+
+    /**
+     * Clear ignore isolation flag.
+     */
+    public static void clearIgnoreIsolation() {
+        IGNORE_ISOLATION.remove();
     }
 
     /**
@@ -92,6 +123,44 @@ public final class TenantContext {
             } else {
                 setTenantId(previous);
             }
+        }
+    }
+
+    // ========== Cross-Tenant Operation Support ==========
+
+    /**
+     * Execute action without tenant isolation (cross-tenant query).
+     * Use this for system-level operations that need to access all tenants' data.
+     * Restores original isolation state after execution.
+     *
+     * @param action the action to execute
+     * @param <T> return type
+     * @return the result of the action
+     */
+    public static <T> T runWithoutIsolation(Supplier<T> action) {
+        boolean previousIgnore = isIgnoreIsolation();
+        try {
+            setIgnoreIsolation(true);
+            return action.get();
+        } finally {
+            setIgnoreIsolation(previousIgnore);
+        }
+    }
+
+    /**
+     * Execute action without tenant isolation (cross-tenant query).
+     * Use this for system-level operations that need to access all tenants' data.
+     * Restores original isolation state after execution.
+     *
+     * @param action the action to execute
+     */
+    public static void runWithoutIsolation(Runnable action) {
+        boolean previousIgnore = isIgnoreIsolation();
+        try {
+            setIgnoreIsolation(true);
+            action.run();
+        } finally {
+            setIgnoreIsolation(previousIgnore);
         }
     }
 }
