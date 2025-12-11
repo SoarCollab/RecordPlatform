@@ -3,7 +3,8 @@ package cn.flying.filter;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.util.Const;
-import cn.flying.common.util.FlowUtils;
+import cn.flying.common.util.DistributedRateLimiter;
+import cn.flying.common.util.DistributedRateLimiter.RateLimitResult;
 import jakarta.annotation.Resource;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -13,77 +14,95 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.annotation.Order;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * 限流控制过滤器
- * 防止用户高频请求接口，借助Redis进行限流
+ * 分布式限流控制过滤器。
+ * 基于 Redis Lua 脚本实现，支持多实例部署。
+ * <p>
+ * 限流策略：
+ * 1. 窗口期内请求次数超过阈值时触发限流
+ * 2. 触发限流后设置封禁 key，封禁期间所有请求被拒绝
+ * 3. 所有操作原子执行，无需本地锁
  */
 @Slf4j
 @Component
 @Order(Const.ORDER_FLOW_LIMIT)
 public class FlowLimitingFilter extends HttpFilter {
 
-    private static final ConcurrentHashMap<String, ReentrantLock> ADDRESS_LOCKS = new ConcurrentHashMap<>();
-
     @Resource
-    StringRedisTemplate template;
-    //指定时间内最大请求次数限制
-    @Value("${spring.web.flow.limit}")
-    int LIMIT;
-    //计数时间周期
-    @Value("${spring.web.flow.period}")
-    int PERIOD;
-    //超出请求限制封禁时间
-    @Value("${spring.web.flow.block}")
-    int BLOCK;
+    private DistributedRateLimiter rateLimiter;
 
-    @Resource
-    FlowUtils utils;
+    /**
+     * 窗口期内最大请求次数
+     */
+    @Value("${spring.web.flow.limit:50}")
+    private int limit;
+
+    /**
+     * 计数窗口期（秒）
+     */
+    @Value("${spring.web.flow.period:10}")
+    private int period;
+
+    /**
+     * 超限后封禁时间（秒）
+     */
+    @Value("${spring.web.flow.block:300}")
+    private int blockTime;
 
     @Override
-    protected void doFilter(HttpServletRequest request, HttpServletResponse response, FilterChain chain) throws IOException, ServletException {
-        String address = request.getRemoteAddr();
-        if (!tryCount(address)) {
-            this.writeBlockMessage(response);
-        } else {
+    protected void doFilter(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
+            throws IOException, ServletException {
+        String clientIp = getClientIp(request);
+
+        RateLimitResult result = rateLimiter.tryAcquireWithBlock(
+                Const.FLOW_LIMIT_COUNTER + clientIp,
+                Const.FLOW_LIMIT_BLOCK + clientIp,
+                limit,
+                period,
+                blockTime
+        );
+
+        if (result == RateLimitResult.ALLOWED) {
             chain.doFilter(request, response);
-        }
-    }
-
-    /**
-     * 尝试对指定IP地址请求计数，如果被限制则无法继续访问
-     * @param address 请求IP地址
-     * @return 是否操作成功
-     */
-    private boolean tryCount(String address) {
-        ReentrantLock lock = ADDRESS_LOCKS.computeIfAbsent(address, k -> new ReentrantLock());
-        lock.lock();
-        try {
-            if(Boolean.TRUE.equals(template.hasKey(Const.FLOW_LIMIT_BLOCK + address))) {
-                return false;
+        } else {
+            if (log.isDebugEnabled()) {
+                log.debug("Rate limited: ip={}, result={}", clientIp, result);
             }
-            String counterKey = Const.FLOW_LIMIT_COUNTER + address;
-            String blockKey = Const.FLOW_LIMIT_BLOCK + address;
-            return utils.limitPeriodCheck(counterKey, blockKey, BLOCK, LIMIT, PERIOD);
-        } finally {
-            lock.unlock();
+            writeBlockMessage(response, result);
         }
     }
 
     /**
-     * 为响应编写拦截内容，提示用户操作频繁
-     * @param response 响应
-     * @throws IOException 可能的异常
+     * 获取客户端真实 IP。
+     * 支持反向代理场景（X-Forwarded-For、X-Real-IP）。
      */
-    private void writeBlockMessage(HttpServletResponse response) throws IOException {
-        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+    private String getClientIp(HttpServletRequest request) {
+        String ip = request.getHeader("X-Forwarded-For");
+        if (ip != null && !ip.isEmpty() && !"unknown".equalsIgnoreCase(ip)) {
+            // 多次代理时取第一个 IP
+            int commaIndex = ip.indexOf(',');
+            return commaIndex > 0 ? ip.substring(0, commaIndex).trim() : ip.trim();
+        }
+
+        ip = request.getHeader("X-Real-IP");
+        if (ip != null && !ip.isEmpty() && !"unknown".equalsIgnoreCase(ip)) {
+            return ip.trim();
+        }
+
+        return request.getRemoteAddr();
+    }
+
+    /**
+     * 写入限流响应。
+     */
+    private void writeBlockMessage(HttpServletResponse response, RateLimitResult result) throws IOException {
+        // HTTP 429 Too Many Requests
+        response.setStatus(429);
         response.setContentType("application/json;charset=utf-8");
         PrintWriter writer = response.getWriter();
         writer.write(Result.error(ResultEnum.PERMISSION_LIMIT).toString());

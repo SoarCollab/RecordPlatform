@@ -13,7 +13,7 @@ import java.util.List;
 /**
  * 分布式限流器。
  * 基于 Redis Lua 脚本实现的滑动窗口限流，支持多实例部署。
- *
+ * <p>
  * 实现原理：
  * 1. 使用 INCR 原子递增计数器
  * 2. 首次访问时设置过期时间（窗口期）
@@ -25,94 +25,91 @@ import java.util.List;
 @RequiredArgsConstructor
 public class DistributedRateLimiter {
 
-    private final StringRedisTemplate redisTemplate;
-
     /**
      * 滑动窗口限流 + 封禁 Lua 脚本。
-     *
+     * <p>
      * KEYS[1]: 计数器 key
      * KEYS[2]: 封禁 key
      * ARGV[1]: 窗口期限制次数
      * ARGV[2]: 窗口期（秒）
      * ARGV[3]: 封禁时间（秒）
-     *
+     * <p>
      * 返回值：
      * 1 = 允许访问
      * 0 = 被限流（在窗口期内超过限制）
      * -1 = 被封禁（已在封禁列表中）
      */
     private static final String RATE_LIMIT_LUA_SCRIPT = """
-        -- Check if already blocked
-        if redis.call('EXISTS', KEYS[2]) == 1 then
-            return -1
-        end
-
-        local limit = tonumber(ARGV[1])
-        local window = tonumber(ARGV[2])
-        local blockTime = tonumber(ARGV[3])
-
-        -- Increment counter
-        local current = redis.call('INCR', KEYS[1])
-
-        -- Set expiration on first request
-        if current == 1 then
-            redis.call('EXPIRE', KEYS[1], window)
-        end
-
-        -- Check if over limit
-        if current > limit then
-            -- Set block key
-            redis.call('SETEX', KEYS[2], blockTime, '1')
-            return 0
-        end
-
-        return 1
-        """;
-
+            -- Check if already blocked
+            if redis.call('EXISTS', KEYS[2]) == 1 then
+                return -1
+            end
+            
+            local limit = tonumber(ARGV[1])
+            local window = tonumber(ARGV[2])
+            local blockTime = tonumber(ARGV[3])
+            
+            -- Increment counter
+            local current = redis.call('INCR', KEYS[1])
+            
+            -- Set expiration on first request
+            if current == 1 then
+                redis.call('EXPIRE', KEYS[1], window)
+            end
+            
+            -- Check if over limit
+            if current > limit then
+                -- Set block key
+                redis.call('SETEX', KEYS[2], blockTime, '1')
+                return 0
+            end
+            
+            return 1
+            """;
     /**
      * 简单限流 Lua 脚本（无封禁）。
-     *
+     * <p>
      * KEYS[1]: 计数器 key
      * ARGV[1]: 窗口期限制次数
      * ARGV[2]: 窗口期（秒）
-     *
+     * <p>
      * 返回值：
      * 1 = 允许访问
      * 0 = 被限流
      */
     private static final String SIMPLE_RATE_LIMIT_LUA_SCRIPT = """
-        local key = KEYS[1]
-        local limit = tonumber(ARGV[1])
-        local window = tonumber(ARGV[2])
-
-        local current = redis.call('INCR', key)
-
-        if current == 1 then
-            redis.call('EXPIRE', key, window)
-        end
-
-        if current > limit then
-            return 0
-        end
-
-        return 1
-        """;
-
+            local key = KEYS[1]
+            local limit = tonumber(ARGV[1])
+            local window = tonumber(ARGV[2])
+            
+            local current = redis.call('INCR', key)
+            
+            if current == 1 then
+                redis.call('EXPIRE', key, window)
+            end
+            
+            if current > limit then
+                return 0
+            end
+            
+            return 1
+            """;
+    private final StringRedisTemplate redisTemplate;
     private final RedisScript<Long> rateLimitScript = new DefaultRedisScript<>(RATE_LIMIT_LUA_SCRIPT, Long.class);
     private final RedisScript<Long> simpleRateLimitScript = new DefaultRedisScript<>(SIMPLE_RATE_LIMIT_LUA_SCRIPT, Long.class);
 
     /**
      * 执行限流检查（带封禁）。
      *
-     * @param counterKey 计数器 key
-     * @param blockKey 封禁 key
-     * @param limit 窗口期内最大请求数
+     * @param counterKey    计数器 key
+     * @param blockKey      封禁 key
+     * @param limit         窗口期内最大请求数
      * @param windowSeconds 窗口期（秒）
-     * @param blockSeconds 超限后封禁时间（秒）
+     * @param blockSeconds  超限后封禁时间（秒）
      * @return 限流结果
      */
     public RateLimitResult tryAcquireWithBlock(String counterKey, String blockKey,
-                                                int limit, int windowSeconds, int blockSeconds) {
+                                               int limit, int windowSeconds, int blockSeconds) {
         try {
             List<String> keys = Arrays.asList(counterKey, blockKey);
             Long result = redisTemplate.execute(
@@ -122,11 +119,6 @@ public class DistributedRateLimiter {
                     String.valueOf(windowSeconds),
                     String.valueOf(blockSeconds)
             );
-
-            if (result == null) {
-                log.warn("Rate limit script returned null, allowing request");
-                return RateLimitResult.ALLOWED;
-            }
 
             return switch (result.intValue()) {
                 case 1 -> RateLimitResult.ALLOWED;
@@ -147,8 +139,8 @@ public class DistributedRateLimiter {
     /**
      * 执行简单限流检查（无封禁）。
      *
-     * @param counterKey 计数器 key
-     * @param limit 窗口期内最大请求数
+     * @param counterKey    计数器 key
+     * @param limit         窗口期内最大请求数
      * @param windowSeconds 窗口期（秒）
      * @return true=允许，false=限流
      */
@@ -162,7 +154,7 @@ public class DistributedRateLimiter {
                     String.valueOf(windowSeconds)
             );
 
-            return result != null && result == 1L;
+            return result == 1L;
         } catch (Exception e) {
             log.error("Rate limit check failed: {}", e.getMessage(), e);
             return true; // Redis 故障时放行
@@ -177,7 +169,7 @@ public class DistributedRateLimiter {
      */
     public boolean isBlocked(String blockKey) {
         try {
-            return Boolean.TRUE.equals(redisTemplate.hasKey(blockKey));
+            return redisTemplate.hasKey(blockKey);
         } catch (Exception e) {
             log.error("Block check failed: {}", e.getMessage(), e);
             return false;
@@ -188,11 +180,17 @@ public class DistributedRateLimiter {
      * 限流结果枚举
      */
     public enum RateLimitResult {
-        /** 允许访问 */
+        /**
+         * 允许访问
+         */
         ALLOWED,
-        /** 被限流（窗口期内超限） */
+        /**
+         * 被限流（窗口期内超限）
+         */
         RATE_LIMITED,
-        /** 被封禁（已在封禁列表中） */
+        /**
+         * 被封禁（已在封禁列表中）
+         */
         BLOCKED
     }
 }
