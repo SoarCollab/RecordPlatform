@@ -59,4 +59,11 @@ public interface FileSagaMapper extends BaseMapper<FileSaga> {
      */
     @Select("SELECT COUNT(*) FROM file_saga WHERE status = 'FAILED' AND retry_count >= #{maxRetries}")
     long countExhaustedRetries(@Param("maxRetries") int maxRetries);
+
+    /**
+     * 仅更新 payload 字段。
+     * 用于在独立事务中持久化补偿步骤的进度。
+     */
+    @Update("UPDATE file_saga SET payload = #{payload}, update_time = NOW() WHERE id = #{id}")
+    int updatePayloadById(@Param("id") Long id, @Param("payload") String payload);
 }
