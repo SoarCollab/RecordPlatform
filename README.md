@@ -102,6 +102,28 @@ Client                Backend               S3兼容存储              Blockcha
 
 补偿策略：指数退避重试（初始 1s，最大 5 次），失败后进入人工处理队列。
 
+### 补偿原子化策略
+
+`SagaCompensationHelper` 使用 `REQUIRES_NEW` 事务传播级别，确保每个补偿步骤独立提交：
+
+**问题背景**：
+- 外部调用（如 MinIO 删除）成功后，若后续事务回滚，状态会不一致
+- 重试时无法判断哪些步骤已完成
+
+**解决方案**：
+```java
+@Transactional(propagation = Propagation.REQUIRES_NEW)
+public void persistPayloadInNewTransaction(FileSaga saga, String payloadJson) {
+    // 补偿步骤完成后立即在独立事务中持久化状态
+    sagaMapper.updatePayloadById(saga.getId(), payloadJson);
+}
+```
+
+**优势**：
+- 每个补偿步骤完成后立即提交（无依赖于外层事务）
+- 重试时根据持久化的步骤状态跳过已完成操作
+- 即使系统崩溃也能恢复到一致状态
+
 ## 技术栈
 
 | 分类 | 技术 | 版本 |
@@ -273,6 +295,29 @@ public Result<File> getFile(@PathVariable Long id) { ... }
 - `IP`：按 IP 地址限流
 - `API`：全局限流（所有请求共享配额）
 
+### 分布式限流器
+
+基于 Redis Lua 脚本的滑动窗口限流，支持多实例部署：
+
+**两种模式**：
+| 模式 | 方法 | 说明 |
+|------|------|------|
+| 带封禁 | `tryAcquireWithBlock()` | 超限后触发封禁，封禁期间直接拒绝 |
+| 简单限流 | `tryAcquire()` | 仅计数限流，无封禁机制 |
+
+**返回值**：
+- `ALLOWED`：允许访问
+- `RATE_LIMITED`：窗口期内超限（在窗口期内超过限制）
+- `BLOCKED`：已在封禁列表中
+
+**实现原理**：
+1. 使用 `INCR` 原子递增计数器
+2. 首次访问时设置过期时间（窗口期）
+3. 超过阈值后设置封禁 key
+4. 所有操作在单个 Lua 脚本中原子执行
+
+**容错策略**：Redis 故障时自动放行，避免服务不可用。
+
 ### ID 混淆
 外部 API 使用加密 ID，内部使用雪花 ID。采用无状态 AES 加密，无需 Redis 缓存：
 ```
@@ -293,6 +338,30 @@ public Result<File> getFile(@PathVariable Long id) { ... }
 密文 (42 bytes): [SIV:16][AES-CTR(plaintext):16][HMAC:10]
 输出: prefix + Base62(密文) ≈ 40 chars
 ```
+
+### HTTPS 强制
+
+生产环境自动将 HTTP 请求 301 重定向到 HTTPS：
+
+**配置项**：
+```yaml
+server:
+  port: 443
+  ssl:
+    enabled: true
+    key-store: classpath:keystore.p12
+    key-store-type: PKCS12
+
+security:
+  require-ssl: true           # 启用 HTTPS 强制
+  http-redirect-port: 80      # HTTP 监听端口
+```
+
+**实现方式**：
+- 额外创建 HTTP Connector 监听 80 端口
+- 配置 Security Constraint 强制 CONFIDENTIAL 传输
+- 所有 HTTP 请求自动 301 重定向到 HTTPS
+- 仅在 `prod` Profile 且 `security.require-ssl=true` 时激活
 
 ### 文件加密策略
 分片文件加密支持两种算法，可通过配置切换：
@@ -475,6 +544,8 @@ saga:
 | RabbitMQ | `RABBITMQ_ADDRESSES`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD` | 消息队列 |
 | 安全 | `JWT_KEY` | JWT 签名 + ID 加密密钥派生（至少 32 字符） |
 | 区块链 | `FISCO_PEER_ADDRESS`, `FISCO_STORAGE_CONTRACT`, `FISCO_SHARING_CONTRACT` | 合约配置 |
+| SSL | `SERVER_SSL_KEY_STORE`, `SERVER_SSL_KEY_STORE_PASSWORD` | HTTPS 证书配置（生产环境） |
+| SSL | `SECURITY_REQUIRE_SSL`, `SECURITY_HTTP_REDIRECT_PORT` | HTTPS 强制和重定向端口 |
 
 > 注：`ID_SECURITY_KEY` 在 v2.0 后不再需要，ID 加密密钥从 `JWT_KEY` 自动派生
 
@@ -683,6 +754,20 @@ A: v2.0 不再支持无版本头的旧格式文件。如需迁移旧数据，需
 
 **Q: 如何选择加密算法**
 A: 如果服务器有 AES-NI 指令集支持，推荐 `aes-gcm`；容器/ARM 环境推荐 `chacha20`。可设置 `algorithm: auto` + `benchmark-on-startup: true` 让系统自动选择。
+
+## 系统演进状态
+
+| 阶段 | 状态 | 完成内容 |
+|------|------|---------|
+| P0 | ✅ | Bug 修复、CORS 安全加固、大文件上传超时优化 |
+| P1 | ✅ | HTTPS 强制、分布式流控改造、定时任务分布式锁、Saga 补偿原子化 |
+| P2 | ✅ | SkyWalking Agent 部署、健康检查指标补全、结构化日志标准化 |
+| P3 | ✅ | 存储路径租户隔离、Redis Key 租户隔离、Dubbo 租户传播 |
+| P4 | 🔄 | API 版本化、区块链 HA、智能合约优化、CQRS/虚拟线程 |
+
+**系统成熟度**：`8.0/10` - 基础架构完善，生产环境就绪，进入长期优化阶段
+
+详细演进规划参见 [EVOLUTION_PLAN.md](./EVOLUTION_PLAN.md)
 
 ## 许可证
 
