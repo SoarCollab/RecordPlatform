@@ -2,17 +2,17 @@ package cn.flying.service.saga;
 
 import cn.flying.api.utils.ResultUtils;
 import cn.flying.common.constant.FileUploadStatus;
-import cn.flying.common.exception.GeneralException;
 import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
 import cn.flying.common.lock.DistributedLock;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.JsonConverter;
+import cn.flying.dao.dto.File;
 import cn.flying.dao.entity.FileSaga;
 import cn.flying.dao.entity.FileSagaStatus;
 import cn.flying.dao.entity.FileSagaStep;
-import cn.flying.dao.mapper.FileSagaMapper;
-import cn.flying.dao.dto.File;
 import cn.flying.dao.mapper.FileMapper;
+import cn.flying.dao.mapper.FileSagaMapper;
 import cn.flying.dao.mapper.TenantMapper;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.request.StoreFileRequest;
@@ -21,7 +21,9 @@ import cn.flying.service.monitor.SagaMetrics;
 import cn.flying.service.outbox.OutboxService;
 import cn.flying.service.remote.FileRemoteClient;
 import io.micrometer.core.instrument.Timer;
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -45,24 +47,21 @@ import java.util.*;
 @RequiredArgsConstructor
 public class FileSagaOrchestrator {
 
+    private static final String COMP_STEP_MINIO = "MINIO_DELETED";
+    private static final String COMP_STEP_DB = "DB_ROLLBACK";
     private final FileSagaMapper sagaMapper;
     private final FileRemoteClient fileRemoteClient;
     private final OutboxService outboxService;
     private final FileMapper fileMapper;
     private final SagaMetrics sagaMetrics;
     private final TenantMapper tenantMapper;
-
+    private final SagaCompensationHelper compensationHelper;
     @Value("${saga.compensation.max-retries:5}")
     private int maxCompensationRetries;
-
     @Value("${saga.compensation.batch-size:50}")
     private int compensationBatchSize;
-
     @Value("${saga.dead-letter.enabled:true}")
     private boolean deadLetterEnabled;
-
-    private static final String COMP_STEP_MINIO = "MINIO_DELETED";
-    private static final String COMP_STEP_DB = "DB_ROLLBACK";
 
     /**
      * 执行文件上传 Saga。
@@ -92,91 +91,6 @@ public class FileSagaOrchestrator {
         } finally {
             sagaMetrics.stopSagaTimer(timerSample);
         }
-    }
-
-    /**
-     * 定时处理待补偿重试的 Saga。
-     * 使用分布式锁防止多实例重复执行。
-     * 按租户分别处理，确保多租户隔离。
-     */
-    @Scheduled(fixedDelayString = "${saga.compensation.poll-interval-ms:30000}")
-    @DistributedLock(key = "saga:compensation:retry", leaseTime = 300)
-    public void processRetriableSagas() {
-        // 获取所有活跃租户
-        List<Long> activeTenantIds = tenantMapper.selectActiveTenantIds();
-        if (activeTenantIds == null || activeTenantIds.isEmpty()) {
-            return;
-        }
-
-        for (Long tenantId : activeTenantIds) {
-            try {
-                TenantContext.runWithTenant(tenantId, () -> processRetriableSagasForTenant(tenantId));
-            } catch (Exception e) {
-                log.error("租户 {} Saga 补偿处理失败: {}", tenantId, e.getMessage(), e);
-            }
-        }
-    }
-
-    /**
-     * 处理指定租户的待补偿 Saga
-     */
-    private void processRetriableSagasForTenant(Long tenantId) {
-        List<FileSaga> pendingSagas = sagaMapper.selectPendingCompensation(tenantId, compensationBatchSize);
-        if (pendingSagas.isEmpty()) {
-            return;
-        }
-
-        log.info("租户 {} 发现 {} 个待重试补偿的 Saga", tenantId, pendingSagas.size());
-
-        for (FileSaga saga : pendingSagas) {
-            if (!saga.isRetryDue()) {
-                continue;
-            }
-
-            try {
-                retryCompensation(saga);
-            } catch (Exception e) {
-                log.error("租户 {} Saga 补偿重试失败: id={}", tenantId, saga.getId(), e);
-            }
-        }
-    }
-
-    /**
-     * 重试单个 Saga 的补偿操作
-     */
-    @Transactional(rollbackFor = Exception.class)
-    public void retryCompensation(FileSaga saga) {
-        Timer.Sample timerSample = sagaMetrics.startCompensationTimer();
-        log.info("开始重试 Saga 补偿: id={}, retryCount={}", saga.getId(), saga.getRetryCount());
-
-        saga.markStatus(FileSagaStatus.COMPENSATING);
-        sagaMapper.updateById(saga);
-
-        try {
-            compensate(saga, loadPayloadContext(saga));
-            saga.markStatus(FileSagaStatus.COMPENSATED);
-            sagaMetrics.recordSagaCompensated();
-            log.info("Saga 补偿成功: id={}", saga.getId());
-        } catch (Exception e) {
-            saga.recordError(e);
-
-            if (saga.isMaxRetriesExceeded(maxCompensationRetries)) {
-                saga.markStatus(FileSagaStatus.FAILED);
-                sagaMetrics.recordSagaFailed();
-                log.error("Saga 补偿超过最大重试次数，标记为失败: id={}, retryCount={}",
-                        saga.getId(), saga.getRetryCount());
-                // 发布死信事件，便于人工介入处理
-                publishDeadLetterEvent(saga, e);
-            } else {
-                saga.scheduleNextRetry()
-                    .markStatus(FileSagaStatus.PENDING_COMPENSATION);
-                log.warn("Saga 补偿失败，安排下次重试: id={}, nextRetryAt={}",
-                        saga.getId(), saga.getNextRetryAt());
-            }
-        } finally {
-            sagaMetrics.stopCompensationTimer(timerSample);
-        }
-        sagaMapper.updateById(saga);
     }
 
     private FileSaga startOrResumeSaga(FileUploadCommand cmd) {
@@ -252,7 +166,7 @@ public class FileSagaOrchestrator {
     }
 
     private StoreFileResponse executeBlockchainStore(FileSaga saga, FileUploadCommand cmd,
-                                                 Map<String, String> storedPaths) {
+                                                     Map<String, String> storedPaths) {
         saga.advanceTo(FileSagaStep.CHAIN_STORING);
         sagaMapper.updateById(saga);
 
@@ -274,12 +188,6 @@ public class FileSagaOrchestrator {
         return res;
     }
 
-    private void completeSaga(FileSaga saga) {
-        saga.advanceTo(FileSagaStep.COMPLETED)
-            .markStatus(FileSagaStatus.SUCCEEDED);
-        sagaMapper.updateById(saga);
-    }
-
     private void publishSuccessEvent(FileSaga saga, FileUploadCommand cmd, StoreFileResponse chainResult) {
         Map<String, Object> eventData = new HashMap<>();
         eventData.put("userId", cmd.getUserId());
@@ -290,6 +198,12 @@ public class FileSagaOrchestrator {
 
         outboxService.appendEvent("FILE", saga.getFileId(), "file.stored",
                 JsonConverter.toJson(eventData));
+    }
+
+    private void completeSaga(FileSaga saga) {
+        saga.advanceTo(FileSagaStep.COMPLETED)
+                .markStatus(FileSagaStatus.SUCCEEDED);
+        sagaMapper.updateById(saga);
     }
 
     private void handleFailure(FileSaga saga, FileUploadCommand cmd, Exception ex) {
@@ -303,9 +217,32 @@ public class FileSagaOrchestrator {
             log.error("补偿失败: saga={}", saga.getId(), compEx);
             // 使用指数退避安排下次重试
             saga.scheduleNextRetry()
-                .markStatus(FileSagaStatus.PENDING_COMPENSATION);
+                    .markStatus(FileSagaStatus.PENDING_COMPENSATION);
             log.info("安排补偿重试: id={}, nextRetryAt={}", saga.getId(), saga.getNextRetryAt());
         }
+        sagaMapper.updateById(saga);
+    }
+
+    private SagaPayloadContext loadPayloadContext(FileSaga saga) {
+        String payloadJson = saga.getPayload();
+        SagaPayloadContext context = null;
+        if (payloadJson != null && !payloadJson.isBlank()) {
+            context = JsonConverter.parse(payloadJson, SagaPayloadContext.class);
+        }
+        if (context == null) {
+            context = new SagaPayloadContext();
+        }
+        if (context.getStoredPaths() == null) {
+            context.setStoredPaths(new LinkedHashMap<>());
+        }
+        if (context.getCompensatedSteps() == null) {
+            context.setCompensatedSteps(new HashSet<>());
+        }
+        return context;
+    }
+
+    private void persistPayload(FileSaga saga, SagaPayloadContext context) {
+        saga.setPayload(JsonConverter.toJsonWithPretty(context));
         sagaMapper.updateById(saga);
     }
 
@@ -330,7 +267,9 @@ public class FileSagaOrchestrator {
     }
 
     /**
-     * 补偿 MinIO 上传
+     * 补偿 MinIO 上传。
+     * 外部调用成功后使用独立事务持久化状态，确保即使后续操作失败，
+     * MinIO 补偿完成的状态也不会丢失。
      */
     private boolean compensateMinioUpload(FileSaga saga, SagaPayloadContext context) {
         if (context.isStepDone(COMP_STEP_MINIO)) {
@@ -351,29 +290,27 @@ public class FileSagaOrchestrator {
         log.info("开始补偿 MinIO 上传: sagaId={}, 文件数量={}", saga.getId(), storedPaths.size());
 
         Result<Boolean> result = fileRemoteClient.deleteStorageFile(storedPaths);
-        if (ResultUtils.isSuccess(result)) {
-            log.info("MinIO 补偿完成: sagaId={}", saga.getId());
+        boolean success = ResultUtils.isSuccess(result);
+        boolean fileNotExist = result != null && result.getCode() == ResultEnum.FILE_NOT_EXIST.getCode();
+
+        if (success || fileNotExist) {
+            // 外部调用成功，立即在独立事务中持久化补偿步骤完成状态
+            // 即使后续 DB 补偿失败事务回滚，此状态也已持久化
             context.markStepDone(COMP_STEP_MINIO);
-            persistPayload(saga, context);
+            String payloadJson = JsonConverter.toJsonWithPretty(context);
+            compensationHelper.persistPayloadInNewTransaction(saga, payloadJson);
+            log.info("MinIO 补偿完成并已持久化: sagaId={}", saga.getId());
             return true;
         } else {
-            // 区分"文件已不存在"（幂等成功）和真正的删除失败
-            log.warn("MinIO 补偿结果: sagaId={}, result={}", saga.getId(),
+            log.warn("MinIO 补偿失败: sagaId={}, result={}", saga.getId(),
                     result != null ? result.getCode() + ":" + result.getMessage() : "null");
-            // 如果是文件不存在的错误，视为补偿成功（幂等）
-            if (result != null && result.getCode() == ResultEnum.FILE_NOT_EXIST.getCode()) {
-                context.markStepDone(COMP_STEP_MINIO);
-                persistPayload(saga, context);
-                return true;
-            }
             return false;
         }
     }
 
     /**
-     * 补偿数据库状态（如果需要）
-     * 当前场景下数据库状态由 Saga 表自身管理，无需额外补偿
-     * 此方法预留用于扩展，如需回滚业务表数据时使用
+     * 补偿数据库状态。
+     * 使用独立事务持久化步骤完成状态，确保补偿进度不会因事务回滚丢失。
      */
     private boolean compensateDatabaseState(FileSaga saga, SagaPayloadContext context) {
         if (context.isStepDone(COMP_STEP_DB)) {
@@ -384,7 +321,8 @@ public class FileSagaOrchestrator {
         if (saga.getFileId() == null) {
             log.debug("Saga 未关联业务文件记录，跳过数据库补偿: sagaId={}", saga.getId());
             context.markStepDone(COMP_STEP_DB);
-            persistPayload(saga, context);
+            String payloadJson = JsonConverter.toJsonWithPretty(context);
+            compensationHelper.persistPayloadInNewTransaction(saga, payloadJson);
             return true;
         }
 
@@ -396,12 +334,112 @@ public class FileSagaOrchestrator {
                     .setTransactionHash(null);
             int updated = fileMapper.updateById(file);
             log.info("数据库补偿结果: sagaId={}, fileId={}, updated={}", saga.getId(), saga.getFileId(), updated);
+
+            // 数据库补偿成功，在独立事务中持久化步骤完成状态
             context.markStepDone(COMP_STEP_DB);
-            persistPayload(saga, context);
+            String payloadJson = JsonConverter.toJsonWithPretty(context);
+            compensationHelper.persistPayloadInNewTransaction(saga, payloadJson);
             return true;
         } catch (Exception e) {
             log.error("数据库状态补偿失败: sagaId={}, fileId={}, error={}", saga.getId(), saga.getFileId(), e.getMessage(), e);
             return false;
+        }
+    }
+
+    /**
+     * 定时处理待补偿重试的 Saga。
+     * 使用分布式锁防止多实例重复执行。
+     * 按租户分别处理，确保多租户隔离。
+     */
+    @Scheduled(fixedDelayString = "${saga.compensation.poll-interval-ms:30000}")
+    @DistributedLock(key = "saga:compensation:retry", leaseTime = 300)
+    public void processRetriableSagas() {
+        // 获取所有活跃租户
+        List<Long> activeTenantIds = tenantMapper.selectActiveTenantIds();
+        if (activeTenantIds == null || activeTenantIds.isEmpty()) {
+            return;
+        }
+
+        for (Long tenantId : activeTenantIds) {
+            try {
+                TenantContext.runWithTenant(tenantId, () -> processRetriableSagasForTenant(tenantId));
+            } catch (Exception e) {
+                log.error("租户 {} Saga 补偿处理失败: {}", tenantId, e.getMessage(), e);
+            }
+        }
+    }
+
+    /**
+     * 处理指定租户的待补偿 Saga
+     */
+    private void processRetriableSagasForTenant(Long tenantId) {
+        List<FileSaga> pendingSagas = sagaMapper.selectPendingCompensation(tenantId, compensationBatchSize);
+        if (pendingSagas.isEmpty()) {
+            return;
+        }
+
+        log.info("租户 {} 发现 {} 个待重试补偿的 Saga", tenantId, pendingSagas.size());
+
+        for (FileSaga saga : pendingSagas) {
+            if (!saga.isRetryDue()) {
+                continue;
+            }
+
+            try {
+                retryCompensation(saga);
+            } catch (Exception e) {
+                log.error("租户 {} Saga 补偿重试失败: id={}", tenantId, saga.getId(), e);
+            }
+        }
+    }
+
+    /**
+     * 重试单个 Saga 的补偿操作。
+     * 不使用外层事务，因为：
+     * 1. 外部调用（MinIO 删除）不受事务管理
+     * 2. 每个补偿步骤完成后使用独立事务 (REQUIRES_NEW) 持久化状态
+     * 3. 避免长事务导致的锁竞争和连接占用
+     */
+    public void retryCompensation(FileSaga saga) {
+        Timer.Sample timerSample = sagaMetrics.startCompensationTimer();
+        log.info("开始重试 Saga 补偿: id={}, retryCount={}", saga.getId(), saga.getRetryCount());
+
+        // 1. 先更新状态为 COMPENSATING（独立事务）
+        saga.markStatus(FileSagaStatus.COMPENSATING);
+        compensationHelper.updateSagaStatusInNewTransaction(saga);
+
+        try {
+            // 2. 执行补偿操作（每个步骤完成后独立持久化）
+            compensate(saga, loadPayloadContext(saga));
+
+            // 3. 补偿成功，更新最终状态
+            saga.markStatus(FileSagaStatus.COMPENSATED);
+            compensationHelper.updateSagaStatusInNewTransaction(saga);
+
+            sagaMetrics.recordSagaCompensated();
+            log.info("Saga 补偿成功: id={}", saga.getId());
+
+        } catch (Exception e) {
+            saga.recordError(e);
+
+            if (saga.isMaxRetriesExceeded(maxCompensationRetries)) {
+                saga.markStatus(FileSagaStatus.FAILED);
+                sagaMetrics.recordSagaFailed();
+                log.error("Saga 补偿超过最大重试次数，标记为失败: id={}, retryCount={}",
+                        saga.getId(), saga.getRetryCount());
+                publishDeadLetterEvent(saga, e);
+            } else {
+                saga.scheduleNextRetry()
+                        .markStatus(FileSagaStatus.PENDING_COMPENSATION);
+                log.warn("Saga 补偿失败，安排下次重试: id={}, nextRetryAt={}",
+                        saga.getId(), saga.getNextRetryAt());
+            }
+
+            // 更新失败/重试状态
+            compensationHelper.updateSagaStatusInNewTransaction(saga);
+
+        } finally {
+            sagaMetrics.stopCompensationTimer(timerSample);
         }
     }
 
@@ -436,48 +474,11 @@ public class FileSagaOrchestrator {
         }
     }
 
-    private SagaPayloadContext loadPayloadContext(FileSaga saga) {
-        String payloadJson = saga.getPayload();
-        SagaPayloadContext context = null;
-        if (payloadJson != null && !payloadJson.isBlank()) {
-            context = JsonConverter.parse(payloadJson, SagaPayloadContext.class);
-        }
-        if (context == null) {
-            context = new SagaPayloadContext();
-        }
-        if (context.getStoredPaths() == null) {
-            context.setStoredPaths(new LinkedHashMap<>());
-        }
-        if (context.getCompensatedSteps() == null) {
-            context.setCompensatedSteps(new HashSet<>());
-        }
-        return context;
-    }
-
-    private void persistPayload(FileSaga saga, SagaPayloadContext context) {
-        saga.setPayload(JsonConverter.toJsonWithPretty(context));
-        sagaMapper.updateById(saga);
-    }
-
+    @Setter
+    @Getter
     private static class SagaPayloadContext {
         private Map<String, String> storedPaths;
         private Set<String> compensatedSteps;
-
-        public Map<String, String> getStoredPaths() {
-            return storedPaths;
-        }
-
-        public void setStoredPaths(Map<String, String> storedPaths) {
-            this.storedPaths = storedPaths;
-        }
-
-        public Set<String> getCompensatedSteps() {
-            return compensatedSteps;
-        }
-
-        public void setCompensatedSteps(Set<String> compensatedSteps) {
-            this.compensatedSteps = compensatedSteps;
-        }
 
         public boolean isStepDone(String step) {
             return compensatedSteps != null && compensatedSteps.contains(step);

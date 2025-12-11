@@ -12,7 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
  * Saga 补偿步骤持久化辅助服务。
  * 使用 REQUIRES_NEW 传播级别确保每个补偿步骤的状态能立即独立提交，
  * 解决外部调用（如 MinIO 删除）成功但后续事务回滚导致的状态不一致问题。
- *
+ * <p>
  * 原子化策略：
  * 1. 每个补偿步骤完成后立即在独立事务中持久化
  * 2. 外部调用前记录"开始"状态，成功后记录"完成"状态
@@ -29,7 +29,7 @@ public class SagaCompensationHelper {
      * 在独立事务中持久化 Saga 的 payload。
      * 无论外层事务是否回滚，此操作都会提交。
      *
-     * @param saga Saga 实体
+     * @param saga        Saga 实体
      * @param payloadJson 序列化后的 payload JSON
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
@@ -55,7 +55,7 @@ public class SagaCompensationHelper {
      * 在独立事务中记录补偿步骤完成。
      * 包含 payload 和 Saga 主表的更新。
      *
-     * @param saga Saga 实体
+     * @param saga        Saga 实体
      * @param payloadJson 序列化后的 payload JSON
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)

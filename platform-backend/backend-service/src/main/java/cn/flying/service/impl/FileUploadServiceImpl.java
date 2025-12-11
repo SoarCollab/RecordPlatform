@@ -3,13 +3,15 @@ package cn.flying.service.impl;
 import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.event.FileStorageEvent;
-import cn.flying.common.util.*;
-import cn.flying.service.assistant.FileUploadRedisStateManager;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.exception.RetryableException;
+import cn.flying.common.util.CommonUtils;
+import cn.flying.common.util.JsonConverter;
+import cn.flying.common.util.UidEncoder;
 import cn.flying.dao.vo.file.*;
 import cn.flying.service.FileService;
 import cn.flying.service.FileUploadService;
+import cn.flying.service.assistant.FileUploadRedisStateManager;
 import cn.flying.service.encryption.*;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -47,13 +49,9 @@ import java.util.stream.Stream;
 @Transactional(rollbackFor = Exception.class)
 public class FileUploadServiceImpl implements FileUploadService {
 
-    @Resource
-    private ApplicationEventPublisher eventPublisher;
-
     // --- 目录常量 ---
     private static final String UPLOAD_BASE_DIR = "uploads"; // 原始分片存储基础目录
     private static final String PROCESSED_BASE_DIR = "processed"; // 加密后分片存储基础目录
-
     // --- 文件处理常量 ---
     private static final int BUFFER_SIZE = 8 * 1024 * 1024; // 8MB I/O 缓冲区大小
     private static final long MAX_FILE_SIZE_BYTES = 4096 * 1024 * 1024L; // 4GB 最大文件大小限制
@@ -62,7 +60,6 @@ public class FileUploadServiceImpl implements FileUploadService {
     private static final String HASH_ALGORITHM = "SHA-256"; // 哈希算法
     private static final String HASH_SEPARATOR = "\n--HASH--\n"; // 哈希值前的分隔符
     private static final String KEY_SEPARATOR = "\n--NEXT_KEY--\n"; // 下一个密钥前的分隔符
-
     // --- 允许的文件类型 ---
     private static final Set<String> ALLOWED_FILE_EXTENSIONS = Set.of(
             "jpg", "jpeg", "png", "gif", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "zip", "rar", "7z"
@@ -78,11 +75,11 @@ public class FileUploadServiceImpl implements FileUploadService {
             Map.entry("text/plain", "txt"), Map.entry("application/zip", "zip"),
             Map.entry("application/x-rar-compressed", "rar"), Map.entry("application/x-7z-compressed", "7z")
     );
-
     // --- 线程池配置 ---
     private final ExecutorService fileProcessingExecutor;
     private final ScheduledExecutorService cleanupScheduler = Executors.newSingleThreadScheduledExecutor();
-
+    @Resource
+    private ApplicationEventPublisher eventPublisher;
     // Redis状态管理器
     @Resource
     private FileUploadRedisStateManager redisStateManager;
@@ -102,6 +99,7 @@ public class FileUploadServiceImpl implements FileUploadService {
                 new LinkedBlockingQueue<>(2000),
                 new ThreadFactory() {
                     private final AtomicInteger counter = new AtomicInteger(0);
+
                     @Override
                     public Thread newThread(@NotNull Runnable r) {
                         Thread t = new Thread(r, "文件处理器-" + counter.incrementAndGet());
@@ -127,6 +125,162 @@ public class FileUploadServiceImpl implements FileUploadService {
         // 启动定时清理任务
         cleanupScheduler.scheduleAtFixedRate(this::cleanupExpiredUploadSessions, 1, 1, TimeUnit.HOURS);
         log.info("The scheduled cleaning task has been initiated...");
+    }
+
+    /**
+     * 定时任务清理过期的上传会话
+     * 改为每6小时执行一次，提高清理效率
+     */
+    @Scheduled(fixedDelay = 6 * 60 * 60 * 1000, initialDelay = 60 * 60 * 1000) // 每6小时执行一次（启动后1小时执行）
+    public void cleanupExpiredUploadSessions() {
+        long now = System.currentTimeMillis();
+        long timeoutMillis = 12 * 60 * 60 * 1000L; // 12 小时
+        long pausedTimeoutMillis = 24 * 60 * 60 * 1000L; // 暂停会话24小时超时
+
+        log.info("-------------开始执行定时清理任务，查找超过 {} 小时未活动的上传会话----------------",
+                TimeUnit.MILLISECONDS.toHours(timeoutMillis));
+
+        Set<String> activeSessionIds = redisStateManager.getAllActiveSessionIds();
+        List<String> expiredSessionIds = new ArrayList<>();
+        List<String> pausedExpiredSessionIds = new ArrayList<>();
+
+        for (String clientId : activeSessionIds) {
+            FileUploadState state = redisStateManager.getState(clientId);
+            if (state != null) {
+                long inactiveDuration = now - state.getLastActivityTime();
+                boolean isPaused = redisStateManager.isSessionPaused(clientId);
+
+                // 暂停会话使用更长的超时时间
+                long currentTimeoutMillis = isPaused ? pausedTimeoutMillis : timeoutMillis;
+
+                if (inactiveDuration >= currentTimeoutMillis) {
+                    if (isPaused) {
+                        pausedExpiredSessionIds.add(clientId);
+                        log.warn("发现过期暂停会话: 客户端ID={}, 文件名={}, 上次活动时间={}, 暂停时长={}小时",
+                                clientId, state.getFileName(),
+                                Instant.ofEpochMilli(state.getLastActivityTime()),
+                                TimeUnit.MILLISECONDS.toHours(inactiveDuration));
+                    } else {
+                        expiredSessionIds.add(clientId);
+                        log.warn("发现过期活跃会话: 客户端ID={}, 文件名={}, 上次活动时间={}, 未活动时长={}小时",
+                                clientId, state.getFileName(),
+                                Instant.ofEpochMilli(state.getLastActivityTime()),
+                                TimeUnit.MILLISECONDS.toHours(inactiveDuration));
+                    }
+                }
+            } else {
+                // 处理状态丢失但仍在活跃集合中的会话
+                expiredSessionIds.add(clientId);
+                log.warn("发现状态丢失的会话ID: {}", clientId);
+            }
+        }
+
+        // 使用通用的SUID，避免依赖MDC
+        int cleanedCount = 0;
+        for (String clientId : expiredSessionIds) {
+            if (cleanupUploadSessionInternal("", clientId)) { // 传空SUID，让内部方法处理
+                cleanedCount++;
+            }
+        }
+        for (String clientId : pausedExpiredSessionIds) {
+            if (cleanupUploadSessionInternal("", clientId)) {
+                cleanedCount++;
+            }
+        }
+
+        if (cleanedCount > 0) {
+            log.info("定时清理完成，共清理 {} 个过期上传会话（活跃: {}, 暂停: {}）。",
+                    cleanedCount, expiredSessionIds.size(), pausedExpiredSessionIds.size());
+        } else {
+            log.info("定时清理完成，未发现需要清理的过期上传会话。");
+        }
+    }
+
+    // === Service 方法实现 ===
+
+    /**
+     * 内部方法清理指定 clientId 的上传状态和相关文件目录
+     * 支持处理SUID为空的情况（用于定时清理任务）
+     */
+    private boolean cleanupUploadSessionInternal(String SUID, String clientId) {
+        FileUploadState state = redisStateManager.getState(clientId);
+        if (state != null) {
+            log.info("--------------------开始清理会话 {} 的相关文件-----------------", clientId);
+
+            // 如果SUID为空，跳过文件系统清理，仅清理Redis状态
+            final String actualSUID = (SUID == null || SUID.isEmpty()) ? "" : SUID;
+
+            if (actualSUID.isEmpty()) {
+                // 对于定时清理任务，我们无法获取准确的SUID，但仍然可以清理Redis状态
+                log.warn("SUID为空，跳过文件系统清理，仅清理Redis状态: 客户端ID={}", clientId);
+            } else {
+                // 使用线程池异步清理文件，避免阻塞当前线程（特别是定时任务线程）
+                fileProcessingExecutor.submit(() -> {
+                    // 清理原始上传目录
+                    Path uploadDir = getUploadSessionDir(actualSUID, clientId);
+                    cleanupDirectory(uploadDir);
+                    // 清理处理后的目录
+                    Path processedDir = getProcessedSessionDir(actualSUID, clientId);
+                    cleanupDirectory(processedDir);
+                    log.info("会话 {} 文件清理完成。", clientId);
+                });
+            }
+
+            // 从Redis中移除状态（即使SUID为空也要清理Redis）
+            redisStateManager.removeSession(state.getClientId(), actualSUID);
+
+            return true; // 状态已找到并开始清理流程
+        } else {
+            // 尝试从暂停集合中移除，以防状态已丢失但仍在暂停集合中
+            boolean removedFromPaused = redisStateManager.removePausedSession(clientId);
+            if (removedFromPaused) {
+                log.warn("清理会话 {} 时，状态已不存在，但从暂停集合移除成功。", clientId);
+            } else {
+                log.debug("尝试清理会话 {}，但状态已不存在。", clientId);
+            }
+            return false; // 会话状态未找到
+        }
+    }
+
+    // === 路径构建辅助方法 ===
+    private Path getUploadSessionDir(String SUID, String clientId) {
+        return Paths.get(UPLOAD_BASE_DIR, SUID, clientId).toAbsolutePath().normalize();
+    }
+
+    /**
+     * 递归删除目录及其内容
+     */
+    private void cleanupDirectory(Path dirPath) {
+        if (Files.exists(dirPath)) {
+            try (Stream<Path> walk = Files.walk(dirPath)) {
+                walk.sorted(Comparator.reverseOrder())
+                        .forEach(this::tryDelete);
+                log.info("已清理目录: {}", dirPath);
+            } catch (IOException e) {
+                log.error("清理目录时发生错误: {}", dirPath, e);
+            }
+        } else {
+            log.debug("尝试清理目录，但目录不存在: {}", dirPath);
+        }
+    }
+
+    private Path getProcessedSessionDir(String SUID, String clientId) {
+        return Paths.get(PROCESSED_BASE_DIR, SUID, clientId).toAbsolutePath().normalize();
+    }
+
+    /**
+     * 尝试删除路径，记录错误但不抛出
+     */
+    private void tryDelete(Path path) {
+        try {
+            Files.delete(path);
+        } catch (NoSuchFileException e) {
+            // Ignore
+        } catch (DirectoryNotEmptyException e) {
+            log.warn("无法删除非空目录 (可能存在并发访问或延迟): {}", path);
+        } catch (IOException e) {
+            log.error("删除路径失败: {}", path, e);
+        }
     }
 
     @PreDestroy
@@ -160,10 +314,9 @@ public class FileUploadServiceImpl implements FileUploadService {
         log.info("文件上传服务关闭完成。");
     }
 
-    // === Service 方法实现 ===
-
     /**
      * 处理开始上传请求
+     *
      * @throws GeneralException 输入验证失败
      * @throws GeneralException IO 操作失败
      */
@@ -175,7 +328,7 @@ public class FileUploadServiceImpl implements FileUploadService {
         String SUID = UidEncoder.encodeUid(uidStr);
 
         // 如果未提供，则生成一个新的客户端ID（随机生成，作为客户端凭证）
-        if(CommonUtils.isBlank(clientId)){
+        if (CommonUtils.isBlank(clientId)) {
             clientId = UidEncoder.encodeCid(SUID);
         }
         String fileClientKey = fileName + "_" + SUID;
@@ -209,7 +362,7 @@ public class FileUploadServiceImpl implements FileUploadService {
                 return createResumeDto(existingState);
             } else {
                 log.warn("发现旧会话但无法恢复 (状态丢失或文件大小不匹配): 旧客户端ID={}, 文件客户端键={}", existClientId, fileClientKey);
-                if(existingState != null) {
+                if (existingState != null) {
                     cleanupUploadSessionInternal(SUID, existClientId); // 主动清理旧状态
                 }
             }
@@ -218,11 +371,11 @@ public class FileUploadServiceImpl implements FileUploadService {
         // --- 创建新会话 ---
         try {
             FileUploadState newState = new FileUploadState(fileName, fileSize, contentType, clientId, chunkIndex, totalChunks);
-            redisStateManager.saveNewState(newState,SUID);
+            redisStateManager.saveNewState(newState, SUID);
 
             // 确保客户端和会话的目录存在
-            Files.createDirectories(getUploadSessionDir(SUID,clientId));
-            Files.createDirectories(getProcessedSessionDir(SUID,clientId));
+            Files.createDirectories(getUploadSessionDir(SUID, clientId));
+            Files.createDirectories(getProcessedSessionDir(SUID, clientId));
 
             log.info("创建新的上传会话: 客户端ID={}, 文件客户端键={}", SUID, fileClientKey);
             // 返回创建成功的 DTO
@@ -237,6 +390,7 @@ public class FileUploadServiceImpl implements FileUploadService {
 
     /**
      * 处理分片上传
+     *
      * @throws GeneralException 会话不存在
      * @throws GeneralException 上传已暂停
      * @throws GeneralException 输入验证失败
@@ -303,7 +457,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             redisStateManager.addChunkHash(clientId, "chunk_" + chunkNumber, calculatedHashBase64);
 
             // --- 触发异步处理 ---
-            processChunkImmediately(SUID ,state, chunkNumber, chunkPath, calculatedHashBase64);
+            processChunkImmediately(SUID, state, chunkNumber, chunkPath, calculatedHashBase64);
 
             updateUploadProgress(state, "上传分片 " + chunkNumber);
 
@@ -332,13 +486,52 @@ public class FileUploadServiceImpl implements FileUploadService {
         }
     }
 
+
+    // === 私有辅助方法 ===
+
+    /**
+     * 获取上传进度
+     *
+     * @throws GeneralException 会话不存在
+     */
+    public ProgressVO getUploadProgress(String clientId) {
+        FileUploadState state = redisStateManager.getState(clientId);
+        if (state == null) {
+            throw new GeneralException("上传会话不存在: 客户端ID=" + clientId);
+        }
+
+        redisStateManager.updateLastActivityTime(clientId);
+        ProgressInfo progressInfo = calculateProgressInfo(state);
+
+        ProgressVO responseDto = new ProgressVO(progressInfo.totalProgress,
+                progressInfo.uploadProgressPercent, progressInfo.processProgressPercent,
+                progressInfo.uploadedCount, progressInfo.processedCount, progressInfo.totalChunks,
+                clientId
+        );
+
+        log.debug("获取进度成功: 客户端ID={}, 总进度={}%", clientId, progressInfo.totalProgress);
+        return responseDto;
+    }
+
+    /**
+     * 取消上传并清理资源
+     *
+     * @return 如果找到并清理了会话则返回 true，否则返回 false
+     */
+    public boolean cancelUpload(Long userId, String clientId) {
+        String SUID = UidEncoder.encodeUid(String.valueOf(userId));
+        log.info("收到取消上传请求: 客户端ID={}", clientId);
+        return cleanupUploadSessionInternal(SUID, clientId); // 内部方法处理查找和清理
+    }
+
     /**
      * 完成文件上传处理
+     *
      * @throws GeneralException 会话不存在
      * @throws GeneralException 上传未完成（分片未处理完）
      * @throws GeneralException IO 操作失败
      */
-    public void completeUpload(Long userId, String clientId){
+    public void completeUpload(Long userId, String clientId) {
 
         String uidStr = String.valueOf(userId);
         String SUID = UidEncoder.encodeUid(uidStr);
@@ -355,19 +548,19 @@ public class FileUploadServiceImpl implements FileUploadService {
         int expectedChunks = state.getTotalChunks();
         boolean allProcessed = state.getProcessedChunks().size() == expectedChunks;
 
-            if (!allProcessed) {
-                log.warn("请求完成上传时，并非所有分片都已处理: 客户端ID={}, 已处理={}, 总数={}",
-                        clientId, state.getProcessedChunks().size(), expectedChunks);
+        if (!allProcessed) {
+            log.warn("请求完成上传时，并非所有分片都已处理: 客户端ID={}, 已处理={}, 总数={}",
+                    clientId, state.getProcessedChunks().size(), expectedChunks);
 
-                // 使用非阻塞方式等待异步处理完成
-                allProcessed = waitForChunkProcessingCompletionNonBlocking(clientId, expectedChunks);
-                if (!allProcessed) {
-                    log.error("等待超时，仍有分片未处理完成: 客户端ID={}, 已处理={}, 总数={}",
-                             clientId, state.getProcessedChunks().size(), expectedChunks);
-                    throw new RetryableException(ResultEnum.SERVICE_UNAVAILABLE,
-                            Map.of("processed", state.getProcessedChunks().size(), "expected", expectedChunks));
-                }
+            // 使用非阻塞方式等待异步处理完成
+            allProcessed = waitForChunkProcessingCompletionNonBlocking(clientId, expectedChunks);
+            if (!allProcessed) {
+                log.error("等待超时，仍有分片未处理完成: 客户端ID={}, 已处理={}, 总数={}",
+                        clientId, state.getProcessedChunks().size(), expectedChunks);
+                throw new RetryableException(ResultEnum.SERVICE_UNAVAILABLE,
+                        Map.of("processed", state.getProcessedChunks().size(), "expected", expectedChunks));
             }
+        }
 
         try {
             // --- 执行最终步骤 (追加下一个分片的密钥) ---
@@ -407,7 +600,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             // 验证文件数量与哈希数量一致
             if (processedFiles.size() != fileHashes.size()) {
                 log.error("处理后的文件数量({})与哈希值数量({})不匹配: 客户端ID={}, 文件名={}",
-                         processedFiles.size(), fileHashes.size(), clientId, state.getFileName());
+                        processedFiles.size(), fileHashes.size(), clientId, state.getFileName());
                 // 更新文件状态为失败
                 fileService.changeFileStatusByName(userId, state.getFileName(), FileUploadStatus.FAIL.getCode());
                 // 清理Redis状态
@@ -478,9 +671,10 @@ public class FileUploadServiceImpl implements FileUploadService {
 
     /**
      * 暂停上传
+     *
      * @throws GeneralException 会话不存在
      */
-    public void pauseUpload(String clientId){
+    public void pauseUpload(String clientId) {
         FileUploadState state = redisStateManager.getState(clientId);
         if (state == null) {
             throw new GeneralException("上传会话不存在: 客户端ID=" + clientId);
@@ -493,9 +687,10 @@ public class FileUploadServiceImpl implements FileUploadService {
 
     /**
      * 恢复上传
+     *
      * @throws GeneralException 会话不存在
      */
-    public ResumeUploadVO resumeUpload(String clientId){
+    public ResumeUploadVO resumeUpload(String clientId) {
         FileUploadState state = redisStateManager.getState(clientId);
         if (state == null) {
             throw new GeneralException("上传会话不存在: 客户端ID=" + clientId);
@@ -515,20 +710,11 @@ public class FileUploadServiceImpl implements FileUploadService {
     }
 
     /**
-     * 取消上传并清理资源
-     * @return 如果找到并清理了会话则返回 true，否则返回 false
-     */
-    public boolean cancelUpload(Long userId, String clientId) {
-        String SUID = UidEncoder.encodeCid(String.valueOf(userId));
-        log.info("收到取消上传请求: 客户端ID={}", clientId);
-        return cleanupUploadSessionInternal(SUID, clientId); // 内部方法处理查找和清理
-    }
-
-    /**
      * 检查文件上传状态
+     *
      * @throws GeneralException 会话不存在
      */
-    public FileUploadStatusVO checkFileStatus(String clientId){
+    public FileUploadStatusVO checkFileStatus(String clientId) {
         FileUploadState state = redisStateManager.getState(clientId);
         if (state == null) {
             throw new GeneralException("上传会话不存在或会话已被清除: 客户端ID=" + clientId);
@@ -548,41 +734,86 @@ public class FileUploadServiceImpl implements FileUploadService {
         }
 
         FileUploadStatusVO responseDto = new FileUploadStatusVO(
-                state.getFileName(), state.getFileSize(),state.getClientId(),
+                state.getFileName(), state.getFileSize(), state.getClientId(),
                 isPaused, statusCode, progressInfo.totalProgress,
                 new ArrayList<>(state.getProcessedChunks()),
                 progressInfo.processedCount, progressInfo.totalChunks
         );
 
-        log.debug("检查状态成功: 客户端ID={}, 状态={}, 进度={}%",clientId,statusCode, progressInfo.totalProgress);
+        log.debug("检查状态成功: 客户端ID={}, 状态={}, 进度={}%", clientId, statusCode, progressInfo.totalProgress);
         return responseDto;
     }
 
-    /**
-     * 获取上传进度
-     * @throws GeneralException 会话不存在
-     */
-    public ProgressVO getUploadProgress(String clientId){
-        FileUploadState state = redisStateManager.getState(clientId);
-        if (state == null) {
-            throw new GeneralException("上传会话不存在: 客户端ID=" + clientId);
+    private ProgressInfo calculateProgressInfo(FileUploadState state) {
+        int totalChunks = state.getTotalChunks();
+        if (totalChunks == 0) {
+            return new ProgressInfo(0, 0, 0, 100, 100, 100);
         }
+        int uploadedCount = state.getUploadedChunks().size();
+        int processedCount = state.getProcessedChunks().size();
+        int uploadProgressPercent = (int) Math.round((uploadedCount * 100.0) / totalChunks);
+        int processProgressPercent = (int) Math.round((processedCount * 100.0) / totalChunks);
+        int totalProgress = (int) Math.round(uploadProgressPercent * 0.3 + processProgressPercent * 0.7);
+        totalProgress = Math.max(0, Math.min(100, totalProgress));
 
-        redisStateManager.updateLastActivityTime(clientId);
-        ProgressInfo progressInfo = calculateProgressInfo(state);
-
-        ProgressVO responseDto = new ProgressVO(progressInfo.totalProgress,
-                progressInfo.uploadProgressPercent, progressInfo.processProgressPercent,
-                progressInfo.uploadedCount, progressInfo.processedCount, progressInfo.totalChunks,
-                clientId
-        );
-
-        log.debug("获取进度成功: 客户端ID={}, 总进度={}%", clientId, progressInfo.totalProgress);
-        return responseDto;
+        return new ProgressInfo(totalChunks, uploadedCount, processedCount,
+                uploadProgressPercent, processProgressPercent, totalProgress);
     }
 
+    // === 验证辅助方法 ===
+    private boolean isValidFileName(String fileName) {
+        if (fileName == null || fileName.trim().isEmpty()) return false;
+        if (fileName.contains("/") || fileName.contains("\\")) return false;
+        if (containsPotentiallyUnsafeCharacters(fileName)) return false;
+        return SAFE_FILENAME_PATTERN.matcher(fileName).matches();
+    }
 
-    // === 私有辅助方法 ===
+    private boolean isFileTypeAllowed(String fileName, String contentType) {
+        String extension = getFileExtension(fileName);
+        if (contentType != null) {
+            String lowerContentType = contentType.toLowerCase();
+            if (ALLOWED_MIME_TYPES.containsKey(lowerContentType)) {
+                return true;
+            }
+        }
+        return extension != null && ALLOWED_FILE_EXTENSIONS.contains(extension);
+    }
+
+    // 创建 /upload/start 的恢复会话响应 DTO
+    private StartUploadVO createResumeDto(FileUploadState state) {
+        // 注意：恢复时返回的是已 *处理* (processed) 的分片列表，因为客户端需要知道哪些不需要再上传和处理
+        return new StartUploadVO(state.getClientId(),
+                state.getChunkSize(), state.getTotalChunks(), state.getTotalChunks() == 1,
+                new ArrayList<>(state.getProcessedChunks()), // 返回已处理的分片序号列表
+                true // 标记为恢复
+        );
+    }
+
+    // 创建 /upload/start 的新会话响应 DTO
+    private StartUploadVO createNewSessionDto(FileUploadState state) {
+        return new StartUploadVO(
+                state.getClientId(),
+                state.getChunkSize(), state.getTotalChunks(), state.getTotalChunks() == 1,
+                Collections.emptyList(), // 新会话没有已处理的分片
+                false // 标记为非恢复
+        );
+    }
+
+    private boolean containsPotentiallyUnsafeCharacters(String fileName) {
+        for (int i = 0; i < fileName.length(); i++) {
+            char c = fileName.charAt(i);
+            if (Character.isISOControl(c) || c == '\u202E' || c == '\u202B' || c == '\u202F') return true;
+        }
+        if (fileName.endsWith(".") || fileName.endsWith(" ")) return true;
+        String upperName = fileName.toUpperCase();
+        return upperName.matches("^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$");
+    }
+
+    private String getFileExtension(String fileName) {
+        if (fileName == null) return null;
+        int dotIndex = fileName.lastIndexOf('.');
+        return (dotIndex > 0 && dotIndex < fileName.length() - 1) ? fileName.substring(dotIndex + 1).toLowerCase() : null;
+    }
 
     /**
      * 异步处理已上传的分片：对其进行加密，并在末尾附加其原始哈希值。
@@ -593,7 +824,7 @@ public class FileUploadServiceImpl implements FileUploadService {
      * [版本头: 4B] [IV/Nonce: 12B] [加密数据] [认证标签] [--HASH--\n] [hash] [--NEXT_KEY--\n] [key]
      * </pre>
      */
-    private void processChunkImmediately(String SUID,FileUploadState state, int chunkNumber, Path chunkPath, String chunkHashBase64) {
+    private void processChunkImmediately(String SUID, FileUploadState state, int chunkNumber, Path chunkPath, String chunkHashBase64) {
         CompletableFuture.runAsync(() -> {
             String clientId = state.getClientId();
             Path processedChunkPath = getChunkProcessedPath(SUID, clientId, chunkNumber);
@@ -660,7 +891,7 @@ public class FileUploadServiceImpl implements FileUploadService {
     /**
      * 文件处理的最后一步：追加下一个分片的密钥。
      */
-    private void completeFileProcessing(String SUID,FileUploadState state) throws IOException {
+    private void completeFileProcessing(String SUID, FileUploadState state) throws IOException {
         log.info("------------开始最终处理步骤 (追加下一个分片密钥): 客户端ID={}--------------", state.getClientId());
         int totalChunks = state.getTotalChunks();
         Map<Integer, byte[]> keys = redisStateManager.getChunkKeys(state.getClientId());
@@ -669,8 +900,8 @@ public class FileUploadServiceImpl implements FileUploadService {
             log.error("密钥数量 ({}) 少于分片总数 ({}), 客户端ID={}. 无法完成处理。", keys.size(), totalChunks, state.getClientId());
             throw new IOException("无法完成处理：并非所有分片的密钥都可用。");
         }
-        for(int i=0; i < totalChunks; i++){
-            if(keys.get(i) == null){
+        for (int i = 0; i < totalChunks; i++) {
+            if (keys.get(i) == null) {
                 log.error("分片 {} 的密钥丢失 (为 null), 客户端ID={}. 无法完成处理。", i, state.getClientId());
                 throw new IOException("无法完成处理：分片 " + i + " 的密钥丢失。");
             }
@@ -693,7 +924,9 @@ public class FileUploadServiceImpl implements FileUploadService {
         log.info("最终处理步骤 (追加下一个分片密钥) 完成: 客户端ID={}", state.getClientId());
     }
 
-    /** 辅助方法：追加密钥到文件 */
+    /**
+     * 辅助方法：追加密钥到文件
+     */
     private void appendKeyToFile(Path filePath, byte[] keyBytes, int chunkIndex) throws IOException {
         if (Files.exists(filePath)) {
             try {
@@ -716,13 +949,20 @@ public class FileUploadServiceImpl implements FileUploadService {
     /**
      * 非阻塞方式等待分片处理完成
      * 使用 CompletableFuture 和 ScheduledExecutorService
+     * <p>
+     * P0-4 修复：优化超时计算逻辑
+     * - 基础等待时间: 60秒
+     * - 每个分片增加: 3秒 (考虑加密处理时间)
+     * - 最大等待时间: 1800秒 (30分钟，支持大文件)
      *
-     * @param clientId 客户端ID
+     * @param clientId       客户端ID
      * @param expectedChunks 期望的分片总数
      * @return 是否所有分片都已处理完成
      */
     private boolean waitForChunkProcessingCompletionNonBlocking(String clientId, int expectedChunks) {
-        final int maxWaitTimeSeconds = Math.min(300, Math.max(60, expectedChunks * 10));
+        // P0-4 修复：优化超时计算
+        // 基础60秒 + 每分片3秒，最大30分钟
+        final int maxWaitTimeSeconds = Math.min(1800, 60 + expectedChunks * 3);
         final int checkIntervalMs = 500; // 检查间隔：500毫秒
 
         log.info("--------------开始非阻塞等待分片处理完成: 客户端ID={}, 期望分片数={}, 最大等待时间={}秒--------------",
@@ -831,148 +1071,8 @@ public class FileUploadServiceImpl implements FileUploadService {
     }
 
     /**
-     * 定时任务清理过期的上传会话
-     * 改为每6小时执行一次，提高清理效率
+     * 收集处理后的文件（按分片索引顺序）
      */
-    @Scheduled(fixedDelay = 6 * 60 * 60 * 1000, initialDelay = 60 * 60 * 1000) // 每6小时执行一次（启动后1小时执行）
-    public void cleanupExpiredUploadSessions() {
-        long now = System.currentTimeMillis();
-        long timeoutMillis = 12 * 60 * 60 * 1000L; // 12 小时
-        long pausedTimeoutMillis = 24 * 60 * 60 * 1000L; // 暂停会话24小时超时
-
-        log.info("-------------开始执行定时清理任务，查找超过 {} 小时未活动的上传会话----------------",
-                TimeUnit.MILLISECONDS.toHours(timeoutMillis));
-
-        Set<String> activeSessionIds = redisStateManager.getAllActiveSessionIds();
-        List<String> expiredSessionIds = new ArrayList<>();
-        List<String> pausedExpiredSessionIds = new ArrayList<>();
-
-        for (String clientId : activeSessionIds) {
-            FileUploadState state = redisStateManager.getState(clientId);
-            if (state != null) {
-                long inactiveDuration = now - state.getLastActivityTime();
-                boolean isPaused = redisStateManager.isSessionPaused(clientId);
-
-                // 暂停会话使用更长的超时时间
-                long currentTimeoutMillis = isPaused ? pausedTimeoutMillis : timeoutMillis;
-
-                if (inactiveDuration >= currentTimeoutMillis) {
-                    if (isPaused) {
-                        pausedExpiredSessionIds.add(clientId);
-                        log.warn("发现过期暂停会话: 客户端ID={}, 文件名={}, 上次活动时间={}, 暂停时长={}小时",
-                                clientId, state.getFileName(),
-                                Instant.ofEpochMilli(state.getLastActivityTime()),
-                                TimeUnit.MILLISECONDS.toHours(inactiveDuration));
-                    } else {
-                        expiredSessionIds.add(clientId);
-                        log.warn("发现过期活跃会话: 客户端ID={}, 文件名={}, 上次活动时间={}, 未活动时长={}小时",
-                                clientId, state.getFileName(),
-                                Instant.ofEpochMilli(state.getLastActivityTime()),
-                                TimeUnit.MILLISECONDS.toHours(inactiveDuration));
-                    }
-                }
-            } else {
-                // 处理状态丢失但仍在活跃集合中的会话
-                expiredSessionIds.add(clientId);
-                log.warn("发现状态丢失的会话ID: {}", clientId);
-            }
-        }
-
-        // 使用通用的SUID，避免依赖MDC
-        int cleanedCount = 0;
-        for (String clientId : expiredSessionIds) {
-            if (cleanupUploadSessionInternal("", clientId)) { // 传空SUID，让内部方法处理
-                cleanedCount++;
-            }
-        }
-        for (String clientId : pausedExpiredSessionIds) {
-            if (cleanupUploadSessionInternal("", clientId)) {
-                cleanedCount++;
-            }
-        }
-
-        if (cleanedCount > 0) {
-            log.info("定时清理完成，共清理 {} 个过期上传会话（活跃: {}, 暂停: {}）。",
-                    cleanedCount, expiredSessionIds.size(), pausedExpiredSessionIds.size());
-        } else {
-            log.info("定时清理完成，未发现需要清理的过期上传会话。");
-        }
-    }
-
-    /**
-     * 内部方法清理指定 clientId 的上传状态和相关文件目录
-     * 支持处理SUID为空的情况（用于定时清理任务）
-     */
-    private boolean cleanupUploadSessionInternal(String SUID, String clientId) {
-        FileUploadState state = redisStateManager.getState(clientId);
-        if (state != null) {
-            log.info("--------------------开始清理会话 {} 的相关文件-----------------", clientId);
-
-            // 如果SUID为空，跳过文件系统清理，仅清理Redis状态
-            final String actualSUID = (SUID == null || SUID.isEmpty()) ? "" : SUID;
-
-            if (actualSUID.isEmpty()) {
-                // 对于定时清理任务，我们无法获取准确的SUID，但仍然可以清理Redis状态
-                log.warn("SUID为空，跳过文件系统清理，仅清理Redis状态: 客户端ID={}", clientId);
-            } else {
-                // 使用线程池异步清理文件，避免阻塞当前线程（特别是定时任务线程）
-                fileProcessingExecutor.submit(() -> {
-                    // 清理原始上传目录
-                    Path uploadDir = getUploadSessionDir(actualSUID, clientId);
-                    cleanupDirectory(uploadDir);
-                    // 清理处理后的目录
-                    Path processedDir = getProcessedSessionDir(actualSUID, clientId);
-                    cleanupDirectory(processedDir);
-                    log.info("会话 {} 文件清理完成。", clientId);
-                });
-            }
-
-            // 从Redis中移除状态（即使SUID为空也要清理Redis）
-            redisStateManager.removeSession(state.getClientId(), actualSUID);
-
-            return true; // 状态已找到并开始清理流程
-        } else {
-            // 尝试从暂停集合中移除，以防状态已丢失但仍在暂停集合中
-            boolean removedFromPaused = redisStateManager.removePausedSession(clientId);
-            if (removedFromPaused) {
-                log.warn("清理会话 {} 时，状态已不存在，但从暂停集合移除成功。", clientId);
-            } else {
-                log.debug("尝试清理会话 {}，但状态已不存在。", clientId);
-            }
-            return false; // 会话状态未找到
-        }
-    }
-
-    /** 递归删除目录及其内容 */
-    private void cleanupDirectory(Path dirPath) {
-        if (Files.exists(dirPath)) {
-            try (Stream<Path> walk = Files.walk(dirPath)) {
-                walk.sorted(Comparator.reverseOrder())
-                        .forEach(this::tryDelete);
-                log.info("已清理目录: {}", dirPath);
-            } catch (IOException e) {
-                log.error("清理目录时发生错误: {}", dirPath, e);
-            }
-        } else {
-            log.debug("尝试清理目录，但目录不存在: {}", dirPath);
-        }
-    }
-
-    /** 尝试删除路径，记录错误但不抛出 */
-    private void tryDelete(Path path) {
-        try {
-            Files.delete(path);
-        } catch (NoSuchFileException e) {
-            // Ignore
-        } catch (DirectoryNotEmptyException e) {
-            log.warn("无法删除非空目录 (可能存在并发访问或延迟): {}", path);
-        } catch (IOException e) {
-            log.error("删除路径失败: {}", path, e);
-        }
-    }
-
-
-    /** 收集处理后的文件（按分片索引顺序）*/
     private List<File> collectProcessedFiles(String SUID, String clientId) {
         // 从Redis获取状态以确定总分片数
         FileUploadState state = redisStateManager.getState(clientId);
@@ -1011,7 +1111,9 @@ public class FileUploadServiceImpl implements FileUploadService {
         return orderedFiles;
     }
 
-    /** 收集文件哈希值（按分片索引顺序）*/
+    /**
+     * 收集文件哈希值（按分片索引顺序）
+     */
     private List<String> collectFileHashes(FileUploadState state) {
         int totalChunks = state.getTotalChunks();
         List<String> orderedHashes = new ArrayList<>(totalChunks);
@@ -1036,7 +1138,7 @@ public class FileUploadServiceImpl implements FileUploadService {
         // 验证收集的哈希数量
         if (orderedHashes.size() != totalChunks) {
             log.error("收集的哈希数量({})与预期分片数量({})不匹配: 客户端ID={}",
-                     orderedHashes.size(), totalChunks, state.getClientId());
+                    orderedHashes.size(), totalChunks, state.getClientId());
             return null;
         }
 
@@ -1064,78 +1166,20 @@ public class FileUploadServiceImpl implements FileUploadService {
         }
     }
 
-    // === 路径构建辅助方法 ===
-    private Path getUploadSessionDir(String SUID, String clientId) {
-        return Paths.get(UPLOAD_BASE_DIR, SUID, clientId).toAbsolutePath().normalize();
-    }
-    private Path getProcessedSessionDir(String SUID, String clientId) {
-        return Paths.get(PROCESSED_BASE_DIR, SUID, clientId).toAbsolutePath().normalize();
-    }
+    // === 响应创建辅助方法 (Service 内部使用) ===
+
     private Path getChunkUploadPath(String SUID, String clientId, int chunkNumber) {
         return getUploadSessionDir(SUID, clientId).resolve("chunk_" + chunkNumber);
     }
+
     private Path getChunkProcessedPath(String SUID, String clientId, int chunkNumber) {
         return getProcessedSessionDir(SUID, clientId).resolve("encrypted_chunk_" + chunkNumber);
     }
 
-    // === 验证辅助方法 ===
-    private boolean isValidFileName(String fileName) {
-        if (fileName == null || fileName.trim().isEmpty()) return false;
-        if (fileName.contains("/") || fileName.contains("\\")) return false;
-        if (containsPotentiallyUnsafeCharacters(fileName)) return false;
-        return SAFE_FILENAME_PATTERN.matcher(fileName).matches();
-    }
-    private boolean containsPotentiallyUnsafeCharacters(String fileName) {
-        for (int i = 0; i < fileName.length(); i++) {
-            char c = fileName.charAt(i);
-            if (Character.isISOControl(c) || c == '\u202E' || c == '\u202B' || c == '\u202F') return true;
-        }
-        if (fileName.endsWith(".") || fileName.endsWith(" ")) return true;
-        String upperName = fileName.toUpperCase();
-        return upperName.matches("^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$");
-    }
-    private boolean isFileTypeAllowed(String fileName, String contentType) {
-        String extension = getFileExtension(fileName);
-        if (contentType != null) {
-            String lowerContentType = contentType.toLowerCase();
-            if (ALLOWED_MIME_TYPES.containsKey(lowerContentType)) {
-                return true;
-            }
-        }
-        return extension != null && ALLOWED_FILE_EXTENSIONS.contains(extension);
-    }
-    private String getFileExtension(String fileName) {
-        if (fileName == null) return null;
-        int dotIndex = fileName.lastIndexOf('.');
-        return (dotIndex > 0 && dotIndex < fileName.length() - 1) ? fileName.substring(dotIndex + 1).toLowerCase() : null;
-    }
     private boolean isValidChunkNumber(int chunkNumber, int totalChunks) {
         if (totalChunks == 0) return chunkNumber == 0; // 0字节文件
         return chunkNumber >= 0 && chunkNumber < totalChunks;
     }
-
-    // === 响应创建辅助方法 (Service 内部使用) ===
-
-    // 创建 /upload/start 的新会话响应 DTO
-    private StartUploadVO createNewSessionDto(FileUploadState state) {
-        return new StartUploadVO(
-                state.getClientId(),
-                state.getChunkSize(), state.getTotalChunks(), state.getTotalChunks() == 1,
-                Collections.emptyList(), // 新会话没有已处理的分片
-                false // 标记为非恢复
-        );
-    }
-
-    // 创建 /upload/start 的恢复会话响应 DTO
-    private StartUploadVO createResumeDto(FileUploadState state) {
-        // 注意：恢复时返回的是已 *处理* (processed) 的分片列表，因为客户端需要知道哪些不需要再上传和处理
-        return new StartUploadVO(state.getClientId(),
-                state.getChunkSize(), state.getTotalChunks(), state.getTotalChunks() == 1,
-                new ArrayList<>(state.getProcessedChunks()), // 返回已处理的分片序号列表
-                true // 标记为恢复
-        );
-    }
-
 
     // === 进度计算辅助方法 ===
     private void updateUploadProgress(FileUploadState state, String reason) {
@@ -1143,7 +1187,7 @@ public class FileUploadServiceImpl implements FileUploadService {
         if (now - state.getLastProgressLogTime() >= PROGRESS_UPDATE_INTERVAL_MS) {
             ProgressInfo info = calculateProgressInfo(state);
             log.info("进度更新 ({}) [客户端ID: {}]: 总进度: {}%, 上传: {}/{} ({}%), 处理: {}/{} ({}%)",
-                    reason,state.getClientId(),info.totalProgress,
+                    reason, state.getClientId(), info.totalProgress,
                     info.uploadedCount, info.totalChunks, info.uploadProgressPercent,
                     info.processedCount, info.totalChunks, info.processProgressPercent);
             state.setLastProgressLogTime(now);
@@ -1152,32 +1196,18 @@ public class FileUploadServiceImpl implements FileUploadService {
             redisStateManager.updateState(state);
         }
     }
-    private ProgressInfo calculateProgressInfo(FileUploadState state) {
-        int totalChunks = state.getTotalChunks();
-        if (totalChunks == 0) {
-            return new ProgressInfo(0, 0, 0, 100, 100, 100);
-        }
-        int uploadedCount = state.getUploadedChunks().size();
-        int processedCount = state.getProcessedChunks().size();
-        int uploadProgressPercent = (int) Math.round((uploadedCount * 100.0) / totalChunks);
-        int processProgressPercent = (int) Math.round((processedCount * 100.0) / totalChunks);
-        int totalProgress = (int) Math.round(uploadProgressPercent * 0.3 + processProgressPercent * 0.7);
-        totalProgress = Math.max(0, Math.min(100, totalProgress));
-
-        return new ProgressInfo(totalChunks, uploadedCount, processedCount,
-                uploadProgressPercent, processProgressPercent, totalProgress);
-    }
 
     /**
      * 判断是否为严重的上传异常，需要清理Redis状态
+     *
      * @param e 异常对象
      * @return true表示严重异常，需要清理状态；false表示轻微异常，保留状态支持重试
      */
     private boolean isCriticalUploadError(Exception e) {
         // 严重异常类型：需要清理Redis状态
         if (e instanceof SecurityException ||           // 安全异常
-            e instanceof NoSuchAlgorithmException ||    // 算法不可用
-            e instanceof IllegalStateException) {       // 非法状态
+                e instanceof NoSuchAlgorithmException ||    // 算法不可用
+                e instanceof IllegalStateException) {       // 非法状态
             return true;
         }
 
