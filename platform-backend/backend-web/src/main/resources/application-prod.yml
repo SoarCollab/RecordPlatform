@@ -1,7 +1,20 @@
 server:
-  port: 80
+  port: ${SERVER_PORT:443}
   servlet:
     context-path: /record-platform
+  # HTTPS/SSL Configuration
+  ssl:
+    enabled: ${SSL_ENABLED:true}
+    key-store: ${SSL_KEY_STORE:classpath:keystore.p12}
+    key-store-password: ${SSL_KEY_STORE_PASSWORD}
+    key-store-type: ${SSL_KEY_STORE_TYPE:PKCS12}
+    key-alias: ${SSL_KEY_ALIAS:server}
+
+# Security settings
+security:
+  require-ssl: true
+  # HTTP to HTTPS redirect port (when using embedded Tomcat)
+  http-redirect-port: ${HTTP_REDIRECT_PORT:80}
 spring:
   # Flyway 生产环境配置
   flyway:
