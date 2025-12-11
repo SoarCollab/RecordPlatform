@@ -26,8 +26,9 @@ public class SecureIdAspect {
 
     /**
      * 环绕通知，拦截带有@SecureId注解的方法
+     *
      * @param joinPoint 切点
-     * @param secureId 注解
+     * @param secureId  注解
      * @return 处理后的返回值
      * @throws Throwable 可能抛出的异常
      */
@@ -36,10 +37,10 @@ public class SecureIdAspect {
         if (log.isDebugEnabled()) {
             log.debug("执行SecureId切面, hideOriginalId={}", secureId.hideOriginalId());
         }
-        
+
         // 执行原方法
         Object result = joinPoint.proceed();
-        
+
         // 如果注解禁用或结果为null，直接返回
         if (!secureId.value() || result == null) {
             if (log.isDebugEnabled()) {
@@ -47,7 +48,7 @@ public class SecureIdAspect {
             }
             return result;
         }
-        
+
         try {
             // 处理返回值中的ID
             if (log.isDebugEnabled()) {
@@ -85,131 +86,34 @@ public class SecureIdAspect {
             return result;
         }
     }
-    
-    /**
-     * 处理单个对象，转换ID字段
-     * @param obj 对象
-     * @param idField ID字段名
-     * @param hideOriginalId 是否隐藏原始ID
-     */
-    private void processObject(Object obj, String idField, boolean hideOriginalId) throws Exception {
-        if (obj == null) {
-            if (log.isDebugEnabled()) {
-                log.debug("对象为空，跳过处理");
-            }
-            return;
-        }
-        
-        Class<?> clazz = obj.getClass();
-        if (log.isDebugEnabled()) {
-            log.debug("处理对象类型: {}, 字段: {}, 隐藏ID: {}", clazz.getName(), idField, hideOriginalId);
-        }
-        
-        try {
-            // 查找并处理ID字段
-            Field field = clazz.getDeclaredField(idField);
-            field.setAccessible(true);
-            
-            Object idValue = field.get(obj);
-            if (log.isDebugEnabled()) {
-                log.debug("ID字段值: {}", idValue);
-            }
-            
-            if (idValue instanceof Long) {
-                // 创建混淆后的外部ID
-                // 可以根据对象类型判断使用不同的混淆方法
-                String externalId;
-                
-                // 根据类名判断是否为用户相关对象
-                String entityName = clazz.getSimpleName().toLowerCase();
-                if (entityName.contains(Const.USER_ENTITY) || entityName.contains(Const.ACCOUNT_ENTITY)) {
-                    externalId = IdUtils.toExternalUserId((Long) idValue);
-                    if (log.isDebugEnabled()) {
-                        log.debug("生成用户相关外部ID: {}", externalId);
-                    }
-                } else {
-                    externalId = IdUtils.toExternalId((Long) idValue);
-                    if (log.isDebugEnabled()) {
-                        log.debug("生成普通外部ID: {}", externalId);
-                    }
-                }
-                
-                // 查找并设置外部ID字段
-                try {
-                    Field externalIdField = clazz.getDeclaredField("externalId");
-                    externalIdField.setAccessible(true);
-                    externalIdField.set(obj, externalId);
-                    if (log.isDebugEnabled()) {
-                        log.debug("设置externalId字段: {}", externalId);
-                    }
-                    
-                    // 如果需要隐藏原始ID，则将原始ID设置为null
-                    if (hideOriginalId) {
-                        field.set(obj, null);
-                        if (log.isDebugEnabled()) {
-                            log.debug("已隐藏对象 {} 的原始ID", clazz.getSimpleName());
-                        }
-                    } else {
-                        if (log.isDebugEnabled()) {
-                            log.debug("保留原始ID: {}", idValue);
-                        }
-                    }
-                } catch (NoSuchFieldException e) {
-                    log.debug("找不到externalId字段，尝试其他字段名");
-                    // 如果没有externalId字段，尝试查找其他可能的字段名
-                    try {
-                        Field extIdField = clazz.getDeclaredField("extId");
-                        extIdField.setAccessible(true);
-                        extIdField.set(obj, externalId);
-                        if (log.isDebugEnabled()) {
-                            log.debug("设置extId字段: {}", externalId);
-                        }
-                    } catch (NoSuchFieldException ex) {
-                        // 如果没有对应的外部ID字段，记录提示信息
-                        if (log.isDebugEnabled()) {
-                            log.debug("对象 {} 没有找到外部ID字段，建议添加externalId字段以支持ID混淆", clazz.getSimpleName());
-                        }
-                    }
-                }
-            } else {
-                if (log.isDebugEnabled()) {
-                    log.debug("ID字段不是Long类型，跳过处理");
-                }
-            }
-        } catch (NoSuchFieldException e) {
-            // 如果没有指定的ID字段，记录日志
-            if (log.isDebugEnabled()) {
-                log.debug("对象 {} 没有找到ID字段: {}", clazz.getSimpleName(), idField);
-            }
-        }
-    }
 
     /**
      * 处理Result包装类
+     *
      * @param resultWrapper Result包装类对象
-     * @param idField ID字段名
-     * @param secureId 方法上的SecureId注解
+     * @param idField       ID字段名
+     * @param secureId      方法上的SecureId注解
      * @return 处理后的Result包装类
      */
     private Result<?> processResultWrapper(Result<?> resultWrapper, String idField, SecureId secureId) throws Exception {
         if (log.isDebugEnabled()) {
             log.debug("处理Result包装类, hideOriginalId={}", secureId.hideOriginalId());
         }
-        
+
         // 获取Result中的data
         Object data = getDataFromResult(resultWrapper);
-        
+
         if (data == null) {
             if (log.isDebugEnabled()) {
                 log.debug("Result包装类中data为空，跳过处理");
             }
             return resultWrapper;
         }
-        
+
         if (log.isDebugEnabled()) {
             log.debug("Result包装类中data类型: {}", data.getClass().getName());
         }
-        
+
         // 处理data对象中的ID
         if (data instanceof Collection<?>) {
             if (log.isDebugEnabled()) {
@@ -230,12 +134,119 @@ public class SecureIdAspect {
                 log.debug("跳过Result中的Map数据处理");
             }
         }
-        
+
         return resultWrapper;
     }
-    
+
+    /**
+     * 处理单个对象，转换ID字段
+     *
+     * @param obj            对象
+     * @param idField        ID字段名
+     * @param hideOriginalId 是否隐藏原始ID
+     */
+    private void processObject(Object obj, String idField, boolean hideOriginalId) throws Exception {
+        if (obj == null) {
+            if (log.isDebugEnabled()) {
+                log.debug("对象为空，跳过处理");
+            }
+            return;
+        }
+
+        Class<?> clazz = obj.getClass();
+        if (log.isDebugEnabled()) {
+            log.debug("处理对象类型: {}, 字段: {}, 隐藏ID: {}", clazz.getName(), idField, hideOriginalId);
+        }
+
+        try {
+            // 查找并处理ID字段
+            Field field = clazz.getDeclaredField(idField);
+            field.setAccessible(true);
+
+            Object idValue = field.get(obj);
+            if (log.isDebugEnabled()) {
+                log.debug("ID字段值: {}", idValue);
+            }
+
+            if (idValue instanceof Long) {
+                // 创建混淆后的外部ID
+                // 可以根据对象类型判断使用不同的混淆方法
+                String externalId;
+
+                // 根据类名判断是否为用户相关对象
+                String entityName = clazz.getSimpleName().toLowerCase();
+                if (entityName.contains(Const.USER_ENTITY) || entityName.contains(Const.ACCOUNT_ENTITY)) {
+                    externalId = IdUtils.toExternalUserId((Long) idValue);
+                    if (log.isDebugEnabled()) {
+                        log.debug("生成用户相关外部ID: {}", externalId);
+                    }
+                } else {
+                    externalId = IdUtils.toExternalId((Long) idValue);
+                    if (log.isDebugEnabled()) {
+                        log.debug("生成普通外部ID: {}", externalId);
+                    }
+                }
+
+                // 查找并设置外部ID字段
+                boolean externalIdFieldFound = false;
+                try {
+                    Field externalIdField = clazz.getDeclaredField("externalId");
+                    externalIdField.setAccessible(true);
+                    externalIdField.set(obj, externalId);
+                    externalIdFieldFound = true;
+                    if (log.isDebugEnabled()) {
+                        log.debug("设置externalId字段: {}", externalId);
+                    }
+                } catch (NoSuchFieldException e) {
+                    log.debug("找不到externalId字段，尝试其他字段名");
+                    // 如果没有externalId字段，尝试查找其他可能的字段名
+                    try {
+                        Field extIdField = clazz.getDeclaredField("extId");
+                        extIdField.setAccessible(true);
+                        extIdField.set(obj, externalId);
+                        externalIdFieldFound = true;
+                        if (log.isDebugEnabled()) {
+                            log.debug("设置extId字段: {}", externalId);
+                        }
+                    } catch (NoSuchFieldException ex) {
+                        // P0-2 修复：将 debug 改为 warn，并明确标识安全风险
+                        log.warn("ID混淆失败：对象 {} 缺少 externalId/extId 字段，内部ID可能泄露。" +
+                                "请添加 externalId 字段以支持ID混淆", clazz.getSimpleName());
+                    }
+                }
+
+                // P0-2 修复：无论是否找到外部ID字段，都要处理 hideOriginalId 逻辑
+                // 如果需要隐藏原始ID，则将原始ID设置为null
+                if (hideOriginalId) {
+                    field.set(obj, null);
+                    if (log.isDebugEnabled()) {
+                        log.debug("已隐藏对象 {} 的原始ID", clazz.getSimpleName());
+                    }
+                } else if (!externalIdFieldFound) {
+                    // 如果未找到外部ID字段且未隐藏原始ID，记录警告
+                    log.warn("安全风险：对象 {} 的内部ID {} 将被暴露给前端",
+                            clazz.getSimpleName(), idValue);
+                } else {
+                    if (log.isDebugEnabled()) {
+                        log.debug("保留原始ID: {}", idValue);
+                    }
+                }
+            } else {
+                if (log.isDebugEnabled()) {
+                    log.debug("ID字段不是Long类型，跳过处理");
+                }
+            }
+        } catch (NoSuchFieldException e) {
+            // 如果没有指定的ID字段，记录日志
+            if (log.isDebugEnabled()) {
+                log.debug("对象 {} 没有找到ID字段: {}", clazz.getSimpleName(), idField);
+            }
+        }
+    }
+
     /**
      * 从Result中获取data字段值
+     *
      * @param resultWrapper Result包装类对象
      * @return data字段值
      */
@@ -259,12 +270,13 @@ public class SecureIdAspect {
 
     /**
      * 处理单个对象，转换ID字段（使用注解中的hideOriginalId设置）
-     * @param obj 对象
+     *
+     * @param obj     对象
      * @param idField ID字段名
      */
     private void processObject(Object obj, String idField) throws Exception {
         boolean hideOriginalId = false;
-        
+
         // 1. 检查对象类上是否有SecureId注解
         if (obj != null && obj.getClass().isAnnotationPresent(SecureId.class)) {
             SecureId annotation = obj.getClass().getAnnotation(SecureId.class);
@@ -275,7 +287,7 @@ public class SecureIdAspect {
                 log.debug("从对象 {} 类注解获取hideOriginalId={}", obj.getClass().getSimpleName(), hideOriginalId);
             }
         }
-        
+
         // 2. 处理对象
         processObject(obj, idField, hideOriginalId);
     }
