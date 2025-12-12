@@ -24,7 +24,7 @@ public class StorageStoreFileInputBO implements Serializable {
   private String param;
 
   public List<Object> toArgs() {
-    List args = new ArrayList();
+    List<Object> args = new ArrayList<>();
     args.add(fileName);
     args.add(uploader);
     args.add(content);

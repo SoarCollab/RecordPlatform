@@ -18,7 +18,7 @@ public class SharingGetUserFilesInputBO implements Serializable {
   private String uploader;
 
   public List<Object> toArgs() {
-    List args = new ArrayList();
+    List<Object> args = new ArrayList<>();
     args.add(uploader);
     return args;
   }

@@ -20,7 +20,7 @@ public class StorageGetFileInputBO implements Serializable {
   private byte[] fileHash;
 
   public List<Object> toArgs() {
-    List args = new ArrayList();
+    List<Object> args = new ArrayList<>();
     args.add(uploader);
     args.add(fileHash);
     return args;

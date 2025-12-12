@@ -18,7 +18,7 @@ public class SharingGetSharedFilesInputBO implements Serializable {
   private String shareCode;
 
   public List<Object> toArgs() {
-    List args = new ArrayList();
+    List<Object> args = new ArrayList<>();
     args.add(shareCode);
     return args;
   }
