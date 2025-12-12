@@ -54,13 +54,6 @@ public enum EncryptionAlgorithm {
                 return alg;
             }
         }
-        // 兼容旧配置
-        if (normalized.contains("aes") || normalized.contains("gcm")) {
-            return AES_GCM;
-        }
-        if (normalized.contains("chacha") || normalized.contains("poly")) {
-            return CHACHA20;
-        }
         return AUTO;
     }
 }

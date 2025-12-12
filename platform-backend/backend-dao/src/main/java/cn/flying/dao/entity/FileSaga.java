@@ -29,7 +29,7 @@ public class FileSaga implements Serializable {
      */
     private static final int[] BACKOFF_SECONDS = {5, 30, 120, 600, 3600};
 
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
     @TableField(fill = FieldFill.INSERT)

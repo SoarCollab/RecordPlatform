@@ -77,8 +77,6 @@ public enum ResultEnum implements Serializable {
     TRANSACTION_RECEIPT_NOT_FOUND(30008, "交易记录回执未找到"),
     /** 文件服务异常 */
     FILE_SERVICE_ERROR(30009, "文件服务请求失败"),
-    /** 区块链服务异常（旧名，保留兼容） */
-    FISCO_SERVICE_ERROR(30006, "区块链服务异常"),
     /** 服务熔断 */
     SERVICE_CIRCUIT_OPEN(30010, "服务暂时不可用，请稍后重试"),
     /** 服务超时 */

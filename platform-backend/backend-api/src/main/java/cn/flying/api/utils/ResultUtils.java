@@ -106,7 +106,7 @@ public class ResultUtils {
         if (!isSuccess(result)) {
             return new cn.flying.common.constant.Result<>(result.getCode(), result.getMessage(), null);
         }
-        Result<T> result_old = result.getData();
-        return new cn.flying.common.constant.Result<>(result_old.getCode(), result_old.getMessage(), result_old.getData());
+        Result<T> innerResult = result.getData();
+        return new cn.flying.common.constant.Result<>(innerResult.getCode(), innerResult.getMessage(), innerResult.getData());
     }
 } 

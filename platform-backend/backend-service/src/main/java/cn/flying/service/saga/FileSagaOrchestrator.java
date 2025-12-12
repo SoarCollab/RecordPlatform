@@ -66,8 +66,13 @@ public class FileSagaOrchestrator {
     /**
      * 执行文件上传 Saga。
      * 区块链存储失败时自动补偿删除 MinIO 数据。
+     *
+     * 注意：此方法不使用 @Transactional，因为：
+     * 1. Saga 模式通过补偿（而非事务回滚）实现最终一致性
+     * 2. 外部调用（MinIO、区块链）不受数据库事务管理
+     * 3. 每个步骤完成后使用独立事务 (REQUIRES_NEW) 持久化状态
+     * 4. 避免长事务导致的锁竞争和连接占用
      */
-    @Transactional(rollbackFor = Exception.class)
     public FileUploadResult executeUpload(FileUploadCommand cmd) {
         Timer.Sample timerSample = sagaMetrics.startSagaTimer();
         sagaMetrics.recordSagaStarted();
@@ -99,7 +104,7 @@ public class FileSagaOrchestrator {
         if (existing != null) {
             if (existing.getFileId() == null && cmd.getFileId() != null) {
                 existing.setFileId(cmd.getFileId());
-                sagaMapper.updateById(existing);
+                compensationHelper.updateSagaStepInNewTransaction(existing);
             }
             if (FileSagaStatus.SUCCEEDED.name().equals(existing.getStatus())) {
                 throw new GeneralException(ResultEnum.FAIL, "上传已完成");
@@ -118,7 +123,7 @@ public class FileSagaOrchestrator {
                 .setCurrentStep(FileSagaStep.PENDING.name())
                 .setStatus(FileSagaStatus.RUNNING.name())
                 .setRetryCount(0);
-        sagaMapper.insert(saga);
+        compensationHelper.insertSagaInNewTransaction(saga);
         return saga;
     }
 
@@ -129,7 +134,7 @@ public class FileSagaOrchestrator {
         }
 
         saga.advanceTo(FileSagaStep.MINIO_UPLOADING);
-        sagaMapper.updateById(saga);
+        compensationHelper.updateSagaStepInNewTransaction(saga);
 
         Map<String, String> storedPaths = new LinkedHashMap<>();
         List<java.io.File> fileList = cmd.getFileList();
@@ -168,7 +173,7 @@ public class FileSagaOrchestrator {
     private StoreFileResponse executeBlockchainStore(FileSaga saga, FileUploadCommand cmd,
                                                      Map<String, String> storedPaths) {
         saga.advanceTo(FileSagaStep.CHAIN_STORING);
-        sagaMapper.updateById(saga);
+        compensationHelper.updateSagaStepInNewTransaction(saga);
 
         String fileContent = JsonConverter.toJsonWithPretty(storedPaths);
         String userIdStr = String.valueOf(cmd.getUserId());
@@ -182,7 +187,7 @@ public class FileSagaOrchestrator {
 
         StoreFileResponse res = ResultUtils.getData(result);
         if (res == null || res.getTransactionHash() == null || res.getFileHash() == null) {
-            throw new GeneralException(ResultEnum.FISCO_SERVICE_ERROR, "区块链存储返回无效结果");
+            throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "区块链存储返回无效结果");
         }
 
         return res;
@@ -203,12 +208,12 @@ public class FileSagaOrchestrator {
     private void completeSaga(FileSaga saga) {
         saga.advanceTo(FileSagaStep.COMPLETED)
                 .markStatus(FileSagaStatus.SUCCEEDED);
-        sagaMapper.updateById(saga);
+        compensationHelper.updateSagaStatusInNewTransaction(saga);
     }
 
     private void handleFailure(FileSaga saga, FileUploadCommand cmd, Exception ex) {
         saga.markStatus(FileSagaStatus.COMPENSATING).recordError(ex);
-        sagaMapper.updateById(saga);
+        compensationHelper.updateSagaStatusInNewTransaction(saga);
 
         try {
             compensate(saga, loadPayloadContext(saga));
@@ -220,7 +225,7 @@ public class FileSagaOrchestrator {
                     .markStatus(FileSagaStatus.PENDING_COMPENSATION);
             log.info("安排补偿重试: id={}, nextRetryAt={}", saga.getId(), saga.getNextRetryAt());
         }
-        sagaMapper.updateById(saga);
+        compensationHelper.updateSagaStatusInNewTransaction(saga);
     }
 
     private SagaPayloadContext loadPayloadContext(FileSaga saga) {
@@ -242,8 +247,9 @@ public class FileSagaOrchestrator {
     }
 
     private void persistPayload(FileSaga saga, SagaPayloadContext context) {
-        saga.setPayload(JsonConverter.toJsonWithPretty(context));
-        sagaMapper.updateById(saga);
+        String payloadJson = JsonConverter.toJsonWithPretty(context);
+        saga.setPayload(payloadJson);
+        compensationHelper.persistPayloadInNewTransaction(saga, payloadJson);
     }
 
     /**

@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -279,5 +280,74 @@ public class CacheUtils {
         return stringSet.stream()
                 .map(Integer::valueOf)
                 .collect(Collectors.toSet());
+    }
+
+    // ===== 原子操作 (Lua Script) =====
+
+    /**
+     * 原子性地向 Set 添加元素并向 Hash 添加字段
+     * 使用 Lua 脚本确保操作原子性，避免高并发下的数据不一致
+     *
+     * @param setKey      Set 的键
+     * @param setValue    要添加到 Set 的值
+     * @param hashKey     Hash 的键
+     * @param hashField   Hash 的字段名
+     * @param hashValue   Hash 的字段值
+     * @return 执行是否成功
+     */
+    public boolean atomicAddToSetAndHash(String setKey, String setValue,
+                                         String hashKey, String hashField, String hashValue) {
+        String luaScript = """
+                redis.call('SADD', KEYS[1], ARGV[1])
+                redis.call('HSET', KEYS[2], ARGV[2], ARGV[3])
+                return 1
+                """;
+
+        try {
+            DefaultRedisScript<Long> script = new DefaultRedisScript<>(luaScript, Long.class);
+            Long result = stringRedisTemplate.execute(script,
+                    List.of(setKey, hashKey),
+                    setValue, hashField, hashValue);
+            return result != null && result == 1;
+        } catch (Exception e) {
+            log.error("原子操作失败 (setKey: {}, hashKey: {}): {}", setKey, hashKey, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 原子性地向 Set 添加元素、向 Hash 添加字段，并更新另一个 Hash 中的时间戳
+     * 适用于需要同时更新上传状态和最后活动时间的场景
+     *
+     * @param setKey          Set 的键
+     * @param setValue        要添加到 Set 的值
+     * @param hashKey         Hash 的键
+     * @param hashField       Hash 的字段名
+     * @param hashValue       Hash 的字段值
+     * @param stateKey        状态 Hash 的键
+     * @param timestampField  时间戳字段名
+     * @param timestamp       时间戳值
+     * @return 执行是否成功
+     */
+    public boolean atomicAddChunkWithTimestamp(String setKey, String setValue,
+                                                String hashKey, String hashField, String hashValue,
+                                                String stateKey, String timestampField, String timestamp) {
+        String luaScript = """
+                redis.call('SADD', KEYS[1], ARGV[1])
+                redis.call('HSET', KEYS[2], ARGV[2], ARGV[3])
+                redis.call('HSET', KEYS[3], ARGV[4], ARGV[5])
+                return 1
+                """;
+
+        try {
+            DefaultRedisScript<Long> script = new DefaultRedisScript<>(luaScript, Long.class);
+            Long result = stringRedisTemplate.execute(script,
+                    List.of(setKey, hashKey, stateKey),
+                    setValue, hashField, hashValue, timestampField, timestamp);
+            return result != null && result == 1;
+        } catch (Exception e) {
+            log.error("原子操作失败: {}", e.getMessage());
+            return false;
+        }
     }
 }

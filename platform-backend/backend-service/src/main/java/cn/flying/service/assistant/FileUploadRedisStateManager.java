@@ -146,6 +146,43 @@ public class FileUploadRedisStateManager {
     }
 
     /**
+     * 原子性地添加上传分片和对应的哈希值
+     * 使用 Lua 脚本确保操作原子性，避免高并发下的数据不一致
+     *
+     * @param sessionId   会话ID
+     * @param chunkNumber 分片编号
+     * @param hash        分片哈希值
+     * @return 是否成功
+     */
+    public boolean addUploadedChunkWithHash(String sessionId, int chunkNumber, String hash) {
+        String uploadedChunksKey = getUploadedChunksKey(sessionId);
+        String chunkHashesKey = getChunkHashesKey(sessionId);
+        String chunkKey = "chunk_" + chunkNumber;
+
+        // 对哈希值进行 JSON 序列化以保持与其他方法的一致性
+        String hashJson = JsonConverter.toJson(hash);
+        if (hashJson == null) {
+            log.error("分片哈希序列化失败: sessionId={}, chunk={}", sessionId, chunkNumber);
+            return false;
+        }
+
+        boolean success = cacheUtils.atomicAddToSetAndHash(
+                uploadedChunksKey, String.valueOf(chunkNumber),
+                chunkHashesKey, chunkKey, hashJson
+        );
+
+        if (success) {
+            // 更新最后活动时间（单独操作，非关键路径）
+            updateLastActivityTime(sessionId);
+            log.debug("原子添加分片和哈希成功: sessionId={}, chunk={}", sessionId, chunkNumber);
+        } else {
+            log.error("原子添加分片和哈希失败: sessionId={}, chunk={}", sessionId, chunkNumber);
+        }
+
+        return success;
+    }
+
+    /**
      * 保存分片密钥
      */
     public void addChunkKey(String sessionId, int chunkNumber, byte[] keyData) {

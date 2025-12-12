@@ -9,10 +9,7 @@ import lombok.experimental.Accessors;
 
 import java.io.Serial;
 import java.io.Serializable;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.Date;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 工单实体
@@ -27,13 +24,6 @@ public class Ticket implements Serializable {
 
     @Serial
     private static final long serialVersionUID = 1L;
-
-    /**
-     * 工单编号生成（日期+序列号）
-     */
-    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
-    private static final AtomicInteger DAILY_SEQUENCE = new AtomicInteger(0);
-    private static volatile String LAST_DATE = "";
 
     @TableId(type = IdType.ASSIGN_ID)
     @Schema(description = "工单ID")
@@ -78,17 +68,4 @@ public class Ticket implements Serializable {
     @TableLogic
     @Schema(description = "逻辑删除: 0-未删除, 1-已删除")
     private Integer deleted;
-
-    /**
-     * 生成工单编号
-     */
-    public static synchronized String generateTicketNo() {
-        String today = LocalDate.now().format(DATE_FORMATTER);
-        if (!today.equals(LAST_DATE)) {
-            LAST_DATE = today;
-            DAILY_SEQUENCE.set(0);
-        }
-        int seq = DAILY_SEQUENCE.incrementAndGet();
-        return "TK" + today + String.format("%04d", seq);
-    }
 }

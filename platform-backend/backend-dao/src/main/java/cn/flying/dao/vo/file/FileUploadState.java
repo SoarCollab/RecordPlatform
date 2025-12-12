@@ -19,6 +19,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @NoArgsConstructor
 @Schema(description = "文件上传状态类")
 public class FileUploadState {
+    @Schema(description = "用户ID（上传会话所属用户）")
+    private Long userId;
     @Schema(description = "客户端ID（标识唯一的客户端会话）")
     private String clientId;
     @Schema(description = "文件名")
@@ -46,7 +48,8 @@ public class FileUploadState {
     @Schema(description = "最后进度日志时间")
     private volatile long lastProgressLogTime;
 
-    public FileUploadState(String fileName, long fileSize, String contentType, String clientId, int chunkSize, int totalChunks) {
+    public FileUploadState(Long userId, String fileName, long fileSize, String contentType, String clientId, int chunkSize, int totalChunks) {
+        this.userId = userId;
         this.clientId = clientId;
         this.fileName = fileName;
         this.fileSize = fileSize;

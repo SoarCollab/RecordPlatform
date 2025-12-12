@@ -16,15 +16,15 @@ import cn.flying.dao.mapper.TicketReplyMapper;
 import cn.flying.dao.vo.ticket.*;
 import cn.flying.service.AccountService;
 import cn.flying.service.TicketService;
-import cn.flying.service.sse.SseEmitterManager;
-import cn.flying.service.sse.SseEvent;
-import cn.flying.service.sse.SseEventType;
+import cn.flying.service.generator.TicketNoGenerator;
+import cn.flying.common.event.TicketNotificationEvent;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -49,13 +49,16 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
     private AccountService accountService;
 
     @Resource
-    private SseEmitterManager sseEmitterManager;
+    private ApplicationEventPublisher eventPublisher;
+
+    @Resource
+    private TicketNoGenerator ticketNoGenerator;
 
     @Override
     @Transactional
     public Ticket createTicket(Long userId, TicketCreateVO vo) {
         Ticket ticket = new Ticket()
-                .setTicketNo(Ticket.generateTicketNo())
+                .setTicketNo(ticketNoGenerator.generateTicketNo())
                 .setTitle(vo.getTitle())
                 .setContent(vo.getContent())
                 .setPriority(vo.getPriority() != null ? vo.getPriority() : TicketPriority.MEDIUM.getCode())
@@ -164,19 +167,23 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
 
         log.info("工单回复成功: ticketNo={}, replierId={}, isInternal={}", ticket.getTicketNo(), replierId, reply.getIsInternal());
 
+        // 发布事件，由 @TransactionalEventListener 在事务提交后异步发送 SSE 通知
         if (reply.getIsInternal() == 0) {
             Long notifyUserId = isAdmin ? ticket.getCreatorId() : ticket.getAssigneeId();
             if (notifyUserId != null) {
                 Account replier = accountService.findAccountById(replierId);
                 Long tenantId = TenantContext.requireTenantId();
-                sseEmitterManager.sendToUser(tenantId, notifyUserId, SseEvent.of(SseEventType.TICKET_REPLY, Map.of(
-                        "ticketId", IdUtils.toExternalId(ticketId),
-                        "ticketNo", ticket.getTicketNo(),
-                        "replierName", replier != null ? replier.getUsername() : "未知用户",
-                        "preview", reply.getContent().length() > 50
-                                ? reply.getContent().substring(0, 50) + "..."
-                                : reply.getContent()
-                )));
+                String preview = reply.getContent().length() > 50
+                        ? reply.getContent().substring(0, 50) + "..."
+                        : reply.getContent();
+
+                eventPublisher.publishEvent(TicketNotificationEvent.replyEvent(
+                        this, tenantId, notifyUserId,
+                        IdUtils.toExternalId(ticketId),
+                        ticket.getTicketNo(),
+                        replier != null ? replier.getUsername() : "未知用户",
+                        preview
+                ));
             }
         }
 
@@ -204,13 +211,15 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
         this.updateById(ticket);
         log.info("工单状态更新: ticketNo={}, {} -> {}", ticket.getTicketNo(), currentStatus, newStatus);
 
+        // 发布事件，由 @TransactionalEventListener 在事务提交后异步发送 SSE 通知
         Long tenantId = TenantContext.requireTenantId();
-        sseEmitterManager.sendToUser(tenantId, ticket.getCreatorId(), SseEvent.of(SseEventType.TICKET_UPDATE, Map.of(
-                "ticketId", IdUtils.toExternalId(ticketId),
-                "ticketNo", ticket.getTicketNo(),
-                "oldStatus", currentStatus.getDescription(),
-                "newStatus", newStatus.getDescription()
-        )));
+        eventPublisher.publishEvent(TicketNotificationEvent.statusUpdateEvent(
+                this, tenantId, ticket.getCreatorId(),
+                IdUtils.toExternalId(ticketId),
+                ticket.getTicketNo(),
+                currentStatus.getDescription(),
+                newStatus.getDescription()
+        ));
     }
 
     @Override
