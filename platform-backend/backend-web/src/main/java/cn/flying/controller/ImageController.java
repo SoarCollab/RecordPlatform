@@ -19,6 +19,8 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 /**
  * @program: forum
@@ -110,6 +112,15 @@ public class ImageController {
         // 路径格式: /api/v1/images/download/images/{imagePath}
         String imagePath = request.getServletPath().substring(28);
 
+        // 安全验证：防止路径遍历攻击
+        if (!isValidImagePath(imagePath)) {
+            log.warn("检测到路径遍历攻击尝试: {}", imagePath);
+            response.setStatus(400);
+            response.setContentType("application/json");
+            response.getWriter().write(Result.error(ResultEnum.PARAM_IS_INVALID).toString());
+            return;
+        }
+
         try (ServletOutputStream outputStream = response.getOutputStream()) {
             if (imagePath.length() <= 13) {
                 response.setStatus(404);
@@ -127,5 +138,29 @@ public class ImageController {
                 throw new GeneralException(ResultEnum.FAIL);
             }
         }
+    }
+
+    /**
+     * 验证图片路径是否安全，防止路径遍历攻击
+     */
+    private boolean isValidImagePath(String imagePath) {
+        if (imagePath == null || imagePath.isEmpty()) {
+            return false;
+        }
+        // 检测路径遍历特征
+        if (imagePath.contains("..") || imagePath.contains("//") || imagePath.startsWith("/")) {
+            return false;
+        }
+        // 规范化路径并验证
+        try {
+            Path normalized = Paths.get(imagePath).normalize();
+            // 确保规范化后的路径不以 .. 开头（防止绕过）
+            if (normalized.startsWith("..") || normalized.isAbsolute()) {
+                return false;
+            }
+        } catch (Exception e) {
+            return false;
+        }
+        return true;
     }
 }

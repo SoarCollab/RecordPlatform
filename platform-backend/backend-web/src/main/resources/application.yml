@@ -1,6 +1,10 @@
 spring:
   application:
     name: backend-web
+  # Java 21 Virtual Threads - 启用虚拟线程处理 HTTP 请求
+  threads:
+    virtual:
+      enabled: true
   servlet:
     multipart:
       max-file-size: 100MB

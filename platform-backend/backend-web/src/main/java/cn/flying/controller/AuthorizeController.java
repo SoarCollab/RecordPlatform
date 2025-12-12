@@ -2,10 +2,13 @@ package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
+import cn.flying.common.util.Const;
 import cn.flying.common.util.ControllerUtils;
+import cn.flying.common.util.JwtUtils;
 import cn.flying.dao.vo.auth.ConfirmResetVO;
 import cn.flying.dao.vo.auth.EmailRegisterVO;
 import cn.flying.dao.vo.auth.EmailResetVO;
+import cn.flying.dao.vo.auth.SseTokenVO;
 import cn.flying.service.AccountService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -31,6 +34,8 @@ public class AuthorizeController {
     AccountService accountService;
     @Resource
     ControllerUtils utils;
+    @Resource
+    JwtUtils jwtUtils;
 
     /**
      * 请求邮件验证码
@@ -84,6 +89,23 @@ public class AuthorizeController {
     public Result<String> resetPassword(@RequestBody @Valid EmailResetVO vo){
         return utils.messageHandle(() ->
                 accountService.resetEmailAccountPassword(vo));
+    }
+
+    /**
+     * 获取 SSE 短期令牌
+     * 用于建立 SSE 连接，有效期 30 秒，一次性使用
+     * @param request HTTP 请求（包含用户认证信息）
+     * @return SSE 短期令牌
+     */
+    @PostMapping("/sse-token")
+    @Operation(summary = "获取SSE短期令牌", description = "生成用于建立SSE连接的短期一次性令牌，有效期30秒")
+    public Result<SseTokenVO> getSseToken(HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute(Const.ATTR_USER_ID);
+        Long tenantId = (Long) request.getAttribute(Const.ATTR_TENANT_ID);
+        String role = (String) request.getAttribute(Const.ATTR_USER_ROLE);
+
+        String sseToken = jwtUtils.createSseToken(userId, tenantId, role);
+        return Result.success(new SseTokenVO(sseToken, Const.SSE_TOKEN_TTL));
     }
 
 }

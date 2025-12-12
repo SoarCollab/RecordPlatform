@@ -13,6 +13,10 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -23,6 +27,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/messages")
 @Tag(name = "私信管理", description = "私信的发送、查看等操作")
+@Validated
 public class MessageController {
 
     @Resource
@@ -55,8 +60,15 @@ public class MessageController {
     public Result<MessageVO> sendMessageToUser(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Parameter(description = "接收者ID") @PathVariable String receiverId,
-            @Parameter(description = "消息内容") @RequestParam String content,
-            @Parameter(description = "内容类型") @RequestParam(defaultValue = "text") String contentType) {
+            @Parameter(description = "消息内容")
+            @RequestParam
+            @NotBlank(message = "消息内容不能为空")
+            @Size(max = 5000, message = "消息内容不能超过5000字符")
+            String content,
+            @Parameter(description = "内容类型")
+            @RequestParam(defaultValue = "text")
+            @Pattern(regexp = "text|image|file", message = "内容类型只能是 text、image 或 file")
+            String contentType) {
         SendMessageVO vo = new SendMessageVO();
         vo.setReceiverId(receiverId);
         vo.setContent(content);

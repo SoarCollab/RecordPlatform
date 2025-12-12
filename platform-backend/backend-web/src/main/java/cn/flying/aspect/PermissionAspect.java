@@ -46,18 +46,18 @@ public class PermissionAspect {
             throw new GeneralException(ResultEnum.USER_NOT_LOGGED_IN);
         }
 
-        // 获取资源ID
+        // 获取资源ID - fail-close：无法获取时拒绝访问
         Long resourceId = extractResourceId(joinPoint, requireOwnership.resourceIdParam());
         if (resourceId == null) {
-            log.warn("无法从方法参数中获取资源ID: {}", requireOwnership.resourceIdParam());
-            return;
+            log.warn("无法从方法参数中获取资源ID: {}，拒绝访问", requireOwnership.resourceIdParam());
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "资源ID参数无效");
         }
 
-        // 获取资源所有者ID
+        // 获取资源所有者ID - fail-close：无法获取时拒绝访问
         Long ownerId = getResourceOwnerId(resourceId, requireOwnership);
         if (ownerId == null) {
-            log.warn("无法获取资源所有者ID, resourceId={}", resourceId);
-            return;
+            log.warn("无法获取资源所有者ID, resourceId={}，拒绝访问", resourceId);
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "无法验证资源所有权");
         }
 
         // 校验所有权

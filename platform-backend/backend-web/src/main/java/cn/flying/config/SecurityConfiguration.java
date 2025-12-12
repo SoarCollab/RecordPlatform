@@ -68,8 +68,22 @@ public class SecurityConfiguration {
         return http
                 .authorizeHttpRequests(conf -> conf
                         // 公开端点
-                        .requestMatchers("/api/v1/auth/**", "/error").permitAll()
+                        .requestMatchers(
+                                "/api/v1/auth/login",
+                                "/api/v1/auth/ask-code",
+                                "/api/v1/auth/register",
+                                "/api/v1/auth/reset-confirm",
+                                "/api/v1/auth/reset-password",
+                                "/error"
+                        ).permitAll()
                         .requestMatchers("/api/v1/images/download/images/**").permitAll()
+                        // SSE 短期令牌发行需要用户已认证
+                        .requestMatchers("/api/v1/auth/sse-token").hasAnyRole(
+                                UserRole.ROLE_DEFAULT.getRole(),
+                                UserRole.ROLE_ADMINISTER.getRole(),
+                                UserRole.ROLE_MONITOR.getRole())
+                        // SSE 连接端点使用短期令牌认证，不使用常规 JWT
+                        .requestMatchers("/api/v1/sse/connect").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/doc.html/**","/webjars/**","/favicon.ico").permitAll()
                         // 健康检查端点公开
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
