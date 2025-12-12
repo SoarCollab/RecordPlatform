@@ -35,6 +35,8 @@ import java.util.Map;
 @PreAuthorize("isAdminOrMonitor()")  // 管理员和监控员可以访问审计功能
 public class SysAuditController {
 
+    private static final DateTimeFormatter DATETIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
     @Resource
     private SysAuditService auditService;
 
@@ -92,7 +94,6 @@ public class SysAuditController {
             }
             
             // 填充数据行
-            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
             for (int i = 0; i < logs.size(); i++) {
                 Row row = sheet.createRow(i + 1);
                 SysOperationLog log = logs.get(i);
@@ -107,7 +108,7 @@ public class SysAuditController {
                 row.createCell(7).setCellValue(log.getRequestUrl());
                 row.createCell(8).setCellValue(log.getRequestIp());
                 row.createCell(9).setCellValue(log.getStatus() == 0 ? "成功" : "失败");
-                row.createCell(10).setCellValue(log.getOperationTime().format(formatter));
+                row.createCell(10).setCellValue(log.getOperationTime().format(DATETIME_FORMATTER));
                 row.createCell(11).setCellValue(log.getExecutionTime() != null ? log.getExecutionTime() : 0);
             }
             

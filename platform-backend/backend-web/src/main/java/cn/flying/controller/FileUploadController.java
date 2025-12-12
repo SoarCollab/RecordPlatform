@@ -75,20 +75,24 @@ public class FileUploadController {
 
     @PostMapping("/upload/pause")
     @Operation(summary = "暂停上传")
-    public Result<String> pauseUpload(@Schema(description = "客户端ID") @RequestParam("clientId") String clientId) {
-    
-        fileUploadService.pauseUpload(clientId);
+    public Result<String> pauseUpload(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Schema(description = "客户端ID") @RequestParam("clientId") String clientId) {
+
+        fileUploadService.pauseUpload(userId, clientId);
         return Result.success("上传已暂停");
-    
+
     }
 
     @PostMapping("/upload/resume")
     @Operation(summary = "恢复上传")
-    public Result<ResumeUploadVO> resumeUpload(@Schema(description = "客户端ID") @RequestParam("clientId") String clientId) {
-        
-        ResumeUploadVO response = fileUploadService.resumeUpload(clientId);
+    public Result<ResumeUploadVO> resumeUpload(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Schema(description = "客户端ID") @RequestParam("clientId") String clientId) {
+
+        ResumeUploadVO response = fileUploadService.resumeUpload(userId, clientId);
         return Result.success(response);
-        
+
     }
 
     @PostMapping("/upload/cancel")
@@ -107,18 +111,22 @@ public class FileUploadController {
 
     @GetMapping("/upload/check")
     @Operation(summary = "检查上传状态")
-    public Result<FileUploadStatusVO> checkFileStatus(@Schema(description = "客户端ID") @RequestParam("clientId") String clientId) {
+    public Result<FileUploadStatusVO> checkFileStatus(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Schema(description = "客户端ID") @RequestParam("clientId") String clientId) {
 
-        FileUploadStatusVO statusVO = fileUploadService.checkFileStatus(clientId);
+        FileUploadStatusVO statusVO = fileUploadService.checkFileStatus(userId, clientId);
         return Result.success(statusVO);
 
     }
 
     @GetMapping("/upload/progress")
     @Operation(summary = "获取上传进度")
-    public Result<ProgressVO> getUploadProgress(@Schema(description = "客户端ID") @RequestParam("clientId") String clientId) {
+    public Result<ProgressVO> getUploadProgress(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Schema(description = "客户端ID") @RequestParam("clientId") String clientId) {
 
-        ProgressVO progressVO = fileUploadService.getUploadProgress(clientId);
+        ProgressVO progressVO = fileUploadService.getUploadProgress(userId, clientId);
         return Result.success(progressVO);
 
     }
