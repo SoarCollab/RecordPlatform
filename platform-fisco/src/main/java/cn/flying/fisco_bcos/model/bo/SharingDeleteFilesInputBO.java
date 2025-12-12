@@ -19,7 +19,7 @@ public class SharingDeleteFilesInputBO implements Serializable {
   private List<byte[]> fileHashes;
 
   public List<Object> toArgs() {
-    List args = new ArrayList();
+    List<Object> args = new ArrayList<>();
     args.add(uploader);
     args.add(fileHashes);
     return args;

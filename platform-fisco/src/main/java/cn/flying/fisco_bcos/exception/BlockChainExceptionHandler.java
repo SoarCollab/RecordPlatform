@@ -1,5 +1,6 @@
 package cn.flying.fisco_bcos.exception;
 
+import cn.flying.fisco_bcos.adapter.model.ChainException;
 import cn.flying.fisco_bcos.monitor.FiscoMetrics;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
@@ -13,6 +14,15 @@ import java.net.SocketTimeoutException;
  * 区块链异常处理器
  * 将底层异常转换为统一的 Result 响应，避免敏感信息泄露
  * 同时记录 Prometheus 监控指标
+ *
+ * <p>支持的异常类型：
+ * <ul>
+ *   <li>{@link ChainException} - 区块链业务异常，记录 warn 日志</li>
+ *   <li>{@link SocketTimeoutException} - 超时异常，返回 BLOCKCHAIN_TIMEOUT</li>
+ *   <li>{@link ConnectException} - 连接异常，返回 BLOCKCHAIN_UNREACHABLE</li>
+ *   <li>{@link java.io.IOException} - IO 异常，返回 BLOCKCHAIN_ERROR</li>
+ *   <li>其他异常 - 记录完整堆栈，返回 fallbackEnum</li>
+ * </ul>
  */
 public final class BlockChainExceptionHandler {
 
@@ -58,10 +68,20 @@ public final class BlockChainExceptionHandler {
      * @return 统一的错误响应
      */
     public static <T> Result<T> handle(Exception e, String operation, ResultEnum fallbackEnum, FiscoMetrics metrics) {
+        // 优先处理 ChainException（业务异常）
+        if (e instanceof ChainException chainEx) {
+            log.warn("[{}] 链操作失败: {}", operation, chainEx.getMessage());
+            if (metrics != null) {
+                metrics.recordFailure();
+            }
+            return Result.error(fallbackEnum, null);
+        }
+
+        // 检查根异常类型
         Throwable rootCause = getRootCause(e);
 
         if (rootCause instanceof SocketTimeoutException) {
-            log.warn("区块链操作 [{}] 超时: {}", operation, rootCause.getMessage());
+            log.warn("[{}] 区块链操作超时: {}", operation, rootCause.getMessage());
             if (metrics != null) {
                 metrics.recordTimeout();
             }
@@ -69,7 +89,7 @@ public final class BlockChainExceptionHandler {
         }
 
         if (rootCause instanceof ConnectException) {
-            log.warn("区块链节点连接失败 [{}]: {}", operation, rootCause.getMessage());
+            log.warn("[{}] 区块链节点连接失败: {}", operation, rootCause.getMessage());
             if (metrics != null) {
                 metrics.recordConnectionError();
             }
@@ -77,7 +97,7 @@ public final class BlockChainExceptionHandler {
         }
 
         if (rootCause instanceof java.io.IOException) {
-            log.error("区块链网络IO异常 [{}]: {}", operation, rootCause.getMessage());
+            log.error("[{}] 区块链网络IO异常: {}", operation, rootCause.getMessage());
             if (metrics != null) {
                 metrics.recordFailure();
             }
@@ -85,7 +105,7 @@ public final class BlockChainExceptionHandler {
         }
 
         // 其他未知异常，记录完整堆栈但不暴露给客户端
-        log.error("区块链操作 [{}] 失败", operation, e);
+        log.error("[{}] 未知异常", operation, e);
         if (metrics != null) {
             metrics.recordFailure();
         }

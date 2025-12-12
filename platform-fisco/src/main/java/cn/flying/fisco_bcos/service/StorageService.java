@@ -16,9 +16,18 @@ import cn.flying.fisco_bcos.model.bo.StorageGetFileInputBO;
 import cn.flying.fisco_bcos.model.bo.StorageGetUserFilesInputBO;
 import cn.flying.fisco_bcos.model.bo.StorageStoreFileInputBO;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 
+/**
+ * FISCO BCOS Storage 合约服务
+ * 封装与 Storage 智能合约的交互逻辑
+ *
+ * <p>激活条件: 当 {@code Client} bean 存在时 (local-fisco 或 bsn-fisco 模式)
+ * <p>当使用 BSN Besu 时，此服务不会被创建，由 BsnBesuAdapter 直接通过 Web3j 调用合约
+ */
 @Service
+@ConditionalOnBean(Client.class)
 @NoArgsConstructor
 @Data
 public class StorageService {

@@ -22,7 +22,7 @@ public class SharingShareFilesInputBO implements Serializable {
   private Integer maxAccesses;
 
   public List<Object> toArgs() {
-    List args = new ArrayList();
+    List<Object> args = new ArrayList<>();
     args.add(uploader);
     args.add(fileHashes);
     args.add(maxAccesses);

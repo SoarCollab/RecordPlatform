@@ -1,4 +1,37 @@
-### Java sdk configuration
+### Multi-chain configuration
+blockchain:
+  # 激活的链类型: local-fisco, bsn-fisco, bsn-besu
+  active: ${BLOCKCHAIN_ACTIVE:local-fisco}
+
+  # BSN FISCO BCOS 配置 (blockchain.active=bsn-fisco 时生效)
+  bsn-fisco:
+    node-id: ${BSN_NODE_ID:city-node-shanghai}
+    group-id: group0
+    cert-path: ${BSN_CERT_PATH:bsn-certs}
+    peers:
+      - ${BSN_FISCO_PEER:bsn-fisco.example.com:20200}
+    app:
+      id: ${BSN_APP_ID:}
+      secret: ${BSN_APP_SECRET:}
+    contracts:
+      storage: ${BSN_CONTRACT_STORAGE:}
+      sharing: ${BSN_CONTRACT_SHARING:}
+
+  # BSN Hyperledger Besu 配置 (blockchain.active=bsn-besu 时生效)
+  bsn-besu:
+    rpc-url: ${BSN_BESU_RPC_URL:}
+    chain-id: ${BSN_BESU_CHAIN_ID:}
+    wallet:
+      type: local
+      private-key: ${BSN_BESU_PRIVATE_KEY:}
+    contracts:
+      storage: ${BSN_BESU_CONTRACT_STORAGE:}
+      sharing: ${BSN_BESU_CONTRACT_SHARING:}
+    gas:
+      gas-price: 0
+      gas-limit: 4500000
+
+### Java sdk configuration (Local FISCO BCOS)
 bcos:
   cryptoMaterial:
     certPath: conf
@@ -24,7 +57,6 @@ spring:
     time-zone: GMT+8
   main:
     allow-bean-definition-overriding: true
-    allow-circular-references: true
   output:
     ansi:
       enabled: ALWAYS
