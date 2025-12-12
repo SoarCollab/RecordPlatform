@@ -131,7 +131,9 @@ public void persistPayloadInNewTransaction(FileSaga saga, String payloadJson) {
 | 语言/框架 | Java, Spring Boot | 21, 3.2.11 |
 | 微服务 | Apache Dubbo (Triple), Nacos | 3.3.3 |
 | 区块链 | FISCO BCOS, Solidity | 3.8.0, ^0.8.11 |
+| 区块链扩展 | Web3j (Besu 支持) | 4.9.8 |
 | 存储 | S3兼容存储, MySQL, Redis | 8.5.9, 8.0+, 6.0+ |
+| S3 客户端 | AWS SDK v2 | 2.29.30 |
 | ORM | MyBatis Plus, Druid | 3.5.9, 1.2.23 |
 | 消息队列 | RabbitMQ | 3.8+ |
 | 弹性设计 | Resilience4j | 2.2.0 |
@@ -214,9 +216,12 @@ RecordPlatform/
 │   └── backend-common/           # 工具类、常量、注解、分布式锁
 │
 ├── platform-fisco/               # 区块链服务 (Dubbo Provider)
-│   └── contract/                 # Solidity 智能合约
+│   ├── contract/                 # Solidity 智能合约
+│   └── adapter/                  # 多链适配器 (FISCO/BSN/Besu)
 │
-├── platform-storage/               # 存储服务 (Dubbo Provider)
+├── platform-storage/             # 存储服务 (Dubbo Provider)
+│
+├── platform-frontend/            # Svelte 5 + SvelteKit 前端 (独立部署)
 │
 └── scripts/                      # 启动脚本
 ```
@@ -387,6 +392,19 @@ file:
 - Header: 魔数 `RP` (0x52 0x50) + 版本号 (0x01) + 算法标识 (0x01=AES-GCM, 0x02=ChaCha20)
 - **重要**：v2.0 不再支持无头部的旧格式，所有加密文件必须包含版本头
 
+### SSE 短期令牌
+
+由于 EventSource 不支持自定义 Header，SSE 连接使用 URL token 参数认证：
+
+**流程**：
+1. `POST /api/v1/auth/sse-token` 获取短期令牌（需 JWT）
+2. `GET /api/v1/sse/connect?token=<token>` 建立 SSE 连接
+
+**特性**：
+- 有效期 30 秒
+- 一次性使用
+- 与主 JWT 绑定用户身份
+
 ## 弹性容错
 
 ### Resilience4j 配置示例
@@ -481,6 +499,7 @@ Flyway 脚本位于 `platform-backend/backend-web/src/main/resources/db/migratio
 | V1.0.3 | 审计日志表 |
 | V1.0.4 | 多租户支持 |
 | V1.1.0 | 消息服务表 (message, announcement, ticket, conversation) |
+| V1.1.1 | 性能优化复合索引 (文件、日志、工单查询) |
 | 06_permission | 权限控制表 (sys_permission, sys_role_permission, account_role_audit) |
 
 启动时自动执行，或手动初始化：
@@ -544,6 +563,7 @@ saga:
 | RabbitMQ | `RABBITMQ_ADDRESSES`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD` | 消息队列 |
 | 安全 | `JWT_KEY` | JWT 签名 + ID 加密密钥派生（至少 32 字符） |
 | 区块链 | `FISCO_PEER_ADDRESS`, `FISCO_STORAGE_CONTRACT`, `FISCO_SHARING_CONTRACT` | 合约配置 |
+| 区块链 | `BLOCKCHAIN_ACTIVE` | 激活的区块链类型 (local-fisco/bsn-fisco/bsn-besu) |
 | SSL | `SERVER_SSL_KEY_STORE`, `SERVER_SSL_KEY_STORE_PASSWORD` | HTTPS 证书配置（生产环境） |
 | SSL | `SECURITY_REQUIRE_SSL`, `SECURITY_HTTP_REDIRECT_PORT` | HTTPS 强制和重定向端口 |
 
@@ -612,6 +632,7 @@ saga:
 | GET | `/ask-code` | 获取验证码 |
 | POST | `/register` | 用户注册 |
 | POST | `/reset-password` | 重置密码 |
+| POST | `/sse-token` | 获取 SSE 连接专用短期令牌 (30s 有效期) |
 
 ### 用户 `/api/v1/users`
 | 方法 | 路径 | 说明 |
@@ -735,6 +756,30 @@ SSE 事件类型：`NEW_MESSAGE`, `NEW_ANNOUNCEMENT`, `TICKET_UPDATE`, `TICKET_R
 
 合约地址通过环境变量配置：`FISCO_STORAGE_CONTRACT`, `FISCO_SHARING_CONTRACT`
 
+### 多链适配
+
+支持多种区块链网络，通过环境变量切换：
+
+| 链类型 | 配置值 | 说明 |
+|--------|--------|------|
+| Local FISCO | `local-fisco` | 本地 FISCO BCOS 节点 (默认) |
+| BSN FISCO | `bsn-fisco` | 区块链服务网络 FISCO |
+| Hyperledger Besu | `bsn-besu` | Hyperledger Besu (EVM 兼容) |
+
+**配置**：
+```yaml
+blockchain:
+  active: ${BLOCKCHAIN_ACTIVE:local-fisco}
+
+  bsn-fisco:
+    node-id: <bsn-node-id>
+    peers: ["<peer-address>"]
+
+  bsn-besu:
+    rpc-url: https://<besu-rpc>
+    chain-id: <chain-id>
+```
+
 ## 常见问题
 
 **Q: 启动报 Nacos 连接失败**
@@ -756,6 +801,8 @@ A: v2.0 不再支持无版本头的旧格式文件。如需迁移旧数据，需
 A: 如果服务器有 AES-NI 指令集支持，推荐 `aes-gcm`；容器/ARM 环境推荐 `chacha20`。可设置 `algorithm: auto` + `benchmark-on-startup: true` 让系统自动选择。
 
 ## 系统演进状态
+
+**当前版本**：v6.0
 
 | 阶段 | 状态 | 完成内容 |
 |------|------|---------|
