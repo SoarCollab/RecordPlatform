@@ -18,8 +18,9 @@ public class TenantLineHandlerImpl implements TenantLineHandler {
     private static final Set<String> IGNORE_TABLES = Set.of(
             "tenant",
             "sys_config",
-            "processed_message",
-            "sys_operation_log"  // 审计日志不做租户隔离（超级管理员功能）
+            "processed_message"
+            // 注意：sys_operation_log 已移除，审计日志保持租户隔离
+            // 超级管理员可通过 TenantContext.setIgnoreIsolation(true) 临时绕过
     );
 
     @Override

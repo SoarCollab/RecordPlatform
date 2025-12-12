@@ -10,6 +10,7 @@ import cn.flying.common.util.JsonConverter;
 import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.mapper.FileMapper;
+import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.request.ShareFilesRequest;
 import cn.flying.platformapi.response.FileDetailVO;
@@ -101,9 +102,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             throw new GeneralException(ResultEnum.FAIL, errorMsg != null ? errorMsg : "File upload failed");
         }
 
+        // 使用文件ID精确匹配，避免误更新同名文件
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
-                .eq(File::getUid, userId)
-                .eq(File::getFileName, OriginFileName);
+                .eq(File::getId, existingFile.getId())
+                .eq(File::getUid, userId)  // 安全校验：确保是该用户的文件
+                .eq(File::getStatus, FileUploadStatus.PREPARE.getCode());  // 只更新 PREPARE 状态的记录
 
         File file = new File()
                 .setUid(userId)
@@ -113,7 +116,13 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 .setFileParam(fileParam)
                 .setStatus(FileUploadStatus.SUCCESS.getCode());
 
-        this.update(file, wrapper);
+        boolean updated = this.update(file, wrapper);
+        if (!updated) {
+            log.warn("文件状态更新失败，可能已被其他操作修改: fileId={}, userId={}, fileName={}",
+                    existingFile.getId(), userId, OriginFileName);
+            throw new GeneralException(ResultEnum.FAIL, "文件状态更新失败，请重试");
+        }
+
         return file;
     }
 
@@ -190,7 +199,13 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         String userIdStr = String.valueOf(userId);
         Result<FileDetailVO> filePointer = fileRemoteClient.getFile(userIdStr, fileHash);
         FileDetailVO detailVO = ResultUtils.getData(filePointer);
+        if (detailVO == null) {
+            throw new GeneralException(ResultEnum.FAIL, "无法获取文件详情，文件可能不存在");
+        }
         String fileContent = detailVO.getContent();
+        if (CommonUtils.isEmpty(fileContent)) {
+            throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
+        }
         Map<String,String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
         Result<List<String>> urlListResult = fileRemoteClient.getFileUrlListByHash(fileContentMap.values().stream().toList(), fileContentMap.keySet().stream().toList());
         return ResultUtils.getData(urlListResult);
@@ -217,7 +232,13 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         String userIdStr = String.valueOf(userId);
         Result<FileDetailVO> filePointer = fileRemoteClient.getFile(userIdStr, fileHash);
         FileDetailVO detailVO = ResultUtils.getData(filePointer);
+        if (detailVO == null) {
+            throw new GeneralException(ResultEnum.FAIL, "无法获取文件详情，文件可能不存在");
+        }
         String fileContent = detailVO.getContent();
+        if (CommonUtils.isEmpty(fileContent)) {
+            throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
+        }
         Map<String,String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
         Result<List<byte[]>> fileListResult = fileRemoteClient.getFileListByHash(fileContentMap.values().stream().toList(), fileContentMap.keySet().stream().toList());
         return ResultUtils.getData(fileListResult);
@@ -300,5 +321,58 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         // 批量保存文件信息
         this.saveBatch(fileList);
         log.info("成功保存分享文件: userId={}, 文件数量={}", userId, fileList.size());
+    }
+
+    @Override
+    public FileDecryptInfoVO getFileDecryptInfo(Long userId, String fileHash) {
+        // 校验文件所有权：用户只能获取自己的文件解密信息，管理员可获取所有
+        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                .eq(File::getFileHash, fileHash);
+
+        if (!SecurityUtils.isAdmin()) {
+            wrapper.eq(File::getUid, userId);
+        }
+
+        File file = this.getOne(wrapper);
+        if (file == null) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权限访问");
+        }
+
+        // 解析 fileParam JSON 获取解密信息
+        String fileParam = file.getFileParam();
+        if (CommonUtils.isEmpty(fileParam)) {
+            throw new GeneralException(ResultEnum.FAIL, "文件元数据不完整，缺少解密信息");
+        }
+
+        try {
+            Map<String, Object> params = JsonConverter.parse(fileParam, Map.class);
+
+            String initialKey = (String) params.get("initialKey");
+            if (CommonUtils.isEmpty(initialKey)) {
+                throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
+            }
+
+            String fileName = (String) params.get("fileName");
+            Long fileSize = params.get("fileSize") instanceof Number
+                    ? ((Number) params.get("fileSize")).longValue() : null;
+            String contentType = (String) params.get("contentType");
+            Integer chunkCount = params.get("chunkCount") instanceof Number
+                    ? ((Number) params.get("chunkCount")).intValue() : null;
+
+            return FileDecryptInfoVO.builder()
+                    .initialKey(initialKey)
+                    .fileName(fileName != null ? fileName : file.getFileName())
+                    .fileSize(fileSize)
+                    .contentType(contentType)
+                    .chunkCount(chunkCount)
+                    .fileHash(fileHash)
+                    .build();
+
+        } catch (GeneralException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("解析文件参数失败: fileHash={}, error={}", fileHash, e.getMessage());
+            throw new GeneralException(ResultEnum.FAIL, "解析文件元数据失败");
+        }
     }
 }

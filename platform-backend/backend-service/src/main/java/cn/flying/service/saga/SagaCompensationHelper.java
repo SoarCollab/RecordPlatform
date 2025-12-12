@@ -64,4 +64,26 @@ public class SagaCompensationHelper {
         sagaMapper.updateById(saga);
         log.debug("Saga 补偿步骤已记录: id={}", saga.getId());
     }
+
+    /**
+     * 在独立事务中插入新的 Saga 记录。
+     *
+     * @param saga Saga 实体
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public void insertSagaInNewTransaction(FileSaga saga) {
+        sagaMapper.insert(saga);
+        log.debug("Saga 已创建: id={}, requestId={}", saga.getId(), saga.getRequestId());
+    }
+
+    /**
+     * 在独立事务中更新 Saga 的步骤状态。
+     *
+     * @param saga Saga 实体
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public void updateSagaStepInNewTransaction(FileSaga saga) {
+        sagaMapper.updateById(saga);
+        log.debug("Saga 步骤已更新: id={}, step={}", saga.getId(), saga.getCurrentStep());
+    }
 }

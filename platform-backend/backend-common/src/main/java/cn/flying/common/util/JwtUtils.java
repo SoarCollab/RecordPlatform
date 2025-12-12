@@ -324,4 +324,58 @@ public class JwtUtils {
         String key = TenantKeyUtils.tenantKey(Const.JWT_BLACK_LIST + uuid);
         return Boolean.TRUE.equals(template.hasKey(key));
     }
+
+    // ===== SSE 短期令牌相关方法 =====
+
+    /**
+     * 生成 SSE 短期令牌
+     * 该令牌仅用于建立 SSE 连接，有效期极短（30秒），且为一次性使用
+     *
+     * @param userId   用户ID
+     * @param tenantId 租户ID
+     * @param role     用户角色
+     * @return SSE 短期令牌
+     */
+    public String createSseToken(Long userId, Long tenantId, String role) {
+        String token = UUID.randomUUID().toString().replace("-", "");
+        String key = TenantKeyUtils.tenantKey(Const.SSE_TOKEN_PREFIX + token);
+
+        // 存储用户信息到 Redis，格式：userId:tenantId:role
+        String value = userId + ":" + tenantId + ":" + role;
+        template.opsForValue().set(key, value, Const.SSE_TOKEN_TTL, TimeUnit.SECONDS);
+
+        log.debug("SSE token created for user {}: {}", userId, token);
+        return token;
+    }
+
+    /**
+     * 验证并消费 SSE 短期令牌（一次性使用）
+     * 验证成功后立即删除令牌，防止重放攻击
+     *
+     * @param token SSE 令牌
+     * @return 用户信息数组 [userId, tenantId, role]，验证失败返回 null
+     */
+    public String[] validateAndConsumeSseToken(String token) {
+        if (token == null || token.isEmpty()) {
+            return null;
+        }
+
+        String key = TenantKeyUtils.tenantKey(Const.SSE_TOKEN_PREFIX + token);
+
+        // 原子性地获取并删除（防止并发消费）
+        String value = template.opsForValue().getAndDelete(key);
+        if (value == null) {
+            log.debug("SSE token not found or already consumed: {}", token);
+            return null;
+        }
+
+        String[] parts = value.split(":");
+        if (parts.length != 3) {
+            log.warn("Invalid SSE token format: {}", token);
+            return null;
+        }
+
+        log.debug("SSE token consumed for user {}: {}", parts[0], token);
+        return parts;
+    }
 }

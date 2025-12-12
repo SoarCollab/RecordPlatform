@@ -26,7 +26,8 @@ public class MdcDubboFilter implements Filter {
 
     @Override
     public Result invoke(Invoker<?> invoker, Invocation invocation) throws RpcException {
-        boolean isConsumer = RpcContext.getContext().isConsumerSide();
+        // 使用 Dubbo 3.x 推荐的 ServiceContext 替代过时的 getContext()
+        boolean isConsumer = RpcContext.getServiceContext().isConsumerSide();
 
         if (isConsumer) {
             RpcContext clientContext = RpcContext.getClientAttachment();

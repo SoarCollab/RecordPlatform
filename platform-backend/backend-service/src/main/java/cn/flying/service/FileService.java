@@ -1,6 +1,7 @@
 package cn.flying.service;
 
 import cn.flying.dao.dto.File;
+import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.platformapi.response.TransactionVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
@@ -114,6 +115,14 @@ public interface FileService extends IService<File> {
      * @param sharingFileIdList 分享文件Id列表
      */
     void saveShareFile(List<String> sharingFileIdList);
+
+    /**
+     * 获取文件解密信息
+     * @param userId 用户ID
+     * @param fileHash 文件哈希
+     * @return 解密信息（包含初始密钥和元数据）
+     */
+    FileDecryptInfoVO getFileDecryptInfo(Long userId, String fileHash);
 
 
 }

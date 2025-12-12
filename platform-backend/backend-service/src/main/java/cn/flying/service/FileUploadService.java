@@ -36,10 +36,11 @@ public interface FileUploadService {
     void uploadChunk(Long userId, String clientId, int chunkNumber, MultipartFile file);
     /**
      * 获取上传进度
+     * @param userId 用户ID
      * @param clientId 上传客户端ID
      * @return 上传进度
      */
-    ProgressVO getUploadProgress(String clientId);
+    ProgressVO getUploadProgress(Long userId, String clientId);
     /**
      * 取消上传
      * @param uid 用户ID
@@ -55,19 +56,22 @@ public interface FileUploadService {
     void completeUpload(Long userId, String clientId);
     /**
      * 暂停上传
+     * @param userId 用户ID
      * @param clientId 上传客户端ID
      */
-    void pauseUpload(String clientId);
+    void pauseUpload(Long userId, String clientId);
     /**
      * 恢复上传
+     * @param userId 用户ID
      * @param clientId 上传客户端ID
      * @return 恢复上传结果
      */
-    ResumeUploadVO resumeUpload(String clientId);
+    ResumeUploadVO resumeUpload(Long userId, String clientId);
     /**
      * 检查上传状态
+     * @param userId 用户ID
      * @param clientId 上传客户端ID
      * @return 上传状态
      */
-    FileUploadStatusVO checkFileStatus(String clientId);
+    FileUploadStatusVO checkFileStatus(Long userId, String clientId);
 }

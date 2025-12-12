@@ -1,5 +1,6 @@
 package cn.flying.service.impl;
 
+import cn.flying.common.util.SqlUtils;
 import cn.flying.dao.dto.SysOperationLog;
 import cn.flying.dao.mapper.SysOperationLogMapper;
 import cn.flying.dao.vo.audit.*;
@@ -26,6 +27,8 @@ import java.util.Map;
 @Slf4j
 @Service
 public class SysAuditServiceImpl implements SysAuditService {
+
+    private static final DateTimeFormatter DATETIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     @Resource
     private SysOperationLogMapper operationLogMapper;
@@ -62,9 +65,8 @@ public class SysAuditServiceImpl implements SysAuditService {
         
         // 处理时间范围查询
         if (StringUtils.isNotBlank(queryVO.getStartTime()) && StringUtils.isNotBlank(queryVO.getEndTime())) {
-            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-            LocalDateTime startTime = LocalDateTime.parse(queryVO.getStartTime(), formatter);
-            LocalDateTime endTime = LocalDateTime.parse(queryVO.getEndTime(), formatter);
+            LocalDateTime startTime = LocalDateTime.parse(queryVO.getStartTime(), DATETIME_FORMATTER);
+            LocalDateTime endTime = LocalDateTime.parse(queryVO.getEndTime(), DATETIME_FORMATTER);
             queryWrapper.between(SysOperationLog::getOperationTime, startTime, endTime);
         }
         
@@ -86,29 +88,33 @@ public class SysAuditServiceImpl implements SysAuditService {
     public IPage<SysOperationLog> getSensitiveOperations(AuditLogQueryVO queryVO) {
         // 计算分页偏移量
         int offset = (queryVO.getPageNum() - 1) * queryVO.getPageSize();
-        
+
+        // 转义 LIKE 查询参数，防止通配符注入
+        String escapedUsername = SqlUtils.escapeLikeParameter(queryVO.getUsername());
+        String escapedModule = SqlUtils.escapeLikeParameter(queryVO.getModule());
+
         // 查询数据
         List<SysOperationLog> records = operationLogMapper.selectSensitiveOperations(
                 queryVO.getUserId(),
-                queryVO.getUsername(),
-                queryVO.getModule(),
+                escapedUsername,
+                escapedModule,
                 queryVO.getOperationType(),
                 queryVO.getStartTime(),
                 queryVO.getEndTime(),
                 queryVO.getPageSize(),
                 offset
         );
-        
+
         // 查询总数
         Long total = operationLogMapper.countSensitiveOperations(
                 queryVO.getUserId(),
-                queryVO.getUsername(),
-                queryVO.getModule(),
+                escapedUsername,
+                escapedModule,
                 queryVO.getOperationType(),
                 queryVO.getStartTime(),
                 queryVO.getEndTime()
         );
-        
+
         // 构建分页结果
         Page<SysOperationLog> page = new Page<>(queryVO.getPageNum(), queryVO.getPageSize(), total);
         page.setRecords(records);
@@ -178,9 +184,8 @@ public class SysAuditServiceImpl implements SysAuditService {
         
         // 处理时间范围查询
         if (StringUtils.isNotBlank(queryVO.getStartTime()) && StringUtils.isNotBlank(queryVO.getEndTime())) {
-            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-            LocalDateTime startTime = LocalDateTime.parse(queryVO.getStartTime(), formatter);
-            LocalDateTime endTime = LocalDateTime.parse(queryVO.getEndTime(), formatter);
+            LocalDateTime startTime = LocalDateTime.parse(queryVO.getStartTime(), DATETIME_FORMATTER);
+            LocalDateTime endTime = LocalDateTime.parse(queryVO.getEndTime(), DATETIME_FORMATTER);
             queryWrapper.between(SysOperationLog::getOperationTime, startTime, endTime);
         }
         
