@@ -54,3 +54,6 @@ App.java
 !.env.example
 **/conf/sdk.*
 docs/frontend-chunk-decryption-guide.md
+/platform-frontend/.svelte-kit/
+/platform-frontend/node_modules/
+/platform-frontend/dist/
