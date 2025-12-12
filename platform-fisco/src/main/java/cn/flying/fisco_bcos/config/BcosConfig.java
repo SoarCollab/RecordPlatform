@@ -13,8 +13,8 @@ import java.util.Map;
 @ConfigurationProperties(prefix = "bcos")
 public class BcosConfig {
     private Map<String, Object> cryptoMaterial;
-    public Map<String, List<String>> network;
-    public List<AmopTopic> amop;
-    public Map<String, Object> account;
-    public Map<String, Object> threadPool;
+    private Map<String, List<String>> network;
+    private List<AmopTopic> amop;
+    private Map<String, Object> account;
+    private Map<String, Object> threadPool;
 }

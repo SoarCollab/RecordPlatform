@@ -6,13 +6,22 @@ import org.fisco.bcos.sdk.v3.BcosSDK;
 import org.fisco.bcos.sdk.v3.client.Client;
 import org.fisco.bcos.sdk.v3.config.ConfigOption;
 import org.fisco.bcos.sdk.v3.config.model.ConfigProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.math.BigInteger;
+import java.util.List;
 import java.util.Map;
 
+/**
+ * 本地 FISCO BCOS SDK 配置
+ * 用于开发和测试环境，连接本地部署的 FISCO BCOS 节点
+ *
+ * <p>激活条件: {@code blockchain.active=local-fisco} (默认)
+ */
 @Configuration(proxyBeanMethods = false)
+@ConditionalOnProperty(name = "blockchain.active", havingValue = "local-fisco", matchIfMissing = true)
 @Slf4j
 public class SdkBeanConfig {
 
@@ -45,6 +54,28 @@ public class SdkBeanConfig {
         return client;
     }
 
+    public void configNetwork(ConfigProperty configProperty) {
+        Map<String, Object> peers = new java.util.HashMap<>(bcosConfig.getNetwork());
+        configProperty.setNetwork(peers);
+    }
+
+    public void configCryptoMaterial(ConfigProperty configProperty) {
+        Map<String, Object> cryptoMaterials = bcosConfig.getCryptoMaterial();
+        configProperty.setCryptoMaterial(cryptoMaterials);
+    }
+
+    public void configCryptoKeyPair(Client client) {
+        String hexPrivateKey = systemConfig.getHexPrivateKey();
+        if (hexPrivateKey == null || hexPrivateKey.isEmpty()) {
+            return;
+        }
+        // 使用局部变量处理前缀，不修改原配置对象
+        if (hexPrivateKey.startsWith("0x") || hexPrivateKey.startsWith("0X")) {
+            hexPrivateKey = hexPrivateKey.substring(2);
+        }
+        client.getCryptoSuite().setCryptoKeyPair(client.getCryptoSuite().loadKeyPair(hexPrivateKey));
+    }
+
     /**
      * 应用关闭时释放 BcosSDK 资源
      */
@@ -59,25 +90,5 @@ public class SdkBeanConfig {
                 log.warn("关闭 BcosSDK 时出错: {}", e.getMessage());
             }
         }
-    }
-
-    public void configNetwork(ConfigProperty configProperty){
-        Map peers = bcosConfig.getNetwork();
-        configProperty.setNetwork(peers);
-    }
-
-    public void configCryptoMaterial(ConfigProperty configProperty){
-        Map<String, Object> cryptoMaterials = bcosConfig.getCryptoMaterial();
-        configProperty.setCryptoMaterial(cryptoMaterials);
-    }
-
-    public void configCryptoKeyPair(Client client){
-        if(systemConfig.getHexPrivateKey() == null || systemConfig.getHexPrivateKey().isEmpty()){
-            return;
-        }
-        if(systemConfig.getHexPrivateKey().startsWith("0x") || systemConfig.getHexPrivateKey().startsWith("0X")){
-            systemConfig.setHexPrivateKey(systemConfig.getHexPrivateKey().substring(2));
-        }
-        client.getCryptoSuite().setCryptoKeyPair(client.getCryptoSuite().loadKeyPair(systemConfig.getHexPrivateKey()));
     }
 }
