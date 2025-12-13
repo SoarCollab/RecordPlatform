@@ -18,6 +18,7 @@ import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -32,6 +33,16 @@ public class AnnouncementController {
     private AnnouncementService announcementService;
 
     // ==================== 用户端接口 ====================
+
+    @GetMapping("/latest")
+    @Operation(summary = "获取最新公告", description = "获取最新发布的公告列表（按置顶和发布时间排序）")
+    @OperationLog(module = "公告模块", operationType = "查询", description = "获取最新公告")
+    public Result<List<AnnouncementVO>> getLatest(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Parameter(description = "数量限制") @RequestParam(defaultValue = "5") Integer limit) {
+        List<AnnouncementVO> result = announcementService.getLatest(userId, limit);
+        return Result.success(result);
+    }
 
     @GetMapping
     @Operation(summary = "获取公告列表", description = "获取已发布的公告列表（分页）")

@@ -123,6 +123,8 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
         }
 
+        // 执行软删除（MyBatis-Plus 的 @TableLogic 会自动处理）
+        this.removeById(conversationId);
         log.info("用户 {} 删除会话 {}", userId, conversationId);
     }
 
@@ -144,7 +146,7 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
         ConversationVO vo = new ConversationVO()
                 .setId(IdUtils.toExternalId(conversation.getId()))
                 .setOtherUserId(IdUtils.toExternalId(otherUserId))
-                .setLastMessageAt(conversation.getLastMessageAt())
+                .setLastMessageTime(conversation.getLastMessageAt())
                 .setUnreadCount(messageService.getUnreadCountInConversation(conversation.getId(), currentUserId));
 
         if (otherUser != null) {

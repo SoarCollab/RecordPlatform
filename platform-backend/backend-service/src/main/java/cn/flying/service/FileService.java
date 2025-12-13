@@ -98,10 +98,10 @@ public interface FileService extends IService<File> {
      * 分享文件给其它用户
      * @param userId 用户ID
      * @param fileHash 待分享的文件哈希
-     * @param maxAccesses 最大访问次数
+     * @param expireMinutes 分享有效期（分钟）
      * @return 分享码
      */
-    String generateSharingCode(Long userId, List<String> fileHash, Integer maxAccesses);
+    String generateSharingCode(Long userId, List<String> fileHash, Integer expireMinutes);
 
     /**
      * 获取根据分享码获取他人分享的文件
@@ -124,5 +124,19 @@ public interface FileService extends IService<File> {
      */
     FileDecryptInfoVO getFileDecryptInfo(Long userId, String fileHash);
 
+    /**
+     * 获取用户创建的分享列表
+     * @param userId 用户ID
+     * @param page 分页参数
+     * @return 分享记录分页
+     */
+    com.baomidou.mybatisplus.core.metadata.IPage<cn.flying.dao.vo.file.FileShareVO> getUserShares(Long userId, com.baomidou.mybatisplus.extension.plugins.pagination.Page<?> page);
+
+    /**
+     * 取消分享（调用区块链）
+     * @param userId 用户ID（用于权限校验）
+     * @param shareCode 分享码
+     */
+    void cancelShare(Long userId, String shareCode);
 
 }

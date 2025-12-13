@@ -20,12 +20,15 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
 
 /**
  * 账户信息处理相关服务
@@ -163,8 +166,10 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
         if(code == null) return "请先获取验证码";
         if(!code.equals(modifyEmailVO.getCode())) return "验证码错误，请重新输入";
         this.deleteEmailVerifyCode(email);
-        Account account=this.findAccountByNameOrEmail(email);
-        if(account!=null && !Objects.equals(account.getId(), userId)) return "此邮箱已被他人绑定，无法完成此操作！";
+        Account account = this.findAccountByNameOrEmail(email);
+        if (account != null && !Objects.equals(account.getId(), userId)) {
+            return "此邮箱已被他人绑定，无法完成此操作！";
+        }
         boolean update = this.update().eq("id", userId).set("email", email).update();
         if(update) {
             return null;
@@ -180,10 +185,14 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
      * @return 操作结果，null表示正常，否则为错误原因
      */
     @Override
-    public String changePassword(Long userId, ChangePasswordVO changePasswordVO){
-        String password = this.query().eq("id", userId).one().getPassword();
-        if(!passwordEncoder.matches(changePasswordVO.getPassword(), password))
+    public String changePassword(Long userId, ChangePasswordVO changePasswordVO) {
+        Account account = this.query().eq("id", userId).one();
+        if (account == null) {
+            return "用户不存在";
+        }
+        if (!passwordEncoder.matches(changePasswordVO.getPassword(), account.getPassword())) {
             return "原密码错误，请重新输入";
+        }
         boolean success = this.update().eq("id", userId)
                 .set("password", passwordEncoder.encode(changePasswordVO.getNew_password()))
                 .update();
@@ -241,6 +250,44 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
     @Override
     public Account findAccountById(Long id) {
         return this.query().eq("id", id).one();
+    }
+
+    @Override
+    public Map<Long, Account> findAccountsByIds(Collection<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Map.of();
+        }
+        List<Account> accounts = this.query().in("id", ids).list();
+        return accounts.stream()
+                .collect(Collectors.toMap(Account::getId, account -> account, (a, b) -> a));
+    }
+
+    /**
+     * 更新用户信息（头像等）
+     * @param userId 用户ID
+     * @param vo 更新请求
+     * @return 更新后的用户信息
+     */
+    @Override
+    public Account updateUserInfo(Long userId, UpdateUserVO vo) {
+        Account account = this.findAccountById(userId);
+        if (account == null) {
+            throw new RuntimeException("用户不存在");
+        }
+
+        // 只更新非空字段
+        boolean needUpdate = false;
+        if (vo.getAvatar() != null) {
+            account.setAvatar(vo.getAvatar());
+            needUpdate = true;
+        }
+        // 如果有昵称字段，也可以在这里更新
+
+        if (needUpdate) {
+            this.updateById(account);
+        }
+
+        return account;
     }
 
     /**

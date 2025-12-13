@@ -41,13 +41,13 @@ public class TicketVO {
     private String creatorId;
 
     @Schema(description = "创建者用户名")
-    private String creatorName;
+    private String creatorUsername;
 
     @Schema(description = "处理人ID")
     private String assigneeId;
 
     @Schema(description = "处理人用户名")
-    private String assigneeName;
+    private String assigneeUsername;
 
     @Schema(description = "回复数量")
     private Integer replyCount;
@@ -66,7 +66,9 @@ public class TicketVO {
      */
     public TicketVO setPriorityWithDesc(Integer priority) {
         this.priority = priority;
-        this.priorityDesc = TicketPriority.fromCode(priority).getDescription();
+        if (priority != null) {
+            this.priorityDesc = TicketPriority.fromCode(priority).getDescription();
+        }
         return this;
     }
 
@@ -75,7 +77,9 @@ public class TicketVO {
      */
     public TicketVO setStatusWithDesc(Integer status) {
         this.status = status;
-        this.statusDesc = TicketStatus.fromCode(status).getDescription();
+        if (status != null) {
+            this.statusDesc = TicketStatus.fromCode(status).getDescription();
+        }
         return this;
     }
 }

@@ -6,6 +6,7 @@ import cn.flying.common.constant.TicketStatus;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.IdUtils;
+import cn.flying.common.util.SqlUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.entity.Ticket;
 import cn.flying.dao.entity.TicketAttachment;
@@ -30,8 +31,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -80,35 +84,87 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
 
     @Override
     public IPage<TicketVO> getUserTickets(Long userId, TicketQueryVO query, Page<Ticket> page) {
+        // 转义 LIKE 通配符，防止通配符注入
+        String escapedTicketNo = SqlUtils.escapeLikeParameter(query.getTicketNo());
+        String escapedKeyword = SqlUtils.escapeLikeParameter(query.getKeyword());
+
         LambdaQueryWrapper<Ticket> wrapper = new LambdaQueryWrapper<Ticket>()
                 .eq(Ticket::getCreatorId, userId)
                 .eq(query.getStatus() != null, Ticket::getStatus, query.getStatus())
                 .eq(query.getPriority() != null, Ticket::getPriority, query.getPriority())
-                .like(StringUtils.hasText(query.getTicketNo()), Ticket::getTicketNo, query.getTicketNo())
-                .and(StringUtils.hasText(query.getKeyword()), w -> w
-                        .like(Ticket::getTitle, query.getKeyword())
+                .like(StringUtils.hasText(escapedTicketNo), Ticket::getTicketNo, escapedTicketNo)
+                .and(StringUtils.hasText(escapedKeyword), w -> w
+                        .like(Ticket::getTitle, escapedKeyword)
                         .or()
-                        .like(Ticket::getContent, query.getKeyword()))
+                        .like(Ticket::getContent, escapedKeyword))
                 .orderByDesc(Ticket::getCreateTime);
 
         IPage<Ticket> ticketPage = this.page(page, wrapper);
-        return ticketPage.convert(this::convertToVO);
+        List<Ticket> tickets = ticketPage.getRecords();
+
+        if (tickets.isEmpty()) {
+            return ticketPage.convert(this::convertToVO);
+        }
+
+        // 批量查询优化：收集所有用户ID和工单ID
+        Set<Long> userIds = new HashSet<>();
+        List<Long> ticketIds = tickets.stream().map(Ticket::getId).toList();
+
+        for (Ticket ticket : tickets) {
+            userIds.add(ticket.getCreatorId());
+            if (ticket.getAssigneeId() != null) {
+                userIds.add(ticket.getAssigneeId());
+            }
+        }
+
+        // 批量查询用户信息
+        Map<Long, Account> userMap = accountService.findAccountsByIds(userIds);
+
+        // 批量查询回复数
+        Map<Long, Long> replyCountMap = batchGetReplyCount(ticketIds);
+
+        // 使用预查询的数据转换
+        return ticketPage.convert(ticket -> convertToVOWithCache(ticket, userMap, replyCountMap));
     }
 
     @Override
     public IPage<TicketVO> getAdminTickets(TicketQueryVO query, Page<Ticket> page) {
+        // 转义 LIKE 通配符，防止通配符注入
+        String escapedTicketNo = SqlUtils.escapeLikeParameter(query.getTicketNo());
+        String escapedKeyword = SqlUtils.escapeLikeParameter(query.getKeyword());
+
         LambdaQueryWrapper<Ticket> wrapper = new LambdaQueryWrapper<Ticket>()
                 .eq(query.getStatus() != null, Ticket::getStatus, query.getStatus())
                 .eq(query.getPriority() != null, Ticket::getPriority, query.getPriority())
-                .like(StringUtils.hasText(query.getTicketNo()), Ticket::getTicketNo, query.getTicketNo())
-                .and(StringUtils.hasText(query.getKeyword()), w -> w
-                        .like(Ticket::getTitle, query.getKeyword())
+                .like(StringUtils.hasText(escapedTicketNo), Ticket::getTicketNo, escapedTicketNo)
+                .and(StringUtils.hasText(escapedKeyword), w -> w
+                        .like(Ticket::getTitle, escapedKeyword)
                         .or()
-                        .like(Ticket::getContent, query.getKeyword()))
+                        .like(Ticket::getContent, escapedKeyword))
                 .orderByDesc(Ticket::getCreateTime);
 
         IPage<Ticket> ticketPage = this.page(page, wrapper);
-        return ticketPage.convert(this::convertToVO);
+        List<Ticket> tickets = ticketPage.getRecords();
+
+        if (tickets.isEmpty()) {
+            return ticketPage.convert(this::convertToVO);
+        }
+
+        // 批量查询优化
+        Set<Long> userIds = new HashSet<>();
+        List<Long> ticketIds = tickets.stream().map(Ticket::getId).toList();
+
+        for (Ticket ticket : tickets) {
+            userIds.add(ticket.getCreatorId());
+            if (ticket.getAssigneeId() != null) {
+                userIds.add(ticket.getAssigneeId());
+            }
+        }
+
+        Map<Long, Account> userMap = accountService.findAccountsByIds(userIds);
+        Map<Long, Long> replyCountMap = batchGetReplyCount(ticketIds);
+
+        return ticketPage.convert(ticket -> convertToVOWithCache(ticket, userMap, replyCountMap));
     }
 
     @Override
@@ -284,6 +340,52 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
 
     @Override
     @Transactional
+    public Ticket updateTicket(Long userId, Long ticketId, TicketUpdateVO vo) {
+        Ticket ticket = getById(ticketId);
+        if (ticket == null) {
+            throw new GeneralException(ResultEnum.TICKET_NOT_FOUND);
+        }
+
+        // 只有工单创建者可以更新工单
+        if (!ticket.getCreatorId().equals(userId)) {
+            throw new GeneralException(ResultEnum.TICKET_NOT_OWNER);
+        }
+
+        // 只有待处理状态的工单可以更新
+        TicketStatus status = TicketStatus.fromCode(ticket.getStatus());
+        if (status != TicketStatus.PENDING) {
+            throw new GeneralException(ResultEnum.INVALID_TICKET_STATUS, "只能更新待处理状态的工单");
+        }
+
+        // 更新非空字段
+        boolean needUpdate = false;
+        if (StringUtils.hasText(vo.getTitle())) {
+            ticket.setTitle(vo.getTitle());
+            needUpdate = true;
+        }
+        if (StringUtils.hasText(vo.getContent())) {
+            ticket.setContent(vo.getContent());
+            needUpdate = true;
+        }
+        if (vo.getPriority() != null) {
+            ticket.setPriority(vo.getPriority());
+            needUpdate = true;
+        }
+        if (vo.getCategory() != null) {
+            ticket.setCategory(vo.getCategory());
+            needUpdate = true;
+        }
+
+        if (needUpdate) {
+            this.updateById(ticket);
+            log.info("工单更新成功: ticketNo={}, userId={}", ticket.getTicketNo(), userId);
+        }
+
+        return ticket;
+    }
+
+    @Override
+    @Transactional
     public void addAttachment(Long ticketId, Long replyId, Long fileId, String fileName, Long fileSize) {
         TicketAttachment attachment = new TicketAttachment()
                 .setTicketId(ticketId)
@@ -319,14 +421,14 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
 
         Account creator = accountService.findAccountById(ticket.getCreatorId());
         if (creator != null) {
-            vo.setCreatorName(creator.getUsername());
+            vo.setCreatorUsername(creator.getUsername());
         }
 
         if (ticket.getAssigneeId() != null) {
             vo.setAssigneeId(IdUtils.toExternalId(ticket.getAssigneeId()));
             Account assignee = accountService.findAccountById(ticket.getAssigneeId());
             if (assignee != null) {
-                vo.setAssigneeName(assignee.getUsername());
+                vo.setAssigneeUsername(assignee.getUsername());
             }
         }
 
@@ -337,6 +439,59 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
         vo.setReplyCount(replyCount.intValue());
 
         return vo;
+    }
+
+    /**
+     * 使用预查询的用户和回复数缓存转换（避免 N+1 查询）
+     */
+    private TicketVO convertToVOWithCache(Ticket ticket, Map<Long, Account> userMap, Map<Long, Long> replyCountMap) {
+        TicketVO vo = new TicketVO()
+                .setId(IdUtils.toExternalId(ticket.getId()))
+                .setTicketNo(ticket.getTicketNo())
+                .setTitle(ticket.getTitle())
+                .setPriorityWithDesc(ticket.getPriority())
+                .setStatusWithDesc(ticket.getStatus())
+                .setCreatorId(IdUtils.toExternalId(ticket.getCreatorId()))
+                .setCreateTime(ticket.getCreateTime())
+                .setUpdateTime(ticket.getUpdateTime())
+                .setCloseTime(ticket.getCloseTime());
+
+        Account creator = userMap.get(ticket.getCreatorId());
+        if (creator != null) {
+            vo.setCreatorUsername(creator.getUsername());
+        }
+
+        if (ticket.getAssigneeId() != null) {
+            vo.setAssigneeId(IdUtils.toExternalId(ticket.getAssigneeId()));
+            Account assignee = userMap.get(ticket.getAssigneeId());
+            if (assignee != null) {
+                vo.setAssigneeUsername(assignee.getUsername());
+            }
+        }
+
+        Long replyCount = replyCountMap.getOrDefault(ticket.getId(), 0L);
+        vo.setReplyCount(replyCount.intValue());
+
+        return vo;
+    }
+
+    /**
+     * 批量查询工单回复数
+     */
+    private Map<Long, Long> batchGetReplyCount(List<Long> ticketIds) {
+        if (ticketIds == null || ticketIds.isEmpty()) {
+            return Map.of();
+        }
+
+        // 使用 GROUP BY 一次性查询所有工单的回复数
+        List<TicketReply> replies = ticketReplyMapper.selectList(
+                new LambdaQueryWrapper<TicketReply>()
+                        .select(TicketReply::getTicketId)
+                        .in(TicketReply::getTicketId, ticketIds)
+        );
+
+        return replies.stream()
+                .collect(Collectors.groupingBy(TicketReply::getTicketId, Collectors.counting()));
     }
 
     private TicketDetailVO convertToDetailVO(Ticket ticket, boolean isAdmin) {
@@ -356,14 +511,14 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
 
         Account creator = accountService.findAccountById(ticket.getCreatorId());
         if (creator != null) {
-            vo.setCreatorName(creator.getUsername());
+            vo.setCreatorUsername(creator.getUsername());
         }
 
         if (ticket.getAssigneeId() != null) {
             vo.setAssigneeId(IdUtils.toExternalId(ticket.getAssigneeId()));
             Account assignee = accountService.findAccountById(ticket.getAssigneeId());
             if (assignee != null) {
-                vo.setAssigneeName(assignee.getUsername());
+                vo.setAssigneeUsername(assignee.getUsername());
             }
         }
 

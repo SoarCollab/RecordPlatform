@@ -122,4 +122,14 @@ public interface TicketService extends IService<Ticket> {
      * @return 待处理工单数
      */
     int getAdminPendingCount(Long adminId);
+
+    /**
+     * 更新工单信息
+     *
+     * @param userId   用户ID
+     * @param ticketId 工单ID
+     * @param vo       更新参数
+     * @return 更新后的工单
+     */
+    Ticket updateTicket(Long userId, Long ticketId, TicketUpdateVO vo);
 }

@@ -47,13 +47,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         request.setAttribute(Const.TRACE_ID, traceId);
 
         String authorization = request.getHeader("Authorization");
-        // SSE EventSource 不支持自定义 Header，从 URL 参数获取 token 作为备用
-        if (authorization == null || authorization.isEmpty()) {
-            String tokenParam = request.getParameter("token");
-            if (tokenParam != null && !tokenParam.isEmpty()) {
-                authorization = "Bearer " + tokenParam;
-            }
-        }
         DecodedJWT jwt = utils.resolveJwt(authorization);
         if(jwt != null) {
             UserDetails user = utils.toUser(jwt);

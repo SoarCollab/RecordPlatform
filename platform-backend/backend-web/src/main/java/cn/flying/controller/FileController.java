@@ -3,18 +3,23 @@ package cn.flying.controller;
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
 import cn.flying.common.util.Const;
+import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.FileShareVO;
 import cn.flying.dao.vo.file.SaveSharingFile;
 import cn.flying.dao.vo.file.FileSharingVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -49,6 +54,23 @@ public class FileController {
     private FileService fileService;
 
     // ==================== Query 端点（读操作）====================
+
+    /**
+     * 根据文件ID获取文件详情
+     * @param userId 用户ID
+     * @param id 文件外部ID
+     * @return 文件详情
+     */
+    @GetMapping("/{id}")
+    @Operation(summary = "根据文件ID获取文件详情")
+    @OperationLog(module = "文件操作", operationType = "查询", description = "根据ID获取文件详情")
+    public Result<File> getFileById(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Schema(description = "文件ID") @PathVariable String id) {
+        Long fileId = IdUtils.fromExternalId(id);
+        File file = fileQueryService.getFileById(userId, fileId);
+        return Result.success(file);
+    }
 
     /**
      * 获取用户文件列表
@@ -144,6 +166,25 @@ public class FileController {
         return Result.success(files);
     }
 
+    /**
+     * 获取我的分享列表
+     * @param userId 用户ID
+     * @param pageNum 页码
+     * @param pageSize 每页数量
+     * @return 分享记录分页
+     */
+    @GetMapping("/shares")
+    @Operation(summary = "获取我的分享列表")
+    @OperationLog(module = "文件操作", operationType = "查询", description = "获取我的分享列表")
+    public Result<IPage<FileShareVO>> getMyShares(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer pageNum,
+            @Parameter(description = "每页数量") @RequestParam(defaultValue = "10") Integer pageSize) {
+        Page<?> page = new Page<>(pageNum, pageSize);
+        IPage<FileShareVO> shares = fileQueryService.getUserShares(userId, page);
+        return Result.success(shares);
+    }
+
     // ==================== Command 端点（写操作）====================
 
     /**
@@ -181,8 +222,9 @@ public class FileController {
     @Operation(summary = "生成文件分享码")
     @OperationLog(module = "文件操作", operationType = "分享", description = "生成文件分享码")
     public Result<String> generateSharingCode(
-            @RequestAttribute(Const.ATTR_USER_ID) Long userId, FileSharingVO fileSharingVO) {
-        String sharingCode = fileService.generateSharingCode(userId,fileSharingVO.getFileHash(),fileSharingVO.getMaxAccesses());
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @RequestBody @Valid FileSharingVO fileSharingVO) {
+        String sharingCode = fileService.generateSharingCode(userId, fileSharingVO.getFileHash(), fileSharingVO.getExpireMinutes());
         return Result.success(sharingCode);
     }
 
@@ -190,8 +232,24 @@ public class FileController {
     @Operation(summary = "保存分享文件")
     @OperationLog(module = "文件操作", operationType = "保存", description = "保存分享文件")
     public Result<String> saveShareFile(
-            @RequestBody SaveSharingFile sharingFile) {
+            @RequestBody @Valid SaveSharingFile sharingFile) {
         fileService.saveShareFile(sharingFile.getSharingFileIdList());
         return Result.success("保存成功");
+    }
+
+    /**
+     * 取消分享（调用区块链）
+     * @param userId 用户ID
+     * @param shareCode 分享码
+     * @return 操作结果
+     */
+    @DeleteMapping("/share/{shareCode}")
+    @Operation(summary = "取消分享")
+    @OperationLog(module = "文件操作", operationType = "删除", description = "取消分享")
+    public Result<String> cancelShare(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Parameter(description = "分享码") @PathVariable String shareCode) {
+        fileService.cancelShare(userId, shareCode);
+        return Result.success("分享已取消");
     }
 }

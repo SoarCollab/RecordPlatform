@@ -265,6 +265,25 @@ public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Ann
         });
     }
 
+    @Override
+    public List<AnnouncementVO> getLatest(Long userId, int limit) {
+        LambdaQueryWrapper<Announcement> wrapper = new LambdaQueryWrapper<Announcement>()
+                .eq(Announcement::getStatus, AnnouncementStatus.PUBLISHED.getCode())
+                .orderByDesc(Announcement::getIsPinned)
+                .orderByDesc(Announcement::getPublishTime)
+                .last("LIMIT " + Math.min(limit, 20));  // 限制最大数量为20
+
+        List<Announcement> announcements = this.list(wrapper);
+
+        Set<Long> readIds = userId != null
+                ? announcementReadMapper.selectReadAnnouncementIds(userId)
+                : Set.of();
+
+        return announcements.stream()
+                .map(announcement -> convertToVO(announcement, readIds.contains(announcement.getId())))
+                .toList();
+    }
+
     private AnnouncementVO convertToVO(Announcement announcement, Boolean isRead) {
         AnnouncementVO vo = new AnnouncementVO()
                 .setId(IdUtils.toExternalId(announcement.getId()))
@@ -282,7 +301,7 @@ public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Ann
         try {
             var publisher = accountService.findAccountById(announcement.getPublisherId());
             if (publisher != null) {
-                vo.setPublisherName(publisher.getUsername());
+                vo.setAuthor(publisher.getUsername());
             }
         } catch (Exception e) {
             log.warn("获取公告发布者信息失败: publisherId={}", announcement.getPublisherId());
