@@ -9,7 +9,7 @@
 	let title = $state('');
 	let content = $state('');
 	let category = $state(TicketCategory.QUESTION);
-	let priority = $state(TicketPriority.NORMAL);
+	let priority = $state(TicketPriority.MEDIUM);
 	let isSubmitting = $state(false);
 
 	async function handleSubmit(e: Event) {

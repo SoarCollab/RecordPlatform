@@ -16,27 +16,71 @@ export interface FileVO {
 }
 
 /**
- * 文件状态枚举
+ * 文件状态枚举（与后端 FileUploadStatus 对齐）
+ * @see FileUploadStatus.java
+ *
+ * 注意：这是文件的最终持久化状态，不是上传进度状态。
+ * 上传进度状态请使用 UploadProgressStatus 枚举。
  */
 export enum FileStatus {
-	UPLOADING = 0,
-	ENCRYPTING = 1,
-	STORING = 2,
-	CERTIFYING = 3,
-	COMPLETED = 4,
-	FAILED = -1
+	/** 已删除 */
+	DELETED = 2,
+	/** 上传成功/已完成 */
+	COMPLETED = 1,
+	/** 待上传/处理中 */
+	PROCESSING = 0,
+	/** 上传失败 */
+	FAILED = -1,
+	/** 无操作（系统内部状态） */
+	NOOP = -2
 }
 
 /**
- * 文件状态标签映射
+ * 文件状态标签映射（持久化状态）
  */
 export const FileStatusLabel: Record<FileStatus, string> = {
-	[FileStatus.UPLOADING]: '上传中',
-	[FileStatus.ENCRYPTING]: '加密中',
-	[FileStatus.STORING]: '存储中',
-	[FileStatus.CERTIFYING]: '存证中',
+	[FileStatus.DELETED]: '已删除',
 	[FileStatus.COMPLETED]: '已完成',
-	[FileStatus.FAILED]: '失败'
+	[FileStatus.PROCESSING]: '处理中',
+	[FileStatus.FAILED]: '失败',
+	[FileStatus.NOOP]: '-'
+};
+
+/**
+ * 上传进度状态枚举（前端本地状态，用于展示上传进度）
+ * 这是上传过程中的细粒度状态，与后端无关。
+ */
+export enum UploadProgressStatus {
+	/** 等待上传 */
+	PENDING = 'pending',
+	/** 上传中 */
+	UPLOADING = 'uploading',
+	/** 加密中 */
+	ENCRYPTING = 'encrypting',
+	/** 存储中 */
+	STORING = 'storing',
+	/** 存证中 */
+	CERTIFYING = 'certifying',
+	/** 上传完成 */
+	COMPLETED = 'completed',
+	/** 上传失败 */
+	FAILED = 'failed',
+	/** 已暂停 */
+	PAUSED = 'paused'
+}
+
+/**
+ * 上传进度状态标签映射
+ */
+export const UploadProgressStatusLabel: Record<UploadProgressStatus, string> = {
+	[UploadProgressStatus.PENDING]: '等待上传',
+	[UploadProgressStatus.UPLOADING]: '上传中',
+	[UploadProgressStatus.ENCRYPTING]: '加密中',
+	[UploadProgressStatus.STORING]: '存储中',
+	[UploadProgressStatus.CERTIFYING]: '存证中',
+	[UploadProgressStatus.COMPLETED]: '已完成',
+	[UploadProgressStatus.FAILED]: '失败',
+	[UploadProgressStatus.PAUSED]: '已暂停'
 };
 
 /**
@@ -78,16 +122,63 @@ export interface UploadChunkRequest {
  */
 export interface ProgressVO {
 	clientId: string;
-	totalChunks: number;
-	uploadedChunks: number;
-	processedChunks: number[];
-	progress: number; // 0-100
-	status: string;
+	progress: number; // 总体进度百分比
+	uploadProgress: number; // 原始分片上传进度百分比
+	processProgress: number; // 分片处理进度百分比
+	uploadedChunkCount: number; // 已上传原始分片数量
+	processedChunkCount: number; // 已处理分片数量
+	totalChunks: number; // 总分片数量
 }
 
 /**
- * 分享信息
- * @see SharingVO.java
+ * 文件上传状态响应 (checkUploadStatus 接口)
+ * @see FileUploadStatusVO.java
+ */
+export interface FileUploadStatusVO {
+	/** 文件名 */
+	fileName: string;
+	/** 文件大小 */
+	fileSize: number;
+	/** 客户端ID */
+	clientId: string;
+	/** 是否暂停 */
+	paused: boolean;
+	/** 上传状态：UPLOADING -> 上传中, PAUSED -> 暂停, PROCESSING_COMPLETE -> 处理完成 */
+	status: string;
+	/** 上传进度百分比 */
+	progress: number;
+	/** 已处理的分片序号列表 */
+	processedChunks: number[];
+	/** 已处理分片数量 */
+	processedChunkCount: number;
+	/** 总分片数量 */
+	totalChunks: number;
+}
+
+/**
+ * 分享记录信息 (我的分享列表)
+ * @see FileShareVO.java
+ * @note 用于 getMyShares 接口返回
+ */
+export interface FileShareVO {
+	id: string;
+	sharingCode: string;
+	fileHashes: string[];
+	fileNames: string[];
+	maxAccesses?: number;
+	accessCount: number;
+	hasPassword: boolean;
+	expireTime?: string;
+	status: number; // 0-已取消, 1-有效, 2-已过期
+	statusDesc?: string;
+	isValid: boolean;
+	createTime: string;
+}
+
+/**
+ * 分享信息 (创建分享响应)
+ * @deprecated 后端 POST /files/share 仅返回分享码字符串
+ * @note 保留此类型用于兼容，但实际 createShare 返回 string
  */
 export interface SharingVO {
 	id: string;

@@ -99,7 +99,7 @@
 		selectedIndex = 0;
 
 		try {
-			const page = await getFiles({ keyword: query.trim(), current: 1, size: 10 });
+			const page = await getFiles({ keyword: query.trim(), pageNum: 1, pageSize: 10 });
 			results = page.records;
 		} catch {
 			results = [];

@@ -33,7 +33,7 @@
 	async function loadConversations() {
 		loading = true;
 		try {
-			const result = await getConversations({ current: page, size: pageSize });
+			const result = await getConversations({ pageNum: page, pageSize });
 			conversations = result.records;
 			total = result.total;
 		} catch (err) {

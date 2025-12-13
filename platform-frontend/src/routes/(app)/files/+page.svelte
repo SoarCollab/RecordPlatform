@@ -21,7 +21,6 @@
 	let shareDialogOpen = $state(false);
 	let shareFile = $state<FileVO | null>(null);
 	let shareExpireHours = $state(72);
-	let shareMaxDownloads = $state<number | undefined>(undefined);
 	let shareCode = $state('');
 	let downloading = $state<string | null>(null);
 
@@ -33,8 +32,8 @@
 		loading = true;
 		try {
 			const result = await getFiles({
-				current: page,
-				size: pageSize,
+				pageNum: page,
+				pageSize,
 				keyword: keyword || undefined,
 				status: statusFilter
 			});
@@ -113,12 +112,11 @@
 		if (!shareFile) return;
 
 		try {
-			const result = await createShare({
-				fileId: shareFile.id,
-				expireHours: shareExpireHours,
-				maxDownloads: shareMaxDownloads
+			// createShare 现在接受对象参数：fileHash + expireMinutes
+			shareCode = await createShare({
+				fileHash: [shareFile.fileHash],
+				expireMinutes: shareExpireHours * 60
 			});
-			shareCode = result.shareCode;
 			notifications.success('分享链接已创建');
 		} catch (err) {
 			notifications.error('创建分享失败', err instanceof Error ? err.message : '请稍后重试');
@@ -389,18 +387,6 @@
 							<option value={168}>7 天</option>
 							<option value={720}>30 天</option>
 						</select>
-					</div>
-
-					<div>
-						<label for="share-max-downloads" class="mb-2 block text-sm font-medium">下载次数限制（可选）</label>
-						<input
-							id="share-max-downloads"
-							type="number"
-							bind:value={shareMaxDownloads}
-							placeholder="不限制"
-							min="1"
-							class="w-full rounded-lg border bg-background px-3 py-2 text-sm"
-						/>
 					</div>
 				</div>
 			{/if}

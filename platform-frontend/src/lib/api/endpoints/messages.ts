@@ -28,9 +28,13 @@ export async function getConversation(id: string): Promise<ConversationVO> {
 
 /**
  * 获取或创建与指定用户的会话
+ * @deprecated 后端尚未实现此接口 (POST /conversations/with/{username})
+ * @todo 后端需要在 ConversationController 中添加此端点
  */
 export async function getOrCreateConversation(username: string): Promise<ConversationVO> {
-	return api.post<ConversationVO>(`${CONV_BASE}/with/${username}`);
+	throw new Error('功能暂未实现：后端缺少 POST /conversations/with/{username} 接口');
+	// TODO: 后端实现后恢复
+	// return api.post<ConversationVO>(`${CONV_BASE}/with/${username}`);
 }
 
 /**
@@ -102,9 +106,13 @@ export async function getAnnouncement(id: string): Promise<AnnouncementVO> {
 
 /**
  * 获取最新公告
+ * @deprecated 后端尚未实现此接口 (GET /announcements/latest)
+ * @todo 后端需要在 AnnouncementController 中添加此端点
  */
 export async function getLatestAnnouncements(limit = 5): Promise<AnnouncementVO[]> {
-	return api.get<AnnouncementVO[]>(`${ANN_BASE}/latest`, { params: { limit } });
+	throw new Error('功能暂未实现：后端缺少 GET /announcements/latest 接口');
+	// TODO: 后端实现后恢复
+	// return api.get<AnnouncementVO[]>(`${ANN_BASE}/latest`, { params: { limit } });
 }
 
 /**

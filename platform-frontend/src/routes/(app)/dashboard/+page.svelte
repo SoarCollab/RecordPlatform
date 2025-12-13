@@ -56,7 +56,7 @@
 			// Load all data in parallel
 			const [filesResult, messagesResult, announcementsResult, ticketsResult] =
 				await Promise.allSettled([
-					getFiles({ current: 1, size: 100 }),
+					getFiles({ pageNum: 1, pageSize: 100 }),
 					getUnreadConversationCount(),
 					getUnreadAnnouncementCount(),
 					getTicketPendingCount()

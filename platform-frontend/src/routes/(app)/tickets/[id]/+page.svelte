@@ -6,7 +6,6 @@
 	import { formatDateTime } from '$utils/format';
 	import {
 		getTicket,
-		getTicketReplies,
 		replyTicket,
 		closeTicket,
 		confirmTicket
@@ -47,12 +46,12 @@
 	let isConfirming = $state(false);
 
 	const canReply = $derived(
-		ticket && ticket.status !== TicketStatus.CLOSED && ticket.status !== TicketStatus.RESOLVED
+		ticket && ticket.status !== TicketStatus.CLOSED && ticket.status !== TicketStatus.COMPLETED
 	);
 	const canClose = $derived(
-		ticket && ticket.status !== TicketStatus.CLOSED && ticket.status !== TicketStatus.RESOLVED
+		ticket && ticket.status !== TicketStatus.CLOSED && ticket.status !== TicketStatus.COMPLETED
 	);
-	const canConfirm = $derived(ticket && ticket.status === TicketStatus.PENDING);
+	const canConfirm = $derived(ticket && ticket.status === TicketStatus.CONFIRMING);
 
 	onMount(() => {
 		loadTicketData();
@@ -63,12 +62,12 @@
 		error = null;
 
 		try {
-			const [ticketData, repliesData] = await Promise.all([
-				getTicket(data.ticketId),
-				getTicketReplies(data.ticketId, { current: 1, size: 100 })
-			]);
+			// 后端 getTicket 返回 TicketDetailVO，包含 replies 字段
+			const ticketData = await getTicket(data.ticketId);
 			ticket = ticketData;
-			replies = repliesData.records;
+			// 从 TicketDetailVO 中获取回复列表（如果后端返回）
+			// @ts-expect-error - TicketDetailVO 包含 replies，但前端 TicketVO 类型未定义
+			replies = ticketData.replies || [];
 		} catch (err) {
 			error = err instanceof Error ? err.message : '加载失败';
 			notifications.error('加载失败', error);
@@ -82,15 +81,15 @@
 
 		isReplying = true;
 		try {
-			const newReply = await replyTicket({
+			// replyTicket 返回 void，需要重新加载工单获取最新回复
+			await replyTicket({
 				ticketId: ticket.id,
 				content: replyContent.trim()
 			});
-			replies = [...replies, newReply];
 			replyContent = '';
 			notifications.success('回复成功');
-			// Reload ticket to get updated status
-			ticket = await getTicket(data.ticketId);
+			// Reload ticket to get updated replies and status
+			await loadTicketData();
 		} catch (err) {
 			notifications.error('回复失败', err instanceof Error ? err.message : '请稍后重试');
 		} finally {
@@ -134,13 +133,13 @@
 
 	function getStatusClass(status: TicketStatus): string {
 		switch (status) {
-			case TicketStatus.OPEN:
-				return 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300';
-			case TicketStatus.IN_PROGRESS:
-				return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300';
 			case TicketStatus.PENDING:
+				return 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300';
+			case TicketStatus.PROCESSING:
+				return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300';
+			case TicketStatus.CONFIRMING:
 				return 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300';
-			case TicketStatus.RESOLVED:
+			case TicketStatus.COMPLETED:
 				return 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300';
 			case TicketStatus.CLOSED:
 				return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
@@ -151,9 +150,9 @@
 
 	function getPriorityClass(priority: TicketPriority): string {
 		switch (priority) {
-			case TicketPriority.URGENT:
-				return 'text-red-600 dark:text-red-400';
 			case TicketPriority.HIGH:
+				return 'text-red-600 dark:text-red-400';
+			case TicketPriority.MEDIUM:
 				return 'text-orange-600 dark:text-orange-400';
 			default:
 				return 'text-muted-foreground';
@@ -224,8 +223,10 @@
 					<div class="space-y-1">
 						<div class="flex items-center gap-2 text-sm text-muted-foreground">
 							<span>{ticket.ticketNo}</span>
-							<span>·</span>
-							<span>{TicketCategoryLabel[ticket.category]}</span>
+							{#if ticket.category !== undefined}
+								<span>·</span>
+								<span>{TicketCategoryLabel[ticket.category]}</span>
+							{/if}
 							{#if ticket.priority >= TicketPriority.HIGH}
 								<span class={getPriorityClass(ticket.priority)}>
 									{TicketPriorityLabel[ticket.priority]}优先级
@@ -341,10 +342,10 @@
 					</Button>
 				</Card.Footer>
 			</Card.Root>
-		{:else if ticket.status === TicketStatus.CLOSED || ticket.status === TicketStatus.RESOLVED}
+		{:else if ticket.status === TicketStatus.CLOSED || ticket.status === TicketStatus.COMPLETED}
 			<Card.Root>
 				<Card.Content class="py-6 text-center text-muted-foreground">
-					工单已{ticket.status === TicketStatus.CLOSED ? '关闭' : '解决'}，无法继续回复
+					工单已{ticket.status === TicketStatus.CLOSED ? '关闭' : '完成'}，无法继续回复
 				</Card.Content>
 			</Card.Root>
 		{/if}

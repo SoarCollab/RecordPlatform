@@ -1,23 +1,27 @@
 /**
  * 工单信息
  * @see TicketVO.java
+ * @note content 和 category 仅在 TicketDetailVO 中返回
  */
 export interface TicketVO {
 	id: string;
 	ticketNo: string;
 	title: string;
-	content: string;
-	category: TicketCategory;
 	priority: TicketPriority;
+	priorityDesc?: string;
 	status: TicketStatus;
-	replyCount: number;
+	statusDesc?: string;
 	creatorId: string;
 	creatorUsername: string;
 	assigneeId?: string;
 	assigneeUsername?: string;
+	replyCount: number;
 	createTime: string;
 	updateTime?: string;
 	closeTime?: string;
+	// 以下字段仅在详情接口 (TicketDetailVO) 中返回
+	content?: string;
+	category?: TicketCategory;
 }
 
 /**
@@ -33,22 +37,23 @@ export enum TicketCategory {
 
 /**
  * 工单优先级
+ * @see TicketPriority.java
  */
 export enum TicketPriority {
 	LOW = 0,
-	NORMAL = 1,
-	HIGH = 2,
-	URGENT = 3
+	MEDIUM = 1,
+	HIGH = 2
 }
 
 /**
  * 工单状态
+ * @see TicketStatus.java
  */
 export enum TicketStatus {
-	OPEN = 0,
-	IN_PROGRESS = 1,
-	PENDING = 2,
-	RESOLVED = 3,
+	PENDING = 0,
+	PROCESSING = 1,
+	CONFIRMING = 2,
+	COMPLETED = 3,
 	CLOSED = 4
 }
 
@@ -68,19 +73,18 @@ export const TicketCategoryLabel: Record<TicketCategory, string> = {
  */
 export const TicketPriorityLabel: Record<TicketPriority, string> = {
 	[TicketPriority.LOW]: '低',
-	[TicketPriority.NORMAL]: '普通',
-	[TicketPriority.HIGH]: '高',
-	[TicketPriority.URGENT]: '紧急'
+	[TicketPriority.MEDIUM]: '中',
+	[TicketPriority.HIGH]: '高'
 };
 
 /**
  * 工单状态标签
  */
 export const TicketStatusLabel: Record<TicketStatus, string> = {
-	[TicketStatus.OPEN]: '待处理',
-	[TicketStatus.IN_PROGRESS]: '处理中',
-	[TicketStatus.PENDING]: '等待反馈',
-	[TicketStatus.RESOLVED]: '已解决',
+	[TicketStatus.PENDING]: '待处理',
+	[TicketStatus.PROCESSING]: '处理中',
+	[TicketStatus.CONFIRMING]: '待确认',
+	[TicketStatus.COMPLETED]: '已完成',
 	[TicketStatus.CLOSED]: '已关闭'
 };
 
@@ -101,12 +105,24 @@ export interface TicketReplyVO {
 
 /**
  * 创建工单请求
+ * @see TicketCreateVO.java
  */
 export interface CreateTicketRequest {
 	title: string;
 	content: string;
-	category: TicketCategory;
+	category?: TicketCategory;
 	priority?: TicketPriority;
+}
+
+/**
+ * 更新工单请求
+ * @see TicketUpdateVO.java
+ */
+export interface UpdateTicketRequest {
+	title?: string;
+	content?: string;
+	priority?: TicketPriority;
+	category?: TicketCategory;
 }
 
 /**

@@ -1,17 +1,20 @@
 /**
  * 会话信息
  * @see ConversationVO.java
+ * @note 部分字段为前端扩展，后端可能不返回
  */
 export interface ConversationVO {
 	id: string;
 	otherUserId: string;
 	otherUsername: string;
-	otherNickname?: string;
 	otherAvatar?: string;
 	lastMessageContent?: string;
+	lastMessageType?: string;
 	lastMessageTime?: string;
 	unreadCount: number;
-	createTime: string;
+	// 以下字段为前端扩展（后端 ConversationVO 不包含）
+	otherNickname?: string;
+	createTime?: string;
 }
 
 /**
@@ -70,37 +73,43 @@ export interface AnnouncementVO {
 	title: string;
 	content: string;
 	priority: AnnouncementPriority;
-	status: AnnouncementStatus;
+	priorityDesc?: string;
+	pinned?: boolean;
 	publishTime?: string;
-	createTime: string;
+	expireTime?: string;
+	status: AnnouncementStatus;
+	statusDesc?: string;
+	publisherId?: string;
 	author?: string;
+	read?: boolean;
+	createTime: string;
 }
 
 /**
  * 公告优先级
+ * @see MessagePriority.java
  */
 export enum AnnouncementPriority {
-	LOW = 0,
-	NORMAL = 1,
-	HIGH = 2,
-	URGENT = 3
+	NORMAL = 0,
+	IMPORTANT = 1,
+	URGENT = 2
 }
 
 /**
  * 公告状态
+ * @see AnnouncementStatus.java
  */
 export enum AnnouncementStatus {
 	DRAFT = 0,
 	PUBLISHED = 1,
-	ARCHIVED = 2
+	EXPIRED = 2
 }
 
 /**
  * 公告优先级标签
  */
 export const AnnouncementPriorityLabel: Record<AnnouncementPriority, string> = {
-	[AnnouncementPriority.LOW]: '低',
 	[AnnouncementPriority.NORMAL]: '普通',
-	[AnnouncementPriority.HIGH]: '高',
+	[AnnouncementPriority.IMPORTANT]: '重要',
 	[AnnouncementPriority.URGENT]: '紧急'
 };

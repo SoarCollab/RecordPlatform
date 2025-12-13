@@ -4,8 +4,7 @@ import type {
 	PageParams,
 	FileVO,
 	FileQueryParams,
-	SharingVO,
-	CreateShareRequest,
+	FileShareVO,
 	TransactionVO,
 	SharedFileVO,
 	SaveShareFileRequest,
@@ -25,23 +24,35 @@ export async function getFiles(
 
 /**
  * 获取单个文件信息
+ * @see FileController.getFileById
  */
 export async function getFile(id: string): Promise<FileVO> {
 	return api.get<FileVO>(`${BASE}/${id}`);
 }
 
 /**
- * 通过哈希获取文件
+ * 通过哈希获取文件信息
+ * @deprecated 后端 /files/address 接口返回的是下载地址列表而非 FileVO
+ * @todo 后端需要添加 GET /files/byHash?hash={hash} 返回 FileVO 的接口
+ * @note 临时方案：使用 getFiles 分页接口并过滤
  */
 export async function getFileByHash(hash: string): Promise<FileVO> {
-	return api.get<FileVO>(`${BASE}/address`, { params: { hash } });
+	// 临时方案：通过分页接口获取并过滤
+	const page = await getFiles({ pageNum: 1, pageSize: 100 });
+	const file = page.records.find((f) => f.fileHash === hash);
+	if (!file) {
+		throw new Error(`找不到文件: ${hash}`);
+	}
+	return file;
 }
 
 /**
  * 删除文件
+ * @note 后端接口: DELETE /files/deleteByHash (使用 hash 而非 id)
+ * @param fileHash 文件哈希
  */
-export async function deleteFile(id: string): Promise<void> {
-	return api.delete(`${BASE}/${id}`);
+export async function deleteFile(fileHash: string): Promise<void> {
+	return api.delete(`${BASE}/deleteByHash`, { params: { hashList: [fileHash] } });
 }
 
 /**
@@ -64,40 +75,53 @@ export async function getDecryptInfo(fileHash: string): Promise<FileDecryptInfoV
 
 /**
  * 创建文件分享
+ * @see FileController.generateSharingCode
+ * @returns 分享码字符串
  */
-export async function createShare(data: CreateShareRequest): Promise<SharingVO> {
-	return api.post<SharingVO>(`${BASE}/share`, data);
+export async function createShare(payload: {
+	fileHash: string[];
+	/** 分享有效期（分钟），范围：1-43200 */
+	expireMinutes: number;
+}): Promise<string> {
+	return api.post<string>(`${BASE}/share`, payload);
 }
 
 /**
  * 获取分享信息
+ * @deprecated 后端未提供此接口，请使用 getSharedFiles 获取分享的文件列表
  */
-export async function getShareByCode(code: string): Promise<SharingVO> {
-	return api.get<SharingVO>(`${BASE}/share/${code}`, { skipAuth: true });
+export async function getShareByCode(code: string): Promise<FileShareVO> {
+	throw new Error('后端未提供 GET /files/share/{code} 接口，请使用 getSharedFiles');
 }
 
 /**
  * 获取分享的文件列表
+ * @see FileController.getShareFile
+ * @param sharingCode 分享码
  */
-export async function getSharedFiles(code: string, password?: string): Promise<SharedFileVO[]> {
+export async function getSharedFiles(sharingCode: string): Promise<SharedFileVO[]> {
 	return api.get<SharedFileVO[]>(`${BASE}/getSharingFiles`, {
-		params: { code, password },
+		params: { sharingCode },
 		skipAuth: true
 	});
 }
 
 /**
  * 取消分享
+ * @see FileController.cancelShare
+ * @param shareCode 分享码
  */
-export async function cancelShare(shareId: string): Promise<void> {
-	return api.delete(`${BASE}/share/${shareId}`);
+export async function cancelShare(shareCode: string): Promise<void> {
+	return api.delete(`${BASE}/share/${shareCode}`);
 }
 
 /**
  * 获取我的分享列表
+ * @see FileController.getMyShares
+ * @see FileShareVO.java
  */
-export async function getMyShares(params?: PageParams): Promise<Page<SharingVO>> {
-	return api.get<Page<SharingVO>>(`${BASE}/shares`, { params });
+export async function getMyShares(params?: PageParams): Promise<Page<FileShareVO>> {
+	return api.get<Page<FileShareVO>>(`${BASE}/shares`, { params });
 }
 
 /**
@@ -122,15 +146,6 @@ export async function getTransaction(transactionHash: string): Promise<Transacti
  */
 export async function saveSharedFiles(request: SaveShareFileRequest): Promise<void> {
 	return api.post(`${BASE}/saveShareFile`, request);
-}
-
-/**
- * 创建文件分享 (多文件)
- * @param fileHash 文件哈希列表
- * @param maxAccesses 最大访问次数
- */
-export async function shareFiles(fileHash: string[], maxAccesses?: number): Promise<string> {
-	return api.post<string>(`${BASE}/share`, { fileHash, maxAccesses });
 }
 
 /**
