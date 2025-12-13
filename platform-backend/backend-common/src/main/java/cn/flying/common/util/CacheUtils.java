@@ -48,6 +48,7 @@ public class CacheUtils {
     /**
      * 从缓存中获取列表数据并转换为指定类型列表
      */
+    @SuppressWarnings("unchecked")
     public <T> List<T> takeListFormCache(String key, Class<T> itemType){
         String s = stringRedisTemplate.opsForValue().get(key);
         if(s == null) return null;
@@ -147,6 +148,7 @@ public class CacheUtils {
     /**
      * 获取哈希表字段值
      */
+    @SuppressWarnings("unchecked")
     public <T> T hashGet(String key, String hashKey, Class<T> type) {
         HashOperations<String, String, String> hashOps = stringRedisTemplate.opsForHash();
         String value = hashOps.get(key, hashKey);

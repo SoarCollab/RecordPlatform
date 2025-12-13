@@ -10,7 +10,11 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.text.SimpleDateFormat;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
@@ -177,31 +181,37 @@ public abstract class CommonUtils {
     }
 
     /**
-     * 格式化日期字符串
-     * @param date
-     * @param format
-     * @return
+     * 格式化日期字符串（线程安全）
+     * @param date 日期
+     * @param format 格式字符串
+     * @return 格式化后的字符串
      */
     public static String formatDate(Date date, String format){
         if(date == null){
             return null;
         }
 
-        return new SimpleDateFormat(format).format(date);
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern(format);
+        LocalDateTime localDateTime = LocalDateTime.ofInstant(
+                date.toInstant(), ZoneId.systemDefault());
+        return formatter.format(localDateTime);
     }
 
     /**
-     * 解析日期字符串
-     * @param dateStr
-     * @param format
-     * @return
+     * 解析日期字符串（线程安全）
+     * @param dateStr 日期字符串
+     * @param format 格式字符串
+     * @return 解析后的日期
      */
     public static Date parseDate(String dateStr, String format) {
         if (isNotEmpty(dateStr)) {
             try {
-                return new SimpleDateFormat(format).parse(dateStr);
-            } catch (Exception ignored) {
-
+                DateTimeFormatter formatter = DateTimeFormatter.ofPattern(format);
+                LocalDateTime localDateTime = LocalDateTime.parse(dateStr, formatter);
+                Instant instant = localDateTime.atZone(ZoneId.systemDefault()).toInstant();
+                return Date.from(instant);
+            } catch (DateTimeParseException e) {
+                log.debug("Failed to parse date: {} with format: {}", dateStr, format);
             }
         }
 

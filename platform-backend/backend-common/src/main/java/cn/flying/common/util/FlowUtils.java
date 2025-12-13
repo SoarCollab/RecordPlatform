@@ -1,16 +1,19 @@
 package cn.flying.common.util;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
-import java.util.Optional;
+import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 /**
  * 限流通用工具
  * 针对于不同的情况进行限流操作，支持限流升级
+ * 使用 Lua 脚本保证原子性，避免竞态条件
  */
 @Slf4j
 @Component
@@ -18,7 +21,27 @@ public class FlowUtils {
 
     @Resource
     StringRedisTemplate template;
+
     private static final LimitAction DEFAULT_ACTION = overclock -> !overclock;
+
+    /**
+     * Lua 脚本：原子递增计数器并设置过期时间
+     * 返回当前计数值
+     */
+    private DefaultRedisScript<Long> incrementScript;
+
+    @PostConstruct
+    public void init() {
+        incrementScript = new DefaultRedisScript<>();
+        incrementScript.setScriptText(
+            "local current = redis.call('INCR', KEYS[1]) " +
+            "if current == 1 then " +
+            "    redis.call('EXPIRE', KEYS[1], ARGV[1]) " +
+            "end " +
+            "return current"
+        );
+        incrementScript.setResultType(Long.class);
+    }
     /**
      * 针对于单次频率限制，请求成功后，在冷却时间内不得再次进行请求，如3秒内不能再次发起请求
      * @param key 键
@@ -75,6 +98,7 @@ public class FlowUtils {
 
     /**
      * 内部使用请求限制主要逻辑
+     * 使用 Lua 脚本保证原子性
      * @param key 计数键
      * @param frequency 请求频率
      * @param period 计数周期
@@ -82,17 +106,19 @@ public class FlowUtils {
      * @return 是否通过限流检查
      */
     private boolean internalCheck(String key, int frequency, int period, LimitAction action){
-        String count = template.opsForValue().get(key);
-        if (count != null) {
-            long value = Optional.ofNullable(template.opsForValue().increment(key)).orElse(0L);
-            int c = Integer.parseInt(count);
-            if(value != c + 1)
-                template.expire(key, period, TimeUnit.SECONDS);
-            return action.run(value > frequency);
-        } else {
-            template.opsForValue().set(key, "1", period, TimeUnit.SECONDS);
-            return true;
+        // 使用 Lua 脚本原子递增并设置过期时间
+        Long current = template.execute(
+            incrementScript,
+            Collections.singletonList(key),
+            String.valueOf(period)
+        );
+
+        if (current == null) {
+            log.warn("Redis 限流脚本执行返回 null，key={}", key);
+            return true; // 降级：允许通过
         }
+
+        return action.run(current > frequency);
     }
 
     /**

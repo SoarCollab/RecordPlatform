@@ -82,6 +82,11 @@ public class Result<T> implements Serializable {
         return new Result<>(500, message, null);
     }
 
+    //失败返回封装-使用自定义状态码和提示信息
+    public static <T> Result<T> failure(int code, String message) {
+        return new Result<>(code, message, null);
+    }
+
     public String toJson(){
         return JsonConverter.toJson(this);
     }
