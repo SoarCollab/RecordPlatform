@@ -19,13 +19,13 @@ public class SharingShareFilesInputBO implements Serializable {
 
   private List<byte[]> fileHashes;
 
-  private Integer maxAccesses;
+  private Integer expireMinutes;
 
   public List<Object> toArgs() {
     List<Object> args = new ArrayList<>();
     args.add(uploader);
     args.add(fileHashes);
-    args.add(maxAccesses);
+    args.add(expireMinutes);
     return args;
   }
 }

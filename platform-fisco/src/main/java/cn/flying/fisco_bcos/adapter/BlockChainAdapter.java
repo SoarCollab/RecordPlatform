@@ -76,11 +76,11 @@ public interface BlockChainAdapter {
      *
      * @param uploader    上传者标识
      * @param fileHashes  要分享的文件哈希列表
-     * @param maxAccesses 最大访问次数
+     * @param expireMinutes 分享有效期（分钟）
      * @return 交易回执，包含 shareCode
      * @throws ChainException 链操作异常
      */
-    ChainReceipt shareFiles(String uploader, List<String> fileHashes, int maxAccesses);
+    ChainReceipt shareFiles(String uploader, List<String> fileHashes, int expireMinutes);
 
     /**
      * 获取分享信息
@@ -90,6 +90,33 @@ public interface BlockChainAdapter {
      * @throws ChainException 链操作异常
      */
     ChainShareInfo getSharedFiles(String shareCode);
+
+    /**
+     * 取消分享
+     *
+     * @param shareCode 分享码
+     * @return 交易回执
+     * @throws ChainException 链操作异常
+     */
+    ChainReceipt cancelShare(String shareCode);
+
+    /**
+     * 获取用户的所有分享码列表
+     *
+     * @param uploader 上传者标识
+     * @return 分享码列表
+     * @throws ChainException 链操作异常
+     */
+    List<String> getUserShareCodes(String uploader);
+
+    /**
+     * 获取分享详情（不校验有效性，包含已取消的分享）
+     *
+     * @param shareCode 分享码
+     * @return 分享详情，包含 isValid 状态
+     * @throws ChainException 链操作异常
+     */
+    ChainShareInfo getShareInfo(String shareCode);
 
     // ==================== 链状态查询 ====================
 

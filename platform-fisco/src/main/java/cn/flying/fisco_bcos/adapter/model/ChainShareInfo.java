@@ -46,4 +46,9 @@ public class ChainShareInfo {
      * 过期时间戳
      */
     private Long expireTimestamp;
+
+    /**
+     * 是否有效（未被取消）
+     */
+    private Boolean isValid;
 }

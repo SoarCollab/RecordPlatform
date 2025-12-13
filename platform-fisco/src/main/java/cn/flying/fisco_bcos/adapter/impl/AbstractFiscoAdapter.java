@@ -202,14 +202,14 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
     // ==================== 文件分享操作 ====================
 
     @Override
-    public ChainReceipt shareFiles(String uploader, List<String> fileHashes, int maxAccesses) {
+    public ChainReceipt shareFiles(String uploader, List<String> fileHashes, int expireMinutes) {
         try {
             List<byte[]> fileHashArr = fileHashes.stream()
                     .map(Convert::hexTobyte)
                     .toList();
 
             TransactionResponse response = getSharingService().shareFiles(
-                    new SharingShareFilesInputBO(uploader, fileHashArr, maxAccesses));
+                    new SharingShareFilesInputBO(uploader, fileHashArr, expireMinutes));
 
             if (response == null) {
                 throw new ChainException(getChainType(), "shareFiles", "Response is null");
@@ -277,6 +277,116 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
         } catch (Exception e) {
             log.error("{} [getSharedFiles] 异常", getLogPrefix(), e);
             throw new ChainException(getChainType(), "getSharedFiles", e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public ChainReceipt cancelShare(String shareCode) {
+        try {
+            TransactionResponse response = getSharingService().cancelShare(
+                    new SharingCancelShareInputBO(shareCode));
+
+            if (response == null) {
+                throw new ChainException(getChainType(), "cancelShare", "Response is null");
+            }
+
+            if (response.getReturnCode() != 0) {
+                throw new ChainException(getChainType(), "cancelShare", response.getReturnMessage());
+            }
+
+            TransactionReceipt receipt = response.getTransactionReceipt();
+
+            return ChainReceipt.builder()
+                    .transactionHash(receipt != null ? normalizeHash(receipt.getTransactionHash()) : null)
+                    .success(true)
+                    .build();
+
+        } catch (ChainException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("{} [cancelShare] 异常", getLogPrefix(), e);
+            throw new ChainException(getChainType(), "cancelShare", e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public List<String> getUserShareCodes(String uploader) {
+        try {
+            CallResponse response = getSharingService().getUserShareCodes(
+                    new SharingGetUserShareCodesInputBO(uploader));
+
+            if (response == null || !(response.getReturnObject() instanceof List<?> returnList)) {
+                return new ArrayList<>();
+            }
+
+            // 返回值结构: [[shareCode1, shareCode2, ...]]
+            if (returnList.isEmpty()) {
+                return new ArrayList<>();
+            }
+
+            Object firstElement = returnList.getFirst();
+            if (!(firstElement instanceof List<?> shareCodes)) {
+                return new ArrayList<>();
+            }
+
+            List<String> result = new ArrayList<>();
+            for (Object code : shareCodes) {
+                if (code instanceof String shareCode && !shareCode.isEmpty()) {
+                    result.add(shareCode);
+                }
+            }
+
+            return result;
+
+        } catch (Exception e) {
+            log.error("{} [getUserShareCodes] 异常", getLogPrefix(), e);
+            throw new ChainException(getChainType(), "getUserShareCodes", e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public ChainShareInfo getShareInfo(String shareCode) {
+        try {
+            CallResponse response = getSharingService().getShareInfo(
+                    new SharingGetShareInfoInputBO(shareCode));
+
+            if (response == null) {
+                throw new ChainException(getChainType(), "getShareInfo", "Share not found");
+            }
+
+            if (!(response.getReturnObject() instanceof List<?> returnList) || returnList.size() < 4) {
+                throw new ChainException(getChainType(), "getShareInfo", "Invalid return value");
+            }
+
+            // 返回值结构: [uploader, fileHashes[], expireTime, isValid]
+            String uploaderResult = safeGetString(returnList, 0).orElse("");
+
+            List<String> fileHashList = new ArrayList<>();
+            Optional<List<?>> fileHashesOpt = safeGetList(returnList, 1);
+            if (fileHashesOpt.isPresent()) {
+                for (Object hash : fileHashesOpt.get()) {
+                    if (hash instanceof byte[] hashBytes) {
+                        fileHashList.add(normalizeHash(Convert.bytesToHex(hashBytes)));
+                    }
+                }
+            }
+
+            long expireTime = parseLong(returnList.get(2));
+            boolean isValid = returnList.get(3) instanceof Boolean b ? b : Boolean.parseBoolean(String.valueOf(returnList.get(3)));
+
+            return ChainShareInfo.builder()
+                    .uploader(uploaderResult)
+                    .fileHashList(fileHashList)
+                    .shareCode(shareCode)
+                    .expireTimestamp(expireTime)
+                    .isValid(isValid)
+                    .build();
+
+        } catch (ChainException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("{} [getShareInfo] 异常", getLogPrefix(), e);
+            throw new ChainException(getChainType(), "getShareInfo", e.getMessage(), e);
         }
     }
 

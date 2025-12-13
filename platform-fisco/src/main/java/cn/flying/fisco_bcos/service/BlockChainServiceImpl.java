@@ -7,6 +7,7 @@ import cn.flying.fisco_bcos.monitor.FiscoMetrics;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.BlockChainService;
+import cn.flying.platformapi.request.CancelShareRequest;
 import cn.flying.platformapi.request.DeleteFilesRequest;
 import cn.flying.platformapi.request.ShareFilesRequest;
 import cn.flying.platformapi.request.StoreFileRequest;
@@ -34,6 +35,8 @@ import java.util.List;
 @DubboService(version = BlockChainService.VERSION)
 public class BlockChainServiceImpl implements BlockChainService {
 
+    private static final int MAX_EXPIRE_MINUTES = 43_200;
+
     @Resource
     private BlockChainAdapter chainAdapter;
 
@@ -46,10 +49,26 @@ public class BlockChainServiceImpl implements BlockChainService {
     public Result<String> shareFiles(ShareFilesRequest request) {
         Timer.Sample timerSample = fiscoMetrics.startShareTimer();
         try {
+            Integer expireMinutes = request != null ? request.getExpireMinutes() : null;
+            if (expireMinutes == null) {
+                return new Result<>(
+                        ResultEnum.PARAM_IS_INVALID.getCode(),
+                        "参数错误：expireMinutes 不能为空，范围 1-43200（分钟）",
+                        null
+                );
+            }
+            if (expireMinutes <= 0 || expireMinutes > MAX_EXPIRE_MINUTES) {
+                return new Result<>(
+                        ResultEnum.PARAM_IS_INVALID.getCode(),
+                        "参数错误：expireMinutes 需在 1-43200（分钟）范围内",
+                        null
+                );
+            }
+
             ChainReceipt receipt = chainAdapter.shareFiles(
                     request.getUploader(),
                     request.getFileHashList(),
-                    request.getMaxAccesses()
+                    expireMinutes
             );
 
             fiscoMetrics.recordSuccess();
@@ -222,6 +241,60 @@ public class BlockChainServiceImpl implements BlockChainService {
 
         } catch (Exception e) {
             return BlockChainExceptionHandler.handle(e, "getTransactionByHash", ResultEnum.TRANSACTION_NOT_FOUND);
+        }
+    }
+
+    @Override
+    @Retry(name = "blockchain")
+    @ApiDoc(value = "取消分享")
+    public Result<Boolean> cancelShare(CancelShareRequest request) {
+        try {
+            ChainReceipt receipt = chainAdapter.cancelShare(request.getShareCode());
+
+            if (receipt.isSuccess()) {
+                fiscoMetrics.recordSuccess();
+                return Result.success(true);
+            }
+
+            log.warn("[cancelShare] 取消分享失败: {}", receipt.getErrorMessage());
+            fiscoMetrics.recordFailure();
+            return Result.error(ResultEnum.BLOCKCHAIN_ERROR, false);
+
+        } catch (Exception e) {
+            return BlockChainExceptionHandler.handle(e, "cancelShare", ResultEnum.BLOCKCHAIN_ERROR);
+        }
+    }
+
+    @Override
+    @Retry(name = "blockchain")
+    @ApiDoc(value = "获取用户分享码列表")
+    public Result<List<String>> getUserShareCodes(String uploader) {
+        try {
+            List<String> shareCodes = chainAdapter.getUserShareCodes(uploader);
+            return Result.success(shareCodes);
+
+        } catch (Exception e) {
+            return BlockChainExceptionHandler.handle(e, "getUserShareCodes", ResultEnum.BLOCKCHAIN_ERROR);
+        }
+    }
+
+    @Override
+    @Retry(name = "blockchain")
+    @ApiDoc(value = "获取分享详情")
+    public Result<SharingVO> getShareInfo(String shareCode) {
+        try {
+            ChainShareInfo shareInfo = chainAdapter.getShareInfo(shareCode);
+
+            return Result.success(SharingVO.builder()
+                    .uploader(shareInfo.getUploader())
+                    .fileHashList(shareInfo.getFileHashList())
+                    .shareCode(shareCode)
+                    .expirationTime(shareInfo.getExpireTimestamp())
+                    .isValid(shareInfo.getIsValid())
+                    .build());
+
+        } catch (Exception e) {
+            return BlockChainExceptionHandler.handle(e, "getShareInfo", ResultEnum.BLOCKCHAIN_ERROR);
         }
     }
 }
