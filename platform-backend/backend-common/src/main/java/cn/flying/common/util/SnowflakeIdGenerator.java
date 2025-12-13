@@ -45,7 +45,9 @@ public class SnowflakeIdGenerator implements InitializingBean {
 
     // 无锁化设计
     private final AtomicLock atomicLock = new AtomicLock();
-    private final long lastTimestamp = -1L;
+
+    // 时钟回拨容忍阈值（毫秒）
+    private static final long CLOCK_BACKWARDS_THRESHOLD_MS = 5_000;
 
     @Override
     public void afterPropertiesSet() {
@@ -73,13 +75,19 @@ public class SnowflakeIdGenerator implements InitializingBean {
     /** 生成ID（无锁化） */
     public long nextId() {
         long currentTimestamp = getCurrentTimestamp();
+        long lastTs = atomicLock.getLastTimestamp();
 
-        // 处理时钟回拨
-        if (currentTimestamp < lastTimestamp) {
-            handleClockBackwards(currentTimestamp);
+        // 提前检测严重的时钟回拨（超过阈值直接失败）
+        if (lastTs > 0 && currentTimestamp < lastTs) {
+            long offset = lastTs - currentTimestamp;
+            if (offset > CLOCK_BACKWARDS_THRESHOLD_MS) {
+                throw new IllegalStateException(
+                    "Clock moved backwards by " + offset + "ms, exceeds threshold " + CLOCK_BACKWARDS_THRESHOLD_MS + "ms");
+            }
+            log.warn("Clock moved backwards by {}ms, will wait in CAS loop", offset);
         }
 
-        // CAS自旋更新序列
+        // CAS自旋更新序列（内部处理时钟回拨）
         return atomicLock.update(currentTimestamp, (ts, seq) -> {
             long timestampDelta = ts - DEFAULT_START_TIMESTAMP;
             return (timestampDelta << TIMESTAMP_SHIFT) |
@@ -129,25 +137,15 @@ public class SnowflakeIdGenerator implements InitializingBean {
         return System.currentTimeMillis();
     }
 
-    /** 处理时钟回拨（短暂等待） */
-    private void handleClockBackwards(long currentTimestamp) {
-        long offset = lastTimestamp - currentTimestamp;
-        if (offset <= 5_000) { // 允许5秒内的回拨
-            try {
-                Thread.sleep(offset);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("Clock adjustment interrupted", e);
-            }
-        } else {
-            throw new IllegalStateException("Clock moved backwards beyond threshold");
-        }
-    }
-
     // ------------------- 辅助类与工具方法 -------------------
     /** 无锁更新器 */
-    private static class AtomicLock {
-        private final AtomicLong state = new AtomicLong(0); // [timestamp:54 | sequence:12]
+    private class AtomicLock {
+        private final AtomicLong state = new AtomicLong(0); // [timestamp:52 | sequence:12]
+
+        /** 获取上次使用的时间戳 */
+        public long getLastTimestamp() {
+            return state.get() >>> SEQUENCE_BITS;
+        }
 
         public long update(long currentTimestamp, IdGeneratorFunction function) {
             long prev, next;
@@ -157,13 +155,28 @@ public class SnowflakeIdGenerator implements InitializingBean {
                 long sequence = prev & MAX_SEQUENCE;
 
                 if (currentTimestamp > lastTs) {
+                    // 正常情况：时间前进，重置序列
                     sequence = 0;
                     lastTs = currentTimestamp;
                 } else if (currentTimestamp == lastTs) {
+                    // 同一毫秒：递增序列
                     if (++sequence > MAX_SEQUENCE) {
                         currentTimestamp = waitNextMillis(lastTs);
                         sequence = 0;
                         lastTs = currentTimestamp;
+                    }
+                } else {
+                    // 时钟回拨：currentTimestamp < lastTs
+                    long offset = lastTs - currentTimestamp;
+                    if (offset <= CLOCK_BACKWARDS_THRESHOLD_MS) {
+                        // 短暂回拨：等待时钟追上
+                        currentTimestamp = waitNextMillis(lastTs);
+                        sequence = 0;
+                        lastTs = currentTimestamp;
+                    } else {
+                        // 严重回拨：抛出异常（理论上不会到达这里，已在 nextId() 中检测）
+                        throw new IllegalStateException(
+                            "Clock moved backwards by " + offset + "ms in CAS loop");
                     }
                 }
 

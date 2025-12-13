@@ -108,16 +108,17 @@ public class JwtUtils {
 
     /**
      * 计算字符串的熵值（比特）
+     * 使用 HashMap 以支持完整 Unicode 字符集，避免数组越界
      */
     private double calculateEntropy(String str) {
-        int[] freq = new int[256];
+        java.util.HashMap<Character, Integer> freq = new java.util.HashMap<>();
         for (char c : str.toCharArray()) {
-            freq[c]++;
+            freq.merge(c, 1, Integer::sum);
         }
 
         double entropy = 0.0;
         int len = str.length();
-        for (int f : freq) {
+        for (int f : freq.values()) {
             if (f > 0) {
                 double p = (double) f / len;
                 entropy -= p * (Math.log(p) / Math.log(2));
@@ -264,6 +265,51 @@ public class JwtUtils {
         Map<String, Claim> claims = jwt.getClaims();
         Claim tenantClaim = claims.get("tenantId");
         return tenantClaim == null ? null : tenantClaim.asLong();
+    }
+
+    /**
+     * 刷新Jwt令牌
+     * 基于现有的有效令牌生成新令牌，同时使旧令牌失效
+     * @param headerToken 请求头中携带的令牌
+     * @return 新的令牌，如果刷新失败返回null
+     */
+    public String refreshJwt(String headerToken) {
+        DecodedJWT jwt = resolveJwt(headerToken);
+        if (jwt == null) {
+            return null;
+        }
+
+        Map<String, Claim> claims = jwt.getClaims();
+        Long userId = claims.get("id").asLong();
+        Long tenantId = claims.get("tenantId") != null ? claims.get("tenantId").asLong() : null;
+        String username = claims.get("name").asString();
+        String[] authorities = claims.get("authorities").asArray(String.class);
+
+        // 频率检测
+        if (!this.frequencyCheck(userId)) {
+            log.warn("Token refresh rate limit exceeded for user: {}", userId);
+            return null;
+        }
+
+        // 使旧令牌失效
+        deleteToken(jwt.getId(), jwt.getExpiresAt());
+
+        // 生成新令牌
+        Date expire = this.expireTime();
+        String newToken = JWT.create()
+                .withJWTId(UUID.randomUUID().toString())
+                .withIssuer(ISSUER)
+                .withAudience(AUDIENCE)
+                .withClaim("id", userId)
+                .withClaim("tenantId", tenantId)
+                .withClaim("name", username)
+                .withClaim("authorities", java.util.Arrays.asList(authorities))
+                .withExpiresAt(expire)
+                .withIssuedAt(new Date())
+                .sign(algorithm);
+
+        log.info("Token refreshed for user: {}", userId);
+        return newToken;
     }
 
     /**

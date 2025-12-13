@@ -44,6 +44,7 @@ public class JsonConverter {
      * @return 反序列化后的对象
      * @throws JsonParseException 如果解析失败
      */
+    @SuppressWarnings("unchecked")
     public static <T> T parse(String json, Class<T> clazz) throws JsonParseException {
         if (json == null || json.trim().isEmpty() || clazz == null) {
             throw new JsonParseException("JSON/类型不能为空");
@@ -105,13 +106,14 @@ public class JsonConverter {
      * @param <T>
      * @return
      */
+    @SuppressWarnings("unchecked")
     public static <T> T parse(String json, TypeReference<T> typeReference) {
         if (CommonUtils.isEmpty(json) || typeReference == null) {
             return null;
         }
 
         try {
-            return (typeReference.getType().equals(String.class) ? (T)json : om.readValue(json, typeReference));
+            return (typeReference.getType().equals(String.class) ? (T) json : om.readValue(json, typeReference));
         } catch (Exception e) {
             logger.error("反序列化失败", e);
             return null;
