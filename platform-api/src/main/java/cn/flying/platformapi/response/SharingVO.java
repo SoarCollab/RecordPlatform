@@ -40,4 +40,7 @@ public class SharingVO implements Serializable {
 
     @Schema(description = "过期时间戳（毫秒）")
     private Long expirationTime;
+
+    @Schema(description = "是否有效（未被取消）")
+    private Boolean isValid;
 }
