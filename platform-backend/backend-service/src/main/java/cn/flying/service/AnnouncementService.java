@@ -7,6 +7,8 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 
+import java.util.List;
+
 /**
  * 公告服务接口
  */
@@ -95,4 +97,13 @@ public interface AnnouncementService extends IService<Announcement> {
      * 处理过期公告
      */
     void processExpiredAnnouncements();
+
+    /**
+     * 获取最新公告列表
+     *
+     * @param userId 当前用户ID
+     * @param limit  数量限制
+     * @return 最新公告列表
+     */
+    List<AnnouncementVO> getLatest(Long userId, int limit);
 }

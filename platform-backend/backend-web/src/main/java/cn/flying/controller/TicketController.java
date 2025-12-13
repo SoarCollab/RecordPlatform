@@ -71,6 +71,19 @@ public class TicketController {
         return Result.success(result);
     }
 
+    @PutMapping("/{id}")
+    @Operation(summary = "更新工单")
+    @OperationLog(module = "工单模块", operationType = "修改", description = "更新工单")
+    public Result<TicketDetailVO> update(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Parameter(description = "工单ID") @PathVariable String id,
+            @Valid @RequestBody TicketUpdateVO vo) {
+        Long ticketId = IdUtils.fromExternalId(id);
+        Ticket ticket = ticketService.updateTicket(userId, ticketId, vo);
+        TicketDetailVO result = ticketService.getTicketDetail(userId, ticket.getId(), false);
+        return Result.success(result);
+    }
+
     @PostMapping("/{id}/reply")
     @Operation(summary = "回复工单")
     @OperationLog(module = "工单模块", operationType = "新增", description = "回复工单")

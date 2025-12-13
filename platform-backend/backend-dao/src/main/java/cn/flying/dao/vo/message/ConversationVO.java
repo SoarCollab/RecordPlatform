@@ -33,7 +33,7 @@ public class ConversationVO {
     private String lastMessageType;
 
     @Schema(description = "最后消息时间")
-    private Date lastMessageAt;
+    private Date lastMessageTime;
 
     @Schema(description = "未读消息数")
     private Integer unreadCount;

@@ -50,7 +50,7 @@ public class AnnouncementVO {
     private String publisherId;
 
     @Schema(description = "发布者名称")
-    private String publisherName;
+    private String author;
 
     @Schema(description = "是否已读")
     private Boolean read;
@@ -63,7 +63,9 @@ public class AnnouncementVO {
      */
     public AnnouncementVO setPriorityWithDesc(Integer priority) {
         this.priority = priority;
-        this.priorityDesc = MessagePriority.fromCode(priority).getDescription();
+        if (priority != null) {
+            this.priorityDesc = MessagePriority.fromCode(priority).getDescription();
+        }
         return this;
     }
 
@@ -72,7 +74,9 @@ public class AnnouncementVO {
      */
     public AnnouncementVO setStatusWithDesc(Integer status) {
         this.status = status;
-        this.statusDesc = AnnouncementStatus.fromCode(status).getDescription();
+        if (status != null) {
+            this.statusDesc = AnnouncementStatus.fromCode(status).getDescription();
+        }
         return this;
     }
 }

@@ -30,6 +30,15 @@ public interface FileQueryService {
     // ==================== 同步查询方法 ====================
 
     /**
+     * 根据文件ID获取文件详情
+     *
+     * @param userId 用户ID（用于权限校验）
+     * @param fileId 文件ID
+     * @return 文件详情
+     */
+    File getFileById(Long userId, Long fileId);
+
+    /**
      * 根据用户ID获取用户文件列表（元信息）
      *
      * @param userId 用户ID
@@ -87,6 +96,15 @@ public interface FileQueryService {
      * @return 解密信息（初始密钥、元数据）
      */
     FileDecryptInfoVO getFileDecryptInfo(Long userId, String fileHash);
+
+    /**
+     * 获取用户创建的分享列表
+     *
+     * @param userId 用户ID
+     * @param page   分页参数
+     * @return 分享记录分页
+     */
+    com.baomidou.mybatisplus.core.metadata.IPage<cn.flying.dao.vo.file.FileShareVO> getUserShares(Long userId, Page<?> page);
 
     // ==================== 异步查询方法（Virtual Thread 优化）====================
 

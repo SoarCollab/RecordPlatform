@@ -8,6 +8,7 @@ import cn.flying.dao.dto.Account;
 import cn.flying.dao.vo.auth.ChangePasswordVO;
 import cn.flying.dao.vo.auth.ModifyEmailVO;
 import cn.flying.dao.vo.auth.AccountVO;
+import cn.flying.dao.vo.auth.UpdateUserVO;
 import cn.flying.service.AccountService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -42,6 +43,23 @@ public class AccountController {
         Account account = accountService.findAccountById(userId);
         return Result.success(account.asViewObject(AccountVO.class));
     }
+
+    /**
+     * 更新用户信息
+     * @param userId 用户ID
+     * @param vo 更新请求
+     * @return 更新后的用户信息
+     */
+    @PutMapping("/info")
+    @Operation(summary = "更新用户信息")
+    @OperationLog(module = "用户模块", operationType = "修改", description = "更新用户信息")
+    public Result<AccountVO> updateUserInfo(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @RequestBody @Valid UpdateUserVO vo) {
+        Account account = accountService.updateUserInfo(userId, vo);
+        return Result.success(account.asViewObject(AccountVO.class));
+    }
+
     /**
      * 修改邮箱地址
      * @param userId 用户ID

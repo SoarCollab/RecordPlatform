@@ -43,13 +43,13 @@ public class TicketDetailVO {
     private String creatorId;
 
     @Schema(description = "创建者用户名")
-    private String creatorName;
+    private String creatorUsername;
 
     @Schema(description = "处理人ID")
     private String assigneeId;
 
     @Schema(description = "处理人用户名")
-    private String assigneeName;
+    private String assigneeUsername;
 
     @Schema(description = "附件列表")
     private List<TicketAttachmentVO> attachments;

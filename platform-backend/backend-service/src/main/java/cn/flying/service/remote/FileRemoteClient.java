@@ -4,6 +4,7 @@ import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.external.DistributedStorageService;
+import cn.flying.platformapi.request.CancelShareRequest;
 import cn.flying.platformapi.request.DeleteFilesRequest;
 import cn.flying.platformapi.request.ShareFilesRequest;
 import cn.flying.platformapi.request.StoreFileRequest;
@@ -138,5 +139,38 @@ public class FileRemoteClient {
     private Result<Boolean> deleteStorageFileFallback(Map<String, String> fileContent, Throwable t) {
         log.error("Storage service deleteFile failed", t);
         return new Result<>(ResultEnum.FILE_SERVICE_ERROR, false);
+    }
+
+    @CircuitBreaker(name = "blockChainService", fallbackMethod = "cancelShareFallback")
+    @Retry(name = "blockChainService")
+    public Result<Boolean> cancelShare(CancelShareRequest request) {
+        return blockChainService.cancelShare(request);
+    }
+
+    private Result<Boolean> cancelShareFallback(CancelShareRequest request, Throwable t) {
+        log.error("BlockChain service cancelShare failed, shareCode={}", request.getShareCode(), t);
+        return new Result<>(ResultEnum.BLOCKCHAIN_ERROR, false);
+    }
+
+    @CircuitBreaker(name = "blockChainService", fallbackMethod = "getUserShareCodesFallback")
+    @Retry(name = "blockChainService")
+    public Result<List<String>> getUserShareCodes(String uploader) {
+        return blockChainService.getUserShareCodes(uploader);
+    }
+
+    private Result<List<String>> getUserShareCodesFallback(String uploader, Throwable t) {
+        log.error("BlockChain service getUserShareCodes failed, uploader={}", uploader, t);
+        return new Result<>(ResultEnum.BLOCKCHAIN_ERROR, List.of());
+    }
+
+    @CircuitBreaker(name = "blockChainService", fallbackMethod = "getShareInfoFallback")
+    @Retry(name = "blockChainService")
+    public Result<SharingVO> getShareInfo(String shareCode) {
+        return blockChainService.getShareInfo(shareCode);
+    }
+
+    private Result<SharingVO> getShareInfoFallback(String shareCode, Throwable t) {
+        log.error("BlockChain service getShareInfo failed, shareCode={}", shareCode, t);
+        return new Result<>(ResultEnum.GET_USER_SHARE_FILE_ERROR, null);
     }
 }

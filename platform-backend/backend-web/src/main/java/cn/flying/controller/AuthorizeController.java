@@ -8,6 +8,7 @@ import cn.flying.common.util.JwtUtils;
 import cn.flying.dao.vo.auth.ConfirmResetVO;
 import cn.flying.dao.vo.auth.EmailRegisterVO;
 import cn.flying.dao.vo.auth.EmailResetVO;
+import cn.flying.dao.vo.auth.RefreshTokenVO;
 import cn.flying.dao.vo.auth.SseTokenVO;
 import cn.flying.service.AccountService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -89,6 +90,23 @@ public class AuthorizeController {
     public Result<String> resetPassword(@RequestBody @Valid EmailResetVO vo){
         return utils.messageHandle(() ->
                 accountService.resetEmailAccountPassword(vo));
+    }
+
+    /**
+     * 刷新访问令牌
+     * 基于当前有效的令牌生成新的令牌，同时使旧令牌失效
+     * @param request HTTP请求（包含Authorization头）
+     * @return 新的令牌信息
+     */
+    @PostMapping("/refresh")
+    @Operation(summary = "刷新访问令牌", description = "基于当前有效令牌生成新令牌，旧令牌将失效")
+    public Result<RefreshTokenVO> refreshToken(HttpServletRequest request) {
+        String headerToken = request.getHeader("Authorization");
+        String newToken = jwtUtils.refreshJwt(headerToken);
+        if (newToken == null) {
+            return Result.failure(401, "令牌刷新失败，请重新登录");
+        }
+        return Result.success(new RefreshTokenVO(newToken, jwtUtils.expireTime()));
     }
 
     /**
