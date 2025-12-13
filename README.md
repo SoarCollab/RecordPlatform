@@ -19,6 +19,8 @@
 - 安全机制：JWT 认证（HMAC512）、ID 混淆、CORS 白名单
 - 多租户隔离：数据库/Redis/S3兼容存储 路径租户隔离
 - 审计追踪：完整的操作日志和审计记录
+- CQRS 架构：FileQueryService 读写分离，Virtual Thread 异步查询
+- 多级缓存：Caffeine 本地缓存 + Redis 分布式缓存
 
 ## 系统架构
 
@@ -405,6 +407,59 @@ file:
 - 一次性使用
 - 与主 JWT 绑定用户身份
 
+## CQRS 读写分离
+
+文件模块采用 CQRS（Command Query Responsibility Segregation）架构，将读写操作分离到独立服务：
+
+### 架构概览
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         CQRS 架构                                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│   Command Side (FileService)        Query Side (FileQueryService)       │
+│   ┌─────────────────────┐           ┌─────────────────────┐            │
+│   │ storeFile           │           │ getUserFilesList    │ ← Caffeine │
+│   │ deleteFile          │           │ getFileAddress      │            │
+│   │ generateSharingCode │           │ getTransactionByHash│ ← Caffeine │
+│   │ cancelShare         │           │ getFileDecryptInfo  │ ← Caffeine │
+│   │ saveShareFile       │           │ getUserShares       │            │
+│   └─────────────────────┘           └─────────────────────┘            │
+│          │                                    │                         │
+│          ▼                                    ▼                         │
+│   ┌─────────────────────┐           ┌─────────────────────┐            │
+│   │ MySQL (主库写入)     │           │ Caffeine + Redis    │            │
+│   └─────────────────────┘           └─────────────────────┘            │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Virtual Thread 异步方法
+
+Query 服务提供异步方法，使用 Java 21 Virtual Thread 执行：
+
+| 方法 | 说明 |
+|------|------|
+| `getUserFilesListAsync()` | 异步获取用户文件列表 |
+| `getFileAddressAsync()` | 异步获取文件分片地址 |
+| `getFileDecryptInfoAsync()` | 异步获取解密信息 |
+
+配置启用：
+```yaml
+spring:
+  threads:
+    virtual:
+      enabled: true  # Java 21 Virtual Threads
+```
+
+### 缓存策略
+
+| 缓存名称 | TTL | 说明 |
+|---------|-----|------|
+| `userFiles` | 5min | 用户文件列表 |
+| `fileDecryptInfo` | 10min | 文件解密信息 |
+| `sharedFiles` | 5min | 分享文件列表 |
+| `transaction` | 1h | 区块链交易记录（不可变） |
+
 ## 弹性容错
 
 ### Resilience4j 配置示例
@@ -646,14 +701,18 @@ saga:
 |------|------|------|
 | GET | `/list` | 文件列表 |
 | GET | `/page` | 分页查询 |
+| GET | `/{id}` | 根据 ID 获取文件详情 |
 | GET | `/address` | 获取预签名下载地址 |
 | GET | `/download` | 下载文件 |
+| GET | `/decryptInfo` | 获取文件解密信息（客户端解密用） |
 | GET | `/getTransaction` | 获取链上交易记录 |
 | DELETE | `/deleteByHash` | 按哈希批量删除 |
 | DELETE | `/deleteById` | 按 ID 批量删除（管理员） |
 | POST | `/share` | 分享文件 |
+| GET | `/shares` | 获取我的分享列表（分页） |
 | GET | `/getSharingFiles` | 获取分享文件列表 |
 | POST | `/saveShareFile` | 保存分享文件 |
+| DELETE | `/share/{shareCode}` | 取消分享 |
 
 ### 分片上传 `/api/v1/files/upload`
 | 方法 | 路径 | 说明 |
@@ -752,9 +811,26 @@ SSE 事件类型：`NEW_MESSAGE`, `NEW_ANNOUNCEMENT`, `TICKET_UPDATE`, `TICKET_R
 | 合约 | 功能 |
 |------|------|
 | Storage.sol | 文件元数据存储、查询、删除 |
-| Sharing.sol | 文件分享、访问控制、次数限制 |
+| Sharing.sol | 文件分享、取消分享、访问控制、分享码管理 |
 
 合约地址通过环境变量配置：`FISCO_STORAGE_CONTRACT`, `FISCO_SHARING_CONTRACT`
+
+### Sharing.sol 方法清单
+
+| 方法 | 参数 | 说明 |
+|------|------|------|
+| `shareFiles` | uploader, fileHashes[], expireMinutes | 创建分享，返回 6 位分享码 |
+| `getSharedFiles` | shareCode | 获取分享文件（校验有效期） |
+| `cancelShare` | shareCode | 取消分享（设置 isValid=false） |
+| `getUserShareCodes` | uploader | 获取用户所有分享码列表 |
+| `getShareInfo` | shareCode | 获取分享详情（不校验有效性） |
+
+### 合约事件
+
+| 事件 | 参数 | 触发时机 |
+|------|------|---------|
+| `FileShared` | shareCode, uploader, fileHashes[], expireTime | 创建分享时 |
+| `ShareCancelled` | shareCode, uploader | 取消分享时 |
 
 ### 多链适配
 
@@ -802,7 +878,7 @@ A: 如果服务器有 AES-NI 指令集支持，推荐 `aes-gcm`；容器/ARM 环
 
 ## 系统演进状态
 
-**当前版本**：v6.0
+**当前版本**：v7.0
 
 | 阶段 | 状态 | 完成内容 |
 |------|------|---------|
@@ -810,9 +886,10 @@ A: 如果服务器有 AES-NI 指令集支持，推荐 `aes-gcm`；容器/ARM 环
 | P1 | ✅ | HTTPS 强制、分布式流控改造、定时任务分布式锁、Saga 补偿原子化 |
 | P2 | ✅ | SkyWalking Agent 部署、健康检查指标补全、结构化日志标准化 |
 | P3 | ✅ | 存储路径租户隔离、Redis Key 租户隔离、Dubbo 租户传播 |
-| P4 | 🔄 | API 版本化、区块链 HA、智能合约优化、CQRS/虚拟线程 |
+| P4 | ✅ | 多链适配器架构、智能合约优化、数据库索引优化 |
+| P5 | 🔄 | CQRS/虚拟线程（✅）、前端核心功能开发 |
 
-**系统成熟度**：`8.0/10` - 基础架构完善，生产环境就绪，进入长期优化阶段
+**系统成熟度**：`8.5/10` - 多链架构就绪，CQRS 读写分离完成，进入前端开发阶段
 
 详细演进规划参见 [EVOLUTION_PLAN.md](./EVOLUTION_PLAN.md)
 
