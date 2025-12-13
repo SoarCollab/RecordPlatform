@@ -32,7 +32,8 @@ public class ShareFilesRequest implements Serializable {
     private List<String> fileHashList;
 
     /**
-     * 最大访问次数（null 表示无限制）
+     * 分享有效期（分钟）
+     * <p>合约要求：必须大于 0，且不超过 43200（30 天）</p>
      */
-    private Integer maxAccesses;
+    private Integer expireMinutes;
 }
