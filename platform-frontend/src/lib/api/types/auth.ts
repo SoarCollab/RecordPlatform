@@ -12,17 +12,19 @@ export interface AuthorizeVO {
 /**
  * 用户信息
  * @see AccountVO.java
+ * @note 部分字段为前端扩展，后端可能不返回
  */
 export interface AccountVO {
 	id: string;
 	username: string;
-	nickname?: string;
 	email?: string;
-	phone?: string;
 	avatar?: string;
 	role: string;
-	status: number;
 	createTime: string;
+	// 以下字段为前端扩展（后端 AccountVO 不包含）
+	nickname?: string;
+	phone?: string;
+	status?: number;
 }
 
 /**
@@ -46,20 +48,20 @@ export interface RegisterRequest {
 
 /**
  * 密码修改请求
+ * @see ChangePasswordVO.java
  */
 export interface ChangePasswordRequest {
-	oldPassword: string;
-	newPassword: string;
+	password: string; // 旧密码
+	new_password: string; // 新密码
 }
 
 /**
  * 用户更新请求
+ * @see UpdateUserVO.java
  */
 export interface UpdateUserRequest {
-	nickname?: string;
-	email?: string;
-	phone?: string;
 	avatar?: string;
+	nickname?: string;
 }
 
 /**
@@ -86,4 +88,13 @@ export interface ResetPasswordRequest {
 export interface SseTokenVO {
 	sseToken: string;
 	expiresIn: number; // 有效期（秒）
+}
+
+/**
+ * Token 刷新响应
+ * @see RefreshTokenVO.java
+ */
+export interface RefreshTokenVO {
+	token: string;
+	expire: string; // ISO datetime
 }

@@ -188,7 +188,7 @@ async function request<T>(
 			const contentType = response.headers.get('Content-Type') || '';
 			if (!contentType.includes('application/json')) {
 				throw new ApiError(
-					ResultCode.SYSTEM_ERROR,
+					ResultCode.PARSE_ERROR,
 					`服务器响应格式错误 (${response.status})`
 				);
 			}
@@ -198,7 +198,7 @@ async function request<T>(
 			try {
 				result = await response.json();
 			} catch {
-				throw new ApiError(ResultCode.SYSTEM_ERROR, '响应解析失败');
+				throw new ApiError(ResultCode.PARSE_ERROR, '响应解析失败');
 			}
 
 			// Handle success

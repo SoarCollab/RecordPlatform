@@ -8,7 +8,8 @@ import type {
 	UpdateUserRequest,
 	ConfirmResetRequest,
 	ResetPasswordRequest,
-	SseTokenVO
+	SseTokenVO,
+	RefreshTokenVO
 } from '../types';
 
 const BASE = '/auth';
@@ -55,13 +56,17 @@ export async function getCurrentUser(): Promise<AccountVO> {
 
 /**
  * 修改密码
+ * @see AccountController.changePassword
+ * @note 字段名与后端 ChangePasswordVO 对齐: password, new_password
  */
 export async function changePassword(data: ChangePasswordRequest): Promise<void> {
-	return api.put('/users/password', data);
+	return api.post('/users/change-password', data);
 }
 
 /**
  * 更新用户信息
+ * @see AccountController.update
+ * @see UpdateUserVO.java
  */
 export async function updateUser(data: UpdateUserRequest): Promise<AccountVO> {
 	return api.put<AccountVO>('/users/info', data);
@@ -69,9 +74,11 @@ export async function updateUser(data: UpdateUserRequest): Promise<AccountVO> {
 
 /**
  * 刷新 Token
+ * @see AuthorizeController.refresh
+ * @see RefreshTokenVO.java
  */
-export async function refreshToken(): Promise<AuthorizeVO> {
-	const result = await api.post<AuthorizeVO>(`${BASE}/refresh`);
+export async function refreshToken(): Promise<RefreshTokenVO> {
+	const result = await api.post<RefreshTokenVO>(`${BASE}/refresh`);
 	setToken(result.token, result.expire);
 	return result;
 }

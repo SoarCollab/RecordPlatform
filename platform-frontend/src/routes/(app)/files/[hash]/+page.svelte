@@ -7,7 +7,7 @@
 		getFileByHash,
 		getTransaction,
 		downloadFile,
-		shareFiles
+		createShare
 	} from '$api/endpoints/files';
 	import { FileStatus, FileStatusLabel, type FileVO, type TransactionVO } from '$api/types';
 	import * as Card from '$lib/components/ui/card';
@@ -34,7 +34,7 @@
 
 	// Share dialog state
 	let shareDialogOpen = $state(false);
-	let shareMaxAccesses = $state<number | undefined>(undefined);
+	let shareExpireHours = $state(72);
 	let shareCode = $state('');
 	let isSharing = $state(false);
 
@@ -107,7 +107,10 @@
 
 		isSharing = true;
 		try {
-			const code = await shareFiles([file.fileHash], shareMaxAccesses);
+			const code = await createShare({
+				fileHash: [file.fileHash],
+				expireMinutes: shareExpireHours * 60
+			});
 			shareCode = code;
 			notifications.success('分享链接已创建');
 		} catch (err) {
@@ -379,17 +382,17 @@
 		{:else}
 			<div class="space-y-4">
 				<div>
-					<label for="share-max-accesses" class="mb-2 block text-sm font-medium">访问次数限制（可选）</label>
-					<Input
-						id="share-max-accesses"
-						type="number"
-						bind:value={shareMaxAccesses}
-						placeholder="不限制"
-						min={1}
-					/>
-					<p class="mt-1 text-xs text-muted-foreground">
-						留空表示不限制访问次数
-					</p>
+					<label for="share-expire" class="mb-2 block text-sm font-medium">有效期</label>
+					<select
+						id="share-expire"
+						bind:value={shareExpireHours}
+						class="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+					>
+						<option value={24}>24 小时</option>
+						<option value={72}>3 天</option>
+						<option value={168}>7 天</option>
+						<option value={720}>30 天</option>
+					</select>
 				</div>
 			</div>
 		{/if}

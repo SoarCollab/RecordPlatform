@@ -100,7 +100,7 @@
 			conversation = await getConversation(data.conversationId);
 
 			// Load initial messages
-			const result = await getMessages(data.conversationId, { current: 1, size: pageSize });
+			const result = await getMessages(data.conversationId, { pageNum: 1, pageSize });
 			// Messages come newest first, reverse for display
 			messages = result.records.slice().reverse();
 			total = result.total;
@@ -126,7 +126,7 @@
 		loadingMore = true;
 		try {
 			const nextPage = page + 1;
-			const result = await getMessages(data.conversationId, { current: nextPage, size: pageSize });
+			const result = await getMessages(data.conversationId, { pageNum: nextPage, pageSize });
 			// Prepend older messages (reversed)
 			messages = [...result.records.slice().reverse(), ...messages];
 			page = nextPage;

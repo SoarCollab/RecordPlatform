@@ -38,7 +38,8 @@
 
 		isSavingProfile = true;
 		try {
-			await auth.updateProfile({ nickname, email, phone });
+			// 后端 UpdateUserVO 仅支持 avatar 和 nickname
+			await auth.updateProfile({ nickname });
 			notifications.success('保存成功');
 		} catch (err) {
 			notifications.error('保存失败', err instanceof Error ? err.message : '请稍后重试');
@@ -68,7 +69,8 @@
 
 		isChangingPassword = true;
 		try {
-			await changePassword({ oldPassword, newPassword });
+			// 字段名与后端 ChangePasswordVO 对齐: password, new_password
+			await changePassword({ password: oldPassword, new_password: newPassword });
 			notifications.success('密码修改成功', '请使用新密码重新登录');
 			oldPassword = '';
 			newPassword = '';

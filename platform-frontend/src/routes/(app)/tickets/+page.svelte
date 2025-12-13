@@ -36,8 +36,8 @@
 		loading = true;
 		try {
 			const result = await getTickets({
-				current: page,
-				size: pageSize,
+				pageNum: page,
+				pageSize,
 				status: statusFilter
 			});
 			tickets = result.records;
@@ -53,13 +53,13 @@
 		status: TicketStatus
 	): 'default' | 'secondary' | 'destructive' | 'outline' {
 		switch (status) {
-			case TicketStatus.OPEN:
-				return 'secondary';
-			case TicketStatus.IN_PROGRESS:
-				return 'default';
 			case TicketStatus.PENDING:
+				return 'secondary';
+			case TicketStatus.PROCESSING:
+				return 'default';
+			case TicketStatus.CONFIRMING:
 				return 'outline';
-			case TicketStatus.RESOLVED:
+			case TicketStatus.COMPLETED:
 				return 'default';
 			case TicketStatus.CLOSED:
 				return 'secondary';
@@ -70,13 +70,13 @@
 
 	function getStatusClass(status: TicketStatus): string {
 		switch (status) {
-			case TicketStatus.OPEN:
-				return 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300';
-			case TicketStatus.IN_PROGRESS:
-				return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300';
 			case TicketStatus.PENDING:
+				return 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300';
+			case TicketStatus.PROCESSING:
+				return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300';
+			case TicketStatus.CONFIRMING:
 				return 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300';
-			case TicketStatus.RESOLVED:
+			case TicketStatus.COMPLETED:
 				return 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300';
 			case TicketStatus.CLOSED:
 				return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
@@ -87,12 +87,10 @@
 
 	function getPriorityClass(priority: TicketPriority): string {
 		switch (priority) {
-			case TicketPriority.URGENT:
-				return 'text-red-600 dark:text-red-400';
 			case TicketPriority.HIGH:
+				return 'text-red-600 dark:text-red-400';
+			case TicketPriority.MEDIUM:
 				return 'text-orange-600 dark:text-orange-400';
-			case TicketPriority.NORMAL:
-				return 'text-muted-foreground';
 			case TicketPriority.LOW:
 				return 'text-muted-foreground/60';
 			default:
@@ -136,37 +134,37 @@
 			全部
 		</button>
 		<button
-			class="rounded-full px-3 py-1 text-sm transition-colors {statusFilter === TicketStatus.OPEN
+			class="rounded-full px-3 py-1 text-sm transition-colors {statusFilter === TicketStatus.PENDING
 				? 'bg-primary text-primary-foreground'
 				: 'bg-muted hover:bg-muted/80'}"
-			onclick={() => handleFilterChange(TicketStatus.OPEN)}
+			onclick={() => handleFilterChange(TicketStatus.PENDING)}
 		>
 			待处理
 		</button>
 		<button
 			class="rounded-full px-3 py-1 text-sm transition-colors {statusFilter ===
-			TicketStatus.IN_PROGRESS
+			TicketStatus.PROCESSING
 				? 'bg-primary text-primary-foreground'
 				: 'bg-muted hover:bg-muted/80'}"
-			onclick={() => handleFilterChange(TicketStatus.IN_PROGRESS)}
+			onclick={() => handleFilterChange(TicketStatus.PROCESSING)}
 		>
 			处理中
 		</button>
 		<button
 			class="rounded-full px-3 py-1 text-sm transition-colors {statusFilter ===
-			TicketStatus.PENDING
+			TicketStatus.CONFIRMING
 				? 'bg-primary text-primary-foreground'
 				: 'bg-muted hover:bg-muted/80'}"
-			onclick={() => handleFilterChange(TicketStatus.PENDING)}
+			onclick={() => handleFilterChange(TicketStatus.CONFIRMING)}
 		>
-			等待反馈
+			待确认
 		</button>
 		<button
 			class="rounded-full px-3 py-1 text-sm transition-colors {statusFilter ===
-			TicketStatus.RESOLVED
+			TicketStatus.COMPLETED
 				? 'bg-primary text-primary-foreground'
 				: 'bg-muted hover:bg-muted/80'}"
-			onclick={() => handleFilterChange(TicketStatus.RESOLVED)}
+			onclick={() => handleFilterChange(TicketStatus.COMPLETED)}
 		>
 			已解决
 		</button>
@@ -237,9 +235,11 @@
 							<div class="min-w-0 flex-1">
 								<div class="mb-1 flex items-center gap-2">
 									<span class="text-xs text-muted-foreground">{ticket.ticketNo}</span>
-									<span class="rounded bg-muted px-1.5 py-0.5 text-xs">
-										{TicketCategoryLabel[ticket.category]}
-									</span>
+									{#if ticket.category !== undefined}
+										<span class="rounded bg-muted px-1.5 py-0.5 text-xs">
+											{TicketCategoryLabel[ticket.category]}
+										</span>
+									{/if}
 									{#if ticket.priority >= TicketPriority.HIGH}
 										<span class="text-xs {getPriorityClass(ticket.priority)}">
 											{TicketPriorityLabel[ticket.priority]}优先级
