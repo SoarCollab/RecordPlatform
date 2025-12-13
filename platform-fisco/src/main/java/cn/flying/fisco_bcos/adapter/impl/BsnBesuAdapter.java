@@ -249,7 +249,7 @@ public class BsnBesuAdapter implements BlockChainAdapter {
     // ==================== 文件分享操作 ====================
 
     @Override
-    public ChainReceipt shareFiles(String uploader, List<String> fileHashes, int maxAccesses) {
+    public ChainReceipt shareFiles(String uploader, List<String> fileHashes, int expireMinutes) {
         try {
             List<Bytes32> hashArray = fileHashes.stream()
                     .map(h -> new Bytes32(Numeric.hexStringToByteArray(h)))
@@ -260,7 +260,7 @@ public class BsnBesuAdapter implements BlockChainAdapter {
                     Arrays.asList(
                             new Utf8String(uploader),
                             new DynamicArray<>(Bytes32.class, hashArray),
-                            new Uint256(maxAccesses)
+                            new Uint256(expireMinutes)
                     ),
                     Collections.singletonList(new TypeReference<Utf8String>() {
                     })
@@ -329,6 +329,112 @@ public class BsnBesuAdapter implements BlockChainAdapter {
         } catch (Exception e) {
             log.error("[BSN Besu getSharedFiles] 异常", e);
             throw new ChainException(ChainType.BSN_BESU, "getSharedFiles", e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public ChainReceipt cancelShare(String shareCode) {
+        try {
+            org.web3j.abi.datatypes.Function abiFunction = new org.web3j.abi.datatypes.Function(
+                    "cancelShare",
+                    Collections.singletonList(new Utf8String(shareCode)),
+                    Collections.emptyList()
+            );
+
+            EthSendTransaction txResponse = sendTransaction(abiFunction);
+
+            if (txResponse.hasError()) {
+                throw new ChainException(ChainType.BSN_BESU, "cancelShare", txResponse.getError().getMessage());
+            }
+
+            TransactionReceipt receipt = waitForReceipt(txResponse.getTransactionHash());
+
+            return ChainReceipt.builder()
+                    .transactionHash(normalizeHash(txResponse.getTransactionHash()))
+                    .success(receipt.isStatusOK())
+                    .build();
+
+        } catch (ChainException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[BSN Besu cancelShare] 异常", e);
+            throw new ChainException(ChainType.BSN_BESU, "cancelShare", e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public List<String> getUserShareCodes(String uploader) {
+        try {
+            org.web3j.abi.datatypes.Function abiFunction = new org.web3j.abi.datatypes.Function(
+                    "getUserShareCodes",
+                    Collections.singletonList(new Utf8String(uploader)),
+                    Collections.singletonList(new TypeReference<DynamicArray<Utf8String>>() {})
+            );
+
+            List<Type> result = callContract(abiFunction);
+
+            if (result.isEmpty()) {
+                return Collections.emptyList();
+            }
+
+            @SuppressWarnings("unchecked")
+            List<Utf8String> shareCodes = ((DynamicArray<Utf8String>) result.get(0)).getValue();
+
+            return shareCodes.stream()
+                    .map(Utf8String::getValue)
+                    .filter(code -> code != null && !code.isEmpty())
+                    .toList();
+
+        } catch (Exception e) {
+            log.error("[BSN Besu getUserShareCodes] 异常", e);
+            throw new ChainException(ChainType.BSN_BESU, "getUserShareCodes", e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public ChainShareInfo getShareInfo(String shareCode) {
+        try {
+            org.web3j.abi.datatypes.Function abiFunction = new org.web3j.abi.datatypes.Function(
+                    "getShareInfo",
+                    Collections.singletonList(new Utf8String(shareCode)),
+                    Arrays.asList(
+                            new TypeReference<Utf8String>() {},      // uploader
+                            new TypeReference<DynamicArray<Bytes32>>() {}, // fileHashes
+                            new TypeReference<Uint256>() {},         // expireTime
+                            new TypeReference<org.web3j.abi.datatypes.Bool>() {} // isValid
+                    )
+            );
+
+            List<Type> result = callContract(abiFunction);
+
+            if (result.size() < 4) {
+                throw new ChainException(ChainType.BSN_BESU, "getShareInfo", "Share not found");
+            }
+
+            String uploaderResult = ((Utf8String) result.get(0)).getValue();
+            @SuppressWarnings("unchecked")
+            List<Bytes32> hashes = ((DynamicArray<Bytes32>) result.get(1)).getValue();
+            BigInteger expireTime = ((Uint256) result.get(2)).getValue();
+            boolean isValid = ((org.web3j.abi.datatypes.Bool) result.get(3)).getValue();
+
+            List<String> fileHashList = hashes.stream()
+                    .map(h -> Numeric.toHexStringNoPrefix(h.getValue()))
+                    .filter(h -> !h.equals("0".repeat(64)))
+                    .toList();
+
+            return ChainShareInfo.builder()
+                    .uploader(uploaderResult)
+                    .fileHashList(fileHashList)
+                    .shareCode(shareCode)
+                    .expireTimestamp(expireTime.longValue())
+                    .isValid(isValid)
+                    .build();
+
+        } catch (ChainException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[BSN Besu getShareInfo] 异常", e);
+            throw new ChainException(ChainType.BSN_BESU, "getShareInfo", e.getMessage(), e);
         }
     }
 

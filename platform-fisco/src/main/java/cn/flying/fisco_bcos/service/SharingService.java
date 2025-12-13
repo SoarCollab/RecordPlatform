@@ -13,10 +13,13 @@ import org.fisco.bcos.sdk.v3.transaction.manager.TransactionProcessorFactory;
 import org.fisco.bcos.sdk.v3.transaction.model.dto.CallResponse;
 import org.fisco.bcos.sdk.v3.transaction.model.dto.TransactionResponse;
 import cn.flying.fisco_bcos.constants.ContractConstants;
+import cn.flying.fisco_bcos.model.bo.SharingCancelShareInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingDeleteFilesInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingGetFileInputBO;
+import cn.flying.fisco_bcos.model.bo.SharingGetShareInfoInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingGetSharedFilesInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingGetUserFilesInputBO;
+import cn.flying.fisco_bcos.model.bo.SharingGetUserShareCodesInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingShareFilesInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingStoreFileInputBO;
 import org.springframework.beans.factory.annotation.Value;
@@ -110,5 +113,46 @@ public class SharingService {
   
   public BcosTransactionReceipt getTransactionReceipt(String transactionHash) {
     return this.client.getTransactionReceipt(transactionHash, false);
+  }
+
+  /**
+   * 取消分享（将分享标记为无效）
+   *
+   * @param input 分享码输入
+   * @return 交易响应
+   */
+  public TransactionResponse cancelShare(SharingCancelShareInputBO input) throws Exception {
+    return this.txProcessor.sendTransactionAndGetResponse(
+        this.address, ContractConstants.SharingAbi, "cancelShare", input.toArgs());
+  }
+
+  /**
+   * 获取用户的所有分享码列表
+   *
+   * @param input 上传者输入
+   * @return 调用响应
+   */
+  public CallResponse getUserShareCodes(SharingGetUserShareCodesInputBO input) throws Exception {
+    return this.txProcessor.sendCall(
+        this.client.getCryptoSuite().getCryptoKeyPair().getAddress(),
+        this.address,
+        ContractConstants.SharingAbi,
+        "getUserShareCodes",
+        input.toArgs());
+  }
+
+  /**
+   * 获取分享详情（不校验有效性）
+   *
+   * @param input 分享码输入
+   * @return 调用响应
+   */
+  public CallResponse getShareInfo(SharingGetShareInfoInputBO input) throws Exception {
+    return this.txProcessor.sendCall(
+        this.client.getCryptoSuite().getCryptoKeyPair().getAddress(),
+        this.address,
+        ContractConstants.SharingAbi,
+        "getShareInfo",
+        input.toArgs());
   }
 }
