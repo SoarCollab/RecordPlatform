@@ -11,18 +11,24 @@ contract Sharing is Storage {
         uint256 expireTime;     // 过期时间（时间戳，毫秒）
         bool isValid;           // 是否有效
     }
-    
+
     // 字符集，用于生成分享码
     string private constant CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    
+
     // 分享码到分享信息的映射
     mapping(string => ShareInfo) private shareInfos;
-    
+
+    // 用户分享码列表索引：uploader → shareCode[]
+    mapping(string => string[]) private userShareCodes;
+
     // 用于生成随机数的nonce
     uint256 private nonce = 0;
-    
+
     // 分享事件
     event FileShared(string shareCode, string uploader, bytes32[] fileHashes, uint256 expireTime);
+
+    // 取消分享事件
+    event ShareCancelled(string shareCode, string uploader);
     
     // 生成随机分享码
     function generateShareCode() private returns (string memory) {
@@ -94,10 +100,13 @@ contract Sharing is Storage {
             expireTime: expireTime,
             isValid: true
         });
-        
+
+        // 将分享码添加到用户分享列表
+        userShareCodes[uploader].push(shareCode);
+
         // 触发事件
         emit FileShared(shareCode, uploader, fileHashes, expireTime);
-        
+
         return shareCode;
     }
     
@@ -127,6 +136,53 @@ contract Sharing is Storage {
             shareInfo.uploader,
             sharedFiles,
             shareInfo.expireTime
+        );
+    }
+
+    // 取消分享
+    function cancelShare(string memory shareCode) public {
+        require(bytes(shareCode).length == 6, "Invalid share code length");
+
+        ShareInfo storage shareInfo = shareInfos[shareCode];
+        require(shareInfo.isValid, "Share not found or already cancelled");
+
+        // 设置分享为无效
+        shareInfo.isValid = false;
+
+        // 触发取消分享事件
+        emit ShareCancelled(shareCode, shareInfo.uploader);
+    }
+
+    // 获取用户的所有分享码列表
+    function getUserShareCodes(string memory uploader)
+        public
+        view
+        returns (string[] memory)
+    {
+        return userShareCodes[uploader];
+    }
+
+    // 获取单个分享的详细信息（不校验有效性，用于查询）
+    function getShareInfo(string memory shareCode)
+        public
+        view
+        returns (
+            string memory uploader,
+            bytes32[] memory fileHashes,
+            uint256 expireTime,
+            bool isValid
+        )
+    {
+        require(bytes(shareCode).length == 6, "Invalid share code length");
+
+        ShareInfo storage shareInfo = shareInfos[shareCode];
+        require(bytes(shareInfo.uploader).length > 0, "Share code does not exist");
+
+        return (
+            shareInfo.uploader,
+            shareInfo.fileHashes,
+            shareInfo.expireTime,
+            shareInfo.isValid
         );
     }
 }
