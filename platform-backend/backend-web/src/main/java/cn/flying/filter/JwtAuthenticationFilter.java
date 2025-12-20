@@ -1,5 +1,7 @@
 package cn.flying.filter;
 
+import cn.flying.common.constant.Result;
+import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.JwtUtils;
@@ -10,6 +12,8 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -20,20 +24,30 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
  * JWT authentication filter with multi-tenant context support.
  * Validates JWT tokens, sets security context, tenant context and MDC for logging.
  * Also initializes traceId for distributed tracing.
+ * 
+ * 注意：租户ID由 TenantFilter 从请求头 X-Tenant-ID 设置，
+ * 此过滤器验证 JWT 中的 tenantId 与请求头一致，防止跨租户攻击。
  */
 @Component
 @Order(Const.SECURITY_ORDER)
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
+    private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
+
     @Resource
     JwtUtils utils;
 
+    /**
+     * 解析并校验 JWT，设置安全上下文与租户相关的日志上下文。
+     */
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     @NotNull HttpServletResponse response,
@@ -46,43 +60,47 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
         request.setAttribute(Const.TRACE_ID, traceId);
 
-        String authorization = request.getHeader("Authorization");
-        DecodedJWT jwt = utils.resolveJwt(authorization);
-        if(jwt != null) {
-            UserDetails user = utils.toUser(jwt);
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
-            authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-
-            // Extract user info from JWT
-            Long userId = utils.toId(jwt);
-            String userRole = utils.toRole(jwt);
-            Long tenantId = utils.toTenantId(jwt);
-
-            // Store in request attributes
-            request.setAttribute(Const.ATTR_USER_ID, userId);
-            request.setAttribute(Const.ATTR_USER_ROLE, userRole);
-            request.setAttribute(Const.ATTR_TENANT_ID, tenantId);
-
-            // Set tenant context for MyBatis-Plus multi-tenant interceptor
-            if (tenantId != null) {
-                TenantContext.setTenantId(tenantId);
-            }
-
-            // Set MDC for logging
-            if (userId != null) {
-                MDC.put(Const.ATTR_USER_ID, userId.toString());
-            }
-            if (userRole != null) {
-                MDC.put(Const.ATTR_USER_ROLE, userRole);
-            }
-            if (tenantId != null) {
-                MDC.put(Const.ATTR_TENANT_ID, tenantId.toString());
-            }
-        }
-
         try {
+            // 获取 TenantFilter 设置的租户ID（来自请求头 X-Tenant-ID）
+            Long headerTenantId = (Long) request.getAttribute(Const.ATTR_TENANT_ID);
+
+            String authorization = request.getHeader("Authorization");
+            DecodedJWT jwt = utils.resolveJwt(authorization);
+            if(jwt != null) {
+                // Extract user info from JWT
+                Long userId = utils.toId(jwt);
+                String userRole = utils.toRole(jwt);
+                Long jwtTenantId = utils.toTenantId(jwt);
+
+                // 验证 JWT 中的 tenantId 与请求头一致（防止跨租户攻击）
+                if (!validateTenantMatch(headerTenantId, jwtTenantId, userId, response)) {
+                    SecurityContextHolder.clearContext();
+                    return;
+                }
+
+                UserDetails user = utils.toUser(jwt);
+                UsernamePasswordAuthenticationToken authentication =
+                        new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+
+                // Store in request attributes
+                request.setAttribute(Const.ATTR_USER_ID, userId);
+                request.setAttribute(Const.ATTR_USER_ROLE, userRole);
+                // 租户ID已由 TenantFilter 设置，这里不覆盖
+
+                // Set MDC for logging
+                if (userId != null) {
+                    MDC.put(Const.ATTR_USER_ID, userId.toString());
+                }
+                if (userRole != null) {
+                    MDC.put(Const.ATTR_USER_ROLE, userRole);
+                }
+                if (headerTenantId != null) {
+                    MDC.put(Const.ATTR_TENANT_ID, headerTenantId.toString());
+                }
+            }
+
             filterChain.doFilter(request, response);
         } finally {
             // Cleanup MDC and tenant context
@@ -92,5 +110,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             MDC.remove(Const.ATTR_TENANT_ID);
             TenantContext.clear();
         }
+    }
+
+    /**
+     * 校验请求头租户ID与 JWT 租户ID 是否一致，不一致时拒绝请求。
+     */
+    private boolean validateTenantMatch(Long headerTenantId,
+                                        Long jwtTenantId,
+                                        Long userId,
+                                        HttpServletResponse response) throws IOException {
+        if (headerTenantId != null && jwtTenantId != null && !Objects.equals(headerTenantId, jwtTenantId)) {
+            log.warn("租户ID不匹配: 请求头={}, JWT={}, userId={}", headerTenantId, jwtTenantId, userId);
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.setContentType("application/json;charset=utf-8");
+            PrintWriter writer = response.getWriter();
+            writer.write(Result.error(ResultEnum.PERMISSION_UNAUTHORIZED, "租户ID不匹配").toJson());
+            writer.flush();
+            return false;
+        }
+        return true;
     }
 }

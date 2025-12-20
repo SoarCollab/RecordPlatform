@@ -7,6 +7,7 @@
 -- ---------------------------------------------
 -- 用户账户表
 -- 存储用户基本信息和认证数据
+-- 注意：用户名和邮箱在租户内唯一（支持同一用户名在不同租户注册）
 -- ---------------------------------------------
 CREATE TABLE IF NOT EXISTS `account` (
     `id`            BIGINT       NOT NULL COMMENT '用户ID（雪花算法生成）',
@@ -20,8 +21,8 @@ CREATE TABLE IF NOT EXISTS `account` (
     `update_time`   DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `deleted`       TINYINT      DEFAULT 0 COMMENT '软删除标记：0-正常，1-已删除',
     PRIMARY KEY (`id`) USING BTREE,
-    UNIQUE KEY `uk_username` (`username`) USING BTREE COMMENT '用户名唯一索引',
-    UNIQUE KEY `uk_email` (`email`) USING BTREE COMMENT '邮箱唯一索引',
+    UNIQUE KEY `uk_tenant_username` (`tenant_id`, `username`) USING BTREE COMMENT '租户内用户名唯一',
+    UNIQUE KEY `uk_tenant_email` (`tenant_id`, `email`) USING BTREE COMMENT '租户内邮箱唯一',
     INDEX `idx_tenant_id` (`tenant_id`) COMMENT '租户索引',
     INDEX `idx_register_time` (`register_time`) USING BTREE COMMENT '注册时间索引'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户账户信息表';
