@@ -63,9 +63,11 @@ public class FlowUtils {
      */
     public boolean limitOnceUpgradeCheck(String key, int frequency, int baseTime, int upgradeTime){
         return this.internalCheck(key, frequency, baseTime, (overclock) -> {
-                    if (overclock)
+                    if (overclock) {
                         template.opsForValue().set(key, "1", upgradeTime, TimeUnit.SECONDS);
-                    return false;
+                        return false;
+                    }
+                    return true;
                 });
     }
 

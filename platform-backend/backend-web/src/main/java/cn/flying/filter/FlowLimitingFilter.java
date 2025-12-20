@@ -5,6 +5,7 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.DistributedRateLimiter;
 import cn.flying.common.util.DistributedRateLimiter.RateLimitResult;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -15,9 +16,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
+import org.springframework.util.AntPathMatcher;
+import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 分布式限流控制过滤器。
@@ -35,6 +41,13 @@ public class FlowLimitingFilter extends HttpFilter {
 
     @Resource
     private DistributedRateLimiter rateLimiter;
+
+    @Value("${spring.web.flow.exclude:}")
+    private String excludePatternsProperty;
+
+    private List<String> excludePatterns = List.of();
+    private final AntPathMatcher pathMatcher = new AntPathMatcher();
+    private final AtomicBoolean invalidConfigLogged = new AtomicBoolean(false);
 
     /**
      * 窗口期内最大请求次数
@@ -54,9 +67,37 @@ public class FlowLimitingFilter extends HttpFilter {
     @Value("${spring.web.flow.block:300}")
     private int blockTime;
 
+    /**
+     * 初始化限流忽略路径配置，避免每次请求重复解析。
+     */
+    @PostConstruct
+    private void initExcludePatterns() {
+        if (!StringUtils.hasText(excludePatternsProperty)) {
+            excludePatterns = List.of();
+            return;
+        }
+        excludePatterns = Arrays.stream(StringUtils.commaDelimitedListToStringArray(excludePatternsProperty))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .toList();
+    }
+
     @Override
     protected void doFilter(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws IOException, ServletException {
+        if (shouldSkipFlowLimit(request)) {
+            chain.doFilter(request, response);
+            return;
+        }
+
+        if (limit <= 0 || period <= 0) {
+            if (invalidConfigLogged.compareAndSet(false, true)) {
+                log.warn("Flow limit disabled due to invalid config: limit={}, period={}, block={}", limit, period, blockTime);
+            }
+            chain.doFilter(request, response);
+            return;
+        }
+
         String clientIp = getClientIp(request);
 
         RateLimitResult result = rateLimiter.tryAcquireWithBlock(
@@ -70,9 +111,9 @@ public class FlowLimitingFilter extends HttpFilter {
         if (result == RateLimitResult.ALLOWED) {
             chain.doFilter(request, response);
         } else {
-            if (log.isDebugEnabled()) {
-                log.debug("Rate limited: ip={}, result={}", clientIp, result);
-            }
+            Object tenantId = request.getAttribute(Const.ATTR_TENANT_ID);
+            log.warn("Rate limited request: ip={}, uri={}, method={}, tenantId={}, result={}, limit={}, period={}, block={}",
+                    clientIp, request.getRequestURI(), request.getMethod(), tenantId, result, limit, period, blockTime);
             writeBlockMessage(response, result);
         }
     }
@@ -95,6 +136,28 @@ public class FlowLimitingFilter extends HttpFilter {
         }
 
         return request.getRemoteAddr();
+    }
+
+    /**
+     * 判断当前请求是否需要跳过全局限流。
+     */
+    private boolean shouldSkipFlowLimit(HttpServletRequest request) {
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            return true;
+        }
+        if (excludePatterns.isEmpty()) {
+            return false;
+        }
+        String path = request.getServletPath();
+        if (!StringUtils.hasText(path)) {
+            path = request.getRequestURI();
+        }
+        for (String pattern : excludePatterns) {
+            if (pathMatcher.match(pattern, path)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

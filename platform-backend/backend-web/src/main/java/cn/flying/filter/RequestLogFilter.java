@@ -11,6 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.MDC;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.stereotype.Component;
@@ -47,24 +48,50 @@ public class RequestLogFilter extends OncePerRequestFilter {
         if(this.isIgnoreUrl(request.getServletPath())) {
             filterChain.doFilter(request, response);
         } else {
-            // 设置请求唯一ID
-            String reqId = IdUtils.nextLogId();
-            MDC.put(Const.ATTR_REQ_ID, reqId);
-            
-            long startTime = System.currentTimeMillis();
-            this.logRequestStart(request);
-            
-            // 使用ContentCachingResponseWrapper包装响应，允许多次读取响应内容
-            ContentCachingResponseWrapper wrapper = new ContentCachingResponseWrapper(response);
-            try {
-                filterChain.doFilter(request, wrapper);
-                this.logRequestEnd(wrapper, startTime);
-            } finally {
-                wrapper.copyBodyToResponse();
-                // 清理MDC
-                MDC.remove(Const.ATTR_REQ_ID);
+            if (isSseRequest(request)) {
+                // SSE 请求特殊处理：不使用 ContentCachingResponseWrapper，避免缓存导致流关闭
+                String reqId = IdUtils.nextLogId();
+                MDC.put(Const.ATTR_REQ_ID, reqId);
+                long startTime = System.currentTimeMillis();
+                this.logRequestStart(request);
+                try {
+                    filterChain.doFilter(request, response);
+                } finally {
+                    long time = System.currentTimeMillis() - startTime;
+                    if (log.isInfoEnabled()) {
+                        log.info("SSE连接保持: 处理耗时: {}ms | 响应状态: {}", time, response.getStatus());
+                    }
+                    MDC.remove(Const.ATTR_REQ_ID);
+                }
+            } else {
+                // 常规请求：使用ContentCachingResponseWrapper包装响应，记录响应体
+                String reqId = IdUtils.nextLogId();
+                MDC.put(Const.ATTR_REQ_ID, reqId);
+
+                long startTime = System.currentTimeMillis();
+                this.logRequestStart(request);
+
+                // 使用ContentCachingResponseWrapper包装响应，允许多次读取响应内容
+                ContentCachingResponseWrapper wrapper = new ContentCachingResponseWrapper(response);
+                try {
+                    filterChain.doFilter(request, wrapper);
+                    this.logRequestEnd(wrapper, startTime);
+                } finally {
+                    wrapper.copyBodyToResponse();
+                    // 清理MDC
+                    MDC.remove(Const.ATTR_REQ_ID);
+                }
             }
         }
+    }
+
+    /**
+     * 判断是否为 SSE 请求
+     */
+    private boolean isSseRequest(HttpServletRequest request) {
+        String contentType = request.getHeader("Accept");
+        return (contentType != null && contentType.contains(MediaType.TEXT_EVENT_STREAM_VALUE))
+                || request.getServletPath().contains("/sse/connect");
     }
 
     /**
@@ -83,7 +110,7 @@ public class RequestLogFilter extends OncePerRequestFilter {
 
     /**
      * 请求结束时的日志打印，包含处理耗时以及响应结果
-     * 使用DEBUG级别，避免与OperationLogAspect的INFO级别日志重复
+     * 使用INFO级别，便于在生产环境定位请求问题
      * @param wrapper 用于读取响应结果的包装类
      * @param startTime 起始时间
      */
@@ -91,23 +118,23 @@ public class RequestLogFilter extends OncePerRequestFilter {
         long time = System.currentTimeMillis() - startTime;
         int status = wrapper.getStatus();
 
-        // 使用DEBUG级别打印响应日志，避免与OperationLogAspect重复
-        if (log.isDebugEnabled()) {
+        // 使用INFO级别打印响应日志
+        if (log.isInfoEnabled()) {
             String content = status != 200 ?
                     status + " 错误" : new String(wrapper.getContentAsByteArray());
-            log.debug("请求处理耗时: {}ms | 响应状态: {} | 响应结果: {}", time, status, content);
+            log.info("请求处理耗时: {}ms | 响应状态: {} | 响应结果: {}", time, status, content);
         }
     }
 
     /**
      * 请求开始时的日志打印，包含请求全部信息，以及对应用户角色
-     * 使用DEBUG级别，避免与OperationLogAspect的INFO级别日志重复
+     * 使用INFO级别，便于在生产环境定位请求问题
      * 敏感参数会被脱敏处理
      * @param request 请求
      */
     public void logRequestStart(HttpServletRequest request){
-        // 仅在DEBUG级别打印
-        if (!log.isDebugEnabled()) {
+        // 仅在INFO级别打印
+        if (!log.isInfoEnabled()) {
             return;
         }
 
@@ -125,11 +152,11 @@ public class RequestLogFilter extends OncePerRequestFilter {
         Object id = request.getAttribute(Const.ATTR_USER_ID);
         if(id != null) {
             User user = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-            log.debug("请求URL: \"{}\" ({}) | 远程IP地址: {} │ 身份: {} (UID: {}) | 角色: {} | 请求参数列表: {}",
+            log.info("请求URL: \"{}\" ({}) | 远程IP地址: {} │ 身份: {} (UID: {}) | 角色: {} | 请求参数列表: {}",
                     request.getServletPath(), request.getMethod(), request.getRemoteAddr(),
                     user.getUsername(), id, user.getAuthorities(), object);
         } else {
-            log.debug("请求URL: \"{}\" ({}) | 远程IP地址: {} │ 身份: 未验证 | 请求参数列表: {}",
+            log.info("请求URL: \"{}\" ({}) | 远程IP地址: {} │ 身份: 未验证 | 请求参数列表: {}",
                     request.getServletPath(), request.getMethod(), request.getRemoteAddr(), object);
         }
     }
