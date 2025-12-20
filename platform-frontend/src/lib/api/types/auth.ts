@@ -3,10 +3,10 @@
  * @see AuthorizeVO.java
  */
 export interface AuthorizeVO {
-	username: string;
-	role: string;
-	token: string;
-	expire: string; // ISO datetime
+  username: string;
+  role: string;
+  token: string;
+  expire: string; // ISO datetime
 }
 
 /**
@@ -15,35 +15,37 @@ export interface AuthorizeVO {
  * @note 部分字段为前端扩展，后端可能不返回
  */
 export interface AccountVO {
-	id: string;
-	username: string;
-	email?: string;
-	avatar?: string;
-	role: string;
-	createTime: string;
-	// 以下字段为前端扩展（后端 AccountVO 不包含）
-	nickname?: string;
-	phone?: string;
-	status?: number;
+  id: string;
+  username: string;
+  email?: string;
+  avatar?: string;
+  role: string;
+  createTime: string;
+  // 以下字段为前端扩展（后端 AccountVO 不包含）
+  nickname?: string;
+  phone?: string;
+  status?: number;
 }
 
 /**
  * 登录请求
  */
 export interface LoginRequest {
-	username: string;
-	password: string;
+  username: string;
+  password: string;
 }
 
 /**
  * 注册请求
+ * @see EmailRegisterVO.java
  */
 export interface RegisterRequest {
-	username: string;
-	password: string;
-	nickname?: string;
-	email?: string;
-	phone?: string;
+  username: string;
+  password: string;
+  email: string; // Required for email verification
+  code: string; // Email verification code
+  nickname?: string;
+  phone?: string;
 }
 
 /**
@@ -51,8 +53,8 @@ export interface RegisterRequest {
  * @see ChangePasswordVO.java
  */
 export interface ChangePasswordRequest {
-	password: string; // 旧密码
-	new_password: string; // 新密码
+  password: string; // 旧密码
+  new_password: string; // 新密码
 }
 
 /**
@@ -60,25 +62,25 @@ export interface ChangePasswordRequest {
  * @see UpdateUserVO.java
  */
 export interface UpdateUserRequest {
-	avatar?: string;
-	nickname?: string;
+  avatar?: string;
+  nickname?: string;
 }
 
 /**
  * 确认重置验证码请求
  */
 export interface ConfirmResetRequest {
-	email: string;
-	code: string;
+  email: string;
+  code: string;
 }
 
 /**
  * 重置密码请求
  */
 export interface ResetPasswordRequest {
-	email: string;
-	code: string;
-	password: string;
+  email: string;
+  code: string;
+  password: string;
 }
 
 /**
@@ -86,8 +88,8 @@ export interface ResetPasswordRequest {
  * @see SseTokenVO.java
  */
 export interface SseTokenVO {
-	sseToken: string;
-	expiresIn: number; // 有效期（秒）
+  sseToken: string;
+  expiresIn: number; // 有效期（秒）
 }
 
 /**
@@ -95,6 +97,6 @@ export interface SseTokenVO {
  * @see RefreshTokenVO.java
  */
 export interface RefreshTokenVO {
-	token: string;
-	expire: string; // ISO datetime
+  token: string;
+  expire: string; // ISO datetime
 }
