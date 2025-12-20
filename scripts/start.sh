@@ -1,73 +1,392 @@
 #!/bin/bash
-# RecordPlatform 启动脚本 (无 SkyWalking)
-# 用法: ./start.sh {backend|fisco|storage|all}
+# RecordPlatform 服务管理脚本
+# 用法: ./start.sh <命令> [服务...] [选项]
+#
+# 命令:
+#   start     启动服务 (默认)
+#   stop      停止服务
+#   restart   重启服务
+#   status    查看服务状态
+#
+# 服务:
+#   all       全部服务 (默认)
+#   storage   存储服务
+#   fisco     区块链服务
+#   backend   后端服务
+#
+# 选项:
+#   --skywalking    启用 SkyWalking 链路追踪
+#   --foreground    前台运行 (仅对单服务 start 有效)
+#   --profile=xxx   指定 Spring Profile (默认 prod)
+#   --help          显示帮助信息
 
-set -e
-
+# 加载环境配置
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")" # 定位到 bin/ 或 scripts/ 的上级目录
-ENV_FILE="$PROJECT_ROOT/.env"
+source "$SCRIPT_DIR/env.sh"
 
-# 加载 .env
-if [ -f "$ENV_FILE" ]; then
-    echo "正在加载环境变量: $ENV_FILE"
-    set -a
-    source "$ENV_FILE"
-    set +a
-else
-    echo "警告: 未找到 .env 文件: $ENV_FILE"
-fi
+# ================================
+# 服务定义
+# ================================
+declare -A SERVICE_JARS=(
+    ["storage"]="$STORAGE_JAR"
+    ["fisco"]="$FISCO_JAR"
+    ["backend"]="$BACKEND_JAR"
+)
 
-# 默认 Profile
-PROFILE=${SPRING_PROFILES_ACTIVE:-local}
+declare -A SERVICE_NAMES=(
+    ["storage"]="存储服务 (Storage)"
+    ["fisco"]="区块链服务 (FISCO)"
+    ["backend"]="后端服务 (Backend)"
+)
 
-# 确定 JAR 包位置 (部署模式 vs 源码模式)
-if [ -d "$PROJECT_ROOT/jars" ]; then
-    JAR_BASE="$PROJECT_ROOT/jars"
-    STORAGE_JAR="$JAR_BASE/platform-storage-0.0.1-SNAPSHOT.jar"
-    FISCO_JAR="$JAR_BASE/platform-fisco-0.0.1-SNAPSHOT.jar"
-    BACKEND_JAR="$JAR_BASE/backend-web-0.0.1-SNAPSHOT.jar"
-else
-    STORAGE_JAR="$PROJECT_ROOT/platform-storage/target/platform-storage-0.0.1-SNAPSHOT.jar"
-    FISCO_JAR="$PROJECT_ROOT/platform-fisco/target/platform-fisco-0.0.1-SNAPSHOT.jar"
-    BACKEND_JAR="$PROJECT_ROOT/platform-backend/backend-web/target/backend-web-0.0.1-SNAPSHOT.jar"
-fi
+declare -A SW_NAMES=(
+    ["storage"]="record-platform-storage"
+    ["fisco"]="record-platform-fisco"
+    ["backend"]="record-platform-web"
+)
 
-SERVICE=${1:-all}
+# 服务启动顺序
+SERVICE_ORDER=("storage" "fisco" "backend")
 
-start_jar() {
-    local name=$1
-    local jar=$2
-    echo "正在启动 $name..."
-    if [ ! -f "$jar" ]; then
-        echo "错误: 未找到 JAR 文件: $jar"
-        return 1
-    fi
-    java -jar "$jar" --spring.profiles.active="$PROFILE" &
+# ================================
+# 帮助信息函数
+# ================================
+show_help() {
+    echo "用法: $0 <命令> [服务...] [选项]"
+    echo ""
+    echo "命令:"
+    echo "  start     启动服务"
+    echo "  stop      停止服务"
+    echo "  restart   重启服务"
+    echo "  status    查看服务状态"
+    echo ""
+    echo "服务:"
+    echo "  all       全部服务 (默认)"
+    echo "  storage   存储服务"
+    echo "  fisco     区块链服务"
+    echo "  backend   后端服务"
+    echo ""
+    echo "选项:"
+    echo "  --skywalking    启用 SkyWalking 链路追踪"
+    echo "  --foreground    前台运行 (仅对单服务 start 有效)"
+    echo "  --profile=xxx   Spring Profile (默认 prod)"
+    echo "  --profile xxx   Spring Profile (默认 prod)"
+    echo ""
+    echo "示例:"
+    echo "  $0 start                    # 启动全部服务"
+    echo "  $0 start backend            # 仅启动后端服务"
+    echo "  $0 restart backend          # 重启后端服务"
+    echo "  $0 stop all                 # 停止全部服务"
+    echo "  $0 status                   # 查看所有服务状态"
+    echo "  $0 start --skywalking       # 启用 SkyWalking 启动"
 }
 
-case "$SERVICE" in
-    storage)
-        start_jar "存储服务 (Storage Service)" "$STORAGE_JAR"
+# 无参数时显示帮助
+if [ $# -eq 0 ]; then
+    show_help
+    exit 0
+fi
+
+# ================================
+# 参数解析
+# ================================
+COMMAND=""
+SERVICES=()
+ENABLE_SKYWALKING=false
+FOREGROUND=false
+HAS_ALL_SERVICE=false
+
+# 添加服务到列表（处理别名、去重与 all 覆盖）
+add_service() {
+    local svc=$1
+
+    if [ "$svc" = "web" ]; then
+        svc="backend"
+    fi
+
+    if [ "$svc" = "all" ]; then
+        HAS_ALL_SERVICE=true
+        SERVICES=()
+        return 0
+    fi
+
+    if [ "$HAS_ALL_SERVICE" = true ]; then
+        return 0
+    fi
+
+    for existing in "${SERVICES[@]}"; do
+        if [ "$existing" = "$svc" ]; then
+            return 0
+        fi
+    done
+    SERVICES+=("$svc")
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        start|stop|restart|status)
+            COMMAND="$1"
+            shift
+            ;;
+        storage|fisco|backend|web|all)
+            add_service "$1"
+            shift
+            ;;
+        --skywalking)
+            ENABLE_SKYWALKING=true
+            shift
+            ;;
+        --foreground)
+            FOREGROUND=true
+            shift
+            ;;
+        --profile=*)
+            SPRING_PROFILE="${1#*=}"
+            shift
+            ;;
+        --profile)
+            shift
+            if [ -z "${1:-}" ]; then
+                echo "错误: --profile 需要参数"
+                echo ""
+                show_help
+                exit 1
+            fi
+            SPRING_PROFILE="$1"
+            shift
+            ;;
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        *)
+            echo "错误: 未知参数 '$1'"
+            echo ""
+            show_help
+            exit 1
+            ;;
+    esac
+done
+
+# 验证命令是否已指定
+if [ -z "$COMMAND" ]; then
+    echo "错误: 请指定命令 (start/stop/restart/status)"
+    echo ""
+    show_help
+    exit 1
+fi
+
+if [ "${#SERVICES[@]}" -eq 0 ] || [ "$HAS_ALL_SERVICE" = true ]; then
+    SERVICES=("${SERVICE_ORDER[@]}")
+    ALL_SERVICES_SELECTED=true
+else
+    ALL_SERVICES_SELECTED=false
+fi
+
+if [ "$FOREGROUND" = true ]; then
+    if [ "$COMMAND" != "start" ]; then
+        echo "提示: --foreground 仅对 start 有效，将忽略"
+        FOREGROUND=false
+    elif [ "${#SERVICES[@]}" -ne 1 ]; then
+        echo "错误: --foreground 仅支持单服务 start"
+        exit 1
+    fi
+fi
+
+# ================================
+# 进程查找函数
+# ================================
+get_pid() {
+    local jar_name=$1
+    # 通过 JAR 名称查找进程
+    pgrep -f "$jar_name" 2>/dev/null || echo ""
+}
+
+# ================================
+# 停止服务函数
+# ================================
+stop_service() {
+    local svc=$1
+    local jar_path="${SERVICE_JARS[$svc]}"
+    local jar_name=$(basename "$jar_path")
+    local name="${SERVICE_NAMES[$svc]}"
+    
+    local pid=$(get_pid "$jar_name")
+    
+    if [ -n "$pid" ]; then
+        echo "正在停止 $name (PID: $pid)..."
+        kill $pid 2>/dev/null || true
+        
+        # 等待进程退出
+        local count=0
+        while [ $count -lt 30 ]; do
+            if ! kill -0 $pid 2>/dev/null; then
+                echo "✓ $name 已停止"
+                return 0
+            fi
+            sleep 1
+            count=$((count + 1))
+        done
+        
+        # 强制终止
+        echo "进程未响应，强制终止..."
+        kill -9 $pid 2>/dev/null || true
+        echo "✓ $name 已强制停止"
+    else
+        echo "○ $name 未运行"
+    fi
+}
+
+# ================================
+# 启动服务函数
+# ================================
+start_service() {
+    local svc=$1
+    local run_foreground=${2:-false}
+    local jar_path="${SERVICE_JARS[$svc]}"
+    local jar_name=$(basename "$jar_path")
+    local name="${SERVICE_NAMES[$svc]}"
+    local sw_name="${SW_NAMES[$svc]}"
+
+    # 检查是否已运行
+    local existing_pid=$(get_pid "$jar_name")
+    if [ -n "$existing_pid" ]; then
+        echo "⚠ $name 已在运行 (PID: $existing_pid)"
+        return 0
+    fi
+
+    echo "----------------------------------------"
+    echo "正在启动: $name"
+    
+    if [ ! -f "$jar_path" ]; then
+        echo "✗ 错误: 未找到 JAR 文件: $jar_path"
+        return 1
+    fi
+
+    local java_opts="$COMMON_JVM_OPTS"
+    
+    if [ "$ENABLE_SKYWALKING" = true ]; then
+        local sw_opts=$(get_skywalking_opts "$sw_name" "$(hostname -s)")
+        if [ -n "$sw_opts" ]; then
+            java_opts="$java_opts $sw_opts"
+            echo "  SkyWalking: 已启用"
+        else
+            echo "  SkyWalking: Agent 未找到"
+        fi
+    fi
+
+    echo "  Profile: $SPRING_PROFILE"
+    echo "  工作目录: $PROJECT_ROOT"
+
+    if [ "$run_foreground" = true ]; then
+        echo "  模式: 前台运行"
+        echo "----------------------------------------"
+        # 切换到项目根目录再启动，确保相对路径正确
+        cd "$PROJECT_ROOT" && exec java $java_opts -jar "$jar_path" --spring.profiles.active="$SPRING_PROFILE"
+    else
+        echo "  模式: 后台运行"
+        # 切换到项目根目录启动后台进程，使用 pushd/popd 保持 PID 可获取
+        pushd "$PROJECT_ROOT" > /dev/null
+        nohup java $java_opts -jar "$jar_path" \
+            --spring.profiles.active="$SPRING_PROFILE" > /dev/null 2>&1 &
+        local new_pid=$!
+        popd > /dev/null
+        sleep 1
+        if kill -0 $new_pid 2>/dev/null; then
+            echo "✓ 已启动 (PID: $new_pid)"
+        else
+            echo "✗ 启动失败"
+            return 1
+        fi
+    fi
+}
+
+# ================================
+# 状态查询函数
+# ================================
+status_service() {
+    local svc=$1
+    local jar_path="${SERVICE_JARS[$svc]}"
+    local jar_name=$(basename "$jar_path")
+    local name="${SERVICE_NAMES[$svc]}"
+    
+    local pid=$(get_pid "$jar_name")
+    
+    if [ -n "$pid" ]; then
+        echo "✓ $name: 运行中 (PID: $pid)"
+    else
+        echo "○ $name: 未运行"
+    fi
+}
+
+# ================================
+# 主逻辑
+# ================================
+echo "========================================"
+echo "RecordPlatform 服务管理"
+echo "========================================"
+
+case "$COMMAND" in
+    start)
+        echo "命令: 启动服务"
+        echo ""
+        for svc in "${SERVICES[@]}"; do
+            start_service "$svc" "$FOREGROUND"
+            # 全部启动时，服务间等待
+            if [ "$ALL_SERVICES_SELECTED" = true ] && [ "$svc" != "backend" ]; then
+                echo "等待 10 秒..."
+                sleep 10
+            fi
+        done
         ;;
-    fisco)
-        start_jar "区块链服务 (FISCO Service)" "$FISCO_JAR"
+        
+    stop)
+        echo "命令: 停止服务"
+        echo ""
+        # 反向顺序停止
+        for ((i=${#SERVICES[@]}-1; i>=0; i--)); do
+            stop_service "${SERVICES[$i]}"
+        done
         ;;
-    backend)
-        start_jar "后端 Web 服务 (Backend Web)" "$BACKEND_JAR"
+        
+    restart)
+        echo "命令: 重启服务"
+        echo ""
+        # 先停止（反向）
+        for ((i=${#SERVICES[@]}-1; i>=0; i--)); do
+            stop_service "${SERVICES[$i]}"
+        done
+        echo ""
+        echo "等待 3 秒..."
+        sleep 3
+        echo ""
+        # 再启动
+        for svc in "${SERVICES[@]}"; do
+            start_service "$svc" false
+            if [ "$ALL_SERVICES_SELECTED" = true ] && [ "$svc" != "backend" ]; then
+                echo "等待 10 秒..."
+                sleep 10
+            fi
+        done
         ;;
-    all)
-        echo "正在按顺序启动所有服务 (Profile: $PROFILE)..."
-        start_jar "存储服务 (Storage Service)" "$STORAGE_JAR"
-        sleep 5
-        start_jar "区块链服务 (FISCO Service)" "$FISCO_JAR"
-        sleep 5
-        start_jar "后端 Web 服务 (Backend Web)" "$BACKEND_JAR"
+        
+    status)
+        echo "命令: 查看状态"
+        echo ""
+        for svc in "${SERVICES[@]}"; do
+            status_service "$svc"
+        done
         ;;
+        
     *)
-        echo "用法: $0 {backend|fisco|storage|all}"
+        echo "错误: 未知命令 '$COMMAND'"
+        echo "可用命令: start, stop, restart, status"
         exit 1
         ;;
 esac
 
-echo "服务启动流程已执行。"
+echo ""
+echo "========================================"
+echo "操作完成"
+echo "日志目录: $LOG_DIR"
+echo "========================================"
