@@ -7,18 +7,22 @@ import cn.flying.common.util.Const;
 import cn.flying.common.util.JwtUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.vo.auth.AuthorizeVO;
+import cn.flying.filter.JsonUsernamePasswordAuthenticationFilter;
 import cn.flying.filter.JwtAuthenticationFilter;
 import cn.flying.filter.RequestLogFilter;
 import cn.flying.service.AccountService;
 import cn.flying.service.LoginSecurityService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -27,6 +31,7 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.authentication.logout.LogoutSuccessEventPublishingLogoutHandler;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -57,6 +62,12 @@ public class SecurityConfiguration {
     @Resource
     LoginSecurityService loginSecurityService;
 
+    @Resource
+    AuthenticationConfiguration authenticationConfiguration;
+
+    @Resource
+    ObjectMapper objectMapper;
+
     /**
      * 针对于 SpringSecurity 6 的新版配置方法
      * @param http 配置器
@@ -65,6 +76,7 @@ public class SecurityConfiguration {
      */
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        JsonUsernamePasswordAuthenticationFilter jsonLoginFilter = buildJsonLoginFilter();
         return http
                 .authorizeHttpRequests(conf -> conf
                         // 公开端点
@@ -84,7 +96,7 @@ public class SecurityConfiguration {
                                 UserRole.ROLE_MONITOR.getRole())
                         // SSE 连接端点使用短期令牌认证，不使用常规 JWT
                         .requestMatchers("/api/v1/sse/connect").permitAll()
-                        .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/doc.html/**","/webjars/**","/favicon.ico").permitAll()
+                        .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**", "/doc.html/**","/webjars/**","/favicon.ico").permitAll()
                         // 健康检查端点公开
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         // 监控端点需要管理员或监控员角色
@@ -101,14 +113,9 @@ public class SecurityConfiguration {
                                 UserRole.ROLE_ADMINISTER.getRole(),
                                 UserRole.ROLE_MONITOR.getRole())
                 )
-                .formLogin(conf -> conf
-                        .loginProcessingUrl("/api/v1/auth/login")
-                        .failureHandler(this::handleProcess)
-                        .successHandler(this::handleProcess)
-                        .permitAll()
-                )
                 .logout(conf -> conf
                         .logoutUrl("/api/v1/auth/logout")
+                        .addLogoutHandler(logoutSuccessEventPublishingLogoutHandler())
                         .logoutSuccessHandler(this::onLogoutSuccess)
                 )
                 .exceptionHandling(conf -> conf
@@ -120,7 +127,17 @@ public class SecurityConfiguration {
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .addFilterBefore(requestLogFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, RequestLogFilter.class)
+                .addFilterAt(jsonLoginFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
+    }
+
+    /**
+     * 注册登出事件发布器，确保 LogoutSuccessEvent 可以被监听。
+     * @return 登出事件发布处理器
+     */
+    @Bean
+    public LogoutSuccessEventPublishingLogoutHandler logoutSuccessEventPublishingLogoutHandler() {
+        return new LogoutSuccessEventPublishingLogoutHandler();
     }
 
     /**
@@ -141,6 +158,9 @@ public class SecurityConfiguration {
 
         // 获取用户名（用于登录安全检查）
         String username = request.getParameter("username");
+        if ((username == null || username.isEmpty()) && request.getAttribute(Const.ATTR_LOGIN_USERNAME) != null) {
+            username = String.valueOf(request.getAttribute(Const.ATTR_LOGIN_USERNAME));
+        }
 
         if(exceptionOrAuthentication instanceof AccessDeniedException exception) {
             writer.write(Result
@@ -186,6 +206,7 @@ public class SecurityConfiguration {
 
     /**
      * 处理登录成功
+     * 注意：租户ID由请求头 X-Tenant-ID 提供，TenantFilter 已设置到 TenantContext
      */
     private void handleLoginSuccess(String username, Authentication authentication, PrintWriter writer) throws IOException {
         User user = (User) authentication.getPrincipal();
@@ -207,6 +228,23 @@ public class SecurityConfiguration {
             vo.setExpire(utils.expireTime());
             writer.write(Result.success(vo).toJson());
         }
+    }
+
+    /**
+     * Build JSON login filter with shared handlers and authentication manager.
+     *
+     * @return configured JSON login filter
+     * @throws Exception when authentication manager cannot be resolved
+     */
+    private JsonUsernamePasswordAuthenticationFilter buildJsonLoginFilter() throws Exception {
+        JsonUsernamePasswordAuthenticationFilter filter =
+                new JsonUsernamePasswordAuthenticationFilter(objectMapper);
+        AuthenticationManager authenticationManager = authenticationConfiguration.getAuthenticationManager();
+        filter.setAuthenticationManager(authenticationManager);
+        filter.setFilterProcessesUrl("/api/v1/auth/login");
+        filter.setAuthenticationSuccessHandler(this::handleProcess);
+        filter.setAuthenticationFailureHandler(this::handleProcess);
+        return filter;
     }
 
     /**

@@ -10,6 +10,7 @@
 -- ---------------------------------------------
 CREATE TABLE IF NOT EXISTS `sys_operation_log` (
     `id`              BIGINT       NOT NULL AUTO_INCREMENT COMMENT '日志ID',
+    `tenant_id`       BIGINT       NOT NULL DEFAULT 0 COMMENT '租户ID',
     `module`          VARCHAR(50)  DEFAULT NULL COMMENT '操作模块',
     `operation_type`  VARCHAR(20)  DEFAULT NULL COMMENT '操作类型',
     `description`     VARCHAR(255) DEFAULT NULL COMMENT '操作描述',
@@ -26,6 +27,7 @@ CREATE TABLE IF NOT EXISTS `sys_operation_log` (
     `operation_time`  DATETIME     DEFAULT NULL COMMENT '操作时间',
     `execution_time`  BIGINT       DEFAULT NULL COMMENT '执行时长（毫秒）',
     PRIMARY KEY (`id`) USING BTREE,
+    INDEX `idx_tenant_id` (`tenant_id`) COMMENT '租户索引',
     INDEX `idx_operation_time` (`operation_time`) USING BTREE COMMENT '操作时间索引',
     INDEX `idx_username` (`username`) USING BTREE COMMENT '用户名索引',
     INDEX `idx_module` (`module`) USING BTREE COMMENT '模块索引',
