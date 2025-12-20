@@ -9,7 +9,7 @@
         <relativePath/>
         <!-- lookup parent from repository -->
     </parent>
-    <groupId>cn.flyingcoding</groupId>
+    <groupId>cn.flying</groupId>
     <artifactId>platform-backend</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>RecordPlatform-backend</name>

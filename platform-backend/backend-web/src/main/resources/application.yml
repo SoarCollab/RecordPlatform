@@ -19,7 +19,7 @@ spring:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: true
-    baseline-version: '0'
+    baseline-version: "0"
     out-of-order: false
     validate-on-migrate: true
     clean-disabled: true
@@ -72,17 +72,17 @@ springdoc:
   api-docs:
     path: /v3/api-docs
   group-configs:
-    - group: '用户认证服务'
-      paths-to-match: '/api/v1/auth/**,/api/v1/users/**,/api/auth/**'
+    - group: "用户认证服务"
+      paths-to-match: "/api/v1/auth/**,/api/v1/users/**,/api/auth/**"
       packages-to-scan: cn.flying.controller
-    - group: '文件存储服务'
-      paths-to-match: '/api/v1/files/**,/api/v1/images/**'
+    - group: "文件存储服务"
+      paths-to-match: "/api/v1/files/**,/api/v1/images/**"
       packages-to-scan: cn.flying.controller
-    - group: '消息通信服务'
-      paths-to-match: '/api/v1/conversations/**,/api/v1/messages/**,/api/v1/sse/**'
+    - group: "消息通信服务"
+      paths-to-match: "/api/v1/conversations/**,/api/v1/messages/**,/api/v1/sse/**"
       packages-to-scan: cn.flying.controller
-    - group: '系统管理服务'
-      paths-to-match: '/api/v1/system/**,/api/v1/announcements/**,/api/v1/tickets/**'
+    - group: "系统管理服务"
+      paths-to-match: "/api/v1/system/**,/api/v1/announcements/**,/api/v1/tickets/**"
       packages-to-scan: cn.flying.controller
 
 # knife4j配置
@@ -91,8 +91,8 @@ knife4j:
   production: false
   basic:
     enable: true
-    username: admin
-    password: 123456
+    username: ${KNIFE4J_USERNAME:admin}
+    password: ${KNIFE4J_PASSWORD:123456}
   setting:
     language: zh_cn
     enable-group: true
@@ -166,9 +166,9 @@ file:
   # Chunk encryption configuration
   encryption:
     # Algorithm: aes-gcm (recommended for servers with AES-NI), chacha20 (recommended for containers/mixed environments), auto
-    algorithm: chacha20
+    algorithm: auto
     # Run benchmark on startup to auto-select optimal algorithm (only for 'auto' mode)
-    benchmark-on-startup: false
+    benchmark-on-startup: true
     # Benchmark data size in bytes (default 1MB)
     benchmark-data-size: 1048576
     # Benchmark iterations
@@ -181,12 +181,12 @@ outbox:
     max-retries: 5
     poll-interval-ms: 2000
   health:
-    pending-threshold: 500    # 待发送事件超过此值标记为 DEGRADED
-    failed-threshold: 20      # 失败事件超过此值标记为 DOWN
+    pending-threshold: 500 # 待发送事件超过此值标记为 DEGRADED
+    failed-threshold: 20 # 失败事件超过此值标记为 DOWN
   cleanup:
-    sent-retention-days: 7    # 已发送事件保留天数
+    sent-retention-days: 7 # 已发送事件保留天数
     failed-retention-days: 30 # 永久失败事件保留天数
-    cron: 0 0 3 * * ?         # 每天凌晨3点清理
+    cron: 0 0 3 * * ? # 每天凌晨3点清理
 
 # Processed message cleanup
 processed-message:
@@ -201,9 +201,9 @@ saga:
     batch-size: 50
     poll-interval-ms: 30000
   health:
-    running-threshold: 100              # 运行中 Saga 超过此值标记为 DEGRADED
-    failed-threshold: 10                # 失败 Saga 超过此值标记为 DOWN
-    pending-compensation-threshold: 50  # 待补偿 Saga 超过此值标记为 DEGRADED
+    running-threshold: 100 # 运行中 Saga 超过此值标记为 DEGRADED
+    failed-threshold: 10 # 失败 Saga 超过此值标记为 DOWN
+    pending-compensation-threshold: 50 # 待补偿 Saga 超过此值标记为 DEGRADED
 
 # Actuator 管理端点配置
 management:

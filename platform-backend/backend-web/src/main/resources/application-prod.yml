@@ -4,7 +4,7 @@ server:
     context-path: /record-platform
   # HTTPS/SSL Configuration
   ssl:
-    enabled: ${SSL_ENABLED:true}
+    enabled: ${SSL_ENABLED:false}
     key-store: ${SSL_KEY_STORE:classpath:keystore.p12}
     key-store-password: ${SSL_KEY_STORE_PASSWORD}
     key-store-type: ${SSL_KEY_STORE_TYPE:PKCS12}
@@ -19,16 +19,14 @@ spring:
   # Flyway 生产环境配置
   flyway:
     enabled: true
-    baseline-on-migrate: false
+    baseline-on-migrate: true
     clean-disabled: true
 
+  # datasource 核心配置 (url/username/password/druid凭证) 从 Nacos 加载 (backend-web.yaml)
   datasource:
     druid:
       type: com.alibaba.druid.pool.DruidDataSource
       driver-class-name: com.mysql.cj.jdbc.Driver
-      url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:RecordPlatform}?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8&useSSL=false
-      username: ${spring.datasource.username}
-      password: ${spring.datasource.password}
       initialSize: 5
       minIdle: 5
       maxActive: 40
@@ -37,57 +35,43 @@ spring:
         url-pattern: /*
         exclusions: /druid/*,*.js,*.css,*.gif,*.jpg,*.bmp,*.png,*.ico
       stat-view-servlet:
-        enabled: false  # 生产环境禁用 Druid 监控页面
+        enabled: false # 生产环境禁用 Druid 监控页面
         url-pattern: /druid/*
         allow:
         deny:
         reset-enable: false
-        login-username: ${DRUID_USERNAME:admin}
-        login-password: ${DRUID_PASSWORD}
 
-  mail:
-    host: ${spring.mail.host}
-    username: ${spring.mail.username}
-    password: ${spring.mail.password}
-    port: 465
-    properties:
-      from: ${spring.mail.username}
-      mail:
-        smtp:
-          socketFactory:
-            class: javax.net.ssl.SSLSocketFactory
-  rabbitmq:
-    addresses: ${spring.rabbitmq.addresses}
-    username: ${spring.rabbitmq.username}
-    password: ${spring.rabbitmq.password}
+  # mail 配置从 Nacos 加载 (backend-web.yaml)
+
+  # rabbitmq 配置从 Nacos 加载 (backend-web.yaml)
+
+  # redis 配置 (username/password 从 Nacos 加载)
   data:
     redis:
       database: 0
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       timeout: 5000
-      username: ${spring.data.redis.username}
-      password: ${spring.data.redis.password}
 minio:
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
-  access-key: ${minio.access-key}
-  secret-key: ${minio.secret-key}
-  bucket-name: forum
+  access-key: ${MINIO_ACCESS_KEY}
+  secret-key: ${MINIO_SECRET_KEY}
+  bucket-name: ${MINIO_BUCKET_NAME:forum}
 
 # dubbo配置
 dubbo:
   application:
     name: RecordPlatform_Main
     logger: slf4j
-    qos-port: 22330
+    qos-port: ${QOS_BACKEND_PORT:22330}
     check-serializable: false
     protocol: tri
   protocol: # Dubbo 协议配置
-    name: tri   # 使用 Triple 协议
+    name: tri # 使用 Triple 协议
     payload: 104857600 # 将最大载荷大小设置为 100MB (100 * 1024 * 1024 bytes)
   registry:
     register-mode: instance
-    address: nacos://localhost:8848?username=${nacos.username}&password=${nacos.password}
+    address: nacos://${NACOS_HOST:localhost}:${NACOS_PORT:8848}?username=${NACOS_USERNAME}&password=${NACOS_PASSWORD}
   consumer:
     timeout: 30000 # 全局消费者超时设置为30秒
     references:
@@ -100,8 +84,8 @@ dubbo:
 # 日志配置
 logging:
   level:
-    root: WARN  # 全局日志级别保持为WARN
+    root: WARN # 全局日志级别保持为WARN
 
 # 生产环境禁用 API 文档
 knife4j:
-  production: true  # 生产环境屏蔽所有 Swagger 相关资源
+  production: true # 生产环境屏蔽所有 Swagger 相关资源
