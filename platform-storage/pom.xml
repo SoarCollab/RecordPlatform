@@ -23,11 +23,27 @@
         <hutool.version>5.8.32</hutool.version>
         <redisson.version>3.35.0</redisson.version>
         <spring-cloud-alibaba-dependencies.version>2023.0.3.2</spring-cloud-alibaba-dependencies.version>
+        <logstash.logback.version>7.4</logstash.logback.version>
+        <skywalking.toolkit.version>9.3.0</skywalking.toolkit.version>
     </properties>
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+
+        <!-- Logstash Logback Encoder for JSON logging -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>${logstash.logback.version}</version>
+        </dependency>
+
+        <!-- SkyWalking Logback integration -->
+        <dependency>
+            <groupId>org.apache.skywalking</groupId>
+            <artifactId>apm-toolkit-logback-1.x</artifactId>
+            <version>${skywalking.toolkit.version}</version>
         </dependency>
 
         <dependency>

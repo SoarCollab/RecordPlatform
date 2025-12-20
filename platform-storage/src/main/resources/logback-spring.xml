@@ -2,7 +2,7 @@
 <configuration>
     <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
 
-    <property name="SERVICE_NAME" value="record-platform-web"/>
+    <property name="SERVICE_NAME" value="record-platform-storage"/>
     <property name="LOG_PATH" value="${LOG_PATH:-log}"/>
     <property name="CONSOLE_LOG_PATTERN"
               value="%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p})  %clr([%15.15t]){faint} %clr([tid=%tid tenant=%X{tenantId:-0} trace=%X{traceId:-}]){faint} %clr(--){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
@@ -16,6 +16,21 @@
                 <pattern>${CONSOLE_LOG_PATTERN}</pattern>
             </layout>
         </encoder>
+    </appender>
+
+    <!-- Rolling File Appender with PatternLayout - for local/dev -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <encoder class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">
+            <layout class="org.apache.skywalking.apm.toolkit.log.logback.v1.x.TraceIdPatternLogbackLayout">
+                <pattern>${FILE_LOG_PATTERN}</pattern>
+            </layout>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <FileNamePattern>${LOG_PATH}/%d{yyyy-MM-dd}-storage-%i.log</FileNamePattern>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+            <maxHistory>30</maxHistory>
+            <maxFileSize>20MB</maxFileSize>
+        </rollingPolicy>
     </appender>
 
     <!-- JSON File Appender with LogstashEncoder - for production -->
@@ -53,7 +68,7 @@
             </throwableConverter>
         </encoder>
         <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
-            <FileNamePattern>${LOG_PATH}/%d{yyyy-MM-dd}-spring-%i.json</FileNamePattern>
+            <FileNamePattern>${LOG_PATH}/%d{yyyy-MM-dd}-storage-%i.json</FileNamePattern>
             <cleanHistoryOnStart>true</cleanHistoryOnStart>
             <maxHistory>30</maxHistory>
             <maxFileSize>50MB</maxFileSize>
@@ -68,31 +83,10 @@
         <appender-ref ref="JSON_FILE"/>
     </appender>
 
-    <!-- Rolling File Appender with PatternLayout - for local/dev -->
-    <springProfile name="dev | local">
-        <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-            <encoder class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">
-                <layout class="org.apache.skywalking.apm.toolkit.log.logback.v1.x.TraceIdPatternLogbackLayout">
-                    <pattern>${FILE_LOG_PATTERN}</pattern>
-                </layout>
-            </encoder>
-            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
-                <FileNamePattern>${LOG_PATH}/%d{yyyy-MM-dd}-spring-%i.log</FileNamePattern>
-                <cleanHistoryOnStart>true</cleanHistoryOnStart>
-                <maxHistory>30</maxHistory>
-                <maxFileSize>20MB</maxFileSize>
-            </rollingPolicy>
-        </appender>
-    </springProfile>
-
     <!-- Production: JSON logs + Console -->
     <springProfile name="prod">
-        <logger name="cn.flying.filter.RequestLogFilter" level="INFO"/>
-        <logger name="cn.flying.common.aspect" level="WARN"/>
-        <logger name="cn.flying.common.lock" level="INFO"/>
-        <logger name="org.springframework.aop" level="WARN"/>
         <logger name="org.apache.dubbo" level="WARN"/>
-        <logger name="org.redisson" level="WARN"/>
+        <logger name="io.minio" level="WARN"/>
         <logger name="io.netty" level="WARN"/>
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
@@ -102,10 +96,8 @@
 
     <!-- Development: Text file logs + Console -->
     <springProfile name="dev">
-        <logger name="cn.flying.filter.RequestLogFilter" level="INFO"/>
-        <logger name="cn.flying.common.aspect" level="INFO"/>
-        <logger name="cn.flying.common.lock" level="DEBUG"/>
-        <logger name="org.springframework.aop" level="INFO"/>
+        <logger name="org.apache.dubbo" level="INFO"/>
+        <logger name="io.minio" level="INFO"/>
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="FILE"/>
@@ -114,14 +106,8 @@
 
     <!-- Local: Console + File with debug -->
     <springProfile name="local">
-        <logger name="cn.flying.filter.RequestLogFilter" level="INFO"/>
-        <logger name="cn.flying.common.aspect" level="DEBUG"/>
-        <logger name="cn.flying.common.lock" level="DEBUG"/>
-        <logger name="cn.flying.service.saga" level="DEBUG"/>
-        <logger name="cn.flying.health" level="DEBUG"/>
-        <logger name="org.springframework.aop" level="INFO"/>
         <logger name="org.apache.dubbo" level="INFO"/>
-        <logger name="org.redisson" level="INFO"/>
+        <logger name="io.minio" level="DEBUG"/>
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="FILE"/>
