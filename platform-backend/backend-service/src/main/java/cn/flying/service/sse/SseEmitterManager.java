@@ -67,8 +67,31 @@ public class SseEmitterManager {
                 try {
                     emitter.complete();
                 } catch (Exception ignored) {
+                    // 连接可能已经处于错误状态，忽略异常
                 }
             }
+            if (tenantEmitters.isEmpty()) {
+                emittersByTenant.remove(tenantId);
+            }
+        }
+        Set<Long> tenantUsers = onlineUsersByTenant.get(tenantId);
+        if (tenantUsers != null) {
+            tenantUsers.remove(userId);
+            if (tenantUsers.isEmpty()) {
+                onlineUsersByTenant.remove(tenantId);
+            }
+        }
+    }
+
+    /**
+     * 静默移除连接，不调用 emitter.complete()
+     * 用于在发送心跳失败等场景下安全清理连接状态，
+     * 避免在连接已处于错误状态时触发 AsyncRequestNotUsableException
+     */
+    private void removeConnectionSilently(Long tenantId, Long userId) {
+        Map<Long, SseEmitter> tenantEmitters = emittersByTenant.get(tenantId);
+        if (tenantEmitters != null) {
+            tenantEmitters.remove(userId);
             if (tenantEmitters.isEmpty()) {
                 emittersByTenant.remove(tenantId);
             }
@@ -152,9 +175,17 @@ public class SseEmitterManager {
                             emitter.send(SseEmitter.event()
                                     .name(heartbeat.getType())
                                     .data(eventData));
-                        } catch (IOException e) {
-                            log.debug("SSE 心跳失败，移除连接: tenantId={}, userId={}", tenantId, userId);
-                            removeConnection(tenantId, userId);
+                        } catch (IOException | IllegalStateException e) {
+                            // IOException: 网络错误
+                            // IllegalStateException: 连接已关闭/完成
+                            log.debug("SSE 心跳失败，移除连接: tenantId={}, userId={}, reason={}", 
+                                    tenantId, userId, e.getClass().getSimpleName());
+                            removeConnectionSilently(tenantId, userId);
+                        } catch (Exception e) {
+                            // 捕获其他运行时异常，避免中断心跳任务
+                            log.warn("SSE 心跳发送异常: tenantId={}, userId={}, error={}", 
+                                    tenantId, userId, e.getMessage());
+                            removeConnectionSilently(tenantId, userId);
                         }
                     })
             );
