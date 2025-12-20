@@ -34,19 +34,19 @@ blockchain:
 ### Java sdk configuration (Local FISCO BCOS)
 bcos:
   cryptoMaterial:
-    certPath: conf
+    certPath: ${FISCO_CERT_PATH:conf}
   network:
-    peers[0]: 127.0.0.1:20200
+    peers[0]: ${FISCO_PEER_ADDRESS:127.0.0.1:20200}
 
 ### System configuration
 system:
-  groupId: group0
-  hexPrivateKey:
+  groupId: ${FISCO_GROUP_ID:group0}
+  hexPrivateKey: ${FISCO_PRIVATE_KEY:}
 
 ### Contract configuration
 contract:
-  sharingAddress: '0x6d5de407db930fd7f5a0d9f19be7ec7bc7b36a2a'
-  storageAddress: '0xe7d7b002e51431b300ddc00b2c059ccc41ce4660'
+  sharingAddress: ${FISCO_SHARING_CONTRACT:}
+  storageAddress: ${FISCO_STORAGE_CONTRACT:}
 
 ### Springboot configuration
 spring:
@@ -67,7 +67,7 @@ dubbo:
     name: RecordPlatform_fisco
     logger: slf4j
     protocol: tri
-    qos-port: 22331  # 使用 23333 端口
+    qos-port: ${QOS_FISCO_PORT:22331} # 使用 23333 端口
     qos-enable: on # 启用 QoS 功能
     qos-accept-foreign-ip: false # 只允许本机访问
     check-serializable: false
@@ -75,11 +75,11 @@ dubbo:
   provider:
     timeout: 60000 # 全局提供者超时设置为 60000ms (60秒)
   protocol:
-    name: tri   # 使用 Triple 协议
-    port: 8091
+    name: tri # 使用 Triple 协议
+    port: ${DUBBO_FISCO_PORT:8091}
   registry:
     register-mode: instance
-    address: nacos://localhost:8848
+    address: nacos://${NACOS_HOST:localhost}:${NACOS_PORT:8848}
 
 logging:
   level:
@@ -87,4 +87,4 @@ logging:
     org:
       fisco: DEBUG
   pattern:
-    console: '%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr([%thread]){magenta} %clr(%-5level) %clr(%logger{50}){cyan} - %msg%n'
+    console: "%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %clr([%thread]){magenta} %clr(%-5level) %clr(%logger{50}){cyan} - %msg%n"

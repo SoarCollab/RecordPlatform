@@ -13,6 +13,6 @@ spring:
     import:
       # optional: 前缀表示如果配置不存在，应用不会启动失败
       # nacos: 表示从 Nacos 加载
-      # platform-storage.yaml 是 Data ID
+      # backend-web.yaml 是 Data ID
       # ?group=DEFAULT_GROUP 指定 Nacos 中的 Group
-      - optional:nacos:platform-storage.yaml?group=DEFAULT_GROUP
+      - optional:nacos:backend-web.yaml?group=DEFAULT_GROUP
