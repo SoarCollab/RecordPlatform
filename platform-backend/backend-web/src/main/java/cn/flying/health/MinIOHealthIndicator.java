@@ -15,7 +15,7 @@ import java.util.concurrent.*;
 @Component("minio")
 public class MinIOHealthIndicator implements HealthIndicator {
 
-    @DubboReference(timeout = 3000, retries = 0)
+    @DubboReference(id = "storageServiceMinioHealth", version = DistributedStorageService.VERSION, timeout = 3000, retries = 0)
     private DistributedStorageService storageService;
 
     private static final int TIMEOUT_SECONDS = 3;

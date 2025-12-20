@@ -25,10 +25,10 @@ import java.util.Map;
 @Component
 public class FileRemoteClient {
 
-    @DubboReference(version = BlockChainService.VERSION)
+    @DubboReference(id = "blockChainServiceFileRemoteClient", version = BlockChainService.VERSION)
     private BlockChainService blockChainService;
 
-    @DubboReference(version = DistributedStorageService.VERSION)
+    @DubboReference(id = "storageServiceFileRemoteClient", version = DistributedStorageService.VERSION)
     private DistributedStorageService storageService;
 
     @CircuitBreaker(name = "storageService", fallbackMethod = "storeFileChunkFallback")

@@ -41,7 +41,7 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
     @Resource
     private SysOperationLogMapper operationLogMapper;
 
-    @DubboReference(timeout = 3000, retries = 0)
+    @DubboReference(id = "blockChainServiceSystemMonitor", version = BlockChainService.VERSION, timeout = 3000, retries = 0)
     private BlockChainService blockChainService;
 
     // Health indicators injected by name
