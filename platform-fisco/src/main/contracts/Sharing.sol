@@ -29,12 +29,12 @@ contract Sharing is Storage {
 
     // 取消分享事件
     event ShareCancelled(string shareCode, string uploader);
-
+    
     // 生成随机分享码
     function generateShareCode() private returns (string memory) {
         bytes memory code = new bytes(6);
         uint256 charsetLength = bytes(CHARSET).length;
-
+        
         for(uint i = 0; i < 6; i++) {
             // 使用区块信息、nonce和循环索引来生成伪随机数
             uint256 randomIndex = uint256(
@@ -48,16 +48,16 @@ contract Sharing is Storage {
                     )
                 )
             ) % charsetLength;
-
+            
             code[i] = bytes(CHARSET)[randomIndex];
         }
-
+        
         // 增加nonce以确保下次生成不同的随机数
         nonce++;
-
+        
         return string(code);
     }
-
+    
     // 分享文件
     function shareFiles(
         string memory uploader,
@@ -68,7 +68,7 @@ contract Sharing is Storage {
         require(fileHashes.length > 0, "File hashes array cannot be empty");
         require(expireMinutes > 0, "Expire minutes must be greater than 0");
         require(expireMinutes <= 43200, "Expire minutes cannot exceed 30 days"); // 30天 = 43200分钟
-
+        
         // 验证所有文件的所有权
         for(uint i = 0; i < fileHashes.length; i++) {
             bytes32 fileHash = fileHashes[i];
@@ -78,21 +78,21 @@ contract Sharing is Storage {
                 "Not owner of one of the files"
             );
         }
-
+        
         // 生成唯一的分享码
         string memory shareCode;
         bool isUnique = false;
-
+        
         while(!isUnique) {
             shareCode = generateShareCode();
             if(!shareInfos[shareCode].isValid) {
                 isUnique = true;
             }
         }
-
+        
         // 计算过期时间（毫秒）
         uint256 expireTime = block.timestamp * 1000 + expireMinutes * 60 * 1000;
-
+        
         // 存储分享信息
         shareInfos[shareCode] = ShareInfo({
             uploader: uploader,
@@ -109,29 +109,29 @@ contract Sharing is Storage {
 
         return shareCode;
     }
-
+    
     // 获取分享文件信息
-    function getSharedFiles(string memory shareCode)
-        public
-        view
+    function getSharedFiles(string memory shareCode) 
+        public 
+        view 
         returns (
             string memory uploader,
             File[] memory files,
             uint256 expireTime
-        )
+        ) 
     {
         require(bytes(shareCode).length == 6, "Invalid share code length");
-
+        
         ShareInfo storage shareInfo = shareInfos[shareCode];
-        require(shareInfo.isValid, "Share code does not exist or cancelled");
+        require(shareInfo.isValid, "Share code does not exist");
         require(shareInfo.expireTime > block.timestamp * 1000, "Share has expired");
-
+        
         // 获取所有分享的文件信息
         File[] memory sharedFiles = new File[](shareInfo.fileHashes.length);
         for(uint i = 0; i < shareInfo.fileHashes.length; i++) {
             sharedFiles[i] = this.getFile(shareInfo.uploader, shareInfo.fileHashes[i]);
         }
-
+        
         return (
             shareInfo.uploader,
             sharedFiles,
