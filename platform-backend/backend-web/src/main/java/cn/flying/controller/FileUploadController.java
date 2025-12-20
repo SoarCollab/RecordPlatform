@@ -32,7 +32,7 @@ public class FileUploadController {
     @Resource
     private FileUploadService fileUploadService;
 
-    @PostMapping("/upload/start")
+    @PostMapping("/start")
     @Operation(summary = "开始上传")
     @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "开始上传文件")
     public Result<StartUploadVO> startUpload(
@@ -48,7 +48,7 @@ public class FileUploadController {
         return Result.success(uploadVO);
     }
 
-    @PostMapping("/upload/chunk")
+    @PostMapping("/chunk")
     @Operation(summary = "上传分片文件")
     public Result<String> uploadChunk(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
@@ -61,7 +61,7 @@ public class FileUploadController {
         
     }
 
-    @PostMapping("/upload/complete")
+    @PostMapping("/complete")
     @Operation(summary = "完成文件上传处理")
     @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "完成文件上传处理")
     public Result<String> completeUpload(
@@ -73,7 +73,7 @@ public class FileUploadController {
 
     }
 
-    @PostMapping("/upload/pause")
+    @PostMapping("/pause")
     @Operation(summary = "暂停上传")
     public Result<String> pauseUpload(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
@@ -84,7 +84,7 @@ public class FileUploadController {
 
     }
 
-    @PostMapping("/upload/resume")
+    @PostMapping("/resume")
     @Operation(summary = "恢复上传")
     public Result<ResumeUploadVO> resumeUpload(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
@@ -95,7 +95,7 @@ public class FileUploadController {
 
     }
 
-    @PostMapping("/upload/cancel")
+    @PostMapping("/cancel")
     @Operation(summary = "取消上传")
     @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "取消文件上传")
     public Result<String> cancelUpload(
@@ -109,7 +109,7 @@ public class FileUploadController {
         return Result.error("上传文件未找到");
     }
 
-    @GetMapping("/upload/check")
+    @GetMapping("/check")
     @Operation(summary = "检查上传状态")
     public Result<FileUploadStatusVO> checkFileStatus(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
@@ -120,7 +120,7 @@ public class FileUploadController {
 
     }
 
-    @GetMapping("/upload/progress")
+    @GetMapping("/progress")
     @Operation(summary = "获取上传进度")
     public Result<ProgressVO> getUploadProgress(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
