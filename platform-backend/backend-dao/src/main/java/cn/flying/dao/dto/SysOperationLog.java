@@ -1,6 +1,8 @@
 package cn.flying.dao.dto;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -22,6 +24,13 @@ public class SysOperationLog {
     @TableId(value = "id", type = IdType.AUTO)
     @Schema(description = "日志ID")
     private Long id;
+    
+    /**
+     * 租户ID
+     */
+    @TableField(fill = FieldFill.INSERT)
+    @Schema(description = "租户ID")
+    private Long tenantId;
     
     /**
      * 操作模块
