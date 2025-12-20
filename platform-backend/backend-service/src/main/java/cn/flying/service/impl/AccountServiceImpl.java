@@ -56,6 +56,7 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
 
     /**
      * 从数据库中通过用户名或邮箱查找用户详细信息
+     * 注意：租户ID由请求头 X-Tenant-ID 提供，TenantFilter 已设置到 TenantContext
      * @param username 用户名
      * @return 用户详细信息
      * @throws UsernameNotFoundException 如果用户未找到则抛出此异常
