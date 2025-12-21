@@ -191,16 +191,20 @@ async function request<T>(
 
       const headers = buildHeaders(config);
 
-      // Remove Content-Type for FormData
+      // Remove Content-Type for FormData (browser will set it with boundary)
       if (body instanceof FormData) {
         headers.delete("Content-Type");
+      }
+      // Handle URLSearchParams (form-urlencoded data)
+      else if (body instanceof URLSearchParams) {
+        headers.set("Content-Type", "application/x-www-form-urlencoded");
       }
 
       const response = await fetch(buildUrl(path, config?.params), {
         method,
         headers,
         body:
-          body instanceof FormData
+          body instanceof FormData || body instanceof URLSearchParams
             ? body
             : body
               ? JSON.stringify(body)

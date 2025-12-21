@@ -3,16 +3,16 @@
  * @see FileVO.java
  */
 export interface FileVO {
-	id: string;
-	fileName: string;
-	fileHash: string;
-	fileSize: number;
-	contentType: string;
-	transactionHash?: string;
-	blockNumber?: number;
-	status: FileStatus;
-	createTime: string;
-	updateTime?: string;
+  id: string;
+  fileName: string;
+  fileHash: string;
+  fileSize: number;
+  contentType: string;
+  transactionHash?: string;
+  blockNumber?: number;
+  status: FileStatus;
+  createTime: string;
+  updateTime?: string;
 }
 
 /**
@@ -23,27 +23,27 @@ export interface FileVO {
  * 上传进度状态请使用 UploadProgressStatus 枚举。
  */
 export enum FileStatus {
-	/** 已删除 */
-	DELETED = 2,
-	/** 上传成功/已完成 */
-	COMPLETED = 1,
-	/** 待上传/处理中 */
-	PROCESSING = 0,
-	/** 上传失败 */
-	FAILED = -1,
-	/** 无操作（系统内部状态） */
-	NOOP = -2
+  /** 已删除 */
+  DELETED = 2,
+  /** 上传成功/已完成 */
+  COMPLETED = 1,
+  /** 待上传/处理中 */
+  PROCESSING = 0,
+  /** 上传失败 */
+  FAILED = -1,
+  /** 无操作（系统内部状态） */
+  NOOP = -2,
 }
 
 /**
  * 文件状态标签映射（持久化状态）
  */
 export const FileStatusLabel: Record<FileStatus, string> = {
-	[FileStatus.DELETED]: '已删除',
-	[FileStatus.COMPLETED]: '已完成',
-	[FileStatus.PROCESSING]: '处理中',
-	[FileStatus.FAILED]: '失败',
-	[FileStatus.NOOP]: '-'
+  [FileStatus.DELETED]: "已删除",
+  [FileStatus.COMPLETED]: "已完成",
+  [FileStatus.PROCESSING]: "处理中",
+  [FileStatus.FAILED]: "失败",
+  [FileStatus.NOOP]: "-",
 };
 
 /**
@@ -51,36 +51,36 @@ export const FileStatusLabel: Record<FileStatus, string> = {
  * 这是上传过程中的细粒度状态，与后端无关。
  */
 export enum UploadProgressStatus {
-	/** 等待上传 */
-	PENDING = 'pending',
-	/** 上传中 */
-	UPLOADING = 'uploading',
-	/** 加密中 */
-	ENCRYPTING = 'encrypting',
-	/** 存储中 */
-	STORING = 'storing',
-	/** 存证中 */
-	CERTIFYING = 'certifying',
-	/** 上传完成 */
-	COMPLETED = 'completed',
-	/** 上传失败 */
-	FAILED = 'failed',
-	/** 已暂停 */
-	PAUSED = 'paused'
+  /** 等待上传 */
+  PENDING = "pending",
+  /** 上传中 */
+  UPLOADING = "uploading",
+  /** 加密中 */
+  ENCRYPTING = "encrypting",
+  /** 存储中 */
+  STORING = "storing",
+  /** 存证中 */
+  CERTIFYING = "certifying",
+  /** 上传完成 */
+  COMPLETED = "completed",
+  /** 上传失败 */
+  FAILED = "failed",
+  /** 已暂停 */
+  PAUSED = "paused",
 }
 
 /**
  * 上传进度状态标签映射
  */
 export const UploadProgressStatusLabel: Record<UploadProgressStatus, string> = {
-	[UploadProgressStatus.PENDING]: '等待上传',
-	[UploadProgressStatus.UPLOADING]: '上传中',
-	[UploadProgressStatus.ENCRYPTING]: '加密中',
-	[UploadProgressStatus.STORING]: '存储中',
-	[UploadProgressStatus.CERTIFYING]: '存证中',
-	[UploadProgressStatus.COMPLETED]: '已完成',
-	[UploadProgressStatus.FAILED]: '失败',
-	[UploadProgressStatus.PAUSED]: '已暂停'
+  [UploadProgressStatus.PENDING]: "等待上传",
+  [UploadProgressStatus.UPLOADING]: "上传中",
+  [UploadProgressStatus.ENCRYPTING]: "加密中",
+  [UploadProgressStatus.STORING]: "存储中",
+  [UploadProgressStatus.CERTIFYING]: "存证中",
+  [UploadProgressStatus.COMPLETED]: "已完成",
+  [UploadProgressStatus.FAILED]: "失败",
+  [UploadProgressStatus.PAUSED]: "已暂停",
 };
 
 /**
@@ -88,32 +88,42 @@ export const UploadProgressStatusLabel: Record<UploadProgressStatus, string> = {
  * @see StartUploadVO.java
  */
 export interface StartUploadVO {
-	clientId: string;
-	chunkSize: number;
-	totalChunks: number;
-	processedChunks: number[]; // 已上传分片索引 (断点续传)
-	resumed: boolean;
+  clientId: string;
+  chunkSize: number;
+  totalChunks: number;
+  singleChunk: boolean; // 是否为单分片文件
+  processedChunks: number[]; // 已上传分片索引 (断点续传)
+  resumed: boolean;
+}
+
+/**
+ * 恢复上传响应
+ * @see ResumeUploadVO.java
+ */
+export interface ResumeUploadVO {
+  processedChunks: number[];
+  totalChunks: number;
 }
 
 /**
  * 开始上传请求
  */
 export interface StartUploadRequest {
-	fileName: string;
-	fileSize: number;
-	contentType: string;
-	chunkSize?: number;
-	totalChunks: number;
-	fileHash?: string;
+  fileName: string;
+  fileSize: number;
+  contentType: string;
+  chunkSize: number;
+  totalChunks: number;
+  fileHash?: string;
 }
 
 /**
  * 上传分片请求
  */
 export interface UploadChunkRequest {
-	clientId: string;
-	chunkNumber: number;
-	file: Blob;
+  clientId: string;
+  chunkNumber: number;
+  file: Blob;
 }
 
 /**
@@ -121,13 +131,13 @@ export interface UploadChunkRequest {
  * @see ProgressVO.java
  */
 export interface ProgressVO {
-	clientId: string;
-	progress: number; // 总体进度百分比
-	uploadProgress: number; // 原始分片上传进度百分比
-	processProgress: number; // 分片处理进度百分比
-	uploadedChunkCount: number; // 已上传原始分片数量
-	processedChunkCount: number; // 已处理分片数量
-	totalChunks: number; // 总分片数量
+  clientId: string;
+  progress: number; // 总体进度百分比
+  uploadProgress: number; // 原始分片上传进度百分比
+  processProgress: number; // 分片处理进度百分比
+  uploadedChunkCount: number; // 已上传原始分片数量
+  processedChunkCount: number; // 已处理分片数量
+  totalChunks: number; // 总分片数量
 }
 
 /**
@@ -135,24 +145,24 @@ export interface ProgressVO {
  * @see FileUploadStatusVO.java
  */
 export interface FileUploadStatusVO {
-	/** 文件名 */
-	fileName: string;
-	/** 文件大小 */
-	fileSize: number;
-	/** 客户端ID */
-	clientId: string;
-	/** 是否暂停 */
-	paused: boolean;
-	/** 上传状态：UPLOADING -> 上传中, PAUSED -> 暂停, PROCESSING_COMPLETE -> 处理完成 */
-	status: string;
-	/** 上传进度百分比 */
-	progress: number;
-	/** 已处理的分片序号列表 */
-	processedChunks: number[];
-	/** 已处理分片数量 */
-	processedChunkCount: number;
-	/** 总分片数量 */
-	totalChunks: number;
+  /** 文件名 */
+  fileName: string;
+  /** 文件大小 */
+  fileSize: number;
+  /** 客户端ID */
+  clientId: string;
+  /** 是否暂停 */
+  paused: boolean;
+  /** 上传状态：UPLOADING -> 上传中, PAUSED -> 暂停, PROCESSING_COMPLETE -> 处理完成 */
+  status: string;
+  /** 上传进度百分比 */
+  progress: number;
+  /** 已处理的分片序号列表 */
+  processedChunks: number[];
+  /** 已处理分片数量 */
+  processedChunkCount: number;
+  /** 总分片数量 */
+  totalChunks: number;
 }
 
 /**
@@ -161,18 +171,18 @@ export interface FileUploadStatusVO {
  * @note 用于 getMyShares 接口返回
  */
 export interface FileShareVO {
-	id: string;
-	sharingCode: string;
-	fileHashes: string[];
-	fileNames: string[];
-	maxAccesses?: number;
-	accessCount: number;
-	hasPassword: boolean;
-	expireTime?: string;
-	status: number; // 0-已取消, 1-有效, 2-已过期
-	statusDesc?: string;
-	isValid: boolean;
-	createTime: string;
+  id: string;
+  sharingCode: string;
+  fileHashes: string[];
+  fileNames: string[];
+  maxAccesses?: number;
+  accessCount: number;
+  hasPassword: boolean;
+  expireTime?: string;
+  status: number; // 0-已取消, 1-有效, 2-已过期
+  statusDesc?: string;
+  isValid: boolean;
+  createTime: string;
 }
 
 /**
@@ -181,34 +191,34 @@ export interface FileShareVO {
  * @note 保留此类型用于兼容，但实际 createShare 返回 string
  */
 export interface SharingVO {
-	id: string;
-	shareCode: string;
-	fileId: string;
-	fileName: string;
-	expireTime: string;
-	maxDownloads?: number;
-	downloadCount: number;
-	createTime: string;
+  id: string;
+  shareCode: string;
+  fileId: string;
+  fileName: string;
+  expireTime: string;
+  maxDownloads?: number;
+  downloadCount: number;
+  createTime: string;
 }
 
 /**
  * 创建分享请求
  */
 export interface CreateShareRequest {
-	fileId: string;
-	expireHours?: number;
-	maxDownloads?: number;
-	password?: string;
+  fileId: string;
+  expireHours?: number;
+  maxDownloads?: number;
+  password?: string;
 }
 
 /**
  * 文件查询参数
  */
 export interface FileQueryParams {
-	keyword?: string;
-	status?: FileStatus;
-	startTime?: string;
-	endTime?: string;
+  keyword?: string;
+  status?: FileStatus;
+  startTime?: string;
+  endTime?: string;
 }
 
 /**
@@ -216,29 +226,29 @@ export interface FileQueryParams {
  * @see TransactionVO.java
  */
 export interface TransactionVO {
-	transactionHash: string;
-	blockNumber: number;
-	timestamp: string;
+  transactionHash: string;
+  blockNumber: number;
+  timestamp: string;
 }
 
 /**
  * 分享的文件信息 (对应 API getSharingFiles 返回)
  */
 export interface SharedFileVO {
-	id: string;
-	fileName: string;
-	fileSize: number;
-	fileHash: string;
-	contentType: string;
-	ownerName: string;
-	createTime: string;
+  id: string;
+  fileName: string;
+  fileSize: number;
+  fileHash: string;
+  contentType: string;
+  ownerName: string;
+  createTime: string;
 }
 
 /**
  * 保存分享文件请求
  */
 export interface SaveShareFileRequest {
-	sharingFileIdList: string[];
+  sharingFileIdList: string[];
 }
 
 /**
@@ -246,16 +256,16 @@ export interface SaveShareFileRequest {
  * @see FileDecryptInfoVO.java
  */
 export interface FileDecryptInfoVO {
-	/** 初始密钥（最后一个分片的解密密钥，Base64编码） */
-	initialKey: string;
-	/** 文件名 */
-	fileName: string;
-	/** 文件大小（字节） */
-	fileSize: number;
-	/** 文件MIME类型 */
-	contentType: string;
-	/** 分片数量 */
-	chunkCount: number;
-	/** 文件哈希 */
-	fileHash: string;
+  /** 初始密钥（最后一个分片的解密密钥，Base64编码） */
+  initialKey: string;
+  /** 文件名 */
+  fileName: string;
+  /** 文件大小（字节） */
+  fileSize: number;
+  /** 文件MIME类型 */
+  contentType: string;
+  /** 分片数量 */
+  chunkCount: number;
+  /** 文件哈希 */
+  fileHash: string;
 }
