@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS `file` (
     `file_param`     VARCHAR(255) DEFAULT NULL COMMENT '文件参数JSON：类型、描述、大小等',
     `file_hash`      VARCHAR(255) DEFAULT NULL COMMENT '文件哈希值',
     `status`         INT          NOT NULL COMMENT '上传状态：见FileUploadStatus枚举',
-    `contract_hash`  VARCHAR(255) DEFAULT NULL COMMENT '区块链交易哈希',
+    `transaction_hash`  VARCHAR(255) DEFAULT NULL COMMENT '区块链交易哈希',
     `deleted`        INT          DEFAULT 0 NOT NULL COMMENT '软删除标记',
     `create_time`    DATETIME     NOT NULL COMMENT '创建时间',
     PRIMARY KEY (`id`),
