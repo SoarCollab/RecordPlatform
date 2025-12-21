@@ -62,7 +62,7 @@ get_skywalking_opts() {
             -Dskywalking.agent.service_name=${service_name} \
             -Dskywalking.agent.instance_name=${instance_name} \
             -Dskywalking.collector.backend_service=${SW_COLLECTOR} \
-            -Dskywalking.agent.sample_n_per_3_secs=50 \
+            -Dskywalking.agent.sample_n_per_3_secs=-1 \
             -Dskywalking.logging.level=WARN \
             -Dskywalking.plugin.dubbo.collect_consumer_arguments=true \
             -Dskywalking.plugin.dubbo.collect_provider_arguments=true"
