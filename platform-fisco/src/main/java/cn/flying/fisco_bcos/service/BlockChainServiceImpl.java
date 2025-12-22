@@ -234,6 +234,7 @@ public class BlockChainServiceImpl implements BlockChainService {
                     tx.getTo(),
                     tx.getInput(),
                     tx.getSignature(),
+                    tx.getBlockNumber() != null ? String.valueOf(tx.getBlockNumber()) : null,
                     tx.getImportTime()
             );
 
