@@ -768,7 +768,7 @@ saga:
 | GET    | `/download`          | 下载文件                         |
 | GET    | `/decryptInfo`       | 获取文件解密信息（客户端解密用） |
 | GET    | `/getTransaction`    | 获取链上交易记录                 |
-| DELETE | `/deleteByHash`      | 按哈希批量删除                   |
+| DELETE | `/delete`            | 批量删除（支持哈希或 ID）        |
 | DELETE | `/deleteById`        | 按 ID 批量删除（管理员）         |
 | POST   | `/share`             | 分享文件                         |
 | GET    | `/shares`            | 获取我的分享列表（分页）         |
