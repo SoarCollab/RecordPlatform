@@ -78,4 +78,42 @@ public class File implements Serializable {
     @Schema(description = "创建时间")
     private Date createTime;
 
+    @TableField(exist = false)
+    @Schema(description = "文件大小")
+    private Long fileSize;
+
+    @TableField(exist = false)
+    @Schema(description = "文件类型")
+    private String contentType;
+
+    public Long getFileSize() {
+        if (fileSize == null && fileParam != null) {
+            try {
+                java.util.Map map = cn.flying.common.util.JsonConverter.parse(fileParam, java.util.Map.class);
+                if (map != null && map.containsKey("fileSize")) {
+                    Object val = map.get("fileSize");
+                    if (val instanceof Number) {
+                        this.fileSize = ((Number) val).longValue();
+                    }
+                }
+            } catch (Exception e) {
+                // ignore
+            }
+        }
+        return fileSize;
+    }
+
+    public String getContentType() {
+        if (contentType == null && fileParam != null) {
+            try {
+                java.util.Map map = cn.flying.common.util.JsonConverter.parse(fileParam, java.util.Map.class);
+                if (map != null && map.containsKey("contentType")) {
+                    this.contentType = (String) map.get("contentType");
+                }
+            } catch (Exception e) {
+                // ignore
+            }
+        }
+        return contentType;
+    }
 }
