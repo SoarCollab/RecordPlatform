@@ -38,7 +38,7 @@ mkdir -p "$LOG_DIR"
 # SkyWalking 配置
 # ================================
 export SW_AGENT_HOME="${SW_AGENT_HOME:-$PROJECT_ROOT/agent}"
-export SW_COLLECTOR="${SW_COLLECTOR:-127.0.0.1:11800}"
+export SW_AGENT_COLLECTOR_BACKEND_SERVICES="${SW_AGENT_COLLECTOR_BACKEND_SERVICES:-127.0.0.1:11800}"
 
 # 检查 SkyWalking Agent
 check_skywalking_agent() {
@@ -61,11 +61,7 @@ get_skywalking_opts() {
         echo "-javaagent:${SW_AGENT_HOME}/skywalking-agent.jar \
             -Dskywalking.agent.service_name=${service_name} \
             -Dskywalking.agent.instance_name=${instance_name} \
-            -Dskywalking.collector.backend_service=${SW_COLLECTOR} \
-            -Dskywalking.agent.sample_n_per_3_secs=-1 \
-            -Dskywalking.logging.level=WARN \
-            -Dskywalking.plugin.dubbo.collect_consumer_arguments=true \
-            -Dskywalking.plugin.dubbo.collect_provider_arguments=true"
+            -Dskywalking.collector.backend_service=${SW_AGENT_COLLECTOR_BACKEND_SERVICES}"
     else
         echo ""
     fi
