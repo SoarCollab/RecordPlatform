@@ -2,6 +2,7 @@ package cn.flying.service.saga;
 
 import cn.flying.dao.entity.FileSaga;
 import cn.flying.dao.mapper.FileSagaMapper;
+import cn.flying.service.outbox.OutboxService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -85,5 +86,29 @@ public class SagaCompensationHelper {
     public void updateSagaStepInNewTransaction(FileSaga saga) {
         sagaMapper.updateById(saga);
         log.debug("Saga 步骤已更新: id={}, step={}", saga.getId(), saga.getCurrentStep());
+    }
+
+    /**
+     * 在独立事务中发布 Outbox 事件。
+     * 用于非事务上下文中需要调用 OutboxService.appendEvent() 的场景。
+     * <p>
+     * 设计说明：OutboxService.appendEvent() 使用 MANDATORY 传播级别，
+     * 需要在已存在的事务中调用。本方法提供一个 REQUIRES_NEW 事务包装器，
+     * 允许从非事务上下文（如 Saga 编排器）中发布事件。
+     *
+     * @param outboxService  OutboxService 实例
+     * @param aggregateType  聚合类型
+     * @param aggregateId    聚合ID
+     * @param eventType      事件类型
+     * @param payload        事件载荷
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public void publishEventInNewTransaction(OutboxService outboxService,
+                                              String aggregateType,
+                                              Long aggregateId,
+                                              String eventType,
+                                              String payload) {
+        outboxService.appendEvent(aggregateType, aggregateId, eventType, payload);
+        log.debug("Outbox 事件已发布: type={}, aggregateId={}", eventType, aggregateId);
     }
 }
