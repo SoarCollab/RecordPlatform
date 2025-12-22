@@ -29,12 +29,12 @@
 
 ### Base Information
 
-| Property | Value |
-|----------|-------|
-| Base URL | `http://localhost:8000/record-platform` |
-| API Version | v1 |
-| API Prefix | `/api/v1/` |
-| Content-Type | `application/json` |
+| Property     | Value                                   |
+| ------------ | --------------------------------------- |
+| Base URL     | `http://localhost:8000/record-platform` |
+| API Version  | v1                                      |
+| API Prefix   | `/api/v1/`                              |
+| Content-Type | `application/json`                      |
 
 ### Service Architecture
 
@@ -89,11 +89,11 @@ All API responses use a unified `Result<T>` wrapper:
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `code` | Integer | Status code (200 = success) |
-| `message` | String | Human-readable message |
-| `data` | T | Response payload (can be null) |
+| Field     | Type    | Description                    |
+| --------- | ------- | ------------------------------ |
+| `code`    | Integer | Status code (200 = success)    |
+| `message` | String  | Human-readable message         |
+| `data`    | T       | Response payload (can be null) |
 
 ### Success Response Example
 
@@ -126,85 +126,85 @@ All API responses use a unified `Result<T>` wrapper:
 
 ### General Status Codes
 
-| Code | Name | Description |
-|------|------|-------------|
-| 200 | SUCCESS | Operation successful |
-| 500 | FAIL | Internal server error |
+| Code | Name    | Description           |
+| ---- | ------- | --------------------- |
+| 200  | SUCCESS | Operation successful  |
+| 500  | FAIL    | Internal server error |
 
 ### Parameter Errors (10000-19999)
 
-| Code | Name | Description |
-|------|------|-------------|
-| 10000 | PARAM_ERROR | Parameter error |
-| 10001 | PARAM_IS_INVALID | Invalid parameter |
-| 10002 | PARAM_IS_BLANK | Parameter is blank |
+| Code  | Name                  | Description            |
+| ----- | --------------------- | ---------------------- |
+| 10000 | PARAM_ERROR           | Parameter error        |
+| 10001 | PARAM_IS_INVALID      | Invalid parameter      |
+| 10002 | PARAM_IS_BLANK        | Parameter is blank     |
 | 10003 | PARAM_TYPE_BIND_ERROR | Parameter format error |
-| 10004 | PARAM_NOT_COMPLETE | Missing parameter |
-| 10005 | JSON_PARSE_ERROR | JSON parsing failed |
+| 10004 | PARAM_NOT_COMPLETE    | Missing parameter      |
+| 10005 | JSON_PARSE_ERROR      | JSON parsing failed    |
 
 ### User/Auth Errors (20000-29999)
 
-| Code | Name | Description |
-|------|------|-------------|
-| 20001 | USER_NOT_LOGGED_IN | User not logged in |
-| 20002 | USER_LOGIN_ERROR | Invalid username or password |
-| 20003 | USER_ACCOUNT_FORBIDDEN | Account disabled |
-| 20004 | USER_NOT_EXIST | User does not exist |
-| 20005 | USER_HAS_EXISTED | User already exists |
-| 20006 | USER_ACCOUNT_LOCKED | Account locked due to too many failed attempts |
+| Code  | Name                   | Description                                    |
+| ----- | ---------------------- | ---------------------------------------------- |
+| 20001 | USER_NOT_LOGGED_IN     | User not logged in                             |
+| 20002 | USER_LOGIN_ERROR       | Invalid username or password                   |
+| 20003 | USER_ACCOUNT_FORBIDDEN | Account disabled                               |
+| 20004 | USER_NOT_EXIST         | User does not exist                            |
+| 20005 | USER_HAS_EXISTED       | User already exists                            |
+| 20006 | USER_ACCOUNT_LOCKED    | Account locked due to too many failed attempts |
 
 ### External Service Errors (30000-39999)
 
-| Code | Name | Description |
-|------|------|-------------|
-| 30001 | CONTRACT_ERROR | Smart contract call failed |
-| 30006 | BLOCKCHAIN_ERROR | Blockchain service request failed |
-| 30007 | TRANSACTION_NOT_FOUND | Transaction record not found |
-| 30009 | FILE_SERVICE_ERROR | File service request failed |
-| 30010 | SERVICE_CIRCUIT_OPEN | Service temporarily unavailable |
-| 30011 | SERVICE_TIMEOUT | Service response timeout |
+| Code  | Name                  | Description                       |
+| ----- | --------------------- | --------------------------------- |
+| 30001 | CONTRACT_ERROR        | Smart contract call failed        |
+| 30006 | BLOCKCHAIN_ERROR      | Blockchain service request failed |
+| 30007 | TRANSACTION_NOT_FOUND | Transaction record not found      |
+| 30009 | FILE_SERVICE_ERROR    | File service request failed       |
+| 30010 | SERVICE_CIRCUIT_OPEN  | Service temporarily unavailable   |
+| 30011 | SERVICE_TIMEOUT       | Service response timeout          |
 
 ### System Errors (40000-49999)
 
-| Code | Name | Description |
-|------|------|-------------|
-| 40001 | FILE_MAX_SIZE_OVERFLOW | File size exceeds limit |
+| Code  | Name                    | Description               |
+| ----- | ----------------------- | ------------------------- |
+| 40001 | FILE_MAX_SIZE_OVERFLOW  | File size exceeds limit   |
 | 40002 | FILE_ACCEPT_NOT_SUPPORT | File format not supported |
-| 40003 | SYSTEM_BUSY | System busy |
-| 40004 | RATE_LIMIT_EXCEEDED | Rate limit exceeded |
+| 40003 | SYSTEM_BUSY             | System busy               |
+| 40004 | RATE_LIMIT_EXCEEDED     | Rate limit exceeded       |
 
 ### Data Errors (50000-59999)
 
-| Code | Name | Description |
-|------|------|-------------|
-| 50001 | RESULT_DATA_NONE | Data not found |
-| 50004 | AUTH_CODE_ERROR | Verification code error |
-| 50005 | FILE_UPLOAD_ERROR | File upload failed |
-| 50006 | FILE_DOWNLOAD_ERROR | File download failed |
-| 50008 | FILE_NOT_EXIST | File does not exist |
-| 50009 | FILE_EMPTY | File is empty |
+| Code  | Name                | Description             |
+| ----- | ------------------- | ----------------------- |
+| 50001 | RESULT_DATA_NONE    | Data not found          |
+| 50004 | AUTH_CODE_ERROR     | Verification code error |
+| 50005 | FILE_UPLOAD_ERROR   | File upload failed      |
+| 50006 | FILE_DOWNLOAD_ERROR | File download failed    |
+| 50008 | FILE_NOT_EXIST      | File does not exist     |
+| 50009 | FILE_EMPTY          | File is empty           |
 
 ### Message Service Errors (60000-69999)
 
-| Code | Name | Description |
-|------|------|-------------|
-| 60001 | MESSAGE_NOT_FOUND | Message not found |
-| 60002 | CONVERSATION_NOT_FOUND | Conversation not found |
-| 60003 | CANNOT_MESSAGE_SELF | Cannot send message to yourself |
-| 60004 | ANNOUNCEMENT_NOT_FOUND | Announcement not found |
-| 60005 | TICKET_NOT_FOUND | Ticket not found |
-| 60006 | TICKET_ALREADY_CLOSED | Ticket already closed |
-| 60007 | TICKET_NOT_OWNER | No permission to operate this ticket |
+| Code  | Name                   | Description                          |
+| ----- | ---------------------- | ------------------------------------ |
+| 60001 | MESSAGE_NOT_FOUND      | Message not found                    |
+| 60002 | CONVERSATION_NOT_FOUND | Conversation not found               |
+| 60003 | CANNOT_MESSAGE_SELF    | Cannot send message to yourself      |
+| 60004 | ANNOUNCEMENT_NOT_FOUND | Announcement not found               |
+| 60005 | TICKET_NOT_FOUND       | Ticket not found                     |
+| 60006 | TICKET_ALREADY_CLOSED  | Ticket already closed                |
+| 60007 | TICKET_NOT_OWNER       | No permission to operate this ticket |
 
 ### Permission Errors (70000-79999)
 
-| Code | Name | Description |
-|------|------|-------------|
+| Code  | Name                       | Description             |
+| ----- | -------------------------- | ----------------------- |
 | 70001 | PERMISSION_UNAUTHENTICATED | Authentication required |
-| 70002 | PERMISSION_UNAUTHORIZED | Permission denied |
-| 70004 | PERMISSION_TOKEN_EXPIRED | Token expired |
-| 70005 | PERMISSION_LIMIT | Access limit reached |
-| 70006 | PERMISSION_TOKEN_INVALID | Invalid token |
+| 70002 | PERMISSION_UNAUTHORIZED    | Permission denied       |
+| 70004 | PERMISSION_TOKEN_EXPIRED   | Token expired           |
+| 70005 | PERMISSION_LIMIT           | Access limit reached    |
+| 70006 | PERMISSION_TOKEN_INVALID   | Invalid token           |
 
 ---
 
@@ -228,10 +228,10 @@ POST /api/auth/login
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| username | string | Yes | Username |
-| password | string | Yes | Password |
+| Parameter | Type   | Required | Description |
+| --------- | ------ | -------- | ----------- |
+| username  | string | Yes      | Username    |
+| password  | string | Yes      | Password    |
 
 **Response**:
 
@@ -250,12 +250,12 @@ POST /api/auth/login
 
 **Response Fields (AuthorizeVO)**:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| username | string | Username |
-| role | string | User role (user/admin/monitor) |
-| token | string | JWT token |
-| expire | Date | Token expiration time |
+| Field    | Type   | Description                    |
+| -------- | ------ | ------------------------------ |
+| username | string | Username                       |
+| role     | string | User role (user/admin/monitor) |
+| token    | string | JWT token                      |
+| expire   | Date   | Token expiration time          |
 
 ---
 
@@ -293,10 +293,10 @@ GET /api/v1/auth/ask-code
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| email | string | Yes | Email address (must be valid email format) |
-| type | string | Yes | Code type: `register`, `reset`, or `modify` |
+| Parameter | Type   | Required | Description                                 |
+| --------- | ------ | -------- | ------------------------------------------- |
+| email     | string | Yes      | Email address (must be valid email format)  |
+| type      | string | Yes      | Code type: `register`, `reset`, or `modify` |
 
 **Response**:
 
@@ -331,12 +331,12 @@ POST /api/v1/auth/register
 }
 ```
 
-| Field | Type | Required | Validation |
-|-------|------|----------|------------|
-| email | string | Yes | Valid email format |
-| code | string | Yes | Exactly 6 characters |
-| username | string | Yes | 1-10 chars, alphanumeric + Chinese |
-| password | string | Yes | 6-20 characters |
+| Field    | Type   | Required | Validation                         |
+| -------- | ------ | -------- | ---------------------------------- |
+| email    | string | Yes      | Valid email format                 |
+| code     | string | Yes      | Exactly 6 characters               |
+| username | string | Yes      | 1-10 chars, alphanumeric + Chinese |
+| password | string | Yes      | 6-20 characters                    |
 
 **Response**:
 
@@ -426,14 +426,14 @@ GET /api/v1/users/info
 
 **Response Fields (AccountVO)**:
 
-| Field | Type | Description |
-|-------|------|-------------|
-| externalId | string | External user ID (for API use) |
-| username | string | Username |
-| email | string | Email address |
-| role | string | User role |
-| avatar | string | Avatar URL |
-| registerTime | Date | Registration time |
+| Field        | Type   | Description                    |
+| ------------ | ------ | ------------------------------ |
+| externalId   | string | External user ID (for API use) |
+| username     | string | Username                       |
+| email        | string | Email address                  |
+| role         | string | User role                      |
+| avatar       | string | Avatar URL                     |
+| registerTime | Date   | Registration time              |
 
 ---
 
@@ -507,14 +507,14 @@ POST /api/v1/files/upload/upload/start
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| fileName | string | Yes | File name |
-| fileSize | long | Yes | File size in bytes |
-| contentType | string | Yes | MIME type |
-| clientId | string | No | Client-provided ID (optional, auto-generated if not provided) |
-| chunkSize | int | Yes | Size of each chunk |
-| totalChunks | int | Yes | Total number of chunks |
+| Parameter   | Type   | Required | Description                                                   |
+| ----------- | ------ | -------- | ------------------------------------------------------------- |
+| fileName    | string | Yes      | File name                                                     |
+| fileSize    | long   | Yes      | File size in bytes                                            |
+| contentType | string | Yes      | MIME type                                                     |
+| clientId    | string | No       | Client-provided ID (optional, auto-generated if not provided) |
+| chunkSize   | int    | Yes      | Size of each chunk                                            |
+| totalChunks | int    | Yes      | Total number of chunks                                        |
 
 **Response (StartUploadVO)**:
 
@@ -547,11 +547,11 @@ POST /api/v1/files/upload/upload/chunk
 
 **Form Data**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| file | MultipartFile | Yes | Chunk file data |
-| clientId | string | Yes | Upload session ID |
-| chunkNumber | int | Yes | Chunk index (0-based) |
+| Parameter   | Type          | Required | Description           |
+| ----------- | ------------- | -------- | --------------------- |
+| file        | MultipartFile | Yes      | Chunk file data       |
+| clientId    | string        | Yes      | Upload session ID     |
+| chunkNumber | int           | Yes      | Chunk index (0-based) |
 
 **Response**:
 
@@ -577,9 +577,9 @@ POST /api/v1/files/upload/upload/complete
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| clientId | string | Yes | Upload session ID |
+| Parameter | Type   | Required | Description       |
+| --------- | ------ | -------- | ----------------- |
+| clientId  | string | Yes      | Upload session ID |
 
 ---
 
@@ -593,9 +593,9 @@ POST /api/v1/files/upload/upload/pause
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| clientId | string | Yes | Upload session ID |
+| Parameter | Type   | Required | Description       |
+| --------- | ------ | -------- | ----------------- |
+| clientId  | string | Yes      | Upload session ID |
 
 ---
 
@@ -634,9 +634,9 @@ POST /api/v1/files/upload/upload/cancel
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| clientId | string | Yes | Upload session ID |
+| Parameter | Type   | Required | Description       |
+| --------- | ------ | -------- | ----------------- |
+| clientId  | string | Yes      | Upload session ID |
 
 ---
 
@@ -650,9 +650,9 @@ GET /api/v1/files/upload/upload/check
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| clientId | string | Yes | Upload session ID |
+| Parameter | Type   | Required | Description       |
+| --------- | ------ | -------- | ----------------- |
+| clientId  | string | Yes      | Upload session ID |
 
 **Response (FileUploadStatusVO)**:
 
@@ -753,10 +753,10 @@ GET /api/v1/files/page
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| pageNum | int | No | Page number (default: 1) |
-| pageSize | int | No | Items per page (default: 10) |
+| Parameter | Type | Required | Description                  |
+| --------- | ---- | -------- | ---------------------------- |
+| pageNum   | int  | No       | Page number (default: 1)     |
+| pageSize  | int  | No       | Items per page (default: 10) |
 
 **Response**:
 
@@ -776,21 +776,21 @@ GET /api/v1/files/page
 
 ---
 
-### 4.3 Delete Files by Hash
+### 4.3 Delete Files
 
-Delete files by their hash values.
+Delete files by their hash values or IDs.
 
 ```
-DELETE /api/v1/files/deleteByHash
+DELETE /api/v1/files/delete
 ```
 
 **Authentication**: Bearer Token
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| hashList | string[] | Yes | List of file hashes to delete |
+| Parameter   | Type     | Required | Description                               |
+| ----------- | -------- | -------- | ----------------------------------------- |
+| identifiers | string[] | Yes      | List of file hashes or file IDs to delete |
 
 ---
 
@@ -806,9 +806,9 @@ DELETE /api/v1/files/deleteById
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| idList | string[] | Yes | List of file IDs to delete |
+| Parameter | Type     | Required | Description                |
+| --------- | -------- | -------- | -------------------------- |
+| idList    | string[] | Yes      | List of file IDs to delete |
 
 ---
 
@@ -824,9 +824,9 @@ GET /api/v1/files/address
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| fileHash | string | Yes | File hash |
+| Parameter | Type   | Required | Description |
+| --------- | ------ | -------- | ----------- |
+| fileHash  | string | Yes      | File hash   |
 
 **Response**:
 
@@ -853,9 +853,9 @@ GET /api/v1/files/getTransaction
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| transactionHash | string | Yes | Blockchain transaction hash |
+| Parameter       | Type   | Required | Description                 |
+| --------------- | ------ | -------- | --------------------------- |
+| transactionHash | string | Yes      | Blockchain transaction hash |
 
 **Response (TransactionVO)**:
 
@@ -885,9 +885,9 @@ GET /api/v1/files/download
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| fileHash | string | Yes | File hash |
+| Parameter | Type   | Required | Description |
+| --------- | ------ | -------- | ----------- |
+| fileHash  | string | Yes      | File hash   |
 
 **Response**: `Result<List<byte[]>>` - List of encrypted file shards
 
@@ -936,9 +936,9 @@ GET /api/v1/files/getSharingFiles
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| sharingCode | string | Yes | Sharing code |
+| Parameter   | Type   | Required | Description  |
+| ----------- | ------ | -------- | ------------ |
+| sharingCode | string | Yes      | Sharing code |
 
 ---
 
@@ -976,9 +976,9 @@ POST /api/v1/images/upload/avatar
 
 **Form Data**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| file | MultipartFile | Yes | Avatar image (max 100KB) |
+| Parameter | Type          | Required | Description              |
+| --------- | ------------- | -------- | ------------------------ |
+| file      | MultipartFile | Yes      | Avatar image (max 100KB) |
 
 **Response**:
 
@@ -1004,9 +1004,9 @@ POST /api/v1/images/upload/image
 
 **Form Data**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| file | MultipartFile | Yes | Image file (max 5MB) |
+| Parameter | Type          | Required | Description          |
+| --------- | ------------- | -------- | -------------------- |
+| file      | MultipartFile | Yes      | Image file (max 5MB) |
 
 ---
 
@@ -1040,10 +1040,10 @@ GET /api/v1/conversations
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| pageNum | int | No | Page number (default: 1) |
-| pageSize | int | No | Items per page (default: 20) |
+| Parameter | Type | Required | Description                  |
+| --------- | ---- | -------- | ---------------------------- |
+| pageNum   | int  | No       | Page number (default: 1)     |
+| pageSize  | int  | No       | Items per page (default: 20) |
 
 **Response (ConversationVO)**:
 
@@ -1084,16 +1084,16 @@ GET /api/v1/conversations/{id}
 
 **Path Parameters**:
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| id | string | Conversation ID (external) |
+| Parameter | Type   | Description                |
+| --------- | ------ | -------------------------- |
+| id        | string | Conversation ID (external) |
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| pageNum | int | No | Message page number (default: 1) |
-| pageSize | int | No | Messages per page (default: 50) |
+| Parameter | Type | Required | Description                      |
+| --------- | ---- | -------- | -------------------------------- |
+| pageNum   | int  | No       | Message page number (default: 1) |
+| pageSize  | int  | No       | Messages per page (default: 50)  |
 
 **Response (ConversationDetailVO)**:
 
@@ -1193,11 +1193,11 @@ POST /api/v1/messages
 }
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| receiverId | string | Yes | Recipient's external ID |
-| content | string | Yes | Message content |
-| contentType | string | No | Content type: `text`, `image`, `file` (default: text) |
+| Field       | Type   | Required | Description                                           |
+| ----------- | ------ | -------- | ----------------------------------------------------- |
+| receiverId  | string | Yes      | Recipient's external ID                               |
+| content     | string | Yes      | Message content                                       |
+| contentType | string | No       | Content type: `text`, `image`, `file` (default: text) |
 
 **Response (MessageVO)**:
 
@@ -1229,10 +1229,10 @@ POST /api/v1/messages/to/{receiverId}
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| content | string | Yes | Message content |
-| contentType | string | No | Content type (default: text) |
+| Parameter   | Type   | Required | Description                  |
+| ----------- | ------ | -------- | ---------------------------- |
+| content     | string | Yes      | Message content              |
+| contentType | string | No       | Content type (default: text) |
 
 ---
 
@@ -1262,10 +1262,10 @@ GET /api/v1/announcements
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| pageNum | int | No | Page number (default: 1) |
-| pageSize | int | No | Items per page (default: 10) |
+| Parameter | Type | Required | Description                  |
+| --------- | ---- | -------- | ---------------------------- |
+| pageNum   | int  | No       | Page number (default: 1)     |
+| pageSize  | int  | No       | Items per page (default: 10) |
 
 **Response (AnnouncementVO)**:
 
@@ -1399,14 +1399,14 @@ GET /api/v1/tickets
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| ticketNo | string | No | Ticket number filter |
-| status | int | No | Status filter |
-| priority | int | No | Priority filter |
-| keyword | string | No | Search in title/content |
-| pageNum | int | No | Page number (default: 1) |
-| pageSize | int | No | Items per page (default: 10) |
+| Parameter | Type   | Required | Description                  |
+| --------- | ------ | -------- | ---------------------------- |
+| ticketNo  | string | No       | Ticket number filter         |
+| status    | int    | No       | Status filter                |
+| priority  | int    | No       | Priority filter              |
+| keyword   | string | No       | Search in title/content      |
+| pageNum   | int    | No       | Page number (default: 1)     |
+| pageSize  | int    | No       | Items per page (default: 10) |
 
 **Response (TicketVO)**:
 
@@ -1571,9 +1571,9 @@ PUT /api/v1/tickets/admin/{id}/assign
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| assigneeId | string | Yes | Assignee's external ID |
+| Parameter  | Type   | Required | Description            |
+| ---------- | ------ | -------- | ---------------------- |
+| assigneeId | string | Yes      | Assignee's external ID |
 
 ---
 
@@ -1585,9 +1585,9 @@ PUT /api/v1/tickets/admin/{id}/status
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| status | int | Yes | New status (0-4) |
+| Parameter | Type | Required | Description      |
+| --------- | ---- | -------- | ---------------- |
+| status    | int  | Yes      | New status (0-4) |
 
 ---
 
@@ -1613,11 +1613,11 @@ GET /api/v1/system/permissions/list
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| module | string | No | Filter by module name |
-| pageNum | int | No | Page number (default: 1) |
-| pageSize | int | No | Items per page (default: 20) |
+| Parameter | Type   | Required | Description                  |
+| --------- | ------ | -------- | ---------------------------- |
+| module    | string | No       | Filter by module name        |
+| pageNum   | int    | No       | Page number (default: 1)     |
+| pageSize  | int    | No       | Items per page (default: 20) |
 
 ---
 
@@ -1673,9 +1673,9 @@ GET /api/v1/system/permissions/roles/{role}
 
 **Path Parameters**:
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| role | string | Role name: `user`, `admin`, `monitor` |
+| Parameter | Type   | Description                           |
+| --------- | ------ | ------------------------------------- |
+| role      | string | Role name: `user`, `admin`, `monitor` |
 
 ---
 
@@ -1703,9 +1703,9 @@ DELETE /api/v1/system/permissions/roles/{role}/revoke
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| permissionCode | string | Yes | Permission code to revoke |
+| Parameter      | Type   | Required | Description               |
+| -------------- | ------ | -------- | ------------------------- |
+| permissionCode | string | Yes      | Permission code to revoke |
 
 ---
 
@@ -1830,10 +1830,10 @@ POST /api/v1/system/audit/backup-logs
 
 **Query Parameters**:
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| days | int | No | Days before today to backup (default: 180) |
-| deleteAfterBackup | boolean | No | Delete after backup (default: false) |
+| Parameter         | Type    | Required | Description                                |
+| ----------------- | ------- | -------- | ------------------------------------------ |
+| days              | int     | No       | Days before today to backup (default: 180) |
+| deleteAfterBackup | boolean | No       | Delete after backup (default: false)       |
 
 ---
 
@@ -1856,6 +1856,7 @@ GET /api/v1/sse/connect
 **Response**: `text/event-stream`
 
 **Event Types**:
+
 - `message` - New private message
 - `announcement` - New announcement
 - `ticket` - Ticket update
@@ -1897,10 +1898,10 @@ GET /api/v1/sse/status
 
 Standard pagination parameters:
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| pageNum | int | 1 | Page number (1-indexed) |
-| pageSize | int | 10-20 | Items per page |
+| Parameter | Type | Default | Description             |
+| --------- | ---- | ------- | ----------------------- |
+| pageNum   | int  | 1       | Page number (1-indexed) |
+| pageSize  | int  | 10-20   | Items per page          |
 
 Paginated response structure:
 
@@ -1925,53 +1926,53 @@ All `id` fields in responses are external IDs. Use these when making subsequent 
 
 ### C. User Roles
 
-| Role | Description |
-|------|-------------|
-| user | Standard user |
-| admin | Administrator (full access) |
+| Role    | Description                      |
+| ------- | -------------------------------- |
+| user    | Standard user                    |
+| admin   | Administrator (full access)      |
 | monitor | Monitor (read-only admin access) |
 
 ### D. File Status
 
-| Value | Status | Description |
-|-------|--------|-------------|
-| 0 | Uploading | File is being uploaded |
-| 1 | Processing | File is being processed |
-| 2 | Completed | File ready for use |
-| 3 | Failed | Upload/processing failed |
+| Value | Status     | Description              |
+| ----- | ---------- | ------------------------ |
+| 0     | Uploading  | File is being uploaded   |
+| 1     | Processing | File is being processed  |
+| 2     | Completed  | File ready for use       |
+| 3     | Failed     | Upload/processing failed |
 
 ### E. Ticket Priority
 
-| Value | Priority | Description |
-|-------|----------|-------------|
-| 0 | Low | Low priority |
-| 1 | Medium | Normal priority |
-| 2 | High | Urgent |
+| Value | Priority | Description     |
+| ----- | -------- | --------------- |
+| 0     | Low      | Low priority    |
+| 1     | Medium   | Normal priority |
+| 2     | High     | Urgent          |
 
 ### F. Ticket Status
 
-| Value | Status | Description |
-|-------|--------|-------------|
-| 0 | Pending | Awaiting assignment |
-| 1 | Processing | Being handled |
-| 2 | Pending Confirm | Awaiting user confirmation |
-| 3 | Completed | Resolved |
-| 4 | Closed | Closed by user or admin |
+| Value | Status          | Description                |
+| ----- | --------------- | -------------------------- |
+| 0     | Pending         | Awaiting assignment        |
+| 1     | Processing      | Being handled              |
+| 2     | Pending Confirm | Awaiting user confirmation |
+| 3     | Completed       | Resolved                   |
+| 4     | Closed          | Closed by user or admin    |
 
 ### G. Announcement Priority
 
-| Value | Priority | Description |
-|-------|----------|-------------|
-| 0 | Normal | Regular announcement |
-| 1 | Important | Highlighted announcement |
-| 2 | Urgent | Critical announcement |
+| Value | Priority  | Description              |
+| ----- | --------- | ------------------------ |
+| 0     | Normal    | Regular announcement     |
+| 1     | Important | Highlighted announcement |
+| 2     | Urgent    | Critical announcement    |
 
 ### H. Announcement Status
 
-| Value | Status | Description |
-|-------|--------|-------------|
-| 0 | Draft | Not published |
-| 1 | Published | Visible to users |
+| Value | Status    | Description      |
+| ----- | --------- | ---------------- |
+| 0     | Draft     | Not published    |
+| 1     | Published | Visible to users |
 
 ---
 

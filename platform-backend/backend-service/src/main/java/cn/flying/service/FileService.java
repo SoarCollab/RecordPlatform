@@ -49,12 +49,12 @@ public interface FileService extends IService<File> {
     void changeFileStatusByHash(Long userId, String fileHash, Integer fileStatus);
 
     /**
-     * 删除文件
+     * 批量删除文件
+     * 支持通过文件哈希或文件ID进行删除
      * @param userId 用户ID
-     * @param fileHashList 文件哈希
-     * @return
+     * @param identifiers 文件哈希或文件ID列表
      */
-    void deleteFile(Long userId, List<String> fileHashList);
+    void deleteFiles(Long userId, List<String> identifiers);
 
     /**
      * 根据用户Id获取用户文件列表（只包含文件元信息，没有实际的文件数据）

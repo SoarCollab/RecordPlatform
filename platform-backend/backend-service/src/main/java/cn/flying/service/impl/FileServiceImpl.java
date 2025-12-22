@@ -158,11 +158,18 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     @Override
     @Transactional(rollbackFor = Exception.class)
     @CacheEvict(cacheNames = "userFiles", key = "#userId")
-    public void deleteFile(Long userId, List<String> fileHashList) {
-        if(CommonUtils.isEmpty(fileHashList)) return;
+    public void deleteFiles(Long userId, List<String> identifiers) {
+        if(CommonUtils.isEmpty(identifiers)) return;
+        
+        // 支持同时按 fileHash 或 ID 匹配删除
+        // 这样前端传入 file.id 时，对于 fileHash 为 null 的失败文件也能正确删除
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getUid, userId)
-                .in(File::getFileHash, fileHashList);
+                .and(w -> w
+                        .in(File::getFileHash, identifiers)
+                        .or()
+                        .in(File::getId, identifiers)
+                );
         // Logical delete only - physical cleanup is handled by FileCleanupTask scheduled job
         this.remove(wrapper);
     }

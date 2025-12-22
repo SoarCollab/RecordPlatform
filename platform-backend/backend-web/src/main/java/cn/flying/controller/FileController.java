@@ -188,18 +188,19 @@ public class FileController {
     // ==================== Command 端点（写操作）====================
 
     /**
-     * 删除文件
+     * 批量删除文件
+     * 支持通过文件哈希或文件ID进行删除
      * @param userId 用户ID
-     * @param fileHashList 文件哈希列表
+     * @param identifiers 文件哈希或文件ID列表
      * @return 删除结果
      */
-    @DeleteMapping("/deleteByHash")
-    @Operation(summary = "根据文件hash列表批量删除文件")
-    @OperationLog(module = "文件操作", operationType = "删除", description = "删除文件")
-    public Result<String> deleteFile(
+    @DeleteMapping("/delete")
+    @Operation(summary = "批量删除文件（支持通过文件哈希或文件ID）")
+    @OperationLog(module = "文件操作", operationType = "删除", description = "批量删除文件")
+    public Result<String> deleteFiles(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
-            @Schema(description = "待删除文件hash列表") @RequestParam("hashList") List<String> fileHashList) {
-        fileService.deleteFile(userId, fileHashList);
+            @Schema(description = "待删除文件标识列表（支持文件哈希或文件ID）") @RequestParam("identifiers") List<String> identifiers) {
+        fileService.deleteFiles(userId, identifiers);
         return Result.success("文件删除成功");
     }
 
