@@ -47,7 +47,7 @@ async function login(
       username: result.username,
       role: result.role,
       status: 1,
-      createTime: "",
+      registerTime: "",
     };
     // Fetch full user info
     await fetchUser();

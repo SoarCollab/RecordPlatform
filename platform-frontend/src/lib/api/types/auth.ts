@@ -20,7 +20,7 @@ export interface AccountVO {
   email?: string;
   avatar?: string;
   role: string;
-  createTime: string;
+  registerTime: string;
   // 以下字段为前端扩展（后端 AccountVO 不包含）
   nickname?: string;
   phone?: string;

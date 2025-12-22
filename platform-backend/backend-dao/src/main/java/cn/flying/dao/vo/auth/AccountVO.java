@@ -30,8 +30,8 @@ public class AccountVO {
     String role;
     @Schema(description = "头像Url")
     String avatar;
-    @Schema(description = "创建时间")
-    Date createTime;
+    @Schema(description = "注册时间")
+    Date registerTime;
 
     @Override
     public String toString() {
@@ -42,7 +42,7 @@ public class AccountVO {
                 ", email='" + email + '\'' +
                 ", role='" + role + '\'' +
                 ", avatar='" + avatar + '\'' +
-                ", createTime=" + createTime +
+                ", registerTime=" + registerTime +
                 '}';
     }
 }
