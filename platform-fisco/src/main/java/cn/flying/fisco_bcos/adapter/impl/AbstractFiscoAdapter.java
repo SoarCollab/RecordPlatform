@@ -442,6 +442,9 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
                     .input(result.getInput())
                     .signature(result.getSignature())
                     .importTime(result.getImportTime())
+                    .blockNumber(receipt != null && receipt.getResult() != null 
+                            ? receipt.getResult().getBlockNumber().longValue() 
+                            : null)
                     .success(receipt != null && receipt.getResult() != null)
                     .build();
 

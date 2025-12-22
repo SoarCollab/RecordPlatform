@@ -36,6 +36,8 @@ public class TransactionVO implements Serializable {
     private String input;
     @Schema(description = "交易签名")
     private String signature;
+    @Schema(description = "区块高度")
+    private String blockNumber;
     @Schema(description = "交易时间戳")
     private Long timestamp;
 } 
