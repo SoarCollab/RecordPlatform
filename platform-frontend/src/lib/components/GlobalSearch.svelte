@@ -31,7 +31,9 @@
 	});
 
 	onDestroy(() => {
-		window.removeEventListener('keydown', handleGlobalKeydown);
+		if (typeof window !== 'undefined') {
+			window.removeEventListener('keydown', handleGlobalKeydown);
+		}
 		if (searchTimeout) clearTimeout(searchTimeout);
 	});
 
