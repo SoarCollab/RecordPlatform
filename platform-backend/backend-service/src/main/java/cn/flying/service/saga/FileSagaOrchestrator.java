@@ -201,7 +201,9 @@ public class FileSagaOrchestrator {
         eventData.put("fileHash", chainResult.getFileHash());
         eventData.put("requestId", cmd.getRequestId());
 
-        outboxService.appendEvent("FILE", saga.getFileId(), "file.stored",
+        // 使用 REQUIRES_NEW 事务发布事件，因为 executeUpload() 没有事务上下文
+        compensationHelper.publishEventInNewTransaction(outboxService,
+                "FILE", saga.getFileId(), "file.stored",
                 JsonConverter.toJson(eventData));
     }
 
@@ -470,7 +472,9 @@ public class FileSagaOrchestrator {
             deadLetterData.put("payload", saga.getPayload());
             deadLetterData.put("failedAt", System.currentTimeMillis());
 
-            outboxService.appendEvent("SAGA_DEAD_LETTER", saga.getId(), "saga.compensation.failed",
+            // 使用 REQUIRES_NEW 事务发布事件，因为 retryCompensation() 没有事务上下文
+            compensationHelper.publishEventInNewTransaction(outboxService,
+                    "SAGA_DEAD_LETTER", saga.getId(), "saga.compensation.failed",
                     JsonConverter.toJson(deadLetterData));
 
             log.warn("已发布 Saga 死信事件: sagaId={}, requestId={}", saga.getId(), saga.getRequestId());
