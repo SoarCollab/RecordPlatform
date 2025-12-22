@@ -4,10 +4,8 @@
 
     <property name="SERVICE_NAME" value="record-platform-storage"/>
     <property name="LOG_PATH" value="${LOG_PATH:-log}"/>
-    <property name="CONSOLE_LOG_PATTERN"
-              value="%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p})  %clr([%15.15t]){faint} %clr([tid=%tid tenant=%X{tenantId:-0} trace=%X{traceId:-}]){faint} %clr(--){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
-    <property name="FILE_LOG_PATTERN"
-              value="%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} ${PID:- } --- [%t] [tid=%tid tenant=%X{tenantId:-0} trace=%X{traceId:-}] %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
+    <property name="CONSOLE_LOG_PATTERN" value="%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p})  %clr([%15.15t]){faint} %clr([tid=%tid tenant=%X{tenantId:-0} trace=%X{traceId:-}]){faint} %clr(--){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
+    <property name="FILE_LOG_PATTERN" value="%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} ${PID:- } --- [%t] [tid=%tid tenant=%X{tenantId:-0} trace=%X{traceId:-}] %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
 
     <!-- Console Appender - for all environments -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
@@ -86,9 +84,10 @@
     <!-- Production: JSON logs + Console -->
     <springProfile name="prod">
         <logger name="org.apache.dubbo" level="WARN"/>
-        <logger name="io.minio" level="WARN"/>
+        <logger name="io.minio" level="${STORAGE_MINIO_LOG_LEVEL:-WARN}"/>
         <logger name="io.netty" level="WARN"/>
-        <root level="INFO">
+        <logger name="cn.flying.storage" level="${STORAGE_BUSINESS_LOG_LEVEL:-INFO}"/>
+        <root level="${STORAGE_ROOT_LOG_LEVEL:-INFO}">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="ASYNC_JSON"/>
         </root>
@@ -97,8 +96,9 @@
     <!-- Development: Text file logs + Console -->
     <springProfile name="dev">
         <logger name="org.apache.dubbo" level="INFO"/>
-        <logger name="io.minio" level="INFO"/>
-        <root level="INFO">
+        <logger name="io.minio" level="${STORAGE_MINIO_LOG_LEVEL:-DEBUG}"/>
+        <logger name="cn.flying.storage" level="${STORAGE_BUSINESS_LOG_LEVEL:-DEBUG}"/>
+        <root level="${STORAGE_ROOT_LOG_LEVEL:-INFO}">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="FILE"/>
         </root>
@@ -107,8 +107,9 @@
     <!-- Local: Console + File with debug -->
     <springProfile name="local">
         <logger name="org.apache.dubbo" level="INFO"/>
-        <logger name="io.minio" level="DEBUG"/>
-        <root level="INFO">
+        <logger name="io.minio" level="${STORAGE_MINIO_LOG_LEVEL:-DEBUG}"/>
+        <logger name="cn.flying.storage" level="${STORAGE_BUSINESS_LOG_LEVEL:-DEBUG}"/>
+        <root level="${STORAGE_ROOT_LOG_LEVEL:-DEBUG}">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="FILE"/>
         </root>
