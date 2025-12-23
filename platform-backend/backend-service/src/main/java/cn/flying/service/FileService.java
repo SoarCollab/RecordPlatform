@@ -11,7 +11,7 @@ import java.util.List;
 /**
  * 文件服务接口（经过多层封装后对外暴露的统一接口）
  * @program: RecordPlatform
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-03-12 21:22
  */
 public interface FileService extends IService<File> {

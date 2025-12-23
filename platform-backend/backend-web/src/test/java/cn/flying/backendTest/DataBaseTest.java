@@ -30,7 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * @program: RecordPlatform
  * @description: 数据库测试
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-03-07 13:22
  */
 @Slf4j

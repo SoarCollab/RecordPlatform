@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 /**
  * @program: RecordPlatform
  * @description: MinIO配置类
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-01-16 14:23
  */
 @Slf4j

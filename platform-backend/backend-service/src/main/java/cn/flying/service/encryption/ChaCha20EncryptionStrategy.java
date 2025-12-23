@@ -10,7 +10,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 
 /**
- * ChaCha20-Poly1305 加密策略
+ *  flyingcoding
  *
  * <p>适用于无 AES-NI 硬件加速的环境（如某些云容器、移动设备）或需要更强侧信道防护的场景。</p>
  *
@@ -34,7 +34,7 @@ import java.security.SecureRandom;
  *   <li>无 AES-NI：ChaCha20-Poly1305 快 3-4 倍</li>
  * </ul>
  *
- * @author Claude Code
+ * @author flyingcoding
  * @since 2.0.0
  */
 @Slf4j
@@ -53,7 +53,7 @@ public class ChaCha20EncryptionStrategy implements ChunkEncryptionStrategy {
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     /**
-     * ThreadLocal 缓存的 KeyGenerator
+     *  flyingcoding
      */
     private static final ThreadLocal<KeyGenerator> KEY_GENERATOR_CACHE = ThreadLocal.withInitial(() -> {
         try {
@@ -66,7 +66,7 @@ public class ChaCha20EncryptionStrategy implements ChunkEncryptionStrategy {
     });
 
     /**
-     * ThreadLocal 缓存的 Cipher
+     *  flyingcoding
      */
     private static final ThreadLocal<Cipher> CIPHER_CACHE = ThreadLocal.withInitial(() -> {
         try {

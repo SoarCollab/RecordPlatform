@@ -11,7 +11,7 @@ import java.util.Arrays;
 /**
  * @program: RecordPlatform
  * @description: Uid编码工具，用于将Uid转换为固定长度的字符串
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-05-05 03:12
  */
 public class UidEncoder {

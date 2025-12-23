@@ -26,7 +26,7 @@ import java.util.UUID;
 /**
  * @program: RecordPlatform
  * @description: 文件上传相关接口实现类
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-01-16 14:42
  */
 @Slf4j

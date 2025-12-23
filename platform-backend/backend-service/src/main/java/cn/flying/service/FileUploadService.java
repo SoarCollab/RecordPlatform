@@ -9,7 +9,7 @@ import org.springframework.web.multipart.MultipartFile;
 /**
  * @program: RecordPlatform
  * @description: 文件分片上传服务
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-04-01 13:19
  */
 

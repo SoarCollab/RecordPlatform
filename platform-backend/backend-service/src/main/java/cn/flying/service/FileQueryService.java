@@ -22,7 +22,7 @@ import java.util.concurrent.CompletableFuture;
  *   <li><b>异步支持</b>：提供 CompletableFuture 异步方法，支持非阻塞调用</li>
  * </ul>
  *
- * @author flying
+ * @author flyingcoding
  * @since 1.0.0
  */
 public interface FileQueryService {

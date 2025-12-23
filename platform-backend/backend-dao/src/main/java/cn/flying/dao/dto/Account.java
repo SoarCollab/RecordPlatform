@@ -11,7 +11,7 @@ import java.util.Date;
 /**
  * @program: RecordPlatform
  * @description: 用户实体类
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-01-16 14:55
  */
 @Setter

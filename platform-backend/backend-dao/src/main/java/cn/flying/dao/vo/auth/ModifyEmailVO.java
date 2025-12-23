@@ -8,7 +8,7 @@ import org.hibernate.validator.constraints.Length;
 /**
  * @program: RecordPlatform
  * @description: 修改邮箱请求类
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-01-16 14:27
  */
 @Data

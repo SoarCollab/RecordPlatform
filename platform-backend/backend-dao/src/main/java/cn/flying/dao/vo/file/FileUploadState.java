@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * @program: RecordPlatform
  * @description: 文件上传状态内部类
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-04-01 13:37
  */
 @Getter

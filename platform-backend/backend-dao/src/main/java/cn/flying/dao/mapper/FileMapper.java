@@ -13,15 +13,15 @@ import java.util.List;
 /**
  * @program: RecordPlatform
  * @description: 文件Mapper
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-04-20 16:05
  */
 @Mapper
 public interface FileMapper extends BaseMapper<File> {
 
     /**
-     * Select soft-deleted files for cleanup (bypasses MyBatis-Plus logical delete interceptor).
-     * Must specify tenantId for tenant isolation in scheduled tasks.
+     *  flyingcoding
+     *  flyingcoding
      *
      * @param tenantId tenant ID for isolation
      * @param cutoffDate files deleted before this date
@@ -34,8 +34,8 @@ public interface FileMapper extends BaseMapper<File> {
                                             @Param("limit") int limit);
 
     /**
-     * Physically delete a file record (bypasses MyBatis-Plus logical delete).
-     * Must specify tenantId for tenant isolation to prevent cross-tenant deletion.
+     *  flyingcoding
+     *  flyingcoding
      *
      * @param id file ID
      * @param tenantId tenant ID for isolation

@@ -11,7 +11,7 @@ import java.util.List;
 /**
  * @program: RecordPlatform
  * @description: /upload/check 接口响应 DTO
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-04-01 13:44
  */
 @Getter

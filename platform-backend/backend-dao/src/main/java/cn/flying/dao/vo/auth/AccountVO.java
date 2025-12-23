@@ -9,7 +9,7 @@ import java.util.Date;
 /**
  * @program: RecordPlatform
  * @description: 用户响应类
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-01-16 14:57
  */
 @Setter

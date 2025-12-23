@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * @program: RecordPlatform
  * @description: /upload/resume 接口响应 DTO
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-04-01 13:43
  */
 @Getter

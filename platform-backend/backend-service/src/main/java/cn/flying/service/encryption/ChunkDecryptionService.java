@@ -23,13 +23,13 @@ import java.util.Arrays;
  * <h3>使用示例：</h3>
  * <pre>
  * // 解密单个分片
- * byte[] plaintext = chunkDecryptionService.decryptChunk(encryptedData, keyBytes);
+ *  flyingcoding
  *
  * // 获取分片使用的算法（用于调试/日志）
- * String algorithm = chunkDecryptionService.detectAlgorithm(encryptedData);
+ *  flyingcoding
  * </pre>
  *
- * @author Claude Code
+ * @author flyingcoding
  * @since 2.0.0
  */
 @Slf4j

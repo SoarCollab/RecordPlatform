@@ -39,7 +39,7 @@ import java.io.PrintWriter;
 /**
  * @program: RecordPlatform
  * @description: SpringSecurity配置类
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-01-16 11:23
  */
 @Configuration
@@ -231,7 +231,7 @@ public class SecurityConfiguration {
     }
 
     /**
-     * Build JSON login filter with shared handlers and authentication manager.
+     *  flyingcoding
      *
      * @return configured JSON login filter
      * @throws Exception when authentication manager cannot be resolved

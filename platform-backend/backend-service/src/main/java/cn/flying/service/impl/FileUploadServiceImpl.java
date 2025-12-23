@@ -41,13 +41,13 @@ import java.util.stream.Stream;
 /**
  * @program: RecordPlatform
  * @description: 文件上传服务 (包含业务逻辑、状态管理、文件操作等)
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-03-31 11:22
  *
  * 注意：此类不使用类级别 @Transactional，因为：
- * 1. 大部分方法是文件 I/O 操作，不涉及数据库
- * 2. 长时间 I/O 操作期间持有事务会占用数据库连接
- * 3. 只在真正需要数据库操作的方法上使用方法级别事务
+ *  flyingcoding
+ *  flyingcoding
+ *  flyingcoding
  */
 @Service
 @Slf4j
@@ -999,7 +999,7 @@ public class FileUploadServiceImpl implements FileUploadService {
      * 非阻塞方式等待分片处理完成
      * 使用 CompletableFuture 和 ScheduledExecutorService
      * <p>
-     * P0-4 修复：优化超时计算逻辑
+     *  flyingcoding
      * - 基础等待时间: 60秒
      * - 每个分片增加: 3秒 (考虑加密处理时间)
      * - 最大等待时间: 1800秒 (30分钟，支持大文件)

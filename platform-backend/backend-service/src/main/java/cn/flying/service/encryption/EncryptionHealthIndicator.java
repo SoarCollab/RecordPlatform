@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
  * }
  * </pre>
  *
- * @author Claude Code
+ * @author flyingcoding
  * @since 2.0.0
  */
 @Component("encryptionHealthIndicator")

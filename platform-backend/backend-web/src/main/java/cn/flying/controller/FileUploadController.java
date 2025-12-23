@@ -20,7 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 /**
  * @program: RecordPlatform
  * @description: 文件分片上传、断点续传控制器
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-03-31 11:22 (Refactored: YYYY-MM-DD)
  */
 @Slf4j

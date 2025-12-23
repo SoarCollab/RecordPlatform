@@ -10,7 +10,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 
 /**
- * AES-256-GCM 加密策略（优化版）
+ *  flyingcoding
  *
  * <p>适用于有 AES-NI 硬件加速的服务器环境，性能最优。</p>
  *
@@ -28,7 +28,7 @@ import java.security.SecureRandom;
  *   <li>12 字节 IV（NIST 推荐）</li>
  * </ul>
  *
- * @author Claude Code
+ * @author flyingcoding
  * @since 2.0.0
  */
 @Slf4j
@@ -47,7 +47,7 @@ public class AesGcmEncryptionStrategy implements ChunkEncryptionStrategy {
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     /**
-     * ThreadLocal 缓存的 KeyGenerator（避免重复创建和初始化）
+     *  flyingcoding
      */
     private static final ThreadLocal<KeyGenerator> KEY_GENERATOR_CACHE = ThreadLocal.withInitial(() -> {
         try {
@@ -60,7 +60,7 @@ public class AesGcmEncryptionStrategy implements ChunkEncryptionStrategy {
     });
 
     /**
-     * ThreadLocal 缓存的 Cipher（避免重复创建）
+     *  flyingcoding
      * 注意：每次使用前仍需 init()，但避免了 getInstance() 的开销
      */
     private static final ThreadLocal<Cipher> CIPHER_CACHE = ThreadLocal.withInitial(() -> {

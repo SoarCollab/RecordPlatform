@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * @program: RecordPlatform
  * @description: 保存分享文件列表
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-04-27 23:31
  */
 @Getter

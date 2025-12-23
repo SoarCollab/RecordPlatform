@@ -6,7 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * @program: RecordPlatform
  * @description:
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-03-05 16:59
  */
 @Slf4j

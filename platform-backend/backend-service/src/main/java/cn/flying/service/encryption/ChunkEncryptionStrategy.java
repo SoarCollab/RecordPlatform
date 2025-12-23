@@ -13,7 +13,7 @@ import javax.crypto.SecretKey;
  *   <li>{@link ChaCha20EncryptionStrategy} - ChaCha20-Poly1305 (适合无硬件加速或混合环境)</li>
  * </ul>
  *
- * @author Claude Code
+ * @author flyingcoding
  * @since 2.0.0
  */
 public interface ChunkEncryptionStrategy {

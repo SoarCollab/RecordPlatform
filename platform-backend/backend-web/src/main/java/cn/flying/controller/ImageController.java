@@ -25,7 +25,7 @@ import java.nio.file.Paths;
 /**
  * @program: forum
  * @description: 文件上传相关接口
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2024-06-10 12:28
  */
 @Slf4j

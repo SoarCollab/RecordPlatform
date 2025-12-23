@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.*;
 /**
  * @program: forum
  * @description: 用户信息相关接口
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2024-06-07 20:55
  */
 @RestController

@@ -45,7 +45,7 @@ import java.util.UUID;
 /**
  * @program: RecordPlatform
  * @description: 文件服务实现类
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-03-12 21:22
  */
 @Slf4j

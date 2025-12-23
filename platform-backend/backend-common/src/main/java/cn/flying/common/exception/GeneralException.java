@@ -7,7 +7,7 @@ import lombok.Setter;
 /**
  * @program: RecordPlatform
  * @description: 通用异常
- * @author: flyingcoding
+ * @author flyingcoding
  * @create: 2025-01-15 16:00
  */
 @Getter
