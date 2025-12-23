@@ -10,9 +10,9 @@ import java.nio.ByteOrder;
  *
  * <h3>文件头格式 (4 bytes)：</h3>
  * <pre>
- * Byte 0-1: 魔数 (0x52 0x50 = "RP" for RecordPlatform)
- * Byte 2:   版本号 (0x01 = v1)
- * Byte 3:   算法标识 (0x01 = AES-GCM, 0x02 = ChaCha20-Poly1305)
+ *  flyingcoding
+ *  flyingcoding
+ *  flyingcoding
  * </pre>
  *
  * <h3>完整分片结构：</h3>
@@ -22,7 +22,7 @@ import java.nio.ByteOrder;
  *
  * <p><b>注意</b>：所有加密文件必须包含版本头，不支持无头部的旧格式。</p>
  *
- * @author Claude Code
+ * @author flyingcoding
  * @since 2.0.0
  */
 public final class ChunkFileHeader {

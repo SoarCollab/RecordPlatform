@@ -11,10 +11,10 @@ import org.springframework.stereotype.Component;
  *
  * <h3>配置示例：</h3>
  * <pre>
- * file:
- *   encryption:
- *     algorithm: chacha20  # 可选: aes-gcm, chacha20, auto
- *     benchmark-on-startup: false  # 是否启动时运行基准测试（用于 auto 模式）
+ *  flyingcoding
+ *    flyingcoding
+ *      flyingcoding
+ *      flyingcoding
  * </pre>
  *
  * <h3>算法选择指南：</h3>
@@ -24,7 +24,7 @@ import org.springframework.stereotype.Component;
  *   <li><b>auto</b>: 自动检测硬件加速并选择最优算法</li>
  * </ul>
  *
- * @author Claude Code
+ * @author flyingcoding
  * @since 2.0.0
  */
 @Data

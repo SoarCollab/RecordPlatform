@@ -30,7 +30,7 @@ import java.util.Map;
 /**
  * @program: RecordPlatform
  * @description: Swagger配置类
- * @author: 王贝强
+ * @author flyingcoding
  * @create: 2025-01-16 12:02
  */
 @Configuration

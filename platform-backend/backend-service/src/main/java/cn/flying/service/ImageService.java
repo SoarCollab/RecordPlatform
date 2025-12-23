@@ -10,7 +10,7 @@ import java.io.OutputStream;
 /**
  * @program: RecordPlatform
  * @description: 文件上传相关接口
- * @author: 王贝强
+ * @author flyingcoding
  * @create: 2025-01-16 14:40
  */
 

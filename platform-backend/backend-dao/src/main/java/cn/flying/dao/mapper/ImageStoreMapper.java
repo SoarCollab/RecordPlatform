@@ -7,7 +7,7 @@ import org.apache.ibatis.annotations.Mapper;
 /**
  * @program: RecordPlatform
  * @description: 图片存储mapper接口类
- * @author: 王贝强
+ * @author flyingcoding
  * @create: 2025-01-16 13:09
  */
 @Mapper

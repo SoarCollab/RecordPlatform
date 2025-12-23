@@ -6,7 +6,7 @@ import lombok.Getter;
 /**
  * @program: RecordPlatform
  * @description: 用户权限
- * @author: 王贝强
+ * @author flyingcoding
  * @create: 2025-05-06 20:54
  */
 @Getter

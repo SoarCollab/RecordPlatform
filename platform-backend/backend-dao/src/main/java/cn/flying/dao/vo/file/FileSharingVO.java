@@ -13,7 +13,7 @@ import java.util.List;
 /**
  * 文件分享VO
  *
- * @author 王贝强
+ * @author flyingcoding
  * @since 2025-04-27
  */
 @Getter

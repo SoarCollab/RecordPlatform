@@ -12,7 +12,7 @@ import java.io.Serializable;
 /**
  * @program: RecordPlatform
  * @description: 返回结果封装
- * @author: 王贝强
+ * @author flyingcoding
  * @create: 2025-01-15 15:38
  */
 

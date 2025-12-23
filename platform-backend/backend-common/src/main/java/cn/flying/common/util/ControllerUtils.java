@@ -8,7 +8,7 @@ import java.util.function.Supplier;
 /**
  * @program: RecordPlatform
  * @description: 控制器工具类
- * @author: 王贝强
+ * @author flyingcoding
  * @create: 2025-01-16 14:31
  */
 @Component

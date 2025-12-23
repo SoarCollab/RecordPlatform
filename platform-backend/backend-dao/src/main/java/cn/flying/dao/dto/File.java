@@ -13,7 +13,7 @@ import java.util.Date;
 /**
  * @program: RecordPlatform
  * @description: 文件信息实体类
- * @author: 王贝强
+ * @author flyingcoding
  * @create: 2025-03-13 00:25
  */
 @Setter

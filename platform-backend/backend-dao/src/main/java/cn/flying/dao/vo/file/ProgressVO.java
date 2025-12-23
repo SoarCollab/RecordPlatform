@@ -8,7 +8,7 @@ import lombok.Setter;
 /**
  * @program: RecordPlatform
  * @description: /upload/progress 接口响应 DTO
- * @author: 王贝强
+ * @author flyingcoding
  * @create: 2025-04-01 13:45
  */
 @Getter

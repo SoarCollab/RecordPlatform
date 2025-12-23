@@ -29,7 +29,7 @@ import java.security.SecureRandom;
  *   <li>auto（默认）→ 默认使用 ChaCha20-Poly1305（更安全的默认值）</li>
  * </ol>
  *
- * @author Claude Code
+ * @author flyingcoding
  * @since 2.0.0
  */
 @Slf4j

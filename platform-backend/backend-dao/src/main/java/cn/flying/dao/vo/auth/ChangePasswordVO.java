@@ -7,7 +7,7 @@ import org.hibernate.validator.constraints.Length;
 /**
  * @program: RecordPlatform
  * @description: 修改密码VO类
- * @author: 王贝强
+ * @author flyingcoding
  * @create: 2024-06-09 16:50
  */
 @Data

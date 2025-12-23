@@ -59,7 +59,7 @@ import java.util.concurrent.CompletableFuture;
  * </ul>
  * </p>
  *
- * @author flying
+ * @author flyingcoding
  * @since 1.0.0
  */
 @Slf4j
