@@ -46,7 +46,7 @@ const failedTasks = $derived(tasks.filter((t) => t.status === "failed"));
 const totalProgress = $derived(
   tasks.length > 0
     ? Math.round(tasks.reduce((sum, t) => sum + t.progress, 0) / tasks.length)
-    : 0
+    : 0,
 );
 
 // ===== Internal Helpers =====
@@ -61,7 +61,7 @@ function updateTask(id: string, updates: Partial<UploadTask>): void {
 
 function calculateChunks(
   fileSize: number,
-  chunkSize: number = DEFAULT_CHUNK_SIZE
+  chunkSize: number = DEFAULT_CHUNK_SIZE,
 ): number {
   return Math.ceil(fileSize / chunkSize);
 }
@@ -90,7 +90,6 @@ async function uploadChunks(task: UploadTask): Promise<void> {
 
   // Speed calculation state
   let lastTime = Date.now();
-  let totalBytesUploaded = 0;
 
   // Upload chunks with concurrency control
   const uploadChunk = async (chunkNumber: number): Promise<void> => {
@@ -109,7 +108,6 @@ async function uploadChunks(task: UploadTask): Promise<void> {
 
     // Thread-safe: add to Set (Set.add is atomic for primitive values)
     chunkSet.add(chunkNumber);
-    totalBytesUploaded += chunkBytes;
 
     // Calculate speed based on total progress
     const now = Date.now();
@@ -202,7 +200,7 @@ async function startUpload(id: string): Promise<void> {
       clientId: result.clientId,
       uploadedChunks: result.processedChunks,
       progress: Math.round(
-        (result.processedChunks.length / task.totalChunks) * 100
+        (result.processedChunks.length / task.totalChunks) * 100,
       ),
     });
 
@@ -265,7 +263,7 @@ async function resumeUpload(id: string): Promise<void> {
       updateTask(id, {
         uploadedChunks: result.processedChunks,
         progress: Math.round(
-          (result.processedChunks.length / task.totalChunks) * 100
+          (result.processedChunks.length / task.totalChunks) * 100,
         ),
       });
     } catch {
