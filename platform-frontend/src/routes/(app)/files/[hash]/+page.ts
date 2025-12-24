@@ -1,7 +1,7 @@
-import type { PageLoad } from './$types';
+import type { PageLoad } from "./$types";
 
 export const load: PageLoad = ({ params }) => {
-	return {
-		hash: params.hash
-	};
+  return {
+    hash: params.hash,
+  };
 };

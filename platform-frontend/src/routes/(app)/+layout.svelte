@@ -110,6 +110,7 @@
 	const menuItems = [
 		{ href: '/dashboard', icon: 'home', label: '仪表盘', badgeKey: null },
 		{ href: '/files', icon: 'folder', label: '文件管理', badgeKey: null },
+		{ href: '/shares', icon: 'share', label: '分享管理', badgeKey: null },
 		{ href: '/upload', icon: 'upload', label: '上传文件', badgeKey: null },
 		{ href: '/messages', icon: 'message', label: '消息中心', badgeKey: 'messages' as const },
 		{ href: '/announcements', icon: 'megaphone', label: '系统公告', badgeKey: 'announcements' as const },
@@ -189,6 +190,8 @@
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
 									{:else if item.icon === 'folder'}
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+									{:else if item.icon === 'share'}
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
 									{:else if item.icon === 'upload'}
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
 									{:else if item.icon === 'message'}

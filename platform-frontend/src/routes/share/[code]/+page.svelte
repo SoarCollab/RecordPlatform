@@ -3,13 +3,12 @@
 	import { goto } from '$app/navigation';
 	import { useAuth } from '$stores/auth.svelte';
 	import { useNotifications } from '$stores/notifications.svelte';
-	import { formatFileSize, formatDateTime } from '$utils/format';
-	import { getSharedFiles, saveSharedFiles, downloadFile } from '$api/endpoints/files';
+	import { formatFileSize } from '$utils/format';
+	import { getSharedFiles, saveSharedFiles, publicDownloadFile, shareDownloadFile } from '$api/endpoints/files';
 	import type { SharedFileVO } from '$api/types';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Separator } from '$lib/components/ui/separator';
 
 	let { data } = $props();
 
@@ -63,7 +62,22 @@
 
 	async function handleDownload(file: SharedFileVO) {
 		try {
-			const blob = await downloadFile(file.fileHash);
+			let blob: Blob;
+
+			// 尝试公开下载（无需登录）
+			try {
+				blob = await publicDownloadFile(data.code, file.fileHash);
+			} catch {
+				// 如果公开下载失败，可能是私密分享，需要登录
+				if (!auth.isAuthenticated) {
+					notifications.info('需要登录', '该文件为私密分享，请先登录后下载');
+					await goto(`/login?redirect=/share/${data.code}`);
+					return;
+				}
+				// 已登录用户通过分享码下载
+				blob = await shareDownloadFile(data.code, file.fileHash);
+			}
+
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;

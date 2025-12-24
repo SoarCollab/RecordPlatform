@@ -4,35 +4,35 @@
  * @note content 和 category 仅在 TicketDetailVO 中返回
  */
 export interface TicketVO {
-	id: string;
-	ticketNo: string;
-	title: string;
-	priority: TicketPriority;
-	priorityDesc?: string;
-	status: TicketStatus;
-	statusDesc?: string;
-	creatorId: string;
-	creatorUsername: string;
-	assigneeId?: string;
-	assigneeUsername?: string;
-	replyCount: number;
-	createTime: string;
-	updateTime?: string;
-	closeTime?: string;
-	// 以下字段仅在详情接口 (TicketDetailVO) 中返回
-	content?: string;
-	category?: TicketCategory;
+  id: string;
+  ticketNo: string;
+  title: string;
+  priority: TicketPriority;
+  priorityDesc?: string;
+  status: TicketStatus;
+  statusDesc?: string;
+  creatorId: string;
+  creatorUsername: string;
+  assigneeId?: string;
+  assigneeUsername?: string;
+  replyCount: number;
+  createTime: string;
+  updateTime?: string;
+  closeTime?: string;
+  // 以下字段仅在详情接口 (TicketDetailVO) 中返回
+  content?: string;
+  category?: TicketCategory;
 }
 
 /**
  * 工单类别
  */
 export enum TicketCategory {
-	BUG = 0,
-	FEATURE = 1,
-	QUESTION = 2,
-	FEEDBACK = 3,
-	OTHER = 99
+  BUG = 0,
+  FEATURE = 1,
+  QUESTION = 2,
+  FEEDBACK = 3,
+  OTHER = 99,
 }
 
 /**
@@ -40,9 +40,9 @@ export enum TicketCategory {
  * @see TicketPriority.java
  */
 export enum TicketPriority {
-	LOW = 0,
-	MEDIUM = 1,
-	HIGH = 2
+  LOW = 0,
+  MEDIUM = 1,
+  HIGH = 2,
 }
 
 /**
@@ -50,42 +50,42 @@ export enum TicketPriority {
  * @see TicketStatus.java
  */
 export enum TicketStatus {
-	PENDING = 0,
-	PROCESSING = 1,
-	CONFIRMING = 2,
-	COMPLETED = 3,
-	CLOSED = 4
+  PENDING = 0,
+  PROCESSING = 1,
+  CONFIRMING = 2,
+  COMPLETED = 3,
+  CLOSED = 4,
 }
 
 /**
  * 工单类别标签
  */
 export const TicketCategoryLabel: Record<TicketCategory, string> = {
-	[TicketCategory.BUG]: 'Bug',
-	[TicketCategory.FEATURE]: '功能请求',
-	[TicketCategory.QUESTION]: '问题咨询',
-	[TicketCategory.FEEDBACK]: '反馈建议',
-	[TicketCategory.OTHER]: '其他'
+  [TicketCategory.BUG]: "Bug",
+  [TicketCategory.FEATURE]: "功能请求",
+  [TicketCategory.QUESTION]: "问题咨询",
+  [TicketCategory.FEEDBACK]: "反馈建议",
+  [TicketCategory.OTHER]: "其他",
 };
 
 /**
  * 工单优先级标签
  */
 export const TicketPriorityLabel: Record<TicketPriority, string> = {
-	[TicketPriority.LOW]: '低',
-	[TicketPriority.MEDIUM]: '中',
-	[TicketPriority.HIGH]: '高'
+  [TicketPriority.LOW]: "低",
+  [TicketPriority.MEDIUM]: "中",
+  [TicketPriority.HIGH]: "高",
 };
 
 /**
  * 工单状态标签
  */
 export const TicketStatusLabel: Record<TicketStatus, string> = {
-	[TicketStatus.PENDING]: '待处理',
-	[TicketStatus.PROCESSING]: '处理中',
-	[TicketStatus.CONFIRMING]: '待确认',
-	[TicketStatus.COMPLETED]: '已完成',
-	[TicketStatus.CLOSED]: '已关闭'
+  [TicketStatus.PENDING]: "待处理",
+  [TicketStatus.PROCESSING]: "处理中",
+  [TicketStatus.CONFIRMING]: "待确认",
+  [TicketStatus.COMPLETED]: "已完成",
+  [TicketStatus.CLOSED]: "已关闭",
 };
 
 /**
@@ -93,14 +93,14 @@ export const TicketStatusLabel: Record<TicketStatus, string> = {
  * @see TicketReplyVO.java
  */
 export interface TicketReplyVO {
-	id: string;
-	ticketId: string;
-	content: string;
-	replyerId: string;
-	replyerUsername: string;
-	replyerNickname?: string;
-	isStaff: boolean;
-	createTime: string;
+  id: string;
+  ticketId: string;
+  content: string;
+  replyerId: string;
+  replyerUsername: string;
+  replyerNickname?: string;
+  isStaff: boolean;
+  createTime: string;
 }
 
 /**
@@ -108,10 +108,10 @@ export interface TicketReplyVO {
  * @see TicketCreateVO.java
  */
 export interface CreateTicketRequest {
-	title: string;
-	content: string;
-	category?: TicketCategory;
-	priority?: TicketPriority;
+  title: string;
+  content: string;
+  category?: TicketCategory;
+  priority?: TicketPriority;
 }
 
 /**
@@ -119,26 +119,26 @@ export interface CreateTicketRequest {
  * @see TicketUpdateVO.java
  */
 export interface UpdateTicketRequest {
-	title?: string;
-	content?: string;
-	priority?: TicketPriority;
-	category?: TicketCategory;
+  title?: string;
+  content?: string;
+  priority?: TicketPriority;
+  category?: TicketCategory;
 }
 
 /**
  * 工单回复请求
  */
 export interface TicketReplyRequest {
-	ticketId: string;
-	content: string;
+  ticketId: string;
+  content: string;
 }
 
 /**
  * 工单查询参数
  */
 export interface TicketQueryParams {
-	keyword?: string;
-	category?: TicketCategory;
-	priority?: TicketPriority;
-	status?: TicketStatus;
+  keyword?: string;
+  category?: TicketCategory;
+  priority?: TicketPriority;
+  status?: TicketStatus;
 }

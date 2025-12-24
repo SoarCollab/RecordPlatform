@@ -10,12 +10,10 @@
 		TicketPriorityLabel,
 		TicketCategoryLabel,
 		TicketStatus,
-		TicketPriority,
-		TicketCategory
+		TicketPriority
 	} from '$api/types';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
 
 	const notifications = useNotifications();
 
@@ -49,7 +47,7 @@
 		}
 	}
 
-	function getStatusVariant(
+	function _getStatusVariant(
 		status: TicketStatus
 	): 'default' | 'secondary' | 'destructive' | 'outline' {
 		switch (status) {

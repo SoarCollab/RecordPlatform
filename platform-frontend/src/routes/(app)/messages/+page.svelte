@@ -2,19 +2,15 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { useNotifications } from '$stores/notifications.svelte';
-	import { useAuth } from '$stores/auth.svelte';
-	import { formatDateTime, formatRelativeTime } from '$utils/format';
+	import { formatRelativeTime } from '$utils/format';
 	import { getConversations, deleteConversation } from '$api/endpoints/messages';
-	import type { ConversationVO, Page } from '$api/types';
+	import type { ConversationVO } from '$api/types';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
-	import { Avatar } from '$lib/components/ui/avatar';
-	import { Badge } from '$lib/components/ui/badge';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
 
 	const notifications = useNotifications();
-	const auth = useAuth();
 
 	let conversations = $state<ConversationVO[]>([]);
 	let loading = $state(true);

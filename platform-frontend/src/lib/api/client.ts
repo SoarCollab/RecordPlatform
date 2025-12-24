@@ -27,7 +27,7 @@ export const REMEMBER_ME_KEY = "auth_remember_me";
 /**
  * Get the appropriate storage based on "remember me" preference
  */
-function getStorage(): Storage | null {
+function _getStorage(): Storage | null {
   if (!browser) return null;
   // Check if user chose "remember me" - stored in localStorage
   const rememberMe = localStorage.getItem(REMEMBER_ME_KEY) === "true";
@@ -60,7 +60,7 @@ export function getToken(): string | null {
 export function setToken(
   token: string,
   expire: string,
-  rememberMe: boolean = true
+  rememberMe: boolean = true,
 ): void {
   if (!browser) return;
 
@@ -109,7 +109,7 @@ export class ApiError extends Error {
     this.name = "ApiError";
     this.code = code;
     this.isUnauthorized = (UNAUTHORIZED_CODES as readonly number[]).includes(
-      code
+      code,
     );
     this.isRateLimited = (RETRYABLE_CODES as readonly number[]).includes(code);
   }
@@ -178,7 +178,7 @@ async function request<T>(
   method: string,
   path: string,
   body?: unknown,
-  config?: RequestConfig
+  config?: RequestConfig,
 ): Promise<T> {
   const maxRetries = config?.retries ?? MAX_RETRIES;
   let lastError: Error | null = null;
@@ -219,7 +219,7 @@ async function request<T>(
       if (!contentType.includes("application/json")) {
         throw new ApiError(
           ResultCode.PARSE_ERROR,
-          `服务器响应格式错误 (${response.status})`
+          `服务器响应格式错误 (${response.status})`,
         );
       }
 
@@ -328,7 +328,7 @@ export const api = {
   upload<T>(
     path: string,
     formData: FormData,
-    config?: RequestConfig
+    config?: RequestConfig,
   ): Promise<T> {
     return request<T>("POST", path, formData, config);
   },

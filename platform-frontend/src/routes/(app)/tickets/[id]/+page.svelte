@@ -2,7 +2,6 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { useNotifications } from '$stores/notifications.svelte';
-	import { useAuth } from '$stores/auth.svelte';
 	import { formatDateTime } from '$utils/format';
 	import {
 		getTicket,
@@ -21,14 +20,11 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Textarea } from '$lib/components/ui/textarea';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Separator } from '$lib/components/ui/separator';
 	import * as Dialog from '$lib/components/ui/dialog';
 
 	let { data } = $props();
 
 	const notifications = useNotifications();
-	const auth = useAuth();
 
 	let ticket = $state<TicketVO | null>(null);
 	let replies = $state<TicketReplyVO[]>([]);

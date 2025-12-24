@@ -9,7 +9,10 @@ import type {
   SharedFileVO,
   SaveShareFileRequest,
   FileDecryptInfoVO,
+  CreateShareRequest,
+  UpdateShareRequest,
 } from "../types";
+import { ShareType } from "../types";
 
 const BASE = "/files";
 
@@ -17,7 +20,7 @@ const BASE = "/files";
  * 获取文件列表 (分页)
  */
 export async function getFiles(
-  params?: PageParams & FileQueryParams
+  params?: PageParams & FileQueryParams,
 ): Promise<Page<FileVO>> {
   return api.get<Page<FileVO>>(`${BASE}/page`, { params });
 }
@@ -63,7 +66,7 @@ export async function deleteFile(fileHashOrId: string): Promise<void> {
  * @returns 加密分片的 Base64 字符串数组
  */
 export async function downloadEncryptedChunks(
-  fileHash: string
+  fileHash: string,
 ): Promise<string[]> {
   return api.get<string[]>(`${BASE}/download`, { params: { fileHash } });
 }
@@ -74,7 +77,7 @@ export async function downloadEncryptedChunks(
  * @returns 解密信息（包含初始密钥）
  */
 export async function getDecryptInfo(
-  fileHash: string
+  fileHash: string,
 ): Promise<FileDecryptInfoVO> {
   return api.get<FileDecryptInfoVO>(`${BASE}/decryptInfo`, {
     params: { fileHash },
@@ -86,21 +89,27 @@ export async function getDecryptInfo(
  * @see FileController.generateSharingCode
  * @returns 分享码字符串
  */
-export async function createShare(payload: {
-  fileHash: string[];
-  /** 分享有效期（分钟），范围：1-43200 */
-  expireMinutes: number;
-}): Promise<string> {
+export async function createShare(
+  payload: CreateShareRequest,
+): Promise<string> {
   return api.post<string>(`${BASE}/share`, payload);
+}
+
+/**
+ * 更新分享设置（类型/有效期）
+ * @see FileController.updateShare
+ */
+export async function updateShare(payload: UpdateShareRequest): Promise<void> {
+  return api.put(`${BASE}/share`, payload);
 }
 
 /**
  * 获取分享信息
  * @deprecated 后端未提供此接口，请使用 getSharedFiles 获取分享的文件列表
  */
-export async function getShareByCode(code: string): Promise<FileShareVO> {
+export async function getShareByCode(_code: string): Promise<FileShareVO> {
   throw new Error(
-    "后端未提供 GET /files/share/{code} 接口，请使用 getSharedFiles"
+    "后端未提供 GET /files/share/{code} 接口，请使用 getSharedFiles",
   );
 }
 
@@ -110,7 +119,7 @@ export async function getShareByCode(code: string): Promise<FileShareVO> {
  * @param sharingCode 分享码
  */
 export async function getSharedFiles(
-  sharingCode: string
+  sharingCode: string,
 ): Promise<SharedFileVO[]> {
   return api.get<SharedFileVO[]>(`${BASE}/getSharingFiles`, {
     params: { sharingCode },
@@ -133,7 +142,7 @@ export async function cancelShare(shareCode: string): Promise<void> {
  * @see FileShareVO.java
  */
 export async function getMyShares(
-  params?: PageParams
+  params?: PageParams,
 ): Promise<Page<FileShareVO>> {
   return api.get<Page<FileShareVO>>(`${BASE}/shares`, { params });
 }
@@ -151,7 +160,7 @@ export async function getDownloadAddress(fileHash: string): Promise<string[]> {
  * @param transactionHash 交易哈希
  */
 export async function getTransaction(
-  transactionHash: string
+  transactionHash: string,
 ): Promise<TransactionVO> {
   return api.get<TransactionVO>(`${BASE}/getTransaction`, {
     params: { transactionHash },
@@ -163,7 +172,7 @@ export async function getTransaction(
  * @param request 要保存的文件 ID 列表
  */
 export async function saveSharedFiles(
-  request: SaveShareFileRequest
+  request: SaveShareFileRequest,
 ): Promise<void> {
   return api.post(`${BASE}/saveShareFile`, request);
 }
@@ -184,7 +193,7 @@ export async function downloadFile(fileHash: string): Promise<Blob> {
 
   // Base64 解码为 Uint8Array
   const chunks = chunksBase64.map((base64) =>
-    Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+    Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
   );
 
   // 解密文件
@@ -192,4 +201,144 @@ export async function downloadFile(fileHash: string): Promise<Blob> {
 
   // 转换为 Blob
   return arrayToBlob(decryptedData, decryptInfo.contentType);
+}
+
+// ==================== 公开分享端点（无需认证）====================
+
+/**
+ * 公开分享下载加密分片（无需登录）
+ * @param shareCode 分享码
+ * @param fileHash 文件哈希
+ * @returns 加密分片的 Base64 字符串数组
+ */
+export async function publicDownloadEncryptedChunks(
+  shareCode: string,
+  fileHash: string,
+): Promise<string[]> {
+  return api.get<string[]>(`${BASE}/public/download`, {
+    params: { shareCode, fileHash },
+    skipAuth: true,
+  });
+}
+
+/**
+ * 公开分享获取解密信息（无需登录）
+ * @param shareCode 分享码
+ * @param fileHash 文件哈希
+ * @returns 解密信息（包含初始密钥）
+ */
+export async function publicGetDecryptInfo(
+  shareCode: string,
+  fileHash: string,
+): Promise<FileDecryptInfoVO> {
+  return api.get<FileDecryptInfoVO>(`${BASE}/public/decryptInfo`, {
+    params: { shareCode, fileHash },
+    skipAuth: true,
+  });
+}
+
+/**
+ * 公开分享下载并解密文件（无需登录）
+ * @param shareCode 分享码
+ * @param fileHash 文件哈希
+ * @returns 解密后的 Blob
+ */
+export async function publicDownloadFile(
+  shareCode: string,
+  fileHash: string,
+): Promise<Blob> {
+  const { decryptFile, arrayToBlob } = await import("$utils/crypto");
+
+  // 并行获取加密分片和解密信息
+  const [chunksBase64, decryptInfo] = await Promise.all([
+    publicDownloadEncryptedChunks(shareCode, fileHash),
+    publicGetDecryptInfo(shareCode, fileHash),
+  ]);
+
+  // Base64 解码为 Uint8Array
+  const chunks = chunksBase64.map((base64) =>
+    Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
+  );
+
+  // 解密文件
+  const decryptedData = await decryptFile(chunks, decryptInfo.initialKey);
+
+  // 转换为 Blob
+  return arrayToBlob(decryptedData, decryptInfo.contentType);
+}
+
+/**
+ * 登录用户分享下载加密分片（需要登录）
+ * @param shareCode 分享码
+ * @param fileHash 文件哈希
+ * @returns 加密分片的 Base64 字符串数组
+ */
+export async function shareDownloadEncryptedChunks(
+  shareCode: string,
+  fileHash: string,
+): Promise<string[]> {
+  return api.get<string[]>(`${BASE}/share/download`, {
+    params: { shareCode, fileHash },
+  });
+}
+
+/**
+ * 登录用户分享获取解密信息（需要登录）
+ * @param shareCode 分享码
+ * @param fileHash 文件哈希
+ * @returns 解密信息（包含初始密钥）
+ */
+export async function shareGetDecryptInfo(
+  shareCode: string,
+  fileHash: string,
+): Promise<FileDecryptInfoVO> {
+  return api.get<FileDecryptInfoVO>(`${BASE}/share/decryptInfo`, {
+    params: { shareCode, fileHash },
+  });
+}
+
+/**
+ * 登录用户通过分享码下载并解密文件（需要登录）
+ * @param shareCode 分享码
+ * @param fileHash 文件哈希
+ * @returns 解密后的 Blob
+ */
+export async function shareDownloadFile(
+  shareCode: string,
+  fileHash: string,
+): Promise<Blob> {
+  const { decryptFile, arrayToBlob } = await import("$utils/crypto");
+
+  const [chunksBase64, decryptInfo] = await Promise.all([
+    shareDownloadEncryptedChunks(shareCode, fileHash),
+    shareGetDecryptInfo(shareCode, fileHash),
+  ]);
+
+  const chunks = chunksBase64.map((base64) =>
+    Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
+  );
+
+  const decryptedData = await decryptFile(chunks, decryptInfo.initialKey);
+
+  return arrayToBlob(decryptedData, decryptInfo.contentType);
+}
+
+/**
+ * 根据分享类型选择下载方式
+ * @param shareCode 分享码
+ * @param fileHash 文件哈希
+ * @param shareType 分享类型
+ * @returns 解密后的 Blob
+ */
+export async function downloadSharedFile(
+  shareCode: string,
+  fileHash: string,
+  shareType: ShareType,
+): Promise<Blob> {
+  if (shareType === ShareType.PUBLIC) {
+    return publicDownloadFile(shareCode, fileHash);
+  } else {
+    // 私密分享需要登录，通过分享码下载
+    return shareDownloadFile(shareCode, fileHash);
+  }
 }

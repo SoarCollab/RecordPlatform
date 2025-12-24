@@ -21,7 +21,7 @@ const BASE = "/auth";
  */
 export async function login(
   data: LoginRequest,
-  rememberMe: boolean = true
+  rememberMe: boolean = true,
 ): Promise<AuthorizeVO> {
   const result = await api.post<AuthorizeVO>(`${BASE}/login`, data, {
     skipAuth: true,
@@ -66,7 +66,7 @@ export async function getCurrentUser(): Promise<AccountVO> {
  * @note 字段名与后端 ChangePasswordVO 对齐: password, new_password
  */
 export async function changePassword(
-  data: ChangePasswordRequest
+  data: ChangePasswordRequest,
 ): Promise<void> {
   return api.post("/users/change-password", data);
 }
@@ -115,7 +115,7 @@ export async function sendResetCode(email: string): Promise<void> {
  * 确认重置验证码
  */
 export async function confirmResetCode(
-  data: ConfirmResetRequest
+  data: ConfirmResetRequest,
 ): Promise<void> {
   await api.post(`${BASE}/reset-confirm`, data, { skipAuth: true });
 }

@@ -182,8 +182,37 @@ export interface FileShareVO {
   status: number; // 0-已取消, 1-有效, 2-已过期
   statusDesc?: string;
   isValid: boolean;
+  shareType: ShareType;
+  shareTypeDesc: string;
   createTime: string;
 }
+
+/**
+ * 分享类型枚举
+ * @see ShareType.java
+ */
+export enum ShareType {
+  /** 公开分享（无需登录即可下载） */
+  PUBLIC = 0,
+  /** 私密分享（需要登录才能下载） */
+  PRIVATE = 1,
+}
+
+/**
+ * 分享类型标签映射
+ */
+export const ShareTypeLabel: Record<ShareType, string> = {
+  [ShareType.PUBLIC]: "公开分享",
+  [ShareType.PRIVATE]: "私密分享",
+};
+
+/**
+ * 分享类型描述映射
+ */
+export const ShareTypeDesc: Record<ShareType, string> = {
+  [ShareType.PUBLIC]: "无需登录即可下载",
+  [ShareType.PRIVATE]: "需要登录才能下载",
+};
 
 /**
  * 分享信息 (创建分享响应)
@@ -205,10 +234,22 @@ export interface SharingVO {
  * 创建分享请求
  */
 export interface CreateShareRequest {
-  fileId: string;
-  expireHours?: number;
-  maxDownloads?: number;
-  password?: string;
+  fileHash: string[];
+  expireMinutes: number;
+  /** 分享类型：0-公开，1-私密 */
+  shareType?: ShareType;
+}
+
+/**
+ * 更新分享请求
+ * @see UpdateShareVO.java
+ */
+export interface UpdateShareRequest {
+  shareCode: string;
+  /** 分享类型：0-公开，1-私密 */
+  shareType?: ShareType;
+  /** 延长有效期（分钟） */
+  extendMinutes?: number;
 }
 
 /**
