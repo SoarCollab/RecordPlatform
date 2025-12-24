@@ -86,6 +86,9 @@ public class SecurityConfiguration {
                                 "/api/v1/auth/register",
                                 "/api/v1/auth/reset-confirm",
                                 "/api/v1/auth/reset-password",
+                                "/api/v1/files/getSharingFiles",
+                                "/api/v1/files/public/download",
+                                "/api/v1/files/public/decryptInfo",
                                 "/error"
                         ).permitAll()
                         .requestMatchers("/api/v1/images/download/images/**").permitAll()

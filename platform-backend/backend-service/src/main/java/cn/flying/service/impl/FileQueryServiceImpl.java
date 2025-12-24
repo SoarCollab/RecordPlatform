@@ -2,12 +2,16 @@ package cn.flying.service.impl;
 
 import cn.flying.api.utils.ResultUtils;
 import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.constant.ShareType;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.CommonUtils;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.File;
+import cn.flying.dao.dto.FileShare;
 import cn.flying.dao.mapper.FileMapper;
+import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileShareVO;
 import cn.flying.platformapi.constant.Result;
@@ -26,6 +30,7 @@ import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -71,6 +76,9 @@ public class FileQueryServiceImpl implements FileQueryService {
 
     @Resource
     private FileRemoteClient fileRemoteClient;
+
+    @Resource
+    private FileShareMapper fileShareMapper;
 
     @Resource(name = "virtualThreadExecutor")
     private TaskExecutor virtualThreadExecutor;
@@ -246,46 +254,37 @@ public class FileQueryServiceImpl implements FileQueryService {
 
     @Override
     public IPage<FileShareVO> getUserShares(Long userId, Page<?> page) {
-        // 从区块链获取用户分享码列表
-        String uploader = String.valueOf(userId);
-        Result<List<String>> shareCodesResult = fileRemoteClient.getUserShareCodes(uploader);
-        List<String> shareCodes = ResultUtils.getData(shareCodesResult);
+        Long tenantId = TenantContext.getTenantId();
 
-        if (CommonUtils.isEmpty(shareCodes)) {
-            return new Page<>(page.getCurrent(), page.getSize());
-        }
+        LambdaQueryWrapper<FileShare> wrapper = new LambdaQueryWrapper<FileShare>()
+                .eq(tenantId != null, FileShare::getTenantId, tenantId)
+                .eq(FileShare::getUserId, userId)
+                .orderByDesc(FileShare::getCreateTime);
 
-        // 获取每个分享码的详细信息
+        Page<FileShare> sharePage = new Page<>(page.getCurrent(), page.getSize());
+        fileShareMapper.selectPage(sharePage, wrapper);
+
         List<FileShareVO> shareList = new ArrayList<>();
-        for (String shareCode : shareCodes) {
-            try {
-                Result<SharingVO> shareInfoResult = fileRemoteClient.getShareInfo(shareCode);
-                SharingVO shareInfo = ResultUtils.getData(shareInfoResult);
-                if (shareInfo != null) {
-                    FileShareVO vo = convertSharingVOToFileShareVO(shareInfo, shareCode);
-                    // 查询文件名列表
-                    if (CommonUtils.isNotEmpty(shareInfo.getFileHashList())) {
-                        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                                .eq(File::getUid, userId)
-                                .in(File::getFileHash, shareInfo.getFileHashList());
-                        List<File> files = fileMapper.selectList(wrapper);
-                        vo.setFileNames(files.stream().map(File::getFileName).toList());
-                    }
-                    shareList.add(vo);
-                }
-            } catch (Exception e) {
-                log.warn("获取分享详情失败: shareCode={}, error={}", shareCode, e.getMessage());
-            }
-        }
+        for (FileShare share : sharePage.getRecords()) {
+            FileShareVO vo = convertFileShareToVO(share);
 
-        // 手动分页
-        int start = (int) ((page.getCurrent() - 1) * page.getSize());
-        int end = Math.min(start + (int) page.getSize(), shareList.size());
-        List<FileShareVO> pagedList = start < shareList.size() ? shareList.subList(start, end) : List.of();
+            List<String> fileHashes = parseFileHashes(share.getFileHashes());
+            if (CommonUtils.isNotEmpty(fileHashes)) {
+                LambdaQueryWrapper<File> fileWrapper = new LambdaQueryWrapper<File>()
+                        .eq(File::getUid, userId)
+                        .in(File::getFileHash, fileHashes);
+                List<File> files = fileMapper.selectList(fileWrapper);
+                vo.setFileNames(files.stream().map(File::getFileName).toList());
+            } else {
+                vo.setFileNames(List.of());
+            }
+
+            shareList.add(vo);
+        }
 
         Page<FileShareVO> result = new Page<>(page.getCurrent(), page.getSize());
-        result.setRecords(pagedList);
-        result.setTotal(shareList.size());
+        result.setRecords(shareList);
+        result.setTotal(sharePage.getTotal());
         return result;
     }
 
@@ -332,35 +331,53 @@ public class FileQueryServiceImpl implements FileQueryService {
     }
 
     /**
-     * 将区块链 SharingVO 转换为 FileShareVO
+     * 将 FileShare 实体转换为 FileShareVO
      */
-    private FileShareVO convertSharingVOToFileShareVO(SharingVO sharingVO, String shareCode) {
+    private FileShareVO convertFileShareToVO(FileShare fileShare) {
         FileShareVO vo = new FileShareVO();
-        vo.setSharingCode(shareCode);
-        vo.setFileHashes(sharingVO.getFileHashList());
-        vo.setMaxAccesses(sharingVO.getMaxAccesses());
-        vo.setIsValid(sharingVO.getIsValid());
+        vo.setSharingCode(fileShare.getShareCode());
+        vo.setFileHashes(parseFileHashes(fileShare.getFileHashes()));
+        vo.setAccessCount(fileShare.getAccessCount() != null ? fileShare.getAccessCount() : 0);
+        vo.setExpireTime(fileShare.getExpireTime());
+        vo.setCreateTime(fileShare.getCreateTime());
 
-        // 根据 isValid 设置状态
-        if (sharingVO.getIsValid() != null && sharingVO.getIsValid()) {
-            // 检查是否过期
-            if (sharingVO.getExpirationTime() != null && sharingVO.getExpirationTime() < System.currentTimeMillis()) {
-                vo.setStatus(2); // 已过期
-                vo.setStatusDesc("已过期");
-            } else {
-                vo.setStatus(1); // 有效
-                vo.setStatusDesc("有效");
-            }
-        } else {
-            vo.setStatus(0); // 已取消
-            vo.setStatusDesc("已取消");
+        ShareType shareType = ShareType.fromCode(fileShare.getShareType());
+        vo.setShareType(shareType.getCode());
+        vo.setShareTypeDesc(shareType.getName());
+
+        int status = fileShare.getStatus() != null ? fileShare.getStatus() : FileShare.STATUS_ACTIVE;
+        if (status == FileShare.STATUS_ACTIVE
+                && fileShare.getExpireTime() != null
+                && fileShare.getExpireTime().before(new Date())) {
+            status = FileShare.STATUS_EXPIRED;
         }
 
-        // 设置过期时间
-        if (sharingVO.getExpirationTime() != null) {
-            vo.setExpireTime(new Date(sharingVO.getExpirationTime()));
+        vo.setStatus(status);
+        vo.setIsValid(status == FileShare.STATUS_ACTIVE);
+
+        switch (status) {
+            case FileShare.STATUS_CANCELLED -> vo.setStatusDesc("已取消");
+            case FileShare.STATUS_ACTIVE -> vo.setStatusDesc("有效");
+            case FileShare.STATUS_EXPIRED -> vo.setStatusDesc("已过期");
+            default -> vo.setStatusDesc("未知");
         }
 
         return vo;
+    }
+
+    /**
+     * 解析文件哈希 JSON 数组
+     */
+    private List<String> parseFileHashes(String fileHashesJson) {
+        if (CommonUtils.isEmpty(fileHashesJson)) {
+            return List.of();
+        }
+        try {
+            String[] hashes = JsonConverter.parse(fileHashesJson, String[].class);
+            return hashes != null ? Arrays.asList(hashes) : List.of();
+        } catch (Exception e) {
+            log.warn("解析文件哈希列表失败: {}", fileHashesJson);
+            return List.of();
+        }
     }
 }

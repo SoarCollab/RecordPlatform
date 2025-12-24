@@ -50,6 +50,12 @@ public class FileShareVO {
     @Schema(description = "是否有效（未被取消）")
     private Boolean isValid;
 
+    @Schema(description = "分享类型：0-公开，1-私密")
+    private Integer shareType;
+
+    @Schema(description = "分享类型描述")
+    private String shareTypeDesc;
+
     @Schema(description = "创建时间")
     private Date createTime;
 }

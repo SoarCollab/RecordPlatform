@@ -54,6 +54,7 @@ public class OutboxPublisher {
     private static final int MAX_RETRIES = 5;
     private static final int[] BACKOFF_SECONDS = {5, 30, 120, 600, 3600};
     public static final String HEADER_TRACE_ID = "X-Trace-ID";
+    public static final String HEADER_TENANT_ID = "X-Tenant-ID";
 
     /**
      * 定时发布待处理事件
@@ -135,6 +136,11 @@ public class OutboxPublisher {
         // 传播 traceId 到消息 header，支持分布式追踪
         if (event.getTraceId() != null) {
             props.setHeader(HEADER_TRACE_ID, event.getTraceId());
+        }
+
+        // 传播 tenantId 到消息 header，支持多租户隔离
+        if (event.getTenantId() != null) {
+            props.setHeader(HEADER_TENANT_ID, event.getTenantId());
         }
 
         Message message = new Message(event.getPayload().getBytes(), props);

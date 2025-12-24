@@ -1,5 +1,6 @@
 package cn.flying.service.listener;
 
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.entity.ProcessedMessage;
@@ -39,8 +40,8 @@ public class FileEventRabbitListener {
         String messageId = message.getMessageProperties().getMessageId();
         String payload = new String(message.getBody(), StandardCharsets.UTF_8);
 
-        // 从消息 header 恢复 traceId，支持分布式追踪
-        restoreTraceId(message);
+        // 从消息 header 恢复 traceId 和 tenantId
+        restoreContext(message);
 
         log.debug("Received file.stored event: messageId={}", messageId);
 
@@ -58,7 +59,7 @@ public class FileEventRabbitListener {
             log.error("Failed to process file.stored event: messageId={}", messageId, ex);
             throw new AmqpRejectAndDontRequeueException("Processing failed", ex);
         } finally {
-            clearTraceId();
+            clearContext();
         }
     }
 
@@ -68,8 +69,8 @@ public class FileEventRabbitListener {
         String messageId = message.getMessageProperties().getMessageId();
         String payload = new String(message.getBody(), StandardCharsets.UTF_8);
 
-        // 从消息 header 恢复 traceId，支持分布式追踪
-        restoreTraceId(message);
+        // 从消息 header 恢复 traceId 和 tenantId
+        restoreContext(message);
 
         log.debug("Received file.deleted event: messageId={}", messageId);
 
@@ -87,25 +88,33 @@ public class FileEventRabbitListener {
             log.error("Failed to process file.deleted event: messageId={}", messageId, ex);
             throw new AmqpRejectAndDontRequeueException("Processing failed", ex);
         } finally {
-            clearTraceId();
+            clearContext();
         }
     }
 
     /**
-     * 从消息 header 恢复 traceId 到 MDC
+     * 从消息 header 恢复 traceId 和 tenantId
      */
-    private void restoreTraceId(Message message) {
+    private void restoreContext(Message message) {
+        // 恢复 traceId 到 MDC
         Object traceIdHeader = message.getMessageProperties().getHeader(OutboxPublisher.HEADER_TRACE_ID);
         if (traceIdHeader != null) {
             MDC.put(Const.TRACE_ID, traceIdHeader.toString());
         }
+
+        // 恢复 tenantId 到 TenantContext
+        Object tenantIdHeader = message.getMessageProperties().getHeader(OutboxPublisher.HEADER_TENANT_ID);
+        if (tenantIdHeader != null) {
+            TenantContext.setTenantId(((Number) tenantIdHeader).longValue());
+        }
     }
 
     /**
-     * 清理 MDC 中的 traceId
+     * 清理 MDC 和 TenantContext
      */
-    private void clearTraceId() {
+    private void clearContext() {
         MDC.remove(Const.TRACE_ID);
+        TenantContext.clear();
     }
 
     private boolean isAlreadyProcessed(String messageId) {
