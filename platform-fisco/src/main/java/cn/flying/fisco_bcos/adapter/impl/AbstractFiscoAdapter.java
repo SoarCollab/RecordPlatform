@@ -151,11 +151,12 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
             long uploadTimeMillis = uploadTimeNanos / 1_000_000;
             String formattedUploadTime = Convert.timeStampToDate(uploadTimeMillis);
 
+            // Contract File struct order: fileName(0), uploader(1), content(2), param(3), fileHash(4), uploadTime(5)
             return ChainFileDetail.builder()
-                    .uploader(safeGetString(fileInfo, 0).orElse(""))
-                    .fileName(safeGetString(fileInfo, 1).orElse(""))
-                    .param(safeGetString(fileInfo, 2).orElse(""))
-                    .content(safeGetString(fileInfo, 3).orElse(""))
+                    .fileName(safeGetString(fileInfo, 0).orElse(""))
+                    .uploader(safeGetString(fileInfo, 1).orElse(""))
+                    .content(safeGetString(fileInfo, 2).orElse(""))
+                    .param(safeGetString(fileInfo, 3).orElse(""))
                     .fileHash(fileHash)
                     .uploadTimestamp(uploadTimeNanos / 1_000_000)
                     .uploadTimeFormatted(formattedUploadTime)
