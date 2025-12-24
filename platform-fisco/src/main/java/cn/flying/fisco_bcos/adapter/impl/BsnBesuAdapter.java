@@ -194,11 +194,12 @@ public class BsnBesuAdapter implements BlockChainAdapter {
 
             BigInteger uploadTimeNanos = ((Uint256) result.get(5)).getValue();
 
+            // Contract File struct order: fileName(0), uploader(1), content(2), param(3), fileHash(4), uploadTime(5)
             return ChainFileDetail.builder()
-                    .uploader(((Utf8String) result.get(0)).getValue())
-                    .fileName(((Utf8String) result.get(1)).getValue())
-                    .param(((Utf8String) result.get(2)).getValue())
-                    .content(((Utf8String) result.get(3)).getValue())
+                    .fileName(((Utf8String) result.get(0)).getValue())
+                    .uploader(((Utf8String) result.get(1)).getValue())
+                    .content(((Utf8String) result.get(2)).getValue())
+                    .param(((Utf8String) result.get(3)).getValue())
                     .fileHash(fileHash)
                     .uploadTimestamp(uploadTimeNanos.divide(BigInteger.valueOf(1_000_000)).longValue())
                     .uploadTimeFormatted(formatTimestamp(uploadTimeNanos.longValue()))
