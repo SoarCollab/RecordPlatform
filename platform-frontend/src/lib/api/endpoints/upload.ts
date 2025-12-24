@@ -14,7 +14,7 @@ const BASE = "/files/upload";
  * @note 后端接口使用 @RequestParam，需要发送 application/x-www-form-urlencoded 或 query params
  */
 export async function startUpload(
-  data: StartUploadRequest
+  data: StartUploadRequest,
 ): Promise<StartUploadVO> {
   // 构建 URLSearchParams 适配后端 @RequestParam
   const params = new URLSearchParams();
@@ -33,7 +33,7 @@ export async function startUpload(
 export async function uploadChunk(
   clientId: string,
   chunkNumber: number,
-  chunk: Blob
+  chunk: Blob,
 ): Promise<void> {
   const formData = new FormData();
   formData.append("clientId", clientId);
@@ -82,7 +82,7 @@ export async function cancelUpload(clientId: string): Promise<void> {
  * @note 后端使用 clientId 而非 fileName/fileSize/fileHash
  */
 export async function checkUploadStatus(
-  clientId: string
+  clientId: string,
 ): Promise<FileUploadStatusVO | null> {
   return api.get<FileUploadStatusVO | null>(`${BASE}/check`, {
     params: { clientId },

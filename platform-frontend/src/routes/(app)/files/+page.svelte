@@ -2,9 +2,9 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { useNotifications } from '$stores/notifications.svelte';
-	import { formatFileSize, formatDateTime, getFileIcon } from '$utils/format';
+	import { formatFileSize, formatDateTime } from '$utils/format';
 	import { getFiles, deleteFile, downloadEncryptedChunks, getDecryptInfo, createShare } from '$api/endpoints/files';
-	import { FileStatus, FileStatusLabel, type FileVO, type Page } from '$api/types';
+	import { FileStatus, FileStatusLabel, ShareType, ShareTypeLabel, ShareTypeDesc, type FileVO } from '$api/types';
 	import { decryptFile, arrayToBlob, downloadBlob } from '$utils/crypto';
 
 	const notifications = useNotifications();
@@ -21,6 +21,7 @@
 	let shareDialogOpen = $state(false);
 	let shareFile = $state<FileVO | null>(null);
 	let shareExpireHours = $state(72);
+	let shareType = $state<ShareType>(ShareType.PUBLIC);
 	let shareCode = $state('');
 	let downloading = $state<string | null>(null);
 
@@ -105,6 +106,7 @@
 	function openShareDialog(file: FileVO) {
 		shareFile = file;
 		shareCode = '';
+		shareType = ShareType.PUBLIC;
 		shareDialogOpen = true;
 	}
 
@@ -112,10 +114,11 @@
 		if (!shareFile) return;
 
 		try {
-			// createShare 现在接受对象参数：fileHash + expireMinutes
+			// createShare 现在接受对象参数：fileHash + expireMinutes + shareType
 			shareCode = await createShare({
 				fileHash: [shareFile.fileHash],
-				expireMinutes: shareExpireHours * 60
+				expireMinutes: shareExpireHours * 60,
+				shareType
 			});
 			notifications.success('分享链接已创建');
 		} catch (err) {
@@ -374,6 +377,30 @@
 					<p class="text-sm text-muted-foreground">
 						正在分享：{shareFile?.fileName}
 					</p>
+
+					<div>
+						<label for="share-type" class="mb-2 block text-sm font-medium">分享类型</label>
+						<div class="flex gap-3">
+							{#each [ShareType.PUBLIC, ShareType.PRIVATE] as type}
+								<label
+									class="flex flex-1 cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors
+										{shareType === type ? 'border-primary bg-primary/5' : 'border-border hover:bg-accent/50'}"
+								>
+									<input
+										type="radio"
+										name="share-type"
+										value={type}
+										bind:group={shareType}
+										class="mt-0.5"
+									/>
+									<div>
+										<div class="font-medium">{ShareTypeLabel[type]}</div>
+										<div class="text-xs text-muted-foreground">{ShareTypeDesc[type]}</div>
+									</div>
+								</label>
+							{/each}
+						</div>
+					</div>
 
 					<div>
 						<label for="share-expire" class="mb-2 block text-sm font-medium">有效期</label>

@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
 	import { useNotifications } from '$stores/notifications.svelte';
 	import { formatDateTime } from '$utils/format';
 	import { getAnnouncements } from '$api/endpoints/messages';
@@ -8,7 +7,6 @@
 	import { AnnouncementPriority, AnnouncementPriorityLabel } from '$api/types';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
-	import { Badge } from '$lib/components/ui/badge';
 
 	const notifications = useNotifications();
 

@@ -1,7 +1,7 @@
-import type { PageLoad } from './$types';
+import type { PageLoad } from "./$types";
 
 export const load: PageLoad = ({ params }) => {
-	return {
-		conversationId: params.id
-	};
+  return {
+    conversationId: params.id,
+  };
 };

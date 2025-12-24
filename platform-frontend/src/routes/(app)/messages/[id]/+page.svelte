@@ -4,20 +4,18 @@
 	import { useNotifications } from '$stores/notifications.svelte';
 	import { useAuth } from '$stores/auth.svelte';
 	import { useSSE } from '$stores/sse.svelte';
-	import { formatDateTime, formatRelativeTime } from '$utils/format';
+	import { formatRelativeTime } from '$utils/format';
 	import {
 		getConversation,
 		getMessages,
 		sendMessage,
 		markAsRead
 	} from '$api/endpoints/messages';
-	import type { ConversationVO, MessageVO, Page } from '$api/types';
+	import type { ConversationVO, MessageVO } from '$api/types';
 	import { MessageType, MessageStatus } from '$api/types';
 	import type { SSEMessage } from '$api/endpoints/sse';
-	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Textarea } from '$lib/components/ui/textarea';
-	import { ScrollArea } from '$lib/components/ui/scroll-area';
 
 	let { data } = $props();
 
@@ -41,7 +39,7 @@
 
 	// Scroll container ref
 	let scrollContainer = $state<HTMLDivElement | null>(null);
-	let shouldScrollToBottom = $state(true);
+	let _shouldScrollToBottom = $state(true);
 
 	// SSE subscription cleanup
 	let unsubscribeSSE: (() => void) | null = null;

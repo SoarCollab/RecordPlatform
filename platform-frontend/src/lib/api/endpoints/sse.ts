@@ -34,7 +34,7 @@ export interface SSEConnectionOptions {
  * 优点：主 JWT 永不暴露在 URL 中，安全性更高
  */
 export async function createSSEConnection(
-  options: SSEConnectionOptions
+  options: SSEConnectionOptions,
 ): Promise<EventSource | null> {
   // 检查是否已登录
   if (!getToken()) {

@@ -2,7 +2,8 @@
   import { useAuth } from "$stores/auth.svelte";
   import { useNotifications } from "$stores/notifications.svelte";
   import * as validation from "$utils/validation";
-  import { changePassword, updateUser } from "$api/endpoints/auth";
+  import { formatDateTime } from "$utils/format";
+  import { changePassword } from "$api/endpoints/auth";
 
   const auth = useAuth();
   const notifications = useNotifications();
@@ -249,7 +250,7 @@
       </div>
       <div class="flex justify-between">
         <span class="text-muted-foreground">注册时间</span>
-        <span>{auth.user?.registerTime || "-"}</span>
+        <span>{auth.user?.registerTime ? formatDateTime(auth.user.registerTime) : "-"}</span>
       </div>
       <div class="flex justify-between">
         <span class="text-muted-foreground">账户状态</span>

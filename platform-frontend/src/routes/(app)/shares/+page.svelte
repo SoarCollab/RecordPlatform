@@ -8,7 +8,6 @@
 		ShareTypeLabel,
 		ShareTypeDesc,
 		type FileShareVO,
-		type Page,
 	} from '$api/types';
 
 	const notifications = useNotifications();
@@ -152,7 +151,7 @@
 							<tr class="hover:bg-muted/30">
 								<td class="px-4 py-3">
 									<div class="max-w-xs">
-										{#each share.fileNames as fileName, i}
+										{#each share.fileNames as fileName}
 											<div class="truncate text-sm" title={fileName}>
 												{fileName}
 											</div>
