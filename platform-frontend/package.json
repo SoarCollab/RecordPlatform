@@ -13,6 +13,7 @@
     "types:gen": "openapi-typescript http://localhost:8000/record-platform/v3/api-docs -o src/lib/api/types/generated.ts"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@internationalized/date": "^3.10.0",
     "@lucide/svelte": "^0.561.0",
     "@sveltejs/adapter-static": "^3.0.10",
@@ -37,6 +38,7 @@
     "vite": "^6.0.0"
   },
   "dependencies": {
+    "@noble/ciphers": "^2.1.1",
     "clsx": "^2.1.1",
     "mode-watcher": "^1.1.0",
     "tailwind-merge": "^3.4.0"

@@ -1,6 +1,6 @@
 import { browser } from "$app/environment";
 import { goto } from "$app/navigation";
-import { getToken, clearToken } from "$api/client";
+import { getToken } from "$api/client";
 import * as authApi from "$api/endpoints/auth";
 import type {
   AccountVO,
@@ -34,7 +34,7 @@ interface LoginOptions {
 
 async function login(
   credentials: LoginRequest,
-  options: LoginOptions = {}
+  options: LoginOptions = {},
 ): Promise<void> {
   const { rememberMe = true } = options;
   isLoading = true;
@@ -61,7 +61,7 @@ async function login(
 
 async function register(
   data: RegisterRequest,
-  options: LoginOptions = {}
+  options: LoginOptions = {},
 ): Promise<void> {
   const { rememberMe = true } = options;
   isLoading = true;
@@ -77,7 +77,7 @@ async function register(
         username: data.username,
         password: data.password,
       },
-      { rememberMe }
+      { rememberMe },
     );
   } catch (err) {
     error = err instanceof Error ? err.message : "注册失败";

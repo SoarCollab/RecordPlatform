@@ -24,7 +24,7 @@
 		try {
 			const stored = localStorage.getItem(RECENT_KEY);
 			if (stored) recentSearches = JSON.parse(stored);
-		} catch {}
+		} catch { /* ignore localStorage errors */ }
 
 		// Keyboard shortcut
 		window.addEventListener('keydown', handleGlobalKeydown);

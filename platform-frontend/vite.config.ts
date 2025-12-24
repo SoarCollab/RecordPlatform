@@ -14,7 +14,7 @@ export default defineConfig(({ mode }) => {
   try {
     const url = new URL(targetUrl);
     proxyTarget = url.origin;
-  } catch (e) {
+  } catch {
     // If it's not a valid URL (e.g. relative), keep as is or fallback
     console.warn("Invalid PUBLIC_API_BASE_URL, using directly:", targetUrl);
   }
