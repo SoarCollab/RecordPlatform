@@ -9,6 +9,7 @@ import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileShareVO;
 import cn.flying.dao.vo.file.SaveSharingFile;
 import cn.flying.dao.vo.file.FileSharingVO;
+import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
@@ -225,7 +226,11 @@ public class FileController {
     public Result<String> generateSharingCode(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @RequestBody @Valid FileSharingVO fileSharingVO) {
-        String sharingCode = fileService.generateSharingCode(userId, fileSharingVO.getFileHash(), fileSharingVO.getExpireMinutes());
+        String sharingCode = fileService.generateSharingCode(
+                userId,
+                fileSharingVO.getFileHash(),
+                fileSharingVO.getExpireMinutes(),
+                fileSharingVO.getShareType());
         return Result.success(sharingCode);
     }
 
@@ -252,5 +257,89 @@ public class FileController {
             @Parameter(description = "分享码") @PathVariable String shareCode) {
         fileService.cancelShare(userId, shareCode);
         return Result.success("分享已取消");
+    }
+
+    /**
+     * 更新分享设置（类型/有效期）
+     * @param userId 用户ID
+     * @param updateVO 更新参数
+     * @return 操作结果
+     */
+    @PutMapping("/share")
+    @Operation(summary = "更新分享设置")
+    @OperationLog(module = "文件操作", operationType = "更新", description = "更新分享设置")
+    public Result<String> updateShare(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @RequestBody @Valid UpdateShareVO updateVO) {
+        fileService.updateShare(userId, updateVO);
+        return Result.success("分享设置已更新");
+    }
+
+    /**
+     * 登录用户通过分享码下载文件（支持私密/公开分享）
+     * @param userId 用户ID
+     * @param shareCode 分享码
+     * @param fileHash 文件哈希
+     * @return 文件分片数据
+     */
+    @GetMapping("/share/download")
+    @Operation(summary = "分享下载文件（需要登录）")
+    @OperationLog(module = "文件操作", operationType = "下载", description = "分享下载文件")
+    public Result<List<byte[]>> shareDownload(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Parameter(description = "分享码") @RequestParam("shareCode") String shareCode,
+            @Parameter(description = "文件哈希") @RequestParam("fileHash") String fileHash) {
+        List<byte[]> files = fileService.getSharedFileContent(userId, shareCode, fileHash);
+        return Result.success(files);
+    }
+
+    /**
+     * 登录用户通过分享码获取解密信息（支持私密/公开分享）
+     * @param userId 用户ID
+     * @param shareCode 分享码
+     * @param fileHash 文件哈希
+     * @return 解密信息
+     */
+    @GetMapping("/share/decryptInfo")
+    @Operation(summary = "分享获取解密信息（需要登录）")
+    @OperationLog(module = "文件操作", operationType = "查询", description = "分享获取解密信息")
+    public Result<FileDecryptInfoVO> shareDecryptInfo(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Parameter(description = "分享码") @RequestParam("shareCode") String shareCode,
+            @Parameter(description = "文件哈希") @RequestParam("fileHash") String fileHash) {
+        FileDecryptInfoVO decryptInfo = fileService.getSharedFileDecryptInfo(userId, shareCode, fileHash);
+        return Result.success(decryptInfo);
+    }
+
+    // ==================== 公开端点（无需认证）====================
+
+    /**
+     * 公开分享下载文件（无需登录）
+     * @param shareCode 分享码
+     * @param fileHash 文件哈希
+     * @return 文件分片数据
+     */
+    @GetMapping("/public/download")
+    @Operation(summary = "公开分享下载文件（无需登录）")
+    public Result<List<byte[]>> publicDownload(
+            @Parameter(description = "分享码") @RequestParam("shareCode") String shareCode,
+            @Parameter(description = "文件哈希") @RequestParam("fileHash") String fileHash) {
+        List<byte[]> files = fileService.getPublicFile(shareCode, fileHash);
+        return Result.success(files);
+    }
+
+    /**
+     * 公开分享获取解密信息（无需登录）
+     * @param shareCode 分享码
+     * @param fileHash 文件哈希
+     * @return 解密信息
+     */
+    @GetMapping("/public/decryptInfo")
+    @Operation(summary = "公开分享获取解密信息（无需登录）")
+    public Result<FileDecryptInfoVO> publicDecryptInfo(
+            @Parameter(description = "分享码") @RequestParam("shareCode") String shareCode,
+            @Parameter(description = "文件哈希") @RequestParam("fileHash") String fileHash) {
+        FileDecryptInfoVO decryptInfo = fileService.getPublicFileDecryptInfo(shareCode, fileHash);
+        return Result.success(decryptInfo);
     }
 }

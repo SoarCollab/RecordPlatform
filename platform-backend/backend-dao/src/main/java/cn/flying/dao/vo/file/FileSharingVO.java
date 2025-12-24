@@ -30,4 +30,7 @@ public class FileSharingVO {
     @Max(value = 43200, message = "分享有效期不能超过 43200 分钟（30 天）")
     @Schema(description = "分享有效期（分钟），最大 43200（30 天）")
     private Integer expireMinutes;
+
+    @Schema(description = "分享类型：0-公开（无需登录），1-私密（需要登录），默认公开")
+    private Integer shareType = 0;
 }

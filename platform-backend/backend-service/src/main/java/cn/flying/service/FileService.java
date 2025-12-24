@@ -1,7 +1,9 @@
 package cn.flying.service;
 
 import cn.flying.dao.dto.File;
+import cn.flying.dao.dto.FileShare;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.platformapi.response.TransactionVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
@@ -99,9 +101,10 @@ public interface FileService extends IService<File> {
      * @param userId 用户ID
      * @param fileHash 待分享的文件哈希
      * @param expireMinutes 分享有效期（分钟）
+     * @param shareType 分享类型：0-公开，1-私密
      * @return 分享码
      */
-    String generateSharingCode(Long userId, List<String> fileHash, Integer expireMinutes);
+    String generateSharingCode(Long userId, List<String> fileHash, Integer expireMinutes, Integer shareType);
 
     /**
      * 获取根据分享码获取他人分享的文件
@@ -138,5 +141,53 @@ public interface FileService extends IService<File> {
      * @param shareCode 分享码
      */
     void cancelShare(Long userId, String shareCode);
+
+    /**
+     * 更新分享设置（类型、有效期）
+     * @param userId 用户ID（用于权限校验）
+     * @param updateVO 更新参数
+     */
+    void updateShare(Long userId, UpdateShareVO updateVO);
+
+    /**
+     * 根据分享码获取分享元数据
+     * @param shareCode 分享码
+     * @return 分享记录
+     */
+    FileShare getShareByCode(String shareCode);
+
+    /**
+     * 公开分享下载文件（无需认证）
+     * @param shareCode 分享码
+     * @param fileHash 文件哈希
+     * @return 文件分片列表
+     */
+    List<byte[]> getPublicFile(String shareCode, String fileHash);
+
+    /**
+     * 公开分享获取解密信息（无需认证）
+     * @param shareCode 分享码
+     * @param fileHash 文件哈希
+     * @return 解密信息
+     */
+    FileDecryptInfoVO getPublicFileDecryptInfo(String shareCode, String fileHash);
+
+    /**
+     * 登录用户通过分享码下载文件（支持私密/公开分享）
+     * @param userId 用户ID
+     * @param shareCode 分享码
+     * @param fileHash 文件哈希
+     * @return 文件分片列表
+     */
+    List<byte[]> getSharedFileContent(Long userId, String shareCode, String fileHash);
+
+    /**
+     * 登录用户通过分享码获取解密信息（支持私密/公开分享）
+     * @param userId 用户ID
+     * @param shareCode 分享码
+     * @param fileHash 文件哈希
+     * @return 解密信息
+     */
+    FileDecryptInfoVO getSharedFileDecryptInfo(Long userId, String shareCode, String fileHash);
 
 }

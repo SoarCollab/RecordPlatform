@@ -3,15 +3,20 @@ package cn.flying.service.impl;
 import cn.flying.api.utils.ResultUtils;
 import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.constant.ShareType;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.CommonUtils;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.File;
+import cn.flying.dao.dto.FileShare;
 import cn.flying.dao.mapper.FileMapper;
+import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileShareVO;
+import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.request.CancelShareRequest;
 import cn.flying.platformapi.request.ShareFilesRequest;
@@ -37,6 +42,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +63,9 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Resource
     private FileSagaOrchestrator sagaOrchestrator;
+
+    @Resource
+    private FileShareMapper fileShareMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -265,7 +274,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
-    public String generateSharingCode(Long userId, List<String> fileHash, Integer expireMinutes) {
+    @Transactional(rollbackFor = Exception.class)
+    public String generateSharingCode(Long userId, List<String> fileHash, Integer expireMinutes, Integer shareType) {
         // 调用区块链生成分享码
         Result<String> result = fileRemoteClient.shareFiles(ShareFilesRequest.builder()
                 .uploader(String.valueOf(userId))
@@ -275,7 +285,24 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         String sharingCode = ResultUtils.getData(result);
 
         if (CommonUtils.isNotEmpty(sharingCode)) {
-            log.info("分享码已生成（链上）: userId={}, sharingCode={}, fileCount={}", userId, sharingCode, fileHash.size());
+            // 同步写入数据库
+            Long tenantId = TenantContext.getTenantId();
+            Date expireTime = new Date(System.currentTimeMillis() + expireMinutes * 60 * 1000L);
+
+            FileShare fileShare = new FileShare()
+                    .setTenantId(tenantId != null ? tenantId : 0L)
+                    .setUserId(userId)
+                    .setShareCode(sharingCode)
+                    .setShareType(shareType != null ? shareType : ShareType.PUBLIC.getCode())
+                    .setFileHashes(JsonConverter.toJson(fileHash))
+                    .setExpireTime(expireTime)
+                    .setAccessCount(0)
+                    .setStatus(FileShare.STATUS_ACTIVE)
+                    .setCreateTime(new Date());
+
+            fileShareMapper.insert(fileShare);
+            log.info("分享码已生成: userId={}, shareCode={}, shareType={}, fileCount={}",
+                    userId, sharingCode, ShareType.fromCode(shareType).getName(), fileHash.size());
         }
 
         return sharingCode;
@@ -406,66 +433,57 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     public IPage<FileShareVO> getUserShares(Long userId, Page<?> page) {
-        // 从区块链获取用户分享码列表
-        String uploader = String.valueOf(userId);
-        Result<List<String>> shareCodesResult = fileRemoteClient.getUserShareCodes(uploader);
-        List<String> shareCodes = ResultUtils.getData(shareCodesResult);
+        Long tenantId = TenantContext.getTenantId();
 
-        if (CommonUtils.isEmpty(shareCodes)) {
-            return new Page<>(page.getCurrent(), page.getSize());
-        }
+        // 从数据库查询用户分享记录
+        LambdaQueryWrapper<FileShare> wrapper = new LambdaQueryWrapper<FileShare>()
+                .eq(tenantId != null, FileShare::getTenantId, tenantId)
+                .eq(FileShare::getUserId, userId)
+                .orderByDesc(FileShare::getCreateTime);
 
-        // 获取每个分享码的详细信息
-        List<FileShareVO> shareList = new ArrayList<>();
-        for (String shareCode : shareCodes) {
-            try {
-                Result<SharingVO> shareInfoResult = fileRemoteClient.getShareInfo(shareCode);
-                SharingVO shareInfo = ResultUtils.getData(shareInfoResult);
-                if (shareInfo != null) {
-                    FileShareVO vo = convertSharingVOToFileShareVO(shareInfo, shareCode);
-                    // 查询文件名列表
-                    if (CommonUtils.isNotEmpty(shareInfo.getFileHashList())) {
-                        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                                .eq(File::getUid, userId)
-                                .in(File::getFileHash, shareInfo.getFileHashList());
-                        List<File> files = this.list(wrapper);
-                        vo.setFileNames(files.stream().map(File::getFileName).toList());
-                    }
-                    shareList.add(vo);
-                }
-            } catch (Exception e) {
-                log.warn("获取分享详情失败: shareCode={}, error={}", shareCode, e.getMessage());
+        Page<FileShare> sharePage = new Page<>(page.getCurrent(), page.getSize());
+        fileShareMapper.selectPage(sharePage, wrapper);
+
+        // 转换为 FileShareVO
+        List<FileShareVO> shareVOList = new ArrayList<>();
+        for (FileShare share : sharePage.getRecords()) {
+            FileShareVO vo = convertFileShareToVO(share);
+
+            // 查询文件名列表
+            List<String> fileHashes = parseFileHashes(share.getFileHashes());
+            if (CommonUtils.isNotEmpty(fileHashes)) {
+                LambdaQueryWrapper<File> fileWrapper = new LambdaQueryWrapper<File>()
+                        .eq(File::getUid, userId)
+                        .in(File::getFileHash, fileHashes);
+                List<File> files = this.list(fileWrapper);
+                vo.setFileNames(files.stream().map(File::getFileName).toList());
             }
-        }
 
-        // 手动分页
-        int start = (int) ((page.getCurrent() - 1) * page.getSize());
-        int end = Math.min(start + (int) page.getSize(), shareList.size());
-        List<FileShareVO> pagedList = start < shareList.size() ? shareList.subList(start, end) : List.of();
+            shareVOList.add(vo);
+        }
 
         Page<FileShareVO> result = new Page<>(page.getCurrent(), page.getSize());
-        result.setRecords(pagedList);
-        result.setTotal(shareList.size());
+        result.setRecords(shareVOList);
+        result.setTotal(sharePage.getTotal());
         return result;
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void cancelShare(Long userId, String shareCode) {
-        // 先验证分享是否属于该用户
-        Result<SharingVO> shareInfoResult = fileRemoteClient.getShareInfo(shareCode);
-        SharingVO shareInfo = ResultUtils.getData(shareInfoResult);
-
-        if (shareInfo == null) {
+        // 先验证分享是否属于该用户（从数据库查询）
+        FileShare fileShare = fileShareMapper.selectByShareCode(shareCode);
+        if (fileShare == null) {
             throw new GeneralException(ResultEnum.FAIL, "分享记录不存在");
         }
 
-        // 权限校验：验证分享是否属于该用户
-        if (!String.valueOf(userId).equals(shareInfo.getUploader())) {
+        // 权限校验
+        if (!userId.equals(fileShare.getUserId())) {
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "无权操作此分享");
         }
 
         // 检查是否已取消
-        if (shareInfo.getIsValid() != null && !shareInfo.getIsValid()) {
+        if (fileShare.getStatus() == FileShare.STATUS_CANCELLED) {
             throw new GeneralException(ResultEnum.FAIL, "分享已被取消");
         }
 
@@ -480,39 +498,374 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "取消分享失败");
         }
 
-        log.info("分享已取消（链上）: userId={}, shareCode={}", userId, shareCode);
+        // 同步更新数据库状态
+        LambdaUpdateWrapper<FileShare> wrapper = new LambdaUpdateWrapper<FileShare>()
+                .eq(FileShare::getShareCode, shareCode)
+                .set(FileShare::getStatus, FileShare.STATUS_CANCELLED);
+        fileShareMapper.update(null, wrapper);
+
+        log.info("分享已取消: userId={}, shareCode={}", userId, shareCode);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateShare(Long userId, UpdateShareVO updateVO) {
+        FileShare fileShare = fileShareMapper.selectByShareCode(updateVO.getShareCode());
+        if (fileShare == null) {
+            throw new GeneralException(ResultEnum.FAIL, "分享记录不存在");
+        }
+
+        // 权限校验
+        if (!userId.equals(fileShare.getUserId())) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "无权操作此分享");
+        }
+
+        // 检查是否已取消
+        if (fileShare.getStatus() == FileShare.STATUS_CANCELLED) {
+            throw new GeneralException(ResultEnum.FAIL, "分享已被取消，无法修改");
+        }
+
+        // 构建更新条件
+        LambdaUpdateWrapper<FileShare> wrapper = new LambdaUpdateWrapper<FileShare>()
+                .eq(FileShare::getShareCode, updateVO.getShareCode());
+
+        // 更新分享类型
+        if (updateVO.getShareType() != null) {
+            wrapper.set(FileShare::getShareType, updateVO.getShareType());
+        }
+
+        // 延长有效期（从当前时间开始计算）
+        if (updateVO.getExtendMinutes() != null && updateVO.getExtendMinutes() > 0) {
+            Date newExpireTime = new Date(System.currentTimeMillis() + updateVO.getExtendMinutes() * 60 * 1000L);
+            wrapper.set(FileShare::getExpireTime, newExpireTime);
+            // 如果已过期，重新激活
+            if (fileShare.getStatus() == FileShare.STATUS_EXPIRED) {
+                wrapper.set(FileShare::getStatus, FileShare.STATUS_ACTIVE);
+            }
+        }
+
+        fileShareMapper.update(null, wrapper);
+        log.info("分享设置已更新: userId={}, shareCode={}", userId, updateVO.getShareCode());
+    }
+
+    @Override
+    public FileShare getShareByCode(String shareCode) {
+        FileShare fileShare = fileShareMapper.selectByShareCode(shareCode);
+        if (fileShare != null) {
+            // 检查是否过期，自动更新状态
+            if (fileShare.getStatus() == FileShare.STATUS_ACTIVE
+                    && fileShare.getExpireTime() != null
+                    && fileShare.getExpireTime().before(new Date())) {
+                LambdaUpdateWrapper<FileShare> wrapper = new LambdaUpdateWrapper<FileShare>()
+                        .eq(FileShare::getShareCode, shareCode)
+                        .set(FileShare::getStatus, FileShare.STATUS_EXPIRED);
+                fileShareMapper.update(null, wrapper);
+                fileShare.setStatus(FileShare.STATUS_EXPIRED);
+            }
+
+            // 仅对有效分享增加访问次数
+            if (fileShare.getStatus() == FileShare.STATUS_ACTIVE) {
+                fileShareMapper.incrementAccessCount(shareCode);
+            }
+        }
+        return fileShare;
+    }
+
+    @Override
+    public List<byte[]> getPublicFile(String shareCode, String fileHash) {
+        // 验证分享有效性（公开分享）
+        ShareAccessContext accessContext = resolveShareAccess(shareCode, fileHash, ShareType.PUBLIC);
+
+        // 使用 owner 的身份获取文件
+        Result<FileDetailVO> filePointer = fileRemoteClient.getFile(String.valueOf(accessContext.ownerId()), fileHash);
+        FileDetailVO detailVO = ResultUtils.getData(filePointer);
+        if (detailVO == null) {
+            throw new GeneralException(ResultEnum.FAIL, "无法获取文件详情");
+        }
+        String fileContent = detailVO.getContent();
+        if (CommonUtils.isEmpty(fileContent)) {
+            throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
+        if (fileContentMap == null || fileContentMap.isEmpty()) {
+            throw new GeneralException(ResultEnum.FAIL, "文件内容格式解析失败");
+        }
+        Result<List<byte[]>> fileListResult = fileRemoteClient.getFileListByHash(
+                fileContentMap.values().stream().toList(),
+                fileContentMap.keySet().stream().toList());
+        List<byte[]> files = ResultUtils.getData(fileListResult);
+        incrementShareAccessCount(accessContext);
+        return files;
+    }
+
+    @Override
+    public FileDecryptInfoVO getPublicFileDecryptInfo(String shareCode, String fileHash) {
+        // 验证分享有效性（公开分享）
+        ShareAccessContext accessContext = resolveShareAccess(shareCode, fileHash, ShareType.PUBLIC);
+
+        // 查询文件元数据
+        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                .eq(File::getUid, accessContext.ownerId())
+                .eq(File::getFileHash, fileHash);
+        File file = this.getOne(wrapper);
+        if (file == null) {
+            throw new GeneralException(ResultEnum.FAIL, "文件不存在");
+        }
+
+        // 解析 fileParam JSON 获取解密信息
+        String fileParam = file.getFileParam();
+        if (CommonUtils.isEmpty(fileParam)) {
+            throw new GeneralException(ResultEnum.FAIL, "文件元数据不完整，缺少解密信息");
+        }
+
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> params = JsonConverter.parse(fileParam, Map.class);
+
+            String initialKey = (String) params.get("initialKey");
+            if (CommonUtils.isEmpty(initialKey)) {
+                throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
+            }
+
+            String fileName = (String) params.get("fileName");
+            Long fileSize = params.get("fileSize") instanceof Number
+                    ? ((Number) params.get("fileSize")).longValue() : null;
+            String contentType = (String) params.get("contentType");
+            Integer chunkCount = params.get("chunkCount") instanceof Number
+                    ? ((Number) params.get("chunkCount")).intValue() : null;
+
+            return FileDecryptInfoVO.builder()
+                    .initialKey(initialKey)
+                    .fileName(fileName != null ? fileName : file.getFileName())
+                    .fileSize(fileSize)
+                    .contentType(contentType)
+                    .chunkCount(chunkCount)
+                    .fileHash(fileHash)
+                    .build();
+
+        } catch (GeneralException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("解析文件参数失败: fileHash={}, error={}", fileHash, e.getMessage());
+            throw new GeneralException(ResultEnum.FAIL, "解析文件元数据失败");
+        }
     }
 
     /**
-     * 将区块链 SharingVO 转换为 FileShareVO
+     * 登录用户通过分享码下载文件（支持私密/公开分享）
      */
-    private FileShareVO convertSharingVOToFileShareVO(SharingVO sharingVO, String shareCode) {
-        FileShareVO vo = new FileShareVO();
-        vo.setSharingCode(shareCode);
-        vo.setFileHashes(sharingVO.getFileHashList());
-        vo.setMaxAccesses(sharingVO.getMaxAccesses());
-        vo.setIsValid(sharingVO.getIsValid());
+    @Override
+    public List<byte[]> getSharedFileContent(Long userId, String shareCode, String fileHash) {
+        // 验证分享有效性（允许公开/私密）
+        ShareAccessContext accessContext = resolveShareAccess(shareCode, fileHash, null);
 
-        // 根据 isValid 设置状态
-        if (sharingVO.getIsValid() != null && sharingVO.getIsValid()) {
-            // 检查是否过期
-            if (sharingVO.getExpirationTime() != null && sharingVO.getExpirationTime() < System.currentTimeMillis()) {
-                vo.setStatus(2); // 已过期
-                vo.setStatusDesc("已过期");
-            } else {
-                vo.setStatus(1); // 有效
-                vo.setStatusDesc("有效");
-            }
-        } else {
-            vo.setStatus(0); // 已取消
-            vo.setStatusDesc("已取消");
+        Result<FileDetailVO> filePointer = fileRemoteClient.getFile(String.valueOf(accessContext.ownerId()), fileHash);
+        FileDetailVO detailVO = ResultUtils.getData(filePointer);
+        if (detailVO == null) {
+            throw new GeneralException(ResultEnum.FAIL, "无法获取文件详情");
+        }
+        String fileContent = detailVO.getContent();
+        if (CommonUtils.isEmpty(fileContent)) {
+            throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
+        if (fileContentMap == null || fileContentMap.isEmpty()) {
+            throw new GeneralException(ResultEnum.FAIL, "文件内容格式解析失败");
+        }
+        Result<List<byte[]>> fileListResult = fileRemoteClient.getFileListByHash(
+                fileContentMap.values().stream().toList(),
+                fileContentMap.keySet().stream().toList());
+        List<byte[]> files = ResultUtils.getData(fileListResult);
+        incrementShareAccessCount(accessContext);
+        return files;
+    }
+
+    /**
+     * 登录用户通过分享码获取解密信息（支持私密/公开分享）
+     */
+    @Override
+    public FileDecryptInfoVO getSharedFileDecryptInfo(Long userId, String shareCode, String fileHash) {
+        // 验证分享有效性（允许公开/私密）
+        ShareAccessContext accessContext = resolveShareAccess(shareCode, fileHash, null);
+
+        // 查询文件元数据
+        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                .eq(File::getUid, accessContext.ownerId())
+                .eq(File::getFileHash, fileHash);
+        File file = this.getOne(wrapper);
+        if (file == null) {
+            throw new GeneralException(ResultEnum.FAIL, "文件不存在");
         }
 
-        // 设置过期时间
-        if (sharingVO.getExpirationTime() != null) {
-            vo.setExpireTime(new Date(sharingVO.getExpirationTime()));
+        // 解析 fileParam JSON 获取解密信息
+        String fileParam = file.getFileParam();
+        if (CommonUtils.isEmpty(fileParam)) {
+            throw new GeneralException(ResultEnum.FAIL, "文件元数据不完整，缺少解密信息");
+        }
+
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> params = JsonConverter.parse(fileParam, Map.class);
+
+            String initialKey = (String) params.get("initialKey");
+            if (CommonUtils.isEmpty(initialKey)) {
+                throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
+            }
+
+            String fileName = (String) params.get("fileName");
+            Long fileSize = params.get("fileSize") instanceof Number
+                    ? ((Number) params.get("fileSize")).longValue() : null;
+            String contentType = (String) params.get("contentType");
+            Integer chunkCount = params.get("chunkCount") instanceof Number
+                    ? ((Number) params.get("chunkCount")).intValue() : null;
+
+            return FileDecryptInfoVO.builder()
+                    .initialKey(initialKey)
+                    .fileName(fileName != null ? fileName : file.getFileName())
+                    .fileSize(fileSize)
+                    .contentType(contentType)
+                    .chunkCount(chunkCount)
+                    .fileHash(fileHash)
+                    .build();
+
+        } catch (GeneralException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("解析文件参数失败: fileHash={}, error={}", fileHash, e.getMessage());
+            throw new GeneralException(ResultEnum.FAIL, "解析文件元数据失败");
+        }
+    }
+
+    /**
+     * 验证分享访问权限并解析分享上下文（支持数据库与区块链回退）
+     */
+    private ShareAccessContext resolveShareAccess(String shareCode, String fileHash, ShareType requiredType) {
+        FileShare fileShare = fileShareMapper.selectByShareCode(shareCode);
+        if (fileShare != null) {
+            ShareType actualType = ShareType.fromCode(fileShare.getShareType());
+            if (requiredType != null && actualType != requiredType) {
+                throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "此分享需要登录后才能访问");
+            }
+
+            if (fileShare.getStatus() == FileShare.STATUS_CANCELLED) {
+                throw new GeneralException(ResultEnum.FAIL, "分享已被取消");
+            }
+
+            Date now = new Date();
+            if (fileShare.getExpireTime() != null && fileShare.getExpireTime().before(now)) {
+                if (fileShare.getStatus() != FileShare.STATUS_EXPIRED) {
+                    LambdaUpdateWrapper<FileShare> wrapper = new LambdaUpdateWrapper<FileShare>()
+                            .eq(FileShare::getShareCode, shareCode)
+                            .set(FileShare::getStatus, FileShare.STATUS_EXPIRED);
+                    fileShareMapper.update(null, wrapper);
+                }
+                throw new GeneralException(ResultEnum.FAIL, "分享已过期");
+            }
+
+            List<String> fileHashes = parseFileHashes(fileShare.getFileHashes());
+            if (!fileHashes.contains(fileHash)) {
+                throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "该文件不在此分享中");
+            }
+
+            return new ShareAccessContext(fileShare.getUserId(), fileShare);
+        }
+
+        // 数据库未命中时回退到区块链分享信息（兼容历史分享）
+        Result<SharingVO> shareInfoResult = fileRemoteClient.getShareInfo(shareCode);
+        SharingVO shareInfo = ResultUtils.getData(shareInfoResult);
+        if (shareInfo == null) {
+            throw new GeneralException(ResultEnum.FAIL, "分享不存在");
+        }
+
+        if (shareInfo.getIsValid() != null && !shareInfo.getIsValid()) {
+            throw new GeneralException(ResultEnum.FAIL, "分享已被取消");
+        }
+
+        if (shareInfo.getExpirationTime() != null && shareInfo.getExpirationTime() < System.currentTimeMillis()) {
+            throw new GeneralException(ResultEnum.FAIL, "分享已过期");
+        }
+
+        List<String> fileHashes = shareInfo.getFileHashList() != null ? shareInfo.getFileHashList() : List.of();
+        if (!fileHashes.contains(fileHash)) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "该文件不在此分享中");
+        }
+
+        Long ownerId;
+        try {
+            ownerId = Long.valueOf(shareInfo.getUploader());
+        } catch (NumberFormatException e) {
+            log.warn("分享上传者ID格式不正确: {}", shareInfo.getUploader());
+            throw new GeneralException(ResultEnum.FAIL, "分享数据异常");
+        }
+
+        return new ShareAccessContext(ownerId, null);
+    }
+
+    /**
+     * 增加分享访问次数（仅数据库记录存在时）
+     */
+    private void incrementShareAccessCount(ShareAccessContext accessContext) {
+        if (accessContext.fileShare() != null) {
+            fileShareMapper.incrementAccessCount(accessContext.fileShare().getShareCode());
+        }
+    }
+
+    /**
+     * 将 FileShare 实体转换为 FileShareVO
+     */
+    private FileShareVO convertFileShareToVO(FileShare fileShare) {
+        FileShareVO vo = new FileShareVO();
+        vo.setSharingCode(fileShare.getShareCode());
+        vo.setFileHashes(parseFileHashes(fileShare.getFileHashes()));
+        vo.setAccessCount(fileShare.getAccessCount());
+        vo.setExpireTime(fileShare.getExpireTime());
+        vo.setCreateTime(fileShare.getCreateTime());
+        vo.setShareType(fileShare.getShareType());
+        vo.setShareTypeDesc(ShareType.fromCode(fileShare.getShareType()).getName());
+
+        // 设置状态
+        int status = fileShare.getStatus();
+        // 检查是否已过期
+        if (status == FileShare.STATUS_ACTIVE
+                && fileShare.getExpireTime() != null
+                && fileShare.getExpireTime().before(new Date())) {
+            status = FileShare.STATUS_EXPIRED;
+        }
+
+        vo.setStatus(status);
+        vo.setIsValid(status == FileShare.STATUS_ACTIVE);
+
+        switch (status) {
+            case FileShare.STATUS_CANCELLED -> vo.setStatusDesc("已取消");
+            case FileShare.STATUS_ACTIVE -> vo.setStatusDesc("有效");
+            case FileShare.STATUS_EXPIRED -> vo.setStatusDesc("已过期");
+            default -> vo.setStatusDesc("未知");
         }
 
         return vo;
+    }
+
+    /**
+     * 解析文件哈希 JSON 数组
+     */
+    private List<String> parseFileHashes(String fileHashesJson) {
+        if (CommonUtils.isEmpty(fileHashesJson)) {
+            return List.of();
+        }
+        try {
+            String[] hashes = JsonConverter.parse(fileHashesJson, String[].class);
+            return hashes != null ? Arrays.asList(hashes) : List.of();
+        } catch (Exception e) {
+            log.warn("解析文件哈希列表失败: {}", fileHashesJson);
+            return List.of();
+        }
+    }
+
+    /**
+     * 分享访问上下文（包含分享拥有者与可选的数据库记录）
+     */
+    private record ShareAccessContext(Long ownerId, FileShare fileShare) {
     }
 }
