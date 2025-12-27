@@ -2,12 +2,13 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { useNotifications } from '$stores/notifications.svelte';
+	import { useDownload } from '$stores/download.svelte';
 	import { formatFileSize, formatDateTime } from '$utils/format';
-	import { getFiles, deleteFile, downloadEncryptedChunks, getDecryptInfo, createShare } from '$api/endpoints/files';
+	import { getFiles, deleteFile, createShare } from '$api/endpoints/files';
 	import { FileStatus, FileStatusLabel, ShareType, ShareTypeLabel, ShareTypeDesc, type FileVO } from '$api/types';
-	import { decryptFile, arrayToBlob, downloadBlob } from '$utils/crypto';
 
 	const notifications = useNotifications();
+	const download = useDownload();
 
 	let files = $state<FileVO[]>([]);
 	let loading = $state(true);
@@ -23,7 +24,6 @@
 	let shareExpireHours = $state(72);
 	let shareType = $state<ShareType>(ShareType.PUBLIC);
 	let shareCode = $state('');
-	let downloading = $state<string | null>(null);
 
 	onMount(() => {
 		loadFiles();
@@ -60,47 +60,9 @@
 	}
 
 	async function handleDownload(file: FileVO) {
-		if (downloading) {
-			notifications.warning('下载中', '请等待当前下载完成');
-			return;
-		}
-
-		downloading = file.id;
-		try {
-			notifications.info('准备下载', '正在获取文件解密信息...');
-
-			// 1. 获取解密信息（包含初始密钥）
-			const decryptInfo = await getDecryptInfo(file.fileHash);
-
-			// 2. 获取加密分片
-			notifications.info('下载中', '正在下载加密分片...');
-			const encryptedChunksBase64 = await downloadEncryptedChunks(file.fileHash);
-
-			// 将 Base64 转换为 Uint8Array
-			const chunks = encryptedChunksBase64.map((base64) => {
-				const binary = atob(base64);
-				const bytes = new Uint8Array(binary.length);
-				for (let i = 0; i < binary.length; i++) {
-					bytes[i] = binary.charCodeAt(i);
-				}
-				return bytes;
-			});
-
-			// 3. 解密分片
-			notifications.info('解密中', '正在解密文件...');
-			const decryptedData = await decryptFile(chunks, decryptInfo.initialKey);
-
-			// 4. 创建 Blob 并下载
-			const blob = arrayToBlob(decryptedData, decryptInfo.contentType || 'application/octet-stream');
-			downloadBlob(blob, decryptInfo.fileName || file.fileName);
-
-			notifications.success('下载完成', file.fileName);
-		} catch (err) {
-			console.error('下载失败:', err);
-			notifications.error('下载失败', err instanceof Error ? err.message : '请稍后重试');
-		} finally {
-			downloading = null;
-		}
+		// Use the new download manager with presigned URLs
+		download.startDownload(file.fileHash, file.fileName, { type: 'owned' });
+		notifications.info('下载已开始', '可在右下角查看下载进度');
 	}
 
 	function openShareDialog(file: FileVO) {
@@ -264,13 +226,14 @@
 											</svg>
 										</button>
 										{#if file.status === FileStatus.COMPLETED}
+											{@const isDownloading = download.tasks.some(t => t.fileHash === file.fileHash && t.status !== 'completed' && t.status !== 'failed' && t.status !== 'cancelled')}
 											<button
 												class="rounded p-1 hover:bg-accent disabled:opacity-50"
 												onclick={() => handleDownload(file)}
-												disabled={downloading === file.id}
-												title={downloading === file.id ? '下载中...' : '下载'}
+												disabled={isDownloading}
+												title={isDownloading ? '下载中...' : '下载'}
 											>
-												{#if downloading === file.id}
+												{#if isDownloading}
 													<svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24">
 														<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
 														<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>

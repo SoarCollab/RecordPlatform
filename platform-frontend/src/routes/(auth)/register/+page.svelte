@@ -18,6 +18,12 @@
   let sendingCode = $state(false);
   let countdown = $state(0);
 
+  $effect(() => {
+    if (auth.initialized && auth.isAuthenticated) {
+      goto("/dashboard", { replaceState: true });
+    }
+  });
+
   // Countdown timer
   $effect(() => {
     if (countdown > 0) {

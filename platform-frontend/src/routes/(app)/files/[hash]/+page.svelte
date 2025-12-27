@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { useNotifications } from "$stores/notifications.svelte";
+  import { useDownload } from "$stores/download.svelte";
   import { formatFileSize, formatDateTime } from "$utils/format";
   import {
     getFileByHash,
@@ -29,6 +30,7 @@
   let { data } = $props();
 
   const notifications = useNotifications();
+  const download = useDownload();
 
   let file = $state<FileVO | null>(null);
   let transaction = $state<TransactionVO | null>(null);
@@ -94,23 +96,9 @@
   async function handleDownload() {
     if (!file) return;
 
-    try {
-      const blob = await downloadFile(file.fileHash);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = file.fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      notifications.success("下载已开始");
-    } catch (err) {
-      notifications.error(
-        "下载失败",
-        err instanceof Error ? err.message : "请稍后重试"
-      );
-    }
+    // Use the new download manager with presigned URLs
+    download.startDownload(file.fileHash, file.fileName, { type: "owned" });
+    notifications.info("下载已开始", "可在右下角查看下载进度");
   }
 
   async function handleShare() {

@@ -4,14 +4,17 @@
 	import { useNotifications } from '$stores/notifications.svelte';
 	import { useSSE } from '$stores/sse.svelte';
 	import { useAuth } from '$stores/auth.svelte';
+	import { useDownload } from '$stores/download.svelte';
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
+	import DownloadManager from '$lib/components/DownloadManager.svelte';
 
 	let { children } = $props();
 
 	const notifications = useNotifications();
 	const sse = useSSE();
 	const auth = useAuth();
+	const download = useDownload();
 
 	// Connect SSE when authenticated
 	$effect(() => {
@@ -20,8 +23,11 @@
 		}
 	});
 
-	// Handle SSE messages
+	// Handle SSE messages and restore download tasks
 	onMount(() => {
+		// Restore pending download tasks from IndexedDB
+		download.restoreTasks();
+
 		const unsubscribe = sse.subscribe((message) => {
 			switch (message.type) {
 				case 'notification':
@@ -48,9 +54,12 @@
 	{@render children()}
 </div>
 
-<!-- Toast Notifications -->
+<!-- Download Manager -->
+<DownloadManager />
+
+<!-- Toast Notifications (left side to avoid overlap with Download Manager) -->
 {#if notifications.notifications.length > 0}
-	<div class="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+	<div class="fixed bottom-4 left-4 z-50 flex flex-col gap-2">
 		{#each notifications.notifications as notification (notification.id)}
 			<div
 				class="flex items-start gap-3 rounded-lg border bg-card p-4 shadow-lg transition-all"
