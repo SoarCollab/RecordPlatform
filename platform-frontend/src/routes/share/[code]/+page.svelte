@@ -137,6 +137,7 @@
     try {
       await saveSharedFiles({
         sharingFileIdList: Array.from(selectedFiles),
+        shareCode: data.code,
       });
       notifications.success(
         "保存成功",
@@ -144,10 +145,15 @@
       );
       selectedFiles = new Set();
     } catch (err) {
-      notifications.error(
-        "保存失败",
-        err instanceof Error ? err.message : "请稍后重试"
-      );
+      // 保存自己的文件是误操作，用 warning 而非 error
+      if (err instanceof ApiError && err.code === ResultCode.PARAM_ERROR) {
+        notifications.warning("无法保存", err.message || "不能保存自己的文件");
+      } else {
+        notifications.error(
+          "保存失败",
+          err instanceof Error ? err.message : "请稍后重试"
+        );
+      }
     } finally {
       isSaving = false;
     }

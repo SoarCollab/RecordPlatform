@@ -12,6 +12,9 @@ import type {
   CreateShareRequest,
   UpdateShareRequest,
   UserFileStatsVO,
+  ShareAccessLogVO,
+  ShareAccessStatsVO,
+  FileProvenanceVO,
 } from "../types";
 import { ShareType } from "../types";
 
@@ -353,4 +356,40 @@ export async function downloadSharedFile(
     // 私密分享需要登录，通过分享码下载
     return shareDownloadFile(shareCode, fileHash);
   }
+}
+
+// ==================== 审计端点 ====================
+
+/**
+ * 获取分享的访问日志
+ * @param shareCode 分享码
+ * @param params 分页参数
+ */
+export async function getShareAccessLogs(
+  shareCode: string,
+  params?: PageParams
+): Promise<Page<ShareAccessLogVO>> {
+  return api.get<Page<ShareAccessLogVO>>(`${BASE}/share/${shareCode}/access-logs`, {
+    params,
+  });
+}
+
+/**
+ * 获取分享的访问统计
+ * @param shareCode 分享码
+ */
+export async function getShareAccessStats(
+  shareCode: string
+): Promise<ShareAccessStatsVO> {
+  return api.get<ShareAccessStatsVO>(`${BASE}/share/${shareCode}/stats`);
+}
+
+/**
+ * 获取文件的溯源信息
+ * @param fileId 文件ID
+ */
+export async function getFileProvenance(
+  fileId: string
+): Promise<FileProvenanceVO> {
+  return api.get<FileProvenanceVO>(`${BASE}/${fileId}/provenance`);
 }
