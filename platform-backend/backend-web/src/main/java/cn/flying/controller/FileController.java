@@ -6,14 +6,18 @@ import cn.flying.common.util.Const;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.FileProvenanceVO;
 import cn.flying.dao.vo.file.FileShareVO;
 import cn.flying.dao.vo.file.SaveSharingFile;
 import cn.flying.dao.vo.file.FileSharingVO;
+import cn.flying.dao.vo.file.ShareAccessLogVO;
+import cn.flying.dao.vo.file.ShareAccessStatsVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.dao.vo.file.UserFileStatsVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
+import cn.flying.service.ShareAuditService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
@@ -21,6 +25,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -54,6 +59,10 @@ public class FileController {
     // ==================== CQRS: Command Service（写操作）====================
     @Resource
     private FileService fileService;
+
+    // ==================== 审计服务 ====================
+    @Resource
+    private ShareAuditService shareAuditService;
 
     // ==================== Query 端点（读操作）====================
 
@@ -176,8 +185,12 @@ public class FileController {
     @Operation(summary = "获取分享文件列表")
     @OperationLog(module = "文件操作", operationType = "查询", description = "获取分享文件")
     public Result<List<File>> getShareFile(
-           @Schema(description = "文件分享码")  @RequestParam("sharingCode") String sharingCode) {
+           @Schema(description = "文件分享码")  @RequestParam("sharingCode") String sharingCode,
+           @RequestAttribute(value = Const.ATTR_USER_ID, required = false) Long userId,
+           HttpServletRequest request) {
         List<File> files = fileQueryService.getShareFile(sharingCode);
+        // 异步记录分享查看审计日志
+        shareAuditService.logShareView(sharingCode, userId, getClientIp(request), request.getHeader("User-Agent"));
         return Result.success(files);
     }
 
@@ -252,9 +265,26 @@ public class FileController {
     @Operation(summary = "保存分享文件")
     @OperationLog(module = "文件操作", operationType = "保存", description = "保存分享文件")
     public Result<String> saveShareFile(
-            @RequestBody @Valid SaveSharingFile sharingFile) {
-        fileService.saveShareFile(sharingFile.getSharingFileIdList());
+            @RequestBody @Valid SaveSharingFile sharingFile,
+            HttpServletRequest request) {
+        String clientIp = getClientIp(request);
+        fileService.saveShareFile(sharingFile.getSharingFileIdList(), sharingFile.getShareCode(), clientIp);
         return Result.success("保存成功");
+    }
+
+    private String getClientIp(HttpServletRequest request) {
+        String ip = request.getHeader("X-Forwarded-For");
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getHeader("X-Real-IP");
+        }
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getRemoteAddr();
+        }
+        // 多代理情况取第一个IP
+        if (ip != null && ip.contains(",")) {
+            ip = ip.split(",")[0].trim();
+        }
+        return ip;
     }
 
     /**
@@ -302,8 +332,11 @@ public class FileController {
     public Result<List<byte[]>> shareDownload(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Parameter(description = "分享码") @RequestParam("shareCode") String shareCode,
-            @Parameter(description = "文件哈希") @RequestParam("fileHash") String fileHash) {
+            @Parameter(description = "文件哈希") @RequestParam("fileHash") String fileHash,
+            HttpServletRequest request) {
         List<byte[]> files = fileService.getSharedFileContent(userId, shareCode, fileHash);
+        // 异步记录分享下载审计日志
+        shareAuditService.logShareDownload(shareCode, userId, fileHash, null, getClientIp(request));
         return Result.success(files);
     }
 
@@ -325,6 +358,59 @@ public class FileController {
         return Result.success(decryptInfo);
     }
 
+    // ==================== 审计端点 ====================
+
+    /**
+     * 获取分享的访问日志（管理员专用）
+     * @param shareCode 分享码
+     * @param pageNum 页码
+     * @param pageSize 每页数量
+     * @return 访问日志分页
+     */
+    @GetMapping("/share/{shareCode}/access-logs")
+    @Operation(summary = "获取分享的访问日志（管理员专用）")
+    @PreAuthorize("isAdmin()")
+    @OperationLog(module = "文件操作", operationType = "查询", description = "获取分享访问日志")
+    public Result<IPage<ShareAccessLogVO>> getShareAccessLogs(
+            @Parameter(description = "分享码") @PathVariable String shareCode,
+            @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer pageNum,
+            @Parameter(description = "每页数量") @RequestParam(defaultValue = "20") Integer pageSize) {
+        Page<?> page = new Page<>(pageNum, pageSize);
+        IPage<ShareAccessLogVO> logs = shareAuditService.getShareAccessLogs(shareCode, page);
+        return Result.success(logs);
+    }
+
+    /**
+     * 获取分享的访问统计（管理员专用）
+     * @param shareCode 分享码
+     * @return 访问统计
+     */
+    @GetMapping("/share/{shareCode}/stats")
+    @Operation(summary = "获取分享的访问统计（管理员专用）")
+    @PreAuthorize("isAdmin()")
+    @OperationLog(module = "文件操作", operationType = "查询", description = "获取分享访问统计")
+    public Result<ShareAccessStatsVO> getShareAccessStats(
+            @Parameter(description = "分享码") @PathVariable String shareCode) {
+        ShareAccessStatsVO stats = shareAuditService.getShareAccessStats(shareCode);
+        return Result.success(stats);
+    }
+
+    /**
+     * 获取文件的溯源信息（管理员专用）
+     * @param id 文件外部ID
+     * @return 溯源信息
+     */
+    @GetMapping("/{id}/provenance")
+    @Operation(summary = "获取文件的溯源信息（管理员专用）")
+    @PreAuthorize("isAdmin()")
+    @OperationLog(module = "文件操作", operationType = "查询", description = "获取文件溯源信息")
+    public Result<FileProvenanceVO> getFileProvenance(
+            @Parameter(description = "文件ID") @PathVariable String id) {
+        Long fileId = IdUtils.fromExternalId(id);
+        FileProvenanceVO provenance = shareAuditService.getFileProvenance(fileId);
+        return Result.success(provenance);
+    }
+
     // ==================== 公开端点（无需认证）====================
 
     /**
@@ -337,8 +423,11 @@ public class FileController {
     @Operation(summary = "公开分享下载文件（无需登录）")
     public Result<List<byte[]>> publicDownload(
             @Parameter(description = "分享码") @RequestParam("shareCode") String shareCode,
-            @Parameter(description = "文件哈希") @RequestParam("fileHash") String fileHash) {
+            @Parameter(description = "文件哈希") @RequestParam("fileHash") String fileHash,
+            HttpServletRequest request) {
         List<byte[]> files = fileService.getPublicFile(shareCode, fileHash);
+        // 异步记录分享下载审计日志（匿名访问）
+        shareAuditService.logShareDownload(shareCode, null, fileHash, null, getClientIp(request));
         return Result.success(files);
     }
 
