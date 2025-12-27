@@ -10,6 +10,7 @@ import cn.flying.dao.vo.file.FileShareVO;
 import cn.flying.dao.vo.file.SaveSharingFile;
 import cn.flying.dao.vo.file.FileSharingVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
+import cn.flying.dao.vo.file.UserFileStatsVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
@@ -100,6 +101,19 @@ public class FileController {
         Page<File> page = new Page<>(pageNum, pageSize);
         fileQueryService.getUserFilesPage(userId, page);
         return Result.success(page);
+    }
+
+    /**
+     * 获取用户文件统计信息（用于 Dashboard）
+     * @param userId 用户ID
+     * @return 文件统计信息（文件数、存储用量等）
+     */
+    @GetMapping("/stats")
+    @Operation(summary = "获取用户文件统计信息（用于 Dashboard）")
+    @OperationLog(module = "文件操作", operationType = "查询", description = "获取用户文件统计")
+    public Result<UserFileStatsVO> getUserFileStats(@RequestAttribute(Const.ATTR_USER_ID) Long userId) {
+        UserFileStatsVO stats = fileQueryService.getUserFileStats(userId);
+        return Result.success(stats);
     }
 
     /**

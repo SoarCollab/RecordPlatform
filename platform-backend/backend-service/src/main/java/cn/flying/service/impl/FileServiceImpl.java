@@ -308,11 +308,26 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         return sharingCode;
     }
 
+    /**
+     * 根据分享码获取分享文件列表，并按过期时间判定取消/过期状态
+     */
     @Override
     public List<File> getShareFile(String sharingCode) {
         Result<SharingVO> result = fileRemoteClient.getSharedFiles(sharingCode);
         if(ResultUtils.isSuccess(result)){
             SharingVO sharingFiles = ResultUtils.getData(result);
+            Long expirationTime = sharingFiles.getExpirationTime();
+            if (expirationTime != null) {
+                if (expirationTime < 0) {
+                    throw new GeneralException(ResultEnum.SHARE_CANCELLED);
+                }
+                if (expirationTime > 0 && expirationTime < System.currentTimeMillis()) {
+                    throw new GeneralException(ResultEnum.SHARE_EXPIRED);
+                }
+            }
+            if (Boolean.FALSE.equals(sharingFiles.getIsValid())) {
+                throw new GeneralException(ResultEnum.SHARE_CANCELLED);
+            }
             String uploader = sharingFiles.getUploader();
             List<String> fileHashList = sharingFiles.getFileHashList();
             if(CommonUtils.isNotEmpty(fileHashList)){
@@ -761,7 +776,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                             .set(FileShare::getStatus, FileShare.STATUS_EXPIRED);
                     fileShareMapper.update(null, wrapper);
                 }
-                throw new GeneralException(ResultEnum.FAIL, "分享已过期");
+                throw new GeneralException(ResultEnum.SHARE_EXPIRED);
             }
 
             List<String> fileHashes = parseFileHashes(fileShare.getFileHashes());
@@ -780,11 +795,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         }
 
         if (shareInfo.getIsValid() != null && !shareInfo.getIsValid()) {
-            throw new GeneralException(ResultEnum.FAIL, "分享已被取消");
+            throw new GeneralException(ResultEnum.SHARE_CANCELLED);
         }
 
         if (shareInfo.getExpirationTime() != null && shareInfo.getExpirationTime() < System.currentTimeMillis()) {
-            throw new GeneralException(ResultEnum.FAIL, "分享已过期");
+            throw new GeneralException(ResultEnum.SHARE_EXPIRED);
         }
 
         List<String> fileHashes = shareInfo.getFileHashList() != null ? shareInfo.getFileHashList() : List.of();

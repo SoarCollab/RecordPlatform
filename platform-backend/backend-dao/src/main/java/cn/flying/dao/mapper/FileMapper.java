@@ -43,4 +43,26 @@ public interface FileMapper extends BaseMapper<File> {
      */
     @Delete("DELETE FROM file WHERE id = #{id} AND tenant_id = #{tenantId}")
     int physicalDeleteById(@Param("id") Long id, @Param("tenantId") Long tenantId);
+
+    /**
+     * 统计用户文件数量
+     *
+     * @param userId 用户ID
+     * @param tenantId 租户ID
+     * @return 文件数量
+     */
+    @Select("SELECT COUNT(*) FROM file WHERE uid = #{userId} AND tenant_id = #{tenantId} AND deleted = 0")
+    Long countByUserId(@Param("userId") Long userId, @Param("tenantId") Long tenantId);
+
+    /**
+     * 统计用户今日上传数量
+     *
+     * @param userId 用户ID
+     * @param tenantId 租户ID  
+     * @param todayStart 今日开始时间
+     * @return 今日上传数量
+     */
+    @Select("SELECT COUNT(*) FROM file WHERE uid = #{userId} AND tenant_id = #{tenantId} AND deleted = 0 AND create_time >= #{todayStart}")
+    Long countTodayUploadsByUserId(@Param("userId") Long userId, @Param("tenantId") Long tenantId, @Param("todayStart") Date todayStart);
 }
+
