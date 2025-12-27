@@ -85,7 +85,9 @@ function openDB(): Promise<IDBDatabase> {
           keyPath: ["taskId", "chunkIndex"],
         });
         chunkStore.createIndex("taskId", "taskId", { unique: false });
-        chunkStore.createIndex("downloadedAt", "downloadedAt", { unique: false });
+        chunkStore.createIndex("downloadedAt", "downloadedAt", {
+          unique: false,
+        });
       }
     };
   });
@@ -106,14 +108,17 @@ export async function saveTask(task: PersistedDownloadTask): Promise<void> {
     const request = store.put(task);
 
     request.onsuccess = () => resolve();
-    request.onerror = () => reject(new Error(`Failed to save task: ${request.error?.message}`));
+    request.onerror = () =>
+      reject(new Error(`Failed to save task: ${request.error?.message}`));
   });
 }
 
 /**
  * Get task by ID
  */
-export async function getTask(taskId: string): Promise<PersistedDownloadTask | null> {
+export async function getTask(
+  taskId: string,
+): Promise<PersistedDownloadTask | null> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(TASKS_STORE, "readonly");
@@ -121,7 +126,8 @@ export async function getTask(taskId: string): Promise<PersistedDownloadTask | n
     const request = store.get(taskId);
 
     request.onsuccess = () => resolve(request.result || null);
-    request.onerror = () => reject(new Error(`Failed to get task: ${request.error?.message}`));
+    request.onerror = () =>
+      reject(new Error(`Failed to get task: ${request.error?.message}`));
   });
 }
 
@@ -136,7 +142,10 @@ export async function getPendingTasks(): Promise<PersistedDownloadTask[]> {
     const request = store.getAll();
 
     request.onsuccess = () => resolve(request.result || []);
-    request.onerror = () => reject(new Error(`Failed to get pending tasks: ${request.error?.message}`));
+    request.onerror = () =>
+      reject(
+        new Error(`Failed to get pending tasks: ${request.error?.message}`),
+      );
   });
 }
 
@@ -151,7 +160,8 @@ export async function deleteTask(taskId: string): Promise<void> {
     const request = store.delete(taskId);
 
     request.onsuccess = () => resolve();
-    request.onerror = () => reject(new Error(`Failed to delete task: ${request.error?.message}`));
+    request.onerror = () =>
+      reject(new Error(`Failed to delete task: ${request.error?.message}`));
   });
 }
 
@@ -173,14 +183,18 @@ export async function saveChunk(
     const chunk: PersistedChunk = {
       taskId,
       chunkIndex,
-      data: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer,
+      data: data.buffer.slice(
+        data.byteOffset,
+        data.byteOffset + data.byteLength,
+      ) as ArrayBuffer,
       downloadedAt: Date.now(),
     };
 
     const request = store.put(chunk);
 
     request.onsuccess = () => resolve();
-    request.onerror = () => reject(new Error(`Failed to save chunk: ${request.error?.message}`));
+    request.onerror = () =>
+      reject(new Error(`Failed to save chunk: ${request.error?.message}`));
   });
 }
 
@@ -188,7 +202,9 @@ export async function saveChunk(
  * Get all downloaded chunks for a task
  * Returns a Map of chunkIndex -> Uint8Array
  */
-export async function getChunks(taskId: string): Promise<Map<number, Uint8Array>> {
+export async function getChunks(
+  taskId: string,
+): Promise<Map<number, Uint8Array>> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(CHUNKS_STORE, "readonly");
@@ -205,7 +221,8 @@ export async function getChunks(taskId: string): Promise<Map<number, Uint8Array>
       resolve(map);
     };
 
-    request.onerror = () => reject(new Error(`Failed to get chunks: ${request.error?.message}`));
+    request.onerror = () =>
+      reject(new Error(`Failed to get chunks: ${request.error?.message}`));
   });
 }
 
@@ -221,7 +238,8 @@ export async function getChunkCount(taskId: string): Promise<number> {
     const request = index.count(taskId);
 
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(new Error(`Failed to count chunks: ${request.error?.message}`));
+    request.onerror = () =>
+      reject(new Error(`Failed to count chunks: ${request.error?.message}`));
   });
 }
 
@@ -245,7 +263,8 @@ export async function deleteChunks(taskId: string): Promise<void> {
     };
 
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(new Error(`Failed to delete chunks: ${tx.error?.message}`));
+    tx.onerror = () =>
+      reject(new Error(`Failed to delete chunks: ${tx.error?.message}`));
   });
 }
 
@@ -284,7 +303,8 @@ export async function cleanupExpiredData(): Promise<number> {
         const chunkIndex = chunkStore.index("taskId");
         const chunkRequest = chunkIndex.openCursor(task.id);
         chunkRequest.onsuccess = (e) => {
-          const chunkCursor = (e.target as IDBRequest<IDBCursorWithValue>).result;
+          const chunkCursor = (e.target as IDBRequest<IDBCursorWithValue>)
+            .result;
           if (chunkCursor) {
             chunkCursor.delete();
             chunkCursor.continue();
@@ -299,7 +319,8 @@ export async function cleanupExpiredData(): Promise<number> {
     };
 
     tx.oncomplete = () => resolve(cleanedCount);
-    tx.onerror = () => reject(new Error(`Failed to cleanup expired data: ${tx.error?.message}`));
+    tx.onerror = () =>
+      reject(new Error(`Failed to cleanup expired data: ${tx.error?.message}`));
   });
 }
 
@@ -320,7 +341,10 @@ export async function isStorageAvailable(): Promise<boolean> {
 /**
  * Get storage usage estimate
  */
-export async function getStorageUsage(): Promise<{ used: number; quota: number } | null> {
+export async function getStorageUsage(): Promise<{
+  used: number;
+  quota: number;
+} | null> {
   if (!browser || !navigator.storage?.estimate) {
     return null;
   }

@@ -98,7 +98,7 @@ public class PermissionServiceImpl implements PermissionService {
 
     @Override
     public boolean hasPermission(String permissionCode) {
-        String role = SecurityUtils.getLoginUserRole().name();
+        String role = SecurityUtils.getLoginUserRole().getRole();
         Long tenantId = SecurityUtils.getTenantId();
         return hasPermission(role, permissionCode, tenantId);
     }

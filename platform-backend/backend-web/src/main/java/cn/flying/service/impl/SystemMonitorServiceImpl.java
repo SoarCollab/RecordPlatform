@@ -89,7 +89,8 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
             try {
                 Result<BlockChainMessage> chainResult = blockChainService.getCurrentBlockChainMessage();
                 if (chainResult != null && chainResult.getData() != null) {
-                    totalTransactions = chainResult.getData().getTransactionCount();
+                    Long txCount = chainResult.getData().getTransactionCount();
+                    totalTransactions = txCount != null ? txCount : 0L;
                 }
             } catch (Exception e) {
                 log.warn("Failed to get chain transaction count: {}", e.getMessage());
@@ -126,13 +127,16 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
             Result<BlockChainMessage> result = blockChainService.getCurrentBlockChainMessage();
             if (result != null && result.getData() != null) {
                 BlockChainMessage message = result.getData();
+                Long blockNumber = message.getBlockNumber() != null ? message.getBlockNumber() : 0L;
+                Long transactionCount = message.getTransactionCount() != null ? message.getTransactionCount() : 0L;
+                Long failedTransactionCount = message.getFailedTransactionCount() != null ? message.getFailedTransactionCount() : 0L;
                 return ChainStatusVO.builder()
-                        .blockNumber(message.getBlockNumber())
-                        .transactionCount(message.getTransactionCount())
-                        .failedTransactionCount(message.getFailedTransactionCount())
+                        .blockNumber(blockNumber)
+                        .transactionCount(transactionCount)
+                        .failedTransactionCount(failedTransactionCount)
                         .nodeCount(4) // 默认值，实际应从链上获取
                         .chainType("LOCAL_FISCO") // 从配置获取
-                        .healthy(message.getBlockNumber() != null && message.getBlockNumber() > 0)
+                        .healthy(blockNumber > 0)
                         .lastUpdateTime(System.currentTimeMillis())
                         .build();
             }

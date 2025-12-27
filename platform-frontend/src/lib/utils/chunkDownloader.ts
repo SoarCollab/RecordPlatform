@@ -63,7 +63,9 @@ export async function downloadChunk(
   });
 
   if (!response.ok) {
-    throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+    throw new Error(
+      `Download failed: ${response.status} ${response.statusText}`,
+    );
   }
 
   const arrayBuffer = await response.arrayBuffer();
@@ -116,7 +118,9 @@ export async function downloadChunkWithRetry(
     }
   }
 
-  throw new Error(`Chunk ${chunkIndex} download failed after ${maxRetries + 1} attempts: ${lastError?.message}`);
+  throw new Error(
+    `Chunk ${chunkIndex} download failed after ${maxRetries + 1} attempts: ${lastError?.message}`,
+  );
 }
 
 // ===== Concurrent Download =====
@@ -285,7 +289,9 @@ export function createTimeoutController(timeoutMs: number): AbortController {
  * @param signals Array of AbortSignals
  * @returns Combined AbortController
  */
-export function mergeAbortSignals(...signals: (AbortSignal | undefined)[]): AbortController {
+export function mergeAbortSignals(
+  ...signals: (AbortSignal | undefined)[]
+): AbortController {
   const controller = new AbortController();
 
   for (const signal of signals) {
