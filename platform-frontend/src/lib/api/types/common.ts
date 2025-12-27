@@ -97,6 +97,10 @@ export const ResultCode = {
   FILE_NOT_EXIST: 50008,
   FILE_EMPTY: 50009,
   FILE_RECORD_ERROR: 50010,
+  /** 分享已被取消 */
+  SHARE_CANCELLED: 50011,
+  /** 分享已过期 */
+  SHARE_EXPIRED: 50012,
 
   // 消息服务错误 60000-69999
   MESSAGE_NOT_FOUND: 60001,
@@ -127,9 +131,6 @@ export const ResultCode = {
   /** 未知错误 */
   UNKNOWN_ERROR: 90099,
 } as const;
-
-export type ResultCodeType = (typeof ResultCode)[keyof typeof ResultCode];
-
 /**
  * 需要清除 Token 并跳转登录的错误码
  */

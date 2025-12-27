@@ -16,6 +16,21 @@ export interface FileVO {
 }
 
 /**
+ * 用户文件统计信息
+ * @see UserFileStatsVO.java
+ */
+export interface UserFileStatsVO {
+  /** 文件总数 */
+  totalFiles: number;
+  /** 存储用量（字节） */
+  totalStorage: number;
+  /** 分享文件数 */
+  sharedFiles: number;
+  /** 今日上传数 */
+  todayUploads: number;
+}
+
+/**
  * 文件状态枚举（与后端 FileUploadStatus 对齐）
  * @see FileUploadStatus.java
  *

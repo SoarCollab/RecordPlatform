@@ -2,6 +2,7 @@ package cn.flying.service;
 
 import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.UserFileStatsVO;
 import cn.flying.platformapi.response.TransactionVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 
@@ -105,6 +106,17 @@ public interface FileQueryService {
      * @return 分享记录分页
      */
     com.baomidou.mybatisplus.core.metadata.IPage<cn.flying.dao.vo.file.FileShareVO> getUserShares(Long userId, Page<?> page);
+
+    /**
+     * 获取用户文件统计信息
+     * <p>
+     * 用于 Dashboard 展示：文件总数、存储用量等
+     * </p>
+     *
+     * @param userId 用户ID
+     * @return 文件统计信息
+     */
+    UserFileStatsVO getUserFileStats(Long userId);
 
     // ==================== 异步查询方法（Virtual Thread 优化）====================
 

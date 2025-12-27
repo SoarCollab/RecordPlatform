@@ -14,6 +14,7 @@ import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileShareVO;
+import cn.flying.dao.vo.file.UserFileStatsVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.SharingVO;
@@ -31,6 +32,8 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -176,21 +179,39 @@ public class FileQueryServiceImpl implements FileQueryService {
         return ResultUtils.getData(fileListResult);
     }
 
+    /**
+     * 根据分享码获取分享文件列表，并按过期时间判定取消/过期状态
+     */
     @Override
     @Cacheable(cacheNames = "sharedFiles", key = "#sharingCode", unless = "#result == null || #result.isEmpty()")
     public List<File> getShareFile(String sharingCode) {
         Result<SharingVO> result = fileRemoteClient.getSharedFiles(sharingCode);
         if (ResultUtils.isSuccess(result)) {
             SharingVO sharingFiles = ResultUtils.getData(result);
+            Long expirationTime = sharingFiles.getExpirationTime();
+            if (expirationTime != null) {
+                if (expirationTime < 0) {
+                    throw new GeneralException(ResultEnum.SHARE_CANCELLED);
+                }
+                if (expirationTime > 0 && expirationTime < System.currentTimeMillis()) {
+                    throw new GeneralException(ResultEnum.SHARE_EXPIRED);
+                }
+            }
+            if (Boolean.FALSE.equals(sharingFiles.getIsValid())) {
+                throw new GeneralException(ResultEnum.SHARE_CANCELLED);
+            }
             String uploader = sharingFiles.getUploader();
             List<String> fileHashList = sharingFiles.getFileHashList();
             if (CommonUtils.isNotEmpty(fileHashList)) {
                 try {
                     Long uploaderId = Long.valueOf(uploader);
-                    LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                            .eq(File::getUid, uploaderId)
-                            .in(File::getFileHash, fileHashList);
-                    return fileMapper.selectList(wrapper);
+                    // 公开分享需要跨租户访问，使用 runWithoutIsolation 绕过租户隔离
+                    return TenantContext.runWithoutIsolation(() -> {
+                        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                                .eq(File::getUid, uploaderId)
+                                .in(File::getFileHash, fileHashList);
+                        return fileMapper.selectList(wrapper);
+                    });
                 } catch (NumberFormatException e) {
                     log.warn("分享文件的上传者ID格式不正确: {}", uploader);
                 }
@@ -286,6 +307,49 @@ public class FileQueryServiceImpl implements FileQueryService {
         result.setRecords(shareList);
         result.setTotal(sharePage.getTotal());
         return result;
+    }
+
+    /**
+     * 统计用户文件数量、存储用量、分享数量与今日上传数。
+     */
+    @Override
+    public UserFileStatsVO getUserFileStats(Long userId) {
+        Long tenantId = TenantContext.getTenantId();
+        
+        // 查询文件总数
+        Long totalFiles = fileMapper.countByUserId(userId, tenantId);
+        
+        // 查询存储用量：遍历未删除文件，累加 fileSize
+        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                .eq(File::getUid, userId)
+                .eq(tenantId != null, File::getTenantId, tenantId)
+                .eq(File::getDeleted, 0);
+        List<File> files = fileMapper.selectList(wrapper);
+        long totalStorage = 0L;
+        for (File file : files) {
+            Long fileSize = file.getFileSize();
+            if (fileSize != null && fileSize > 0) {
+                totalStorage += fileSize;
+            }
+        }
+        
+        // 查询分享数量
+        LambdaQueryWrapper<FileShare> shareWrapper = new LambdaQueryWrapper<FileShare>()
+                .eq(tenantId != null, FileShare::getTenantId, tenantId)
+                .eq(FileShare::getUserId, userId)
+                .eq(FileShare::getStatus, FileShare.STATUS_ACTIVE);
+        Long sharedFiles = fileShareMapper.selectCount(shareWrapper);
+        
+        // 查询今日上传数（今日 00:00:00 开始）
+        Date todayStart = Date.from(LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant());
+        Long todayUploads = fileMapper.countTodayUploadsByUserId(userId, tenantId, todayStart);
+        
+        return UserFileStatsVO.builder()
+                .totalFiles(totalFiles != null ? totalFiles : 0L)
+                .totalStorage(totalStorage)
+                .sharedFiles(sharedFiles != null ? sharedFiles : 0L)
+                .todayUploads(todayUploads != null ? todayUploads : 0L)
+                .build();
     }
 
     // ==================== 异步查询方法（Virtual Thread）====================
