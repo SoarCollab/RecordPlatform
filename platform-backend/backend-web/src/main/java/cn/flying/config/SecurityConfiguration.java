@@ -10,19 +10,24 @@ import cn.flying.dao.vo.auth.AuthorizeVO;
 import cn.flying.filter.JsonUsernamePasswordAuthenticationFilter;
 import cn.flying.filter.JwtAuthenticationFilter;
 import cn.flying.filter.RequestLogFilter;
+import cn.flying.security.CustomMethodSecurityExpressionHandler;
 import cn.flying.service.AccountService;
 import cn.flying.service.LoginSecurityService;
+import cn.flying.service.PermissionService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.access.expression.method.MethodSecurityExpressionHandler;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -43,6 +48,7 @@ import java.io.PrintWriter;
  * @create: 2025-01-16 11:23
  */
 @Configuration
+@EnableMethodSecurity
 public class SecurityConfiguration {
 
     private static final Logger log = LoggerFactory.getLogger(SecurityConfiguration.class);
@@ -132,6 +138,15 @@ public class SecurityConfiguration {
                 .addFilterBefore(jwtAuthenticationFilter, RequestLogFilter.class)
                 .addFilterAt(jsonLoginFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
+    }
+
+    /**
+     * 注册方法级安全表达式处理器，支持自定义 SpEL 权限校验方法。
+     */
+    @Bean
+    public MethodSecurityExpressionHandler methodSecurityExpressionHandler(
+            @Lazy PermissionService permissionService) {
+        return new CustomMethodSecurityExpressionHandler(permissionService);
     }
 
     /**

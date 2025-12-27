@@ -6,6 +6,8 @@ import org.springframework.security.access.expression.SecurityExpressionRoot;
 import org.springframework.security.access.expression.method.MethodSecurityExpressionOperations;
 import org.springframework.security.core.Authentication;
 
+import java.util.function.Supplier;
+
 /**
  * 自定义方法安全表达式根
  * 提供自定义 SpEL 方法用于 @PreAuthorize 注解
@@ -24,6 +26,24 @@ public class CustomMethodSecurityExpressionRoot extends SecurityExpressionRoot
     private Object returnObject;
     private Object target;
 
+    /**
+     * 构建方法安全表达式根（支持延迟获取认证信息）。
+     *
+     * @param authenticationSupplier 认证信息提供者
+     * @param permissionService 权限服务
+     */
+    public CustomMethodSecurityExpressionRoot(Supplier<Authentication> authenticationSupplier,
+                                               PermissionService permissionService) {
+        super(authenticationSupplier);
+        this.permissionService = permissionService;
+    }
+
+    /**
+     * 构建方法安全表达式根（直接使用认证信息）。
+     *
+     * @param authentication 认证信息
+     * @param permissionService 权限服务
+     */
     public CustomMethodSecurityExpressionRoot(Authentication authentication,
                                                PermissionService permissionService) {
         super(authentication);
@@ -116,7 +136,12 @@ public class CustomMethodSecurityExpressionRoot extends SecurityExpressionRoot
         return this.returnObject;
     }
 
-    void setThis(Object target) {
+    /**
+     * 设置方法调用目标对象，供 SpEL 中 this 引用使用。
+     *
+     * @param target 目标对象
+     */
+    public void setThis(Object target) {
         this.target = target;
     }
 
