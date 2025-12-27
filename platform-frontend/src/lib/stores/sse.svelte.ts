@@ -5,6 +5,7 @@ import {
   closeSSEConnection,
   type SSEMessage,
 } from "$api/endpoints/sse";
+import { useSSELeader } from "./sse-leader.svelte";
 
 // ===== Types =====
 
@@ -12,19 +13,27 @@ export type SSEStatus = "disconnected" | "connecting" | "connected" | "error";
 
 // ===== Configuration =====
 
-const RECONNECT_BASE_DELAY = 1000; // 1 second
+const RECONNECT_BASE_DELAY = 2000; // 2 seconds (increased from 1s)
 const RECONNECT_MAX_DELAY = 30000; // 30 seconds
-const MAX_RECONNECT_ATTEMPTS = 10;
+const MAX_RECONNECT_ATTEMPTS = 5; // Reduced from 10
 
 // ===== State =====
 
 let status = $state<SSEStatus>("disconnected");
 let lastMessage = $state<SSEMessage | null>(null);
+let canManualReconnect = $state(false);
 
-// Non-reactive: internal tracking only, not displayed in UI
+// Non-reactive: internal tracking only
 let reconnectAttempts = 0;
-// Non-reactive: EventSource is a complex object that shouldn't be in $state
 let eventSource: EventSource | null = null;
+let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+let connectionId = "";
+let userId = "";
+let isPageVisible = true;
+let isInitialized = false;
+
+// ===== Leader Election Integration =====
+const leader = useSSELeader();
 
 // ===== Event Handlers =====
 
@@ -36,9 +45,50 @@ function notifyHandlers(message: SSEMessage): void {
   messageHandlers.forEach((handler) => handler(message));
 }
 
-// ===== Connection Logic =====
+function updateStatus(newStatus: SSEStatus): void {
+  status = newStatus;
+  canManualReconnect = newStatus === "error";
 
-let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  // Broadcast status to followers
+  leader.broadcastSSEStatus(newStatus);
+}
+
+// ===== Visibility API =====
+
+function setupVisibilityListener(): void {
+  if (!browser) return;
+
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  isPageVisible = document.visibilityState === "visible";
+}
+
+function cleanupVisibilityListener(): void {
+  if (!browser) return;
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
+}
+
+function handleVisibilityChange(): void {
+  const wasVisible = isPageVisible;
+  isPageVisible = document.visibilityState === "visible";
+
+  if (!wasVisible && isPageVisible) {
+    // Page became visible
+    console.log("SSE: Page visible, checking connection");
+
+    if (leader.isLeader && (status === "error" || status === "disconnected")) {
+      // Reset retry counter and reconnect immediately
+      reconnectAttempts = 0;
+      canManualReconnect = false;
+      connect();
+    }
+  } else if (wasVisible && !isPageVisible) {
+    // Page became hidden - pause reconnection scheduling (keep existing connection)
+    console.log("SSE: Page hidden, pausing reconnection");
+    clearReconnectTimeout();
+  }
+}
+
+// ===== Connection Logic =====
 
 function clearReconnectTimeout(): void {
   if (reconnectTimeout) {
@@ -48,9 +98,15 @@ function clearReconnectTimeout(): void {
 }
 
 function scheduleReconnect(): void {
+  // Don't schedule if page is hidden
+  if (!isPageVisible) {
+    console.log("SSE: Page hidden, skipping reconnect schedule");
+    return;
+  }
+
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
     console.error("SSE: Max reconnect attempts reached");
-    status = "error";
+    updateStatus("error");
     return;
   }
 
@@ -70,8 +126,19 @@ function scheduleReconnect(): void {
 }
 
 function connect(): void {
-  if (!browser || !getToken()) {
-    status = "disconnected";
+  if (!browser) {
+    updateStatus("disconnected");
+    return;
+  }
+
+  // Only leader should connect - check first to avoid unnecessary token operations
+  if (!leader.isLeader) {
+    console.log("SSE: Not leader, skipping connection");
+    return;
+  }
+
+  if (!getToken()) {
+    updateStatus("disconnected");
     return;
   }
 
@@ -81,23 +148,25 @@ function connect(): void {
     eventSource = null;
   }
 
-  status = "connecting";
+  updateStatus("connecting");
 
-  // 异步创建 SSE 连接（使用短期令牌握手）
   createSSEConnection({
+    connectionId,
     onOpen: () => {
-      status = "connected";
+      updateStatus("connected");
       reconnectAttempts = 0;
       console.log("SSE: Connected");
     },
     onMessage: (message) => {
       notifyHandlers(message);
+      // Broadcast to followers
+      leader.broadcastSSEMessage(message);
     },
     onError: () => {
-      status = "error";
+      updateStatus("error");
     },
     onClose: () => {
-      status = "disconnected";
+      updateStatus("disconnected");
       eventSource = null;
       scheduleReconnect();
     },
@@ -105,7 +174,7 @@ function connect(): void {
     if (es) {
       eventSource = es;
     } else {
-      status = "disconnected";
+      updateStatus("disconnected");
     }
   });
 }
@@ -119,7 +188,57 @@ function disconnect(): void {
     eventSource = null;
   }
 
-  status = "disconnected";
+  updateStatus("disconnected");
+}
+
+function manualReconnect(): void {
+  console.log("SSE: Manual reconnect triggered");
+  reconnectAttempts = 0;
+  canManualReconnect = false;
+  connect();
+}
+
+// ===== Initialization =====
+
+function init(currentUserId: string): void {
+  if (!browser || isInitialized) return;
+
+  userId = currentUserId;
+  connectionId = crypto.randomUUID();
+  isInitialized = true;
+
+  setupVisibilityListener();
+
+  // Initialize leader election
+  leader.init(userId, {
+    onBecomeLeader: () => {
+      console.log("SSE: Became leader, establishing connection");
+      connect();
+    },
+    onBecomeFollower: () => {
+      console.log("SSE: Became follower, closing any existing connection");
+      if (eventSource) {
+        closeSSEConnection(eventSource);
+        eventSource = null;
+      }
+      clearReconnectTimeout();
+      // Status will be synced from leader via BroadcastChannel
+    },
+    onMessage: (message) => {
+      notifyHandlers(message as SSEMessage);
+    },
+    onStatusChange: (newStatus) => {
+      status = newStatus as SSEStatus;
+      canManualReconnect = newStatus === "error";
+    },
+  });
+}
+
+function cleanup(): void {
+  disconnect();
+  leader.cleanup();
+  cleanupVisibilityListener();
+  isInitialized = false;
 }
 
 // ===== Subscription =====
@@ -145,10 +264,19 @@ export function useSSE() {
     get lastMessage() {
       return lastMessage;
     },
+    get canManualReconnect() {
+      return canManualReconnect;
+    },
+    get isLeader() {
+      return leader.isLeader;
+    },
 
     // Actions
+    init,
+    cleanup,
     connect,
     disconnect,
+    manualReconnect,
     subscribe,
   };
 }

@@ -23,16 +23,20 @@
 
   onMount(() => {
     badges.startAutoRefresh();
-
-    // Connect SSE and handle events
-    sse.connect();
     unsubscribeSSE = sse.subscribe(handleSSEMessage);
   });
 
   onDestroy(() => {
     badges.stopAutoRefresh();
-    sse.disconnect();
+    sse.cleanup();
     unsubscribeSSE?.();
+  });
+
+  // Initialize SSE when user is available (handles both initial load and user changes)
+  $effect(() => {
+    if (auth.user?.id && auth.initialized) {
+      sse.init(auth.user.id);
+    }
   });
 
   function handleSSEMessage(message: SSEMessage) {
@@ -497,7 +501,7 @@
           <!-- SSE Status -->
           <div
             class="flex items-center gap-2 text-sm text-muted-foreground"
-            title={`SSE: ${sse.status}`}
+            title={`SSE: ${sse.status}${sse.isLeader ? " (主窗口)" : ""}`}
           >
             <span
               class="h-2 w-2 rounded-full"
@@ -514,6 +518,15 @@
                     ? "连接中"
                     : "未连接"}
               </span>
+            {/if}
+            {#if sse.canManualReconnect}
+              <button
+                class="rounded px-2 py-0.5 text-xs text-primary hover:bg-accent"
+                onclick={() => sse.manualReconnect()}
+                title="点击重新连接"
+              >
+                重连
+              </button>
             {/if}
           </div>
 
