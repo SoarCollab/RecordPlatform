@@ -1,12 +1,11 @@
 <script lang="ts">
   import { useDownload } from "$stores/download.svelte";
   import DownloadProgress from "./DownloadProgress.svelte";
-  import { Download, ChevronDown, ChevronUp, Trash2, X } from "@lucide/svelte";
+  import { Download, ChevronDown, ChevronUp, Trash2 } from "@lucide/svelte";
   import { slide } from "svelte/transition";
 
   const download = useDownload();
 
-  let isExpanded = $state(true);
   let isMinimized = $state(false);
 
   const hasTasks = $derived(download.tasks.length > 0);

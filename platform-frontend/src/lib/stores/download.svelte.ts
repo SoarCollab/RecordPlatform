@@ -85,7 +85,11 @@ const downloadedChunksMap = new Map<string, Map<number, Uint8Array>>();
 // ===== Derived =====
 
 const pendingTasks = $derived(tasks.filter((t) => t.status === "pending"));
-const activeTasks = $derived(tasks.filter((t) => t.status === "downloading" || t.status === "fetching_urls"));
+const activeTasks = $derived(
+  tasks.filter(
+    (t) => t.status === "downloading" || t.status === "fetching_urls",
+  ),
+);
 const pausedTasks = $derived(tasks.filter((t) => t.status === "paused"));
 const completedTasks = $derived(tasks.filter((t) => t.status === "completed"));
 const failedTasks = $derived(tasks.filter((t) => t.status === "failed"));
@@ -125,7 +129,9 @@ async function fetchPresignedUrls(
 
   // For shared files, we don't have presigned URL endpoint yet
   // This will throw if not implemented
-  throw new Error("Presigned URLs not available for shared files. Use fallback download.");
+  throw new Error(
+    "Presigned URLs not available for shared files. Use fallback download.",
+  );
 }
 
 async function executeDownload(task: DownloadTask): Promise<void> {
@@ -216,7 +222,10 @@ async function executeDownload(task: DownloadTask): Promise<void> {
         const currentTask = getTask(taskId);
         if (currentTask) {
           const chunks = [...currentTask.chunks];
-          chunks[result.index] = { ...chunks[result.index], status: "completed" };
+          chunks[result.index] = {
+            ...chunks[result.index],
+            status: "completed",
+          };
           updateTask(taskId, { chunks });
         }
       },
@@ -230,7 +239,11 @@ async function executeDownload(task: DownloadTask): Promise<void> {
 
     // Check if cancelled during download
     const currentTask = getTask(taskId);
-    if (!currentTask || currentTask.status === "cancelled" || currentTask.status === "paused") {
+    if (
+      !currentTask ||
+      currentTask.status === "cancelled" ||
+      currentTask.status === "paused"
+    ) {
       return;
     }
 
@@ -257,7 +270,10 @@ async function executeDownload(task: DownloadTask): Promise<void> {
     const err = error as Error;
 
     // Check if cancelled
-    if (abortController.signal.aborted || err.message === "Download cancelled") {
+    if (
+      abortController.signal.aborted ||
+      err.message === "Download cancelled"
+    ) {
       const currentTask = getTask(taskId);
       if (currentTask?.status !== "paused") {
         updateTask(taskId, {
@@ -497,7 +513,10 @@ async function restoreTasks(): Promise<void> {
         error: null,
         totalChunks: pt.totalChunks,
         downloadedChunks: chunks.size,
-        progress: pt.totalChunks > 0 ? Math.round((chunks.size / pt.totalChunks) * 100) : 0,
+        progress:
+          pt.totalChunks > 0
+            ? Math.round((chunks.size / pt.totalChunks) * 100)
+            : 0,
         presignedUrls: pt.presignedUrls,
         urlsFetchedAt: pt.urlsFetchedAt,
         chunks: Array.from({ length: pt.totalChunks }, (_, i) => ({

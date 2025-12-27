@@ -27,7 +27,7 @@ const BASE = "/files";
  * 获取文件列表 (分页)
  */
 export async function getFiles(
-  params?: PageParams & FileQueryParams
+  params?: PageParams & FileQueryParams,
 ): Promise<Page<FileVO>> {
   return api.get<Page<FileVO>>(`${BASE}/page`, { params });
 }
@@ -81,7 +81,7 @@ export async function deleteFile(fileHashOrId: string): Promise<void> {
  * @returns 加密分片的 Base64 字符串数组
  */
 export async function downloadEncryptedChunks(
-  fileHash: string
+  fileHash: string,
 ): Promise<string[]> {
   return api.get<string[]>(`${BASE}/download`, { params: { fileHash } });
 }
@@ -92,7 +92,7 @@ export async function downloadEncryptedChunks(
  * @returns 解密信息（包含初始密钥）
  */
 export async function getDecryptInfo(
-  fileHash: string
+  fileHash: string,
 ): Promise<FileDecryptInfoVO> {
   return api.get<FileDecryptInfoVO>(`${BASE}/decryptInfo`, {
     params: { fileHash },
@@ -105,7 +105,7 @@ export async function getDecryptInfo(
  * @returns 分享码字符串
  */
 export async function createShare(
-  payload: CreateShareRequest
+  payload: CreateShareRequest,
 ): Promise<string> {
   return api.post<string>(`${BASE}/share`, payload);
 }
@@ -124,7 +124,7 @@ export async function updateShare(payload: UpdateShareRequest): Promise<void> {
  */
 export async function getShareByCode(_code: string): Promise<FileShareVO> {
   throw new Error(
-    "后端未提供 GET /files/share/{code} 接口，请使用 getSharedFiles"
+    "后端未提供 GET /files/share/{code} 接口，请使用 getSharedFiles",
   );
 }
 
@@ -134,7 +134,7 @@ export async function getShareByCode(_code: string): Promise<FileShareVO> {
  * @param sharingCode 分享码
  */
 export async function getSharedFiles(
-  sharingCode: string
+  sharingCode: string,
 ): Promise<SharedFileVO[]> {
   return api.get<SharedFileVO[]>(`${BASE}/getSharingFiles`, {
     params: { sharingCode },
@@ -157,7 +157,7 @@ export async function cancelShare(shareCode: string): Promise<void> {
  * @see FileShareVO.java
  */
 export async function getMyShares(
-  params?: PageParams
+  params?: PageParams,
 ): Promise<Page<FileShareVO>> {
   return api.get<Page<FileShareVO>>(`${BASE}/shares`, { params });
 }
@@ -175,7 +175,7 @@ export async function getDownloadAddress(fileHash: string): Promise<string[]> {
  * @param transactionHash 交易哈希
  */
 export async function getTransaction(
-  transactionHash: string
+  transactionHash: string,
 ): Promise<TransactionVO> {
   return api.get<TransactionVO>(`${BASE}/getTransaction`, {
     params: { transactionHash },
@@ -187,7 +187,7 @@ export async function getTransaction(
  * @param request 要保存的文件 ID 列表
  */
 export async function saveSharedFiles(
-  request: SaveShareFileRequest
+  request: SaveShareFileRequest,
 ): Promise<void> {
   return api.post(`${BASE}/saveShareFile`, request);
 }
@@ -208,7 +208,7 @@ export async function downloadFile(fileHash: string): Promise<Blob> {
 
   // Base64 解码为 Uint8Array
   const chunks = chunksBase64.map((base64) =>
-    Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+    Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
   );
 
   // 解密文件
@@ -228,7 +228,7 @@ export async function downloadFile(fileHash: string): Promise<Blob> {
  */
 export async function publicDownloadEncryptedChunks(
   shareCode: string,
-  fileHash: string
+  fileHash: string,
 ): Promise<string[]> {
   return api.get<string[]>(`${BASE}/public/download`, {
     params: { shareCode, fileHash },
@@ -244,7 +244,7 @@ export async function publicDownloadEncryptedChunks(
  */
 export async function publicGetDecryptInfo(
   shareCode: string,
-  fileHash: string
+  fileHash: string,
 ): Promise<FileDecryptInfoVO> {
   return api.get<FileDecryptInfoVO>(`${BASE}/public/decryptInfo`, {
     params: { shareCode, fileHash },
@@ -260,7 +260,7 @@ export async function publicGetDecryptInfo(
  */
 export async function publicDownloadFile(
   shareCode: string,
-  fileHash: string
+  fileHash: string,
 ): Promise<Blob> {
   const { decryptFile, arrayToBlob } = await import("$utils/crypto");
 
@@ -272,7 +272,7 @@ export async function publicDownloadFile(
 
   // Base64 解码为 Uint8Array
   const chunks = chunksBase64.map((base64) =>
-    Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+    Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
   );
 
   // 解密文件
@@ -290,7 +290,7 @@ export async function publicDownloadFile(
  */
 export async function shareDownloadEncryptedChunks(
   shareCode: string,
-  fileHash: string
+  fileHash: string,
 ): Promise<string[]> {
   return api.get<string[]>(`${BASE}/share/download`, {
     params: { shareCode, fileHash },
@@ -305,7 +305,7 @@ export async function shareDownloadEncryptedChunks(
  */
 export async function shareGetDecryptInfo(
   shareCode: string,
-  fileHash: string
+  fileHash: string,
 ): Promise<FileDecryptInfoVO> {
   return api.get<FileDecryptInfoVO>(`${BASE}/share/decryptInfo`, {
     params: { shareCode, fileHash },
@@ -320,7 +320,7 @@ export async function shareGetDecryptInfo(
  */
 export async function shareDownloadFile(
   shareCode: string,
-  fileHash: string
+  fileHash: string,
 ): Promise<Blob> {
   const { decryptFile, arrayToBlob } = await import("$utils/crypto");
 
@@ -330,7 +330,7 @@ export async function shareDownloadFile(
   ]);
 
   const chunks = chunksBase64.map((base64) =>
-    Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+    Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
   );
 
   const decryptedData = await decryptFile(chunks, decryptInfo.initialKey);
@@ -348,7 +348,7 @@ export async function shareDownloadFile(
 export async function downloadSharedFile(
   shareCode: string,
   fileHash: string,
-  shareType: ShareType
+  shareType: ShareType,
 ): Promise<Blob> {
   if (shareType === ShareType.PUBLIC) {
     return publicDownloadFile(shareCode, fileHash);
@@ -367,11 +367,14 @@ export async function downloadSharedFile(
  */
 export async function getShareAccessLogs(
   shareCode: string,
-  params?: PageParams
+  params?: PageParams,
 ): Promise<Page<ShareAccessLogVO>> {
-  return api.get<Page<ShareAccessLogVO>>(`${BASE}/share/${shareCode}/access-logs`, {
-    params,
-  });
+  return api.get<Page<ShareAccessLogVO>>(
+    `${BASE}/share/${shareCode}/access-logs`,
+    {
+      params,
+    },
+  );
 }
 
 /**
@@ -379,7 +382,7 @@ export async function getShareAccessLogs(
  * @param shareCode 分享码
  */
 export async function getShareAccessStats(
-  shareCode: string
+  shareCode: string,
 ): Promise<ShareAccessStatsVO> {
   return api.get<ShareAccessStatsVO>(`${BASE}/share/${shareCode}/stats`);
 }
@@ -389,7 +392,7 @@ export async function getShareAccessStats(
  * @param fileId 文件ID
  */
 export async function getFileProvenance(
-  fileId: string
+  fileId: string,
 ): Promise<FileProvenanceVO> {
   return api.get<FileProvenanceVO>(`${BASE}/${fileId}/provenance`);
 }

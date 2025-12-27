@@ -249,11 +249,24 @@ public class JwtUtils {
     /**
      * 将jwt对象中的用户role提取出来
      * @param jwt 已解析的Jwt对象
-     * @return 用户ID
+     * @return 用户角色（如 "admin", "monitor", "user"）
      */
     public String toRole(DecodedJWT jwt) {
         Map<String, Claim> claims = jwt.getClaims();
-        return claims.get("authorities").toString();
+        Claim authoritiesClaim = claims.get("authorities");
+        if (authoritiesClaim == null || authoritiesClaim.isNull()) {
+            return null;
+        }
+        java.util.List<String> authorities = authoritiesClaim.asList(String.class);
+        if (authorities == null || authorities.isEmpty()) {
+            return null;
+        }
+        // 提取第一个角色，并去除 "ROLE_" 前缀以匹配 UserRole 枚举
+        String role = authorities.get(0);
+        if (role != null && role.startsWith("ROLE_")) {
+            return role.substring(5); // 去除 "ROLE_" 前缀
+        }
+        return role;
     }
 
     /**

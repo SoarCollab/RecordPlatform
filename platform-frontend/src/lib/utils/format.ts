@@ -20,10 +20,12 @@ export function formatFileSize(bytes: number | string): string {
 
 /**
  * 格式化数字（添加千分位）
+ * 支持 number 或字符串形式的数字
  */
-export function formatNumber(num: number): string {
-  if (!Number.isFinite(num)) return "-";
-  return num.toLocaleString("zh-CN");
+export function formatNumber(num: number | string): string {
+  const value = typeof num === "string" ? parseFloat(num) : num;
+  if (!Number.isFinite(value)) return "-";
+  return value.toLocaleString("zh-CN");
 }
 
 /**

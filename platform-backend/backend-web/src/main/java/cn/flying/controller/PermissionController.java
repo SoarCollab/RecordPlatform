@@ -48,6 +48,17 @@ public class PermissionController {
 
     // ==================== 权限定义管理 ====================
 
+    @GetMapping
+    @Operation(summary = "获取权限树")
+    public Result<List<SysPermission>> getPermissionTree() {
+        Long tenantId = SecurityUtils.getTenantId();
+        LambdaQueryWrapper<SysPermission> wrapper = new LambdaQueryWrapper<>();
+        wrapper.and(w -> w.eq(SysPermission::getTenantId, 0L).or().eq(SysPermission::getTenantId, tenantId));
+        wrapper.eq(SysPermission::getStatus, 1);
+        wrapper.orderByAsc(SysPermission::getModule, SysPermission::getCode);
+        return Result.success(permissionMapper.selectList(wrapper));
+    }
+
     @GetMapping("/list")
     @Operation(summary = "获取权限列表（分页）")
     @OperationLog(module = "权限管理", operationType = "查询", description = "获取权限列表")
