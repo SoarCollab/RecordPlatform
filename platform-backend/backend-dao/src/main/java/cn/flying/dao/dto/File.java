@@ -43,6 +43,12 @@ public class File implements Serializable {
     @Schema(description = "来源Id(标识分享文件原始来源用户Id)")
     private Long origin;
 
+    /**
+     * 直接分享者用户ID（谁分享给我的）
+     */
+    @Schema(description = "直接分享者用户ID")
+    private Long sharedFromUserId;
+
     @Schema(description = "文件名称")
     private String fileName;
 
@@ -85,6 +91,18 @@ public class File implements Serializable {
     @TableField(exist = false)
     @Schema(description = "文件类型")
     private String contentType;
+
+    @TableField(exist = false)
+    @Schema(description = "文件所有者用户名（分享场景）")
+    private String ownerName;
+
+    @TableField(exist = false)
+    @Schema(description = "原上传者用户名（来自分享保存场景）")
+    private String originOwnerName;
+
+    @TableField(exist = false)
+    @Schema(description = "直接分享者用户名")
+    private String sharedFromUserName;
 
     public Long getFileSize() {
         if (fileSize == null && fileParam != null) {

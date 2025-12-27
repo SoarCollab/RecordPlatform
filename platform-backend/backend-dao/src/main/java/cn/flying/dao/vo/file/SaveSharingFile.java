@@ -1,6 +1,7 @@
 package cn.flying.dao.vo.file;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import lombok.Getter;
 import lombok.Setter;
@@ -20,4 +21,8 @@ public class SaveSharingFile {
     @NotEmpty(message = "分享文件ID列表不能为空")
     @Schema(description = "分享文件ID列表")
     List<String> sharingFileIdList;
+
+    @NotBlank(message = "分享码不能为空")
+    @Schema(description = "分享码（用于链路追踪）")
+    String shareCode;
 }
