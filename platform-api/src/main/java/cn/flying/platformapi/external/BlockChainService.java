@@ -72,7 +72,7 @@ public interface BlockChainService {
      * 获取分享文件信息
      *
      * @param shareCode 分享码
-     * @return 分享文件信息
+     * @return 分享文件信息（取消分享时 expirationTime 为 -1）
      */
     Result<SharingVO> getSharedFiles(String shareCode);
 

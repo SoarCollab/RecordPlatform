@@ -81,6 +81,9 @@ public class BlockChainServiceImpl implements BlockChainService {
         }
     }
 
+    /**
+     * 获取分享文件信息并返回过期时间（取消分享时 expirationTime 为 -1）
+     */
     @Override
     @Retry(name = "blockchain")
     @ApiDoc(value = "获取分享文件")
@@ -91,6 +94,8 @@ public class BlockChainServiceImpl implements BlockChainService {
             return Result.success(SharingVO.builder()
                     .uploader(shareInfo.getUploader())
                     .fileHashList(shareInfo.getFileHashList())
+                    .expirationTime(shareInfo.getExpireTimestamp())
+                    .isValid(shareInfo.getIsValid())
                     .build());
 
         } catch (Exception e) {

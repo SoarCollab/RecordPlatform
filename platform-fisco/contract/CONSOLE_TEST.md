@@ -174,7 +174,7 @@ call Sharing latest shareFiles "" ["0x<fileHash>"] 60
 
 ### 7. getSharedFiles - 获取分享的文件
 
-**函数签名**：`getSharedFiles(string shareCode) returns (string uploader, File[] files, uint256 expireTime)`
+**函数签名**：`getSharedFiles(string shareCode) returns (string uploader, File[] files, int256 expireTime)`（取消分享时 expireTime 返回 -1）
 
 ```bash
 # 7.1 使用有效分享码获取文件（使用 shareFiles 返回的分享码）
@@ -307,7 +307,7 @@ call Sharing latest cancelShare "<shareCode1>"
 # 12. 验证分享已取消（isValid 应为 false）
 call Sharing latest getShareInfo "<shareCode1>"
 
-# 13. 尝试使用已取消的分享码获取文件（预期失败）
+# 13. 使用已取消的分享码获取文件（预期返回 expireTime = -1）
 call Sharing latest getSharedFiles "<shareCode1>"
 
 # ==================== 文件删除测试 ====================

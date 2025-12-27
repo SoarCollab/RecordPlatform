@@ -38,7 +38,7 @@ public class SharingVO implements Serializable {
     @Schema(description = "剩余访问次数")
     private Integer remainingAccesses;
 
-    @Schema(description = "过期时间戳（毫秒）")
+    @Schema(description = "过期时间戳（毫秒，取消分享时为 -1）")
     private Long expirationTime;
 
     @Schema(description = "是否有效（未被取消）")

@@ -115,6 +115,10 @@ public enum ResultEnum implements Serializable {
     FILE_EMPTY(50009, "文件为空"),
     /** 文件存证失败 */
     FILE_RECORD_ERROR(50010, "文件存证失败"),
+    /** 分享已被取消 */
+    SHARE_CANCELLED(50011, "分享链接已被取消"),
+    /** 分享已过期 */
+    SHARE_EXPIRED(50012, "分享已过期"),
 
     /* ==================== 消息服务错误：60000-69999 ==================== */
     /** 消息不存在 */
