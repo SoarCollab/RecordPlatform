@@ -245,6 +245,7 @@ CREATE TABLE IF NOT EXISTS `processed_message` (
 -- ---------------------------------------------
 CREATE TABLE IF NOT EXISTS `sys_operation_log` (
     `id`              BIGINT       NOT NULL AUTO_INCREMENT COMMENT 'Log ID',
+    `tenant_id`       BIGINT       DEFAULT 0 COMMENT 'Tenant ID',
     `module`          VARCHAR(50)  DEFAULT NULL COMMENT 'Module',
     `operation_type`  VARCHAR(20)  DEFAULT NULL COMMENT 'Operation type',
     `description`     VARCHAR(255) DEFAULT NULL COMMENT 'Description',
@@ -261,6 +262,7 @@ CREATE TABLE IF NOT EXISTS `sys_operation_log` (
     `operation_time`  DATETIME     DEFAULT NULL COMMENT 'Operation time',
     `execution_time`  BIGINT       DEFAULT NULL COMMENT 'Execution time (ms)',
     PRIMARY KEY (`id`),
+    INDEX `idx_operation_log_tenant` (`tenant_id`),
     INDEX `idx_operation_time` (`operation_time`),
     INDEX `idx_username` (`username`),
     INDEX `idx_module` (`module`),
