@@ -81,6 +81,15 @@
         <appender-ref ref="JSON_FILE"/>
     </appender>
 
+    <!-- SkyWalking Log Reporter - sends logs to OAP via gRPC -->
+    <appender name="SKYWALKING" class="org.apache.skywalking.apm.toolkit.log.logback.v1.x.log.GRPCLogClientAppender">
+        <encoder class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">
+            <layout class="org.apache.skywalking.apm.toolkit.log.logback.v1.x.mdc.TraceIdMDCPatternLogbackLayout">
+                <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            </layout>
+        </encoder>
+    </appender>
+
     <!-- Production: JSON logs + Console -->
     <springProfile name="prod">
         <logger name="org.apache.dubbo" level="WARN"/>
@@ -90,6 +99,7 @@
         <root level="${STORAGE_ROOT_LOG_LEVEL:-INFO}">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="ASYNC_JSON"/>
+            <appender-ref ref="SKYWALKING"/>
         </root>
     </springProfile>
 
@@ -101,6 +111,7 @@
         <root level="${STORAGE_ROOT_LOG_LEVEL:-INFO}">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="FILE"/>
+            <appender-ref ref="SKYWALKING"/>
         </root>
     </springProfile>
 
@@ -112,6 +123,7 @@
         <root level="${STORAGE_ROOT_LOG_LEVEL:-DEBUG}">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="FILE"/>
+            <appender-ref ref="SKYWALKING"/>
         </root>
     </springProfile>
 
