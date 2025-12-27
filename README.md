@@ -10,6 +10,8 @@
 - 分布式存储：S3 兼容存储 双副本冗余，任一副本可读
 - 分片上传：大文件断点续传，支持 AES-GCM / ChaCha20-Poly1305 可配置加密
 - 文件分享：生成带访问次数限制的分享码
+- 分享审计：记录访问、下载、保存操作，追踪访问来源和行为
+- 文件溯源：追踪文件分享链路（A→B→C），支持多级分享溯源查询
 - 协作通知：站内消息、公告广播、工单系统、会话管理
 - SSE 实时推送：文件状态变更、消息通知实时送达
 
@@ -272,11 +274,11 @@ RecordPlatform/
 
 **角色定义**
 
-| 角色      | 说明     | 默认权限                             |
-| --------- | -------- | ------------------------------------ |
-| `user`    | 普通用户 | 文件读写删除分享、工单创建、消息收发 |
-| `admin`   | 管理员   | 所有权限                             |
-| `monitor` | 监控员   | 只读权限 + 审计日志查看              |
+| 角色      | 说明     | 默认权限                                             |
+| --------- | -------- | ---------------------------------------------------- |
+| `user`    | 普通用户 | 文件读写删除分享、工单创建、消息收发                 |
+| `admin`   | 管理员   | 所有权限，含文件审计、分享管理、溯源查询、强制删除   |
+| `monitor` | 监控员   | 只读权限 + 审计日志查看                              |
 
 **权限码格式**
 
@@ -284,7 +286,11 @@ RecordPlatform/
 module:action
 ```
 
-示例：`file:read`, `file:admin`, `ticket:write`, `system:audit`
+示例：
+- `file:read` - 文件读取
+- `file:admin` - 文件管理（跨用户查看、状态变更、强制删除、溯源查询）
+- `ticket:write` - 工单操作
+- `system:audit` - 审计日志
 
 **使用方式**
 
@@ -610,6 +616,7 @@ Flyway 脚本位于 `platform-backend/backend-web/src/main/resources/db/migratio
 | V1.1.0        | 消息服务表 (message, announcement, ticket, conversation)             |
 | V1.1.1        | 性能优化复合索引 (文件、日志、工单查询)                              |
 | 06_permission | 权限控制表 (sys_permission, sys_role_permission, account_role_audit) |
+| V1.3.0        | 分享审计 (share_access_log, file_source, file.shared_from_user_id)   |
 
 启动时自动执行，或手动初始化：
 
@@ -869,6 +876,19 @@ SSE 事件类型：`NEW_MESSAGE`, `NEW_ANNOUNCEMENT`, `TICKET_UPDATE`, `TICKET_R
 | POST   | `/roles/{role}/grant`  | 为角色授予权限   |
 | DELETE | `/roles/{role}/revoke` | 撤销角色权限     |
 
+### 管理员文件审计 `/api/v1/admin/files`
+
+| 方法   | 路径                       | 说明                             |
+| ------ | -------------------------- | -------------------------------- |
+| GET    | `/`                        | 获取所有文件列表（分页，跨用户） |
+| GET    | `/{id}`                    | 获取文件详情（含溯源链路）       |
+| PUT    | `/{id}/status`             | 更新文件状态                     |
+| DELETE | `/{id}`                    | 强制删除文件（物理删除）         |
+| GET    | `/shares`                  | 获取所有分享列表（分页）         |
+| DELETE | `/shares/{shareCode}`      | 强制取消分享                     |
+| GET    | `/shares/{shareCode}/logs` | 获取分享访问日志                 |
+| GET    | `/shares/{shareCode}/stats`| 获取分享访问统计                 |
+
 详细 API 文档请访问 Swagger UI。
 
 ## 智能合约
@@ -941,25 +961,6 @@ A: v2.0 不再支持无版本头的旧格式文件。如需迁移旧数据，需
 
 **Q: 如何选择加密算法**
 A: 如果服务器有 AES-NI 指令集支持，推荐 `aes-gcm`；容器/ARM 环境推荐 `chacha20`。可设置 `algorithm: auto` + `benchmark-on-startup: true` 让系统自动选择。
-
-## 系统演进状态
-
-**当前版本**：v7.0
-
-| 阶段 | 状态 | 完成内容                                                                |
-| ---- | ---- | ----------------------------------------------------------------------- |
-| P0   | ✅   | Bug 修复、CORS 安全加固、大文件上传超时优化                             |
-| P1   | ✅   | HTTPS 强制、分布式流控改造、定时任务分布式锁、Saga 补偿原子化           |
-| P2   | ✅   | SkyWalking Agent 部署、健康检查指标补全、结构化日志标准化               |
-| P3   | ✅   | 存储路径租户隔离、Redis Key 租户隔离、Dubbo 租户传播                    |
-| P4   | ✅   | 多链适配器架构（FISCO/BSN/Besu 三链切换）、智能合约优化、数据库索引优化 |
-| P5   | 🔄   | CQRS/虚拟线程（✅）、前端核心功能开发（进行中）                         |
-
-**系统成熟度**：`8.5/10` - 多链架构就绪，CQRS 读写分离完成，进入前端开发阶段
-
-> 后端部署脚本已完善，支持 SkyWalking 链路追踪，详见 [scripts/README.md](./scripts/README.md)
-
-详细演进规划参见 [EVOLUTION_PLAN.md](./EVOLUTION_PLAN.md)
 
 ## 许可证
 
