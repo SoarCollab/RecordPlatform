@@ -372,7 +372,7 @@
 						</div>
 						<div class="rounded-lg border p-4">
 							<p class="text-sm text-muted-foreground">失败交易</p>
-							<p class="mt-1 text-2xl font-bold font-mono {chainStatus.failedTransactionCount > 0 ? 'text-destructive' : ''}">
+							<p class="mt-1 text-2xl font-bold font-mono {Number(chainStatus.failedTransactionCount) > 0 ? 'text-destructive' : ''}">
 								{formatNumber(chainStatus.failedTransactionCount)}
 							</p>
 						</div>
@@ -385,7 +385,7 @@
 					<!-- Last Update -->
 					{#if chainStatus.lastUpdateTime}
 						<p class="text-sm text-muted-foreground">
-							数据更新时间: {formatDateTime(new Date(chainStatus.lastUpdateTime).toISOString())}
+							数据更新时间: {formatDateTime(chainStatus.lastUpdateTime)}
 						</p>
 					{/if}
 				</div>
