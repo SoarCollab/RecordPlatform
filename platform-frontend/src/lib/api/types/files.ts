@@ -13,6 +13,10 @@ export interface FileVO {
   status: FileStatus;
   createTime: string;
   updateTime?: string;
+  /** 原上传者用户名（来自分享保存的文件） */
+  originOwnerName?: string;
+  /** 直接分享者用户名 */
+  sharedFromUserName?: string;
 }
 
 /**
@@ -305,6 +309,8 @@ export interface SharedFileVO {
  */
 export interface SaveShareFileRequest {
   sharingFileIdList: string[];
+  /** 分享码（用于链路追踪，必填） */
+  shareCode: string;
 }
 
 /**
@@ -324,4 +330,69 @@ export interface FileDecryptInfoVO {
   chunkCount: number;
   /** 文件哈希 */
   fileHash: string;
+}
+
+/**
+ * 分享访问日志
+ * @see ShareAccessLogVO.java
+ */
+export interface ShareAccessLogVO {
+  id: string;
+  shareCode: string;
+  /** 操作类型：1=查看，2=下载，3=保存 */
+  actionType: number;
+  actionTypeDesc: string;
+  actorUserId?: string;
+  actorUserName: string;
+  actorIp: string;
+  fileHash?: string;
+  fileName?: string;
+  accessTime: string;
+}
+
+/**
+ * 分享访问统计
+ * @see ShareAccessStatsVO.java
+ */
+export interface ShareAccessStatsVO {
+  shareCode: string;
+  viewCount: number;
+  downloadCount: number;
+  saveCount: number;
+  uniqueActors: number;
+  totalAccess: number;
+}
+
+/**
+ * 文件溯源信息
+ * @see FileProvenanceVO.java
+ */
+export interface FileProvenanceVO {
+  fileId: string;
+  fileHash: string;
+  fileName: string;
+  /** 是否为原始文件（自己上传的） */
+  isOriginal: boolean;
+  originUserId?: string;
+  originUserName?: string;
+  sharedFromUserId?: string;
+  sharedFromUserName?: string;
+  /** 分享链路深度（0=原始文件，1=一次分享，2=二次分享...） */
+  depth: number;
+  saveTime?: string;
+  shareCode?: string;
+  /** 完整分享链路 */
+  chain: ProvenanceNode[];
+}
+
+/**
+ * 分享链路节点
+ */
+export interface ProvenanceNode {
+  userId: string;
+  userName: string;
+  fileId: string;
+  depth: number;
+  shareCode?: string;
+  time?: string;
 }

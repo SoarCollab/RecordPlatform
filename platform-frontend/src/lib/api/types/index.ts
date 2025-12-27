@@ -5,3 +5,4 @@ export * from "./files";
 export * from "./messages";
 export * from "./tickets";
 export * from "./system";
+export * from "./admin";
