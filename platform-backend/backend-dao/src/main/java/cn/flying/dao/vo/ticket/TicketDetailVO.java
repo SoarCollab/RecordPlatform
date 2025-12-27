@@ -33,6 +33,12 @@ public class TicketDetailVO {
     @Schema(description = "优先级描述")
     private String priorityDesc;
 
+    @Schema(description = "类别: 0-Bug, 1-功能请求, 2-问题咨询, 3-反馈建议, 99-其他")
+    private Integer category;
+
+    @Schema(description = "类别描述")
+    private String categoryDesc;
+
     @Schema(description = "状态")
     private Integer status;
 

@@ -1,6 +1,7 @@
 package cn.flying.service.impl;
 
 import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.constant.TicketCategory;
 import cn.flying.common.constant.TicketPriority;
 import cn.flying.common.constant.TicketStatus;
 import cn.flying.common.exception.GeneralException;
@@ -92,6 +93,7 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
                 .eq(Ticket::getCreatorId, userId)
                 .eq(query.getStatus() != null, Ticket::getStatus, query.getStatus())
                 .eq(query.getPriority() != null, Ticket::getPriority, query.getPriority())
+                .eq(query.getCategory() != null, Ticket::getCategory, query.getCategory())
                 .like(StringUtils.hasText(escapedTicketNo), Ticket::getTicketNo, escapedTicketNo)
                 .and(StringUtils.hasText(escapedKeyword), w -> w
                         .like(Ticket::getTitle, escapedKeyword)
@@ -136,6 +138,7 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
         LambdaQueryWrapper<Ticket> wrapper = new LambdaQueryWrapper<Ticket>()
                 .eq(query.getStatus() != null, Ticket::getStatus, query.getStatus())
                 .eq(query.getPriority() != null, Ticket::getPriority, query.getPriority())
+                .eq(query.getCategory() != null, Ticket::getCategory, query.getCategory())
                 .like(StringUtils.hasText(escapedTicketNo), Ticket::getTicketNo, escapedTicketNo)
                 .and(StringUtils.hasText(escapedKeyword), w -> w
                         .like(Ticket::getTitle, escapedKeyword)
@@ -413,6 +416,7 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
                 .setTicketNo(ticket.getTicketNo())
                 .setTitle(ticket.getTitle())
                 .setPriorityWithDesc(ticket.getPriority())
+                .setCategoryWithDesc(ticket.getCategory())
                 .setStatusWithDesc(ticket.getStatus())
                 .setCreatorId(IdUtils.toExternalId(ticket.getCreatorId()))
                 .setCreateTime(ticket.getCreateTime())
@@ -450,6 +454,7 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
                 .setTicketNo(ticket.getTicketNo())
                 .setTitle(ticket.getTitle())
                 .setPriorityWithDesc(ticket.getPriority())
+                .setCategoryWithDesc(ticket.getCategory())
                 .setStatusWithDesc(ticket.getStatus())
                 .setCreatorId(IdUtils.toExternalId(ticket.getCreatorId()))
                 .setCreateTime(ticket.getCreateTime())
@@ -502,6 +507,10 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
                 .setContent(ticket.getContent())
                 .setPriority(ticket.getPriority())
                 .setPriorityDesc(TicketPriority.fromCode(ticket.getPriority()).getDescription())
+                .setCategory(ticket.getCategory())
+                .setCategoryDesc(ticket.getCategory() != null
+                        ? TicketCategory.fromCode(ticket.getCategory()).getDescription()
+                        : TicketCategory.OTHER.getDescription())
                 .setStatus(ticket.getStatus())
                 .setStatusDesc(TicketStatus.fromCode(ticket.getStatus()).getDescription())
                 .setCreatorId(IdUtils.toExternalId(ticket.getCreatorId()))
