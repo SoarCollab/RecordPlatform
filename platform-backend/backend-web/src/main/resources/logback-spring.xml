@@ -4,10 +4,8 @@
 
     <property name="SERVICE_NAME" value="record-platform-web"/>
     <property name="LOG_PATH" value="${LOG_PATH:-log}"/>
-    <property name="CONSOLE_LOG_PATTERN"
-              value="%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p})  %clr([%15.15t]){faint} %clr([tid=%tid tenant=%X{tenantId:-0} trace=%X{traceId:-}]){faint} %clr(--){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
-    <property name="FILE_LOG_PATTERN"
-              value="%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} ${PID:- } --- [%t] [tid=%tid tenant=%X{tenantId:-0} trace=%X{traceId:-}] %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
+    <property name="CONSOLE_LOG_PATTERN" value="%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p})  %clr([%15.15t]){faint} %clr([tid=%tid tenant=%X{tenantId:-0} trace=%X{traceId:-}]){faint} %clr(--){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
+    <property name="FILE_LOG_PATTERN" value="%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} ${PID:- } --- [%t] [tid=%tid tenant=%X{tenantId:-0} trace=%X{traceId:-}] %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
 
     <!-- Console Appender - for all environments -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
@@ -68,6 +66,15 @@
         <appender-ref ref="JSON_FILE"/>
     </appender>
 
+    <!-- SkyWalking Log Reporter - sends logs to OAP via gRPC -->
+    <appender name="SKYWALKING" class="org.apache.skywalking.apm.toolkit.log.logback.v1.x.log.GRPCLogClientAppender">
+        <encoder class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">
+            <layout class="org.apache.skywalking.apm.toolkit.log.logback.v1.x.mdc.TraceIdMDCPatternLogbackLayout">
+                <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+            </layout>
+        </encoder>
+    </appender>
+
     <!-- Rolling File Appender with PatternLayout - for local/dev -->
     <springProfile name="dev | local">
         <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
@@ -97,6 +104,7 @@
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="ASYNC_JSON"/>
+            <appender-ref ref="SKYWALKING"/>
         </root>
     </springProfile>
 
@@ -109,6 +117,7 @@
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="FILE"/>
+            <appender-ref ref="SKYWALKING"/>
         </root>
     </springProfile>
 
@@ -125,6 +134,7 @@
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="FILE"/>
+            <appender-ref ref="SKYWALKING"/>
         </root>
     </springProfile>
 
