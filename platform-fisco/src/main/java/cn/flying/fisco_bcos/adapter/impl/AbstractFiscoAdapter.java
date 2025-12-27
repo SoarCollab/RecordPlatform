@@ -241,6 +241,9 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
         }
     }
 
+    /**
+     * 查询分享码对应的文件列表并解析过期时间（取消分享时 expireTime=-1）
+     */
     @Override
     public ChainShareInfo getSharedFiles(String shareCode) {
         try {
@@ -251,7 +254,7 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
                 throw new ChainException(getChainType(), "getSharedFiles", "Share not found");
             }
 
-            if (!(response.getReturnObject() instanceof List<?> returnList) || returnList.size() != 2) {
+            if (!(response.getReturnObject() instanceof List<?> returnList) || returnList.size() != 3) {
                 throw new ChainException(getChainType(), "getSharedFiles", "Invalid return value");
             }
 
@@ -267,10 +270,15 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
                 }
             }
 
+            long expireTime = parseLong(returnList.get(2));
+            boolean isValid = expireTime >= 0;
+
             return ChainShareInfo.builder()
                     .uploader(uploaderResult)
                     .fileHashList(fileList)
                     .shareCode(shareCode)
+                    .expireTimestamp(expireTime)
+                    .isValid(isValid)
                     .build();
 
         } catch (ChainException e) {

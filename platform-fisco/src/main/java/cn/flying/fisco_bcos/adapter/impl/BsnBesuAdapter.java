@@ -12,9 +12,11 @@ import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.FunctionReturnDecoder;
 import org.web3j.abi.TypeReference;
 import org.web3j.abi.datatypes.DynamicArray;
+import org.web3j.abi.datatypes.DynamicStruct;
 import org.web3j.abi.datatypes.Type;
 import org.web3j.abi.datatypes.Utf8String;
 import org.web3j.abi.datatypes.generated.Bytes32;
+import org.web3j.abi.datatypes.generated.Int256;
 import org.web3j.abi.datatypes.generated.Uint256;
 import org.web3j.crypto.Credentials;
 import org.web3j.crypto.RawTransaction;
@@ -55,6 +57,65 @@ public class BsnBesuAdapter implements BlockChainAdapter {
     private final BsnBesuConfig besuConfig;
 
     private String sharingContractAddress;
+
+    /**
+     * 分享文件结构体（与 Solidity 中 Storage.File 对齐）
+     */
+    public static class SharingFileStruct extends DynamicStruct {
+        public Utf8String fileName;
+        public Utf8String uploader;
+        public Utf8String content;
+        public Utf8String param;
+        public Bytes32 fileHash;
+        public Uint256 uploadTime;
+
+        /**
+         * 构造分享文件结构体（用于 ABI 解码）
+         */
+        public SharingFileStruct(
+                Utf8String fileName,
+                Utf8String uploader,
+                Utf8String content,
+                Utf8String param,
+                Bytes32 fileHash,
+                Uint256 uploadTime
+        ) {
+            super(fileName, uploader, content, param, fileHash, uploadTime);
+            this.fileName = fileName;
+            this.uploader = uploader;
+            this.content = content;
+            this.param = param;
+            this.fileHash = fileHash;
+            this.uploadTime = uploadTime;
+        }
+
+        /**
+         * 构造分享文件结构体（用于 ABI 编码）
+         */
+        public SharingFileStruct(
+                String fileName,
+                String uploader,
+                String content,
+                String param,
+                byte[] fileHash,
+                BigInteger uploadTime
+        ) {
+            super(
+                    new Utf8String(fileName),
+                    new Utf8String(uploader),
+                    new Utf8String(content),
+                    new Utf8String(param),
+                    new Bytes32(fileHash),
+                    new Uint256(uploadTime)
+            );
+            this.fileName = new Utf8String(fileName);
+            this.uploader = new Utf8String(uploader);
+            this.content = new Utf8String(content);
+            this.param = new Utf8String(param);
+            this.fileHash = new Bytes32(fileHash);
+            this.uploadTime = new Uint256(uploadTime);
+        }
+    }
 
     @PostConstruct
     public void init() {
@@ -290,6 +351,9 @@ public class BsnBesuAdapter implements BlockChainAdapter {
         }
     }
 
+    /**
+     * 获取分享文件信息并解析过期时间（取消分享时 expireTime=-1）
+     */
     @Override
     public ChainShareInfo getSharedFiles(String shareCode) {
         try {
@@ -299,23 +363,26 @@ public class BsnBesuAdapter implements BlockChainAdapter {
                     Arrays.asList(
                             new TypeReference<Utf8String>() {
                             },
-                            new TypeReference<DynamicArray<Bytes32>>() {
+                            new TypeReference<DynamicArray<SharingFileStruct>>() {
+                            },
+                            new TypeReference<Int256>() {
                             }
                     )
             );
 
             List<Type> result = callContract(abiFunction);
 
-            if (result.size() < 2) {
+            if (result.size() < 3) {
                 throw new ChainException(ChainType.BSN_BESU, "getSharedFiles", "Share not found");
             }
 
             String uploaderResult = ((Utf8String) result.get(0)).getValue();
             @SuppressWarnings("unchecked")
-            List<Bytes32> hashes = ((DynamicArray<Bytes32>) result.get(1)).getValue();
+            List<SharingFileStruct> files = ((DynamicArray<SharingFileStruct>) result.get(1)).getValue();
+            BigInteger expireTime = ((Int256) result.get(2)).getValue();
 
-            List<String> fileHashList = hashes.stream()
-                    .map(h -> Numeric.toHexStringNoPrefix(h.getValue()))
+            List<String> fileHashList = files.stream()
+                    .map(file -> Numeric.toHexStringNoPrefix(file.fileHash.getValue()))
                     .filter(h -> !h.equals("0".repeat(64)))
                     .toList();
 
@@ -323,6 +390,8 @@ public class BsnBesuAdapter implements BlockChainAdapter {
                     .uploader(uploaderResult)
                     .fileHashList(fileHashList)
                     .shareCode(shareCode)
+                    .expireTimestamp(expireTime.longValue())
+                    .isValid(expireTime.signum() >= 0)
                     .build();
 
         } catch (ChainException e) {
