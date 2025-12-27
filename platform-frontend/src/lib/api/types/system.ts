@@ -76,14 +76,15 @@ export interface AuditLogQueryParams {
 
 /**
  * 系统统计信息
+ * 注意：Long 类型字段从后端序列化为字符串
  */
 export interface SystemStats {
-  totalUsers: number;
-  totalFiles: number;
-  totalStorage: number;
-  totalTransactions: number;
-  todayUploads: number;
-  todayDownloads: number;
+  totalUsers: number | string;
+  totalFiles: number | string;
+  totalStorage: number | string;
+  totalTransactions: number | string;
+  todayUploads: number | string;
+  todayDownloads: number | string;
 }
 
 /**
@@ -97,15 +98,16 @@ export enum ChainType {
 
 /**
  * 区块链状态信息
+ * 注意：Long 类型字段从后端序列化为字符串
  */
 export interface ChainStatus {
-  blockNumber: number;
-  transactionCount: number;
-  failedTransactionCount: number;
+  blockNumber: number | string;
+  transactionCount: number | string;
+  failedTransactionCount: number | string;
   nodeCount: number;
   chainType: ChainType;
   healthy: boolean;
-  lastUpdateTime: number;
+  lastUpdateTime: number | string;
 }
 
 /**

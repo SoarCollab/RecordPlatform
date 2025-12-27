@@ -20,7 +20,7 @@ const BASE = "/admin/files";
  * 获取所有文件列表（分页）
  */
 export async function getAllFiles(
-  params?: PageParams & AdminFileQueryParams
+  params?: PageParams & AdminFileQueryParams,
 ): Promise<Page<AdminFileVO>> {
   return api.get<Page<AdminFileVO>>(BASE, { params });
 }
@@ -37,7 +37,7 @@ export async function getFileDetail(id: string): Promise<AdminFileDetailVO> {
  */
 export async function updateFileStatus(
   id: string,
-  request: UpdateFileStatusRequest
+  request: UpdateFileStatusRequest,
 ): Promise<void> {
   return api.put(`${BASE}/${id}/status`, request);
 }
@@ -47,7 +47,7 @@ export async function updateFileStatus(
  */
 export async function forceDeleteFile(
   id: string,
-  reason?: string
+  reason?: string,
 ): Promise<void> {
   return api.delete(`${BASE}/${id}`, { params: { reason } });
 }
@@ -58,7 +58,7 @@ export async function forceDeleteFile(
  * 获取所有分享列表（分页）
  */
 export async function getAllShares(
-  params?: PageParams & AdminShareQueryParams
+  params?: PageParams & AdminShareQueryParams,
 ): Promise<Page<AdminShareVO>> {
   return api.get<Page<AdminShareVO>>(`${BASE}/shares`, { params });
 }
@@ -68,7 +68,7 @@ export async function getAllShares(
  */
 export async function forceCancelShare(
   shareCode: string,
-  reason?: string
+  reason?: string,
 ): Promise<void> {
   return api.delete(`${BASE}/shares/${shareCode}`, { params: { reason } });
 }
@@ -78,7 +78,7 @@ export async function forceCancelShare(
  */
 export async function getShareAccessLogs(
   shareCode: string,
-  params?: PageParams
+  params?: PageParams,
 ): Promise<Page<ShareAccessLogVO>> {
   return api.get<Page<ShareAccessLogVO>>(`${BASE}/shares/${shareCode}/logs`, {
     params,
@@ -89,7 +89,7 @@ export async function getShareAccessLogs(
  * 获取分享访问统计
  */
 export async function getShareAccessStats(
-  shareCode: string
+  shareCode: string,
 ): Promise<ShareAccessStatsVO> {
   return api.get<ShareAccessStatsVO>(`${BASE}/shares/${shareCode}/stats`);
 }

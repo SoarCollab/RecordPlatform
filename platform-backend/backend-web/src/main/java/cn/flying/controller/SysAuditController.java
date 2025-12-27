@@ -51,13 +51,49 @@ public class SysAuditController {
     }
 
     /**
-     * 分页查询操作日志
+     * 分页查询审计日志
      */
-    @GetMapping("/logs/page")
-    @Operation(summary = "分页查询操作日志")
-    @OperationLog(module = "系统审计", operationType = "查询", description = "分页查询操作日志")
-    public Result<IPage<SysOperationLog>> queryOperationLogs(@RequestBody AuditLogQueryVO queryVO) {
-        return Result.success(auditService.queryOperationLogs(queryVO));
+    @GetMapping
+    @Operation(summary = "分页查询审计日志")
+    public Result<IPage<AuditLogVO>> getAuditLogs(
+            @RequestParam(value = "current", defaultValue = "1") Integer current,
+            @RequestParam(value = "size", defaultValue = "20") Integer size,
+            @RequestParam(required = false) String username,
+            @RequestParam(required = false) String action,
+            @RequestParam(required = false) String module,
+            @RequestParam(required = false) String startTime,
+            @RequestParam(required = false) String endTime,
+            @RequestParam(required = false) Integer status) {
+
+        AuditLogQueryVO queryVO = new AuditLogQueryVO();
+        queryVO.setPageNum(current);
+        queryVO.setPageSize(size);
+        queryVO.setUsername(username);
+        queryVO.setOperationType(action);
+        queryVO.setModule(module);
+        queryVO.setStartTime(startTime);
+        queryVO.setEndTime(endTime);
+        queryVO.setStatus(status);
+
+        IPage<SysOperationLog> logPage = auditService.queryOperationLogs(queryVO);
+
+        IPage<AuditLogVO> result = logPage.convert(log -> AuditLogVO.builder()
+                .id(String.valueOf(log.getId()))
+                .userId(log.getUserId())
+                .username(log.getUsername())
+                .action(log.getOperationType())
+                .module(log.getModule())
+                .detail(log.getRequestParam())
+                .ip(log.getRequestIp())
+                .status(log.getStatus())
+                .errorMessage(log.getErrorMsg())
+                .duration(log.getExecutionTime())
+                .createTime(log.getOperationTime() != null
+                        ? log.getOperationTime().format(DATETIME_FORMATTER)
+                        : null)
+                .build());
+
+        return Result.success(result);
     }
 
     /**
@@ -71,12 +107,31 @@ public class SysAuditController {
     }
 
     /**
-     * 导出操作日志
+     * 导出审计日志
      */
-    @PostMapping("/logs/export")
-    @Operation(summary = "导出操作日志")
-    //@OperationLog(module = "系统审计", operationType = "导出", description = "导出操作日志")
-    public void exportOperationLogs(@RequestBody AuditLogQueryVO queryVO, HttpServletResponse response) throws IOException {
+    @GetMapping("/export")
+    @Operation(summary = "导出审计日志")
+    public void exportAuditLogs(
+            @RequestParam(required = false) String username,
+            @RequestParam(required = false) String action,
+            @RequestParam(required = false) String module,
+            @RequestParam(required = false) String startTime,
+            @RequestParam(required = false) String endTime,
+            @RequestParam(required = false) Integer status,
+            HttpServletResponse response) throws IOException {
+
+        AuditLogQueryVO queryVO = new AuditLogQueryVO();
+        queryVO.setUsername(username);
+        queryVO.setOperationType(action);
+        queryVO.setModule(module);
+        queryVO.setStartTime(startTime);
+        queryVO.setEndTime(endTime);
+        queryVO.setStatus(status);
+
+        doExportLogs(queryVO, response);
+    }
+
+    private void doExportLogs(AuditLogQueryVO queryVO, HttpServletResponse response) throws IOException {
         List<SysOperationLog> logs = auditService.exportOperationLogs(queryVO);
         
         // 创建Excel工作簿
@@ -108,7 +163,8 @@ public class SysAuditController {
                 row.createCell(7).setCellValue(log.getRequestUrl());
                 row.createCell(8).setCellValue(log.getRequestIp());
                 row.createCell(9).setCellValue(log.getStatus() == 0 ? "成功" : "失败");
-                row.createCell(10).setCellValue(log.getOperationTime().format(DATETIME_FORMATTER));
+                row.createCell(10).setCellValue(log.getOperationTime() != null
+                        ? log.getOperationTime().format(DATETIME_FORMATTER) : "");
                 row.createCell(11).setCellValue(log.getExecutionTime() != null ? log.getExecutionTime() : 0);
             }
             

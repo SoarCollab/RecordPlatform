@@ -3,7 +3,7 @@
  * @see AdminFileVO.java, AdminShareVO.java, etc.
  */
 
-import type { ProvenanceNode, ShareAccessLogVO, ShareAccessStatsVO } from './files';
+import type { ProvenanceNode, ShareAccessLogVO } from "./files";
 
 /**
  * 管理员文件列表 VO
@@ -144,10 +144,10 @@ export const AdminFileStatus = {
 } as const;
 
 export const AdminFileStatusLabel: Record<number, string> = {
-  [AdminFileStatus.PROCESSING]: '处理中',
-  [AdminFileStatus.COMPLETED]: '已完成',
-  [AdminFileStatus.DELETED]: '已删除',
-  [AdminFileStatus.FAILED]: '失败',
+  [AdminFileStatus.PROCESSING]: "处理中",
+  [AdminFileStatus.COMPLETED]: "已完成",
+  [AdminFileStatus.DELETED]: "已删除",
+  [AdminFileStatus.FAILED]: "失败",
 };
 
 // 分享状态枚举（管理员视图）
@@ -158,7 +158,7 @@ export const AdminShareStatus = {
 } as const;
 
 export const AdminShareStatusLabel: Record<number, string> = {
-  [AdminShareStatus.CANCELLED]: '已取消',
-  [AdminShareStatus.ACTIVE]: '有效',
-  [AdminShareStatus.EXPIRED]: '已过期',
+  [AdminShareStatus.CANCELLED]: "已取消",
+  [AdminShareStatus.ACTIVE]: "有效",
+  [AdminShareStatus.EXPIRED]: "已过期",
 };
