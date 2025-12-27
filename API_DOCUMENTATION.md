@@ -21,6 +21,7 @@
   - [Permission Module](#10-permission-module-admin)
   - [Audit Module](#11-audit-module-admin)
   - [SSE Module](#12-sse-module)
+  - [File Admin Module](#13-file-admin-module-admin)
 - [Appendix](#appendix)
 
 ---
@@ -1892,6 +1893,478 @@ GET /api/v1/sse/status
 
 ---
 
+## 13. File Admin Module (Admin)
+
+Base Path: `/api/v1/admin/files`
+
+**Authentication**: Bearer Token + Admin role required (`@PreAuthorize("isAdmin()")`)
+
+This module provides administrative file and share management capabilities including:
+- Cross-user file viewing and management
+- File provenance (sharing chain) tracking
+- Share access audit logs and statistics
+- Force deletion and status updates
+
+---
+
+### 13.1 Get All Files (Paginated)
+
+Get all files across all users with filtering options.
+
+```
+GET /api/v1/admin/files
+```
+
+**Query Parameters**:
+
+| Parameter    | Type    | Required | Description                   |
+| ------------ | ------- | -------- | ----------------------------- |
+| keyword      | string  | No       | Search by filename or hash    |
+| status       | int     | No       | Filter by status (0-3)        |
+| ownerId      | string  | No       | Filter by owner external ID   |
+| ownerName    | string  | No       | Filter by owner name          |
+| originalOnly | boolean | No       | Only show original uploads    |
+| sharedOnly   | boolean | No       | Only show files from shares   |
+| startTime    | string  | No       | Filter by create time (start) |
+| endTime      | string  | No       | Filter by create time (end)   |
+| pageNum      | int     | No       | Page number (default: 1)      |
+| pageSize     | int     | No       | Items per page (default: 20)  |
+
+**Response (AdminFileVO)**:
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "records": [
+      {
+        "id": "file123",
+        "fileName": "document.pdf",
+        "fileHash": "abc123hash",
+        "fileSize": 1024000,
+        "contentType": "application/pdf",
+        "status": 1,
+        "statusDesc": "已完成",
+        "ownerId": "user123",
+        "ownerName": "john",
+        "originOwnerId": "user100",
+        "originOwnerName": "alice",
+        "sharedFromUserId": "user100",
+        "sharedFromUserName": "alice",
+        "isOriginal": false,
+        "depth": 1,
+        "transactionHash": "0x123...",
+        "blockNumber": 12345,
+        "refCount": 3,
+        "createTime": "2025-01-01T00:00:00.000Z",
+        "updateTime": "2025-01-01T12:00:00.000Z"
+      }
+    ],
+    "total": 100,
+    "size": 20,
+    "current": 1,
+    "pages": 5
+  }
+}
+```
+
+**Response Fields**:
+
+| Field             | Type    | Description                                    |
+| ----------------- | ------- | ---------------------------------------------- |
+| isOriginal        | boolean | True if file was uploaded by current owner     |
+| depth             | int     | Share chain depth (0=original, 1=first share)  |
+| sharedFromUserId  | string  | ID of user who shared this file to owner       |
+| originOwnerId     | string  | ID of original uploader                        |
+| refCount          | int     | Number of users who saved this file via shares |
+
+---
+
+### 13.2 Get File Detail (with Audit Info)
+
+Get comprehensive file details including provenance chain and recent access logs.
+
+```
+GET /api/v1/admin/files/{id}
+```
+
+**Path Parameters**:
+
+| Parameter | Type   | Description          |
+| --------- | ------ | -------------------- |
+| id        | string | File external ID     |
+
+**Response (AdminFileDetailVO)**:
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "id": "file123",
+    "fileName": "document.pdf",
+    "fileHash": "abc123hash",
+    "fileSize": 1024000,
+    "contentType": "application/pdf",
+    "status": 1,
+    "statusDesc": "已完成",
+    "createTime": "2025-01-01T00:00:00.000Z",
+    "updateTime": "2025-01-01T12:00:00.000Z",
+    "ownerId": "user123",
+    "ownerName": "john",
+    "originOwnerId": "user100",
+    "originOwnerName": "alice",
+    "sharedFromUserId": "user200",
+    "sharedFromUserName": "bob",
+    "isOriginal": false,
+    "depth": 2,
+    "saveShareCode": "XYZ789",
+    "provenanceChain": [
+      {
+        "userId": "user100",
+        "userName": "alice",
+        "fileId": "file100",
+        "depth": 0,
+        "shareCode": null,
+        "time": "2025-01-01T00:00:00.000Z"
+      },
+      {
+        "userId": "user200",
+        "userName": "bob",
+        "fileId": "file200",
+        "depth": 1,
+        "shareCode": "ABC123",
+        "time": "2025-01-02T00:00:00.000Z"
+      },
+      {
+        "userId": "user123",
+        "userName": "john",
+        "fileId": "file123",
+        "depth": 2,
+        "shareCode": "XYZ789",
+        "time": "2025-01-03T00:00:00.000Z"
+      }
+    ],
+    "transactionHash": "0x123...",
+    "blockNumber": 12345,
+    "refCount": 3,
+    "relatedShares": [
+      {
+        "shareCode": "ABC123",
+        "sharerName": "alice",
+        "shareType": 1,
+        "status": 1,
+        "createTime": "2025-01-01T00:00:00.000Z",
+        "expireTime": null,
+        "accessCount": 15
+      }
+    ],
+    "recentAccessLogs": [
+      {
+        "actionType": 1,
+        "actionTypeDesc": "查看",
+        "actorUserId": "user456",
+        "actorUserName": "visitor",
+        "actorIp": "192.168.1.1",
+        "accessTime": "2025-01-01T12:00:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 13.3 Update File Status
+
+Update the status of a file (e.g., mark as deleted, failed).
+
+```
+PUT /api/v1/admin/files/{id}/status
+```
+
+**Path Parameters**:
+
+| Parameter | Type   | Description      |
+| --------- | ------ | ---------------- |
+| id        | string | File external ID |
+
+**Request Body (UpdateFileStatusVO)**:
+
+```json
+{
+  "status": 2,
+  "reason": "Violation of terms of service"
+}
+```
+
+| Field  | Type   | Required | Description                |
+| ------ | ------ | -------- | -------------------------- |
+| status | int    | Yes      | New status (0-3)           |
+| reason | string | No       | Reason for status change   |
+
+**Response**:
+
+```json
+{
+  "code": 200,
+  "message": "文件状态已更新",
+  "data": null
+}
+```
+
+---
+
+### 13.4 Force Delete File (Physical)
+
+Permanently delete a file and all associated data.
+
+```
+DELETE /api/v1/admin/files/{id}
+```
+
+**Path Parameters**:
+
+| Parameter | Type   | Description      |
+| --------- | ------ | ---------------- |
+| id        | string | File external ID |
+
+**Query Parameters**:
+
+| Parameter | Type   | Required | Description     |
+| --------- | ------ | -------- | --------------- |
+| reason    | string | No       | Deletion reason |
+
+**Response**:
+
+```json
+{
+  "code": 200,
+  "message": "文件已删除",
+  "data": null
+}
+```
+
+---
+
+### 13.5 Get All Shares (Paginated)
+
+Get all shares across all users with filtering and statistics.
+
+```
+GET /api/v1/admin/files/shares
+```
+
+**Query Parameters**:
+
+| Parameter  | Type   | Required | Description                              |
+| ---------- | ------ | -------- | ---------------------------------------- |
+| keyword    | string | No       | Search by share code                     |
+| status     | int    | No       | Filter: 0=cancelled, 1=active, 2=expired |
+| shareType  | int    | No       | Share type filter                        |
+| sharerId   | string | No       | Filter by sharer external ID             |
+| sharerName | string | No       | Filter by sharer name                    |
+| startTime  | string | No       | Filter by create time (start)            |
+| endTime    | string | No       | Filter by create time (end)              |
+| pageNum    | int    | No       | Page number (default: 1)                 |
+| pageSize   | int    | No       | Items per page (default: 20)             |
+
+**Response (AdminShareVO)**:
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "records": [
+      {
+        "id": "share123",
+        "shareCode": "ABC123",
+        "sharerId": "user123",
+        "sharerName": "john",
+        "shareType": 1,
+        "shareTypeDesc": "公开分享",
+        "status": 1,
+        "statusDesc": "有效",
+        "fileCount": 3,
+        "fileHashes": ["hash1", "hash2", "hash3"],
+        "fileNames": ["doc1.pdf", "doc2.pdf", "doc3.pdf"],
+        "accessCount": 25,
+        "maxAccess": 100,
+        "hasPassword": false,
+        "createTime": "2025-01-01T00:00:00.000Z",
+        "expireTime": "2025-02-01T00:00:00.000Z",
+        "viewCount": 20,
+        "downloadCount": 4,
+        "saveCount": 1,
+        "uniqueActors": 8
+      }
+    ],
+    "total": 50,
+    "size": 20,
+    "current": 1,
+    "pages": 3
+  }
+}
+```
+
+---
+
+### 13.6 Force Cancel Share
+
+Cancel a share regardless of ownership.
+
+```
+DELETE /api/v1/admin/files/shares/{shareCode}
+```
+
+**Path Parameters**:
+
+| Parameter | Type   | Description |
+| --------- | ------ | ----------- |
+| shareCode | string | Share code  |
+
+**Query Parameters**:
+
+| Parameter | Type   | Required | Description        |
+| --------- | ------ | -------- | ------------------ |
+| reason    | string | No       | Cancellation reason|
+
+**Response**:
+
+```json
+{
+  "code": 200,
+  "message": "分享已取消",
+  "data": null
+}
+```
+
+---
+
+### 13.7 Get Share Access Logs
+
+Get detailed access logs for a specific share.
+
+```
+GET /api/v1/admin/files/shares/{shareCode}/logs
+```
+
+**Path Parameters**:
+
+| Parameter | Type   | Description |
+| --------- | ------ | ----------- |
+| shareCode | string | Share code  |
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description                  |
+| --------- | ---- | -------- | ---------------------------- |
+| pageNum   | int  | No       | Page number (default: 1)     |
+| pageSize  | int  | No       | Items per page (default: 20) |
+
+**Response (ShareAccessLogVO)**:
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "records": [
+      {
+        "id": "log123",
+        "shareCode": "ABC123",
+        "actionType": 1,
+        "actionTypeDesc": "查看",
+        "actorUserId": "user456",
+        "actorUserName": "visitor",
+        "actorIp": "192.168.1.1",
+        "actorUa": "Mozilla/5.0...",
+        "fileHash": null,
+        "fileName": null,
+        "accessTime": "2025-01-01T12:00:00.000Z"
+      },
+      {
+        "id": "log124",
+        "shareCode": "ABC123",
+        "actionType": 2,
+        "actionTypeDesc": "下载",
+        "actorUserId": "user456",
+        "actorUserName": "visitor",
+        "actorIp": "192.168.1.1",
+        "actorUa": "Mozilla/5.0...",
+        "fileHash": "abc123hash",
+        "fileName": "document.pdf",
+        "accessTime": "2025-01-01T12:05:00.000Z"
+      }
+    ],
+    "total": 50,
+    "size": 20,
+    "current": 1,
+    "pages": 3
+  }
+}
+```
+
+**Action Types**:
+
+| Value | Action   | Description                |
+| ----- | -------- | -------------------------- |
+| 1     | View     | Viewed share page          |
+| 2     | Download | Downloaded file from share |
+| 3     | Save     | Saved file to account      |
+
+---
+
+### 13.8 Get Share Access Statistics
+
+Get aggregated access statistics for a share.
+
+```
+GET /api/v1/admin/files/shares/{shareCode}/stats
+```
+
+**Path Parameters**:
+
+| Parameter | Type   | Description |
+| --------- | ------ | ----------- |
+| shareCode | string | Share code  |
+
+**Response (ShareAccessStatsVO)**:
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "shareCode": "ABC123",
+    "totalViews": 50,
+    "totalDownloads": 10,
+    "totalSaves": 3,
+    "uniqueVisitors": 25,
+    "anonymousVisitors": 15,
+    "registeredVisitors": 10,
+    "topFiles": [
+      {
+        "fileHash": "abc123hash",
+        "fileName": "document.pdf",
+        "downloadCount": 8
+      }
+    ],
+    "recentActivity": [
+      {
+        "date": "2025-01-01",
+        "views": 10,
+        "downloads": 2
+      }
+    ]
+  }
+}
+```
+
+---
+
 ## Appendix
 
 ### A. Pagination
@@ -1974,8 +2447,35 @@ All `id` fields in responses are external IDs. Use these when making subsequent 
 | 0     | Draft     | Not published    |
 | 1     | Published | Visible to users |
 
+### I. Share Access Action Types
+
+| Value | Action   | Description                |
+| ----- | -------- | -------------------------- |
+| 1     | View     | Viewed share page          |
+| 2     | Download | Downloaded file from share |
+| 3     | Save     | Saved file to account      |
+
+### J. Admin Share Status
+
+| Value | Status    | Description     |
+| ----- | --------- | --------------- |
+| 0     | Cancelled | Share cancelled |
+| 1     | Active    | Share is valid  |
+| 2     | Expired   | Share expired   |
+
+### K. File Provenance
+
+File provenance tracking enables tracing the complete sharing chain of a file:
+
+- **Original file** (`depth=0`): Uploaded directly by the user
+- **First share** (`depth=1`): Saved from a share created by the original uploader
+- **Reshare** (`depth=2+`): Saved from a share created by someone who also received it via share
+
+The `provenanceChain` array in file details shows the complete path from original uploader to current owner.
+
 ---
 
 ## Changelog
 
+- **v1.1** - Added File Admin Module for share audit and file provenance tracking
 - **v1.0** - Initial API documentation
