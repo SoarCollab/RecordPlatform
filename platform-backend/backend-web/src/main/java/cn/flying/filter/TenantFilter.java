@@ -33,7 +33,7 @@ public class TenantFilter extends OncePerRequestFilter {
 
     /**
      * 白名单路径 - 这些路径不需要租户ID
-     * 主要用于健康检查、Swagger文档等公共端点
+     * 主要用于健康检查、Swagger文档、公开分享等公共端点
      */
     private static final Set<String> WHITELIST_PATHS = Set.of(
             "/actuator/health",
@@ -43,7 +43,11 @@ public class TenantFilter extends OncePerRequestFilter {
             "/doc.html",
             "/webjars",
             "/favicon.ico",
-            "/error"
+            "/error",
+            // 公开分享相关端点
+            "/api/v1/files/getSharingFiles",
+            "/api/v1/files/public/download",
+            "/api/v1/files/public/decryptInfo"
     );
 
     @Override
