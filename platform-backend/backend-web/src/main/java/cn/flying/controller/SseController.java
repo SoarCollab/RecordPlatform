@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * SSE 实时推送控制器
@@ -32,10 +33,13 @@ public class SseController {
     /**
      * 建立 SSE 连接（使用短期令牌）
      * 该端点使用一次性短期令牌进行认证，不使用常规 JWT
+     * 支持同一用户多个连接（多设备/多标签页），通过 connectionId 区分
      */
     @GetMapping(value = "/connect", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    @Operation(summary = "建立SSE连接", description = "使用短期SSE令牌建立长连接，接收实时消息推送")
-    public ResponseEntity<SseEmitter> connect(@RequestParam("token") String sseToken) {
+    @Operation(summary = "建立SSE连接", description = "使用短期SSE令牌建立长连接，接收实时消息推送。支持多设备/多标签页连接。")
+    public ResponseEntity<SseEmitter> connect(
+            @RequestParam("token") String sseToken,
+            @RequestParam(value = "connectionId", required = false) String connectionId) {
         // 验证并消费 SSE 短期令牌
         String[] userInfo = jwtUtils.validateAndConsumeSseToken(sseToken);
         if (userInfo == null || userInfo.length < 2) {
@@ -54,17 +58,29 @@ public class SseController {
             return ResponseEntity.status(401).build();
         }
 
-        log.info("SSE 连接请求: tenantId={}, userId={}", tenantId, userId);
-        SseEmitter emitter = sseEmitterManager.createConnection(tenantId, userId);
+        // 如果未提供 connectionId，则生成一个（向后兼容）
+        if (connectionId == null || connectionId.isBlank()) {
+            connectionId = UUID.randomUUID().toString().replace("-", "");
+        }
+
+        log.info("SSE 连接请求: tenantId={}, userId={}, connectionId={}", tenantId, userId, connectionId);
+        SseEmitter emitter = sseEmitterManager.createConnection(tenantId, userId, connectionId);
         return ResponseEntity.ok(emitter);
     }
 
     @DeleteMapping("/disconnect")
-    @Operation(summary = "断开SSE连接")
-    public void disconnect(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
-                           @RequestAttribute(Const.ATTR_TENANT_ID) Long tenantId) {
-        log.info("SSE 断开请求: tenantId={}, userId={}", tenantId, userId);
-        sseEmitterManager.removeConnection(tenantId, userId);
+    @Operation(summary = "断开SSE连接", description = "断开指定的SSE连接。如不提供connectionId，则由客户端维护。")
+    public void disconnect(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @RequestAttribute(Const.ATTR_TENANT_ID) Long tenantId,
+            @RequestParam(value = "connectionId", required = false) String connectionId) {
+        if (connectionId == null || connectionId.isBlank()) {
+            // 未提供 connectionId，记录警告并跳过（连接会在超时或客户端关闭时自动清理）
+            log.warn("SSE 断开请求缺少 connectionId: tenantId={}, userId={}", tenantId, userId);
+            return;
+        }
+        log.info("SSE 断开请求: tenantId={}, userId={}, connectionId={}", tenantId, userId, connectionId);
+        sseEmitterManager.removeConnection(tenantId, userId, connectionId);
     }
 
     @GetMapping("/status")
@@ -73,8 +89,10 @@ public class SseController {
                                          @RequestAttribute(Const.ATTR_TENANT_ID) Long tenantId) {
         boolean online = sseEmitterManager.isOnline(tenantId, userId);
         int totalOnline = sseEmitterManager.getOnlineCount(tenantId);
+        int userConnections = sseEmitterManager.getUserConnectionCount(tenantId, userId);
         return Map.of(
                 "connected", online,
+                "connectionCount", userConnections,
                 "onlineCount", totalOnline
         );
     }

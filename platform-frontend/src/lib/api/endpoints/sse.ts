@@ -18,6 +18,7 @@ export interface SSEMessage<T = unknown> {
 }
 
 export interface SSEConnectionOptions {
+  connectionId?: string;
   onMessage?: (event: SSEMessage) => void;
   onError?: (error: Event) => void;
   onOpen?: () => void;
@@ -47,7 +48,17 @@ export async function createSSEConnection(
     const { sseToken } = await getSseToken();
 
     // 步骤2：使用短期 Token 建立 SSE 连接
-    const url = `/record-platform/api/v1/sse/connect?token=${encodeURIComponent(sseToken)}&x-tenant-id=${PUBLIC_TENANT_ID || ""}`;
+    const params = new URLSearchParams({
+      token: sseToken,
+      "x-tenant-id": PUBLIC_TENANT_ID || "",
+    });
+
+    // 如果提供了 connectionId，添加到参数中
+    if (options.connectionId) {
+      params.set("connectionId", options.connectionId);
+    }
+
+    const url = `/record-platform/api/v1/sse/connect?${params.toString()}`;
     const eventSource = new EventSource(url);
 
     eventSource.onopen = () => {

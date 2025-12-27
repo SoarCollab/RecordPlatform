@@ -28,6 +28,7 @@ let leaderLastSeen = 0;
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let healthCheckInterval: ReturnType<typeof setInterval> | null = null;
 let electionTimeout: ReturnType<typeof setTimeout> | null = null;
+let isInitialized = false;
 
 // Callbacks
 let onBecomeLeader: (() => void) | null = null;
@@ -47,14 +48,24 @@ function init(
 ) {
   if (!browser) return;
 
+  // Prevent re-initialization
+  if (isInitialized) {
+    console.warn("SSE Leader: Already initialized, skipping");
+    return;
+  }
+
   // Check BroadcastChannel support
   if (typeof BroadcastChannel === "undefined") {
-    console.warn("SSE Leader: BroadcastChannel not supported, acting as leader");
+    console.warn(
+      "SSE Leader: BroadcastChannel not supported, acting as leader",
+    );
     role = "leader";
+    isInitialized = true;
     callbacks.onBecomeLeader();
     return;
   }
 
+  isInitialized = true;
   tabId = crypto.randomUUID();
   onBecomeLeader = callbacks.onBecomeLeader;
   onBecomeFollower = callbacks.onBecomeFollower;
@@ -258,9 +269,13 @@ function broadcastSSEStatus(status: string) {
 
 // ===== Cleanup =====
 function cleanup() {
-  if (role === "leader") {
+  if (!isInitialized) return;
+
+  const wasLeader = role === "leader";
+  if (wasLeader) {
     stepDown();
   }
+
   if (electionTimeout) {
     clearTimeout(electionTimeout);
     electionTimeout = null;
@@ -273,9 +288,26 @@ function cleanup() {
     clearInterval(healthCheckInterval);
     healthCheckInterval = null;
   }
-  channel?.close();
+
+  // Delay channel close to ensure step-down message is delivered
+  const channelToClose = channel;
+  if (channelToClose) {
+    if (wasLeader) {
+      setTimeout(() => channelToClose.close(), 50);
+    } else {
+      channelToClose.close();
+    }
+  }
   channel = null;
+
+  // Clear callbacks to allow garbage collection
+  onBecomeLeader = null;
+  onBecomeFollower = null;
+  onMessage = null;
+  onStatusChange = null;
+
   role = "init";
+  isInitialized = false;
 }
 
 // ===== Export =====
