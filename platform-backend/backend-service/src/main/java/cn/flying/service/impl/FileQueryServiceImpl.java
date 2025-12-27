@@ -8,8 +8,10 @@ import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.CommonUtils;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.common.util.SecurityUtils;
+import cn.flying.dao.dto.Account;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
+import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
@@ -78,6 +80,9 @@ public class FileQueryServiceImpl implements FileQueryService {
     private FileMapper fileMapper;
 
     @Resource
+    private AccountMapper accountMapper;
+
+    @Resource
     private FileRemoteClient fileRemoteClient;
 
     @Resource
@@ -97,6 +102,25 @@ public class FileQueryServiceImpl implements FileQueryService {
         // 权限校验：用户只能查看自己的文件，管理员可查看所有
         if (!SecurityUtils.isAdmin() && !file.getUid().equals(userId)) {
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "无权访问此文件");
+        }
+
+        // 如果是从分享保存的文件，查询原上传者用户名和直接分享者用户名
+        if (file.getOrigin() != null) {
+            File originFile = fileMapper.selectById(file.getOrigin());
+            if (originFile != null) {
+                Account originOwner = accountMapper.selectById(originFile.getUid());
+                if (originOwner != null) {
+                    file.setOriginOwnerName(originOwner.getUsername());
+                }
+            }
+        }
+
+        // 查询直接分享者用户名
+        if (file.getSharedFromUserId() != null) {
+            Account sharedFromUser = accountMapper.selectById(file.getSharedFromUserId());
+            if (sharedFromUser != null) {
+                file.setSharedFromUserName(sharedFromUser.getUsername());
+            }
         }
         return file;
     }
@@ -210,7 +234,15 @@ public class FileQueryServiceImpl implements FileQueryService {
                         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
                                 .eq(File::getUid, uploaderId)
                                 .in(File::getFileHash, fileHashList);
-                        return fileMapper.selectList(wrapper);
+                        List<File> files = fileMapper.selectList(wrapper);
+
+                        // 查询分享者用户名并填充到文件对象
+                        if (CommonUtils.isNotEmpty(files)) {
+                            Account owner = accountMapper.selectById(uploaderId);
+                            String ownerName = (owner != null) ? owner.getUsername() : null;
+                            files.forEach(file -> file.setOwnerName(ownerName));
+                        }
+                        return files;
                     });
                 } catch (NumberFormatException e) {
                     log.warn("分享文件的上传者ID格式不正确: {}", uploader);

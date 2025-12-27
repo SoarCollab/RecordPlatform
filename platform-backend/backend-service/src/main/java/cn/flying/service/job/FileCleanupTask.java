@@ -144,41 +144,53 @@ public class FileCleanupTask {
         String userId = String.valueOf(file.getUid());
         String fileHash = file.getFileHash();
 
-        // 1. 尝试从区块链获取文件内容映射
-        try {
-            FileDetailVO detail = ResultUtils.getData(
-                fileRemoteClient.getFile(userId, fileHash)
-            );
+        // 检查是否有其他用户仍在使用该 fileHash（分享保存的文件）
+        // 如果有其他活跃引用，只删除数据库记录，保留存储和区块链数据
+        Long activeReferences = fileMapper.countActiveFilesByHash(fileHash, file.getId());
+        boolean hasOtherReferences = activeReferences != null && activeReferences > 0;
 
-            if (detail != null && detail.getContent() != null) {
-                // 2. 解析存储位置并从 MinIO 删除
-                @SuppressWarnings("unchecked")
-                Map<String, String> contentMap = JsonConverter.parse(detail.getContent(), Map.class);
-                if (contentMap != null && !contentMap.isEmpty()) {
-                    try {
-                        fileRemoteClient.deleteStorageFile(contentMap);
-                    } catch (Exception e) {
-                        log.warn("存储删除失败: file={}, error={}", fileHash, e.getMessage());
+        if (hasOtherReferences) {
+            log.info("文件 {} 仍有 {} 个其他用户引用，仅删除数据库记录，保留存储数据",
+                    fileHash, activeReferences);
+        } else {
+            // 没有其他引用，可以安全删除存储和区块链数据
+            // 1. 尝试从区块链获取文件内容映射
+            try {
+                FileDetailVO detail = ResultUtils.getData(
+                    fileRemoteClient.getFile(userId, fileHash)
+                );
+
+                if (detail != null && detail.getContent() != null) {
+                    // 2. 解析存储位置并从 MinIO 删除
+                    @SuppressWarnings("unchecked")
+                    Map<String, String> contentMap = JsonConverter.parse(detail.getContent(), Map.class);
+                    if (contentMap != null && !contentMap.isEmpty()) {
+                        try {
+                            fileRemoteClient.deleteStorageFile(contentMap);
+                        } catch (Exception e) {
+                            log.warn("存储删除失败: file={}, error={}", fileHash, e.getMessage());
+                        }
                     }
                 }
-            }
 
-            // 3. 从区块链删除
-            try {
-                fileRemoteClient.deleteFiles(DeleteFilesRequest.builder()
-                        .uploader(userId)
-                        .fileHashList(List.of(fileHash))
-                        .build());
+                // 3. 从区块链删除
+                try {
+                    fileRemoteClient.deleteFiles(DeleteFilesRequest.builder()
+                            .uploader(userId)
+                            .fileHashList(List.of(fileHash))
+                            .build());
+                } catch (Exception e) {
+                    log.warn("区块链删除失败: file={}, error={}", fileHash, e.getMessage());
+                }
             } catch (Exception e) {
-                log.warn("区块链删除失败: file={}, error={}", fileHash, e.getMessage());
+                log.warn("获取文件详情失败: {}, 继续数据库清理: {}", fileHash, e.getMessage());
             }
-        } catch (Exception e) {
-            log.warn("获取文件详情失败: {}, 继续数据库清理: {}", fileHash, e.getMessage());
         }
 
         // 4. 物理删除数据库记录（带租户隔离）
         fileMapper.physicalDeleteById(file.getId(), tenantId);
 
-        log.debug("文件清理成功: tenantId={}, id={}, hash={}", tenantId, file.getId(), fileHash);
+        log.debug("文件清理成功: tenantId={}, id={}, hash={}, 保留存储={}",
+                tenantId, file.getId(), fileHash, hasOtherReferences);
     }
 }
