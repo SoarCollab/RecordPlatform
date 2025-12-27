@@ -209,13 +209,13 @@ public class SecureIdAspect {
                             log.debug("设置extId字段: {}", externalId);
                         }
                     } catch (NoSuchFieldException ex) {
-                        // P0-2 修复：将 debug 改为 warn，并明确标识安全风险
+                        // 明确标识安全风险
                         log.warn("ID混淆失败：对象 {} 缺少 externalId/extId 字段，内部ID可能泄露。" +
                                 "请添加 externalId 字段以支持ID混淆", clazz.getSimpleName());
                     }
                 }
 
-                // P0-2 修复：无论是否找到外部ID字段，都要处理 hideOriginalId 逻辑
+                // 无论是否找到外部ID字段，都要处理 hideOriginalId 逻辑
                 // 如果需要隐藏原始ID，则将原始ID设置为null
                 if (hideOriginalId) {
                     field.set(obj, null);

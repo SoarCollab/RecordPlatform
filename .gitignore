@@ -59,3 +59,4 @@ App.java
 /platform-fisco/src/main/resources/conf/
 /docs/
 /platform-frontend/AGENTS.md
+.ace-tool/

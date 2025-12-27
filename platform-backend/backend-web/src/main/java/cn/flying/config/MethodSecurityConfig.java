@@ -13,7 +13,7 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
  * 注册自定义 SpEL 表达式处理器
  */
 @Configuration
-@EnableMethodSecurity(prePostEnabled = true)
+@EnableMethodSecurity()
 public class MethodSecurityConfig {
 
     private final PermissionService permissionService;
