@@ -26,6 +26,9 @@ public class TicketCreateVO {
     @Schema(description = "优先级: 0-低, 1-中, 2-高", defaultValue = "1")
     private Integer priority = 1;
 
+    @Schema(description = "类别: 0-Bug, 1-功能请求, 2-问题咨询, 3-反馈建议, 99-其他", defaultValue = "99")
+    private Integer category = 99;
+
     @Schema(description = "附件文件ID列表")
     private List<String> attachmentIds;
 }

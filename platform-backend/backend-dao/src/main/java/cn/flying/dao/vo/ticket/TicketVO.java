@@ -1,5 +1,6 @@
 package cn.flying.dao.vo.ticket;
 
+import cn.flying.common.constant.TicketCategory;
 import cn.flying.common.constant.TicketPriority;
 import cn.flying.common.constant.TicketStatus;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -30,6 +31,12 @@ public class TicketVO {
 
     @Schema(description = "优先级描述")
     private String priorityDesc;
+
+    @Schema(description = "类别: 0-Bug, 1-功能请求, 2-问题咨询, 3-反馈建议, 99-其他")
+    private Integer category;
+
+    @Schema(description = "类别描述")
+    private String categoryDesc;
 
     @Schema(description = "状态")
     private Integer status;
@@ -68,6 +75,17 @@ public class TicketVO {
         this.priority = priority;
         if (priority != null) {
             this.priorityDesc = TicketPriority.fromCode(priority).getDescription();
+        }
+        return this;
+    }
+
+    /**
+     * 设置类别并填充描述
+     */
+    public TicketVO setCategoryWithDesc(Integer category) {
+        this.category = category;
+        if (category != null) {
+            this.categoryDesc = TicketCategory.fromCode(category).getDescription();
         }
         return this;
     }
