@@ -116,8 +116,10 @@ public interface FileService extends IService<File> {
     /**
      * 保存他人分享的文件
      * @param sharingFileIdList 分享文件Id列表
+     * @param shareCode 分享码（用于追踪链路，可选）
+     * @param clientIp 客户端IP（用于审计日志）
      */
-    void saveShareFile(List<String> sharingFileIdList);
+    void saveShareFile(List<String> sharingFileIdList, String shareCode, String clientIp);
 
     /**
      * 获取文件解密信息

@@ -12,8 +12,10 @@ import cn.flying.common.util.JsonConverter;
 import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
+import cn.flying.dao.dto.FileSource;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
+import cn.flying.dao.mapper.FileSourceMapper;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileShareVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
@@ -25,6 +27,7 @@ import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.platformapi.response.SharingVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FileService;
+import cn.flying.service.ShareAuditService;
 import cn.flying.service.saga.FileSagaOrchestrator;
 import cn.flying.service.saga.FileUploadCommand;
 import cn.flying.service.saga.FileUploadResult;
@@ -66,6 +69,12 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Resource
     private FileShareMapper fileShareMapper;
+
+    @Resource
+    private FileSourceMapper fileSourceMapper;
+
+    @Resource
+    private ShareAuditService shareAuditService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -347,7 +356,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void saveShareFile(List<String> sharingFileIdList) {
+    public void saveShareFile(List<String> sharingFileIdList, String shareCode, String clientIp) {
         if (CommonUtils.isEmpty(sharingFileIdList)) {
             return;
         }
@@ -375,21 +384,71 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             return;
         }
 
+        // 过滤掉自己的文件，只保存其他用户分享的文件
+        final Long currentUserId = userId;
+        fileList = fileList.stream()
+                .filter(file -> !currentUserId.equals(file.getUid()))
+                .toList();
+
+        if (CommonUtils.isEmpty(fileList)) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "不能保存自己的文件");
+        }
+
+        // 构建需要插入的 FileSource 记录列表
+        List<FileSource> fileSources = new ArrayList<>();
+
         // 拷贝其它用户分享文件对应的信息，修改文件所有人并增加文件来源
-        fileList.forEach(file -> {
-            // 如果源文件已经有来源，则保留最初的文件所有人
-            if (CommonUtils.isEmpty(file.getOrigin())) {
-                file.setOrigin(file.getId());
+        for (File file : fileList) {
+            Long sourceFileId = file.getId();
+            Long sourceUserId = file.getUid();
+            Long originFileId = file.getOrigin();
+
+            // 如果源文件已经有来源，则保留最初的文件所有人；否则源文件就是原始文件
+            if (originFileId == null) {
+                originFileId = sourceFileId;
             }
-            // 重置文件ID和创建时间
-            file.setUid(userId)
+
+            // 计算链路深度：查询源文件的深度并加1
+            int depth = 1;
+            FileSource sourceFileSource = fileSourceMapper.selectByFileId(sourceFileId, file.getTenantId());
+            if (sourceFileSource != null) {
+                depth = sourceFileSource.getDepth() + 1;
+            }
+
+            // 设置文件属性
+            file.setOrigin(originFileId)
+                .setSharedFromUserId(sourceUserId)
+                .setUid(userId)
                 .setId(null)
                 .setCreateTime(null);
-        });
 
-        // 批量保存文件信息
-        this.saveBatch(fileList);
-        log.info("成功保存分享文件: userId={}, 文件数量={}", userId, fileList.size());
+            // 先保存文件以获取新ID
+            this.save(file);
+
+            // 创建 FileSource 记录
+            FileSource fileSource = new FileSource()
+                    .setFileId(file.getId())
+                    .setOriginFileId(originFileId)
+                    .setSourceFileId(sourceFileId)
+                    .setSourceUserId(sourceUserId)
+                    .setShareCode(shareCode)
+                    .setDepth(depth);
+            fileSources.add(fileSource);
+
+            // 记录审计日志
+            if (CommonUtils.isNotEmpty(shareCode)) {
+                shareAuditService.logShareSave(shareCode, userId, file.getFileHash(), file.getFileName(), clientIp);
+            }
+        }
+
+        // 批量保存 FileSource 记录
+        if (CommonUtils.isNotEmpty(fileSources)) {
+            for (FileSource fs : fileSources) {
+                fileSourceMapper.insert(fs);
+            }
+        }
+
+        log.info("成功保存分享文件: userId={}, 文件数量={}, shareCode={}", userId, fileList.size(), shareCode);
     }
 
     @Override
