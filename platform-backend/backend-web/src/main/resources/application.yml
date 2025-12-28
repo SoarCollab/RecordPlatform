@@ -205,6 +205,11 @@ saga:
     failed-threshold: 10 # 失败 Saga 超过此值标记为 DOWN
     pending-compensation-threshold: 50 # 待补偿 Saga 超过此值标记为 DEGRADED
 
+# 过期分享状态清理间隔
+share:
+  cleanup:
+    interval: 300000
+
 # Actuator 管理端点配置
 management:
   endpoints:
