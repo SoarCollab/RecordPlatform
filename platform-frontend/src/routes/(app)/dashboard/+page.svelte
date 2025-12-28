@@ -11,6 +11,8 @@
   import { getPendingCount as getTicketPendingCount } from "$api/endpoints/tickets";
   import type { FileVO } from "$api/types";
   import { FileStatus, FileStatusLabel } from "$api/types";
+  import { fly } from "svelte/transition";
+  import Skeleton from "$lib/components/ui/Skeleton.svelte";
 
   const auth = useAuth();
   const notifications = useNotifications();
@@ -136,16 +138,19 @@
   {#if loading}
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {#each Array(4) as _}
-        <div class="animate-pulse rounded-lg border bg-card p-6">
-          <div class="h-4 w-24 rounded bg-muted"></div>
-          <div class="mt-4 h-8 w-16 rounded bg-muted"></div>
+        <div class="rounded-lg border bg-card p-6">
+          <Skeleton class="h-4 w-24" />
+          <Skeleton class="mt-4 h-8 w-16" />
         </div>
       {/each}
     </div>
   {:else}
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {#each stats as stat}
-        <div class="rounded-lg border bg-card p-6">
+      {#each stats as stat, i}
+        <div
+          class="rounded-lg border bg-card p-6"
+          in:fly={{ y: 20, duration: 300, delay: i * 50 }}
+        >
           <div class="flex items-center justify-between">
             <p class="text-sm text-muted-foreground">{stat.label}</p>
             <svg
@@ -253,13 +258,13 @@
         {#each Array(3) as _}
           <div class="flex items-center justify-between p-4">
             <div class="flex items-center gap-3">
-              <div class="h-10 w-10 animate-pulse rounded-lg bg-muted"></div>
+              <Skeleton class="h-10 w-10 rounded-lg" />
               <div>
-                <div class="h-4 w-32 animate-pulse rounded bg-muted"></div>
-                <div class="mt-2 h-3 w-24 animate-pulse rounded bg-muted"></div>
+                <Skeleton class="h-4 w-32" />
+                <Skeleton class="mt-2 h-3 w-24" />
               </div>
             </div>
-            <div class="h-6 w-16 animate-pulse rounded-full bg-muted"></div>
+            <Skeleton class="h-6 w-16 rounded-full" />
           </div>
         {/each}
       </div>
@@ -292,11 +297,12 @@
       </div>
     {:else}
       <div class="divide-y">
-        {#each recentFiles as file (file.id)}
+        {#each recentFiles as file, i (file.id)}
           {@const statusVariant = getStatusVariant(file.status)}
           <a
             href="/files/{file.fileHash}"
             class="flex items-center justify-between p-4 transition-colors hover:bg-muted/50"
+            in:fly={{ y: 10, duration: 300, delay: i * 50 }}
           >
             <div class="flex items-center gap-3">
               <div
