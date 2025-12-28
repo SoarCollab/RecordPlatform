@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@variant dark (&:where(.dark, .dark *));
+
 /* ===== CSS Variables for Shadcn-Svelte Theme ===== */
 @theme {
   /* Light mode colors */
