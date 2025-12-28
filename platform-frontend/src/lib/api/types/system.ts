@@ -7,6 +7,8 @@ export interface SysPermission {
   name: string;
   code: string;
   type: PermissionType;
+  module?: string;
+  action?: string;
   parentId?: string;
   path?: string;
   icon?: string;
