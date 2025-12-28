@@ -4,6 +4,7 @@
   import { useNotifications } from "$stores/notifications.svelte";
   import * as validation from "$utils/validation";
   import { sendRegisterCode } from "$api/endpoints/auth";
+  import { fly } from "svelte/transition";
 
   const auth = useAuth();
   const notifications = useNotifications();
@@ -117,7 +118,10 @@
   <title>注册 - 存证平台</title>
 </svelte:head>
 
-<div class="rounded-lg border bg-card p-8 shadow-sm">
+<div
+  class="rounded-lg border bg-card p-8 shadow-sm"
+  in:fly={{ y: 20, duration: 400, delay: 100 }}
+>
   <div class="mb-6 text-center">
     <div
       class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary text-primary-foreground"
