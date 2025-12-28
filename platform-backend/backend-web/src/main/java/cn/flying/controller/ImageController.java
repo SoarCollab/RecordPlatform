@@ -110,7 +110,10 @@ public class ImageController {
      */
     private void fetchImage(HttpServletRequest request, HttpServletResponse response) throws Exception {
         // 路径格式: /api/v1/images/download/images/{imagePath}
-        String imagePath = request.getServletPath().substring(28);
+        // 前缀长度: "/api/v1/images/download/images/" = 31 字符
+        String servletPath = request.getServletPath();
+        String prefix = "/api/v1/images/download/images/";
+        String imagePath = servletPath.startsWith(prefix) ? servletPath.substring(prefix.length()) : servletPath.substring(31);
 
         // 安全验证：防止路径遍历攻击
         if (!isValidImagePath(imagePath)) {
@@ -148,7 +151,12 @@ public class ImageController {
             return false;
         }
         // 检测路径遍历特征
-        if (imagePath.contains("..") || imagePath.contains("//") || imagePath.startsWith("/")) {
+        if (imagePath.contains("..") || imagePath.contains("//")) {
+            return false;
+        }
+        // 检测绝对路径（Unix 和 Windows）
+        if (imagePath.startsWith("/") || imagePath.startsWith("\\") ||
+            (imagePath.length() >= 2 && imagePath.charAt(1) == ':')) {
             return false;
         }
         // 规范化路径并验证

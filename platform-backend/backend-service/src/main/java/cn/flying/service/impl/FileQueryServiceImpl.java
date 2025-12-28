@@ -34,11 +34,14 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -104,22 +107,33 @@ public class FileQueryServiceImpl implements FileQueryService {
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "无权访问此文件");
         }
 
-        // 如果是从分享保存的文件，查询原上传者用户名和直接分享者用户名
+        // 收集需要查询的用户ID，避免多次独立查询
+        Set<Long> userIds = new HashSet<>();
+        Long originOwnerId = null;
+
         if (file.getOrigin() != null) {
-            File originFile = fileMapper.selectById(file.getOrigin());
+            // 使用 selectByIdIncludeDeleted 绕过软删除，因为原始文件可能已被删除
+            File originFile = fileMapper.selectByIdIncludeDeleted(file.getOrigin());
             if (originFile != null) {
-                Account originOwner = accountMapper.selectById(originFile.getUid());
-                if (originOwner != null) {
-                    file.setOriginOwnerName(originOwner.getUsername());
-                }
+                originOwnerId = originFile.getUid();
+                userIds.add(originOwnerId);
             }
         }
 
-        // 查询直接分享者用户名
         if (file.getSharedFromUserId() != null) {
-            Account sharedFromUser = accountMapper.selectById(file.getSharedFromUserId());
-            if (sharedFromUser != null) {
-                file.setSharedFromUserName(sharedFromUser.getUsername());
+            userIds.add(file.getSharedFromUserId());
+        }
+
+        // 一次性批量查询所有相关用户
+        if (!userIds.isEmpty()) {
+            Map<Long, String> userNameMap = accountMapper.selectBatchIds(userIds).stream()
+                    .collect(Collectors.toMap(Account::getId, Account::getUsername, (a, b) -> a));
+
+            if (originOwnerId != null) {
+                file.setOriginOwnerName(userNameMap.get(originOwnerId));
+            }
+            if (file.getSharedFromUserId() != null) {
+                file.setSharedFromUserName(userNameMap.get(file.getSharedFromUserId()));
             }
         }
         return file;
@@ -146,9 +160,9 @@ public class FileQueryServiceImpl implements FileQueryService {
 
     @Override
     public List<String> getFileAddress(Long userId, String fileHash) {
-        validateFileOwnership(userId, fileHash);
-
-        String userIdStr = String.valueOf(userId);
+        // 合并验证和解析，避免重复查询
+        Long blockchainUserId = validateAndResolveBlockchainUserId(userId, fileHash);
+        String userIdStr = String.valueOf(blockchainUserId);
         Result<FileDetailVO> filePointer = fileRemoteClient.getFile(userIdStr, fileHash);
         FileDetailVO detailVO = ResultUtils.getData(filePointer);
         if (detailVO == null) {
@@ -179,9 +193,9 @@ public class FileQueryServiceImpl implements FileQueryService {
 
     @Override
     public List<byte[]> getFile(Long userId, String fileHash) {
-        validateFileOwnership(userId, fileHash);
-
-        String userIdStr = String.valueOf(userId);
+        // 合并验证和解析，避免重复查询
+        Long blockchainUserId = validateAndResolveBlockchainUserId(userId, fileHash);
+        String userIdStr = String.valueOf(blockchainUserId);
         Result<FileDetailVO> filePointer = fileRemoteClient.getFile(userIdStr, fileHash);
         FileDetailVO detailVO = ResultUtils.getData(filePointer);
         if (detailVO == null) {
@@ -317,21 +331,40 @@ public class FileQueryServiceImpl implements FileQueryService {
         Page<FileShare> sharePage = new Page<>(page.getCurrent(), page.getSize());
         fileShareMapper.selectPage(sharePage, wrapper);
 
+        // 批量收集所有 fileHash，避免 N+1 查询
+        Set<String> allFileHashes = new HashSet<>();
+        for (FileShare share : sharePage.getRecords()) {
+            List<String> fileHashes = parseFileHashes(share.getFileHashes());
+            if (CommonUtils.isNotEmpty(fileHashes)) {
+                allFileHashes.addAll(fileHashes);
+            }
+        }
+
+        // 一次性批量查询所有文件
+        Map<String, String> hashToFileName = Map.of();
+        if (!allFileHashes.isEmpty()) {
+            LambdaQueryWrapper<File> fileWrapper = new LambdaQueryWrapper<File>()
+                    .eq(File::getUid, userId)
+                    .in(File::getFileHash, allFileHashes);
+            List<File> files = fileMapper.selectList(fileWrapper);
+            hashToFileName = files.stream()
+                    .collect(Collectors.toMap(File::getFileHash, File::getFileName, (a, b) -> a));
+        }
+
+        // 构建结果
         List<FileShareVO> shareList = new ArrayList<>();
         for (FileShare share : sharePage.getRecords()) {
             FileShareVO vo = convertFileShareToVO(share);
-
             List<String> fileHashes = parseFileHashes(share.getFileHashes());
             if (CommonUtils.isNotEmpty(fileHashes)) {
-                LambdaQueryWrapper<File> fileWrapper = new LambdaQueryWrapper<File>()
-                        .eq(File::getUid, userId)
-                        .in(File::getFileHash, fileHashes);
-                List<File> files = fileMapper.selectList(fileWrapper);
-                vo.setFileNames(files.stream().map(File::getFileName).toList());
+                Map<String, String> finalHashToFileName = hashToFileName;
+                List<String> fileNames = fileHashes.stream()
+                        .map(hash -> finalHashToFileName.getOrDefault(hash, "未知文件"))
+                        .toList();
+                vo.setFileNames(fileNames);
             } else {
                 vo.setFileNames(List.of());
             }
-
             shareList.add(vo);
         }
 
@@ -347,38 +380,27 @@ public class FileQueryServiceImpl implements FileQueryService {
     @Override
     public UserFileStatsVO getUserFileStats(Long userId) {
         Long tenantId = TenantContext.getTenantId();
-        
+
         // 查询文件总数
         Long totalFiles = fileMapper.countByUserId(userId, tenantId);
-        
-        // 查询存储用量：遍历未删除文件，累加 fileSize
-        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                .eq(File::getUid, userId)
-                .eq(tenantId != null, File::getTenantId, tenantId)
-                .eq(File::getDeleted, 0);
-        List<File> files = fileMapper.selectList(wrapper);
-        long totalStorage = 0L;
-        for (File file : files) {
-            Long fileSize = file.getFileSize();
-            if (fileSize != null && fileSize > 0) {
-                totalStorage += fileSize;
-            }
-        }
-        
+
+        // 查询存储用量：使用数据库聚合（避免加载全部文件到内存）
+        Long totalStorage = fileMapper.sumStorageByUserId(userId, tenantId);
+
         // 查询分享数量
         LambdaQueryWrapper<FileShare> shareWrapper = new LambdaQueryWrapper<FileShare>()
                 .eq(tenantId != null, FileShare::getTenantId, tenantId)
                 .eq(FileShare::getUserId, userId)
                 .eq(FileShare::getStatus, FileShare.STATUS_ACTIVE);
         Long sharedFiles = fileShareMapper.selectCount(shareWrapper);
-        
+
         // 查询今日上传数（今日 00:00:00 开始）
         Date todayStart = Date.from(LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant());
         Long todayUploads = fileMapper.countTodayUploadsByUserId(userId, tenantId, todayStart);
-        
+
         return UserFileStatsVO.builder()
                 .totalFiles(totalFiles != null ? totalFiles : 0L)
-                .totalStorage(totalStorage)
+                .totalStorage(totalStorage != null ? totalStorage : 0L)
                 .sharedFiles(sharedFiles != null ? sharedFiles : 0L)
                 .todayUploads(todayUploads != null ? todayUploads : 0L)
                 .build();
@@ -413,17 +435,38 @@ public class FileQueryServiceImpl implements FileQueryService {
     // ==================== 私有辅助方法 ====================
 
     /**
-     * 校验文件所有权：用户只能访问自己的文件，管理员可访问所有文件
+     * 合并验证与解析：校验文件所有权并解析区块链查询用的userId
+     * <p>
+     * 对于保存的分享文件使用原始上传者ID，因为区块链上文件是以原始上传者身份存储的。
+     * 使用 selectByIdIncludeDeleted 绕过软删除，因为原始文件可能已被删除。
+     * </p>
+     *
+     * @param userId   当前用户ID
+     * @param fileHash 文件哈希
+     * @return 用于区块链查询的userId
+     * @throws GeneralException 如果用户无权访问该文件
      */
-    private void validateFileOwnership(Long userId, String fileHash) {
+    private Long validateAndResolveBlockchainUserId(Long userId, String fileHash) {
+        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                .eq(File::getFileHash, fileHash);
         if (!SecurityUtils.isAdmin()) {
-            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                    .eq(File::getUid, userId)
-                    .eq(File::getFileHash, fileHash);
-            if (fileMapper.selectCount(wrapper) == 0) {
-                throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
+            wrapper.eq(File::getUid, userId);
+        }
+        File file = fileMapper.selectOne(wrapper);
+
+        // 验证文件存在性（所有用户都需要检查，包括管理员）
+        if (file == null) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权访问");
+        }
+
+        // 解析区块链查询用的userId
+        if (file != null && file.getOrigin() != null) {
+            File originFile = fileMapper.selectByIdIncludeDeleted(file.getOrigin());
+            if (originFile != null) {
+                return originFile.getUid();
             }
         }
+        return userId;
     }
 
     /**
