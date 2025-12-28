@@ -1,6 +1,7 @@
 package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
+import cn.flying.common.annotation.RateLimit;
 import cn.flying.common.constant.Result;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.IdUtils;
@@ -421,6 +422,7 @@ public class FileController {
      */
     @GetMapping("/public/download")
     @Operation(summary = "公开分享下载文件（无需登录）")
+    @RateLimit(limit = 30, type = RateLimit.LimitType.IP, key = "public:download")
     public Result<List<byte[]>> publicDownload(
             @Parameter(description = "分享码") @RequestParam("shareCode") String shareCode,
             @Parameter(description = "文件哈希") @RequestParam("fileHash") String fileHash,
@@ -439,6 +441,7 @@ public class FileController {
      */
     @GetMapping("/public/decryptInfo")
     @Operation(summary = "公开分享获取解密信息（无需登录）")
+    @RateLimit(limit = 30, type = RateLimit.LimitType.IP, key = "public:decryptInfo")
     public Result<FileDecryptInfoVO> publicDecryptInfo(
             @Parameter(description = "分享码") @RequestParam("shareCode") String shareCode,
             @Parameter(description = "文件哈希") @RequestParam("fileHash") String fileHash) {

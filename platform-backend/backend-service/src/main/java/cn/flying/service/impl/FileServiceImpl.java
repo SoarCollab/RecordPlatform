@@ -39,8 +39,11 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -75,6 +78,9 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Resource
     private ShareAuditService shareAuditService;
+
+    @Resource
+    private CacheManager cacheManager;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -178,7 +184,18 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     @CacheEvict(cacheNames = "userFiles", key = "#userId")
     public void deleteFiles(Long userId, List<String> identifiers) {
         if(CommonUtils.isEmpty(identifiers)) return;
-        
+
+        // 先查询要删除的文件，用于后续清除缓存
+        LambdaQueryWrapper<File> queryWrapper = new LambdaQueryWrapper<File>()
+                .eq(File::getUid, userId)
+                .and(w -> w
+                        .in(File::getFileHash, identifiers)
+                        .or()
+                        .in(File::getId, identifiers)
+                )
+                .select(File::getFileHash);
+        List<File> filesToDelete = this.list(queryWrapper);
+
         // 支持同时按 fileHash 或 ID 匹配删除
         // 这样前端传入 file.id 时，对于 fileHash 为 null 的失败文件也能正确删除
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
@@ -190,6 +207,28 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 );
         // Logical delete only - physical cleanup is handled by FileCleanupTask scheduled job
         this.remove(wrapper);
+
+        // 清除 fileDecryptInfo 缓存
+        evictFileDecryptInfoCache(userId, filesToDelete);
+    }
+
+    /**
+     * 清除文件解密信息缓存
+     * <p>
+     * 缓存 key 格式为 userId:fileHash，仅清除当前用户的缓存条目。
+     * 如果其他用户保存了相同 hash 的分享文件，他们的缓存不会被清除，
+     * 这是正确的行为，因为分享文件有独立的元数据副本，原始文件删除不影响分享文件。
+     * </p>
+     */
+    private void evictFileDecryptInfoCache(Long userId, List<File> files) {
+        Cache cache = cacheManager.getCache("fileDecryptInfo");
+        if (cache != null && CommonUtils.isNotEmpty(files)) {
+            for (File file : files) {
+                if (file.getFileHash() != null) {
+                    cache.evict(userId + ":" + file.getFileHash());
+                }
+            }
+        }
     }
 
     @Override
@@ -285,6 +324,24 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     @Override
     @Transactional(rollbackFor = Exception.class)
     public String generateSharingCode(Long userId, List<String> fileHash, Integer expireMinutes, Integer shareType) {
+        // 验证参数
+        if (CommonUtils.isEmpty(fileHash)) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "文件列表不能为空");
+        }
+        if (expireMinutes == null || expireMinutes <= 0) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "过期时间必须为正数");
+        }
+
+        // 去重后验证用户拥有所有要分享的文件（避免重复 hash 导致误报）
+        List<String> distinctHashes = fileHash.stream().distinct().toList();
+        LambdaQueryWrapper<File> ownershipWrapper = new LambdaQueryWrapper<File>()
+                .eq(File::getUid, userId)
+                .in(File::getFileHash, distinctHashes);
+        long ownedCount = this.count(ownershipWrapper);
+        if (ownedCount != distinctHashes.size()) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "无权分享部分文件");
+        }
+
         // 调用区块链生成分享码
         Result<String> result = fileRemoteClient.shareFiles(ShareFilesRequest.builder()
                 .uploader(String.valueOf(userId))
@@ -296,7 +353,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         if (CommonUtils.isNotEmpty(sharingCode)) {
             // 同步写入数据库
             Long tenantId = TenantContext.getTenantId();
-            Date expireTime = new Date(System.currentTimeMillis() + expireMinutes * 60 * 1000L);
+            Date expireTime = new Date(System.currentTimeMillis() + (long) expireMinutes * 60 * 1000L);
 
             FileShare fileShare = new FileShare()
                     .setTenantId(tenantId != null ? tenantId : 0L)
@@ -544,6 +601,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(cacheNames = "sharedFiles", key = "#shareCode")
     public void cancelShare(Long userId, String shareCode) {
         // 先验证分享是否属于该用户（从数据库查询）
         FileShare fileShare = fileShareMapper.selectByShareCode(shareCode);
@@ -610,7 +668,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
         // 延长有效期（从当前时间开始计算）
         if (updateVO.getExtendMinutes() != null && updateVO.getExtendMinutes() > 0) {
-            Date newExpireTime = new Date(System.currentTimeMillis() + updateVO.getExtendMinutes() * 60 * 1000L);
+            Date newExpireTime = new Date(System.currentTimeMillis() + (long) updateVO.getExtendMinutes() * 60 * 1000L);
             wrapper.set(FileShare::getExpireTime, newExpireTime);
             // 如果已过期，重新激活
             if (fileShare.getStatus() == FileShare.STATUS_EXPIRED) {
@@ -624,22 +682,19 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     public FileShare getShareByCode(String shareCode) {
+        // 原子操作：先尝试将过期分享标记为过期状态，返回更新条数
+        int expiredCount = fileShareMapper.markAsExpiredIfNecessary(shareCode);
+
         FileShare fileShare = fileShareMapper.selectByShareCode(shareCode);
         if (fileShare != null) {
-            // 检查是否过期，自动更新状态
-            if (fileShare.getStatus() == FileShare.STATUS_ACTIVE
-                    && fileShare.getExpireTime() != null
-                    && fileShare.getExpireTime().before(new Date())) {
-                LambdaUpdateWrapper<FileShare> wrapper = new LambdaUpdateWrapper<FileShare>()
-                        .eq(FileShare::getShareCode, shareCode)
-                        .set(FileShare::getStatus, FileShare.STATUS_EXPIRED);
-                fileShareMapper.update(null, wrapper);
+            // 如果刚刚被标记为过期，同步更新内存对象状态
+            if (expiredCount > 0) {
                 fileShare.setStatus(FileShare.STATUS_EXPIRED);
             }
-
-            // 仅对有效分享增加访问次数
+            // 原子操作：仅当分享处于活跃状态时增加访问计数
+            // 避免 TOCTOU 竞态条件
             if (fileShare.getStatus() == FileShare.STATUS_ACTIVE) {
-                fileShareMapper.incrementAccessCount(shareCode);
+                fileShareMapper.incrementAccessCountIfActive(shareCode);
             }
         }
         return fileShare;

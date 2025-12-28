@@ -37,6 +37,25 @@ public interface FileShareMapper extends BaseMapper<FileShare> {
     int incrementAccessCount(@Param("shareCode") String shareCode);
 
     /**
+     * 原子操作：仅当分享处于活跃状态时增加访问计数
+     * 解决 TOCTOU 竞态条件
+     *
+     * @param shareCode 分享码
+     * @return 影响行数（0表示分享已取消/过期，无法增加计数）
+     */
+    @Update("UPDATE file_share SET access_count = access_count + 1 WHERE share_code = #{shareCode} AND status = 1 AND deleted = 0")
+    int incrementAccessCountIfActive(@Param("shareCode") String shareCode);
+
+    /**
+     * 原子操作：将已过期的分享标记为过期状态
+     *
+     * @param shareCode 分享码
+     * @return 影响行数（0表示未过期或已处理）
+     */
+    @Update("UPDATE file_share SET status = 2 WHERE share_code = #{shareCode} AND status = 1 AND expire_time < NOW() AND deleted = 0")
+    int markAsExpiredIfNecessary(@Param("shareCode") String shareCode);
+
+    /**
      * 批量更新过期分享的状态
      *
      * @param tenantId 租户ID

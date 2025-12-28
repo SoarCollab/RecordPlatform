@@ -75,5 +75,49 @@ public interface FileMapper extends BaseMapper<File> {
      */
     @Select("SELECT COUNT(*) FROM file WHERE file_hash = #{fileHash} AND id != #{excludeId} AND deleted = 0")
     Long countActiveFilesByHash(@Param("fileHash") String fileHash, @Param("excludeId") Long excludeId);
+
+    /**
+     * 根据ID查询文件（包括已删除的记录，绕过@TableLogic）
+     * 用于分享文件下载时追溯原始上传者信息
+     * <p>
+     * <b>安全说明</b>：此方法有意不添加租户隔离，因为：
+     * <ul>
+     *   <li>仅用于追溯分享文件的原始上传者，不返回敏感数据</li>
+     *   <li>分享场景本身就是跨用户的，原始文件可能属于不同租户</li>
+     *   <li>调用方仅使用返回的 uid 字段用于区块链查询</li>
+     * </ul>
+     *
+     * @param id 文件ID（来自当前用户文件的 origin 字段，非外部输入）
+     * @return 文件记录（可能已删除），仅用于获取 uid
+     */
+    @Select("SELECT id, uid, tenant_id FROM file WHERE id = #{id}")
+    File selectByIdIncludeDeleted(@Param("id") Long id);
+
+    /**
+     * 计算用户文件总存储量（使用数据库聚合，避免加载全部文件到内存）
+     * file_param 是 JSON 格式，使用 JSON_EXTRACT 提取 fileSize
+     * 支持 tenantId 为 null 时忽略租户条件
+     *
+     * @param userId 用户ID
+     * @param tenantId 租户ID（可为 null）
+     * @return 总存储量（字节）
+     */
+    @Select("""
+            <script>
+            SELECT COALESCE(SUM(
+                CASE
+                    WHEN file_param IS NOT NULL AND JSON_VALID(file_param)
+                    THEN CAST(JSON_UNQUOTE(JSON_EXTRACT(file_param, '$.fileSize')) AS UNSIGNED)
+                    ELSE 0
+                END
+            ), 0)
+            FROM file
+            WHERE uid = #{userId} AND deleted = 0
+            <if test="tenantId != null">
+                AND tenant_id = #{tenantId}
+            </if>
+            </script>
+            """)
+    Long sumStorageByUserId(@Param("userId") Long userId, @Param("tenantId") Long tenantId);
 }
 
