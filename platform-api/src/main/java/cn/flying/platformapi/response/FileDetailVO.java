@@ -37,7 +37,7 @@ public class FileDetailVO implements Serializable {
     private String param;
 
     /**
-     * 文件内容映射（MinIO 存储路径 JSON）
+     * 文件内容映射（S3 存储路径 JSON）
      */
     private String content;
 

@@ -102,8 +102,8 @@ Client                Backend               S3兼容存储              Blockcha
 | 步骤            | 正向操作             | 补偿操作              |
 | --------------- | -------------------- | --------------------- |
 | PENDING         | 初始化               | -                     |
-| MINIO_UPLOADING | S3 兼容存储 存储分片 | 清理已存储分片        |
-| MINIO_UPLOADED  | 分片存储完成         | 删除 S3 兼容存储 文件 |
+| S3_UPLOADING    | S3 兼容存储 存储分片 | 清理已存储分片        |
+| S3_UPLOADED     | 分片存储完成         | 删除 S3 兼容存储 文件 |
 | CHAIN_STORING   | 区块链存证           | 标记链上记录删除      |
 | COMPLETED       | 提交成功             | -                     |
 
@@ -115,7 +115,7 @@ Client                Backend               S3兼容存储              Blockcha
 
 **问题背景**：
 
-- 外部调用（如 MinIO 删除）成功后，若后续事务回滚，状态会不一致
+- 外部调用（如 S3 存储删除）成功后，若后续事务回滚，状态会不一致
 - 重试时无法判断哪些步骤已完成
 
 **解决方案**：
@@ -677,7 +677,7 @@ saga:
 | 数据库      | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD`            | MySQL 连接                                        |
 | Redis       | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`                             | Redis 连接                                        |
 | Nacos       | `NACOS_HOST`, `NACOS_USERNAME`, `NACOS_PASSWORD`                         | 配置中心                                          |
-| S3 兼容存储 | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`                 | 对象存储                                          |
+| S3 兼容存储 | `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`                          | 对象存储                                          |
 | RabbitMQ    | `RABBITMQ_ADDRESSES`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD`           | 消息队列                                          |
 | 安全        | `JWT_KEY`                                                                | JWT 签名 + ID 加密密钥派生（至少 32 字符）        |
 | 区块链      | `FISCO_PEER_ADDRESS`, `FISCO_STORAGE_CONTRACT`, `FISCO_SHARING_CONTRACT` | 合约配置                                          |
@@ -948,7 +948,7 @@ blockchain:
 A: 确认 Nacos 已启动，检查 `NACOS_HOST` 配置。
 
 **Q: S3 兼容存储 上传失败**
-A: 检查 S3 兼容存储 集群健康：`/actuator/health` 中 `minio` 状态。双节点至少一个在线即可写入。
+A: 检查 S3 兼容存储集群健康：`/actuator/health` 中 `s3Storage` 状态。双节点至少一个在线即可写入。
 
 **Q: Saga 事务卡在 PENDING**
 A: 检查 `file_saga` 表状态，查看 `outbox_event` 是否有积压。可通过 `/actuator/health` 查看 Saga/Outbox 健康指标。

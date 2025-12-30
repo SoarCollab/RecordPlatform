@@ -8,7 +8,7 @@ import java.util.List;
 
 /**
  * 文件存证事件，在文件上传完成后触发
- * 用于异步执行文件存证上链与MinIO集群存储
+ * 用于异步执行文件存证上链与 S3 兼容存储
  */
 @Getter
 public class FileStorageEvent extends ApplicationEvent {
