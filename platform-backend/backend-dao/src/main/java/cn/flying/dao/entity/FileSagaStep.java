@@ -6,8 +6,8 @@ package cn.flying.dao.entity;
  */
 public enum FileSagaStep {
     PENDING,
-    MINIO_UPLOADING,
-    MINIO_UPLOADED,
+    S3_UPLOADING,
+    S3_UPLOADED,
     CHAIN_STORING,
     COMPLETED
 }
