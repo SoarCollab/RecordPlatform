@@ -54,8 +54,8 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
     @Resource(name = "fisco")
     private HealthIndicator fiscoHealthIndicator;
 
-    @Resource(name = "minio")
-    private HealthIndicator minioHealthIndicator;
+    @Resource(name = "s3Storage")
+    private HealthIndicator s3HealthIndicator;
 
     private static final int HEALTH_CHECK_TIMEOUT_SECONDS = 5;
     private final ExecutorService healthCheckExecutor = Executors.newFixedThreadPool(4);
@@ -97,7 +97,7 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
             }
 
             // 总存储容量 (暂时使用文件数量估算，实际应从存储服务获取)
-            // TODO: 从 MinIO 服务获取实际存储容量
+            // TODO: 从 S3 存储服务获取实际存储容量
             long totalStorage = totalFiles * 1024 * 1024; // 临时估算值
 
             return SystemStatsVO.builder()
@@ -168,7 +168,7 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
         futures.add(healthCheckExecutor.submit(() ->
                 components.put("blockchain", checkHealth(fiscoHealthIndicator, "blockchain"))));
         futures.add(healthCheckExecutor.submit(() ->
-                components.put("storage", checkHealth(minioHealthIndicator, "storage"))));
+                components.put("storage", checkHealth(s3HealthIndicator, "storage"))));
 
         // 等待所有检查完成
         for (Future<?> future : futures) {

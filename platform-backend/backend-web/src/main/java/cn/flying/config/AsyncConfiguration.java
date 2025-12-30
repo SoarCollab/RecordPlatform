@@ -103,7 +103,7 @@ public class AsyncConfiguration {
 
     /**
      * 文件处理任务专用线程池（Platform Thread）。
-     * 用于处理文件存证、上链和 MinIO 存储等 CPU 密集型操作。
+     * 用于处理文件存证、上链和 S3 兼容存储等 CPU 密集型操作。
      * 已配置 TaskDecorator 以传递 MDC 和 TenantContext。
      * <p>
      * 保留平台线程池的原因：

@@ -130,10 +130,10 @@ public class FileController {
      * 获取文件访问地址
      * @param userId 用户ID
      * @param fileHash 文件哈希
-     * @return 文件访问地址列表（Minio预签名下载地址【包含多个文件加密分片】）
+     * @return 文件访问地址列表（S3 预签名下载地址【包含多个文件加密分片】）
      */
     @GetMapping("/address")
-    @Operation(summary = "获取文件下载地址（Minio预签名下载地址【包含多个文件加密分片】）")
+    @Operation(summary = "获取文件下载地址（S3 预签名下载地址【包含多个文件加密分片】）")
     @OperationLog(module = "文件操作", operationType = "下载", description = "获取文件下载地址")
     public Result<List<String>> getFileAddress(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,

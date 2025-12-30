@@ -15,14 +15,14 @@ dubbo:
     name: RecordPlatform_storage
     logger: slf4j
     protocol: tri
-    qos-port: ${QOS_MINIO_PORT:22332} # 使用 23333 端口
+    qos-port: ${QOS_STORAGE_PORT:22332}
     qos-enable: true # 启用 QoS 功能
     qos-accept-foreign-ip: false # 只允许本机访问
     check-serializable: false # 关闭序列化检查
     serialize-check-status: DISABLE
   protocol:
     name: tri # 使用 Triple 协议
-    port: ${DUBBO_MINIO_PORT:8092}
+    port: ${DUBBO_STORAGE_PORT:8092}
     payload: 104857600 # 将最大载荷大小设置为 100MB (100 * 1024 * 1024 bytes)
   registry:
     register-mode: instance

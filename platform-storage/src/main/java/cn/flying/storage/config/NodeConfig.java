@@ -3,7 +3,7 @@ package cn.flying.storage.config;
 import lombok.Data;
 
 /**
- * 单个 MinIO 物理节点配置
+ * 单个 S3 兼容存储物理节点配置
  */
 @Data
 public class NodeConfig {

@@ -32,10 +32,10 @@ import java.util.UUID;
 @Slf4j
 @Service
 public class ImageServiceImpl extends ServiceImpl<ImageStoreMapper, ImageStore> implements ImageService {
-    @Value("${minio.bucket-name}")
+    @Value("${s3.bucket-name}")
     String bucketName;
     @Resource
-    MinioClient minioClient;
+    MinioClient s3Client;
     @Resource
     AccountMapper accountMapper;
     @Resource
@@ -50,7 +50,7 @@ public class ImageServiceImpl extends ServiceImpl<ImageStoreMapper, ImageStore> 
                 .object(imageName)
                 .build();
         try {
-            minioClient.putObject(objectArgs);
+            s3Client.putObject(objectArgs);
             String avatar =accountMapper.selectById(userId).getAvatar();
             this.deleteOldImage(avatar);
             if(accountMapper.update(null, Wrappers.<Account>update()
@@ -79,7 +79,7 @@ public class ImageServiceImpl extends ServiceImpl<ImageStoreMapper, ImageStore> 
                 .object(imageName)
                 .build();
         try {
-            minioClient.putObject(objectArgs);
+            s3Client.putObject(objectArgs);
             if (this.save(new ImageStore(null,imageName,data)))
                 return imageName;
             else {
@@ -98,7 +98,7 @@ public class ImageServiceImpl extends ServiceImpl<ImageStoreMapper, ImageStore> 
                 .bucket(bucketName)
                 .object(imagePath)
                 .build();
-        GetObjectResponse object = minioClient.getObject(args);
+        GetObjectResponse object = s3Client.getObject(args);
         IOUtils.copy(object,outputStream);
     }
     private void deleteOldImage(String avatar){
@@ -109,7 +109,7 @@ public class ImageServiceImpl extends ServiceImpl<ImageStoreMapper, ImageStore> 
                 .object(avatar)
                 .build();
         try {
-            minioClient.removeObject(args);
+            s3Client.removeObject(args);
         }catch (Exception e){
             log.error("图片删除失败:{}", e.getMessage(), e);
         }

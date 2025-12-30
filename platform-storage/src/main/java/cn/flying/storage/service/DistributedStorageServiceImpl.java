@@ -545,9 +545,8 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     }
 
     /**
-     * 解析逻辑路径，支持新旧两种格式：
-     * 新格式: minio/tenant/{tenantId}/node/{logic_node_name}/{object_name}
-     * 旧格式: minio/node/{logic_node_name}/{object_name}
+     * 解析逻辑路径。
+     * 格式: storage/tenant/{tenantId}/node/{logic_node_name}/{object_name}
      *
      * @return ParsedPath 对象，如果解析失败则返回 null
      */
@@ -557,10 +556,9 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             return null;
         }
 
-        // 使用 TenantContextUtil 解析（支持新旧格式）
         TenantContextUtil.ParsedTenantPath parsed = TenantContextUtil.parseTenantPath(filePath);
         if (parsed == null) {
-            log.error("无效的逻辑路径格式 {}，预期格式：minio/tenant/{tenantId}/node/{logicNode}/{objectName} 或 minio/node/{logicNode}/{objectName}", filePath);
+            log.error("无效的逻辑路径格式 {}，预期格式：storage/tenant/{tenantId}/node/{logicNode}/{objectName}", filePath);
             return null;
         }
 

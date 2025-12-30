@@ -7,14 +7,13 @@ import org.slf4j.LoggerFactory;
 /**
  * S3 兼容存储模块的租户上下文工具类。
  * 从 Dubbo RPC 上下文中读取租户 ID，用于存储路径隔离。
- *
- * 注意：路径前缀 "minio/" 为历史遗留格式，保留以兼容已有数据。
  */
 public final class TenantContextUtil {
 
     private static final Logger log = LoggerFactory.getLogger(TenantContextUtil.class);
     private static final String TENANT_ATTACHMENT_KEY = "tenant.id";
     private static final Long DEFAULT_TENANT_ID = 0L;
+    private static final String PATH_PREFIX = "storage";
 
     private TenantContextUtil() {}
 
@@ -48,9 +47,7 @@ public final class TenantContextUtil {
 
     /**
      * 构建包含租户隔离的存储路径。
-     * 格式: minio/tenant/{tenantId}/node/{logicNode}/{objectName}
-     *
-     * 注意：保留 "minio/" 前缀以兼容已有数据。
+     * 格式: storage/tenant/{tenantId}/node/{logicNode}/{objectName}
      *
      * @param logicNodeName 逻辑节点名称
      * @param objectName    对象名称（通常是 fileHash）
@@ -58,7 +55,7 @@ public final class TenantContextUtil {
      */
     public static String buildTenantPath(String logicNodeName, String objectName) {
         Long tenantId = getTenantIdOrDefault();
-        return String.format("minio/tenant/%d/node/%s/%s", tenantId, logicNodeName, objectName);
+        return String.format("%s/tenant/%d/node/%s/%s", PATH_PREFIX, tenantId, logicNodeName, objectName);
     }
 
     /**
@@ -75,7 +72,7 @@ public final class TenantContextUtil {
 
     /**
      * 从租户隔离的逻辑路径中解析原始对象名。
-     * 输入格式: minio/tenant/{tenantId}/node/{logicNode}/{objectName}
+     * 格式: storage/tenant/{tenantId}/node/{logicNode}/{objectName}
      *
      * @param tenantPath 租户隔离的路径
      * @return 解析结果，包含租户 ID、逻辑节点名和对象名
@@ -85,8 +82,8 @@ public final class TenantContextUtil {
             return null;
         }
 
-        // 新格式: minio/tenant/{tenantId}/node/{logicNode}/{objectName}
-        String tenantPrefix = "minio/tenant/";
+        // 格式: storage/tenant/{tenantId}/node/{logicNode}/{objectName}
+        String tenantPrefix = PATH_PREFIX + "/tenant/";
         if (tenantPath.startsWith(tenantPrefix)) {
             String remaining = tenantPath.substring(tenantPrefix.length());
             int firstSlash = remaining.indexOf('/');
@@ -108,18 +105,6 @@ public final class TenantContextUtil {
                 } catch (NumberFormatException e) {
                     log.warn("解析租户路径失败，无效的租户 ID: {}", tenantPath);
                 }
-            }
-        }
-
-        // 兼容旧格式: minio/node/{logicNode}/{objectName}
-        String oldPrefix = "minio/node/";
-        if (tenantPath.startsWith(oldPrefix)) {
-            String remaining = tenantPath.substring(oldPrefix.length());
-            int lastSlash = remaining.lastIndexOf('/');
-            if (lastSlash > 0) {
-                String logicNode = remaining.substring(0, lastSlash);
-                String objectName = remaining.substring(lastSlash + 1);
-                return new ParsedTenantPath(DEFAULT_TENANT_ID, logicNode, objectName);
             }
         }
 
