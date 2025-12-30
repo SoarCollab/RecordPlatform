@@ -11,11 +11,14 @@ import org.springframework.stereotype.Component;
 import java.util.Map;
 import java.util.concurrent.*;
 
+/**
+ * S3 兼容对象存储健康检查指示器
+ */
 @Slf4j
-@Component("minio")
-public class MinIOHealthIndicator implements HealthIndicator {
+@Component("s3Storage")
+public class S3StorageHealthIndicator implements HealthIndicator {
 
-    @DubboReference(id = "storageServiceMinioHealth", version = DistributedStorageService.VERSION, timeout = 3000, retries = 0)
+    @DubboReference(id = "storageServiceHealth", version = DistributedStorageService.VERSION, timeout = 3000, retries = 0)
     private DistributedStorageService storageService;
 
     private static final int TIMEOUT_SECONDS = 3;
@@ -23,29 +26,29 @@ public class MinIOHealthIndicator implements HealthIndicator {
 
     @Override
     public Health health() {
-        Future<Health> future = executor.submit(this::checkMinioHealth);
+        Future<Health> future = executor.submit(this::checkS3Health);
         try {
             return future.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             future.cancel(true);
-            log.warn("MinIO health check timed out");
+            log.warn("S3 storage health check timed out");
             return Health.down()
                     .withDetail("reason", "Health check timed out after " + TIMEOUT_SECONDS + "s")
                     .build();
         } catch (Exception e) {
-            log.error("MinIO health check failed", e);
+            log.error("S3 storage health check failed", e);
             return Health.down()
                     .withException(e)
                     .build();
         }
     }
 
-    private Health checkMinioHealth() {
+    private Health checkS3Health() {
         try {
             Result<Map<String, Boolean>> result = storageService.getClusterHealth();
             if (result == null || result.getData() == null) {
                 return Health.down()
-                        .withDetail("reason", "Unable to retrieve MinIO cluster status")
+                        .withDetail("reason", "Unable to retrieve S3 storage cluster status")
                         .build();
             }
 
@@ -59,7 +62,7 @@ public class MinIOHealthIndicator implements HealthIndicator {
                         .withDetail("onlineCount", onlineCount)
                         .withDetail("totalNodes", nodeStatus.size())
                         .withDetail("nodes", nodeStatus)
-                        .withDetail("reason", "No MinIO nodes are online")
+                        .withDetail("reason", "No S3 storage nodes are online")
                         .build();
             }
 
@@ -70,15 +73,15 @@ public class MinIOHealthIndicator implements HealthIndicator {
 
             if (onlineCount == 1) {
                 return builder.status("DEGRADED")
-                        .withDetail("warning", "Only one MinIO node online")
+                        .withDetail("warning", "Only one S3 storage node online")
                         .build();
             }
 
             return builder.build();
         } catch (Exception e) {
-            log.error("MinIO health check error", e);
+            log.error("S3 storage health check error", e);
             return Health.down()
-                    .withDetail("reason", "Failed to connect to MinIO cluster")
+                    .withDetail("reason", "Failed to connect to S3 storage cluster")
                     .withException(e)
                     .build();
         }
