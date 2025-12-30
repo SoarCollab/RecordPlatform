@@ -62,7 +62,7 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-amqp</artifactId>
         </dependency>
-        <!-- 对象存储minIO -->
+        <!-- S3 兼容对象存储 (使用 MinIO SDK) -->
         <dependency>
             <groupId>io.minio</groupId>
             <artifactId>minio</artifactId>
