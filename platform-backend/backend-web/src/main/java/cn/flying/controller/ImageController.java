@@ -137,7 +137,7 @@ public class ImageController {
             if (e.response() != null && e.response().code() == 404) {
                 throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
             } else {
-                log.error("从minIO读取图片出现异常：{}", e.getMessage(), e);
+                log.error("从 S3 存储读取图片出现异常：{}", e.getMessage(), e);
                 throw new GeneralException(ResultEnum.FAIL);
             }
         }

@@ -37,7 +37,7 @@ import java.util.*;
 
 /**
  * 文件上传 Saga 编排器。
- * 协调 MinIO 上传 + 区块链存储的分布式事务，失败时自动补偿。
+ * 协调 S3 兼容存储上传 + 区块链存储的分布式事务，失败时自动补偿。
  * 支持指数退避重试策略。
  * 集成 Prometheus 监控指标。
  * 多租户隔离：按租户分别执行补偿任务。
@@ -47,7 +47,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class FileSagaOrchestrator {
 
-    private static final String COMP_STEP_MINIO = "MINIO_DELETED";
+    private static final String COMP_STEP_S3 = "S3_DELETED";
     private static final String COMP_STEP_DB = "DB_ROLLBACK";
     private final FileSagaMapper sagaMapper;
     private final FileRemoteClient fileRemoteClient;
@@ -65,11 +65,11 @@ public class FileSagaOrchestrator {
 
     /**
      * 执行文件上传 Saga。
-     * 区块链存储失败时自动补偿删除 MinIO 数据。
+     * 区块链存储失败时自动补偿删除 S3 存储数据。
      *
      * 注意：此方法不使用 @Transactional，因为：
      * 1. Saga 模式通过补偿（而非事务回滚）实现最终一致性
-     * 2. 外部调用（MinIO、区块链）不受数据库事务管理
+     * 2. 外部调用（S3 存储、区块链）不受数据库事务管理
      * 3. 每个步骤完成后使用独立事务 (REQUIRES_NEW) 持久化状态
      * 4. 避免长事务导致的锁竞争和连接占用
      */
@@ -80,7 +80,7 @@ public class FileSagaOrchestrator {
         FileSaga saga = startOrResumeSaga(cmd);
 
         try {
-            Map<String, String> storedPaths = executeMinioUpload(saga, cmd);
+            Map<String, String> storedPaths = executeS3Upload(saga, cmd);
             StoreFileResponse chainResult = executeBlockchainStore(saga, cmd, storedPaths);
 
             publishSuccessEvent(saga, cmd, chainResult);
@@ -127,13 +127,13 @@ public class FileSagaOrchestrator {
         return saga;
     }
 
-    private Map<String, String> executeMinioUpload(FileSaga saga, FileUploadCommand cmd) {
+    private Map<String, String> executeS3Upload(FileSaga saga, FileUploadCommand cmd) {
         SagaPayloadContext context = loadPayloadContext(saga);
-        if (saga.reachedStep(FileSagaStep.MINIO_UPLOADED) && context.getStoredPaths() != null) {
+        if (saga.reachedStep(FileSagaStep.S3_UPLOADED) && context.getStoredPaths() != null) {
             return new LinkedHashMap<>(context.getStoredPaths());
         }
 
-        saga.advanceTo(FileSagaStep.MINIO_UPLOADING);
+        saga.advanceTo(FileSagaStep.S3_UPLOADING);
         compensationHelper.updateSagaStepInNewTransaction(saga);
 
         Map<String, String> storedPaths = new LinkedHashMap<>();
@@ -155,7 +155,7 @@ public class FileSagaOrchestrator {
             Result<String> result = fileRemoteClient.storeFileChunk(chunkData, chunkHash);
             String logicalPath = ResultUtils.getData(result);
             if (logicalPath == null) {
-                log.error("MinIO 上传失败: index={}, hash={}", i, chunkHash);
+                log.error("S3 存储上传失败: index={}, hash={}", i, chunkHash);
                 throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR);
             }
             storedPaths.put(chunkHash, logicalPath);
@@ -164,7 +164,7 @@ public class FileSagaOrchestrator {
         context.setStoredPaths(storedPaths);
         context.resetCompensatedSteps();
 
-        saga.advanceTo(FileSagaStep.MINIO_UPLOADED);
+        saga.advanceTo(FileSagaStep.S3_UPLOADED);
         persistPayload(saga, context);
 
         return new LinkedHashMap<>(storedPaths);
@@ -255,7 +255,7 @@ public class FileSagaOrchestrator {
     }
 
     /**
-     * 补偿操作：删除已上传到 MinIO 的文件
+     * 补偿操作：删除已上传到 S3 存储的文件
      * 设计为幂等操作，重复调用不会产生副作用
      */
     private void compensate(FileSaga saga, SagaPayloadContext context) {
@@ -265,37 +265,37 @@ public class FileSagaOrchestrator {
             return;
         }
 
-        boolean minioCompensated = compensateMinioUpload(saga, context);
+        boolean s3Compensated = compensateS3Upload(saga, context);
         boolean dbCompensated = compensateDatabaseState(saga, context);
 
-        if (!minioCompensated || !dbCompensated) {
-            throw new RuntimeException("补偿未完全成功: minioCompensated=" + minioCompensated
+        if (!s3Compensated || !dbCompensated) {
+            throw new RuntimeException("补偿未完全成功: s3Compensated=" + s3Compensated
                     + ", dbCompensated=" + dbCompensated);
         }
     }
 
     /**
-     * 补偿 MinIO 上传。
+     * 补偿 S3 存储上传。
      * 外部调用成功后使用独立事务持久化状态，确保即使后续操作失败，
-     * MinIO 补偿完成的状态也不会丢失。
+     * S3 补偿完成的状态也不会丢失。
      */
-    private boolean compensateMinioUpload(FileSaga saga, SagaPayloadContext context) {
-        if (context.isStepDone(COMP_STEP_MINIO)) {
-            log.info("MinIO 补偿已完成（幂等跳过）：sagaId={}", saga.getId());
+    private boolean compensateS3Upload(FileSaga saga, SagaPayloadContext context) {
+        if (context.isStepDone(COMP_STEP_S3)) {
+            log.info("S3 存储补偿已完成（幂等跳过）：sagaId={}", saga.getId());
             return true;
         }
-        if (!saga.reachedStep(FileSagaStep.MINIO_UPLOADED)) {
-            log.info("无需补偿 MinIO 数据（未到达 MINIO_UPLOADED 步骤）: sagaId={}", saga.getId());
+        if (!saga.reachedStep(FileSagaStep.S3_UPLOADED)) {
+            log.info("无需补偿 S3 存储数据（未到达 S3_UPLOADED 步骤）: sagaId={}", saga.getId());
             return true;
         }
 
         Map<String, String> storedPaths = context.getStoredPaths();
         if (storedPaths == null || storedPaths.isEmpty()) {
-            log.info("存储路径为空，跳过 MinIO 补偿: sagaId={}", saga.getId());
+            log.info("存储路径为空，跳过 S3 存储补偿: sagaId={}", saga.getId());
             return true;
         }
 
-        log.info("开始补偿 MinIO 上传: sagaId={}, 文件数量={}", saga.getId(), storedPaths.size());
+        log.info("开始补偿 S3 存储上传: sagaId={}, 文件数量={}", saga.getId(), storedPaths.size());
 
         Result<Boolean> result = fileRemoteClient.deleteStorageFile(storedPaths);
         boolean success = ResultUtils.isSuccess(result);
@@ -304,13 +304,13 @@ public class FileSagaOrchestrator {
         if (success || fileNotExist) {
             // 外部调用成功，立即在独立事务中持久化补偿步骤完成状态
             // 即使后续 DB 补偿失败事务回滚，此状态也已持久化
-            context.markStepDone(COMP_STEP_MINIO);
+            context.markStepDone(COMP_STEP_S3);
             String payloadJson = JsonConverter.toJsonWithPretty(context);
             compensationHelper.persistPayloadInNewTransaction(saga, payloadJson);
-            log.info("MinIO 补偿完成并已持久化: sagaId={}", saga.getId());
+            log.info("S3 存储补偿完成并已持久化: sagaId={}", saga.getId());
             return true;
         } else {
-            log.warn("MinIO 补偿失败: sagaId={}, result={}", saga.getId(),
+            log.warn("S3 存储补偿失败: sagaId={}, result={}", saga.getId(),
                     result != null ? result.getCode() + ":" + result.getMessage() : "null");
             return false;
         }
@@ -404,7 +404,7 @@ public class FileSagaOrchestrator {
     /**
      * 重试单个 Saga 的补偿操作。
      * 不使用外层事务，因为：
-     * 1. 外部调用（MinIO 删除）不受事务管理
+     * 1. 外部调用（S3 存储删除）不受事务管理
      * 2. 每个补偿步骤完成后使用独立事务 (REQUIRES_NEW) 持久化状态
      * 3. 避免长事务导致的锁竞争和连接占用
      */

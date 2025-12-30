@@ -93,7 +93,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     /**
-     * 存储文件：执行 Saga 流程（MinIO + 区块链）
+     * 存储文件：执行 Saga 流程（S3 存储 + 区块链）
      * 注意：此方法不使用类级别事务，Saga 编排器内部管理自己的事务
      */
     @Override

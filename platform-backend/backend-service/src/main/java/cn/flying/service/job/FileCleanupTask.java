@@ -161,7 +161,7 @@ public class FileCleanupTask {
                 );
 
                 if (detail != null && detail.getContent() != null) {
-                    // 2. 解析存储位置并从 MinIO 删除
+                    // 2. 解析存储位置并从 S3 存储删除
                     @SuppressWarnings("unchecked")
                     Map<String, String> contentMap = JsonConverter.parse(detail.getContent(), Map.class);
                     if (contentMap != null && !contentMap.isEmpty()) {

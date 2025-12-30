@@ -130,7 +130,7 @@ public class S3ClientManager {
                                         AwsBasicCredentials.create(nodeConfig.getAccessKey(), nodeConfig.getSecretKey())
                                 ))
                                 .serviceConfiguration(S3Configuration.builder()
-                                        .pathStyleAccessEnabled(true)  // MinIO/Ceph 需要路径样式访问
+                                        .pathStyleAccessEnabled(true)  // S3 兼容存储需要路径样式访问
                                         .build())
                                 .httpClient(ApacheHttpClient.builder()
                                         .connectionTimeout(Duration.ofSeconds(10))

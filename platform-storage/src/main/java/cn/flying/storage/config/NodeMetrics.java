@@ -10,8 +10,8 @@ import lombok.Setter;
 @Setter
 public class NodeMetrics {
     // --- 保留/新增 的指标 ---
-    private Double apiInflightRequests = 0.0;   // minio_s3_requests_inflight_total (累加)
-    private Double apiWaitingRequests = 0.0;    // minio_s3_requests_waiting_total (累加)
+    private Double apiInflightRequests = 0.0;   // s3_requests_inflight_total (累加)
+    private Double apiWaitingRequests = 0.0;    // s3_requests_waiting_total (累加)
     private Double diskUsagePercent = null;     // 计算得到的磁盘使用率
 
     // --- 用于计算 diskUsagePercent 的临时字段 ---

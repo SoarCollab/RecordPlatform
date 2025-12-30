@@ -17,7 +17,7 @@ import java.util.concurrent.Executor;
 
 /**
  * 文件存证事件监听器
- * 负责异步处理文件存证和MinIO存储
+ * 负责异步处理文件存证和 S3 兼容存储
  *
  * @author flyingcoding
  * @create 2025-04-05
@@ -38,7 +38,7 @@ public class FileStorageEventListener {
 
     /**
      * 异步处理文件存证事件
-     * 接收文件上传完成事件，处理文件存证上链与MinIO集群存储
+     * 接收文件上传完成事件，处理文件存证上链与 S3 兼容存储
      */
     @EventListener
     @Async("fileProcessTaskExecutor") // 使用指定的线程池进行异步处理
