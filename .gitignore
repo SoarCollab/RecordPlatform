@@ -57,6 +57,5 @@ App.java
 /platform-frontend/node_modules/
 /platform-frontend/dist/
 /platform-fisco/src/main/resources/conf/
-/docs/
 /platform-frontend/AGENTS.md
 .ace-tool/
