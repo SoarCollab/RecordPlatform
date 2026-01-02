@@ -46,7 +46,6 @@ async function login(
       id: "",
       username: result.username,
       role: result.role,
-      status: 1,
       registerTime: "",
     };
     // Fetch full user info

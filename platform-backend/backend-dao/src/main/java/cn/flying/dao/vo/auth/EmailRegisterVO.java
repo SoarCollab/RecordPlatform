@@ -25,4 +25,8 @@ public class EmailRegisterVO {
     @Length(min = 6, max = 20)
     @Schema(description = "密码")
     String password;
+
+    @Length(max = 50)
+    @Schema(description = "昵称")
+    String nickname;
 }

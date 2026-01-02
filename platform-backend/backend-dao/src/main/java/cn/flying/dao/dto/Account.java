@@ -39,6 +39,9 @@ public class Account implements BaseData {
     @Schema(description = "头像Url")
     private String avatar;
 
+    @Schema(description = "昵称")
+    private String nickname;
+
     @TableField(fill = FieldFill.INSERT)
     @Schema(description = "租户ID")
     private Long tenantId;
@@ -55,12 +58,13 @@ public class Account implements BaseData {
     @Schema(description = "逻辑删除字段：0—>未删除 , 1->已删除")
     Integer deleted;
 
-    public Account(Long id, String username, String password, String email, String role, String avatar) {
+    public Account(Long id, String username, String password, String email, String role, String avatar, String nickname) {
         this.id=id;
         this.username = username;
         this.password = password;
         this.email = email;
         this.role = role;
         this.avatar = avatar;
+        this.nickname = nickname;
     }
 }
