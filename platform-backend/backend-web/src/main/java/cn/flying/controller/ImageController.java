@@ -110,10 +110,11 @@ public class ImageController {
      */
     private void fetchImage(HttpServletRequest request, HttpServletResponse response) throws Exception {
         // 路径格式: /api/v1/images/download/images/{imagePath}
-        // 前缀长度: "/api/v1/images/download/images/" = 31 字符
+        // 前缀长度: "/api/v1/images/download/images" = 30 字符（不含末尾斜杠）
+        // 存储时路径带前导斜杠，如 /avatar/uuid，所以这里保留前导斜杠
         String servletPath = request.getServletPath();
-        String prefix = "/api/v1/images/download/images/";
-        String imagePath = servletPath.startsWith(prefix) ? servletPath.substring(prefix.length()) : servletPath.substring(31);
+        String prefix = "/api/v1/images/download/images";
+        String imagePath = servletPath.startsWith(prefix) ? servletPath.substring(prefix.length()) : servletPath.substring(30);
 
         // 安全验证：防止路径遍历攻击
         if (!isValidImagePath(imagePath)) {
@@ -154,14 +155,16 @@ public class ImageController {
         if (imagePath.contains("..") || imagePath.contains("//")) {
             return false;
         }
-        // 检测绝对路径（Unix 和 Windows）
-        if (imagePath.startsWith("/") || imagePath.startsWith("\\") ||
-            (imagePath.length() >= 2 && imagePath.charAt(1) == ':')) {
+        // 允许以单个 / 开头的相对路径（S3 存储格式）
+        String pathToCheck = imagePath.startsWith("/") ? imagePath.substring(1) : imagePath;
+        // 检测绝对路径（Windows）
+        if (pathToCheck.startsWith("\\") ||
+            (pathToCheck.length() >= 2 && pathToCheck.charAt(1) == ':')) {
             return false;
         }
         // 规范化路径并验证
         try {
-            Path normalized = Paths.get(imagePath).normalize();
+            Path normalized = Paths.get(pathToCheck).normalize();
             // 确保规范化后的路径不以 .. 开头（防止绕过）
             if (normalized.startsWith("..") || normalized.isAbsolute()) {
                 return false;
