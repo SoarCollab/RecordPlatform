@@ -112,8 +112,8 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
         String username = info.getUsername();
         if(this.existsAccountByUsername(username)) return "该用户名已被他人使用，请重新更换";
         String password = passwordEncoder.encode(info.getPassword());
-        Account account = new Account(IdUtils.nextUserId(),info.getUsername(),
-                password, email, UserRole.ROLE_DEFAULT.getRole(),null);
+        Account account = new Account(IdUtils.nextUserId(), info.getUsername(),
+                password, email, UserRole.ROLE_DEFAULT.getRole(), null, info.getNickname());
         if(!this.save(account)) {
             return "内部错误，注册失败";
         } else {
@@ -282,7 +282,10 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
             account.setAvatar(vo.getAvatar());
             needUpdate = true;
         }
-        // 如果有昵称字段，也可以在这里更新
+        if (vo.getNickname() != null) {
+            account.setNickname(vo.getNickname());
+            needUpdate = true;
+        }
 
         if (needUpdate) {
             this.updateById(account);

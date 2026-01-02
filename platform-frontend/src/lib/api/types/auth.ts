@@ -12,7 +12,6 @@ export interface AuthorizeVO {
 /**
  * 用户信息
  * @see AccountVO.java
- * @note 部分字段为前端扩展，后端可能不返回
  */
 export interface AccountVO {
   id: string;
@@ -21,10 +20,9 @@ export interface AccountVO {
   avatar?: string;
   role: string;
   registerTime: string;
-  // 以下字段为前端扩展（后端 AccountVO 不包含）
   nickname?: string;
-  phone?: string;
-  status?: number;
+  /** 软删除标记：0-正常，1-已禁用 */
+  deleted?: number;
 }
 
 /**
@@ -45,7 +43,6 @@ export interface RegisterRequest {
   email: string; // Required for email verification
   code: string; // Email verification code
   nickname?: string;
-  phone?: string;
 }
 
 /**

@@ -30,8 +30,12 @@ public class AccountVO {
     String role;
     @Schema(description = "头像Url")
     String avatar;
+    @Schema(description = "昵称")
+    String nickname;
     @Schema(description = "注册时间")
     Date registerTime;
+    @Schema(description = "状态：0-正常，1-已禁用")
+    Integer deleted;
 
     @Override
     public String toString() {
@@ -42,7 +46,9 @@ public class AccountVO {
                 ", email='" + email + '\'' +
                 ", role='" + role + '\'' +
                 ", avatar='" + avatar + '\'' +
+                ", nickname='" + nickname + '\'' +
                 ", registerTime=" + registerTime +
+                ", deleted=" + deleted +
                 '}';
     }
 }
