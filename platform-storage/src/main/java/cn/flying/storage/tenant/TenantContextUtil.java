@@ -46,16 +46,16 @@ public final class TenantContextUtil {
     }
 
     /**
-     * 构建包含租户隔离的存储路径。
-     * 格式: storage/tenant/{tenantId}/node/{logicNode}/{objectName}
+     * 构建分片存储路径（故障域模式）。
+     * 格式: storage/tenant/{tenantId}/chunk/{objectName}
+     * 不再包含逻辑节点名，因为分片分布由一致性哈希决定。
      *
-     * @param logicNodeName 逻辑节点名称
-     * @param objectName    对象名称（通常是 fileHash）
-     * @return 租户隔离的存储路径
+     * @param objectName 对象名称（通常是 fileHash）
+     * @return 租户隔离的分片路径
      */
-    public static String buildTenantPath(String logicNodeName, String objectName) {
+    public static String buildChunkPath(String objectName) {
         Long tenantId = getTenantIdOrDefault();
-        return String.format("%s/tenant/%d/node/%s/%s", PATH_PREFIX, tenantId, logicNodeName, objectName);
+        return String.format("%s/tenant/%d/chunk/%s", PATH_PREFIX, tenantId, objectName);
     }
 
     /**
@@ -71,39 +71,36 @@ public final class TenantContextUtil {
     }
 
     /**
-     * 从租户隔离的逻辑路径中解析原始对象名。
-     * 格式: storage/tenant/{tenantId}/node/{logicNode}/{objectName}
+     * 从分片路径中解析信息。
+     * 格式: storage/tenant/{tenantId}/chunk/{objectName}
      *
-     * @param tenantPath 租户隔离的路径
-     * @return 解析结果，包含租户 ID、逻辑节点名和对象名
+     * @param chunkPath 分片路径
+     * @return 解析结果，包含租户 ID 和对象名
      */
-    public static ParsedTenantPath parseTenantPath(String tenantPath) {
-        if (tenantPath == null || tenantPath.isEmpty()) {
+    public static ParsedChunkPath parseChunkPath(String chunkPath) {
+        if (chunkPath == null || chunkPath.isEmpty()) {
             return null;
         }
 
-        // 格式: storage/tenant/{tenantId}/node/{logicNode}/{objectName}
+        // 格式: storage/tenant/{tenantId}/chunk/{objectName}
         String tenantPrefix = PATH_PREFIX + "/tenant/";
-        if (tenantPath.startsWith(tenantPrefix)) {
-            String remaining = tenantPath.substring(tenantPrefix.length());
+        if (chunkPath.startsWith(tenantPrefix)) {
+            String remaining = chunkPath.substring(tenantPrefix.length());
             int firstSlash = remaining.indexOf('/');
             if (firstSlash > 0) {
                 try {
                     Long tenantId = Long.parseLong(remaining.substring(0, firstSlash));
                     String afterTenant = remaining.substring(firstSlash + 1);
 
-                    // 期望格式: node/{logicNode}/{objectName}
-                    if (afterTenant.startsWith("node/")) {
-                        String nodeAndObject = afterTenant.substring(5);
-                        int lastSlash = nodeAndObject.lastIndexOf('/');
-                        if (lastSlash > 0) {
-                            String logicNode = nodeAndObject.substring(0, lastSlash);
-                            String objectName = nodeAndObject.substring(lastSlash + 1);
-                            return new ParsedTenantPath(tenantId, logicNode, objectName);
+                    // 期望格式: chunk/{objectName}
+                    if (afterTenant.startsWith("chunk/")) {
+                        String objectName = afterTenant.substring(6);
+                        if (!objectName.isEmpty()) {
+                            return new ParsedChunkPath(tenantId, objectName);
                         }
                     }
                 } catch (NumberFormatException e) {
-                    log.warn("解析租户路径失败，无效的租户 ID: {}", tenantPath);
+                    log.warn("解析分片路径失败，无效的租户 ID: {}", chunkPath);
                 }
             }
         }
@@ -112,7 +109,7 @@ public final class TenantContextUtil {
     }
 
     /**
-     * 解析后的租户路径信息。
+     * 解析后的分片路径信息。
      */
-    public record ParsedTenantPath(Long tenantId, String logicNodeName, String objectName) {}
+    public record ParsedChunkPath(Long tenantId, String objectName) {}
 }

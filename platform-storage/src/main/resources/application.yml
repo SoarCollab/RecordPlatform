@@ -28,14 +28,48 @@ dubbo:
     register-mode: instance
     address: nacos://${NACOS_HOST:localhost}:${NACOS_PORT:8848}
 
-# Storage 副本一致性修复配置
+# Storage 配置
 storage:
+  # 活跃域名称列表（按优先级排序）
+  # - 本地/开发环境：若未配置（且未配置 nodes/domains），服务仍可启动（用于占位/等待 Nacos 下发配置）
+  # - 生产环境：若已配置 nodes/domains，则必须配置 active-domains
+  # active-domains:
+  #   - local
+
+  # 外部访问端点（v3.2.0 新增）
+  # 用于生成预签名 URL 时替换内部端点地址，解决跨网段（如 VPN）访问问题
+  # 格式：http://host:port（不带尾部斜杠）
+  # 如果未配置，则使用各节点的 endpoint 配置
+  # external-endpoint: http://10.1.0.2:9000
+
+  # 副本策略配置 (v3.1.0 新增)
+  replication:
+    # factor: 2                   # 副本数量，默认=活跃域数量
+    quorum: auto                  # 仲裁策略: auto|majority|all|具体数字
+    # auto: 2副本=2, 3+副本=多数派(N/2+1)
+    # majority: 始终使用多数派
+    # all: 全部成功
+    # 具体数字: 手动指定仲裁数
+
+  # 降级写入配置 (v3.1.0 新增)
+  degraded-write:
+    enabled: true                 # 是否允许降级写入
+    min-replicas: 1               # 降级模式下的最小副本数
+    track-for-sync: true          # 是否记录降级写入以便后续同步
+
+  # 副本一致性修复配置
   consistency:
     repair:
       enabled: true
-      cron: 0 0 * * * ? # 每小时执行一次
+      cron: 0 */15 * * * ?        # 每15分钟执行一次 (v3.1.0 调整)
       batch-size: 100
-      lock-timeout-seconds: 600 # 分布式锁超时时间（10分钟）
+      lock-timeout-seconds: 600   # 分布式锁超时时间（10分钟）
+
+  # 数据再平衡配置
+  rebalance:
+    enabled: true                 # 是否启用自动再平衡
+    rate-limit-per-second: 10     # 每秒最大复制对象数（限流）
+    cleanup-source: false         # 再平衡后是否删除源数据（默认不删除，确保数据安全）
 
 # 其他 Spring Boot 配置...
 logging:

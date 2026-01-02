@@ -144,7 +144,7 @@ public class FaultDomainManager {
      * @return 活跃域名称列表
      */
     public List<String> getActiveDomains() {
-        return storageProperties.getEffectiveActiveDomains();
+        return storageProperties.getActiveDomains();
     }
 
     /**
