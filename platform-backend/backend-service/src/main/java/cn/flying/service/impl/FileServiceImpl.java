@@ -234,22 +234,19 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     @Override
     @Cacheable(cacheNames = "userFiles", key = "#userId", unless = "#result == null || #result.isEmpty()")
     public List<File> getUserFilesList(Long userId) {
-        LambdaQueryWrapper<File> wrapper= new LambdaQueryWrapper<>();
-        //超管账号可查看所有文件
-        if(!SecurityUtils.isAdmin()){
-            wrapper.eq(File::getUid, userId);
-        }
-
+        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
+        // 所有用户（包括管理员）只能查询自己的文件
+        // 管理员查看所有文件请使用 FileAdminService.getAllFiles()
+        wrapper.eq(File::getUid, userId);
         return this.list(wrapper);
     }
 
     @Override
     public void getUserFilesPage(Long userId, Page<File> page) {
-        LambdaQueryWrapper<File> wrapper= new LambdaQueryWrapper<>();
-        //超管账号可查看所有文件
-        if(!SecurityUtils.isAdmin()){
-            wrapper.eq(File::getUid, userId);
-        }
+        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
+        // 所有用户（包括管理员）只能查询自己的文件
+        // 管理员查看所有文件请使用 FileAdminService.getAllFiles()
+        wrapper.eq(File::getUid, userId);
         this.page(page, wrapper);
     }
 
