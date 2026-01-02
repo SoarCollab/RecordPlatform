@@ -47,7 +47,9 @@ public class TenantFilter extends OncePerRequestFilter {
             // 公开分享相关端点
             "/api/v1/files/getSharingFiles",
             "/api/v1/files/public/download",
-            "/api/v1/files/public/decryptInfo"
+            "/api/v1/files/public/decryptInfo",
+            // 图片下载端点（img 标签无法携带自定义 header）
+            "/api/v1/images/download"
     );
 
     @Override
