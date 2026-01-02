@@ -143,18 +143,18 @@ public class FileQueryServiceImpl implements FileQueryService {
     @Cacheable(cacheNames = "userFiles", key = "#userId", unless = "#result == null || #result.isEmpty()")
     public List<File> getUserFilesList(Long userId) {
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
-        if (!SecurityUtils.isAdmin()) {
-            wrapper.eq(File::getUid, userId);
-        }
+        // 所有用户（包括管理员）只能查询自己的文件
+        // 管理员查看所有文件请使用 FileAdminService.getAllFiles()
+        wrapper.eq(File::getUid, userId);
         return fileMapper.selectList(wrapper);
     }
 
     @Override
     public void getUserFilesPage(Long userId, Page<File> page) {
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
-        if (!SecurityUtils.isAdmin()) {
-            wrapper.eq(File::getUid, userId);
-        }
+        // 所有用户（包括管理员）只能查询自己的文件
+        // 管理员查看所有文件请使用 FileAdminService.getAllFiles()
+        wrapper.eq(File::getUid, userId);
         fileMapper.selectPage(page, wrapper);
     }
 
