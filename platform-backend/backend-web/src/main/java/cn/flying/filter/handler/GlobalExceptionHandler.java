@@ -4,6 +4,7 @@ import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.exception.RetryableException;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.skywalking.apm.toolkit.trace.TraceContext;
 import org.slf4j.MDC;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -78,6 +80,26 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .headers(headers)
                 .body(result);
+    }
+
+    /**
+     * 处理 IO 异常（如 SSE 连接断开）
+     * SSE 连接断开是正常行为，只记录 debug 日志，不返回响应体
+     */
+    @ExceptionHandler(IOException.class)
+    public ResponseEntity<Void> handleIOException(IOException ex, HttpServletRequest request) {
+        String contentType = request.getHeader("Accept");
+        String uri = request.getRequestURI();
+
+        // SSE 连接断开是正常行为，只记录 debug 日志
+        if (uri.contains("/sse/") || (contentType != null && contentType.contains("text/event-stream"))) {
+            log.debug("SSE 连接断开: uri={}, error={}", uri, ex.getMessage());
+            return ResponseEntity.ok().build();
+        }
+
+        // 其他 IO 异常记录 warn 日志
+        log.warn("IO 异常: uri={}, error={}", uri, ex.getMessage());
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
     }
 
     /**
