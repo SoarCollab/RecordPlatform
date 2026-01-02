@@ -1,0 +1,357 @@
+/**
+ * Custom Component Styles
+ * StepCard, CustomCallout, FeatureHighlight, ComparisonTable
+ */
+
+/* ========================================
+ * Step Card Component
+ * ======================================== */
+.step-card {
+  display: flex;
+  gap: 20px;
+  padding: 20px 0;
+  position: relative;
+}
+
+.step-card:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 20px;
+  top: 56px;
+  bottom: 0;
+  width: 2px;
+  background: var(--rp-step-line);
+}
+
+.step-number {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  background: var(--rp-step-number-bg);
+  color: var(--rp-step-number-text);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1rem;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.step-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.step-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+  margin: 0 0 8px 0;
+  line-height: 40px;
+}
+
+.step-body {
+  color: var(--vp-c-text-2);
+  line-height: 1.7;
+}
+
+.step-body p:first-child {
+  margin-top: 0;
+}
+
+.step-body p:last-child {
+  margin-bottom: 0;
+}
+
+/* ========================================
+ * Custom Callout Component
+ * ======================================== */
+.custom-callout {
+  display: flex;
+  gap: 16px;
+  padding: 16px 20px;
+  border-radius: 12px;
+  margin: 16px 0;
+  border-left: 4px solid;
+}
+
+.custom-callout.info {
+  background: var(--rp-callout-info-bg);
+  border-color: var(--rp-callout-info-border);
+}
+
+.custom-callout.warning {
+  background: var(--rp-callout-warning-bg);
+  border-color: var(--rp-callout-warning-border);
+}
+
+.custom-callout.danger {
+  background: var(--rp-callout-danger-bg);
+  border-color: var(--rp-callout-danger-border);
+}
+
+.custom-callout.tip {
+  background: var(--rp-callout-tip-bg);
+  border-color: var(--rp-callout-tip-border);
+}
+
+.callout-icon {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+}
+
+.custom-callout.info .callout-icon {
+  color: #6366f1;
+}
+
+.custom-callout.warning .callout-icon {
+  color: #f59e0b;
+}
+
+.custom-callout.danger .callout-icon {
+  color: #ef4444;
+}
+
+.custom-callout.tip .callout-icon {
+  color: #10b981;
+}
+
+.callout-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.callout-title {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  margin-bottom: 4px;
+  color: var(--vp-c-text-1);
+}
+
+.callout-content p {
+  margin: 0;
+  color: var(--vp-c-text-2);
+  line-height: 1.6;
+}
+
+/* ========================================
+ * Feature Highlight Component
+ * ======================================== */
+.feature-highlight {
+  display: flex;
+  gap: 16px;
+  padding: 20px;
+  background: var(--rp-glass-bg);
+  backdrop-filter: var(--rp-glass-blur);
+  border: 1px solid var(--rp-glass-border);
+  border-radius: 12px;
+  margin: 16px 0;
+  transition: all 0.3s ease;
+}
+
+.feature-highlight:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--rp-glass-shadow);
+}
+
+.highlight-icon {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  background: var(--rp-feature-icon-bg);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+}
+
+.highlight-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.highlight-content h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+  margin: 0 0 6px 0;
+}
+
+.highlight-content p {
+  font-size: 0.9375rem;
+  color: var(--vp-c-text-2);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* ========================================
+ * Comparison Table Component
+ * ======================================== */
+.comparison-table-wrapper {
+  overflow-x: auto;
+  margin: 20px 0;
+  border-radius: 12px;
+  border: 1px solid var(--vp-c-divider);
+}
+
+.comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.comparison-table th,
+.comparison-table td {
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+
+.comparison-table th {
+  background: var(--vp-c-bg-soft);
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+  white-space: nowrap;
+}
+
+.comparison-table th:first-child {
+  border-top-left-radius: 11px;
+}
+
+.comparison-table th:last-child {
+  border-top-right-radius: 11px;
+}
+
+.comparison-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.comparison-table tbody tr:last-child td:first-child {
+  border-bottom-left-radius: 11px;
+}
+
+.comparison-table tbody tr:last-child td:last-child {
+  border-bottom-right-radius: 11px;
+}
+
+.comparison-table tbody tr:hover {
+  background: var(--vp-c-bg-soft);
+}
+
+.comparison-table td {
+  color: var(--vp-c-text-2);
+}
+
+/* Check/Cross icons in comparison tables */
+.comparison-table .check {
+  color: #10b981;
+  font-weight: bold;
+}
+
+.comparison-table .cross {
+  color: #ef4444;
+}
+
+.comparison-table .partial {
+  color: #f59e0b;
+}
+
+/* ========================================
+ * Code Block Enhancements
+ * ======================================== */
+div[class*='language-'] {
+  border-radius: 12px !important;
+  border: 1px solid var(--vp-c-divider);
+}
+
+div[class*='language-'] .copy {
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+  transition: all 0.2s ease;
+}
+
+div[class*='language-'] .copy:hover {
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
+}
+
+/* Language label styling */
+div[class*='language-']::before {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--vp-c-text-3);
+}
+
+/* ========================================
+ * Tabs Enhancement
+ * ======================================== */
+.vp-code-group .tabs {
+  background: var(--vp-c-bg-soft);
+  border-radius: 12px 12px 0 0;
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+
+.vp-code-group .tabs label {
+  padding: 10px 16px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.vp-code-group .tabs label:hover {
+  color: var(--vp-c-brand-1);
+}
+
+.vp-code-group .tabs input:checked + label {
+  color: var(--vp-c-brand-1);
+  border-bottom: 2px solid var(--vp-c-brand-1);
+}
+
+/* ========================================
+ * Responsive Adjustments
+ * ======================================== */
+@media (max-width: 768px) {
+  .step-card {
+    gap: 16px;
+    padding: 16px 0;
+  }
+
+  .step-number {
+    width: 32px;
+    height: 32px;
+    font-size: 0.875rem;
+  }
+
+  .step-card:not(:last-child)::before {
+    left: 16px;
+    top: 48px;
+  }
+
+  .step-title {
+    font-size: 1rem;
+    line-height: 32px;
+  }
+
+  .custom-callout {
+    padding: 12px 16px;
+    gap: 12px;
+  }
+
+  .feature-highlight {
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .comparison-table th,
+  .comparison-table td {
+    padding: 10px 12px;
+    font-size: 0.875rem;
+  }
+}

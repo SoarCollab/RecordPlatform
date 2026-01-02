@@ -1,0 +1,199 @@
+/**
+ * Sidebar Enhancement Styles
+ * Active state indicators and improved navigation
+ */
+
+/* ========================================
+ * Sidebar Container
+ * ======================================== */
+.VPSidebar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--vp-c-divider) transparent;
+}
+
+.VPSidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.VPSidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.VPSidebar::-webkit-scrollbar-thumb {
+  background: var(--vp-c-divider);
+  border-radius: 3px;
+}
+
+.VPSidebar::-webkit-scrollbar-thumb:hover {
+  background: var(--vp-c-text-3);
+}
+
+/* ========================================
+ * Sidebar Groups
+ * ======================================== */
+.VPSidebarItem.level-0 {
+  padding-bottom: 16px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+
+.VPSidebarItem.level-0:last-child {
+  border-bottom: none;
+}
+
+/* Group title styling */
+.VPSidebarItem.level-0 > .item > .text {
+  font-weight: 600;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--vp-c-text-2);
+}
+
+/* ========================================
+ * Collapsible Indicator
+ * ======================================== */
+.VPSidebarItem .caret {
+  transition: transform 0.25s ease;
+}
+
+.VPSidebarItem.collapsed .caret {
+  transform: rotate(-90deg);
+}
+
+/* ========================================
+ * Sidebar Links
+ * ======================================== */
+.VPSidebarItem .link {
+  border-radius: 6px;
+  margin: 2px 0;
+  padding: 6px 12px;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.VPSidebarItem .link:hover {
+  background: var(--vp-c-default-soft);
+}
+
+/* ========================================
+ * Active State Enhancement
+ * ======================================== */
+.VPSidebarItem.is-active > .item > .link {
+  background: var(--rp-sidebar-active-bg);
+  border-left: 3px solid var(--rp-sidebar-active-border);
+  padding-left: 9px;
+  font-weight: 500;
+}
+
+.VPSidebarItem.is-active > .item > .link .text {
+  color: var(--vp-c-brand-1);
+}
+
+/* Active indicator dot */
+.VPSidebarItem.is-active > .item > .link::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  background: var(--rp-gradient);
+  border-radius: 50%;
+  opacity: 0.8;
+}
+
+/* ========================================
+ * Nested Items
+ * ======================================== */
+.VPSidebarItem.level-1 > .items {
+  padding-left: 16px;
+  border-left: 1px solid var(--vp-c-divider);
+  margin-left: 8px;
+}
+
+.VPSidebarItem.level-2 > .items {
+  padding-left: 12px;
+  border-left: 1px dashed var(--vp-c-divider);
+  margin-left: 8px;
+}
+
+/* ========================================
+ * Sidebar Brand Indicator
+ * ======================================== */
+.sidebar-brand-indicator {
+  height: 3px;
+  background: var(--rp-gradient);
+  margin: 0 12px 16px;
+  border-radius: 2px;
+  opacity: 0.8;
+}
+
+/* ========================================
+ * Mobile Sidebar
+ * ======================================== */
+@media (max-width: 959px) {
+  .VPSidebar {
+    padding-top: 16px;
+  }
+
+  .sidebar-brand-indicator {
+    margin: 0 16px 16px;
+  }
+}
+
+/* ========================================
+ * Keyboard Navigation Hints
+ * ======================================== */
+.sidebar-nav-hint {
+  display: none;
+  padding: 8px 12px;
+  margin: 8px 12px;
+  background: var(--vp-c-default-soft);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--vp-c-text-3);
+}
+
+.sidebar-nav-hint kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  background: var(--vp-c-bg);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.7rem;
+  margin: 0 2px;
+}
+
+/* Show hint on hover with delay */
+.VPSidebar:hover .sidebar-nav-hint {
+  display: block;
+  animation: fadeIn 0.3s ease 0.5s forwards;
+  opacity: 0;
+}
+
+@keyframes fadeIn {
+  to {
+    opacity: 1;
+  }
+}
+
+/* ========================================
+ * Progress Indicator (for multi-page guides)
+ * ======================================== */
+.sidebar-progress {
+  height: 2px;
+  background: var(--vp-c-divider);
+  border-radius: 1px;
+  margin: 12px 12px 16px;
+  overflow: hidden;
+}
+
+.sidebar-progress-bar {
+  height: 100%;
+  background: var(--rp-gradient);
+  border-radius: 1px;
+  transition: width 0.3s ease;
+}

@@ -1,0 +1,99 @@
+/* Mermaid diagram container styles */
+.mermaid {
+  display: flex;
+  justify-content: center;
+  margin: 1.5rem 0;
+  padding: 1.5rem;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  overflow-x: auto;
+}
+
+/* Dark mode container */
+.dark .mermaid {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  border-color: #334155;
+}
+
+/* Flowchart node styles */
+.mermaid .node rect,
+.mermaid .node circle,
+.mermaid .node ellipse,
+.mermaid .node polygon,
+.mermaid .node path {
+  stroke-width: 2px;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.1));
+}
+
+/* Flowchart labels */
+.mermaid .nodeLabel {
+  font-weight: 500;
+}
+
+/* Edge/line styles */
+.mermaid .flowchart-link {
+  stroke-width: 2px;
+}
+
+/* Sequence diagram actors */
+.mermaid .actor {
+  stroke-width: 2px;
+  filter: drop-shadow(0 2px 4px rgb(0 0 0 / 0.15));
+}
+
+/* Sequence diagram messages */
+.mermaid .messageText {
+  font-weight: 500;
+  font-size: 13px;
+}
+
+/* Sequence diagram notes */
+.mermaid .note {
+  stroke-width: 1.5px;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.1));
+}
+
+/* Subgraph/cluster styles */
+.mermaid .cluster rect {
+  stroke-width: 2px;
+  stroke-dasharray: none;
+  rx: 8;
+  ry: 8;
+}
+
+.mermaid .cluster-label .nodeLabel {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+/* Hover effects */
+.mermaid .node:hover rect,
+.mermaid .node:hover circle,
+.mermaid .node:hover ellipse,
+.mermaid .node:hover polygon {
+  filter: drop-shadow(0 4px 6px rgb(0 0 0 / 0.15));
+  transition: filter 0.2s ease;
+}
+
+/* Animation for better UX */
+.mermaid svg {
+  transition: transform 0.2s ease;
+}
+
+.mermaid:hover svg {
+  transform: scale(1.01);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .mermaid {
+    padding: 1rem;
+    margin: 1rem 0;
+  }
+
+  .mermaid .nodeLabel {
+    font-size: 12px;
+  }
+}
