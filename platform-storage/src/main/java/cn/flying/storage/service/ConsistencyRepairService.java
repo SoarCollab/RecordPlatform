@@ -1,7 +1,7 @@
 package cn.flying.storage.service;
 
-import cn.flying.storage.config.LogicNodeMapping;
 import cn.flying.storage.config.StorageProperties;
+import cn.flying.storage.core.FaultDomainManager;
 import cn.flying.storage.core.S3ClientManager;
 import cn.flying.storage.core.S3Monitor;
 import jakarta.annotation.Resource;
@@ -23,8 +23,14 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * S3 副本一致性修复服务。
- * 定期扫描逻辑节点下的物理节点对，检测并修复单副本风险。
- * 当文件仅存在于一个物理节点时，自动复制到另一个节点。
+ * 支持多活跃域配置，定期扫描各域节点，检测并修复跨域副本不一致。
+ * 当文件仅存在于部分域时，自动从健康副本复制到缺失的域。
+ *
+ * <p>支持模式:
+ * <ul>
+ *   <li>单域模式：跳过跨域修复（无需修复）</li>
+ *   <li>多域模式：所有活跃域两两比较，确保数据一致</li>
+ * </ul>
  */
 @Slf4j
 @Service
@@ -51,6 +57,9 @@ public class ConsistencyRepairService {
     private StorageProperties storageProperties;
 
     @Resource
+    private FaultDomainManager faultDomainManager;
+
+    @Resource
     private RedissonClient redissonClient;
 
     @Value("${storage.consistency.repair.batch-size:100}")
@@ -73,6 +82,12 @@ public class ConsistencyRepairService {
             return;
         }
 
+        // 单域模式无需跨域修复
+        if (faultDomainManager.isSingleDomainMode()) {
+            log.debug("单域模式，跳过跨域副本一致性修复");
+            return;
+        }
+
         RLock lock = redissonClient.getLock(LOCK_KEY);
         boolean acquired = false;
 
@@ -85,9 +100,9 @@ public class ConsistencyRepairService {
             }
 
             log.info("开始执行存储副本一致性修复任务...");
-            RepairStatistics stats = repairAllLogicNodes();
-            log.info("副本一致性修复任务完成：检查逻辑节点数={}, 检查文件数={}, 修复文件数={}, 失败数={}",
-                    stats.logicNodesChecked, stats.filesChecked, stats.filesRepaired, stats.failureCount);
+            RepairStatistics stats = repairAllDomains();
+            log.info("副本一致性修复任务完成：检查域数={}, 检查文件数={}, 修复文件数={}, 失败数={}",
+                    stats.domainsChecked, stats.filesChecked, stats.filesRepaired, stats.failureCount);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -103,48 +118,106 @@ public class ConsistencyRepairService {
     }
 
     /**
-     * 修复所有逻辑节点的副本一致性。
+     * 修复所有故障域的副本一致性。
+     * 遍历所有活跃域对，确保每个对象在所有域都有副本。
      *
      * @return 修复统计信息
      */
-    public RepairStatistics repairAllLogicNodes() {
+    public RepairStatistics repairAllDomains() {
         RepairStatistics stats = new RepairStatistics();
 
-        List<LogicNodeMapping> mappings = storageProperties.getLogicalMapping();
-        if (CollectionUtils.isEmpty(mappings)) {
-            log.warn("未配置逻辑节点映射，跳过副本一致性修复");
+        List<String> activeDomains = faultDomainManager.getActiveDomains();
+
+        // 单域模式或域不足，跳过修复
+        if (activeDomains.size() < 2) {
+            log.info("活跃域数量不足 ({})，跳过跨域副本一致性修复", activeDomains.size());
             return stats;
         }
 
-        for (LogicNodeMapping mapping : mappings) {
-            String logicNodeName = mapping.getLogicNodeName();
-            List<String> physicalPair = mapping.getPhysicalNodePair();
+        // 收集每个域的对象信息
+        Map<String, Map<String, Set<String>>> domainNodeObjects = new HashMap<>();
+        Map<String, Set<String>> domainAllObjects = new HashMap<>();
+        List<String> domainsWithData = new ArrayList<>();
 
-            if (physicalPair == null || physicalPair.size() != 2) {
-                log.warn("逻辑节点 {} 的物理节点对配置无效，跳过", logicNodeName);
+        for (String domainName : activeDomains) {
+            Set<String> domainNodes = faultDomainManager.getNodesInDomain(domainName);
+            List<String> healthyNodes = domainNodes.stream()
+                    .filter(s3Monitor::isNodeOnline)
+                    .toList();
+
+            if (healthyNodes.isEmpty()) {
+                log.warn("域 {} 没有健康节点，跳过该域", domainName);
                 continue;
             }
 
-            String node1 = physicalPair.get(0);
-            String node2 = physicalPair.get(1);
+            Map<String, Set<String>> nodeObjects = new HashMap<>();
+            Set<String> allObjectsInDomain = new HashSet<>();
 
-            // 检查两个物理节点是否都在线
-            boolean node1Online = s3Monitor.isNodeOnline(node1);
-            boolean node2Online = s3Monitor.isNodeOnline(node2);
-
-            if (!node1Online || !node2Online) {
-                log.info("逻辑节点 {} 的物理节点不全在线（{}={}, {}={}），跳过修复",
-                        logicNodeName, node1, node1Online, node2, node2Online);
-                continue;
+            for (String node : healthyNodes) {
+                S3Client client = clientManager.getClient(node);
+                if (client != null) {
+                    try {
+                        Set<String> objects = listAllObjects(client, node);
+                        nodeObjects.put(node, objects);
+                        allObjectsInDomain.addAll(objects);
+                    } catch (Exception e) {
+                        log.error("列出节点 {} 对象时发生错误: {}", node, e.getMessage());
+                    }
+                }
             }
 
-            try {
-                RepairStatistics nodeStats = repairLogicNode(logicNodeName, node1, node2);
-                stats.merge(nodeStats);
-                stats.logicNodesChecked++;
-            } catch (Exception e) {
-                log.error("修复逻辑节点 {} 时发生错误: {}", logicNodeName, e.getMessage(), e);
-                stats.failureCount++;
+            if (!allObjectsInDomain.isEmpty()) {
+                domainNodeObjects.put(domainName, nodeObjects);
+                domainAllObjects.put(domainName, allObjectsInDomain);
+                domainsWithData.add(domainName);
+            }
+        }
+
+        stats.domainsChecked = domainsWithData.size();
+
+        if (domainsWithData.size() < 2) {
+            log.info("有数据的域不足 2 个，跳过跨域修复");
+            return stats;
+        }
+
+        log.info("开始跨域副本一致性检查：有数据的域={}", domainsWithData);
+
+        // 两两比较所有域
+        for (int i = 0; i < domainsWithData.size(); i++) {
+            for (int j = i + 1; j < domainsWithData.size(); j++) {
+                String domainA = domainsWithData.get(i);
+                String domainB = domainsWithData.get(j);
+
+                Set<String> objectsInA = domainAllObjects.get(domainA);
+                Set<String> objectsInB = domainAllObjects.get(domainB);
+
+                // 找出仅在 A 域存在的对象
+                Set<String> onlyInA = new HashSet<>(objectsInA);
+                onlyInA.removeAll(objectsInB);
+
+                // 找出仅在 B 域存在的对象
+                Set<String> onlyInB = new HashSet<>(objectsInB);
+                onlyInB.removeAll(objectsInA);
+
+                stats.filesChecked += objectsInA.size() + objectsInB.size();
+
+                if (onlyInA.isEmpty() && onlyInB.isEmpty()) {
+                    log.debug("域 {} 和域 {} 数据一致", domainA, domainB);
+                    continue;
+                }
+
+                log.info("发现跨域不一致 ({} <-> {}): 仅在{}存在 {} 个，仅在{}存在 {} 个",
+                        domainA, domainB, domainA, onlyInA.size(), domainB, onlyInB.size());
+
+                // 从 A 域复制到 B 域
+                if (!onlyInA.isEmpty()) {
+                    repairMissingObjects(onlyInA, domainNodeObjects.get(domainA), domainB, stats);
+                }
+
+                // 从 B 域复制到 A 域
+                if (!onlyInB.isEmpty()) {
+                    repairMissingObjects(onlyInB, domainNodeObjects.get(domainB), domainA, stats);
+                }
             }
         }
 
@@ -152,79 +225,55 @@ public class ConsistencyRepairService {
     }
 
     /**
-     * 修复单个逻辑节点的副本一致性。
+     * 修复缺失的对象
      *
-     * @param logicNodeName 逻辑节点名称
-     * @param node1         物理节点1名称
-     * @param node2         物理节点2名称
-     * @return 修复统计信息
+     * @param missingObjects 缺失的对象集合
+     * @param sourceNodeObjects 源域节点对象映射
+     * @param targetDomain 目标域
+     * @param stats 统计信息
      */
-    private RepairStatistics repairLogicNode(String logicNodeName, String node1, String node2) {
-        RepairStatistics stats = new RepairStatistics();
-        log.debug("开始检查逻辑节点 {} 的副本一致性（物理节点：{}, {}）", logicNodeName, node1, node2);
-
-        S3Client client1 = clientManager.getClient(node1);
-        S3Client client2 = clientManager.getClient(node2);
-
-        if (client1 == null || client2 == null) {
-            log.error("无法获取物理节点的 S3 客户端：{} 或 {}", node1, node2);
-            stats.failureCount++;
-            return stats;
+    private void repairMissingObjects(Set<String> missingObjects,
+                                      Map<String, Set<String>> sourceNodeObjects,
+                                      String targetDomain,
+                                      RepairStatistics stats) {
+        // 获取目标域的健康节点
+        List<String> targetNodes = faultDomainManager.getHealthyNodesInDomainList(targetDomain);
+        if (targetNodes.isEmpty()) {
+            log.error("目标域 {} 没有健康节点，无法修复", targetDomain);
+            stats.failureCount += missingObjects.size();
+            return;
         }
 
-        try {
-            // 获取两个节点的对象列表
-            Set<String> objects1 = listAllObjects(client1, node1);
-            Set<String> objects2 = listAllObjects(client2, node2);
+        String targetNode = targetNodes.getFirst();
 
-            stats.filesChecked = objects1.size() + objects2.size();
-
-            // 找出仅存在于 node1 的对象
-            Set<String> onlyInNode1 = new HashSet<>(objects1);
-            onlyInNode1.removeAll(objects2);
-
-            // 找出仅存在于 node2 的对象
-            Set<String> onlyInNode2 = new HashSet<>(objects2);
-            onlyInNode2.removeAll(objects1);
-
-            if (onlyInNode1.isEmpty() && onlyInNode2.isEmpty()) {
-                log.debug("逻辑节点 {} 的两个物理节点数据一致，无需修复", logicNodeName);
-                return stats;
-            }
-
-            log.info("逻辑节点 {} 发现不一致：仅在 {} 存在 {} 个对象，仅在 {} 存在 {} 个对象",
-                    logicNodeName, node1, onlyInNode1.size(), node2, onlyInNode2.size());
-
-            // 从 node1 复制到 node2
-            for (String objectName : onlyInNode1) {
-                try {
-                    copyObject(client1, node1, client2, node2, objectName);
+        for (String objectName : missingObjects) {
+            String sourceNode = findNodeContainingObject(sourceNodeObjects, objectName);
+            if (sourceNode != null) {
+                boolean success = copyObjectBetweenNodes(objectName, sourceNode, targetNode);
+                if (success) {
                     stats.filesRepaired++;
-                    log.debug("已将对象 {} 从 {} 复制到 {}", objectName, node1, node2);
-                } catch (Exception e) {
-                    log.error("复制对象 {} 从 {} 到 {} 失败: {}", objectName, node1, node2, e.getMessage());
+                    log.debug("已将对象 {} 从 {} 复制到 {} (域 {})",
+                            objectName, sourceNode, targetNode, targetDomain);
+                } else {
                     stats.failureCount++;
                 }
+            } else {
+                log.warn("无法找到对象 {} 的源节点", objectName);
+                stats.failureCount++;
             }
-
-            // 从 node2 复制到 node1
-            for (String objectName : onlyInNode2) {
-                try {
-                    copyObject(client2, node2, client1, node1, objectName);
-                    stats.filesRepaired++;
-                    log.debug("已将对象 {} 从 {} 复制到 {}", objectName, node2, node1);
-                } catch (Exception e) {
-                    log.error("复制对象 {} 从 {} 到 {} 失败: {}", objectName, node2, node1, e.getMessage());
-                    stats.failureCount++;
-                }
-            }
-
-        } catch (Exception e) {
-            log.error("检查逻辑节点 {} 的副本一致性时发生错误: {}", logicNodeName, e.getMessage(), e);
-            stats.failureCount++;
         }
+    }
 
-        return stats;
+    /**
+     * 查找包含指定对象的节点
+     */
+    private String findNodeContainingObject(Map<String, Set<String>> nodeObjects, String objectName) {
+        for (Map.Entry<String, Set<String>> entry : nodeObjects.entrySet()) {
+            if (entry.getValue().contains(objectName)) {
+                return entry.getKey();
+            }
+        }
+        return null;
     }
 
     /**
@@ -268,47 +317,60 @@ public class ConsistencyRepairService {
     }
 
     /**
-     * 将对象从源节点复制到目标节点。
+     * 在两个节点之间复制对象
      *
-     * @param sourceClient 源 S3 客户端
-     * @param sourceBucket 源桶名（节点名）
-     * @param targetClient 目标 S3 客户端
-     * @param targetBucket 目标桶名（节点名）
-     * @param objectName   对象名称
+     * @param objectName 对象名称
+     * @param sourceNode 源节点
+     * @param targetNode 目标节点
+     * @return 是否成功
      */
-    private void copyObject(S3Client sourceClient, String sourceBucket,
-                            S3Client targetClient, String targetBucket,
-                            String objectName) throws Exception {
-        // 确保目标桶存在
+    private boolean copyObjectBetweenNodes(String objectName, String sourceNode, String targetNode) {
         try {
-            targetClient.headBucket(HeadBucketRequest.builder().bucket(targetBucket).build());
-        } catch (NoSuchBucketException e) {
-            targetClient.createBucket(CreateBucketRequest.builder().bucket(targetBucket).build());
-            log.info("在节点 {} 上创建了桶 {}", targetBucket, targetBucket);
-        }
+            S3Client sourceClient = clientManager.getClient(sourceNode);
+            S3Client targetClient = clientManager.getClient(targetNode);
 
-        // 获取源对象元数据
-        HeadObjectRequest headRequest = HeadObjectRequest.builder()
-                .bucket(sourceBucket)
-                .key(objectName)
-                .build();
-        HeadObjectResponse headResponse = sourceClient.headObject(headRequest);
+            if (sourceClient == null || targetClient == null) {
+                log.error("无法获取 S3 客户端: source={}, target={}", sourceNode, targetNode);
+                return false;
+            }
 
-        // 下载并上传对象
-        GetObjectRequest getRequest = GetObjectRequest.builder()
-                .bucket(sourceBucket)
-                .key(objectName)
-                .build();
+            // 确保目标桶存在
+            try {
+                targetClient.headBucket(HeadBucketRequest.builder().bucket(targetNode).build());
+            } catch (NoSuchBucketException e) {
+                targetClient.createBucket(CreateBucketRequest.builder().bucket(targetNode).build());
+                log.info("在节点 {} 上创建了桶", targetNode);
+            }
 
-        try (ResponseInputStream<GetObjectResponse> inputStream = sourceClient.getObject(getRequest)) {
-            PutObjectRequest putRequest = PutObjectRequest.builder()
-                    .bucket(targetBucket)
+            // 获取源对象元数据
+            HeadObjectRequest headRequest = HeadObjectRequest.builder()
+                    .bucket(sourceNode)
                     .key(objectName)
-                    .contentLength(headResponse.contentLength())
-                    .contentType(headResponse.contentType())
+                    .build();
+            HeadObjectResponse headResponse = sourceClient.headObject(headRequest);
+
+            // 下载并上传对象
+            GetObjectRequest getRequest = GetObjectRequest.builder()
+                    .bucket(sourceNode)
+                    .key(objectName)
                     .build();
 
-            targetClient.putObject(putRequest, RequestBody.fromInputStream(inputStream, headResponse.contentLength()));
+            try (ResponseInputStream<GetObjectResponse> inputStream = sourceClient.getObject(getRequest)) {
+                PutObjectRequest putRequest = PutObjectRequest.builder()
+                        .bucket(targetNode)
+                        .key(objectName)
+                        .contentLength(headResponse.contentLength())
+                        .contentType(headResponse.contentType())
+                        .build();
+
+                targetClient.putObject(putRequest, RequestBody.fromInputStream(inputStream, headResponse.contentLength()));
+            }
+
+            return true;
+
+        } catch (Exception e) {
+            log.error("复制对象 {} 从 {} 到 {} 失败: {}", objectName, sourceNode, targetNode, e.getMessage());
+            return false;
         }
     }
 
@@ -319,21 +381,18 @@ public class ConsistencyRepairService {
      */
     public RepairStatistics triggerManualRepair() {
         log.info("手动触发副本一致性修复...");
-        return repairAllLogicNodes();
+        return repairAllDomains();
     }
 
     /**
-     * 立即修复指定逻辑节点的单个对象。
-     * 当 firstSuccessOf 上传策略中有一个节点失败时调用此方法。
-     * 具备重试机制和并发限制。
+     * 调度立即修复任务（故障域模式）
+     * 当写入过程中某节点失败时，从成功节点复制到失败节点。
      *
-     * @param logicNodeName 逻辑节点名称
-     * @param objectName    对象名称
-     * @param sourceNode    成功上传的源节点
-     * @param targetNode    需要修复的目标节点
+     * @param objectName 对象名称（包含租户路径）
+     * @param sourceNode 成功上传的源节点
+     * @param targetNode 需要修复的目标节点
      */
-    public void scheduleImmediateRepair(String logicNodeName, String objectName,
-                                         String sourceNode, String targetNode) {
+    public void scheduleImmediateRepairByNodes(String objectName, String sourceNode, String targetNode) {
         // 使用信号量限制并发修复任务数量
         if (!IMMEDIATE_REPAIR_SEMAPHORE.tryAcquire()) {
             log.warn("立即修复任务队列已满，跳过修复: object={}, source={}, target={}",
@@ -344,7 +403,7 @@ public class ConsistencyRepairService {
         // 异步执行修复，不阻塞主流程
         Thread.startVirtualThread(() -> {
             try {
-                executeRepairWithRetry(logicNodeName, objectName, sourceNode, targetNode);
+                executeRepairByNodesWithRetry(objectName, sourceNode, targetNode);
             } finally {
                 IMMEDIATE_REPAIR_SEMAPHORE.release();
             }
@@ -354,21 +413,18 @@ public class ConsistencyRepairService {
     /**
      * 执行带重试的修复操作
      */
-    private void executeRepairWithRetry(String logicNodeName, String objectName,
-                                          String sourceNode, String targetNode) {
+    private void executeRepairByNodesWithRetry(String objectName, String sourceNode, String targetNode) {
         for (int attempt = 1; attempt <= IMMEDIATE_REPAIR_MAX_RETRIES; attempt++) {
             try {
-                log.info("开始修复对象 {} 从 {} 到 {} (逻辑节点: {}, 尝试 {}/{})",
-                        objectName, sourceNode, targetNode, logicNodeName, attempt, IMMEDIATE_REPAIR_MAX_RETRIES);
+                log.info("开始修复对象 {} 从 {} 到 {} (尝试 {}/{})",
+                        objectName, sourceNode, targetNode, attempt, IMMEDIATE_REPAIR_MAX_RETRIES);
 
-                // 检查节点在线状态
                 if (!s3Monitor.isNodeOnline(sourceNode)) {
-                    log.warn("源节点 {} 不在线，无法修复逻辑节点 {} 的对象 {}", sourceNode, logicNodeName, objectName);
-                    return; // 源节点不在线，无法修复，不再重试
+                    log.warn("源节点 {} 不在线，无法修复对象 {}", sourceNode, objectName);
+                    return;
                 }
                 if (!s3Monitor.isNodeOnline(targetNode)) {
-                    log.warn("目标节点 {} 不在线，等待后重试修复逻辑节点 {} 的对象 {}", targetNode, logicNodeName, objectName);
-                    // 目标节点不在线，可以等待后重试（使用指数退避）
+                    log.warn("目标节点 {} 不在线，等待后重试修复对象 {}", targetNode, objectName);
                     if (attempt < IMMEDIATE_REPAIR_MAX_RETRIES) {
                         long backoffMs = RETRY_BASE_BACKOFF_MS * (1L << (attempt - 1));
                         Thread.sleep(backoffMs);
@@ -377,42 +433,28 @@ public class ConsistencyRepairService {
                     return;
                 }
 
-                S3Client sourceClient = clientManager.getClient(sourceNode);
-                S3Client targetClient = clientManager.getClient(targetNode);
-
-                if (sourceClient == null || targetClient == null) {
-                    log.error("无法获取 S3 客户端进行修复：逻辑节点={}, source={}, target={}",
-                            logicNodeName, sourceNode, targetNode);
-                    return; // 客户端获取失败，不再重试
+                // 执行复制
+                boolean success = copyObjectBetweenNodes(objectName, sourceNode, targetNode);
+                if (success) {
+                    log.info("成功修复对象 {} 从 {} 到 {}", objectName, sourceNode, targetNode);
+                    return;
                 }
 
-                copyObject(sourceClient, sourceNode, targetClient, targetNode, objectName);
-                log.info("成功修复对象 {} 从 {} 到 {} (逻辑节点: {}, 尝试 {}/{})",
-                        objectName, sourceNode, targetNode, logicNodeName, attempt, IMMEDIATE_REPAIR_MAX_RETRIES);
-                return; // 成功，退出
+                // 复制失败，准备重试
+                if (attempt < IMMEDIATE_REPAIR_MAX_RETRIES) {
+                    long backoffMs = RETRY_BASE_BACKOFF_MS * (1L << (attempt - 1));
+                    log.warn("修复对象 {} 失败，{}ms 后重试", objectName, backoffMs);
+                    Thread.sleep(backoffMs);
+                }
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                log.warn("修复任务被中断: 逻辑节点={}, object={}", logicNodeName, objectName);
+                log.error("修复任务被中断: object={}", objectName);
                 return;
             } catch (Exception e) {
-                log.warn("修复对象 {} 从 {} 到 {} 失败 (逻辑节点: {}, 尝试 {}/{}): {}",
-                        objectName, sourceNode, targetNode, logicNodeName, attempt, IMMEDIATE_REPAIR_MAX_RETRIES, e.getMessage());
-
-                if (attempt < IMMEDIATE_REPAIR_MAX_RETRIES) {
-                    try {
-                        // 指数退避
-                        long backoffMs = RETRY_BASE_BACKOFF_MS * (1L << (attempt - 1));
-                        log.debug("等待 {}ms 后重试", backoffMs);
-                        Thread.sleep(backoffMs);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        return;
-                    }
-                } else {
-                    log.error("修复对象 {} 从 {} 到 {} 最终失败（逻辑节点: {}），已达最大重试次数 {}",
-                            objectName, sourceNode, targetNode, logicNodeName, IMMEDIATE_REPAIR_MAX_RETRIES);
-                    // 可选：此处可以将失败任务记录到数据库，供后续人工或定时任务处理
+                log.error("修复对象 {} 时发生异常: {}", objectName, e.getMessage(), e);
+                if (attempt >= IMMEDIATE_REPAIR_MAX_RETRIES) {
+                    log.error("修复对象 {} 最终失败，已达最大重试次数", objectName);
                 }
             }
         }
@@ -422,7 +464,7 @@ public class ConsistencyRepairService {
      * 修复统计信息。
      */
     public static class RepairStatistics {
-        public int logicNodesChecked = 0;
+        public int domainsChecked = 0;
         public int filesChecked = 0;
         public int filesRepaired = 0;
         public int failureCount = 0;
@@ -435,8 +477,8 @@ public class ConsistencyRepairService {
 
         @Override
         public String toString() {
-            return String.format("RepairStatistics{logicNodes=%d, checked=%d, repaired=%d, failures=%d}",
-                    logicNodesChecked, filesChecked, filesRepaired, failureCount);
+            return String.format("RepairStatistics{domains=%d, checked=%d, repaired=%d, failures=%d}",
+                    domainsChecked, filesChecked, filesRepaired, failureCount);
         }
     }
 }

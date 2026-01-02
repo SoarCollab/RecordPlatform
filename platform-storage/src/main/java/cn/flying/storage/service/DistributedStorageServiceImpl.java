@@ -1,22 +1,19 @@
 package cn.flying.storage.service;
 
-import cn.flying.storage.config.LogicNodeMapping;
 import cn.flying.storage.config.StorageProperties;
+import cn.flying.storage.core.FaultDomainManager;
 import cn.flying.storage.core.S3ClientManager;
 import cn.flying.storage.core.S3Monitor;
 import cn.flying.storage.tenant.TenantContextUtil;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.DistributedStorageService;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.annotation.Resource;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.slf4j.Logger;
 import org.springframework.util.CollectionUtils;
-import org.springframework.util.StringUtils;
-
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
-
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -28,22 +25,25 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequ
 import java.io.ByteArrayOutputStream;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiConsumer;
-import java.util.stream.Collectors;
 
 /**
- * 分布式存储实现类（S3 兼容）v2.4.0
- * 支持 Nacos 动态配置、负载均衡和租户隔离。
- * 使用 firstSuccessOf 容错模式，任一副本写入成功即返回，异步修复失败副本。
+ * 分布式存储实现类（S3 兼容）v3.1.0
+ * 基于故障域机制实现 50% 节点容错和负载均衡读取。
+ *
+ * <p>核心特性：
+ * <ul>
+ *   <li>双故障域副本策略（A + B 域各一份）</li>
+ *   <li>一致性哈希实现均匀分布</li>
+ *   <li>负载感知的读取节点选择</li>
+ *   <li>写入仲裁 (Write Quorum) 保证数据持久性</li>
+ *   <li>降级写入支持及域恢复后自动同步</li>
+ *   <li>Nacos 动态配置刷新</li>
+ * </ul>
  */
 @DubboService(version = DistributedStorageService.VERSION)
 public class DistributedStorageServiceImpl implements DistributedStorageService {
@@ -59,6 +59,15 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
 
     @Resource
     private ConsistencyRepairService consistencyRepairService;
+
+    @Resource
+    private FaultDomainManager faultDomainManager;
+
+    @Resource
+    private RebalanceService rebalanceService;
+
+    @Resource
+    private DegradedWriteTracker degradedWriteTracker;
 
     //预签名链接有效期
     private final static Integer EXPIRY_HOURS = 24;
@@ -171,69 +180,236 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             return Result.error(ResultEnum.PARAM_IS_INVALID, null);
         }
 
-        List<String> availableLogicNodes = getAvailableLogicNodes();
-        if (CollectionUtils.isEmpty(availableLogicNodes)) {
-            log.error("无法存储文件块：没有运行状况良好的逻辑节点可用。");
-            return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
-        }
+        // 获取目标节点（每个活跃域一个）
+        List<String> targetNodes = faultDomainManager.getTargetNodes(fileHash);
+        int requiredReplicas = storageProperties.getEffectiveReplicationFactor();
+        int quorumSize = storageProperties.getEffectiveQuorum();
+        var degradedWriteConfig = storageProperties.getDegradedWrite();
 
-        String targetLogicNode = selectBestLogicNode(availableLogicNodes);
-        if (targetLogicNode == null) {
-            log.error("无法选择合适的逻辑节点存储文件块: {}", fileHash);
-            return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
-        }
-
-        List<String> physicalNodePair = getPhysicalNodePair(targetLogicNode);
-        if (physicalNodePair == null || physicalNodePair.size() != 2) {
-            log.error("逻辑节点的物理节点对无效: {}", targetLogicNode);
-            return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
+        // 检查可用节点是否满足要求
+        if (targetNodes.size() < requiredReplicas) {
+            // 检查是否可以降级写入
+            if (degradedWriteConfig != null && degradedWriteConfig.isEnabled()
+                    && targetNodes.size() >= degradedWriteConfig.getMinReplicas()) {
+                log.warn("降级写入模式: hash={}, 目标副本={}, 实际可用={}",
+                        fileHash, requiredReplicas, targetNodes.size());
+                // 降级模式下，仲裁数调整为可用节点数
+                quorumSize = targetNodes.size();
+            } else {
+                log.error("无法存储文件块：跨故障域的健康节点不足。可用节点: {}, 需要: {}, 最小降级: {}",
+                        targetNodes, requiredReplicas,
+                        degradedWriteConfig != null ? degradedWriteConfig.getMinReplicas() : "disabled");
+                return Result.error(ResultEnum.STORAGE_INSUFFICIENT_REPLICAS, null);
+            }
         }
 
         try {
-            // 使用带租户隔离的对象路径
             String tenantObjectPath = TenantContextUtil.buildTenantObjectPath(fileHash);
-            String node1 = physicalNodePair.get(0);
-            String node2 = physicalNodePair.get(1);
 
-            CompletableFuture<String> upload1 = uploadToNodeAsyncWithResult(node1, tenantObjectPath, fileData);
-            CompletableFuture<String> upload2 = uploadToNodeAsyncWithResult(node2, tenantObjectPath, fileData);
-
-            // 使用 firstSuccessOf 模式：任一成功即返回，两个都失败才返回错误
-            CompletableFuture<String> firstSuccess = firstSuccessOf(upload1, upload2);
-
-            try {
-                // 等待任一上传成功
-                String successNode = firstSuccess.get(FILE_OPERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-
-                // 使用租户隔离的逻辑路径
-                String logicalPath = TenantContextUtil.buildTenantPath(targetLogicNode, fileHash);
-                log.info("已成功将文件块 '{}' 存储到节点 '{}' (路径: {})", fileHash, successNode, logicalPath);
-
-                // 异步检查另一个上传任务的状态，失败则触发修复
-                scheduleRepairIfNeeded(upload1, upload2, successNode, node1, node2, targetLogicNode, tenantObjectPath);
-
-                return Result.success(logicalPath);
-
-            } catch (TimeoutException e) {
-                // 超时时取消未完成的上传任务，避免资源浪费和数据不一致
-                cancelIfNotDone(upload1, "upload1");
-                cancelIfNotDone(upload2, "upload2");
-                log.error("存储文件块超时（>{}s）: hash={}, logicNode={}", FILE_OPERATION_TIMEOUT_SECONDS, fileHash, targetLogicNode, e);
-                return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
+            // 创建所有节点的上传任务
+            List<CompletableFuture<String>> uploadFutures = new ArrayList<>();
+            for (String node : targetNodes) {
+                uploadFutures.add(uploadToNodeAsyncWithResult(node, tenantObjectPath, fileData));
             }
+
+            // 使用仲裁模式等待写入结果
+            QuorumResult quorumResult = storeWithQuorum(uploadFutures, targetNodes, quorumSize, fileHash);
+
+            if (!quorumResult.isSuccess()) {
+                uploadFutures.forEach(f -> cancelIfNotDone(f, "upload"));
+                log.error("存储文件块仲裁失败: hash={}, 成功={}, 需要={}", fileHash,
+                        quorumResult.getSuccessCount(), quorumSize);
+                return Result.error(ResultEnum.STORAGE_QUORUM_NOT_REACHED, null);
+            }
+
+            // 使用新的路径格式（不包含逻辑节点名）
+            String logicalPath = TenantContextUtil.buildChunkPath(fileHash);
+            log.info("已成功将文件块 '{}' 存储到 {} 个节点 (仲裁: {}/{}, 路径: {})",
+                    fileHash, quorumResult.getSuccessCount(), quorumResult.getSuccessCount(),
+                    targetNodes.size(), logicalPath);
+
+            // 异步检查其他上传任务的状态，失败则触发修复
+            scheduleRepairIfNeededForDomains(uploadFutures, targetNodes, tenantObjectPath);
+
+            // 如果是降级写入，记录以便后续同步
+            boolean isDegraded = targetNodes.size() < requiredReplicas;
+            if (isDegraded && degradedWriteConfig != null && degradedWriteConfig.isTrackForSync()) {
+                Long tenantId = TenantContextUtil.getTenantIdOrDefault();
+                degradedWriteTracker.recordDegradedWrite(fileHash, quorumResult.getSuccessNodes(), tenantId);
+                return Result.success(logicalPath); // 降级成功仍返回 SUCCESS
+            }
+
+            return Result.success(logicalPath);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            log.error("存储文件块被中断: hash={}, logicNode={}", fileHash, targetLogicNode, e);
-            return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
-        } catch (ExecutionException e) {
-            // 两个副本都失败了
-            log.error("存储文件块失败（两个副本都失败）: hash={}, logicNode={}, cause={}", fileHash, targetLogicNode, e.getCause() != null ? e.getCause().getMessage() : e.getMessage(), e);
+            log.error("存储文件块被中断: hash={}", fileHash, e);
             return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
         } catch (Exception e) {
             log.error("存储文件块 '{}' 失败: {}", fileHash, e.getMessage(), e);
             return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
         }
+    }
+
+    /**
+     * 仲裁写入结果
+     */
+    private static class QuorumResult {
+        private final boolean success;
+        private final int successCount;
+        private final List<String> successNodes;
+        private final List<String> failedNodes;
+
+        QuorumResult(boolean success, int successCount, List<String> successNodes, List<String> failedNodes) {
+            this.success = success;
+            this.successCount = successCount;
+            this.successNodes = successNodes;
+            this.failedNodes = failedNodes;
+        }
+
+        boolean isSuccess() { return success; }
+        int getSuccessCount() { return successCount; }
+        List<String> getSuccessNodes() { return successNodes; }
+        List<String> getFailedNodes() { return failedNodes; }
+    }
+
+    /**
+     * 使用仲裁模式写入，等待达到仲裁数后返回
+     *
+     * @param futures     上传任务列表
+     * @param nodes       目标节点列表
+     * @param quorumSize  仲裁所需的最小成功数
+     * @param fileHash    文件哈希（用于日志）
+     * @return 仲裁结果
+     * @throws InterruptedException 如果等待被中断
+     */
+    private QuorumResult storeWithQuorum(List<CompletableFuture<String>> futures,
+                                          List<String> nodes,
+                                          int quorumSize,
+                                          String fileHash) throws InterruptedException {
+        CompletableFuture<QuorumResult> resultFuture = new CompletableFuture<>();
+        AtomicInteger successCount = new AtomicInteger(0);
+        AtomicInteger failureCount = new AtomicInteger(0);
+        List<String> successNodes = new CopyOnWriteArrayList<>();
+        List<String> failedNodes = new CopyOnWriteArrayList<>();
+
+        for (int i = 0; i < futures.size(); i++) {
+            final String nodeName = nodes.get(i);
+
+            futures.get(i).whenComplete((result, error) -> {
+                if (error == null && result != null) {
+                    successNodes.add(nodeName);
+                    int currentSuccess = successCount.incrementAndGet();
+                    log.debug("节点 {} 写入成功 ({}/{}), hash={}", nodeName, currentSuccess, quorumSize, fileHash);
+
+                    if (currentSuccess >= quorumSize && !resultFuture.isDone()) {
+                        // 达到仲裁数，立即返回成功（创建快照避免后续修改）
+                        resultFuture.complete(new QuorumResult(true, currentSuccess,
+                                new ArrayList<>(successNodes), new ArrayList<>(failedNodes)));
+                    }
+                } else {
+                    failedNodes.add(nodeName);
+                    int currentFailure = failureCount.incrementAndGet();
+                    log.warn("节点 {} 写入失败 ({}/{}), hash={}, error={}",
+                            nodeName, currentFailure, futures.size() - quorumSize + 1, fileHash,
+                            error != null ? error.getMessage() : "null result");
+
+                    // 检查是否已无法达到仲裁
+                    if (currentFailure > futures.size() - quorumSize && !resultFuture.isDone()) {
+                        resultFuture.complete(new QuorumResult(false, successCount.get(),
+                                new ArrayList<>(successNodes), new ArrayList<>(failedNodes)));
+                    }
+                }
+
+                // 所有任务都完成了
+                if (successCount.get() + failureCount.get() >= futures.size() && !resultFuture.isDone()) {
+                    boolean success = successCount.get() >= quorumSize;
+                    resultFuture.complete(new QuorumResult(success, successCount.get(),
+                            new ArrayList<>(successNodes), new ArrayList<>(failedNodes)));
+                }
+            });
+        }
+
+        try {
+            return resultFuture.get(FILE_OPERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            log.error("存储文件块仲裁超时（>{}s）: hash={}", FILE_OPERATION_TIMEOUT_SECONDS, fileHash);
+            return new QuorumResult(false, successCount.get(),
+                    new ArrayList<>(successNodes), new ArrayList<>(failedNodes));
+        } catch (ExecutionException e) {
+            log.error("存储文件块仲裁异常: hash={}", fileHash, e);
+            return new QuorumResult(false, successCount.get(),
+                    new ArrayList<>(successNodes), new ArrayList<>(failedNodes));
+        }
+    }
+
+    /**
+     * firstSuccessOf 的多节点版本
+     */
+    private CompletableFuture<String> firstSuccessOf(List<CompletableFuture<String>> futures) {
+        if (futures.size() == 2) {
+            return firstSuccessOf(futures.get(0), futures.get(1));
+        }
+
+        CompletableFuture<String> result = new CompletableFuture<>();
+        AtomicInteger failureCount = new AtomicInteger(0);
+        AtomicReference<Throwable> lastError = new AtomicReference<>();
+
+        for (CompletableFuture<String> future : futures) {
+            future.whenComplete((value, error) -> {
+                if (error == null && value != null) {
+                    result.complete(value);
+                } else {
+                    lastError.set(error);
+                    if (failureCount.incrementAndGet() == futures.size()) {
+                        result.completeExceptionally(lastError.get() != null ?
+                                lastError.get() : new RuntimeException("All uploads failed"));
+                    }
+                }
+            });
+        }
+
+        return result;
+    }
+
+    /**
+     * 检查故障域模式下其他上传任务的状态，失败则触发修复
+     */
+    private void scheduleRepairIfNeededForDomains(List<CompletableFuture<String>> futures,
+                                                   List<String> nodes, String objectPath) {
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).whenComplete((v, ex) -> {
+            if (!REPAIR_CHECK_SEMAPHORE.tryAcquire()) {
+                log.warn("修复检查队列已满，跳过本次修复检查: object={}", objectPath);
+                return;
+            }
+
+            try {
+                // 找出成功和失败的节点
+                List<String> successNodes = new ArrayList<>();
+                List<String> failedNodes = new ArrayList<>();
+
+                for (int i = 0; i < futures.size(); i++) {
+                    if (futures.get(i).isCompletedExceptionally()) {
+                        failedNodes.add(nodes.get(i));
+                    } else {
+                        successNodes.add(nodes.get(i));
+                    }
+                }
+
+                if (!failedNodes.isEmpty() && !successNodes.isEmpty()) {
+                    log.warn("部分节点上传失败: 失败={}, 成功={}，触发修复任务", failedNodes, successNodes);
+                    // 从成功节点复制到失败节点
+                    String sourceNode = successNodes.get(0);
+                    for (String failedNode : failedNodes) {
+                        consistencyRepairService.scheduleImmediateRepairByNodes(objectPath, sourceNode, failedNode);
+                    }
+                } else if (failedNodes.isEmpty()) {
+                    log.debug("所有副本都成功写入，无需修复");
+                }
+            } finally {
+                REPAIR_CHECK_SEMAPHORE.release();
+            }
+        });
     }
 
     /**
@@ -244,41 +420,6 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             boolean cancelled = future.cancel(true);
             log.debug("取消未完成任务 {}: cancelled={}", name, cancelled);
         }
-    }
-
-    /**
-     * 检查另一个上传任务的状态，如果失败则触发修复。
-     * 使用 whenComplete 回调，等两个任务都完成后再判断。
-     */
-    private void scheduleRepairIfNeeded(CompletableFuture<String> upload1, CompletableFuture<String> upload2,
-                                         String successNode, String node1, String node2,
-                                         String logicNodeName, String objectPath) {
-        // 等待两个任务都完成后再检查（无论成功或失败）
-        CompletableFuture.allOf(upload1, upload2).whenComplete((v, ex) -> {
-            // 使用信号量限制并发修复检查数量
-            if (!REPAIR_CHECK_SEMAPHORE.tryAcquire()) {
-                log.warn("修复检查队列已满，跳过本次修复检查: object={}", objectPath);
-                return;
-            }
-
-            try {
-                boolean upload1Failed = upload1.isCompletedExceptionally();
-                boolean upload2Failed = upload2.isCompletedExceptionally();
-
-                if (upload1Failed && !upload2Failed) {
-                    log.warn("节点 {} 上传失败，触发修复任务", node1);
-                    consistencyRepairService.scheduleImmediateRepair(logicNodeName, objectPath, node2, node1);
-                } else if (upload2Failed && !upload1Failed) {
-                    log.warn("节点 {} 上传失败，触发修复任务", node2);
-                    consistencyRepairService.scheduleImmediateRepair(logicNodeName, objectPath, node1, node2);
-                } else if (!upload1Failed) {
-                    log.debug("两个副本都成功写入，无需修复");
-                }
-                // 如果两个都失败，不会走到这里（firstSuccessOf 会抛出异常）
-            } finally {
-                REPAIR_CHECK_SEMAPHORE.release();
-            }
-        });
     }
 
     /**
@@ -328,27 +469,38 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             String filePath = entry.getValue();
 
             try {
-                ParsedPath parsedPath = parseLogicalPath(filePath, fileHash);
+                // 解析分片路径
+                TenantContextUtil.ParsedChunkPath parsedPath = TenantContextUtil.parseChunkPath(filePath);
                 if (parsedPath == null) {
-                    errors.add(fileHash + ": invalid path format");
+                    errors.add(fileHash + ": invalid chunk path format");
                     continue;
                 }
 
-                List<String> physicalNodes = getPhysicalNodePair(parsedPath.logicNodeName);
-                if (physicalNodes == null || physicalNodes.size() != 2) {
-                    errors.add(fileHash + ": invalid physical node pair");
+                // 校验 fileHash 与路径中的 objectName 匹配
+                if (!fileHash.equals(parsedPath.objectName())) {
+                    errors.add(fileHash + ": hash mismatch with path");
                     continue;
                 }
 
-                // Delete from both physical nodes
-                for (String nodeName : physicalNodes) {
+                // 获取分片存储的所有目标节点（基于一致性哈希）
+                List<String> targetNodes = faultDomainManager.getCandidateNodes(fileHash);
+                if (targetNodes.isEmpty()) {
+                    errors.add(fileHash + ": no candidate nodes found");
+                    continue;
+                }
+
+                // 构建对象路径
+                String objectPath = String.format("tenant/%d/%s", parsedPath.tenantId(), parsedPath.objectName());
+
+                // 从所有目标节点删除
+                for (String nodeName : targetNodes) {
                     try {
-                        deleteFromNode(nodeName, parsedPath.objectName);
+                        deleteFromNode(nodeName, objectPath);
                     } catch (Exception e) {
-                        log.warn("Failed to delete {} from node {}: {}", parsedPath.objectName, nodeName, e.getMessage());
+                        log.warn("Failed to delete {} from node {}: {}", objectPath, nodeName, e.getMessage());
                     }
                 }
-                log.info("Deleted file {} from logical node {}", fileHash, parsedPath.logicNodeName);
+                log.info("Deleted file chunk {} from nodes {}", fileHash, targetNodes);
             } catch (Exception e) {
                 log.error("Failed to delete file {}: {}", fileHash, e.getMessage());
                 errors.add(fileHash + ": " + e.getMessage());
@@ -384,218 +536,127 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     // --- 内部辅助方法 ---
 
     /**
-     * 获取当前所有配置的、且对应物理节点对都健康的逻辑节点名称列表
-     */
-    private List<String> getAvailableLogicNodes() {
-        List<LogicNodeMapping> mappings = storageProperties.getLogicalMapping();
-        if (CollectionUtils.isEmpty(mappings)) {
-            log.warn("未在 StorageProperties 中配置逻辑节点映射");
-            return List.of();
-        }
-
-        return mappings.stream()
-            .filter(mapping -> {
-                List<String> pair = mapping.getPhysicalNodePair();
-                // 必须配置了两个物理节点，且这两个节点都必须在线
-                return pair != null && pair.size() == 2 &&
-                    s3Monitor.isNodeOnline(pair.get(0)) &&
-                    s3Monitor.isNodeOnline(pair.get(1));
-            })
-            .map(LogicNodeMapping::getLogicNodeName)
-            .collect(Collectors.toList());
-    }
-
-    /**
-     * 根据逻辑节点名称从配置中获取物理节点对
-     */
-    private List<String> getPhysicalNodePair(String logicNodeName) {
-        List<LogicNodeMapping> mappings = storageProperties.getLogicalMapping();
-        if (CollectionUtils.isEmpty(mappings)) {
-            return null;
-        }
-        return mappings.stream()
-            .filter(m -> logicNodeName.equals(m.getLogicNodeName()))
-            .findFirst()
-            .map(LogicNodeMapping::getPhysicalNodePair)
-            .orElse(null);
-    }
-
-    /**
-     * 从可用逻辑节点列表中选择负载最低的一个
-     */
-    private String selectBestLogicNode(List<String> availableLogicNodes) {
-        if (CollectionUtils.isEmpty(availableLogicNodes)) {
-            return null;
-        }
-
-        String bestNode = null;
-        double minScore = Double.MAX_VALUE;
-
-        for (String logicNode : availableLogicNodes) {
-            List<String> physicalPair = getPhysicalNodePair(logicNode);
-            if (physicalPair == null || physicalPair.size() != 2) continue;
-
-            // 计算逻辑节点的平均负载（或取最大值，取决于策略）
-            double score1 = s3Monitor.getNodeLoadScore(physicalPair.get(0));
-            double score2 = s3Monitor.getNodeLoadScore(physicalPair.get(1));
-            // 如果任一物理节点分数无效，则跳过此逻辑节点
-            if (score1 == Double.MAX_VALUE || score2 == Double.MAX_VALUE) continue;
-
-            double averageScore = (score1 + score2) / 2.0;
-
-            if (averageScore < minScore) {
-                minScore = averageScore;
-                bestNode = logicNode;
-            }
-        }
-
-        if (bestNode == null) {
-            log.warn("无法从 available：{} 中确定最佳逻辑节点,回退到随机选择", availableLogicNodes);
-            //回退策略:随机选择一个
-            if (!availableLogicNodes.isEmpty()) {
-                return availableLogicNodes.get(new Random().nextInt(availableLogicNodes.size()));
-            }
-        }
-
-        log.debug("选择得分为 {} 的最佳逻辑节点 '{}'", bestNode, minScore);
-        return bestNode;
-    }
-
-    /**
      * 内部实现：根据文件路径和哈希获取文件
+     * 使用故障域机制，从候选节点中选择负载最低的进行读取
      *
      * @return Optional<File> 如果成功获取文件；Optional.empty() 如果尝试后未找到或节点不可用；
      * @throws RuntimeException 如果发生不可恢复的存储错误
      */
     private Optional<byte[]> getFileByHashInternal(String filePath, String fileHash) throws RuntimeException {
-        ParsedPath parsedPath = parseLogicalPath(filePath, fileHash);
+        // 解析分片路径
+        TenantContextUtil.ParsedChunkPath parsedPath = TenantContextUtil.parseChunkPath(filePath);
         if (parsedPath == null) {
-            return Optional.empty(); // 解析失败，已记录日志
-        }
-
-        List<String> physicalNodes = getPhysicalNodePair(parsedPath.logicNodeName);
-        if (physicalNodes == null || physicalNodes.size() != 2) {
-            log.error("逻辑节点 {} 的物理节点对配置无效", parsedPath.logicNodeName);
+            log.error("无效的分片路径格式: {}", filePath);
             return Optional.empty();
         }
 
-        // 优先选择负载低的节点
-        String primaryNode = selectPrimaryNodeForRead(physicalNodes.get(0), physicalNodes.get(1));
-        String secondaryNode = physicalNodes.get(0).equals(primaryNode) ? physicalNodes.get(1) : physicalNodes.get(0);
-
-        // 尝试从主节点获取
-        Optional<byte[]> fileOpt = tryGetObjectFromNode(primaryNode, parsedPath.objectName);
-        if (fileOpt.isPresent()) {
-            return fileOpt;
+        // 校验 fileHash 与路径中的 objectName 匹配
+        if (!fileHash.equals(parsedPath.objectName())) {
+            log.error("路径[{}]中的 fileHash '{}' 和 objectName '{}' 不匹配",
+                    filePath, fileHash, parsedPath.objectName());
+            return Optional.empty();
         }
 
-        // 主节点失败，尝试从备用节点获取
-        log.warn("无法从主节点 '{}' 获取文件 '{}'。正在尝试辅助节点 '{}'...",
-            primaryNode, parsedPath.objectName, secondaryNode);
-        fileOpt = tryGetObjectFromNode(secondaryNode, parsedPath.objectName);
-        if (fileOpt.isPresent()) {
-            return fileOpt;
+        // 获取候选节点
+        List<String> candidateNodes = faultDomainManager.getCandidateNodes(fileHash);
+        if (candidateNodes.isEmpty()) {
+            log.error("无法找到文件 '{}' 的候选存储节点", fileHash);
+            return Optional.empty();
         }
 
-        // 两个节点都失败
-        log.error("无法从逻辑节点 '{}' 的两个物理节点（{}、{}）获取文件 '{}'",
-            parsedPath.logicNodeName, primaryNode, secondaryNode, parsedPath.objectName);
-        //返回空
+        // 构建对象路径
+        String objectPath = String.format("tenant/%d/%s", parsedPath.tenantId(), parsedPath.objectName());
+
+        // 选择负载最低的节点作为主节点
+        String primaryNode = faultDomainManager.selectBestNodeForRead(candidateNodes);
+        if (primaryNode != null) {
+            Optional<byte[]> fileOpt = tryGetObjectFromNode(primaryNode, objectPath);
+            if (fileOpt.isPresent()) {
+                return fileOpt;
+            }
+            log.warn("无法从主节点 '{}' 获取文件 '{}'", primaryNode, objectPath);
+        }
+
+        // 主节点失败，尝试其他候选节点
+        for (String node : candidateNodes) {
+            if (node.equals(primaryNode)) {
+                continue; // 已经尝试过
+            }
+            if (!s3Monitor.isNodeOnline(node)) {
+                continue;
+            }
+
+            log.info("正在尝试从备选节点 '{}' 获取文件 '{}'...", node, objectPath);
+            Optional<byte[]> fileOpt = tryGetObjectFromNode(node, objectPath);
+            if (fileOpt.isPresent()) {
+                return fileOpt;
+            }
+        }
+
+        // 所有节点都失败
+        log.error("无法从任何候选节点 {} 获取文件 '{}'", candidateNodes, objectPath);
         return Optional.empty();
     }
 
     /**
      * 内部实现：获取文件的预签名下载 URL
+     * 使用故障域机制，从候选节点中选择负载最低的生成 URL
      *
      * @return Optional<String> 如果成功；Optional.empty() 如果失败
      */
     private Optional<String> getPresignedUrlInternal(String filePath, String fileHash) {
-        ParsedPath parsedPath = parseLogicalPath(filePath, fileHash);
+        // 解析分片路径
+        TenantContextUtil.ParsedChunkPath parsedPath = TenantContextUtil.parseChunkPath(filePath);
         if (parsedPath == null) {
+            log.error("无效的分片路径格式: {}", filePath);
             return Optional.empty();
         }
 
-        List<String> physicalNodes = getPhysicalNodePair(parsedPath.logicNodeName);
-        if (physicalNodes == null || physicalNodes.size() != 2) {
-            log.error("逻辑节点 {} 的物理节点对配置无效", parsedPath.logicNodeName);
+        // 校验 fileHash 与路径中的 objectName 匹配
+        if (!fileHash.equals(parsedPath.objectName())) {
+            log.error("路径[{}]中的 fileHash '{}' 和 objectName '{}' 不匹配",
+                    filePath, fileHash, parsedPath.objectName());
             return Optional.empty();
         }
 
-        // 优先选择负载低的节点
-        String primaryNode = selectPrimaryNodeForRead(physicalNodes.get(0), physicalNodes.get(1));
-        String secondaryNode = physicalNodes.get(0).equals(primaryNode) ? physicalNodes.get(1) : physicalNodes.get(0);
-
-        // 尝试从主节点获取 URL
-        Optional<String> urlOpt = tryGetResignedUrlFromNode(primaryNode, parsedPath.objectName);
-        if (urlOpt.isPresent()) {
-            return urlOpt;
+        // 获取候选节点
+        List<String> candidateNodes = faultDomainManager.getCandidateNodes(fileHash);
+        if (candidateNodes.isEmpty()) {
+            log.error("无法找到文件 '{}' 的候选存储节点", fileHash);
+            return Optional.empty();
         }
 
-        // 主节点失败，尝试从备用节点获取
-        log.warn("无法从主节点 '{}' 获取 '{}' 的预签名 URL。正在尝试辅助节点 '{}'...",
-            primaryNode, parsedPath.objectName, secondaryNode);
-        urlOpt = tryGetResignedUrlFromNode(secondaryNode, parsedPath.objectName);
-        if (urlOpt.isPresent()) {
-            return urlOpt;
+        // 构建对象路径
+        String objectPath = String.format("tenant/%d/%s", parsedPath.tenantId(), parsedPath.objectName());
+
+        // 选择负载最低的节点作为主节点
+        String primaryNode = faultDomainManager.selectBestNodeForRead(candidateNodes);
+        if (primaryNode != null) {
+            Optional<String> urlOpt = tryGetResignedUrlFromNode(primaryNode, objectPath);
+            if (urlOpt.isPresent()) {
+                return urlOpt;
+            }
+            log.warn("无法从主节点 '{}' 获取 '{}' 的预签名 URL", primaryNode, objectPath);
         }
 
-        log.error("无法从逻辑节点 '{}' 的两个物理节点（{}、{}）获取 '{}' 的预签名 URL",
-            parsedPath.logicNodeName, primaryNode, secondaryNode, parsedPath.objectName);
+        // 主节点失败，尝试其他候选节点
+        for (String node : candidateNodes) {
+            if (node.equals(primaryNode)) {
+                continue; // 已经尝试过
+            }
+            if (!s3Monitor.isNodeOnline(node)) {
+                continue;
+            }
+
+            log.info("正在尝试从备选节点 '{}' 获取 '{}' 的预签名 URL...", node, objectPath);
+            Optional<String> urlOpt = tryGetResignedUrlFromNode(node, objectPath);
+            if (urlOpt.isPresent()) {
+                return urlOpt;
+            }
+        }
+
+        log.error("无法从任何候选节点 {} 获取 '{}' 的预签名 URL", candidateNodes, objectPath);
         return Optional.empty();
-    }
-
-    /**
-     * 解析逻辑路径。
-     * 格式: storage/tenant/{tenantId}/node/{logic_node_name}/{object_name}
-     *
-     * @return ParsedPath 对象，如果解析失败则返回 null
-     */
-    private ParsedPath parseLogicalPath(String filePath, String fileHash) {
-        if (!StringUtils.hasText(filePath) || !StringUtils.hasText(fileHash)) {
-            log.error("无法解析 null 或空 filePath/fileHash。");
-            return null;
-        }
-
-        TenantContextUtil.ParsedTenantPath parsed = TenantContextUtil.parseTenantPath(filePath);
-        if (parsed == null) {
-            log.error("无效的逻辑路径格式 {}，预期格式：storage/tenant/{tenantId}/node/{logicNode}/{objectName}", filePath);
-            return null;
-        }
-
-        // 校验 objectName 是否与传入的 fileHash 匹配
-        if (!fileHash.equals(parsed.objectName())) {
-            log.error("路径[{}]中的fileHash'{}'和objectName'{}'不匹配", filePath, fileHash, parsed.objectName());
-            return null;
-        }
-
-        // 构建带租户隔离的对象路径（用于在物理节点中查找）
-        String tenantObjectPath = String.format("tenant/%d/%s", parsed.tenantId(), parsed.objectName());
-        return new ParsedPath(parsed.logicNodeName(), tenantObjectPath);
-    }
-
-    /**
-     * 内部记录类，用于存储解析后的路径信息
-     */
-    private record ParsedPath(String logicNodeName, String objectName) {
-    }
-
-    /**
-     * 根据负载选择读取操作的主节点
-     */
-    private String selectPrimaryNodeForRead(String node1, String node2) {
-        double score1 = s3Monitor.getNodeLoadScore(node1);
-        double score2 = s3Monitor.getNodeLoadScore(node2);
-
-        // 优先选择分数低的 (负载低)。如果分数相同或都无效，随机选一个
-        if (score1 != Double.MAX_VALUE && (score1 < score2 || score2 == Double.MAX_VALUE)) {
-            return node1;
-        } else if (score2 != Double.MAX_VALUE) {
-            return node2;
-        } else {
-            // 如果两个节点分数都无效（可能都不在线或监控异常），随机选一个尝试
-            log.warn("两个节点（{}，{}）的负载分数都无效，随机选择一个尝试", node1, node2);
-            return new Random().nextBoolean() ? node1 : node2;
-        }
     }
 
     /**
@@ -801,19 +862,146 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         Set<String> onlineNodes = s3Monitor.getOnlineNodes();
         Map<String, Boolean> nodeStatus = new LinkedHashMap<>();
 
-        List<LogicNodeMapping> mappings = storageProperties.getLogicalMapping();
-        if (!CollectionUtils.isEmpty(mappings)) {
-            for (LogicNodeMapping mapping : mappings) {
-                List<String> pair = mapping.getPhysicalNodePair();
-                if (pair != null) {
-                    for (String nodeName : pair) {
-                        nodeStatus.put(nodeName, onlineNodes.contains(nodeName));
-                    }
+        // 从配置中获取所有节点
+        var nodes = storageProperties.getNodes();
+        if (!CollectionUtils.isEmpty(nodes)) {
+            for (var node : nodes) {
+                if (Boolean.TRUE.equals(node.getEnabled())) {
+                    nodeStatus.put(node.getName(), onlineNodes.contains(node.getName()));
                 }
             }
         }
 
         return Result.success(nodeStatus);
+    }
+
+    // ===== v3.0.0 新增：故障域管理 API 实现 =====
+
+    @Override
+    public Result<Map<String, Map<String, Object>>> getDomainHealth() {
+        Map<String, Map<String, Object>> domainHealth = new LinkedHashMap<>();
+
+        // 动态获取所有故障域（活跃域 + 备用域）
+        List<String> allDomains = new ArrayList<>(faultDomainManager.getActiveDomains());
+        if (storageProperties.isStandbyEnabled()) {
+            allDomains.add(storageProperties.getStandbyDomain());
+        }
+
+        for (String domainName : allDomains) {
+            Map<String, Object> domainInfo = new LinkedHashMap<>();
+
+            Set<String> nodesInDomain = faultDomainManager.getNodesInDomain(domainName);
+            int totalNodes = nodesInDomain.size();
+            int healthyNodes = faultDomainManager.countHealthyNodesInDomain(domainName);
+
+            domainInfo.put("totalNodes", totalNodes);
+            domainInfo.put("healthyNodes", healthyNodes);
+
+            // 计算状态
+            String status;
+            if (totalNodes == 0) {
+                status = "empty";
+            } else if (healthyNodes == totalNodes) {
+                status = "healthy";
+            } else if (healthyNodes > 0) {
+                status = "degraded";
+            } else {
+                status = "down";
+            }
+            domainInfo.put("status", status);
+
+            // 添加节点详情
+            Map<String, Boolean> nodeStatus = new LinkedHashMap<>();
+            for (String nodeName : nodesInDomain) {
+                nodeStatus.put(nodeName, s3Monitor.isNodeOnline(nodeName));
+            }
+            domainInfo.put("nodes", nodeStatus);
+
+            domainHealth.put(domainName, domainInfo);
+        }
+
+        return Result.success(domainHealth);
+    }
+
+    @Override
+    public Result<List<String>> getChunkLocations(String chunkHash) {
+        if (chunkHash == null || chunkHash.isEmpty()) {
+            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+        }
+
+        // 获取候选节点
+        List<String> candidateNodes = faultDomainManager.getCandidateNodes(chunkHash);
+        if (candidateNodes.isEmpty()) {
+            return Result.success(Collections.emptyList());
+        }
+
+        // 验证对象实际存在于哪些节点
+        List<String> actualLocations = new ArrayList<>();
+        String objectPath = TenantContextUtil.buildTenantObjectPath(chunkHash);
+
+        for (String nodeName : candidateNodes) {
+            if (!s3Monitor.isNodeOnline(nodeName)) {
+                continue;
+            }
+
+            S3Client client = clientManager.getClient(nodeName);
+            if (client == null) {
+                continue;
+            }
+
+            try {
+                HeadObjectRequest headRequest = HeadObjectRequest.builder()
+                        .bucket(nodeName)
+                        .key(objectPath)
+                        .build();
+                client.headObject(headRequest);
+                actualLocations.add(nodeName);
+            } catch (NoSuchKeyException e) {
+                // 对象不存在于此节点
+                log.debug("分片 {} 不存在于节点 {}", chunkHash, nodeName);
+            } catch (Exception e) {
+                log.warn("检查分片 {} 在节点 {} 的位置时出错: {}", chunkHash, nodeName, e.getMessage());
+            }
+        }
+
+        return Result.success(actualLocations);
+    }
+
+    @Override
+    public Result<String> triggerRebalance(String targetDomain) {
+        try {
+            String taskId = rebalanceService.triggerManualRebalance(targetDomain);
+            if (taskId == null) {
+                return Result.error(ResultEnum.FILE_SERVICE_ERROR, "再平衡功能已禁用");
+            }
+            return Result.success(taskId);
+        } catch (Exception e) {
+            log.error("触发再平衡失败: {}", e.getMessage(), e);
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
+        }
+    }
+
+    @Override
+    public Result<Map<String, Object>> getRebalanceStatus() {
+        try {
+            RebalanceService.RebalanceStatus status = rebalanceService.getStatus();
+            Map<String, Object> statusMap = new LinkedHashMap<>();
+
+            statusMap.put("running", status.isRunning());
+            statusMap.put("success", status.isSuccess());
+            statusMap.put("type", status.getType() != null ? status.getType().name() : null);
+            statusMap.put("triggerNode", status.getTriggerNode());
+            statusMap.put("startTime", status.getStartTime() != null ? status.getStartTime().toString() : null);
+            statusMap.put("endTime", status.getEndTime() != null ? status.getEndTime().toString() : null);
+            statusMap.put("migratedCount", status.getMigratedCount().get());
+            statusMap.put("failedCount", status.getFailedCount().get());
+            statusMap.put("error", status.getError());
+
+            return Result.success(statusMap);
+        } catch (Exception e) {
+            log.error("获取再平衡状态失败: {}", e.getMessage(), e);
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
+        }
     }
 
     /**

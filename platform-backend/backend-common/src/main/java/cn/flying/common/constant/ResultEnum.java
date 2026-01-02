@@ -81,6 +81,12 @@ public enum ResultEnum implements Serializable {
     SERVICE_CIRCUIT_OPEN(30010, "服务暂时不可用，请稍后重试"),
     /** 服务超时 */
     SERVICE_TIMEOUT(30011, "服务响应超时"),
+    /** 存储仲裁失败 */
+    STORAGE_QUORUM_NOT_REACHED(30012, "存储写入未达到仲裁要求"),
+    /** 存储副本不足 */
+    STORAGE_INSUFFICIENT_REPLICAS(30013, "可用存储节点不足"),
+    /** 降级写入成功 */
+    STORAGE_DEGRADED_WRITE(30014, "存储以降级模式写入，将在节点恢复后自动同步"),
 
     /* ==================== 系统错误：40000-49999 ==================== */
     /** 文件大小超限 */

@@ -10,6 +10,7 @@ import jakarta.annotation.Resource;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
+import org.redisson.api.RMap;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.EventListener;
@@ -21,6 +22,7 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 
 import java.io.ByteArrayOutputStream;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -37,9 +39,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class RebalanceService {
 
     private static final String REBALANCE_LOCK_KEY = "storage:rebalance:lock";
+    private static final String REBALANCE_STATUS_KEY = "storage:rebalance:status";
     private static final int BUFFER_SIZE = 8192;
     // 最大允许直接加载到内存的文件大小（100MB）
     private static final long MAX_IN_MEMORY_FILE_SIZE = 100 * 1024 * 1024L;
+    // 状态在 Redis 中的过期时间（24小时）
+    private static final Duration STATUS_TTL = Duration.ofHours(24);
 
     @Resource
     private FaultDomainManager faultDomainManager;
@@ -58,6 +63,9 @@ public class RebalanceService {
 
     @Value("${storage.rebalance.enabled:true}")
     private boolean rebalanceEnabled;
+
+    @Value("${storage.rebalance.cleanup-source:false}")
+    private boolean cleanupSourceAfterRebalance;
 
     private volatile RebalanceStatus currentStatus = new RebalanceStatus();
 
@@ -127,6 +135,7 @@ public class RebalanceService {
         currentStatus.setType(type);
         currentStatus.setTriggerNode(triggerNode);
         currentStatus.setRunning(true);
+        saveStatusToRedis();
 
         RateLimiter rateLimiter = RateLimiter.create(rateLimitPerSecond);
 
@@ -147,6 +156,7 @@ public class RebalanceService {
         } finally {
             currentStatus.setEndTime(Instant.now());
             currentStatus.setRunning(false);
+            saveStatusToRedis();
         }
     }
 
@@ -334,8 +344,10 @@ public class RebalanceService {
                         boolean success = copyObject(sourceNode, newNode, objectPath);
                         if (success) {
                             currentStatus.getMigratedCount().incrementAndGet();
-                            // 可选：从源节点删除（取决于策略，这里暂不删除以保证数据安全）
-                            // deleteObject(sourceNode, objectPath);
+                            // 可选：从源节点删除（根据配置决定）
+                            if (cleanupSourceAfterRebalance) {
+                                deleteObject(sourceNode, objectPath);
+                            }
                         } else {
                             currentStatus.getFailedCount().incrementAndGet();
                         }
@@ -495,6 +507,32 @@ public class RebalanceService {
     }
 
     /**
+     * 删除源节点上的对象（再平衡后清理）
+     *
+     * @param nodeName   节点名称
+     * @param objectPath 对象路径
+     */
+    private void deleteObject(String nodeName, String objectPath) {
+        try {
+            S3Client client = clientManager.getClient(nodeName);
+            if (client == null) {
+                log.warn("无法获取节点 {} 的 S3 客户端，跳过删除", nodeName);
+                return;
+            }
+
+            DeleteObjectRequest deleteRequest = DeleteObjectRequest.builder()
+                    .bucket(nodeName)
+                    .key(objectPath)
+                    .build();
+
+            client.deleteObject(deleteRequest);
+            log.debug("已从源节点 {} 删除对象 {}", nodeName, objectPath);
+        } catch (Exception e) {
+            log.warn("从节点 {} 删除对象 {} 失败: {}", nodeName, objectPath, e.getMessage());
+        }
+    }
+
+    /**
      * 手动触发再平衡（用于 API 调用）
      *
      * @param targetDomain 目标域（可选，null 表示全部域）
@@ -533,9 +571,95 @@ public class RebalanceService {
 
     /**
      * 获取当前再平衡状态
+     * 如果本地正在运行再平衡，返回本地状态（更准确）
+     * 否则从 Redis 读取，确保多实例部署时状态同步
      */
     public RebalanceStatus getStatus() {
+        // 如果本地正在运行，返回本地状态（计数器实时更新）
+        if (currentStatus.isRunning()) {
+            return currentStatus;
+        }
+        // 否则尝试从 Redis 读取（可能是其他实例的状态）
+        RebalanceStatus redisStatus = loadStatusFromRedis();
+        if (redisStatus != null) {
+            currentStatus = redisStatus;
+        }
         return currentStatus;
+    }
+
+    /**
+     * 保存状态到 Redis（原子操作）
+     */
+    private void saveStatusToRedis() {
+        try {
+            // 使用 putAll 实现原子更新
+            Map<String, String> statusData = new HashMap<>();
+            statusData.put("running", String.valueOf(currentStatus.isRunning()));
+            statusData.put("success", String.valueOf(currentStatus.isSuccess()));
+            statusData.put("type", currentStatus.getType() != null ? currentStatus.getType().name() : "");
+            statusData.put("triggerNode", currentStatus.getTriggerNode() != null ? currentStatus.getTriggerNode() : "");
+            statusData.put("startTime", currentStatus.getStartTime() != null ? currentStatus.getStartTime().toString() : "");
+            statusData.put("endTime", currentStatus.getEndTime() != null ? currentStatus.getEndTime().toString() : "");
+            statusData.put("migratedCount", String.valueOf(currentStatus.getMigratedCount().get()));
+            statusData.put("failedCount", String.valueOf(currentStatus.getFailedCount().get()));
+            statusData.put("error", currentStatus.getError() != null ? currentStatus.getError() : "");
+
+            RMap<String, String> statusMap = redissonClient.getMap(REBALANCE_STATUS_KEY);
+            statusMap.putAll(statusData);
+            statusMap.expire(STATUS_TTL);
+            log.debug("已保存再平衡状态到 Redis");
+        } catch (Exception e) {
+            log.warn("保存再平衡状态到 Redis 失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 从 Redis 加载状态
+     */
+    private RebalanceStatus loadStatusFromRedis() {
+        try {
+            RMap<String, String> statusMap = redissonClient.getMap(REBALANCE_STATUS_KEY);
+            if (statusMap.isEmpty()) {
+                return null;
+            }
+
+            // 使用 readAllMap 一次性读取所有数据
+            Map<String, String> allData = statusMap.readAllMap();
+
+            RebalanceStatus status = new RebalanceStatus();
+            status.setRunning(Boolean.parseBoolean(allData.getOrDefault("running", "false")));
+            status.setSuccess(Boolean.parseBoolean(allData.getOrDefault("success", "false")));
+
+            String typeStr = allData.get("type");
+            if (typeStr != null && !typeStr.isEmpty()) {
+                try {
+                    status.setType(RebalanceType.valueOf(typeStr));
+                } catch (IllegalArgumentException e) {
+                    log.warn("无法解析再平衡类型: {}", typeStr);
+                }
+            }
+
+            status.setTriggerNode(allData.get("triggerNode"));
+
+            String startTimeStr = allData.get("startTime");
+            if (startTimeStr != null && !startTimeStr.isEmpty()) {
+                status.setStartTime(Instant.parse(startTimeStr));
+            }
+
+            String endTimeStr = allData.get("endTime");
+            if (endTimeStr != null && !endTimeStr.isEmpty()) {
+                status.setEndTime(Instant.parse(endTimeStr));
+            }
+
+            status.getMigratedCount().set(Integer.parseInt(allData.getOrDefault("migratedCount", "0")));
+            status.getFailedCount().set(Integer.parseInt(allData.getOrDefault("failedCount", "0")));
+            status.setError(allData.get("error"));
+
+            return status;
+        } catch (Exception e) {
+            log.warn("从 Redis 加载再平衡状态失败: {}", e.getMessage());
+            return null;
+        }
     }
 
     /**

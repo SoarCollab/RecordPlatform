@@ -122,7 +122,7 @@ public class S3ClientManager {
                     } else {
                         log.info("为节点创建/更新 S3 客户端: {}", nodeConfig.getName());
 
-                        // 创建 S3Client
+                        // 创建 S3Client（使用内部端点进行实际存储操作）
                         S3Client newClient = S3Client.builder()
                                 .endpointOverride(URI.create(nodeConfig.getEndpoint()))
                                 .region(Region.of("us-east-1"))  // 固定区域，S3兼容存储通常忽略此设置
@@ -139,8 +139,13 @@ public class S3ClientManager {
                                 .build();
 
                         // 创建 S3Presigner（用于生成预签名 URL）
+                        // 如果配置了外部端点，则使用外部端点生成 URL，解决跨网段访问问题
+                        String presignerEndpoint = storageProperties.hasExternalEndpoint()
+                                ? storageProperties.getEffectiveExternalEndpoint()
+                                : nodeConfig.getEndpoint();
+
                         S3Presigner presigner = S3Presigner.builder()
-                                .endpointOverride(URI.create(nodeConfig.getEndpoint()))
+                                .endpointOverride(URI.create(presignerEndpoint))
                                 .region(Region.of("us-east-1"))
                                 .credentialsProvider(StaticCredentialsProvider.create(
                                         AwsBasicCredentials.create(nodeConfig.getAccessKey(), nodeConfig.getSecretKey())
@@ -149,6 +154,10 @@ public class S3ClientManager {
                                         .pathStyleAccessEnabled(true)
                                         .build())
                                 .build();
+
+                        if (storageProperties.hasExternalEndpoint()) {
+                            log.debug("节点 '{}' 的预签名 URL 将使用外部端点: {}", nodeConfig.getName(), presignerEndpoint);
+                        }
 
                         // 健康检查
                         try {
