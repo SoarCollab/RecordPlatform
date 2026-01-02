@@ -1,0 +1,172 @@
+# 配置说明
+
+本指南介绍 RecordPlatform 的环境变量和配置选项。
+
+## 环境变量
+
+复制示例文件并自定义：
+
+```bash
+cp .env.example .env
+vim .env
+```
+
+### 核心配置
+
+| 分类 | 变量 | 说明 | 默认值 |
+|------|------|------|--------|
+| **数据库** | `DB_HOST` | MySQL 主机 | localhost |
+| | `DB_PORT` | MySQL 端口 | 3306 |
+| | `DB_NAME` | 数据库名 | RecordPlatform |
+| | `DB_USERNAME` | 数据库用户 | root |
+| | `DB_PASSWORD` | 数据库密码 | - |
+| **Redis** | `REDIS_HOST` | Redis 主机 | localhost |
+| | `REDIS_PORT` | Redis 端口 | 6379 |
+| | `REDIS_PASSWORD` | Redis 密码 | - |
+| **Nacos** | `NACOS_HOST` | Nacos 服务器 | localhost |
+| | `NACOS_USERNAME` | Nacos 用户名 | nacos |
+| | `NACOS_PASSWORD` | Nacos 密码 | nacos |
+| **RabbitMQ** | `RABBITMQ_ADDRESSES` | RabbitMQ 地址 | localhost:5672 |
+| | `RABBITMQ_USERNAME` | RabbitMQ 用户 | guest |
+| | `RABBITMQ_PASSWORD` | RabbitMQ 密码 | guest |
+
+### 安全配置
+
+| 变量 | 说明 | 要求 |
+|------|------|------|
+| `JWT_KEY` | JWT 签名密钥 + ID 加密派生 | 至少 32 字符，高熵值 |
+
+> **注意**: `ID_SECURITY_KEY` 自 v2.0 起已弃用，ID 加密密钥现在从 `JWT_KEY` 派生。
+
+### 存储配置
+
+S3 兼容存储通过 Nacos 配置。基本环境变量：
+
+| 变量 | 说明 |
+|------|------|
+| `S3_ENDPOINT` | S3 端点 URL |
+| `S3_ACCESS_KEY` | 访问密钥 |
+| `S3_SECRET_KEY` | 私有密钥 |
+
+故障域配置通过 Nacos 管理，支持运行时刷新。
+
+### 区块链配置
+
+| 变量 | 说明 | 示例 |
+|------|------|------|
+| `BLOCKCHAIN_ACTIVE` | 激活的链类型 | `local-fisco`, `bsn-fisco`, `bsn-besu` |
+| `FISCO_PEER_ADDRESS` | FISCO 节点地址 | `127.0.0.1:20200` |
+| `FISCO_STORAGE_CONTRACT` | Storage 合约地址 | `0x...` |
+| `FISCO_SHARING_CONTRACT` | Sharing 合约地址 | `0x...` |
+
+### SSL 配置（生产环境）
+
+| 变量 | 说明 |
+|------|------|
+| `SERVER_SSL_KEY_STORE` | 密钥库路径 |
+| `SERVER_SSL_KEY_STORE_PASSWORD` | 密钥库密码 |
+| `SECURITY_REQUIRE_SSL` | 强制 HTTPS (true/false) |
+| `SECURITY_HTTP_REDIRECT_PORT` | HTTP 重定向端口 |
+
+## Profile 配置
+
+可用 Profile: `local`, `dev`, `prod`
+
+```bash
+# 使用指定 Profile 运行
+java -jar app.jar --spring.profiles.active=prod
+```
+
+### Profile 差异
+
+| 特性 | local | dev | prod |
+|------|-------|-----|------|
+| Swagger UI | 启用 | 启用 | 禁用 |
+| Druid 监控 | 启用 | 启用 | 禁用 |
+| Debug 日志 | 启用 | 部分 | 禁用 |
+| 强制 SSL | 否 | 否 | 是 |
+
+## Nacos 配置
+
+动态配置通过 Nacos 管理。模板：`docs/nacos-config-template.yaml`
+
+### 关键 Nacos 配置
+
+```yaml
+# 存储节点与故障域配置
+storage:
+  # 必须配置：活跃域列表
+  active-domains:
+    - domain-a
+    - domain-b
+
+  # 可选：外部访问端点（v3.2.0 新增）
+  # 用于生成预签名 URL 时替换内部端点地址，解决跨网段（如 VPN）访问问题
+  # 格式：http://host:port（不带尾部斜杠）
+  external-endpoint: http://10.1.0.2:9000
+
+  # 可选：备用域（用于故障转移）
+  standby-domain: standby
+
+  # 副本策略配置（v3.1.0 新增）
+  replication:
+    factor: 2                     # 副本数量，默认=活跃域数量
+    quorum: auto                  # 仲裁策略: auto|majority|all|具体数字
+
+  # 降级写入配置（v3.1.0 新增）
+  degraded-write:
+    enabled: true                 # 允许降级写入
+    min-replicas: 1               # 降级模式下的最小副本数
+    track-for-sync: true          # 记录降级写入以便后续同步
+
+  virtualNodesPerNode: 150
+
+  # 可选：域详细配置
+  domains:
+    - name: domain-a
+      minNodes: 1
+      acceptsWrites: true
+    - name: domain-b
+      minNodes: 1
+      acceptsWrites: true
+    - name: standby
+      minNodes: 0
+      acceptsWrites: false
+
+  nodes:
+    - name: node-a1
+      endpoint: http://minio-a:9000
+      faultDomain: domain-a
+      weight: 100
+    - name: node-b1
+      endpoint: http://minio-b:9000
+      faultDomain: domain-b
+      weight: 100
+
+  # 副本一致性修复配置
+  consistency:
+    repair:
+      enabled: true               # 是否启用定时修复
+      cron: "0 */15 * * * ?"      # 每 15 分钟执行
+      batch-size: 100
+      lock-timeout-seconds: 600
+
+  # 数据再平衡配置
+  rebalance:
+    enabled: true                 # 是否启用自动再平衡
+    rate-limit-per-second: 10     # 每秒最大复制对象数
+    cleanup-source: false         # 再平衡后是否删除源数据
+```
+
+> **注意**: `active-domains` 为必填项，启动时会校验。单域开发模式只需配置一个域名。
+
+## 前端配置
+
+前端环境变量 (`platform-frontend/.env`):
+
+| 变量 | 说明 |
+|------|------|
+| `PUBLIC_API_BASE_URL` | 后端 API 地址 |
+| `PUBLIC_ENV` | 环境名称 |
+| `PUBLIC_TENANT_ID` | 默认租户 ID |
+
