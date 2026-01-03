@@ -13,11 +13,11 @@
 ## Features
 
 - **Blockchain Attestation** - File metadata stored on FISCO BCOS, ensuring immutability and traceability
-- **Distributed Storage** - Dual-replica with fault domain isolation, consistent hashing, standby pool auto-promotion, and 50% node fault tolerance
+- **Distributed Storage** - Multi-replica with fault domain isolation, consistent hashing, quorum-based writes, degraded write support, standby pool auto-promotion, and N-1 fault tolerance
 - **Chunked Upload** - Resumable uploads with AES-GCM/ChaCha20-Poly1305 encryption
 - **File Sharing** - Generate share codes with access limits and expiration
-- **Share Audit** - Track access, downloads, and saves with multi-level provenance (A→B→C)
-- **Real-time Notifications** - SSE push for file status changes and messages
+- **Share Audit & Provenance** - Track access, downloads, and saves with multi-level provenance chain (A→B→C), full share access logging
+- **Real-time Notifications** - SSE push for file status changes and messages, multi-device support
 - **RBAC Permissions** - Fine-grained access control with resource ownership verification
 - **Multi-tenancy** - Database, cache, and storage path isolation per tenant
 

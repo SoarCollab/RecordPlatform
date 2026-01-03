@@ -68,6 +68,50 @@ Fault domain configuration is managed through Nacos and supports runtime refresh
 | `SECURITY_REQUIRE_SSL` | Force HTTPS (true/false) |
 | `SECURITY_HTTP_REDIRECT_PORT` | HTTP redirect port |
 
+### Service Port Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SERVER_PORT` | Backend REST API port | 8000 |
+| `DUBBO_FISCO_PORT` | FISCO Dubbo service port | 8091 |
+| `DUBBO_STORAGE_PORT` | Storage Dubbo service port | 8092 |
+| `DUBBO_HOST` | Service registration IP (for Docker) | - |
+| `QOS_BACKEND_PORT` | Backend QoS management port | 22330 |
+| `QOS_FISCO_PORT` | FISCO QoS management port | 22331 |
+| `QOS_STORAGE_PORT` | Storage QoS management port | 22332 |
+
+> **Note**: `DUBBO_HOST` is critical in Docker environments to ensure services register with accessible IPs rather than Docker bridge network IPs.
+
+### Logging Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `LOG_LEVEL` | Application log level | INFO |
+| `LOG_PATH` | Log file output directory | /var/log/record-platform |
+
+### CORS Configuration
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `CORS_ALLOWED_ORIGINS` | Allowed frontend origins (comma-separated) | `http://localhost:3000,http://localhost:5173` |
+
+### API Documentation Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `KNIFE4J_USERNAME` | Knife4j/Swagger UI username | admin |
+| `KNIFE4J_PASSWORD` | Knife4j/Swagger UI password | - |
+
+### APM Configuration (Optional)
+
+SkyWalking integration for distributed tracing:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SW_AGENT_COLLECTOR_BACKEND_SERVICES` | SkyWalking OAP collector | localhost:11800 |
+| `SW_AGENT_NAME` | Service name in SkyWalking | record-platform |
+| `SW_JDBC_TRACE_SQL_PARAMETERS` | Trace SQL parameters | true |
+
 ## Profile Configuration
 
 Available profiles: `local`, `dev`, `prod`

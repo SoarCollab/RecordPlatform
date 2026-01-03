@@ -71,6 +71,14 @@ Authorization: Bearer <token>
 | DELETE | `/file/{id}` | 删除文件 |
 | GET | `/file/search` | 搜索文件 |
 
+### 图片
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| POST | `/images/upload/avatar` | 上传用户头像 |
+| POST | `/images/upload/image` | 上传通用图片 |
+| GET | `/images/download/**` | 下载图片 |
+
 ### 文件分享
 
 | 方法 | 端点 | 说明 |
@@ -86,6 +94,13 @@ Authorization: Bearer <token>
 | 方法 | 端点 | 说明 |
 |------|------|------|
 | GET | `/admin/files` | 列出所有文件（管理员） |
+| GET | `/admin/files/{id}` | 文件详情（含溯源链） |
+| PUT | `/admin/files/{id}/status` | 更新文件状态 |
+| DELETE | `/admin/files/{id}` | 强制删除文件 |
+| GET | `/admin/files/shares` | 列出所有分享 |
+| DELETE | `/admin/files/shares/{code}` | 强制取消分享 |
+| GET | `/admin/files/shares/{code}/logs` | 分享访问日志 |
+| GET | `/admin/files/shares/{code}/stats` | 分享访问统计 |
 | GET | `/admin/users` | 列出所有用户 |
 | PUT | `/admin/user/{id}/role` | 更新用户角色 |
 | GET | `/admin/audit/logs` | 获取审计日志 |

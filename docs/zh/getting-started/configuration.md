@@ -68,6 +68,50 @@ S3 兼容存储通过 Nacos 配置。基本环境变量：
 | `SECURITY_REQUIRE_SSL` | 强制 HTTPS (true/false) |
 | `SECURITY_HTTP_REDIRECT_PORT` | HTTP 重定向端口 |
 
+### 服务端口配置
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `SERVER_PORT` | 后端 REST API 端口 | 8000 |
+| `DUBBO_FISCO_PORT` | FISCO Dubbo 服务端口 | 8091 |
+| `DUBBO_STORAGE_PORT` | Storage Dubbo 服务端口 | 8092 |
+| `DUBBO_HOST` | 服务注册 IP（用于 Docker 环境） | - |
+| `QOS_BACKEND_PORT` | Backend QoS 管理端口 | 22330 |
+| `QOS_FISCO_PORT` | FISCO QoS 管理端口 | 22331 |
+| `QOS_STORAGE_PORT` | Storage QoS 管理端口 | 22332 |
+
+> **注意**: `DUBBO_HOST` 在 Docker 环境中非常重要，确保服务注册使用可访问的 IP 而非 Docker 网桥 IP。
+
+### 日志配置
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `LOG_LEVEL` | 应用日志级别 | INFO |
+| `LOG_PATH` | 日志文件输出目录 | /var/log/record-platform |
+
+### CORS 配置
+
+| 变量 | 说明 | 示例 |
+|------|------|------|
+| `CORS_ALLOWED_ORIGINS` | 允许的前端域名（逗号分隔） | `http://localhost:3000,http://localhost:5173` |
+
+### API 文档配置
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `KNIFE4J_USERNAME` | Knife4j/Swagger UI 用户名 | admin |
+| `KNIFE4J_PASSWORD` | Knife4j/Swagger UI 密码 | - |
+
+### APM 配置（可选）
+
+SkyWalking 分布式追踪集成：
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `SW_AGENT_COLLECTOR_BACKEND_SERVICES` | SkyWalking OAP 收集器 | localhost:11800 |
+| `SW_AGENT_NAME` | SkyWalking 中的服务名 | record-platform |
+| `SW_JDBC_TRACE_SQL_PARAMETERS` | 追踪 SQL 参数 | true |
+
 ## Profile 配置
 
 可用 Profile: `local`, `dev`, `prod`
