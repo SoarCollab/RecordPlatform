@@ -59,6 +59,7 @@ public class FileUploadServiceImpl implements FileUploadService {
     // --- 文件处理常量 ---
     private static final int BUFFER_SIZE = 8 * 1024 * 1024; // 8MB I/O 缓冲区大小
     private static final long MAX_FILE_SIZE_BYTES = 4096 * 1024 * 1024L; // 4GB 最大文件大小限制
+    private static final int MAX_CHUNK_SIZE_BYTES = 80 * 1024 * 1024; // 80MB 最大分片大小 (Dubbo载荷限制100MB，预留安全边际)
     private static final int PROGRESS_UPDATE_INTERVAL_MS = 1000; // 进度日志更新间隔（毫秒）
     private static final Pattern SAFE_FILENAME_PATTERN = Pattern.compile("^[\\p{IsHan}a-zA-Z0-9\\u4e00-\\u9fa5._\\-\\s,;!@#$%&()+=]+$");
     private static final String HASH_ALGORITHM = "SHA-256"; // 哈希算法
@@ -331,7 +332,7 @@ public class FileUploadServiceImpl implements FileUploadService {
      * @throws GeneralException IO 操作失败
      */
     @Override
-    public StartUploadVO startUpload(Long userId, String fileName, long fileSize, String contentType, String clientId, int chunkIndex, int totalChunks) {
+    public StartUploadVO startUpload(Long userId, String fileName, long fileSize, String contentType, String clientId, int chunkSize, int totalChunks) {
 
         //获取加密后的uid，防止数据泄漏
         String uidStr = String.valueOf(userId);
@@ -355,6 +356,9 @@ public class FileUploadServiceImpl implements FileUploadService {
         }
         if (fileSize > MAX_FILE_SIZE_BYTES) {
             throw new GeneralException("文件大小超过限制 (" + (MAX_FILE_SIZE_BYTES / 1024 / 1024 / 1024) + "GB)");
+        }
+        if (chunkSize <= 0 || chunkSize > MAX_CHUNK_SIZE_BYTES) {
+            throw new GeneralException("分片大小必须在 1B 到 " + (MAX_CHUNK_SIZE_BYTES / 1024 / 1024) + "MB 之间");
         }
         if (!isFileTypeAllowed(fileName, contentType)) {
             throw new GeneralException("不支持的文件类型");
@@ -380,7 +384,7 @@ public class FileUploadServiceImpl implements FileUploadService {
 
         // --- 创建新会话 ---
         try {
-            FileUploadState newState = new FileUploadState(userId, fileName, fileSize, contentType, clientId, chunkIndex, totalChunks);
+            FileUploadState newState = new FileUploadState(userId, fileName, fileSize, contentType, clientId, chunkSize, totalChunks);
             redisStateManager.saveNewState(newState, SUID);
 
             // 确保客户端和会话的目录存在

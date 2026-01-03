@@ -18,6 +18,7 @@ export interface UploadTask {
   progress: number; // 0-100
   uploadedChunks: number[];
   totalChunks: number;
+  chunkSize: number; // 该任务使用的分片大小
   speed: number; // bytes/sec
   error: string | null;
   startTime: number | null;
@@ -26,9 +27,34 @@ export interface UploadTask {
 
 // ===== Configuration =====
 
-const DEFAULT_CHUNK_SIZE = 5 * 1024 * 1024; // 5MB
+// 动态分片配置
+const CHUNK_CONFIG = {
+  MIN_SIZE: 2 * 1024 * 1024, // 2MB 最小分片
+  MAX_SIZE: 80 * 1024 * 1024, // 80MB 最大分片 (后端 Dubbo 限制)
+  // 基于文件大小的分片规则
+  RULES: [
+    { maxFileSize: 10 * 1024 * 1024, chunkSize: 2 * 1024 * 1024 }, // < 10MB: 2MB
+    { maxFileSize: 100 * 1024 * 1024, chunkSize: 5 * 1024 * 1024 }, // < 100MB: 5MB
+    { maxFileSize: 500 * 1024 * 1024, chunkSize: 10 * 1024 * 1024 }, // < 500MB: 10MB
+    { maxFileSize: 2 * 1024 * 1024 * 1024, chunkSize: 20 * 1024 * 1024 }, // < 2GB: 20MB
+    { maxFileSize: Infinity, chunkSize: 50 * 1024 * 1024 }, // >= 2GB: 50MB
+  ],
+} as const;
+
 const MAX_CONCURRENT_UPLOADS = 3;
 const MAX_CONCURRENT_CHUNKS = 3;
+
+/**
+ * 根据文件大小计算最优分片大小
+ */
+function calculateOptimalChunkSize(fileSize: number): number {
+  for (const rule of CHUNK_CONFIG.RULES) {
+    if (fileSize <= rule.maxFileSize) {
+      return rule.chunkSize;
+    }
+  }
+  return CHUNK_CONFIG.MAX_SIZE;
+}
 
 // ===== State =====
 
@@ -61,7 +87,7 @@ function updateTask(id: string, updates: Partial<UploadTask>): void {
 
 function calculateChunks(
   fileSize: number,
-  chunkSize: number = DEFAULT_CHUNK_SIZE,
+  chunkSize: number = CHUNK_CONFIG.RULES[1].chunkSize, // 默认 5MB
 ): number {
   return Math.ceil(fileSize / chunkSize);
 }
@@ -71,7 +97,7 @@ function calculateChunks(
 async function uploadChunks(task: UploadTask): Promise<void> {
   if (!task.clientId) return;
 
-  const chunkSize = DEFAULT_CHUNK_SIZE;
+  const chunkSize = task.chunkSize;
   const file = task.file;
 
   // Initialize chunk tracking Set if not exists
@@ -150,7 +176,8 @@ async function uploadChunks(task: UploadTask): Promise<void> {
 
 async function addFile(file: File): Promise<string> {
   const id = generateId();
-  const totalChunks = calculateChunks(file.size);
+  const chunkSize = calculateOptimalChunkSize(file.size);
+  const totalChunks = calculateChunks(file.size, chunkSize);
 
   const task: UploadTask = {
     id,
@@ -160,6 +187,7 @@ async function addFile(file: File): Promise<string> {
     progress: 0,
     uploadedChunks: [],
     totalChunks,
+    chunkSize,
     speed: 0,
     error: null,
     startTime: null,
@@ -192,7 +220,7 @@ async function startUpload(id: string): Promise<void> {
       fileName: task.file.name,
       fileSize: task.file.size,
       contentType: task.file.type || "application/octet-stream",
-      chunkSize: DEFAULT_CHUNK_SIZE,
+      chunkSize: task.chunkSize,
       totalChunks: task.totalChunks,
     });
 
