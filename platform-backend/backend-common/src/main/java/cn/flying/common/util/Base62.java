@@ -1,6 +1,7 @@
 package cn.flying.common.util;
 
 import java.math.BigInteger;
+import java.util.Arrays;
 
 /**
  * Base62 编码/解码工具类
@@ -15,9 +16,7 @@ public final class Base62 {
 
     static {
         // 初始化解码表
-        for (int i = 0; i < DECODE_TABLE.length; i++) {
-            DECODE_TABLE[i] = -1;
-        }
+        Arrays.fill(DECODE_TABLE, -1);
         for (int i = 0; i < ALPHABET.length(); i++) {
             DECODE_TABLE[ALPHABET.charAt(i)] = i;
         }
