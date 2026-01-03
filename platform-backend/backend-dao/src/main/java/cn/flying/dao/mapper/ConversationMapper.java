@@ -1,6 +1,7 @@
 package cn.flying.dao.mapper;
 
 import cn.flying.dao.entity.Conversation;
+import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -30,7 +31,9 @@ public interface ConversationMapper extends BaseMapper<Conversation> {
 
     /**
      * 统计用户未读会话数（带租户隔离）
+     * 注意：手动处理租户条件，禁用自动注入避免 JOIN 歧义
      */
+    @InterceptorIgnore(tenantLine = "true")
     @Select("""
         SELECT COUNT(DISTINCT c.id) FROM conversation c
         INNER JOIN message m ON c.id = m.conversation_id
