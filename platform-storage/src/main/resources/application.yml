@@ -23,10 +23,11 @@ dubbo:
   protocol:
     name: tri # 使用 Triple 协议
     port: ${DUBBO_STORAGE_PORT:8092}
+    host: ${DUBBO_HOST:192.168.5.100}
     payload: 104857600 # 将最大载荷大小设置为 100MB (100 * 1024 * 1024 bytes)
   registry:
     register-mode: instance
-    address: nacos://${NACOS_HOST:localhost}:${NACOS_PORT:8848}
+    address: nacos://${NACOS_HOST:localhost}:${NACOS_PORT:8848}?username=${NACOS_USERNAME:}&password=${NACOS_PASSWORD:}
 
 # Storage 配置
 storage:

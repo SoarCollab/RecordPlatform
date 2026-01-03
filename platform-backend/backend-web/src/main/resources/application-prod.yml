@@ -72,6 +72,7 @@ dubbo:
   registry:
     register-mode: instance
     address: nacos://${NACOS_HOST:localhost}:${NACOS_PORT:8848}?username=${NACOS_USERNAME}&password=${NACOS_PASSWORD}
+    enable-empty-protection: true  # 空保护：收到空列表时保留旧地址，防止服务闪断
   consumer:
     timeout: 30000 # 全局消费者超时设置为30秒
     references:

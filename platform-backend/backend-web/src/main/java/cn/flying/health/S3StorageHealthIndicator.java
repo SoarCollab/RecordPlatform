@@ -18,7 +18,7 @@ import java.util.concurrent.*;
 @Component("s3Storage")
 public class S3StorageHealthIndicator implements HealthIndicator {
 
-    @DubboReference(id = "storageServiceHealth", version = DistributedStorageService.VERSION, timeout = 3000, retries = 0)
+    @DubboReference(id = "storageServiceHealth", version = DistributedStorageService.VERSION, timeout = 3000, retries = 0, providedBy = "RecordPlatform_storage")
     private DistributedStorageService storageService;
 
     private static final int TIMEOUT_SECONDS = 3;
