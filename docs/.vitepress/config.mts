@@ -3,6 +3,7 @@ import { withMermaid } from "vitepress-plugin-mermaid";
 
 export default withMermaid(
   defineConfig({
+    base: '/RecordPlatform/',
     title: "RecordPlatform",
     description:
       "Enterprise-grade file attestation platform powered by blockchain and distributed storage",
@@ -19,10 +20,10 @@ export default withMermaid(
         link: "/en/",
         themeConfig: {
           nav: [
-            { text: "Guide", link: "/en/getting-started/" },
-            { text: "Architecture", link: "/en/architecture/" },
-            { text: "Deployment", link: "/en/deployment/" },
-            { text: "API", link: "/en/api/" },
+            { text: "Guide", link: "/en/getting-started/", activeMatch: "/en/getting-started/" },
+            { text: "Architecture", link: "/en/architecture/", activeMatch: "/en/architecture/" },
+            { text: "Deployment", link: "/en/deployment/", activeMatch: "/en/deployment/" },
+            { text: "API", link: "/en/api/", activeMatch: "/en/api/" },
           ],
           sidebar: {
             "/en/getting-started/": [
@@ -112,10 +113,10 @@ export default withMermaid(
         link: "/zh/",
         themeConfig: {
           nav: [
-            { text: "指南", link: "/zh/getting-started/" },
-            { text: "架构", link: "/zh/architecture/" },
-            { text: "部署", link: "/zh/deployment/" },
-            { text: "API", link: "/zh/api/" },
+            { text: "指南", link: "/zh/getting-started/", activeMatch: "/zh/getting-started/" },
+            { text: "架构", link: "/zh/architecture/", activeMatch: "/zh/architecture/" },
+            { text: "部署", link: "/zh/deployment/", activeMatch: "/zh/deployment/" },
+            { text: "API", link: "/zh/api/", activeMatch: "/zh/api/" },
           ],
           sidebar: {
             "/zh/getting-started/": [
