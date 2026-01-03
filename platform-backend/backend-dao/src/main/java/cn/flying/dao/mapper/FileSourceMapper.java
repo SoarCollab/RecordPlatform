@@ -1,6 +1,7 @@
 package cn.flying.dao.mapper;
 
 import cn.flying.dao.dto.FileSource;
+import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -45,6 +46,7 @@ public interface FileSourceMapper extends BaseMapper<FileSource> {
      * @param tenantId 租户ID
      * @return 分享链路列表
      */
+    @InterceptorIgnore(tenantLine = "true")
     @Select("""
         WITH RECURSIVE chain AS (
             SELECT fs.*, 1 as level

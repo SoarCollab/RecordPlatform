@@ -1,6 +1,7 @@
 package cn.flying.dao.mapper;
 
 import cn.flying.dao.entity.SysPermission;
+import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -11,8 +12,10 @@ import java.util.Set;
 
 /**
  * 权限定义 Mapper 接口
+ * 注意：所有方法均手动处理租户条件 (tenant_id = 0 OR tenant_id = ?) 以支持全局权限
  */
 @Mapper
+@InterceptorIgnore(tenantLine = "true")
 public interface SysPermissionMapper extends BaseMapper<SysPermission> {
 
     /**
