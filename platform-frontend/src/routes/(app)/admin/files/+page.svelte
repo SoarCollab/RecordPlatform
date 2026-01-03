@@ -28,6 +28,7 @@
   import * as Tabs from "$lib/components/ui/tabs";
   import * as Table from "$lib/components/ui/table";
   import { Separator } from "$lib/components/ui/separator";
+  import DateTimePicker from "$lib/components/ui/date-picker/date-time-picker.svelte";
 
   const notifications = useNotifications();
 
@@ -40,6 +41,11 @@
   let filesPageNum = $state(1);
   let filesTotalPages = $state(1);
   let filesKeyword = $state("");
+  let filesStatus = $state<number | "">("");
+  let filesSourceType = $state<"" | "original" | "shared">("");
+  let filesOwnerName = $state("");
+  let filesStartTime = $state("");
+  let filesEndTime = $state("");
 
   // Shares state
   let shares = $state<AdminShareVO[]>([]);
@@ -47,6 +53,11 @@
   let sharesPageNum = $state(1);
   let sharesTotalPages = $state(1);
   let sharesKeyword = $state("");
+  let sharesStatus = $state<number | "">("");
+  let sharesShareType = $state<number | "">("");
+  let sharesSharerName = $state("");
+  let sharesStartTime = $state("");
+  let sharesEndTime = $state("");
 
   // File detail dialog
   let detailDialogOpen = $state(false);
@@ -76,6 +87,12 @@
         pageNum: filesPageNum,
         pageSize: 20,
         keyword: filesKeyword || undefined,
+        status: filesStatus !== "" ? filesStatus : undefined,
+        originalOnly: filesSourceType === "original" ? true : undefined,
+        sharedOnly: filesSourceType === "shared" ? true : undefined,
+        ownerName: filesOwnerName || undefined,
+        startTime: filesStartTime || undefined,
+        endTime: filesEndTime || undefined,
       });
       files = result.records;
       filesTotalPages = Math.ceil(result.total / 20);
@@ -93,6 +110,11 @@
         pageNum: sharesPageNum,
         pageSize: 20,
         keyword: sharesKeyword || undefined,
+        status: sharesStatus !== "" ? sharesStatus : undefined,
+        shareType: sharesShareType !== "" ? sharesShareType : undefined,
+        sharerName: sharesSharerName || undefined,
+        startTime: sharesStartTime || undefined,
+        endTime: sharesEndTime || undefined,
       });
       shares = result.records;
       sharesTotalPages = Math.ceil(result.total / 20);
@@ -101,6 +123,38 @@
     } finally {
       sharesLoading = false;
     }
+  }
+
+  function handleFilesSearch() {
+    filesPageNum = 1;
+    loadFiles();
+  }
+
+  function handleSharesSearch() {
+    sharesPageNum = 1;
+    loadShares();
+  }
+
+  function clearFilesFilters() {
+    filesKeyword = "";
+    filesStatus = "";
+    filesSourceType = "";
+    filesOwnerName = "";
+    filesStartTime = "";
+    filesEndTime = "";
+    filesPageNum = 1;
+    loadFiles();
+  }
+
+  function clearSharesFilters() {
+    sharesKeyword = "";
+    sharesStatus = "";
+    sharesShareType = "";
+    sharesSharerName = "";
+    sharesStartTime = "";
+    sharesEndTime = "";
+    sharesPageNum = 1;
+    loadShares();
   }
 
   async function handleViewDetail(file: AdminFileVO) {
@@ -213,17 +267,53 @@
     <!-- 文件管理标签页 -->
     <Tabs.Content value="files" class="mt-4">
       <Card.Root>
-        <Card.Header>
-          <div class="flex items-center justify-between gap-4">
+        <Card.Header class="pb-4">
+          <div class="flex items-center justify-between">
             <Card.Title>所有文件</Card.Title>
-            <div class="flex gap-2">
+          </div>
+
+          <!-- 筛选面板 -->
+          <div class="mt-4 rounded-lg border bg-muted/30 p-4">
+            <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               <Input
                 placeholder="搜索文件名或哈希..."
                 bind:value={filesKeyword}
-                class="w-64"
-                onkeydown={(e) => e.key === "Enter" && loadFiles()}
+                onkeydown={(e) => e.key === "Enter" && handleFilesSearch()}
               />
-              <Button onclick={loadFiles}>搜索</Button>
+
+              <select
+                bind:value={filesStatus}
+                class="h-9 w-full rounded-md border bg-background px-3 text-sm focus:border-primary focus:outline-none"
+              >
+                <option value="">全部状态</option>
+                <option value={0}>处理中</option>
+                <option value={1}>已完成</option>
+                <option value={2}>已删除</option>
+                <option value={-1}>失败</option>
+              </select>
+
+              <select
+                bind:value={filesSourceType}
+                class="h-9 w-full rounded-md border bg-background px-3 text-sm focus:border-primary focus:outline-none"
+              >
+                <option value="">全部来源</option>
+                <option value="original">原始上传</option>
+                <option value="shared">分享保存</option>
+              </select>
+
+              <Input
+                placeholder="所有者用户名"
+                bind:value={filesOwnerName}
+                onkeydown={(e) => e.key === "Enter" && handleFilesSearch()}
+              />
+
+              <DateTimePicker bind:value={filesStartTime} placeholder="开始时间" />
+              <DateTimePicker bind:value={filesEndTime} placeholder="结束时间" />
+
+              <div class="flex gap-2">
+                <Button onclick={handleFilesSearch} class="flex-1">搜索</Button>
+                <Button variant="secondary" onclick={clearFilesFilters}>重置</Button>
+              </div>
             </div>
           </div>
         </Card.Header>
@@ -330,17 +420,52 @@
     <!-- 分享管理标签页 -->
     <Tabs.Content value="shares" class="mt-4">
       <Card.Root>
-        <Card.Header>
-          <div class="flex items-center justify-between gap-4">
+        <Card.Header class="pb-4">
+          <div class="flex items-center justify-between">
             <Card.Title>所有分享</Card.Title>
-            <div class="flex gap-2">
+          </div>
+
+          <!-- 筛选面板 -->
+          <div class="mt-4 rounded-lg border bg-muted/30 p-4">
+            <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               <Input
                 placeholder="搜索分享码或文件名..."
                 bind:value={sharesKeyword}
-                class="w-64"
-                onkeydown={(e) => e.key === "Enter" && loadShares()}
+                onkeydown={(e) => e.key === "Enter" && handleSharesSearch()}
               />
-              <Button onclick={loadShares}>搜索</Button>
+
+              <select
+                bind:value={sharesStatus}
+                class="h-9 w-full rounded-md border bg-background px-3 text-sm focus:border-primary focus:outline-none"
+              >
+                <option value="">全部状态</option>
+                <option value={1}>有效</option>
+                <option value={0}>已取消</option>
+                <option value={2}>已过期</option>
+              </select>
+
+              <select
+                bind:value={sharesShareType}
+                class="h-9 w-full rounded-md border bg-background px-3 text-sm focus:border-primary focus:outline-none"
+              >
+                <option value="">全部类型</option>
+                <option value={0}>公开</option>
+                <option value={1}>私密</option>
+              </select>
+
+              <Input
+                placeholder="分享者用户名"
+                bind:value={sharesSharerName}
+                onkeydown={(e) => e.key === "Enter" && handleSharesSearch()}
+              />
+
+              <DateTimePicker bind:value={sharesStartTime} placeholder="开始时间" />
+              <DateTimePicker bind:value={sharesEndTime} placeholder="结束时间" />
+
+              <div class="flex gap-2">
+                <Button onclick={handleSharesSearch} class="flex-1">搜索</Button>
+                <Button variant="secondary" onclick={clearSharesFilters}>重置</Button>
+              </div>
             </div>
           </div>
         </Card.Header>
