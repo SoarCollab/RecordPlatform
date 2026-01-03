@@ -71,6 +71,14 @@ Authorization: Bearer <token>
 | DELETE | `/file/{id}` | Delete file |
 | GET | `/file/search` | Search files |
 
+### Images
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/images/upload/avatar` | Upload user avatar |
+| POST | `/images/upload/image` | Upload general image |
+| GET | `/images/download/**` | Download image |
+
 ### File Sharing
 
 | Method | Endpoint | Description |
@@ -86,6 +94,13 @@ Authorization: Bearer <token>
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/admin/files` | List all files (admin) |
+| GET | `/admin/files/{id}` | File detail with provenance |
+| PUT | `/admin/files/{id}/status` | Update file status |
+| DELETE | `/admin/files/{id}` | Force delete file |
+| GET | `/admin/files/shares` | List all shares |
+| DELETE | `/admin/files/shares/{code}` | Force cancel share |
+| GET | `/admin/files/shares/{code}/logs` | Share access logs |
+| GET | `/admin/files/shares/{code}/stats` | Share access stats |
 | GET | `/admin/users` | List all users |
 | PUT | `/admin/user/{id}/role` | Update user role |
 | GET | `/admin/audit/logs` | Get audit logs |

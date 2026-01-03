@@ -200,11 +200,24 @@ storage:
     - domain-a
     - domain-b
 
+  # Optional: External endpoint (v3.2.0)
+  # Used to replace internal endpoints when generating presigned URLs
+  # Solves cross-network access issues (e.g., VPN)
+  external-endpoint: http://10.1.0.2:9000
+
   # Optional: Standby domain (for failover)
   standby-domain: standby
 
-  # Optional: Replication factor (defaults to active domain count)
-  replication-factor: 2
+  # Replication policy (v3.1.0)
+  replication:
+    factor: 2                     # Replica count, defaults to active domain count
+    quorum: auto                  # Quorum strategy: auto|majority|all|number
+
+  # Degraded write configuration (v3.1.0)
+  degraded-write:
+    enabled: true                 # Allow degraded writes
+    min-replicas: 1               # Minimum replicas in degraded mode
+    track-for-sync: true          # Track degraded writes for later sync
 ```
 
 ### NodeConfig Properties
