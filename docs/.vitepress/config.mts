@@ -3,6 +3,7 @@ import { withMermaid } from "vitepress-plugin-mermaid";
 
 export default withMermaid(
   defineConfig({
+    base: '/RecordPlatform/',
     title: "RecordPlatform",
     description:
       "Enterprise-grade file attestation platform powered by blockchain and distributed storage",
