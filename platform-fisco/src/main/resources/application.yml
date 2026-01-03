@@ -77,9 +77,10 @@ dubbo:
   protocol:
     name: tri # 使用 Triple 协议
     port: ${DUBBO_FISCO_PORT:8091}
+    host: ${DUBBO_HOST:192.168.5.100}
   registry:
     register-mode: instance
-    address: nacos://${NACOS_HOST:localhost}:${NACOS_PORT:8848}
+    address: nacos://${NACOS_HOST:localhost}:${NACOS_PORT:8848}?username=${NACOS_USERNAME:}&password=${NACOS_PASSWORD:}
 
 logging:
   level:

@@ -16,7 +16,7 @@ import java.util.concurrent.*;
 @Component("fisco")
 public class FiscoHealthIndicator implements HealthIndicator {
 
-    @DubboReference(id = "blockChainServiceFiscoHealth", version = BlockChainService.VERSION, timeout = 3000, retries = 0)
+    @DubboReference(id = "blockChainServiceFiscoHealth", version = BlockChainService.VERSION, timeout = 3000, retries = 0, providedBy = "RecordPlatform_fisco")
     private BlockChainService blockChainService;
 
     private static final int TIMEOUT_SECONDS = 3;
