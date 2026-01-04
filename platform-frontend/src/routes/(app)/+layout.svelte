@@ -161,6 +161,7 @@
 
   const adminItems = [
     { href: "/admin/files", icon: "file-search", label: "文件审计" },
+    { href: "/admin/tickets", icon: "ticket", label: "工单管理" },
     { href: "/admin/monitor", icon: "activity", label: "系统监控" },
     { href: "/admin/audit", icon: "shield", label: "审计日志" },
     { href: "/admin/permissions", icon: "users", label: "权限管理" },
@@ -364,6 +365,13 @@
                         stroke-linejoin="round"
                         stroke-width="2"
                         d="M10 21h7a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v11m0 5l4.879-4.879m0 0a3 3 0 104.243-4.242 3 3 0 00-4.243 4.242z"
+                      />
+                    {:else if item.icon === "ticket"}
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"
                       />
                     {:else if item.icon === "activity"}
                       <path
