@@ -60,6 +60,29 @@ Authorization: Bearer <token>
 | POST | `/auth/logout` | 用户登出 |
 | GET | `/auth/me` | 获取当前用户信息 |
 
+#### 用户注册
+
+```http
+POST /auth/register
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "code": "123456",
+  "username": "user1",
+  "password": "securepass",
+  "nickname": "显示名称"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| email | string | 是 | 用户邮箱地址 |
+| code | string | 是 | 邮箱验证码 |
+| username | string | 是 | 登录用户名 |
+| password | string | 是 | 用户密码 |
+| nickname | string | 否 | 显示名称（最大 50 字符）|
+
 ### 文件
 
 | 方法 | 端点 | 说明 |
@@ -115,6 +138,72 @@ Authorization: Bearer <token>
 | GET | `/ticket/{id}` | 获取工单详情 |
 | POST | `/ticket/{id}/reply` | 回复工单 |
 | PUT | `/ticket/{id}/status` | 更新工单状态 |
+| GET | `/ticket/admin/list` | 列出所有工单（管理员）|
+| PUT | `/ticket/admin/{id}/assign` | 分配处理人（管理员）|
+| PUT | `/ticket/admin/{id}/status` | 更新状态（管理员）|
+
+#### 创建工单
+
+```http
+POST /ticket
+Content-Type: application/json
+
+{
+  "title": "无法上传大文件",
+  "content": "上传超过1GB的文件时，上传失败...",
+  "priority": 1,
+  "category": 0,
+  "attachmentIds": ["file-id-1", "file-id-2"]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| title | string | 是 | 工单标题（最大 200 字符）|
+| content | string | 是 | 工单描述 |
+| priority | int | 否 | 0=低, 1=中（默认）, 2=高 |
+| category | int | 否 | 见下方类别表（默认：99）|
+| attachmentIds | string[] | 否 | 关联文件 ID |
+
+#### 工单状态
+
+| 代码 | 状态 | 说明 |
+|------|------|------|
+| 0 | PENDING | 待处理 |
+| 1 | PROCESSING | 处理中 |
+| 2 | CONFIRMING | 待用户确认 |
+| 3 | COMPLETED | 已解决 |
+| 4 | CLOSED | 已关闭 |
+
+#### 工单优先级
+
+| 代码 | 优先级 |
+|------|--------|
+| 0 | 低 |
+| 1 | 中 |
+| 2 | 高 |
+
+#### 工单类别
+
+| 代码 | 类别 |
+|------|------|
+| 0 | Bug 报告 |
+| 1 | 功能请求 |
+| 2 | 问题咨询 |
+| 3 | 反馈建议 |
+| 99 | 其他 |
+
+#### 回复工单
+
+```http
+POST /ticket/{id}/reply
+Content-Type: application/json
+
+{
+  "content": "感谢您的反馈，我们正在调查...",
+  "attachmentIds": []
+}
+```
 
 ### SSE（服务器推送事件）
 
@@ -191,7 +280,38 @@ file: <binary>
 
 ### 分块上传
 
-对于大文件（>10MB），使用分块上传：
+对于大文件（>10MB），使用动态分块上传：
+
+#### 动态分块大小策略
+
+系统根据文件大小自动选择最优分块大小以提高性能：
+
+| 文件大小 | 推荐分块大小 |
+|----------|--------------|
+| < 10MB   | 2MB          |
+| < 100MB  | 5MB          |
+| < 500MB  | 10MB         |
+| < 2GB    | 20MB         |
+| >= 2GB   | 50MB         |
+
+**最大分块限制：80MB**（Dubbo 载荷限制为 100MB）
+
+#### 开始分块上传
+
+```http
+POST /file/upload/start
+Content-Type: application/json
+
+{
+  "fileName": "large-file.zip",
+  "fileSize": 1073741824,
+  "contentType": "application/zip",
+  "chunkSize": 20971520,
+  "totalChunks": 52
+}
+```
+
+#### 上传分块
 
 ```http
 POST /file/upload/chunk
@@ -203,7 +323,9 @@ totalChunks: 10
 fileHash: abc123...
 ```
 
-所有块完成后：
+#### 合并分块
+
+所有分块上传完成后：
 ```http
 POST /file/upload/merge
 Content-Type: application/json

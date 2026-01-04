@@ -44,6 +44,10 @@ export default withMermaid(
                     text: "Configuration",
                     link: "/en/getting-started/configuration",
                   },
+                  {
+                    text: "Frontend",
+                    link: "/en/getting-started/frontend",
+                  },
                 ],
               },
             ],
@@ -88,7 +92,10 @@ export default withMermaid(
               {
                 text: "API Reference",
                 collapsed: false,
-                items: [{ text: "Overview", link: "/en/api/" }],
+                items: [
+                  { text: "Overview", link: "/en/api/" },
+                  { text: "Error Codes", link: "/en/api/error-codes" },
+                ],
               },
             ],
             "/en/troubleshooting/": [
@@ -137,6 +144,10 @@ export default withMermaid(
                     text: "配置说明",
                     link: "/zh/getting-started/configuration",
                   },
+                  {
+                    text: "前端开发",
+                    link: "/zh/getting-started/frontend",
+                  },
                 ],
               },
             ],
@@ -181,7 +192,10 @@ export default withMermaid(
               {
                 text: "API 参考",
                 collapsed: false,
-                items: [{ text: "概述", link: "/zh/api/" }],
+                items: [
+                  { text: "概述", link: "/zh/api/" },
+                  { text: "错误码参考", link: "/zh/api/error-codes" },
+                ],
               },
             ],
             "/zh/troubleshooting/": [
@@ -215,7 +229,7 @@ export default withMermaid(
       },
       footer: {
         message: "Released under the Apache 2.0 License.",
-        copyright: "Copyright © 2025 RecordPlatform",
+        copyright: "Copyright © 2025-2026 RecordPlatform",
       },
     },
 

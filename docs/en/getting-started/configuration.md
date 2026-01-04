@@ -204,6 +204,32 @@ storage:
 
 > **Note**: `active-domains` is required and validated at startup. For single-domain development mode, configure only one domain.
 
+## Scheduled Tasks Configuration
+
+### Share Cleanup
+
+Automatically marks expired shares as inactive:
+
+```yaml
+share:
+  cleanup:
+    interval: 300000  # Check every 5 minutes (milliseconds)
+```
+
+Uses distributed lock to prevent duplicate execution in multi-instance deployments.
+
+### File Cleanup
+
+Cleans up soft-deleted files after retention period:
+
+```yaml
+file:
+  cleanup:
+    retention-days: 30      # Days to retain soft-deleted files
+    batch-size: 100         # Files processed per batch
+    cron: "0 0 3 * * ?"     # Daily at 3:00 AM
+```
+
 ## Frontend Configuration
 
 Frontend environment variables (`platform-frontend/.env`):

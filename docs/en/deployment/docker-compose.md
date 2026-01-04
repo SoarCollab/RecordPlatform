@@ -107,6 +107,10 @@ volumes:
 
 Create `docker-compose.app.yml`:
 
+::: warning CRITICAL: DUBBO_HOST Configuration
+In Docker environments, Dubbo provider services (storage, fisco) must register with host-accessible IPs rather than internal Docker bridge IPs. Without proper `DUBBO_HOST` configuration, the backend cannot discover and call provider services, resulting in "No provider available" errors.
+:::
+
 ```yaml
 version: '3.8'
 
@@ -121,6 +125,7 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - NACOS_HOST=nacos
+      - DUBBO_HOST=${DUBBO_HOST:-host.docker.internal}  # Required for Docker
     depends_on:
       - nacos
       - redis
@@ -136,6 +141,7 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - NACOS_HOST=nacos
+      - DUBBO_HOST=${DUBBO_HOST:-host.docker.internal}  # Required for Docker
     volumes:
       - ./platform-fisco/src/main/resources/conf:/app/conf
     depends_on:
@@ -152,6 +158,7 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - NACOS_HOST=nacos
+      # Backend is Dubbo consumer, doesn't need DUBBO_HOST
     depends_on:
       - storage
       - fisco
@@ -228,4 +235,37 @@ docker-compose -f docker-compose.app.yml up -d --scale backend=3
 ```
 
 Use a load balancer (nginx, traefik) in front of backend instances.
+
+## DUBBO_HOST Configuration
+
+The `DUBBO_HOST` environment variable is critical for Docker deployments. It specifies the IP address that Dubbo providers register with Nacos for service discovery.
+
+### Configuration by Scenario
+
+| Scenario | DUBBO_HOST Value | Notes |
+|----------|------------------|-------|
+| Docker Desktop (Mac/Windows) | `host.docker.internal` | Special DNS name resolving to host |
+| Docker on Linux | Host machine IP (e.g., `192.168.1.100`) | Use actual network IP |
+| Docker Compose (same network) | Container name (e.g., `platform-storage`) | Internal Docker DNS |
+| Kubernetes | Pod IP or Service IP | Use K8s service discovery |
+
+### Troubleshooting
+
+**Symptom**: Backend starts but cannot call storage/fisco services
+
+**Check service registration**:
+```bash
+# View registered services in Nacos
+curl "http://localhost:8848/nacos/v1/ns/instance/list?serviceName=platform-storage"
+```
+
+If the registered IP shows `172.x.x.x` (Docker internal IP), the `DUBBO_HOST` is not configured correctly.
+
+**Fix**: Add `DUBBO_HOST` to your `.env` file:
+```bash
+# .env
+DUBBO_HOST=host.docker.internal  # For Docker Desktop
+# or
+DUBBO_HOST=192.168.1.100         # For Linux, use actual host IP
+```
 
