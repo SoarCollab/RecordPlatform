@@ -60,6 +60,29 @@ Authorization: Bearer <token>
 | POST | `/auth/logout` | User logout |
 | GET | `/auth/me` | Get current user info |
 
+#### User Registration
+
+```http
+POST /auth/register
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "code": "123456",
+  "username": "user1",
+  "password": "securepass",
+  "nickname": "Display Name"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| email | string | Yes | User email address |
+| code | string | Yes | Email verification code |
+| username | string | Yes | Login username |
+| password | string | Yes | User password |
+| nickname | string | No | Display name (max 50 chars) |
+
 ### Files
 
 | Method | Endpoint | Description |
@@ -115,6 +138,72 @@ Authorization: Bearer <token>
 | GET | `/ticket/{id}` | Get ticket details |
 | POST | `/ticket/{id}/reply` | Reply to ticket |
 | PUT | `/ticket/{id}/status` | Update ticket status |
+| GET | `/ticket/admin/list` | List all tickets (admin) |
+| PUT | `/ticket/admin/{id}/assign` | Assign handler (admin) |
+| PUT | `/ticket/admin/{id}/status` | Update status (admin) |
+
+#### Create Ticket
+
+```http
+POST /ticket
+Content-Type: application/json
+
+{
+  "title": "Unable to upload large files",
+  "content": "When uploading files over 1GB, the upload fails...",
+  "priority": 1,
+  "category": 0,
+  "attachmentIds": ["file-id-1", "file-id-2"]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| title | string | Yes | Ticket title (max 200 chars) |
+| content | string | Yes | Ticket description |
+| priority | int | No | 0=Low, 1=Medium (default), 2=High |
+| category | int | No | See category table below (default: 99) |
+| attachmentIds | string[] | No | Related file IDs |
+
+#### Ticket Status
+
+| Code | Status | Description |
+|------|--------|-------------|
+| 0 | PENDING | Awaiting processing |
+| 1 | PROCESSING | In progress |
+| 2 | CONFIRMING | Pending user confirmation |
+| 3 | COMPLETED | Resolved |
+| 4 | CLOSED | Closed |
+
+#### Ticket Priority
+
+| Code | Priority |
+|------|----------|
+| 0 | Low |
+| 1 | Medium |
+| 2 | High |
+
+#### Ticket Category
+
+| Code | Category |
+|------|----------|
+| 0 | Bug Report |
+| 1 | Feature Request |
+| 2 | Question |
+| 3 | Feedback |
+| 99 | Other |
+
+#### Reply to Ticket
+
+```http
+POST /ticket/{id}/reply
+Content-Type: application/json
+
+{
+  "content": "Thank you for reporting. We are investigating...",
+  "attachmentIds": []
+}
+```
 
 ### SSE (Server-Sent Events)
 
@@ -191,7 +280,38 @@ file: <binary>
 
 ### Chunked Upload
 
-For large files (>10MB), use chunked upload:
+For large files (>10MB), use chunked upload with dynamic chunk sizing:
+
+#### Dynamic Chunk Size Strategy
+
+The system supports dynamic chunk sizing based on file size for optimal performance:
+
+| File Size | Recommended Chunk Size |
+|-----------|------------------------|
+| < 10MB    | 2MB                    |
+| < 100MB   | 5MB                    |
+| < 500MB   | 10MB                   |
+| < 2GB     | 20MB                   |
+| >= 2GB    | 50MB                   |
+
+**Maximum chunk size limit: 80MB** (Dubbo payload limit is 100MB)
+
+#### Start Chunked Upload
+
+```http
+POST /file/upload/start
+Content-Type: application/json
+
+{
+  "fileName": "large-file.zip",
+  "fileSize": 1073741824,
+  "contentType": "application/zip",
+  "chunkSize": 20971520,
+  "totalChunks": 52
+}
+```
+
+#### Upload Chunk
 
 ```http
 POST /file/upload/chunk
@@ -203,7 +323,9 @@ totalChunks: 10
 fileHash: abc123...
 ```
 
-After all chunks:
+#### Merge Chunks
+
+After all chunks are uploaded:
 ```http
 POST /file/upload/merge
 Content-Type: application/json
