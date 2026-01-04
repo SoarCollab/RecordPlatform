@@ -522,18 +522,14 @@
 {#if shareDialogOpen}
   <div
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-    onclick={() => (shareDialogOpen = false)}
+    onclick={(e) => e.currentTarget === e.target && (shareDialogOpen = false)}
     onkeydown={(e) => e.key === "Escape" && (shareDialogOpen = false)}
     role="dialog"
     aria-modal="true"
     aria-labelledby="share-dialog-title"
     tabindex="-1"
   >
-    <div
-      class="w-full max-w-md rounded-lg bg-card p-6 shadow-lg"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.key === "Escape" && (shareDialogOpen = false)}
-    >
+    <div class="w-full max-w-md rounded-lg bg-card p-6 shadow-lg">
       <h3 id="share-dialog-title" class="mb-4 text-lg font-semibold">
         分享文件
       </h3>

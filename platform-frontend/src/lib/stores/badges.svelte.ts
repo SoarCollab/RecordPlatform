@@ -4,12 +4,18 @@ import {
   getUnreadAnnouncementCount,
 } from "$api/endpoints/messages";
 import { getPendingCount } from "$api/endpoints/tickets";
+import {
+  getPendingRequestCount,
+  getUnreadFriendShareCount,
+} from "$api/endpoints/friends";
 
 // ===== State =====
 
 let unreadMessages = $state(0);
 let unreadAnnouncements = $state(0);
 let pendingTickets = $state(0);
+let pendingFriendRequests = $state(0);
+let unreadFriendShares = $state(0);
 let isLoading = $state(false);
 let lastFetched = $state<Date | null>(null);
 
@@ -24,12 +30,19 @@ async function fetchBadgeCounts() {
   isLoading = true;
 
   try {
-    const [messagesResult, announcementsResult, ticketsResult] =
-      await Promise.allSettled([
-        getUnreadConversationCount(),
-        getUnreadAnnouncementCount(),
-        getPendingCount(),
-      ]);
+    const [
+      messagesResult,
+      announcementsResult,
+      ticketsResult,
+      friendRequestsResult,
+      friendSharesResult,
+    ] = await Promise.allSettled([
+      getUnreadConversationCount(),
+      getUnreadAnnouncementCount(),
+      getPendingCount(),
+      getPendingRequestCount(),
+      getUnreadFriendShareCount(),
+    ]);
 
     if (messagesResult.status === "fulfilled") {
       unreadMessages = messagesResult.value.count;
@@ -41,6 +54,14 @@ async function fetchBadgeCounts() {
 
     if (ticketsResult.status === "fulfilled") {
       pendingTickets = ticketsResult.value.count;
+    }
+
+    if (friendRequestsResult.status === "fulfilled") {
+      pendingFriendRequests = friendRequestsResult.value.count;
+    }
+
+    if (friendSharesResult.status === "fulfilled") {
+      unreadFriendShares = friendSharesResult.value.count;
     }
 
     lastFetched = new Date();
@@ -63,6 +84,14 @@ function updateTicketCount(count: number) {
   pendingTickets = count;
 }
 
+function updateFriendRequestCount(count: number) {
+  pendingFriendRequests = count;
+}
+
+function updateFriendShareCount(count: number) {
+  unreadFriendShares = count;
+}
+
 function decrementMessages() {
   if (unreadMessages > 0) {
     unreadMessages--;
@@ -79,6 +108,8 @@ function reset() {
   unreadMessages = 0;
   unreadAnnouncements = 0;
   pendingTickets = 0;
+  pendingFriendRequests = 0;
+  unreadFriendShares = 0;
   lastFetched = null;
 }
 
@@ -116,6 +147,15 @@ export function useBadges() {
     get pendingTickets() {
       return pendingTickets;
     },
+    get pendingFriendRequests() {
+      return pendingFriendRequests;
+    },
+    get unreadFriendShares() {
+      return unreadFriendShares;
+    },
+    get friendBadgeTotal() {
+      return pendingFriendRequests + unreadFriendShares;
+    },
     get isLoading() {
       return isLoading;
     },
@@ -128,7 +168,11 @@ export function useBadges() {
     },
     get hasUnread() {
       return (
-        unreadMessages > 0 || unreadAnnouncements > 0 || pendingTickets > 0
+        unreadMessages > 0 ||
+        unreadAnnouncements > 0 ||
+        pendingTickets > 0 ||
+        pendingFriendRequests > 0 ||
+        unreadFriendShares > 0
       );
     },
 
@@ -137,6 +181,8 @@ export function useBadges() {
     updateMessageCount,
     updateAnnouncementCount,
     updateTicketCount,
+    updateFriendRequestCount,
+    updateFriendShareCount,
     decrementMessages,
     decrementAnnouncements,
     reset,

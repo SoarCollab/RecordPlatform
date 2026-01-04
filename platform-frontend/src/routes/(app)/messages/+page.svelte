@@ -4,11 +4,13 @@
 	import { useNotifications } from '$stores/notifications.svelte';
 	import { formatRelativeTime } from '$utils/format';
 	import { getConversations, deleteConversation } from '$api/endpoints/messages';
-	import type { ConversationVO } from '$api/types';
+	import { getAllFriends } from '$api/endpoints/friends';
+	import type { ConversationVO, FriendVO } from '$api/types';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
+	import * as Avatar from '$lib/components/ui/avatar';
 
 	const notifications = useNotifications();
 
@@ -20,7 +22,10 @@
 
 	// New conversation dialog
 	let newConversationOpen = $state(false);
-	let newReceiverUsername = $state('');
+	let friends = $state<FriendVO[]>([]);
+	let loadingFriends = $state(false);
+	let selectedFriend = $state<FriendVO | null>(null);
+	let friendSearchKeyword = $state('');
 
 	onMount(() => {
 		loadConversations();
@@ -52,16 +57,46 @@
 		}
 	}
 
+	async function openNewConversationDialog() {
+		newConversationOpen = true;
+		selectedFriend = null;
+		friendSearchKeyword = '';
+		if (friends.length === 0) {
+			loadingFriends = true;
+			try {
+				friends = await getAllFriends();
+			} catch (err) {
+				notifications.error('加载好友失败', err instanceof Error ? err.message : '请稍后重试');
+			} finally {
+				loadingFriends = false;
+			}
+		}
+	}
+
 	function handleStartConversation() {
-		if (!newReceiverUsername.trim()) {
-			notifications.warning('请输入用户名');
+		if (!selectedFriend) {
+			notifications.warning('请选择好友');
 			return;
 		}
 		// Navigate to a new conversation (the backend will create if not exists)
-		goto(`/messages/new?to=${encodeURIComponent(newReceiverUsername.trim())}`);
+		goto(`/messages/new?to=${encodeURIComponent(selectedFriend.username)}`);
 		newConversationOpen = false;
-		newReceiverUsername = '';
+		selectedFriend = null;
 	}
+
+	function getDisplayFriendName(friend: FriendVO): string {
+		return friend.remark || friend.nickname || friend.username;
+	}
+
+	const filteredFriends = $derived(
+		friendSearchKeyword.trim()
+			? friends.filter(f =>
+				f.username.toLowerCase().includes(friendSearchKeyword.toLowerCase()) ||
+				(f.nickname?.toLowerCase().includes(friendSearchKeyword.toLowerCase())) ||
+				(f.remark?.toLowerCase().includes(friendSearchKeyword.toLowerCase()))
+			)
+			: friends
+	);
 
 	function getDisplayName(conv: ConversationVO): string {
 		return conv.otherNickname || conv.otherUsername;
@@ -82,7 +117,7 @@
 			<h1 class="text-2xl font-bold">消息中心</h1>
 			<p class="text-muted-foreground">与其他用户的私信会话</p>
 		</div>
-		<Button onclick={() => newConversationOpen = true}>
+		<Button onclick={openNewConversationDialog}>
 			<svg class="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
 			</svg>
@@ -105,8 +140,8 @@
 					</svg>
 				</div>
 				<p class="text-muted-foreground">暂无会话</p>
-				<p class="mt-2 text-sm text-muted-foreground">开始与其他用户交流</p>
-				<Button class="mt-4" onclick={() => newConversationOpen = true}>
+				<p class="mt-2 text-sm text-muted-foreground">选择好友开始交流</p>
+				<Button class="mt-4" onclick={openNewConversationDialog}>
 					发起会话
 				</Button>
 			</Card.Content>
@@ -201,27 +236,66 @@
 		<Dialog.Header>
 			<Dialog.Title>发起新会话</Dialog.Title>
 			<Dialog.Description>
-				输入对方的用户名开始对话
+				选择好友开始对话
 			</Dialog.Description>
 		</Dialog.Header>
 
 		<div class="space-y-4">
-			<div>
-				<label for="new-receiver-username" class="mb-2 block text-sm font-medium">用户名</label>
-				<Input
-					id="new-receiver-username"
-					bind:value={newReceiverUsername}
-					placeholder="请输入用户名"
-					onkeypress={(e) => e.key === 'Enter' && handleStartConversation()}
-				/>
-			</div>
+			<Input
+				bind:value={friendSearchKeyword}
+				placeholder="搜索好友..."
+			/>
+
+			{#if loadingFriends}
+				<div class="flex items-center justify-center p-8">
+					<div class="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+				</div>
+			{:else if filteredFriends.length === 0}
+				<div class="p-8 text-center text-muted-foreground">
+					{#if friends.length === 0}
+						<p>暂无好友</p>
+						<Button variant="link" class="mt-2" onclick={() => { newConversationOpen = false; goto('/friends'); }}>
+							去添加好友
+						</Button>
+					{:else}
+						<p>未找到匹配的好友</p>
+					{/if}
+				</div>
+			{:else}
+				<div class="max-h-60 overflow-y-auto space-y-2">
+					{#each filteredFriends as friend}
+						<button
+							class="w-full flex items-center gap-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors text-left {selectedFriend?.id === friend.id ? 'border-primary bg-primary/5' : ''}"
+							onclick={() => selectedFriend = friend}
+						>
+							<Avatar.Root class="h-10 w-10">
+								{#if friend.avatar}
+									<Avatar.Image src={friend.avatar} alt={friend.username} />
+								{/if}
+								<Avatar.Fallback>{friend.username.charAt(0).toUpperCase()}</Avatar.Fallback>
+							</Avatar.Root>
+							<div class="flex-1 min-w-0">
+								<div class="font-medium truncate">{getDisplayFriendName(friend)}</div>
+								{#if friend.remark || friend.nickname}
+									<div class="text-xs text-muted-foreground truncate">@{friend.username}</div>
+								{/if}
+							</div>
+							{#if selectedFriend?.id === friend.id}
+								<svg class="h-5 w-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+								</svg>
+							{/if}
+						</button>
+					{/each}
+				</div>
+			{/if}
 		</div>
 
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => newConversationOpen = false}>
 				取消
 			</Button>
-			<Button onclick={handleStartConversation}>
+			<Button onclick={handleStartConversation} disabled={!selectedFriend}>
 				开始对话
 			</Button>
 		</Dialog.Footer>

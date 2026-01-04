@@ -146,6 +146,24 @@ public enum ResultEnum implements Serializable {
     /** 附件数量超限 */
     ATTACHMENT_LIMIT_EXCEEDED(60009, "附件数量超过限制"),
 
+    /* ==================== 好友系统错误：60010-60019 ==================== */
+    /** 不是好友关系 */
+    NOT_FRIENDS(60010, "你们还不是好友，无法发送消息"),
+    /** 好友请求已存在 */
+    FRIEND_REQUEST_EXISTS(60011, "已发送过好友请求，请等待对方处理"),
+    /** 已经是好友 */
+    ALREADY_FRIENDS(60012, "你们已经是好友了"),
+    /** 不能添加自己 */
+    CANNOT_ADD_SELF(60013, "不能添加自己为好友"),
+    /** 好友请求不存在 */
+    FRIEND_REQUEST_NOT_FOUND(60014, "好友请求不存在"),
+    /** 好友请求已处理 */
+    FRIEND_REQUEST_PROCESSED(60015, "好友请求已处理"),
+    /** 好友分享不存在 */
+    FRIEND_SHARE_NOT_FOUND(60016, "好友分享不存在"),
+    /** 无权操作好友分享 */
+    FRIEND_SHARE_UNAUTHORIZED(60017, "无权操作此好友分享"),
+
     /* ==================== 权限错误：70000-79999 ==================== */
     /** 需要登录 */
     PERMISSION_UNAUTHENTICATED(70001, "此操作需要登录系统"),

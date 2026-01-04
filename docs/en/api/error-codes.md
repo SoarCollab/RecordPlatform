@@ -103,6 +103,19 @@ This page documents all error codes returned by the RecordPlatform API.
 | 60008 | INVALID_TICKET_STATUS | Invalid ticket status |
 | 60009 | ATTACHMENT_LIMIT_EXCEEDED | Attachment count exceeds limit |
 
+## Friend System Errors (60010-60019)
+
+| Code | Name | Description |
+|------|------|-------------|
+| 60010 | NOT_FRIENDS | Not friends, cannot send message |
+| 60011 | FRIEND_REQUEST_EXISTS | Friend request already sent, awaiting response |
+| 60012 | ALREADY_FRIENDS | Already friends |
+| 60013 | CANNOT_ADD_SELF | Cannot add yourself as friend |
+| 60014 | FRIEND_REQUEST_NOT_FOUND | Friend request not found |
+| 60015 | FRIEND_REQUEST_PROCESSED | Friend request already processed |
+| 60016 | FRIEND_SHARE_NOT_FOUND | Friend share not found |
+| 60017 | FRIEND_SHARE_UNAUTHORIZED | Not authorized to operate this friend share |
+
 ## Permission Errors (70000-79999)
 
 | Code | Name | Description |

@@ -22,6 +22,7 @@ import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.SharingVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FileQueryService;
+import cn.flying.service.FriendFileShareService;
 import cn.flying.service.remote.FileRemoteClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -90,6 +91,9 @@ public class FileQueryServiceImpl implements FileQueryService {
 
     @Resource
     private FileShareMapper fileShareMapper;
+
+    @Resource
+    private FriendFileShareService friendFileShareService;
 
     @Resource(name = "virtualThreadExecutor")
     private TaskExecutor virtualThreadExecutor;
@@ -269,14 +273,32 @@ public class FileQueryServiceImpl implements FileQueryService {
     @Override
     @Cacheable(cacheNames = "fileDecryptInfo", key = "#userId + ':' + #fileHash", unless = "#result == null")
     public FileDecryptInfoVO getFileDecryptInfo(Long userId, String fileHash) {
-        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                .eq(File::getFileHash, fileHash);
+        File file = null;
 
-        if (!SecurityUtils.isAdmin()) {
-            wrapper.eq(File::getUid, userId);
+        // 管理员可以访问所有文件
+        if (SecurityUtils.isAdmin()) {
+            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                    .eq(File::getFileHash, fileHash);
+            file = fileMapper.selectOne(wrapper);
+        } else {
+            // 首先检查用户自己的文件
+            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                    .eq(File::getFileHash, fileHash)
+                    .eq(File::getUid, userId);
+            file = fileMapper.selectOne(wrapper);
+
+            // 检查好友分享权限
+            if (file == null) {
+                Long sharerId = friendFileShareService.getSharerIdForFile(userId, fileHash);
+                if (sharerId != null) {
+                    LambdaQueryWrapper<File> sharerWrapper = new LambdaQueryWrapper<File>()
+                            .eq(File::getFileHash, fileHash)
+                            .eq(File::getUid, sharerId);
+                    file = fileMapper.selectOne(sharerWrapper);
+                }
+            }
         }
 
-        File file = fileMapper.selectOne(wrapper);
         if (file == null) {
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权限访问");
         }
@@ -440,6 +462,12 @@ public class FileQueryServiceImpl implements FileQueryService {
      * 对于保存的分享文件使用原始上传者ID，因为区块链上文件是以原始上传者身份存储的。
      * 使用 selectByIdIncludeDeleted 绕过软删除，因为原始文件可能已被删除。
      * </p>
+     * <p>
+     * 权限检查顺序：
+     * 1. 管理员可以访问所有文件
+     * 2. 用户可以访问自己的文件
+     * 3. 用户可以通过好友分享访问他人的文件
+     * </p>
      *
      * @param userId   当前用户ID
      * @param fileHash 文件哈希
@@ -447,26 +475,54 @@ public class FileQueryServiceImpl implements FileQueryService {
      * @throws GeneralException 如果用户无权访问该文件
      */
     private Long validateAndResolveBlockchainUserId(Long userId, String fileHash) {
-        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                .eq(File::getFileHash, fileHash);
-        if (!SecurityUtils.isAdmin()) {
-            wrapper.eq(File::getUid, userId);
+        // 管理员可以访问所有文件
+        if (SecurityUtils.isAdmin()) {
+            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                    .eq(File::getFileHash, fileHash);
+            File file = fileMapper.selectOne(wrapper);
+            if (file == null) {
+                throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权访问");
+            }
+            return resolveBlockchainUserId(file, file.getUid());
         }
+
+        // 首先检查用户自己的文件
+        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                .eq(File::getFileHash, fileHash)
+                .eq(File::getUid, userId);
         File file = fileMapper.selectOne(wrapper);
 
-        // 验证文件存在性（所有用户都需要检查，包括管理员）
-        if (file == null) {
-            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权访问");
+        if (file != null) {
+            return resolveBlockchainUserId(file, userId);
         }
 
-        // 解析区块链查询用的userId
-        if (file != null && file.getOrigin() != null) {
+        // 检查好友分享权限
+        Long sharerId = friendFileShareService.getSharerIdForFile(userId, fileHash);
+        if (sharerId != null) {
+            // 用户通过好友分享有权访问，使用分享者的文件
+            LambdaQueryWrapper<File> sharerWrapper = new LambdaQueryWrapper<File>()
+                    .eq(File::getFileHash, fileHash)
+                    .eq(File::getUid, sharerId);
+            File sharerFile = fileMapper.selectOne(sharerWrapper);
+            if (sharerFile != null) {
+                return resolveBlockchainUserId(sharerFile, sharerId);
+            }
+        }
+
+        throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权访问");
+    }
+
+    /**
+     * 解析区块链查询用的userId
+     */
+    private Long resolveBlockchainUserId(File file, Long defaultUserId) {
+        if (file.getOrigin() != null) {
             File originFile = fileMapper.selectByIdIncludeDeleted(file.getOrigin());
             if (originFile != null) {
                 return originFile.getUid();
             }
         }
-        return userId;
+        return defaultUserId;
     }
 
     /**

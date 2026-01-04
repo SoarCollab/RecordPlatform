@@ -205,6 +205,80 @@ Content-Type: application/json
 }
 ```
 
+### Friends
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/friends/requests` | Send friend request |
+| GET | `/api/v1/friends/requests/received` | Get received requests |
+| GET | `/api/v1/friends/requests/sent` | Get sent requests |
+| POST | `/api/v1/friends/requests/{id}/accept` | Accept friend request |
+| POST | `/api/v1/friends/requests/{id}/reject` | Reject friend request |
+| DELETE | `/api/v1/friends/requests/{id}` | Cancel friend request |
+| GET | `/api/v1/friends/requests/pending-count` | Get pending request count |
+| GET | `/api/v1/friends` | Get friends list (paginated) |
+| GET | `/api/v1/friends/all` | Get all friends (for selector) |
+| DELETE | `/api/v1/friends/{id}` | Unfriend |
+| PUT | `/api/v1/friends/{id}/remark` | Update friend remark |
+| GET | `/api/v1/friends/search` | Search users |
+
+#### Send Friend Request
+
+```http
+POST /api/v1/friends/requests
+Content-Type: application/json
+
+{
+  "addresseeId": "user-external-id",
+  "message": "Hi, let's be friends!"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| addresseeId | string | Yes | Target user's external ID |
+| message | string | No | Request message (max 255 chars) |
+
+#### Friend Request Status
+
+| Code | Status | Description |
+|------|--------|-------------|
+| 0 | PENDING | Awaiting response |
+| 1 | ACCEPTED | Request accepted |
+| 2 | REJECTED | Request rejected |
+| 3 | CANCELLED | Request cancelled by sender |
+
+### Friend File Shares
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/friend-shares` | Share files to friend |
+| GET | `/api/v1/friend-shares/received` | Get received shares |
+| GET | `/api/v1/friend-shares/sent` | Get sent shares |
+| GET | `/api/v1/friend-shares/{id}` | Get share details |
+| POST | `/api/v1/friend-shares/{id}/read` | Mark share as read |
+| DELETE | `/api/v1/friend-shares/{id}` | Cancel share |
+| GET | `/api/v1/friend-shares/unread-count` | Get unread count |
+
+#### Share Files to Friend
+
+```http
+POST /api/v1/friend-shares
+Content-Type: application/json
+
+{
+  "friendId": "friend-external-id",
+  "fileHashes": ["hash1", "hash2"],
+  "message": "Check out these files!"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| friendId | string | Yes | Friend's external ID |
+| fileHashes | string[] | Yes | Array of file hashes to share |
+| message | string | No | Share message (max 255 chars) |
+
 ### SSE (Server-Sent Events)
 
 | Method | Endpoint | Description |
@@ -403,10 +477,13 @@ eventSource.onmessage = (event) => {
 };
 ```
 
-Event types:
-- `FILE_UPLOADED` - File upload completed
-- `FILE_DELETED` - File deleted
-- `SHARE_ACCESSED` - Share link accessed
-- `ANNOUNCEMENT` - System announcement
-- `TICKET_REPLY` - Ticket reply received
+Event types (kebab-case format):
+- `message-received` - New private message
+- `announcement-published` - New system announcement
+- `ticket-updated` - Ticket status update or reply
+- `friend-request` - New friend request received
+- `friend-accepted` - Friend request accepted
+- `friend-share` - Friend shared files with you
+- `heartbeat` - Connection heartbeat
+- `connected` - Connection established
 

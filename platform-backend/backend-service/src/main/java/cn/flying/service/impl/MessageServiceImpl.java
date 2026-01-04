@@ -12,6 +12,7 @@ import cn.flying.dao.vo.message.MessageVO;
 import cn.flying.dao.vo.message.SendMessageVO;
 import cn.flying.service.AccountService;
 import cn.flying.service.ConversationService;
+import cn.flying.service.FriendService;
 import cn.flying.service.MessageService;
 import cn.flying.service.sse.SseEmitterManager;
 import cn.flying.service.sse.SseEvent;
@@ -41,6 +42,10 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
     @Resource
     private AccountService accountService;
 
+    @Lazy
+    @Resource
+    private FriendService friendService;
+
     @Resource
     private SseEmitterManager sseEmitterManager;
 
@@ -56,6 +61,11 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
         Account receiver = accountService.findAccountById(receiverId);
         if (receiver == null) {
             throw new GeneralException(ResultEnum.USER_NOT_EXIST);
+        }
+
+        // 检查是否是好友关系
+        if (!friendService.areFriends(senderId, receiverId)) {
+            throw new GeneralException(ResultEnum.NOT_FRIENDS);
         }
 
         Conversation conversation = conversationService.getOrCreateConversation(senderId, receiverId);
@@ -75,13 +85,15 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
 
         Account sender = accountService.findAccountById(senderId);
         Long tenantId = TenantContext.requireTenantId();
+        String messageExternalId = IdUtils.toExternalId(message.getId());
         sseEmitterManager.sendToUser(tenantId, receiverId, SseEvent.of(SseEventType.NEW_MESSAGE, Map.of(
-                "messageId", IdUtils.toExternalId(message.getId()),
+                "id", messageExternalId,
+                "messageId", messageExternalId,
                 "conversationId", IdUtils.toExternalId(conversation.getId()),
+                "senderId", IdUtils.toExternalId(senderId),
                 "senderName", sender != null ? sender.getUsername() : "未知用户",
-                "preview", message.getContent().length() > 50
-                        ? message.getContent().substring(0, 50) + "..."
-                        : message.getContent()
+                "content", message.getContent(),
+                "createTime", (message.getCreateTime() != null ? message.getCreateTime() : new Date()).toInstant().toString()
         )));
 
         return message;
