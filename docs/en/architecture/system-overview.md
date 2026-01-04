@@ -204,3 +204,67 @@ public void cleanupDeletedFiles() { ... }
 @TenantScope(tenantId = 1)
 public void migrateDataForTenant() { ... }
 ```
+
+## Real-time Notifications (SSE)
+
+Server-Sent Events provide real-time updates to connected clients.
+
+### Multi-Connection Architecture
+
+The system supports multiple simultaneous connections per user:
+
+```mermaid
+flowchart LR
+    classDef browser fill:#f97316,stroke:#ea580c,stroke-width:2px,color:#ffffff
+    classDef server fill:#3b82f6,stroke:#2563eb,stroke-width:2px,color:#ffffff
+
+    subgraph User["User's Devices"]
+        Tab1["Browser Tab 1"]:::browser
+        Tab2["Browser Tab 2"]:::browser
+        Mobile["Mobile App"]:::browser
+    end
+
+    subgraph Backend["SSE Manager"]
+        Manager["Connection Manager"]:::server
+        Emitter1["SseEmitter 1"]:::server
+        Emitter2["SseEmitter 2"]:::server
+        Emitter3["SseEmitter 3"]:::server
+    end
+
+    Tab1 -->|connectionId: abc| Emitter1
+    Tab2 -->|connectionId: def| Emitter2
+    Mobile -->|connectionId: ghi| Emitter3
+
+    Manager --> Emitter1 & Emitter2 & Emitter3
+```
+
+### Connection Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| Max connections per user | 5 | Oldest connection closed when exceeded |
+| Heartbeat interval | 30s | Keep-alive signal |
+| Connection timeout | 30m | Auto-close after inactivity |
+| Reconnect delay | 1s | Client reconnect backoff |
+
+### Event Types
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `connected` | `{ connectionId }` | Initial connection confirmation |
+| `notification` | `{ title, content }` | General notification |
+| `message-received` | `{ conversationId, preview }` | New message in conversation |
+| `file-processed` | `{ fileId, status }` | File upload/processing complete |
+| `announcement-published` | `{ id, title }` | System announcement |
+| `ticket-updated` | `{ ticketId, status }` | Ticket status change |
+| `badge-update` | `{ unreadMessages, tickets }` | UI badge count update |
+
+### Frontend Leader Election
+
+For multi-tab scenarios, frontend uses `BroadcastChannel` for leader election:
+
+- **Leader tab**: Maintains single SSE connection
+- **Follower tabs**: Receive events via BroadcastChannel
+- **Failover**: Auto-elect new leader when leader tab closes
+
+This prevents multiple SSE connections from same browser, reducing server load.

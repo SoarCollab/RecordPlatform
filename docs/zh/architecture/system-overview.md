@@ -217,3 +217,67 @@ public void cleanupDeletedFiles() { ... }
 @TenantScope(tenantId = 1)
 public void migrateDataForTenant() { ... }
 ```
+
+## 实时通知（SSE）
+
+服务器推送事件（Server-Sent Events）为连接的客户端提供实时更新。
+
+### 多连接架构
+
+系统支持同一用户的多个同时连接：
+
+```mermaid
+flowchart LR
+    classDef browser fill:#f97316,stroke:#ea580c,stroke-width:2px,color:#ffffff
+    classDef server fill:#3b82f6,stroke:#2563eb,stroke-width:2px,color:#ffffff
+
+    subgraph User["用户设备"]
+        Tab1["浏览器标签页 1"]:::browser
+        Tab2["浏览器标签页 2"]:::browser
+        Mobile["移动应用"]:::browser
+    end
+
+    subgraph Backend["SSE 管理器"]
+        Manager["连接管理器"]:::server
+        Emitter1["SseEmitter 1"]:::server
+        Emitter2["SseEmitter 2"]:::server
+        Emitter3["SseEmitter 3"]:::server
+    end
+
+    Tab1 -->|connectionId: abc| Emitter1
+    Tab2 -->|connectionId: def| Emitter2
+    Mobile -->|connectionId: ghi| Emitter3
+
+    Manager --> Emitter1 & Emitter2 & Emitter3
+```
+
+### 连接配置
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| 每用户最大连接数 | 5 | 超出时关闭最旧连接 |
+| 心跳间隔 | 30 秒 | 保活信号 |
+| 连接超时 | 30 分钟 | 无活动后自动关闭 |
+| 重连延迟 | 1 秒 | 客户端重连退避 |
+
+### 事件类型
+
+| 事件 | 载荷 | 说明 |
+|------|------|------|
+| `connected` | `{ connectionId }` | 连接确认 |
+| `notification` | `{ title, content }` | 通用通知 |
+| `message-received` | `{ conversationId, preview }` | 会话新消息 |
+| `file-processed` | `{ fileId, status }` | 文件上传/处理完成 |
+| `announcement-published` | `{ id, title }` | 系统公告 |
+| `ticket-updated` | `{ ticketId, status }` | 工单状态变更 |
+| `badge-update` | `{ unreadMessages, tickets }` | UI 徽章数量更新 |
+
+### 前端 Leader 选举
+
+对于多标签页场景，前端使用 `BroadcastChannel` 进行 Leader 选举：
+
+- **Leader 标签页**：维护单一 SSE 连接
+- **Follower 标签页**：通过 BroadcastChannel 接收事件
+- **故障转移**：Leader 标签页关闭时自动选举新 Leader
+
+这可以防止同一浏览器建立多个 SSE 连接，减少服务器负载。

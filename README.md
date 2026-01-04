@@ -20,6 +20,7 @@
 - **Real-time Notifications** - SSE push for file status changes and messages, multi-device support
 - **RBAC Permissions** - Fine-grained access control with resource ownership verification
 - **Multi-tenancy** - Database, cache, and storage path isolation per tenant
+- **Support Tickets** - Built-in ticket system with categories, priorities, and admin management
 
 ## Quick Start
 
