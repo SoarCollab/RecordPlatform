@@ -289,6 +289,12 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
             throw new GeneralException(ResultEnum.TICKET_NOT_FOUND);
         }
 
+        // 验证被分配用户存在
+        Account assignee = accountService.findAccountById(assigneeId);
+        if (assignee == null) {
+            throw new GeneralException(ResultEnum.USER_NOT_EXIST);
+        }
+
         ticket.setAssigneeId(assigneeId);
         if (ticket.getStatus() == TicketStatus.PENDING.getCode()) {
             ticket.setStatus(TicketStatus.PROCESSING.getCode());

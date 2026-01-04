@@ -96,3 +96,53 @@ export async function confirmTicket(id: string): Promise<void> {
 export async function getPendingCount(): Promise<{ count: number }> {
   return api.get<{ count: number }>(`${BASE}/pending-count`);
 }
+
+// ==================== 管理员接口 ====================
+
+/**
+ * 获取所有工单列表（管理员）
+ * @see TicketController.getAdminList
+ * @requires ticket:admin permission
+ */
+export async function getAdminTickets(
+  params?: PageParams & TicketQueryParams,
+): Promise<Page<TicketVO>> {
+  return api.get<Page<TicketVO>>(`${BASE}/admin/list`, { params });
+}
+
+/**
+ * 分配工单处理人（管理员）
+ * @see TicketController.assign
+ * @requires ticket:admin permission
+ */
+export async function assignTicket(
+  ticketId: string,
+  assigneeId: string,
+): Promise<void> {
+  return api.put(`${BASE}/admin/${ticketId}/assign`, null, {
+    params: { assigneeId },
+  });
+}
+
+/**
+ * 更新工单状态（管理员）
+ * @see TicketController.updateStatus
+ * @requires ticket:admin permission
+ */
+export async function updateTicketStatus(
+  ticketId: string,
+  status: number,
+): Promise<void> {
+  return api.put(`${BASE}/admin/${ticketId}/status`, null, {
+    params: { status },
+  });
+}
+
+/**
+ * 获取管理员待处理工单数量
+ * @see TicketController.getAdminPendingCount
+ * @requires ticket:admin permission
+ */
+export async function getAdminPendingCount(): Promise<{ count: number }> {
+  return api.get<{ count: number }>(`${BASE}/admin/pending-count`);
+}
