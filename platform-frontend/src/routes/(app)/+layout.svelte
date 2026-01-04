@@ -124,6 +124,42 @@
         }
         break;
       }
+      case "friend-request": {
+        // New friend request received
+        const data = message.data as { requesterName?: string };
+        badges.updateFriendRequestCount(badges.pendingFriendRequests + 1);
+        if (!$page.url.pathname.startsWith("/friends")) {
+          notifications.info(
+            "新好友请求",
+            data.requesterName ? `${data.requesterName} 请求添加你为好友` : "收到新的好友请求"
+          );
+        }
+        break;
+      }
+      case "friend-accepted": {
+        // Friend request accepted
+        const data = message.data as { friendName?: string };
+        badges.fetch(); // Refresh badge counts
+        notifications.success(
+          "好友添加成功",
+          data.friendName ? `${data.friendName} 已接受你的好友请求` : "你们已成为好友"
+        );
+        break;
+      }
+      case "friend-share": {
+        // New file share from friend
+        const data = message.data as { sharerName?: string; fileCount?: number };
+        badges.updateFriendShareCount(badges.unreadFriendShares + 1);
+        if (!$page.url.pathname.startsWith("/friends")) {
+          notifications.info(
+            "好友分享",
+            data.sharerName
+              ? `${data.sharerName} 分享了 ${data.fileCount || 1} 个文件给你`
+              : "收到好友分享的文件"
+          );
+        }
+        break;
+      }
     }
   }
 
@@ -138,6 +174,12 @@
     { href: "/files", icon: "folder", label: "文件管理", badgeKey: null },
     { href: "/shares", icon: "share", label: "分享管理", badgeKey: null },
     { href: "/upload", icon: "upload", label: "上传文件", badgeKey: null },
+    {
+      href: "/friends",
+      icon: "users",
+      label: "好友",
+      badgeKey: "friends" as const,
+    },
     {
       href: "/messages",
       icon: "message",
@@ -174,7 +216,7 @@
   }
 
   function getBadgeCount(
-    key: "messages" | "announcements" | "tickets" | null
+    key: "messages" | "announcements" | "tickets" | "friends" | null
   ): number {
     if (!key) return 0;
     switch (key) {
@@ -184,6 +226,8 @@
         return badges.unreadAnnouncements;
       case "tickets":
         return badges.pendingTickets;
+      case "friends":
+        return badges.friendBadgeTotal;
       default:
         return 0;
     }
@@ -269,6 +313,13 @@
                         stroke-linejoin="round"
                         stroke-width="2"
                         d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                      />
+                    {:else if item.icon === "users"}
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
                       />
                     {:else if item.icon === "message"}
                       <path

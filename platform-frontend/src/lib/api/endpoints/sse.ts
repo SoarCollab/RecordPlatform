@@ -9,7 +9,10 @@ export type SSEEventType =
   | "heartbeat"
   | "announcement-published"
   | "ticket-updated"
-  | "badge-update";
+  | "badge-update"
+  | "friend-request"
+  | "friend-accepted"
+  | "friend-share";
 
 export interface SSEMessage<T = unknown> {
   type: SSEEventType;
@@ -93,6 +96,9 @@ export async function createSSEConnection(
       "announcement-published",
       "ticket-updated",
       "badge-update",
+      "friend-request",
+      "friend-accepted",
+      "friend-share",
     ];
 
     eventTypes.forEach((eventType) => {

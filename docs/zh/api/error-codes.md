@@ -103,6 +103,19 @@
 | 60008 | INVALID_TICKET_STATUS | 工单状态无效 |
 | 60009 | ATTACHMENT_LIMIT_EXCEEDED | 附件数量超过限制 |
 
+## 好友系统错误（60010-60019）
+
+| 代码 | 名称 | 说明 |
+|------|------|------|
+| 60010 | NOT_FRIENDS | 你们还不是好友，无法发送消息 |
+| 60011 | FRIEND_REQUEST_EXISTS | 已发送过好友请求，请等待对方处理 |
+| 60012 | ALREADY_FRIENDS | 你们已经是好友了 |
+| 60013 | CANNOT_ADD_SELF | 不能添加自己为好友 |
+| 60014 | FRIEND_REQUEST_NOT_FOUND | 好友请求不存在 |
+| 60015 | FRIEND_REQUEST_PROCESSED | 好友请求已处理 |
+| 60016 | FRIEND_SHARE_NOT_FOUND | 好友分享不存在 |
+| 60017 | FRIEND_SHARE_UNAUTHORIZED | 无权操作此好友分享 |
+
 ## 权限错误（70000-79999）
 
 | 代码 | 名称 | 说明 |

@@ -21,6 +21,7 @@
 - **RBAC Permissions** - Fine-grained access control with resource ownership verification
 - **Multi-tenancy** - Database, cache, and storage path isolation per tenant
 - **Support Tickets** - Built-in ticket system with categories, priorities, and admin management
+- **Friend System** - Direct file sharing with friends, friend requests with real-time SSE notifications
 
 ## Quick Start
 

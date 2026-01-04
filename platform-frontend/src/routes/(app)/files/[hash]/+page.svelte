@@ -10,6 +10,7 @@
     downloadFile,
     createShare,
   } from "$api/endpoints/files";
+  import { getAllFriends, shareToFriend } from "$api/endpoints/friends";
   import {
     FileStatus,
     FileStatusLabel,
@@ -18,6 +19,7 @@
     ShareTypeDesc,
     type FileVO,
     type TransactionVO,
+    type FriendVO,
   } from "$api/types";
   import * as Card from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
@@ -25,6 +27,8 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Separator } from "$lib/components/ui/separator";
   import { Input } from "$lib/components/ui/input";
+  import { Textarea } from "$lib/components/ui/textarea";
+  import * as Avatar from "$lib/components/ui/avatar";
   import FilePreview from "$lib/components/FilePreview.svelte";
 
   let { data } = $props();
@@ -48,6 +52,15 @@
   let shareType = $state<ShareType>(ShareType.PUBLIC);
   let shareCode = $state("");
   let isSharing = $state(false);
+
+  // Friend share dialog state
+  let friendShareDialogOpen = $state(false);
+  let friends = $state<FriendVO[]>([]);
+  let loadingFriends = $state(false);
+  let selectedFriends = $state<Set<string>>(new Set());
+  let friendShareMessage = $state("");
+  let isSharingToFriend = $state(false);
+  let friendSearchKeyword = $state("");
 
   // Check if file type supports preview
   const canPreview = $derived(file && isPreviewable(file.contentType));
@@ -128,6 +141,70 @@
     navigator.clipboard.writeText(link);
     notifications.success("已复制到剪贴板");
   }
+
+  async function openFriendShareDialog() {
+    friendShareDialogOpen = true;
+    selectedFriends = new Set();
+    friendShareMessage = "";
+    friendSearchKeyword = "";
+    if (friends.length === 0) {
+      loadingFriends = true;
+      try {
+        friends = await getAllFriends();
+      } catch (err) {
+        notifications.error("加载好友失败", err instanceof Error ? err.message : "请稍后重试");
+      } finally {
+        loadingFriends = false;
+      }
+    }
+  }
+
+  function toggleFriendSelection(friendId: string) {
+    const newSet = new Set(selectedFriends);
+    if (newSet.has(friendId)) {
+      newSet.delete(friendId);
+    } else {
+      newSet.add(friendId);
+    }
+    selectedFriends = newSet;
+  }
+
+  async function handleShareToFriend() {
+    if (!file || selectedFriends.size === 0) return;
+
+    isSharingToFriend = true;
+    try {
+      // Share to each selected friend
+      const sharePromises = Array.from(selectedFriends).map(friendId =>
+        shareToFriend({
+          friendId,
+          fileHashes: [file!.fileHash],
+          message: friendShareMessage || undefined
+        })
+      );
+      await Promise.all(sharePromises);
+      notifications.success(`已分享给 ${selectedFriends.size} 位好友`);
+      friendShareDialogOpen = false;
+    } catch (err) {
+      notifications.error("分享失败", err instanceof Error ? err.message : "请稍后重试");
+    } finally {
+      isSharingToFriend = false;
+    }
+  }
+
+  function getDisplayFriendName(friend: FriendVO): string {
+    return friend.remark || friend.nickname || friend.username;
+  }
+
+  const filteredFriends = $derived(
+    friendSearchKeyword.trim()
+      ? friends.filter(f =>
+          f.username.toLowerCase().includes(friendSearchKeyword.toLowerCase()) ||
+          (f.nickname?.toLowerCase().includes(friendSearchKeyword.toLowerCase())) ||
+          (f.remark?.toLowerCase().includes(friendSearchKeyword.toLowerCase()))
+        )
+      : friends
+  );
 
   async function handlePreview() {
     if (!file || previewUrl) {
@@ -366,7 +443,26 @@
                   d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"
                 />
               </svg>
-              分享文件
+              分享链接
+            </Button>
+            <Button
+              variant="outline"
+              onclick={openFriendShareDialog}
+            >
+              <svg
+                class="mr-2 h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
+                />
+              </svg>
+              分享给好友
             </Button>
           </div>
         {/if}
@@ -603,6 +699,99 @@
           {isSharing ? "创建中..." : "创建分享"}
         </Button>
       {/if}
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
+<!-- Friend Share Dialog -->
+<Dialog.Root bind:open={friendShareDialogOpen}>
+  <Dialog.Content class="sm:max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>分享给好友</Dialog.Title>
+      <Dialog.Description>
+        选择好友直接分享文件
+      </Dialog.Description>
+    </Dialog.Header>
+
+    <div class="space-y-4">
+      <Input
+        bind:value={friendSearchKeyword}
+        placeholder="搜索好友..."
+      />
+
+      {#if loadingFriends}
+        <div class="flex items-center justify-center p-8">
+          <div class="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+        </div>
+      {:else if filteredFriends.length === 0}
+        <div class="p-8 text-center text-muted-foreground">
+          {#if friends.length === 0}
+            <p>暂无好友</p>
+            <Button variant="link" class="mt-2" onclick={() => { friendShareDialogOpen = false; goto('/friends'); }}>
+              去添加好友
+            </Button>
+          {:else}
+            <p>未找到匹配的好友</p>
+          {/if}
+        </div>
+      {:else}
+        <div class="max-h-48 overflow-y-auto space-y-2">
+          {#each filteredFriends as friend}
+            <button
+              class="w-full flex items-center gap-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors text-left {selectedFriends.has(friend.id) ? 'border-primary bg-primary/5' : ''}"
+              onclick={() => toggleFriendSelection(friend.id)}
+            >
+              <Avatar.Root class="h-10 w-10">
+                {#if friend.avatar}
+                  <Avatar.Image src={friend.avatar} alt={friend.username} />
+                {/if}
+                <Avatar.Fallback>{friend.username.charAt(0).toUpperCase()}</Avatar.Fallback>
+              </Avatar.Root>
+              <div class="flex-1 min-w-0">
+                <div class="font-medium truncate">{getDisplayFriendName(friend)}</div>
+                {#if friend.remark || friend.nickname}
+                  <div class="text-xs text-muted-foreground truncate">@{friend.username}</div>
+                {/if}
+              </div>
+              {#if selectedFriends.has(friend.id)}
+                <svg class="h-5 w-5 text-primary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      {/if}
+
+      {#if selectedFriends.size > 0}
+        <div class="space-y-2">
+          <label for="friend-share-message" class="text-sm font-medium">留言（可选）</label>
+          <Textarea
+            id="friend-share-message"
+            bind:value={friendShareMessage}
+            placeholder="给好友留言..."
+            rows={2}
+          />
+        </div>
+      {/if}
+    </div>
+
+    <Dialog.Footer>
+      <Button variant="outline" onclick={() => (friendShareDialogOpen = false)}>
+        取消
+      </Button>
+      <Button
+        onclick={handleShareToFriend}
+        disabled={selectedFriends.size === 0 || isSharingToFriend}
+      >
+        {#if isSharingToFriend}
+          分享中...
+        {:else if selectedFriends.size > 0}
+          分享给 {selectedFriends.size} 位好友
+        {:else}
+          选择好友
+        {/if}
+      </Button>
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

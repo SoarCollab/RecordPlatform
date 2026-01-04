@@ -205,6 +205,80 @@ Content-Type: application/json
 }
 ```
 
+### 好友
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| POST | `/api/v1/friends/requests` | 发送好友请求 |
+| GET | `/api/v1/friends/requests/received` | 获取收到的请求 |
+| GET | `/api/v1/friends/requests/sent` | 获取发送的请求 |
+| POST | `/api/v1/friends/requests/{id}/accept` | 接受好友请求 |
+| POST | `/api/v1/friends/requests/{id}/reject` | 拒绝好友请求 |
+| DELETE | `/api/v1/friends/requests/{id}` | 取消好友请求 |
+| GET | `/api/v1/friends/requests/pending-count` | 获取待处理请求数量 |
+| GET | `/api/v1/friends` | 获取好友列表（分页）|
+| GET | `/api/v1/friends/all` | 获取所有好友（选择器）|
+| DELETE | `/api/v1/friends/{id}` | 解除好友关系 |
+| PUT | `/api/v1/friends/{id}/remark` | 更新好友备注 |
+| GET | `/api/v1/friends/search` | 搜索用户 |
+
+#### 发送好友请求
+
+```http
+POST /api/v1/friends/requests
+Content-Type: application/json
+
+{
+  "addresseeId": "user-external-id",
+  "message": "你好，交个朋友吧！"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| addresseeId | string | 是 | 目标用户的外部 ID |
+| message | string | 否 | 请求附言（最大 255 字符）|
+
+#### 好友请求状态
+
+| 代码 | 状态 | 说明 |
+|------|------|------|
+| 0 | PENDING | 待处理 |
+| 1 | ACCEPTED | 已接受 |
+| 2 | REJECTED | 已拒绝 |
+| 3 | CANCELLED | 已取消 |
+
+### 好友文件分享
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| POST | `/api/v1/friend-shares` | 分享文件给好友 |
+| GET | `/api/v1/friend-shares/received` | 获取收到的分享 |
+| GET | `/api/v1/friend-shares/sent` | 获取发送的分享 |
+| GET | `/api/v1/friend-shares/{id}` | 获取分享详情 |
+| POST | `/api/v1/friend-shares/{id}/read` | 标记为已读 |
+| DELETE | `/api/v1/friend-shares/{id}` | 取消分享 |
+| GET | `/api/v1/friend-shares/unread-count` | 获取未读数量 |
+
+#### 分享文件给好友
+
+```http
+POST /api/v1/friend-shares
+Content-Type: application/json
+
+{
+  "friendId": "friend-external-id",
+  "fileHashes": ["hash1", "hash2"],
+  "message": "看看这些文件！"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| friendId | string | 是 | 好友的外部 ID |
+| fileHashes | string[] | 是 | 要分享的文件哈希数组 |
+| message | string | 否 | 分享附言（最大 255 字符）|
+
 ### SSE（服务器推送事件）
 
 | 方法 | 端点 | 说明 |
@@ -403,10 +477,13 @@ eventSource.onmessage = (event) => {
 };
 ```
 
-事件类型：
-- `FILE_UPLOADED` - 文件上传完成
-- `FILE_DELETED` - 文件已删除
-- `SHARE_ACCESSED` - 分享链接被访问
-- `ANNOUNCEMENT` - 系统公告
-- `TICKET_REPLY` - 工单回复
+事件类型（kebab-case 格式）：
+- `message-received` - 新私信
+- `announcement-published` - 新系统公告
+- `ticket-updated` - 工单状态更新或回复
+- `friend-request` - 收到新好友请求
+- `friend-accepted` - 好友请求被接受
+- `friend-share` - 好友分享了文件给你
+- `heartbeat` - 连接心跳
+- `connected` - 连接建立成功
 

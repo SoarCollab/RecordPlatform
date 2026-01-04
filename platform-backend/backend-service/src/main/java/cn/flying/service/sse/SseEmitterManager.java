@@ -194,7 +194,7 @@ public class SseEmitterManager {
         try {
             emitter.send(SseEmitter.event()
                     .name(event.getType())
-                    .data(JsonConverter.toJson(event)));
+                    .data(JsonConverter.toJson(event.getPayload())));
         } catch (IOException e) {
             log.warn("SSE 发送到连接失败: error={}", e.getMessage());
         }
@@ -217,7 +217,7 @@ public class SseEmitterManager {
             snapshot = new ArrayList<>(userConnections.entrySet());
         }
 
-        String eventData = JsonConverter.toJson(event);
+        String eventData = JsonConverter.toJson(event.getPayload());
         List<String> failedConnections = new ArrayList<>();
 
         // 发送到用户的所有连接（使用快照）
@@ -249,7 +249,7 @@ public class SseEmitterManager {
         Map<Long, Map<String, SseEmitter>> tenantEmitters = emittersByTenant.get(tenantId);
         if (tenantEmitters == null || tenantEmitters.isEmpty()) return;
 
-        String eventData = JsonConverter.toJson(event);
+        String eventData = JsonConverter.toJson(event.getPayload());
         List<String[]> failedConnections = new ArrayList<>();
 
         // 遍历所有用户
@@ -317,7 +317,7 @@ public class SseEmitterManager {
         if (emittersByTenant.isEmpty()) return;
 
         SseEvent heartbeat = SseEvent.heartbeat();
-        String eventData = JsonConverter.toJson(heartbeat);
+        String eventData = JsonConverter.toJson(heartbeat.getPayload());
         List<Object[]> failedConnections = new ArrayList<>();
 
         // 遍历所有租户和用户
