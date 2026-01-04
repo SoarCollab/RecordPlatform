@@ -107,6 +107,10 @@ volumes:
 
 创建 `docker-compose.app.yml`：
 
+::: warning 重要：DUBBO_HOST 配置
+在 Docker 环境中，Dubbo 提供者服务（storage、fisco）必须使用宿主机可访问的 IP 进行注册，而非 Docker 内部桥接网络 IP。如果未正确配置 `DUBBO_HOST`，后端服务将无法发现和调用提供者服务，导致 "No provider available" 错误。
+:::
+
 ```yaml
 version: '3.8'
 
@@ -121,6 +125,7 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - NACOS_HOST=nacos
+      - DUBBO_HOST=${DUBBO_HOST:-host.docker.internal}  # Docker 环境必须配置
     depends_on:
       - nacos
       - redis
@@ -136,6 +141,7 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - NACOS_HOST=nacos
+      - DUBBO_HOST=${DUBBO_HOST:-host.docker.internal}  # Docker 环境必须配置
     volumes:
       - ./platform-fisco/src/main/resources/conf:/app/conf
     depends_on:
@@ -152,6 +158,7 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - NACOS_HOST=nacos
+      # 后端是 Dubbo 消费者，不需要 DUBBO_HOST
     depends_on:
       - storage
       - fisco
@@ -228,4 +235,37 @@ docker-compose -f docker-compose.app.yml up -d --scale backend=3
 ```
 
 在 backend 实例前使用负载均衡器（nginx, traefik）。
+
+## DUBBO_HOST 配置说明
+
+`DUBBO_HOST` 环境变量对于 Docker 部署至关重要。它指定 Dubbo 提供者向 Nacos 注册时使用的 IP 地址。
+
+### 不同场景的配置值
+
+| 场景 | DUBBO_HOST 值 | 说明 |
+|------|---------------|------|
+| Docker Desktop（Mac/Windows）| `host.docker.internal` | 解析到宿主机的特殊 DNS 名称 |
+| Linux 上的 Docker | 宿主机 IP（如 `192.168.1.100`）| 使用实际网络 IP |
+| Docker Compose（同一网络）| 容器名（如 `platform-storage`）| 使用内部 Docker DNS |
+| Kubernetes | Pod IP 或 Service IP | 使用 K8s 服务发现 |
+
+### 故障排查
+
+**症状**：后端启动正常但无法调用 storage/fisco 服务
+
+**检查服务注册**：
+```bash
+# 查看 Nacos 中注册的服务
+curl "http://localhost:8848/nacos/v1/ns/instance/list?serviceName=platform-storage"
+```
+
+如果注册的 IP 显示为 `172.x.x.x`（Docker 内部 IP），说明 `DUBBO_HOST` 配置不正确。
+
+**解决方法**：在 `.env` 文件中添加 `DUBBO_HOST`：
+```bash
+# .env
+DUBBO_HOST=host.docker.internal  # Docker Desktop 用户
+# 或
+DUBBO_HOST=192.168.1.100         # Linux 用户，使用实际宿主机 IP
+```
 
