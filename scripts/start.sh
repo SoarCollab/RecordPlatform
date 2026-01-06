@@ -45,8 +45,16 @@ declare -A SW_NAMES=(
     ["backend"]="record-platform-web"
 )
 
-# 服务启动顺序
+declare -A SERVICE_PORTS=(
+    ["storage"]="$STORAGE_PORT"
+    ["fisco"]="$FISCO_PORT"
+    ["backend"]="$BACKEND_PORT"
+)
+
 SERVICE_ORDER=("storage" "fisco" "backend")
+
+HEALTH_CHECK_TIMEOUT=60
+HEALTH_CHECK_INTERVAL=2
 
 # ================================
 # 帮助信息函数
@@ -196,10 +204,59 @@ fi
 # ================================
 # 进程查找函数
 # ================================
+get_pid_file() {
+    local svc=$1
+    echo "$PID_DIR/${svc}.pid"
+}
+
 get_pid() {
-    local jar_name=$1
-    # 通过 JAR 名称查找进程
-    pgrep -f "$jar_name" 2>/dev/null || echo ""
+    local svc=$1
+    local pid_file=$(get_pid_file "$svc")
+    
+    if [ -f "$pid_file" ]; then
+        local pid=$(cat "$pid_file" 2>/dev/null)
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            echo "$pid"
+            return 0
+        fi
+        rm -f "$pid_file"
+    fi
+    echo ""
+}
+
+save_pid() {
+    local svc=$1
+    local pid=$2
+    local pid_file=$(get_pid_file "$svc")
+    echo "$pid" > "$pid_file"
+}
+
+remove_pid() {
+    local svc=$1
+    local pid_file=$(get_pid_file "$svc")
+    rm -f "$pid_file"
+}
+
+wait_for_health() {
+    local svc=$1
+    local port="${SERVICE_PORTS[$svc]}"
+    local elapsed=0
+    
+    if [ -z "$port" ]; then
+        return 0
+    fi
+    
+    echo "  等待健康检查 (最多 ${HEALTH_CHECK_TIMEOUT}s)..."
+    
+    while [ $elapsed -lt $HEALTH_CHECK_TIMEOUT ]; do
+        if curl -sf "http://localhost:$port/actuator/health" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep $HEALTH_CHECK_INTERVAL
+        elapsed=$((elapsed + HEALTH_CHECK_INTERVAL))
+    done
+    
+    return 1
 }
 
 # ================================
@@ -211,16 +268,16 @@ stop_service() {
     local jar_name=$(basename "$jar_path")
     local name="${SERVICE_NAMES[$svc]}"
     
-    local pid=$(get_pid "$jar_name")
+    local pid=$(get_pid "$svc")
     
     if [ -n "$pid" ]; then
         echo "正在停止 $name (PID: $pid)..."
         kill $pid 2>/dev/null || true
         
-        # 等待进程退出
         local count=0
         while [ $count -lt 30 ]; do
             if ! kill -0 $pid 2>/dev/null; then
+                remove_pid "$svc"
                 echo "✓ $name 已停止"
                 return 0
             fi
@@ -228,9 +285,9 @@ stop_service() {
             count=$((count + 1))
         done
         
-        # 强制终止
         echo "进程未响应，强制终止..."
         kill -9 $pid 2>/dev/null || true
+        remove_pid "$svc"
         echo "✓ $name 已强制停止"
     else
         echo "○ $name 未运行"
@@ -247,9 +304,9 @@ start_service() {
     local jar_name=$(basename "$jar_path")
     local name="${SERVICE_NAMES[$svc]}"
     local sw_name="${SW_NAMES[$svc]}"
+    local port="${SERVICE_PORTS[$svc]}"
 
-    # 检查是否已运行
-    local existing_pid=$(get_pid "$jar_name")
+    local existing_pid=$(get_pid "$svc")
     if [ -n "$existing_pid" ]; then
         echo "⚠ $name 已在运行 (PID: $existing_pid)"
         return 0
@@ -276,27 +333,35 @@ start_service() {
     fi
 
     echo "  Profile: $SPRING_PROFILE"
+    echo "  端口: $port"
     echo "  工作目录: $PROJECT_ROOT"
 
     if [ "$run_foreground" = true ]; then
         echo "  模式: 前台运行"
         echo "----------------------------------------"
-        # 切换到项目根目录再启动，确保相对路径正确
         cd "$PROJECT_ROOT" && exec java $java_opts -jar "$jar_path" --spring.profiles.active="$SPRING_PROFILE"
     else
         echo "  模式: 后台运行"
-        # 切换到项目根目录启动后台进程，使用 pushd/popd 保持 PID 可获取
         pushd "$PROJECT_ROOT" > /dev/null
         nohup java $java_opts -jar "$jar_path" \
             --spring.profiles.active="$SPRING_PROFILE" > /dev/null 2>&1 &
         local new_pid=$!
         popd > /dev/null
+        
         sleep 1
-        if kill -0 $new_pid 2>/dev/null; then
-            echo "✓ 已启动 (PID: $new_pid)"
-        else
-            echo "✗ 启动失败"
+        if ! kill -0 $new_pid 2>/dev/null; then
+            echo "✗ 启动失败: 进程立即退出"
             return 1
+        fi
+        
+        save_pid "$svc" "$new_pid"
+        echo "  PID: $new_pid"
+        
+        if wait_for_health "$svc"; then
+            echo "✓ $name 启动成功，健康检查通过"
+        else
+            echo "⚠ $name 已启动 (PID: $new_pid)，但健康检查超时"
+            echo "  请检查日志: $LOG_DIR"
         fi
     fi
 }
@@ -309,11 +374,20 @@ status_service() {
     local jar_path="${SERVICE_JARS[$svc]}"
     local jar_name=$(basename "$jar_path")
     local name="${SERVICE_NAMES[$svc]}"
+    local port="${SERVICE_PORTS[$svc]}"
     
-    local pid=$(get_pid "$jar_name")
+    local pid=$(get_pid "$svc")
     
     if [ -n "$pid" ]; then
-        echo "✓ $name: 运行中 (PID: $pid)"
+        local health_status="未知"
+        if [ -n "$port" ]; then
+            if curl -sf "http://localhost:$port/actuator/health" >/dev/null 2>&1; then
+                health_status="健康"
+            else
+                health_status="不健康"
+            fi
+        fi
+        echo "✓ $name: 运行中 (PID: $pid, 端口: $port, 状态: $health_status)"
     else
         echo "○ $name: 未运行"
     fi
@@ -388,5 +462,6 @@ esac
 echo ""
 echo "========================================"
 echo "操作完成"
+echo "PID 目录: $PID_DIR"
 echo "日志目录: $LOG_DIR"
 echo "========================================"
