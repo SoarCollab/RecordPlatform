@@ -33,6 +33,7 @@ build/
 .vscode/
 ######log#########
 logs
+log/
 *.log
 App.java
 
@@ -56,6 +57,9 @@ App.java
 /platform-frontend/.svelte-kit/
 /platform-frontend/node_modules/
 /platform-frontend/dist/
+/platform-frontend/coverage/
 /platform-fisco/src/main/resources/conf/
 /platform-frontend/AGENTS.md
 .ace-tool/
+/platform-storage/log/
+/.sisyphus/

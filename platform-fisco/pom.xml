@@ -142,6 +142,19 @@
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <!--
+                            WedPR Crypto SDK 会在 ${user.home}/.fisco 下解压/写入 native 依赖。
+                            测试环境（CI/沙箱）可能限制写入真实用户目录，因此将 user.home 指向模块的 target 目录，确保测试可重复且无外部副作用。
+                         -->
+                        <user.home>${project.build.directory}</user.home>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
                 <version>3.5.0</version>
                 <executions>

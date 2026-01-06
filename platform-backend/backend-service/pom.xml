@@ -3,13 +3,11 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <parent>
-        <groupId>cn.flyingcoding</groupId>
+        <groupId>cn.flying</groupId>
         <artifactId>platform-backend</artifactId>
         <version>0.0.1-SNAPSHOT</version>
     </parent>
-    <groupId>cn.flying</groupId>
     <artifactId>backend-service</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
     <name>backend-service</name>
     <description>backend-service</description>
 
@@ -45,6 +43,12 @@
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-core</artifactId>
+        </dependency>
+        <!-- Test dependencies -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

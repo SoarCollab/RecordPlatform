@@ -1,0 +1,133 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [main, backend_v2]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+  pull_request:
+    branches: [main, backend_v2]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend-test:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven'
+
+      - name: Install platform-api
+        run: mvn -f platform-api/pom.xml clean install -DskipTests -q
+
+      - name: Run Backend Tests
+        run: mvn -f platform-backend/pom.xml clean verify -pl backend-service,backend-web -am -Pit
+
+      - name: Run FISCO Tests
+        run: mvn -f platform-fisco/pom.xml test
+
+      - name: Run Storage Tests
+        run: mvn -f platform-storage/pom.xml test
+
+      - name: Upload Backend Coverage Report
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: |
+            platform-backend/backend-service/target/site/jacoco/jacoco.xml
+            platform-backend/backend-web/target/site/jacoco/jacoco.xml
+          flags: backend
+          fail_ci_if_error: false
+
+  frontend-test:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: platform-frontend
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: platform-frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Tests with Coverage
+        run: pnpm test:coverage
+
+      - name: Upload Frontend Coverage Report
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: platform-frontend/coverage/lcov.info
+          flags: frontend
+          fail_ci_if_error: false
+
+  build-check:
+    name: Build Verification
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-test]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'maven'
+
+      - name: Build Backend
+        run: |
+          mvn -f platform-api/pom.xml clean install -DskipTests -q
+          mvn -f platform-backend/pom.xml clean package -DskipTests -q
+          mvn -f platform-fisco/pom.xml clean package -DskipTests -q
+          mvn -f platform-storage/pom.xml clean package -DskipTests -q
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: platform-frontend/pnpm-lock.yaml
+
+      - name: Build Frontend
+        working-directory: platform-frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build

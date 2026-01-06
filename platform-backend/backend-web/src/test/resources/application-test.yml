@@ -1,0 +1,59 @@
+# Test environment configuration
+# Database, Redis, RabbitMQ are provided by TestContainers
+
+spring:
+  application:
+    name: backend-web-test
+
+  cloud:
+    nacos:
+      config:
+        enabled: false
+      discovery:
+        enabled: false
+
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # URL, username, password are set by TestContainers DynamicPropertySource
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    clean-on-validation-error: true
+
+  data:
+    redis:
+      timeout: 5000ms
+      # Host, port are set by TestContainers DynamicPropertySource
+
+  rabbitmq:
+    virtual-host: /
+    # Host, port are set by TestContainers DynamicPropertySource
+
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=1000,expireAfterWrite=10m
+
+  security:
+    jwt:
+      key: test-jwt-key-32-chars-long-minimum-for-testing-purposes
+      expire: 1
+
+# Disable Dubbo registry for tests (mock external services)
+dubbo:
+  registry:
+    address: N/A
+  consumer:
+    check: false
+
+# Logging configuration for tests
+logging:
+  level:
+    cn.flying: DEBUG
+    org.springframework.test: DEBUG
+    org.testcontainers: INFO
+    com.github.dockerjava: WARN
+
+# Disable scheduled tasks in tests
+spring.task.scheduling.pool.size: 0
