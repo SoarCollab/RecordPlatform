@@ -287,8 +287,14 @@ public class FileAdminServiceImpl implements FileAdminService {
             List<Map<String, Object>> statsList = shareAccessLogMapper.batchCountByShareCodes(shareCodes, tenantId);
             for (Map<String, Object> row : statsList) {
                 String code = (String) row.get("share_code");
-                Integer actionType = ((Number) row.get("action_type")).intValue();
-                Long cnt = ((Number) row.get("cnt")).longValue();
+                Object actionTypeObj = row.get("action_type");
+                Object cntObj = row.get("cnt");
+                if (code == null || !(actionTypeObj instanceof Number) || !(cntObj instanceof Number)) {
+                    log.warn("Invalid row in batchCountByShareCodes: {}", row);
+                    continue;
+                }
+                Integer actionType = ((Number) actionTypeObj).intValue();
+                Long cnt = ((Number) cntObj).longValue();
                 statsMap.computeIfAbsent(code, k -> new HashMap<>()).put(actionType, cnt);
             }
 
@@ -296,7 +302,12 @@ public class FileAdminServiceImpl implements FileAdminService {
             List<Map<String, Object>> actorsList = shareAccessLogMapper.batchCountDistinctActors(shareCodes, tenantId);
             for (Map<String, Object> row : actorsList) {
                 String code = (String) row.get("share_code");
-                Long uniqueActors = ((Number) row.get("unique_actors")).longValue();
+                Object uniqueActorsObj = row.get("unique_actors");
+                if (code == null || !(uniqueActorsObj instanceof Number)) {
+                    log.warn("Invalid row in batchCountDistinctActors: {}", row);
+                    continue;
+                }
+                Long uniqueActors = ((Number) uniqueActorsObj).longValue();
                 uniqueActorsMap.put(code, uniqueActors);
             }
         }

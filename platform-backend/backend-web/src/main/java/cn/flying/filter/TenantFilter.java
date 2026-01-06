@@ -56,52 +56,60 @@ public class TenantFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request,
                                     @NotNull HttpServletResponse response,
                                     @NotNull FilterChain filterChain) throws ServletException, IOException {
-        String requestUri = request.getRequestURI();
-        String requestPath = request.getServletPath();
-        if (requestPath == null || requestPath.isEmpty()) {
-            requestPath = requestUri;
-        }
+        // 外层 try/finally 确保无论何种分支都清理 TenantContext，防止线程复用泄漏
+        try {
+            // 防止线程复用导致的 TenantContext 泄漏（例如：前一次请求在错误分支提前返回未进入 JWT 过滤器清理）
+            TenantContext.clear();
 
-        // 检查是否在白名单中
-        if (isWhitelisted(requestPath)) {
-            filterChain.doFilter(request, response);
-            return;
-        }
+            String requestUri = request.getRequestURI();
+            String requestPath = request.getServletPath();
+            if (requestPath == null || requestPath.isEmpty()) {
+                requestPath = requestUri;
+            }
 
-        // 从请求头获取租户ID
-        String tenantIdHeader = request.getHeader(TENANT_HEADER);
+            // 检查是否在白名单中
+            if (isWhitelisted(requestPath)) {
+                filterChain.doFilter(request, response);
+                return;
+            }
 
-        if (tenantIdHeader == null || tenantIdHeader.isEmpty()) {
-            // 仅对 SSE 连接接口允许从参数中获取租户ID，因为 EventSource 不支持自定义 Header
-            if (requestPath.contains("/sse/connect")) {
-                tenantIdHeader = request.getParameter("x-tenant-id");
-                if (tenantIdHeader == null || tenantIdHeader.isEmpty()) {
-                    tenantIdHeader = request.getParameter("tenantId");
+            // 从请求头获取租户ID
+            String tenantIdHeader = request.getHeader(TENANT_HEADER);
+
+            if (tenantIdHeader == null || tenantIdHeader.isEmpty()) {
+                // 仅对 SSE 连接接口允许从参数中获取租户ID，因为 EventSource 不支持自定义 Header
+                if (requestPath.contains("/sse/connect")) {
+                    tenantIdHeader = request.getParameter("x-tenant-id");
+                    if (tenantIdHeader == null || tenantIdHeader.isEmpty()) {
+                        tenantIdHeader = request.getParameter("tenantId");
+                    }
                 }
             }
-        }
 
-        if (tenantIdHeader == null || tenantIdHeader.isEmpty()) {
-            log.warn("请求缺少租户ID: {} {}", request.getMethod(), requestUri);
-            sendErrorResponse(response, ResultEnum.PARAM_IS_INVALID, "缺少租户标识 (X-Tenant-ID)");
-            return;
-        }
+            if (tenantIdHeader == null || tenantIdHeader.isEmpty()) {
+                log.warn("请求缺少租户ID: {} {}", request.getMethod(), requestUri);
+                sendErrorResponse(response, ResultEnum.PARAM_IS_INVALID, "缺少租户标识 (X-Tenant-ID)");
+                return;
+            }
 
-        try {
-            Long tenantId = Long.parseLong(tenantIdHeader);
-            // 设置租户上下文（会被 MyBatis-Plus 租户拦截器使用）
-            TenantContext.setTenantId(tenantId);
-            // 存储到请求属性，供 JWT 过滤器之后使用
-            request.setAttribute(Const.ATTR_TENANT_ID, tenantId);
+            try {
+                Long tenantId = Long.parseLong(tenantIdHeader);
+                // 设置租户上下文（会被 MyBatis-Plus 租户拦截器使用）
+                TenantContext.setTenantId(tenantId);
+                // 存储到请求属性，供 JWT 过滤器之后使用
+                request.setAttribute(Const.ATTR_TENANT_ID, tenantId);
 
-            log.debug("租户上下文已设置: tenantId={}, uri={}", tenantId, requestUri);
+                log.debug("租户上下文已设置: tenantId={}, uri={}", tenantId, requestUri);
 
-            filterChain.doFilter(request, response);
-        } catch (NumberFormatException e) {
-            log.warn("租户ID格式错误: {}", tenantIdHeader);
-            sendErrorResponse(response, ResultEnum.PARAM_IS_INVALID, "租户标识格式错误");
+                filterChain.doFilter(request, response);
+            } catch (NumberFormatException e) {
+                log.warn("租户ID格式错误: {}", tenantIdHeader);
+                sendErrorResponse(response, ResultEnum.PARAM_IS_INVALID, "租户标识格式错误");
+            }
+            // 注意：正常路径不在这里清理 TenantContext，由 JwtAuthenticationFilter 统一清理
         } finally {
-            // 注意：不在这里清理 TenantContext，由 JwtAuthenticationFilter 统一清理
+            // 双重保护：确保任何异常或提前返回分支都清理 TenantContext
+            TenantContext.clear();
         }
     }
 
