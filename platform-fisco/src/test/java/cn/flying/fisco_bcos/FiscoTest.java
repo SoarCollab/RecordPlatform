@@ -1,32 +1,27 @@
 package cn.flying.fisco_bcos;
 
-import org.fisco.bcos.sdk.v3.client.Client;
 import org.fisco.bcos.sdk.v3.crypto.keypair.CryptoKeyPair;
 import org.fisco.bcos.sdk.v3.crypto.keypair.ECDSAKeyPair;
 import org.fisco.bcos.sdk.v3.crypto.keypair.SM2KeyPair;
-import org.junit.runner.RunWith;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.junit4.SpringRunner;
+import org.junit.jupiter.api.Test;
 
-@SpringBootTest
-@RunWith(SpringRunner.class)
-public class FiscoTest {
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-    @Autowired
-    private Client client;
+class FiscoTest {
 
-    @org.junit.Test
-    public void keyGeneration() {
-        //ECDSA key generation
+    /**
+     * 验证 FISCO BCOS SDK 的 ECDSA/SM2 密钥对可正常生成（不依赖链节点/网络环境）。
+     */
+    @Test
+    void shouldGenerateKeyPairs() {
         CryptoKeyPair ecdsaKeyPair = new ECDSAKeyPair().generateKeyPair();
-        System.out.println("ecdsa private key :"+ecdsaKeyPair.getHexPrivateKey());
-        System.out.println("ecdsa public key :"+ecdsaKeyPair.getHexPublicKey());
-        System.out.println("ecdsa address :"+ecdsaKeyPair.getAddress());
-        //SM2 key generation
+        assertNotNull(ecdsaKeyPair.getHexPrivateKey());
+        assertNotNull(ecdsaKeyPair.getHexPublicKey());
+        assertNotNull(ecdsaKeyPair.getAddress());
+
         CryptoKeyPair sm2KeyPair = new SM2KeyPair().generateKeyPair();
-        System.out.println("sm2 private key :"+sm2KeyPair.getHexPrivateKey());
-        System.out.println("sm2 public key :"+sm2KeyPair.getHexPublicKey());
-        System.out.println("sm2 address :"+sm2KeyPair.getAddress());
+        assertNotNull(sm2KeyPair.getHexPrivateKey());
+        assertNotNull(sm2KeyPair.getHexPublicKey());
+        assertNotNull(sm2KeyPair.getAddress());
     }
 }

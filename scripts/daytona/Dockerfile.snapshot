@@ -1,0 +1,115 @@
+# Daytona Optimized Snapshot for RecordPlatform Integration Tests
+# This Dockerfile creates a pre-configured environment with:
+# - Pre-cloned repository
+# - Pre-downloaded Maven dependencies
+# - Pre-installed pnpm packages
+# - Pre-pulled Docker images for Testcontainers
+#
+# Build time: ~15-20 minutes (one-time)
+# Startup time from snapshot: < 10 seconds
+
+FROM docker:28.3.3-dind
+
+LABEL maintainer="RecordPlatform Team"
+LABEL description="Optimized test environment with pre-cached dependencies"
+LABEL version="1.0.0"
+
+RUN apk add --no-cache \
+    openjdk21 \
+    maven \
+    nodejs \
+    npm \
+    git \
+    bash \
+    curl \
+    wget \
+    procps \
+    coreutils \
+    jq \
+    netcat-openbsd
+
+RUN npm install -g pnpm@10
+
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk
+ENV PATH="$JAVA_HOME/bin:$PATH"
+ENV MAVEN_OPTS="-Xmx2g -XX:+UseG1GC"
+
+RUN mkdir -p /root/.m2 && \
+    echo '<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0" \
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" \
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 \
+          http://maven.apache.org/xsd/settings-1.0.0.xsd"> \
+          <localRepository>/root/.m2/repository</localRepository> \
+          <interactiveMode>false</interactiveMode> \
+          <offline>false</offline> \
+        </settings>' > /root/.m2/settings.xml
+
+WORKDIR /workspace
+
+RUN git clone --depth 1 --branch main \
+    https://github.com/SoarCollab/RecordPlatform.git /workspace/project
+
+WORKDIR /workspace/project
+
+RUN mvn -f platform-api/pom.xml clean install -DskipTests -q && \
+    echo "✓ platform-api dependencies cached"
+
+RUN mvn -f platform-backend/pom.xml dependency:go-offline -q && \
+    mvn -f platform-backend/pom.xml clean verify -DskipTests -q && \
+    echo "✓ Backend dependencies cached"
+
+RUN mvn -f platform-fisco/pom.xml dependency:go-offline -q && \
+    mvn -f platform-fisco/pom.xml clean package -DskipTests -q && \
+    echo "✓ platform-fisco dependencies cached"
+
+RUN mvn -f platform-storage/pom.xml dependency:go-offline -q && \
+    mvn -f platform-storage/pom.xml clean package -DskipTests -q && \
+    echo "✓ platform-storage dependencies cached"
+
+WORKDIR /workspace/project/platform-frontend
+
+RUN if [ -f "pnpm-lock.yaml" ]; then \
+        pnpm install --frozen-lockfile && \
+        echo "✓ Frontend dependencies cached"; \
+    else \
+        echo "⚠ pnpm-lock.yaml not found, skipping frontend cache"; \
+    fi
+
+RUN nohup dockerd --host=unix:///var/run/docker.sock > /dev/null 2>&1 & \
+    echo "Waiting for Docker daemon..." && \
+    timeout 120 sh -c 'until docker info >/dev/null 2>&1; do sleep 2; done' && \
+    echo "✓ Docker daemon started" && \
+    docker pull mysql:8.0 && echo "✓ MySQL image pulled" && \
+    docker pull redis:7-alpine && echo "✓ Redis image pulled" && \
+    docker pull rabbitmq:3.12-management-alpine && echo "✓ RabbitMQ image pulled" && \
+    pkill -9 dockerd && \
+    echo "✓ Docker images pre-cached"
+
+WORKDIR /workspace
+
+COPY run-tests-optimized.sh /workspace/run-tests-optimized.sh
+RUN chmod +x /workspace/run-tests-optimized.sh
+
+RUN printf '#!/bin/bash\n\
+echo "=== RecordPlatform Test Environment Health Check ==="\n\
+echo "Java Version: $(java -version 2>&1 | head -1)"\n\
+echo "Maven Version: $(mvn -version | head -1)"\n\
+echo "Node Version: $(node --version)"\n\
+echo "pnpm Version: $(pnpm --version)"\n\
+echo "Docker Version: $(docker --version 2>/dev/null || echo \"Not running\")"\n\
+echo "Repository: $(git -C /workspace/project rev-parse --abbrev-ref HEAD 2>/dev/null || echo \"Not cloned\")"\n\
+echo "Maven Cache: $(du -sh /root/.m2/repository 2>/dev/null | cut -f1)"\n\
+echo "================================================"\n\
+' > /workspace/health-check.sh && chmod +x /workspace/health-check.sh
+
+ENV REPO_URL="https://github.com/SoarCollab/RecordPlatform.git"
+ENV BRANCH="main"
+ENV PROJECT_DIR="/workspace/project"
+ENV SKIP_FRONTEND="false"
+ENV SKIP_BACKEND="false"
+
+WORKDIR /workspace
+
+ENTRYPOINT ["dockerd-entrypoint.sh"]
+
+CMD ["/workspace/health-check.sh"]
