@@ -71,6 +71,7 @@ dubbo:
     payload: 104857600 # 将最大载荷大小设置为 100MB (100 * 1024 * 1024 bytes)
   registry:
     register-mode: instance
+    # 生产环境不使用空默认值：如果 NACOS_USERNAME/NACOS_PASSWORD 未设置，启动时快速失败
     address: nacos://${NACOS_HOST:localhost}:${NACOS_PORT:8848}?username=${NACOS_USERNAME}&password=${NACOS_PASSWORD}
     enable-empty-protection: true  # 空保护：收到空列表时保留旧地址，防止服务闪断
   consumer:
