@@ -35,6 +35,19 @@ export LOG_DIR="${LOG_DIR:-$PROJECT_ROOT/log}"
 mkdir -p "$LOG_DIR"
 
 # ================================
+# PID 文件目录
+# ================================
+export PID_DIR="${PID_DIR:-$PROJECT_ROOT/run}"
+mkdir -p "$PID_DIR"
+
+# ================================
+# 服务端口配置 (用于健康检查)
+# ================================
+export STORAGE_PORT="${STORAGE_PORT:-8092}"
+export FISCO_PORT="${FISCO_PORT:-8091}"
+export BACKEND_PORT="${BACKEND_PORT:-8000}"
+
+# ================================
 # SkyWalking 配置
 # ================================
 export SW_AGENT_HOME="${SW_AGENT_HOME:-$PROJECT_ROOT/agent}"
