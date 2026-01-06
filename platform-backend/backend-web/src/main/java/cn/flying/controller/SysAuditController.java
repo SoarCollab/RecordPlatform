@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
+import jakarta.validation.Valid;
 import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -201,7 +202,7 @@ public class SysAuditController {
     @PostMapping("/sensitive/page")
     @Operation(summary = "获取敏感操作记录")
     @OperationLog(module = "系统审计", operationType = "查询", description = "获取敏感操作记录")
-    public Result<IPage<SysOperationLog>> getSensitiveOperations(@RequestBody AuditLogQueryVO queryVO) {
+    public Result<IPage<SysOperationLog>> getSensitiveOperations(@Valid @RequestBody AuditLogQueryVO queryVO) {
         return Result.success(auditService.getSensitiveOperations(queryVO));
     }
 
@@ -241,7 +242,7 @@ public class SysAuditController {
     @PutMapping("/configs")
     @Operation(summary = "更新审计配置")
     @OperationLog(module = "系统审计", operationType = "修改", description = "更新审计配置")
-    public Result<Boolean> updateAuditConfig(@RequestBody AuditConfigVO configVO) {
+    public Result<Boolean> updateAuditConfig(@Valid @RequestBody AuditConfigVO configVO) {
         return Result.success(auditService.updateAuditConfig(configVO));
     }
 
