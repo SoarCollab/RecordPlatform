@@ -174,7 +174,9 @@ public abstract class CommonUtils {
         if(isNotEmpty(value)){
             try {
                 result = new BigDecimal(value.trim());
-            } catch (Exception ignored) {}
+            } catch (NumberFormatException e) {
+                log.debug("Failed to convert to BigDecimal: {}", value);
+            }
         }
 
         return result;
@@ -371,16 +373,22 @@ public abstract class CommonUtils {
             if (ginzip != null) {
                 try {
                     ginzip.close();
-                } catch (IOException ignored) {}
+                } catch (IOException e) {
+                    log.trace("Failed to close GZIPInputStream: {}", e.getMessage());
+                }
             }
             if (in != null) {
                 try {
                     in.close();
-                } catch (IOException ignored) {}
+                } catch (IOException e) {
+                    log.trace("Failed to close ByteArrayInputStream: {}", e.getMessage());
+                }
             }
             try {
                 out.close();
-            } catch (IOException ignored) {}
+            } catch (IOException e) {
+                log.trace("Failed to close StringWriter: {}", e.getMessage());
+            }
         }
         return decompressed;
     }

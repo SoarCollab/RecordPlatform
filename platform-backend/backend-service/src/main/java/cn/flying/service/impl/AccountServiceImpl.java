@@ -20,11 +20,11 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.security.SecureRandom;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
@@ -86,7 +86,7 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
         try {
             if(!this.verifyLimit(address))
                 return "请求频繁，请稍后再试";
-            Random random = new Random();
+            SecureRandom random = new SecureRandom();
             int code = random.nextInt(899999) + 100000;
             Map<String, Object> data = Map.of("type",type,"email", email, "code", code);
             rabbitTemplate.convertAndSend(Const.MQ_MAIL, data);
