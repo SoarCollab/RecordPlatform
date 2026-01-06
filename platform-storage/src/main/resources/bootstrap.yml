@@ -2,8 +2,8 @@ spring:
   cloud:
     nacos:
       server-addr: ${NACOS_HOST:localhost}:${NACOS_PORT:8848}
-      username: ${NACOS_USERNAME}
-      password: ${NACOS_PASSWORD}
+      username: ${NACOS_USERNAME:}
+      password: ${NACOS_PASSWORD:}
       config:
         group: DEFAULT_GROUP
         file-extension: yaml
