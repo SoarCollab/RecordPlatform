@@ -56,7 +56,8 @@ public class SseEmitterManager {
         for (SseEmitter oldEmitter : emittersToComplete) {
             try {
                 oldEmitter.complete();
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                log.debug("Failed to complete old SSE emitter during connection limit cleanup: {}", e.getMessage());
             }
         }
 
@@ -144,8 +145,8 @@ public class SseEmitterManager {
         if (emitter != null) {
             try {
                 emitter.complete();
-            } catch (Exception ignored) {
-                // 连接可能已经处于错误状态，忽略异常
+            } catch (Exception e) {
+                log.debug("Failed to complete SSE emitter during connection removal: {}", e.getMessage());
             }
         }
 

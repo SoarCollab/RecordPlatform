@@ -71,7 +71,7 @@ public class SecureIdCodec {
     /** HMAC 签名密钥 */
     private final SecretKeySpec hmacKey;
 
-    private static SecureIdCodec instance;
+    private static volatile SecureIdCodec instance;
 
     /**
      * 构造函数，从 JWT 密钥派生加密密钥

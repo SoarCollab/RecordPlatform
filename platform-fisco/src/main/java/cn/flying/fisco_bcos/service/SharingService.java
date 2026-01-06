@@ -2,7 +2,7 @@ package cn.flying.fisco_bcos.service;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.fisco.bcos.sdk.v3.client.Client;
 import org.fisco.bcos.sdk.v3.client.protocol.response.BcosTransaction;
@@ -36,7 +36,7 @@ import org.springframework.stereotype.Service;
 @Service
 @ConditionalOnBean(Client.class)
 @NoArgsConstructor
-@Data
+@Getter
 public class SharingService {
   @Value("${contract.sharingAddress}")
   private String address;

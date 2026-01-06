@@ -13,6 +13,11 @@ import java.util.Arrays;
  * @description: Uid编码工具，用于将Uid转换为固定长度的字符串
  * @author flyingcoding
  * @create: 2025-05-05 03:12
+ *
+ * <p>安全说明：SALT 和 KEY 应通过环境变量配置，避免硬编码。
+ * 默认值仅用于开发环境，生产环境必须设置环境变量：
+ * - RECORD_PLATFORM_UID_SALT: UID编码盐值
+ * - RECORD_PLATFORM_CLIENT_KEY: 客户端ID编码密钥
  */
 public class UidEncoder {
     // 输出编码字符集
@@ -21,12 +26,28 @@ public class UidEncoder {
     private static final int OUTPUT_LENGTH = 12;
     // 新增：盐的长度
     private static final int SALT_LENGTH = 4;
-    // 加盐 (用于encodeUid)
-    private static final String SALT = "RecordPlatform_Uid_Key";
-    // 密钥 (用于encodeCid)
-    private static final String KEY = "RecordPlatform_Client_Key";
-    //用于生成盐的SecureRandom实例
+    // 加盐 (用于encodeUid) - 从环境变量读取，开发环境使用默认值
+    private static final String SALT = getConfigValue("RECORD_PLATFORM_UID_SALT", "RecordPlatform_Uid_Key_Dev");
+    // 密钥 (用于encodeCid) - 从环境变量读取，开发环境使用默认值
+    private static final String KEY = getConfigValue("RECORD_PLATFORM_CLIENT_KEY", "RecordPlatform_Client_Key_Dev");
+    // 用于生成盐的SecureRandom实例
     private static final SecureRandom random = new SecureRandom();
+
+    /**
+     * 从环境变量获取配置值，如果不存在则使用默认值
+     */
+    private static String getConfigValue(String envKey, String defaultValue) {
+        String value = System.getenv(envKey);
+        if (value != null && !value.isBlank()) {
+            return value;
+        }
+        // 尝试从系统属性获取（支持 -D 参数）
+        value = System.getProperty(envKey);
+        if (value != null && !value.isBlank()) {
+            return value;
+        }
+        return defaultValue;
+    }
 
     /**
      * 将UID编码为固定长度字符串
