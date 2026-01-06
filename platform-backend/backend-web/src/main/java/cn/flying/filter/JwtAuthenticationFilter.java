@@ -113,12 +113,26 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     /**
-     * 校验请求头租户ID与 JWT 租户ID 是否一致，不一致时拒绝请求。
+     * 校验请求头租户ID与 JWT 租户ID 是否一致。
+     * 拒绝情况：
+     * 1. 两者都存在但不相等
+     * 2. 请求头有租户ID但 JWT 中没有（防止跨租户令牌滥用）
      */
     private boolean validateTenantMatch(Long headerTenantId,
                                         Long jwtTenantId,
                                         Long userId,
                                         HttpServletResponse response) throws IOException {
+        // 请求头有租户ID但 JWT 中没有，拒绝请求（JWT 应包含租户信息）
+        if (headerTenantId != null && jwtTenantId == null) {
+            log.warn("JWT缺少租户ID: 请求头tenantId={}, userId={}", headerTenantId, userId);
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.setContentType("application/json;charset=utf-8");
+            PrintWriter writer = response.getWriter();
+            writer.write(Result.error(ResultEnum.PERMISSION_UNAUTHORIZED, "令牌缺少租户信息").toJson());
+            writer.flush();
+            return false;
+        }
+        // 两者都存在但不相等，拒绝请求
         if (headerTenantId != null && jwtTenantId != null && !Objects.equals(headerTenantId, jwtTenantId)) {
             log.warn("租户ID不匹配: 请求头={}, JWT={}, userId={}", headerTenantId, jwtTenantId, userId);
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);

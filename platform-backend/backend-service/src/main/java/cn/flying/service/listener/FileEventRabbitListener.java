@@ -130,7 +130,12 @@ public class FileEventRabbitListener {
     }
 
     private void processFileStoredEvent(Map<String, Object> event) {
-        Long userId = ((Number) event.get("userId")).longValue();
+        Object userIdObj = event.get("userId");
+        if (!(userIdObj instanceof Number)) {
+            log.warn("Invalid or missing userId in file.stored event: {}", userIdObj);
+            return;
+        }
+        Long userId = ((Number) userIdObj).longValue();
         String fileName = (String) event.get("fileName");
         String fileHash = (String) event.get("fileHash");
         String transactionHash = (String) event.get("transactionHash");
@@ -143,7 +148,12 @@ public class FileEventRabbitListener {
     }
 
     private void processFileDeletedEvent(Map<String, Object> event) {
-        Long userId = ((Number) event.get("userId")).longValue();
+        Object userIdObj = event.get("userId");
+        if (!(userIdObj instanceof Number)) {
+            log.warn("Invalid or missing userId in file.deleted event: {}", userIdObj);
+            return;
+        }
+        Long userId = ((Number) userIdObj).longValue();
         String fileHash = (String) event.get("fileHash");
 
         log.info("Processing file deleted: userId={}, fileHash={}", userId, fileHash);
