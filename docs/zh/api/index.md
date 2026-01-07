@@ -287,7 +287,7 @@ Content-Type: application/json
 | DELETE | `/api/v1/sse/disconnect` | 断开 SSE 连接 |
 | GET | `/api/v1/sse/status` | 检查连接状态 |
 
-> **注意**：完整的 REST API 文档（包含所有端点、请求/响应示例和详细字段描述）请参阅项目根目录的 [API_DOCUMENTATION.md](../../../API_DOCUMENTATION.md)。
+> **注意**：完整的 REST API 文档（包含所有端点、请求/响应示例和详细字段描述）请参阅项目根目录的 [API_DOCUMENTATION.md](https://github.com/SoarCollab/RecordPlatform/blob/main/API_DOCUMENTATION.md)。
 
 ## 响应格式
 
