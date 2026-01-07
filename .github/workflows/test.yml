@@ -23,6 +23,9 @@ jobs:
   backend-test:
     name: Backend Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -50,6 +53,7 @@ jobs:
         uses: codecov/codecov-action@v4
         if: always()
         with:
+          use_oidc: true
           files: |
             platform-backend/backend-service/target/site/jacoco/jacoco.xml
             platform-backend/backend-web/target/site/jacoco/jacoco.xml
@@ -59,6 +63,9 @@ jobs:
   frontend-test:
     name: Frontend Tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         working-directory: platform-frontend
@@ -88,6 +95,7 @@ jobs:
         uses: codecov/codecov-action@v4
         if: always()
         with:
+          use_oidc: true
           files: platform-frontend/coverage/lcov.info
           flags: frontend
           fail_ci_if_error: false

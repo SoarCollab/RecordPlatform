@@ -180,19 +180,44 @@ public class SecurityConfiguration {
             username = String.valueOf(request.getAttribute(Const.ATTR_LOGIN_USERNAME));
         }
 
-        if(exceptionOrAuthentication instanceof AccessDeniedException exception) {
-            writer.write(Result
-                    .error(exception.getMessage()).toJson());
-        } else if(exceptionOrAuthentication instanceof AuthenticationException) {
-            // 登录失败处理
-            handleLoginFailure(username, writer);
-        } else if(exceptionOrAuthentication instanceof Exception exception) {
-            writer.write(Result
-                    .error(exception.getMessage()).toJson());
-        } else if(exceptionOrAuthentication instanceof Authentication authentication){
-            // 登录成功处理
+        if (exceptionOrAuthentication instanceof AccessDeniedException) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            writer.write(Result.error(ResultEnum.PERMISSION_UNAUTHORIZED).toJson());
+            return;
+        }
+
+        if (exceptionOrAuthentication instanceof AuthenticationException) {
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            // 区分：登录失败 vs 访问受保护资源未认证
+            if (isLoginRequest(request)) {
+                handleLoginFailure(username, writer);
+            } else {
+                writer.write(Result.error(ResultEnum.PERMISSION_UNAUTHENTICATED).toJson());
+            }
+            return;
+        }
+
+        if (exceptionOrAuthentication instanceof Exception) {
+            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            writer.write(Result.error(ResultEnum.FAIL).toJson());
+            return;
+        }
+
+        if (exceptionOrAuthentication instanceof Authentication authentication) {
+            response.setStatus(HttpServletResponse.SC_OK);
             handleLoginSuccess(username, authentication, writer);
         }
+    }
+
+    /**
+     * 判断当前请求是否为登录接口请求，用于区分登录失败与未认证访问受保护资源。
+     *
+     * @param request 当前 HTTP 请求
+     * @return 是否为 /api/v1/auth/login
+     */
+    private boolean isLoginRequest(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        return "/api/v1/auth/login".equals(uri);
     }
 
     /**

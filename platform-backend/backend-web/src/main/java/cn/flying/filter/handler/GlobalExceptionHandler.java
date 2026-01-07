@@ -4,6 +4,8 @@ import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.exception.RetryableException;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.ConstraintViolationException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.skywalking.apm.toolkit.trace.TraceContext;
@@ -11,6 +13,8 @@ import org.slf4j.MDC;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.BindException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -19,6 +23,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 全局异常处理器 - 异常分类处理策略
@@ -36,6 +41,60 @@ import java.util.Map;
 public class GlobalExceptionHandler {
 
     /**
+     * 处理 @Valid @RequestBody 校验失败（JSON Body 参数校验）。
+     *
+     * @param ex 校验异常
+     * @return 400 BAD_REQUEST 的统一错误响应
+     */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<?> handleMethodArgumentNotValidException(MethodArgumentNotValidException ex) {
+        String traceId = currentTraceId();
+        String detail = ex.getBindingResult().getFieldErrors().stream()
+                .map(err -> err.getField() + ": " + err.getDefaultMessage())
+                .collect(Collectors.joining("; "));
+
+        log.warn("参数校验失败(MethodArgumentNotValidException): detail={}, traceId={}", detail, traceId);
+        return Result.error(ResultEnum.PARAM_IS_INVALID, withTrace(detail.isEmpty() ? "参数无效" : detail));
+    }
+
+    /**
+     * 处理表单/Query 参数绑定校验失败（如 @Valid + @ModelAttribute）。
+     *
+     * @param ex 绑定异常
+     * @return 400 BAD_REQUEST 的统一错误响应
+     */
+    @ExceptionHandler(BindException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<?> handleBindException(BindException ex) {
+        String traceId = currentTraceId();
+        String detail = ex.getBindingResult().getFieldErrors().stream()
+                .map(err -> err.getField() + ": " + err.getDefaultMessage())
+                .collect(Collectors.joining("; "));
+
+        log.warn("参数绑定失败(BindException): detail={}, traceId={}", detail, traceId);
+        return Result.error(ResultEnum.PARAM_IS_INVALID, withTrace(detail.isEmpty() ? "参数无效" : detail));
+    }
+
+    /**
+     * 处理方法参数级校验失败（如 @RequestParam/@PathVariable 上的 @NotBlank/@Size 等）。
+     *
+     * @param ex 约束违反异常
+     * @return 400 BAD_REQUEST 的统一错误响应
+     */
+    @ExceptionHandler(ConstraintViolationException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<?> handleConstraintViolationException(ConstraintViolationException ex) {
+        String traceId = currentTraceId();
+        String detail = ex.getConstraintViolations().stream()
+                .map(this::formatConstraintViolation)
+                .collect(Collectors.joining("; "));
+
+        log.warn("参数校验失败(ConstraintViolationException): detail={}, traceId={}", detail, traceId);
+        return Result.error(ResultEnum.PARAM_IS_INVALID, withTrace(detail.isEmpty() ? "参数无效" : detail));
+    }
+
+    /**
      * 处理业务异常（可预期的错误，如参数验证失败、业务规则违反）
      */
     @ExceptionHandler(GeneralException.class)
@@ -44,11 +103,11 @@ public class GlobalExceptionHandler {
         String traceId = currentTraceId();
         log.warn("业务异常: message={}, traceId={}", ex.getMessage(), traceId);
 
-        Map<String, Object> payload = withTrace(ex.getData());
+        Map<String, Object> payload = withTrace(ex.getData() != null ? ex.getData() : ex.getMessage());
         if (ex.getResultEnum() != null) {
             return Result.error(ex.getResultEnum(), payload);
         }
-        return new Result<>(ResultEnum.FAIL.getCode(), ex.getMessage(), payload);
+        return new Result<>(ResultEnum.PARAM_IS_INVALID.getCode(), ex.getMessage(), payload);
     }
 
     /**
@@ -113,6 +172,21 @@ public class GlobalExceptionHandler {
 
         Map<String, Object> payload = withTrace("服务器内部错误，请联系管理员");
         return Result.error(ResultEnum.FAIL, payload);
+    }
+
+    /**
+     * 将 ConstraintViolation 格式化为可读文本。
+     *
+     * @param violation 单个约束违反
+     * @return 格式化后的文本（包含路径与提示）
+     */
+    private String formatConstraintViolation(ConstraintViolation<?> violation) {
+        String path = violation.getPropertyPath() != null ? violation.getPropertyPath().toString() : "";
+        String message = violation.getMessage() != null ? violation.getMessage() : "";
+        if (path.isEmpty()) {
+            return message.isEmpty() ? "参数无效" : message;
+        }
+        return message.isEmpty() ? path : (path + ": " + message);
     }
 
     private Map<String, Object> withTrace(Object detail) {

@@ -5,6 +5,14 @@ spring:
   application:
     name: backend-web-test
 
+  # Exclude Dubbo auto-configuration to prevent @DubboReference from attempting registry lookup
+  autoconfigure:
+    exclude:
+      - org.apache.dubbo.spring.boot.autoconfigure.DubboAutoConfiguration
+      - org.apache.dubbo.spring.boot.autoconfigure.DubboListenerAutoConfiguration
+      - org.apache.dubbo.spring.boot.autoconfigure.DubboRelaxedBinding2AutoConfiguration
+      - org.apache.dubbo.spring.boot.autoconfigure.DubboTripleAutoConfiguration
+
   cloud:
     nacos:
       config:
@@ -35,9 +43,13 @@ spring:
     caffeine:
       spec: maximumSize=1000,expireAfterWrite=10m
 
+  # Mail username for MailQueueListener (JavaMailSender is mocked)
+  mail:
+    username: test@example.com
+
   security:
     jwt:
-      key: test-jwt-key-32-chars-long-minimum-for-testing-purposes
+      key: ci-integration-jwt-key-32chars-xK9mN2pL5qR8vW3y
       expire: 1
 
 # Disable Dubbo registry for tests (mock external services)
@@ -50,8 +62,8 @@ dubbo:
 # Logging configuration for tests
 logging:
   level:
-    cn.flying: DEBUG
-    org.springframework.test: DEBUG
+    cn.flying: INFO
+    org.springframework.test: INFO
     org.testcontainers: INFO
     com.github.dockerjava: WARN
 
