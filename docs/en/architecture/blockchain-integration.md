@@ -101,6 +101,50 @@ flowchart TB
     BesuAdapter --> Web3j
 ```
 
+### BlockChainAdapter Interface
+
+All adapters implement the `BlockChainAdapter` interface:
+
+```java
+public interface BlockChainAdapter {
+    // File operations
+    Result<StoreFileResponse> storeFile(StoreFileRequest request);
+    Result<List<FileVO>> getUserFiles(String uploader);
+    Result<FileDetailVO> getFile(String uploader, String fileHash);
+    Result<Boolean> deleteFiles(DeleteFilesRequest request);
+    
+    // Sharing operations
+    Result<String> shareFiles(ShareFilesRequest request);
+    Result<SharingVO> getSharedFiles(String shareCode);
+    Result<Boolean> cancelShare(CancelShareRequest request);
+    
+    // Chain status
+    Result<ChainStatusVO> getCurrentBlockChainMessage();
+    Result<TransactionVO> getTransactionByHash(String txHash);
+}
+```
+
+### Adapter Selection
+
+Adapter selection is controlled by the `blockchain.active` configuration:
+
+```java
+@Configuration
+public class BlockChainConfig {
+    @Bean
+    @ConditionalOnProperty(name = "blockchain.active", havingValue = "local-fisco")
+    public BlockChainAdapter localFiscoAdapter() { ... }
+    
+    @Bean
+    @ConditionalOnProperty(name = "blockchain.active", havingValue = "bsn-fisco")
+    public BlockChainAdapter bsnFiscoAdapter() { ... }
+    
+    @Bean
+    @ConditionalOnProperty(name = "blockchain.active", havingValue = "bsn-besu")
+    public BlockChainAdapter bsnBesuAdapter() { ... }
+}
+```
+
 ## Certificate Management
 
 ### FISCO BCOS Certificates

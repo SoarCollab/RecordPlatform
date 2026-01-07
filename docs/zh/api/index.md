@@ -283,7 +283,11 @@ Content-Type: application/json
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| GET | `/sse/subscribe` | 订阅事件 |
+| GET | `/api/v1/sse/connect` | 订阅事件 |
+| DELETE | `/api/v1/sse/disconnect` | 断开 SSE 连接 |
+| GET | `/api/v1/sse/status` | 检查连接状态 |
+
+> **注意**：完整的 REST API 文档（包含所有端点、请求/响应示例和详细字段描述）请参阅项目根目录的 [API_DOCUMENTATION.md](../../../API_DOCUMENTATION.md)。
 
 ## 响应格式
 
@@ -467,7 +471,7 @@ boolean exists(String bucket, String objectKey);
 订阅实时事件：
 
 ```javascript
-const eventSource = new EventSource('/record-platform/sse/subscribe', {
+const eventSource = new EventSource('/record-platform/api/v1/sse/connect', {
   headers: { 'Authorization': 'Bearer <token>' }
 });
 
