@@ -101,6 +101,50 @@ flowchart TB
     BesuAdapter --> Web3j
 ```
 
+### BlockChainAdapter 接口
+
+所有适配器实现 `BlockChainAdapter` 接口：
+
+```java
+public interface BlockChainAdapter {
+    // 文件操作
+    Result<StoreFileResponse> storeFile(StoreFileRequest request);
+    Result<List<FileVO>> getUserFiles(String uploader);
+    Result<FileDetailVO> getFile(String uploader, String fileHash);
+    Result<Boolean> deleteFiles(DeleteFilesRequest request);
+    
+    // 分享操作
+    Result<String> shareFiles(ShareFilesRequest request);
+    Result<SharingVO> getSharedFiles(String shareCode);
+    Result<Boolean> cancelShare(CancelShareRequest request);
+    
+    // 链状态
+    Result<ChainStatusVO> getCurrentBlockChainMessage();
+    Result<TransactionVO> getTransactionByHash(String txHash);
+}
+```
+
+### 适配器选择
+
+适配器选择由 `blockchain.active` 配置控制：
+
+```java
+@Configuration
+public class BlockChainConfig {
+    @Bean
+    @ConditionalOnProperty(name = "blockchain.active", havingValue = "local-fisco")
+    public BlockChainAdapter localFiscoAdapter() { ... }
+    
+    @Bean
+    @ConditionalOnProperty(name = "blockchain.active", havingValue = "bsn-fisco")
+    public BlockChainAdapter bsnFiscoAdapter() { ... }
+    
+    @Bean
+    @ConditionalOnProperty(name = "blockchain.active", havingValue = "bsn-besu")
+    public BlockChainAdapter bsnBesuAdapter() { ... }
+}
+```
+
 ## 证书管理
 
 ### FISCO BCOS 证书

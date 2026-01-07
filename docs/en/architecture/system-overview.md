@@ -132,6 +132,70 @@ sequenceDiagram
 
 **Compensation Strategy**: Exponential backoff (initial 1s, max 5 retries), then manual queue.
 
+### Saga State Machine
+
+The `FileSagaOrchestrator` manages the complete state machine:
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING: Initialize
+    PENDING --> S3_UPLOADING: Start upload
+    S3_UPLOADING --> S3_UPLOADED: Chunks stored
+    S3_UPLOADING --> FAILED: Storage error
+    S3_UPLOADED --> CHAIN_STORING: Start attestation
+    CHAIN_STORING --> COMPLETED: TX confirmed
+    CHAIN_STORING --> FAILED: Chain error
+    FAILED --> COMPENSATING: Trigger compensation
+    COMPENSATING --> COMPENSATED: Cleanup done
+```
+
+## Transactional Outbox Pattern
+
+RecordPlatform uses the Outbox pattern for reliable event publishing to RabbitMQ.
+
+### How It Works
+
+```mermaid
+flowchart LR
+    classDef service fill:#3b82f6,stroke:#2563eb,stroke-width:2px,color:#ffffff
+    classDef db fill:#10b981,stroke:#059669,stroke-width:2px,color:#ffffff
+    classDef mq fill:#f97316,stroke:#ea580c,stroke-width:2px,color:#ffffff
+
+    Service["Business<br/>Service"]:::service
+    Outbox[("Outbox<br/>Table")]:::db
+    Publisher["Outbox<br/>Publisher"]:::service
+    MQ["RabbitMQ"]:::mq
+
+    Service -->|1. Save event in same TX| Outbox
+    Publisher -->|2. Poll pending events| Outbox
+    Publisher -->|3. Publish event| MQ
+    Publisher -->|4. Mark delivered| Outbox
+```
+
+### Components
+
+| Component | Responsibility |
+|-----------|----------------|
+| `OutboxService` | Appends events within business transaction |
+| `OutboxPublisher` | Background polling and publishing (30s interval) |
+| `outbox_event` table | Persistent event store with tenant isolation |
+
+### Guarantees
+
+- **At-least-once delivery**: Events survive broker unavailability
+- **Transactional consistency**: Event created in same DB transaction as business data
+- **Tenant-aware polling**: Each tenant's events processed independently
+
+### Configuration
+
+```yaml
+outbox:
+  enabled: true
+  poll-interval: 30s
+  batch-size: 100
+  retention-days: 7  # Auto-cleanup after 7 days
+```
+
 ## CQRS Architecture
 
 File module uses Command Query Responsibility Segregation:

@@ -145,6 +145,70 @@ sequenceDiagram
 
 **补偿策略**：指数退避重试（初始 1s，最多 5 次），失败后进入人工处理队列。
 
+### Saga 状态机
+
+`FileSagaOrchestrator` 管理完整的状态机：
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING: 初始化
+    PENDING --> S3_UPLOADING: 开始上传
+    S3_UPLOADING --> S3_UPLOADED: 分片存储完成
+    S3_UPLOADING --> FAILED: 存储错误
+    S3_UPLOADED --> CHAIN_STORING: 开始存证
+    CHAIN_STORING --> COMPLETED: 交易确认
+    CHAIN_STORING --> FAILED: 链上错误
+    FAILED --> COMPENSATING: 触发补偿
+    COMPENSATING --> COMPENSATED: 清理完成
+```
+
+## 事务性 Outbox 模式
+
+RecordPlatform 使用 Outbox 模式实现到 RabbitMQ 的可靠事件发布。
+
+### 工作原理
+
+```mermaid
+flowchart LR
+    classDef service fill:#3b82f6,stroke:#2563eb,stroke-width:2px,color:#ffffff
+    classDef db fill:#10b981,stroke:#059669,stroke-width:2px,color:#ffffff
+    classDef mq fill:#f97316,stroke:#ea580c,stroke-width:2px,color:#ffffff
+
+    Service["业务<br/>服务"]:::service
+    Outbox[("Outbox<br/>表")]:::db
+    Publisher["Outbox<br/>发布器"]:::service
+    MQ["RabbitMQ"]:::mq
+
+    Service -->|1. 同事务保存事件| Outbox
+    Publisher -->|2. 轮询待发送事件| Outbox
+    Publisher -->|3. 发布事件| MQ
+    Publisher -->|4. 标记已发送| Outbox
+```
+
+### 组件
+
+| 组件 | 职责 |
+|------|------|
+| `OutboxService` | 在业务事务中追加事件 |
+| `OutboxPublisher` | 后台轮询和发布（30秒间隔）|
+| `outbox_event` 表 | 带租户隔离的持久化事件存储 |
+
+### 保证
+
+- **至少一次投递**：事件在消息队列不可用时仍能存活
+- **事务一致性**：事件在同一数据库事务中与业务数据一起创建
+- **租户感知轮询**：每个租户的事件独立处理
+
+### 配置
+
+```yaml
+outbox:
+  enabled: true
+  poll-interval: 30s
+  batch-size: 100
+  retention-days: 7  # 7 天后自动清理
+```
+
 ## CQRS 架构
 
 文件模块采用命令查询职责分离：

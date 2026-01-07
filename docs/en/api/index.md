@@ -283,7 +283,11 @@ Content-Type: application/json
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/sse/subscribe` | Subscribe to events |
+| GET | `/api/v1/sse/connect` | Subscribe to events |
+| DELETE | `/api/v1/sse/disconnect` | Disconnect SSE |
+| GET | `/api/v1/sse/status` | Check connection status |
+
+> **Note**: For comprehensive REST API documentation with all endpoints, request/response examples, and detailed field descriptions, see [API_DOCUMENTATION.md](../../../API_DOCUMENTATION.md) in the project root.
 
 ## Response Format
 
@@ -467,7 +471,7 @@ boolean exists(String bucket, String objectKey);
 Subscribe to real-time events:
 
 ```javascript
-const eventSource = new EventSource('/record-platform/sse/subscribe', {
+const eventSource = new EventSource('/record-platform/api/v1/sse/connect', {
   headers: { 'Authorization': 'Bearer <token>' }
 });
 

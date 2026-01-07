@@ -114,7 +114,7 @@ java -jar platform-backend/backend-web/target/backend-web-*.jar --spring.profile
 | Backend       | Java, Spring Boot                 | 21, 3.2.11               |
 | Microservices | Apache Dubbo (Triple), Nacos      | 3.3.3                    |
 | Blockchain    | FISCO BCOS, Solidity              | 3.8.0, ^0.8.11           |
-| Storage       | S3-compatible, MySQL, Redis       | AWS SDK 2.29, 8.0+, 6.0+ |
+| Storage       | S3-compatible, MySQL, Redis       | AWS SDK 2.29, 8.0+, 7.0+ |
 | Frontend      | Svelte 5, SvelteKit, Tailwind CSS, Vite | 5.46, 2.49, 4.1, 6.0 |
 | Resilience    | Resilience4j                      | 2.2.0                    |
 | Monitoring    | Micrometer, Prometheus            | -                        |
