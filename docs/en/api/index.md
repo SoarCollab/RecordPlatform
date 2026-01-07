@@ -287,7 +287,7 @@ Content-Type: application/json
 | DELETE | `/api/v1/sse/disconnect` | Disconnect SSE |
 | GET | `/api/v1/sse/status` | Check connection status |
 
-> **Note**: For comprehensive REST API documentation with all endpoints, request/response examples, and detailed field descriptions, see [API_DOCUMENTATION.md](../../../API_DOCUMENTATION.md) in the project root.
+> **Note**: For comprehensive REST API documentation with all endpoints, request/response examples, and detailed field descriptions, see [API_DOCUMENTATION.md](https://github.com/SoarCollab/RecordPlatform/blob/main/API_DOCUMENTATION.md) in the project root.
 
 ## Response Format
 
