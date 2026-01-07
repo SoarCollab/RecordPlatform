@@ -1,6 +1,6 @@
 import { getToken } from "../client";
 import { getSseToken } from "./auth";
-import { PUBLIC_TENANT_ID } from "$env/static/public";
+import { env } from "$env/dynamic/public";
 
 export type SSEEventType =
   | "notification"
@@ -53,7 +53,7 @@ export async function createSSEConnection(
     // 步骤2：使用短期 Token 建立 SSE 连接
     const params = new URLSearchParams({
       token: sseToken,
-      "x-tenant-id": PUBLIC_TENANT_ID || "",
+      "x-tenant-id": env.PUBLIC_TENANT_ID || "",
     });
 
     // 如果提供了 connectionId，添加到参数中

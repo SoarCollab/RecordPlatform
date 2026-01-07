@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom/vitest";
+import "fake-indexeddb/auto";
 import { vi } from "vitest";
 
 // Mock SvelteKit modules
@@ -57,6 +58,8 @@ vi.mock("$env/static/public", () => ({
 }));
 
 vi.mock("$env/dynamic/public", () => ({
+  PUBLIC_API_BASE_URL: "http://localhost:8000/record-platform",
+  PUBLIC_TENANT_ID: "1",
   env: {
     PUBLIC_API_BASE_URL: "http://localhost:8000/record-platform",
     PUBLIC_TENANT_ID: "1",

@@ -3,6 +3,7 @@ package cn.flying.test.builders;
 import cn.flying.dao.entity.FriendRequest;
 
 import java.util.Date;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
@@ -11,11 +12,11 @@ import java.util.function.Consumer;
  */
 public class FriendRequestTestBuilder {
 
-    private static long idCounter = 1L;
+    private static final AtomicLong idCounter = new AtomicLong(1L);
 
     public static FriendRequest aFriendRequest() {
         return new FriendRequest()
-                .setId(idCounter++)
+                .setId(idCounter.getAndIncrement())
                 .setRequesterId(100L)
                 .setAddresseeId(200L)
                 .setMessage("Hi, let's be friends!")
@@ -52,6 +53,6 @@ public class FriendRequestTestBuilder {
     }
 
     public static void resetIdCounter() {
-        idCounter = 1L;
+        idCounter.set(1L);
     }
 }

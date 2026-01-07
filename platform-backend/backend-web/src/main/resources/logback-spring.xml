@@ -138,4 +138,17 @@
         </root>
     </springProfile>
 
+    <!-- Test: Console only (avoid file logs / SkyWalking network) -->
+    <springProfile name="test">
+        <logger name="cn.flying.filter.RequestLogFilter" level="INFO"/>
+        <logger name="cn.flying.aspect" level="INFO"/>
+        <logger name="org.springframework" level="WARN"/>
+        <logger name="org.springframework.test" level="INFO"/>
+        <logger name="org.testcontainers" level="INFO"/>
+        <logger name="com.github.dockerjava" level="WARN"/>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
 </configuration>

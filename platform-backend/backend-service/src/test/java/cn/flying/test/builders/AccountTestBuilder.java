@@ -3,6 +3,7 @@ package cn.flying.test.builders;
 import cn.flying.dao.dto.Account;
 
 import java.util.Date;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
@@ -11,10 +12,10 @@ import java.util.function.Consumer;
  */
 public class AccountTestBuilder {
 
-    private static long idCounter = 1L;
+    private static final AtomicLong idCounter = new AtomicLong(1L);
 
     public static Account anAccount() {
-        long id = idCounter++;
+        long id = idCounter.getAndIncrement();
         Account account = new Account(
                 id,
                 "testuser_" + id,
@@ -44,6 +45,6 @@ public class AccountTestBuilder {
     }
 
     public static void resetIdCounter() {
-        idCounter = 1L;
+        idCounter.set(1L);
     }
 }

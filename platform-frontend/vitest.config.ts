@@ -3,10 +3,12 @@ import { resolve } from "path";
 
 export default defineConfig({
   test: {
-    include: ["src/**/*.{test,spec}.ts"],
+    include: ["src/**/*.{test,spec}.{ts,js}"],
     globals: true,
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
+    testTimeout: 10000,
+    hookTimeout: 10000,
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov", "html"],
@@ -16,7 +18,17 @@ export default defineConfig({
         "src/lib/components/ui/**",
         "**/*.d.ts",
         "**/index.ts",
+        "**/*.test.ts",
+        "**/*.spec.ts",
       ],
+      thresholds: {
+        "src/lib/utils/**": {
+          lines: 70,
+          functions: 70,
+          branches: 60,
+          statements: 70,
+        },
+      },
     },
   },
   resolve: {

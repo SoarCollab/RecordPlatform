@@ -4,6 +4,7 @@ import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.dao.dto.File;
 
 import java.util.Date;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
@@ -12,11 +13,11 @@ import java.util.function.Consumer;
  */
 public class FileTestBuilder {
 
-    private static long idCounter = 1L;
+    private static final AtomicLong idCounter = new AtomicLong(1L);
 
     public static File aFile() {
         return new File()
-                .setId(idCounter++)
+                .setId(idCounter.getAndIncrement())
                 .setUid(100L)
                 .setFileName("test_file.txt")
                 .setFileHash("sha256_" + System.nanoTime())
@@ -52,6 +53,6 @@ public class FileTestBuilder {
     }
 
     public static void resetIdCounter() {
-        idCounter = 1L;
+        idCounter.set(1L);
     }
 }
