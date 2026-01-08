@@ -19,15 +19,12 @@ RecordPlatform provides ready-to-use scripts in the `scripts/` directory.
 
 | Script | Purpose |
 |--------|---------|
-| `start.sh` | Development startup (no agent) |
-| `start-all-skywalking.sh` | Production startup with SkyWalking |
-| `start-with-skywalking.sh` | Single service with SkyWalking |
-| `stop-all.sh` | Stop all services |
+| `start.sh` | Unified service management (start/stop/restart/status) |
 
 ### Start All Services (Production)
 
 ```bash
-./scripts/start-all-skywalking.sh prod
+./scripts/start.sh start all --skywalking --profile=prod
 ```
 
 This starts services in the correct order with SkyWalking agent attached.
@@ -35,18 +32,18 @@ This starts services in the correct order with SkyWalking agent attached.
 ### Start Individual Service
 
 ```bash
-./scripts/start-with-skywalking.sh <service> <profile>
+./scripts/start.sh start <service> --skywalking --profile=prod
 
 # Examples
-./scripts/start-with-skywalking.sh storage prod
-./scripts/start-with-skywalking.sh fisco prod
-./scripts/start-with-skywalking.sh web prod
+./scripts/start.sh start storage --skywalking --profile=prod
+./scripts/start.sh start fisco --skywalking --profile=prod
+./scripts/start.sh start backend --skywalking --profile=prod
 ```
 
 ### Stop All Services
 
 ```bash
-./scripts/stop-all.sh
+./scripts/start.sh stop all
 ```
 
 ## High Availability Setup

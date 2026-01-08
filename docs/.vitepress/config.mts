@@ -4,6 +4,15 @@ import { withMermaid } from "vitepress-plugin-mermaid";
 export default withMermaid(
   defineConfig({
     base: '/RecordPlatform/',
+
+    // Vite build configuration
+    vite: {
+      build: {
+        // Mermaid and other diagram libraries are large but necessary
+        // Increase warning limit to suppress false positives
+        chunkSizeWarningLimit: 2000,
+      },
+    },
     title: "RecordPlatform",
     description:
       "Enterprise-grade file attestation platform powered by blockchain and distributed storage",

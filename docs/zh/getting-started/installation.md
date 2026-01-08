@@ -5,7 +5,7 @@
 ## 克隆仓库
 
 ```bash
-git clone https://github.com/your-org/RecordPlatform.git
+git clone https://github.com/SoarCollab/RecordPlatform.git
 cd RecordPlatform
 ```
 
@@ -69,12 +69,12 @@ cd platform-frontend && pnpm run dev
 
 ```bash
 # 启动所有服务
-./scripts/start.sh all
+./scripts/start.sh start all
 
 # 或单独启动
-./scripts/start.sh storage
-./scripts/start.sh fisco
-./scripts/start.sh web
+./scripts/start.sh start storage
+./scripts/start.sh start fisco
+./scripts/start.sh start backend
 ```
 
 ### 生产模式
@@ -83,12 +83,12 @@ cd platform-frontend && pnpm run dev
 
 ```bash
 # 启动所有服务（带 SkyWalking）
-./scripts/start-all-skywalking.sh prod
+./scripts/start.sh start all --skywalking --profile=prod
 
 # 或单独启动
-./scripts/start-with-skywalking.sh storage prod
-./scripts/start-with-skywalking.sh fisco prod
-./scripts/start-with-skywalking.sh web prod
+./scripts/start.sh start storage --skywalking --profile=prod
+./scripts/start.sh start fisco --skywalking --profile=prod
+./scripts/start.sh start backend --skywalking --profile=prod
 ```
 
 ## 验证安装

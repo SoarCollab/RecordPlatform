@@ -55,15 +55,15 @@ Authorization: Bearer <token>
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| POST | `/auth/login` | 用户登录 |
-| POST | `/auth/register` | 用户注册 |
-| POST | `/auth/logout` | 用户登出 |
-| GET | `/auth/me` | 获取当前用户信息 |
+| POST | `/api/v1/auth/login` | 用户登录 |
+| POST | `/api/v1/auth/register` | 用户注册 |
+| POST | `/api/v1/auth/logout` | 用户登出 |
+| GET | `/api/v1/auth/me` | 获取当前用户信息 |
 
 #### 用户注册
 
 ```http
-POST /auth/register
+POST /api/v1/auth/register
 Content-Type: application/json
 
 {
@@ -87,65 +87,67 @@ Content-Type: application/json
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| POST | `/file/upload` | 上传文件（multipart） |
-| GET | `/file/list` | 列出用户文件 |
-| GET | `/file/{id}` | 获取文件详情 |
-| GET | `/file/download/{id}` | 下载文件 |
-| DELETE | `/file/{id}` | 删除文件 |
-| GET | `/file/search` | 搜索文件 |
+| POST | `/api/v1/files/upload/start` | 开始分块上传 |
+| POST | `/api/v1/files/upload/chunk` | 上传文件块 |
+| POST | `/api/v1/files/upload/merge` | 合并上传块 |
+| GET | `/api/v1/files` | 列出用户文件 |
+| GET | `/api/v1/files/{hash}` | 获取文件详情 |
+| GET | `/api/v1/files/{hash}/download` | 下载文件 |
+| DELETE | `/api/v1/files/{hash}` | 删除文件 |
+| GET | `/api/v1/files/search` | 搜索文件 |
 
 ### 图片
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| POST | `/images/upload/avatar` | 上传用户头像 |
-| POST | `/images/upload/image` | 上传通用图片 |
-| GET | `/images/download/**` | 下载图片 |
+| POST | `/api/v1/images/upload/avatar` | 上传用户头像 |
+| POST | `/api/v1/images/upload/image` | 上传通用图片 |
+| GET | `/api/v1/images/download/**` | 下载图片 |
 
 ### 文件分享
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| POST | `/share/create` | 创建分享链接 |
-| GET | `/share/{code}` | 访问分享文件 |
-| GET | `/share/list` | 列出用户分享 |
-| DELETE | `/share/{id}` | 撤销分享 |
-| GET | `/share/{id}/logs` | 获取分享访问日志 |
+| POST | `/api/v1/files/share` | 创建分享链接 |
+| GET | `/api/v1/files/share/{code}` | 访问分享文件 |
+| GET | `/api/v1/files/shares` | 列出用户分享 |
+| DELETE | `/api/v1/files/share/{code}` | 撤销分享 |
+| GET | `/api/v1/files/share/{code}/logs` | 获取分享访问日志 |
 
 ### 管理
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| GET | `/admin/files` | 列出所有文件（管理员） |
-| GET | `/admin/files/{id}` | 文件详情（含溯源链） |
-| PUT | `/admin/files/{id}/status` | 更新文件状态 |
-| DELETE | `/admin/files/{id}` | 强制删除文件 |
-| GET | `/admin/files/shares` | 列出所有分享 |
-| DELETE | `/admin/files/shares/{code}` | 强制取消分享 |
-| GET | `/admin/files/shares/{code}/logs` | 分享访问日志 |
-| GET | `/admin/files/shares/{code}/stats` | 分享访问统计 |
-| GET | `/admin/users` | 列出所有用户 |
-| PUT | `/admin/user/{id}/role` | 更新用户角色 |
-| GET | `/admin/audit/logs` | 获取审计日志 |
-| GET | `/admin/system/monitor` | 系统指标 |
+| GET | `/api/v1/admin/files` | 列出所有文件（管理员） |
+| GET | `/api/v1/admin/files/{hash}` | 文件详情（含溯源链） |
+| PUT | `/api/v1/admin/files/{hash}/status` | 更新文件状态 |
+| DELETE | `/api/v1/admin/files/{hash}` | 强制删除文件 |
+| GET | `/api/v1/admin/files/shares` | 列出所有分享 |
+| DELETE | `/api/v1/admin/files/shares/{code}` | 强制取消分享 |
+| GET | `/api/v1/admin/files/shares/{code}/logs` | 分享访问日志 |
+| GET | `/api/v1/admin/files/shares/{code}/stats` | 分享访问统计 |
+| GET | `/api/v1/system/permissions/users` | 列出所有用户 |
+| PUT | `/api/v1/system/permissions/users/{id}/role` | 更新用户角色 |
+| GET | `/api/v1/system/audit/logs` | 获取审计日志 |
+| GET | `/api/v1/system/monitor` | 系统指标 |
 
 ### 工单
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| POST | `/ticket` | 创建支持工单 |
-| GET | `/ticket/list` | 列出用户工单 |
-| GET | `/ticket/{id}` | 获取工单详情 |
-| POST | `/ticket/{id}/reply` | 回复工单 |
-| PUT | `/ticket/{id}/status` | 更新工单状态 |
-| GET | `/ticket/admin/list` | 列出所有工单（管理员）|
-| PUT | `/ticket/admin/{id}/assign` | 分配处理人（管理员）|
-| PUT | `/ticket/admin/{id}/status` | 更新状态（管理员）|
+| POST | `/api/v1/tickets` | 创建支持工单 |
+| GET | `/api/v1/tickets` | 列出用户工单 |
+| GET | `/api/v1/tickets/{id}` | 获取工单详情 |
+| POST | `/api/v1/tickets/{id}/reply` | 回复工单 |
+| PUT | `/api/v1/tickets/{id}/status` | 更新工单状态 |
+| GET | `/api/v1/tickets/admin` | 列出所有工单（管理员）|
+| PUT | `/api/v1/tickets/admin/{id}/assign` | 分配处理人（管理员）|
+| PUT | `/api/v1/tickets/admin/{id}/status` | 更新状态（管理员）|
 
 #### 创建工单
 
 ```http
-POST /ticket
+POST /api/v1/tickets
 Content-Type: application/json
 
 {
@@ -196,7 +198,7 @@ Content-Type: application/json
 #### 回复工单
 
 ```http
-POST /ticket/{id}/reply
+POST /api/v1/tickets/{id}/reply
 Content-Type: application/json
 
 {
@@ -480,6 +482,8 @@ eventSource.onmessage = (event) => {
   console.log(data.type, data.payload);
 };
 ```
+
+> **注意**：原生 EventSource 不支持自定义请求头。平台使用通过查询参数传递的短期令牌来建立认证的 SSE 连接。
 
 事件类型（kebab-case 格式）：
 - `message-received` - 新私信

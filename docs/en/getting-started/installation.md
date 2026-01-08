@@ -5,7 +5,7 @@ This guide covers building and running RecordPlatform from source.
 ## Clone the Repository
 
 ```bash
-git clone https://github.com/your-org/RecordPlatform.git
+git clone https://github.com/SoarCollab/RecordPlatform.git
 cd RecordPlatform
 ```
 
@@ -69,12 +69,12 @@ cd platform-frontend && pnpm run dev
 
 ```bash
 # Start all services
-./scripts/start.sh all
+./scripts/start.sh start all
 
 # Or start individually
-./scripts/start.sh storage
-./scripts/start.sh fisco
-./scripts/start.sh web
+./scripts/start.sh start storage
+./scripts/start.sh start fisco
+./scripts/start.sh start backend
 ```
 
 ### Production Mode
@@ -83,12 +83,12 @@ For production deployment with SkyWalking tracing:
 
 ```bash
 # Start all with SkyWalking
-./scripts/start-all-skywalking.sh prod
+./scripts/start.sh start all --skywalking --profile=prod
 
 # Or individually
-./scripts/start-with-skywalking.sh storage prod
-./scripts/start-with-skywalking.sh fisco prod
-./scripts/start-with-skywalking.sh web prod
+./scripts/start.sh start storage --skywalking --profile=prod
+./scripts/start.sh start fisco --skywalking --profile=prod
+./scripts/start.sh start backend --skywalking --profile=prod
 ```
 
 ## Verify Installation

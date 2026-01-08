@@ -19,15 +19,12 @@ RecordPlatform 在 `scripts/` 目录提供现成的脚本。
 
 | 脚本 | 用途 |
 |------|------|
-| `start.sh` | 开发环境启动（无 Agent） |
-| `start-all-skywalking.sh` | 生产启动（带 SkyWalking） |
-| `start-with-skywalking.sh` | 单服务启动（带 SkyWalking） |
-| `stop-all.sh` | 停止所有服务 |
+| `start.sh` | 统一服务管理（start/stop/restart/status）|
 
 ### 启动所有服务（生产环境）
 
 ```bash
-./scripts/start-all-skywalking.sh prod
+./scripts/start.sh start all --skywalking --profile=prod
 ```
 
 按正确顺序启动所有服务并挂载 SkyWalking Agent。
@@ -35,18 +32,18 @@ RecordPlatform 在 `scripts/` 目录提供现成的脚本。
 ### 启动单个服务
 
 ```bash
-./scripts/start-with-skywalking.sh <service> <profile>
+./scripts/start.sh start <service> --skywalking --profile=prod
 
 # 示例
-./scripts/start-with-skywalking.sh storage prod
-./scripts/start-with-skywalking.sh fisco prod
-./scripts/start-with-skywalking.sh web prod
+./scripts/start.sh start storage --skywalking --profile=prod
+./scripts/start.sh start fisco --skywalking --profile=prod
+./scripts/start.sh start backend --skywalking --profile=prod
 ```
 
 ### 停止所有服务
 
 ```bash
-./scripts/stop-all.sh
+./scripts/start.sh stop all
 ```
 
 ## 高可用架构
