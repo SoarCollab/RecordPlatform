@@ -183,16 +183,53 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     @Transactional(rollbackFor = Exception.class)
     @CacheEvict(cacheNames = "userFiles", key = "#userId")
     public void deleteFiles(Long userId, List<String> identifiers) {
-        if(CommonUtils.isEmpty(identifiers)) return;
+        if (CommonUtils.isEmpty(identifiers)) {
+            return;
+        }
+
+        List<String> fileHashes = new ArrayList<>();
+        List<Long> fileIds = new ArrayList<>();
+        for (String identifier : identifiers) {
+            if (CommonUtils.isEmpty(identifier)) {
+                continue;
+            }
+            String normalized = identifier.trim();
+            if (normalized.isEmpty()) {
+                continue;
+            }
+
+            boolean allDigits = normalized.chars().allMatch(Character::isDigit);
+            if (allDigits) {
+                try {
+                    fileIds.add(Long.parseLong(normalized));
+                } catch (NumberFormatException ignored) {
+                    fileHashes.add(normalized);
+                }
+            } else {
+                fileHashes.add(normalized);
+            }
+        }
+
+        if (fileHashes.isEmpty() && fileIds.isEmpty()) {
+            return;
+        }
 
         // 先查询要删除的文件，用于后续清除缓存
         LambdaQueryWrapper<File> queryWrapper = new LambdaQueryWrapper<File>()
                 .eq(File::getUid, userId)
-                .and(w -> w
-                        .in(File::getFileHash, identifiers)
-                        .or()
-                        .in(File::getId, identifiers)
-                )
+                .and(w -> {
+                    boolean hasCondition = false;
+                    if (!fileHashes.isEmpty()) {
+                        w.in(File::getFileHash, fileHashes);
+                        hasCondition = true;
+                    }
+                    if (!fileIds.isEmpty()) {
+                        if (hasCondition) {
+                            w.or();
+                        }
+                        w.in(File::getId, fileIds);
+                    }
+                })
                 .select(File::getFileHash);
         List<File> filesToDelete = this.list(queryWrapper);
 
@@ -200,11 +237,19 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         // 这样前端传入 file.id 时，对于 fileHash 为 null 的失败文件也能正确删除
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getUid, userId)
-                .and(w -> w
-                        .in(File::getFileHash, identifiers)
-                        .or()
-                        .in(File::getId, identifiers)
-                );
+                .and(w -> {
+                    boolean hasCondition = false;
+                    if (!fileHashes.isEmpty()) {
+                        w.in(File::getFileHash, fileHashes);
+                        hasCondition = true;
+                    }
+                    if (!fileIds.isEmpty()) {
+                        if (hasCondition) {
+                            w.or();
+                        }
+                        w.in(File::getId, fileIds);
+                    }
+                });
         // Logical delete only - physical cleanup is handled by FileCleanupTask scheduled job
         this.remove(wrapper);
 
@@ -339,34 +384,41 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "无权分享部分文件");
         }
 
-        // 调用区块链生成分享码
+        // 调用区块链生成分享码（核心能力：失败则直接返回错误，不做降级）
         Result<String> result = fileRemoteClient.shareFiles(ShareFilesRequest.builder()
                 .uploader(String.valueOf(userId))
                 .fileHashList(fileHash)
                 .expireMinutes(expireMinutes)
                 .build());
         String sharingCode = ResultUtils.getData(result);
-
-        if (CommonUtils.isNotEmpty(sharingCode)) {
-            // 同步写入数据库
-            Long tenantId = TenantContext.getTenantId();
-            Date expireTime = new Date(System.currentTimeMillis() + (long) expireMinutes * 60 * 1000L);
-
-            FileShare fileShare = new FileShare()
-                    .setTenantId(tenantId != null ? tenantId : 0L)
-                    .setUserId(userId)
-                    .setShareCode(sharingCode)
-                    .setShareType(shareType != null ? shareType : ShareType.PUBLIC.getCode())
-                    .setFileHashes(JsonConverter.toJson(fileHash))
-                    .setExpireTime(expireTime)
-                    .setAccessCount(0)
-                    .setStatus(FileShare.STATUS_ACTIVE)
-                    .setCreateTime(new Date());
-
-            fileShareMapper.insert(fileShare);
-            log.info("分享码已生成: userId={}, shareCode={}, shareType={}, fileCount={}",
-                    userId, sharingCode, ShareType.fromCode(shareType).getName(), fileHash.size());
+        if (CommonUtils.isEmpty(sharingCode)) {
+            throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "区块链返回的分享码为空");
         }
+
+        // 同步写入数据库
+        Long tenantId = TenantContext.getTenantId();
+        Date expireTime = new Date(System.currentTimeMillis() + (long) expireMinutes * 60 * 1000L);
+
+        // 分享码全局唯一（跨租户），提前检测避免唯一索引冲突导致 500
+        boolean exists = TenantContext.runWithoutIsolation(() -> fileShareMapper.selectByShareCode(sharingCode) != null);
+        if (exists) {
+            throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "分享码冲突，请重试");
+        }
+
+        FileShare fileShare = new FileShare()
+                .setTenantId(tenantId != null ? tenantId : 0L)
+                .setUserId(userId)
+                .setShareCode(sharingCode)
+                .setShareType(shareType != null ? shareType : ShareType.PUBLIC.getCode())
+                .setFileHashes(JsonConverter.toJson(fileHash))
+                .setExpireTime(expireTime)
+                .setAccessCount(0)
+                .setStatus(FileShare.STATUS_ACTIVE)
+                .setCreateTime(new Date());
+
+        fileShareMapper.insert(fileShare);
+        log.info("分享码已生成: userId={}, shareCode={}, shareType={}, fileCount={}",
+                userId, sharingCode, ShareType.fromCode(fileShare.getShareType()).getName(), fileHash.size());
 
         return sharingCode;
     }
@@ -616,13 +668,12 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             throw new GeneralException(ResultEnum.FAIL, "分享已被取消");
         }
 
-        // 调用区块链取消分享
+        // 调用区块链取消分享（核心能力：失败则直接返回错误，不做降级）
         Result<Boolean> result = fileRemoteClient.cancelShare(
                 CancelShareRequest.builder()
                         .shareCode(shareCode)
                         .uploader(String.valueOf(userId))
                         .build());
-
         if (!ResultUtils.isSuccess(result) || !Boolean.TRUE.equals(ResultUtils.getData(result))) {
             throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "取消分享失败");
         }

@@ -2,14 +2,21 @@ package cn.flying.test;
 
 import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.external.DistributedStorageService;
+import cn.flying.platformapi.constant.Result;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.test.config.MockDubboServicesConfig;
+import io.minio.BucketExistsArgs;
+import io.minio.MakeBucketArgs;
+import io.minio.MinioClient;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -21,8 +28,12 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
+import org.mockito.Mockito;
 
 import java.time.Duration;
+import java.util.UUID;
+
+import static org.mockito.ArgumentMatchers.any;
 
 @SpringBootTest(
         classes = TestApplication.class,
@@ -35,6 +46,7 @@ import java.time.Duration;
 )
 @Import(MockDubboServicesConfig.class)
 @ActiveProfiles("test")
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Testcontainers(disabledWithoutDocker = true)
 public abstract class BaseIntegrationTest {
 
@@ -57,6 +69,12 @@ public abstract class BaseIntegrationTest {
 
     @Autowired
     protected DistributedStorageService distributedStorageService;
+
+    @Autowired
+    private MinioClient s3Client;
+
+    @Value("${s3.bucket-name}")
+    private String s3BucketName;
 
     private static final String MINIO_ACCESS_KEY = "minioadmin";
     private static final String MINIO_SECRET_KEY = "minioadmin";
@@ -129,5 +147,51 @@ public abstract class BaseIntegrationTest {
 
     protected static String getMinioSecretKey() {
         return MINIO_SECRET_KEY;
+    }
+
+    /**
+     * 为集成测试提供 FileRemoteClient 的默认行为。
+     * <p>
+     * CI 环境不会连接真实的区块链/存储 Dubbo 服务，本项目通过 @MockBean 注入 FileRemoteClient。
+     * 这里为常用的“分享/取消分享”链路提供成功返回，避免因未 stub 导致返回 null 触发 NPE。
+     * 业务侧仍然以区块链调用为核心能力：生产环境不做降级，失败应直接返回错误。
+     * </p>
+     */
+    @BeforeEach
+    void stubFileRemoteClientDefaults() {
+        Mockito.lenient()
+                .when(fileRemoteClient.shareFiles(any()))
+                .thenAnswer(invocation -> Result.success(generateTestShareCode()));
+
+        Mockito.lenient()
+                .when(fileRemoteClient.cancelShare(any()))
+                .thenReturn(Result.success(true));
+
+        ensureS3BucketExists();
+    }
+
+    /**
+     * 生成测试用的分享码（长度 6，满足 file_share.share_code 唯一约束）。
+     *
+     * @return 分享码
+     */
+    private String generateTestShareCode() {
+        return UUID.randomUUID().toString().replace("-", "").substring(0, 6).toUpperCase();
+    }
+
+    /**
+     * 确保测试环境下 MinIO 的 S3 bucket 已创建，避免图片上传等集成测试因 NoSuchBucket 失败。
+     */
+    private void ensureS3BucketExists() {
+        try {
+            boolean exists = s3Client.bucketExists(
+                    BucketExistsArgs.builder().bucket(s3BucketName).build()
+            );
+            if (!exists) {
+                s3Client.makeBucket(MakeBucketArgs.builder().bucket(s3BucketName).build());
+            }
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to ensure S3 bucket exists: " + s3BucketName, e);
+        }
     }
 }

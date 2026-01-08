@@ -30,11 +30,13 @@ public class ProgressVO {
     private int totalChunks; // 总分片数量
     @Schema(description = "客户端ID")
     private String clientId;
+    @Schema(description = "上传状态：pending/uploading/paused/completed")
+    private String status;
 
     public ProgressVO(int progress, int uploadProgress,
                       int processProgress, int uploadedChunkCount,
                       int processedChunkCount, int totalChunks,
-                      String clientId) {
+                      String clientId, String status) {
         this.progress = progress;
         this.uploadProgress = uploadProgress;
         this.processProgress = processProgress;
@@ -42,5 +44,6 @@ public class ProgressVO {
         this.processedChunkCount = processedChunkCount;
         this.totalChunks = totalChunks;
         this.clientId = clientId;
+        this.status = status;
     }
 }

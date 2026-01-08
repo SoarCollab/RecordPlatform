@@ -37,6 +37,11 @@ spring:
   rabbitmq:
     virtual-host: /
     # Host, port are set by TestContainers DynamicPropertySource
+    listener:
+      simple:
+        auto-startup: false
+      direct:
+        auto-startup: false
 
   cache:
     type: caffeine

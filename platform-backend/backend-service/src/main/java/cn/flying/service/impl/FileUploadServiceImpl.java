@@ -5,6 +5,7 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.event.FileStorageEvent;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.exception.RetryableException;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.CommonUtils;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.common.util.UidEncoder;
@@ -337,15 +338,8 @@ public class FileUploadServiceImpl implements FileUploadService {
         //获取加密后的uid，防止数据泄漏
         String uidStr = String.valueOf(userId);
         String SUID = UidEncoder.encodeUid(uidStr);
-
-        // 如果未提供，则生成一个新的客户端ID（随机生成，作为客户端凭证）
-        if (CommonUtils.isBlank(clientId)) {
-            clientId = UidEncoder.encodeCid(SUID);
-        }
+        Long tenantId = TenantContext.getTenantId();
         String fileClientKey = fileName + "_" + SUID;
-
-        log.info("处理上传开始请求: 文件名={}, 文件大小={}, 内容类型={}, 用户SUID={}, 客户端ID={}",
-                fileName, fileSize, contentType, SUID, clientId);
 
         // --- 输入验证 ---
         if (!isValidFileName(fileName)) {
@@ -364,27 +358,60 @@ public class FileUploadServiceImpl implements FileUploadService {
             throw new GeneralException("不支持的文件类型");
         }
 
-        // --- 检查是否可恢复 ---
-        String existClientId = redisStateManager.getSessionIdByFileClientKey(fileName, SUID);
-        if (existClientId != null) {
-            FileUploadState existingState = redisStateManager.getState(existClientId);
-            if (existingState != null && existingState.getFileSize() == fileSize) {
-                log.info("发现可恢复的上传会话: 客户端ID={}, 文件客户端键={}", existClientId, fileClientKey);
-                redisStateManager.removePausedSession(existClientId); // 恢复会话（如果之前暂停了）
-                redisStateManager.updateLastActivityTime(existClientId);
-                // 返回恢复成功的 DTO
-                return createResumeDto(existingState);
-            } else {
-                log.warn("发现旧会话但无法恢复 (状态丢失或文件大小不匹配): 旧客户端ID={}, 文件客户端键={}", existClientId, fileClientKey);
-                if (existingState != null) {
-                    cleanupUploadSessionInternal(SUID, existClientId); // 主动清理旧状态
+        boolean hasProvidedClientId = !CommonUtils.isBlank(clientId);
+
+        // --- 显式 clientId：优先按 clientId 幂等恢复 ---
+        if (hasProvidedClientId) {
+            FileUploadState existingByClientId = redisStateManager.getState(clientId);
+            if (existingByClientId != null) {
+                validateUploadOwnership(userId, existingByClientId, clientId);
+                if (!Objects.equals(existingByClientId.getFileName(), fileName) || existingByClientId.getFileSize() != fileSize) {
+                    throw new GeneralException("客户端ID与上传会话不匹配");
+                }
+
+                log.info("发现可恢复的上传会话(显式 clientId): 客户端ID={}, 文件客户端键={}", clientId, fileClientKey);
+                redisStateManager.removePausedSession(clientId);
+                redisStateManager.updateLastActivityTime(clientId);
+                return createResumeDto(existingByClientId);
+            }
+        } else {
+            // --- 未提供 clientId：按 fileName + SUID 自动恢复 ---
+            String existClientId = redisStateManager.getSessionIdByFileClientKey(fileName, SUID);
+            if (existClientId != null) {
+                FileUploadState existingState = redisStateManager.getState(existClientId);
+                if (existingState != null && existingState.getFileSize() == fileSize) {
+                    try {
+                        validateUploadOwnership(userId, existingState, existClientId);
+                    } catch (GeneralException ex) {
+                        log.warn("发现旧会话但所有权不匹配，忽略恢复: 旧客户端ID={}, 文件客户端键={}, tenantId={}", existClientId, fileClientKey, tenantId);
+                        existingState = null;
+                    }
+                }
+                if (existingState != null && existingState.getFileSize() == fileSize) {
+                    log.info("发现可恢复的上传会话: 客户端ID={}, 文件客户端键={}", existClientId, fileClientKey);
+                    redisStateManager.removePausedSession(existClientId); // 恢复会话（如果之前暂停了）
+                    redisStateManager.updateLastActivityTime(existClientId);
+                    // 返回恢复成功的 DTO
+                    return createResumeDto(existingState);
+                } else {
+                    log.warn("发现旧会话但无法恢复 (状态丢失或文件大小不匹配): 旧客户端ID={}, 文件客户端键={}", existClientId, fileClientKey);
+                    if (existingState != null) {
+                        cleanupUploadSessionInternal(SUID, existClientId); // 主动清理旧状态
+                    }
                 }
             }
+
+            // 如果未提供，则生成一个新的客户端ID（随机生成，作为客户端凭证）
+            clientId = UidEncoder.encodeCid(SUID);
         }
+
+        log.info("处理上传开始请求: 文件名={}, 文件大小={}, 内容类型={}, 用户SUID={}, 客户端ID={}",
+                fileName, fileSize, contentType, SUID, clientId);
 
         // --- 创建新会话 ---
         try {
             FileUploadState newState = new FileUploadState(userId, fileName, fileSize, contentType, clientId, chunkSize, totalChunks);
+            newState.setTenantId(tenantId);
             redisStateManager.saveNewState(newState, SUID);
 
             // 确保客户端和会话的目录存在
@@ -528,11 +555,22 @@ public class FileUploadServiceImpl implements FileUploadService {
 
         redisStateManager.updateLastActivityTime(clientId);
         ProgressInfo progressInfo = calculateProgressInfo(state);
+        boolean paused = redisStateManager.isSessionPaused(clientId);
+        String status;
+        if (paused) {
+            status = "paused";
+        } else if (progressInfo.totalChunks > 0 && progressInfo.processedCount == progressInfo.totalChunks) {
+            status = "completed";
+        } else if (progressInfo.uploadedCount == 0) {
+            status = "pending";
+        } else {
+            status = "uploading";
+        }
 
         ProgressVO responseDto = new ProgressVO(progressInfo.totalProgress,
                 progressInfo.uploadProgressPercent, progressInfo.processProgressPercent,
                 progressInfo.uploadedCount, progressInfo.processedCount, progressInfo.totalChunks,
-                clientId
+                clientId, status
         );
 
         log.debug("获取进度成功: 客户端ID={}, 总进度={}%", clientId, progressInfo.totalProgress);
@@ -784,6 +822,14 @@ public class FileUploadServiceImpl implements FileUploadService {
      * 确保 Redis 中记录的 userId 与当前请求用户一致，否则拒绝访问
      */
     private void validateUploadOwnership(Long userId, FileUploadState state, String clientId) {
+        Long currentTenantId = TenantContext.getTenantId();
+        if (currentTenantId != null) {
+            Long stateTenantId = state.getTenantId();
+            if (stateTenantId == null || !stateTenantId.equals(currentTenantId)) {
+                log.warn("租户无权访问上传会话: tenantId={}, clientId={}, ownerTenantId={}", currentTenantId, clientId, stateTenantId);
+                throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "无权访问此上传会话");
+            }
+        }
         Long stateUserId = state.getUserId();
         if (stateUserId == null || !stateUserId.equals(userId)) {
             log.warn("用户无权访问上传会话: userId={}, clientId={}, ownerUserId={}", userId, clientId, stateUserId);
@@ -828,10 +874,11 @@ public class FileUploadServiceImpl implements FileUploadService {
 
     // 创建 /upload/start 的恢复会话响应 DTO
     private StartUploadVO createResumeDto(FileUploadState state) {
-        // 注意：恢复时返回的是已 *处理* (processed) 的分片列表，因为客户端需要知道哪些不需要再上传和处理
+        // 恢复时同时返回 uploadedChunks / processedChunks，便于客户端决定跳过上传或仅等待服务端处理
         return new StartUploadVO(state.getClientId(),
                 state.getChunkSize(), state.getTotalChunks(), state.getTotalChunks() == 1,
-                new ArrayList<>(state.getProcessedChunks()), // 返回已处理的分片序号列表
+                new ArrayList<>(state.getUploadedChunks()),
+                new ArrayList<>(state.getProcessedChunks()),
                 true // 标记为恢复
         );
     }
@@ -841,7 +888,8 @@ public class FileUploadServiceImpl implements FileUploadService {
         return new StartUploadVO(
                 state.getClientId(),
                 state.getChunkSize(), state.getTotalChunks(), state.getTotalChunks() == 1,
-                Collections.emptyList(), // 新会话没有已处理的分片
+                Collections.emptyList(),
+                Collections.emptyList(),
                 false // 标记为非恢复
         );
     }

@@ -25,8 +25,10 @@ public class StartUploadVO {
     private int totalChunks;
     @Schema(description = "是否为单分片文件")
     private boolean singleChunk; // 是否为单分片文件
-    @Schema(description = "已上传原始分片数量")
-    private List<Integer> processedChunks; // 更准确的命名：已处理的分片
+    @Schema(description = "已上传分片序号列表")
+    private List<Integer> uploadedChunks;
+    @Schema(description = "已处理分片序号列表")
+    private List<Integer> processedChunks;
     @Schema(description = "是否为恢复的会话")
     private boolean resumed; // 标记是否为恢复的会话
 }
