@@ -72,7 +72,8 @@ class FriendControllerIntegrationTest extends BaseControllerIntegrationTest {
     }
 
     private Friendship createFriendship(Long userId1, Long userId2, Long tenantId) {
-        Friendship friendship = Friendship.create(userId1, userId2, null);
+        FriendRequest request = createFriendRequest(userId1, userId2, tenantId, FriendRequest.STATUS_ACCEPTED);
+        Friendship friendship = Friendship.create(userId1, userId2, request.getId());
         friendship.setTenantId(tenantId);
         friendship.setCreateTime(new Date());
         friendship.setDeleted(0);

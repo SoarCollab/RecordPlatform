@@ -13,7 +13,9 @@ import org.slf4j.MDC;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.BindException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseBody;
@@ -41,6 +43,21 @@ import java.util.stream.Collectors;
 public class GlobalExceptionHandler {
 
     /**
+     * 处理缺失必填请求参数（如 @RequestParam 缺失）。
+     *
+     * @param ex 缺失参数异常
+     * @return 400 BAD_REQUEST 的统一错误响应
+     */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<?> handleMissingServletRequestParameterException(MissingServletRequestParameterException ex) {
+        String traceId = currentTraceId();
+        String detail = "缺少参数: " + ex.getParameterName();
+        log.warn("参数缺失(MissingServletRequestParameterException): detail={}, traceId={}", detail, traceId);
+        return Result.error(ResultEnum.PARAM_NOT_COMPLETE, withTrace(detail));
+    }
+
+    /**
      * 处理 @Valid @RequestBody 校验失败（JSON Body 参数校验）。
      *
      * @param ex 校验异常
@@ -56,6 +73,21 @@ public class GlobalExceptionHandler {
 
         log.warn("参数校验失败(MethodArgumentNotValidException): detail={}, traceId={}", detail, traceId);
         return Result.error(ResultEnum.PARAM_IS_INVALID, withTrace(detail.isEmpty() ? "参数无效" : detail));
+    }
+
+    /**
+     * 处理权限不足（如方法级鉴权抛出的 AccessDeniedException）。
+     *
+     * @param ex 权限异常
+     * @return 403 FORBIDDEN 的统一错误响应
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public Result<?> handleAccessDeniedException(AccessDeniedException ex) {
+        String traceId = currentTraceId();
+        String detail = ex.getMessage() != null ? ex.getMessage() : "权限不足";
+        log.warn("权限不足(AccessDeniedException): detail={}, traceId={}", detail, traceId);
+        return Result.error(ResultEnum.PERMISSION_UNAUTHORIZED, withTrace(detail));
     }
 
     /**

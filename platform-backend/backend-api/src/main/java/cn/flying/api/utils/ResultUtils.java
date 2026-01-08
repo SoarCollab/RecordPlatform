@@ -28,10 +28,15 @@ public class ResultUtils {
      * @throws GeneralException 当结果不成功时抛出异常
      */
     public static <T> T getData(Result<T> result) {
+        if (result == null) {
+            throw new GeneralException(cn.flying.common.constant.ResultEnum.SERVICE_UNAVAILABLE, "远程服务调用失败（返回为空）");
+        }
         if (isSuccess(result)) {
             return result.getData();
         }
-        throw new GeneralException(result.getMessage());
+        cn.flying.common.constant.ResultEnum mapped = cn.flying.common.constant.ResultEnum.fromCode(result.getCode());
+        Object detail = result.getMessage() != null ? result.getMessage() : "远程服务调用失败";
+        throw new GeneralException(mapped, detail);
     }
     
     /**
@@ -53,10 +58,15 @@ public class ResultUtils {
      * @throws GeneralException 当结果不成功时抛出异常
      */
     public static <T> T handleResult(Result<T> result) {
+        if (result == null) {
+            throw new GeneralException(cn.flying.common.constant.ResultEnum.SERVICE_UNAVAILABLE, "远程服务调用失败（返回为空）");
+        }
         if (isSuccess(result)) {
             return result.getData();
         }
-        throw new GeneralException("操作失败: " + result.getMessage() + ", 错误码: " + result.getCode());
+        cn.flying.common.constant.ResultEnum mapped = cn.flying.common.constant.ResultEnum.fromCode(result.getCode());
+        String detail = "操作失败: " + result.getMessage() + ", 错误码: " + result.getCode();
+        throw new GeneralException(mapped, detail);
     }
     
     /**
@@ -65,8 +75,13 @@ public class ResultUtils {
      * @throws GeneralException 当结果不成功时抛出异常
      */
     public static void checkResult(Result<?> result) {
+        if (result == null) {
+            throw new GeneralException(cn.flying.common.constant.ResultEnum.SERVICE_UNAVAILABLE, "远程服务调用失败（返回为空）");
+        }
         if (!isSuccess(result)) {
-            throw new GeneralException("操作失败: " + result.getMessage() + ", 错误码: " + result.getCode());
+            cn.flying.common.constant.ResultEnum mapped = cn.flying.common.constant.ResultEnum.fromCode(result.getCode());
+            String detail = "操作失败: " + result.getMessage() + ", 错误码: " + result.getCode();
+            throw new GeneralException(mapped, detail);
         }
     }
     
@@ -78,6 +93,12 @@ public class ResultUtils {
      * @return 如果原始结果成功则返回 null，否则返回包含相同错误信息的新 Result
      */
     public static <T, R> cn.flying.common.constant.Result<R> extractError(Result<T> result) {
+        if (result == null) {
+            return new cn.flying.common.constant.Result<>(
+                    cn.flying.common.constant.ResultEnum.SERVICE_UNAVAILABLE.getCode(),
+                    cn.flying.common.constant.ResultEnum.SERVICE_UNAVAILABLE.getMessage(),
+                    null);
+        }
         if (isSuccess(result)) {
             return null;
         }
@@ -93,6 +114,12 @@ public class ResultUtils {
      * @return 包含新数据但保留原始状态和消息的 Result
      */
     public static <T, R> cn.flying.common.constant.Result<R> transform(Result<T> result, R data) {
+        if (result == null) {
+            return new cn.flying.common.constant.Result<>(
+                    cn.flying.common.constant.ResultEnum.SERVICE_UNAVAILABLE.getCode(),
+                    cn.flying.common.constant.ResultEnum.SERVICE_UNAVAILABLE.getMessage(),
+                    data);
+        }
         return new cn.flying.common.constant.Result<>(result.getCode(), result.getMessage(), data);
     }
     
@@ -103,10 +130,22 @@ public class ResultUtils {
      * @return 解除嵌套后的 Result 对象
      */
     public static <T> cn.flying.common.constant.Result<T> unwrap(Result<Result<T>> result) {
+        if (result == null) {
+            return new cn.flying.common.constant.Result<>(
+                    cn.flying.common.constant.ResultEnum.SERVICE_UNAVAILABLE.getCode(),
+                    cn.flying.common.constant.ResultEnum.SERVICE_UNAVAILABLE.getMessage(),
+                    null);
+        }
         if (!isSuccess(result)) {
             return new cn.flying.common.constant.Result<>(result.getCode(), result.getMessage(), null);
         }
         Result<T> innerResult = result.getData();
+        if (innerResult == null) {
+            return new cn.flying.common.constant.Result<>(
+                    cn.flying.common.constant.ResultEnum.SERVICE_UNAVAILABLE.getCode(),
+                    cn.flying.common.constant.ResultEnum.SERVICE_UNAVAILABLE.getMessage(),
+                    null);
+        }
         return new cn.flying.common.constant.Result<>(innerResult.getCode(), innerResult.getMessage(), innerResult.getData());
     }
-} 
+}

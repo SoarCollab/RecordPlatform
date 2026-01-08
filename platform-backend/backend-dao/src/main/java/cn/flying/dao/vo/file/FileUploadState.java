@@ -19,6 +19,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @NoArgsConstructor
 @Schema(description = "文件上传状态类")
 public class FileUploadState {
+    @Schema(description = "租户ID（上传会话所属租户）")
+    private Long tenantId;
     @Schema(description = "用户ID（上传会话所属用户）")
     private Long userId;
     @Schema(description = "客户端ID（标识唯一的客户端会话）")
