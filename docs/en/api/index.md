@@ -55,15 +55,15 @@ Authorization: Bearer <token>
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/auth/login` | User login |
-| POST | `/auth/register` | User registration |
-| POST | `/auth/logout` | User logout |
-| GET | `/auth/me` | Get current user info |
+| POST | `/api/v1/auth/login` | User login |
+| POST | `/api/v1/auth/register` | User registration |
+| POST | `/api/v1/auth/logout` | User logout |
+| GET | `/api/v1/auth/me` | Get current user info |
 
 #### User Registration
 
 ```http
-POST /auth/register
+POST /api/v1/auth/register
 Content-Type: application/json
 
 {
@@ -87,65 +87,67 @@ Content-Type: application/json
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/file/upload` | Upload file (multipart) |
-| GET | `/file/list` | List user's files |
-| GET | `/file/{id}` | Get file details |
-| GET | `/file/download/{id}` | Download file |
-| DELETE | `/file/{id}` | Delete file |
-| GET | `/file/search` | Search files |
+| POST | `/api/v1/files/upload/start` | Start chunked upload |
+| POST | `/api/v1/files/upload/chunk` | Upload file chunk |
+| POST | `/api/v1/files/upload/merge` | Merge uploaded chunks |
+| GET | `/api/v1/files` | List user's files |
+| GET | `/api/v1/files/{hash}` | Get file details |
+| GET | `/api/v1/files/{hash}/download` | Download file |
+| DELETE | `/api/v1/files/{hash}` | Delete file |
+| GET | `/api/v1/files/search` | Search files |
 
 ### Images
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/images/upload/avatar` | Upload user avatar |
-| POST | `/images/upload/image` | Upload general image |
-| GET | `/images/download/**` | Download image |
+| POST | `/api/v1/images/upload/avatar` | Upload user avatar |
+| POST | `/api/v1/images/upload/image` | Upload general image |
+| GET | `/api/v1/images/download/**` | Download image |
 
 ### File Sharing
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/share/create` | Create share link |
-| GET | `/share/{code}` | Access shared file |
-| GET | `/share/list` | List user's shares |
-| DELETE | `/share/{id}` | Revoke share |
-| GET | `/share/{id}/logs` | Get share access logs |
+| POST | `/api/v1/files/share` | Create share link |
+| GET | `/api/v1/files/share/{code}` | Access shared file |
+| GET | `/api/v1/files/shares` | List user's shares |
+| DELETE | `/api/v1/files/share/{code}` | Revoke share |
+| GET | `/api/v1/files/share/{code}/logs` | Get share access logs |
 
 ### Admin
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/admin/files` | List all files (admin) |
-| GET | `/admin/files/{id}` | File detail with provenance |
-| PUT | `/admin/files/{id}/status` | Update file status |
-| DELETE | `/admin/files/{id}` | Force delete file |
-| GET | `/admin/files/shares` | List all shares |
-| DELETE | `/admin/files/shares/{code}` | Force cancel share |
-| GET | `/admin/files/shares/{code}/logs` | Share access logs |
-| GET | `/admin/files/shares/{code}/stats` | Share access stats |
-| GET | `/admin/users` | List all users |
-| PUT | `/admin/user/{id}/role` | Update user role |
-| GET | `/admin/audit/logs` | Get audit logs |
-| GET | `/admin/system/monitor` | System metrics |
+| GET | `/api/v1/admin/files` | List all files (admin) |
+| GET | `/api/v1/admin/files/{hash}` | File detail with provenance |
+| PUT | `/api/v1/admin/files/{hash}/status` | Update file status |
+| DELETE | `/api/v1/admin/files/{hash}` | Force delete file |
+| GET | `/api/v1/admin/files/shares` | List all shares |
+| DELETE | `/api/v1/admin/files/shares/{code}` | Force cancel share |
+| GET | `/api/v1/admin/files/shares/{code}/logs` | Share access logs |
+| GET | `/api/v1/admin/files/shares/{code}/stats` | Share access stats |
+| GET | `/api/v1/system/permissions/users` | List all users |
+| PUT | `/api/v1/system/permissions/users/{id}/role` | Update user role |
+| GET | `/api/v1/system/audit/logs` | Get audit logs |
+| GET | `/api/v1/system/monitor` | System metrics |
 
 ### Tickets
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/ticket` | Create support ticket |
-| GET | `/ticket/list` | List user's tickets |
-| GET | `/ticket/{id}` | Get ticket details |
-| POST | `/ticket/{id}/reply` | Reply to ticket |
-| PUT | `/ticket/{id}/status` | Update ticket status |
-| GET | `/ticket/admin/list` | List all tickets (admin) |
-| PUT | `/ticket/admin/{id}/assign` | Assign handler (admin) |
-| PUT | `/ticket/admin/{id}/status` | Update status (admin) |
+| POST | `/api/v1/tickets` | Create support ticket |
+| GET | `/api/v1/tickets` | List user's tickets |
+| GET | `/api/v1/tickets/{id}` | Get ticket details |
+| POST | `/api/v1/tickets/{id}/reply` | Reply to ticket |
+| PUT | `/api/v1/tickets/{id}/status` | Update ticket status |
+| GET | `/api/v1/tickets/admin` | List all tickets (admin) |
+| PUT | `/api/v1/tickets/admin/{id}/assign` | Assign handler (admin) |
+| PUT | `/api/v1/tickets/admin/{id}/status` | Update status (admin) |
 
 #### Create Ticket
 
 ```http
-POST /ticket
+POST /api/v1/tickets
 Content-Type: application/json
 
 {
@@ -196,7 +198,7 @@ Content-Type: application/json
 #### Reply to Ticket
 
 ```http
-POST /ticket/{id}/reply
+POST /api/v1/tickets/{id}/reply
 Content-Type: application/json
 
 {
@@ -480,6 +482,8 @@ eventSource.onmessage = (event) => {
   console.log(data.type, data.payload);
 };
 ```
+
+> **Note**: Native EventSource doesn't support custom headers. The platform uses a short-lived token passed via query parameter for authenticated SSE connections.
 
 Event types (kebab-case format):
 - `message-received` - New private message
