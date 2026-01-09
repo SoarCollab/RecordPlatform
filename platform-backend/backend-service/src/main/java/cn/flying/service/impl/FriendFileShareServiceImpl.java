@@ -77,7 +77,8 @@ public class FriendFileShareServiceImpl extends ServiceImpl<FriendFileShareMappe
                 .in(File::getFileHash, fileHashes);
         long ownedCount = fileMapper.selectCount(wrapper);
         if (ownedCount != fileHashes.size()) {
-            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "无权分享部分文件");
+            // 安全策略：不泄露文件存在性/归属，统一视为文件不存在
+            throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
         }
 
         // 序列化文件哈希列表
@@ -142,6 +143,22 @@ public class FriendFileShareServiceImpl extends ServiceImpl<FriendFileShareMappe
     @Transactional
     public void markAsRead(Long userId, String shareId) {
         Long sId = IdUtils.fromExternalId(shareId);
+        FriendFileShare share = this.getById(sId);
+
+        if (share == null) {
+            throw new GeneralException(ResultEnum.FRIEND_SHARE_NOT_FOUND);
+        }
+
+        // 仅接收者可以标记已读
+        if (!share.getFriendId().equals(userId)) {
+            throw new GeneralException(ResultEnum.FRIEND_SHARE_UNAUTHORIZED);
+        }
+
+        // 幂等：已读则直接返回成功
+        if (share.getIsRead() != null && share.getIsRead() == 1) {
+            return;
+        }
+
         int updated = baseMapper.markAsRead(sId, userId, new Date(), TenantContext.getTenantId());
         if (updated > 0) {
             log.info("标记好友分享已读: shareId={}, userId={}", sId, userId);

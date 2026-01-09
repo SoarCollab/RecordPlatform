@@ -2,6 +2,8 @@ package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
+import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.entity.Conversation;
@@ -15,6 +17,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -53,7 +57,12 @@ public class ConversationController {
             @Parameter(description = "会话ID") @PathVariable String id,
             @Parameter(description = "消息页码") @RequestParam(defaultValue = "1") Integer pageNum,
             @Parameter(description = "消息每页数量") @RequestParam(defaultValue = "50") Integer pageSize) {
-        Long conversationId = IdUtils.fromExternalId(id);
+        Long conversationId;
+        try {
+            conversationId = IdUtils.fromExternalId(id);
+        } catch (Exception e) {
+            throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
+        }
         ConversationDetailVO result = conversationService.getConversationDetail(userId, conversationId, pageNum, pageSize);
         return Result.success(result);
     }
@@ -72,7 +81,12 @@ public class ConversationController {
     public Result<String> markAsRead(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Parameter(description = "会话ID") @PathVariable String id) {
-        Long conversationId = IdUtils.fromExternalId(id);
+        Long conversationId;
+        try {
+            conversationId = IdUtils.fromExternalId(id);
+        } catch (Exception e) {
+            throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
+        }
         messageService.markAsRead(userId, conversationId);
         return Result.success("已标记为已读");
     }
@@ -83,8 +97,23 @@ public class ConversationController {
     public Result<String> delete(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Parameter(description = "会话ID") @PathVariable String id) {
-        Long conversationId = IdUtils.fromExternalId(id);
+        Long conversationId;
+        try {
+            conversationId = IdUtils.fromExternalId(id);
+        } catch (Exception e) {
+            throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
+        }
         conversationService.deleteConversation(userId, conversationId);
         return Result.success("删除成功");
+    }
+
+    /**
+     * 兜底处理：避免路径被归一化后误匹配到 /{id}（例如 /conversations//read 可能变为 /conversations/read）。
+     *
+     * @return 404 Not Found
+     */
+    @GetMapping("/read")
+    public ResponseEntity<Void> readGetNotSupported() {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
     }
 }

@@ -230,10 +230,12 @@ class ConversationServiceImplTest {
             ConversationDetailVO result = conversationService.getConversationDetail(USER_A, CONVERSATION_ID, 1, 20);
 
             assertNotNull(result);
-            assertEquals("ext_" + CONVERSATION_ID, result.getId());
-            assertEquals("ext_" + USER_B, result.getOtherUserId());
-            assertEquals("userB", result.getOtherUsername());
-            assertEquals(1, result.getMessages().size());
+            assertNotNull(result.getConversation());
+            assertEquals("ext_" + CONVERSATION_ID, result.getConversation().getId());
+            assertEquals("ext_" + USER_B, result.getConversation().getOtherUserId());
+            assertEquals("userB", result.getConversation().getOtherUsername());
+            assertNotNull(result.getMessages());
+            assertEquals(1, result.getMessages().getRecords().size());
         }
 
         @Test
@@ -258,7 +260,7 @@ class ConversationServiceImplTest {
             GeneralException ex = assertThrows(GeneralException.class,
                     () -> conversationService.getConversationDetail(otherUserId, CONVERSATION_ID, 1, 20));
 
-            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, ex.getResultEnum());
+            assertEquals(ResultEnum.CONVERSATION_NOT_FOUND, ex.getResultEnum());
         }
 
         @Test
@@ -346,13 +348,13 @@ class ConversationServiceImplTest {
         }
 
         @Test
-        @DisplayName("should do nothing when conversation not found")
+        @DisplayName("should throw when conversation not found")
         void deleteConversation_notFound() {
             when(conversationService.getById(CONVERSATION_ID)).thenReturn(null);
 
-            assertDoesNotThrow(() -> conversationService.deleteConversation(USER_A, CONVERSATION_ID));
-
-            verify(conversationService, never()).removeById(any());
+            GeneralException ex = assertThrows(GeneralException.class,
+                    () -> conversationService.deleteConversation(USER_A, CONVERSATION_ID));
+            assertEquals(ResultEnum.CONVERSATION_NOT_FOUND, ex.getResultEnum());
         }
 
         @Test
@@ -366,7 +368,7 @@ class ConversationServiceImplTest {
             GeneralException ex = assertThrows(GeneralException.class,
                     () -> conversationService.deleteConversation(otherUserId, CONVERSATION_ID));
 
-            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, ex.getResultEnum());
+            assertEquals(ResultEnum.CONVERSATION_NOT_FOUND, ex.getResultEnum());
         }
 
         @Test
