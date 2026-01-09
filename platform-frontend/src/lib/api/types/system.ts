@@ -9,11 +9,15 @@ export interface SysPermission {
   type: PermissionType;
   module?: string;
   action?: string;
+  description?: string;
+  tenantId?: number;
   parentId?: string;
   path?: string;
   icon?: string;
   sort: number;
   status: number;
+  createTime?: string;
+  updateTime?: string;
   children?: SysPermission[];
 }
 
@@ -142,4 +146,90 @@ export interface MonitorMetrics {
   systemStats: SystemStats;
   chainStatus: ChainStatus;
   health: SystemHealth;
+}
+
+export type AuditOverview = Record<string, unknown>;
+
+export interface AuditConfigVO {
+  id: number;
+  configKey: string;
+  configValue: string;
+  description?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface HighFrequencyOperationVO {
+  userId: string;
+  username: string;
+  requestIp: string;
+  operationCount: number;
+  startTime: string;
+  endTime: string;
+  timeSpanSeconds: number;
+}
+
+export interface ErrorOperationStatsVO {
+  module: string;
+  operationType: string;
+  errorMsg: string;
+  errorCount: number;
+  firstOccurrence: string;
+  lastOccurrence: string;
+}
+
+export interface UserTimeDistributionVO {
+  hourOfDay: number;
+  dayOfWeek: number;
+  operationCount: number;
+}
+
+export interface AuditLogQueryVO {
+  pageNum?: number;
+  pageSize?: number;
+  userId?: string;
+  username?: string;
+  module?: string;
+  operationType?: string;
+  status?: number;
+  requestIp?: string;
+  startTime?: string;
+  endTime?: string;
+}
+
+export interface SysOperationLog {
+  id: number | string;
+  module: string;
+  operationType: string;
+  description?: string;
+  method?: string;
+  requestUrl?: string;
+  requestMethod?: string;
+  requestIp?: string;
+  requestParam?: string;
+  responseResult?: string;
+  status: number;
+  errorMsg?: string;
+  userId?: string;
+  username?: string;
+  operationTime?: string;
+  executionTime?: number;
+}
+
+export interface PermissionCreateRequest {
+  code: string;
+  name: string;
+  module: string;
+  action: string;
+  description?: string;
+}
+
+export interface PermissionUpdateRequest {
+  name?: string;
+  description?: string;
+  status?: number;
+}
+
+export interface GrantPermissionRequest {
+  permissionCode: string;
 }
