@@ -112,6 +112,15 @@ public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
     @Override
     @Transactional
     public void markAsRead(Long userId, Long conversationId) {
+        Conversation conversation = conversationService.getById(conversationId);
+        if (conversation == null) {
+            throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
+        }
+        if (!conversation.getParticipantA().equals(userId) && !conversation.getParticipantB().equals(userId)) {
+            // 安全策略：隐藏会话是否存在
+            throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
+        }
+
         int updated = baseMapper.markConversationAsRead(conversationId, userId, new Date(), TenantContext.getTenantId());
         if (updated > 0) {
             log.info("标记 {} 条消息为已读, conversationId={}, userId={}", updated, conversationId, userId);

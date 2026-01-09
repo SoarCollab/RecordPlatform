@@ -82,28 +82,20 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
         }
 
         if (!conversation.getParticipantA().equals(userId) && !conversation.getParticipantB().equals(userId)) {
-            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
+            // 安全策略：隐藏会话是否存在
+            throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
         }
-
-        Long otherUserId = conversation.getOtherParticipant(userId);
-        Account otherUser = accountService.findAccountById(otherUserId);
 
         Page<Message> messagePage = new Page<>(pageNum, pageSize);
         IPage<MessageVO> messages = messageService.getMessages(userId, conversationId, messagePage);
 
-        ConversationDetailVO vo = new ConversationDetailVO()
-                .setId(IdUtils.toExternalId(conversationId))
-                .setOtherUserId(IdUtils.toExternalId(otherUserId))
-                .setMessages(messages.getRecords())
+        ConversationVO conversationVO = convertToVO(conversation, userId);
+
+        return new ConversationDetailVO()
+                .setConversation(conversationVO)
+                .setMessages(messages)
                 .setHasMore(messages.getCurrent() < messages.getPages())
                 .setTotalMessages(messages.getTotal());
-
-        if (otherUser != null) {
-            vo.setOtherUsername(otherUser.getUsername())
-                    .setOtherAvatar(otherUser.getAvatar());
-        }
-
-        return vo;
     }
 
     @Override
@@ -116,11 +108,12 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
     public void deleteConversation(Long userId, Long conversationId) {
         Conversation conversation = getById(conversationId);
         if (conversation == null) {
-            return;
+            throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
         }
 
         if (!conversation.getParticipantA().equals(userId) && !conversation.getParticipantB().equals(userId)) {
-            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
+            // 安全策略：隐藏会话是否存在
+            throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
         }
 
         // 执行软删除（MyBatis-Plus 的 @TableLogic 会自动处理）

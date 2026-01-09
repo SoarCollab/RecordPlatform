@@ -187,6 +187,7 @@ class MessageServiceImplTest {
         @Test
         @DisplayName("should mark messages as read")
         void markAsRead_success() {
+            when(conversationService.getById(CONVERSATION_ID)).thenReturn(createConversation());
             when(messageMapper.markConversationAsRead(eq(CONVERSATION_ID), eq(SENDER_ID), any(), eq(TENANT_ID)))
                     .thenReturn(5);
 
@@ -198,6 +199,7 @@ class MessageServiceImplTest {
         @Test
         @DisplayName("should handle no messages to mark")
         void markAsRead_noMessages() {
+            when(conversationService.getById(CONVERSATION_ID)).thenReturn(createConversation());
             when(messageMapper.markConversationAsRead(eq(CONVERSATION_ID), eq(SENDER_ID), any(), eq(TENANT_ID)))
                     .thenReturn(0);
 

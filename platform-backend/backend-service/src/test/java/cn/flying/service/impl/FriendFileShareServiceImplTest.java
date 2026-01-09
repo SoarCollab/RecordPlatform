@@ -160,7 +160,7 @@ class FriendFileShareServiceImplTest {
             GeneralException ex = assertThrows(GeneralException.class,
                     () -> friendFileShareService.shareToFriend(SHARER_ID, vo));
 
-            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, ex.getResultEnum());
+            assertEquals(ResultEnum.FILE_NOT_EXIST, ex.getResultEnum());
         }
 
         @Test
@@ -288,6 +288,8 @@ class FriendFileShareServiceImplTest {
         @Test
         @DisplayName("should mark share as read")
         void markAsRead_success() {
+            FriendFileShare share = createActiveShare();
+            doReturn(share).when(friendFileShareService).getById(SHARE_ID);
             when(friendFileShareMapper.markAsRead(eq(SHARE_ID), eq(FRIEND_ID), any(), eq(TENANT_ID)))
                     .thenReturn(1);
 
@@ -299,8 +301,9 @@ class FriendFileShareServiceImplTest {
         @Test
         @DisplayName("should handle already read share")
         void markAsRead_alreadyRead() {
-            when(friendFileShareMapper.markAsRead(eq(SHARE_ID), eq(FRIEND_ID), any(), eq(TENANT_ID)))
-                    .thenReturn(0);
+            FriendFileShare share = createActiveShare();
+            share.setIsRead(1);
+            doReturn(share).when(friendFileShareService).getById(SHARE_ID);
 
             assertDoesNotThrow(() -> friendFileShareService.markAsRead(FRIEND_ID, "ext_" + SHARE_ID));
         }
