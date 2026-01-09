@@ -15,6 +15,8 @@
     <description>fisco</description>
     <properties>
         <java.version>21</java.version>
+        <!-- Mockito inline mock maker relies on Byte Buddy instrumentation -->
+        <byte-buddy-agent.version>1.14.19</byte-buddy-agent.version>
         <fisco.bcos.version>3.8.0</fisco.bcos.version>
         <web3j.version>4.9.8</web3j.version>
         <jakarta.servlet-api.version>6.0.0</jakarta.servlet-api.version>
@@ -144,6 +146,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
+                    <argLine>-javaagent:${settings.localRepository}/net/bytebuddy/byte-buddy-agent/${byte-buddy-agent.version}/byte-buddy-agent-${byte-buddy-agent.version}.jar -Djdk.attach.allowAttachSelf=true -XX:+EnableDynamicAgentLoading</argLine>
                     <systemPropertyVariables>
                         <!--
                             WedPR Crypto SDK 会在 ${user.home}/.fisco 下解压/写入 native 依赖。

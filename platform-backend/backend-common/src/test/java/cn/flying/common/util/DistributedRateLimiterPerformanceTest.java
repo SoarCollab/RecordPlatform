@@ -1,5 +1,7 @@
 package cn.flying.common.util;
 
+import cn.flying.test.logging.LogbackSilencerExtension;
+import cn.flying.test.logging.SilenceLoggers;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -21,6 +23,7 @@ import static org.mockito.Mockito.*;
 
 @DisplayName("DistributedRateLimiter Performance Tests")
 @ExtendWith(MockitoExtension.class)
+@ExtendWith(LogbackSilencerExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class DistributedRateLimiterPerformanceTest {
 
@@ -32,6 +35,7 @@ class DistributedRateLimiterPerformanceTest {
 
     private static final int THREAD_COUNT = 20;
     private static final int REQUESTS_PER_THREAD = 100;
+
 
     @Nested
     @DisplayName("Concurrent Rate Limiting")
@@ -297,6 +301,7 @@ class DistributedRateLimiterPerformanceTest {
 
         @Test
         @DisplayName("should handle Redis failures gracefully under load")
+        @SilenceLoggers("cn.flying.common.util.DistributedRateLimiter")
         void shouldHandleRedisFailuresGracefullyUnderLoad() throws Exception {
             AtomicInteger callCount = new AtomicInteger(0);
             doAnswer(inv -> {
@@ -341,6 +346,7 @@ class DistributedRateLimiterPerformanceTest {
 
         @Test
         @DisplayName("should recover after Redis reconnection")
+        @SilenceLoggers("cn.flying.common.util.DistributedRateLimiter")
         void shouldRecoverAfterRedisReconnection() throws Exception {
             AtomicInteger callCount = new AtomicInteger(0);
             AtomicInteger failurePhase = new AtomicInteger(0);

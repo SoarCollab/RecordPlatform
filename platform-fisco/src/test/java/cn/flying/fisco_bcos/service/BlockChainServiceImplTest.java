@@ -6,6 +6,8 @@ import cn.flying.fisco_bcos.monitor.FiscoMetrics;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.request.*;
 import cn.flying.platformapi.response.*;
+import cn.flying.test.logging.LogbackSilencerExtension;
+import cn.flying.test.logging.SilenceLoggers;
 import io.micrometer.core.instrument.Timer;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,6 +22,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
+@ExtendWith(LogbackSilencerExtension.class)
 @DisplayName("BlockChainServiceImpl Tests")
 class BlockChainServiceImplTest {
 
@@ -76,18 +79,19 @@ class BlockChainServiceImplTest {
 
         @Test
         @DisplayName("Should handle store file exception")
+        @SilenceLoggers("cn.flying.fisco_bcos.exception.BlockChainExceptionHandler")
         void storeFile_shouldHandleException() {
             StoreFileRequest request = new StoreFileRequest();
             request.setUploader("user123");
             request.setFileName("test.pdf");
             request.setContent("content");
             request.setParam("{}");
-            
+
             when(chainAdapter.storeFile(anyString(), anyString(), anyString(), anyString()))
                     .thenThrow(new RuntimeException("Connection failed"));
-            
+
             Result<StoreFileResponse> result = blockChainService.storeFile(request);
-            
+
             assertThat(result.getCode()).isNotEqualTo(200);
             verify(fiscoMetrics).stopStoreTimer(timerSample);
         }
@@ -189,12 +193,13 @@ class BlockChainServiceImplTest {
 
         @Test
         @DisplayName("Should handle exception when getting shared files")
+        @SilenceLoggers("cn.flying.fisco_bcos.exception.BlockChainExceptionHandler")
         void getSharedFiles_shouldHandleException() {
             when(chainAdapter.getSharedFiles(anyString()))
                     .thenThrow(new RuntimeException("Share not found"));
-            
+
             Result<SharingVO> result = blockChainService.getSharedFiles("INVALID_CODE");
-            
+
             assertThat(result.getCode()).isNotEqualTo(200);
         }
     }
@@ -380,12 +385,13 @@ class BlockChainServiceImplTest {
 
         @Test
         @DisplayName("Should handle transaction not found")
+        @SilenceLoggers("cn.flying.fisco_bcos.exception.BlockChainExceptionHandler")
         void getTransactionByHash_shouldHandleNotFound() {
             when(chainAdapter.getTransaction(anyString()))
                     .thenThrow(new RuntimeException("Transaction not found"));
-            
+
             Result<TransactionVO> result = blockChainService.getTransactionByHash("invalid_hash");
-            
+
             assertThat(result.getCode()).isNotEqualTo(200);
         }
     }
