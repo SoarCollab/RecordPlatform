@@ -9,6 +9,16 @@ import type {
   ChainStatus,
   SystemHealth,
   MonitorMetrics,
+  AuditOverview,
+  AuditConfigVO,
+  HighFrequencyOperationVO,
+  ErrorOperationStatsVO,
+  UserTimeDistributionVO,
+  AuditLogQueryVO,
+  SysOperationLog,
+  PermissionCreateRequest,
+  PermissionUpdateRequest,
+  GrantPermissionRequest,
 } from "../types";
 
 // ===== System Stats =====
@@ -52,14 +62,55 @@ export async function getPermissionTree(): Promise<SysPermission[]> {
   return api.get<SysPermission[]>(PERM_BASE);
 }
 
-/**
- * 获取用户权限
- */
-export async function getUserPermissions(
-  userId: string,
-): Promise<SysPermission[]> {
-  return api.get<SysPermission[]>(`${PERM_BASE}/user/${userId}`);
+export async function listPermissionModules(): Promise<string[]> {
+  return api.get<string[]>(`${PERM_BASE}/modules`);
 }
+
+export async function listPermissions(params?: {
+  module?: string;
+  pageNum?: number;
+  pageSize?: number;
+}): Promise<Page<SysPermission>> {
+  return api.get<Page<SysPermission>>(`${PERM_BASE}/list`, { params });
+}
+
+export async function createPermission(
+  data: PermissionCreateRequest,
+): Promise<SysPermission> {
+  return api.post<SysPermission>(PERM_BASE, data);
+}
+
+export async function updatePermission(
+  id: string,
+  data: PermissionUpdateRequest,
+): Promise<SysPermission> {
+  return api.put<SysPermission>(`${PERM_BASE}/${id}`, data);
+}
+
+export async function deletePermission(id: string): Promise<void> {
+  await api.delete(`${PERM_BASE}/${id}`);
+}
+
+export async function getRolePermissions(role: string): Promise<string[]> {
+  return api.get<string[]>(`${PERM_BASE}/roles/${role}`);
+}
+
+export async function grantRolePermission(
+  role: string,
+  data: GrantPermissionRequest,
+): Promise<void> {
+  await api.post(`${PERM_BASE}/roles/${role}/grant`, data);
+}
+
+export async function revokeRolePermission(
+  role: string,
+  permissionCode: string,
+): Promise<void> {
+  await api.delete(`${PERM_BASE}/roles/${role}/revoke`, {
+    params: { permissionCode },
+  });
+}
+
 
 // ===== Audit Logs =====
 
@@ -74,11 +125,51 @@ export async function getAuditLogs(
   return api.get<Page<AuditLogVO>>(AUDIT_BASE, { params });
 }
 
-/**
- * 获取审计日志详情
- */
-export async function getAuditLog(id: string): Promise<AuditLogVO> {
-  return api.get<AuditLogVO>(`${AUDIT_BASE}/${id}`);
+export async function getAuditLog(id: string): Promise<SysOperationLog> {
+  return api.get<SysOperationLog>(`${AUDIT_BASE}/logs/${id}`);
+}
+
+export async function getAuditOverview(): Promise<AuditOverview> {
+  return api.get<AuditOverview>(`${AUDIT_BASE}/overview`);
+}
+
+export async function getHighFrequencyOperations(): Promise<HighFrequencyOperationVO[]> {
+  return api.get<HighFrequencyOperationVO[]>(`${AUDIT_BASE}/high-frequency`);
+}
+
+export async function getSensitiveOperations(
+  data: AuditLogQueryVO,
+): Promise<Page<SysOperationLog>> {
+  return api.post<Page<SysOperationLog>>(`${AUDIT_BASE}/sensitive/page`, data);
+}
+
+export async function getErrorOperationStats(): Promise<ErrorOperationStatsVO[]> {
+  return api.get<ErrorOperationStatsVO[]>(`${AUDIT_BASE}/error-stats`);
+}
+
+export async function getUserTimeDistribution(): Promise<UserTimeDistributionVO[]> {
+  return api.get<UserTimeDistributionVO[]>(`${AUDIT_BASE}/time-distribution`);
+}
+
+export async function getAuditConfigs(): Promise<AuditConfigVO[]> {
+  return api.get<AuditConfigVO[]>(`${AUDIT_BASE}/configs`);
+}
+
+export async function updateAuditConfig(
+  data: AuditConfigVO,
+): Promise<boolean> {
+  return api.put<boolean>(`${AUDIT_BASE}/configs`, data);
+}
+
+export async function checkAuditAnomalies(): Promise<Record<string, unknown>> {
+  return api.get<Record<string, unknown>>(`${AUDIT_BASE}/check-anomalies`);
+}
+
+export async function backupAuditLogs(params?: {
+  days?: number;
+  deleteAfterBackup?: boolean;
+}): Promise<string> {
+  return api.post<string>(`${AUDIT_BASE}/backup-logs`, null, { params });
 }
 
 /**

@@ -15,7 +15,7 @@ import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -136,7 +136,7 @@ public class SysAuditController {
         List<SysOperationLog> logs = auditService.exportOperationLogs(queryVO);
         
         // 创建Excel工作簿
-        try (Workbook workbook = new XSSFWorkbook()) {
+        try (Workbook workbook = new HSSFWorkbook()) {
             Sheet sheet = workbook.createSheet("操作日志");
             
             // 创建标题行
@@ -175,7 +175,7 @@ public class SysAuditController {
             }
             
             // 设置响应头
-            String fileName = URLEncoder.encode("操作日志_" + System.currentTimeMillis() + ".xlsx", StandardCharsets.UTF_8);
+            String fileName = URLEncoder.encode("操作日志_" + System.currentTimeMillis() + ".xls", StandardCharsets.UTF_8);
             response.setContentType("application/vnd.ms-excel");
             response.setHeader("Content-Disposition", "attachment; filename=" + fileName);
             

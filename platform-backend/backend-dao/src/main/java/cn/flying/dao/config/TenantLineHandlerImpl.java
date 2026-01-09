@@ -17,6 +17,7 @@ public class TenantLineHandlerImpl implements TenantLineHandler {
 
     private static final Set<String> IGNORE_TABLES = Set.of(
             "tenant",
+            "sys_audit_config",
             "sys_config",
             "processed_message"
             // 注意：sys_operation_log 已移除，审计日志保持租户隔离
