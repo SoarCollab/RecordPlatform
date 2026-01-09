@@ -1,5 +1,7 @@
 package cn.flying.common.util;
 
+import cn.flying.test.logging.LogbackSilencerExtension;
+import cn.flying.test.logging.SilenceLoggers;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -13,6 +15,7 @@ import static org.mockito.Mockito.*;
 
 @DisplayName("DistributedRateLimiter Tests")
 @ExtendWith(MockitoExtension.class)
+@ExtendWith(LogbackSilencerExtension.class)
 class DistributedRateLimiterTest {
 
     @Mock
@@ -26,6 +29,7 @@ class DistributedRateLimiterTest {
     private static final int LIMIT = 10;
     private static final int WINDOW_SECONDS = 60;
     private static final int BLOCK_SECONDS = 300;
+
 
     @Nested
     @DisplayName("tryAcquireWithBlock Tests")
@@ -66,6 +70,7 @@ class DistributedRateLimiterTest {
 
         @Test
         @DisplayName("should return ALLOWED on Redis failure (graceful degradation)")
+        @SilenceLoggers("cn.flying.common.util.DistributedRateLimiter")
         void tryAcquireWithBlock_returnsAllowedOnRedisFailure() {
             doThrow(new RuntimeException("Redis connection failed"))
                     .when(redisTemplate).execute(any(), anyList(), any(Object[].class));
@@ -115,6 +120,7 @@ class DistributedRateLimiterTest {
 
         @Test
         @DisplayName("should return true on Redis failure (graceful degradation)")
+        @SilenceLoggers("cn.flying.common.util.DistributedRateLimiter")
         void tryAcquire_returnsTrueOnRedisFailure() {
             doThrow(new RuntimeException("Redis connection failed"))
                     .when(redisTemplate).execute(any(), anyList(), any(Object[].class));
@@ -151,6 +157,7 @@ class DistributedRateLimiterTest {
 
         @Test
         @DisplayName("should return false on Redis failure")
+        @SilenceLoggers("cn.flying.common.util.DistributedRateLimiter")
         void isBlocked_returnsFalseOnRedisFailure() {
             when(redisTemplate.hasKey(BLOCK_KEY))
                     .thenThrow(new RuntimeException("Redis connection failed"));

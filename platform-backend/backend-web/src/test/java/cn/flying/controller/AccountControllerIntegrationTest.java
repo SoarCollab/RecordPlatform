@@ -183,14 +183,15 @@ class AccountControllerIntegrationTest extends BaseControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("POST /change-password - Should return 400 for wrong old password")
-        void changePassword_shouldReturn400ForWrongOldPassword() throws Exception {
+        @DisplayName("POST /change-password - Should return business error for wrong old password")
+        void changePassword_shouldReturnBusinessErrorForWrongOldPassword() throws Exception {
             ChangePasswordVO changeVO = new ChangePasswordVO();
             changeVO.setPassword("wrongPassword");
             changeVO.setNew_password("newPassword123");
 
             performPost(BASE_URL + "/change-password", changeVO)
-                    .andExpect(status().isBadRequest());
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value(10001));
         }
 
         @Test

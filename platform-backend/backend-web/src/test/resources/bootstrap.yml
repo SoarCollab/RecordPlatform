@@ -1,0 +1,11 @@
+spring:
+  cloud:
+    nacos:
+      config:
+        enabled: false
+      discovery:
+        enabled: false
+  # 覆盖主资源目录的 bootstrap.yml，避免测试阶段触发 Nacos 配置导入与其日志文件写入。
+  config:
+    import: ""
+

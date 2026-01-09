@@ -1,6 +1,9 @@
 package cn.flying.common.util;
 
+import cn.flying.test.logging.LogbackSilencerExtension;
+import cn.flying.test.logging.SilenceLoggers;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.math.BigDecimal;
 import java.nio.file.Files;
@@ -15,7 +18,9 @@ import static org.assertj.core.api.Assertions.*;
  * 测试通用工具类的各种方法
  */
 @DisplayName("CommonUtils Unit Tests")
+@ExtendWith(LogbackSilencerExtension.class)
 class CommonUtilsTest {
+
 
     @Nested
     @DisplayName("assertNotNull Tests")
@@ -673,6 +678,7 @@ class CommonUtilsTest {
 
         @Test
         @DisplayName("should return null for non-existent file")
+        @SilenceLoggers("cn.flying.common.util.CommonUtils")
         void shouldReturnNullForNonExistentFile() {
             Path nonExistent = Path.of("/non/existent/file.txt");
             assertThat(CommonUtils.calculateFileSha256Hex(nonExistent)).isNull();

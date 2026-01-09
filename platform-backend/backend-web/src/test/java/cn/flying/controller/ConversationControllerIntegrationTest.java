@@ -222,7 +222,7 @@ class ConversationControllerIntegrationTest extends BaseControllerIntegrationTes
             performGet(BASE_URL + "/unread-count")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
-                    .andExpect(jsonPath("$.data.count").value(2)); // 2 unread messages created
+                    .andExpect(jsonPath("$.data.count").value(1)); // Same conversation counts as 1 unread conversation
         }
 
         @Test

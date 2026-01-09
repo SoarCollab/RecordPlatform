@@ -21,6 +21,11 @@
         <testcontainers.version>1.20.4</testcontainers.version>
         <jacoco.version>0.8.12</jacoco.version>
         <maven-failsafe-plugin.version>3.2.5</maven-failsafe-plugin.version>
+        <!--
+            Mockito inline mock maker relies on Byte Buddy instrumentation.
+            On some macOS/JDK builds, runtime self-attach is not available; pre-attaching the agent fixes it.
+         -->
+        <byte-buddy-agent.version>1.14.19</byte-buddy-agent.version>
     </properties>
     <!--  设置打包方式pom  -->
     <packaging>pom</packaging>
@@ -106,6 +111,17 @@
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+            <!--
+                Ensure Mockito inline mock maker can load without relying on runtime self-attach.
+                JDK 21+ may restrict dynamic agent loading; tests using MockedStatic require it.
+             -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>${argLine} -javaagent:${settings.localRepository}/net/bytebuddy/byte-buddy-agent/${byte-buddy-agent.version}/byte-buddy-agent-${byte-buddy-agent.version}.jar -Djdk.attach.allowAttachSelf=true -XX:+EnableDynamicAgentLoading</argLine>
+                </configuration>
             </plugin>
             <!-- JaCoCo for test coverage -->
             <plugin>
