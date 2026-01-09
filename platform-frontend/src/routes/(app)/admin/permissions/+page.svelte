@@ -1,27 +1,127 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { goto } from "$app/navigation";
   import { useNotifications } from "$stores/notifications.svelte";
   import { useAuth } from "$stores/auth.svelte";
-  import { goto } from "$app/navigation";
-  import { getPermissionTree } from "$api/endpoints/system";
+  import {
+    getPermissionTree,
+    listPermissionModules,
+    listPermissions,
+    createPermission,
+    updatePermission,
+    deletePermission,
+    getRolePermissions,
+    grantRolePermission,
+    revokeRolePermission,
+  } from "$api/endpoints/system";
   import { PermissionType, type SysPermission } from "$api/types";
   import { Button } from "$lib/components/ui/button";
-  import { Badge } from "$lib/components/ui/badge";
   import { Input } from "$lib/components/ui/input";
+  import { Badge } from "$lib/components/ui/badge";
+  import * as Table from "$lib/components/ui/table";
+  import * as Dialog from "$lib/components/ui/dialog";
+  import * as Card from "$lib/components/ui/card";
+  import * as Tabs from "$lib/components/ui/tabs";
 
   const notifications = useNotifications();
   const auth = useAuth();
 
-  let permissions = $state<SysPermission[]>([]);
-  let loading = $state(true);
+  let activeTab = $state("tree");
+
+  let tree = $state<SysPermission[]>([]);
+  let treeLoading = $state(true);
   let searchQuery = $state("");
   let expandedNodes = $state<Set<string>>(new Set());
 
-  // Filtered permissions based on search
-  const filteredPermissions = $derived(
-    searchQuery
-      ? filterPermissions(permissions, searchQuery.toLowerCase())
-      : permissions
+  let modules = $state<string[]>([]);
+
+  let listLoading = $state(false);
+  let listRecords = $state<SysPermission[]>([]);
+  let listTotal = $state(0);
+  let listPage = $state(1);
+  let listPageSize = $state(20);
+  let listModule = $state("");
+  let listSearch = $state("");
+
+  let createDialogOpen = $state(false);
+  let creating = $state(false);
+  let createCode = $state("");
+  let createName = $state("");
+  let createModule = $state("");
+  let createAction = $state("");
+  let createDescription = $state("");
+
+  let editDialogOpen = $state(false);
+  let editing = $state(false);
+  let editingPermission = $state<SysPermission | null>(null);
+  let editName = $state("");
+  let editDescription = $state("");
+  let editStatus = $state<number>(1);
+
+  let deleteDialogOpen = $state(false);
+  let deleting = $state(false);
+  let deletingPermission = $state<SysPermission | null>(null);
+
+  let roleTab = $state("admin");
+  let roleCodes = $state<Set<string>>(new Set());
+  let roleDesiredCodes = $state<Set<string>>(new Set());
+  let roleLoading = $state(false);
+  let roleSaving = $state(false);
+  let showGrantedOnly = $state(false);
+  let roleModule = $state("");
+  let roleSearch = $state("");
+  let rolePermLoading = $state(false);
+  let rolePermRecords = $state<SysPermission[]>([]);
+  let rolePermTotal = $state(0);
+  let rolePermPage = $state(1);
+  let rolePermPageSize = $state(50);
+  let rolePendingCodes = $state<Set<string>>(new Set());
+
+  const filteredTree = $derived(
+    searchQuery ? filterPermissions(tree, searchQuery.toLowerCase()) : tree,
+  );
+
+  const filteredListRecords = $derived(
+    (() => {
+      const q = listSearch.trim().toLowerCase();
+      if (!q) return listRecords;
+      return listRecords.filter(
+        (p) =>
+          p.code.toLowerCase().includes(q) ||
+          p.name.toLowerCase().includes(q) ||
+          (p.description || "").toLowerCase().includes(q),
+      );
+    })(),
+  );
+
+  const filteredRolePermRecords = $derived(
+    (() => {
+      const q = roleSearch.trim().toLowerCase();
+      return rolePermRecords.filter((p) => {
+        const matchesQuery =
+          !q ||
+          p.code.toLowerCase().includes(q) ||
+          p.name.toLowerCase().includes(q) ||
+          (p.description || "").toLowerCase().includes(q);
+
+        const matchesGranted = !showGrantedOnly || roleDesiredCodes.has(p.code);
+
+        return matchesQuery && matchesGranted;
+      });
+    })(),
+  );
+
+  const roleChangeCount = $derived(
+    (() => {
+      let count = 0;
+      roleDesiredCodes.forEach((code) => {
+        if (!roleCodes.has(code)) count++;
+      });
+      roleCodes.forEach((code) => {
+        if (!roleDesiredCodes.has(code)) count++;
+      });
+      return count;
+    })(),
   );
 
   onMount(() => {
@@ -30,53 +130,92 @@
       goto("/dashboard");
       return;
     }
-    loadPermissions();
+    reloadAll();
   });
 
-  async function loadPermissions() {
-    loading = true;
+  async function reloadAll() {
+    await Promise.allSettled([loadTree(), loadModules(), loadPermissionList()]);
+  }
+
+  async function loadModules() {
     try {
-      const rawPermissions = await getPermissionTree();
-      permissions = buildPermissionTree(rawPermissions);
-      // Expand first level by default
-      permissions.forEach((p) => expandedNodes.add(p.id));
-      expandedNodes = new Set(expandedNodes);
-    } catch (err) {
-      notifications.error(
-        "加载失败",
-        err instanceof Error ? err.message : "请稍后重试"
-      );
-    } finally {
-      loading = false;
+      modules = await listPermissionModules();
+    } catch {
+      modules = [];
     }
   }
 
+  async function loadTree() {
+    treeLoading = true;
+    try {
+      const raw = await getPermissionTree();
+      tree = buildPermissionTree(raw);
+      const nextExpanded = new Set<string>();
+      tree.forEach((p) => nextExpanded.add(p.id));
+      expandedNodes = nextExpanded;
+    } catch (err) {
+      notifications.error(
+        "加载失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
+    } finally {
+      treeLoading = false;
+    }
+  }
+
+  async function loadPermissionList() {
+    listLoading = true;
+    try {
+      const result = await listPermissions({
+        module: listModule || undefined,
+        pageNum: listPage,
+        pageSize: listPageSize,
+      });
+      listRecords = result.records;
+      listTotal = result.total;
+    } catch (err) {
+      notifications.error(
+        "加载失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
+    } finally {
+      listLoading = false;
+    }
+  }
+
+  function handleListSearch() {
+    listPage = 1;
+    loadPermissionList();
+  }
+
+  function resetListFilters() {
+    listModule = "";
+    listSearch = "";
+    listPage = 1;
+    loadPermissionList();
+  }
+
   function buildPermissionTree(flatPerms: SysPermission[]): SysPermission[] {
-    const modules = new Map<string, SysPermission[]>();
+    const modulesMap = new Map<string, SysPermission[]>();
 
-    // Group by module
     flatPerms.forEach((p) => {
-      const action =
-        p.action || (p.code.includes(":") ? p.code.split(":")[1] : "");
-
-      // Infer type since backend doesn't provide it
+      const action = p.action || (p.code.includes(":") ? p.code.split(":")[1] : "");
       p.type = inferPermissionType(action);
 
       const moduleName =
         p.module || (p.code.includes(":") ? p.code.split(":")[0] : "other");
 
-      if (!modules.has(moduleName)) {
-        modules.set(moduleName, []);
+      if (!modulesMap.has(moduleName)) {
+        modulesMap.set(moduleName, []);
       }
-      modules.get(moduleName)!.push(p);
+      modulesMap.get(moduleName)!.push(p);
     });
 
-    // Create tree
-    const tree: SysPermission[] = [];
+    const treeNodes: SysPermission[] = [];
     let sortCounter = 0;
 
-    modules.forEach((children, moduleName) => {
-      tree.push({
+    modulesMap.forEach((children, moduleName) => {
+      treeNodes.push({
         id: `module-${moduleName}`,
         name: getModuleDisplayName(moduleName),
         code: `module:${moduleName}`,
@@ -88,15 +227,14 @@
       });
     });
 
-    // Sort modules by name/sort
-    return tree.sort((a, b) => a.sort - b.sort);
+    return treeNodes.sort((a, b) => a.sort - b.sort);
   }
 
   function inferPermissionType(action: string): PermissionType {
     const lowerAction = action.toLowerCase();
     if (
       ["read", "view", "list", "query", "get", "monitor"].some((k) =>
-        lowerAction.includes(k)
+        lowerAction.includes(k),
       )
     ) {
       return PermissionType.API;
@@ -104,7 +242,7 @@
     if (["admin", "manage"].some((k) => lowerAction.includes(k))) {
       return PermissionType.BUTTON;
     }
-    return PermissionType.BUTTON; // Default for write/update/delete etc.
+    return PermissionType.BUTTON;
   }
 
   function getModuleDisplayName(module: string): string {
@@ -119,84 +257,303 @@
       role: "角色管理",
       audit: "审计日志",
     };
-    return map[module] || module.charAt(0).toUpperCase() + module.slice(1);
+    return map[module] || module;
   }
 
-  function filterPermissions(
-    perms: SysPermission[],
-    query: string
-  ): SysPermission[] {
-    const result: SysPermission[] = [];
-    for (const perm of perms) {
-      const matches =
-        perm.name.toLowerCase().includes(query) ||
-        perm.code.toLowerCase().includes(query);
-      const childMatches = perm.children
-        ? filterPermissions(perm.children, query)
-        : [];
+  function filterPermissions(perms: SysPermission[], query: string): SysPermission[] {
+    const mapped = perms
+      .map((perm) => {
+        const children = perm.children
+          ? filterPermissions(perm.children, query)
+          : undefined;
 
-      if (matches || childMatches.length > 0) {
-        result.push({
-          ...perm,
-          children: childMatches.length > 0 ? childMatches : perm.children,
-        });
-      }
-    }
-    return result;
+        const matches =
+          perm.name.toLowerCase().includes(query) ||
+          perm.code.toLowerCase().includes(query) ||
+          (perm.module || "").toLowerCase().includes(query) ||
+          (perm.action || "").toLowerCase().includes(query);
+
+        if (matches || (children && children.length > 0)) {
+          return { ...perm, children };
+        }
+        return null;
+      })
+      .filter((x) => x !== null);
+
+    return mapped as SysPermission[];
   }
 
   function toggleExpand(id: string) {
-    if (expandedNodes.has(id)) {
-      expandedNodes.delete(id);
+    const next = new Set(expandedNodes);
+    if (next.has(id)) {
+      next.delete(id);
     } else {
-      expandedNodes.add(id);
+      next.add(id);
     }
-    expandedNodes = new Set(expandedNodes);
-  }
-
-  function expandAll() {
-    const allIds = collectAllIds(permissions);
-    expandedNodes = new Set(allIds);
-  }
-
-  function collapseAll() {
-    expandedNodes = new Set();
-  }
-
-  function collectAllIds(perms: SysPermission[]): string[] {
-    const ids: string[] = [];
-    for (const perm of perms) {
-      ids.push(perm.id);
-      if (perm.children) {
-        ids.push(...collectAllIds(perm.children));
-      }
-    }
-    return ids;
+    expandedNodes = next;
   }
 
   function getTypeLabel(type: PermissionType): string {
-    switch (type) {
-      case PermissionType.MENU:
-        return "菜单";
-      case PermissionType.BUTTON:
-        return "按钮";
-      case PermissionType.API:
-        return "API";
-      default:
-        return "未知";
+    if (type === PermissionType.MENU) return "菜单";
+    if (type === PermissionType.API) return "API";
+    return "按钮";
+  }
+
+  function openCreateDialog() {
+    createCode = "";
+    createName = "";
+    createModule = listModule || "";
+    createAction = "";
+    createDescription = "";
+    createDialogOpen = true;
+  }
+
+  async function submitCreate() {
+    const code = createCode.trim();
+    const name = createName.trim();
+    const module = createModule.trim();
+    const action = createAction.trim();
+
+    if (!code || !name || !module || !action) {
+      notifications.warning("请完整填写必填项");
+      return;
+    }
+
+    creating = true;
+    try {
+      await createPermission({
+        code,
+        name,
+        module,
+        action,
+        description: createDescription.trim() || undefined,
+      });
+      notifications.success("创建成功");
+      createDialogOpen = false;
+      await Promise.allSettled([loadPermissionList(), loadModules(), loadTree()]);
+    } catch (err) {
+      notifications.error(
+        "创建失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
+    } finally {
+      creating = false;
     }
   }
 
-  function getTypeIcon(type: PermissionType): string {
-    switch (type) {
-      case PermissionType.MENU:
-        return "menu";
-      case PermissionType.BUTTON:
-        return "button";
-      case PermissionType.API:
-        return "api";
-      default:
-        return "unknown";
+  function openEditDialog(perm: SysPermission) {
+    editingPermission = perm;
+    editName = perm.name;
+    editDescription = perm.description || "";
+    editStatus = perm.status ?? 1;
+    editDialogOpen = true;
+  }
+
+  async function submitEdit() {
+    if (!editingPermission) return;
+    editing = true;
+    try {
+      await updatePermission(String(editingPermission.id), {
+        name: editName.trim() || undefined,
+        description: editDescription.trim() || undefined,
+        status: editStatus,
+      });
+      notifications.success("更新成功");
+      editDialogOpen = false;
+      editingPermission = null;
+      await Promise.allSettled([loadPermissionList(), loadTree()]);
+    } catch (err) {
+      notifications.error(
+        "更新失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
+    } finally {
+      editing = false;
+    }
+  }
+
+  function openDeleteDialog(perm: SysPermission) {
+    deletingPermission = perm;
+    deleteDialogOpen = true;
+  }
+
+  async function confirmDelete() {
+    if (!deletingPermission) return;
+    deleting = true;
+    try {
+      await deletePermission(String(deletingPermission.id));
+      notifications.success("删除成功");
+      deleteDialogOpen = false;
+      deletingPermission = null;
+      await Promise.allSettled([loadPermissionList(), loadModules(), loadTree()]);
+    } catch (err) {
+      notifications.error(
+        "删除失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
+    } finally {
+      deleting = false;
+    }
+  }
+
+  async function loadRolePermissionsFor(role: string) {
+    roleLoading = true;
+    try {
+      const list = await getRolePermissions(role);
+      const set = new Set<string>(list);
+      roleCodes = set;
+      roleDesiredCodes = new Set(set);
+    } catch (err) {
+      notifications.error(
+        "加载失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
+      roleCodes = new Set();
+      roleDesiredCodes = new Set();
+    } finally {
+      roleLoading = false;
+    }
+  }
+
+  async function loadRolePermissionList() {
+    rolePermLoading = true;
+    try {
+      const result = await listPermissions({
+        module: roleModule || undefined,
+        pageNum: rolePermPage,
+        pageSize: rolePermPageSize,
+      });
+      rolePermRecords = result.records;
+      rolePermTotal = result.total;
+    } catch (err) {
+      notifications.error(
+        "加载失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
+    } finally {
+      rolePermLoading = false;
+    }
+  }
+
+  function handleRoleTabChange(role: string) {
+    roleTab = role;
+    rolePermPage = 1;
+    loadRolePermissionsFor(role);
+    loadRolePermissionList();
+  }
+
+  function resetRoleFilters() {
+    roleModule = "";
+    roleSearch = "";
+    rolePermPage = 1;
+    loadRolePermissionList();
+  }
+
+  function setRoleDesired(code: string, checked: boolean) {
+    const next = new Set(roleDesiredCodes);
+    if (checked) {
+      next.add(code);
+    } else {
+      next.delete(code);
+    }
+    roleDesiredCodes = next;
+  }
+
+  function resetRoleDesired() {
+    roleDesiredCodes = new Set(roleCodes);
+  }
+
+  function selectAllVisible() {
+    const next = new Set(roleDesiredCodes);
+    filteredRolePermRecords.forEach((p) => {
+      if (p.status === 1) next.add(p.code);
+    });
+    roleDesiredCodes = next;
+  }
+
+  function clearAllVisible() {
+    const next = new Set(roleDesiredCodes);
+    filteredRolePermRecords.forEach((p) => {
+      next.delete(p.code);
+    });
+    roleDesiredCodes = next;
+  }
+
+  async function saveRoleChanges() {
+    if (roleSaving) return;
+
+    const toGrant: string[] = [];
+    roleDesiredCodes.forEach((code) => {
+      if (!roleCodes.has(code)) toGrant.push(code);
+    });
+
+    const toRevoke: string[] = [];
+    roleCodes.forEach((code) => {
+      if (!roleDesiredCodes.has(code)) toRevoke.push(code);
+    });
+
+    if (toGrant.length === 0 && toRevoke.length === 0) {
+      notifications.info("没有需要保存的变更");
+      return;
+    }
+
+    roleSaving = true;
+    const errors: string[] = [];
+    const pending = new Set<string>();
+
+    try {
+      for (const code of toGrant) {
+        pending.add(code);
+        rolePendingCodes = new Set(pending);
+        try {
+          await grantRolePermission(roleTab, { permissionCode: code });
+        } catch (err) {
+          errors.push(code);
+          notifications.error(
+            "授权失败",
+            err instanceof Error ? err.message : "请稍后重试",
+          );
+        } finally {
+          pending.delete(code);
+          rolePendingCodes = new Set(pending);
+        }
+      }
+
+      for (const code of toRevoke) {
+        pending.add(code);
+        rolePendingCodes = new Set(pending);
+        try {
+          await revokeRolePermission(roleTab, code);
+        } catch (err) {
+          errors.push(code);
+          notifications.error(
+            "撤销失败",
+            err instanceof Error ? err.message : "请稍后重试",
+          );
+        } finally {
+          pending.delete(code);
+          rolePendingCodes = new Set(pending);
+        }
+      }
+    } finally {
+      roleSaving = false;
+      rolePendingCodes = new Set();
+      await loadRolePermissionsFor(roleTab);
+    }
+
+    if (errors.length > 0) {
+      notifications.warning("部分变更未生效", `失败项：${errors.length}`);
+    } else {
+      notifications.success("保存成功");
+    }
+  }
+
+  function handleTabChange(value: string) {
+    activeTab = value;
+    if (value === "list") loadPermissionList();
+    if (value === "roles") {
+      loadRolePermissionsFor(roleTab);
+      loadRolePermissionList();
     }
   }
 </script>
@@ -209,205 +566,457 @@
   <div class="flex items-center justify-between">
     <div>
       <h1 class="text-2xl font-bold">权限管理</h1>
-      <p class="text-muted-foreground">查看系统权限树结构</p>
+      <p class="text-muted-foreground">权限定义维护与角色授权</p>
     </div>
     <div class="flex gap-2">
-      <Button variant="outline" size="sm" onclick={expandAll}>展开全部</Button>
-      <Button variant="outline" size="sm" onclick={collapseAll}>折叠全部</Button
-      >
+      <Button variant="outline" onclick={reloadAll}>刷新</Button>
+      <Button onclick={openCreateDialog}>创建权限</Button>
     </div>
   </div>
 
-  <!-- Search -->
-  <div
-    class="mb-4 flex gap-4 rounded-xl border bg-card/50 p-4 backdrop-blur-sm"
-  >
-    <div class="relative flex-1 max-w-lg">
-      <div
-        class="pointer-events-none absolute left-3 top-2.5 text-muted-foreground"
-      >
-        <svg
-          class="h-4 w-4"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-          />
-        </svg>
-      </div>
-      <Input
-        placeholder="搜索权限名称或编码..."
-        bind:value={searchQuery}
-        class="pl-9"
-      />
-    </div>
-    {#if searchQuery}
-      <Button
-        variant="ghost"
-        onclick={() => (searchQuery = "")}
-        class="text-muted-foreground hover:text-foreground"
-      >
-        清除
-      </Button>
-    {/if}
-  </div>
+  <Tabs.Root value={activeTab} onValueChange={handleTabChange}>
+    <Tabs.List>
+      <Tabs.Trigger value="tree">权限树</Tabs.Trigger>
+      <Tabs.Trigger value="list">权限列表</Tabs.Trigger>
+      <Tabs.Trigger value="roles">角色权限</Tabs.Trigger>
+    </Tabs.List>
 
-  <!-- Permission Tree -->
-  <div class="rounded-xl border bg-card text-card-foreground shadow-sm">
-    <div class="p-6">
-      {#if loading}
-        <div class="flex h-64 items-center justify-center">
-          <div class="flex flex-col items-center gap-2">
-            <div
-              class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"
-            ></div>
-            <p class="text-sm text-muted-foreground">加载权限数据中...</p>
-          </div>
-        </div>
-      {:else if filteredPermissions.length === 0}
-        <div
-          class="flex h-64 flex-col items-center justify-center p-12 text-center text-muted-foreground"
-        >
-          <div
-            class="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted"
-          >
-            <svg
-              class="h-8 w-8 text-muted-foreground"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+    <Tabs.Content value="tree" class="mt-4">
+      <Card.Root>
+        <Card.Header class="pb-4">
+          <div class="flex items-center justify-between gap-3">
+            <Input
+              placeholder="搜索权限名称或编码..."
+              bind:value={searchQuery}
+            />
+            <Button
+              variant="outline"
+              onclick={() => {
+                searchQuery = "";
+              }}
+              disabled={!searchQuery}
             >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-              />
-            </svg>
+              清除
+            </Button>
           </div>
-          {#if searchQuery}
-            <p>未找到匹配的权限</p>
+        </Card.Header>
+        <Card.Content>
+          {#if treeLoading}
+            <div class="flex items-center justify-center p-10">
+              <div class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+            </div>
+          {:else if filteredTree.length === 0}
+            <div class="p-12 text-center text-muted-foreground">暂无权限数据</div>
           {:else}
-            <p>暂无权限数据</p>
+            <div class="space-y-1">
+              {#each filteredTree as perm (perm.id)}
+                {@render PermissionNode(perm, 0)}
+              {/each}
+            </div>
           {/if}
-        </div>
-      {:else}
-        <div class="space-y-1">
-          {#each filteredPermissions as permission (permission.id)}
-            {@render PermissionNode(permission, 0)}
-          {/each}
-        </div>
-      {/if}
-    </div>
-  </div>
+        </Card.Content>
+      </Card.Root>
+    </Tabs.Content>
 
-  <!-- Legend -->
-  <div
-    class="mt-4 flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3"
-  >
-    <div class="flex items-center gap-6">
-      <span class="text-sm font-medium text-muted-foreground">图例说明：</span>
-      <div class="flex items-center gap-2">
-        <div
-          class="flex h-5 w-5 items-center justify-center rounded bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
-        >
-          <svg
-            class="h-3 w-3"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M4 6h16M4 12h16M4 18h16"
+    <Tabs.Content value="list" class="mt-4">
+      <Card.Root>
+        <Card.Header class="pb-4">
+          <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <select
+              bind:value={listModule}
+              class="h-9 w-full rounded-md border bg-background px-3 text-sm focus:border-primary focus:outline-none"
+            >
+              <option value="">全部模块</option>
+              {#each modules as m (m)}
+                <option value={m}>{m}</option>
+              {/each}
+            </select>
+            <Input
+              placeholder="搜索 code/name/description"
+              bind:value={listSearch}
+              onkeydown={(e) => e.key === "Enter" && handleListSearch()}
             />
-          </svg>
-        </div>
-        <span class="text-sm">菜单</span>
-      </div>
-      <div class="flex items-center gap-2">
-        <div
-          class="flex h-5 w-5 items-center justify-center rounded bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
-        >
-          <svg
-            class="h-3 w-3"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5"
-            />
-          </svg>
-        </div>
-        <span class="text-sm">按钮</span>
-      </div>
-      <div class="flex items-center gap-2">
-        <div
-          class="flex h-5 w-5 items-center justify-center rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
-        >
-          <svg
-            class="h-3 w-3"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
-            />
-          </svg>
-        </div>
-        <span class="text-sm">API</span>
-      </div>
-    </div>
-  </div>
+            <div class="flex gap-2">
+              <Button onclick={handleListSearch} class="flex-1">搜索</Button>
+              <Button variant="secondary" onclick={resetListFilters}>重置</Button>
+            </div>
+            <div class="flex justify-end">
+              <Button variant="outline" onclick={loadPermissionList} disabled={listLoading}>
+                刷新
+              </Button>
+            </div>
+          </div>
+        </Card.Header>
+        <Card.Content>
+          {#if listLoading}
+            <div class="flex items-center justify-center p-10">
+              <div class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+            </div>
+          {:else}
+            <Table.Root>
+              <Table.Header>
+                <Table.Row>
+                  <Table.Head>Code</Table.Head>
+                  <Table.Head>Name</Table.Head>
+                  <Table.Head>Module</Table.Head>
+                  <Table.Head>Action</Table.Head>
+                  <Table.Head>Status</Table.Head>
+                  <Table.Head class="text-right">操作</Table.Head>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {#each filteredListRecords as perm (perm.id)}
+                  <Table.Row>
+                    <Table.Cell class="font-mono text-xs">{perm.code}</Table.Cell>
+                    <Table.Cell>{perm.name}</Table.Cell>
+                    <Table.Cell>{perm.module || "-"}</Table.Cell>
+                    <Table.Cell>{perm.action || "-"}</Table.Cell>
+                    <Table.Cell>
+                      <Badge variant={perm.status === 1 ? "default" : "destructive"}>
+                        {perm.status === 1 ? "启用" : "禁用"}
+                      </Badge>
+                    </Table.Cell>
+                    <Table.Cell class="text-right">
+                      <div class="flex justify-end gap-2">
+                        <Button size="sm" variant="outline" onclick={() => openEditDialog(perm)}>
+                          编辑
+                        </Button>
+                        <Button size="sm" variant="destructive" onclick={() => openDeleteDialog(perm)}>
+                          删除
+                        </Button>
+                      </div>
+                    </Table.Cell>
+                  </Table.Row>
+                {/each}
+              </Table.Body>
+            </Table.Root>
+
+            {#if listTotal > listPageSize}
+              <div class="mt-4 flex items-center justify-between">
+                <p class="text-sm text-muted-foreground">
+                  共 {listTotal} 条，第 {listPage} / {Math.max(1, Math.ceil(listTotal / listPageSize))} 页
+                </p>
+                <div class="flex gap-2">
+                  <Button
+                    variant="outline"
+                    disabled={listPage <= 1}
+                    onclick={() => {
+                      listPage = Math.max(1, listPage - 1);
+                      loadPermissionList();
+                    }}
+                  >
+                    上一页
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={listPage >= Math.ceil(listTotal / listPageSize)}
+                    onclick={() => {
+                      listPage = listPage + 1;
+                      loadPermissionList();
+                    }}
+                  >
+                    下一页
+                  </Button>
+                </div>
+              </div>
+            {/if}
+
+            {#if filteredListRecords.length === 0}
+              <div class="p-6 text-sm text-muted-foreground">暂无数据</div>
+            {/if}
+          {/if}
+        </Card.Content>
+      </Card.Root>
+    </Tabs.Content>
+
+    <Tabs.Content value="roles" class="mt-4">
+      <Card.Root>
+        <Card.Header class="pb-4">
+          <div class="flex flex-col gap-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="flex items-center gap-3">
+                <Card.Title>角色授权</Card.Title>
+                <span class="text-sm text-muted-foreground">待保存 {roleChangeCount} 项</span>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <Button
+                  variant={roleTab === "admin" ? "default" : "outline"}
+                  onclick={() => handleRoleTabChange("admin")}
+                >
+                  管理员
+                </Button>
+                <Button
+                  variant={roleTab === "monitor" ? "default" : "outline"}
+                  onclick={() => handleRoleTabChange("monitor")}
+                >
+                  监控员
+                </Button>
+                <Button
+                  variant={roleTab === "user" ? "default" : "outline"}
+                  onclick={() => handleRoleTabChange("user")}
+                >
+                  普通用户
+                </Button>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <label class="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  bind:checked={showGrantedOnly}
+                  class="h-4 w-4 rounded border accent-primary"
+                  disabled={roleSaving}
+                />
+                <span>仅看已授权</span>
+              </label>
+              <Button variant="outline" onclick={selectAllVisible} disabled={roleSaving}>
+                全选当前列表
+              </Button>
+              <Button variant="outline" onclick={clearAllVisible} disabled={roleSaving}>
+                取消当前列表
+              </Button>
+              <Button
+                variant="secondary"
+                onclick={resetRoleDesired}
+                disabled={roleSaving || roleChangeCount === 0}
+              >
+                撤销更改
+              </Button>
+              <Button onclick={saveRoleChanges} disabled={roleSaving || roleChangeCount === 0}>
+                {#if roleSaving}
+                  <div class="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+                {/if}
+                保存更改
+              </Button>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <select
+                bind:value={roleModule}
+                class="h-9 w-full rounded-md border bg-background px-3 text-sm focus:border-primary focus:outline-none"
+              >
+                <option value="">全部模块</option>
+                {#each modules as m (m)}
+                  <option value={m}>{m}</option>
+                {/each}
+              </select>
+              <Input
+                placeholder="搜索 code/name/description"
+                bind:value={roleSearch}
+                onkeydown={(e) => e.key === "Enter" && loadRolePermissionList()}
+              />
+              <div class="flex gap-2">
+                <Button
+                  onclick={() => {
+                    rolePermPage = 1;
+                    loadRolePermissionList();
+                  }}
+                  class="flex-1"
+                >
+                  搜索
+                </Button>
+                <Button variant="secondary" onclick={resetRoleFilters}>重置</Button>
+              </div>
+              <div class="flex justify-end">
+                <Button variant="outline" onclick={() => {
+                  loadRolePermissionsFor(roleTab);
+                  loadRolePermissionList();
+                }} disabled={roleLoading || rolePermLoading}>
+                  刷新
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Card.Header>
+        <Card.Content>
+          {#if roleLoading || rolePermLoading}
+            <div class="flex items-center justify-center p-10">
+              <div class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+            </div>
+          {:else}
+            <Table.Root>
+              <Table.Header>
+                <Table.Row>
+                  <Table.Head class="w-[80px]">授权</Table.Head>
+                  <Table.Head>Code</Table.Head>
+                  <Table.Head>Name</Table.Head>
+                  <Table.Head>Module</Table.Head>
+                  <Table.Head>Action</Table.Head>
+                  <Table.Head>Status</Table.Head>
+                </Table.Row>
+              </Table.Header>
+              <Table.Body>
+                {#each filteredRolePermRecords as perm (perm.id)}
+                  {@const checked = roleDesiredCodes.has(perm.code)}
+                  {@const changed = checked !== roleCodes.has(perm.code)}
+                  {@const disabled = perm.status !== 1}
+                  {@const pending = rolePendingCodes.has(perm.code)}
+                  <Table.Row>
+                    <Table.Cell>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={disabled || pending || roleSaving}
+                        class="h-4 w-4 rounded border accent-primary"
+                        onchange={(e) =>
+                          setRoleDesired(perm.code, (e.currentTarget as HTMLInputElement).checked)
+                        }
+                      />
+                    </Table.Cell>
+                    <Table.Cell class="font-mono text-xs">
+                      <div class="flex items-center gap-2">
+                        <span>{perm.code}</span>
+                        {#if changed}
+                          <span class="rounded bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">未保存</span>
+                        {/if}
+                      </div>
+                    </Table.Cell>
+                    <Table.Cell>{perm.name}</Table.Cell>
+                    <Table.Cell>{perm.module || "-"}</Table.Cell>
+                    <Table.Cell>{perm.action || "-"}</Table.Cell>
+                    <Table.Cell>
+                      <Badge variant={perm.status === 1 ? "default" : "destructive"}>
+                        {perm.status === 1 ? "启用" : "禁用"}
+                      </Badge>
+                    </Table.Cell>
+                  </Table.Row>
+                {/each}
+              </Table.Body>
+            </Table.Root>
+
+            {#if rolePermTotal > rolePermPageSize}
+              <div class="mt-4 flex items-center justify-between">
+                <p class="text-sm text-muted-foreground">
+                  共 {rolePermTotal} 条，第 {rolePermPage} / {Math.max(1, Math.ceil(rolePermTotal / rolePermPageSize))} 页
+                </p>
+                <div class="flex gap-2">
+                  <Button
+                    variant="outline"
+                    disabled={rolePermPage <= 1}
+                    onclick={() => {
+                      rolePermPage = Math.max(1, rolePermPage - 1);
+                      loadRolePermissionList();
+                    }}
+                  >
+                    上一页
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={rolePermPage >= Math.ceil(rolePermTotal / rolePermPageSize)}
+                    onclick={() => {
+                      rolePermPage = rolePermPage + 1;
+                      loadRolePermissionList();
+                    }}
+                  >
+                    下一页
+                  </Button>
+                </div>
+              </div>
+            {/if}
+
+            {#if filteredRolePermRecords.length === 0}
+              <div class="p-6 text-sm text-muted-foreground">暂无数据</div>
+            {/if}
+          {/if}
+        </Card.Content>
+      </Card.Root>
+    </Tabs.Content>
+  </Tabs.Root>
 </div>
 
-{#snippet PermissionNode(perm: SysPermission, level: number)}
-  <div class="permission-node relative">
-    <!-- Connection Line for Children -->
-    {#if level > 0}
-      <div
-        class="absolute -left-3 top-0 h-full w-px bg-border/50"
-        style="left: calc(-12px + 24px * {level})"
-      ></div>
-    {/if}
+<Dialog.Root bind:open={createDialogOpen}>
+  <Dialog.Content class="max-w-lg">
+    <Dialog.Header>
+      <Dialog.Title>创建权限</Dialog.Title>
+    </Dialog.Header>
+    <div class="space-y-4">
+      <Input placeholder="Code (module:action)" bind:value={createCode} />
+      <Input placeholder="Name" bind:value={createName} />
+      <Input placeholder="Module" bind:value={createModule} />
+      <Input placeholder="Action" bind:value={createAction} />
+      <Input placeholder="Description" bind:value={createDescription} />
+      <div class="flex justify-end gap-2">
+        <Button variant="secondary" onclick={() => (createDialogOpen = false)}>
+          取消
+        </Button>
+        <Button onclick={submitCreate} disabled={creating}>
+          {creating ? "创建中..." : "创建"}
+        </Button>
+      </div>
+    </div>
+  </Dialog.Content>
+</Dialog.Root>
 
+<Dialog.Root bind:open={editDialogOpen}>
+  <Dialog.Content class="max-w-lg">
+    <Dialog.Header>
+      <Dialog.Title>编辑权限</Dialog.Title>
+      {#if editingPermission}
+        <Dialog.Description class="font-mono text-xs">
+          {editingPermission.code}
+        </Dialog.Description>
+      {/if}
+    </Dialog.Header>
+    <div class="space-y-4">
+      <Input placeholder="Name" bind:value={editName} />
+      <Input placeholder="Description" bind:value={editDescription} />
+      <select
+        bind:value={editStatus}
+        class="h-9 w-full rounded-md border bg-background px-3 text-sm focus:border-primary focus:outline-none"
+      >
+        <option value={1}>启用</option>
+        <option value={0}>禁用</option>
+      </select>
+      <div class="flex justify-end gap-2">
+        <Button variant="secondary" onclick={() => (editDialogOpen = false)}>
+          取消
+        </Button>
+        <Button onclick={submitEdit} disabled={editing}>
+          {editing ? "保存中..." : "保存"}
+        </Button>
+      </div>
+    </div>
+  </Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={deleteDialogOpen}>
+  <Dialog.Content class="max-w-md">
+    <Dialog.Header>
+      <Dialog.Title>删除权限</Dialog.Title>
+    </Dialog.Header>
+    <div class="space-y-4">
+      <p class="text-sm text-muted-foreground">
+        {#if deletingPermission}
+          确认删除权限 {deletingPermission.code}？
+        {/if}
+      </p>
+      <div class="flex justify-end gap-2">
+        <Button variant="secondary" onclick={() => (deleteDialogOpen = false)}>
+          取消
+        </Button>
+        <Button variant="destructive" onclick={confirmDelete} disabled={deleting}>
+          {deleting ? "删除中..." : "删除"}
+        </Button>
+      </div>
+    </div>
+  </Dialog.Content>
+</Dialog.Root>
+
+{#snippet PermissionNode(perm: SysPermission, level: number)}
+  <div class="permission-node">
     <div
-      class="relative flex items-center gap-3 rounded-lg border border-transparent px-3 py-2 transition-colors hover:bg-muted/50 hover:border-border/50"
+      class="flex items-center gap-3 rounded-lg border border-transparent px-3 py-2 transition-colors hover:bg-muted/50 hover:border-border/50"
       style="margin-left: {level * 24}px"
     >
-      <!-- Connector (Horizontal) if not root -->
-      {#if level > 0}
-        <div class="absolute -left-6 top-1/2 h-px w-6 bg-border/50"></div>
-      {/if}
-
-      <!-- Expand/Collapse Button -->
       {#if perm.children && perm.children.length > 0}
         <button
-          class="z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border bg-background shadow-sm hover:bg-accent hover:text-accent-foreground"
+          class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border bg-background shadow-sm hover:bg-accent hover:text-accent-foreground"
           onclick={() => toggleExpand(perm.id)}
           aria-label={expandedNodes.has(perm.id) ? "收起" : "展开"}
         >
           <svg
-            class="h-3 w-3 transition-transform duration-200 {expandedNodes.has(
-              perm.id
-            )
-              ? 'rotate-90'
-              : ''}"
+            class="h-3 w-3 transition-transform duration-200 {expandedNodes.has(perm.id) ? 'rotate-90' : ''}"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -422,99 +1031,38 @@
         </button>
       {:else}
         <div class="h-6 w-6 shrink-0">
-          <!-- Dot for leaf nodes -->
           <div class="mx-auto mt-2 h-1.5 w-1.5 rounded-full bg-border"></div>
         </div>
       {/if}
 
-      <!-- Content Card -->
-      <div class="flex flex-1 items-center gap-3">
-        <!-- Icon -->
-        <div
-          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border shadow-sm
-					{getTypeIcon(perm.type) === 'menu'
-            ? 'bg-blue-50 text-blue-600 border-blue-100 dark:bg-blue-950 dark:text-blue-400 dark:border-blue-900'
-            : getTypeIcon(perm.type) === 'button'
-              ? 'bg-purple-50 text-purple-600 border-purple-100 dark:bg-purple-950 dark:text-purple-400 dark:border-purple-900'
-              : 'bg-emerald-50 text-emerald-600 border-emerald-100 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-900'}"
-        >
-          {#if getTypeIcon(perm.type) === "menu"}
-            <svg
-              class="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 6h16M4 12h16M4 18h16"
-              />
-            </svg>
-          {:else if getTypeIcon(perm.type) === "button"}
-            <svg
-              class="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5"
-              />
-            </svg>
-          {:else}
-            <svg
-              class="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
-              />
-            </svg>
-          {/if}
-        </div>
-
-        <!-- Info -->
-        <div class="flex min-w-0 flex-1 flex-col justify-center">
+      <div class="flex min-w-0 flex-1 items-center justify-between gap-3">
+        <div class="min-w-0">
           <div class="flex items-center gap-2">
             <span class="font-medium">{perm.name}</span>
-            {#if perm.status === 0}
-              <Badge variant="destructive" class="h-4 px-1 text-[10px]"
-                >禁用</Badge
-              >
-            {/if}
+            <Badge variant={perm.status === 1 ? "default" : "destructive"}>
+              {perm.status === 1 ? "启用" : "禁用"}
+            </Badge>
+            <span class="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+              {getTypeLabel(perm.type)}
+            </span>
           </div>
-          <div class="flex items-center gap-2 text-xs text-muted-foreground">
-            <span class="font-mono">{perm.code}</span>
-            {#if perm.path}
-              <span class="hidden text-muted-foreground/50 sm:inline">•</span>
-              <span class="hidden truncate font-mono sm:inline"
-                >{perm.path}</span
-              >
-            {/if}
-          </div>
+          <p class="mt-1 truncate text-xs text-muted-foreground">{perm.code}</p>
         </div>
-
-        <!-- Tag -->
-        <Badge variant="outline" class="shrink-0 bg-background/50 font-normal">
-          {getTypeLabel(perm.type)}
-        </Badge>
+        {#if level > 0}
+          <div class="flex gap-2">
+            <Button size="sm" variant="outline" onclick={() => openEditDialog(perm)}>
+              编辑
+            </Button>
+            <Button size="sm" variant="destructive" onclick={() => openDeleteDialog(perm)}>
+              删除
+            </Button>
+          </div>
+        {/if}
       </div>
     </div>
 
-    <!-- Children Recursion -->
     {#if perm.children && perm.children.length > 0 && expandedNodes.has(perm.id)}
-      <div class="children relative">
-        <!-- Vertical line extension for children -->
+      <div class="space-y-1">
         {#each perm.children as child (child.id)}
           {@render PermissionNode(child, level + 1)}
         {/each}
