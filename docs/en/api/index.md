@@ -89,7 +89,12 @@ Content-Type: application/json
 |--------|----------|-------------|
 | POST | `/api/v1/files/upload/start` | Start chunked upload |
 | POST | `/api/v1/files/upload/chunk` | Upload file chunk |
-| POST | `/api/v1/files/upload/merge` | Merge uploaded chunks |
+| POST | `/api/v1/files/upload/complete` | Complete chunked upload |
+| POST | `/api/v1/files/upload/pause` | Pause upload |
+| POST | `/api/v1/files/upload/resume` | Resume upload |
+| POST | `/api/v1/files/upload/cancel` | Cancel upload |
+| GET | `/api/v1/files/upload/check` | Check upload status |
+| GET | `/api/v1/files/upload/progress` | Get upload progress |
 | GET | `/api/v1/files` | List user's files |
 | GET | `/api/v1/files/{hash}` | Get file details |
 | GET | `/api/v1/files/{hash}/download` | Download file |
@@ -109,10 +114,47 @@ Content-Type: application/json
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/v1/files/share` | Create share link |
+| GET | `/api/v1/share/{code}/info` | Get share info (public) |
 | GET | `/api/v1/files/share/{code}` | Access shared file |
 | GET | `/api/v1/files/shares` | List user's shares |
 | DELETE | `/api/v1/files/share/{code}` | Revoke share |
 | GET | `/api/v1/files/share/{code}/logs` | Get share access logs |
+
+#### Get Share Info (Public)
+
+Public endpoint - no authentication required.
+
+```http
+GET /api/v1/share/{shareCode}/info
+```
+
+Returns share details including file list. Uses business codes for share status:
+
+| Business Code | Meaning |
+|---------------|---------|
+| 200 | Success |
+| 50009 | Share not found |
+| 50010 | Share cancelled |
+| 50011 | Share expired |
+
+Response:
+```json
+{
+  "code": 200,
+  "data": {
+    "shareCode": "abc123",
+    "shareType": 0,
+    "expireTime": "2025-01-15T00:00:00Z",
+    "files": [
+      {
+        "fileId": "...",
+        "fileName": "document.pdf",
+        "fileSize": 1024000
+      }
+    ]
+  }
+}
+```
 
 ### Admin
 
@@ -403,18 +445,14 @@ totalChunks: 10
 fileHash: abc123...
 ```
 
-#### Merge Chunks
+#### Complete Upload
 
 After all chunks are uploaded:
 ```http
-POST /file/upload/merge
-Content-Type: application/json
+POST /api/v1/files/upload/complete
+Content-Type: application/x-www-form-urlencoded
 
-{
-  "fileHash": "abc123...",
-  "fileName": "large-file.zip",
-  "totalChunks": 10
-}
+clientId=abc123...
 ```
 
 ## Rate Limiting

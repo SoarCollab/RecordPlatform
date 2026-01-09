@@ -2,6 +2,10 @@
 
 本指南介绍 RecordPlatform 的环境变量和配置选项。
 
+::: tip 配置迁移说明
+自 v2.0 起，敏感配置（数据库凭据、Redis、邮件 SMTP、RabbitMQ）已迁移至 Nacos 配置中心。环境变量中仅保留 Nacos 连接信息和安全密钥（JWT_KEY）。完整的配置结构请参阅 [Nacos 配置模板](../../nacos-config-template.yaml)。
+:::
+
 ## 环境变量
 
 复制示例文件并自定义：

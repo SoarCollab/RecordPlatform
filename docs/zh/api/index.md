@@ -89,7 +89,12 @@ Content-Type: application/json
 |------|------|------|
 | POST | `/api/v1/files/upload/start` | 开始分块上传 |
 | POST | `/api/v1/files/upload/chunk` | 上传文件块 |
-| POST | `/api/v1/files/upload/merge` | 合并上传块 |
+| POST | `/api/v1/files/upload/complete` | 完成分块上传 |
+| POST | `/api/v1/files/upload/pause` | 暂停上传 |
+| POST | `/api/v1/files/upload/resume` | 恢复上传 |
+| POST | `/api/v1/files/upload/cancel` | 取消上传 |
+| GET | `/api/v1/files/upload/check` | 检查上传状态 |
+| GET | `/api/v1/files/upload/progress` | 获取上传进度 |
 | GET | `/api/v1/files` | 列出用户文件 |
 | GET | `/api/v1/files/{hash}` | 获取文件详情 |
 | GET | `/api/v1/files/{hash}/download` | 下载文件 |
@@ -109,10 +114,47 @@ Content-Type: application/json
 | 方法 | 端点 | 说明 |
 |------|------|------|
 | POST | `/api/v1/files/share` | 创建分享链接 |
+| GET | `/api/v1/share/{code}/info` | 获取分享信息（公开）|
 | GET | `/api/v1/files/share/{code}` | 访问分享文件 |
 | GET | `/api/v1/files/shares` | 列出用户分享 |
 | DELETE | `/api/v1/files/share/{code}` | 撤销分享 |
 | GET | `/api/v1/files/share/{code}/logs` | 获取分享访问日志 |
+
+#### 获取分享信息（公开）
+
+公开端点 - 无需认证。
+
+```http
+GET /api/v1/share/{shareCode}/info
+```
+
+返回分享详情（包含文件列表）。使用业务码表示分享状态：
+
+| 业务码 | 含义 |
+|--------|------|
+| 200 | 成功 |
+| 50009 | 分享不存在 |
+| 50010 | 分享已取消 |
+| 50011 | 分享已过期 |
+
+响应：
+```json
+{
+  "code": 200,
+  "data": {
+    "shareCode": "abc123",
+    "shareType": 0,
+    "expireTime": "2025-01-15T00:00:00Z",
+    "files": [
+      {
+        "fileId": "...",
+        "fileName": "document.pdf",
+        "fileSize": 1024000
+      }
+    ]
+  }
+}
+```
 
 ### 管理
 
@@ -403,18 +445,14 @@ totalChunks: 10
 fileHash: abc123...
 ```
 
-#### 合并分块
+#### 完成上传
 
 所有分块上传完成后：
 ```http
-POST /file/upload/merge
-Content-Type: application/json
+POST /api/v1/files/upload/complete
+Content-Type: application/x-www-form-urlencoded
 
-{
-  "fileHash": "abc123...",
-  "fileName": "large-file.zip",
-  "totalChunks": 10
-}
+clientId=abc123...
 ```
 
 ## 速率限制
