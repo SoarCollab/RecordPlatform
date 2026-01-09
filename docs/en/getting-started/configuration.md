@@ -2,6 +2,10 @@
 
 This guide covers environment variables and configuration options for RecordPlatform.
 
+::: tip Configuration Migration
+Since v2.0, sensitive configurations (database credentials, Redis, email SMTP, RabbitMQ) have been migrated to Nacos configuration center. Only Nacos connection details and security keys (JWT_KEY) remain in environment variables. See [Nacos Configuration Template](../../nacos-config-template.yaml) for the complete configuration structure.
+:::
+
 ## Environment Variables
 
 Copy the example file and customize:

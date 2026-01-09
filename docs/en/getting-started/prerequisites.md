@@ -8,7 +8,7 @@ Before running RecordPlatform, ensure the following infrastructure services are 
 |---------|---------|--------------|---------|
 | **Nacos** | 2.x | 8848 | Service discovery and configuration center |
 | **MySQL** | 8.0+ | 3306 | Relational database |
-| **Redis** | 6.0+ | 6379 | Caching and distributed locks |
+| **Redis** | 7.0+ | 6379 | Caching and distributed locks |
 | **RabbitMQ** | 3.8+ | 5672, 15672 | Asynchronous message queue |
 | **S3-compatible Storage** | - | 9000 | Object storage (MinIO recommended) |
 | **FISCO BCOS** | 3.x | 20200 | Blockchain node |
