@@ -23,6 +23,8 @@ let initStarted = false;
 
 const isAuthenticated = $derived(!!user && !!getToken());
 const isAdmin = $derived(user?.role === "admin");
+const isMonitor = $derived(user?.role === "monitor");
+const isAdminOrMonitor = $derived(isAdmin || isMonitor);
 const username = $derived(user?.username ?? "");
 const displayName = $derived(user?.nickname || user?.username || "");
 
@@ -166,6 +168,12 @@ export function useAuth() {
     },
     get isAdmin() {
       return isAdmin;
+    },
+    get isMonitor() {
+      return isMonitor;
+    },
+    get isAdminOrMonitor() {
+      return isAdminOrMonitor;
     },
     get username() {
       return username;
