@@ -78,8 +78,7 @@
 			notifications.warning('请选择好友');
 			return;
 		}
-		// Navigate to a new conversation (the backend will create if not exists)
-		goto(`/messages/new?to=${encodeURIComponent(selectedFriend.username)}`);
+		goto(`/messages/new?to=${encodeURIComponent(selectedFriend.id)}`);
 		newConversationOpen = false;
 		selectedFriend = null;
 	}
