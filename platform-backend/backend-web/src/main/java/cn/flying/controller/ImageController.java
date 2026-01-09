@@ -19,8 +19,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.util.regex.Pattern;
 
 /**
  * @program: forum
@@ -35,6 +34,9 @@ import java.nio.file.Paths;
 public class ImageController {
     @Resource
     ImageService imageService;
+
+    private static final Pattern AVATAR_PATH_PATTERN = Pattern.compile("^/avatar/[0-9a-fA-F]{32}$");
+    private static final Pattern CACHE_PATH_PATTERN = Pattern.compile("^/cache\\d{8}/[0-9a-fA-F]{32}$");
     /**
      * 上传头像
      * @param file 头像文件
@@ -110,11 +112,14 @@ public class ImageController {
      */
     private void fetchImage(HttpServletRequest request, HttpServletResponse response) throws Exception {
         // 路径格式: /api/v1/images/download/images/{imagePath}
-        // 前缀长度: "/api/v1/images/download/images" = 30 字符（不含末尾斜杠）
-        // 存储时路径带前导斜杠，如 /avatar/uuid，所以这里保留前导斜杠
-        String servletPath = request.getServletPath();
-        String prefix = "/api/v1/images/download/images";
-        String imagePath = servletPath.startsWith(prefix) ? servletPath.substring(prefix.length()) : servletPath.substring(30);
+        // 注意：在 Spring Boot 默认 servlet 映射下，request.getServletPath() 可能为空，需使用 requestUri 解析
+        String imagePath = extractImagePath(request);
+        if (imagePath == null) {
+            response.setStatus(404);
+            response.setContentType("application/json");
+            response.getWriter().write(Result.error(ResultEnum.FILE_NOT_EXIST).toString());
+            return;
+        }
 
         // 安全验证：防止路径遍历攻击
         if (!isValidImagePath(imagePath)) {
@@ -145,33 +150,50 @@ public class ImageController {
     }
 
     /**
+     * 从请求中提取图片存储路径（保留前导 /），用于后续安全校验与 S3 读取。
+     *
+     * @param request 请求
+     * @return 图片路径（例如：/avatar/xxx 或 /cache20250101/xxx），无法解析则返回 null
+     */
+    private String extractImagePath(HttpServletRequest request) {
+        String requestUri = request.getRequestURI();
+        if (requestUri == null) {
+            return null;
+        }
+
+        String contextPath = request.getContextPath();
+        String path = (contextPath != null && !contextPath.isEmpty() && requestUri.startsWith(contextPath))
+                ? requestUri.substring(contextPath.length())
+                : requestUri;
+
+        String prefix = "/api/v1/images/download/images";
+        if (!path.startsWith(prefix)) {
+            return null;
+        }
+        return path.substring(prefix.length());
+    }
+
+    /**
      * 验证图片路径是否安全，防止路径遍历攻击
      */
     private boolean isValidImagePath(String imagePath) {
         if (imagePath == null || imagePath.isEmpty()) {
             return false;
         }
+        if (AVATAR_PATH_PATTERN.matcher(imagePath).matches() || CACHE_PATH_PATTERN.matcher(imagePath).matches()) {
+            return true;
+        }
         // 检测路径遍历特征
-        if (imagePath.contains("..") || imagePath.contains("//")) {
+        if (imagePath.contains("..") || imagePath.contains("//") || imagePath.contains("\\") || imagePath.contains("%00")) {
             return false;
         }
         // 允许以单个 / 开头的相对路径（S3 存储格式）
         String pathToCheck = imagePath.startsWith("/") ? imagePath.substring(1) : imagePath;
-        // 检测绝对路径（Windows）
-        if (pathToCheck.startsWith("\\") ||
-            (pathToCheck.length() >= 2 && pathToCheck.charAt(1) == ':')) {
+        // 多级路径但不符合已知安全格式（/avatar/{uuid} 或 /cacheYYYYMMDD/{uuid}），视为可疑请求
+        if (pathToCheck.contains("/")) {
             return false;
         }
-        // 规范化路径并验证
-        try {
-            Path normalized = Paths.get(pathToCheck).normalize();
-            // 确保规范化后的路径不以 .. 开头（防止绕过）
-            if (normalized.startsWith("..") || normalized.isAbsolute()) {
-                return false;
-            }
-        } catch (Exception e) {
-            return false;
-        }
-        return true;
+        // 单段短路径用于返回 404（由长度校验处理），避免把所有未知路径都当作参数错误
+        return imagePath.length() <= 13;
     }
 }

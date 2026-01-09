@@ -17,6 +17,7 @@ import jakarta.annotation.Resource;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.validation.annotation.Validated;
@@ -45,7 +46,9 @@ public class FileUploadController {
     @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "开始上传文件")
     public Result<StartUploadVO> startUpload(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
-            @Schema(description = "文件名") @RequestParam("fileName") @NotBlank @Size(max = 255) String fileName,
+            @Schema(description = "文件名") @RequestParam("fileName") @NotBlank @Size(max = 255)
+            @Pattern(regexp = "^[\\p{IsHan}a-zA-Z0-9\\u4e00-\\u9fa5._\\-\\s,;!@#$%&()+=]+$")
+            String fileName,
             @Schema(description = "文件大小") @RequestParam("fileSize") @Min(1) @Max(4294967296L) long fileSize,
             @Schema(description = "文件类型") @RequestParam(value = "contentType") @NotBlank String contentType,
             @Schema(description = "客户端ID") @RequestParam(value = "clientId", required = false) String providedClientId,

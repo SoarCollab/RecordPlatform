@@ -32,7 +32,7 @@ import java.util.stream.Collectors;
  *
  * <p>异常层级：
  * <ul>
- *   <li>GeneralException → 业务异常（可预期）→ 400 BAD_REQUEST</li>
+ *   <li>GeneralException → 业务异常（可预期）→ 200 OK（保持统一 Result.code 表达错误）</li>
  *   <li>RetryableException → 可重试异常（暂时性故障）→ 503 SERVICE_UNAVAILABLE</li>
  *   <li>Exception → 系统异常（不可预期）→ 500 INTERNAL_SERVER_ERROR</li>
  * </ul>
@@ -130,16 +130,21 @@ public class GlobalExceptionHandler {
      * 处理业务异常（可预期的错误，如参数验证失败、业务规则违反）
      */
     @ExceptionHandler(GeneralException.class)
-    @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public Result<?> handleBusinessException(GeneralException ex) {
+    public ResponseEntity<Result<?>> handleBusinessException(GeneralException ex) {
         String traceId = currentTraceId();
         log.warn("业务异常: message={}, traceId={}", ex.getMessage(), traceId);
 
         Map<String, Object> payload = withTrace(ex.getData() != null ? ex.getData() : ex.getMessage());
+
+        Result<?> result;
         if (ex.getResultEnum() != null) {
-            return Result.error(ex.getResultEnum(), payload);
+            result = Result.error(ex.getResultEnum(), payload);
+        } else {
+            result = new Result<>(ResultEnum.PARAM_IS_INVALID.getCode(), ex.getMessage(), payload);
         }
-        return new Result<>(ResultEnum.PARAM_IS_INVALID.getCode(), ex.getMessage(), payload);
+
+        // 约定：业务异常保持 HTTP 200，通过 Result.code 表达具体错误
+        return ResponseEntity.ok(result);
     }
 
     /**

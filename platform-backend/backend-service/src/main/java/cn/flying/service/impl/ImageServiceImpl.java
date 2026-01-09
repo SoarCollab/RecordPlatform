@@ -80,7 +80,8 @@ public class ImageServiceImpl extends ServiceImpl<ImageStoreMapper, ImageStore> 
                 .build();
         try {
             s3Client.putObject(objectArgs);
-            if (this.save(new ImageStore(null,imageName,data)))
+            String imageUid = UUID.randomUUID().toString().replace("-", "");
+            if (this.save(new ImageStore(imageUid, imageName, data)))
                 return imageName;
             else {
                 this.deleteOldImage(imageName);
