@@ -1,4 +1,5 @@
-import { api } from "../client";
+import { api, getToken } from "../client";
+import { env } from "$env/dynamic/public";
 import type {
   Page,
   PageParams,
@@ -111,7 +112,6 @@ export async function revokeRolePermission(
   });
 }
 
-
 // ===== Audit Logs =====
 
 const AUDIT_BASE = "/system/audit";
@@ -122,7 +122,7 @@ const AUDIT_BASE = "/system/audit";
 export async function getAuditLogs(
   params?: PageParams & AuditLogQueryParams,
 ): Promise<Page<AuditLogVO>> {
-  return api.get<Page<AuditLogVO>>(AUDIT_BASE, { params });
+  return api.get<Page<AuditLogVO>>(`${AUDIT_BASE}/logs/page`, { params });
 }
 
 export async function getAuditLog(id: string): Promise<SysOperationLog> {
@@ -133,7 +133,9 @@ export async function getAuditOverview(): Promise<AuditOverview> {
   return api.get<AuditOverview>(`${AUDIT_BASE}/overview`);
 }
 
-export async function getHighFrequencyOperations(): Promise<HighFrequencyOperationVO[]> {
+export async function getHighFrequencyOperations(): Promise<
+  HighFrequencyOperationVO[]
+> {
   return api.get<HighFrequencyOperationVO[]>(`${AUDIT_BASE}/high-frequency`);
 }
 
@@ -143,11 +145,15 @@ export async function getSensitiveOperations(
   return api.post<Page<SysOperationLog>>(`${AUDIT_BASE}/sensitive/page`, data);
 }
 
-export async function getErrorOperationStats(): Promise<ErrorOperationStatsVO[]> {
+export async function getErrorOperationStats(): Promise<
+  ErrorOperationStatsVO[]
+> {
   return api.get<ErrorOperationStatsVO[]>(`${AUDIT_BASE}/error-stats`);
 }
 
-export async function getUserTimeDistribution(): Promise<UserTimeDistributionVO[]> {
+export async function getUserTimeDistribution(): Promise<
+  UserTimeDistributionVO[]
+> {
   return api.get<UserTimeDistributionVO[]>(`${AUDIT_BASE}/time-distribution`);
 }
 
@@ -155,9 +161,7 @@ export async function getAuditConfigs(): Promise<AuditConfigVO[]> {
   return api.get<AuditConfigVO[]>(`${AUDIT_BASE}/configs`);
 }
 
-export async function updateAuditConfig(
-  data: AuditConfigVO,
-): Promise<boolean> {
+export async function updateAuditConfig(data: AuditConfigVO): Promise<boolean> {
   return api.put<boolean>(`${AUDIT_BASE}/configs`, data);
 }
 
@@ -178,14 +182,24 @@ export async function backupAuditLogs(params?: {
 export async function exportAuditLogs(
   params?: AuditLogQueryParams,
 ): Promise<Blob> {
-  const response = await fetch(
-    `/record-platform/api/v1${AUDIT_BASE}/export?${new URLSearchParams(params as Record<string, string>)}`,
-    {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
-      },
+  const token = getToken();
+  if (!token) {
+    throw new Error("未登录");
+  }
+
+  const apiBase = import.meta.env.DEV
+    ? "/record-platform/api/v1"
+    : `${env.PUBLIC_API_BASE_URL || "/record-platform"}/api/v1`;
+
+  const response = await fetch(`${apiBase}${AUDIT_BASE}/logs/export`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      "X-Tenant-ID": env.PUBLIC_TENANT_ID || "",
     },
-  );
+    body: JSON.stringify(params ?? {}),
+  });
 
   if (!response.ok) {
     throw new Error("导出失败");

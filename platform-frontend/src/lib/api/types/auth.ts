@@ -15,6 +15,8 @@ export interface AuthorizeVO {
  */
 export interface AccountVO {
   id: string;
+  /** 后端安全切面生成的外部ID（部分接口会返回该字段而不是 id） */
+  externalId?: string;
   username: string;
   email?: string;
   avatar?: string;

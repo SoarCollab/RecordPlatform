@@ -40,6 +40,22 @@ public interface FileQueryService {
     File getFileById(Long userId, Long fileId);
 
     /**
+     * 根据文件哈希获取文件详情（支持好友分享访问）
+     *
+     * <p>权限策略：</p>
+     * <ul>
+     *   <li>管理员：可查询任意文件</li>
+     *   <li>普通用户：可查询自己的文件</li>
+     *   <li>普通用户：若存在有效的好友分享记录，可查询分享者对应文件</li>
+     * </ul>
+     *
+     * @param userId   当前用户ID（用于权限校验）
+     * @param fileHash 文件哈希
+     * @return 文件详情
+     */
+    File getFileByHash(Long userId, String fileHash);
+
+    /**
      * 根据用户ID获取用户文件列表（元信息）
      *
      * @param userId 用户ID
@@ -50,10 +66,12 @@ public interface FileQueryService {
     /**
      * 分页获取用户文件列表
      *
-     * @param userId 用户ID
-     * @param page   分页参数（传入后会被填充结果）
+     * @param userId  用户ID
+     * @param page    分页参数（传入后会被填充结果）
+     * @param keyword 搜索关键词（可选，匹配文件名或文件哈希）
+     * @param status  文件状态过滤（可选）
      */
-    void getUserFilesPage(Long userId, Page<File> page);
+    void getUserFilesPage(Long userId, Page<File> page, String keyword, Integer status);
 
     /**
      * 获取文件分片存储地址（预签名URL）

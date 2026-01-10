@@ -17,6 +17,9 @@ describe("API Client", () => {
     vi.clearAllMocks();
     localStorage.clear();
     sessionStorage.clear();
+
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -277,7 +280,9 @@ describe("API Client", () => {
           fetch: mockFetch,
         });
 
-        await api.get("/users", { params: { page: 1, filter: null, sort: undefined } });
+        await api.get("/users", {
+          params: { page: 1, filter: null, sort: undefined },
+        });
 
         const [url] = mockFetch.mock.calls[0];
         expect(url).toContain("page=1");
@@ -296,7 +301,9 @@ describe("API Client", () => {
         await api.get("/users");
 
         const [, options] = mockFetch.mock.calls[0];
-        expect(options.headers.get("Authorization")).toBe("Bearer my-auth-token");
+        expect(options.headers.get("Authorization")).toBe(
+          "Bearer my-auth-token",
+        );
       });
 
       it("should skip Authorization header when skipAuth is true", async () => {
@@ -377,7 +384,10 @@ describe("API Client", () => {
       });
 
       it("should handle URLSearchParams body", async () => {
-        const params = new URLSearchParams({ username: "test", password: "pass" });
+        const params = new URLSearchParams({
+          username: "test",
+          password: "pass",
+        });
         const mockFetch = createMockFetch({ token: "abc" });
         const api = createApiClient({
           baseUrl: "https://api.test.com",
@@ -466,7 +476,9 @@ describe("API Client", () => {
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
-        const mockFetch = vi.fn().mockImplementation(() => Promise.resolve(createErrorResponse()));
+        const mockFetch = vi
+          .fn()
+          .mockImplementation(() => Promise.resolve(createErrorResponse()));
         const api = createApiClient({
           baseUrl: "https://api.test.com",
           fetch: mockFetch,
@@ -510,20 +522,34 @@ describe("API Client", () => {
       });
 
       it("should throw ApiError on timeout", async () => {
-        const mockFetch = vi.fn().mockImplementation(() => {
-          return new Promise((_, reject) => {
-            const error = new DOMException("Aborted", "AbortError");
-            setTimeout(() => reject(error), 10);
-          });
-        });
-        const api = createApiClient({
-          baseUrl: "https://api.test.com",
-          fetch: mockFetch,
-        });
+        vi.useFakeTimers();
 
-        await expect(
-          api.get("/test", { timeout: 5, retries: 0 }),
-        ).rejects.toThrow("请求超时");
+        try {
+          const mockFetch = vi
+            .fn()
+            .mockImplementation((_url: string, options?: RequestInit) => {
+              return new Promise((_, reject) => {
+                if (options?.signal) {
+                  options.signal.addEventListener("abort", () => {
+                    reject(new DOMException("Aborted", "AbortError"));
+                  });
+                }
+              });
+            });
+
+          const api = createApiClient({
+            baseUrl: "https://api.test.com",
+            fetch: mockFetch,
+          });
+
+          const requestPromise = api.get("/test", { timeout: 5, retries: 0 });
+          const assertion = expect(requestPromise).rejects.toThrow("请求超时");
+
+          await vi.advanceTimersByTimeAsync(10);
+          await assertion;
+        } finally {
+          vi.useRealTimers();
+        }
       });
 
       it("should throw ApiError on network error", async () => {

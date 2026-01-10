@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { getItem, setItem, removeItem, clearAll, theme, sidebar } from "./storage";
+import {
+  getItem,
+  setItem,
+  removeItem,
+  clearAll,
+  theme,
+  sidebar,
+} from "./storage";
 
 describe("storage utils", () => {
   beforeEach(() => {
@@ -75,7 +82,9 @@ describe("storage utils", () => {
     });
 
     it("should handle storage errors gracefully", () => {
-      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const consoleSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
       const originalSetItem = localStorage.setItem;
       localStorage.setItem = vi.fn(() => {
         throw new Error("QuotaExceededError");
@@ -139,7 +148,7 @@ describe("storage utils", () => {
       (themeValue) => {
         theme.set(themeValue);
         expect(theme.get()).toBe(themeValue);
-      }
+      },
     );
   });
 
@@ -155,7 +164,9 @@ describe("storage utils", () => {
 
     it("should set collapsed state", () => {
       sidebar.set(true);
-      expect(JSON.parse(localStorage.getItem("rp_sidebar_collapsed")!)).toBe(true);
+      expect(JSON.parse(localStorage.getItem("rp_sidebar_collapsed")!)).toBe(
+        true,
+      );
     });
 
     it("should toggle state", () => {

@@ -1,3 +1,5 @@
+import type { Page } from "./common";
+
 export interface ConversationVO {
   id: string;
   otherUserId: string;
@@ -24,13 +26,10 @@ export interface MessageVO {
 }
 
 export interface ConversationDetailVO {
-  id: string;
-  otherUserId: string;
-  otherUsername: string;
-  otherAvatar?: string;
-  messages: MessageVO[];
+  conversation: ConversationVO;
+  messages: Page<MessageVO>;
   hasMore: boolean;
-  totalMessages: number;
+  totalMessages: number | string;
 }
 
 export interface SendMessageRequest {

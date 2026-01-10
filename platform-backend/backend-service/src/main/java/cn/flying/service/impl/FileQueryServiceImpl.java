@@ -32,6 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -143,6 +144,60 @@ public class FileQueryServiceImpl implements FileQueryService {
         return file;
     }
 
+    /**
+     * 根据文件哈希获取文件详情（支持好友分享访问）。
+     *
+     * <p>该方法用于前端文件详情页按 hash 直接查询文件，不再依赖分页列表过滤。</p>
+     *
+     * @param userId   当前用户ID（用于权限校验）
+     * @param fileHash 文件哈希
+     * @return 文件详情（若通过好友分享访问，将填充 sharedFromUserId/sharedFromUserName）
+     */
+    @Override
+    public File getFileByHash(Long userId, String fileHash) {
+        if (!StringUtils.hasText(fileHash)) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "文件哈希不能为空");
+        }
+
+        File file = null;
+
+        // 管理员可以访问所有文件
+        if (SecurityUtils.isAdmin()) {
+            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                    .eq(File::getFileHash, fileHash);
+            file = fileMapper.selectOne(wrapper);
+        } else {
+            // 首先检查用户自己的文件
+            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                    .eq(File::getFileHash, fileHash)
+                    .eq(File::getUid, userId);
+            file = fileMapper.selectOne(wrapper);
+
+            // 检查好友分享权限：如果存在有效分享记录，则允许访问分享者的文件
+            if (file == null) {
+                Long sharerId = friendFileShareService.getSharerIdForFile(userId, fileHash);
+                if (sharerId != null) {
+                    LambdaQueryWrapper<File> sharerWrapper = new LambdaQueryWrapper<File>()
+                            .eq(File::getFileHash, fileHash)
+                            .eq(File::getUid, sharerId);
+                    file = fileMapper.selectOne(sharerWrapper);
+                    if (file != null) {
+                        Account sharer = accountMapper.selectById(sharerId);
+                        file.setSharedFromUserId(sharerId);
+                        file.setSharedFromUserName(sharer != null ? sharer.getUsername() : null);
+                    }
+                }
+            }
+        }
+
+        if (file == null) {
+            // 安全策略：不泄露文件存在性/归属
+            throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
+        }
+
+        return file;
+    }
+
     @Override
     @Cacheable(cacheNames = "userFiles", key = "#userId", unless = "#result == null || #result.isEmpty()")
     public List<File> getUserFilesList(Long userId) {
@@ -154,11 +209,28 @@ public class FileQueryServiceImpl implements FileQueryService {
     }
 
     @Override
-    public void getUserFilesPage(Long userId, Page<File> page) {
+    public void getUserFilesPage(Long userId, Page<File> page, String keyword, Integer status) {
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
         // 所有用户（包括管理员）只能查询自己的文件
         // 管理员查看所有文件请使用 FileAdminService.getAllFiles()
         wrapper.eq(File::getUid, userId);
+
+        // 关键词搜索（匹配文件名或文件哈希）
+        if (StringUtils.hasText(keyword)) {
+            wrapper.and(w -> w
+                    .like(File::getFileName, keyword)
+                    .or()
+                    .like(File::getFileHash, keyword));
+        }
+
+        // 状态过滤
+        if (status != null) {
+            wrapper.eq(File::getStatus, status);
+        }
+
+        // 按创建时间倒序排列
+        wrapper.orderByDesc(File::getCreateTime);
+
         fileMapper.selectPage(page, wrapper);
     }
 

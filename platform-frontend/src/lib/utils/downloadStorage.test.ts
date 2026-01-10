@@ -32,7 +32,10 @@ describe("downloadStorage", () => {
       totalChunks: 2,
       initialKey: null,
       source: { type: "owned" as const },
-      presignedUrls: ["https://example.com/chunk1", "https://example.com/chunk2"],
+      presignedUrls: [
+        "https://example.com/chunk1",
+        "https://example.com/chunk2",
+      ],
       urlsFetchedAt: Date.now(),
       createdAt: Date.now(),
       ...overrides,
@@ -76,8 +79,12 @@ describe("downloadStorage", () => {
       });
 
       it("should overwrite existing task with same id", async () => {
-        const task1 = createTestTask("task-overwrite", { fileName: "original.txt" });
-        const task2 = createTestTask("task-overwrite", { fileName: "updated.txt" });
+        const task1 = createTestTask("task-overwrite", {
+          fileName: "original.txt",
+        });
+        const task2 = createTestTask("task-overwrite", {
+          fileName: "updated.txt",
+        });
 
         await saveTask(task1);
         await saveTask(task2);
@@ -243,8 +250,14 @@ describe("downloadStorage", () => {
   describe("Type validations", () => {
     it("DownloadSource should support all source types", () => {
       const ownedSource = { type: "owned" as const };
-      const publicShare = { type: "public_share" as const, shareCode: "abc123" };
-      const privateShare = { type: "private_share" as const, shareCode: "xyz789" };
+      const publicShare = {
+        type: "public_share" as const,
+        shareCode: "abc123",
+      };
+      const privateShare = {
+        type: "private_share" as const,
+        shareCode: "xyz789",
+      };
 
       expect(ownedSource.type).toBe("owned");
       expect(publicShare.type).toBe("public_share");

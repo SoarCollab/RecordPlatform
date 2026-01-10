@@ -97,6 +97,13 @@ export async function getPendingCount(): Promise<{ count: number }> {
   return api.get<{ count: number }>(`${BASE}/pending-count`);
 }
 
+/**
+ * 获取未读工单数量
+ */
+export async function getUnreadCount(): Promise<{ count: number }> {
+  return api.get<{ count: number }>(`${BASE}/unread-count`);
+}
+
 // ==================== 管理员接口 ====================
 
 /**
