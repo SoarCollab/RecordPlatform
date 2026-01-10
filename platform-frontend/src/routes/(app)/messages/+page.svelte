@@ -1,11 +1,14 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { useNotifications } from '$stores/notifications.svelte';
+	import { useSSE } from '$stores/sse.svelte';
 	import { formatRelativeTime } from '$utils/format';
+	import { getAvatarUrl } from '$utils/avatar';
 	import { getConversations, deleteConversation } from '$api/endpoints/messages';
 	import { getAllFriends } from '$api/endpoints/friends';
 	import type { ConversationVO, FriendVO } from '$api/types';
+	import type { SSEMessage } from '$api/endpoints/sse';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -13,12 +16,14 @@
 	import * as Avatar from '$lib/components/ui/avatar';
 
 	const notifications = useNotifications();
+	const sse = useSSE();
 
 	let conversations = $state<ConversationVO[]>([]);
 	let loading = $state(true);
 	let page = $state(1);
 	let total = $state(0);
 	let pageSize = $state(20);
+	let unsubscribeSSE: (() => void) | null = null;
 
 	// New conversation dialog
 	let newConversationOpen = $state(false);
@@ -29,6 +34,54 @@
 
 	onMount(() => {
 		loadConversations();
+		unsubscribeSSE = sse.subscribe(handleSSEMessage);
+	});
+
+	/**
+	 * 处理 SSE 推送的消息事件，使消息列表页在不手动刷新/点击的情况下自动更新会话列表。
+	 *
+	 * @param message SSE 推送消息
+	 */
+	function handleSSEMessage(message: SSEMessage) {
+		if (message.type !== 'message-received') return;
+
+		const data = message.data as {
+			conversationId?: string;
+			senderId?: string;
+			senderName?: string;
+			content?: string;
+			createTime?: string;
+		};
+
+		// 无法定位会话时，退化为刷新当前分页
+		if (!data.conversationId) {
+			loadConversations();
+			return;
+		}
+
+		const index = conversations.findIndex((c) => c.id === data.conversationId);
+		if (index >= 0) {
+			const current = conversations[index];
+			const updated: ConversationVO = {
+				...current,
+				lastMessageContent: data.content ?? current.lastMessageContent,
+				lastMessageType: current.lastMessageType ?? 'text',
+				lastMessageTime: data.createTime ?? current.lastMessageTime,
+				unreadCount: (current.unreadCount ?? 0) + 1,
+			};
+
+			// 新消息会话置顶
+			conversations = [updated, ...conversations.filter((c) => c.id !== current.id)];
+			return;
+		}
+
+		// 当前分页未包含该会话：切回第一页并刷新，确保新会话能显示在顶部
+		page = 1;
+		loadConversations();
+	}
+
+	onDestroy(() => {
+		unsubscribeSSE?.();
 	});
 
 	async function loadConversations() {
@@ -151,7 +204,7 @@
 				<div class="divide-y">
 					{#each conversations as conv (conv.id)}
 						<div
-							class="flex cursor-pointer items-center gap-4 p-4 transition-colors hover:bg-muted/50"
+							class="group flex cursor-pointer items-center gap-4 p-4 transition-colors hover:bg-muted/50"
 							onclick={() => goto(`/messages/${conv.id}`)}
 							role="button"
 							tabindex="0"
@@ -159,9 +212,17 @@
 						>
 							<!-- Avatar -->
 							<div class="relative">
-								<div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-lg font-medium text-primary">
-									{getAvatarText(conv)}
-								</div>
+								<Avatar.Root class="size-12">
+									{#if conv.otherAvatar}
+										<Avatar.Image
+											src={getAvatarUrl(conv.otherAvatar)}
+											alt={getDisplayName(conv)}
+										/>
+									{/if}
+									<Avatar.Fallback class="bg-primary/10 text-lg font-medium text-primary">
+										{getAvatarText(conv)}
+									</Avatar.Fallback>
+								</Avatar.Root>
 								{#if conv.unreadCount > 0}
 									<span class="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-xs text-white">
 										{conv.unreadCount > 9 ? '9+' : conv.unreadCount}
@@ -269,7 +330,7 @@
 						>
 							<Avatar.Root class="h-10 w-10">
 								{#if friend.avatar}
-									<Avatar.Image src={friend.avatar} alt={friend.username} />
+									<Avatar.Image src={getAvatarUrl(friend.avatar)} alt={friend.username} />
 								{/if}
 								<Avatar.Fallback>{friend.username.charAt(0).toUpperCase()}</Avatar.Fallback>
 							</Avatar.Root>

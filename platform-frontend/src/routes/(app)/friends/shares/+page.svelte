@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { useNotifications } from '$stores/notifications.svelte';
 	import { formatRelativeTime } from '$utils/format';
+	import { getAvatarUrl } from '$utils/avatar';
 	import {
 		getReceivedFriendShares,
 		getSentFriendShares,
@@ -131,7 +132,7 @@
 									<Avatar.Root class="h-12 w-12">
 										{#if activeTab === 'received'}
 											{#if share.sharerAvatar}
-												<Avatar.Image src={share.sharerAvatar} alt={share.sharerUsername} />
+												<Avatar.Image src={getAvatarUrl(share.sharerAvatar)} alt={share.sharerUsername} />
 											{/if}
 											<Avatar.Fallback>{share.sharerUsername?.charAt(0).toUpperCase() || '?'}</Avatar.Fallback>
 										{:else}

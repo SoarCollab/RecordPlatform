@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { useNotifications } from '$stores/notifications.svelte';
 	import { formatRelativeTime } from '$utils/format';
+	import { getAvatarUrl } from '$utils/avatar';
 	import {
 		getFriends,
 		unfriend,
@@ -118,7 +119,11 @@
 	}
 
 	function startChat(friend: FriendVO) {
-		goto(`/messages/new?to=${encodeURIComponent(friend.username)}`);
+		/**
+		 * 发起与指定好友的新会话。
+		 * 通过 URL 参数传递好友的用户ID（FriendVO.id），确保新会话页能从好友列表中正确匹配到接收者。
+		 */
+		goto(`/messages/new?to=${encodeURIComponent(friend.id)}`);
 	}
 
 	function getDisplayName(friend: FriendVO): string {
@@ -174,12 +179,12 @@
 				<Card.Root class="hover:shadow-md transition-shadow">
 					<Card.Content class="p-4">
 						<div class="flex items-start gap-4">
-							<Avatar.Root class="h-12 w-12">
-								{#if friend.avatar}
-									<Avatar.Image src={friend.avatar} alt={friend.username} />
-								{/if}
-								<Avatar.Fallback>{friend.username.charAt(0).toUpperCase()}</Avatar.Fallback>
-							</Avatar.Root>
+								<Avatar.Root class="h-12 w-12">
+									{#if friend.avatar}
+										<Avatar.Image src={getAvatarUrl(friend.avatar)} alt={friend.username} />
+									{/if}
+									<Avatar.Fallback>{friend.username.charAt(0).toUpperCase()}</Avatar.Fallback>
+								</Avatar.Root>
 							<div class="flex-1 min-w-0">
 								<div class="flex items-center gap-2">
 									<h3 class="font-medium truncate">{getDisplayName(friend)}</h3>
@@ -261,12 +266,12 @@
 							class="w-full flex items-center gap-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors {selectedUser?.id === user.id ? 'border-primary bg-muted/50' : ''}"
 							onclick={() => selectedUser = user}
 						>
-							<Avatar.Root class="h-10 w-10">
-								{#if user.avatar}
-									<Avatar.Image src={user.avatar} alt={user.username} />
-								{/if}
-								<Avatar.Fallback>{user.username.charAt(0).toUpperCase()}</Avatar.Fallback>
-							</Avatar.Root>
+								<Avatar.Root class="h-10 w-10">
+									{#if user.avatar}
+										<Avatar.Image src={getAvatarUrl(user.avatar)} alt={user.username} />
+									{/if}
+									<Avatar.Fallback>{user.username.charAt(0).toUpperCase()}</Avatar.Fallback>
+								</Avatar.Root>
 							<div class="flex-1 text-left">
 								<div class="font-medium">{user.nickname || user.username}</div>
 								{#if user.nickname}

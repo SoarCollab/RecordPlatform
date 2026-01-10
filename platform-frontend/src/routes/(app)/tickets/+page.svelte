@@ -1,7 +1,9 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { useNotifications } from '$stores/notifications.svelte';
+	import { useSSE } from '$stores/sse.svelte';
+	import type { SSEMessage } from '$api/endpoints/sse';
 	import { formatDateTime } from '$utils/format';
 	import { getTickets } from '$api/endpoints/tickets';
 	import type { TicketVO } from '$api/types';
@@ -16,19 +18,46 @@
 	import * as Card from '$lib/components/ui/card';
 
 	const notifications = useNotifications();
+	const sse = useSSE();
 
 	let tickets = $state<TicketVO[]>([]);
 	let loading = $state(true);
 	let page = $state(1);
 	let total = $state(0);
 	let pageSize = $state(20);
+	let unsubscribeSSE: (() => void) | null = null;
 
 	// Filters
 	let statusFilter = $state<TicketStatus | undefined>(undefined);
 
 	onMount(() => {
 		loadTickets();
+		unsubscribeSSE = sse.subscribe(handleSSEMessage);
 	});
+
+	onDestroy(() => {
+		unsubscribeSSE?.();
+	});
+
+	/**
+	 * 处理 SSE 推送的工单更新事件，使工单列表在不手动刷新/点击的情况下自动刷新。
+	 *
+	 * @param message SSE 推送消息
+	 */
+	function handleSSEMessage(message: SSEMessage) {
+		if (message.type !== 'ticket-updated') return;
+
+		const data = message.data as { ticketId?: string };
+		// 如果事件没有指定工单ID，直接刷新当前列表
+		if (!data.ticketId) {
+			loadTickets();
+			return;
+		}
+
+		// 当前页包含该工单则刷新；不包含也刷新一次以更新排序/回复数等信息
+		//（工单列表通常量不大，直接刷新实现最稳妥）
+		loadTickets();
+	}
 
 	async function loadTickets() {
 		loading = true;

@@ -65,12 +65,31 @@
       }
       case "ticket-updated": {
         // Ticket status changed
-        const data = message.data as { title?: string; status?: string };
+        const data = message.data as {
+          ticketId?: string;
+          ticketNo?: string;
+          replierName?: string;
+          preview?: string;
+          oldStatus?: string;
+          newStatus?: string;
+        };
         badges.fetch(); // Refresh badge counts
-        notifications.info(
-          "工单更新",
-          data.title ? `工单「${data.title}」状态已更新` : "您的工单有新回复"
-        );
+        // Avoid noisy toast when user is already browsing tickets; the page itself will auto-refresh.
+        if (!$page.url.pathname.startsWith("/tickets")) {
+          if (data.replierName) {
+            notifications.info(
+              "工单新回复",
+              `${data.ticketNo ? `#${data.ticketNo} ` : ""}${data.replierName}: ${data.preview || "收到新的回复"}`,
+            );
+          } else if (data.newStatus) {
+            notifications.info(
+              "工单状态更新",
+              `${data.ticketNo ? `#${data.ticketNo} ` : ""}${data.oldStatus || ""}${data.oldStatus ? " → " : ""}${data.newStatus}`,
+            );
+          } else {
+            notifications.info("工单更新", "你的工单有新的动态");
+          }
+        }
         break;
       }
       case "file-processed": {

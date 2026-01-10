@@ -2,6 +2,7 @@
   import { useAuth } from "$stores/auth.svelte";
   import { useNotifications } from "$stores/notifications.svelte";
   import * as validation from "$utils/validation";
+  import { getAvatarUrl } from "$utils/avatar";
   import { changePassword } from "$api/endpoints/auth";
   import { uploadAvatar } from "$api/endpoints/images"; // Keep this as it's used later
 
@@ -137,12 +138,6 @@
     return `${name.slice(0, 3)}****@${domain}`;
   }
 
-  // Helper to get full avatar URL
-  function getAvatarUrl(path?: string) {
-    if (!path) return undefined;
-    if (path.startsWith("http")) return path;
-    return `/record-platform/api/v1/images/download/images${path}`;
-  }
 </script>
 
 <svelte:head>

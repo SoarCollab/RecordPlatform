@@ -13,11 +13,13 @@
   import { FileStatus, FileStatusLabel } from "$api/types";
   import { fly } from "svelte/transition";
   import Skeleton from "$lib/components/ui/Skeleton.svelte";
+  import * as Card from "$lib/components/ui/card";
+  import { Button } from "$lib/components/ui/button";
+  import { Badge } from "$lib/components/ui/badge";
 
   const auth = useAuth();
   const notifications = useNotifications();
 
-  // Dashboard data state
   let loading = $state(true);
   let fileCount = $state(0);
   let storageUsed = $state(0);
@@ -26,27 +28,30 @@
   let pendingTickets = $state(0);
   let recentFiles = $state<FileVO[]>([]);
 
-  // Computed stats for display
   const stats = $derived([
     {
       label: "文件总数",
       value: fileCount.toString(),
       icon: "folder",
+      color: "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"
     },
     {
       label: "存储用量",
       value: formatFileSize(storageUsed),
       icon: "database",
+      color: "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400"
     },
     {
       label: "未读消息",
       value: unreadMessages.toString(),
       icon: "message",
+      color: "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400"
     },
     {
       label: "待处理工单",
       value: pendingTickets.toString(),
       icon: "ticket",
+      color: "bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400"
     },
   ]);
 
@@ -58,7 +63,6 @@
     loading = true;
 
     try {
-      // Load all data in parallel
       const [
         statsResult,
         filesResult,
@@ -73,29 +77,24 @@
         getTicketPendingCount(),
       ]);
 
-      // Process stats result (from backend)
       if (statsResult.status === "fulfilled") {
         const stats = statsResult.value;
         fileCount = stats.totalFiles;
         storageUsed = stats.totalStorage;
       }
 
-      // Process files result (for recent files only)
       if (filesResult.status === "fulfilled") {
         recentFiles = filesResult.value.records;
       }
 
-      // Process message count
       if (messagesResult.status === "fulfilled") {
         unreadMessages = messagesResult.value.count;
       }
 
-      // Process announcement count
       if (announcementsResult.status === "fulfilled") {
         unreadAnnouncements = announcementsResult.value.count;
       }
 
-      // Process ticket count
       if (ticketsResult.status === "fulfilled") {
         pendingTickets = ticketsResult.value.count;
       }
@@ -109,16 +108,12 @@
     }
   }
 
-  function getStatusVariant(
-    status: FileStatus
-  ): "completed" | "processing" | "failed" {
-    switch (status) {
-      case FileStatus.COMPLETED:
-        return "completed";
-      case FileStatus.FAILED:
-        return "failed";
-      default:
-        return "processing";
+  function getStatusColorClass(status: FileStatus): string {
+    switch(status) {
+      case FileStatus.COMPLETED: return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 hover:bg-green-100/80";
+      case FileStatus.FAILED: return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 hover:bg-red-100/80";
+      case FileStatus.PROCESSING: return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 hover:bg-yellow-100/80";
+      default: return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 hover:bg-gray-100/80";
     }
   }
 </script>
@@ -128,188 +123,167 @@
 </svelte:head>
 
 <div class="space-y-6">
-  <!-- Welcome -->
-  <div>
-    <h1 class="text-2xl font-bold">欢迎回来，{auth.displayName}</h1>
-    <p class="text-muted-foreground">这是您的存证平台概览</p>
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-3xl font-bold tracking-tight">概览</h1>
+      <p class="text-muted-foreground mt-1">欢迎回来，{auth.displayName}，这里是您的数字资产中心。</p>
+    </div>
   </div>
 
-  <!-- Stats -->
   {#if loading}
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {#each Array(4) as _}
-        <div class="rounded-lg border bg-card p-6">
-          <Skeleton class="h-4 w-24" />
-          <Skeleton class="mt-4 h-8 w-16" />
-        </div>
+        <Card.Root>
+          <Card.Header class="flex flex-row items-center justify-between space-y-0 pb-2">
+            <Skeleton class="h-4 w-24" />
+            <Skeleton class="h-4 w-4" />
+          </Card.Header>
+          <Card.Content>
+            <Skeleton class="h-8 w-16" />
+          </Card.Content>
+        </Card.Root>
       {/each}
     </div>
   {:else}
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {#each stats as stat, i}
-        <div
-          class="rounded-lg border bg-card p-6"
-          in:fly={{ y: 20, duration: 300, delay: i * 50 }}
-        >
-          <div class="flex items-center justify-between">
-            <p class="text-sm text-muted-foreground">{stat.label}</p>
-            <svg
-              class="h-5 w-5 text-muted-foreground"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              {#if stat.icon === "folder"}
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                />
-              {:else if stat.icon === "database"}
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
-                />
-              {:else if stat.icon === "message"}
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                />
-              {:else if stat.icon === "ticket"}
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                />
-              {/if}
-            </svg>
-          </div>
-          <div class="mt-2">
-            <span class="text-3xl font-bold">{stat.value}</span>
-          </div>
+        <div in:fly={{ y: 20, duration: 300, delay: i * 50 }}>
+          <Card.Root>
+            <Card.Header class="flex flex-row items-center justify-between space-y-0 pb-2">
+              <Card.Title class="text-sm font-medium text-muted-foreground">
+                {stat.label}
+              </Card.Title>
+              <div class={`p-2 rounded-full ${stat.color}`}>
+                 <svg
+                  class="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  {#if stat.icon === "folder"}
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                    />
+                  {:else if stat.icon === "database"}
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
+                    />
+                  {:else if stat.icon === "message"}
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                    />
+                  {:else if stat.icon === "ticket"}
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                    />
+                  {/if}
+                </svg>
+              </div>
+            </Card.Header>
+            <Card.Content>
+              <div class="text-2xl font-bold">{stat.value}</div>
+            </Card.Content>
+          </Card.Root>
         </div>
       {/each}
     </div>
   {/if}
 
-  <!-- Notification Banner (if unread announcements) -->
   {#if unreadAnnouncements > 0}
-    <a
-      href="/announcements"
-      class="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-4 transition-colors hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-900/20 dark:hover:bg-amber-900/30"
-    >
-      <div class="flex items-center gap-3">
-        <div
-          class="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900 dark:text-amber-400"
-        >
-          <svg
-            class="h-5 w-5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"
-            />
-          </svg>
-        </div>
-        <div>
-          <p class="font-medium text-amber-900 dark:text-amber-100">
-            您有 {unreadAnnouncements} 条未读公告
-          </p>
-          <p class="text-sm text-amber-700 dark:text-amber-300">
-            点击查看系统公告
-          </p>
-        </div>
-      </div>
-      <svg
-        class="h-5 w-5 text-amber-600 dark:text-amber-400"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
+    <div in:fly={{ y: 20, duration: 300 }}>
+      <a
+        href="/announcements"
+        class="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-4 transition-colors hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-900/20 dark:hover:bg-amber-900/30"
       >
-        <path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M9 5l7 7-7 7"
-        />
-      </svg>
-    </a>
+        <div class="flex items-center gap-3">
+          <div
+            class="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900 dark:text-amber-400"
+          >
+            <svg
+              class="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"
+              />
+            </svg>
+          </div>
+          <div>
+            <p class="font-medium text-amber-900 dark:text-amber-100">
+              您有 {unreadAnnouncements} 条未读公告
+            </p>
+            <p class="text-sm text-amber-700 dark:text-amber-300">
+              点击查看系统公告
+            </p>
+          </div>
+        </div>
+        <svg
+          class="h-5 w-5 text-amber-600 dark:text-amber-400"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M9 5l7 7-7 7"
+          />
+        </svg>
+      </a>
+    </div>
   {/if}
 
-  <!-- Recent files -->
-  <div class="rounded-lg border bg-card">
-    <div class="flex items-center justify-between border-b p-4">
-      <h2 class="font-semibold">最近文件</h2>
-      <a href="/files" class="text-sm text-primary hover:underline">查看全部</a>
-    </div>
-    {#if loading}
-      <div class="divide-y">
-        {#each Array(3) as _}
-          <div class="flex items-center justify-between p-4">
-            <div class="flex items-center gap-3">
-              <Skeleton class="h-10 w-10 rounded-lg" />
-              <div>
-                <Skeleton class="h-4 w-32" />
-                <Skeleton class="mt-2 h-3 w-24" />
-              </div>
-            </div>
-            <Skeleton class="h-6 w-16 rounded-full" />
+  <div class="grid gap-6 md:grid-cols-1 lg:grid-cols-3">
+    <div class="lg:col-span-2">
+      <Card.Root class="h-full">
+        <Card.Header class="flex flex-row items-center justify-between">
+          <div class="space-y-1">
+            <Card.Title>最近文件</Card.Title>
+            <Card.Description>您最近上传或修改的文件</Card.Description>
           </div>
-        {/each}
-      </div>
-    {:else if recentFiles.length === 0}
-      <div class="p-8 text-center">
-        <div
-          class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted"
-        >
-          <svg
-            class="h-8 w-8 text-muted-foreground"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-            />
-          </svg>
-        </div>
-        <p class="text-muted-foreground">暂无文件</p>
-        <a
-          href="/upload"
-          class="mt-2 inline-block text-sm text-primary hover:underline"
-        >
-          上传您的第一个文件
-        </a>
-      </div>
-    {:else}
-      <div class="divide-y">
-        {#each recentFiles as file, i (file.id)}
-          {@const statusVariant = getStatusVariant(file.status)}
-          <a
-            href="/files/{file.fileHash}"
-            class="flex items-center justify-between p-4 transition-colors hover:bg-muted/50"
-            in:fly={{ y: 10, duration: 300, delay: i * 50 }}
-          >
-            <div class="flex items-center gap-3">
+          <Button variant="ghost" size="sm" href="/files">查看全部</Button>
+        </Card.Header>
+        <Card.Content>
+          {#if loading}
+            <div class="space-y-4">
+              {#each Array(3) as _}
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <Skeleton class="h-10 w-10 rounded-lg" />
+                    <div>
+                      <Skeleton class="h-4 w-32" />
+                      <Skeleton class="mt-2 h-3 w-24" />
+                    </div>
+                  </div>
+                  <Skeleton class="h-6 w-16 rounded-full" />
+                </div>
+              {/each}
+            </div>
+          {:else if recentFiles.length === 0}
+            <div class="flex flex-col items-center justify-center py-8 text-center">
               <div
-                class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary"
+                class="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted"
               >
                 <svg
-                  class="h-5 w-5"
+                  class="h-8 w-8 text-muted-foreground"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -318,124 +292,150 @@
                     stroke-linecap="round"
                     stroke-linejoin="round"
                     stroke-width="2"
-                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                    d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
                   />
                 </svg>
               </div>
-              <div>
-                <p class="font-medium">{file.fileName}</p>
-                <p class="text-sm text-muted-foreground">
-                  {formatFileSize(file.fileSize)} · {formatDateTime(
-                    file.createTime,
-                    "date"
-                  )}
-                </p>
-              </div>
+              <p class="text-muted-foreground">暂无文件</p>
+              <Button variant="link" href="/upload" class="mt-2">
+                上传您的第一个文件
+              </Button>
             </div>
-            <span
-              class="rounded-full px-2 py-1 text-xs"
-              class:bg-green-100={statusVariant === "completed"}
-              class:text-green-700={statusVariant === "completed"}
-              class:dark:bg-green-900={statusVariant === "completed"}
-              class:dark:text-green-300={statusVariant === "completed"}
-              class:bg-yellow-100={statusVariant === "processing"}
-              class:text-yellow-700={statusVariant === "processing"}
-              class:dark:bg-yellow-900={statusVariant === "processing"}
-              class:dark:text-yellow-300={statusVariant === "processing"}
-              class:bg-red-100={statusVariant === "failed"}
-              class:text-red-700={statusVariant === "failed"}
-              class:dark:bg-red-900={statusVariant === "failed"}
-              class:dark:text-red-300={statusVariant === "failed"}
+          {:else}
+            <div class="space-y-1">
+              {#each recentFiles as file, i (file.id)}
+                <a
+                  href="/files/{file.fileHash}"
+                  class="flex items-center justify-between rounded-lg p-3 transition-colors hover:bg-muted/50"
+                  in:fly={{ y: 10, duration: 300, delay: i * 50 }}
+                >
+                  <div class="flex items-center gap-3">
+                    <div
+                      class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary"
+                    >
+                      <svg
+                        class="h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                        />
+                      </svg>
+                    </div>
+                    <div>
+                      <p class="font-medium text-sm">{file.fileName}</p>
+                      <p class="text-xs text-muted-foreground">
+                        {formatFileSize(file.fileSize)} · {formatDateTime(
+                          file.createTime,
+                          "date"
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                   <Badge class={getStatusColorClass(file.status)} variant="outline">
+                      {FileStatusLabel[file.status]}
+                   </Badge>
+                </a>
+              {/each}
+            </div>
+          {/if}
+        </Card.Content>
+      </Card.Root>
+    </div>
+
+    <div class="space-y-4">
+      <Card.Root>
+        <Card.Header>
+          <Card.Title>快速操作</Card.Title>
+        </Card.Header>
+        <Card.Content class="grid gap-4">
+          <a
+            href="/upload"
+            class="group flex items-center gap-4 rounded-lg border p-4 hover:border-primary hover:bg-primary/5 transition-all"
+          >
+            <div
+              class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground group-hover:scale-110 transition-transform"
             >
-              {FileStatusLabel[file.status]}
-            </span>
+              <svg
+                class="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                />
+              </svg>
+            </div>
+            <div>
+              <p class="font-medium">上传文件</p>
+              <p class="text-xs text-muted-foreground">存证您的文件</p>
+            </div>
           </a>
-        {/each}
-      </div>
-    {/if}
-  </div>
 
-  <!-- Quick actions -->
-  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-    <a
-      href="/upload"
-      class="flex items-center gap-4 rounded-lg border bg-card p-6 transition-colors hover:border-primary"
-    >
-      <div
-        class="flex h-12 w-12 items-center justify-center rounded-lg bg-primary text-primary-foreground"
-      >
-        <svg
-          class="h-6 w-6"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
-          />
-        </svg>
-      </div>
-      <div>
-        <p class="font-semibold">上传文件</p>
-        <p class="text-sm text-muted-foreground">上传并存证您的文件</p>
-      </div>
-    </a>
+          <a
+            href="/files"
+            class="group flex items-center gap-4 rounded-lg border p-4 hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-all"
+          >
+            <div
+              class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500 text-white group-hover:scale-110 transition-transform"
+            >
+              <svg
+                class="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                />
+              </svg>
+            </div>
+            <div>
+              <p class="font-medium">文件管理</p>
+              <p class="text-xs text-muted-foreground">管理存证文件</p>
+            </div>
+          </a>
 
-    <a
-      href="/files"
-      class="flex items-center gap-4 rounded-lg border bg-card p-6 transition-colors hover:border-primary"
-    >
-      <div
-        class="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-500 text-white"
-      >
-        <svg
-          class="h-6 w-6"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-          />
-        </svg>
-      </div>
-      <div>
-        <p class="font-semibold">文件管理</p>
-        <p class="text-sm text-muted-foreground">查看和管理您的文件</p>
-      </div>
-    </a>
-
-    <a
-      href="/tickets/new"
-      class="flex items-center gap-4 rounded-lg border bg-card p-6 transition-colors hover:border-primary"
-    >
-      <div
-        class="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-500 text-white"
-      >
-        <svg
-          class="h-6 w-6"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-          />
-        </svg>
-      </div>
-      <div>
-        <p class="font-semibold">提交工单</p>
-        <p class="text-sm text-muted-foreground">反馈问题或获取帮助</p>
-      </div>
-    </a>
+          <a
+            href="/tickets/new"
+            class="group flex items-center gap-4 rounded-lg border p-4 hover:border-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/10 transition-all"
+          >
+            <div
+              class="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500 text-white group-hover:scale-110 transition-transform"
+            >
+              <svg
+                class="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            </div>
+            <div>
+              <p class="font-medium">提交工单</p>
+              <p class="text-xs text-muted-foreground">反馈问题</p>
+            </div>
+          </a>
+        </Card.Content>
+      </Card.Root>
+    </div>
   </div>
 </div>
