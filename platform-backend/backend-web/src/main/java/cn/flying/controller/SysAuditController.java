@@ -15,7 +15,7 @@ import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
-import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.format.DateTimeFormatter;
+import java.util.Objects;
 import java.util.List;
 import java.util.Map;
 
@@ -52,49 +53,27 @@ public class SysAuditController {
     }
 
     /**
-     * 分页查询审计日志
+     * 分页查询审计日志（标准接口：使用 QueryParams）
+     *
+     * @param queryVO 查询条件（pageNum/pageSize/operationType 等）
+     * @return 分页结果（前端展示 VO）
      */
-    @GetMapping
-    @Operation(summary = "分页查询审计日志")
-    public Result<IPage<AuditLogVO>> getAuditLogs(
-            @RequestParam(value = "current", defaultValue = "1") Integer current,
-            @RequestParam(value = "size", defaultValue = "20") Integer size,
-            @RequestParam(required = false) String username,
-            @RequestParam(required = false) String action,
-            @RequestParam(required = false) String module,
-            @RequestParam(required = false) String startTime,
-            @RequestParam(required = false) String endTime,
-            @RequestParam(required = false) Integer status) {
+    @GetMapping("/logs/page")
+    @Operation(summary = "分页查询审计日志（标准参数）")
+    public Result<IPage<AuditLogVO>> getAuditLogsPage(@ModelAttribute AuditLogQueryVO queryVO) {
+        return Result.success(queryAuditLogs(queryVO));
+    }
 
-        AuditLogQueryVO queryVO = new AuditLogQueryVO();
-        queryVO.setPageNum(current);
-        queryVO.setPageSize(size);
-        queryVO.setUsername(username);
-        queryVO.setOperationType(action);
-        queryVO.setModule(module);
-        queryVO.setStartTime(startTime);
-        queryVO.setEndTime(endTime);
-        queryVO.setStatus(status);
-
-        IPage<SysOperationLog> logPage = auditService.queryOperationLogs(queryVO);
-
-        IPage<AuditLogVO> result = logPage.convert(log -> AuditLogVO.builder()
-                .id(String.valueOf(log.getId()))
-                .userId(log.getUserId())
-                .username(log.getUsername())
-                .action(log.getOperationType())
-                .module(log.getModule())
-                .detail(log.getRequestParam())
-                .ip(log.getRequestIp())
-                .status(log.getStatus())
-                .errorMessage(log.getErrorMsg())
-                .duration(log.getExecutionTime())
-                .createTime(log.getOperationTime() != null
-                        ? log.getOperationTime().format(DATETIME_FORMATTER)
-                        : null)
-                .build());
-
-        return Result.success(result);
+    /**
+     * 分页查询审计日志（标准接口：使用 RequestBody）
+     *
+     * @param queryVO 查询条件（pageNum/pageSize/operationType 等）
+     * @return 分页结果（前端展示 VO）
+     */
+    @PostMapping("/logs/page")
+    @Operation(summary = "分页查询审计日志（标准参数，POST Body）")
+    public Result<IPage<AuditLogVO>> postAuditLogsPage(@Valid @RequestBody AuditLogQueryVO queryVO) {
+        return Result.success(queryAuditLogs(queryVO));
     }
 
     /**
@@ -108,35 +87,65 @@ public class SysAuditController {
     }
 
     /**
-     * 导出审计日志
+     * 导出审计日志（标准接口：使用 RequestBody）
+     *
+     * @param queryVO 查询条件（可为空，表示不带过滤条件导出）
+     * @param response HTTP 响应
+     * @throws IOException IO 异常
      */
-    @GetMapping("/export")
-    @Operation(summary = "导出审计日志")
-    public void exportAuditLogs(
-            @RequestParam(required = false) String username,
-            @RequestParam(required = false) String action,
-            @RequestParam(required = false) String module,
-            @RequestParam(required = false) String startTime,
-            @RequestParam(required = false) String endTime,
-            @RequestParam(required = false) Integer status,
-            HttpServletResponse response) throws IOException {
-
-        AuditLogQueryVO queryVO = new AuditLogQueryVO();
-        queryVO.setUsername(username);
-        queryVO.setOperationType(action);
-        queryVO.setModule(module);
-        queryVO.setStartTime(startTime);
-        queryVO.setEndTime(endTime);
-        queryVO.setStatus(status);
-
-        doExportLogs(queryVO, response);
+    @PostMapping("/logs/export")
+    @Operation(summary = "导出审计日志（POST Body）")
+    public void exportAuditLogsByBody(@RequestBody(required = false) AuditLogQueryVO queryVO, HttpServletResponse response) throws IOException {
+        doExportLogs(Objects.requireNonNullElseGet(queryVO, AuditLogQueryVO::new), response);
     }
 
+    /**
+     * 统一的审计日志分页查询：查询 SysOperationLog 并转换为前端展示 VO。
+     *
+     * @param queryVO 查询条件
+     * @return 分页结果（前端展示 VO）
+     */
+    private IPage<AuditLogVO> queryAuditLogs(AuditLogQueryVO queryVO) {
+        IPage<SysOperationLog> logPage = auditService.queryOperationLogs(Objects.requireNonNullElseGet(queryVO, AuditLogQueryVO::new));
+        return logPage.convert(this::toAuditLogVO);
+    }
+
+    /**
+     * 将操作日志实体转换为前端展示用的审计日志 VO。
+     *
+     * @param log 操作日志实体
+     * @return 审计日志 VO
+     */
+    private AuditLogVO toAuditLogVO(SysOperationLog log) {
+        return AuditLogVO.builder()
+                .id(String.valueOf(log.getId()))
+                .userId(log.getUserId())
+                .username(log.getUsername())
+                .action(log.getOperationType())
+                .module(log.getModule())
+                .detail(log.getRequestParam())
+                .ip(log.getRequestIp())
+                .status(log.getStatus())
+                .errorMessage(log.getErrorMsg())
+                .duration(log.getExecutionTime())
+                .createTime(log.getOperationTime() != null
+                        ? log.getOperationTime().format(DATETIME_FORMATTER)
+                        : null)
+                .build();
+    }
+
+    /**
+     * 执行导出：查询日志并写出 Excel（.xls）。
+     *
+     * @param queryVO 查询条件
+     * @param response HTTP 响应
+     * @throws IOException IO 异常
+     */
     private void doExportLogs(AuditLogQueryVO queryVO, HttpServletResponse response) throws IOException {
         List<SysOperationLog> logs = auditService.exportOperationLogs(queryVO);
         
         // 创建Excel工作簿
-        try (Workbook workbook = new HSSFWorkbook()) {
+        try (Workbook workbook = new XSSFWorkbook()) {
             Sheet sheet = workbook.createSheet("操作日志");
             
             // 创建标题行
@@ -154,15 +163,15 @@ public class SysAuditController {
                 Row row = sheet.createRow(i + 1);
                 SysOperationLog log = logs.get(i);
                 
-                row.createCell(0).setCellValue(log.getId());
-                row.createCell(1).setCellValue(log.getUserId());
-                row.createCell(2).setCellValue(log.getUsername());
-                row.createCell(3).setCellValue(log.getModule());
-                row.createCell(4).setCellValue(log.getOperationType());
-                row.createCell(5).setCellValue(log.getDescription());
-                row.createCell(6).setCellValue(log.getMethod());
-                row.createCell(7).setCellValue(log.getRequestUrl());
-                row.createCell(8).setCellValue(log.getRequestIp());
+                row.createCell(0).setCellValue(toCellString(log.getId()));
+                row.createCell(1).setCellValue(toCellString(log.getUserId()));
+                row.createCell(2).setCellValue(toCellString(log.getUsername()));
+                row.createCell(3).setCellValue(toCellString(log.getModule()));
+                row.createCell(4).setCellValue(toCellString(log.getOperationType()));
+                row.createCell(5).setCellValue(toCellString(log.getDescription()));
+                row.createCell(6).setCellValue(toCellString(log.getMethod()));
+                row.createCell(7).setCellValue(toCellString(log.getRequestUrl()));
+                row.createCell(8).setCellValue(toCellString(log.getRequestIp()));
                 row.createCell(9).setCellValue(log.getStatus() == 0 ? "成功" : "失败");
                 row.createCell(10).setCellValue(log.getOperationTime() != null
                         ? log.getOperationTime().format(DATETIME_FORMATTER) : "");
@@ -175,8 +184,8 @@ public class SysAuditController {
             }
             
             // 设置响应头
-            String fileName = URLEncoder.encode("操作日志_" + System.currentTimeMillis() + ".xls", StandardCharsets.UTF_8);
-            response.setContentType("application/vnd.ms-excel");
+            String fileName = URLEncoder.encode("操作日志_" + System.currentTimeMillis() + ".xlsx", StandardCharsets.UTF_8);
+            response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
             response.setHeader("Content-Disposition", "attachment; filename=" + fileName);
             
             // 写入响应
@@ -184,6 +193,16 @@ public class SysAuditController {
             workbook.write(outputStream);
             outputStream.flush();
         }
+    }
+
+    /**
+     * 将值安全转换为 Excel 单元格字符串，null 转为空字符串。
+     *
+     * @param value 任意值
+     * @return 单元格字符串
+     */
+    private String toCellString(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 
     /**

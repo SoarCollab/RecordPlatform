@@ -114,6 +114,7 @@ public class SysOperationLog {
      * 操作时间
      */
     @Schema(description = "操作时间")
+    @com.fasterxml.jackson.annotation.JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime operationTime;
     
     /**

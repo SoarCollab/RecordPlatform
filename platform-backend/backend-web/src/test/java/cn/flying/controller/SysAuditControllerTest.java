@@ -11,6 +11,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.LocalDateTime;
@@ -27,7 +28,16 @@ import static org.mockito.ArgumentMatchers.anyString;
 
 @WebMvcTest(SysAuditController.class)
 // @Import(cn.flying.config.WebConfiguration.class) // Import config to pick up any web settings if needed
+@ActiveProfiles("test")
 public class SysAuditControllerTest {
+
+    static {
+        // 在 Spring 初始化日志系统前设置 Nacos 日志目录，避免测试环境写入 ${user.home}/logs 导致权限问题。
+        java.io.File logDir = new java.io.File("target/test-logs");
+        // Nacos 默认会在 logPath 下创建 nacos 子目录写入 config/naming/remote 日志
+        new java.io.File(logDir, "nacos").mkdirs();
+        System.setProperty("JM.LOG.PATH", logDir.getAbsolutePath());
+    }
 
     @Autowired
     private MockMvc mockMvc;

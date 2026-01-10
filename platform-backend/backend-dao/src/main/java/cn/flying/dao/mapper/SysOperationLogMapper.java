@@ -5,10 +5,10 @@ import cn.flying.dao.vo.audit.AuditConfigVO;
 import cn.flying.dao.vo.audit.ErrorOperationStatsVO;
 import cn.flying.dao.vo.audit.HighFrequencyOperationVO;
 import cn.flying.dao.vo.audit.UserTimeDistributionVO;
+import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
-import org.apache.ibatis.annotations.Select;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -21,42 +21,17 @@ import java.util.Map;
 public interface SysOperationLogMapper extends BaseMapper<SysOperationLog> {
 
     /**
-     * 获取审计概览数据 - 今日操作数
+     * 执行异常检查存储过程（OUT 参数会写回到入参 Map 中）。
+     *
+     * @param params OUT 参数容器，执行后包含：hasAnomalies、anomalyDetails
      */
-    @Select("SELECT COUNT(*) FROM sys_operation_log WHERE DATE(operation_time) = CURDATE()")
-    Integer selectTodayOperations();
-
-    /**
-     * 获取审计概览数据 - 异常操作数
-     */
-    @Select("SELECT COUNT(*) FROM sys_operation_log WHERE status = 1")
-    Integer selectErrorOperations();
-
-    /**
-     * 获取审计概览数据 - 敏感操作数
-     */
-    @Select("SELECT COUNT(*) FROM v_sensitive_operations")
-    Integer selectSensitiveOperationCount();
-
-    /**
-     * 获取审计概览数据 - 活跃用户数
-     */
-    @Select("SELECT COUNT(DISTINCT user_id) FROM sys_operation_log WHERE DATE(operation_time) = CURDATE()")
-    Integer selectActiveUsers();
-
-    /**
-     * 获取最近7天的操作统计
-     */
-    List<Map<String, Object>> selectDailyStats();
-
-    /**
-     * 执行异常检查
-     */
-    Map<String, Object> checkAnomalies();
+    @InterceptorIgnore(tenantLine = "true")
+    void checkAnomalies(Map<String, Object> params);
 
     /**
      * 执行日志备份
      */
+    @InterceptorIgnore(tenantLine = "true")
     void backupLogs(@Param("days") Integer days, @Param("deleteAfterBackup") Boolean deleteAfterBackup);
 
     /**

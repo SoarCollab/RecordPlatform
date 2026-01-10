@@ -1,9 +1,11 @@
 -- Add stored procedure for anomaly detection
 -- Checks for: high frequency operations, failed logins, error rate anomalies
 
+DROP PROCEDURE IF EXISTS `proc_check_operation_anomalies`;
+
 DELIMITER //
 
-CREATE PROCEDURE IF NOT EXISTS `proc_check_operation_anomalies`(
+CREATE PROCEDURE `proc_check_operation_anomalies`(
     OUT p_has_anomalies BOOLEAN,
     OUT p_anomaly_details VARCHAR(4000)
 )
@@ -15,12 +17,14 @@ BEGIN
     DECLARE v_error_rate DECIMAL(5,2) DEFAULT 0;
     DECLARE v_details JSON;
 
-    -- Load thresholds from config
-    SELECT CAST(config_value AS UNSIGNED) INTO v_high_freq_threshold
-    FROM sys_audit_config WHERE config_key = 'HIGH_FREQ_THRESHOLD';
+    -- Load thresholds from config (with IFNULL protection)
+    SELECT IFNULL(CAST(config_value AS UNSIGNED), 100) INTO v_high_freq_threshold
+    FROM sys_audit_config WHERE config_key = 'HIGH_FREQ_THRESHOLD'
+    LIMIT 1;
 
-    SELECT CAST(config_value AS UNSIGNED) INTO v_failed_login_threshold
-    FROM sys_audit_config WHERE config_key = 'FAILED_LOGIN_THRESHOLD';
+    SELECT IFNULL(CAST(config_value AS UNSIGNED), 5) INTO v_failed_login_threshold
+    FROM sys_audit_config WHERE config_key = 'FAILED_LOGIN_THRESHOLD'
+    LIMIT 1;
 
     -- Check 1: High frequency operations (users exceeding threshold in last 5 min)
     SELECT COUNT(*) INTO v_high_freq_count

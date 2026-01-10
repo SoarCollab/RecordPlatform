@@ -40,12 +40,14 @@ public class HighFrequencyOperationVO {
      * 开始时间
      */
     @Schema(description = "开始时间")
+    @com.fasterxml.jackson.annotation.JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime startTime;
     
     /**
      * 结束时间
      */
     @Schema(description = "结束时间")
+    @com.fasterxml.jackson.annotation.JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime endTime;
     
     /**

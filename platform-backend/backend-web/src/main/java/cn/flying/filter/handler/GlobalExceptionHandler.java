@@ -17,6 +17,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -176,6 +177,30 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .headers(headers)
                 .body(result);
+    }
+
+    /**
+     * 处理异步请求超时（常见于 SSE 长连接）。
+     *
+     * <p>对于 SSE(text/event-stream) 请求，超时/断开属于正常现象，避免返回 JSON 以免触发转换器报错。</p>
+     *
+     * @param ex      异步超时异常
+     * @param request HTTP 请求
+     * @return 对 SSE 请求返回空响应体；其他请求返回 503
+     */
+    @ExceptionHandler(AsyncRequestTimeoutException.class)
+    public ResponseEntity<Void> handleAsyncRequestTimeoutException(
+            AsyncRequestTimeoutException ex, HttpServletRequest request) {
+        String contentType = request.getHeader("Accept");
+        String uri = request.getRequestURI();
+
+        if (uri.contains("/sse/") || (contentType != null && contentType.contains("text/event-stream"))) {
+            log.debug("SSE 请求超时/断开: uri={}, error={}", uri, ex.getMessage());
+            return ResponseEntity.ok().build();
+        }
+
+        log.warn("异步请求超时: uri={}, error={}", uri, ex.getMessage());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
     }
 
     /**

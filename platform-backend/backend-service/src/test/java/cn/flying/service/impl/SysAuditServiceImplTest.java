@@ -338,10 +338,12 @@ class SysAuditServiceImplTest {
         @Test
         @DisplayName("should return anomaly check results")
         void shouldReturnAnomalyCheckResults() {
-            Map<String, Object> procedureResult = new HashMap<>();
-            procedureResult.put("hasAnomalies", true);
-            procedureResult.put("anomalyDetails", "High login failures detected");
-            when(operationLogMapper.checkAnomalies()).thenReturn(procedureResult);
+            doAnswer(invocation -> {
+                Map<String, Object> outParams = invocation.getArgument(0);
+                outParams.put("hasAnomalies", true);
+                outParams.put("anomalyDetails", "High login failures detected");
+                return null;
+            }).when(operationLogMapper).checkAnomalies(anyMap());
 
             Map<String, Object> result = sysAuditService.checkAnomalies();
 
@@ -354,7 +356,7 @@ class SysAuditServiceImplTest {
         @Test
         @DisplayName("should handle anomaly check failure")
         void shouldHandleAnomalyCheckFailure() {
-            when(operationLogMapper.checkAnomalies()).thenThrow(new RuntimeException("Procedure error"));
+            doThrow(new RuntimeException("Procedure error")).when(operationLogMapper).checkAnomalies(anyMap());
 
             Map<String, Object> result = sysAuditService.checkAnomalies();
 
