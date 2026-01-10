@@ -50,16 +50,19 @@ pnpm run build
 
 ```bash
 # 终端 1: 存储服务
-java -jar platform-storage/target/platform-storage-0.0.1-SNAPSHOT.jar \
+java -jar "$(ls platform-storage/target/platform-storage-*.jar | head -n 1)" \
   --spring.profiles.active=local
 
 # 终端 2: FISCO 服务
-java -jar platform-fisco/target/platform-fisco-0.0.1-SNAPSHOT.jar \
+java -jar "$(ls platform-fisco/target/platform-fisco-*.jar | head -n 1)" \
   --spring.profiles.active=local
 
 # 终端 3: 后端 Web
-java -jar platform-backend/backend-web/target/backend-web-0.0.1-SNAPSHOT.jar \
+java -jar "$(ls platform-backend/backend-web/target/backend-web-*.jar | head -n 1)" \
   --spring.profiles.active=local
+
+> 说明：`$(...)` 写法适用于 macOS/Linux Shell。Windows PowerShell 建议显式选取单个 JAR（fisco/backend 同理）：
+> `java -jar (Get-ChildItem platform-storage/target/platform-storage-*.jar | Select-Object -First 1).FullName --spring.profiles.active=local`
 
 # 终端 4: 前端（开发服务器）
 cd platform-frontend && pnpm run dev

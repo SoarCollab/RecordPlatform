@@ -50,13 +50,17 @@ mvn -f platform-fisco/pom.xml clean package -DskipTests
 mvn -f platform-storage/pom.xml clean package -DskipTests
 ```
 
+### 2.5 Test
+
+See `TESTING.md` for the recommended test matrix (unit + integration).
+
 ### 3. Run
 
 ```bash
 # Start services in order (providers before consumer)
-java -jar platform-storage/target/platform-storage-*.jar --spring.profiles.active=local
-java -jar platform-fisco/target/platform-fisco-*.jar --spring.profiles.active=local
-java -jar platform-backend/backend-web/target/backend-web-*.jar --spring.profiles.active=local
+java -jar "$(ls platform-storage/target/platform-storage-*.jar | head -n 1)" --spring.profiles.active=local
+java -jar "$(ls platform-fisco/target/platform-fisco-*.jar | head -n 1)" --spring.profiles.active=local
+java -jar "$(ls platform-backend/backend-web/target/backend-web-*.jar | head -n 1)" --spring.profiles.active=local
 ```
 
 > For detailed setup, see [Getting Started Guide](docs/en/getting-started/index.md)
