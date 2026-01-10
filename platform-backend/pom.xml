@@ -22,6 +22,21 @@
         <jacoco.version>0.8.12</jacoco.version>
         <maven-failsafe-plugin.version>3.2.5</maven-failsafe-plugin.version>
         <!--
+            Keep commons-compress consistent on test/runtime classpath.
+            Testcontainers may pull an older commons-compress which can break Apache POI at runtime (NoSuchMethodError).
+         -->
+        <commons-compress.version>1.28.0</commons-compress.version>
+        <!--
+            Keep commons-io consistent on test/runtime classpath.
+            Apache POI may pull an older commons-io which can break Testcontainers file copy (NoSuchMethodError: FileTimes.toUnixTime).
+         -->
+        <commons-io.version>2.20.0</commons-io.version>
+        <!--
+            commons-compress 1.28+ requires commons-lang3 containing ArrayFill (>= 3.14.0).
+            Testcontainers (docker-java) may require SystemProperties.getUserName(String) (>= 3.17.0).
+         -->
+        <commons-lang3.version>3.18.0</commons-lang3.version>
+        <!--
             Mockito inline mock maker relies on Byte Buddy instrumentation.
             On some macOS/JDK builds, runtime self-attach is not available; pre-attaching the agent fixes it.
          -->
@@ -86,6 +101,24 @@
                 <version>${testcontainers.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- Force commons-compress version to avoid POI runtime incompatibility in tests -->
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-compress</artifactId>
+                <version>${commons-compress.version}</version>
+            </dependency>
+            <!-- Force commons-io version to avoid Testcontainers/POI runtime incompatibility in tests -->
+            <dependency>
+                <groupId>commons-io</groupId>
+                <artifactId>commons-io</artifactId>
+                <version>${commons-io.version}</version>
+            </dependency>
+            <!-- Ensure commons-lang3 matches commons-compress runtime needs (ArrayFill) -->
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-lang3</artifactId>
+                <version>${commons-lang3.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
