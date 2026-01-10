@@ -8,6 +8,7 @@ import cn.flying.dao.entity.FriendFileShare;
 import cn.flying.dao.entity.FriendRequest;
 import cn.flying.dao.entity.Friendship;
 import cn.flying.dao.mapper.*;
+import cn.flying.dao.vo.friend.FriendFileShareDetailVO;
 import cn.flying.dao.vo.friend.FriendShareVO;
 import cn.flying.test.support.BaseControllerIntegrationTest;
 import org.junit.jupiter.api.*;
@@ -117,6 +118,17 @@ class FriendFileShareControllerIntegrationTest extends BaseControllerIntegration
         return request;
     }
 
+    /**
+     * 构造并写入一条好友分享记录（用于集成测试准备数据）。
+     *
+     * @param sharerId 分享者用户ID（内部ID）
+     * @param friendId 接收者用户ID（内部ID）
+     * @param tenantId 租户ID
+     * @param fileHashes 文件哈希 JSON 字符串（如：["sha256_xxx"]）
+     * @param status 分享状态
+     * @param isRead 是否已读（0/1）
+     * @return 写入后的好友分享实体
+     */
     private FriendFileShare createFriendFileShare(Long sharerId, Long friendId, Long tenantId,
                                                    String fileHashes, Integer status, Integer isRead) {
         FriendFileShare share = new FriendFileShare();
@@ -430,10 +442,21 @@ class FriendFileShareControllerIntegrationTest extends BaseControllerIntegration
             String fileHash = "sha256_cancel_" + System.currentTimeMillis();
             createTestFile(testUserId, testTenantId, fileHash);
 
-            FriendFileShare share = createFriendFileShare(testUserId, friendAccount.getId(), testTenantId,
-                    "[\"" + fileHash + "\"]", FriendFileShare.STATUS_ACTIVE, 0);
+            // 通过真实接口创建分享，避免直接插入记录与租户拦截/自动填充行为不一致导致查询不到（CI 偶发 60016）
+            FriendShareVO shareVO = new FriendShareVO();
+            shareVO.setFriendId(IdUtils.toExternalId(friendAccount.getId()));
+            shareVO.setFileHashes(List.of(fileHash));
+            shareVO.setMessage("cancel-test");
 
-            performDelete(BASE_URL + "/" + IdUtils.toExternalId(share.getId()))
+            FriendFileShareDetailVO created = extractData(
+                    performPost(BASE_URL, shareVO)
+                            .andExpect(status().isOk())
+                            .andExpect(jsonPath("$.code").value(200))
+                            .andReturn(),
+                    FriendFileShareDetailVO.class
+            );
+
+            performDelete(BASE_URL + "/" + created.getId())
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
