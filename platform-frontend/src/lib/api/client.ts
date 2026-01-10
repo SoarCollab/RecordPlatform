@@ -132,7 +132,9 @@ function buildUrl(
   path: string,
   params?: RequestConfig["params"],
 ): string {
-  const baseUrlForParsing = browser ? window.location.origin : "http://localhost";
+  const baseUrlForParsing = browser
+    ? window.location.origin
+    : "http://localhost";
   const url = new URL(`${baseUrl}${path}`, baseUrlForParsing);
 
   if (params) {
@@ -215,17 +217,20 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
           headers.set("Content-Type", "application/x-www-form-urlencoded");
         }
 
-        const response = await fetchFn(buildUrl(baseUrl, path, config?.params), {
-          method,
-          headers,
-          body:
-            body instanceof FormData || body instanceof URLSearchParams
-              ? body
-              : body
-                ? JSON.stringify(body)
-                : undefined,
-          signal: controller.signal,
-        });
+        const response = await fetchFn(
+          buildUrl(baseUrl, path, config?.params),
+          {
+            method,
+            headers,
+            body:
+              body instanceof FormData || body instanceof URLSearchParams
+                ? body
+                : body
+                  ? JSON.stringify(body)
+                  : undefined,
+            signal: controller.signal,
+          },
+        );
 
         clearTimeout(timeoutId);
 

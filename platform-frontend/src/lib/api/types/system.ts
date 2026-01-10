@@ -73,11 +73,12 @@ export interface OperationLogVO {
  */
 export interface AuditLogQueryParams {
   username?: string;
-  action?: string;
+  operationType?: string;
   module?: string;
   startTime?: string;
   endTime?: string;
   status?: number;
+  requestIp?: string;
 }
 
 /**

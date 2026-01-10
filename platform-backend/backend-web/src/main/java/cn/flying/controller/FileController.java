@@ -3,6 +3,7 @@ package cn.flying.controller;
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.annotation.RateLimit;
 import cn.flying.common.constant.Result;
+import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.IdUtils;
@@ -32,6 +33,7 @@ import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.util.StringUtils;
 
 import java.util.List;
 
@@ -86,6 +88,31 @@ public class FileController {
     }
 
     /**
+     * 通过文件哈希获取文件详情（支持好友分享访问）
+     *
+     * <p>用于前端文件详情页直接按 hash 查询，避免通过分页列表过滤导致的“文件不存在”。</p>
+     *
+     * @param userId   当前用户ID
+     * @param fileHash 文件哈希（推荐参数名）
+     * @param hash     文件哈希（兼容参数名）
+     * @return 文件详情
+     */
+    @GetMapping("/byHash")
+    @Operation(summary = "通过文件哈希获取文件详情", description = "支持访问自己的文件与好友分享给自己的文件")
+    @OperationLog(module = "文件操作", operationType = "查询", description = "通过哈希获取文件详情")
+    public Result<File> getFileByHash(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Parameter(description = "文件哈希") @RequestParam(value = "fileHash", required = false) String fileHash,
+            @Parameter(description = "文件哈希(兼容参数名)") @RequestParam(value = "hash", required = false) String hash) {
+        String finalHash = StringUtils.hasText(fileHash) ? fileHash : hash;
+        if (!StringUtils.hasText(finalHash)) {
+            throw new GeneralException(ResultEnum.PARAM_NOT_COMPLETE, "缺少参数: fileHash");
+        }
+        File file = fileQueryService.getFileByHash(userId, finalHash);
+        return Result.success(file);
+    }
+
+    /**
      * 获取用户文件列表
      * @param userId 用户ID
      * @return 用户文件列表
@@ -99,18 +126,25 @@ public class FileController {
     }
 
     /**
-     * 获取用户文件列表
+     * 获取用户文件分页列表
      * @param userId 用户ID
-     * @return 用户文件列表
+     * @param pageNum 页码
+     * @param pageSize 每页数量
+     * @param keyword 搜索关键词（可选，匹配文件名或文件哈希）
+     * @param status 文件状态过滤（可选）
+     * @return 用户文件分页列表
      */
     @GetMapping("/page")
     @Operation(summary = "获取用户文件分页（只包含文件元信息，没有实际的文件数据内容）")
     @OperationLog(module = "文件操作", operationType = "查询", description = "获取用户文件分页")
-    public Result<Page<File>> getUserFiles(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
-                                          @Schema(description = "当前分页") Integer pageNum,
-                                          @Schema(description = "分页大小") Integer pageSize) {
+    public Result<Page<File>> getUserFiles(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer pageNum,
+            @Parameter(description = "每页数量") @RequestParam(defaultValue = "10") Integer pageSize,
+            @Parameter(description = "搜索关键词") @RequestParam(required = false) String keyword,
+            @Parameter(description = "文件状态") @RequestParam(required = false) Integer status) {
         Page<File> page = new Page<>(pageNum, pageSize);
-        fileQueryService.getUserFilesPage(userId, page);
+        fileQueryService.getUserFilesPage(userId, page, keyword, status);
         return Result.success(page);
     }
 

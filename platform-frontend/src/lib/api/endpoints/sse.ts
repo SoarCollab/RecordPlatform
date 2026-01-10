@@ -61,7 +61,11 @@ export async function createSSEConnection(
       params.set("connectionId", options.connectionId);
     }
 
-    const url = `/record-platform/api/v1/sse/connect?${params.toString()}`;
+    const apiBase = import.meta.env.DEV
+      ? "/record-platform/api/v1"
+      : `${env.PUBLIC_API_BASE_URL || "/record-platform"}/api/v1`;
+
+    const url = `${apiBase}/sse/connect?${params.toString()}`;
     const eventSource = new EventSource(url);
 
     eventSource.onopen = () => {

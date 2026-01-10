@@ -50,18 +50,10 @@ export async function getFile(id: string): Promise<FileVO> {
 
 /**
  * 通过哈希获取文件信息
- * @deprecated 后端 /files/address 接口返回的是下载地址列表而非 FileVO
- * @todo 后端需要添加 GET /files/byHash?hash={hash} 返回 FileVO 的接口
- * @note 临时方案：使用 getFiles 分页接口并过滤
+ * @note 支持查询自己的文件与好友分享给自己的文件
  */
 export async function getFileByHash(hash: string): Promise<FileVO> {
-  // 临时方案：通过分页接口获取并过滤
-  const page = await getFiles({ pageNum: 1, pageSize: 100 });
-  const file = page.records.find((f) => f.fileHash === hash);
-  if (!file) {
-    throw new Error(`找不到文件: ${hash}`);
-  }
-  return file;
+  return api.get<FileVO>(`${BASE}/byHash`, { params: { fileHash: hash } });
 }
 
 /**

@@ -10,9 +10,5 @@ export async function uploadAvatar(file: File): Promise<string> {
   const formData = new FormData();
   formData.append("file", file);
 
-  return api.post<string>(`${BASE}/upload/avatar`, formData, {
-    headers: {
-      "Content-Type": "multipart/form-data",
-    },
-  });
+  return api.upload<string>(`${BASE}/upload/avatar`, formData);
 }

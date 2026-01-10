@@ -44,7 +44,7 @@ describe("chunkDownloader", () => {
       });
 
       await expect(downloadChunk("https://example.com/chunk")).rejects.toThrow(
-        "Download failed: 404 Not Found"
+        "Download failed: 404 Not Found",
       );
     });
 
@@ -76,7 +76,7 @@ describe("chunkDownloader", () => {
       const result = await downloadChunkWithRetry(
         "https://example.com/chunk",
         0,
-        { maxRetries: 3, retryDelayMs: 10 }
+        { maxRetries: 3, retryDelayMs: 10 },
       );
 
       expect(fetch).toHaveBeenCalledTimes(1);
@@ -97,7 +97,7 @@ describe("chunkDownloader", () => {
       const result = await downloadChunkWithRetry(
         "https://example.com/chunk",
         0,
-        { maxRetries: 3, retryDelayMs: 10 }
+        { maxRetries: 3, retryDelayMs: 10 },
       );
 
       expect(fetch).toHaveBeenCalledTimes(3);
@@ -111,7 +111,7 @@ describe("chunkDownloader", () => {
         downloadChunkWithRetry("https://example.com/chunk", 5, {
           maxRetries: 2,
           retryDelayMs: 10,
-        })
+        }),
       ).rejects.toThrow("Chunk 5 download failed after 3 attempts");
 
       expect(fetch).toHaveBeenCalledTimes(3);
@@ -128,7 +128,7 @@ describe("chunkDownloader", () => {
           maxRetries: 3,
           retryDelayMs: 10,
           signal: controller.signal,
-        })
+        }),
       ).rejects.toThrow("Download cancelled");
 
       expect(fetch).toHaveBeenCalledTimes(0);
@@ -138,7 +138,7 @@ describe("chunkDownloader", () => {
       global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
 
       await expect(
-        downloadChunkWithRetry("https://example.com/chunk", 0)
+        downloadChunkWithRetry("https://example.com/chunk", 0),
       ).rejects.toThrow();
 
       expect(fetch).toHaveBeenCalledTimes(4);
@@ -153,17 +153,19 @@ describe("chunkDownloader", () => {
         new Uint8Array([3]),
       ];
 
-      global.fetch = vi
-        .fn()
-        .mockImplementation((url: string) => {
-          const index = parseInt(url.split("/").pop()!);
-          return Promise.resolve({
-            ok: true,
-            arrayBuffer: () => Promise.resolve(chunks[index].buffer),
-          });
+      global.fetch = vi.fn().mockImplementation((url: string) => {
+        const index = parseInt(url.split("/").pop()!);
+        return Promise.resolve({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(chunks[index].buffer),
         });
+      });
 
-      const urls = ["https://example.com/0", "https://example.com/1", "https://example.com/2"];
+      const urls = [
+        "https://example.com/0",
+        "https://example.com/1",
+        "https://example.com/2",
+      ];
       const results = await downloadAllChunks(urls, {
         concurrency: 3,
         maxRetries: 0,
@@ -297,7 +299,7 @@ describe("chunkDownloader", () => {
 
       const promise = downloadAllChunks(
         ["https://example.com/0", "https://example.com/1"],
-        { signal: controller.signal, concurrency: 1 }
+        { signal: controller.signal, concurrency: 1 },
       );
 
       setTimeout(() => controller.abort(), 10);
@@ -317,7 +319,11 @@ describe("chunkDownloader", () => {
       const urls = ["https://example.com/0", "https://example.com/1"];
 
       await expect(
-        downloadAllChunks(urls, { concurrency: 1, maxRetries: 0, retryDelayMs: 10 })
+        downloadAllChunks(urls, {
+          concurrency: 1,
+          maxRetries: 0,
+          retryDelayMs: 10,
+        }),
       ).rejects.toThrow();
     });
   });

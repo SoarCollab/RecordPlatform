@@ -41,7 +41,9 @@ export async function markAsRead(conversationId: string): Promise<void> {
   await api.post(`${CONV_BASE}/${conversationId}/read`);
 }
 
-export async function sendMessage(data: SendMessageRequest): Promise<MessageVO> {
+export async function sendMessage(
+  data: SendMessageRequest,
+): Promise<MessageVO> {
   return api.post<MessageVO>(MSG_BASE, {
     receiverId: data.receiverId,
     content: data.content,

@@ -96,10 +96,11 @@ export interface TicketReplyVO {
   id: string;
   ticketId: string;
   content: string;
-  replyerId: string;
-  replyerUsername: string;
-  replyerNickname?: string;
-  isStaff: boolean;
+  replierId: string;
+  replierName: string;
+  replierAvatar?: string;
+  isInternal: boolean;
+  isAdmin: boolean;
   createTime: string;
 }
 
