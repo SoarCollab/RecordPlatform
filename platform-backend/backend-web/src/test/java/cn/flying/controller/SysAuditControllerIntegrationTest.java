@@ -184,7 +184,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
     }
 
     @Nested
-    @DisplayName("GET / - Get Audit Logs")
+    @DisplayName("GET /logs/page - Get Audit Logs")
     class GetAuditLogsTests {
 
         @Test
@@ -193,7 +193,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
             createTestLog(testUserId, "testuser", "file", "查询", 0);
             createTestLog(testUserId, "testuser", "file", "上传", 0);
 
-            performGet(BASE_URL + "?current=1&size=20")
+            performGet(BASE_URL + "/logs/page?pageNum=1&pageSize=20")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data.records").isArray());
@@ -205,7 +205,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
             createTestLog(testUserId, "targetuser", "file", "查询", 0);
             createTestLog(200L, "otheruser", "file", "查询", 0);
 
-            performGet(BASE_URL + "?current=1&size=20&username=targetuser")
+            performGet(BASE_URL + "/logs/page?pageNum=1&pageSize=20&username=targetuser")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -216,7 +216,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
             createTestLog(testUserId, "testuser", "file", "查询", 0);
             createTestLog(testUserId, "testuser", "ticket", "查询", 0);
 
-            performGet(BASE_URL + "?current=1&size=20&module=file")
+            performGet(BASE_URL + "/logs/page?pageNum=1&pageSize=20&module=file")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -227,7 +227,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
             createTestLog(testUserId, "testuser", "file", "查询", 0);
             createTestLog(testUserId, "testuser", "file", "上传", 1);
 
-            performGet(BASE_URL + "?current=1&size=20&status=0")
+            performGet(BASE_URL + "/logs/page?pageNum=1&pageSize=20&status=0")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -238,7 +238,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
             createTestLog(testUserId, "testuser", "file", "查询", 0);
             createTestLog(testUserId, "testuser", "file", "上传", 0);
 
-            performGet(BASE_URL + "?current=1&size=20&action=查询")
+            performGet(BASE_URL + "/logs/page?pageNum=1&pageSize=20&operationType=查询")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -248,7 +248,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
         void shouldHandleTimeRangeFilter() throws Exception {
             createTestLog(testUserId, "testuser", "file", "查询", 0);
 
-            performGet(BASE_URL + "?current=1&size=20&startTime=2020-01-01 00:00:00&endTime=2030-12-31 23:59:59")
+            performGet(BASE_URL + "/logs/page?pageNum=1&pageSize=20&startTime=2020-01-01 00:00:00&endTime=2030-12-31 23:59:59")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -277,9 +277,23 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
                     .andExpect(jsonPath("$.data").doesNotExist());
         }
     }
+    
+    @Test
+    @DisplayName("should format date fields correctly")
+    void shouldFormatDateFieldsCorrectly() throws Exception {
+        SysOperationLog log = createTestLog(testUserId, "testuser", "file", "查询", 0);
+        
+        mockMvc.perform(get(BASE_URL + "/logs/" + log.getId())
+                        .header("Authorization", "Bearer " + testToken)
+                        .header(HEADER_TENANT_ID, testTenantId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.operationTime").isString())
+                .andExpect(jsonPath("$.data.operationTime").value(org.hamcrest.Matchers.matchesPattern("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$")));
+    }
 
     @Nested
-    @DisplayName("GET /export - Export Audit Logs")
+    @DisplayName("POST /logs/export - Export Audit Logs")
     class ExportAuditLogsTests {
 
         @Test
@@ -287,11 +301,13 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
         void shouldExportAuditLogsAsExcel() throws Exception {
             createTestLog(testUserId, "testuser", "file", "查询", 0);
 
-            MvcResult result = mockMvc.perform(get(BASE_URL + "/export")
+            MvcResult result = mockMvc.perform(post(BASE_URL + "/logs/export")
                             .header("Authorization", "Bearer " + testToken)
-                            .header(HEADER_TENANT_ID, testTenantId))
+                            .header(HEADER_TENANT_ID, testTenantId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{}"))
                     .andExpect(status().isOk())
-                    .andExpect(header().string("Content-Type", "application/vnd.ms-excel"))
+                    .andExpect(header().string("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
                     .andReturn();
 
             assertThat(result.getResponse().getContentAsByteArray()).isNotEmpty();
@@ -302,9 +318,11 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
         void shouldExportWithFilters() throws Exception {
             createTestLog(testUserId, "testuser", "file", "查询", 0);
 
-            mockMvc.perform(get(BASE_URL + "/export?module=file&status=0")
+            mockMvc.perform(post(BASE_URL + "/logs/export")
                             .header("Authorization", "Bearer " + testToken)
-                            .header(HEADER_TENANT_ID, testTenantId))
+                            .header(HEADER_TENANT_ID, testTenantId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"module\":\"file\",\"status\":0}"))
                     .andExpect(status().isOk());
         }
     }

@@ -177,12 +177,12 @@
 
     <!-- == Stored Procedure Calls == -->
 
-    <select id="checkAnomalies" statementType="CALLABLE" resultType="java.util.Map">
+    <update id="checkAnomalies" statementType="CALLABLE" parameterType="java.util.Map">
         {CALL proc_check_operation_anomalies(
                 #{hasAnomalies, mode=OUT, jdbcType=BOOLEAN},
                 #{anomalyDetails, mode=OUT, jdbcType=VARCHAR}
               )}
-    </select>
+    </update>
 
     <update id="backupLogs" statementType="CALLABLE">
         {CALL proc_backup_operation_logs(

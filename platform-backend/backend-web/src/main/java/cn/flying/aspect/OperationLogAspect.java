@@ -40,7 +40,15 @@ public class OperationLogAspect {
     private SysOperationLogService operationLogService;
     
     // 忽略的非业务URL前缀（保留 /api/file 等核心接口的审计记录）
-    private final Set<String> ignores = Set.of("/favicon.ico","/webjars","/doc.html","/swagger-ui", "/v3/api-docs", "/api/system/logs");
+    private final Set<String> ignores = Set.of(
+            "/favicon.ico",
+            "/webjars",
+            "/doc.html",
+            "/swagger-ui",
+            "/v3/api-docs",
+            "/api/system/logs",
+            "/api/v1/system/audit"
+    );
 
     /**
      * 设置操作日志切入点 记录操作日志 在注解的位置切入代码

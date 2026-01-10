@@ -40,11 +40,13 @@ public class ErrorOperationStatsVO {
      * 首次出现时间
      */
     @Schema(description = "首次出现时间")
+    @com.fasterxml.jackson.annotation.JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime firstOccurrence;
     
     /**
      * 最后出现时间
      */
     @Schema(description = "最后出现时间")
+    @com.fasterxml.jackson.annotation.JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
     private LocalDateTime lastOccurrence;
 } 

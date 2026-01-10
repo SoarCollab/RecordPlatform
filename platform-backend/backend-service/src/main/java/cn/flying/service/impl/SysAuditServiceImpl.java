@@ -35,46 +35,15 @@ public class SysAuditServiceImpl implements SysAuditService {
     
     @Override
     public IPage<SysOperationLog> queryOperationLogs(AuditLogQueryVO queryVO) {
-        // 使用MyBatis Plus的LambdaQueryWrapper构建查询条件
-        LambdaQueryWrapper<SysOperationLog> queryWrapper = new LambdaQueryWrapper<>();
-        
-        // 构建查询条件
-        if (StringUtils.isNotBlank(queryVO.getUserId())) {
-            queryWrapper.eq(SysOperationLog::getUserId, queryVO.getUserId());
+        if (queryVO == null) {
+            queryVO = new AuditLogQueryVO();
         }
-        
-        if (StringUtils.isNotBlank(queryVO.getUsername())) {
-            queryWrapper.like(SysOperationLog::getUsername, queryVO.getUsername());
-        }
-        
-        if (StringUtils.isNotBlank(queryVO.getModule())) {
-            queryWrapper.like(SysOperationLog::getModule, queryVO.getModule());
-        }
-        
-        if (StringUtils.isNotBlank(queryVO.getOperationType())) {
-            queryWrapper.eq(SysOperationLog::getOperationType, queryVO.getOperationType());
-        }
-        
-        if (queryVO.getStatus() != null) {
-            queryWrapper.eq(SysOperationLog::getStatus, queryVO.getStatus());
-        }
-        
-        if (StringUtils.isNotBlank(queryVO.getRequestIp())) {
-            queryWrapper.eq(SysOperationLog::getRequestIp, queryVO.getRequestIp());
-        }
-        
-        // 处理时间范围查询
-        if (StringUtils.isNotBlank(queryVO.getStartTime()) && StringUtils.isNotBlank(queryVO.getEndTime())) {
-            LocalDateTime startTime = LocalDateTime.parse(queryVO.getStartTime(), DATETIME_FORMATTER);
-            LocalDateTime endTime = LocalDateTime.parse(queryVO.getEndTime(), DATETIME_FORMATTER);
-            queryWrapper.between(SysOperationLog::getOperationTime, startTime, endTime);
-        }
-        
-        // 默认按操作时间降序排序
-        queryWrapper.orderByDesc(SysOperationLog::getOperationTime);
-        
-        // 使用MyBatis Plus的分页查询
-        Page<SysOperationLog> page = new Page<>(queryVO.getPageNum(), queryVO.getPageSize());
+        LambdaQueryWrapper<SysOperationLog> queryWrapper = buildOperationLogQueryWrapper(queryVO);
+
+        // 使用 MyBatis Plus 的分页查询
+        long pageNum = normalizePageNum(queryVO.getPageNum());
+        long pageSize = normalizePageSize(queryVO.getPageSize(), 10);
+        Page<SysOperationLog> page = new Page<>(pageNum, pageSize);
         return operationLogMapper.selectPage(page, queryWrapper);
     }
     
@@ -154,44 +123,11 @@ public class SysAuditServiceImpl implements SysAuditService {
     
     @Override
     public List<SysOperationLog> exportOperationLogs(AuditLogQueryVO queryVO) {
-        // 使用与分页查询相同的条件构建器，但不分页
-        LambdaQueryWrapper<SysOperationLog> queryWrapper = new LambdaQueryWrapper<>();
-        
-        // 构建查询条件
-        if (StringUtils.isNotBlank(queryVO.getUserId())) {
-            queryWrapper.eq(SysOperationLog::getUserId, queryVO.getUserId());
+        if (queryVO == null) {
+            queryVO = new AuditLogQueryVO();
         }
-        
-        if (StringUtils.isNotBlank(queryVO.getUsername())) {
-            queryWrapper.like(SysOperationLog::getUsername, queryVO.getUsername());
-        }
-        
-        if (StringUtils.isNotBlank(queryVO.getModule())) {
-            queryWrapper.like(SysOperationLog::getModule, queryVO.getModule());
-        }
-        
-        if (StringUtils.isNotBlank(queryVO.getOperationType())) {
-            queryWrapper.eq(SysOperationLog::getOperationType, queryVO.getOperationType());
-        }
-        
-        if (queryVO.getStatus() != null) {
-            queryWrapper.eq(SysOperationLog::getStatus, queryVO.getStatus());
-        }
-        
-        if (StringUtils.isNotBlank(queryVO.getRequestIp())) {
-            queryWrapper.eq(SysOperationLog::getRequestIp, queryVO.getRequestIp());
-        }
-        
-        // 处理时间范围查询
-        if (StringUtils.isNotBlank(queryVO.getStartTime()) && StringUtils.isNotBlank(queryVO.getEndTime())) {
-            LocalDateTime startTime = LocalDateTime.parse(queryVO.getStartTime(), DATETIME_FORMATTER);
-            LocalDateTime endTime = LocalDateTime.parse(queryVO.getEndTime(), DATETIME_FORMATTER);
-            queryWrapper.between(SysOperationLog::getOperationTime, startTime, endTime);
-        }
-        
-        // 默认按操作时间降序排序
-        queryWrapper.orderByDesc(SysOperationLog::getOperationTime);
-        
+        LambdaQueryWrapper<SysOperationLog> queryWrapper = buildOperationLogQueryWrapper(queryVO);
+
         // 最多导出10000条记录，防止内存溢出
         queryWrapper.last("LIMIT 10000");
         
@@ -242,16 +178,113 @@ public class SysAuditServiceImpl implements SysAuditService {
             return defaultValue;
         }
     }
+
+    /**
+     * 构建操作日志查询条件（用于分页查询与导出）。
+     *
+     * @param queryVO 查询条件
+     * @return MyBatis Plus 查询构造器
+     */
+    private LambdaQueryWrapper<SysOperationLog> buildOperationLogQueryWrapper(AuditLogQueryVO queryVO) {
+        LambdaQueryWrapper<SysOperationLog> queryWrapper = new LambdaQueryWrapper<>();
+
+        if (queryVO == null) {
+            return queryWrapper.orderByDesc(SysOperationLog::getOperationTime);
+        }
+
+        if (StringUtils.isNotBlank(queryVO.getUserId())) {
+            queryWrapper.eq(SysOperationLog::getUserId, queryVO.getUserId());
+        }
+
+        if (StringUtils.isNotBlank(queryVO.getUsername())) {
+            String escapedUsername = SqlUtils.escapeLikeParameter(queryVO.getUsername());
+            queryWrapper.like(SysOperationLog::getUsername, escapedUsername);
+        }
+
+        if (StringUtils.isNotBlank(queryVO.getModule())) {
+            String escapedModule = SqlUtils.escapeLikeParameter(queryVO.getModule());
+            queryWrapper.like(SysOperationLog::getModule, escapedModule);
+        }
+
+        if (StringUtils.isNotBlank(queryVO.getOperationType())) {
+            queryWrapper.eq(SysOperationLog::getOperationType, queryVO.getOperationType());
+        }
+
+        if (queryVO.getStatus() != null) {
+            queryWrapper.eq(SysOperationLog::getStatus, queryVO.getStatus());
+        }
+
+        if (StringUtils.isNotBlank(queryVO.getRequestIp())) {
+            queryWrapper.eq(SysOperationLog::getRequestIp, queryVO.getRequestIp());
+        }
+
+        LocalDateTime startTime = parseDateTimeOrNull(queryVO.getStartTime());
+        LocalDateTime endTime = parseDateTimeOrNull(queryVO.getEndTime());
+        if (startTime != null && endTime != null) {
+            queryWrapper.between(SysOperationLog::getOperationTime, startTime, endTime);
+        } else if (startTime != null) {
+            queryWrapper.ge(SysOperationLog::getOperationTime, startTime);
+        } else if (endTime != null) {
+            queryWrapper.le(SysOperationLog::getOperationTime, endTime);
+        }
+
+        return queryWrapper.orderByDesc(SysOperationLog::getOperationTime);
+    }
+
+    /**
+     * 解析前端传入的日期时间字符串，失败则返回 null（避免直接抛出导致查询接口 500）。
+     *
+     * @param value 日期时间字符串（格式：yyyy-MM-dd HH:mm:ss）
+     * @return 解析后的 LocalDateTime，解析失败返回 null
+     */
+    private LocalDateTime parseDateTimeOrNull(String value) {
+        if (StringUtils.isBlank(value)) {
+            return null;
+        }
+        try {
+            return LocalDateTime.parse(value, DATETIME_FORMATTER);
+        } catch (Exception e) {
+            log.warn("解析日期时间失败: value={}, pattern={}", value, DATETIME_FORMATTER);
+            return null;
+        }
+    }
+
+    /**
+     * 规范化分页页码，避免出现 null/0/负数导致的分页异常。
+     *
+     * @param pageNum 页码
+     * @return 规范化后的页码（最小为 1）
+     */
+    private long normalizePageNum(Integer pageNum) {
+        return pageNum != null && pageNum > 0 ? pageNum : 1L;
+    }
+
+    /**
+     * 规范化分页大小，避免出现 null/0/负数导致的分页异常。
+     *
+     * @param pageSize 分页大小
+     * @param defaultSize 默认分页大小
+     * @return 规范化后的分页大小（最小为 1）
+     */
+    private long normalizePageSize(Integer pageSize, int defaultSize) {
+        return pageSize != null && pageSize > 0 ? pageSize : defaultSize;
+    }
     
+    /**
+     * 手动触发一次异常操作检测，并返回检测结果。
+     *
+     * @return 包含 hasAnomalies/anomalyDetails/checkTime/success 的结果 Map
+     */
     @Override
     public Map<String, Object> checkAnomalies() {
         Map<String, Object> result = new HashMap<>();
         
         try {
-            Map<String, Object> procedureResult = operationLogMapper.checkAnomalies();
-            
-            Boolean hasAnomalies = (Boolean) procedureResult.get("hasAnomalies");
-            String anomalyDetails = (String) procedureResult.get("anomalyDetails");
+            Map<String, Object> outParams = new HashMap<>();
+            operationLogMapper.checkAnomalies(outParams);
+
+            Boolean hasAnomalies = toBooleanOrNull(outParams.get("hasAnomalies"));
+            String anomalyDetails = toStringOrNull(outParams.get("anomalyDetails"));
             
             result.put("hasAnomalies", hasAnomalies);
             result.put("anomalyDetails", anomalyDetails);
@@ -264,6 +297,45 @@ public class SysAuditServiceImpl implements SysAuditService {
         }
         
         return result;
+    }
+
+    /**
+     * 将存储过程 OUT 参数返回值转换为布尔值。
+     *
+     * @param value OUT 参数值（可能为 Boolean/Number/String）
+     * @return 转换后的布尔值，无法识别时返回 null
+     */
+    private Boolean toBooleanOrNull(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Boolean booleanValue) {
+            return booleanValue;
+        }
+        if (value instanceof Number numberValue) {
+            return numberValue.intValue() != 0;
+        }
+        String text = value.toString().trim();
+        if (text.isEmpty()) {
+            return null;
+        }
+        if ("1".equals(text) || "true".equalsIgnoreCase(text) || "yes".equalsIgnoreCase(text)) {
+            return true;
+        }
+        if ("0".equals(text) || "false".equalsIgnoreCase(text) || "no".equalsIgnoreCase(text)) {
+            return false;
+        }
+        return null;
+    }
+
+    /**
+     * 将任意对象安全转换为字符串。
+     *
+     * @param value 可能为 null 的对象
+     * @return 字符串值，value 为 null 时返回 null
+     */
+    private String toStringOrNull(Object value) {
+        return value == null ? null : value.toString();
     }
     
     @Override
