@@ -22,6 +22,7 @@
   - [Audit Module](#11-audit-module-admin)
   - [SSE Module](#12-sse-module)
   - [File Admin Module](#13-file-admin-module-admin)
+  - [System Monitor Module](#14-system-monitor-module-admin)
 - [Appendix](#appendix)
 
 ---
@@ -1722,6 +1723,21 @@ Base Path: `/api/v1/system/audit`
 GET /api/v1/system/audit/overview
 ```
 
+**Response Example**:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "totalOperations": 15234,
+    "todayOperations": 456,
+    "errorCount": 23,
+    "activeUsers": 12
+  }
+}
+```
+
 ---
 
 ### 11.2 Query Operation Logs
@@ -1771,6 +1787,28 @@ POST /api/v1/system/audit/logs/page
 GET /api/v1/system/audit/logs/{id}
 ```
 
+**Response Example**:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "id": "1234567890",
+    "userId": "user123",
+    "username": "john_doe",
+    "action": "DELETE",
+    "module": "文件操作",
+    "detail": "{\"fileHash\": \"abc123...\"}",
+    "ip": "192.168.1.100",
+    "status": 0,
+    "errorMessage": null,
+    "duration": 156,
+    "createTime": "2025-01-10 14:30:00"
+  }
+}
+```
+
 ---
 
 ### 11.4 Export Logs
@@ -1789,6 +1827,26 @@ POST /api/v1/system/audit/logs/export
 GET /api/v1/system/audit/high-frequency
 ```
 
+**Response Example**:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "userId": "user123",
+      "username": "john_doe",
+      "requestIp": "192.168.1.100",
+      "operationCount": 156,
+      "startTime": "2025-01-10 14:25:00",
+      "endTime": "2025-01-10 14:30:00",
+      "timeSpanSeconds": 300
+    }
+  ]
+}
+```
+
 ---
 
 ### 11.6 Get Sensitive Operations
@@ -1805,12 +1863,52 @@ POST /api/v1/system/audit/sensitive/page
 GET /api/v1/system/audit/error-stats
 ```
 
+**Response Example**:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "module": "文件操作",
+      "operationType": "上传",
+      "errorMsg": "Storage quota exceeded",
+      "errorCount": 15,
+      "firstOccurrence": "2025-01-08 10:00:00",
+      "lastOccurrence": "2025-01-10 14:00:00"
+    }
+  ]
+}
+```
+
 ---
 
 ### 11.8 Get Time Distribution
 
 ```
 GET /api/v1/system/audit/time-distribution
+```
+
+**Response Example**:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "hourOfDay": 14,
+      "dayOfWeek": 2,
+      "operationCount": 234
+    },
+    {
+      "hourOfDay": 10,
+      "dayOfWeek": 0,
+      "operationCount": 189
+    }
+  ]
+}
 ```
 
 ---
@@ -1821,6 +1919,33 @@ GET /api/v1/system/audit/time-distribution
 GET /api/v1/system/audit/configs
 ```
 
+**Response Example**:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "id": 1,
+      "configKey": "HIGH_FREQ_THRESHOLD",
+      "configValue": "100",
+      "description": "High frequency operation threshold (ops per 5 min)",
+      "createTime": "2025-01-01 00:00:00",
+      "updateTime": "2025-01-05 10:00:00"
+    },
+    {
+      "id": 2,
+      "configKey": "FAILED_LOGIN_THRESHOLD",
+      "configValue": "5",
+      "description": "Failed login threshold per hour",
+      "createTime": "2025-01-01 00:00:00",
+      "updateTime": "2025-01-01 00:00:00"
+    }
+  ]
+}
+```
+
 ---
 
 ### 11.10 Update Audit Config
@@ -1829,12 +1954,53 @@ GET /api/v1/system/audit/configs
 PUT /api/v1/system/audit/configs
 ```
 
+**Request Body**:
+
+```json
+{
+  "id": 1,
+  "configKey": "HIGH_FREQ_THRESHOLD",
+  "configValue": "150",
+  "description": "High frequency operation threshold (ops per 5 min)"
+}
+```
+
+**Response Example**:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": true
+}
+```
+
 ---
 
 ### 11.11 Check Anomalies
 
 ```
 GET /api/v1/system/audit/check-anomalies
+```
+
+**Response Example**:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "hasAnomalies": true,
+    "highFrequencyUsers": 2,
+    "failedLoginUsers": 1,
+    "errorRatePercent": 5.23,
+    "thresholds": {
+      "highFrequency": 100,
+      "failedLogin": 5,
+      "errorRate": 10
+    }
+  }
+}
 ```
 
 ---
@@ -2375,6 +2541,186 @@ GET /api/v1/admin/files/shares/{shareCode}/stats
         "downloads": 2
       }
     ]
+  }
+}
+```
+
+---
+
+## 14. System Monitor Module (Admin)
+
+Base Path: `/api/v1/system`
+
+**Authentication**: Bearer Token + Admin or Monitor role required
+
+### 14.1 Get System Statistics
+
+```
+GET /api/v1/system/stats
+```
+
+Returns overall system statistics including user counts, file counts, storage usage, and transaction counts.
+
+**Response Example**:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "totalUsers": 1523,
+    "totalFiles": 45678,
+    "totalStorage": 10737418240,
+    "totalTransactions": 12345,
+    "todayUploads": 56,
+    "todayDownloads": 234
+  }
+}
+```
+
+| Field             | Type | Description                        |
+| ----------------- | ---- | ---------------------------------- |
+| totalUsers        | long | Total registered users             |
+| totalFiles        | long | Total files stored                 |
+| totalStorage      | long | Total storage used (bytes)         |
+| totalTransactions | long | Total blockchain transactions      |
+| todayUploads      | long | Files uploaded today               |
+| todayDownloads    | long | File downloads today               |
+
+---
+
+### 14.2 Get Blockchain Status
+
+```
+GET /api/v1/system/chain-status
+```
+
+Returns the current blockchain status including block height, transaction counts, and health status.
+
+**Response Example**:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "blockNumber": 123456,
+    "transactionCount": 98765,
+    "failedTransactionCount": 12,
+    "nodeCount": 4,
+    "chainType": "LOCAL_FISCO",
+    "healthy": true,
+    "lastUpdateTime": 1704873600000
+  }
+}
+```
+
+| Field                  | Type    | Description                              |
+| ---------------------- | ------- | ---------------------------------------- |
+| blockNumber            | long    | Current block height                     |
+| transactionCount       | long    | Total transactions on chain              |
+| failedTransactionCount | long    | Failed transaction count                 |
+| nodeCount              | int     | Number of blockchain nodes               |
+| chainType              | string  | Chain type (LOCAL_FISCO, BSN_FISCO, etc) |
+| healthy                | boolean | Whether the chain is healthy             |
+| lastUpdateTime         | long    | Last update timestamp (ms)               |
+
+---
+
+### 14.3 Get System Health
+
+```
+GET /api/v1/system/health
+```
+
+Returns the health status of all system components including database, Redis, blockchain, and storage.
+
+**Response Example**:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "status": "UP",
+    "components": {
+      "database": {
+        "status": "UP",
+        "details": {
+          "type": "MySQL",
+          "version": "8.0.35"
+        }
+      },
+      "redis": {
+        "status": "UP",
+        "details": {
+          "version": "7.0.12"
+        }
+      },
+      "blockchain": {
+        "status": "UP",
+        "details": {
+          "nodeCount": 4,
+          "blockHeight": 123456
+        }
+      },
+      "storage": {
+        "status": "UP",
+        "details": {
+          "activeNodes": 3,
+          "totalNodes": 3
+        }
+      }
+    },
+    "uptime": 864000,
+    "timestamp": "2025-01-10T15:00:00Z"
+  }
+}
+```
+
+| Field      | Type   | Description                      |
+| ---------- | ------ | -------------------------------- |
+| status     | string | Overall status (UP/DOWN/DEGRADED)|
+| components | object | Individual component health      |
+| uptime     | long   | System uptime in seconds         |
+| timestamp  | string | Health check timestamp           |
+
+---
+
+### 14.4 Get Monitor Metrics (Aggregated)
+
+```
+GET /api/v1/system/monitor
+```
+
+Returns aggregated monitoring metrics combining system stats, chain status, and health information.
+
+**Response Example**:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "stats": {
+      "totalUsers": 1523,
+      "totalFiles": 45678,
+      "totalStorage": 10737418240,
+      "totalTransactions": 12345,
+      "todayUploads": 56,
+      "todayDownloads": 234
+    },
+    "chainStatus": {
+      "blockNumber": 123456,
+      "transactionCount": 98765,
+      "nodeCount": 4,
+      "chainType": "LOCAL_FISCO",
+      "healthy": true
+    },
+    "health": {
+      "status": "UP",
+      "uptime": 864000
+    }
   }
 }
 ```

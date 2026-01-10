@@ -156,7 +156,7 @@ Response:
 }
 ```
 
-### Admin
+### Admin (File Management)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -168,10 +168,15 @@ Response:
 | DELETE | `/api/v1/admin/files/shares/{code}` | Force cancel share |
 | GET | `/api/v1/admin/files/shares/{code}/logs` | Share access logs |
 | GET | `/api/v1/admin/files/shares/{code}/stats` | Share access stats |
+
+### Permissions (Admin Only)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | GET | `/api/v1/system/permissions/users` | List all users |
 | PUT | `/api/v1/system/permissions/users/{id}/role` | Update user role |
-| GET | `/api/v1/system/audit/logs` | Get audit logs |
-| GET | `/api/v1/system/monitor` | System metrics |
+| GET | `/api/v1/system/permissions/roles` | List all roles |
+| GET | `/api/v1/system/permissions/permissions` | List all permissions |
 
 ### Tickets
 
@@ -330,6 +335,33 @@ Content-Type: application/json
 | GET | `/api/v1/sse/connect` | Subscribe to events |
 | DELETE | `/api/v1/sse/disconnect` | Disconnect SSE |
 | GET | `/api/v1/sse/status` | Check connection status |
+
+### System Monitoring (Admin Only)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/system/stats` | Get system statistics (users, files, storage, transactions) |
+| GET | `/api/v1/system/chain-status` | Get blockchain status (block height, nodes, chain type) |
+| GET | `/api/v1/system/health` | Get system health status (database, Redis, blockchain, storage) |
+| GET | `/api/v1/system/monitor` | Get aggregated monitor metrics |
+
+### System Audit (Admin Only)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/system/audit/overview` | Get audit overview data |
+| GET | `/api/v1/system/audit/logs/page` | Query audit logs (paginated, GET params) |
+| POST | `/api/v1/system/audit/logs/page` | Query audit logs (paginated, POST body) |
+| GET | `/api/v1/system/audit/logs/{id}` | Get log details by ID |
+| POST | `/api/v1/system/audit/logs/export` | Export audit logs to Excel |
+| GET | `/api/v1/system/audit/high-frequency` | Get high frequency operations |
+| POST | `/api/v1/system/audit/sensitive/page` | Get sensitive operations (paginated) |
+| GET | `/api/v1/system/audit/error-stats` | Get error operation statistics |
+| GET | `/api/v1/system/audit/time-distribution` | Get user time distribution |
+| GET | `/api/v1/system/audit/configs` | Get audit configurations |
+| PUT | `/api/v1/system/audit/configs` | Update audit configuration |
+| GET | `/api/v1/system/audit/check-anomalies` | Check for operation anomalies |
+| POST | `/api/v1/system/audit/backup-logs` | Backup old logs |
 
 > **Note**: For comprehensive REST API documentation with all endpoints, request/response examples, and detailed field descriptions, see [API_DOCUMENTATION.md](https://github.com/SoarCollab/RecordPlatform/blob/main/API_DOCUMENTATION.md) in the project root.
 

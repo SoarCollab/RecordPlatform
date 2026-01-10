@@ -156,7 +156,7 @@ GET /api/v1/share/{shareCode}/info
 }
 ```
 
-### 管理
+### 管理（文件管理）
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
@@ -168,10 +168,15 @@ GET /api/v1/share/{shareCode}/info
 | DELETE | `/api/v1/admin/files/shares/{code}` | 强制取消分享 |
 | GET | `/api/v1/admin/files/shares/{code}/logs` | 分享访问日志 |
 | GET | `/api/v1/admin/files/shares/{code}/stats` | 分享访问统计 |
+
+### 权限管理（仅管理员）
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
 | GET | `/api/v1/system/permissions/users` | 列出所有用户 |
 | PUT | `/api/v1/system/permissions/users/{id}/role` | 更新用户角色 |
-| GET | `/api/v1/system/audit/logs` | 获取审计日志 |
-| GET | `/api/v1/system/monitor` | 系统指标 |
+| GET | `/api/v1/system/permissions/roles` | 列出所有角色 |
+| GET | `/api/v1/system/permissions/permissions` | 列出所有权限 |
 
 ### 工单
 
@@ -330,6 +335,33 @@ Content-Type: application/json
 | GET | `/api/v1/sse/connect` | 订阅事件 |
 | DELETE | `/api/v1/sse/disconnect` | 断开 SSE 连接 |
 | GET | `/api/v1/sse/status` | 检查连接状态 |
+
+### 系统监控（仅管理员）
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/v1/system/stats` | 获取系统统计（用户数、文件数、存储用量、交易数）|
+| GET | `/api/v1/system/chain-status` | 获取区块链状态（区块高度、节点数、链类型）|
+| GET | `/api/v1/system/health` | 获取系统健康状态（数据库、Redis、区块链、存储）|
+| GET | `/api/v1/system/monitor` | 获取聚合监控指标 |
+
+### 系统审计（仅管理员）
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/v1/system/audit/overview` | 获取审计概览数据 |
+| GET | `/api/v1/system/audit/logs/page` | 分页查询审计日志（GET 参数）|
+| POST | `/api/v1/system/audit/logs/page` | 分页查询审计日志（POST Body）|
+| GET | `/api/v1/system/audit/logs/{id}` | 获取日志详情 |
+| POST | `/api/v1/system/audit/logs/export` | 导出审计日志到 Excel |
+| GET | `/api/v1/system/audit/high-frequency` | 获取高频操作记录 |
+| POST | `/api/v1/system/audit/sensitive/page` | 获取敏感操作记录（分页）|
+| GET | `/api/v1/system/audit/error-stats` | 获取错误操作统计 |
+| GET | `/api/v1/system/audit/time-distribution` | 获取用户时间分布 |
+| GET | `/api/v1/system/audit/configs` | 获取审计配置 |
+| PUT | `/api/v1/system/audit/configs` | 更新审计配置 |
+| GET | `/api/v1/system/audit/check-anomalies` | 检查操作异常 |
+| POST | `/api/v1/system/audit/backup-logs` | 备份历史日志 |
 
 > **注意**：完整的 REST API 文档（包含所有端点、请求/响应示例和详细字段描述）请参阅项目根目录的 [API_DOCUMENTATION.md](https://github.com/SoarCollab/RecordPlatform/blob/main/API_DOCUMENTATION.md)。
 
