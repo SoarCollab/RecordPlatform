@@ -108,10 +108,16 @@ public interface TicketService extends IService<Ticket> {
     void addAttachment(Long ticketId, Long replyId, Long fileId, String fileName, Long fileSize);
 
     /**
-     * 获取用户待处理工单数
-     *
+     * 获取用户未读工单数量
      * @param userId 用户ID
-     * @return 待处理工单数
+     * @return 未读数量
+     */
+    int getUserUnreadCount(Long userId);
+
+    /**
+     * 获取用户待处理工单数量 (Legacy)
+     * @param userId 用户ID
+     * @return 待处理数量
      */
     int getUserPendingCount(Long userId);
 

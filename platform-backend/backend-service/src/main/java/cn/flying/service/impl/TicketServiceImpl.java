@@ -21,6 +21,7 @@ import cn.flying.service.TicketService;
 import cn.flying.service.generator.TicketNoGenerator;
 import cn.flying.common.event.TicketNotificationEvent;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -68,7 +69,8 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
                 .setContent(vo.getContent())
                 .setPriority(vo.getPriority() != null ? vo.getPriority() : TicketPriority.MEDIUM.getCode())
                 .setStatus(TicketStatus.PENDING.getCode())
-                .setCreatorId(userId);
+                .setCreatorId(userId)
+                .setCreatorLastViewTime(new Date());
 
         this.save(ticket);
 
@@ -181,7 +183,47 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
             throw new GeneralException(ResultEnum.TICKET_NOT_OWNER);
         }
 
+        // 更新查看时间（仅更新 last_view_time 字段，避免触发 MyBatis-Plus 自动更新 update_time，导致未读统计误判）
+        updateTicketLastViewTime(ticket, userId);
+
         return convertToDetailVO(ticket, isAdmin);
+    }
+
+    /**
+     * 更新工单的最后查看时间（creator/assignee），且不触发 ticket.update_time 自动刷新。
+     * <p>
+     * 说明：系统未读统计依赖 {@code ticket.update_time} 与各端 {@code *_last_view_time} 对比；
+     * 若使用 {@code updateById(ticket)}，MyBatis-Plus MetaObjectHandler 会在任何更新时刷新 {@code update_time}；
+     * 同时若数据库字段存在 {@code update_time ... ON UPDATE CURRENT_TIMESTAMP}，仅更新查看时间也会触发 {@code update_time} 变化。
+     * 因此这里通过 {@code baseMapper.update(null, wrapper)} 并追加 {@code update_time = update_time}，避免“仅浏览工单”被视为工单有新更新，
+     * 进而导致对方未读数错误增长。
+     * </p>
+     *
+     * @param ticket  工单实体（用于回填返回值的 last_view_time）
+     * @param userId  当前查看者用户ID
+     */
+    private void updateTicketLastViewTime(Ticket ticket, Long userId) {
+        Date now = new Date();
+        UpdateWrapper<Ticket> wrapper = new UpdateWrapper<Ticket>()
+                .eq("id", ticket.getId());
+
+        boolean needUpdate = false;
+        if (ticket.getCreatorId() != null && ticket.getCreatorId().equals(userId)) {
+            ticket.setCreatorLastViewTime(now);
+            wrapper.set("creator_last_view_time", now);
+            needUpdate = true;
+        }
+        if (ticket.getAssigneeId() != null && ticket.getAssigneeId().equals(userId)) {
+            ticket.setAssigneeLastViewTime(now);
+            wrapper.set("assignee_last_view_time", now);
+            needUpdate = true;
+        }
+
+        if (needUpdate) {
+            wrapper.setSql("update_time = update_time");
+            // entity 传 null，避免触发 MetaObjectHandler#updateFill 对 update_time 的自动填充
+            baseMapper.update(null, wrapper);
+        }
     }
 
     @Override
@@ -224,6 +266,8 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
             this.updateById(ticket);
         }
 
+        refreshTicketActivityAfterReply(ticket, replierId, reply.getIsInternal() == 1);
+
         log.info("工单回复成功: ticketNo={}, replierId={}, isInternal={}", ticket.getTicketNo(), replierId, reply.getIsInternal());
 
         // 发布事件，由 @TransactionalEventListener 在事务提交后异步发送 SSE 通知
@@ -247,6 +291,41 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
         }
 
         return reply;
+    }
+
+    /**
+     * 在创建工单回复后刷新工单活跃时间与查看时间，用于未读统计。
+     * <p>
+     * 规则：
+     * <ul>
+     *   <li>强制更新 ticket.update_time：未读统计依赖 update_time 与 last_view_time 对比</li>
+     *   <li>将回复者对应的 last_view_time 更新为当前时间：避免“自己的回复”被统计为未读</li>
+     *   <li>内部回复(isInternal=true)对创建者不可见：同步更新 creator_last_view_time，避免创建者未读误报</li>
+     * </ul>
+     * </p>
+     *
+     * @param ticket     工单实体
+     * @param replierId  回复者用户ID
+     * @param isInternal 是否内部回复
+     */
+    private void refreshTicketActivityAfterReply(Ticket ticket, Long replierId, boolean isInternal) {
+        Date now = new Date();
+
+        UpdateWrapper<Ticket> wrapper = new UpdateWrapper<Ticket>()
+                .eq("id", ticket.getId())
+                .set("update_time", now);
+
+        if (ticket.getCreatorId() != null && ticket.getCreatorId().equals(replierId)) {
+            wrapper.set("creator_last_view_time", now);
+        }
+        if (ticket.getAssigneeId() != null && ticket.getAssigneeId().equals(replierId)) {
+            wrapper.set("assignee_last_view_time", now);
+        }
+        if (isInternal) {
+            wrapper.set("creator_last_view_time", now);
+        }
+
+        baseMapper.update(null, wrapper);
     }
 
     @Override
@@ -409,6 +488,11 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
     @Override
     public int getUserPendingCount(Long userId) {
         return baseMapper.countUserPendingTickets(userId);
+    }
+
+    @Override
+    public int getUserUnreadCount(Long userId) {
+        return baseMapper.countUserUnreadTickets(userId);
     }
 
     @Override

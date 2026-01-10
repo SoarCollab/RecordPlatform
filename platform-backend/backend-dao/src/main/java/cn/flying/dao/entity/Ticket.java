@@ -57,6 +57,12 @@ public class Ticket implements Serializable {
     @Schema(description = "处理人ID")
     private Long assigneeId;
 
+    @Schema(description = "创建者最后查看时间")
+    private Date creatorLastViewTime;
+
+    @Schema(description = "处理人最后查看时间")
+    private Date assigneeLastViewTime;
+
     @TableField(fill = FieldFill.INSERT)
     @Schema(description = "创建时间")
     private Date createTime;

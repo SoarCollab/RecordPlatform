@@ -22,6 +22,17 @@ public interface TicketMapper extends BaseMapper<Ticket> {
 
     @Select("""
         SELECT COUNT(*) FROM ticket
+        WHERE (
+            (creator_id = #{userId} AND (creator_last_view_time IS NULL OR update_time > creator_last_view_time))
+            OR
+            (assignee_id = #{userId} AND (assignee_last_view_time IS NULL OR update_time > assignee_last_view_time))
+        )
+        AND deleted = 0
+        """)
+    int countUserUnreadTickets(@Param("userId") Long userId);
+
+    @Select("""
+        SELECT COUNT(*) FROM ticket
         WHERE (assignee_id = #{adminId} OR assignee_id IS NULL)
           AND status IN (0, 1)
           AND deleted = 0

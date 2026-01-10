@@ -18,8 +18,11 @@ import cn.flying.dao.vo.ticket.TicketUpdateVO;
 import cn.flying.service.AccountService;
 import cn.flying.service.generator.TicketNoGenerator;
 import cn.flying.test.builders.AccountTestBuilder;
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
@@ -208,6 +211,68 @@ class TicketServiceTest {
             assertEquals("This is a reply", result.getContent());
             assertEquals(USER_ID, result.getReplierId());
             assertEquals(0, result.getIsInternal()); // Not internal for user reply
+        }
+
+        /**
+         * 验证用户回复后会触发工单 update_time 刷新，并同步更新回复者的 last_view_time，确保未读统计生效且不会把自己的回复计为未读。
+         */
+        @Test
+        @DisplayName("should refresh ticket update_time and view_time for unread tracking on user reply")
+        void shouldRefreshTicketActivityOnUserReply() {
+            // Given
+            Ticket ticket = createTicket(1L, USER_ID, TicketStatus.PROCESSING);
+            TicketReplyVO vo = createReplyVO("User reply");
+
+            when(ticketMapper.selectById(1L)).thenReturn(ticket);
+            when(ticketReplyMapper.insert(any(TicketReply.class))).thenReturn(1);
+
+            // When
+            ticketService.replyTicket(USER_ID, 1L, vo, false);
+
+            // Then
+            ArgumentCaptor<Wrapper<Ticket>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+            verify(ticketMapper).update(isNull(), wrapperCaptor.capture());
+
+            Wrapper<Ticket> wrapper = wrapperCaptor.getValue();
+            assertInstanceOf(UpdateWrapper.class, wrapper);
+
+            String sqlSet = ((UpdateWrapper<Ticket>) wrapper).getSqlSet();
+            assertNotNull(sqlSet);
+            assertTrue(sqlSet.contains("update_time"));
+            assertTrue(sqlSet.contains("creator_last_view_time"));
+        }
+
+        /**
+         * 验证管理员内部备注会更新工单 update_time，同时刷新 creator_last_view_time，避免创建者因为不可见的内部备注出现未读提示。
+         */
+        @Test
+        @DisplayName("should not count internal admin reply as unread for creator")
+        void shouldRefreshCreatorViewTimeOnInternalAdminReply() {
+            // Given
+            Ticket ticket = createTicket(1L, USER_ID, TicketStatus.PROCESSING);
+            ticket.setAssigneeId(ADMIN_ID);
+
+            TicketReplyVO vo = createReplyVO("Internal admin note");
+            vo.setIsInternal(true);
+
+            when(ticketMapper.selectById(1L)).thenReturn(ticket);
+            when(ticketReplyMapper.insert(any(TicketReply.class))).thenReturn(1);
+
+            // When
+            ticketService.replyTicket(ADMIN_ID, 1L, vo, true);
+
+            // Then
+            ArgumentCaptor<Wrapper<Ticket>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+            verify(ticketMapper).update(isNull(), wrapperCaptor.capture());
+
+            Wrapper<Ticket> wrapper = wrapperCaptor.getValue();
+            assertInstanceOf(UpdateWrapper.class, wrapper);
+
+            String sqlSet = ((UpdateWrapper<Ticket>) wrapper).getSqlSet();
+            assertNotNull(sqlSet);
+            assertTrue(sqlSet.contains("update_time"));
+            assertTrue(sqlSet.contains("creator_last_view_time"));
+            assertTrue(sqlSet.contains("assignee_last_view_time"));
         }
 
         @Test
