@@ -120,10 +120,18 @@ public class TicketController {
     }
 
     @GetMapping("/pending-count")
-    @Operation(summary = "获取待处理工单数")
+    @Operation(summary = "获取待处理工单数 (Legacy, will be replaced by unread-count)")
     public Result<Map<String, Integer>> getPendingCount(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId) {
         int count = ticketService.getUserPendingCount(userId);
+        return Result.success(Map.of("count", count));
+    }
+
+    @GetMapping("/unread-count")
+    @Operation(summary = "获取未读工单数")
+    public Result<Map<String, Integer>> getUnreadCount(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId) {
+        int count = ticketService.getUserUnreadCount(userId);
         return Result.success(Map.of("count", count));
     }
 
