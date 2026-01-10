@@ -50,16 +50,19 @@ Start services in order (providers before consumer):
 
 ```bash
 # Terminal 1: Storage Service
-java -jar platform-storage/target/platform-storage-0.0.1-SNAPSHOT.jar \
+java -jar "$(ls platform-storage/target/platform-storage-*.jar | head -n 1)" \
   --spring.profiles.active=local
 
 # Terminal 2: FISCO Service
-java -jar platform-fisco/target/platform-fisco-0.0.1-SNAPSHOT.jar \
+java -jar "$(ls platform-fisco/target/platform-fisco-*.jar | head -n 1)" \
   --spring.profiles.active=local
 
 # Terminal 3: Backend Web
-java -jar platform-backend/backend-web/target/backend-web-0.0.1-SNAPSHOT.jar \
+java -jar "$(ls platform-backend/backend-web/target/backend-web-*.jar | head -n 1)" \
   --spring.profiles.active=local
+
+> Note: The `$(...)` form is for macOS/Linux shells. On Windows PowerShell, pick a single JAR explicitly (same idea for fisco/backend):
+> `java -jar (Get-ChildItem platform-storage/target/platform-storage-*.jar | Select-Object -First 1).FullName --spring.profiles.active=local`
 
 # Terminal 4: Frontend (dev server)
 cd platform-frontend && pnpm run dev

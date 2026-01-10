@@ -51,6 +51,7 @@
 
 - **单元测试（Unit）**：命名 `*Test.java`，由 Maven Surefire 在 `test` 阶段执行  
   - 特点：不依赖外部系统（DB/Redis/MQ/Nacos/Dubbo），执行快、可并行、定位问题清晰
+  - 建议：单测里尽量避免打印异常堆栈（用 mock + 断言覆盖失败分支即可）
 - **集成测试（Integration）**：命名 `*IT.java`，由 Maven Failsafe 在 `verify` 阶段执行（需要启用 `it` Profile）  
   - 特点：使用 Testcontainers 启动依赖（如 MySQL/Redis/RabbitMQ），覆盖 Flyway、MyBatis、AOP、关键基础设施联动
 
@@ -107,7 +108,8 @@ mvn -f platform-storage/pom.xml test
 | FaultDomainManagerTest | 单元 | 故障域管理、节点状态转换 |
 | StandbyPoolManagerTest | 单元 | 备用节点池、自动提升逻辑 |
 | RebalanceServiceTest | 单元 | 数据再平衡、限流控制 |
-| S3MonitorTest | 单元 | 健康检查、指标收集 |
+| ConsistencyRepairServiceTest | 单元 | 一致性修复、统计与调度条件 |
+| DistributedStorageServiceImplTest | 单元 | 存储/查询/删除/健康检查、再平衡触发 |
 
 #### Mock 策略
 

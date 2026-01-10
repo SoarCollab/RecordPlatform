@@ -50,13 +50,17 @@ mvn -f platform-fisco/pom.xml clean package -DskipTests
 mvn -f platform-storage/pom.xml clean package -DskipTests
 ```
 
+### 2.5 测试
+
+测试命令矩阵（单元 + 集成）请参考 `TESTING.md`。
+
 ### 3. 启动
 
 ```bash
 # 按顺序启动服务（Provider 先于 Consumer）
-java -jar platform-storage/target/platform-storage-*.jar --spring.profiles.active=local
-java -jar platform-fisco/target/platform-fisco-*.jar --spring.profiles.active=local
-java -jar platform-backend/backend-web/target/backend-web-*.jar --spring.profiles.active=local
+java -jar "$(ls platform-storage/target/platform-storage-*.jar | head -n 1)" --spring.profiles.active=local
+java -jar "$(ls platform-fisco/target/platform-fisco-*.jar | head -n 1)" --spring.profiles.active=local
+java -jar "$(ls platform-backend/backend-web/target/backend-web-*.jar | head -n 1)" --spring.profiles.active=local
 ```
 
 > 详细配置请参阅 [快速开始指南](docs/zh/getting-started/index.md)

@@ -1728,9 +1728,25 @@ GET /api/v1/system/audit/overview
 
 ```
 GET /api/v1/system/audit/logs/page
+POST /api/v1/system/audit/logs/page
 ```
 
-**Request Body (AuditLogQueryVO)**:
+**Request Query Parameters (GET /logs/page)**:
+
+| Parameter     | Type    | Required | Description                             |
+| ------------- | ------- | -------- | --------------------------------------- |
+| pageNum       | int     | No       | Current page number (default: 1)        |
+| pageSize      | int     | No       | Page size (default: 10)                 |
+| userId        | string  | No       | User ID                                 |
+| username      | string  | No       | Username (LIKE)                         |
+| module        | string  | No       | Module (LIKE)                           |
+| operationType | string  | No       | Operation type                          |
+| status        | int     | No       | Status (0=success, 1=fail)              |
+| requestIp     | string  | No       | Request IP                              |
+| startTime     | string  | No       | Start time (yyyy-MM-dd HH:mm:ss)        |
+| endTime       | string  | No       | End time (yyyy-MM-dd HH:mm:ss)          |
+
+**Request Body (POST /logs/page, AuditLogQueryVO)**:
 
 ```json
 {
@@ -1763,7 +1779,7 @@ GET /api/v1/system/audit/logs/{id}
 POST /api/v1/system/audit/logs/export
 ```
 
-**Response**: Excel file download
+**Response**: Excel file download (.xlsx)
 
 ---
 
