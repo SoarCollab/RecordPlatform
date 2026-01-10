@@ -113,6 +113,8 @@ public abstract class BaseIntegrationTest {
 
     @DynamicPropertySource
     static void configureProperties(DynamicPropertyRegistry registry) {
+        ensureMySqlTestUserCanReadPerformanceSchema();
+
         registry.add("spring.datasource.url", mysql::getJdbcUrl);
         registry.add("spring.datasource.username", mysql::getUsername);
         registry.add("spring.datasource.password", mysql::getPassword);
@@ -135,6 +137,36 @@ public abstract class BaseIntegrationTest {
         registry.add("s3.access-key", () -> MINIO_ACCESS_KEY);
         registry.add("s3.secret-key", () -> MINIO_SECRET_KEY);
         registry.add("s3.bucket-name", () -> "record-platform-images");
+    }
+
+    /**
+     * 确保测试数据库用户具备读取 performance_schema 的权限，避免 Flyway 在检测 foreign_key_checks 时触发权限错误。
+     * <p>
+     * GitHub Actions / Testcontainers 环境中，Flyway 可能会通过 performance_schema.user_variables_by_thread 读取变量值；
+     * 若测试用户缺少相应 SELECT 权限，将导致 Spring 容器启动失败并引发大量级联用例报错。
+     * </p>
+     */
+    private static void ensureMySqlTestUserCanReadPerformanceSchema() {
+        if (!mysql.isRunning()) {
+            return;
+        }
+
+        try {
+            mysql.execInContainer(
+                    "bash",
+                    "-lc",
+                    """
+                    mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "
+                    CREATE USER IF NOT EXISTS 'test'@'%' IDENTIFIED BY 'test';
+                    GRANT SELECT ON performance_schema.* TO 'test'@'%';
+                    GRANT SELECT ON performance_schema.user_variables_by_thread TO 'test'@'%';
+                    FLUSH PRIVILEGES;
+                    "
+                    """
+            );
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to grant MySQL test user performance_schema privileges", e);
+        }
     }
 
     protected static String getMinioEndpoint() {
