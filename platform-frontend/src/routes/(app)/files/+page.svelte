@@ -16,7 +16,6 @@
     ShareTypeDesc,
     type FileVO,
   } from "$api/types";
-  import { fly } from "svelte/transition";
   import Skeleton from "$lib/components/ui/Skeleton.svelte";
   import * as Card from "$lib/components/ui/card";
   import * as Table from "$lib/components/ui/table";
@@ -334,7 +333,7 @@
             </Table.Row>
           </Table.Header>
           <Table.Body>
-            {#each files as file, i (file.id)}
+            {#each files as file (file.id)}
               <Table.Row>
                 <Table.Cell>
                   <div class="flex items-center gap-3">

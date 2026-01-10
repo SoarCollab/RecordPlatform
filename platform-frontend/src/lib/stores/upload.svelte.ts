@@ -72,7 +72,9 @@ const uploadedChunkSets = new Map<string, Set<number>>();
 
 const pendingTasks = $derived(tasks.filter((t) => t.status === "pending"));
 const activeTasks = $derived(tasks.filter((t) => t.status === "uploading"));
-const processingTasks = $derived(tasks.filter((t) => t.status === "processing"));
+const processingTasks = $derived(
+  tasks.filter((t) => t.status === "processing"),
+);
 const completedTasks = $derived(tasks.filter((t) => t.status === "completed"));
 const failedTasks = $derived(tasks.filter((t) => t.status === "failed"));
 const cancelledTasks = $derived(tasks.filter((t) => t.status === "cancelled"));
@@ -80,7 +82,8 @@ const totalProgress = $derived(
   tasks.length > 0
     ? Math.round(
         tasks.reduce((sum, t) => {
-          const visibleProgress = t.status === "processing" ? t.processProgress : t.progress;
+          const visibleProgress =
+            t.status === "processing" ? t.processProgress : t.progress;
           return sum + visibleProgress;
         }, 0) / tasks.length,
       )
@@ -123,7 +126,10 @@ function ensureSideEffectsInitialized(): void {
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") {
         for (const t of tasks) {
-          if (t.clientId && (t.status === "uploading" || t.status === "processing")) {
+          if (
+            t.clientId &&
+            (t.status === "uploading" || t.status === "processing")
+          ) {
             startProgressPolling(t.id, true);
           }
         }
@@ -156,7 +162,9 @@ function stopProgressPolling(id: string): void {
 function scheduleNextPoll(id: string): void {
   stopProgressPolling(id);
 
-  const delay = isPageVisible() ? VISIBLE_POLL_INTERVAL_MS : HIDDEN_POLL_INTERVAL_MS;
+  const delay = isPageVisible()
+    ? VISIBLE_POLL_INTERVAL_MS
+    : HIDDEN_POLL_INTERVAL_MS;
   const timeout = setTimeout(() => {
     void pollServerProgress(id);
   }, delay);
@@ -200,6 +208,7 @@ async function pollServerProgress(id: string): Promise<void> {
       return;
     }
   } catch {
+    // Silently ignore polling errors - will retry on next poll
   }
 
   scheduleNextPoll(id);
@@ -269,7 +278,10 @@ async function uploadChunks(task: UploadTask): Promise<void> {
     // Update task state from the Set (single source of truth)
     const nextProgress = Math.round((chunkSet.size / task.totalChunks) * 100);
     const current = tasks.find((t) => t.id === task.id);
-    const nextServerProgress = Math.max(current?.serverProgress ?? 0, nextProgress);
+    const nextServerProgress = Math.max(
+      current?.serverProgress ?? 0,
+      nextProgress,
+    );
 
     updateTask(task.id, {
       uploadedChunks: Array.from(chunkSet),
@@ -529,7 +541,9 @@ function clearFailedAndCancelled(): void {
     .filter((t) => t.status === "failed" || t.status === "cancelled")
     .map((t) => t.id);
 
-  tasks = tasks.filter((t) => t.status !== "failed" && t.status !== "cancelled");
+  tasks = tasks.filter(
+    (t) => t.status !== "failed" && t.status !== "cancelled",
+  );
 
   ids.forEach((id) => {
     stopProgressPolling(id);
@@ -551,7 +565,12 @@ async function retryAllFailedAndCancelled(): Promise<number> {
 
 async function cancelAllActiveAndProcessing(): Promise<number> {
   const ids = tasks
-    .filter((t) => t.status === "uploading" || t.status === "paused" || t.status === "processing")
+    .filter(
+      (t) =>
+        t.status === "uploading" ||
+        t.status === "paused" ||
+        t.status === "processing",
+    )
     .map((t) => t.id);
 
   for (const id of ids) {
