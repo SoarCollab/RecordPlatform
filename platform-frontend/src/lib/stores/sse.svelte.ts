@@ -82,9 +82,8 @@ function handleVisibilityChange(): void {
       connect();
     }
   } else if (wasVisible && !isPageVisible) {
-    // Page became hidden - pause reconnection scheduling (keep existing connection)
-    console.log("SSE: Page hidden, pausing reconnection");
-    clearReconnectTimeout();
+    // Page became hidden - keep existing connection and allow reconnect scheduling if it drops
+    console.log("SSE: Page hidden");
   }
 }
 
@@ -98,20 +97,22 @@ function clearReconnectTimeout(): void {
 }
 
 function scheduleReconnect(): void {
-  // Don't schedule if page is hidden
-  if (!isPageVisible) {
-    console.log("SSE: Page hidden, skipping reconnect schedule");
-    return;
-  }
-
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
     console.error("SSE: Max reconnect attempts reached");
     updateStatus("error");
     return;
   }
 
+  /**
+   * 计算重连等待时间。
+   *
+   * @note
+   * - 页面不可见时仍允许重连（满足“用户不点击页面也能实时提醒”）
+   * - 但将基础延迟提升到 RECONNECT_MAX_DELAY，减少后台重连频率与资源占用
+   */
+  const baseDelay = isPageVisible ? RECONNECT_BASE_DELAY : RECONNECT_MAX_DELAY;
   const delay = Math.min(
-    RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttempts),
+    baseDelay * Math.pow(2, reconnectAttempts),
     RECONNECT_MAX_DELAY,
   );
 

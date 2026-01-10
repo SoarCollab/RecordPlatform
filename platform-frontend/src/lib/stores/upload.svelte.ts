@@ -1,3 +1,5 @@
+import { browser } from "$app/environment";
+import { useSSE } from "$stores/sse.svelte";
 import * as uploadApi from "$api/endpoints/upload";
 
 // ===== Types =====
@@ -5,6 +7,7 @@ import * as uploadApi from "$api/endpoints/upload";
 export type UploadStatus =
   | "pending"
   | "uploading"
+  | "processing"
   | "paused"
   | "completed"
   | "failed"
@@ -15,7 +18,9 @@ export interface UploadTask {
   file: File;
   clientId: string | null;
   status: UploadStatus;
-  progress: number; // 0-100
+  progress: number;
+  processProgress: number;
+  serverProgress: number;
   uploadedChunks: number[];
   totalChunks: number;
   chunkSize: number; // 该任务使用的分片大小
@@ -67,11 +72,18 @@ const uploadedChunkSets = new Map<string, Set<number>>();
 
 const pendingTasks = $derived(tasks.filter((t) => t.status === "pending"));
 const activeTasks = $derived(tasks.filter((t) => t.status === "uploading"));
+const processingTasks = $derived(tasks.filter((t) => t.status === "processing"));
 const completedTasks = $derived(tasks.filter((t) => t.status === "completed"));
 const failedTasks = $derived(tasks.filter((t) => t.status === "failed"));
+const cancelledTasks = $derived(tasks.filter((t) => t.status === "cancelled"));
 const totalProgress = $derived(
   tasks.length > 0
-    ? Math.round(tasks.reduce((sum, t) => sum + t.progress, 0) / tasks.length)
+    ? Math.round(
+        tasks.reduce((sum, t) => {
+          const visibleProgress = t.status === "processing" ? t.processProgress : t.progress;
+          return sum + visibleProgress;
+        }, 0) / tasks.length,
+      )
     : 0,
 );
 
@@ -90,6 +102,119 @@ function calculateChunks(
   chunkSize: number = CHUNK_CONFIG.RULES[1].chunkSize, // 默认 5MB
 ): number {
   return Math.ceil(fileSize / chunkSize);
+}
+
+const sse = useSSE();
+let unsubscribeSSE: (() => void) | null = null;
+let visibilityListenerBound = false;
+
+const progressPollTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+const VISIBLE_POLL_INTERVAL_MS = 1500;
+const HIDDEN_POLL_INTERVAL_MS = 8000;
+
+function isPageVisible(): boolean {
+  return browser && document.visibilityState === "visible";
+}
+
+function ensureSideEffectsInitialized(): void {
+  if (!browser) return;
+
+  if (!visibilityListenerBound) {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        for (const t of tasks) {
+          if (t.clientId && (t.status === "uploading" || t.status === "processing")) {
+            startProgressPolling(t.id, true);
+          }
+        }
+      }
+    });
+    visibilityListenerBound = true;
+  }
+
+  if (!unsubscribeSSE) {
+    unsubscribeSSE = sse.subscribe((message) => {
+      if (message.type === "file-processed") {
+        for (const t of tasks) {
+          if (t.clientId && t.status === "processing") {
+            startProgressPolling(t.id, true);
+          }
+        }
+      }
+    });
+  }
+}
+
+function stopProgressPolling(id: string): void {
+  const timeout = progressPollTimeouts.get(id);
+  if (timeout) {
+    clearTimeout(timeout);
+    progressPollTimeouts.delete(id);
+  }
+}
+
+function scheduleNextPoll(id: string): void {
+  stopProgressPolling(id);
+
+  const delay = isPageVisible() ? VISIBLE_POLL_INTERVAL_MS : HIDDEN_POLL_INTERVAL_MS;
+  const timeout = setTimeout(() => {
+    void pollServerProgress(id);
+  }, delay);
+  progressPollTimeouts.set(id, timeout);
+}
+
+async function pollServerProgress(id: string): Promise<void> {
+  const task = tasks.find((t) => t.id === id);
+  if (!task?.clientId) {
+    stopProgressPolling(id);
+    return;
+  }
+
+  if (!(task.status === "uploading" || task.status === "processing")) {
+    stopProgressPolling(id);
+    return;
+  }
+
+  try {
+    const progress = await uploadApi.getUploadProgress(task.clientId);
+    const nextProgress = Math.max(task.progress, progress.uploadProgress);
+
+    updateTask(id, {
+      progress: nextProgress,
+      processProgress: progress.processProgress,
+      serverProgress: progress.progress,
+    });
+
+    if (
+      task.status === "processing" &&
+      (progress.progress >= 100 || progress.processProgress >= 100)
+    ) {
+      updateTask(id, {
+        status: "completed",
+        progress: 100,
+        processProgress: 100,
+        serverProgress: 100,
+        endTime: Date.now(),
+      });
+      stopProgressPolling(id);
+      return;
+    }
+  } catch {
+  }
+
+  scheduleNextPoll(id);
+}
+
+function startProgressPolling(id: string, immediate: boolean = false): void {
+  ensureSideEffectsInitialized();
+
+  if (immediate) {
+    stopProgressPolling(id);
+    void pollServerProgress(id);
+    return;
+  }
+
+  scheduleNextPoll(id);
 }
 
 // ===== Upload Logic =====
@@ -142,9 +267,14 @@ async function uploadChunks(task: UploadTask): Promise<void> {
     lastTime = now;
 
     // Update task state from the Set (single source of truth)
+    const nextProgress = Math.round((chunkSet.size / task.totalChunks) * 100);
+    const current = tasks.find((t) => t.id === task.id);
+    const nextServerProgress = Math.max(current?.serverProgress ?? 0, nextProgress);
+
     updateTask(task.id, {
       uploadedChunks: Array.from(chunkSet),
-      progress: Math.round((chunkSet.size / task.totalChunks) * 100),
+      progress: nextProgress,
+      serverProgress: nextServerProgress,
       speed,
     });
   };
@@ -185,6 +315,8 @@ async function addFile(file: File): Promise<string> {
     clientId: null,
     status: "pending",
     progress: 0,
+    processProgress: 0,
+    serverProgress: 0,
     uploadedChunks: [],
     totalChunks,
     chunkSize,
@@ -212,7 +344,13 @@ async function startUpload(id: string): Promise<void> {
   const task = tasks.find((t) => t.id === id);
   if (!task || task.status === "uploading") return;
 
-  updateTask(id, { status: "uploading", startTime: Date.now(), error: null });
+  updateTask(id, {
+    status: "uploading",
+    startTime: Date.now(),
+    error: null,
+    processProgress: 0,
+    serverProgress: 0,
+  });
 
   try {
     // Initialize upload
@@ -224,13 +362,19 @@ async function startUpload(id: string): Promise<void> {
       totalChunks: task.totalChunks,
     });
 
+    const initialProgress = Math.round(
+      (result.processedChunks.length / task.totalChunks) * 100,
+    );
+
     updateTask(id, {
       clientId: result.clientId,
       uploadedChunks: result.processedChunks,
-      progress: Math.round(
-        (result.processedChunks.length / task.totalChunks) * 100,
-      ),
+      progress: initialProgress,
+      processProgress: 0,
+      serverProgress: initialProgress,
     });
+
+    startProgressPolling(id, true);
 
     // Initialize chunk set with server-reported processed chunks
     uploadedChunkSets.set(id, new Set(result.processedChunks));
@@ -241,15 +385,17 @@ async function startUpload(id: string): Promise<void> {
     // Check final status
     const finalTask = tasks.find((t) => t.id === id);
     if (finalTask?.status === "uploading") {
-      // Complete upload
       await uploadApi.completeUpload(finalTask.clientId!);
       updateTask(id, {
-        status: "completed",
+        status: "processing",
         progress: 100,
-        endTime: Date.now(),
+        processProgress: Math.max(finalTask.processProgress, 0),
+        serverProgress: Math.max(finalTask.serverProgress, 0),
       });
+      startProgressPolling(id, true);
     }
   } catch (err) {
+    stopProgressPolling(id);
     updateTask(id, {
       status: "failed",
       error: err instanceof Error ? err.message : "上传失败",
@@ -269,6 +415,7 @@ async function pauseUpload(id: string): Promise<void> {
   if (!task || task.status !== "uploading") return;
 
   updateTask(id, { status: "paused" });
+  stopProgressPolling(id);
 
   if (task.clientId) {
     try {
@@ -300,12 +447,19 @@ async function resumeUpload(id: string): Promise<void> {
   }
 
   updateTask(id, { status: "uploading" });
+  startProgressPolling(id, true);
   await uploadChunks(tasks.find((t) => t.id === id)!);
 
   const finalTask = tasks.find((t) => t.id === id);
   if (finalTask?.status === "uploading") {
     await uploadApi.completeUpload(finalTask.clientId!);
-    updateTask(id, { status: "completed", progress: 100, endTime: Date.now() });
+    updateTask(id, {
+      status: "processing",
+      progress: 100,
+      processProgress: Math.max(finalTask.processProgress, 0),
+      serverProgress: Math.max(finalTask.serverProgress, 0),
+    });
+    startProgressPolling(id, true);
   }
 }
 
@@ -314,6 +468,7 @@ async function cancelUpload(id: string): Promise<void> {
   if (!task) return;
 
   updateTask(id, { status: "cancelled", endTime: Date.now() });
+  stopProgressPolling(id);
 
   if (task.clientId) {
     try {
@@ -328,14 +483,19 @@ async function retryUpload(id: string): Promise<void> {
   const task = tasks.find((t) => t.id === id);
   if (!task || !["failed", "cancelled"].includes(task.status)) return;
 
-  // Clear chunk tracking for fresh start
   uploadedChunkSets.delete(id);
+  stopProgressPolling(id);
 
   updateTask(id, {
     status: "pending",
     progress: 0,
+    processProgress: 0,
+    serverProgress: 0,
     uploadedChunks: [],
     clientId: null,
+    speed: 0,
+    startTime: null,
+    endTime: null,
     error: null,
   });
 
@@ -344,11 +504,12 @@ async function retryUpload(id: string): Promise<void> {
 
 function removeTask(id: string): void {
   const task = tasks.find((t) => t.id === id);
-  if (task?.status === "uploading") {
+  if (task && ["uploading", "paused", "processing"].includes(task.status)) {
     cancelUpload(id);
   }
+
+  stopProgressPolling(id);
   tasks = tasks.filter((t) => t.id !== id);
-  // Clean up chunk tracking
   uploadedChunkSets.delete(id);
 }
 
@@ -357,8 +518,47 @@ function clearCompleted(): void {
     .filter((t) => t.status === "completed")
     .map((t) => t.id);
   tasks = tasks.filter((t) => t.status !== "completed");
-  // Clean up chunk tracking for completed tasks
-  completedIds.forEach((id) => uploadedChunkSets.delete(id));
+  completedIds.forEach((id) => {
+    stopProgressPolling(id);
+    uploadedChunkSets.delete(id);
+  });
+}
+
+function clearFailedAndCancelled(): void {
+  const ids = tasks
+    .filter((t) => t.status === "failed" || t.status === "cancelled")
+    .map((t) => t.id);
+
+  tasks = tasks.filter((t) => t.status !== "failed" && t.status !== "cancelled");
+
+  ids.forEach((id) => {
+    stopProgressPolling(id);
+    uploadedChunkSets.delete(id);
+  });
+}
+
+async function retryAllFailedAndCancelled(): Promise<number> {
+  const ids = tasks
+    .filter((t) => t.status === "failed" || t.status === "cancelled")
+    .map((t) => t.id);
+
+  for (const id of ids) {
+    await retryUpload(id);
+  }
+
+  return ids.length;
+}
+
+async function cancelAllActiveAndProcessing(): Promise<number> {
+  const ids = tasks
+    .filter((t) => t.status === "uploading" || t.status === "paused" || t.status === "processing")
+    .map((t) => t.id);
+
+  for (const id of ids) {
+    await cancelUpload(id);
+  }
+
+  return ids.length;
 }
 
 // ===== Export Hook =====
@@ -378,11 +578,17 @@ export function useUpload() {
     get activeTasks() {
       return activeTasks;
     },
+    get processingTasks() {
+      return processingTasks;
+    },
     get completedTasks() {
       return completedTasks;
     },
     get failedTasks() {
       return failedTasks;
+    },
+    get cancelledTasks() {
+      return cancelledTasks;
     },
     get totalProgress() {
       return totalProgress;
@@ -396,7 +602,10 @@ export function useUpload() {
     resumeUpload,
     cancelUpload,
     retryUpload,
+    retryAllFailedAndCancelled,
+    cancelAllActiveAndProcessing,
     removeTask,
     clearCompleted,
+    clearFailedAndCancelled,
   };
 }
