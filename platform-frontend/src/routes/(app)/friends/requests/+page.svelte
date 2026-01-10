@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { useNotifications } from '$stores/notifications.svelte';
 	import { formatRelativeTime } from '$utils/format';
+	import { getAvatarUrl } from '$utils/avatar';
 	import {
 		getReceivedRequests,
 		getSentRequests,
@@ -157,12 +158,12 @@
 									<Avatar.Root class="h-12 w-12">
 										{#if activeTab === 'received'}
 											{#if request.requesterAvatar}
-												<Avatar.Image src={request.requesterAvatar} alt={request.requesterUsername} />
+												<Avatar.Image src={getAvatarUrl(request.requesterAvatar)} alt={request.requesterUsername} />
 											{/if}
 											<Avatar.Fallback>{request.requesterUsername?.charAt(0).toUpperCase() || '?'}</Avatar.Fallback>
 										{:else}
 											{#if request.addresseeAvatar}
-												<Avatar.Image src={request.addresseeAvatar} alt={request.addresseeUsername} />
+												<Avatar.Image src={getAvatarUrl(request.addresseeAvatar)} alt={request.addresseeUsername} />
 											{/if}
 											<Avatar.Fallback>{request.addresseeUsername?.charAt(0).toUpperCase() || '?'}</Avatar.Fallback>
 										{/if}

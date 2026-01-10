@@ -1,9 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { browser } from "$app/environment";
   import { goto } from "$app/navigation";
+  import { page as appPage } from "$app/state";
   import { useNotifications } from "$stores/notifications.svelte";
   import { useDownload } from "$stores/download.svelte";
   import { formatFileSize, formatDateTime } from "$utils/format";
+  import { getAvatarUrl } from "$utils/avatar";
   import {
     getFileByHash,
     getTransaction,
@@ -51,6 +54,7 @@
   let shareExpireHours = $state(72);
   let shareType = $state<ShareType>(ShareType.PUBLIC);
   let shareCode = $state("");
+  let shareLink = $derived(shareCode ? `${appPage.url.origin}/share/${shareCode}` : "");
   let isSharing = $state(false);
 
   // Friend share dialog state
@@ -136,10 +140,40 @@
     }
   }
 
-  function copyShareLink() {
-    const link = `${window.location.origin}/share/${shareCode}`;
-    navigator.clipboard.writeText(link);
-    notifications.success("已复制到剪贴板");
+  async function copyShareLink(): Promise<void> {
+    if (!shareLink || !browser) return;
+
+    try {
+      await navigator.clipboard.writeText(shareLink);
+      notifications.success("已复制到剪贴板");
+      return;
+    } catch {
+      // Fallback to legacy copy flow
+    }
+
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = shareLink;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.top = "0";
+      textarea.style.left = "0";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+
+      const ok = document.execCommand("copy");
+      document.body.removeChild(textarea);
+
+      if (ok) {
+        notifications.success("已复制到剪贴板");
+      } else {
+        notifications.warning("复制失败", "请手动复制分享链接");
+      }
+    } catch {
+      notifications.warning("复制失败", "请手动复制分享链接");
+    }
   }
 
   async function openFriendShareDialog() {
@@ -641,7 +675,7 @@
         <div class="flex gap-2">
           <Input
             readonly
-            value={`${window.location.origin}/share/${shareCode}`}
+            value={shareLink}
             class="flex-1 font-mono text-sm"
           />
           <Button onclick={copyShareLink}>复制</Button>
@@ -743,7 +777,7 @@
             >
               <Avatar.Root class="h-10 w-10">
                 {#if friend.avatar}
-                  <Avatar.Image src={friend.avatar} alt={friend.username} />
+                  <Avatar.Image src={getAvatarUrl(friend.avatar)} alt={friend.username} />
                 {/if}
                 <Avatar.Fallback>{friend.username.charAt(0).toUpperCase()}</Avatar.Fallback>
               </Avatar.Root>

@@ -10,7 +10,7 @@
 		markAsRead,
 		sendMessage,
 	} from "$api/endpoints/messages";
-	import type { ConversationDetailVO, MessageVO } from "$api/types";
+	import type { ConversationDetailVO, ConversationVO, MessageVO } from "$api/types";
 	import type { SSEMessage } from "$api/endpoints/sse";
 	import { Button } from "$lib/components/ui/button";
 	import { Textarea } from "$lib/components/ui/textarea";
@@ -21,7 +21,7 @@
 	const sse = useSSE();
 	const auth = useAuth();
 
-	let conversation = $state<ConversationDetailVO | null>(null);
+	let conversation = $state<ConversationVO | null>(null);
 	let messages = $state<MessageVO[]>([]);
 	let loading = $state(true);
 	let loadingMore = $state(false);
@@ -45,6 +45,18 @@
 	onDestroy(() => {
 		unsubscribeSSE?.();
 	});
+
+	/**
+	 * 将后端可能返回的数字/数字字符串安全转换为 number，避免 `+` 拼接成字符串等问题。
+	 */
+	function toNumber(value: unknown, fallback = 0): number {
+		if (typeof value === "number" && Number.isFinite(value)) return value;
+		if (typeof value === "string" && value.trim() !== "") {
+			const parsed = Number(value);
+			if (Number.isFinite(parsed)) return parsed;
+		}
+		return fallback;
+	}
 
 	function handleSSEMessage(message: SSEMessage) {
 		if (message.type !== "message-received" || !conversation) return;
@@ -87,16 +99,16 @@
 		error = null;
 
 		try {
-			const detail = await getConversationDetail(data.conversationId, {
+			const detail: ConversationDetailVO = await getConversationDetail(data.conversationId, {
 				pageNum: 1,
 				pageSize,
 			});
 
-			conversation = detail;
-			messages = detail.messages.slice().reverse();
-			total = detail.totalMessages;
+			conversation = detail.conversation;
+			messages = (detail.messages?.records ?? []).slice().reverse();
+			total = toNumber(detail.totalMessages, toNumber(detail.messages?.total, 0));
 			page = 1;
-			hasMore = detail.hasMore;
+			hasMore = Boolean(detail.hasMore);
 
 			await markAsRead(data.conversationId);
 
@@ -116,14 +128,14 @@
 		loadingMore = true;
 		try {
 			const nextPage = page + 1;
-			const detail = await getConversationDetail(data.conversationId, {
+			const detail: ConversationDetailVO = await getConversationDetail(data.conversationId, {
 				pageNum: nextPage,
 				pageSize,
 			});
 
-			messages = [...detail.messages.slice().reverse(), ...messages];
+			messages = [...(detail.messages?.records ?? []).slice().reverse(), ...messages];
 			page = nextPage;
-			hasMore = detail.hasMore;
+			hasMore = Boolean(detail.hasMore);
 		} catch (err) {
 			notifications.error(
 				"加载更多失败",

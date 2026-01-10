@@ -22,4 +22,3 @@ export function getAvatarUrl(path?: string): string | undefined {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${apiBase}/images/download/images${normalizedPath}`;
 }
-

@@ -3,7 +3,7 @@ import {
   getUnreadConversationCount,
   getUnreadAnnouncementCount,
 } from "$api/endpoints/messages";
-import { getPendingCount } from "$api/endpoints/tickets";
+import { getUnreadCount } from "$api/endpoints/tickets";
 import {
   getPendingRequestCount,
   getUnreadFriendShareCount,
@@ -39,7 +39,7 @@ async function fetchBadgeCounts() {
     ] = await Promise.allSettled([
       getUnreadConversationCount(),
       getUnreadAnnouncementCount(),
-      getPendingCount(),
+      getUnreadCount(),
       getPendingRequestCount(),
       getUnreadFriendShareCount(),
     ]);

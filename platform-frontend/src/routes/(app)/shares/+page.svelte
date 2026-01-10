@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { browser } from '$app/environment';
+	import { page as appPage } from '$app/state';
 	import { useNotifications } from '$stores/notifications.svelte';
 	import { formatDateTime } from '$utils/format';
 	import { getMyShares, cancelShare, updateShare } from '$api/endpoints/files';
@@ -54,10 +56,41 @@
 		}
 	}
 
-	function copyShareLink(shareCode: string) {
-		const link = `${window.location.origin}/share/${shareCode}`;
-		navigator.clipboard.writeText(link);
-		notifications.success('已复制到剪贴板');
+	async function copyShareLink(shareCode: string) {
+		if (!browser) return;
+		const link = `${appPage.url.origin}/share/${shareCode}`;
+
+		try {
+			await navigator.clipboard.writeText(link);
+			notifications.success('已复制到剪贴板');
+			return;
+		} catch {
+			// ignore
+		}
+
+		try {
+			const textarea = document.createElement('textarea');
+			textarea.value = link;
+			textarea.setAttribute('readonly', '');
+			textarea.style.position = 'fixed';
+			textarea.style.top = '0';
+			textarea.style.left = '0';
+			textarea.style.opacity = '0';
+			document.body.appendChild(textarea);
+			textarea.select();
+			textarea.setSelectionRange(0, textarea.value.length);
+
+			const ok = document.execCommand('copy');
+			document.body.removeChild(textarea);
+
+			if (ok) {
+				notifications.success('已复制到剪贴板');
+			} else {
+				notifications.warning('复制失败', '请手动复制分享链接');
+			}
+		} catch {
+			notifications.warning('复制失败', '请手动复制分享链接');
+		}
 	}
 
 	function openEditDialog(share: FileShareVO) {

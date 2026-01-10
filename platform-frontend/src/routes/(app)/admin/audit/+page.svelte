@@ -119,13 +119,13 @@
   async function loadLogs() {
     loadingLogs = true;
     try {
-      const params: AuditLogQueryParams & { current: number; size: number } = {
-        current: page,
-        size: pageSize,
+      const params: AuditLogQueryParams & { pageNum: number; pageSize: number } = {
+        pageNum: page,
+        pageSize,
       };
       if (filterUsername) params.username = filterUsername;
       if (filterModule) params.module = filterModule;
-      if (filterAction) params.action = filterAction;
+      if (filterAction) params.operationType = filterAction;
       if (filterStartTime) params.startTime = filterStartTime;
       if (filterEndTime) params.endTime = filterEndTime;
 
@@ -177,7 +177,7 @@
       const params: AuditLogQueryParams = {};
       if (filterUsername) params.username = filterUsername;
       if (filterModule) params.module = filterModule;
-      if (filterAction) params.action = filterAction;
+      if (filterAction) params.operationType = filterAction;
       if (filterStartTime) params.startTime = filterStartTime;
       if (filterEndTime) params.endTime = filterEndTime;
 

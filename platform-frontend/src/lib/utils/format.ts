@@ -46,7 +46,9 @@ export function formatDateTime(
     if (/^\d+$/.test(date)) {
       d = new Date(parseInt(date, 10));
     } else {
-      d = new Date(date);
+      // 尝试处理 "yyyy-MM-dd HH:mm:ss" 格式，替换空格为 T 以符合 ISO 标准
+      const normalizedDate = date.replace(" ", "T");
+      d = new Date(normalizedDate);
     }
   } else {
     return "-";
@@ -82,10 +84,13 @@ export function formatRelativeTime(date: string | number | Date): string {
   } else if (typeof date === "number") {
     d = new Date(date);
   } else if (typeof date === "string") {
+    // 检查是否为纯数字字符串（时间戳）
     if (/^\d+$/.test(date)) {
       d = new Date(parseInt(date, 10));
     } else {
-      d = new Date(date);
+      // 尝试处理 "yyyy-MM-dd HH:mm:ss" 格式，替换空格为 T 以符合 ISO 标准
+      const normalizedDate = date.replace(" ", "T");
+      d = new Date(normalizedDate);
     }
   } else {
     return "-";
