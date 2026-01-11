@@ -289,19 +289,12 @@ public class FileController {
     public Result<String> generateSharingCode(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @RequestBody @Valid FileSharingVO fileSharingVO) {
-        try {
-            String sharingCode = fileService.generateSharingCode(
-                    userId,
-                    fileSharingVO.getFileHash(),
-                    fileSharingVO.getExpireMinutes(),
-                    fileSharingVO.getShareType());
-            return Result.success(sharingCode);
-        } catch (GeneralException ex) {
-            return mapFileBusinessException(ex);
-        } catch (Exception ex) {
-            log.error("生成文件分享码失败: userId={}", userId, ex);
-            return Result.error(cn.flying.common.constant.ResultEnum.FAIL);
-        }
+        String sharingCode = fileService.generateSharingCode(
+                userId,
+                fileSharingVO.getFileHash(),
+                fileSharingVO.getExpireMinutes(),
+                fileSharingVO.getShareType());
+        return Result.success(sharingCode);
     }
 
     @PostMapping("/saveShareFile")
@@ -336,24 +329,6 @@ public class FileController {
      * @param ex 业务异常
      * @return 映射后的统一响应
      */
-    private <T> Result<T> mapFileBusinessException(GeneralException ex) {
-        String message = ex.getMessage();
-        if (message == null && ex.getData() != null) {
-            message = String.valueOf(ex.getData());
-        }
-        if (message == null && ex.getResultEnum() != null) {
-            message = ex.getResultEnum().getMessage();
-        }
-        if (message == null) {
-            message = "请求失败";
-        }
-
-        if (ex.getResultEnum() != null) {
-            return Result.failure(ex.getResultEnum().getCode(), message);
-        }
-        return Result.failure(400, message);
-    }
-
     /**
      * 取消分享（调用区块链）
      * @param userId 用户ID
@@ -366,15 +341,8 @@ public class FileController {
     public Result<String> cancelShare(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Parameter(description = "分享码") @PathVariable String shareCode) {
-        try {
-            fileService.cancelShare(userId, shareCode);
-            return Result.success("分享已取消");
-        } catch (GeneralException ex) {
-            return mapFileBusinessException(ex);
-        } catch (Exception ex) {
-            log.error("取消分享失败: userId={}, shareCode={}", userId, shareCode, ex);
-            return Result.error(cn.flying.common.constant.ResultEnum.FAIL);
-        }
+        fileService.cancelShare(userId, shareCode);
+        return Result.success("分享已取消");
     }
 
     /**
