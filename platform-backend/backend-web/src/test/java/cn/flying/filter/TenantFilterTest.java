@@ -62,6 +62,19 @@ class TenantFilterTest {
         assertNull(TenantContext.getTenantId());
     }
 
+    @Test
+    @DisplayName("should allow share endpoint without tenant header")
+    void shouldAllowShareEndpointWithoutTenantHeader() throws ServletException, IOException {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/share/abc");
+        request.setServletPath("/api/v1/share/abc");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilterInternal(request, response, filterChain);
+
+        verify(filterChain).doFilter(request, response);
+        assertNull(TenantContext.getTenantId());
+    }
+
     /**
      * 非白名单路径缺少租户头时应返回 400，并且不进入后续过滤器链。
      */

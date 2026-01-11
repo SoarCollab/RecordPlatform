@@ -25,6 +25,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -127,8 +129,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             log.warn("JWT缺少租户ID: 请求头tenantId={}, userId={}", headerTenantId, userId);
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType("application/json;charset=utf-8");
+
+            Map<String, Object> payload = new LinkedHashMap<>();
+            String traceId = MDC.get(Const.TRACE_ID);
+            if (traceId != null && !traceId.isEmpty()) {
+                payload.put("traceId", traceId);
+            }
+            payload.put("detail", "令牌缺少租户信息");
+
             PrintWriter writer = response.getWriter();
-            writer.write(Result.error(ResultEnum.PERMISSION_UNAUTHORIZED, "令牌缺少租户信息").toJson());
+            writer.write(Result.error(ResultEnum.PERMISSION_UNAUTHORIZED, payload).toJson());
             writer.flush();
             return false;
         }
@@ -137,8 +147,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             log.warn("租户ID不匹配: 请求头={}, JWT={}, userId={}", headerTenantId, jwtTenantId, userId);
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType("application/json;charset=utf-8");
+
+            Map<String, Object> payload = new LinkedHashMap<>();
+            String traceId = MDC.get(Const.TRACE_ID);
+            if (traceId != null && !traceId.isEmpty()) {
+                payload.put("traceId", traceId);
+            }
+            payload.put("detail", "租户ID不匹配");
+
             PrintWriter writer = response.getWriter();
-            writer.write(Result.error(ResultEnum.PERMISSION_UNAUTHORIZED, "租户ID不匹配").toJson());
+            writer.write(Result.error(ResultEnum.PERMISSION_UNAUTHORIZED, payload).toJson());
             writer.flush();
             return false;
         }
