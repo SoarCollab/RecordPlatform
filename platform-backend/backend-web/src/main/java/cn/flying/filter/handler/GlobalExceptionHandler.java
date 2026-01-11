@@ -128,21 +128,41 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 处理业务异常（可预期的错误，如参数验证失败、业务规则违反）
+     * 处理业务异常（可预期的错误，如参数验证失败、业务规则违反）。
+     *
+     * <p>约定：HTTP 状态保持 200，通过 {@link Result#code} 表达业务错误码；</p>
+     * <p>当 {@link GeneralException} 携带 data 时，需要将其透传到响应 payload.detail，避免丢失错误上下文。</p>
      */
     @ExceptionHandler(GeneralException.class)
     public ResponseEntity<Result<?>> handleBusinessException(GeneralException ex) {
         String traceId = currentTraceId();
         log.warn("业务异常: message={}, traceId={}", ex.getMessage(), traceId);
 
-        Map<String, Object> payload = withTrace(ex.getData() != null ? ex.getData() : ex.getMessage());
-
-        Result<?> result;
-        if (ex.getResultEnum() != null) {
-            result = Result.error(ex.getResultEnum(), payload);
-        } else {
-            result = new Result<>(ResultEnum.PARAM_IS_INVALID.getCode(), ex.getMessage(), payload);
+        String message = ex.getMessage();
+        if ((message == null || message.isEmpty()) && ex.getData() != null) {
+            message = String.valueOf(ex.getData());
         }
+        if ((message == null || message.isEmpty()) && ex.getResultEnum() != null) {
+            message = ex.getResultEnum().getMessage();
+        }
+        if (message == null || message.isEmpty()) {
+            message = "请求失败";
+        }
+
+        int code;
+        if (ex.getResultEnum() == ResultEnum.PERMISSION_UNAUTHORIZED) {
+            code = 403;
+        } else if (message.contains("不存在") || message.contains("未找到")) {
+            code = 404;
+        } else if (ex.getResultEnum() != null) {
+            code = ex.getResultEnum().getCode();
+        } else {
+            code = 400;
+        }
+
+        Object detail = ex.getData() != null ? ex.getData() : message;
+        Map<String, Object> payload = withTrace(detail);
+        Result<?> result = new Result<>(code, message, payload);
 
         // 约定：业务异常保持 HTTP 200，通过 Result.code 表达具体错误
         return ResponseEntity.ok(result);
