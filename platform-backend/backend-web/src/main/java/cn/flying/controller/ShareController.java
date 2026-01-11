@@ -3,6 +3,7 @@ package cn.flying.controller;
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.CommonUtils;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.dto.File;
@@ -85,7 +86,15 @@ public class ShareController {
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
                 .eq(File::getUid, fileShare.getUserId())
                 .in(File::getFileHash, fileHashes);
-        List<File> files = fileMapper.selectList(wrapper);
+
+        // 公开分享接口可能绕过 TenantFilter（无租户上下文），这里根据分享记录的 tenantId 临时补齐租户上下文以完成文件查询
+        List<File> files;
+        if (TenantContext.isSet()) {
+            files = fileMapper.selectList(wrapper);
+        } else {
+            Long shareTenantId = fileShare.getTenantId() != null ? fileShare.getTenantId() : 0L;
+            files = TenantContext.callWithTenant(shareTenantId, () -> fileMapper.selectList(wrapper));
+        }
 
         ShareInfoVO info = new ShareInfoVO();
         info.setShareCode(fileShare.getShareCode());

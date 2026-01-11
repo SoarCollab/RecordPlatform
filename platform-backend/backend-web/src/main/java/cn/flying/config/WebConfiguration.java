@@ -1,5 +1,6 @@
 package cn.flying.config;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -31,10 +32,15 @@ public class WebConfiguration implements WebMvcConfigurer {
         return new BCryptPasswordEncoder();
     }
     /**
-     * RestTemplate
-     * */
+     * 创建 RestTemplate Bean（带超时配置）。
+     * <p>
+     * 优先使用 Spring Boot 自动配置的 {@link RestTemplateBuilder}；在 {@code @WebMvcTest} 等精简上下文中
+     * 若未提供 Builder，则回退到默认构造的 Builder，避免启动失败。
+     * </p>
+     */
     @Bean
-    public RestTemplate restTemplate(RestTemplateBuilder builder) {
+    public RestTemplate restTemplate(ObjectProvider<RestTemplateBuilder> builderProvider) {
+        RestTemplateBuilder builder = builderProvider.getIfAvailable(RestTemplateBuilder::new);
         return builder
                 .setConnectTimeout(Duration.ofSeconds(3))
                 .setReadTimeout(Duration.ofSeconds(10))
