@@ -730,6 +730,23 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     public FileShare getShareByCode(String shareCode) {
+        if (!TenantContext.isSet()) {
+            return TenantContext.runWithoutIsolation(() -> getShareByCodeInternal(shareCode));
+        }
+        return getShareByCodeInternal(shareCode);
+    }
+
+    /**
+     * 根据分享码查询分享记录，并在查询前做过期标记与访问计数更新。
+     * <p>
+     * 注意：公开分享相关端点可能处于租户过滤白名单（无 X-Tenant-ID），调用方可通过
+     * {@link TenantContext#runWithoutIsolation(java.util.function.Supplier)} 在无租户上下文时跨租户查询。
+     * </p>
+     *
+     * @param shareCode 分享码
+     * @return 分享记录，不存在返回 null
+     */
+    private FileShare getShareByCodeInternal(String shareCode) {
         // 原子操作：先尝试将过期分享标记为过期状态，返回更新条数
         int expiredCount = fileShareMapper.markAsExpiredIfNecessary(shareCode);
 
