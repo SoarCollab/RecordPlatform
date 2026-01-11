@@ -19,26 +19,19 @@ vim .env
 
 | 分类 | 变量 | 说明 | 默认值 |
 |------|------|------|--------|
-| **数据库** | `DB_HOST` | MySQL 主机 | localhost |
-| | `DB_PORT` | MySQL 端口 | 3306 |
-| | `DB_NAME` | 数据库名 | RecordPlatform |
-| | `DB_USERNAME` | 数据库用户 | root |
-| | `DB_PASSWORD` | 数据库密码 | - |
-| **Redis** | `REDIS_HOST` | Redis 主机 | localhost |
-| | `REDIS_PORT` | Redis 端口 | 6379 |
-| | `REDIS_PASSWORD` | Redis 密码 | - |
 | **Nacos** | `NACOS_HOST` | Nacos 服务器 | localhost |
+| | `NACOS_PORT` | Nacos 端口 | 8848 |
 | | `NACOS_USERNAME` | Nacos 用户名 | nacos |
 | | `NACOS_PASSWORD` | Nacos 密码 | nacos |
-| **RabbitMQ** | `RABBITMQ_ADDRESSES` | RabbitMQ 地址 | localhost:5672 |
-| | `RABBITMQ_USERNAME` | RabbitMQ 用户 | guest |
-| | `RABBITMQ_PASSWORD` | RabbitMQ 密码 | guest |
+| **Profile** | `SPRING_PROFILES_ACTIVE` | Spring Profile | local |
 
 ### 安全配置
 
 | 变量 | 说明 | 要求 |
 |------|------|------|
 | `JWT_KEY` | JWT 签名密钥 + ID 加密派生 | 至少 32 字符，高熵值 |
+| `RECORD_PLATFORM_UID_SALT` | UID 混淆用盐值 | 建议 8–16 字符随机字符串 |
+| `RECORD_PLATFORM_CLIENT_KEY` | UID 混淆用客户端密钥 | 建议 16–32 字符随机字符串 |
 
 > **注意**: `ID_SECURITY_KEY` 自 v2.0 起已弃用，ID 加密密钥现在从 `JWT_KEY` 派生。
 
@@ -51,6 +44,7 @@ S3 兼容存储通过 Nacos 配置。基本环境变量：
 | `S3_ENDPOINT` | S3 端点 URL |
 | `S3_ACCESS_KEY` | 访问密钥 |
 | `S3_SECRET_KEY` | 私有密钥 |
+| `S3_BUCKET_NAME` | Bucket 名称 |
 
 故障域配置通过 Nacos 管理，支持运行时刷新。
 
@@ -76,7 +70,7 @@ S3 兼容存储通过 Nacos 配置。基本环境变量：
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `SERVER_PORT` | 后端 REST API 端口 | 8000 |
+| `SERVER_PORT` | 后端 REST API 端口 | 8000（本地/开发推荐；prod profile 未设置时默认 8080） |
 | `DUBBO_FISCO_PORT` | FISCO Dubbo 服务端口 | 8091 |
 | `DUBBO_STORAGE_PORT` | Storage Dubbo 服务端口 | 8092 |
 | `DUBBO_HOST` | 服务注册 IP（用于 Docker 环境） | - |
@@ -104,7 +98,7 @@ S3 兼容存储通过 Nacos 配置。基本环境变量：
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `KNIFE4J_USERNAME` | Knife4j/Swagger UI 用户名 | admin |
-| `KNIFE4J_PASSWORD` | Knife4j/Swagger UI 密码 | - |
+| `KNIFE4J_PASSWORD` | Knife4j/Swagger UI 密码 | 123456（未设置时） |
 
 ### APM 配置（可选）
 

@@ -7,7 +7,7 @@ RecordPlatform REST API 文档。
 - **Swagger UI**: http://localhost:8000/record-platform/swagger-ui.html
 - **OpenAPI 规范**: http://localhost:8000/record-platform/v3/api-docs
 
-默认凭据：`admin` / `123456`
+Swagger Basic 认证（Knife4j）：`admin` / `123456`（默认；可配置）
 
 ## 基础 URL
 
@@ -17,17 +17,17 @@ http://localhost:8000/record-platform
 
 ## 认证
 
-除 `/auth/**` 外，所有端点都需要 JWT 认证。
+除 `/api/v1/auth/**` 外，所有端点都需要 JWT 认证。
 
 ### 获取 Token
 
 ```http
-POST /auth/login
+POST /api/v1/auth/login
 Content-Type: application/json
 
 {
-  "username": "admin",
-  "password": "123456"
+  "username": "<你的用户名>",
+  "password": "<你的密码>"
 }
 ```
 

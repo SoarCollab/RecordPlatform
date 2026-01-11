@@ -227,7 +227,7 @@ Configure logrotate for production:
 
 ```bash
 # Daily full backup
-mysqldump -h $DB_HOST -u $DB_USERNAME -p$DB_PASSWORD \
+mysqldump -h <mysql-host> -u <mysql-user> -p \
   --single-transaction --routines --triggers \
   RecordPlatform > backup_$(date +%Y%m%d).sql
 

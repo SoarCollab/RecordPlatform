@@ -19,26 +19,19 @@ vim .env
 
 | Category | Variable | Description | Default |
 |----------|----------|-------------|---------|
-| **Database** | `DB_HOST` | MySQL host | localhost |
-| | `DB_PORT` | MySQL port | 3306 |
-| | `DB_NAME` | Database name | RecordPlatform |
-| | `DB_USERNAME` | Database user | root |
-| | `DB_PASSWORD` | Database password | - |
-| **Redis** | `REDIS_HOST` | Redis host | localhost |
-| | `REDIS_PORT` | Redis port | 6379 |
-| | `REDIS_PASSWORD` | Redis password | - |
 | **Nacos** | `NACOS_HOST` | Nacos server | localhost |
+| | `NACOS_PORT` | Nacos port | 8848 |
 | | `NACOS_USERNAME` | Nacos username | nacos |
 | | `NACOS_PASSWORD` | Nacos password | nacos |
-| **RabbitMQ** | `RABBITMQ_ADDRESSES` | RabbitMQ addresses | localhost:5672 |
-| | `RABBITMQ_USERNAME` | RabbitMQ user | guest |
-| | `RABBITMQ_PASSWORD` | RabbitMQ password | guest |
+| **Profile** | `SPRING_PROFILES_ACTIVE` | Spring profile | local |
 
 ### Security Configuration
 
 | Variable | Description | Requirement |
 |----------|-------------|-------------|
 | `JWT_KEY` | JWT signing key + ID encryption derivation | Min 32 characters, high entropy |
+| `RECORD_PLATFORM_UID_SALT` | Salt for UID obfuscation | Recommended 8–16 random chars |
+| `RECORD_PLATFORM_CLIENT_KEY` | Client key for UID obfuscation | Recommended 16–32 random chars |
 
 > **Note**: `ID_SECURITY_KEY` is deprecated since v2.0. ID encryption keys are now derived from `JWT_KEY`.
 
@@ -51,6 +44,7 @@ S3-compatible storage is configured via Nacos. Basic environment variables:
 | `S3_ENDPOINT` | S3 endpoint URL |
 | `S3_ACCESS_KEY` | Access key |
 | `S3_SECRET_KEY` | Secret key |
+| `S3_BUCKET_NAME` | Bucket name |
 
 Fault domain configuration is managed through Nacos and supports runtime refresh.
 
@@ -76,7 +70,7 @@ Fault domain configuration is managed through Nacos and supports runtime refresh
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SERVER_PORT` | Backend REST API port | 8000 |
+| `SERVER_PORT` | Backend REST API port | 8000 (recommended for local/dev; prod profile defaults to 8080 if unset) |
 | `DUBBO_FISCO_PORT` | FISCO Dubbo service port | 8091 |
 | `DUBBO_STORAGE_PORT` | Storage Dubbo service port | 8092 |
 | `DUBBO_HOST` | Service registration IP (for Docker) | - |
@@ -104,7 +98,7 @@ Fault domain configuration is managed through Nacos and supports runtime refresh
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `KNIFE4J_USERNAME` | Knife4j/Swagger UI username | admin |
-| `KNIFE4J_PASSWORD` | Knife4j/Swagger UI password | - |
+| `KNIFE4J_PASSWORD` | Knife4j/Swagger UI password | 123456 (if not set) |
 
 ### APM Configuration (Optional)
 

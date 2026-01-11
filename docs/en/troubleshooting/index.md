@@ -52,10 +52,10 @@ grep -r "Exception" /var/log/recordplatform/
 curl http://localhost:8848/nacos/v1/console/health/liveness
 
 # MySQL connection
-mysql -h $DB_HOST -u $DB_USERNAME -p$DB_PASSWORD -e "SELECT 1"
+mysql -h <mysql-host> -u <mysql-user> -p -e "SELECT 1"
 
 # Redis connection
-redis-cli -h $REDIS_HOST ping
+redis-cli -h <redis-host> ping
 
 # RabbitMQ status
 rabbitmqctl status

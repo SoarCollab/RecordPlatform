@@ -25,7 +25,7 @@
    ```
    **解决方案**：验证 MySQL 正在运行且凭据正确。
    ```bash
-   mysql -h $DB_HOST -u $DB_USERNAME -p$DB_PASSWORD RecordPlatform
+   mysql -h <mysql-host> -u <mysql-user> -p RecordPlatform
    ```
 
 3. **端口被占用**
@@ -253,7 +253,7 @@
 
 1. **检查 Redis 连通性**
    ```bash
-   redis-cli -h $REDIS_HOST ping
+   redis-cli -h <redis-host> ping
    ```
 
 2. **验证 TTL 设置**
@@ -271,7 +271,7 @@
 
 1. **检查网络延迟**
    ```bash
-   redis-cli -h $REDIS_HOST --latency
+   redis-cli -h <redis-host> --latency
    ```
 
 2. **增加连接超时**

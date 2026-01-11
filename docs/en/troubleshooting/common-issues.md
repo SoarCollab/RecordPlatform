@@ -25,7 +25,7 @@ Solutions for frequently encountered problems.
    ```
    **Solution**: Verify MySQL is running and credentials are correct.
    ```bash
-   mysql -h $DB_HOST -u $DB_USERNAME -p$DB_PASSWORD RecordPlatform
+   mysql -h <mysql-host> -u <mysql-user> -p RecordPlatform
    ```
 
 3. **Port already in use**
@@ -253,7 +253,7 @@ Solutions for frequently encountered problems.
 
 1. **Check Redis connectivity**
    ```bash
-   redis-cli -h $REDIS_HOST ping
+   redis-cli -h <redis-host> ping
    ```
 
 2. **Verify TTL settings**
@@ -271,7 +271,7 @@ Solutions for frequently encountered problems.
 
 1. **Check network latency**
    ```bash
-   redis-cli -h $REDIS_HOST --latency
+   redis-cli -h <redis-host> --latency
    ```
 
 2. **Increase connection timeout**
