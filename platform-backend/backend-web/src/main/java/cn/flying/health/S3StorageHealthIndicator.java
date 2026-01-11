@@ -2,6 +2,7 @@ package cn.flying.health;
 
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.external.DistributedStorageService;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.boot.actuate.health.Health;
@@ -22,7 +23,9 @@ public class S3StorageHealthIndicator implements HealthIndicator {
     private DistributedStorageService storageService;
 
     private static final int TIMEOUT_SECONDS = 3;
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+
+    @Resource(name = "healthIndicatorExecutor")
+    private ExecutorService executor;
 
     @Override
     public Health health() {
