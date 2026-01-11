@@ -80,6 +80,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     return;
                 }
 
+                // 白名单路径可能绕过 TenantFilter（例如公开分享、图片下载），此时补齐租户上下文
+                if (headerTenantId == null && jwtTenantId != null) {
+                    TenantContext.setTenantId(jwtTenantId);
+                    request.setAttribute(Const.ATTR_TENANT_ID, jwtTenantId);
+                    headerTenantId = jwtTenantId;
+                }
+
                 UserDetails user = utils.toUser(jwt);
                 UsernamePasswordAuthenticationToken authentication =
                         new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());

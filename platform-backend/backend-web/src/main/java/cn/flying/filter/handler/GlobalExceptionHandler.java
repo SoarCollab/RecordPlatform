@@ -150,14 +150,12 @@ public class GlobalExceptionHandler {
         }
 
         int code;
-        if (ex.getResultEnum() == ResultEnum.PERMISSION_UNAUTHORIZED) {
-            code = 403;
-        } else if (message.contains("不存在") || message.contains("未找到")) {
-            code = 404;
-        } else if (ex.getResultEnum() != null) {
+        if (ex.getResultEnum() != null) {
             code = ex.getResultEnum().getCode();
+        } else if (ex.getCode() != 0) {
+            code = ex.getCode();
         } else {
-            code = 400;
+            code = ResultEnum.PARAM_IS_INVALID.getCode();
         }
 
         Object detail = ex.getData() != null ? ex.getData() : message;
