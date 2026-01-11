@@ -11,13 +11,17 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 租户过滤器
@@ -45,6 +49,7 @@ public class TenantFilter extends OncePerRequestFilter {
             "/favicon.ico",
             "/error",
             // 公开分享相关端点
+            "/api/v1/share",
             "/api/v1/files/getSharingFiles",
             "/api/v1/files/public/download",
             "/api/v1/files/public/decryptInfo",
@@ -56,6 +61,15 @@ public class TenantFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request,
                                     @NotNull HttpServletResponse response,
                                     @NotNull FilterChain filterChain) throws ServletException, IOException {
+        String traceId = MDC.get(Const.TRACE_ID);
+        boolean traceIdGenerated = false;
+        if (traceId == null || traceId.isEmpty()) {
+            traceId = UUID.randomUUID().toString().replace("-", "");
+            MDC.put(Const.TRACE_ID, traceId);
+            traceIdGenerated = true;
+        }
+        request.setAttribute(Const.TRACE_ID, traceId);
+
         // 外层 try/finally 确保无论何种分支都清理 TenantContext，防止线程复用泄漏
         try {
             // 防止线程复用导致的 TenantContext 泄漏（例如：前一次请求在错误分支提前返回未进入 JWT 过滤器清理）
@@ -108,8 +122,10 @@ public class TenantFilter extends OncePerRequestFilter {
             }
             // 注意：正常路径不在这里清理 TenantContext，由 JwtAuthenticationFilter 统一清理
         } finally {
-            // 双重保护：确保任何异常或提前返回分支都清理 TenantContext
             TenantContext.clear();
+            if (traceIdGenerated) {
+                MDC.remove(Const.TRACE_ID);
+            }
         }
     }
 
@@ -126,8 +142,16 @@ public class TenantFilter extends OncePerRequestFilter {
     private void sendErrorResponse(HttpServletResponse response, ResultEnum resultEnum, String message) throws IOException {
         response.setContentType("application/json;charset=utf-8");
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        String traceId = MDC.get(Const.TRACE_ID);
+        if (traceId != null && !traceId.isEmpty()) {
+            payload.put("traceId", traceId);
+        }
+        payload.put("detail", message);
+
         PrintWriter writer = response.getWriter();
-        writer.write(Result.error(resultEnum, message).toJson());
+        writer.write(Result.error(resultEnum, payload).toJson());
         writer.flush();
     }
 }
