@@ -12,6 +12,8 @@
   import type { FileVO } from "$api/types";
   import { FileStatus, FileStatusLabel } from "$api/types";
   import { fly } from "svelte/transition";
+  import AppIcon from "$components/ui/AppIcon.svelte";
+  import { appIconMap } from "$components/ui/appIcon";
   import Skeleton from "$lib/components/ui/Skeleton.svelte";
   import * as Card from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
@@ -28,30 +30,39 @@
   let pendingTickets = $state(0);
   let recentFiles = $state<FileVO[]>([]);
 
-  const stats = $derived([
+  type DashboardIconName = keyof typeof appIconMap;
+
+  type StatCard = {
+    label: string;
+    value: string;
+    icon: DashboardIconName;
+    color: string;
+  };
+
+  const stats = $derived<StatCard[]>([
     {
       label: "文件总数",
       value: fileCount.toString(),
       icon: "folder",
-      color: "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"
+      color: "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400",
     },
     {
       label: "存储用量",
       value: formatFileSize(storageUsed),
       icon: "database",
-      color: "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400"
+      color: "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400",
     },
     {
       label: "未读消息",
       value: unreadMessages.toString(),
       icon: "message",
-      color: "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400"
+      color: "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400",
     },
     {
       label: "待处理工单",
       value: pendingTickets.toString(),
       icon: "ticket",
-      color: "bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400"
+      color: "bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400",
     },
   ]);
 
@@ -154,42 +165,7 @@
                 {stat.label}
               </Card.Title>
               <div class={`p-2 rounded-full ${stat.color}`}>
-                 <svg
-                  class="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  {#if stat.icon === "folder"}
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                    />
-                  {:else if stat.icon === "database"}
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
-                    />
-                  {:else if stat.icon === "message"}
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                    />
-                  {:else if stat.icon === "ticket"}
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
-                  {/if}
-                </svg>
+                <AppIcon name={stat.icon} class="h-4 w-4" />
               </div>
             </Card.Header>
             <Card.Content>
@@ -211,19 +187,7 @@
           <div
             class="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900 dark:text-amber-400"
           >
-            <svg
-              class="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"
-              />
-            </svg>
+            <AppIcon name="megaphone" class="h-5 w-5" />
           </div>
           <div>
             <p class="font-medium text-amber-900 dark:text-amber-100">
@@ -234,19 +198,10 @@
             </p>
           </div>
         </div>
-        <svg
+        <AppIcon
+          name="chevron-right"
           class="h-5 w-5 text-amber-600 dark:text-amber-400"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M9 5l7 7-7 7"
-          />
-        </svg>
+        />
       </a>
     </div>
   {/if}
@@ -282,19 +237,7 @@
               <div
                 class="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted"
               >
-                <svg
-                  class="h-8 w-8 text-muted-foreground"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                  />
-                </svg>
+                <AppIcon name="folder" class="h-8 w-8 text-muted-foreground" />
               </div>
               <p class="text-muted-foreground">暂无文件</p>
               <Button variant="link" href="/upload" class="mt-2">
@@ -313,19 +256,7 @@
                     <div
                       class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary"
                     >
-                      <svg
-                        class="h-5 w-5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                        />
-                      </svg>
+                      <AppIcon name="file-text" class="h-5 w-5" />
                     </div>
                     <div>
                       <p class="font-medium text-sm">{file.fileName}</p>
@@ -361,19 +292,7 @@
             <div
               class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground group-hover:scale-110 transition-transform"
             >
-              <svg
-                class="h-5 w-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
-                />
-              </svg>
+              <AppIcon name="upload" class="h-5 w-5" />
             </div>
             <div>
               <p class="font-medium">上传文件</p>
@@ -388,19 +307,7 @@
             <div
               class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500 text-white group-hover:scale-110 transition-transform"
             >
-              <svg
-                class="h-5 w-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                />
-              </svg>
+              <AppIcon name="folder" class="h-5 w-5" />
             </div>
             <div>
               <p class="font-medium">文件管理</p>
@@ -415,19 +322,7 @@
             <div
               class="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500 text-white group-hover:scale-110 transition-transform"
             >
-              <svg
-                class="h-5 w-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
+              <AppIcon name="ticket" class="h-5 w-5" />
             </div>
             <div>
               <p class="font-medium">提交工单</p>
