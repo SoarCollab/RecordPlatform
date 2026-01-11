@@ -83,6 +83,19 @@ public class TenantFilter extends OncePerRequestFilter {
 
             // 检查是否在白名单中
             if (isWhitelisted(requestPath)) {
+                // 白名单路径不强制要求租户头，但若请求主动携带租户头则仍写入上下文，确保后续 DB 查询具备正确的 tenant_id 条件
+                String tenantIdHeader = request.getHeader(TENANT_HEADER);
+                if (tenantIdHeader != null && !tenantIdHeader.isEmpty()) {
+                    try {
+                        Long tenantId = Long.parseLong(tenantIdHeader);
+                        TenantContext.setTenantId(tenantId);
+                        request.setAttribute(Const.ATTR_TENANT_ID, tenantId);
+                    } catch (NumberFormatException e) {
+                        log.warn("租户ID格式错误: {}", tenantIdHeader);
+                        sendErrorResponse(response, ResultEnum.PARAM_IS_INVALID, "租户标识格式错误");
+                        return;
+                    }
+                }
                 filterChain.doFilter(request, response);
                 return;
             }

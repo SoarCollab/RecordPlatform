@@ -151,9 +151,16 @@ public class GlobalExceptionHandler {
 
         int code;
         if (ex.getResultEnum() != null) {
-            code = ex.getResultEnum().getCode();
+            // 兼容历史约定：权限不足统一用 403（而不是 70002）
+            if (ex.getResultEnum() == ResultEnum.PERMISSION_UNAUTHORIZED) {
+                code = 403;
+            } else {
+                code = ex.getResultEnum().getCode();
+            }
         } else if (ex.getCode() != 0) {
             code = ex.getCode();
+        } else if (message.contains("不存在") || message.contains("未找到")) {
+            code = 404;
         } else {
             code = ResultEnum.PARAM_IS_INVALID.getCode();
         }

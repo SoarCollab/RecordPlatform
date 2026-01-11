@@ -76,6 +76,32 @@ class TenantFilterTest {
     }
 
     /**
+     * 白名单路径不强制要求租户头，但若主动携带租户头，应写入 TenantContext 与 request attribute，
+     * 以便后续 MyBatis-Plus 租户拦截器能正确注入 tenant_id 条件。
+     */
+    @Test
+    @DisplayName("should set tenant context for whitelisted path when tenant header present")
+    void shouldSetTenantContextForWhitelistedPathWhenTenantHeaderPresent() throws ServletException, IOException {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/share/abc");
+        request.setServletPath("/api/v1/share/abc");
+        request.addHeader("X-Tenant-ID", "12");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        AtomicLong capturedTenantId = new AtomicLong(-1);
+        doAnswer(invocation -> {
+            capturedTenantId.set(TenantContext.getTenantId() != null ? TenantContext.getTenantId() : -1);
+            return null;
+        }).when(filterChain).doFilter(any(), any());
+
+        filter.doFilterInternal(request, response, filterChain);
+
+        verify(filterChain).doFilter(request, response);
+        assertEquals(12L, capturedTenantId.get());
+        assertEquals(12L, request.getAttribute(Const.ATTR_TENANT_ID));
+        assertNull(TenantContext.getTenantId());
+    }
+
+    /**
      * 非白名单路径缺少租户头时应返回 400，并且不进入后续过滤器链。
      */
     @Test
@@ -175,4 +201,3 @@ class TenantFilterTest {
         assertNull(TenantContext.getTenantId());
     }
 }
-
