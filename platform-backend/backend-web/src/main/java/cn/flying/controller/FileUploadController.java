@@ -2,9 +2,7 @@ package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
-import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.util.Const;
-import cn.flying.common.exception.GeneralException;
 import cn.flying.dao.vo.file.FileUploadStatusVO;
 import cn.flying.dao.vo.file.ProgressVO;
 import cn.flying.dao.vo.file.ResumeUploadVO;
@@ -126,12 +124,8 @@ public class FileUploadController {
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Schema(description = "客户端ID") @RequestParam("clientId") String clientId) {
 
-        try {
-            FileUploadStatusVO statusVO = fileUploadService.checkFileStatus(userId, clientId);
-            return Result.success(statusVO);
-        } catch (GeneralException ex) {
-            return mapUploadSessionException(ex);
-        }
+        FileUploadStatusVO statusVO = fileUploadService.checkFileStatus(userId, clientId);
+        return Result.success(statusVO);
 
     }
 
@@ -141,42 +135,8 @@ public class FileUploadController {
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Schema(description = "客户端ID") @RequestParam("clientId") String clientId) {
 
-        try {
-            ProgressVO progressVO = fileUploadService.getUploadProgress(userId, clientId);
-            return Result.success(progressVO);
-        } catch (GeneralException ex) {
-            return mapUploadSessionException(ex);
-        }
+        ProgressVO progressVO = fileUploadService.getUploadProgress(userId, clientId);
+        return Result.success(progressVO);
 
-    }
-
-    /**
-     * 将上传会话相关的业务异常转换为统一的 Result 响应（保持 HTTP 200，使用 code 表达业务错误）。
-     *
-     * @param ex 业务异常
-     * @return 映射后的统一响应
-     */
-    private <T> Result<T> mapUploadSessionException(GeneralException ex) {
-        String message = ex.getMessage();
-        if (message == null && ex.getData() != null) {
-            message = String.valueOf(ex.getData());
-        }
-        if (message == null && ex.getResultEnum() != null) {
-            message = ex.getResultEnum().getMessage();
-        }
-        if (message == null) {
-            message = "请求失败";
-        }
-
-        if (ex.getResultEnum() == ResultEnum.PERMISSION_UNAUTHORIZED) {
-            return Result.failure(403, message);
-        }
-        if (message.contains("不存在") || message.contains("未找到")) {
-            return Result.failure(404, message);
-        }
-        if (ex.getResultEnum() != null) {
-            return Result.failure(ex.getResultEnum().getCode(), message);
-        }
-        return Result.failure(400, message);
     }
 }
