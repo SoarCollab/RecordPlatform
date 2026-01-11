@@ -14,8 +14,9 @@ import java.util.concurrent.TimeUnit;
 public @interface DistributedLock {
 
     /**
-     * 锁的 key，支持 SpEL 表达式。
-     * 默认使用方法全限定名作为 key。
+     * 锁的 key。
+     * 当 key 包含 # 时按 SpEL 表达式解析；否则按字面值使用。
+     * 默认使用 类名:方法名 作为 key。
      */
     String key() default "";
 
