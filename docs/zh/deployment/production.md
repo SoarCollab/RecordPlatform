@@ -227,7 +227,7 @@ JAVA_OPTS="-Xms2g -Xmx4g \
 
 ```bash
 # 每日全量备份
-mysqldump -h $DB_HOST -u $DB_USERNAME -p$DB_PASSWORD \
+mysqldump -h <mysql-host> -u <mysql-user> -p \
   --single-transaction --routines --triggers \
   RecordPlatform > backup_$(date +%Y%m%d).sql
 

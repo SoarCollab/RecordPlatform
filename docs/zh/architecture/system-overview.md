@@ -61,8 +61,8 @@ flowchart TB
 
 所有模块依赖的共享 Dubbo 接口定义：
 
-- `FiscoExternalService` - 区块链操作
-- `StorageExternalService` - 存储操作
+- `BlockChainService` - 区块链操作
+- `DistributedStorageService` - 存储操作
 - 公共 DTO 和响应类型
 
 ### platform-backend
@@ -74,6 +74,7 @@ flowchart TB
 | **backend-web**     | REST 控制器、JWT 过滤器、限流、CORS |
 | **backend-service** | 业务逻辑、Saga 编排、Outbox 发布    |
 | **backend-dao**     | MyBatis Plus 映射、实体、VO         |
+| **backend-api**     | 内部 API 接口定义                   |
 | **backend-common**  | 工具类、常量、注解                  |
 
 ### platform-fisco

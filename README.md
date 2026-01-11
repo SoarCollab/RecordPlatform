@@ -38,6 +38,8 @@ Ensure the following services are running:
 | S3-compatible storage | 9000  | Object storage             |
 | FISCO BCOS            | 20200 | Blockchain node            |
 
+Optional but recommended: copy `.env.example` to `.env` and set at least `JWT_KEY`, `S3_*`, and (for dev) `KNIFE4J_*` before starting services.
+
 ### 2. Build
 
 ```bash

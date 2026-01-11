@@ -52,19 +52,26 @@ RecordPlatform supports multiple blockchain networks through an adapter pattern.
 blockchain:
   active: ${BLOCKCHAIN_ACTIVE:local-fisco}
 
-  local-fisco:
-    peer-address: ${FISCO_PEER_ADDRESS:127.0.0.1:20200}
-    storage-contract: ${FISCO_STORAGE_CONTRACT}
-    sharing-contract: ${FISCO_SHARING_CONTRACT}
-
+  # BSN FISCO BCOS (active=bsn-fisco)
   bsn-fisco:
     node-id: <bsn-node-id>
     peers:
       - <peer-address>
 
+  # Hyperledger Besu (active=bsn-besu)
   bsn-besu:
     rpc-url: https://<besu-rpc>
     chain-id: <chain-id>
+
+# Local FISCO BCOS (Java SDK)
+bcos:
+  network:
+    peers[0]: ${FISCO_PEER_ADDRESS:127.0.0.1:20200}
+
+# Contract addresses (used by local-fisco and bsn)
+contract:
+  storageAddress: ${FISCO_STORAGE_CONTRACT:}
+  sharingAddress: ${FISCO_SHARING_CONTRACT:}
 ```
 
 ### Adapter Architecture
@@ -77,7 +84,7 @@ flowchart TB
     classDef sdk fill:#10b981,stroke:#059669,stroke-width:2px,color:#ffffff
 
     subgraph API["Core Interface"]
-        Interface([FiscoExternalService]):::interface
+        Interface([BlockChainService]):::interface
     end
 
     subgraph Impls["Adapter Implementations"]

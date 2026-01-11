@@ -61,8 +61,8 @@ flowchart TB
 
 Shared Dubbo interface definitions that all modules depend on:
 
-- `FiscoExternalService` - Blockchain operations
-- `StorageExternalService` - Storage operations
+- `BlockChainService` - Blockchain operations
+- `DistributedStorageService` - Storage operations
 - Common DTOs and response types
 
 ### platform-backend
@@ -74,6 +74,7 @@ Multi-module backend service (Dubbo Consumer):
 | **backend-web**     | REST controllers, JWT filters, rate limiting, CORS    |
 | **backend-service** | Business logic, Saga orchestration, Outbox publishing |
 | **backend-dao**     | MyBatis Plus mappers, entities, VOs                   |
+| **backend-api**     | Internal API interfaces                               |
 | **backend-common**  | Utilities, constants, annotations                     |
 
 ### platform-fisco

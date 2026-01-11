@@ -7,7 +7,7 @@ RecordPlatform REST API documentation.
 - **Swagger UI**: http://localhost:8000/record-platform/swagger-ui.html
 - **OpenAPI Spec**: http://localhost:8000/record-platform/v3/api-docs
 
-Default credentials: `admin` / `123456`
+Swagger basic auth (Knife4j): `admin` / `123456` (default; configurable)
 
 ## Base URL
 
@@ -17,17 +17,17 @@ http://localhost:8000/record-platform
 
 ## Authentication
 
-All endpoints except `/auth/**` require JWT authentication.
+All endpoints except `/api/v1/auth/**` require JWT authentication.
 
 ### Get Token
 
 ```http
-POST /auth/login
+POST /api/v1/auth/login
 Content-Type: application/json
 
 {
-  "username": "admin",
-  "password": "123456"
+  "username": "<your-username>",
+  "password": "<your-password>"
 }
 ```
 
