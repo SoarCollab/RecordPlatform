@@ -8,7 +8,13 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.context.expression.MethodBasedEvaluationContext;
+import org.springframework.core.DefaultParameterNameDiscoverer;
+import org.springframework.core.ParameterNameDiscoverer;
 import org.springframework.core.annotation.Order;
+import org.springframework.expression.EvaluationContext;
+import org.springframework.expression.ExpressionParser;
+import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Method;
@@ -27,6 +33,9 @@ public class DistributedLockAspect {
     private final RedissonClient redissonClient;
 
     private static final String LOCK_KEY_PREFIX = "distributed:lock:";
+
+    private static final ExpressionParser SPEL_PARSER = new SpelExpressionParser();
+    private static final ParameterNameDiscoverer PARAM_NAME_DISCOVERER = new DefaultParameterNameDiscoverer();
 
     @Around("@annotation(distributedLock)")
     public Object around(ProceedingJoinPoint joinPoint, DistributedLock distributedLock) throws Throwable {
@@ -65,12 +74,33 @@ public class DistributedLockAspect {
     }
 
     private String buildLockKey(ProceedingJoinPoint joinPoint, DistributedLock distributedLock) {
+        MethodSignature signature = (MethodSignature) joinPoint.getSignature();
+        Method method = signature.getMethod();
+
         String key = distributedLock.key();
-        if (key == null || key.isEmpty()) {
-            MethodSignature signature = (MethodSignature) joinPoint.getSignature();
-            Method method = signature.getMethod();
-            key = method.getDeclaringClass().getSimpleName() + ":" + method.getName();
+        if (key == null || key.isBlank()) {
+            key = defaultKey(method);
+        } else if (key.contains("#")) {
+            try {
+                EvaluationContext context = new MethodBasedEvaluationContext(
+                        joinPoint.getTarget(),
+                        method,
+                        joinPoint.getArgs(),
+                        PARAM_NAME_DISCOVERER
+                );
+                Object value = SPEL_PARSER.parseExpression(key).getValue(context);
+                String evaluated = value != null ? value.toString() : "";
+                key = evaluated.isBlank() ? defaultKey(method) : evaluated;
+            } catch (Exception e) {
+                log.warn("解析分布式锁 key 失败，使用默认 key: {}", key);
+                key = defaultKey(method);
+            }
         }
+
         return LOCK_KEY_PREFIX + key;
+    }
+
+    private String defaultKey(Method method) {
+        return method.getDeclaringClass().getSimpleName() + ":" + method.getName();
     }
 }
