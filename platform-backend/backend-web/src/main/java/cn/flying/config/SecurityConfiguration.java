@@ -20,6 +20,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.http.HttpMethod;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -41,6 +42,8 @@ import org.springframework.security.web.authentication.logout.LogoutSuccessEvent
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * @program: RecordPlatform
@@ -182,32 +185,34 @@ public class SecurityConfiguration {
             username = String.valueOf(request.getAttribute(Const.ATTR_LOGIN_USERNAME));
         }
 
-        if (exceptionOrAuthentication instanceof AccessDeniedException) {
+        if (exceptionOrAuthentication instanceof AccessDeniedException ex) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-            writer.write(Result.error(ResultEnum.PERMISSION_UNAUTHORIZED).toJson());
+            String detail = ex.getMessage() != null && !ex.getMessage().isEmpty() ? ex.getMessage() : null;
+            writer.write(Result.error(ResultEnum.PERMISSION_UNAUTHORIZED, tracePayload(request, detail)).toJson());
             return;
         }
 
-        if (exceptionOrAuthentication instanceof AuthenticationException) {
+        if (exceptionOrAuthentication instanceof AuthenticationException ex) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             // 区分：登录失败 vs 访问受保护资源未认证
             if (isLoginRequest(request)) {
-                handleLoginFailure(username, writer);
+                handleLoginFailure(username, writer, request);
             } else {
-                writer.write(Result.error(ResultEnum.PERMISSION_UNAUTHENTICATED).toJson());
+                String detail = ex.getMessage() != null && !ex.getMessage().isEmpty() ? ex.getMessage() : null;
+                writer.write(Result.error(ResultEnum.PERMISSION_UNAUTHENTICATED, tracePayload(request, detail)).toJson());
             }
             return;
         }
 
         if (exceptionOrAuthentication instanceof Exception) {
             response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-            writer.write(Result.error(ResultEnum.FAIL).toJson());
+            writer.write(Result.error(ResultEnum.FAIL, tracePayload(request, null)).toJson());
             return;
         }
 
         if (exceptionOrAuthentication instanceof Authentication authentication) {
             response.setStatus(HttpServletResponse.SC_OK);
-            handleLoginSuccess(username, authentication, writer);
+            handleLoginSuccess(username, authentication, writer, request);
         }
     }
 
@@ -225,13 +230,13 @@ public class SecurityConfiguration {
     /**
      * 处理登录失败
      */
-    private void handleLoginFailure(String username, PrintWriter writer) {
+    private void handleLoginFailure(String username, PrintWriter writer, HttpServletRequest request) {
         if (username != null && !username.isEmpty()) {
             // 检查是否已被锁定
             if (loginSecurityService.isAccountLocked(username)) {
                 long remainingTime = loginSecurityService.getRemainingLockTime(username);
                 log.warn("账户 [{}] 已被锁定，剩余锁定时间: {}秒", username, remainingTime);
-                writer.write(Result.error(ResultEnum.USER_ACCOUNT_LOCKED).toJson());
+                writer.write(Result.error(ResultEnum.USER_ACCOUNT_LOCKED, tracePayload(request, null)).toJson());
                 return;
             }
 
@@ -241,19 +246,19 @@ public class SecurityConfiguration {
             log.warn("账户 [{}] 登录失败，当前失败次数: {}, 剩余尝试次数: {}", username, failCount, remaining);
 
             if (remaining <= 0) {
-                writer.write(Result.error(ResultEnum.USER_ACCOUNT_LOCKED).toJson());
+                writer.write(Result.error(ResultEnum.USER_ACCOUNT_LOCKED, tracePayload(request, null)).toJson());
                 return;
             }
         }
 
-        writer.write(Result.error(ResultEnum.USER_LOGIN_ERROR).toJson());
+        writer.write(Result.error(ResultEnum.USER_LOGIN_ERROR, tracePayload(request, null)).toJson());
     }
 
     /**
      * 处理登录成功
      * 注意：租户ID由请求头 X-Tenant-ID 提供，TenantFilter 已设置到 TenantContext
      */
-    private void handleLoginSuccess(String username, Authentication authentication, PrintWriter writer) throws IOException {
+    private void handleLoginSuccess(String username, Authentication authentication, PrintWriter writer, HttpServletRequest request) throws IOException {
         User user = (User) authentication.getPrincipal();
         Account account = service.findAccountByNameOrEmail(user.getUsername());
 
@@ -267,7 +272,7 @@ public class SecurityConfiguration {
         String jwt = utils.createJwt(user, account.getUsername(), userId, account.getTenantId());
 
         if(jwt == null) {
-            writer.write(Result.error(ResultEnum.PERMISSION_LIMIT).toJson());
+            writer.write(Result.error(ResultEnum.PERMISSION_LIMIT, tracePayload(request, null)).toJson());
         } else {
             AuthorizeVO vo = account.asViewObject(AuthorizeVO.class, o -> o.setToken(jwt));
             vo.setExpire(utils.expireTime());
@@ -309,6 +314,19 @@ public class SecurityConfiguration {
             writer.write(Result.success("退出登录成功").toJson());
             return;
         }
-        writer.write(Result.error(ResultEnum.PERMISSION_TOKEN_EXPIRED).toJson());
+        writer.write(Result.error(ResultEnum.PERMISSION_TOKEN_EXPIRED, tracePayload(request, null)).toJson());
+    }
+
+    private Map<String, Object> tracePayload(HttpServletRequest request, Object detail) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        Object requestTraceId = request.getAttribute(Const.TRACE_ID);
+        String traceId = requestTraceId != null ? String.valueOf(requestTraceId) : MDC.get(Const.TRACE_ID);
+        if (traceId != null && !traceId.isEmpty()) {
+            payload.put("traceId", traceId);
+        }
+        if (detail != null) {
+            payload.put("detail", detail);
+        }
+        return payload;
     }
 }
