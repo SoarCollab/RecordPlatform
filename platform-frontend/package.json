@@ -50,6 +50,7 @@
   "dependencies": {
     "@noble/ciphers": "^2.1.1",
     "clsx": "^2.1.1",
+    "echarts": "^6.0.0",
     "mode-watcher": "^1.1.0",
     "tailwind-merge": "^3.4.0"
   },
