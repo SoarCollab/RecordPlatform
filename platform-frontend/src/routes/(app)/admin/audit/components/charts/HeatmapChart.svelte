@@ -11,7 +11,7 @@
 
   let { data, title = "操作时间热力图", loading = false }: Props = $props();
 
-  let chartContainer: HTMLDivElement;
+  let chartContainer: HTMLDivElement = $state()!;
   let chart: echarts.ECharts | null = null;
 
   const days = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];

@@ -12,7 +12,7 @@
 
   let { data, title = "错误类型分布", loading = false, onItemClick }: Props = $props();
 
-  let chartContainer: HTMLDivElement;
+  let chartContainer: HTMLDivElement = $state()!;
   let chart: echarts.ECharts | null = null;
 
   const colors = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#8b5cf6"];

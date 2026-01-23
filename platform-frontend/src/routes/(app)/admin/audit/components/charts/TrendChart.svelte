@@ -10,7 +10,7 @@
 
   let { data, title = "7天操作趋势", loading = false }: Props = $props();
 
-  let chartContainer: HTMLDivElement;
+  let chartContainer: HTMLDivElement = $state()!;
   let chart: echarts.ECharts | null = null;
 
   function initChart() {
