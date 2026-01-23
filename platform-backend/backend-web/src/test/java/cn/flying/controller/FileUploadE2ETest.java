@@ -209,8 +209,8 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
 
             int code = objectMapper.readTree(result.getResponse().getContentAsString())
                     .get("code").asInt();
-            // Should return 404 (not found) or specific business error code for non-existent upload
-            assertThat(code).isIn(404, 40004, 1001);
+            // Should return 40006 (UPLOAD_SESSION_NOT_FOUND) for non-existent upload
+            assertThat(code).isEqualTo(40006);
         }
     }
 
