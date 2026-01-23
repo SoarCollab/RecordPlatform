@@ -164,7 +164,8 @@ public class FileQueryServiceImpl implements FileQueryService {
         // 管理员可以访问所有文件
         if (SecurityUtils.isAdmin()) {
             LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                    .eq(File::getFileHash, fileHash);
+                    .eq(File::getFileHash, fileHash)
+                    .last("LIMIT 1");
             file = fileMapper.selectOne(wrapper);
         } else {
             // 首先检查用户自己的文件
@@ -350,7 +351,8 @@ public class FileQueryServiceImpl implements FileQueryService {
         // 管理员可以访问所有文件
         if (SecurityUtils.isAdmin()) {
             LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                    .eq(File::getFileHash, fileHash);
+                    .eq(File::getFileHash, fileHash)
+                    .last("LIMIT 1");
             file = fileMapper.selectOne(wrapper);
         } else {
             // 首先检查用户自己的文件
@@ -550,7 +552,8 @@ public class FileQueryServiceImpl implements FileQueryService {
         // 管理员可以访问所有文件
         if (SecurityUtils.isAdmin()) {
             LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                    .eq(File::getFileHash, fileHash);
+                    .eq(File::getFileHash, fileHash)
+                    .last("LIMIT 1");
             File file = fileMapper.selectOne(wrapper);
             if (file == null) {
                 throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权访问");
