@@ -28,11 +28,11 @@ src/routes/(app)/admin/audit/
 
 ### 1. 标签页精简：8 → 3
 
-| 新标签 | 内容 |
-|--------|------|
-| **仪表盘** | KPI 卡片 + 趋势图 + 错误分布 + 热力图 + 高频告警 |
-| **日志查询** | 审计日志列表 + 筛选 + 分页 |
-| **敏感操作** | 敏感操作列表 + 筛选 + 分页 |
+| 新标签       | 内容                                             |
+| ------------ | ------------------------------------------------ |
+| **仪表盘**   | KPI 卡片 + 趋势图 + 错误分布 + 热力图 + 高频告警 |
+| **日志查询** | 审计日志列表 + 筛选 + 分页                       |
+| **敏感操作** | 敏感操作列表 + 筛选 + 分页                       |
 
 **工具和配置** → 右上角设置按钮
 
@@ -54,27 +54,32 @@ src/routes/(app)/admin/audit/
 ### 4. 组件职责
 
 #### 主页面 (+page.svelte)
+
 - 标签页切换
 - 导出日志
 - 设置抽屉管理
 
 #### AuditDashboard
+
 - 加载概览数据
 - 显示 KPI 卡片
 - 渲染图表
 - 30 秒自动刷新
 
 #### AuditLogList / SensitiveLogList
+
 - 日志列表展示
 - 筛选和分页
 - 详情弹窗
 
 #### 图表组件
+
 - 独立的 ECharts 封装
 - 自动响应式调整
 - 统一的加载和空状态
 
 #### SettingsDrawer
+
 - 审计配置编辑
 - 异常检查工具
 - 日志备份工具
@@ -89,12 +94,14 @@ src/routes/(app)/admin/audit/
 ## 使用示例
 
 ### 查看仪表盘
+
 ```typescript
 // 自动加载并每 30 秒刷新
 <AuditDashboard onViewHighFreq={() => activeTab = "sensitive"} />
 ```
 
 ### 自定义图表
+
 ```typescript
 <TrendChart
   data={[{ date: "2024-01-01", count: 100 }]}
@@ -104,6 +111,7 @@ src/routes/(app)/admin/audit/
 ```
 
 ### KPI 卡片交互
+
 ```typescript
 <KpiCard
   title="高频告警"
