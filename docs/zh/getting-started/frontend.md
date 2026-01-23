@@ -12,6 +12,7 @@
 | 构建工具 | Vite | 6.0+ |
 | 包管理器 | pnpm | 10.26+ |
 | UI 组件 | Bits UI + Lucide Icons | - |
+| 图表库 | ECharts | 6.0+ |
 
 ## 快速开始
 

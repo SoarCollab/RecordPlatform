@@ -12,6 +12,7 @@ This guide covers development setup for the RecordPlatform frontend application.
 | Build Tool | Vite | 6.0+ |
 | Package Manager | pnpm | 10.26+ |
 | UI Components | Bits UI + Lucide Icons | - |
+| Charts | ECharts | 6.0+ |
 
 ## Getting Started
 
