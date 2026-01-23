@@ -157,6 +157,7 @@ export interface ProgressVO {
   uploadedChunkCount: number; // 已上传原始分片数量
   processedChunkCount: number; // 已处理分片数量
   totalChunks: number; // 总分片数量
+  status: string; // 上传状态：pending/uploading/processing/paused/completed
 }
 
 /**

@@ -49,6 +49,8 @@ public class FileUploadState {
     private volatile long lastActivityTime;
     @Schema(description = "最后进度日志时间")
     private volatile long lastProgressLogTime;
+    @Schema(description = "上传状态: pending, uploading, processing, paused, completed")
+    private volatile String status = "uploading";
 
     public FileUploadState(Long userId, String fileName, long fileSize, String contentType, String clientId, int chunkSize, int totalChunks) {
         this.userId = userId;

@@ -1,6 +1,7 @@
 import { browser } from "$app/environment";
 import { useSSE } from "$stores/sse.svelte";
 import * as uploadApi from "$api/endpoints/upload";
+import { ApiError } from "$api/client";
 
 // ===== Types =====
 
@@ -195,7 +196,9 @@ async function pollServerProgress(id: string): Promise<void> {
 
     if (
       task.status === "processing" &&
-      (progress.progress >= 100 || progress.processProgress >= 100)
+      (progress.status === "completed" ||
+        progress.progress >= 100 ||
+        progress.processProgress >= 100)
     ) {
       updateTask(id, {
         status: "completed",
@@ -207,8 +210,21 @@ async function pollServerProgress(id: string): Promise<void> {
       stopProgressPolling(id);
       return;
     }
-  } catch {
-    // Silently ignore polling errors - will retry on next poll
+  } catch (error) {
+    // 如果返回 40006，说明会话已被清理（上传已完成或过期）
+    // 后端约定：UPLOAD_SESSION_NOT_FOUND = 40006
+    if (error instanceof ApiError && error.code === 40006) {
+      updateTask(id, {
+        status: "completed",
+        progress: 100,
+        processProgress: 100,
+        serverProgress: 100,
+        endTime: Date.now(),
+      });
+      stopProgressPolling(id);
+      return;
+    }
+    // 其他错误继续重试
   }
 
   scheduleNextPoll(id);

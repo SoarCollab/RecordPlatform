@@ -249,6 +249,46 @@ public class FileUploadRedisStateManager {
     }
 
     /**
+     * 标记上传会话为已完成，并设置 TTL 让其自动过期
+     * 用于 completeUpload 成功后，让前端能够轮询到完成状态
+     *
+     * <p>注意：此方法应仅在所有分片处理完成后调用，此时不会有并发修改状态的操作，
+     * 因此 read-modify-write 模式在此场景下是安全的。</p>
+     *
+     * @param sessionId  会话 ID
+     * @param SUID       用户 SUID
+     * @param ttlSeconds TTL 秒数（建议 300 秒 = 5 分钟）
+     */
+    public void markCompleted(String sessionId, String SUID, long ttlSeconds) {
+        FileUploadState state = getState(sessionId);
+        if (state == null) {
+            log.debug("尝试标记会话完成，但状态不存在: sessionId={}", sessionId);
+            return;
+        }
+
+        // 更新状态为 completed
+        state.setStatus("completed");
+        String stateKey = getSessionKey(sessionId);
+        cacheUtils.saveToCache(stateKey, state, ttlSeconds);
+
+        // 从活跃上传集合中移除
+        cacheUtils.setRemove(ACTIVE_UPLOADS_KEY, sessionId);
+        cacheUtils.setRemove(PAUSED_SESSIONS_KEY, sessionId);
+
+        // 删除文件名映射（防止重名文件冲突）
+        String fileClientKey = state.getFileName() + "_" + SUID;
+        cacheUtils.hashDelete(FILE_SUID_MAPPING_KEY, fileClientKey);
+
+        // 设置相关缓存的 TTL
+        cacheUtils.setExpire(getUploadedChunksKey(sessionId), ttlSeconds, TimeUnit.SECONDS);
+        cacheUtils.setExpire(getProcessedChunksKey(sessionId), ttlSeconds, TimeUnit.SECONDS);
+        cacheUtils.setExpire(getChunkHashesKey(sessionId), ttlSeconds, TimeUnit.SECONDS);
+        cacheUtils.setExpire(getKeysKey(sessionId), ttlSeconds, TimeUnit.SECONDS);
+
+        log.info("Redis: 已标记会话为completed并设置TTL: sessionId={}, ttl={}s", sessionId, ttlSeconds);
+    }
+
+    /**
      * 移除会话及相关数据
      */
     public void removeSession(String sessionId, String SUID) {

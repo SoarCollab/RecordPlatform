@@ -99,6 +99,8 @@ public enum ResultEnum implements Serializable {
     RATE_LIMIT_EXCEEDED(40004, "请求过于频繁，请稍后重试"),
     /** 服务不可用（可重试） */
     SERVICE_UNAVAILABLE(40005, "服务暂时不可用，请稍后重试"),
+    /** 上传会话不存在或已过期 */
+    UPLOAD_SESSION_NOT_FOUND(40006, "上传会话不存在或已过期"),
 
     /* ==================== 数据错误：50000-59999 ==================== */
     /** 数据未找到 */

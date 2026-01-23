@@ -444,7 +444,7 @@ public class FileUploadServiceImpl implements FileUploadService {
 
         FileUploadState state = redisStateManager.getState(clientId);
         if (state == null) {
-            throw new GeneralException("上传会话不存在或已过期: 客户端ID=" + clientId);
+            throw new GeneralException(ResultEnum.UPLOAD_SESSION_NOT_FOUND);
         }
 
         // 验证用户权限
@@ -547,7 +547,7 @@ public class FileUploadServiceImpl implements FileUploadService {
     public ProgressVO getUploadProgress(Long userId, String clientId) {
         FileUploadState state = redisStateManager.getState(clientId);
         if (state == null) {
-            throw new GeneralException("上传会话不存在: 客户端ID=" + clientId);
+            throw new GeneralException(ResultEnum.UPLOAD_SESSION_NOT_FOUND);
         }
 
         // 验证用户权限
@@ -556,15 +556,22 @@ public class FileUploadServiceImpl implements FileUploadService {
         redisStateManager.updateLastActivityTime(clientId);
         ProgressInfo progressInfo = calculateProgressInfo(state);
         boolean paused = redisStateManager.isSessionPaused(clientId);
+
+        // 确定状态字符串
         String status;
-        if (paused) {
+        if ("completed".equals(state.getStatus())) {
+            // 如果状态已标记为 completed，直接返回完成
+            status = "completed";
+        } else if (paused) {
             status = "paused";
         } else if (progressInfo.totalChunks > 0 && progressInfo.processedCount == progressInfo.totalChunks) {
             status = "completed";
-        } else if (progressInfo.uploadedCount == 0) {
-            status = "pending";
-        } else {
+        } else if (progressInfo.processedCount > 0) {
+            status = "processing";
+        } else if (progressInfo.uploadedCount > 0) {
             status = "uploading";
+        } else {
+            status = "pending";
         }
 
         ProgressVO responseDto = new ProgressVO(progressInfo.totalProgress,
@@ -602,7 +609,7 @@ public class FileUploadServiceImpl implements FileUploadService {
 
         FileUploadState state = redisStateManager.getState(clientId);
         if (state == null) {
-            throw new GeneralException("上传会话不存在或已过期: 客户端ID=" + clientId);
+            throw new GeneralException(ResultEnum.UPLOAD_SESSION_NOT_FOUND);
         }
 
         log.info("处理完成上传请求: 客户端ID={}, 文件名={}", clientId, state.getFileName());
@@ -690,12 +697,12 @@ public class FileUploadServiceImpl implements FileUploadService {
 
                 log.info("已发布文件存证事件: 用户={}, 文件名={}, 分片数量={}", userId, state.getFileName(), processedFiles.size());
 
-                // 立即清理Redis上传状态
+                // 标记状态为完成，设置 TTL 让其自动过期（供前端轮询检测完成）
                 try {
-                    redisStateManager.removeSession(state.getClientId(), SUID);
-                    log.info("上传完成，已清理Redis状态: 客户端ID={}", clientId);
+                    redisStateManager.markCompleted(state.getClientId(), SUID, 300); // 5 分钟 TTL
+                    log.info("上传完成，已标记Redis状态为completed: 客户端ID={}", clientId);
                 } catch (Exception e) {
-                    log.warn("清理Redis状态失败，但不影响主流程: 客户端ID={}", clientId, e);
+                    log.warn("标记Redis状态为completed失败，但不影响主流程: 客户端ID={}", clientId, e);
                 }
             } else {
                 log.error("事件发布器未初始化，无法发送文件存证事件: 客户端ID={}, 文件名={}", clientId, state.getFileName());
@@ -741,7 +748,7 @@ public class FileUploadServiceImpl implements FileUploadService {
     public void pauseUpload(Long userId, String clientId) {
         FileUploadState state = redisStateManager.getState(clientId);
         if (state == null) {
-            throw new GeneralException("上传会话不存在: 客户端ID=" + clientId);
+            throw new GeneralException(ResultEnum.UPLOAD_SESSION_NOT_FOUND);
         }
 
         // 验证用户权限
@@ -760,7 +767,7 @@ public class FileUploadServiceImpl implements FileUploadService {
     public ResumeUploadVO resumeUpload(Long userId, String clientId) {
         FileUploadState state = redisStateManager.getState(clientId);
         if (state == null) {
-            throw new GeneralException("上传会话不存在: 客户端ID=" + clientId);
+            throw new GeneralException(ResultEnum.UPLOAD_SESSION_NOT_FOUND);
         }
 
         // 验证用户权限
@@ -787,7 +794,7 @@ public class FileUploadServiceImpl implements FileUploadService {
     public FileUploadStatusVO checkFileStatus(Long userId, String clientId) {
         FileUploadState state = redisStateManager.getState(clientId);
         if (state == null) {
-            throw new GeneralException("上传会话不存在或会话已被清除: 客户端ID=" + clientId);
+            throw new GeneralException(ResultEnum.UPLOAD_SESSION_NOT_FOUND);
         }
 
         // 验证用户权限
