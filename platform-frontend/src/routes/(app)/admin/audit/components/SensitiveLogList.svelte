@@ -24,7 +24,6 @@
   let filterEndTime = $state("");
 
   let detailDialogOpen = $state(false);
-  let selectedRow = $state<SysOperationLog | null>(null);
   let detail = $state<SysOperationLog | null>(null);
   let loadingDetail = $state(false);
 
@@ -67,7 +66,6 @@
   }
 
   async function openDetail(row: SysOperationLog) {
-    selectedRow = row;
     detail = row;
     detailDialogOpen = true;
 
