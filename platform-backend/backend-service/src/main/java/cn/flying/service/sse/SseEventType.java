@@ -44,6 +44,11 @@ public enum SseEventType {
     FRIEND_SHARE("friend-share", "好友文件分享"),
 
     /**
+     * 审计告警
+     */
+    AUDIT_ALERT("audit-alert", "审计告警"),
+
+    /**
      * 心跳
      */
     HEARTBEAT("heartbeat", "心跳"),

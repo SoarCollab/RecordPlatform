@@ -1,6 +1,12 @@
 package cn.flying.service.sse;
 
+import cn.flying.common.constant.UserRole;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.JsonConverter;
+import cn.flying.dao.dto.Account;
+import cn.flying.dao.mapper.AccountMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -15,6 +21,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Component
@@ -22,6 +29,9 @@ public class SseEmitterManager {
 
     private static final long SSE_TIMEOUT = 30 * 60 * 1000L;
     private static final int MAX_CONNECTIONS_PER_USER = 5;
+
+    @Resource
+    private AccountMapper accountMapper;
 
     // tenantId -> userId -> connectionId -> emitter
     private final Map<Long, Map<Long, Map<String, SseEmitter>>> emittersByTenant = new ConcurrentHashMap<>();
@@ -379,5 +389,66 @@ public class SseEmitterManager {
                 .flatMap(tenantEmitters -> tenantEmitters.values().stream())
                 .mapToInt(Map::size)
                 .sum();
+    }
+
+    /**
+     * 向租户内所有在线管理员和监控员广播消息
+     *
+     * @param tenantId 租户ID
+     * @param event SSE事件
+     */
+    public void broadcastToAdmins(Long tenantId, SseEvent event) {
+        Set<Long> onlineUsers = getOnlineUsers(tenantId);
+        if (onlineUsers.isEmpty()) {
+            log.debug("租户 {} 没有在线用户，跳过管理员广播", tenantId);
+            return;
+        }
+
+        // 查询当前租户的所有管理员和监控员
+        LambdaQueryWrapper<Account> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(Account::getTenantId, tenantId)
+                    .in(Account::getRole, UserRole.ROLE_ADMINISTER.getRole(), UserRole.ROLE_MONITOR.getRole())
+                    .in(Account::getId, onlineUsers);
+
+        List<Account> admins = accountMapper.selectList(queryWrapper);
+        if (admins.isEmpty()) {
+            log.debug("租户 {} 没有在线管理员/监控员，跳过广播", tenantId);
+            return;
+        }
+
+        Set<Long> adminIds = admins.stream()
+                .map(Account::getId)
+                .collect(Collectors.toSet());
+
+        sendToUsers(tenantId, adminIds, event);
+        log.info("向租户 {} 的 {} 个在线管理员/监控员广播审计告警", tenantId, adminIds.size());
+    }
+
+    /**
+     * 向所有租户的在线管理员和监控员广播消息（跨租户全局广播）
+     * 自动处理租户上下文切换，确保数据库查询正确执行
+     *
+     * @param event SSE事件
+     */
+    public void broadcastToAllAdmins(SseEvent event) {
+        List<Long> tenantIds = new ArrayList<>(emittersByTenant.keySet());
+        if (tenantIds.isEmpty()) {
+            log.debug("没有活跃的SSE连接，跳过全局管理员广播");
+            return;
+        }
+
+        int successCount = 0;
+        for (Long tenantId : tenantIds) {
+            try {
+                TenantContext.callWithTenant(tenantId, () -> {
+                    broadcastToAdmins(tenantId, event);
+                    return null;
+                });
+                successCount++;
+            } catch (Exception e) {
+                log.warn("向租户 {} 的管理员广播失败: {}", tenantId, e.getMessage());
+            }
+        }
+        log.info("全局管理员广播完成，成功租户数={}/总租户数={}", successCount, tenantIds.size());
     }
 }
