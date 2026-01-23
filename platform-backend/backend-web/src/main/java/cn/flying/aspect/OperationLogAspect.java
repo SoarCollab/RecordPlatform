@@ -4,6 +4,7 @@ import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.JsonConverter;
+import cn.flying.common.util.SensitiveDataMasker;
 import cn.flying.dao.dto.SysOperationLog;
 import cn.flying.service.SysOperationLogService;
 import jakarta.annotation.Resource;
@@ -226,9 +227,9 @@ public class OperationLogAspect {
                 operationLog.setRequestParam(getRequestParams(joinPoint));
             }
             
-            // 设置响应数据
+            // 设置响应数据（已脱敏）
             if (operationLogAnnotation.saveResponseData() && result != null) {
-                operationLog.setResponseResult(JsonConverter.toJsonWithPretty(result));
+                operationLog.setResponseResult(SensitiveDataMasker.maskAndSerialize(result));
             }
             
             // 设置操作状态和时间
@@ -268,7 +269,7 @@ public class OperationLogAspect {
     }
 
     /**
-     * 获取请求参数
+     * 获取请求参数（已脱敏）
      *
      * @param joinPoint 切入点
      * @return 请求参数字符串
@@ -284,7 +285,11 @@ public class OperationLogAspect {
             }
             logArgs.add(arg);
         }
-        return logArgs.isEmpty() ? "" : JsonConverter.toJsonWithPretty(logArgs);
+        if (logArgs.isEmpty()) {
+            return "";
+        }
+        // 使用脱敏工具对敏感字段进行脱敏
+        return SensitiveDataMasker.maskAndSerialize(logArgs);
     }
 
     /**
