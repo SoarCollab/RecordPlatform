@@ -184,7 +184,7 @@ storage:
   consistency:
     repair:
       enabled: true # Enable scheduled repair
-      cron: "0 0 * * * ?" # Cron expression (default: hourly)
+      cron: "0 */15 * * * ?" # Cron expression (default: every 15 minutes)
       batch-size: 100 # Objects per batch
       lock-timeout-seconds: 600 # Distributed lock timeout (seconds)
 ```

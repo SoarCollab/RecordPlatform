@@ -184,7 +184,7 @@ storage:
   consistency:
     repair:
       enabled: true # 是否启用定时修复
-      cron: "0 0 * * * ?" # Cron 表达式（默认每小时）
+      cron: "0 */15 * * * ?" # Cron 表达式（默认每 15 分钟）
       batch-size: 100 # 每批处理对象数
       lock-timeout-seconds: 600 # 分布式锁超时时间（秒）
 ```
