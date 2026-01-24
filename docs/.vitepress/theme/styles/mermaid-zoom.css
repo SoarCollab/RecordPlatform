@@ -1,0 +1,166 @@
+/* Mermaid Zoom Modal Styles */
+
+/* Overlay */
+.mermaid-zoom-overlay {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.4) 0%,
+    rgba(99, 102, 241, 0.4) 50%,
+    rgba(139, 92, 246, 0.4) 100%
+  );
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  opacity: 0;
+  transition: opacity 300ms ease-out;
+}
+
+.mermaid-zoom-overlay.mermaid-zoom-visible {
+  opacity: 1;
+}
+
+.mermaid-zoom-overlay.mermaid-zoom-closing {
+  opacity: 0;
+}
+
+/* Dark mode overlay */
+.dark .mermaid-zoom-overlay {
+  background: linear-gradient(
+    135deg,
+    rgba(30, 41, 59, 0.7) 0%,
+    rgba(15, 23, 42, 0.8) 50%,
+    rgba(30, 27, 75, 0.7) 100%
+  );
+}
+
+/* Content container */
+.mermaid-zoom-content {
+  position: relative;
+  background: white;
+  border-radius: 16px;
+  box-shadow:
+    0 20px 60px rgba(99, 102, 241, 0.3),
+    0 8px 16px rgba(0, 0, 0, 0.1);
+  max-width: 90vw;
+  max-height: 90vh;
+  padding: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: scale(0.9);
+  transition: transform 300ms ease-out;
+  overflow: auto;
+}
+
+.mermaid-zoom-visible .mermaid-zoom-content {
+  transform: scale(1);
+}
+
+.mermaid-zoom-closing .mermaid-zoom-content {
+  transform: scale(0.9);
+}
+
+/* Dark mode content */
+.dark .mermaid-zoom-content {
+  background: #1e293b;
+  box-shadow:
+    0 20px 60px rgba(139, 92, 246, 0.4),
+    0 8px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* SVG inside modal */
+.mermaid-zoom-content svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Close button */
+.mermaid-zoom-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6 0%, #6366f1 50%, #8b5cf6 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 200ms ease;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+  z-index: 10;
+}
+
+.mermaid-zoom-close:hover {
+  background: linear-gradient(135deg, #2563eb 0%, #4f46e5 50%, #7c3aed 100%);
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.5);
+}
+
+.mermaid-zoom-close:active {
+  transform: scale(0.95);
+}
+
+.mermaid-zoom-close svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .mermaid-zoom-overlay {
+    padding: 1rem;
+  }
+
+  .mermaid-zoom-content {
+    max-width: 95vw;
+    max-height: 95vh;
+    padding: 1.5rem;
+    border-radius: 12px;
+  }
+
+  .mermaid-zoom-close {
+    top: 0.5rem;
+    right: 0.5rem;
+    width: 36px;
+    height: 36px;
+  }
+
+  .mermaid-zoom-close svg {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+/* Tablet responsive */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .mermaid-zoom-content {
+    max-width: 95vw;
+    max-height: 95vh;
+  }
+}
+
+/* Accessibility: Focus styles */
+.mermaid-zoom-close:focus {
+  outline: 2px solid white;
+  outline-offset: 2px;
+}
+
+.mermaid-zoom-close:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Prevent scroll on body when modal is open */
+body:has(.mermaid-zoom-overlay) {
+  overflow: hidden;
+}
