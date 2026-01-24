@@ -73,7 +73,7 @@ S3 兼容存储通过 Nacos 配置。基本环境变量：
 | `SERVER_PORT` | 后端 REST API 端口 | 8000（本地/开发推荐；prod profile 未设置时默认 8080） |
 | `DUBBO_FISCO_PORT` | FISCO Dubbo 服务端口 | 8091 |
 | `DUBBO_STORAGE_PORT` | Storage Dubbo 服务端口 | 8092 |
-| `DUBBO_HOST` | 服务注册 IP（用于 Docker 环境） | - |
+| `DUBBO_HOST` | 服务注册 IP（用于 Docker 环境） | `192.168.5.100` (YAML 默认值；请根据环境修改) |
 | `QOS_BACKEND_PORT` | Backend QoS 管理端口 | 22330 |
 | `QOS_FISCO_PORT` | FISCO QoS 管理端口 | 22331 |
 | `QOS_STORAGE_PORT` | Storage QoS 管理端口 | 22332 |

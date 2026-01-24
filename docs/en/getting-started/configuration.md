@@ -73,7 +73,7 @@ Fault domain configuration is managed through Nacos and supports runtime refresh
 | `SERVER_PORT` | Backend REST API port | 8000 (recommended for local/dev; prod profile defaults to 8080 if unset) |
 | `DUBBO_FISCO_PORT` | FISCO Dubbo service port | 8091 |
 | `DUBBO_STORAGE_PORT` | Storage Dubbo service port | 8092 |
-| `DUBBO_HOST` | Service registration IP (for Docker) | - |
+| `DUBBO_HOST` | Service registration IP (for Docker) | `192.168.5.100` (in YAML; override for your environment) |
 | `QOS_BACKEND_PORT` | Backend QoS management port | 22330 |
 | `QOS_FISCO_PORT` | FISCO QoS management port | 22331 |
 | `QOS_STORAGE_PORT` | Storage QoS management port | 22332 |
