@@ -3,9 +3,13 @@ import DefaultTheme from 'vitepress/theme'
 import { useData } from 'vitepress'
 import HomeTechStack from './components/HomeTechStack.vue'
 import HomeCallToAction from './components/HomeCallToAction.vue'
+import { useMermaidZoom } from './composables/useMermaidZoom'
 
 const { Layout } = DefaultTheme
 const { frontmatter } = useData()
+
+// Initialize Mermaid zoom - handles lifecycle and route changes internally
+useMermaidZoom()
 </script>
 
 <template>

@@ -6,6 +6,7 @@ import './styles/vars.css'
 import './styles/home.css'
 import './styles/sidebar.css'
 import './styles/components.css'
+import './styles/mermaid-zoom.css'
 import './custom.css'  // Keep existing Mermaid styles
 
 // Layout
