@@ -9,33 +9,47 @@
   let { task }: Props = $props();
   const download = useDownload();
 
+  type StatusConfigItem = { label: string; icon: typeof Loader2; color: string };
+
   const statusConfig = {
     pending: { label: "等待中", icon: Loader2, color: "text-muted-foreground" },
     fetching_urls: { label: "获取地址", icon: Loader2, color: "text-blue-500" },
     downloading: { label: "下载中", icon: Download, color: "text-blue-500" },
+    streaming: { label: "下载中", icon: Download, color: "text-blue-500" },
     paused: { label: "已暂停", icon: Pause, color: "text-yellow-500" },
     decrypting: { label: "解密中", icon: Loader2, color: "text-purple-500" },
+    writing: { label: "写入中", icon: Loader2, color: "text-purple-500" },
     completed: { label: "已完成", icon: Check, color: "text-green-500" },
     failed: { label: "失败", icon: AlertCircle, color: "text-red-500" },
     cancelled: { label: "已取消", icon: X, color: "text-muted-foreground" },
-  };
+  } satisfies Record<DownloadTask["status"], StatusConfigItem>;
 
   const config = $derived(statusConfig[task.status]);
   const Icon = $derived(config.icon);
-  const isActive = $derived(task.status === "downloading" || task.status === "fetching_urls" || task.status === "decrypting");
-  const canPause = $derived(task.status === "downloading");
+  const isActive = $derived(
+    task.status === "downloading" ||
+      task.status === "fetching_urls" ||
+      task.status === "streaming" ||
+      task.status === "decrypting" ||
+      task.status === "writing",
+  );
+  const canPause = $derived(
+    task.status === "downloading" ||
+      task.status === "streaming" ||
+      task.status === "writing",
+  );
   const canResume = $derived(task.status === "paused");
   const canRetry = $derived(task.status === "failed" || task.status === "cancelled");
   const canRemove = $derived(!isActive);
 </script>
 
 <div class="flex items-center gap-3 rounded-lg border bg-card p-3 text-card-foreground">
-  <!-- Status Icon -->
+  <!-- 状态图标 -->
   <div class="flex-shrink-0">
     <Icon class="h-5 w-5 {config.color} {isActive ? 'animate-spin' : ''}" />
   </div>
 
-  <!-- File Info & Progress -->
+  <!-- 文件信息与进度 -->
   <div class="flex-1 min-w-0">
     <div class="flex items-center justify-between gap-2">
       <span class="text-sm font-medium truncate" title={task.fileName}>
@@ -46,7 +60,7 @@
       </span>
     </div>
 
-    <!-- Progress Bar -->
+    <!-- 进度条 -->
     <div class="mt-1.5 h-1.5 w-full rounded-full bg-muted overflow-hidden">
       <div
         class="h-full rounded-full transition-all duration-300 {task.status === 'completed'
@@ -58,7 +72,7 @@
       ></div>
     </div>
 
-    <!-- Details -->
+    <!-- 详情 -->
     <div class="mt-1 flex items-center justify-between text-xs text-muted-foreground">
       <span>
         {#if task.totalChunks > 0}
@@ -77,7 +91,7 @@
     {/if}
   </div>
 
-  <!-- Actions -->
+  <!-- 操作 -->
   <div class="flex items-center gap-1 flex-shrink-0">
     {#if canPause}
       <button

@@ -152,8 +152,9 @@ async function decryptChaCha20(
 
 /**
  * 解密单个分片
+ * 导出以支持流式解密场景
  */
-async function decryptChunk(
+export async function decryptChunk(
   encryptedData: Uint8Array,
   keyBase64: string,
 ): Promise<{
@@ -282,4 +283,210 @@ export function downloadBlob(blob: Blob, filename: string): void {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// ===== Streaming Decryption Support =====
+
+/**
+ * 解密状态，用于流式解密
+ */
+export interface StreamingDecryptState {
+  totalChunks: number;
+  initialKey: string;
+  /** 从最后一个分片提取的第一个分片密钥 */
+  firstChunkKey: string | null;
+  /** 当前已知的各分片密钥（从解密中获得） */
+  chunkKeys: Map<number, string>;
+}
+
+/**
+ * 初始化流式解密状态
+ * 需要先解密最后一个分片来获取第一个分片的密钥
+ *
+ * @param lastChunkData - 最后一个分片的加密数据
+ * @param initialKey - 最后一个分片的解密密钥
+ * @param totalChunks - 总分片数
+ * @returns 解密后的最后一个分片数据和流式解密状态
+ */
+export async function initStreamingDecrypt(
+  lastChunkData: Uint8Array,
+  initialKey: string,
+  totalChunks: number,
+): Promise<{
+  lastChunkPlaintext: Uint8Array;
+  state: StreamingDecryptState;
+}> {
+  // 解密最后一个分片获取第一个分片的密钥
+  const result = await decryptChunk(lastChunkData, initialKey);
+
+  if (!result.nextKey) {
+    throw new Error("最后一个分片缺少下一个密钥");
+  }
+
+  const state: StreamingDecryptState = {
+    totalChunks,
+    initialKey,
+    firstChunkKey: result.nextKey,
+    chunkKeys: new Map(),
+  };
+
+  // 存储第一个分片的密钥
+  state.chunkKeys.set(0, result.nextKey);
+
+  return {
+    lastChunkPlaintext: result.plaintext,
+    state,
+  };
+}
+
+/**
+ * 流式解密单个分片（按顺序）
+ * 解密后会更新状态中下一个分片的密钥
+ *
+ * @param chunkData - 加密的分片数据
+ * @param chunkIndex - 分片索引（0-based）
+ * @param state - 流式解密状态
+ * @returns 解密后的分片数据
+ */
+export async function streamDecryptChunk(
+  chunkData: Uint8Array,
+  chunkIndex: number,
+  state: StreamingDecryptState,
+): Promise<Uint8Array> {
+  // 获取当前分片的密钥
+  const currentKey = state.chunkKeys.get(chunkIndex);
+  if (!currentKey) {
+    throw new Error(`分片 ${chunkIndex} 的密钥未知，请确保按顺序解密`);
+  }
+
+  // 解密分片
+  const result = await decryptChunk(chunkData, currentKey);
+
+  // 存储下一个分片的密钥（如果不是最后一个分片之前的分片）
+  if (result.nextKey && chunkIndex < state.totalChunks - 2) {
+    state.chunkKeys.set(chunkIndex + 1, result.nextKey);
+  }
+
+  // 清理已使用的密钥以释放内存
+  state.chunkKeys.delete(chunkIndex);
+
+  return result.plaintext;
+}
+
+/**
+ * 获取解密顺序
+ * 由于密钥链的特性，需要特殊的解密顺序：
+ * 1. 首先解密最后一个分片（使用 initialKey）获取第一个分片的密钥
+ * 2. 然后按顺序解密 0, 1, 2, ..., n-2
+ *
+ * @param totalChunks - 总分片数
+ * @returns 分片索引数组，表示解密顺序
+ */
+export function getDecryptionOrder(totalChunks: number): number[] {
+  if (totalChunks === 0) return [];
+  if (totalChunks === 1) return [0];
+
+  // 最后一个分片先解密，然后是 0 到 n-2
+  const order: number[] = [totalChunks - 1];
+  for (let i = 0; i < totalChunks - 1; i++) {
+    order.push(i);
+  }
+  return order;
+}
+
+/**
+ * 获取写入顺序（解密数据应该按什么顺序写入文件）
+ * 虽然解密顺序是 [last, 0, 1, 2, ..., n-2]
+ * 但写入文件应该是 [0, 1, 2, ..., n-2, last] 即原始顺序
+ *
+ * @param totalChunks - 总分片数
+ * @returns 分片索引数组，表示写入顺序
+ */
+export function getWriteOrder(totalChunks: number): number[] {
+  const order: number[] = [];
+  for (let i = 0; i < totalChunks; i++) {
+    order.push(i);
+  }
+  return order;
+}
+
+/**
+ * 流式解密回调接口
+ */
+export interface StreamDecryptCallbacks {
+  /** 下载单个分片 */
+  downloadChunk: (index: number) => Promise<Uint8Array>;
+  /** 写入解密后的数据 */
+  writeDecrypted: (index: number, data: Uint8Array) => Promise<void>;
+  /** 进度回调 */
+  onProgress?: (decrypted: number, total: number) => void;
+  /** 检查是否取消 */
+  isCancelled?: () => boolean;
+}
+
+/**
+ * 执行完整的流式解密流程
+ * 按照正确的顺序下载、解密并写入文件
+ *
+ * 流程：
+ * 1. 下载最后一个分片，解密获取 chunk[0] 的密钥
+ * 2. 缓存最后一个分片的解密数据
+ * 3. 下载并解密 chunk[0] 到 chunk[n-2]，每个解密后立即写入
+ * 4. 最后写入缓存的最后一个分片数据
+ *
+ * @param totalChunks - 总分片数
+ * @param initialKey - 最后一个分片的解密密钥
+ * @param callbacks - 回调函数
+ */
+export async function executeStreamingDecrypt(
+  totalChunks: number,
+  initialKey: string,
+  callbacks: StreamDecryptCallbacks,
+): Promise<void> {
+  if (totalChunks === 0) {
+    throw new Error("没有分片数据");
+  }
+
+  const { downloadChunk, writeDecrypted, onProgress, isCancelled } = callbacks;
+
+  // 单分片情况
+  if (totalChunks === 1) {
+    const data = await downloadChunk(0);
+    const result = await decryptChunk(data, initialKey);
+    await writeDecrypted(0, result.plaintext);
+    onProgress?.(1, 1);
+    return;
+  }
+
+  // 步骤 1: 下载并解密最后一个分片
+  if (isCancelled?.()) throw new Error("Download cancelled");
+
+  const lastChunkIndex = totalChunks - 1;
+  const lastChunkData = await downloadChunk(lastChunkIndex);
+
+  const { lastChunkPlaintext, state } = await initStreamingDecrypt(
+    lastChunkData,
+    initialKey,
+    totalChunks,
+  );
+
+  let decryptedCount = 1;
+  onProgress?.(decryptedCount, totalChunks);
+
+  // 步骤 2-3: 按顺序下载、解密并写入 chunk[0] 到 chunk[n-2]
+  for (let i = 0; i < totalChunks - 1; i++) {
+    if (isCancelled?.()) throw new Error("Download cancelled");
+
+    const chunkData = await downloadChunk(i);
+    const plaintext = await streamDecryptChunk(chunkData, i, state);
+    await writeDecrypted(i, plaintext);
+
+    decryptedCount++;
+    onProgress?.(decryptedCount, totalChunks);
+  }
+
+  // 步骤 4: 写入最后一个分片的解密数据
+  await writeDecrypted(lastChunkIndex, lastChunkPlaintext);
+
+  onProgress?.(totalChunks, totalChunks);
 }

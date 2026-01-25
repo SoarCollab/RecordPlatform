@@ -1,7 +1,7 @@
 /**
  * Download Manager Store
  * Manages file download tasks with presigned URL direct S3 access
- * Supports concurrent downloads, progress tracking, and resumable downloads
+ * Supports concurrent downloads, progress tracking, resumable downloads, and streaming for large files
  */
 
 import { browser } from "$app/environment";
@@ -22,9 +22,22 @@ import {
   type DownloadSource,
 } from "$utils/downloadStorage";
 import { decryptFile, arrayToBlob, downloadBlob } from "$utils/crypto";
+import {
+  performPreDownloadCheck,
+  type DownloadStrategy,
+  type DownloadDecision,
+  type BrowserCapabilities,
+  formatFileSize,
+  isStreamingSupported,
+} from "$utils/fileSize";
+import {
+  executeBufferedStreamingDownload,
+  type StreamingPhase,
+} from "$utils/streamingDownloader";
 
 // Re-export types
 export type { DownloadSource } from "$utils/downloadStorage";
+export type { DownloadStrategy, DownloadDecision, BrowserCapabilities } from "$utils/fileSize";
 
 // ===== Types =====
 
@@ -32,8 +45,10 @@ export type DownloadStatus =
   | "pending"
   | "fetching_urls"
   | "downloading"
+  | "streaming"
   | "paused"
   | "decrypting"
+  | "writing"
   | "completed"
   | "failed"
   | "cancelled";
@@ -65,6 +80,17 @@ export interface DownloadTask {
   startedAt: number | null;
   completedAt: number | null;
   abortController: AbortController | null;
+  /** Download strategy used for this task */
+  strategy: DownloadStrategy;
+}
+
+// ===== Pre-download Check Result =====
+
+export interface PreDownloadCheckResult {
+  canProceed: boolean;
+  decision: DownloadDecision;
+  capabilities: BrowserCapabilities;
+  formattedSize: string;
 }
 
 // ===== Configuration =====
@@ -87,8 +113,15 @@ const downloadedChunksMap = new Map<string, Map<number, Uint8Array>>();
 const pendingTasks = $derived(tasks.filter((t) => t.status === "pending"));
 const activeTasks = $derived(
   tasks.filter(
-    (t) => t.status === "downloading" || t.status === "fetching_urls",
+    (t) =>
+      t.status === "downloading" ||
+      t.status === "fetching_urls" ||
+      t.status === "streaming" ||
+      t.status === "writing",
   ),
+);
+const streamingTasks = $derived(
+  tasks.filter((t) => t.status === "streaming" || t.status === "writing"),
 );
 const pausedTasks = $derived(tasks.filter((t) => t.status === "paused"));
 const completedTasks = $derived(tasks.filter((t) => t.status === "completed"));
@@ -292,6 +325,146 @@ async function executeDownload(task: DownloadTask): Promise<void> {
   }
 }
 
+// ===== Streaming Download (File System Access API) =====
+
+/**
+ * Execute streaming download for large files
+ * Uses File System Access API to write directly to disk
+ */
+async function executeStreamingDownload(task: DownloadTask): Promise<void> {
+  const taskId = task.id;
+  const abortController = new AbortController();
+  updateTask(taskId, { abortController });
+
+  try {
+    // Step 1: Fetch presigned URLs if needed
+    let urls = task.presignedUrls;
+    let initialKey = task.initialKey;
+    let totalChunks = task.totalChunks;
+    let contentType = task.contentType;
+    let fileName = task.fileName;
+    let fileSize = task.fileSize;
+
+    if (urls.length === 0 || areUrlsExpired(task.urlsFetchedAt)) {
+      updateTask(taskId, { status: "fetching_urls" });
+
+      const { urls: newUrls, decryptInfo } = await fetchPresignedUrls(task);
+      urls = newUrls;
+      initialKey = decryptInfo.initialKey;
+      totalChunks = decryptInfo.chunkCount;
+      contentType = decryptInfo.contentType;
+      fileName = decryptInfo.fileName;
+      fileSize = decryptInfo.fileSize;
+
+      updateTask(taskId, {
+        presignedUrls: urls,
+        urlsFetchedAt: Date.now(),
+        initialKey,
+        totalChunks,
+        contentType,
+        fileName,
+        fileSize,
+        chunks: Array.from({ length: totalChunks }, (_, i) => ({
+          index: i,
+          status: "pending" as const,
+          retryCount: 0,
+        })),
+      });
+    }
+
+    // Step 2: Execute streaming download
+    updateTask(taskId, {
+      status: "streaming",
+      startedAt: task.startedAt ?? Date.now(),
+    });
+
+    const result = await executeBufferedStreamingDownload({
+      fileName,
+      contentType,
+      totalChunks,
+      initialKey: initialKey!,
+      presignedUrls: urls,
+      signal: abortController.signal,
+      onProgress: (phase: StreamingPhase, current: number, total: number) => {
+        const currentTask = getTask(taskId);
+        if (!currentTask || currentTask.status === "cancelled") return;
+
+        const progress = Math.round((current / total) * 100);
+
+        switch (phase) {
+          case "downloading":
+            updateTask(taskId, {
+              status: "streaming",
+              downloadedChunks: current,
+              progress,
+            });
+            break;
+          case "decrypting":
+            updateTask(taskId, {
+              status: "decrypting",
+              progress,
+            });
+            break;
+          case "writing":
+            updateTask(taskId, {
+              status: "writing",
+              progress,
+            });
+            break;
+          case "completed":
+            break;
+        }
+      },
+    });
+
+    // Check result
+    if (!result.success) {
+      if (
+        result.error === "Download cancelled" ||
+        result.error === "File save cancelled by user"
+      ) {
+        updateTask(taskId, {
+          status: "cancelled",
+          abortController: null,
+        });
+        return;
+      }
+
+      throw new Error(result.error);
+    }
+
+    // Success
+    updateTask(taskId, {
+      status: "completed",
+      progress: 100,
+      completedAt: Date.now(),
+      abortController: null,
+    });
+  } catch (error) {
+    const err = error as Error;
+
+    if (
+      abortController.signal.aborted ||
+      err.message === "Download cancelled"
+    ) {
+      const currentTask = getTask(taskId);
+      if (currentTask?.status !== "paused") {
+        updateTask(taskId, {
+          status: "cancelled",
+          abortController: null,
+        });
+      }
+      return;
+    }
+
+    updateTask(taskId, {
+      status: "failed",
+      error: err.message,
+      abortController: null,
+    });
+  }
+}
+
 // ===== Fallback for shared files (backend proxy) =====
 
 async function executeBackendProxyDownload(task: DownloadTask): Promise<void> {
@@ -330,20 +503,53 @@ async function executeBackendProxyDownload(task: DownloadTask): Promise<void> {
 // ===== Actions =====
 
 /**
+ * Check file size and get download strategy recommendation
+ * Call this before starting a large file download to warn the user
+ */
+function checkFileSize(fileSizeBytes: number): PreDownloadCheckResult {
+  const check = performPreDownloadCheck(fileSizeBytes);
+  return {
+    ...check,
+    formattedSize: formatFileSize(fileSizeBytes),
+  };
+}
+
+/**
+ * Check if streaming download is available in this browser
+ */
+function canUseStreaming(): boolean {
+  return isStreamingSupported();
+}
+
+/**
  * Start a new download task
+ * @param fileHash File hash identifier
+ * @param fileName Display name for the file
+ * @param source Download source (owned, public_share, private_share)
+ * @param fileSize Optional file size for strategy decision (if known)
+ * @param forceStrategy Optional strategy override (user confirmed)
  */
 async function startDownload(
   fileHash: string,
   fileName: string,
   source: DownloadSource = { type: "owned" },
+  fileSize?: number,
+  forceStrategy?: DownloadStrategy,
 ): Promise<string> {
   const id = generateId();
+
+  // Determine initial strategy
+  let strategy: DownloadStrategy = forceStrategy ?? "inmemory";
+  if (!forceStrategy && fileSize) {
+    const check = checkFileSize(fileSize);
+    strategy = check.decision.strategy;
+  }
 
   const task: DownloadTask = {
     id,
     fileHash,
     fileName,
-    fileSize: 0,
+    fileSize: fileSize ?? 0,
     contentType: "application/octet-stream",
     status: "pending",
     error: null,
@@ -359,15 +565,21 @@ async function startDownload(
     startedAt: null,
     completedAt: null,
     abortController: null,
+    strategy,
   };
 
   tasks = [...tasks, task];
 
-  // Use presigned URLs for owned files, backend proxy for shared files
-  if (source.type === "owned") {
-    executeDownload(task);
-  } else {
+  // Choose execution method based on source and strategy
+  if (source.type !== "owned") {
+    // Shared files use backend proxy
     executeBackendProxyDownload(task);
+  } else if (strategy === "streaming" && canUseStreaming()) {
+    // Large files with streaming support
+    executeStreamingDownload(task);
+  } else {
+    // Default in-memory download
+    executeDownload(task);
   }
 
   return id;
@@ -378,7 +590,14 @@ async function startDownload(
  */
 function pauseDownload(id: string): void {
   const task = getTask(id);
-  if (!task || task.status !== "downloading") return;
+  if (
+    !task ||
+    (task.status !== "downloading" &&
+      task.status !== "streaming" &&
+      task.status !== "writing")
+  ) {
+    return;
+  }
 
   task.abortController?.abort();
   updateTask(id, {
@@ -400,10 +619,13 @@ async function resumeDownload(id: string): Promise<void> {
   const updatedTask = getTask(id);
   if (!updatedTask) return;
 
-  if (updatedTask.source.type === "owned") {
-    executeDownload(updatedTask);
-  } else {
+  // Choose execution method based on source and strategy
+  if (updatedTask.source.type !== "owned") {
     executeBackendProxyDownload(updatedTask);
+  } else if (updatedTask.strategy === "streaming" && canUseStreaming()) {
+    executeStreamingDownload(updatedTask);
+  } else {
+    executeDownload(updatedTask);
   }
 }
 
@@ -444,10 +666,13 @@ async function retryDownload(id: string): Promise<void> {
   const updatedTask = getTask(id);
   if (!updatedTask) return;
 
-  if (updatedTask.source.type === "owned") {
-    executeDownload(updatedTask);
-  } else {
+  // Choose execution method based on source and strategy
+  if (updatedTask.source.type !== "owned") {
     executeBackendProxyDownload(updatedTask);
+  } else if (updatedTask.strategy === "streaming" && canUseStreaming()) {
+    executeStreamingDownload(updatedTask);
+  } else {
+    executeDownload(updatedTask);
   }
 }
 
@@ -459,7 +684,12 @@ async function removeTask(id: string): Promise<void> {
   if (!task) return;
 
   // Cancel if active
-  if (task.status === "downloading" || task.status === "fetching_urls") {
+  if (
+    task.status === "downloading" ||
+    task.status === "fetching_urls" ||
+    task.status === "streaming" ||
+    task.status === "writing"
+  ) {
     task.abortController?.abort();
   }
 
@@ -530,6 +760,9 @@ async function restoreTasks(): Promise<void> {
         startedAt: null,
         completedAt: null,
         abortController: null,
+        // Restored tasks use in-memory strategy since we've already downloaded some chunks
+        // (streaming doesn't support resuming from partial chunks)
+        strategy: "inmemory",
       };
 
       tasks = [...tasks, task];
@@ -583,6 +816,9 @@ export function useDownload() {
     get activeTasks() {
       return activeTasks;
     },
+    get streamingTasks() {
+      return streamingTasks;
+    },
     get pausedTasks() {
       return pausedTasks;
     },
@@ -609,5 +845,9 @@ export function useDownload() {
     clearCompleted,
     restoreTasks,
     setConcurrency,
+
+    // File size utilities
+    checkFileSize,
+    canUseStreaming,
   };
 }
