@@ -3,7 +3,7 @@
 This guide covers environment variables and configuration options for RecordPlatform.
 
 ::: tip Configuration Migration
-Since v2.0, sensitive configurations (database credentials, Redis, email SMTP, RabbitMQ) have been migrated to Nacos configuration center. Only Nacos connection details and security keys (JWT_KEY) remain in environment variables. See [Nacos Configuration Template](../../nacos-config-template.yaml) for the complete configuration structure.
+Since v2.0, sensitive configurations (database credentials, Redis, email SMTP, RabbitMQ) have been migrated to Nacos configuration center. Only Nacos connection details and security keys (JWT_KEY) remain in environment variables. See [Nacos Configuration Template](/nacos-config-template.yaml) for the complete configuration structure.
 :::
 
 ## Environment Variables
@@ -130,7 +130,7 @@ java -jar app.jar --spring.profiles.active=prod
 
 ## Nacos Configuration
 
-Dynamic configurations are managed in Nacos. Template: `docs/nacos-config-template.yaml`
+Dynamic configurations are managed in Nacos. Template: `docs/public/nacos-config-template.yaml`
 
 ### Key Nacos Configs
 
@@ -237,4 +237,3 @@ Frontend environment variables (`platform-frontend/.env`):
 | `PUBLIC_API_BASE_URL` | Backend API URL |
 | `PUBLIC_ENV` | Environment name |
 | `PUBLIC_TENANT_ID` | Default tenant ID |
-

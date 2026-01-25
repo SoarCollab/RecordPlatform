@@ -3,7 +3,7 @@
 本指南介绍 RecordPlatform 的环境变量和配置选项。
 
 ::: tip 配置迁移说明
-自 v2.0 起，敏感配置（数据库凭据、Redis、邮件 SMTP、RabbitMQ）已迁移至 Nacos 配置中心。环境变量中仅保留 Nacos 连接信息和安全密钥（JWT_KEY）。完整的配置结构请参阅 [Nacos 配置模板](../../nacos-config-template.yaml)。
+自 v2.0 起，敏感配置（数据库凭据、Redis、邮件 SMTP、RabbitMQ）已迁移至 Nacos 配置中心。环境变量中仅保留 Nacos 连接信息和安全密钥（JWT_KEY）。完整的配置结构请参阅 [Nacos 配置模板](/nacos-config-template.yaml)。
 :::
 
 ## 环境变量
@@ -130,7 +130,7 @@ java -jar app.jar --spring.profiles.active=prod
 
 ## Nacos 配置
 
-动态配置通过 Nacos 管理。模板：`docs/nacos-config-template.yaml`
+动态配置通过 Nacos 管理。模板：`docs/public/nacos-config-template.yaml`
 
 ### 关键 Nacos 配置
 
@@ -237,4 +237,3 @@ file:
 | `PUBLIC_API_BASE_URL` | 后端 API 地址 |
 | `PUBLIC_ENV` | 环境名称 |
 | `PUBLIC_TENANT_ID` | 默认租户 ID |
-

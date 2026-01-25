@@ -139,7 +139,7 @@ storage:
       acceptsWrites: false
 ```
 
-> 完整配置项请参阅 [Nacos 配置模板](../../nacos-config-template.yaml)
+> 完整配置项请参阅 [Nacos 配置模板](/nacos-config-template.yaml)
 
 ## SSL/TLS 配置
 
@@ -238,4 +238,3 @@ gzip backup_$(date +%Y%m%d).sql
 ### S3 数据同步
 
 启用跨区域复制或定期同步 S3 数据。
-

@@ -139,7 +139,7 @@ storage:
       acceptsWrites: false
 ```
 
-> For complete configuration options, see [Nacos Config Template](../../nacos-config-template.yaml)
+> For complete configuration options, see [Nacos Config Template](/nacos-config-template.yaml)
 
 ## SSL/TLS Configuration
 
