@@ -165,7 +165,7 @@
 									</div>
 								</div>
 
-								<!-- File list -->
+								<!-- 文件列表 -->
 								<div class="mt-4 space-y-2">
 									{#each share.fileNames.slice(0, 5) as fileName, i}
 										<button

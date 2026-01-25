@@ -32,10 +32,10 @@
 
   const notifications = useNotifications();
 
-  // Tab state
+  // 标签页状态
   let activeTab = $state<"files" | "shares">("files");
 
-  // Files state
+  // 文件列表状态
   let files = $state<AdminFileVO[]>([]);
   let filesLoading = $state(true);
   let filesPageNum = $state(1);
@@ -47,7 +47,7 @@
   let filesStartTime = $state("");
   let filesEndTime = $state("");
 
-  // Shares state
+  // 分享列表状态
   let shares = $state<AdminShareVO[]>([]);
   let sharesLoading = $state(true);
   let sharesPageNum = $state(1);
@@ -59,18 +59,18 @@
   let sharesStartTime = $state("");
   let sharesEndTime = $state("");
 
-  // File detail dialog
+  // 文件详情对话框
   let detailDialogOpen = $state(false);
   let selectedFile = $state<AdminFileDetailVO | null>(null);
   let detailLoading = $state(false);
 
-  // Delete confirmation dialog
+  // 删除确认对话框
   let deleteDialogOpen = $state(false);
   let deleteTarget = $state<{ type: "file" | "share"; id: string; name: string } | null>(null);
   let deleteReason = $state("");
   let deleting = $state(false);
 
-  // Access logs dialog
+  // 访问日志对话框
   let logsDialogOpen = $state(false);
   let logsShareCode = $state("");
   let accessLogs = $state<ShareAccessLogVO[]>([]);

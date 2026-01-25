@@ -32,7 +32,7 @@
 </svelte:head>
 
 <div class="flex min-h-screen flex-col">
-  <!-- Header -->
+  <!-- 页头 -->
   <header class="border-b bg-card">
     <div class="container mx-auto flex h-16 items-center justify-between px-4">
       <div class="flex items-center gap-2">
@@ -56,7 +56,7 @@
     </div>
   </header>
 
-  <!-- Hero -->
+  <!-- 主视觉 -->
   <main class="flex-1">
     <section class="container mx-auto px-4 py-20 text-center">
       <h1
@@ -88,7 +88,7 @@
       </div>
     </section>
 
-    <!-- Features -->
+    <!-- 功能特性 -->
     <section id="features" class="border-t bg-muted/50 py-20">
       <div class="container mx-auto px-4">
         <h2 class="mb-12 text-center text-3xl font-bold">核心功能</h2>
@@ -147,7 +147,7 @@
     </section>
   </main>
 
-  <!-- Footer -->
+  <!-- 页脚 -->
   <footer class="border-t py-8">
     <div
       class="container mx-auto px-4 text-center text-sm text-muted-foreground"

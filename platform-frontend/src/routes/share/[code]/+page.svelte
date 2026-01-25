@@ -109,8 +109,8 @@
       }
     }
 
-    // Shared files use backend proxy (no presigned URLs available)
-    // Try public share first, fallback to private share if user is authenticated
+    // 共享文件使用后端代理（无可用的预签名 URL）
+    // 优先尝试公开分享；若用户已登录则回退到私密分享
     const sourceType = auth.isAuthenticated ? "private_share" : "public_share";
 
     download.startDownload(file.fileHash, file.fileName, {
@@ -145,7 +145,7 @@
       );
       selectedFiles = new Set();
     } catch (err) {
-      // 保存自己的文件是误操作，用 warning 而非 error
+      // 保存自己的文件是误操作，用“警告”而非“错误”
       if (err instanceof ApiError && err.code === ResultCode.PARAM_ERROR) {
         notifications.warning("无法保存", err.message || "不能保存自己的文件");
       } else {
@@ -166,7 +166,7 @@
 
 <div class="min-h-screen bg-muted/30">
   <div class="mx-auto max-w-4xl p-6">
-    <!-- Header -->
+    <!-- 页头 -->
     <div class="mb-8 text-center">
       <div
         class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary text-primary-foreground"
@@ -389,7 +389,7 @@
         </Card.Content>
       </Card.Root>
 
-      <!-- Login prompt for unauthenticated users -->
+      <!-- 未登录用户登录提示 -->
       {#if !auth.isAuthenticated}
         <Card.Root class="mt-6">
           <Card.Content class="flex items-center justify-between p-6">
@@ -407,7 +407,7 @@
       {/if}
     {/if}
 
-    <!-- Footer -->
+    <!-- 页脚 -->
     <div class="mt-8 text-center">
       <a href="/" class="text-sm text-muted-foreground hover:text-foreground">
         了解更多关于存证平台

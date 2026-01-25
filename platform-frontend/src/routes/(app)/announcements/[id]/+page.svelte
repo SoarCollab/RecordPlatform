@@ -28,9 +28,9 @@
 
 		try {
 			announcement = await getAnnouncement(data.announcementId);
-			// Mark as read
+			// 标记为已读
 			await markAnnouncementAsRead(data.announcementId).catch(() => {
-				// Ignore errors when marking as read
+				// 标记已读失败时忽略错误
 			});
 		} catch (err) {
 			error = err instanceof Error ? err.message : '加载失败';
@@ -59,7 +59,7 @@
 </svelte:head>
 
 <div class="mx-auto max-w-3xl space-y-6">
-	<!-- Back button -->
+	<!-- 返回按钮 -->
 	<a
 		href="/announcements"
 		class="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"

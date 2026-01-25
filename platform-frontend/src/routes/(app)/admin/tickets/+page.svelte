@@ -29,7 +29,7 @@
   const auth = useAuth();
   const notifications = useNotifications();
 
-  // State
+  // 状态
   let tickets = $state<TicketVO[]>([]);
   let loading = $state(true);
   let pageNum = $state(1);
@@ -37,19 +37,19 @@
   let total = $state(0);
   let pendingCount = $state(0);
 
-  // Filters
+  // 筛选条件
   let keyword = $state("");
   let statusFilter = $state<TicketStatus | "">("");
   let priorityFilter = $state<TicketPriority | "">("");
   let categoryFilter = $state<TicketCategory | "">("");
 
-  // Assign dialog
+  // 分派对话框
   let assignDialogOpen = $state(false);
   let assignTarget = $state<TicketVO | null>(null);
   let assigneeId = $state("");
   let assigning = $state(false);
 
-  // Status update dialog
+  // 状态更新对话框
   let statusDialogOpen = $state(false);
   let statusTarget = $state<TicketVO | null>(null);
   let newStatus = $state<TicketStatus>(TicketStatus.PENDING);
@@ -91,7 +91,7 @@
       const result = await getAdminPendingCount();
       pendingCount = result.count;
     } catch {
-      // Ignore
+      // 忽略
     }
   }
 
@@ -215,7 +215,7 @@
         <Card.Title>所有工单 ({total})</Card.Title>
       </div>
 
-      <!-- Filter panel -->
+      <!-- 筛选面板 -->
       <div class="mt-4 rounded-lg border bg-muted/30 p-4">
         <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <Input
@@ -339,7 +339,7 @@
           </Table.Body>
         </Table.Root>
 
-        <!-- Pagination -->
+        <!-- 分页 -->
         <div class="mt-4 flex items-center justify-between">
           <span class="text-sm text-muted-foreground">
             第 {pageNum} / {totalPages} 页，共 {total} 条
@@ -374,7 +374,7 @@
   </Card.Root>
 </div>
 
-<!-- Assign dialog -->
+<!-- 分派对话框 -->
 <Dialog.Root bind:open={assignDialogOpen}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
@@ -405,7 +405,7 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<!-- Status update dialog -->
+<!-- 状态更新对话框 -->
 <Dialog.Root bind:open={statusDialogOpen}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>

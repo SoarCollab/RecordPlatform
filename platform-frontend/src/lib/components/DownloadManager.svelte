@@ -24,7 +24,7 @@
   <div
     class="fixed bottom-4 right-4 z-50 w-96 max-w-[calc(100vw-2rem)] rounded-lg border bg-background shadow-lg"
   >
-    <!-- Header -->
+    <!-- 头部 -->
     <div
       class="flex items-center justify-between gap-2 border-b px-4 py-3 cursor-pointer select-none"
       role="button"
@@ -66,7 +66,7 @@
       </div>
     </div>
 
-    <!-- Progress Summary (when minimized) -->
+    <!-- 进度概览（折叠时） -->
     {#if isMinimized}
       <div class="px-4 py-2">
         <div class="flex items-center justify-between text-xs text-muted-foreground mb-1">
@@ -82,7 +82,7 @@
       </div>
     {/if}
 
-    <!-- Task List -->
+    <!-- 任务列表 -->
     {#if !isMinimized}
       <div
         class="max-h-80 overflow-y-auto p-2 space-y-2"

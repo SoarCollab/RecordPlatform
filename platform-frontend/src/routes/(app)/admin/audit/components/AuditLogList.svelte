@@ -85,7 +85,7 @@
     return status === 0 ? "成功" : "失败";
   }
 
-  // Load on mount
+  // 挂载时加载
   $effect(() => {
     loadLogs();
   });

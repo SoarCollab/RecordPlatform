@@ -8,17 +8,17 @@
   interface Props {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    // Configs
+    // 配置列表
     configs: AuditConfigVO[];
     loadingConfigs: boolean;
     onRefreshConfigs: () => void;
     onSaveConfig: (config: AuditConfigVO) => Promise<void>;
-    // Anomaly check
+    // 异常检测
     anomalies: Record<string, unknown> | null;
     checkingAnomalies: boolean;
     onCheckAnomalies: () => void;
     onClearAnomalies: () => void;
-    // Backup
+    // 备份
     backupResult: string | null;
     backupRunning: boolean;
     onBackup: (days: number, deleteAfter: boolean) => void;
@@ -44,13 +44,13 @@
 
   let activeSection = $state<"configs" | "anomaly" | "backup">("configs");
 
-  // Config editing
+  // 配置编辑
   let configDialogOpen = $state(false);
   let editingConfig = $state<AuditConfigVO | null>(null);
   let editingConfigValue = $state("");
   let savingConfig = $state(false);
 
-  // Backup settings
+  // 备份设置
   let backupDays = $state(180);
   let backupDeleteAfter = $state(false);
 
@@ -217,7 +217,7 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<!-- Config Edit Dialog -->
+<!-- 配置编辑对话框 -->
 <Dialog.Root bind:open={configDialogOpen}>
   <Dialog.Content class="max-w-md">
     <Dialog.Header>

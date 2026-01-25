@@ -25,7 +25,7 @@
   let isExporting = $state(false);
   let settingsOpen = $state(false);
 
-  // Settings data
+  // 设置数据
   let auditConfigs = $state<AuditConfigVO[]>([]);
   let loadingConfigs = $state(false);
   let anomalies = $state<Record<string, unknown> | null>(null);

@@ -25,7 +25,7 @@
 	let pageSize = $state(20);
 	let unsubscribeSSE: (() => void) | null = null;
 
-	// New conversation dialog
+	// 新建会话对话框
 	let newConversationOpen = $state(false);
 	let friends = $state<FriendVO[]>([]);
 	let loadingFriends = $state(false);
@@ -210,7 +210,7 @@
 							tabindex="0"
 							onkeypress={(e) => e.key === 'Enter' && goto(`/messages/${conv.id}`)}
 						>
-							<!-- Avatar -->
+							<!-- 头像 -->
 							<div class="relative">
 								<Avatar.Root class="size-12">
 									{#if conv.otherAvatar}
@@ -230,7 +230,7 @@
 								{/if}
 							</div>
 
-							<!-- Content -->
+							<!-- 内容 -->
 							<div class="min-w-0 flex-1">
 								<div class="flex items-center justify-between">
 									<p class="font-medium">{getDisplayName(conv)}</p>
@@ -247,7 +247,7 @@
 								{/if}
 							</div>
 
-							<!-- Actions -->
+							<!-- 操作 -->
 							<button
 								class="rounded p-2 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-destructive group-hover:opacity-100"
 								onclick={(e) => handleDelete(conv, e)}
@@ -263,7 +263,7 @@
 			</Card.Content>
 		</Card.Root>
 
-		<!-- Pagination -->
+		<!-- 分页 -->
 		{#if total > pageSize}
 			<div class="flex items-center justify-between">
 				<p class="text-sm text-muted-foreground">共 {total} 个会话</p>
@@ -290,7 +290,7 @@
 	{/if}
 </div>
 
-<!-- New Conversation Dialog -->
+<!-- 新建会话对话框 -->
 <Dialog.Root bind:open={newConversationOpen}>
 	<Dialog.Content class="sm:max-w-md">
 		<Dialog.Header>

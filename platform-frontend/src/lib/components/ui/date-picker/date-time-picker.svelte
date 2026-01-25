@@ -34,11 +34,11 @@
     hour12: false,
   });
 
-  // Init from value
+  // 从 value 初始化
   $effect(() => {
     if (value) {
       try {
-        // Handle SQL format (replace space with T for parsing)
+        // 处理 SQL 格式（将空格替换为 T 以便解析）
         const isoValue = value.replace(" ", "T");
         const parsed = parseDateTime(isoValue);
         date = parsed;
@@ -46,7 +46,7 @@
         minute = parsed.minute;
         second = parsed.second;
       } catch {
-        // console.warn("Date parse error", e);
+        // console.warn("日期解析错误", e);
       }
     } else {
       if (date && date.toString().replace("T", " ") !== value) {
@@ -57,7 +57,7 @@
 
   function updateValue() {
     if (date) {
-      // Replace T with space for backend compatibility
+      // 为兼容后端，将 T 替换回空格
       value = date.toString().replace("T", " ");
     } else {
       value = "";

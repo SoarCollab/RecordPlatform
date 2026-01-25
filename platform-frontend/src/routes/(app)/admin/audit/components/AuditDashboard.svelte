@@ -131,7 +131,7 @@
     </div>
   </div>
 
-  <!-- KPI Cards -->
+  <!-- 关键指标卡片 -->
   <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
     <KpiCard title="今日操作" value={todayOperations} icon="activity" />
     <KpiCard title="今日错误" value={todayErrorOperations} icon="error" />
@@ -146,18 +146,18 @@
     <KpiCard title="活跃用户" value={todayActiveUsers} icon="users" />
   </div>
 
-  <!-- Charts Row 1 -->
+  <!-- 图表行 1 -->
   <div class="grid gap-4 lg:grid-cols-2">
     <TrendChart data={dailyStats} {loading} />
     <ErrorPieChart data={errorStats.slice(0, 6)} {loading} />
   </div>
 
-  <!-- Heatmap -->
+  <!-- 热力图 -->
   <HeatmapChart data={timeDistribution} {loading} />
 
-  <!-- Tables Row -->
+  <!-- 表格区域 -->
   <div class="grid gap-4 lg:grid-cols-2">
-    <!-- High Frequency Alerts -->
+    <!-- 高频告警 -->
     <div class="rounded-xl border bg-card/50 p-4">
       <div class="mb-3 flex items-center justify-between">
         <p class="text-sm font-medium">高频操作告警</p>
@@ -197,7 +197,7 @@
       {/if}
     </div>
 
-    <!-- Error Stats Top 5 -->
+    <!-- 错误统计前 5 -->
     <div class="rounded-xl border bg-card/50 p-4">
       <p class="mb-3 text-sm font-medium">错误统计 Top 5</p>
       {#if loading}

@@ -38,11 +38,11 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
 
-  // Reply state
+  // 回复状态
   let replyContent = $state("");
   let isReplying = $state(false);
 
-  // Action dialogs
+  // 操作对话框
   let closeDialogOpen = $state(false);
   let confirmDialogOpen = $state(false);
   let isClosing = $state(false);
@@ -96,7 +96,7 @@
       // 后端 getTicket 返回 TicketDetailVO，包含 replies 字段
       const ticketData = await getTicket(data.ticketId);
       ticket = ticketData;
-      // Reload badges to clear unread count since backend updates view time on getTicket
+      // 重新加载徽标以清除未读数（后端在 getTicket 时会更新查看时间）
       badges.fetch();
       // 从 TicketDetailVO 中获取回复列表（如果后端返回）
       // @ts-expect-error - TicketDetailVO 包含 replies，但前端 TicketVO 类型未定义
@@ -121,7 +121,7 @@
       });
       replyContent = "";
       notifications.success("回复成功");
-      // Reload ticket to get updated replies and status
+      // 重新加载工单以获取最新回复与状态
       await loadTicketData();
     } catch (err) {
       notifications.error(
@@ -141,7 +141,7 @@
       await closeTicket(ticket.id);
       notifications.success("工单已关闭");
       closeDialogOpen = false;
-      // Reload ticket
+      // 重新加载工单
       ticket = await getTicket(data.ticketId);
     } catch (err) {
       notifications.error(
@@ -161,7 +161,7 @@
       await confirmTicket(ticket.id);
       notifications.success("已确认问题解决");
       confirmDialogOpen = false;
-      // Reload ticket
+      // 重新加载工单
       ticket = await getTicket(data.ticketId);
     } catch (err) {
       notifications.error(
@@ -207,7 +207,7 @@
 </svelte:head>
 
 <div class="mx-auto max-w-4xl space-y-6">
-  <!-- Back button -->
+  <!-- 返回按钮 -->
   <a
     href="/tickets"
     class="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
@@ -258,7 +258,7 @@
       </Card.Content>
     </Card.Root>
   {:else if ticket}
-    <!-- Ticket Header -->
+    <!-- 工单头部 -->
     <Card.Root>
       <Card.Header>
         <div class="flex items-start justify-between">
@@ -341,7 +341,7 @@
       {/if}
     </Card.Root>
 
-    <!-- Replies -->
+    <!-- 回复列表 -->
     <Card.Root>
       <Card.Header>
         <Card.Title>回复记录 ({replies.length})</Card.Title>
@@ -383,7 +383,7 @@
       </Card.Content>
     </Card.Root>
 
-    <!-- Reply Form -->
+    <!-- 回复表单 -->
     {#if canReply}
       <Card.Root>
         <Card.Header>
@@ -418,7 +418,7 @@
   {/if}
 </div>
 
-<!-- Close Confirmation Dialog -->
+<!-- 关闭确认对话框 -->
 <Dialog.Root bind:open={closeDialogOpen}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
@@ -438,7 +438,7 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<!-- Confirm Resolution Dialog -->
+<!-- 确认解决对话框 -->
 <Dialog.Root bind:open={confirmDialogOpen}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>

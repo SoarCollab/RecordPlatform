@@ -14,7 +14,7 @@
 	let loadingText = $state(false);
 	let textError = $state<string | null>(null);
 
-	// Determine preview type based on contentType
+	// 根据 contentType 判断预览类型
 	const previewType = $derived(getPreviewType(contentType));
 
 	function getPreviewType(type: string): 'image' | 'video' | 'audio' | 'pdf' | 'text' | 'unsupported' {
@@ -46,7 +46,7 @@
 			const response = await fetch(url);
 			if (!response.ok) throw new Error('Failed to load file');
 			const text = await response.text();
-			// Limit text length for performance
+			// 为提升性能限制文本长度
 			textContent = text.length > 100000 ? text.slice(0, 100000) + '\n\n... (内容过长，已截断)' : text;
 		} catch (err) {
 			textError = err instanceof Error ? err.message : '加载失败';

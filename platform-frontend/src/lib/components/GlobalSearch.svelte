@@ -12,21 +12,21 @@
 	let selectedIndex = $state(0);
 	let inputElement = $state<HTMLInputElement | null>(null);
 
-	// Debounce timer
+	// 防抖计时器
 	let searchTimeout: ReturnType<typeof setTimeout> | null = null;
 
-	// Recent searches stored in localStorage
+	// 最近搜索记录（存储于 localStorage）
 	const RECENT_KEY = 'global_search_recent';
 	let recentSearches = $state<string[]>([]);
 
 	onMount(() => {
-		// Load recent searches
+		// 加载最近搜索记录
 		try {
 			const stored = localStorage.getItem(RECENT_KEY);
 			if (stored) recentSearches = JSON.parse(stored);
-		} catch { /* ignore localStorage errors */ }
+		} catch { /* 忽略 localStorage 错误 */ }
 
-		// Keyboard shortcut
+		// 键盘快捷键
 		window.addEventListener('keydown', handleGlobalKeydown);
 	});
 
@@ -38,12 +38,12 @@
 	});
 
 	function handleGlobalKeydown(e: KeyboardEvent) {
-		// Cmd/Ctrl + K to open search
+		// Cmd/Ctrl + K 打开搜索
 		if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
 			e.preventDefault();
 			openSearch();
 		}
-		// Escape to close
+		// Esc 关闭
 		if (e.key === 'Escape' && searchOpen) {
 			closeSearch();
 		}
@@ -54,7 +54,7 @@
 		query = '';
 		results = [];
 		selectedIndex = 0;
-		// Focus input after render
+		// 渲染后聚焦输入框
 		setTimeout(() => inputElement?.focus(), 50);
 	}
 
@@ -76,7 +76,7 @@
 			if (results.length > 0 && results[selectedIndex]) {
 				selectResult(results[selectedIndex]);
 			} else if (query.trim()) {
-				// Search with the query
+				// 使用关键词搜索
 				performSearch();
 			}
 		}
@@ -90,7 +90,7 @@
 			return;
 		}
 
-		// Debounce search
+		// 搜索防抖
 		searchTimeout = setTimeout(performSearch, 300);
 	}
 
@@ -111,9 +111,9 @@
 	}
 
 	function selectResult(file: FileVO) {
-		// Save to recent searches
+		// 保存到最近搜索
 		saveRecentSearch(query.trim());
-		// Navigate to file detail
+		// 跳转到文件详情
 		goto(`/files/${file.fileHash}`);
 		closeSearch();
 	}
@@ -125,7 +125,7 @@
 
 	function saveRecentSearch(search: string) {
 		if (!search) return;
-		// Remove if exists, add to front
+		// 若已存在则先移除，再追加到最前
 		recentSearches = [search, ...recentSearches.filter(s => s !== search)].slice(0, 5);
 		localStorage.setItem(RECENT_KEY, JSON.stringify(recentSearches));
 	}
@@ -144,7 +144,7 @@
 	}
 </script>
 
-<!-- Search Trigger Button -->
+<!-- 搜索触发按钮 -->
 <button
 	class="flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted"
 	onclick={openSearch}
@@ -158,9 +158,9 @@
 	</kbd>
 </button>
 
-<!-- Search Modal -->
+<!-- 搜索弹窗 -->
 {#if searchOpen}
-	<!-- Backdrop -->
+	<!-- 遮罩层 -->
 	<div
 		class="fixed inset-0 z-50 bg-black/50"
 		onclick={closeSearch}
@@ -169,9 +169,9 @@
 		tabindex="-1"
 	></div>
 
-	<!-- Dialog -->
+	<!-- 对话框 -->
 	<div class="fixed left-1/2 top-1/4 z-50 w-full max-w-lg -translate-x-1/2 rounded-lg border bg-card shadow-2xl">
-		<!-- Search Input -->
+		<!-- 搜索输入框 -->
 		<div class="flex items-center gap-3 border-b px-4 py-3">
 			<svg class="h-5 w-5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -199,7 +199,7 @@
 			</button>
 		</div>
 
-		<!-- Results / Recent -->
+		<!-- 搜索结果 / 最近 -->
 		<div class="max-h-80 overflow-y-auto">
 			{#if results.length > 0}
 				<div class="p-2">
@@ -276,7 +276,7 @@
 			{/if}
 		</div>
 
-		<!-- Footer -->
+		<!-- 底部提示 -->
 		<div class="flex items-center justify-between border-t px-4 py-2 text-xs text-muted-foreground">
 			<div class="flex items-center gap-2">
 				<kbd class="rounded border bg-muted px-1.5 py-0.5 font-mono">↑↓</kbd>

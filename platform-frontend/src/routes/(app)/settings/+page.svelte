@@ -4,9 +4,9 @@
   import * as validation from "$utils/validation";
   import { getAvatarUrl } from "$utils/avatar";
   import { changePassword } from "$api/endpoints/auth";
-  import { uploadAvatar } from "$api/endpoints/images"; // Keep this as it's used later
+  import { uploadAvatar } from "$api/endpoints/images"; // 保留此导入：后续会用到
 
-  // UI Components
+  // UI 组件
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
@@ -17,25 +17,25 @@
   const auth = useAuth();
   const notifications = useNotifications();
 
-  // Profile state
+  // 资料状态
   let displayName = $state(auth.user?.nickname || "");
   let isProfileSubmitting = $state(false);
 
-  // Avatar Upload State
+  // 头像上传状态
   let isUploadingAvatar = $state(false);
   let fileInput: HTMLInputElement;
 
-  // Dialog States
+  // 弹窗状态
   let showPasswordDialog = $state(false);
 
-  // Password Form State
+  // 密码表单状态
   let oldPassword = $state("");
   let newPassword = $state("");
   let confirmPwd = $state("");
   let isChangingPassword = $state(false);
 
   $effect(() => {
-    // Sync local state when auth user updates
+    // 认证用户信息更新时同步本地状态
     if (auth.user) {
       displayName = auth.user.nickname || "";
     }
@@ -50,17 +50,17 @@
     const file = target.files?.[0];
     if (!file) return;
 
-    // Validate size (100KB limit from backend)
+    // 校验大小（后端限制 100KB）
     if (file.size > 100 * 1024) {
       notifications.warning("头像文件过大", "请上传小于 100KB 的图片");
-      target.value = ""; // Reset input
+      target.value = ""; // 重置输入
       return;
     }
 
     isUploadingAvatar = true;
     try {
       await uploadAvatar(file);
-      // Refresh the user profile to show the new avatar
+      // 刷新用户资料以显示新头像
       await auth.fetchUser();
       notifications.success("头像上传成功");
     } catch (err) {
@@ -70,7 +70,7 @@
       );
     } finally {
       isUploadingAvatar = false;
-      target.value = ""; // Reset input
+      target.value = ""; // 重置输入
     }
   }
 
@@ -116,7 +116,7 @@
       });
       notifications.success("密码修改成功", "请使用新密码重新登录");
       showPasswordDialog = false;
-      // Reset form
+      // 重置表单
       oldPassword = "";
       newPassword = "";
       confirmPwd = "";
@@ -130,7 +130,7 @@
     }
   }
 
-  // Helper to mask email
+  // 邮箱脱敏辅助函数
   function maskEmail(email?: string) {
     if (!email) return "未绑定";
     const [name, domain] = email.split("@");
@@ -145,20 +145,20 @@
 </svelte:head>
 
 <div class="space-y-8 p-2">
-  <!-- Header -->
+  <!-- 页头 -->
   <div>
     <h1 class="text-3xl font-bold tracking-tight">个人信息</h1>
     <p class="mt-2 text-muted-foreground">更新您的基本信息和联系方式</p>
   </div>
 
   <div class="space-y-6">
-    <!-- Basic Information Card -->
+    <!-- 基本信息卡片 -->
     <Card.Root
       class="overflow-hidden border-border/50 bg-card/50 backdrop-blur-sm"
     >
       <Card.Content class="p-8">
         <div class="flex flex-col gap-8 md:flex-row">
-          <!-- Avatar Section -->
+          <!-- 头像区域 -->
           <div class="flex flex-col items-center gap-4 md:w-64">
             <div class="relative group">
               <Avatar.Root
@@ -196,10 +196,10 @@
             </div>
           </div>
 
-          <!-- Form Section -->
+          <!-- 表单区域 -->
           <div class="flex-1 space-y-6">
             <div class="grid gap-6">
-              <!-- Nickname -->
+              <!-- 昵称 -->
               <div class="space-y-2">
                 <Label for="displayName" class="text-base"
                   >昵称 <span class="text-destructive">*</span></Label
@@ -211,7 +211,7 @@
                 />
               </div>
 
-              <!-- Login Account (Read-only) -->
+              <!-- 登录账号（只读） -->
               <div class="space-y-2">
                 <Label class="text-base text-muted-foreground">登录账号</Label>
                 <div
@@ -236,7 +236,7 @@
       </Card.Content>
     </Card.Root>
 
-    <!-- Account Security Card -->
+    <!-- 账户安全卡片 -->
     <Card.Root
       class="overflow-hidden border-border/50 bg-card/50 backdrop-blur-sm"
     >
@@ -246,7 +246,7 @@
       </Card.Header>
       <Card.Content class="p-0">
         <div class="divide-y divide-border/50">
-          <!-- Email Item -->
+          <!-- 邮箱项 -->
           <div
             class="flex items-center justify-between px-8 py-6 hover:bg-muted/30 transition-colors"
           >
@@ -275,13 +275,10 @@
                 </p>
               </div>
             </div>
-            <!-- <Button variant="ghost" class="gap-2 text-muted-foreground hover:text-primary" onclick={() => showEmailDialog = true}>
-                    修改 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                </Button> -->
             <div class="text-sm text-muted-foreground">此处暂不支持修改</div>
           </div>
 
-          <!-- Password Item -->
+          <!-- 密码项 -->
           <div
             class="flex items-center justify-between px-8 py-6 hover:bg-muted/30 transition-colors"
           >
@@ -335,7 +332,7 @@
   </div>
 </div>
 
-<!-- Change Password Dialog -->
+<!-- 修改密码对话框 -->
 <Dialog.Root bind:open={showPasswordDialog}>
   <Dialog.Content>
     <Dialog.Header>

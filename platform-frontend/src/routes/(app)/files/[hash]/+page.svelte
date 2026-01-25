@@ -44,12 +44,12 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
 
-  // Preview state
+  // 预览状态
   let previewUrl = $state<string | null>(null);
   let showPreview = $state(false);
   let loadingPreview = $state(false);
 
-  // Share dialog state
+  // 分享对话框状态
   let shareDialogOpen = $state(false);
   let shareExpireHours = $state(72);
   let shareType = $state<ShareType>(ShareType.PUBLIC);
@@ -57,7 +57,7 @@
   let shareLink = $derived(shareCode ? `${appPage.url.origin}/share/${shareCode}` : "");
   let isSharing = $state(false);
 
-  // Friend share dialog state
+  // 好友分享对话框状态
   let friendShareDialogOpen = $state(false);
   let friends = $state<FriendVO[]>([]);
   let loadingFriends = $state(false);
@@ -66,7 +66,7 @@
   let isSharingToFriend = $state(false);
   let friendSearchKeyword = $state("");
 
-  // Check if file type supports preview
+  // 检查文件类型是否支持预览
   const canPreview = $derived(file && isPreviewable(file.contentType));
 
   function isPreviewable(contentType: string): boolean {
@@ -94,12 +94,12 @@
     try {
       file = await getFileByHash(data.hash);
 
-      // Load transaction details if available
+      // 若可用则加载交易详情
       if (file.transactionHash) {
         try {
           transaction = await getTransaction(file.transactionHash);
         } catch {
-          // Transaction might not be available yet
+          // 交易信息可能尚未生成
         }
       }
     } catch (err) {
@@ -113,7 +113,7 @@
   async function handleDownload() {
     if (!file) return;
 
-    // Use the new download manager with presigned URLs
+    // 使用新的下载管理器（预签名 URL）
     download.startDownload(file.fileHash, file.fileName, { type: "owned" });
     notifications.info("下载已开始", "可在右下角查看下载进度");
   }
@@ -148,7 +148,7 @@
       notifications.success("已复制到剪贴板");
       return;
     } catch {
-      // Fallback to legacy copy flow
+      // 回退到旧的复制流程
     }
 
     try {
@@ -208,7 +208,7 @@
 
     isSharingToFriend = true;
     try {
-      // Share to each selected friend
+      // 逐个分享给选中的好友
       const sharePromises = Array.from(selectedFriends).map(friendId =>
         shareToFriend({
           friendId,
@@ -284,7 +284,7 @@
 </svelte:head>
 
 <div class="mx-auto max-w-4xl space-y-6">
-  <!-- Back button -->
+  <!-- 返回按钮 -->
   <a
     href="/files"
     class="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
@@ -335,7 +335,7 @@
       </Card.Content>
     </Card.Root>
   {:else if file}
-    <!-- File Info Card -->
+    <!-- 文件信息卡片 -->
     <Card.Root>
       <Card.Header>
         <div class="flex items-start justify-between">
@@ -503,7 +503,7 @@
       </Card.Content>
     </Card.Root>
 
-    <!-- Blockchain Certificate Card -->
+    <!-- 区块链存证卡片 -->
     {#if file.transactionHash}
       <Card.Root>
         <Card.Header>
@@ -600,7 +600,7 @@
       </Card.Root>
     {/if}
 
-    <!-- File Preview Card -->
+    <!-- 文件预览卡片 -->
     {#if showPreview && previewUrl && file}
       <Card.Root>
         <Card.Header>
@@ -656,7 +656,7 @@
   {/if}
 </div>
 
-<!-- Share Dialog -->
+<!-- 分享对话框 -->
 <Dialog.Root bind:open={shareDialogOpen}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
@@ -737,7 +737,7 @@
   </Dialog.Content>
 </Dialog.Root>
 
-<!-- Friend Share Dialog -->
+<!-- 好友分享对话框 -->
 <Dialog.Root bind:open={friendShareDialogOpen}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>

@@ -14,7 +14,7 @@
 	const notifications = useNotifications();
 	const auth = useAuth();
 
-	// State
+	// 状态
 	let loading = $state(true);
 	let systemStats = $state<SystemStats | null>(null);
 	let chainStatus = $state<ChainStatus | null>(null);
@@ -22,7 +22,7 @@
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 	let lastRefresh = $state<Date | null>(null);
 
-	// Computed
+	// 派生计算
 	const chainTypeLabel = $derived(
 		chainStatus
 			? {
@@ -49,7 +49,7 @@
 
 		loadAllData();
 
-		// Auto refresh every 30 seconds
+		// 每 30 秒自动刷新
 		refreshInterval = setInterval(loadAllData, 30000);
 	});
 
@@ -63,7 +63,7 @@
 		loading = true;
 
 		try {
-			// Load all data in parallel with graceful fallbacks
+			// 并行加载所有数据，并提供优雅降级
 			const [statsResult, chainResult, healthResult] = await Promise.allSettled([
 				getSystemStats(),
 				getChainStatus(),
@@ -137,7 +137,7 @@
 		</div>
 	</div>
 
-	<!-- System Health Overview -->
+	<!-- 系统健康概览 -->
 	<Card.Root>
 		<Card.Header>
 			<Card.Title class="flex items-center gap-2">
@@ -154,7 +154,7 @@
 				</div>
 			{:else if systemHealth}
 				<div class="space-y-6">
-					<!-- Overall Status -->
+					<!-- 整体状态 -->
 					<div class="flex items-center justify-between rounded-lg bg-muted/50 p-4">
 						<div class="flex items-center gap-4">
 							<div class="flex h-12 w-12 items-center justify-center rounded-full {systemHealth.status === 'UP' ? 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-400' : systemHealth.status === 'DOWN' ? 'bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-400' : 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900 dark:text-yellow-400'}">
@@ -186,7 +186,7 @@
 						</Badge>
 					</div>
 
-					<!-- Component Status Grid -->
+					<!-- 组件状态网格 -->
 					<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 						{#each Object.entries(systemHealth.components) as [name, component]}
 							<div class="rounded-lg border p-4">
@@ -221,7 +221,7 @@
 		</Card.Content>
 	</Card.Root>
 
-	<!-- Statistics Grid -->
+	<!-- 统计网格 -->
 	<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 		{#if loading && !systemStats}
 			{#each Array(4) as _}
@@ -283,7 +283,7 @@
 		{/if}
 	</div>
 
-	<!-- Today's Activity -->
+	<!-- 今日活动 -->
 	{#if systemStats}
 		<div class="grid gap-4 sm:grid-cols-2">
 			<Card.Root>
@@ -320,7 +320,7 @@
 		</div>
 	{/if}
 
-	<!-- Blockchain Status -->
+	<!-- 区块链状态 -->
 	<Card.Root>
 		<Card.Header>
 			<Card.Title class="flex items-center gap-2">
@@ -340,7 +340,7 @@
 				</div>
 			{:else if chainStatus}
 				<div class="space-y-6">
-					<!-- Chain Info Header -->
+					<!-- 链信息标题栏 -->
 					<div class="flex items-center justify-between rounded-lg bg-muted/50 p-4">
 						<div class="flex items-center gap-4">
 							<div class="flex h-12 w-12 items-center justify-center rounded-full {chainStatus.healthy ? 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-400' : 'bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-400'}">
@@ -360,7 +360,7 @@
 						</Badge>
 					</div>
 
-					<!-- Chain Metrics Grid -->
+					<!-- 链指标网格 -->
 					<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 						<div class="rounded-lg border p-4">
 							<p class="text-sm text-muted-foreground">区块高度</p>
@@ -382,7 +382,7 @@
 						</div>
 					</div>
 
-					<!-- Last Update -->
+					<!-- 最后更新 -->
 					{#if chainStatus.lastUpdateTime}
 						<p class="text-sm text-muted-foreground">
 							数据更新时间: {formatDateTime(chainStatus.lastUpdateTime)}

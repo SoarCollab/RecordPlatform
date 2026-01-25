@@ -25,7 +25,7 @@
     }
   });
 
-  // Countdown timer
+  // 倒计时
   $effect(() => {
     if (countdown > 0) {
       const timer = setTimeout(() => {
@@ -36,7 +36,7 @@
   });
 
   async function handleSendCode() {
-    // Validate email first
+    // 先校验邮箱
     const emailResult = validation.email(email);
     if (!emailResult.valid) {
       notifications.warning("邮箱格式错误", emailResult.message);
@@ -47,7 +47,7 @@
     try {
       await sendRegisterCode(email);
       notifications.success("验证码已发送", "请查收邮件");
-      countdown = 60; // Start 60s countdown
+      countdown = 60; // 开始 60 秒倒计时
     } catch (err) {
       notifications.error(
         "发送失败",
@@ -61,7 +61,7 @@
   async function handleSubmit(e: Event) {
     e.preventDefault();
 
-    // Validate
+    // 校验
     const usernameResult = validation.username(username);
     if (!usernameResult.valid) {
       notifications.warning("用户名格式错误", usernameResult.message);

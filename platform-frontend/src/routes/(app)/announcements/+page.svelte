@@ -126,7 +126,7 @@
 			{/each}
 		</div>
 
-		<!-- Pagination -->
+		<!-- 分页 -->
 		{#if total > pageSize}
 			<div class="flex items-center justify-between">
 				<p class="text-sm text-muted-foreground">共 {total} 条公告</p>

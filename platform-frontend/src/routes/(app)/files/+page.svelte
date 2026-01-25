@@ -37,7 +37,7 @@
   let keyword = $state("");
   let statusFilter = $state<FileStatus | undefined>(undefined);
 
-  // Share dialog state
+  // 分享对话框状态
   let shareDialogOpen = $state(false);
   let shareFile = $state<FileVO | null>(null);
   let shareExpireHours = $state(72);
@@ -46,7 +46,7 @@
   let shareLink = $derived(shareCode ? `${appPage.url.origin}/share/${shareCode}` : "");
   let isSharing = $state(false);
 
-  // Delete dialog state
+  // 删除对话框状态
   let deleteDialogOpen = $state(false);
   let deleteTarget = $state<FileVO | null>(null);
   let isDeleting = $state(false);
@@ -163,7 +163,7 @@
       notifications.success("已复制到剪贴板");
       return;
     } catch {
-      // Fallback to legacy copy flow
+      // 回退到旧的复制流程
     }
 
     try {

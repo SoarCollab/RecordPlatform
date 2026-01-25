@@ -35,7 +35,7 @@
     unsubscribeSSE?.();
   });
 
-  // Initialize SSE when user is available (handles both initial load and user changes)
+  // 用户可用时初始化 SSE（兼容首次加载与用户变更）
   $effect(() => {
     if (auth.user?.id && auth.initialized) {
       sse.init(auth.user.id);
@@ -94,7 +94,7 @@
       getBadgeCount={getBadgeCount}
     />
 
-    <!-- Main content -->
+    <!-- 主内容 -->
     <div class="flex flex-1 flex-col overflow-hidden">
       <AppHeader
         sidebarCollapsed={sidebarCollapsed}
@@ -106,7 +106,7 @@
         onLogout={() => auth.logout()}
       />
 
-      <!-- Page content -->
+      <!-- 页面内容 -->
       <main class="flex-1 overflow-y-auto bg-muted/30 p-6">
         {#key $page.url.pathname}
           <div in:fly={{ y: 10, duration: 400, delay: 100 }} class="h-full">

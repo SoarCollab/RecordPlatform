@@ -27,7 +27,7 @@
 	let pageSize = $state(20);
 	let unsubscribeSSE: (() => void) | null = null;
 
-	// Filters
+	// 筛选条件
 	let statusFilter = $state<TicketStatus | undefined>(undefined);
 
 	onMount(() => {
@@ -150,7 +150,7 @@
 		</Button>
 	</div>
 
-	<!-- Filters -->
+	<!-- 筛选条件 -->
 	<div class="flex flex-wrap gap-2">
 		<button
 			class="rounded-full px-3 py-1 text-sm transition-colors {statusFilter === undefined
@@ -287,7 +287,7 @@
 			</Card.Content>
 		</Card.Root>
 
-		<!-- Pagination -->
+		<!-- 分页 -->
 		{#if total > pageSize}
 			<div class="flex items-center justify-between">
 				<p class="text-sm text-muted-foreground">共 {total} 个工单</p>

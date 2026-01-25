@@ -244,7 +244,7 @@
 		<p class="text-muted-foreground">上传文件并存证到区块链</p>
 	</div>
 
-	<!-- Drop zone -->
+	<!-- 拖拽区域 -->
 	<div
 		class="rounded-lg border-2 border-dashed p-12 text-center transition-colors {dragOver ? 'border-primary bg-primary/5' : ''}"
 		ondragover={(e) => { e.preventDefault(); dragOver = true; }}
@@ -278,7 +278,7 @@
 		</div>
 	</div>
 
-	<!-- Upload queue -->
+	<!-- 上传队列 -->
 	{#if upload.tasks.length > 0}
 		<div class="rounded-lg border bg-card">
 			<div class="flex items-center justify-between gap-3 border-b p-4">
@@ -383,7 +383,7 @@
 							</div>
 						</div>
 
-						<!-- Progress bar -->
+						<!-- 进度条 -->
 						{#if t.status === 'uploading' || t.status === 'paused' || t.status === 'processing'}
 							{@const isProcessing = t.status === 'processing'}
 							{@const displayProgress = isProcessing ? (t.processProgress ?? 0) : task.progress}
@@ -413,7 +413,7 @@
 							</div>
 						{/if}
 
-						<!-- Error message -->
+						<!-- 错误信息 -->
 						{#if task.error}
 							<p class="mt-2 text-sm text-destructive">{task.error}</p>
 						{/if}
@@ -434,7 +434,7 @@
 		</div>
 	{/if}
 
-	<!-- Tips -->
+	<!-- 提示 -->
 	<div class="rounded-lg border bg-muted/50 p-4">
 		<h3 class="mb-2 font-medium">上传说明</h3>
 		<ul class="space-y-1 text-sm text-muted-foreground">

@@ -26,7 +26,7 @@
 	let total = $state(0);
 	let pageSize = $state(20);
 
-	// Add friend dialog
+	// 添加好友对话框
 	let addFriendOpen = $state(false);
 	let searchKeyword = $state('');
 	let searchResults = $state<UserSearchVO[]>([]);
@@ -34,7 +34,7 @@
 	let requestMessage = $state('');
 	let selectedUser = $state<UserSearchVO | null>(null);
 
-	// Edit remark dialog
+	// 编辑备注对话框
 	let editRemarkOpen = $state(false);
 	let editingFriend = $state<FriendVO | null>(null);
 	let newRemark = $state('');
@@ -240,7 +240,7 @@
 	{/if}
 </div>
 
-<!-- Add Friend Dialog -->
+<!-- 添加好友对话框 -->
 <Dialog.Root bind:open={addFriendOpen}>
 	<Dialog.Content class="sm:max-w-md">
 		<Dialog.Header>
@@ -312,7 +312,7 @@
 	</Dialog.Content>
 </Dialog.Root>
 
-<!-- Edit Remark Dialog -->
+<!-- 编辑备注对话框 -->
 <Dialog.Root bind:open={editRemarkOpen}>
 	<Dialog.Content class="sm:max-w-md">
 		<Dialog.Header>

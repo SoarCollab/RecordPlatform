@@ -36,7 +36,7 @@
       return;
     }
 
-    // Transform data to [hour, day, value] format
+    // 将数据转换为 [hour, day, value] 格式
     const heatmapData: Array<[number, number, number]> = [];
     const maxValue = data.reduce((max, item) => Math.max(max, item.operationCount), 0);
 

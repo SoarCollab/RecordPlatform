@@ -20,7 +20,7 @@
 	let total = $state(0);
 	let pageSize = $state(10);
 
-	// Edit dialog state
+	// 编辑对话框状态
 	let editDialogOpen = $state(false);
 	let editingShare = $state<FileShareVO | null>(null);
 	let editShareType = $state<ShareType>(ShareType.PUBLIC);
@@ -65,7 +65,7 @@
 			notifications.success('已复制到剪贴板');
 			return;
 		} catch {
-			// ignore
+			// 忽略
 		}
 
 		try {
@@ -264,7 +264,7 @@
 				</table>
 			</div>
 
-			<!-- Pagination -->
+			<!-- 分页 -->
 			{#if total > pageSize}
 				<div class="flex items-center justify-between border-t px-4 py-3">
 					<div class="text-sm text-muted-foreground">
@@ -295,7 +295,7 @@
 	</div>
 </div>
 
-<!-- Edit Dialog -->
+<!-- 编辑对话框 -->
 {#if editDialogOpen}
 	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 	<div

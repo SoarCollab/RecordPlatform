@@ -18,14 +18,14 @@
   const auth = useAuth();
   const download = useDownload();
 
-  // Connect SSE when authenticated
+  // 登录后连接 SSE
   $effect(() => {
     if (browser && auth.isAuthenticated) {
       sse.connect();
     }
   });
 
-  // Sanitize text for display (escape HTML entities)
+  // 显示前清理文本（转义 HTML 实体）
   function sanitizeText(text: unknown): string {
     const str = String(text ?? "");
     return str
@@ -36,9 +36,9 @@
       .replace(/'/g, "&#039;");
   }
 
-  // Handle SSE messages and restore download tasks
+  // 处理 SSE 消息并恢复下载任务
   onMount(() => {
-    // Restore pending download tasks from IndexedDB
+    // 从 IndexedDB 恢复待处理的下载任务
     download.restoreTasks();
 
     const unsubscribe = sse.subscribe((message) => {
@@ -72,10 +72,10 @@
   {@render children()}
 </div>
 
-<!-- Download Manager -->
+<!-- 下载管理器 -->
 <DownloadManager />
 
-<!-- Toast Notifications (left side to avoid overlap with Download Manager) -->
+<!-- 通知提示（左侧显示，避免与下载管理器重叠） -->
 {#if notifications.notifications.length > 0}
   <div class="fixed bottom-4 left-4 z-50 flex flex-col gap-2">
     {#each notifications.notifications as notification (notification.id)}
