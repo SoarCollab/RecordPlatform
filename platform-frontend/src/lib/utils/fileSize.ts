@@ -232,7 +232,8 @@ export function decideDownloadStrategy(
   // Medium files - use in-memory with optional warning
   if (category === "medium") {
     // Check if device memory is low
-    const lowMemory = capabilities.deviceMemory && capabilities.deviceMemory < 4;
+    const lowMemory =
+      capabilities.deviceMemory && capabilities.deviceMemory < 4;
     if (lowMemory) {
       return {
         strategy: canStream ? "streaming" : "inmemory",
@@ -272,7 +273,9 @@ export interface PreDownloadCheck {
 /**
  * Perform pre-download check and return all relevant information
  */
-export function performPreDownloadCheck(fileSizeBytes: number): PreDownloadCheck {
+export function performPreDownloadCheck(
+  fileSizeBytes: number,
+): PreDownloadCheck {
   const capabilities = detectBrowserCapabilities();
   const decision = decideDownloadStrategy(fileSizeBytes, capabilities);
 

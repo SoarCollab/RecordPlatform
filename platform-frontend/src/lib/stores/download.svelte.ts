@@ -37,7 +37,11 @@ import {
 
 // Re-export types
 export type { DownloadSource } from "$utils/downloadStorage";
-export type { DownloadStrategy, DownloadDecision, BrowserCapabilities } from "$utils/fileSize";
+export type {
+  DownloadStrategy,
+  DownloadDecision,
+  BrowserCapabilities,
+} from "$utils/fileSize";
 
 // ===== Types =====
 
