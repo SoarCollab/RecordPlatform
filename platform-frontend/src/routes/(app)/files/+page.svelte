@@ -122,7 +122,7 @@
   }
 
   async function handleDownload(file: FileVO) {
-    download.startDownload(file.fileHash, file.fileName, { type: "owned" });
+    download.startDownload(file.fileHash, file.fileName, { type: "owned" }, file.fileSize);
     notifications.info("下载已开始", "可在右下角查看下载进度");
   }
 

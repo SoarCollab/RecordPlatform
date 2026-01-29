@@ -116,7 +116,7 @@
     download.startDownload(file.fileHash, file.fileName, {
       type: sourceType,
       shareCode: data.code,
-    });
+    }, file.fileSize);
 
     notifications.info("下载已开始", "可在右下角查看下载进度");
   }

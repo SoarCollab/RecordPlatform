@@ -340,7 +340,38 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
   const abortController = new AbortController();
   updateTask(taskId, { abortController });
 
+  let fileHandle: unknown | null = null;
+
   try {
+    // Step 0: Prompt save picker immediately (preserve user activation)
+    const showSaveFilePicker = (
+      window as unknown as {
+        showSaveFilePicker?: (options?: {
+          suggestedName?: string;
+        }) => Promise<unknown>;
+      }
+    ).showSaveFilePicker;
+
+    if (!showSaveFilePicker) {
+      throw new Error("Streaming download not supported in this browser");
+    }
+
+    fileHandle = await showSaveFilePicker({
+      suggestedName: task.fileName,
+    });
+
+    // If paused/cancelled while picker was open, stop here
+    if (abortController.signal.aborted) {
+      const currentTask = getTask(taskId);
+      if (currentTask?.status !== "paused") {
+        updateTask(taskId, {
+          status: "cancelled",
+          abortController: null,
+        });
+      }
+      return;
+    }
+
     // Step 1: Fetch presigned URLs if needed
     let urls = task.presignedUrls;
     let initialKey = task.initialKey;
@@ -388,10 +419,17 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
       totalChunks,
       initialKey: initialKey!,
       presignedUrls: urls,
+      fileHandle,
       signal: abortController.signal,
       onProgress: (phase: StreamingPhase, current: number, total: number) => {
         const currentTask = getTask(taskId);
-        if (!currentTask || currentTask.status === "cancelled") return;
+        if (
+          !currentTask ||
+          currentTask.status === "cancelled" ||
+          currentTask.status === "paused"
+        ) {
+          return;
+        }
 
         const progress = Math.round((current / total) * 100);
 
@@ -423,10 +461,18 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
 
     // Check result
     if (!result.success) {
-      if (
-        result.error === "Download cancelled" ||
-        result.error === "File save cancelled by user"
-      ) {
+      if (result.error === "Download cancelled") {
+        const currentTask = getTask(taskId);
+        if (currentTask?.status !== "paused") {
+          updateTask(taskId, {
+            status: "cancelled",
+            abortController: null,
+          });
+        }
+        return;
+      }
+
+      if (result.error === "File save cancelled by user") {
         updateTask(taskId, {
           status: "cancelled",
           abortController: null,
@@ -458,6 +504,15 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
           abortController: null,
         });
       }
+      return;
+    }
+
+    // User cancelled the save picker
+    if (err.name === "AbortError") {
+      updateTask(taskId, {
+        status: "cancelled",
+        abortController: null,
+      });
       return;
     }
 
@@ -544,9 +599,14 @@ async function startDownload(
 
   // Determine initial strategy
   let strategy: DownloadStrategy = forceStrategy ?? "inmemory";
-  if (!forceStrategy && fileSize) {
-    const check = checkFileSize(fileSize);
-    strategy = check.decision.strategy;
+  if (!forceStrategy) {
+    if (fileSize) {
+      const check = checkFileSize(fileSize);
+      strategy = check.decision.strategy;
+    } else if (source.type === "owned" && canUseStreaming()) {
+      // If size is unknown, prefer streaming (avoids OOM on large files).
+      strategy = "streaming";
+    }
   }
 
   const task: DownloadTask = {

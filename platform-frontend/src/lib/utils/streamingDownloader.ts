@@ -32,6 +32,7 @@ interface FileSystemWritableFileStreamLocal {
   write(data: BufferSource | Blob | string): Promise<void>;
   seek(position: number): Promise<void>;
   truncate(size: number): Promise<void>;
+  abort?(reason?: unknown): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -55,6 +56,12 @@ export interface StreamingDownloadOptions {
   initialKey: string;
   /** Presigned URLs for each chunk (ordered) */
   presignedUrls: string[];
+  /**
+   * Optional file handle obtained earlier via `showSaveFilePicker`.
+   * Useful to preserve user activation when the caller must await other work
+   * (e.g. presigned URL fetch) before starting the download.
+   */
+  fileHandle?: unknown;
   /** AbortSignal for cancellation */
   signal?: AbortSignal;
   /** Progress callback */
@@ -145,6 +152,20 @@ function toArrayBuffer(data: Uint8Array): ArrayBuffer {
   const buffer = new ArrayBuffer(data.byteLength);
   new Uint8Array(buffer).set(data);
   return buffer;
+}
+
+async function discardWritable(
+  writable: FileSystemWritableFileStreamLocal | null,
+): Promise<void> {
+  if (!writable) return;
+
+  if (typeof writable.abort === "function") {
+    try {
+      await writable.abort("Discard partial download");
+    } catch {
+      // Ignore
+    }
+  }
 }
 
 // ===== Main Streaming Download Function =====
@@ -257,13 +278,16 @@ export async function executeStreamingDownload(
   } catch (error) {
     const err = error as Error;
 
-    // Clean up
-    if (writable) {
-      try {
-        await writable.close();
-      } catch {
-        // Ignore close errors
-      }
+    // Discard partial file (avoid committing corrupt output)
+    await discardWritable(writable);
+
+    // Download was cancelled
+    if (signal?.aborted || err.message === "Download cancelled") {
+      return {
+        success: false,
+        error: "Download cancelled",
+        bytesWritten,
+      };
     }
 
     // User cancelled the save picker
@@ -271,15 +295,6 @@ export async function executeStreamingDownload(
       return {
         success: false,
         error: "File save cancelled by user",
-        bytesWritten,
-      };
-    }
-
-    // Download was cancelled
-    if (signal?.aborted || err.message === "Download cancelled") {
-      return {
-        success: false,
-        error: "Download cancelled",
         bytesWritten,
       };
     }
@@ -309,6 +324,7 @@ export async function executeBufferedStreamingDownload(
     totalChunks,
     initialKey,
     presignedUrls,
+    fileHandle: providedFileHandle,
     signal,
     onProgress,
   } = options;
@@ -333,18 +349,22 @@ export async function executeBufferedStreamingDownload(
     onProgress?.("preparing", 0, totalChunks);
 
     // Show save file picker
-    const showSaveFilePicker = (
-      window as unknown as {
-        showSaveFilePicker: (
-          options?: SaveFilePickerOptionsLocal,
-        ) => Promise<FileSystemFileHandleLocal>;
-      }
-    ).showSaveFilePicker;
+    const fileHandle: FileSystemFileHandleLocal =
+      (providedFileHandle as FileSystemFileHandleLocal | undefined) ??
+      (await (
+        window as unknown as {
+          showSaveFilePicker: (
+            options?: SaveFilePickerOptionsLocal,
+          ) => Promise<FileSystemFileHandleLocal>;
+        }
+      ).showSaveFilePicker({
+        suggestedName: fileName,
+        types: buildFileTypeFilters(contentType, fileName),
+      }));
 
-    const fileHandle = await showSaveFilePicker({
-      suggestedName: fileName,
-      types: buildFileTypeFilters(contentType, fileName),
-    });
+    if (signal?.aborted) {
+      throw new Error("Download cancelled");
+    }
 
     writable = await fileHandle.createWritable();
 
@@ -427,26 +447,20 @@ export async function executeBufferedStreamingDownload(
   } catch (error) {
     const err = error as Error;
 
-    if (writable) {
-      try {
-        await writable.close();
-      } catch {
-        // Ignore
-      }
+    await discardWritable(writable);
+
+    if (signal?.aborted || err.message === "Download cancelled") {
+      return {
+        success: false,
+        error: "Download cancelled",
+        bytesWritten,
+      };
     }
 
     if (err.name === "AbortError") {
       return {
         success: false,
         error: "File save cancelled by user",
-        bytesWritten,
-      };
-    }
-
-    if (signal?.aborted || err.message === "Download cancelled") {
-      return {
-        success: false,
-        error: "Download cancelled",
         bytesWritten,
       };
     }
