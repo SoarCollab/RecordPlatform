@@ -121,6 +121,129 @@ sequenceDiagram
     Backend-->>Client: SSE: status update
 ```
 
+### File Download Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+
+    participant Client
+    participant Backend
+    participant Storage as platform-storage
+    participant S3 as S3 Cluster
+
+    Note over Client, Backend: Phase 1: Get Download Info
+    Client->>Backend: GET /files/{fileId}/download-info
+    Backend->>Backend: Verify permissions & get file metadata
+    Backend->>Storage: RPC: generatePresignedUrls()
+    Storage->>S3: Generate presigned URLs
+    S3-->>Storage: Presigned URL list
+    Storage-->>Backend: URLs + Decrypt key chain
+    Backend-->>Client: 200 OK (URLs, DecryptKeys, ChunkInfo)
+
+    Note over Client, S3: Phase 2: Concurrent Chunk Download
+    par Concurrent downloads
+        Client->>S3: GET presigned URL (chunk 1)
+        S3-->>Client: Encrypted chunk data
+    and
+        Client->>S3: GET presigned URL (chunk 2)
+        S3-->>Client: Encrypted chunk data
+    and
+        Client->>S3: GET presigned URL (chunk N)
+        S3-->>Client: Encrypted chunk data
+    end
+
+    Note over Client: Phase 3: Decrypt & Assemble
+    Client->>Client: Decrypt chunks in key chain order
+    Client->>Client: Merge chunks & trigger browser download
+```
+
+**Download Strategy Comparison**:
+
+| Strategy | Use Case | Characteristics |
+|----------|----------|-----------------|
+| **Memory Mode** | Small files (< 50MB) | Load all chunks into memory then decrypt, fast |
+| **Streaming Mode** | Large files (≥ 50MB) | Uses StreamSaver.js, download while writing, low memory |
+| **Backend Proxy** | Special scenarios | Backend proxies download, for environments without direct S3 access |
+
+**Key Chain Decryption**: Each chunk is encrypted with an independent key. During download, keys are matched by `chunkIndex` order for decryption.
+
+### File Sharing Flow
+
+#### Link Sharing
+
+```mermaid
+sequenceDiagram
+    autonumber
+
+    participant Owner as File Owner
+    participant Backend
+    participant Chain as FISCO BCOS
+    participant DB as MySQL
+    participant Visitor
+
+    Note over Owner, Chain: Phase 1: Generate Share
+    Owner->>Backend: POST /files/{fileId}/share
+    Backend->>Chain: RPC: generateSharingCode()
+    Chain->>Chain: Generate share code & store metadata
+    Chain-->>Backend: ShareCode
+    Backend->>DB: Sync share record
+    Backend-->>Owner: 200 OK (ShareCode, ShareUrl)
+
+    Note over Visitor, DB: Phase 2: Access Share
+    Visitor->>Backend: GET /share/{shareCode}
+    Backend->>DB: Query share record
+    alt Database hit
+        DB-->>Backend: Share info
+    else Database miss
+        Backend->>Chain: RPC: querySharingInfo()
+        Chain-->>Backend: Share info
+    end
+    Backend->>Backend: Validate expiry & access password
+    Backend->>DB: Log access
+    Backend-->>Visitor: 200 OK (FileInfo)
+```
+
+#### Friend Sharing
+
+```mermaid
+sequenceDiagram
+    autonumber
+
+    participant Owner as File Owner
+    participant Backend
+    participant DB as MySQL
+    participant SSE as SSE Manager
+    participant Friend
+
+    Note over Owner, DB: Phase 1: Initiate Share
+    Owner->>Backend: POST /friends/{friendId}/share-file
+    Backend->>DB: Verify friendship
+    Backend->>DB: Create friend share record
+    Backend->>SSE: Push share notification
+    SSE--)Friend: SSE: friend-file-shared
+    Backend-->>Owner: 200 OK
+
+    Note over Friend, DB: Phase 2: View Shares
+    Friend->>Backend: GET /friends/shared-files
+    Backend->>DB: Query received shares
+    Backend->>DB: Update read status
+    Backend-->>Friend: 200 OK (SharedFiles)
+
+    Note over Friend, Backend: Phase 3: Download Shared File
+    Friend->>Backend: GET /friends/shared-files/{shareId}/download-info
+    Backend->>Backend: Query file using original uploader ID
+    Backend-->>Friend: 200 OK (DownloadInfo)
+```
+
+**Share Type Comparison**:
+
+| Type | Access Control | Expiry | Characteristics |
+|------|----------------|--------|-----------------|
+| **Public Share** | None | Configurable | Anyone can access via link |
+| **Private Share** | Password | Configurable | Password required for access |
+| **Friend Share** | Friendship | Permanent | Only specified friend can view, supports read status |
+
 ### Saga Compensation Flow
 
 | Step          | Forward Action         | Compensation              |

@@ -134,6 +134,129 @@ sequenceDiagram
     Backend--)Client: SSE: UPLOAD_COMPLETED
 ```
 
+### 文件下载流程
+
+```mermaid
+sequenceDiagram
+    autonumber
+
+    participant Client as 客户端
+    participant Backend as platform-backend
+    participant Storage as platform-storage
+    participant S3 as S3 Cluster
+
+    Note over Client, Backend: 阶段 1: 获取下载信息
+    Client->>Backend: GET /files/{fileId}/download-info
+    Backend->>Backend: 校验权限 & 获取文件元数据
+    Backend->>Storage: RPC: generatePresignedUrls()
+    Storage->>S3: 生成预签名 URL
+    S3-->>Storage: 预签名 URL 列表
+    Storage-->>Backend: URL + 解密密钥链
+    Backend-->>Client: 200 OK (URLs, DecryptKeys, ChunkInfo)
+
+    Note over Client, S3: 阶段 2: 并发下载分片
+    par 并发下载
+        Client->>S3: GET 预签名 URL (分片 1)
+        S3-->>Client: 加密分片数据
+    and
+        Client->>S3: GET 预签名 URL (分片 2)
+        S3-->>Client: 加密分片数据
+    and
+        Client->>S3: GET 预签名 URL (分片 N)
+        S3-->>Client: 加密分片数据
+    end
+
+    Note over Client: 阶段 3: 解密 & 组装
+    Client->>Client: 按密钥链顺序解密分片
+    Client->>Client: 合并分片 & 触发浏览器下载
+```
+
+**下载策略对比**：
+
+| 策略 | 适用场景 | 特点 |
+|------|----------|------|
+| **内存模式** | 小文件 (< 50MB) | 全部分片加载到内存后解密，速度快 |
+| **流式模式** | 大文件 (≥ 50MB) | 使用 StreamSaver.js，边下载边写入，内存占用低 |
+| **后端代理** | 特殊场景 | 后端代理下载，适用于无法直连 S3 的环境 |
+
+**密钥链解密**：每个分片使用独立密钥加密，下载时按 `chunkIndex` 顺序匹配密钥进行解密。
+
+### 文件分享流程
+
+#### 普通分享（链接分享）
+
+```mermaid
+sequenceDiagram
+    autonumber
+
+    participant Owner as 文件所有者
+    participant Backend as platform-backend
+    participant Chain as FISCO BCOS
+    participant DB as MySQL
+    participant Visitor as 访问者
+
+    Note over Owner, Chain: 阶段 1: 生成分享
+    Owner->>Backend: POST /files/{fileId}/share
+    Backend->>Chain: RPC: generateSharingCode()
+    Chain->>Chain: 生成分享码 & 存储元数据
+    Chain-->>Backend: ShareCode
+    Backend->>DB: 同步分享记录
+    Backend-->>Owner: 200 OK (ShareCode, ShareUrl)
+
+    Note over Visitor, DB: 阶段 2: 访问分享
+    Visitor->>Backend: GET /share/{shareCode}
+    Backend->>DB: 查询分享记录
+    alt 数据库命中
+        DB-->>Backend: 分享信息
+    else 数据库未命中
+        Backend->>Chain: RPC: querySharingInfo()
+        Chain-->>Backend: 分享信息
+    end
+    Backend->>Backend: 校验有效期 & 访问密码
+    Backend->>DB: 记录访问日志
+    Backend-->>Visitor: 200 OK (FileInfo)
+```
+
+#### 好友分享
+
+```mermaid
+sequenceDiagram
+    autonumber
+
+    participant Owner as 文件所有者
+    participant Backend as platform-backend
+    participant DB as MySQL
+    participant SSE as SSE Manager
+    participant Friend as 好友
+
+    Note over Owner, DB: 阶段 1: 发起分享
+    Owner->>Backend: POST /friends/{friendId}/share-file
+    Backend->>DB: 校验好友关系
+    Backend->>DB: 创建好友分享记录
+    Backend->>SSE: 推送分享通知
+    SSE--)Friend: SSE: friend-file-shared
+    Backend-->>Owner: 200 OK
+
+    Note over Friend, DB: 阶段 2: 查看分享
+    Friend->>Backend: GET /friends/shared-files
+    Backend->>DB: 查询收到的分享列表
+    Backend->>DB: 更新已读状态
+    Backend-->>Friend: 200 OK (SharedFiles)
+
+    Note over Friend, Backend: 阶段 3: 下载分享文件
+    Friend->>Backend: GET /friends/shared-files/{shareId}/download-info
+    Backend->>Backend: 使用原上传者 ID 查询文件
+    Backend-->>Friend: 200 OK (DownloadInfo)
+```
+
+**分享类型对比**：
+
+| 类型 | 访问控制 | 有效期 | 特点 |
+|------|----------|--------|------|
+| **公开分享** | 无限制 | 可设置 | 任何人可通过链接访问 |
+| **私密分享** | 访问密码 | 可设置 | 需要密码才能访问 |
+| **好友分享** | 好友关系 | 永久 | 仅指定好友可见，支持已读状态 |
+
 ### Saga 补偿流程
 
 | 步骤          | 正向操作     | 补偿操作         |
