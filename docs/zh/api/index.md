@@ -17,9 +17,11 @@ http://localhost:8000/record-platform
 
 ## 认证
 
-除 `/api/v1/auth/**` 外，所有端点都需要 JWT 认证。
+除 `/api/v1/auth/**` 和 `/api/v1/share/**` 外，所有端点都需要 JWT 认证。
 
 ### 获取 Token
+
+登录功能通过 Spring Security 处理（`/api/v1/auth/login`），不在 AuthorizeController 中。
 
 ```http
 POST /api/v1/auth/login
@@ -55,10 +57,14 @@ Authorization: Bearer <token>
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| POST | `/api/v1/auth/login` | 用户登录 |
+| GET | `/api/v1/auth/ask-code` | 请求邮件验证码 |
 | POST | `/api/v1/auth/register` | 用户注册 |
-| POST | `/api/v1/auth/logout` | 用户登出 |
-| GET | `/api/v1/auth/me` | 获取当前用户信息 |
+| POST | `/api/v1/auth/reset-confirm` | 密码重置确认 |
+| POST | `/api/v1/auth/reset-password` | 执行密码重置 |
+| POST | `/api/v1/auth/refresh` | 刷新访问令牌 |
+| POST | `/api/v1/auth/sse-token` | 获取 SSE 短期令牌 |
+
+> **注意**：登录功能通过 Spring Security 处理，用户信息获取在 `/api/v1/users/info`
 
 #### 用户注册
 
@@ -95,32 +101,34 @@ Content-Type: application/json
 | POST | `/api/v1/files/upload/cancel` | 取消上传 |
 | GET | `/api/v1/files/upload/check` | 检查上传状态 |
 | GET | `/api/v1/files/upload/progress` | 获取上传进度 |
-| GET | `/api/v1/files` | 列出用户文件 |
-| GET | `/api/v1/files/{hash}` | 获取文件详情 |
-| GET | `/api/v1/files/{hash}/download` | 下载文件 |
-| DELETE | `/api/v1/files/{hash}` | 删除文件 |
-| GET | `/api/v1/files/search` | 搜索文件 |
+| GET | `/api/v1/files/{id}` | 根据 ID 获取文件详情 |
+| GET | `/api/v1/files/byHash` | 通过哈希获取文件（查询参数：hash）|
+| GET | `/api/v1/files/list` | 获取用户文件列表 |
+| GET | `/api/v1/files/page` | 分页获取用户文件 |
+| GET | `/api/v1/files/address` | 获取文件下载地址 |
+| GET | `/api/v1/files/decryptInfo` | 获取文件解密信息 |
+| GET | `/api/v1/files/download` | 下载文件（查询参数：fileHash）|
+| DELETE | `/api/v1/files/delete` | 批量删除文件（查询参数：identifiers；支持文件 hash 或文件 id）|
 
 ### 图片
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
 | POST | `/api/v1/images/upload/avatar` | 上传用户头像 |
-| POST | `/api/v1/images/upload/image` | 上传通用图片 |
-| GET | `/api/v1/images/download/**` | 下载图片 |
+| POST | `/api/v1/images/upload/image` | 上传图片 |
+| GET | `/api/v1/images/download/images/**` | 下载图片 |
 
 ### 文件分享
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
+| GET | `/api/v1/share/{shareCode}/info` | 获取分享详情（公开，无需认证）|
 | POST | `/api/v1/files/share` | 创建分享链接 |
-| GET | `/api/v1/share/{code}/info` | 获取分享信息（公开）|
-| GET | `/api/v1/files/share/{code}` | 访问分享文件 |
-| GET | `/api/v1/files/shares` | 列出用户分享 |
-| DELETE | `/api/v1/files/share/{code}` | 撤销分享 |
-| GET | `/api/v1/files/share/{code}/logs` | 获取分享访问日志 |
+| PUT | `/api/v1/files/share` | 更新分享（shareCode 在请求体中）|
+| DELETE | `/api/v1/files/share/{shareCode}` | 取消分享 |
+| GET | `/api/v1/files/shares` | 获取用户分享列表 |
 
-#### 获取分享信息（公开）
+#### 获取分享详情（公开）
 
 公开端点 - 无需认证。
 
@@ -160,36 +168,43 @@ GET /api/v1/share/{shareCode}/info
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| GET | `/api/v1/admin/files` | 列出所有文件（管理员） |
-| GET | `/api/v1/admin/files/{hash}` | 文件详情（含溯源链） |
-| PUT | `/api/v1/admin/files/{hash}/status` | 更新文件状态 |
-| DELETE | `/api/v1/admin/files/{hash}` | 强制删除文件 |
-| GET | `/api/v1/admin/files/shares` | 列出所有分享 |
-| DELETE | `/api/v1/admin/files/shares/{code}` | 强制取消分享 |
-| GET | `/api/v1/admin/files/shares/{code}/logs` | 分享访问日志 |
-| GET | `/api/v1/admin/files/shares/{code}/stats` | 分享访问统计 |
+| GET | `/api/v1/admin/files` | 获取所有文件列表（分页）|
+| GET | `/api/v1/admin/files/{id}` | 获取文件详情（按 ID）|
+| PUT | `/api/v1/admin/files/{id}/status` | 更新文件状态 |
+| DELETE | `/api/v1/admin/files/{id}` | 强制删除文件 |
+| GET | `/api/v1/admin/files/shares` | 获取所有分享列表 |
+| DELETE | `/api/v1/admin/files/shares/{shareCode}` | 强制取消分享 |
+| GET | `/api/v1/admin/files/shares/{shareCode}/logs` | 分享访问日志 |
+| GET | `/api/v1/admin/files/shares/{shareCode}/stats` | 分享访问统计 |
 
 ### 权限管理（仅管理员）
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| GET | `/api/v1/system/permissions/users` | 列出所有用户 |
-| PUT | `/api/v1/system/permissions/users/{id}/role` | 更新用户角色 |
-| GET | `/api/v1/system/permissions/roles` | 列出所有角色 |
-| GET | `/api/v1/system/permissions/permissions` | 列出所有权限 |
+| GET | `/api/v1/system/permissions` | 获取权限树 |
+| GET | `/api/v1/system/permissions/list` | 获取权限列表（分页）|
+| GET | `/api/v1/system/permissions/modules` | 获取所有模块名列表 |
+| POST | `/api/v1/system/permissions` | 创建权限 |
+| PUT | `/api/v1/system/permissions/{id}` | 更新权限 |
+| DELETE | `/api/v1/system/permissions/{id}` | 删除权限 |
+| GET | `/api/v1/system/permissions/roles/{role}` | 获取角色的权限列表 |
+| POST | `/api/v1/system/permissions/roles/{role}/grant` | 为角色授予权限 |
+| DELETE | `/api/v1/system/permissions/roles/{role}/revoke` | 撤销角色权限（查询参数：permissionCode）|
 
 ### 工单
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
 | POST | `/api/v1/tickets` | 创建支持工单 |
-| GET | `/api/v1/tickets` | 列出用户工单 |
+| GET | `/api/v1/tickets` | 获取用户工单列表 |
 | GET | `/api/v1/tickets/{id}` | 获取工单详情 |
 | POST | `/api/v1/tickets/{id}/reply` | 回复工单 |
-| PUT | `/api/v1/tickets/{id}/status` | 更新工单状态 |
-| GET | `/api/v1/tickets/admin` | 列出所有工单（管理员）|
+| PUT | `/api/v1/tickets/{id}` | 更新工单 |
+| POST | `/api/v1/tickets/{id}/close` | 关闭工单 |
+| POST | `/api/v1/tickets/{id}/confirm` | 确认完成 |
+| GET | `/api/v1/tickets/admin/list` | 获取所有工单列表（管理员）|
 | PUT | `/api/v1/tickets/admin/{id}/assign` | 分配处理人（管理员）|
-| PUT | `/api/v1/tickets/admin/{id}/status` | 更新状态（管理员）|
+| PUT | `/api/v1/tickets/admin/{id}/status` | 更新工单状态（管理员）|
 
 #### 创建工单
 
@@ -302,11 +317,11 @@ Content-Type: application/json
 | 方法 | 端点 | 说明 |
 |------|------|------|
 | POST | `/api/v1/friend-shares` | 分享文件给好友 |
-| GET | `/api/v1/friend-shares/received` | 获取收到的分享 |
-| GET | `/api/v1/friend-shares/sent` | 获取发送的分享 |
-| GET | `/api/v1/friend-shares/{id}` | 获取分享详情 |
-| POST | `/api/v1/friend-shares/{id}/read` | 标记为已读 |
-| DELETE | `/api/v1/friend-shares/{id}` | 取消分享 |
+| GET | `/api/v1/friend-shares/received` | 获取收到的好友分享 |
+| GET | `/api/v1/friend-shares/sent` | 获取发送的好友分享 |
+| GET | `/api/v1/friend-shares/{shareId}` | 获取分享详情 |
+| POST | `/api/v1/friend-shares/{shareId}/read` | 标记分享已读 |
+| DELETE | `/api/v1/friend-shares/{shareId}` | 取消分享 |
 | GET | `/api/v1/friend-shares/unread-count` | 获取未读数量 |
 
 #### 分享文件给好友
@@ -327,6 +342,44 @@ Content-Type: application/json
 | friendId | string | 是 | 好友的外部 ID |
 | fileHashes | string[] | 是 | 要分享的文件哈希数组 |
 | message | string | 否 | 分享附言（最大 255 字符）|
+
+### 会话
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/v1/conversations` | 获取会话列表（分页）|
+| GET | `/api/v1/conversations/{id}` | 获取会话详情及消息列表 |
+| GET | `/api/v1/conversations/unread-count` | 获取未读会话数 |
+| DELETE | `/api/v1/conversations/{id}` | 删除会话 |
+
+### 消息
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| POST | `/api/v1/messages` | 发送私信 |
+| POST | `/api/v1/messages/to/{receiverId}` | 发送私信（按接收者 ID）|
+| GET | `/api/v1/messages/unread-count` | 获取未读私信总数 |
+
+### 公告
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/v1/announcements/latest` | 获取最新公告 |
+| GET | `/api/v1/announcements` | 获取公告列表（分页）|
+| GET | `/api/v1/announcements/{id}` | 获取公告详情 |
+| GET | `/api/v1/announcements/unread-count` | 获取未读公告数 |
+| POST | `/api/v1/announcements/{id}/read` | 标记公告已读 |
+| POST | `/api/v1/announcements` | 发布公告（管理员）|
+| PUT | `/api/v1/announcements/{id}` | 更新公告（管理员）|
+
+### 用户账户
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/v1/users/info` | 获取用户信息 |
+| PUT | `/api/v1/users/info` | 更新用户信息 |
+| POST | `/api/v1/users/modify-email` | 修改邮箱地址 |
+| POST | `/api/v1/users/change-password` | 修改密码 |
 
 ### SSE（服务器推送事件）
 
@@ -564,4 +617,3 @@ eventSource.onmessage = (event) => {
 - `friend-share` - 好友分享了文件给你
 - `heartbeat` - 连接心跳
 - `connected` - 连接建立成功
-

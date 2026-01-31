@@ -109,13 +109,13 @@ sequenceDiagram
     participant Chain as FISCO BCOS
 
     Note over Client, Backend: 阶段 1: 初始化上传
-    Client->>Backend: POST /files/init (Hash, Size)
+    Client->>Backend: POST /api/v1/files/upload/start
     Backend->>Backend: 校验配额 & 文件是否存在
-    Backend-->>Client: 200 OK (UploadID, ChunkSize)
+    Backend-->>Client: 200 OK (ClientId, ChunkSize)
 
     Note over Client, S3: 阶段 2: 分片上传
     loop 每个分片
-        Client->>Backend: PUT /files/chunk/{index}
+        Client->>Backend: POST /api/v1/files/upload/chunk
         Backend->>Storage: RPC: storeChunk()
         Storage->>S3: PutObject (加密)
         S3-->>Storage: 成功
@@ -124,7 +124,7 @@ sequenceDiagram
     end
 
     Note over Client, Chain: 阶段 3: 存证 & 确认
-    Client->>Backend: POST /files/finish
+    Client->>Backend: POST /api/v1/files/upload/complete
     Backend->>Backend: 合并分片元数据
     Backend->>Chain: 异步 Transaction (Saga)
     Chain-->>Backend: TxHash
@@ -146,13 +146,17 @@ sequenceDiagram
     participant S3 as S3 Cluster
 
     Note over Client, Backend: 阶段 1: 获取下载信息
-    Client->>Backend: GET /files/{fileId}/download-info
+    Client->>Backend: GET /api/v1/files/address
     Backend->>Backend: 校验权限 & 获取文件元数据
     Backend->>Storage: RPC: generatePresignedUrls()
     Storage->>S3: 生成预签名 URL
     S3-->>Storage: 预签名 URL 列表
     Storage-->>Backend: URL + 解密密钥链
-    Backend-->>Client: 200 OK (URLs, DecryptKeys, ChunkInfo)
+    Backend-->>Client: 200 OK (URLs, ChunkInfo)
+
+    Note over Client, Backend: 阶段 1.5: 获取解密信息
+    Client->>Backend: GET /api/v1/files/decryptInfo
+    Backend-->>Client: 200 OK (DecryptKeys)
 
     Note over Client, S3: 阶段 2: 并发下载分片
     par 并发下载
@@ -196,7 +200,7 @@ sequenceDiagram
     participant Visitor as 访问者
 
     Note over Owner, Chain: 阶段 1: 生成分享
-    Owner->>Backend: POST /files/{fileId}/share
+    Owner->>Backend: POST /api/v1/files/share
     Backend->>Chain: RPC: generateSharingCode()
     Chain->>Chain: 生成分享码 & 存储元数据
     Chain-->>Backend: ShareCode
@@ -204,7 +208,7 @@ sequenceDiagram
     Backend-->>Owner: 200 OK (ShareCode, ShareUrl)
 
     Note over Visitor, DB: 阶段 2: 访问分享
-    Visitor->>Backend: GET /share/{shareCode}
+    Visitor->>Backend: GET /api/v1/share/{shareCode}/info
     Backend->>DB: 查询分享记录
     alt 数据库命中
         DB-->>Backend: 分享信息
@@ -230,7 +234,7 @@ sequenceDiagram
     participant Friend as 好友
 
     Note over Owner, DB: 阶段 1: 发起分享
-    Owner->>Backend: POST /friends/{friendId}/share-file
+    Owner->>Backend: POST /api/v1/friend-shares
     Backend->>DB: 校验好友关系
     Backend->>DB: 创建好友分享记录
     Backend->>SSE: 推送分享通知
@@ -238,13 +242,13 @@ sequenceDiagram
     Backend-->>Owner: 200 OK
 
     Note over Friend, DB: 阶段 2: 查看分享
-    Friend->>Backend: GET /friends/shared-files
+    Friend->>Backend: GET /api/v1/friend-shares/received
     Backend->>DB: 查询收到的分享列表
     Backend->>DB: 更新已读状态
     Backend-->>Friend: 200 OK (SharedFiles)
 
     Note over Friend, Backend: 阶段 3: 下载分享文件
-    Friend->>Backend: GET /friends/shared-files/{shareId}/download-info
+    Friend->>Backend: GET /api/v1/files/address (使用分享文件哈希)
     Backend->>Backend: 使用原上传者 ID 查询文件
     Backend-->>Friend: 200 OK (DownloadInfo)
 ```

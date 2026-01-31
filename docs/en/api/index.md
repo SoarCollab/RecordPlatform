@@ -17,9 +17,11 @@ http://localhost:8000/record-platform
 
 ## Authentication
 
-All endpoints except `/api/v1/auth/**` require JWT authentication.
+All endpoints except `/api/v1/auth/**` and `/api/v1/share/**` require JWT authentication.
 
 ### Get Token
+
+Login is handled by Spring Security (`/api/v1/auth/login`), not in AuthorizeController.
 
 ```http
 POST /api/v1/auth/login
@@ -55,10 +57,14 @@ Authorization: Bearer <token>
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/v1/auth/login` | User login |
+| GET | `/api/v1/auth/ask-code` | Request email verification code |
 | POST | `/api/v1/auth/register` | User registration |
-| POST | `/api/v1/auth/logout` | User logout |
-| GET | `/api/v1/auth/me` | Get current user info |
+| POST | `/api/v1/auth/reset-confirm` | Password reset confirmation |
+| POST | `/api/v1/auth/reset-password` | Execute password reset |
+| POST | `/api/v1/auth/refresh` | Refresh access token |
+| POST | `/api/v1/auth/sse-token` | Get SSE short-lived token |
+
+> **Note**: Login is handled by Spring Security. User info is available at `/api/v1/users/info`
 
 #### User Registration
 
@@ -95,32 +101,34 @@ Content-Type: application/json
 | POST | `/api/v1/files/upload/cancel` | Cancel upload |
 | GET | `/api/v1/files/upload/check` | Check upload status |
 | GET | `/api/v1/files/upload/progress` | Get upload progress |
-| GET | `/api/v1/files` | List user's files |
-| GET | `/api/v1/files/{hash}` | Get file details |
-| GET | `/api/v1/files/{hash}/download` | Download file |
-| DELETE | `/api/v1/files/{hash}` | Delete file |
-| GET | `/api/v1/files/search` | Search files |
+| GET | `/api/v1/files/{id}` | Get file details by ID |
+| GET | `/api/v1/files/byHash` | Get file by hash (query param: hash) |
+| GET | `/api/v1/files/list` | Get user's file list |
+| GET | `/api/v1/files/page` | Get user's files (paginated) |
+| GET | `/api/v1/files/address` | Get file download address |
+| GET | `/api/v1/files/decryptInfo` | Get file decrypt info |
+| GET | `/api/v1/files/download` | Download file (query param: fileHash) |
+| DELETE | `/api/v1/files/delete` | Batch delete files (query param: identifiers; supports file hash or file id) |
 
 ### Images
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/v1/images/upload/avatar` | Upload user avatar |
-| POST | `/api/v1/images/upload/image` | Upload general image |
-| GET | `/api/v1/images/download/**` | Download image |
+| POST | `/api/v1/images/upload/image` | Upload image |
+| GET | `/api/v1/images/download/images/**` | Download image |
 
 ### File Sharing
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| GET | `/api/v1/share/{shareCode}/info` | Get share details (public, no auth required) |
 | POST | `/api/v1/files/share` | Create share link |
-| GET | `/api/v1/share/{code}/info` | Get share info (public) |
-| GET | `/api/v1/files/share/{code}` | Access shared file |
-| GET | `/api/v1/files/shares` | List user's shares |
-| DELETE | `/api/v1/files/share/{code}` | Revoke share |
-| GET | `/api/v1/files/share/{code}/logs` | Get share access logs |
+| PUT | `/api/v1/files/share` | Update share (shareCode in body) |
+| DELETE | `/api/v1/files/share/{shareCode}` | Cancel share |
+| GET | `/api/v1/files/shares` | Get user's share list |
 
-#### Get Share Info (Public)
+#### Get Share Details (Public)
 
 Public endpoint - no authentication required.
 
@@ -160,36 +168,43 @@ Response:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/admin/files` | List all files (admin) |
-| GET | `/api/v1/admin/files/{hash}` | File detail with provenance |
-| PUT | `/api/v1/admin/files/{hash}/status` | Update file status |
-| DELETE | `/api/v1/admin/files/{hash}` | Force delete file |
-| GET | `/api/v1/admin/files/shares` | List all shares |
-| DELETE | `/api/v1/admin/files/shares/{code}` | Force cancel share |
-| GET | `/api/v1/admin/files/shares/{code}/logs` | Share access logs |
-| GET | `/api/v1/admin/files/shares/{code}/stats` | Share access stats |
+| GET | `/api/v1/admin/files` | Get all files (paginated) |
+| GET | `/api/v1/admin/files/{id}` | Get file details by ID |
+| PUT | `/api/v1/admin/files/{id}/status` | Update file status |
+| DELETE | `/api/v1/admin/files/{id}` | Force delete file |
+| GET | `/api/v1/admin/files/shares` | Get all shares list |
+| DELETE | `/api/v1/admin/files/shares/{shareCode}` | Force cancel share |
+| GET | `/api/v1/admin/files/shares/{shareCode}/logs` | Share access logs |
+| GET | `/api/v1/admin/files/shares/{shareCode}/stats` | Share access statistics |
 
 ### Permissions (Admin Only)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/system/permissions/users` | List all users |
-| PUT | `/api/v1/system/permissions/users/{id}/role` | Update user role |
-| GET | `/api/v1/system/permissions/roles` | List all roles |
-| GET | `/api/v1/system/permissions/permissions` | List all permissions |
+| GET | `/api/v1/system/permissions` | Get permission tree |
+| GET | `/api/v1/system/permissions/list` | Get permissions (paginated) |
+| GET | `/api/v1/system/permissions/modules` | Get all module names |
+| POST | `/api/v1/system/permissions` | Create permission |
+| PUT | `/api/v1/system/permissions/{id}` | Update permission |
+| DELETE | `/api/v1/system/permissions/{id}` | Delete permission |
+| GET | `/api/v1/system/permissions/roles/{role}` | Get permissions of a role |
+| POST | `/api/v1/system/permissions/roles/{role}/grant` | Grant permission to role |
+| DELETE | `/api/v1/system/permissions/roles/{role}/revoke` | Revoke permission from role (query param: permissionCode) |
 
 ### Tickets
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/v1/tickets` | Create support ticket |
-| GET | `/api/v1/tickets` | List user's tickets |
+| GET | `/api/v1/tickets` | Get user's ticket list |
 | GET | `/api/v1/tickets/{id}` | Get ticket details |
 | POST | `/api/v1/tickets/{id}/reply` | Reply to ticket |
-| PUT | `/api/v1/tickets/{id}/status` | Update ticket status |
-| GET | `/api/v1/tickets/admin` | List all tickets (admin) |
+| PUT | `/api/v1/tickets/{id}` | Update ticket |
+| POST | `/api/v1/tickets/{id}/close` | Close ticket |
+| POST | `/api/v1/tickets/{id}/confirm` | Confirm completion |
+| GET | `/api/v1/tickets/admin/list` | Get all tickets (admin) |
 | PUT | `/api/v1/tickets/admin/{id}/assign` | Assign handler (admin) |
-| PUT | `/api/v1/tickets/admin/{id}/status` | Update status (admin) |
+| PUT | `/api/v1/tickets/admin/{id}/status` | Update ticket status (admin) |
 
 #### Create Ticket
 
@@ -302,11 +317,11 @@ Content-Type: application/json
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/v1/friend-shares` | Share files to friend |
-| GET | `/api/v1/friend-shares/received` | Get received shares |
-| GET | `/api/v1/friend-shares/sent` | Get sent shares |
-| GET | `/api/v1/friend-shares/{id}` | Get share details |
-| POST | `/api/v1/friend-shares/{id}/read` | Mark share as read |
-| DELETE | `/api/v1/friend-shares/{id}` | Cancel share |
+| GET | `/api/v1/friend-shares/received` | Get received friend shares |
+| GET | `/api/v1/friend-shares/sent` | Get sent friend shares |
+| GET | `/api/v1/friend-shares/{shareId}` | Get share details |
+| POST | `/api/v1/friend-shares/{shareId}/read` | Mark share as read |
+| DELETE | `/api/v1/friend-shares/{shareId}` | Cancel share |
 | GET | `/api/v1/friend-shares/unread-count` | Get unread count |
 
 #### Share Files to Friend
@@ -327,6 +342,44 @@ Content-Type: application/json
 | friendId | string | Yes | Friend's external ID |
 | fileHashes | string[] | Yes | Array of file hashes to share |
 | message | string | No | Share message (max 255 chars) |
+
+### Conversations
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/conversations` | Get conversation list (paginated) |
+| GET | `/api/v1/conversations/{id}` | Get conversation details with messages |
+| GET | `/api/v1/conversations/unread-count` | Get unread conversation count |
+| DELETE | `/api/v1/conversations/{id}` | Delete conversation |
+
+### Messages
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/messages` | Send private message |
+| POST | `/api/v1/messages/to/{receiverId}` | Send private message (by receiverId) |
+| GET | `/api/v1/messages/unread-count` | Get total unread private messages |
+
+### Announcements
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/announcements/latest` | Get latest announcement |
+| GET | `/api/v1/announcements` | Get announcement list (paginated) |
+| GET | `/api/v1/announcements/{id}` | Get announcement details |
+| GET | `/api/v1/announcements/unread-count` | Get unread announcement count |
+| POST | `/api/v1/announcements/{id}/read` | Mark announcement as read |
+| POST | `/api/v1/announcements` | Publish announcement (admin) |
+| PUT | `/api/v1/announcements/{id}` | Update announcement (admin) |
+
+### User Account
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/v1/users/info` | Get user info |
+| PUT | `/api/v1/users/info` | Update user info |
+| POST | `/api/v1/users/modify-email` | Modify email address |
+| POST | `/api/v1/users/change-password` | Change password |
 
 ### SSE (Server-Sent Events)
 
@@ -564,4 +617,3 @@ Event types (kebab-case format):
 - `friend-share` - Friend shared files with you
 - `heartbeat` - Connection heartbeat
 - `connected` - Connection established
-

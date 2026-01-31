@@ -133,13 +133,17 @@ sequenceDiagram
     participant S3 as S3 Cluster
 
     Note over Client, Backend: Phase 1: Get Download Info
-    Client->>Backend: GET /files/{fileId}/download-info
+    Client->>Backend: GET /api/v1/files/address
     Backend->>Backend: Verify permissions & get file metadata
     Backend->>Storage: RPC: generatePresignedUrls()
     Storage->>S3: Generate presigned URLs
     S3-->>Storage: Presigned URL list
     Storage-->>Backend: URLs + Decrypt key chain
-    Backend-->>Client: 200 OK (URLs, DecryptKeys, ChunkInfo)
+    Backend-->>Client: 200 OK (URLs, ChunkInfo)
+
+    Note over Client, Backend: Phase 1.5: Get Decrypt Info
+    Client->>Backend: GET /api/v1/files/decryptInfo
+    Backend-->>Client: 200 OK (DecryptKeys)
 
     Note over Client, S3: Phase 2: Concurrent Chunk Download
     par Concurrent downloads
@@ -183,7 +187,7 @@ sequenceDiagram
     participant Visitor
 
     Note over Owner, Chain: Phase 1: Generate Share
-    Owner->>Backend: POST /files/{fileId}/share
+    Owner->>Backend: POST /api/v1/files/share
     Backend->>Chain: RPC: generateSharingCode()
     Chain->>Chain: Generate share code & store metadata
     Chain-->>Backend: ShareCode
@@ -191,7 +195,7 @@ sequenceDiagram
     Backend-->>Owner: 200 OK (ShareCode, ShareUrl)
 
     Note over Visitor, DB: Phase 2: Access Share
-    Visitor->>Backend: GET /share/{shareCode}
+    Visitor->>Backend: GET /api/v1/share/{shareCode}/info
     Backend->>DB: Query share record
     alt Database hit
         DB-->>Backend: Share info
@@ -217,7 +221,7 @@ sequenceDiagram
     participant Friend
 
     Note over Owner, DB: Phase 1: Initiate Share
-    Owner->>Backend: POST /friends/{friendId}/share-file
+    Owner->>Backend: POST /api/v1/friend-shares
     Backend->>DB: Verify friendship
     Backend->>DB: Create friend share record
     Backend->>SSE: Push share notification
@@ -225,13 +229,13 @@ sequenceDiagram
     Backend-->>Owner: 200 OK
 
     Note over Friend, DB: Phase 2: View Shares
-    Friend->>Backend: GET /friends/shared-files
+    Friend->>Backend: GET /api/v1/friend-shares/received
     Backend->>DB: Query received shares
     Backend->>DB: Update read status
     Backend-->>Friend: 200 OK (SharedFiles)
 
     Note over Friend, Backend: Phase 3: Download Shared File
-    Friend->>Backend: GET /friends/shared-files/{shareId}/download-info
+    Friend->>Backend: GET /api/v1/files/address (with shared file hash)
     Backend->>Backend: Query file using original uploader ID
     Backend-->>Friend: 200 OK (DownloadInfo)
 ```
