@@ -274,6 +274,6 @@ public class FriendFileShareServiceImpl extends ServiceImpl<FriendFileShareMappe
 
         return fileHashes.stream()
                 .map(hash -> hashToName.getOrDefault(hash, "未知文件"))
-                .collect(Collectors.toList());
+                .toList();
     }
 }

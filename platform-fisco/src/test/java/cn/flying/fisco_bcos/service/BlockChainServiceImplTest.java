@@ -53,11 +53,12 @@ class BlockChainServiceImplTest {
         @Test
         @DisplayName("Should store file successfully")
         void storeFile_shouldStoreSuccessfully() {
-            StoreFileRequest request = new StoreFileRequest();
-            request.setUploader("user123");
-            request.setFileName("test.pdf");
-            request.setContent("file_content_hash");
-            request.setParam("{\"size\":1024}");
+            StoreFileRequest request = new StoreFileRequest(
+                    "user123",
+                    "test.pdf",
+                    "{\"size\":1024}",
+                    "file_content_hash"
+            );
             
             ChainReceipt receipt = new ChainReceipt();
             receipt.setSuccess(true);
@@ -70,8 +71,8 @@ class BlockChainServiceImplTest {
             Result<StoreFileResponse> result = blockChainService.storeFile(request);
             
             assertThat(result.getCode()).isEqualTo(200);
-            assertThat(result.getData().getTransactionHash()).isEqualTo("0xabc123");
-            assertThat(result.getData().getFileHash()).isEqualTo("sha256_file_hash");
+            assertThat(result.getData().transactionHash()).isEqualTo("0xabc123");
+            assertThat(result.getData().fileHash()).isEqualTo("sha256_file_hash");
             
             verify(fiscoMetrics).recordSuccess();
             verify(fiscoMetrics).stopStoreTimer(timerSample);
@@ -81,11 +82,12 @@ class BlockChainServiceImplTest {
         @DisplayName("Should handle store file exception")
         @SilenceLoggers("cn.flying.fisco_bcos.exception.BlockChainExceptionHandler")
         void storeFile_shouldHandleException() {
-            StoreFileRequest request = new StoreFileRequest();
-            request.setUploader("user123");
-            request.setFileName("test.pdf");
-            request.setContent("content");
-            request.setParam("{}");
+            StoreFileRequest request = new StoreFileRequest(
+                    "user123",
+                    "test.pdf",
+                    "{}",
+                    "content"
+            );
 
             when(chainAdapter.storeFile(anyString(), anyString(), anyString(), anyString()))
                     .thenThrow(new RuntimeException("Connection failed"));
@@ -104,10 +106,11 @@ class BlockChainServiceImplTest {
         @Test
         @DisplayName("Should share files successfully")
         void shareFiles_shouldShareSuccessfully() {
-            ShareFilesRequest request = new ShareFilesRequest();
-            request.setUploader("user123");
-            request.setFileHashList(List.of("hash1", "hash2"));
-            request.setExpireMinutes(60);
+            ShareFilesRequest request = new ShareFilesRequest(
+                    "user123",
+                    List.of("hash1", "hash2"),
+                    60
+            );
             
             ChainReceipt receipt = new ChainReceipt();
             receipt.setSuccess(true);
@@ -127,10 +130,11 @@ class BlockChainServiceImplTest {
         @Test
         @DisplayName("Should return error for null expire minutes")
         void shareFiles_shouldReturnErrorForNullExpireMinutes() {
-            ShareFilesRequest request = new ShareFilesRequest();
-            request.setUploader("user123");
-            request.setFileHashList(List.of("hash1"));
-            request.setExpireMinutes(null);
+            ShareFilesRequest request = new ShareFilesRequest(
+                    "user123",
+                    List.of("hash1"),
+                    null
+            );
             
             Result<String> result = blockChainService.shareFiles(request);
             
@@ -141,10 +145,11 @@ class BlockChainServiceImplTest {
         @Test
         @DisplayName("Should return error for expire minutes exceeding max")
         void shareFiles_shouldReturnErrorForExceedingExpireMinutes() {
-            ShareFilesRequest request = new ShareFilesRequest();
-            request.setUploader("user123");
-            request.setFileHashList(List.of("hash1"));
-            request.setExpireMinutes(50000);
+            ShareFilesRequest request = new ShareFilesRequest(
+                    "user123",
+                    List.of("hash1"),
+                    50000
+            );
             
             Result<String> result = blockChainService.shareFiles(request);
             
@@ -155,10 +160,11 @@ class BlockChainServiceImplTest {
         @Test
         @DisplayName("Should return error for zero expire minutes")
         void shareFiles_shouldReturnErrorForZeroExpireMinutes() {
-            ShareFilesRequest request = new ShareFilesRequest();
-            request.setUploader("user123");
-            request.setFileHashList(List.of("hash1"));
-            request.setExpireMinutes(0);
+            ShareFilesRequest request = new ShareFilesRequest(
+                    "user123",
+                    List.of("hash1"),
+                    0
+            );
             
             Result<String> result = blockChainService.shareFiles(request);
             
@@ -186,9 +192,9 @@ class BlockChainServiceImplTest {
             Result<SharingVO> result = blockChainService.getSharedFiles(shareCode);
             
             assertThat(result.getCode()).isEqualTo(200);
-            assertThat(result.getData().getUploader()).isEqualTo("user123");
-            assertThat(result.getData().getFileHashList()).hasSize(2);
-            assertThat(result.getData().getIsValid()).isTrue();
+            assertThat(result.getData().uploader()).isEqualTo("user123");
+            assertThat(result.getData().fileHashList()).hasSize(2);
+            assertThat(result.getData().isValid()).isTrue();
         }
 
         @Test
@@ -224,7 +230,7 @@ class BlockChainServiceImplTest {
             
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData()).hasSize(2);
-            assertThat(result.getData().get(0).getFileName()).isEqualTo("file1.pdf");
+            assertThat(result.getData().get(0).fileName()).isEqualTo("file1.pdf");
         }
 
         @Test
@@ -262,8 +268,8 @@ class BlockChainServiceImplTest {
             Result<FileDetailVO> result = blockChainService.getFile(uploader, fileHash);
             
             assertThat(result.getCode()).isEqualTo(200);
-            assertThat(result.getData().getFileName()).isEqualTo("test.pdf");
-            assertThat(result.getData().getFileHash()).isEqualTo(fileHash);
+            assertThat(result.getData().fileName()).isEqualTo("test.pdf");
+            assertThat(result.getData().fileHash()).isEqualTo(fileHash);
             
             verify(fiscoMetrics).stopQueryTimer(timerSample);
         }
@@ -276,9 +282,10 @@ class BlockChainServiceImplTest {
         @Test
         @DisplayName("Should delete files successfully")
         void deleteFiles_shouldDeleteSuccessfully() {
-            DeleteFilesRequest request = new DeleteFilesRequest();
-            request.setUploader("user123");
-            request.setFileHashList(List.of("hash1", "hash2"));
+            DeleteFilesRequest request = new DeleteFilesRequest(
+                    "user123",
+                    List.of("hash1", "hash2")
+            );
             
             ChainReceipt receipt = new ChainReceipt();
             receipt.setSuccess(true);
@@ -296,9 +303,10 @@ class BlockChainServiceImplTest {
         @Test
         @DisplayName("Should handle delete failure")
         void deleteFiles_shouldHandleFailure() {
-            DeleteFilesRequest request = new DeleteFilesRequest();
-            request.setUploader("user123");
-            request.setFileHashList(List.of("hash1"));
+            DeleteFilesRequest request = new DeleteFilesRequest(
+                    "user123",
+                    List.of("hash1")
+            );
             
             ChainReceipt receipt = new ChainReceipt();
             receipt.setSuccess(false);
@@ -321,8 +329,10 @@ class BlockChainServiceImplTest {
         @Test
         @DisplayName("Should cancel share successfully")
         void cancelShare_shouldCancelSuccessfully() {
-            CancelShareRequest request = new CancelShareRequest();
-            request.setShareCode("SHARE_CODE_123");
+            CancelShareRequest request = new CancelShareRequest(
+                    "SHARE_CODE_123",
+                    null
+            );
             
             ChainReceipt receipt = new ChainReceipt();
             receipt.setSuccess(true);
@@ -340,8 +350,10 @@ class BlockChainServiceImplTest {
         @Test
         @DisplayName("Should handle cancel share failure")
         void cancelShare_shouldHandleFailure() {
-            CancelShareRequest request = new CancelShareRequest();
-            request.setShareCode("INVALID_CODE");
+            CancelShareRequest request = new CancelShareRequest(
+                    "INVALID_CODE",
+                    null
+            );
             
             ChainReceipt receipt = new ChainReceipt();
             receipt.setSuccess(false);
@@ -379,8 +391,8 @@ class BlockChainServiceImplTest {
             Result<TransactionVO> result = blockChainService.getTransactionByHash(txHash);
             
             assertThat(result.getCode()).isEqualTo(200);
-            assertThat(result.getData().getTransactionHash()).isEqualTo(txHash);
-            assertThat(result.getData().getBlockNumber()).isEqualTo("12345");
+            assertThat(result.getData().transactionHash()).isEqualTo(txHash);
+            assertThat(result.getData().blockNumber()).isEqualTo("12345");
         }
 
         @Test
@@ -458,8 +470,8 @@ class BlockChainServiceImplTest {
             Result<SharingVO> result = blockChainService.getShareInfo(shareCode);
             
             assertThat(result.getCode()).isEqualTo(200);
-            assertThat(result.getData().getShareCode()).isEqualTo(shareCode);
-            assertThat(result.getData().getIsValid()).isTrue();
+            assertThat(result.getData().shareCode()).isEqualTo(shareCode);
+            assertThat(result.getData().isValid()).isTrue();
         }
     }
 

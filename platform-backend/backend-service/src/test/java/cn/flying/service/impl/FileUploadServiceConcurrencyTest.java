@@ -22,7 +22,6 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -71,6 +70,8 @@ class FileUploadServiceConcurrencyTest {
     void setUp() {
         FileUploadStateTestBuilder.resetClientIdCounter();
         ReflectionTestUtils.setField(fileUploadService, "eventPublisher", eventPublisher);
+        // 让异步分片处理在测试中同步执行，避免线程池/时序不稳定
+        ReflectionTestUtils.setField(fileUploadService, "fileProcessingExecutor", (java.util.concurrent.Executor) Runnable::run);
     }
 
     @Nested

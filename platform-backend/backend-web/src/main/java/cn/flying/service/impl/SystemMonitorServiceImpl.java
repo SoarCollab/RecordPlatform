@@ -44,6 +44,9 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
     @DubboReference(id = "blockChainServiceSystemMonitor", version = BlockChainService.VERSION, timeout = 3000, retries = 0, providedBy = "RecordPlatform_fisco")
     private BlockChainService blockChainService;
 
+    private static final int FALLBACK_CHAIN_NODE_COUNT = 0;
+    private static final String FALLBACK_CHAIN_TYPE = "UNKNOWN";
+
     // Health indicators injected by name
     @Resource(name = "database")
     private HealthIndicator databaseHealthIndicator;
@@ -57,8 +60,24 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
     @Resource(name = "s3Storage")
     private HealthIndicator s3HealthIndicator;
 
+    /**
+     * 监控指标聚合使用的执行器。
+     * <p>
+     * 这些任务包含 DB/Dubbo/health check 等阻塞操作，必须避免落到 ForkJoinPool.commonPool。
+     * 采用 AsyncConfiguration 中的虚拟线程执行器（局部 vthreads 策略）。
+     */
+    @Resource(name = "virtualThreadExecutor")
+    private Executor monitorMetricsExecutor;
+
     private static final int HEALTH_CHECK_TIMEOUT_SECONDS = 5;
-    private final ExecutorService healthCheckExecutor = Executors.newFixedThreadPool(4);
+
+    /**
+     * 健康检查执行器（Spring 管理）。
+     * <p>
+     * 统一使用 Spring Bean，避免 ad-hoc executor 造成线程泄漏和配置分散。
+     */
+    @Resource(name = "healthIndicatorExecutor")
+    private ExecutorService healthCheckExecutor;
 
     @Override
     public SystemStatsVO getSystemStats() {
@@ -100,59 +119,58 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
             // TODO: 从 S3 存储服务获取实际存储容量
             long totalStorage = totalFiles * 1024 * 1024; // 临时估算值
 
-            return SystemStatsVO.builder()
-                    .totalUsers(totalUsers)
-                    .totalFiles(totalFiles)
-                    .totalStorage(totalStorage)
-                    .totalTransactions(totalTransactions)
-                    .todayUploads(todayUploads)
-                    .todayDownloads(todayDownloads != null ? todayDownloads : 0L)
-                    .build();
+            return new SystemStatsVO(
+                    totalUsers,
+                    totalFiles,
+                    totalStorage,
+                    totalTransactions,
+                    todayUploads,
+                    todayDownloads != null ? todayDownloads : 0L
+            );
         } catch (Exception e) {
             log.error("Failed to get system stats", e);
-            return SystemStatsVO.builder()
-                    .totalUsers(0L)
-                    .totalFiles(0L)
-                    .totalStorage(0L)
-                    .totalTransactions(0L)
-                    .todayUploads(0L)
-                    .todayDownloads(0L)
-                    .build();
+            return new SystemStatsVO(0L, 0L, 0L, 0L, 0L, 0L);
         }
     }
 
+    /**
+     * 获取区块链状态信息（用于监控展示）。
+     *
+     * @return 区块链状态 VO（包含区块高度、交易统计、节点数、链类型与健康标识）
+     */
     @Override
     public ChainStatusVO getChainStatus() {
+        long now = System.currentTimeMillis();
         try {
             Result<BlockChainMessage> result = blockChainService.getCurrentBlockChainMessage();
-            if (result != null && result.getData() != null) {
-                BlockChainMessage message = result.getData();
-                Long blockNumber = message.getBlockNumber() != null ? message.getBlockNumber() : 0L;
-                Long transactionCount = message.getTransactionCount() != null ? message.getTransactionCount() : 0L;
-                Long failedTransactionCount = message.getFailedTransactionCount() != null ? message.getFailedTransactionCount() : 0L;
-                return ChainStatusVO.builder()
-                        .blockNumber(blockNumber)
-                        .transactionCount(transactionCount)
-                        .failedTransactionCount(failedTransactionCount)
-                        .nodeCount(4) // 默认值，实际应从链上获取
-                        .chainType("LOCAL_FISCO") // 从配置获取
-                        .healthy(blockNumber > 0)
-                        .lastUpdateTime(System.currentTimeMillis())
-                        .build();
+            if (result == null || !result.isSuccess() || result.getData() == null) {
+                if (result != null && !result.isSuccess()) {
+                    log.warn("Blockchain service returned non-success result: code={}, message={}", result.getCode(), result.getMessage());
+                }
+                return new ChainStatusVO(0L, 0L, 0L, FALLBACK_CHAIN_NODE_COUNT, FALLBACK_CHAIN_TYPE, false, now);
             }
+
+            BlockChainMessage message = result.getData();
+            Long blockNumber = message.getBlockNumber() != null ? message.getBlockNumber() : 0L;
+            Long transactionCount = message.getTransactionCount() != null ? message.getTransactionCount() : 0L;
+            Long failedTransactionCount = message.getFailedTransactionCount() != null ? message.getFailedTransactionCount() : 0L;
+            Integer nodeCount = message.getNodeCount() != null ? message.getNodeCount() : FALLBACK_CHAIN_NODE_COUNT;
+            String chainType = message.getChainType() != null ? message.getChainType() : FALLBACK_CHAIN_TYPE;
+
+            boolean healthy = message.getBlockNumber() != null;
+            return new ChainStatusVO(
+                    blockNumber,
+                    transactionCount,
+                    failedTransactionCount,
+                    nodeCount,
+                    chainType,
+                    healthy,
+                    now
+            );
         } catch (Exception e) {
             log.error("Failed to get chain status", e);
+            return new ChainStatusVO(0L, 0L, 0L, FALLBACK_CHAIN_NODE_COUNT, FALLBACK_CHAIN_TYPE, false, now);
         }
-
-        return ChainStatusVO.builder()
-                .blockNumber(0L)
-                .transactionCount(0L)
-                .failedTransactionCount(0L)
-                .nodeCount(0)
-                .chainType("LOCAL_FISCO")
-                .healthy(false)
-                .lastUpdateTime(System.currentTimeMillis())
-                .build();
     }
 
     @Override
@@ -187,34 +205,30 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
         // 系统运行时间
         long uptime = ManagementFactory.getRuntimeMXBean().getUptime() / 1000;
 
-        return SystemHealthVO.builder()
-                .status(overallStatus)
-                .components(components)
-                .uptime(uptime)
-                .timestamp(LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME))
-                .build();
+        return new SystemHealthVO(
+                overallStatus,
+                components,
+                uptime,
+                LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+        );
     }
 
     @Override
     public MonitorMetricsVO getMonitorMetrics() {
         // 并发获取所有指标
-        CompletableFuture<SystemStatsVO> statsFuture = CompletableFuture.supplyAsync(this::getSystemStats);
-        CompletableFuture<ChainStatusVO> chainFuture = CompletableFuture.supplyAsync(this::getChainStatus);
-        CompletableFuture<SystemHealthVO> healthFuture = CompletableFuture.supplyAsync(this::getSystemHealth);
+        CompletableFuture<SystemStatsVO> statsFuture = CompletableFuture.supplyAsync(this::getSystemStats, monitorMetricsExecutor);
+        CompletableFuture<ChainStatusVO> chainFuture = CompletableFuture.supplyAsync(this::getChainStatus, monitorMetricsExecutor);
+        CompletableFuture<SystemHealthVO> healthFuture = CompletableFuture.supplyAsync(this::getSystemHealth, monitorMetricsExecutor);
 
         try {
-            return MonitorMetricsVO.builder()
-                    .systemStats(statsFuture.get(10, TimeUnit.SECONDS))
-                    .chainStatus(chainFuture.get(10, TimeUnit.SECONDS))
-                    .health(healthFuture.get(10, TimeUnit.SECONDS))
-                    .build();
+            return new MonitorMetricsVO(
+                    statsFuture.get(10, TimeUnit.SECONDS),
+                    chainFuture.get(10, TimeUnit.SECONDS),
+                    healthFuture.get(10, TimeUnit.SECONDS)
+            );
         } catch (Exception e) {
             log.error("Failed to get monitor metrics", e);
-            return MonitorMetricsVO.builder()
-                    .systemStats(getSystemStats())
-                    .chainStatus(getChainStatus())
-                    .health(getSystemHealth())
-                    .build();
+            return new MonitorMetricsVO(getSystemStats(), getChainStatus(), getSystemHealth());
         }
     }
 
@@ -222,16 +236,10 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
         try {
             Health health = indicator.health();
             Map<String, Object> details = new HashMap<>(health.getDetails());
-            return ComponentHealthVO.builder()
-                    .status(health.getStatus().getCode())
-                    .details(details.isEmpty() ? null : details)
-                    .build();
+            return new ComponentHealthVO(health.getStatus().getCode(), details.isEmpty() ? null : details);
         } catch (Exception e) {
             log.warn("Health check failed for {}: {}", name, e.getMessage());
-            return ComponentHealthVO.builder()
-                    .status("DOWN")
-                    .details(Map.of("error", e.getMessage()))
-                    .build();
+            return new ComponentHealthVO("DOWN", Map.of("error", e.getMessage()));
         }
     }
 

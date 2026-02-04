@@ -29,16 +29,11 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.annotation.Resource;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 /**
  * 管理员文件审计服务实现
@@ -46,9 +41,10 @@ import java.util.Map;
  * @author flyingcoding
  * @since 2025-12-27
  */
-@Slf4j
 @Service
 public class FileAdminServiceImpl implements FileAdminService {
+
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(FileAdminServiceImpl.class);
 
     @Resource
     private FileMapper fileMapper;
@@ -109,7 +105,7 @@ public class FileAdminServiceImpl implements FileAdminService {
         List<File> files = result.getRecords();
         List<Long> originIds = files.stream()
                 .map(File::getOrigin)
-                .filter(id -> id != null)
+                .filter(Objects::nonNull)
                 .distinct()
                 .toList();
         Map<Long, File> originFileMap = new HashMap<>();
@@ -211,7 +207,7 @@ public class FileAdminServiceImpl implements FileAdminService {
                 .set(File::getStatus, status);
 
         fileMapper.update(null, wrapper);
-        log.info("管理员更新文件状态: fileId={}, oldStatus={}, newStatus={}, reason={}",
+        LOGGER.info("管理员更新文件状态: fileId={}, oldStatus={}, newStatus={}, reason={}",
                 fileId, file.getStatus(), status, reason);
     }
 
@@ -235,7 +231,7 @@ public class FileAdminServiceImpl implements FileAdminService {
         // 物理删除文件记录
         int deleted = fileMapper.physicalDeleteById(id, tenantId);
         if (deleted > 0) {
-            log.info("管理员强制删除文件: fileId={}, fileName={}, reason={}",
+            LOGGER.info("管理员强制删除文件: fileId={}, fileName={}, reason={}",
                     fileId, file.getFileName(), reason);
         }
     }
@@ -290,7 +286,7 @@ public class FileAdminServiceImpl implements FileAdminService {
                 Object actionTypeObj = row.get("action_type");
                 Object cntObj = row.get("cnt");
                 if (code == null || !(actionTypeObj instanceof Number) || !(cntObj instanceof Number)) {
-                    log.warn("Invalid row in batchCountByShareCodes: {}", row);
+                    LOGGER.warn("Invalid row in batchCountByShareCodes: {}", row);
                     continue;
                 }
                 Integer actionType = ((Number) actionTypeObj).intValue();
@@ -304,7 +300,7 @@ public class FileAdminServiceImpl implements FileAdminService {
                 String code = (String) row.get("share_code");
                 Object uniqueActorsObj = row.get("unique_actors");
                 if (code == null || !(uniqueActorsObj instanceof Number)) {
-                    log.warn("Invalid row in batchCountDistinctActors: {}", row);
+                    LOGGER.warn("Invalid row in batchCountDistinctActors: {}", row);
                     continue;
                 }
                 Long uniqueActors = ((Number) uniqueActorsObj).longValue();
@@ -329,7 +325,7 @@ public class FileAdminServiceImpl implements FileAdminService {
                 .set(FileShare::getUpdateTime, new Date());
 
         fileShareMapper.update(null, wrapper);
-        log.info("管理员强制取消分享: shareCode={}, reason={}", shareCode, reason);
+        LOGGER.info("管理员强制取消分享: shareCode={}, reason={}", shareCode, reason);
     }
 
     // ==================== 工具方法 ====================
@@ -415,38 +411,39 @@ public class FileAdminServiceImpl implements FileAdminService {
 
         // 添加原始节点
         if (originFile != null) {
-            chain.add(ProvenanceNode.builder()
-                    .userId(String.valueOf(originFile.getUid()))
-                    .userName(getUserName(originFile.getUid(), userNameCache))
-                    .fileId(String.valueOf(originFile.getId()))
-                    .depth(0)
-                    .time(originFile.getCreateTime())
-                    .build());
+            chain.add(new ProvenanceNode(
+                    String.valueOf(originFile.getUid()),
+                    getUserName(originFile.getUid(), userNameCache),
+                    String.valueOf(originFile.getId()),
+                    0,
+                    null,
+                    originFile.getCreateTime()
+            ));
         }
 
         // 获取中间节点
         List<FileSource> chainSources = fileSourceMapper.selectProvenanceChain(fileId, tenantId);
         for (FileSource source : chainSources) {
-            chain.add(ProvenanceNode.builder()
-                    .userId(String.valueOf(source.getSourceUserId()))
-                    .userName(getUserName(source.getSourceUserId(), userNameCache))
-                    .fileId(String.valueOf(source.getSourceFileId()))
-                    .depth(source.getDepth())
-                    .shareCode(source.getShareCode())
-                    .time(source.getCreateTime())
-                    .build());
+            chain.add(new ProvenanceNode(
+                    String.valueOf(source.getSourceUserId()),
+                    getUserName(source.getSourceUserId(), userNameCache),
+                    String.valueOf(source.getSourceFileId()),
+                    source.getDepth(),
+                    source.getShareCode(),
+                    source.getCreateTime()
+            ));
         }
 
         // 添加当前节点
         FileSource currentSource = fileSourceMapper.selectByFileId(fileId, tenantId);
-        chain.add(ProvenanceNode.builder()
-                .userId(String.valueOf(file.getUid()))
-                .userName(getUserName(file.getUid(), userNameCache))
-                .fileId(String.valueOf(file.getId()))
-                .depth(currentSource != null ? currentSource.getDepth() : 0)
-                .shareCode(currentSource != null ? currentSource.getShareCode() : null)
-                .time(file.getCreateTime())
-                .build());
+        chain.add(new ProvenanceNode(
+                String.valueOf(file.getUid()),
+                getUserName(file.getUid(), userNameCache),
+                String.valueOf(file.getId()),
+                currentSource != null ? currentSource.getDepth() : 0,
+                currentSource != null ? currentSource.getShareCode() : null,
+                file.getCreateTime()
+        ));
 
         return chain;
     }
@@ -482,19 +479,19 @@ public class FileAdminServiceImpl implements FileAdminService {
         IPage<ShareAccessLog> logPage = shareAccessLogMapper.selectPage(page, wrapper);
 
         return logPage.getRecords().stream()
-                .map(logEntry -> ShareAccessLogVO.builder()
-                        .id(String.valueOf(logEntry.getId()))
-                        .shareCode(logEntry.getShareCode())
-                        .actionType(logEntry.getActionType())
-                        .actionTypeDesc(ShareAccessLogVO.getActionTypeDesc(logEntry.getActionType()))
-                        .actorUserId(logEntry.getActorUserId() != null ? String.valueOf(logEntry.getActorUserId()) : null)
-                        .actorUserName(logEntry.getActorUserId() != null ?
-                                getUserName(logEntry.getActorUserId(), userNameCache) : "匿名用户")
-                        .actorIp(logEntry.getActorIp())
-                        .fileHash(logEntry.getFileHash())
-                        .fileName(logEntry.getFileName())
-                        .accessTime(logEntry.getAccessTime())
-                        .build())
+                .map(logEntry -> new ShareAccessLogVO(
+                        String.valueOf(logEntry.getId()),
+                        logEntry.getShareCode(),
+                        logEntry.getActionType(),
+                        ShareAccessLogVO.getActionTypeDesc(logEntry.getActionType()),
+                        logEntry.getActorUserId() != null ? String.valueOf(logEntry.getActorUserId()) : null,
+                        logEntry.getActorUserId() != null ?
+                                getUserName(logEntry.getActorUserId(), userNameCache) : "匿名用户",
+                        logEntry.getActorIp(),
+                        logEntry.getFileHash(),
+                        logEntry.getFileName(),
+                        logEntry.getAccessTime()
+                ))
                 .toList();
     }
 

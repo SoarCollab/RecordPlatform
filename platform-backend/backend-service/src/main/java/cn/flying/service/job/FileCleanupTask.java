@@ -160,10 +160,10 @@ public class FileCleanupTask {
                     fileRemoteClient.getFile(userId, fileHash)
                 );
 
-                if (detail != null && detail.getContent() != null) {
+                if (detail != null && detail.content() != null) {
                     // 2. 解析存储位置并从 S3 存储删除
                     @SuppressWarnings("unchecked")
-                    Map<String, String> contentMap = JsonConverter.parse(detail.getContent(), Map.class);
+                    Map<String, String> contentMap = JsonConverter.parse(detail.content(), Map.class);
                     if (contentMap != null && !contentMap.isEmpty()) {
                         try {
                             fileRemoteClient.deleteStorageFile(contentMap);
@@ -175,10 +175,10 @@ public class FileCleanupTask {
 
                 // 3. 从区块链删除
                 try {
-                    fileRemoteClient.deleteFiles(DeleteFilesRequest.builder()
-                            .uploader(userId)
-                            .fileHashList(List.of(fileHash))
-                            .build());
+                    fileRemoteClient.deleteFiles(new DeleteFilesRequest(
+                            userId,
+                            List.of(fileHash)
+                    ));
                 } catch (Exception e) {
                     log.warn("区块链删除失败: file={}, error={}", fileHash, e.getMessage());
                 }

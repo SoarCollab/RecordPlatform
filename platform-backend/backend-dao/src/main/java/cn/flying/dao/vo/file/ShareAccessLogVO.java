@@ -1,10 +1,6 @@
 package cn.flying.dao.vo.file;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 
 import java.util.Date;
 
@@ -14,42 +10,69 @@ import java.util.Date;
  * @author flyingcoding
  * @since 2025-12-27
  */
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
 @Schema(description = "分享访问日志")
-public class ShareAccessLogVO {
+public record ShareAccessLogVO(
+        @Schema(description = "日志ID")
+        String id,
+        @Schema(description = "分享码")
+        String shareCode,
+        @Schema(description = "操作类型：1=查看，2=下载，3=保存")
+        Integer actionType,
+        @Schema(description = "操作类型描述")
+        String actionTypeDesc,
+        @Schema(description = "操作者用户ID")
+        String actorUserId,
+        @Schema(description = "操作者用户名（匿名为'匿名用户'）")
+        String actorUserName,
+        @Schema(description = "操作者IP")
+        String actorIp,
+        @Schema(description = "文件哈希（下载/保存时）")
+        String fileHash,
+        @Schema(description = "文件名（下载/保存时）")
+        String fileName,
+        @Schema(description = "访问时间")
+        Date accessTime
+) {
 
-    @Schema(description = "日志ID")
-    private String id;
+    public String getId() {
+        return id;
+    }
 
-    @Schema(description = "分享码")
-    private String shareCode;
+    public String getShareCode() {
+        return shareCode;
+    }
 
-    @Schema(description = "操作类型：1=查看，2=下载，3=保存")
-    private Integer actionType;
+    public Integer getActionType() {
+        return actionType;
+    }
 
-    @Schema(description = "操作类型描述")
-    private String actionTypeDesc;
+    public String getActionTypeDesc() {
+        return actionTypeDesc;
+    }
 
-    @Schema(description = "操作者用户ID")
-    private String actorUserId;
+    public String getActorUserId() {
+        return actorUserId;
+    }
 
-    @Schema(description = "操作者用户名（匿名为'匿名用户'）")
-    private String actorUserName;
+    public String getActorUserName() {
+        return actorUserName;
+    }
 
-    @Schema(description = "操作者IP")
-    private String actorIp;
+    public String getActorIp() {
+        return actorIp;
+    }
 
-    @Schema(description = "文件哈希（下载/保存时）")
-    private String fileHash;
+    public String getFileHash() {
+        return fileHash;
+    }
 
-    @Schema(description = "文件名（下载/保存时）")
-    private String fileName;
+    public String getFileName() {
+        return fileName;
+    }
 
-    @Schema(description = "访问时间")
-    private Date accessTime;
+    public Date getAccessTime() {
+        return accessTime;
+    }
 
     /**
      * 获取操作类型描述

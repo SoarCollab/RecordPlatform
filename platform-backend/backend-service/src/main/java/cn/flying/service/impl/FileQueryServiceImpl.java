@@ -245,7 +245,7 @@ public class FileQueryServiceImpl implements FileQueryService {
         if (detailVO == null) {
             throw new GeneralException(ResultEnum.FAIL, "无法获取文件详情，文件可能不存在");
         }
-        String fileContent = detailVO.getContent();
+        String fileContent = detailVO.content();
         if (CommonUtils.isEmpty(fileContent)) {
             throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
         }
@@ -278,7 +278,7 @@ public class FileQueryServiceImpl implements FileQueryService {
         if (detailVO == null) {
             throw new GeneralException(ResultEnum.FAIL, "无法获取文件详情，文件可能不存在");
         }
-        String fileContent = detailVO.getContent();
+        String fileContent = detailVO.content();
         if (CommonUtils.isEmpty(fileContent)) {
             throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
         }
@@ -303,7 +303,7 @@ public class FileQueryServiceImpl implements FileQueryService {
         Result<SharingVO> result = fileRemoteClient.getSharedFiles(sharingCode);
         if (ResultUtils.isSuccess(result)) {
             SharingVO sharingFiles = ResultUtils.getData(result);
-            Long expirationTime = sharingFiles.getExpirationTime();
+            Long expirationTime = sharingFiles.expirationTime();
             if (expirationTime != null) {
                 if (expirationTime < 0) {
                     throw new GeneralException(ResultEnum.SHARE_CANCELLED);
@@ -312,11 +312,11 @@ public class FileQueryServiceImpl implements FileQueryService {
                     throw new GeneralException(ResultEnum.SHARE_EXPIRED);
                 }
             }
-            if (Boolean.FALSE.equals(sharingFiles.getIsValid())) {
+            if (Boolean.FALSE.equals(sharingFiles.isValid())) {
                 throw new GeneralException(ResultEnum.SHARE_CANCELLED);
             }
-            String uploader = sharingFiles.getUploader();
-            List<String> fileHashList = sharingFiles.getFileHashList();
+            String uploader = sharingFiles.uploader();
+            List<String> fileHashList = sharingFiles.fileHashList();
             if (CommonUtils.isNotEmpty(fileHashList)) {
                 try {
                     Long uploaderId = Long.valueOf(uploader);
@@ -398,14 +398,14 @@ public class FileQueryServiceImpl implements FileQueryService {
             Integer chunkCount = params.get("chunkCount") instanceof Number
                     ? ((Number) params.get("chunkCount")).intValue() : null;
 
-            return FileDecryptInfoVO.builder()
-                    .initialKey(initialKey)
-                    .fileName(fileName != null ? fileName : file.getFileName())
-                    .fileSize(fileSize)
-                    .contentType(contentType)
-                    .chunkCount(chunkCount)
-                    .fileHash(fileHash)
-                    .build();
+            return new FileDecryptInfoVO(
+                    initialKey,
+                    fileName != null ? fileName : file.getFileName(),
+                    fileSize,
+                    contentType,
+                    chunkCount,
+                    fileHash
+            );
 
         } catch (GeneralException e) {
             throw e;
@@ -494,12 +494,12 @@ public class FileQueryServiceImpl implements FileQueryService {
         Date todayStart = Date.from(LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant());
         Long todayUploads = fileMapper.countTodayUploadsByUserId(userId, tenantId, todayStart);
 
-        return UserFileStatsVO.builder()
-                .totalFiles(totalFiles != null ? totalFiles : 0L)
-                .totalStorage(totalStorage != null ? totalStorage : 0L)
-                .sharedFiles(sharedFiles != null ? sharedFiles : 0L)
-                .todayUploads(todayUploads != null ? todayUploads : 0L)
-                .build();
+        return new UserFileStatsVO(
+                totalFiles != null ? totalFiles : 0L,
+                totalStorage != null ? totalStorage : 0L,
+                sharedFiles != null ? sharedFiles : 0L,
+                todayUploads != null ? todayUploads : 0L
+        );
     }
 
     // ==================== 异步查询方法（Virtual Thread）====================
@@ -625,12 +625,13 @@ public class FileQueryServiceImpl implements FileQueryService {
         vo.setStatus(status);
         vo.setIsValid(status == FileShare.STATUS_ACTIVE);
 
-        switch (status) {
-            case FileShare.STATUS_CANCELLED -> vo.setStatusDesc("已取消");
-            case FileShare.STATUS_ACTIVE -> vo.setStatusDesc("有效");
-            case FileShare.STATUS_EXPIRED -> vo.setStatusDesc("已过期");
-            default -> vo.setStatusDesc("未知");
-        }
+        String statusDesc = switch (status) {
+            case FileShare.STATUS_CANCELLED -> "已取消";
+            case FileShare.STATUS_ACTIVE -> "有效";
+            case FileShare.STATUS_EXPIRED -> "已过期";
+            default -> "未知";
+        };
+        vo.setStatusDesc(statusDesc);
 
         return vo;
     }

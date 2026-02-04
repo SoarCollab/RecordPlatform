@@ -1,10 +1,6 @@
 package cn.flying.dao.vo.file;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 
 /**
  * 分享访问统计 VO
@@ -12,28 +8,43 @@ import lombok.NoArgsConstructor;
  * @author flyingcoding
  * @since 2025-12-27
  */
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
 @Schema(description = "分享访问统计")
-public class ShareAccessStatsVO {
+public record ShareAccessStatsVO(
+        @Schema(description = "分享码")
+        String shareCode,
+        @Schema(description = "查看次数")
+        Long viewCount,
+        @Schema(description = "下载次数")
+        Long downloadCount,
+        @Schema(description = "保存次数")
+        Long saveCount,
+        @Schema(description = "独立访问用户数")
+        Long uniqueActors,
+        @Schema(description = "总访问次数")
+        Long totalAccess
+) {
 
-    @Schema(description = "分享码")
-    private String shareCode;
+    public String getShareCode() {
+        return shareCode;
+    }
 
-    @Schema(description = "查看次数")
-    private Long viewCount;
+    public Long getViewCount() {
+        return viewCount;
+    }
 
-    @Schema(description = "下载次数")
-    private Long downloadCount;
+    public Long getDownloadCount() {
+        return downloadCount;
+    }
 
-    @Schema(description = "保存次数")
-    private Long saveCount;
+    public Long getSaveCount() {
+        return saveCount;
+    }
 
-    @Schema(description = "独立访问用户数")
-    private Long uniqueActors;
+    public Long getUniqueActors() {
+        return uniqueActors;
+    }
 
-    @Schema(description = "总访问次数")
-    private Long totalAccess;
+    public Long getTotalAccess() {
+        return totalAccess;
+    }
 }

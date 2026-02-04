@@ -5,6 +5,7 @@ import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.SysOperationLogMapper;
 import cn.flying.dao.vo.system.*;
 import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.response.BlockChainMessage;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,12 +20,11 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
-import org.springframework.boot.actuate.health.Status;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -66,6 +66,9 @@ class SystemMonitorServiceImplTest {
     void setUp() {
         ExecutorService executor = Executors.newFixedThreadPool(4);
         ReflectionTestUtils.setField(systemMonitorService, "healthCheckExecutor", executor);
+
+        // 默认给监控聚合一个可控 Executor，避免测试环境依赖 commonPool
+        ReflectionTestUtils.setField(systemMonitorService, "monitorMetricsExecutor", (java.util.concurrent.Executor) Runnable::run);
     }
 
     @Nested
@@ -79,8 +82,7 @@ class SystemMonitorServiceImplTest {
             when(fileMapper.selectCount(any())).thenReturn(500L);
             when(operationLogMapper.selectOperationsBetween(any(), any())).thenReturn(50L);
 
-            BlockChainMessage chainMessage = new BlockChainMessage();
-            chainMessage.setTransactionCount(1000L);
+            BlockChainMessage chainMessage = new BlockChainMessage(null, 1000L, null);
             when(blockChainService.getCurrentBlockChainMessage()).thenReturn(Result.success(chainMessage));
 
             SystemStatsVO result = systemMonitorService.getSystemStats();
@@ -140,10 +142,7 @@ class SystemMonitorServiceImplTest {
         @Test
         @DisplayName("should return healthy chain status when chain is active")
         void shouldReturnHealthyChainStatus() {
-            BlockChainMessage chainMessage = new BlockChainMessage();
-            chainMessage.setBlockNumber(12345L);
-            chainMessage.setTransactionCount(10000L);
-            chainMessage.setFailedTransactionCount(5L);
+            BlockChainMessage chainMessage = new BlockChainMessage(12345L, 10000L, 5L, 4, "BSN_FISCO");
             when(blockChainService.getCurrentBlockChainMessage()).thenReturn(Result.success(chainMessage));
 
             ChainStatusVO result = systemMonitorService.getChainStatus();
@@ -152,15 +151,31 @@ class SystemMonitorServiceImplTest {
             assertThat(result.getBlockNumber()).isEqualTo(12345L);
             assertThat(result.getTransactionCount()).isEqualTo(10000L);
             assertThat(result.getFailedTransactionCount()).isEqualTo(5L);
+            assertThat(result.getNodeCount()).isEqualTo(4);
+            assertThat(result.getChainType()).isEqualTo("BSN_FISCO");
             assertThat(result.getHealthy()).isTrue();
         }
 
         @Test
-        @DisplayName("should return unhealthy status when block number is zero")
-        void shouldReturnUnhealthyWhenBlockNumberIsZero() {
-            BlockChainMessage chainMessage = new BlockChainMessage();
-            chainMessage.setBlockNumber(0L);
+        @DisplayName("should return healthy status when service is reachable even if block number is zero")
+        void shouldReturnHealthyWhenBlockNumberIsZero() {
+            BlockChainMessage chainMessage = new BlockChainMessage(0L, null, null, 1, "LOCAL_FISCO");
             when(blockChainService.getCurrentBlockChainMessage()).thenReturn(Result.success(chainMessage));
+
+            ChainStatusVO result = systemMonitorService.getChainStatus();
+
+            assertThat(result).isNotNull();
+            assertThat(result.getBlockNumber()).isEqualTo(0L);
+            assertThat(result.getNodeCount()).isEqualTo(1);
+            assertThat(result.getChainType()).isEqualTo("LOCAL_FISCO");
+            assertThat(result.getHealthy()).isTrue();
+        }
+
+        @Test
+        @DisplayName("should return unhealthy status when blockchain service returns non-success result")
+        void shouldReturnUnhealthyWhenResultNotSuccess() {
+            when(blockChainService.getCurrentBlockChainMessage())
+                    .thenReturn(Result.error(ResultEnum.BLOCKCHAIN_ERROR, (BlockChainMessage) null));
 
             ChainStatusVO result = systemMonitorService.getChainStatus();
 
@@ -194,12 +209,13 @@ class SystemMonitorServiceImplTest {
             when(fiscoHealthIndicator.health()).thenReturn(upHealth);
             when(s3HealthIndicator.health()).thenReturn(upHealth);
 
-            SystemHealthVO result = systemMonitorService.getSystemHealth();
+             SystemHealthVO result = systemMonitorService.getSystemHealth();
 
-            assertThat(result).isNotNull();
-            assertThat(result.getStatus()).isEqualTo("UP");
-            assertThat(result.getUptime()).isGreaterThan(0);
-        }
+             assertThat(result).isNotNull();
+             assertThat(result.getStatus()).isEqualTo("UP");
+             // 运行时间为秒级，极短进程在测试中可能为 0，保证非负即可
+             assertThat(result.getUptime()).isGreaterThanOrEqualTo(0);
+         }
 
         @Test
         @DisplayName("should return DOWN when any component is down")
@@ -245,9 +261,7 @@ class SystemMonitorServiceImplTest {
             when(fileMapper.selectCount(any())).thenReturn(500L);
             when(operationLogMapper.selectOperationsBetween(any(), any())).thenReturn(50L);
 
-            BlockChainMessage chainMessage = new BlockChainMessage();
-            chainMessage.setBlockNumber(100L);
-            chainMessage.setTransactionCount(1000L);
+            BlockChainMessage chainMessage = new BlockChainMessage(100L, 1000L, null);
             when(blockChainService.getCurrentBlockChainMessage()).thenReturn(Result.success(chainMessage));
 
             Health upHealth = Health.up().build();
@@ -262,6 +276,32 @@ class SystemMonitorServiceImplTest {
             assertThat(result.getSystemStats()).isNotNull();
             assertThat(result.getChainStatus()).isNotNull();
             assertThat(result.getHealth()).isNotNull();
+        }
+
+        @Test
+        @DisplayName("should dispatch metric tasks via configured executor (not commonPool)")
+        void shouldUseConfiguredExecutor() {
+            AtomicInteger submitted = new AtomicInteger();
+            java.util.concurrent.Executor countingExecutor = runnable -> {
+                submitted.incrementAndGet();
+                runnable.run();
+            };
+            ReflectionTestUtils.setField(systemMonitorService, "monitorMetricsExecutor", countingExecutor);
+
+            when(accountMapper.selectCount(any())).thenReturn(1L);
+            when(fileMapper.selectCount(any())).thenReturn(1L);
+            when(operationLogMapper.selectOperationsBetween(any(), any())).thenReturn(0L);
+            when(blockChainService.getCurrentBlockChainMessage()).thenReturn(Result.success(new BlockChainMessage(null, null, null)));
+
+            Health upHealth = Health.up().build();
+            when(databaseHealthIndicator.health()).thenReturn(upHealth);
+            when(redisHealthIndicator.health()).thenReturn(upHealth);
+            when(fiscoHealthIndicator.health()).thenReturn(upHealth);
+            when(s3HealthIndicator.health()).thenReturn(upHealth);
+
+            systemMonitorService.getMonitorMetrics();
+
+            assertThat(submitted.get()).isEqualTo(3);
         }
     }
 }

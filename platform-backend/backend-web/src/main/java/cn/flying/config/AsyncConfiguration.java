@@ -13,8 +13,12 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.Map;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 异步任务和定时任务线程池配置。
@@ -92,11 +96,28 @@ public class AsyncConfiguration {
      * </p>
      */
     @Bean("virtualThreadExecutor")
-    public TaskExecutor virtualThreadExecutor(TaskDecorator contextPropagatingDecorator) {
-        var executor = Executors.newVirtualThreadPerTaskExecutor();
-        var adapter = new TaskExecutorAdapter(executor);
+    public TaskExecutor virtualThreadExecutor(ExecutorService virtualThreadExecutorService,
+                                              TaskDecorator contextPropagatingDecorator) {
+        var adapter = new TaskExecutorAdapter(virtualThreadExecutorService);
         adapter.setTaskDecorator(contextPropagatingDecorator);
         return adapter;
+    }
+
+    @Bean(destroyMethod = "close")
+    public ExecutorService virtualThreadExecutorService() {
+        return Executors.newVirtualThreadPerTaskExecutor();
+    }
+
+    @Bean(destroyMethod = "shutdown")
+    public ScheduledExecutorService chunkProcessingWaitScheduler() {
+        AtomicInteger idx = new AtomicInteger(1);
+        ThreadFactory factory = r -> {
+            Thread t = new Thread(r);
+            t.setName("chunk-processing-wait-" + idx.getAndIncrement());
+            t.setDaemon(true);
+            return t;
+        };
+        return Executors.newScheduledThreadPool(2, factory);
     }
 
     /**

@@ -51,10 +51,10 @@ public class MockResultHelper {
     }
 
     public static Result<StoreFileResponse> blockchainStoreSuccess(String fileHash) {
-        return success(StoreFileResponse.builder()
-                .transactionHash("0x" + UUID.randomUUID().toString().replace("-", ""))
-                .fileHash(fileHash)
-                .build());
+        return success(new StoreFileResponse(
+                "0x" + UUID.randomUUID().toString().replace("-", ""),
+                fileHash
+        ));
     }
 
     public static Result<StoreFileResponse> blockchainStoreSuccess() {

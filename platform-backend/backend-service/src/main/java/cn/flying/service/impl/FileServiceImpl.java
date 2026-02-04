@@ -313,7 +313,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         if (detailVO == null) {
             throw new GeneralException(ResultEnum.FAIL, "无法获取文件详情，文件可能不存在");
         }
-        String fileContent = detailVO.getContent();
+        String fileContent = detailVO.content();
         if (CommonUtils.isEmpty(fileContent)) {
             throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
         }
@@ -350,7 +350,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         if (detailVO == null) {
             throw new GeneralException(ResultEnum.FAIL, "无法获取文件详情，文件可能不存在");
         }
-        String fileContent = detailVO.getContent();
+        String fileContent = detailVO.content();
         if (CommonUtils.isEmpty(fileContent)) {
             throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
         }
@@ -385,11 +385,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         }
 
         // 调用区块链生成分享码（核心能力：失败则直接返回错误，不做降级）
-        Result<String> result = fileRemoteClient.shareFiles(ShareFilesRequest.builder()
-                .uploader(String.valueOf(userId))
-                .fileHashList(fileHash)
-                .expireMinutes(expireMinutes)
-                .build());
+        Result<String> result = fileRemoteClient.shareFiles(new ShareFilesRequest(
+                String.valueOf(userId),
+                fileHash,
+                expireMinutes
+        ));
         String sharingCode = ResultUtils.getData(result);
         if (CommonUtils.isEmpty(sharingCode)) {
             throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "区块链返回的分享码为空");
@@ -431,7 +431,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         Result<SharingVO> result = fileRemoteClient.getSharedFiles(sharingCode);
         if(ResultUtils.isSuccess(result)){
             SharingVO sharingFiles = ResultUtils.getData(result);
-            Long expirationTime = sharingFiles.getExpirationTime();
+            Long expirationTime = sharingFiles.expirationTime();
             if (expirationTime != null) {
                 if (expirationTime < 0) {
                     throw new GeneralException(ResultEnum.SHARE_CANCELLED);
@@ -440,11 +440,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                     throw new GeneralException(ResultEnum.SHARE_EXPIRED);
                 }
             }
-            if (Boolean.FALSE.equals(sharingFiles.getIsValid())) {
+            if (Boolean.FALSE.equals(sharingFiles.isValid())) {
                 throw new GeneralException(ResultEnum.SHARE_CANCELLED);
             }
-            String uploader = sharingFiles.getUploader();
-            List<String> fileHashList = sharingFiles.getFileHashList();
+            String uploader = sharingFiles.uploader();
+            List<String> fileHashList = sharingFiles.fileHashList();
             if(CommonUtils.isNotEmpty(fileHashList)){
                 try {
                     Long uploaderId = Long.valueOf(uploader);
@@ -594,14 +594,14 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             Integer chunkCount = params.get("chunkCount") instanceof Number
                     ? ((Number) params.get("chunkCount")).intValue() : null;
 
-            return FileDecryptInfoVO.builder()
-                    .initialKey(initialKey)
-                    .fileName(fileName != null ? fileName : file.getFileName())
-                    .fileSize(fileSize)
-                    .contentType(contentType)
-                    .chunkCount(chunkCount)
-                    .fileHash(fileHash)
-                    .build();
+            return new FileDecryptInfoVO(
+                    initialKey,
+                    fileName != null ? fileName : file.getFileName(),
+                    fileSize,
+                    contentType,
+                    chunkCount,
+                    fileHash
+            );
 
         } catch (GeneralException e) {
             throw e;
@@ -670,10 +670,10 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
         // 调用区块链取消分享（核心能力：失败则直接返回错误，不做降级）
         Result<Boolean> result = fileRemoteClient.cancelShare(
-                CancelShareRequest.builder()
-                        .shareCode(shareCode)
-                        .uploader(String.valueOf(userId))
-                        .build());
+                new CancelShareRequest(
+                        shareCode,
+                        String.valueOf(userId)
+                ));
         if (!ResultUtils.isSuccess(result) || !Boolean.TRUE.equals(ResultUtils.getData(result))) {
             throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "取消分享失败");
         }
@@ -776,7 +776,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         if (detailVO == null) {
             throw new GeneralException(ResultEnum.FAIL, "无法获取文件详情");
         }
-        String fileContent = detailVO.getContent();
+        String fileContent = detailVO.content();
         if (CommonUtils.isEmpty(fileContent)) {
             throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
         }
@@ -829,14 +829,14 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             Integer chunkCount = params.get("chunkCount") instanceof Number
                     ? ((Number) params.get("chunkCount")).intValue() : null;
 
-            return FileDecryptInfoVO.builder()
-                    .initialKey(initialKey)
-                    .fileName(fileName != null ? fileName : file.getFileName())
-                    .fileSize(fileSize)
-                    .contentType(contentType)
-                    .chunkCount(chunkCount)
-                    .fileHash(fileHash)
-                    .build();
+            return new FileDecryptInfoVO(
+                    initialKey,
+                    fileName != null ? fileName : file.getFileName(),
+                    fileSize,
+                    contentType,
+                    chunkCount,
+                    fileHash
+            );
 
         } catch (GeneralException e) {
             throw e;
@@ -859,7 +859,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         if (detailVO == null) {
             throw new GeneralException(ResultEnum.FAIL, "无法获取文件详情");
         }
-        String fileContent = detailVO.getContent();
+        String fileContent = detailVO.content();
         if (CommonUtils.isEmpty(fileContent)) {
             throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
         }
@@ -915,14 +915,14 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             Integer chunkCount = params.get("chunkCount") instanceof Number
                     ? ((Number) params.get("chunkCount")).intValue() : null;
 
-            return FileDecryptInfoVO.builder()
-                    .initialKey(initialKey)
-                    .fileName(fileName != null ? fileName : file.getFileName())
-                    .fileSize(fileSize)
-                    .contentType(contentType)
-                    .chunkCount(chunkCount)
-                    .fileHash(fileHash)
-                    .build();
+            return new FileDecryptInfoVO(
+                    initialKey,
+                    fileName != null ? fileName : file.getFileName(),
+                    fileSize,
+                    contentType,
+                    chunkCount,
+                    fileHash
+            );
 
         } catch (GeneralException e) {
             throw e;
@@ -973,24 +973,24 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             throw new GeneralException(ResultEnum.FAIL, "分享不存在");
         }
 
-        if (shareInfo.getIsValid() != null && !shareInfo.getIsValid()) {
+        if (shareInfo.isValid() != null && !shareInfo.isValid()) {
             throw new GeneralException(ResultEnum.SHARE_CANCELLED);
         }
 
-        if (shareInfo.getExpirationTime() != null && shareInfo.getExpirationTime() < System.currentTimeMillis()) {
+        if (shareInfo.expirationTime() != null && shareInfo.expirationTime() < System.currentTimeMillis()) {
             throw new GeneralException(ResultEnum.SHARE_EXPIRED);
         }
 
-        List<String> fileHashes = shareInfo.getFileHashList() != null ? shareInfo.getFileHashList() : List.of();
+        List<String> fileHashes = shareInfo.fileHashList() != null ? shareInfo.fileHashList() : List.of();
         if (!fileHashes.contains(fileHash)) {
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "该文件不在此分享中");
         }
 
-        Long ownerId;
+        long ownerId;
         try {
-            ownerId = Long.valueOf(shareInfo.getUploader());
+            ownerId = Long.parseLong(shareInfo.uploader());
         } catch (NumberFormatException e) {
-            log.warn("分享上传者ID格式不正确: {}", shareInfo.getUploader());
+            log.warn("分享上传者ID格式不正确: {}", shareInfo.uploader());
             throw new GeneralException(ResultEnum.FAIL, "分享数据异常");
         }
 
@@ -1031,12 +1031,13 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         vo.setStatus(status);
         vo.setIsValid(status == FileShare.STATUS_ACTIVE);
 
-        switch (status) {
-            case FileShare.STATUS_CANCELLED -> vo.setStatusDesc("已取消");
-            case FileShare.STATUS_ACTIVE -> vo.setStatusDesc("有效");
-            case FileShare.STATUS_EXPIRED -> vo.setStatusDesc("已过期");
-            default -> vo.setStatusDesc("未知");
-        }
+        String statusDesc = switch (status) {
+            case FileShare.STATUS_CANCELLED -> "已取消";
+            case FileShare.STATUS_ACTIVE -> "有效";
+            case FileShare.STATUS_EXPIRED -> "已过期";
+            default -> "未知";
+        };
+        vo.setStatusDesc(statusDesc);
 
         return vo;
     }

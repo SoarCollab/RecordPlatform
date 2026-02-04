@@ -1,39 +1,53 @@
 package cn.flying.dao.vo.system;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 
 /**
  * 区块链状态 VO
  */
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
 @Schema(description = "区块链状态信息")
-public class ChainStatusVO {
+public record ChainStatusVO(
+        @Schema(description = "当前区块高度")
+        Long blockNumber,
+        @Schema(description = "总交易数")
+        Long transactionCount,
+        @Schema(description = "失败交易数")
+        Long failedTransactionCount,
+        @Schema(description = "节点数量")
+        Integer nodeCount,
+        @Schema(description = "链类型", example = "LOCAL_FISCO")
+        String chainType,
+        @Schema(description = "是否健康")
+        Boolean healthy,
+        @Schema(description = "最后更新时间戳（毫秒）")
+        Long lastUpdateTime
+) {
 
-    @Schema(description = "当前区块高度")
-    private Long blockNumber;
+    public Long getBlockNumber() {
+        return blockNumber;
+    }
 
-    @Schema(description = "总交易数")
-    private Long transactionCount;
+    public Long getTransactionCount() {
+        return transactionCount;
+    }
 
-    @Schema(description = "失败交易数")
-    private Long failedTransactionCount;
+    public Long getFailedTransactionCount() {
+        return failedTransactionCount;
+    }
 
-    @Schema(description = "节点数量")
-    private Integer nodeCount;
+    public Integer getNodeCount() {
+        return nodeCount;
+    }
 
-    @Schema(description = "链类型", example = "LOCAL_FISCO")
-    private String chainType;
+    public String getChainType() {
+        return chainType;
+    }
 
-    @Schema(description = "是否健康")
-    private Boolean healthy;
+    public Boolean getHealthy() {
+        return healthy;
+    }
 
-    @Schema(description = "最后更新时间戳（毫秒）")
-    private Long lastUpdateTime;
+    public Long getLastUpdateTime() {
+        return lastUpdateTime;
+    }
 }

@@ -71,14 +71,7 @@ public class TestApplication {
          */
         @Override
         public SystemStatsVO getSystemStats() {
-            return SystemStatsVO.builder()
-                    .totalUsers(0L)
-                    .totalFiles(0L)
-                    .totalStorage(0L)
-                    .totalTransactions(0L)
-                    .todayUploads(0L)
-                    .todayDownloads(0L)
-                    .build();
+            return new SystemStatsVO(0L, 0L, 0L, 0L, 0L, 0L);
         }
 
         /**
@@ -88,15 +81,7 @@ public class TestApplication {
          */
         @Override
         public ChainStatusVO getChainStatus() {
-            return ChainStatusVO.builder()
-                    .blockNumber(0L)
-                    .transactionCount(0L)
-                    .failedTransactionCount(0L)
-                    .nodeCount(0)
-                    .chainType("TEST")
-                    .healthy(false)
-                    .lastUpdateTime(System.currentTimeMillis())
-                    .build();
+            return new ChainStatusVO(0L, 0L, 0L, 0, "TEST", false, System.currentTimeMillis());
         }
 
         /**
@@ -106,12 +91,12 @@ public class TestApplication {
          */
         @Override
         public SystemHealthVO getSystemHealth() {
-            return SystemHealthVO.builder()
-                    .status("UNKNOWN")
-                    .components(Collections.emptyMap())
-                    .uptime(0L)
-                    .timestamp(String.valueOf(System.currentTimeMillis()))
-                    .build();
+            return new SystemHealthVO(
+                    "UNKNOWN",
+                    Collections.emptyMap(),
+                    0L,
+                    String.valueOf(System.currentTimeMillis())
+            );
         }
 
         /**
@@ -121,11 +106,7 @@ public class TestApplication {
          */
         @Override
         public MonitorMetricsVO getMonitorMetrics() {
-            return MonitorMetricsVO.builder()
-                    .systemStats(getSystemStats())
-                    .chainStatus(getChainStatus())
-                    .health(getSystemHealth())
-                    .build();
+            return new MonitorMetricsVO(getSystemStats(), getChainStatus(), getSystemHealth());
         }
     }
 }

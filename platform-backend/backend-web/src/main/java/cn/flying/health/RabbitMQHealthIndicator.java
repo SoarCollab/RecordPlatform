@@ -2,9 +2,9 @@ package cn.flying.health;
 
 import com.rabbitmq.client.AMQP;
 import com.rabbitmq.client.Channel;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
@@ -14,16 +14,34 @@ import java.util.concurrent.*;
 
 @Slf4j
 @Component("rabbitmq")
-@RequiredArgsConstructor
 public class RabbitMQHealthIndicator implements HealthIndicator {
 
     private final RabbitTemplate rabbitTemplate;
+
+    private final ExecutorService executor;
 
     @Value("${spring.rabbitmq.health.queue:}")
     private String healthQueue;
 
     private static final int TIMEOUT_SECONDS = 3;
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+
+    /**
+     * RabbitMQ 健康检查指示器构造方法。
+     * <p>
+     * 显式使用 {@link Qualifier} 绑定到 {@code healthIndicatorExecutor}，避免容器中存在多个 {@link ExecutorService}
+     * Bean 时发生注入歧义导致启动失败。
+     * </p>
+     *
+     * @param rabbitTemplate RabbitTemplate
+     * @param executor       健康检查专用线程池
+     */
+    public RabbitMQHealthIndicator(
+            RabbitTemplate rabbitTemplate,
+            @Qualifier("healthIndicatorExecutor") ExecutorService executor
+    ) {
+        this.rabbitTemplate = rabbitTemplate;
+        this.executor = executor;
+    }
 
     @Override
     public Health health() {

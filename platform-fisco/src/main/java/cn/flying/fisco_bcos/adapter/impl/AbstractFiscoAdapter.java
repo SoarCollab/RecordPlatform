@@ -401,6 +401,14 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
 
     // ==================== 链状态查询 ====================
 
+    /**
+     * 获取链状态信息。
+     * <p>
+     * 对于 FISCO BCOS 链，节点数量通过 SDK 的 {@code getGroupPeers} 查询获取；
+     * 区块高度/交易统计通过 {@code getTotalTransactionCount} 获取。
+     *
+     * @return 链状态（包含区块高度、交易统计、节点数量、链类型与健康标识）
+     */
     @Override
     public ChainStatus getChainStatus() {
         try {
@@ -409,6 +417,18 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
                     .chainType(getChainType())
                     .healthy(true)
                     .lastUpdateTime(System.currentTimeMillis());
+
+            // 节点数量（通过 getGroupPeers 查询）
+            int nodeCount = 0;
+            try {
+                if (getSharingService().getClient() != null && getSharingService().getClient().getGroupPeers() != null) {
+                    List<String> peers = getSharingService().getClient().getGroupPeers().getGroupPeers();
+                    nodeCount = peers != null ? peers.size() : 0;
+                }
+            } catch (Exception e) {
+                log.warn("{} [getChainStatus] 获取节点数量失败: {}", getLogPrefix(), e.getMessage());
+            }
+            builder.nodeCount(nodeCount);
 
             if (totalTransactionCount != null) {
                 TotalTransactionCount.TransactionCountInfo info = totalTransactionCount.getTotalTransactionCount();

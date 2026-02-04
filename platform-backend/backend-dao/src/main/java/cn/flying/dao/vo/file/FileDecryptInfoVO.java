@@ -1,37 +1,48 @@
 package cn.flying.dao.vo.file;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 
 /**
  * 文件解密信息响应 VO
  * 包含前端解密所需的初始密钥和元数据
  */
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
 @Schema(description = "文件解密信息响应类")
-public class FileDecryptInfoVO {
+public record FileDecryptInfoVO(
+        @Schema(description = "初始密钥（最后一个分片的解密密钥，Base64编码）")
+        String initialKey,
+        @Schema(description = "文件名")
+        String fileName,
+        @Schema(description = "文件大小（字节）")
+        Long fileSize,
+        @Schema(description = "文件MIME类型")
+        String contentType,
+        @Schema(description = "分片数量")
+        Integer chunkCount,
+        @Schema(description = "文件哈希")
+        String fileHash
+) {
 
-    @Schema(description = "初始密钥（最后一个分片的解密密钥，Base64编码）")
-    private String initialKey;
+    public String getInitialKey() {
+        return initialKey;
+    }
 
-    @Schema(description = "文件名")
-    private String fileName;
+    public String getFileName() {
+        return fileName;
+    }
 
-    @Schema(description = "文件大小（字节）")
-    private Long fileSize;
+    public Long getFileSize() {
+        return fileSize;
+    }
 
-    @Schema(description = "文件MIME类型")
-    private String contentType;
+    public String getContentType() {
+        return contentType;
+    }
 
-    @Schema(description = "分片数量")
-    private Integer chunkCount;
+    public Integer getChunkCount() {
+        return chunkCount;
+    }
 
-    @Schema(description = "文件哈希")
-    private String fileHash;
+    public String getFileHash() {
+        return fileHash;
+    }
 }

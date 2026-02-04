@@ -1,26 +1,25 @@
 package cn.flying.dao.vo.system;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 
 import java.util.Map;
 
 /**
  * 组件健康状态 VO
  */
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
 @Schema(description = "组件健康状态")
-public class ComponentHealthVO {
+public record ComponentHealthVO(
+        @Schema(description = "健康状态", example = "UP")
+        String status,
+        @Schema(description = "详细信息")
+        Map<String, Object> details
+) {
 
-    @Schema(description = "健康状态", example = "UP")
-    private String status;
+    public String getStatus() {
+        return status;
+    }
 
-    @Schema(description = "详细信息")
-    private Map<String, Object> details;
+    public Map<String, Object> getDetails() {
+        return details;
+    }
 }

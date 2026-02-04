@@ -514,10 +514,13 @@ public class BsnBesuAdapter implements BlockChainAdapter {
     public ChainStatus getChainStatus() {
         try {
             EthBlockNumber blockNumber = web3j.ethBlockNumber().send();
+            NetPeerCount peerCount = web3j.netPeerCount().send();
+            int nodeCount = peerCount != null ? peerCount.getQuantity().intValue() + 1 : 1;
 
             return ChainStatus.builder()
                     .chainType(ChainType.BSN_BESU)
                     .blockNumber(blockNumber.getBlockNumber().longValue())
+                    .nodeCount(nodeCount)
                     .healthy(true)
                     .lastUpdateTime(System.currentTimeMillis())
                     .build();

@@ -1,10 +1,6 @@
 package cn.flying.dao.vo.file;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 
 /**
  * 用户文件统计信息 VO
@@ -13,22 +9,31 @@ import lombok.NoArgsConstructor;
  * @author flyingcoding
  * @since 2025-12-26
  */
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
 @Schema(description = "用户文件统计信息")
-public class UserFileStatsVO {
+public record UserFileStatsVO(
+        @Schema(description = "文件总数")
+        Long totalFiles,
+        @Schema(description = "存储用量（字节）")
+        Long totalStorage,
+        @Schema(description = "分享文件数")
+        Long sharedFiles,
+        @Schema(description = "今日上传数")
+        Long todayUploads
+) {
 
-    @Schema(description = "文件总数")
-    private Long totalFiles;
+    public Long getTotalFiles() {
+        return totalFiles;
+    }
 
-    @Schema(description = "存储用量（字节）")
-    private Long totalStorage;
+    public Long getTotalStorage() {
+        return totalStorage;
+    }
 
-    @Schema(description = "分享文件数")
-    private Long sharedFiles;
+    public Long getSharedFiles() {
+        return sharedFiles;
+    }
 
-    @Schema(description = "今日上传数")
-    private Long todayUploads;
+    public Long getTodayUploads() {
+        return todayUploads;
+    }
 }

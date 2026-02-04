@@ -49,7 +49,7 @@ public class FileRemoteClient {
     }
 
     private Result<StoreFileResponse> storeFileOnChainFallback(StoreFileRequest request, Throwable t) {
-        log.error("BlockChain service storeFile failed, uploader={}", request.getUploader(), t);
+        log.error("BlockChain service storeFile failed, uploader={}", request.uploader(), t);
         return new Result<>(ResultEnum.BLOCKCHAIN_ERROR, null);
     }
 
@@ -104,7 +104,7 @@ public class FileRemoteClient {
     }
 
     private Result<String> shareFilesFallback(ShareFilesRequest request, Throwable t) {
-        log.error("BlockChain service shareFiles failed, uploader={}", request.getUploader(), t);
+        log.error("BlockChain service shareFiles failed, uploader={}", request.uploader(), t);
         return new Result<>(ResultEnum.GET_USER_SHARE_FILE_ERROR, null);
     }
 
@@ -126,7 +126,7 @@ public class FileRemoteClient {
     }
 
     private Result<Boolean> deleteFilesFallback(DeleteFilesRequest request, Throwable t) {
-        log.error("BlockChain service deleteFiles failed, uploader={}", request.getUploader(), t);
+        log.error("BlockChain service deleteFiles failed, uploader={}", request.uploader(), t);
         return new Result<>(ResultEnum.BLOCKCHAIN_ERROR, false);
     }
 
@@ -148,7 +148,7 @@ public class FileRemoteClient {
     }
 
     private Result<Boolean> cancelShareFallback(CancelShareRequest request, Throwable t) {
-        log.error("BlockChain service cancelShare failed, shareCode={}", request.getShareCode(), t);
+        log.error("BlockChain service cancelShare failed, shareCode={}", request.shareCode(), t);
         return new Result<>(ResultEnum.BLOCKCHAIN_ERROR, false);
     }
 

@@ -177,27 +177,27 @@ public class ShareAuditServiceImpl implements ShareAuditService {
         // 批量获取用户名
         Map<Long, String> userNameCache = new HashMap<>();
 
-        return result.convert(logEntry -> {
-            String actorUserName = "匿名用户";
-            if (logEntry.getActorUserId() != null) {
-                actorUserName = userNameCache.computeIfAbsent(logEntry.getActorUserId(), id -> {
-                    Account account = accountMapper.selectById(id);
-                    return account != null ? account.getUsername() : "未知用户";
-                });
-            }
+            return result.convert(logEntry -> {
+                String actorUserName = "匿名用户";
+                if (logEntry.getActorUserId() != null) {
+                    actorUserName = userNameCache.computeIfAbsent(logEntry.getActorUserId(), id -> {
+                        Account account = accountMapper.selectById(id);
+                        return account != null ? account.getUsername() : "未知用户";
+                    });
+                }
 
-            return ShareAccessLogVO.builder()
-                    .id(String.valueOf(logEntry.getId()))
-                    .shareCode(logEntry.getShareCode())
-                    .actionType(logEntry.getActionType())
-                    .actionTypeDesc(ShareAccessLogVO.getActionTypeDesc(logEntry.getActionType()))
-                    .actorUserId(logEntry.getActorUserId() != null ? String.valueOf(logEntry.getActorUserId()) : null)
-                    .actorUserName(actorUserName)
-                    .actorIp(logEntry.getActorIp())
-                    .fileHash(logEntry.getFileHash())
-                    .fileName(logEntry.getFileName())
-                    .accessTime(logEntry.getAccessTime())
-                    .build();
+            return new ShareAccessLogVO(
+                    String.valueOf(logEntry.getId()),
+                    logEntry.getShareCode(),
+                    logEntry.getActionType(),
+                    ShareAccessLogVO.getActionTypeDesc(logEntry.getActionType()),
+                    logEntry.getActorUserId() != null ? String.valueOf(logEntry.getActorUserId()) : null,
+                    actorUserName,
+                    logEntry.getActorIp(),
+                    logEntry.getFileHash(),
+                    logEntry.getFileName(),
+                    logEntry.getAccessTime()
+            );
         });
     }
 
@@ -215,16 +215,17 @@ public class ShareAuditServiceImpl implements ShareAuditService {
         Long saveCount = shareAccessLogMapper.countByShareCodeAndAction(shareCode, ShareAccessLog.ACTION_SAVE, tenantId);
         Long uniqueActors = shareAccessLogMapper.countDistinctActors(shareCode, tenantId);
 
-        return ShareAccessStatsVO.builder()
-                .shareCode(shareCode)
-                .viewCount(viewCount != null ? viewCount : 0L)
-                .downloadCount(downloadCount != null ? downloadCount : 0L)
-                .saveCount(saveCount != null ? saveCount : 0L)
-                .uniqueActors(uniqueActors != null ? uniqueActors : 0L)
-                .totalAccess((viewCount != null ? viewCount : 0L) +
-                        (downloadCount != null ? downloadCount : 0L) +
-                        (saveCount != null ? saveCount : 0L))
-                .build();
+        long safeViewCount = viewCount != null ? viewCount : 0L;
+        long safeDownloadCount = downloadCount != null ? downloadCount : 0L;
+        long safeSaveCount = saveCount != null ? saveCount : 0L;
+        return new ShareAccessStatsVO(
+                shareCode,
+                safeViewCount,
+                safeDownloadCount,
+                safeSaveCount,
+                uniqueActors != null ? uniqueActors : 0L,
+                safeViewCount + safeDownloadCount + safeSaveCount
+        );
     }
 
     // ==================== 文件溯源（管理员专用）====================
@@ -241,16 +242,20 @@ public class ShareAuditServiceImpl implements ShareAuditService {
 
         // 如果是原始文件
         if (file.getOrigin() == null) {
-            return FileProvenanceVO.builder()
-                    .fileId(String.valueOf(file.getId()))
-                    .fileHash(file.getFileHash())
-                    .fileName(file.getFileName())
-                    .isOriginal(true)
-                    .originUserId(String.valueOf(file.getUid()))
-                    .originUserName(getUserName(file.getUid()))
-                    .depth(0)
-                    .chain(List.of())
-                    .build();
+            return new FileProvenanceVO(
+                    String.valueOf(file.getId()),
+                    file.getFileHash(),
+                    file.getFileName(),
+                    true,
+                    String.valueOf(file.getUid()),
+                    getUserName(file.getUid()),
+                    null,
+                    null,
+                    0,
+                    null,
+                    null,
+                    List.of()
+            );
         }
 
         // 查询来源信息
@@ -283,52 +288,53 @@ public class ShareAuditServiceImpl implements ShareAuditService {
 
             // 添加原始节点
             if (originFile != null) {
-                chain.add(ProvenanceNode.builder()
-                        .userId(String.valueOf(originFile.getUid()))
-                        .userName(originUserName)
-                        .fileId(String.valueOf(originFile.getId()))
-                        .depth(0)
-                        .time(originFile.getCreateTime())
-                        .build());
+                chain.add(new ProvenanceNode(
+                        String.valueOf(originFile.getUid()),
+                        originUserName,
+                        String.valueOf(originFile.getId()),
+                        0,
+                        null,
+                        originFile.getCreateTime()
+                ));
             }
 
             // 添加中间节点
             for (FileSource chainSource : chainSources) {
-                chain.add(ProvenanceNode.builder()
-                        .userId(String.valueOf(chainSource.getSourceUserId()))
-                        .userName(getUserName(chainSource.getSourceUserId()))
-                        .fileId(String.valueOf(chainSource.getSourceFileId()))
-                        .depth(chainSource.getDepth())
-                        .shareCode(chainSource.getShareCode())
-                        .time(chainSource.getCreateTime())
-                        .build());
+                chain.add(new ProvenanceNode(
+                        String.valueOf(chainSource.getSourceUserId()),
+                        getUserName(chainSource.getSourceUserId()),
+                        String.valueOf(chainSource.getSourceFileId()),
+                        chainSource.getDepth(),
+                        chainSource.getShareCode(),
+                        chainSource.getCreateTime()
+                ));
             }
 
             // 添加当前节点
-            chain.add(ProvenanceNode.builder()
-                    .userId(String.valueOf(file.getUid()))
-                    .userName(getUserName(file.getUid()))
-                    .fileId(String.valueOf(file.getId()))
-                    .depth(depth)
-                    .shareCode(source.getShareCode())
-                    .time(file.getCreateTime())
-                    .build());
+            chain.add(new ProvenanceNode(
+                    String.valueOf(file.getUid()),
+                    getUserName(file.getUid()),
+                    String.valueOf(file.getId()),
+                    depth,
+                    source.getShareCode(),
+                    file.getCreateTime()
+            ));
         }
 
-        return FileProvenanceVO.builder()
-                .fileId(String.valueOf(file.getId()))
-                .fileHash(file.getFileHash())
-                .fileName(file.getFileName())
-                .isOriginal(false)
-                .originUserId(originUserId)
-                .originUserName(originUserName)
-                .sharedFromUserId(sharedFromUserId)
-                .sharedFromUserName(sharedFromUserName)
-                .depth(depth)
-                .saveTime(file.getCreateTime())
-                .shareCode(source != null ? source.getShareCode() : null)
-                .chain(chain)
-                .build();
+        return new FileProvenanceVO(
+                String.valueOf(file.getId()),
+                file.getFileHash(),
+                file.getFileName(),
+                false,
+                originUserId,
+                originUserName,
+                sharedFromUserId,
+                sharedFromUserName,
+                depth,
+                file.getCreateTime(),
+                source != null ? source.getShareCode() : null,
+                chain
+        );
     }
 
     // ==================== 工具方法 ====================

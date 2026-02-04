@@ -1,6 +1,7 @@
 package cn.flying.service.impl;
 
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.lock.DistributedLock;
 import cn.flying.common.util.UidEncoder;
 import cn.flying.dao.vo.file.FileUploadState;
 import cn.flying.dao.vo.file.ProgressVO;
@@ -20,6 +21,8 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
+
+import java.lang.reflect.Method;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -72,6 +75,8 @@ class FileUploadServiceTest {
         FileUploadStateTestBuilder.resetClientIdCounter();
         // Skip @PostConstruct initialization
         ReflectionTestUtils.setField(fileUploadService, "eventPublisher", eventPublisher);
+        // 让异步分片处理在测试中同步执行，避免线程池/时序不稳定
+        ReflectionTestUtils.setField(fileUploadService, "fileProcessingExecutor", (java.util.concurrent.Executor) Runnable::run);
     }
 
     @Nested
@@ -429,6 +434,70 @@ class FileUploadServiceTest {
             Long differentUserId = 888L;
             assertThrows(GeneralException.class, () ->
                     fileUploadService.getUploadProgress(differentUserId, CLIENT_ID));
+        }
+    }
+
+    @Nested
+    @DisplayName("CleanupExpiredUploadSessions")
+    class CleanupExpiredUploadSessions {
+
+        @Test
+        @DisplayName("should be protected by distributed lock to avoid multi-instance overlap")
+        void shouldBeProtectedByDistributedLock() throws Exception {
+            Method method = FileUploadServiceImpl.class.getDeclaredMethod("cleanupExpiredUploadSessions");
+            DistributedLock lock = method.getAnnotation(DistributedLock.class);
+
+            assertNotNull(lock);
+            assertEquals("upload:session:cleanup", lock.key());
+            assertEquals(3600, lock.leaseTime());
+            assertFalse(lock.throwOnFailure());
+        }
+
+        @Test
+        @DisplayName("should cleanup expired active session")
+        void shouldCleanupExpiredActiveSession() {
+            String clientId = "expired_active_1";
+            FileUploadState state = new FileUploadState(USER_ID, "expired.pdf", 1024, "application/pdf", clientId, 256, 1);
+            state.setLastActivityTime(System.currentTimeMillis() - java.util.concurrent.TimeUnit.HOURS.toMillis(13));
+
+            when(redisStateManager.getAllActiveSessionIds()).thenReturn(java.util.Set.of(clientId));
+            when(redisStateManager.getState(clientId)).thenReturn(state);
+            when(redisStateManager.isSessionPaused(clientId)).thenReturn(false);
+
+            fileUploadService.cleanupExpiredUploadSessions();
+
+            verify(redisStateManager).removeSession(clientId, "");
+        }
+
+        @Test
+        @DisplayName("should cleanup expired paused session with longer timeout")
+        void shouldCleanupExpiredPausedSession() {
+            String clientId = "expired_paused_1";
+            FileUploadState state = new FileUploadState(USER_ID, "paused.pdf", 1024, "application/pdf", clientId, 256, 1);
+            state.setLastActivityTime(System.currentTimeMillis() - java.util.concurrent.TimeUnit.HOURS.toMillis(25));
+
+            when(redisStateManager.getAllActiveSessionIds()).thenReturn(java.util.Set.of(clientId));
+            when(redisStateManager.getState(clientId)).thenReturn(state);
+            when(redisStateManager.isSessionPaused(clientId)).thenReturn(true);
+
+            fileUploadService.cleanupExpiredUploadSessions();
+
+            verify(redisStateManager).removeSession(clientId, "");
+        }
+
+        @Test
+        @DisplayName("should handle missing state session by removing from paused set")
+        void shouldHandleMissingStateSession() {
+            String clientId = "missing_state_1";
+
+            when(redisStateManager.getAllActiveSessionIds()).thenReturn(java.util.Set.of(clientId));
+            when(redisStateManager.getState(clientId)).thenReturn(null);
+            when(redisStateManager.removePausedSession(clientId)).thenReturn(true);
+
+            fileUploadService.cleanupExpiredUploadSessions();
+
+            verify(redisStateManager).removePausedSession(clientId);
+            verify(redisStateManager, never()).removeSession(eq(clientId), anyString());
         }
     }
 }

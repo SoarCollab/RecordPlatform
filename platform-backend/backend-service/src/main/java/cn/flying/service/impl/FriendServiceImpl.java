@@ -28,7 +28,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -230,7 +229,7 @@ public class FriendServiceImpl extends ServiceImpl<FriendshipMapper, Friendship>
         List<Friendship> friendships = this.list(wrapper);
         return friendships.stream()
                 .map(f -> convertFriendshipToVO(f, userId))
-                .collect(Collectors.toList());
+                .toList();
     }
 
     @Override
@@ -300,7 +299,7 @@ public class FriendServiceImpl extends ServiceImpl<FriendshipMapper, Friendship>
                     .setNickname(account.getNickname())
                     .setIsFriend(isFriend)
                     .setHasPendingRequest(hasPending);
-        }).collect(Collectors.toList());
+        }).toList();
     }
 
     private FriendRequestDetailVO convertRequestToVO(FriendRequest request, boolean isReceived) {

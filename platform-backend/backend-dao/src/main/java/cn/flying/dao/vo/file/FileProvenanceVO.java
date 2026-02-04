@@ -1,10 +1,6 @@
 package cn.flying.dao.vo.file;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 
 import java.util.Date;
 import java.util.List;
@@ -15,75 +11,123 @@ import java.util.List;
  * @author flyingcoding
  * @since 2025-12-27
  */
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
 @Schema(description = "文件溯源信息")
-public class FileProvenanceVO {
+public record FileProvenanceVO(
+        @Schema(description = "当前文件ID")
+        String fileId,
+        @Schema(description = "文件哈希")
+        String fileHash,
+        @Schema(description = "文件名")
+        String fileName,
+        @Schema(description = "是否为原始文件（自己上传的）")
+        Boolean isOriginal,
+        @Schema(description = "原始上传者用户ID")
+        String originUserId,
+        @Schema(description = "原始上传者用户名")
+        String originUserName,
+        @Schema(description = "直接分享者用户ID")
+        String sharedFromUserId,
+        @Schema(description = "直接分享者用户名")
+        String sharedFromUserName,
+        @Schema(description = "分享链路深度（0=原始文件，1=一次分享，2=二次分享...）")
+        Integer depth,
+        @Schema(description = "保存时间")
+        Date saveTime,
+        @Schema(description = "使用的分享码")
+        String shareCode,
+        @Schema(description = "完整分享链路（从原始到当前）")
+        List<ProvenanceNode> chain
+) {
 
-    @Schema(description = "当前文件ID")
-    private String fileId;
+    public String getFileId() {
+        return fileId;
+    }
 
-    @Schema(description = "文件哈希")
-    private String fileHash;
+    public String getFileHash() {
+        return fileHash;
+    }
 
-    @Schema(description = "文件名")
-    private String fileName;
+    public String getFileName() {
+        return fileName;
+    }
 
-    @Schema(description = "是否为原始文件（自己上传的）")
-    private Boolean isOriginal;
+    public Boolean getIsOriginal() {
+        return isOriginal;
+    }
 
-    @Schema(description = "原始上传者用户ID")
-    private String originUserId;
+    public String getOriginUserId() {
+        return originUserId;
+    }
 
-    @Schema(description = "原始上传者用户名")
-    private String originUserName;
+    public String getOriginUserName() {
+        return originUserName;
+    }
 
-    @Schema(description = "直接分享者用户ID")
-    private String sharedFromUserId;
+    public String getSharedFromUserId() {
+        return sharedFromUserId;
+    }
 
-    @Schema(description = "直接分享者用户名")
-    private String sharedFromUserName;
+    public String getSharedFromUserName() {
+        return sharedFromUserName;
+    }
 
-    @Schema(description = "分享链路深度（0=原始文件，1=一次分享，2=二次分享...）")
-    private Integer depth;
+    public Integer getDepth() {
+        return depth;
+    }
 
-    @Schema(description = "保存时间")
-    private Date saveTime;
+    public Date getSaveTime() {
+        return saveTime;
+    }
 
-    @Schema(description = "使用的分享码")
-    private String shareCode;
+    public String getShareCode() {
+        return shareCode;
+    }
 
-    @Schema(description = "完整分享链路（从原始到当前）")
-    private List<ProvenanceNode> chain;
+    public List<ProvenanceNode> getChain() {
+        return chain;
+    }
 
     /**
      * 分享链路节点
      */
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
     @Schema(description = "分享链路节点")
-    public static class ProvenanceNode {
+    public record ProvenanceNode(
+            @Schema(description = "用户ID")
+            String userId,
+            @Schema(description = "用户名")
+            String userName,
+            @Schema(description = "文件ID")
+            String fileId,
+            @Schema(description = "链路深度")
+            Integer depth,
+            @Schema(description = "分享码（传递时使用的）")
+            String shareCode,
+            @Schema(description = "获取时间")
+            Date time
+    ) {
 
-        @Schema(description = "用户ID")
-        private String userId;
+        public String getUserId() {
+            return userId;
+        }
 
-        @Schema(description = "用户名")
-        private String userName;
+        public String getUserName() {
+            return userName;
+        }
 
-        @Schema(description = "文件ID")
-        private String fileId;
+        public String getFileId() {
+            return fileId;
+        }
 
-        @Schema(description = "链路深度")
-        private Integer depth;
+        public Integer getDepth() {
+            return depth;
+        }
 
-        @Schema(description = "分享码（传递时使用的）")
-        private String shareCode;
+        public String getShareCode() {
+            return shareCode;
+        }
 
-        @Schema(description = "获取时间")
-        private Date time;
+        public Date getTime() {
+            return time;
+        }
     }
 }

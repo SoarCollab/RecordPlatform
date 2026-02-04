@@ -12,10 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -128,8 +125,8 @@ public class DegradedWriteTracker {
                         return null;
                     }
                 })
-                .filter(r -> r != null)
-                .collect(Collectors.toList());
+                .filter(Objects::nonNull)
+                .toList();
     }
 
     /**
@@ -141,7 +138,7 @@ public class DegradedWriteTracker {
     public List<DegradedWriteRecord> getPendingSyncsForDomain(String domainName) {
         return getPendingSyncs().stream()
                 .filter(r -> r.getMissingDomains().contains(domainName))
-                .collect(Collectors.toList());
+                .toList();
     }
 
     /**
@@ -151,7 +148,7 @@ public class DegradedWriteTracker {
      */
     public void markSynced(String objectHash) {
         Long removed = stringRedisTemplate.opsForHash().delete(DEGRADED_WRITE_KEY, objectHash);
-        if (removed != null && removed > 0) {
+        if (removed > 0) {
             log.info("Marked degraded write as synced: {}", objectHash);
         }
     }
@@ -196,8 +193,7 @@ public class DegradedWriteTracker {
      * @return 记录数量
      */
     public long getPendingCount() {
-        Long size = stringRedisTemplate.opsForHash().size(DEGRADED_WRITE_KEY);
-        return size != null ? size : 0;
+        return stringRedisTemplate.opsForHash().size(DEGRADED_WRITE_KEY);
     }
 
     /**
@@ -210,11 +206,11 @@ public class DegradedWriteTracker {
         List<String> activeDomains = faultDomainManager.getActiveDomains();
         Set<String> writtenDomains = writtenNodes.stream()
                 .map(faultDomainManager::getNodeDomain)
-                .filter(d -> d != null)
+                .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
 
         return activeDomains.stream()
                 .filter(d -> !writtenDomains.contains(d))
-                .collect(Collectors.toList());
+                .toList();
     }
 }

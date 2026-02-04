@@ -6,7 +6,8 @@ import cn.flying.service.FileService;
 import cn.flying.service.assistant.FileUploadRedisStateManager;
 import cn.flying.common.event.FileStorageEvent;
 import cn.flying.common.util.CommonUtils;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
@@ -23,8 +24,9 @@ import java.util.concurrent.Executor;
  * @create 2025-04-05
  */
 @Component
-@Slf4j
 public class FileStorageEventListener {
+
+    private static final Logger log = LoggerFactory.getLogger(FileStorageEventListener.class);
 
     @Resource
     private FileService fileService;
@@ -113,6 +115,6 @@ public class FileStorageEventListener {
         return CompletableFuture.runAsync(() -> {
             //todo 实现实际的用户通知逻辑
             log.info("通知用户文件存证完成: 用户={}, 文件名={}, 文件哈希={}", uid, fileName, fileHash);
-        });
+        }, fileProcessTaskExecutor);
     }
 }

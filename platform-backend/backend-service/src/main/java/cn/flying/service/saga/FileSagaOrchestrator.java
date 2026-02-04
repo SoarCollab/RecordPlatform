@@ -28,7 +28,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -66,7 +65,7 @@ public class FileSagaOrchestrator {
     /**
      * 执行文件上传 Saga。
      * 区块链存储失败时自动补偿删除 S3 存储数据。
-     *
+     * <p>
      * 注意：此方法不使用 @Transactional，因为：
      * 1. Saga 模式通过补偿（而非事务回滚）实现最终一致性
      * 2. 外部调用（S3 存储、区块链）不受数据库事务管理
@@ -87,7 +86,7 @@ public class FileSagaOrchestrator {
             completeSaga(saga);
 
             sagaMetrics.recordSagaCompleted();
-            return FileUploadResult.success(chainResult.getTransactionHash(), chainResult.getFileHash());
+            return FileUploadResult.success(chainResult.transactionHash(), chainResult.fileHash());
 
         } catch (Exception ex) {
             log.error("Saga 执行失败: requestId={}", cmd.getRequestId(), ex);
@@ -178,15 +177,15 @@ public class FileSagaOrchestrator {
         String fileContent = JsonConverter.toJsonWithPretty(storedPaths);
         String userIdStr = String.valueOf(cmd.getUserId());
 
-        Result<StoreFileResponse> result = fileRemoteClient.storeFileOnChain(StoreFileRequest.builder()
-                .uploader(userIdStr)
-                .fileName(cmd.getFileName())
-                .param(cmd.getFileParam())
-                .content(fileContent)
-                .build());
+        Result<StoreFileResponse> result = fileRemoteClient.storeFileOnChain(new StoreFileRequest(
+                userIdStr,
+                cmd.getFileName(),
+                cmd.getFileParam(),
+                fileContent
+        ));
 
         StoreFileResponse res = ResultUtils.getData(result);
-        if (res == null || res.getTransactionHash() == null || res.getFileHash() == null) {
+        if (res == null || res.transactionHash() == null || res.fileHash() == null) {
             throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "区块链存储返回无效结果");
         }
 
@@ -197,8 +196,8 @@ public class FileSagaOrchestrator {
         Map<String, Object> eventData = new HashMap<>();
         eventData.put("userId", cmd.getUserId());
         eventData.put("fileName", cmd.getFileName());
-        eventData.put("transactionHash", chainResult.getTransactionHash());
-        eventData.put("fileHash", chainResult.getFileHash());
+        eventData.put("transactionHash", chainResult.transactionHash());
+        eventData.put("fileHash", chainResult.fileHash());
         eventData.put("requestId", cmd.getRequestId());
 
         // 使用 REQUIRES_NEW 事务发布事件，因为 executeUpload() 没有事务上下文

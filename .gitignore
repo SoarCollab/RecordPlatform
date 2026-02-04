@@ -63,3 +63,5 @@ App.java
 .ace-tool/
 /platform-storage/log/
 /.sisyphus/
+/.pnpm-store/
+/.codex/environments/environment.toml

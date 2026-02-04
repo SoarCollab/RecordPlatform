@@ -49,7 +49,7 @@ public class BlockChainServiceImpl implements BlockChainService {
     public Result<String> shareFiles(ShareFilesRequest request) {
         Timer.Sample timerSample = fiscoMetrics.startShareTimer();
         try {
-            Integer expireMinutes = request != null ? request.getExpireMinutes() : null;
+            Integer expireMinutes = request != null ? request.expireMinutes() : null;
             if (expireMinutes == null) {
                 return new Result<>(
                         ResultEnum.PARAM_IS_INVALID.getCode(),
@@ -66,8 +66,8 @@ public class BlockChainServiceImpl implements BlockChainService {
             }
 
             ChainReceipt receipt = chainAdapter.shareFiles(
-                    request.getUploader(),
-                    request.getFileHashList(),
+                    request.uploader(),
+                    request.fileHashList(),
                     expireMinutes
             );
 
@@ -91,12 +91,15 @@ public class BlockChainServiceImpl implements BlockChainService {
         try {
             ChainShareInfo shareInfo = chainAdapter.getSharedFiles(shareCode);
 
-            return Result.success(SharingVO.builder()
-                    .uploader(shareInfo.getUploader())
-                    .fileHashList(shareInfo.getFileHashList())
-                    .expirationTime(shareInfo.getExpireTimestamp())
-                    .isValid(shareInfo.getIsValid())
-                    .build());
+            return Result.success(new SharingVO(
+                    shareInfo.getUploader(),
+                    shareInfo.getFileHashList(),
+                    null,
+                    null,
+                    null,
+                    shareInfo.getExpireTimestamp(),
+                    shareInfo.getIsValid()
+            ));
 
         } catch (Exception e) {
             return BlockChainExceptionHandler.handle(e, "getSharedFiles", ResultEnum.GET_USER_SHARE_FILE_ERROR);
@@ -110,17 +113,17 @@ public class BlockChainServiceImpl implements BlockChainService {
         Timer.Sample timerSample = fiscoMetrics.startStoreTimer();
         try {
             ChainReceipt receipt = chainAdapter.storeFile(
-                    request.getUploader(),
-                    request.getFileName(),
-                    request.getContent(),
-                    request.getParam()
+                    request.uploader(),
+                    request.fileName(),
+                    request.content(),
+                    request.param()
             );
 
             fiscoMetrics.recordSuccess();
-            return Result.success(StoreFileResponse.builder()
-                    .transactionHash(receipt.getTransactionHash())
-                    .fileHash(receipt.getFileHash())
-                    .build());
+            return Result.success(new StoreFileResponse(
+                    receipt.getTransactionHash(),
+                    receipt.getFileHash()
+            ));
 
         } catch (Exception e) {
             return BlockChainExceptionHandler.handle(e, "storeFile", ResultEnum.CONTRACT_ERROR, fiscoMetrics);
@@ -137,10 +140,13 @@ public class BlockChainServiceImpl implements BlockChainService {
             List<ChainFileInfo> chainFiles = chainAdapter.getUserFiles(uploader);
 
             List<FileVO> fileList = chainFiles.stream()
-                    .map(f -> FileVO.builder()
-                            .fileName(f.getFileName())
-                            .fileHash(f.getFileHash())
-                            .build())
+                    .map(f -> new FileVO(
+                            f.getFileName(),
+                            f.getFileHash(),
+                            null,
+                            null,
+                            null
+                    ))
                     .toList();
 
             return Result.success(fileList);
@@ -158,15 +164,17 @@ public class BlockChainServiceImpl implements BlockChainService {
         try {
             ChainFileDetail detail = chainAdapter.getFile(uploader, fileHash);
 
-            FileDetailVO fileDetailVO = FileDetailVO.builder()
-                    .uploader(detail.getUploader())
-                    .fileName(detail.getFileName())
-                    .param(detail.getParam())
-                    .content(detail.getContent())
-                    .fileHash(detail.getFileHash())
-                    .uploadTime(detail.getUploadTimeFormatted())
-                    .uploadTimestamp(detail.getUploadTimestamp())
-                    .build();
+            FileDetailVO fileDetailVO = new FileDetailVO(
+                    detail.getUploader(),
+                    detail.getFileName(),
+                    detail.getParam(),
+                    detail.getContent(),
+                    detail.getFileHash(),
+                    detail.getUploadTimeFormatted(),
+                    detail.getUploadTimestamp(),
+                    null,
+                    null
+            );
 
             return Result.success(fileDetailVO);
 
@@ -184,8 +192,8 @@ public class BlockChainServiceImpl implements BlockChainService {
         Timer.Sample timerSample = fiscoMetrics.startDeleteTimer();
         try {
             ChainReceipt receipt = chainAdapter.deleteFiles(
-                    request.getUploader(),
-                    request.getFileHashList()
+                    request.uploader(),
+                    request.fileHashList()
             );
 
             if (receipt.isSuccess()) {
@@ -211,10 +219,13 @@ public class BlockChainServiceImpl implements BlockChainService {
         try {
             ChainStatus status = chainAdapter.getChainStatus();
 
-            BlockChainMessage message = new BlockChainMessage();
-            message.setBlockNumber(status.getBlockNumber());
-            message.setTransactionCount(status.getTransactionCount());
-            message.setFailedTransactionCount(status.getFailedTransactionCount());
+            BlockChainMessage message = new BlockChainMessage(
+                    status.getBlockNumber(),
+                    status.getTransactionCount(),
+                    status.getFailedTransactionCount(),
+                    status.getNodeCount(),
+                    status.getChainType() != null ? status.getChainType().name() : null
+            );
 
             return Result.success(message);
 
@@ -255,7 +266,7 @@ public class BlockChainServiceImpl implements BlockChainService {
     @ApiDoc(value = "取消分享")
     public Result<Boolean> cancelShare(CancelShareRequest request) {
         try {
-            ChainReceipt receipt = chainAdapter.cancelShare(request.getShareCode());
+            ChainReceipt receipt = chainAdapter.cancelShare(request.shareCode());
 
             if (receipt.isSuccess()) {
                 fiscoMetrics.recordSuccess();
@@ -291,13 +302,15 @@ public class BlockChainServiceImpl implements BlockChainService {
         try {
             ChainShareInfo shareInfo = chainAdapter.getShareInfo(shareCode);
 
-            return Result.success(SharingVO.builder()
-                    .uploader(shareInfo.getUploader())
-                    .fileHashList(shareInfo.getFileHashList())
-                    .shareCode(shareCode)
-                    .expirationTime(shareInfo.getExpireTimestamp())
-                    .isValid(shareInfo.getIsValid())
-                    .build());
+            return Result.success(new SharingVO(
+                    shareInfo.getUploader(),
+                    shareInfo.getFileHashList(),
+                    shareCode,
+                    null,
+                    null,
+                    shareInfo.getExpireTimestamp(),
+                    shareInfo.getIsValid()
+            ));
 
         } catch (Exception e) {
             return BlockChainExceptionHandler.handle(e, "getShareInfo", ResultEnum.BLOCKCHAIN_ERROR);

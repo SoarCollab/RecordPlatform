@@ -84,8 +84,9 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     // 修复检查并发限制信号量
     private static final Semaphore REPAIR_CHECK_SEMAPHORE = new Semaphore(10);
 
-    // 专用 I/O 线程池，用于文件上传操作（避免阻塞 ForkJoinPool.commonPool）
-    private static final ExecutorService UPLOAD_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
+    // 专用 I/O 执行器，用于文件上传操作（避免阻塞 ForkJoinPool.commonPool），由 Spring 管理生命周期
+    @Resource(name = "storageUploadExecutor")
+    private ExecutorService uploadExecutor;
 
     // 缓存 Bucket 是否存在，减少重复检查开销（带TTL自动过期）
     private final Cache<String, Boolean> bucketExistenceCache = Caffeine.newBuilder()
@@ -399,7 +400,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 if (!failedNodes.isEmpty() && !successNodes.isEmpty()) {
                     log.warn("部分节点上传失败: 失败={}, 成功={}，触发修复任务", failedNodes, successNodes);
                     // 从成功节点复制到失败节点
-                    String sourceNode = successNodes.get(0);
+                    String sourceNode = successNodes.getFirst();
                     for (String failedNode : failedNodes) {
                         consistencyRepairService.scheduleImmediateRepairByNodes(objectPath, sourceNode, failedNode);
                     }
@@ -453,7 +454,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 log.error("将'{}'上传到节点'{}'时出错：{}", objectName, nodeName, e.getMessage());
                 throw new RuntimeException("Upload of '" + objectName + "' to node '" + nodeName + "' failed: " + e.getMessage(), e);
             }
-        }, UPLOAD_EXECUTOR);
+        }, uploadExecutor);
     }
 
     @Override
@@ -816,7 +817,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 // 包装成自定义异常，携带更多上下文信息
                 throw new RuntimeException("Upload of '" + objectName + "' to node '" + nodeName + "' failed: " + e.getMessage(), e);
             }
-        });
+        }, uploadExecutor);
     }
 
     /**

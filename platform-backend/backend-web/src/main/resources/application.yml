@@ -1,10 +1,10 @@
 spring:
   application:
     name: backend-web
-  # Java 21 Virtual Threads - 启用虚拟线程处理 HTTP 请求
+  # Java 21 Virtual Threads - 全局 servlet 虚拟线程已禁用（采用局部 vthread executor 策略）
   threads:
     virtual:
-      enabled: true
+      enabled: false
   servlet:
     multipart:
       max-file-size: 100MB

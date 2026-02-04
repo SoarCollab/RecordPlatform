@@ -626,7 +626,7 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
                         .eq(TicketAttachment::getTicketId, ticket.getId())
                         .isNull(TicketAttachment::getReplyId)
         );
-        vo.setAttachments(attachments.stream().map(this::convertAttachmentToVO).collect(Collectors.toList()));
+        vo.setAttachments(attachments.stream().map(this::convertAttachmentToVO).toList());
 
         LambdaQueryWrapper<TicketReply> replyWrapper = new LambdaQueryWrapper<TicketReply>()
                 .eq(TicketReply::getTicketId, ticket.getId());
@@ -638,7 +638,7 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
         replyWrapper.orderByAsc(TicketReply::getCreateTime);
 
         List<TicketReply> replies = ticketReplyMapper.selectList(replyWrapper);
-        vo.setReplies(replies.stream().map(reply -> convertReplyToVO(reply, ticket)).collect(Collectors.toList()));
+        vo.setReplies(replies.stream().map(reply -> convertReplyToVO(reply, ticket)).toList());
 
         return vo;
     }
@@ -662,7 +662,7 @@ public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
                 new LambdaQueryWrapper<TicketAttachment>()
                         .eq(TicketAttachment::getReplyId, reply.getId())
         );
-        vo.setAttachments(attachments.stream().map(this::convertAttachmentToVO).collect(Collectors.toList()));
+        vo.setAttachments(attachments.stream().map(this::convertAttachmentToVO).toList());
 
         return vo;
     }

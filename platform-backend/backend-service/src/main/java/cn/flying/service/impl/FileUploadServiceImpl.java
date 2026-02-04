@@ -5,6 +5,7 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.event.FileStorageEvent;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.exception.RetryableException;
+import cn.flying.common.lock.DistributedLock;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.CommonUtils;
 import cn.flying.common.util.JsonConverter;
@@ -15,14 +16,11 @@ import cn.flying.service.FileUploadService;
 import cn.flying.service.assistant.FileUploadRedisStateManager;
 import cn.flying.service.encryption.*;
 import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.jetbrains.annotations.NotNull;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.crypto.SecretKey;
@@ -36,6 +34,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -44,7 +43,7 @@ import java.util.stream.Stream;
  * @description: 文件上传服务 (包含业务逻辑、状态管理、文件操作等)
  * @author flyingcoding
  * @create: 2025-03-31 11:22
- *
+ * <p>
  * 注意：此类不使用类级别 @Transactional，因为：
  *  flyingcoding
  *  flyingcoding
@@ -82,13 +81,16 @@ public class FileUploadServiceImpl implements FileUploadService {
             Map.entry("application/x-rar-compressed", "rar"), Map.entry("application/x-7z-compressed", "7z")
     );
     // --- 线程池配置 ---
-    private final ExecutorService fileProcessingExecutor;
-    private final ScheduledExecutorService cleanupScheduler = Executors.newSingleThreadScheduledExecutor();
+    @Resource(name = "fileProcessTaskExecutor")
+    private Executor fileProcessingExecutor;
     @Resource
     private ApplicationEventPublisher eventPublisher;
     // Redis状态管理器
     @Resource
     private FileUploadRedisStateManager redisStateManager;
+
+    @Resource(name = "chunkProcessingWaitScheduler")
+    private ScheduledExecutorService chunkProcessingWaitScheduler;
 
     // 加密策略工厂
     @Resource
@@ -96,26 +98,6 @@ public class FileUploadServiceImpl implements FileUploadService {
 
     @Resource
     private FileService fileService;
-
-    public FileUploadServiceImpl() {
-        int corePoolSize = Math.max(2, Runtime.getRuntime().availableProcessors());
-        int maxPoolSize = Runtime.getRuntime().availableProcessors() * 2;
-        this.fileProcessingExecutor = new ThreadPoolExecutor(
-                corePoolSize, maxPoolSize, 60L, TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(2000),
-                new ThreadFactory() {
-                    private final AtomicInteger counter = new AtomicInteger(0);
-
-                    @Override
-                    public Thread newThread(@NotNull Runnable r) {
-                        Thread t = new Thread(r, "文件处理器-" + counter.incrementAndGet());
-                        t.setDaemon(true);
-                        return t;
-                    }
-                },
-                new ThreadPoolExecutor.CallerRunsPolicy() // 拒绝策略：调用者线程执行
-        );
-    }
 
     @PostConstruct
     public void initialize() {
@@ -128,9 +110,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             // 初始化失败是严重问题，可以抛出运行时异常阻止应用启动
             throw new RuntimeException("创建基础目录失败", e);
         }
-        // 启动定时清理任务
-        cleanupScheduler.scheduleAtFixedRate(this::cleanupExpiredUploadSessions, 1, 1, TimeUnit.HOURS);
-        log.info("The scheduled cleaning task has been initiated...");
+        // 定时清理任务由 Spring @Scheduled 驱动（避免重复调度）
     }
 
     /**
@@ -138,6 +118,7 @@ public class FileUploadServiceImpl implements FileUploadService {
      * 改为每6小时执行一次，提高清理效率
      */
     @Scheduled(fixedDelay = 6 * 60 * 60 * 1000, initialDelay = 60 * 60 * 1000) // 每6小时执行一次（启动后1小时执行）
+    @DistributedLock(key = "upload:session:cleanup", leaseTime = 3600)
     public void cleanupExpiredUploadSessions() {
         long now = System.currentTimeMillis();
         long timeoutMillis = 12 * 60 * 60 * 1000L; // 12 小时
@@ -207,7 +188,7 @@ public class FileUploadServiceImpl implements FileUploadService {
     /**
      * 内部方法清理指定 clientId 的上传状态和相关文件目录
      * 支持处理SUID为空的情况（用于定时清理任务）
-     *
+     * <p>
      * 修复竞态条件：先同步清理文件，再删除 Redis 状态
      * 这样即使系统崩溃，定时清理任务仍可通过 Redis 状态找到残留文件
      */
@@ -293,37 +274,6 @@ public class FileUploadServiceImpl implements FileUploadService {
         } catch (IOException e) {
             log.error("删除路径失败: {}", path, e);
         }
-    }
-
-    @PreDestroy
-    public void shutdown() {
-        log.info("开始关闭文件上传服务...");
-        // 关闭定时任务
-        cleanupScheduler.shutdown();
-        try {
-            if (!cleanupScheduler.awaitTermination(10, TimeUnit.SECONDS)) {
-                cleanupScheduler.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            cleanupScheduler.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
-
-        // 优雅关闭文件处理线程池
-        fileProcessingExecutor.shutdown();
-        try {
-            if (!fileProcessingExecutor.awaitTermination(60, TimeUnit.SECONDS)) {
-                fileProcessingExecutor.shutdownNow();
-                log.warn("文件处理线程池被强制关闭。");
-            } else {
-                log.info("文件处理线程池已优雅关闭。");
-            }
-        } catch (InterruptedException e) {
-            fileProcessingExecutor.shutdownNow();
-            Thread.currentThread().interrupt();
-            log.error("等待线程池关闭时被中断。", e);
-        }
-        log.info("文件上传服务关闭完成。");
     }
 
     /**
@@ -1079,65 +1029,61 @@ public class FileUploadServiceImpl implements FileUploadService {
         // 创建一个 CompletableFuture 来处理异步等待
         CompletableFuture<Boolean> completionFuture = new CompletableFuture<>();
 
-        // 使用 ScheduledExecutorService 进行定期检查，避免忙等待
-        try (ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "ChunkProcessingWaiter-" + clientId);
-            t.setDaemon(true);
-            return t;
-        })) {
+        // 使用 Spring 管理的 ScheduledExecutorService 进行定期检查，避免每次调用创建新线程池
+        final AtomicInteger checkCount = new AtomicInteger(0);
+        final AtomicInteger lastProcessedCount = new AtomicInteger(0);
+        final AtomicInteger stagnationCounter = new AtomicInteger(0);
+        final long startTime = System.currentTimeMillis();
 
-            // 进度跟踪
-            final AtomicInteger checkCount = new AtomicInteger(0);
-            final AtomicInteger lastProcessedCount = new AtomicInteger(0);
-            final AtomicInteger stagnationCounter = new AtomicInteger(0);
-            final long startTime = System.currentTimeMillis();
-
-            // 定期检查任务
-            ScheduledFuture<?> checkTask = scheduler.scheduleAtFixedRate(() -> {
+        AtomicReference<ScheduledFuture<?>> checkTaskRef = new AtomicReference<>();
+        try {
+            ScheduledFuture<?> checkTask = chunkProcessingWaitScheduler.scheduleAtFixedRate(() -> {
                 try {
                     int currentCheckCount = checkCount.incrementAndGet();
                     long elapsedTime = System.currentTimeMillis() - startTime;
 
-                    // 检查超时
                     if (elapsedTime > maxWaitTimeSeconds * 1000L) {
                         log.warn("等待超时: 客户端ID={}, 耗时={}ms", clientId, elapsedTime);
                         completionFuture.complete(false);
+                        ScheduledFuture<?> f = checkTaskRef.get();
+                        if (f != null) f.cancel(false);
                         return;
                     }
 
-                    // 获取最新状态
                     FileUploadState currentState = redisStateManager.getState(clientId);
                     if (currentState == null) {
                         log.warn("等待过程中状态丢失: 客户端ID={}", clientId);
                         completionFuture.complete(false);
+                        ScheduledFuture<?> f = checkTaskRef.get();
+                        if (f != null) f.cancel(false);
                         return;
                     }
 
                     int processedCount = currentState.getProcessedChunks().size();
-
-                    // 检查是否所有分片都已处理完成
                     if (processedCount >= expectedChunks) {
                         log.info("所有分片处理完成: 客户端ID={}, 耗时={}ms, 检查次数={}",
                                 clientId, elapsedTime, currentCheckCount);
                         completionFuture.complete(true);
+                        ScheduledFuture<?> f = checkTaskRef.get();
+                        if (f != null) f.cancel(false);
                         return;
                     }
 
-                    // 检测进度停滞
                     int lastCount = lastProcessedCount.get();
                     if (processedCount == lastCount) {
                         int stagnation = stagnationCounter.incrementAndGet();
-                        if (stagnation >= 10) { // 5秒无进度（10次 * 500ms）
+                        if (stagnation >= 10) {
                             log.warn("检测到进度停滞: 客户端ID={}, 已处理={}/{}, 停滞时间={}秒",
                                     clientId, processedCount, expectedChunks, stagnation * checkIntervalMs / 1000);
 
-                            if (stagnation >= 30) { // 15秒无进度，认为异常
+                            if (stagnation >= 30) {
                                 log.error("进度长时间停滞，可能存在处理异常: 客户端ID={}", clientId);
                                 completionFuture.complete(false);
+                                ScheduledFuture<?> f = checkTaskRef.get();
+                                if (f != null) f.cancel(false);
                             }
                         }
                     } else {
-                        // 有进度，重置停滞计数器
                         stagnationCounter.set(0);
                         lastProcessedCount.set(processedCount);
                     }
@@ -1145,29 +1091,32 @@ public class FileUploadServiceImpl implements FileUploadService {
                 } catch (Exception e) {
                     log.error("检查分片处理状态时发生异常: 客户端ID={}", clientId, e);
                     completionFuture.completeExceptionally(e);
+                    ScheduledFuture<?> f = checkTaskRef.get();
+                    if (f != null) f.cancel(false);
                 }
             }, 0, checkIntervalMs, TimeUnit.MILLISECONDS);
+            checkTaskRef.set(checkTask);
 
-            try {
-                // 等待完成或超时
-                return completionFuture.get(maxWaitTimeSeconds + 10, TimeUnit.SECONDS);
-
-            } catch (TimeoutException e) {
-                log.error("CompletableFuture 等待超时: 客户端ID={}", clientId, e);
-                return false;
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                log.error("等待被中断: 客户端ID={}", clientId, e);
-                return false;
-            } catch (ExecutionException e) {
-                log.error("等待执行异常: 客户端ID={}", clientId, e.getCause());
-                return false;
-            } finally {
-                // 取消定期检查任务
-                // 注意：scheduler 的关闭由 try-with-resources 自动处理（Java 19+ ExecutorService 实现了 AutoCloseable）
-                checkTask.cancel(true);
+            return completionFuture.get(maxWaitTimeSeconds + 10, TimeUnit.SECONDS);
+        } catch (RejectedExecutionException e) {
+            log.error("等待调度被拒绝: 客户端ID={}", clientId, e);
+            return false;
+        } catch (TimeoutException e) {
+            log.error("CompletableFuture 等待超时: 客户端ID={}", clientId, e);
+            return false;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("等待被中断: 客户端ID={}", clientId, e);
+            return false;
+        } catch (ExecutionException e) {
+            log.error("等待执行异常: 客户端ID={}", clientId, e.getCause());
+            return false;
+        } finally {
+            ScheduledFuture<?> f = checkTaskRef.get();
+            if (f != null) {
+                f.cancel(true);
             }
-        }  // try-with-resources 自动调用 scheduler.close()，等效于 shutdown() + awaitTermination()
+        }
     }
 
     /**

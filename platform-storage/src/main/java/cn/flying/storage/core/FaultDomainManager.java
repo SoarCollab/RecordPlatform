@@ -318,7 +318,7 @@ public class FaultDomainManager {
     public List<String> getHealthyStandbyNodes() {
         return getStandbyNodes().stream()
                 .filter(s3Monitor::isNodeOnline)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     // ==================== 域查询方法 ====================
@@ -495,12 +495,9 @@ public class FaultDomainManager {
 
         // 3. 创建新的哈希环映射（原子替换模式）
         Map<String, ConsistentHashRing> oldRings = domainRingsRef.get();
-        Map<String, ConsistentHashRing> newRings = new ConcurrentHashMap<>();
 
         // 复制现有哈希环
-        for (Map.Entry<String, ConsistentHashRing> entry : oldRings.entrySet()) {
-            newRings.put(entry.getKey(), entry.getValue());
-        }
+        Map<String, ConsistentHashRing> newRings = new ConcurrentHashMap<>(oldRings);
 
         // 从旧域哈希环移除
         if (oldDomain != null) {
