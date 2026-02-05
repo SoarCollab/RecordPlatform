@@ -50,15 +50,6 @@ public final class Base62 {
             number = divRem[0];
         }
 
-        // 处理前导零字节
-        for (byte b : data) {
-            if (b == 0) {
-                result.insert(0, ALPHABET.charAt(0));
-            } else {
-                break;
-            }
-        }
-
         return result.toString();
     }
 
@@ -71,16 +62,6 @@ public final class Base62 {
     public static byte[] decode(String encoded) {
         if (encoded == null || encoded.isEmpty()) {
             return new byte[0];
-        }
-
-        // 计算前导零的数量
-        int leadingZeros = 0;
-        for (int i = 0; i < encoded.length(); i++) {
-            if (encoded.charAt(i) == ALPHABET.charAt(0)) {
-                leadingZeros++;
-            } else {
-                break;
-            }
         }
 
         // 转换为 BigInteger
@@ -104,11 +85,8 @@ public final class Base62 {
             offset = 1;
         }
 
-        // 添加前导零
-        byte[] result = new byte[leadingZeros + decoded.length - offset];
-        System.arraycopy(decoded, offset, result, leadingZeros, decoded.length - offset);
-
-        return result;
+        // 移除编码时附加的前导符号字节，返回原始字节数组
+        return Arrays.copyOfRange(decoded, offset, decoded.length);
     }
 
     /**

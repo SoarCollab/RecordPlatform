@@ -317,24 +317,13 @@ class SecureIdCodecTest {
         @Test
         @DisplayName("should handle sequential IDs")
         void sequentialIds_allRoundTripCorrectly() {
-            // Test a smaller range to avoid potential edge cases
-            int successCount = 0;
-            int failCount = 0;
-
             for (long i = 1; i <= 100; i++) {
                 String externalId = codec.toExternalId(i);
                 Long decodedId = codec.fromExternalId(externalId);
-
-                if (decodedId != null && decodedId.equals(i)) {
-                    successCount++;
-                } else {
-                    failCount++;
-                }
+                assertThat(decodedId)
+                        .as("Sequential ID %d should round-trip correctly", i)
+                        .isEqualTo(i);
             }
-
-            // Allow some failures due to potential encoding edge cases
-            // but ensure the vast majority succeed
-            assertThat(successCount).isGreaterThanOrEqualTo(95);
         }
     }
 }
