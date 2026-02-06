@@ -15,8 +15,13 @@ import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.mapper.FileSourceMapper;
 import cn.flying.dao.mapper.ShareAccessLogMapper;
 import cn.flying.dao.vo.admin.AdminFileDetailVO;
+import cn.flying.dao.vo.admin.AdminFileQueryParam;
+import cn.flying.dao.vo.admin.AdminFileVO;
+import cn.flying.dao.vo.admin.AdminShareQueryParam;
+import cn.flying.dao.vo.admin.AdminShareVO;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -27,8 +32,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -308,6 +316,198 @@ class FileAdminServiceImplTest {
     }
 
     @Nested
+    @DisplayName("getAllFiles - query and conversion")
+    class GetAllFilesQueryAndConversion {
+
+        /**
+         * 验证管理员文件列表在仅查询原始文件时，能正确返回并完成 VO 转换。
+         */
+        @Test
+        @DisplayName("should return original file records with converted fields")
+        void shouldReturnOriginalFileRecordsWithConvertedFields() {
+            File file = createFile();
+            file.setOrigin(null);
+
+            Page<File> filePage = new Page<>(1, 10);
+            filePage.setRecords(List.of(file));
+            filePage.setTotal(1);
+
+            when(fileMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(filePage);
+            when(accountMapper.selectById(USER_ID)).thenReturn(createAccount());
+
+            AdminFileQueryParam param = new AdminFileQueryParam();
+            param.setKeyword("test");
+            param.setStatus(1);
+            param.setOriginalOnly(true);
+
+            IPage<AdminFileVO> result = fileAdminService.getAllFiles(param, new Page<>(1, 10));
+
+            assertNotNull(result);
+            assertEquals(1, result.getRecords().size());
+
+            AdminFileVO vo = result.getRecords().get(0);
+            assertTrue(vo.getIsOriginal());
+            assertEquals(0, vo.getDepth());
+            assertEquals("testuser", vo.getOwnerName());
+        }
+
+        /**
+         * 验证分享保存文件在管理员列表中能正确填充来源所有者、直接分享者和链路深度。
+         */
+        @Test
+        @DisplayName("should enrich shared-saved file with origin and source metadata")
+        void shouldEnrichSharedSavedFileWithOriginAndSourceMetadata() {
+            Long originFileId = 3001L;
+            Long sharerUserId = 4001L;
+            Long originOwnerId = 5001L;
+
+            File savedFile = createFile();
+            savedFile.setOrigin(originFileId);
+            savedFile.setSharedFromUserId(sharerUserId);
+
+            File originFile = createFile();
+            originFile.setId(originFileId);
+            originFile.setUid(originOwnerId);
+
+            FileSource fileSource = new FileSource();
+            fileSource.setFileId(savedFile.getId());
+            fileSource.setDepth(3);
+            fileSource.setTenantId(TENANT_ID);
+
+            Page<File> filePage = new Page<>(1, 10);
+            filePage.setRecords(List.of(savedFile));
+            filePage.setTotal(1);
+
+            Account owner = createAccount();
+            Account originOwner = new Account();
+            originOwner.setId(originOwnerId);
+            originOwner.setUsername("origin-owner");
+            Account sharer = new Account();
+            sharer.setId(sharerUserId);
+            sharer.setUsername("direct-sharer");
+
+            when(fileMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(filePage);
+            when(fileMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(originFile));
+            when(fileSourceMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(fileSource));
+            when(accountMapper.selectById(USER_ID)).thenReturn(owner);
+            when(accountMapper.selectById(originOwnerId)).thenReturn(originOwner);
+            when(accountMapper.selectById(sharerUserId)).thenReturn(sharer);
+
+            AdminFileQueryParam param = new AdminFileQueryParam();
+            param.setSharedOnly(true);
+
+            IPage<AdminFileVO> result = fileAdminService.getAllFiles(param, new Page<>(1, 10));
+
+            assertNotNull(result);
+            assertEquals(1, result.getRecords().size());
+
+            AdminFileVO vo = result.getRecords().get(0);
+            assertFalse(vo.getIsOriginal());
+            assertEquals(3, vo.getDepth());
+            assertEquals(String.valueOf(originOwnerId), vo.getOriginOwnerId());
+            assertEquals("origin-owner", vo.getOriginOwnerName());
+            assertEquals(String.valueOf(sharerUserId), vo.getSharedFromUserId());
+            assertEquals("direct-sharer", vo.getSharedFromUserName());
+        }
+    }
+
+    @Nested
+    @DisplayName("getAllShares - query and aggregation")
+    class GetAllSharesQueryAndAggregation {
+
+        /**
+         * 验证空分享列表时，服务不应继续查询访问统计并返回空分页结果。
+         */
+        @Test
+        @DisplayName("should return empty page when there are no shares")
+        void shouldReturnEmptyPageWhenThereAreNoShares() {
+            Page<FileShare> sharePage = new Page<>(1, 10);
+            sharePage.setRecords(List.of());
+            sharePage.setTotal(0);
+
+            when(fileShareMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(sharePage);
+
+            AdminShareQueryParam param = new AdminShareQueryParam();
+            IPage<AdminShareVO> result = fileAdminService.getAllShares(param, new Page<>(1, 10));
+
+            assertNotNull(result);
+            assertTrue(result.getRecords().isEmpty());
+            verify(shareAccessLogMapper, never()).batchCountByShareCodes(anyList(), anyLong());
+            verify(shareAccessLogMapper, never()).batchCountDistinctActors(anyList(), anyLong());
+        }
+
+        /**
+         * 验证分享列表聚合统计时，可忽略脏数据行并正确填充访问统计与私密分享标记。
+         */
+        @Test
+        @DisplayName("should aggregate valid stats and ignore invalid stat rows")
+        void shouldAggregateValidStatsAndIgnoreInvalidStatRows() {
+            FileShare share = createFileShare();
+            share.setShareType(1);
+
+            Page<FileShare> sharePage = new Page<>(1, 10);
+            sharePage.setRecords(List.of(share));
+            sharePage.setTotal(1);
+
+            File file = createFile();
+
+            Map<String, Object> validView = new HashMap<>();
+            validView.put("share_code", SHARE_CODE);
+            validView.put("action_type", ShareAccessLog.ACTION_VIEW);
+            validView.put("cnt", 5L);
+
+            Map<String, Object> validDownload = new HashMap<>();
+            validDownload.put("share_code", SHARE_CODE);
+            validDownload.put("action_type", ShareAccessLog.ACTION_DOWNLOAD);
+            validDownload.put("cnt", 2L);
+
+            Map<String, Object> validSave = new HashMap<>();
+            validSave.put("share_code", SHARE_CODE);
+            validSave.put("action_type", ShareAccessLog.ACTION_SAVE);
+            validSave.put("cnt", 1L);
+
+            Map<String, Object> invalidStatRow = new HashMap<>();
+            invalidStatRow.put("share_code", null);
+            invalidStatRow.put("action_type", ShareAccessLog.ACTION_VIEW);
+            invalidStatRow.put("cnt", 9L);
+
+            Map<String, Object> validActors = new HashMap<>();
+            validActors.put("share_code", SHARE_CODE);
+            validActors.put("unique_actors", 3L);
+
+            Map<String, Object> invalidActors = new HashMap<>();
+            invalidActors.put("share_code", SHARE_CODE);
+            invalidActors.put("unique_actors", "bad-value");
+
+            when(fileShareMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(sharePage);
+            when(fileMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(file));
+            when(accountMapper.selectById(USER_ID)).thenReturn(createAccount());
+            when(shareAccessLogMapper.batchCountByShareCodes(anyList(), eq(TENANT_ID))).thenReturn(
+                    new ArrayList<>(List.of(validView, validDownload, validSave, invalidStatRow)));
+            when(shareAccessLogMapper.batchCountDistinctActors(anyList(), eq(TENANT_ID))).thenReturn(
+                    new ArrayList<>(List.of(validActors, invalidActors)));
+
+            AdminShareQueryParam param = new AdminShareQueryParam();
+            param.setKeyword("ABC");
+            param.setStatus(FileShare.STATUS_ACTIVE);
+            param.setShareType(1);
+
+            IPage<AdminShareVO> result = fileAdminService.getAllShares(param, new Page<>(1, 10));
+
+            assertNotNull(result);
+            assertEquals(1, result.getRecords().size());
+
+            AdminShareVO vo = result.getRecords().get(0);
+            assertEquals(SHARE_CODE, vo.getShareCode());
+            assertTrue(vo.getHasPassword());
+            assertEquals(5L, vo.getViewCount());
+            assertEquals(2L, vo.getDownloadCount());
+            assertEquals(1L, vo.getSaveCount());
+            assertEquals(3L, vo.getUniqueActors());
+        }
+    }
+
+    @Nested
     @DisplayName("updateFileStatus - validation")
     class UpdateFileStatusValidation {
 
@@ -378,6 +578,19 @@ class FileAdminServiceImplTest {
                     () -> fileAdminService.forceCancelShare(SHARE_CODE, "test"));
 
             assertEquals(ResultEnum.PARAM_ERROR, ex.getResultEnum());
+        }
+
+        /**
+         * 验证管理员强制取消分享时，会更新分享状态为已取消。
+         */
+        @Test
+        @DisplayName("should update share status to cancelled")
+        void forceCancelShare_success_updatesStatus() {
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(createFileShare());
+
+            assertDoesNotThrow(() -> fileAdminService.forceCancelShare(SHARE_CODE, "admin-operation"));
+
+            verify(fileShareMapper).update(isNull(), any());
         }
     }
 

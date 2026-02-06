@@ -3,6 +3,7 @@ package cn.flying.service.impl;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.constant.ShareType;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
 import cn.flying.dao.mapper.FileMapper;
@@ -10,14 +11,21 @@ import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.mapper.FileSourceMapper;
 import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.request.CancelShareRequest;
+import cn.flying.platformapi.response.FileDetailVO;
+import cn.flying.platformapi.response.SharingVO;
 import cn.flying.service.ShareAuditService;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.service.saga.FileSagaOrchestrator;
 import cn.flying.test.builders.FileTestBuilder;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -27,6 +35,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -82,6 +91,17 @@ class FileServiceTest {
     private static final Long OTHER_USER_ID = 200L;
     private static final String SHARE_CODE = "ABC123";
     private static final String FILE_HASH = "sha256_test_hash";
+
+    /**
+     * 初始化 MyBatis-Plus Lambda 缓存，避免在纯 Mockito 场景下构造 LambdaWrapper 失败。
+     */
+    @BeforeAll
+    static void initTableInfo() {
+        MybatisConfiguration configuration = new MybatisConfiguration();
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(configuration, "");
+        TableInfoHelper.initTableInfo(assistant, File.class);
+        TableInfoHelper.initTableInfo(assistant, FileShare.class);
+    }
 
     @BeforeEach
     void setUp() {
@@ -505,6 +525,159 @@ class FileServiceTest {
             GeneralException ex = assertThrows(GeneralException.class, () ->
                     fileService.cancelShare(USER_ID, SHARE_CODE));
             assertEquals(ResultEnum.FAIL.getCode(), ex.getResultEnum().getCode());
+        }
+    }
+
+    @Nested
+    @DisplayName("Get File")
+    class GetFileTests {
+
+        /**
+         * 验证非管理员访问他人文件时会被拒绝。
+         */
+        @Test
+        @DisplayName("should reject non-admin when file is not owned")
+        void shouldRejectNonAdminWhenFileIsNotOwned() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                when(fileMapper.selectCount(any())).thenReturn(0L);
+
+                GeneralException ex = assertThrows(GeneralException.class, () ->
+                        fileService.getFile(USER_ID, FILE_HASH));
+
+                assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), ex.getResultEnum().getCode());
+            }
+        }
+
+        /**
+         * 验证远端返回空文件详情时会抛出业务异常。
+         */
+        @Test
+        @DisplayName("should throw when remote file detail is null")
+        void shouldThrowWhenRemoteFileDetailIsNull() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                when(fileMapper.selectCount(any())).thenReturn(1L);
+                when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH)).thenReturn(Result.success((FileDetailVO) null));
+
+                GeneralException ex = assertThrows(GeneralException.class, () ->
+                        fileService.getFile(USER_ID, FILE_HASH));
+
+                assertEquals(ResultEnum.FAIL.getCode(), ex.getResultEnum().getCode());
+            }
+        }
+    }
+
+    @Nested
+    @DisplayName("Share File Lookup")
+    class ShareFileLookupTests {
+
+        /**
+         * 验证分享过期时间为负值时返回“已取消”异常。
+         */
+        @Test
+        @DisplayName("should throw cancelled when expiration is negative")
+        void shouldThrowCancelledWhenExpirationIsNegative() {
+            SharingVO sharingVO = new SharingVO("100", List.of(FILE_HASH), SHARE_CODE, null, null, -1L, true);
+            when(fileRemoteClient.getSharedFiles(SHARE_CODE)).thenReturn(Result.success(sharingVO));
+
+            GeneralException ex = assertThrows(GeneralException.class, () -> fileService.getShareFile(SHARE_CODE));
+
+            assertEquals(ResultEnum.SHARE_CANCELLED.getCode(), ex.getResultEnum().getCode());
+        }
+
+        /**
+         * 验证分享过期时间早于当前时间时返回“已过期”异常。
+         */
+        @Test
+        @DisplayName("should throw expired when share is timeout")
+        void shouldThrowExpiredWhenShareIsTimeout() {
+            SharingVO sharingVO = new SharingVO(
+                    "100",
+                    List.of(FILE_HASH),
+                    SHARE_CODE,
+                    null,
+                    null,
+                    System.currentTimeMillis() - 1000,
+                    true
+            );
+            when(fileRemoteClient.getSharedFiles(SHARE_CODE)).thenReturn(Result.success(sharingVO));
+
+            GeneralException ex = assertThrows(GeneralException.class, () -> fileService.getShareFile(SHARE_CODE));
+
+            assertEquals(ResultEnum.SHARE_EXPIRED.getCode(), ex.getResultEnum().getCode());
+        }
+
+        /**
+         * 验证分享有效位为 false 时返回“已取消”异常。
+         */
+        @Test
+        @DisplayName("should throw cancelled when share is invalid")
+        void shouldThrowCancelledWhenShareIsInvalid() {
+            SharingVO sharingVO = new SharingVO("100", List.of(FILE_HASH), SHARE_CODE, null, null, null, false);
+            when(fileRemoteClient.getSharedFiles(SHARE_CODE)).thenReturn(Result.success(sharingVO));
+
+            GeneralException ex = assertThrows(GeneralException.class, () -> fileService.getShareFile(SHARE_CODE));
+
+            assertEquals(ResultEnum.SHARE_CANCELLED.getCode(), ex.getResultEnum().getCode());
+        }
+    }
+
+    @Nested
+    @DisplayName("Generate Sharing Code Failure")
+    class GenerateSharingCodeFailure {
+
+        /**
+         * 验证区块链返回空分享码时会抛出区块链错误。
+         */
+        @Test
+        @DisplayName("should throw blockchain error when share code is empty")
+        void shouldThrowBlockchainErrorWhenShareCodeIsEmpty() {
+            when(fileMapper.selectCount(any())).thenReturn(1L);
+            when(fileRemoteClient.shareFiles(any())).thenReturn(Result.success(""));
+
+            GeneralException ex = assertThrows(GeneralException.class, () ->
+                    fileService.generateSharingCode(USER_ID, List.of(FILE_HASH), 30, ShareType.PUBLIC.getCode()));
+
+            assertEquals(ResultEnum.BLOCKCHAIN_ERROR.getCode(), ex.getResultEnum().getCode());
+            verify(fileShareMapper, never()).insert(any(FileShare.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("Cancel Share Blockchain Paths")
+    class CancelShareBlockchainPaths {
+
+        /**
+         * 验证区块链取消分享返回失败时会抛出区块链错误。
+         */
+        @Test
+        @DisplayName("should throw blockchain error when remote cancel fails")
+        void shouldThrowBlockchainErrorWhenRemoteCancelFails() {
+            FileShare share = aFileShare(s -> s.setStatus(FileShare.STATUS_ACTIVE));
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
+            when(fileRemoteClient.cancelShare(any(CancelShareRequest.class))).thenReturn(Result.success(false));
+
+            GeneralException ex = assertThrows(GeneralException.class, () ->
+                    fileService.cancelShare(USER_ID, SHARE_CODE));
+
+            assertEquals(ResultEnum.BLOCKCHAIN_ERROR.getCode(), ex.getResultEnum().getCode());
+            verify(fileShareMapper, never()).update(isNull(), any());
+        }
+
+        /**
+         * 验证区块链取消分享成功后会更新本地分享状态。
+         */
+        @Test
+        @DisplayName("should update status when remote cancel succeeds")
+        void shouldUpdateStatusWhenRemoteCancelSucceeds() {
+            FileShare share = aFileShare(s -> s.setStatus(FileShare.STATUS_ACTIVE));
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
+            when(fileRemoteClient.cancelShare(any(CancelShareRequest.class))).thenReturn(Result.success(true));
+
+            assertDoesNotThrow(() -> fileService.cancelShare(USER_ID, SHARE_CODE));
+
+            verify(fileShareMapper).update(isNull(), any());
         }
     }
 }

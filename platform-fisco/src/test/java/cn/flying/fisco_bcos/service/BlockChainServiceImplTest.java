@@ -170,6 +170,42 @@ class BlockChainServiceImplTest {
             
             assertThat(result.getCode()).isNotEqualTo(200);
         }
+
+        /**
+         * 验证分享请求为空时会返回参数错误。
+         */
+        @Test
+        @DisplayName("Should return error when request is null")
+        void shareFiles_shouldReturnErrorWhenRequestIsNull() {
+            Result<String> result = blockChainService.shareFiles(null);
+
+            assertThat(result.getCode()).isNotEqualTo(200);
+            assertThat(result.getMessage()).contains("expireMinutes");
+            verify(chainAdapter, never()).shareFiles(anyString(), anyList(), anyInt());
+            verify(fiscoMetrics).stopShareTimer(timerSample);
+        }
+
+        /**
+         * 验证适配器抛出异常时分享接口会返回失败并停止计时。
+         */
+        @Test
+        @DisplayName("Should handle share adapter exception")
+        @SilenceLoggers("cn.flying.fisco_bcos.exception.BlockChainExceptionHandler")
+        void shareFiles_shouldHandleAdapterException() {
+            ShareFilesRequest request = new ShareFilesRequest(
+                    "user123",
+                    List.of("hash1"),
+                    60
+            );
+
+            when(chainAdapter.shareFiles(anyString(), anyList(), anyInt()))
+                    .thenThrow(new RuntimeException("Adapter unavailable"));
+
+            Result<String> result = blockChainService.shareFiles(request);
+
+            assertThat(result.getCode()).isNotEqualTo(200);
+            verify(fiscoMetrics).stopShareTimer(timerSample);
+        }
     }
 
     @Nested
@@ -243,6 +279,21 @@ class BlockChainServiceImplTest {
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData()).isEmpty();
         }
+
+        /**
+         * 验证查询用户文件时适配器异常会返回失败结果。
+         */
+        @Test
+        @DisplayName("Should handle exception when getting user files")
+        @SilenceLoggers("cn.flying.fisco_bcos.exception.BlockChainExceptionHandler")
+        void getUserFiles_shouldHandleException() {
+            when(chainAdapter.getUserFiles(anyString()))
+                    .thenThrow(new RuntimeException("Query failed"));
+
+            Result<List<FileVO>> result = blockChainService.getUserFiles("user123");
+
+            assertThat(result.getCode()).isNotEqualTo(200);
+        }
     }
 
     @Nested
@@ -271,6 +322,22 @@ class BlockChainServiceImplTest {
             assertThat(result.getData().fileName()).isEqualTo("test.pdf");
             assertThat(result.getData().fileHash()).isEqualTo(fileHash);
             
+            verify(fiscoMetrics).stopQueryTimer(timerSample);
+        }
+
+        /**
+         * 验证获取文件详情时适配器抛异常会返回失败并停止查询计时。
+         */
+        @Test
+        @DisplayName("Should handle exception when getting file detail")
+        @SilenceLoggers("cn.flying.fisco_bcos.exception.BlockChainExceptionHandler")
+        void getFile_shouldHandleException() {
+            when(chainAdapter.getFile(anyString(), anyString()))
+                    .thenThrow(new RuntimeException("File query failed"));
+
+            Result<FileDetailVO> result = blockChainService.getFile("user123", "sha256_hash");
+
+            assertThat(result.getCode()).isNotEqualTo(200);
             verify(fiscoMetrics).stopQueryTimer(timerSample);
         }
     }
@@ -320,6 +387,27 @@ class BlockChainServiceImplTest {
             
             verify(fiscoMetrics).recordFailure();
         }
+
+        /**
+         * 验证删除文件时适配器异常分支。
+         */
+        @Test
+        @DisplayName("Should handle delete exception")
+        @SilenceLoggers("cn.flying.fisco_bcos.exception.BlockChainExceptionHandler")
+        void deleteFiles_shouldHandleException() {
+            DeleteFilesRequest request = new DeleteFilesRequest(
+                    "user123",
+                    List.of("hash1")
+            );
+
+            when(chainAdapter.deleteFiles(anyString(), anyList()))
+                    .thenThrow(new RuntimeException("Delete failed"));
+
+            Result<Boolean> result = blockChainService.deleteFiles(request);
+
+            assertThat(result.getCode()).isNotEqualTo(200);
+            verify(fiscoMetrics).stopDeleteTimer(timerSample);
+        }
     }
 
     @Nested
@@ -367,6 +455,26 @@ class BlockChainServiceImplTest {
             
             verify(fiscoMetrics).recordFailure();
         }
+
+        /**
+         * 验证取消分享时适配器异常分支。
+         */
+        @Test
+        @DisplayName("Should handle cancel share exception")
+        @SilenceLoggers("cn.flying.fisco_bcos.exception.BlockChainExceptionHandler")
+        void cancelShare_shouldHandleException() {
+            CancelShareRequest request = new CancelShareRequest(
+                    "ERR_CODE",
+                    null
+            );
+
+            when(chainAdapter.cancelShare(anyString()))
+                    .thenThrow(new RuntimeException("Cancel failed"));
+
+            Result<Boolean> result = blockChainService.cancelShare(request);
+
+            assertThat(result.getCode()).isNotEqualTo(200);
+        }
     }
 
     @Nested
@@ -406,6 +514,30 @@ class BlockChainServiceImplTest {
 
             assertThat(result.getCode()).isNotEqualTo(200);
         }
+
+        /**
+         * 验证区块号为空时交易映射结果也应返回 null。
+         */
+        @Test
+        @DisplayName("Should map null block number to null string")
+        void getTransactionByHash_shouldMapNullBlockNumber() {
+            String txHash = "0xnullblock";
+
+            ChainTransaction tx = new ChainTransaction();
+            tx.setHash(txHash);
+            tx.setChainId("1");
+            tx.setGroupId("1");
+            tx.setFrom("0xfrom");
+            tx.setTo("0xto");
+            tx.setBlockNumber(null);
+
+            when(chainAdapter.getTransaction(txHash)).thenReturn(tx);
+
+            Result<TransactionVO> result = blockChainService.getTransactionByHash(txHash);
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData().blockNumber()).isNull();
+        }
     }
 
     @Nested
@@ -428,6 +560,21 @@ class BlockChainServiceImplTest {
             assertThat(result.getData().getBlockNumber()).isEqualTo(12345L);
             assertThat(result.getData().getTransactionCount()).isEqualTo(1000L);
         }
+
+        /**
+         * 验证获取链状态异常分支。
+         */
+        @Test
+        @DisplayName("Should handle exception when getting blockchain status")
+        @SilenceLoggers("cn.flying.fisco_bcos.exception.BlockChainExceptionHandler")
+        void getCurrentBlockChainMessage_shouldHandleException() {
+            when(chainAdapter.getChainStatus())
+                    .thenThrow(new RuntimeException("Chain status failed"));
+
+            Result<BlockChainMessage> result = blockChainService.getCurrentBlockChainMessage();
+
+            assertThat(result.getCode()).isNotEqualTo(200);
+        }
     }
 
     @Nested
@@ -447,6 +594,21 @@ class BlockChainServiceImplTest {
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData()).hasSize(3);
             assertThat(result.getData()).contains("CODE1", "CODE2");
+        }
+
+        /**
+         * 验证查询用户分享码异常分支。
+         */
+        @Test
+        @DisplayName("Should handle exception when getting user share codes")
+        @SilenceLoggers("cn.flying.fisco_bcos.exception.BlockChainExceptionHandler")
+        void getUserShareCodes_shouldHandleException() {
+            when(chainAdapter.getUserShareCodes(anyString()))
+                    .thenThrow(new RuntimeException("Share code query failed"));
+
+            Result<List<String>> result = blockChainService.getUserShareCodes("user123");
+
+            assertThat(result.getCode()).isNotEqualTo(200);
         }
     }
 
@@ -472,6 +634,21 @@ class BlockChainServiceImplTest {
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData().shareCode()).isEqualTo(shareCode);
             assertThat(result.getData().isValid()).isTrue();
+        }
+
+        /**
+         * 验证获取分享详情异常分支。
+         */
+        @Test
+        @DisplayName("Should handle exception when getting share info")
+        @SilenceLoggers("cn.flying.fisco_bcos.exception.BlockChainExceptionHandler")
+        void getShareInfo_shouldHandleException() {
+            when(chainAdapter.getShareInfo(anyString()))
+                    .thenThrow(new RuntimeException("Share info failed"));
+
+            Result<SharingVO> result = blockChainService.getShareInfo("INVALID");
+
+            assertThat(result.getCode()).isNotEqualTo(200);
         }
     }
 

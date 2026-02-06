@@ -12,8 +12,8 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
@@ -22,6 +22,8 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequ
 
 import java.net.URL;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -63,6 +65,27 @@ class DistributedStorageServiceImplTest {
 
     private static final String TEST_FILE_HASH = "sha256_test_hash_1234";
     private static final byte[] TEST_FILE_DATA = "test file content".getBytes();
+
+    private ExecutorService uploadExecutor;
+
+    /**
+     * 初始化上传线程池并注入到待测服务，保证异步分支可被稳定执行。
+     */
+    @BeforeEach
+    void setUp() {
+        uploadExecutor = Executors.newFixedThreadPool(4);
+        ReflectionTestUtils.setField(storageService, "uploadExecutor", uploadExecutor);
+    }
+
+    /**
+     * 回收测试线程池，避免测试间线程泄漏。
+     */
+    @AfterEach
+    void tearDown() {
+        if (uploadExecutor != null) {
+            uploadExecutor.shutdownNow();
+        }
+    }
 
     @Nested
     @DisplayName("Store File Chunk Tests")
@@ -112,6 +135,79 @@ class DistributedStorageServiceImplTest {
             Result<String> result = storageService.storeFileChunk(TEST_FILE_DATA, TEST_FILE_HASH);
 
             assertThat(result.getCode()).isEqualTo(ResultEnum.STORAGE_INSUFFICIENT_REPLICAS.getCode());
+        }
+
+        /**
+         * 验证降级写入允许时可返回成功并记录待同步信息。
+         */
+        @Test
+        @DisplayName("Should allow degraded write and track sync")
+        void shouldAllowDegradedWriteAndTrackSync() {
+            when(faultDomainManager.getTargetNodes(TEST_FILE_HASH)).thenReturn(Collections.singletonList("node1"));
+            when(storageProperties.getEffectiveReplicationFactor()).thenReturn(2);
+            when(storageProperties.getEffectiveQuorum()).thenReturn(2);
+
+            StorageProperties.DegradedWriteConfig degradedConfig = new StorageProperties.DegradedWriteConfig();
+            degradedConfig.setEnabled(true);
+            degradedConfig.setMinReplicas(1);
+            degradedConfig.setTrackForSync(true);
+            when(storageProperties.getDegradedWrite()).thenReturn(degradedConfig);
+
+            when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
+            when(clientManager.getClient("node1")).thenReturn(s3Client);
+            when(s3Client.headBucket(any(HeadBucketRequest.class))).thenReturn(HeadBucketResponse.builder().build());
+            when(s3Client.putObject(any(PutObjectRequest.class), any(software.amazon.awssdk.core.sync.RequestBody.class)))
+                    .thenReturn(PutObjectResponse.builder().eTag("ok").build());
+
+            Result<String> result = storageService.storeFileChunk(TEST_FILE_DATA, TEST_FILE_HASH);
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData()).contains(TEST_FILE_HASH);
+            verify(degradedWriteTracker).recordDegradedWrite(eq(TEST_FILE_HASH), anyList(), anyLong());
+        }
+
+        /**
+         * 验证达到副本数但无法满足仲裁时返回仲裁失败错误。
+         */
+        @Test
+        @DisplayName("Should return quorum error when all uploads fail")
+        void shouldReturnQuorumErrorWhenAllUploadsFail() {
+            when(faultDomainManager.getTargetNodes(TEST_FILE_HASH)).thenReturn(Arrays.asList("node1", "node2"));
+            when(storageProperties.getEffectiveReplicationFactor()).thenReturn(2);
+            when(storageProperties.getEffectiveQuorum()).thenReturn(2);
+
+            StorageProperties.DegradedWriteConfig degradedConfig = new StorageProperties.DegradedWriteConfig();
+            degradedConfig.setEnabled(false);
+            when(storageProperties.getDegradedWrite()).thenReturn(degradedConfig);
+
+            when(s3Monitor.isNodeOnline(anyString())).thenReturn(true);
+            when(clientManager.getClient(anyString())).thenReturn(null);
+
+            Result<String> result = storageService.storeFileChunk(TEST_FILE_DATA, TEST_FILE_HASH);
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.STORAGE_QUORUM_NOT_REACHED.getCode());
+        }
+
+        /**
+         * 验证存储流程在 try 块内出现异常时会统一返回文件服务错误。
+         */
+        @Test
+        @DisplayName("Should return file service error on exception")
+        void shouldReturnFileServiceErrorOnException() {
+            when(faultDomainManager.getTargetNodes(TEST_FILE_HASH)).thenReturn(Collections.singletonList("node1"));
+            when(storageProperties.getEffectiveReplicationFactor()).thenReturn(1);
+            when(storageProperties.getEffectiveQuorum()).thenReturn(1);
+
+            StorageProperties.DegradedWriteConfig degradedConfig = new StorageProperties.DegradedWriteConfig();
+            degradedConfig.setEnabled(false);
+            when(storageProperties.getDegradedWrite()).thenReturn(degradedConfig);
+
+            ReflectionTestUtils.setField(storageService, "uploadExecutor", null);
+
+            Result<String> result = storageService.storeFileChunk(TEST_FILE_DATA, TEST_FILE_HASH);
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.FILE_SERVICE_ERROR.getCode());
+            ReflectionTestUtils.setField(storageService, "uploadExecutor", uploadExecutor);
         }
     }
 
@@ -172,6 +268,67 @@ class DistributedStorageServiceImplTest {
 
             assertThat(result.getCode()).isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
         }
+
+        /**
+         * 验证 URL 生成成功分支。
+         */
+        @Test
+        @DisplayName("Should generate file url successfully")
+        void shouldGenerateFileUrlSuccessfully() throws Exception {
+            String hash = "hash-url-1";
+            String chunkPath = TenantContextUtil.buildChunkPath(hash);
+
+            when(faultDomainManager.getCandidateNodes(hash)).thenReturn(Collections.singletonList("node1"));
+            when(faultDomainManager.selectBestNodeForRead(anyList())).thenReturn("node1");
+            when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
+            when(clientManager.getClient("node1")).thenReturn(s3Client);
+            when(clientManager.getPresigner("node1")).thenReturn(s3Presigner);
+            when(s3Client.headObject(any(HeadObjectRequest.class))).thenReturn(HeadObjectResponse.builder().build());
+
+            PresignedGetObjectRequest presigned = mock(PresignedGetObjectRequest.class);
+            when(presigned.url()).thenReturn(new URL("http://example.com/test-file"));
+            when(s3Presigner.presignGetObject(any(GetObjectPresignRequest.class))).thenReturn(presigned);
+
+            Result<List<String>> result = storageService.getFileUrlListByHash(
+                    Collections.singletonList(chunkPath),
+                    Collections.singletonList(hash)
+            );
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData()).containsExactly("http://example.com/test-file");
+        }
+
+        /**
+         * 验证部分 URL 生成失败时返回容错错误和部分结果。
+         */
+        @Test
+        @DisplayName("Should return partial result when one node fails")
+        void shouldReturnPartialResultWhenOneNodeFails() throws Exception {
+            String successHash = "hash-url-success";
+            String failedHash = "hash-url-failed";
+            String successPath = TenantContextUtil.buildChunkPath(successHash);
+            String failedPath = TenantContextUtil.buildChunkPath(failedHash);
+
+            when(faultDomainManager.getCandidateNodes(successHash)).thenReturn(Collections.singletonList("node1"));
+            when(faultDomainManager.getCandidateNodes(failedHash)).thenReturn(Collections.emptyList());
+            when(faultDomainManager.selectBestNodeForRead(anyList())).thenReturn("node1");
+            when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
+            when(clientManager.getClient("node1")).thenReturn(s3Client);
+            when(clientManager.getPresigner("node1")).thenReturn(s3Presigner);
+            when(s3Client.headObject(any(HeadObjectRequest.class))).thenReturn(HeadObjectResponse.builder().build());
+
+            PresignedGetObjectRequest presigned = mock(PresignedGetObjectRequest.class);
+            when(presigned.url()).thenReturn(new URL("http://example.com/success"));
+            when(s3Presigner.presignGetObject(any(GetObjectPresignRequest.class))).thenReturn(presigned);
+
+            Result<List<String>> result = storageService.getFileUrlListByHash(
+                    Arrays.asList(successPath, failedPath),
+                    Arrays.asList(successHash, failedHash)
+            );
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.FILE_SERVICE_ERROR.getCode());
+            assertThat(result.getData()).containsExactly("http://example.com/success");
+        }
     }
 
     @Nested
@@ -194,6 +351,70 @@ class DistributedStorageServiceImplTest {
 
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData()).isTrue();
+        }
+
+        /**
+         * 验证路径格式非法时删除接口返回失败。
+         */
+        @Test
+        @DisplayName("Should return error for invalid chunk path")
+        void shouldReturnErrorForInvalidChunkPath() {
+            Result<Boolean> result = storageService.deleteFile(Map.of(TEST_FILE_HASH, "invalid-path"));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.FILE_SERVICE_ERROR.getCode());
+            assertThat(result.getData()).isFalse();
+        }
+
+        /**
+         * 验证路径与 hash 不匹配时删除接口返回失败。
+         */
+        @Test
+        @DisplayName("Should return error for hash mismatch")
+        void shouldReturnErrorForHashMismatch() {
+            String mismatchedPath = TenantContextUtil.buildChunkPath("another-hash");
+
+            Result<Boolean> result = storageService.deleteFile(Map.of(TEST_FILE_HASH, mismatchedPath));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.FILE_SERVICE_ERROR.getCode());
+            assertThat(result.getData()).isFalse();
+        }
+
+        /**
+         * 验证候选节点为空时删除接口返回失败。
+         */
+        @Test
+        @DisplayName("Should return error when no candidate nodes")
+        void shouldReturnErrorWhenNoCandidateNodes() {
+            String chunkPath = TenantContextUtil.buildChunkPath(TEST_FILE_HASH);
+            when(faultDomainManager.getCandidateNodes(TEST_FILE_HASH)).thenReturn(Collections.emptyList());
+
+            Result<Boolean> result = storageService.deleteFile(Map.of(TEST_FILE_HASH, chunkPath));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.FILE_SERVICE_ERROR.getCode());
+            assertThat(result.getData()).isFalse();
+        }
+
+        /**
+         * 验证部分文件删除失败时返回失败并保留部分执行结果。
+         */
+        @Test
+        @DisplayName("Should return error when partial delete fails")
+        void shouldReturnErrorWhenPartialDeleteFails() {
+            String successHash = "hash-delete-success";
+            String successPath = TenantContextUtil.buildChunkPath(successHash);
+            String invalidPath = "invalid-path";
+
+            when(faultDomainManager.getCandidateNodes(successHash)).thenReturn(Collections.singletonList("node1"));
+            when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
+            when(clientManager.getClient("node1")).thenReturn(s3Client);
+
+            Result<Boolean> result = storageService.deleteFile(Map.of(
+                    successHash, successPath,
+                    TEST_FILE_HASH, invalidPath
+            ));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.FILE_SERVICE_ERROR.getCode());
+            assertThat(result.getData()).isFalse();
         }
     }
 
@@ -332,6 +553,42 @@ class DistributedStorageServiceImplTest {
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData()).isEmpty();
         }
+
+        /**
+         * 验证候选节点全部离线时返回空位置列表。
+         */
+        @Test
+        @DisplayName("Should return empty locations when all nodes offline")
+        void shouldReturnEmptyLocationsWhenAllNodesOffline() {
+            when(faultDomainManager.getCandidateNodes(TEST_FILE_HASH)).thenReturn(Arrays.asList("node1", "node2"));
+            when(s3Monitor.isNodeOnline(anyString())).thenReturn(false);
+
+            Result<List<String>> result = storageService.getChunkLocations(TEST_FILE_HASH);
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData()).isEmpty();
+        }
+
+        /**
+         * 验证仅在线且对象存在的节点会被过滤返回。
+         */
+        @Test
+        @DisplayName("Should filter and return only online nodes with object")
+        void shouldFilterAndReturnOnlyOnlineNodesWithObject() {
+            when(faultDomainManager.getCandidateNodes(TEST_FILE_HASH)).thenReturn(Arrays.asList("node1", "node2", "node3"));
+            when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
+            when(s3Monitor.isNodeOnline("node2")).thenReturn(false);
+            when(s3Monitor.isNodeOnline("node3")).thenReturn(true);
+
+            when(clientManager.getClient("node1")).thenReturn(s3Client);
+            when(clientManager.getClient("node3")).thenReturn(null);
+            when(s3Client.headObject(any(HeadObjectRequest.class))).thenReturn(HeadObjectResponse.builder().build());
+
+            Result<List<String>> result = storageService.getChunkLocations(TEST_FILE_HASH);
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData()).containsExactly("node1");
+        }
     }
 
     @Nested
@@ -403,6 +660,32 @@ class DistributedStorageServiceImplTest {
             Result<Map<String, Object>> result = storageService.getRebalanceStatus();
 
             assertThat(result.getCode()).isEqualTo(ResultEnum.FILE_SERVICE_ERROR.getCode());
+        }
+
+        /**
+         * 验证再平衡状态中可空字段会被正确映射为 null。
+         */
+        @Test
+        @DisplayName("Should keep nullable rebalance fields as null")
+        void shouldKeepNullableRebalanceFieldsAsNull() {
+            RebalanceService.RebalanceStatus status = mock(RebalanceService.RebalanceStatus.class);
+            when(status.isRunning()).thenReturn(false);
+            when(status.isSuccess()).thenReturn(true);
+            when(status.getType()).thenReturn(null);
+            when(status.getTriggerNode()).thenReturn(null);
+            when(status.getStartTime()).thenReturn(null);
+            when(status.getEndTime()).thenReturn(null);
+            when(status.getMigratedCount()).thenReturn(new java.util.concurrent.atomic.AtomicInteger(0));
+            when(status.getFailedCount()).thenReturn(new java.util.concurrent.atomic.AtomicInteger(0));
+            when(status.getError()).thenReturn(null);
+            when(rebalanceService.getStatus()).thenReturn(status);
+
+            Result<Map<String, Object>> result = storageService.getRebalanceStatus();
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData().get("type")).isNull();
+            assertThat(result.getData().get("startTime")).isNull();
+            assertThat(result.getData().get("endTime")).isNull();
         }
     }
 

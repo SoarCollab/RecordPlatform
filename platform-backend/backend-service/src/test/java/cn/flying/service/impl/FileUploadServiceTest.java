@@ -303,6 +303,50 @@ class FileUploadServiceTest {
             assertThrows(GeneralException.class, () ->
                     fileUploadService.pauseUpload(USER_ID, "non_existent"));
         }
+
+        /**
+         * 验证恢复上传时如果会话不存在，会抛出会话不存在异常。
+         */
+        @Test
+        @DisplayName("should reject resume for non-existent session")
+        void shouldRejectResumeForNonExistentSession() {
+            when(redisStateManager.getState(anyString())).thenReturn(null);
+
+            assertThrows(GeneralException.class, () ->
+                    fileUploadService.resumeUpload(USER_ID, "non_existent"));
+        }
+
+        /**
+         * 验证恢复上传时会执行所有权校验，非所有者会被拒绝。
+         */
+        @Test
+        @DisplayName("should reject resume for unauthorized user")
+        void shouldRejectResumeForUnauthorizedUser() {
+            FileUploadState state = FileUploadStateTestBuilder.anUploadStateWithChunks(4, 2, 2);
+            ReflectionTestUtils.setField(state, "clientId", CLIENT_ID);
+            ReflectionTestUtils.setField(state, "userId", 999L);
+
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+
+            assertThrows(GeneralException.class, () ->
+                    fileUploadService.resumeUpload(USER_ID, CLIENT_ID));
+        }
+
+        /**
+         * 验证暂停上传时会执行所有权校验，非所有者会被拒绝。
+         */
+        @Test
+        @DisplayName("should reject pause for unauthorized user")
+        void shouldRejectPauseForUnauthorizedUser() {
+            FileUploadState state = FileUploadStateTestBuilder.anUploadState();
+            ReflectionTestUtils.setField(state, "clientId", CLIENT_ID);
+            ReflectionTestUtils.setField(state, "userId", 999L);
+
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+
+            assertThrows(GeneralException.class, () ->
+                    fileUploadService.pauseUpload(USER_ID, CLIENT_ID));
+        }
     }
 
     @Nested
@@ -337,6 +381,23 @@ class FileUploadServiceTest {
 
             // Then
             assertFalse(result);
+        }
+
+        /**
+         * 验证取消上传时会使用用户编码后的 SUID 清理会话状态。
+         */
+        @Test
+        @DisplayName("should remove session with encoded suid")
+        void shouldRemoveSessionWithEncodedSuid() {
+            FileUploadState state = FileUploadStateTestBuilder.anUploadState();
+            ReflectionTestUtils.setField(state, "clientId", CLIENT_ID);
+
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+
+            boolean result = fileUploadService.cancelUpload(USER_ID, CLIENT_ID);
+
+            assertTrue(result);
+            verify(redisStateManager).removeSession(CLIENT_ID, SUID);
         }
     }
 
