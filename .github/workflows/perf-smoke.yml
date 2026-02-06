@@ -1,0 +1,80 @@
+name: Performance Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      include_chunk_upload:
+        description: Include chunk-upload scenario in CI smoke
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  perf-smoke:
+    name: K6 Performance Smoke
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: ${{ secrets.BASE_URL }}
+      TENANT_ID: ${{ secrets.TENANT_ID }}
+      USERNAME: ${{ secrets.USERNAME }}
+      PASSWORD: ${{ secrets.PASSWORD }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        run: |
+          missing=0
+          for name in BASE_URL TENANT_ID USERNAME PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required secret: $name"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Prepare run context
+        run: |
+          RUN_ID="gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date +%Y%m%d%H%M%S)"
+          RESULT_DIR="tools/k6/results/${RUN_ID}"
+          mkdir -p "$RESULT_DIR"
+          echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
+          echo "RESULT_DIR=$RESULT_DIR" >> "$GITHUB_ENV"
+
+      - name: Resolve CI include chunk flag
+        run: |
+          INCLUDE_CHUNK=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.include_chunk_upload }}" = "true" ]; then
+            INCLUDE_CHUNK=true
+          fi
+          echo "CI_INCLUDE_CHUNK=$INCLUDE_CHUNK" >> "$GITHUB_ENV"
+
+      - name: Run k6 CI smoke suite
+        run: |
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            -e BASE_URL="$BASE_URL" \
+            -e TENANT_ID="$TENANT_ID" \
+            -e USERNAME="$USERNAME" \
+            -e PASSWORD="$PASSWORD" \
+            -e K6_PROFILE="smoke" \
+            -e K6_SCENARIO="all" \
+            -e CI_INCLUDE_CHUNK="$CI_INCLUDE_CHUNK" \
+            -e RUN_ID="$RUN_ID" \
+            -e RESULT_DIR="$RESULT_DIR" \
+            grafana/k6:0.49.0 \
+            run tools/k6/suites/ci-smoke.js
+
+      - name: Upload performance artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-smoke-${{ env.RUN_ID }}
+          path: ${{ env.RESULT_DIR }}
+          if-no-files-found: warn

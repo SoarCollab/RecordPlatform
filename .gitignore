@@ -65,3 +65,5 @@ App.java
 /.sisyphus/
 /.pnpm-store/
 /.codex/environments/environment.toml
+
+/tools/k6/results/

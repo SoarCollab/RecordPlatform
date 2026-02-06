@@ -229,3 +229,13 @@ management:
       enabled: true
     circuitbreakers:
       enabled: true
+
+# Local-only load testing seed data (k6)
+loadtest:
+  seed:
+    enabled: true
+    tenant-id: 1
+    tenant-code: loadtest
+    tenant-name: LoadTest
+    username: loadtest
+    password: ${LOADTEST_PASSWORD:loadtest123}
