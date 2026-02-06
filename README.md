@@ -13,7 +13,7 @@
 ## Features
 
 - **Blockchain Attestation** - File metadata stored on FISCO BCOS, ensuring immutability and traceability
-- **Distributed Storage** - Multi-replica with fault domain isolation, consistent hashing, quorum-based writes, degraded write support, standby pool auto-promotion, and N-1 fault tolerance
+- **Distributed Storage** - Configurable 1~N active domains with optional standby domain, consistent hashing, quorum-based writes, degraded write support, auto-promotion, and N-1 fault tolerance
 - **Chunked Upload** - Resumable uploads with AES-GCM/ChaCha20-Poly1305 encryption
 - **File Sharing** - Generate share codes with access limits and expiration
 - **Share Audit & Provenance** - Track access, downloads, and saves with multi-level provenance chain (A→B→C), full share access logging
@@ -63,6 +63,9 @@ See `TESTING.md` for the recommended test matrix (unit + integration).
 java -jar "$(ls platform-storage/target/platform-storage-*.jar | head -n 1)" --spring.profiles.active=local
 java -jar "$(ls platform-fisco/target/platform-fisco-*.jar | head -n 1)" --spring.profiles.active=local
 java -jar "$(ls platform-backend/backend-web/target/backend-web-*.jar | head -n 1)" --spring.profiles.active=local
+
+# Start frontend dev server (optional but recommended for local verification)
+cd platform-frontend && pnpm install && pnpm dev
 ```
 
 > For detailed setup, see [Getting Started Guide](docs/en/getting-started/index.md)
@@ -111,7 +114,8 @@ java -jar "$(ls platform-backend/backend-web/target/backend-web-*.jar | head -n 
 | [Architecture](docs/en/architecture/index.md)       | System overview, distributed storage, blockchain, security |
 | [Deployment](docs/en/deployment/index.md)           | Docker, production setup, monitoring                       |
 | [Troubleshooting](docs/en/troubleshooting/index.md) | Common issues and solutions                                |
-| [API Reference](docs/en/api/index.md)               | REST API endpoints                                         |
+| [API Reference](docs/en/api/index.md)               | Controller-aligned REST API index and auth rules           |
+| [Comprehensive API Doc](API_DOCUMENTATION.md)       | Full module-level API checklist with key request examples  |
 
 ## Tech Stack
 

@@ -25,7 +25,7 @@ RecordPlatform 技术架构文档。
 
 ### 3. 高可用设计
 
-- 故障域隔离（A/B 双活跃 + STANDBY 备用池）
+- 故障域隔离（1~N 活跃域 + 可选 STANDBY 备用池）
 - 一致性哈希实现数据分布
 - 自动故障转移和再平衡
 
@@ -47,4 +47,3 @@ RecordPlatform 技术架构文档。
 | 区块链 | FISCO BCOS | 不可篡改存证 |
 | 缓存 | Caffeine + Redis | 多级缓存 |
 | 弹性设计 | Resilience4j | 熔断、重试 |
-

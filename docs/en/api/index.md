@@ -1,619 +1,303 @@
 # API Reference
 
-RecordPlatform REST API documentation.
+RecordPlatform REST API index aligned with current controllers and security rules.
 
-## Interactive Documentation
+## Interactive Docs
 
 - **Swagger UI**: http://localhost:8000/record-platform/swagger-ui.html
-- **OpenAPI Spec**: http://localhost:8000/record-platform/v3/api-docs
+- **OpenAPI**: http://localhost:8000/record-platform/v3/api-docs
 
-Swagger basic auth (Knife4j): `admin` / `123456` (default; configurable)
+Swagger Basic auth (Knife4j): `admin` / `123456` by default (configurable).
 
 ## Base URL
 
-```
+```text
 http://localhost:8000/record-platform
 ```
 
-## Authentication
+## Authentication and Public Rules
 
-All endpoints except `/api/v1/auth/**` and `/api/v1/share/**` require JWT authentication.
+### 1) Standard JWT auth
 
-### Get Token
+Most endpoints require:
 
-Login is handled by Spring Security (`/api/v1/auth/login`), not in AuthorizeController.
-
-```http
-POST /api/v1/auth/login
-Content-Type: application/json
-
-{
-  "username": "<your-username>",
-  "password": "<your-password>"
-}
-```
-
-Response:
-```json
-{
-  "code": 200,
-  "data": {
-    "token": "eyJhbGciOiJIUzUxMiJ9...",
-    "expiresIn": 86400
-  }
-}
-```
-
-### Use Token
-
-Include in all subsequent requests:
 ```http
 Authorization: Bearer <token>
 ```
 
-## API Endpoints
+### 2) Explicit public endpoints (`permitAll`)
 
-### Authentication
+Based on `SecurityConfiguration`:
+
+- `POST /api/v1/auth/login`
+- `GET /api/v1/auth/ask-code`
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/reset-confirm`
+- `POST /api/v1/auth/reset-password`
+- `GET /api/v1/files/getSharingFiles`
+- `GET /api/v1/files/public/download`
+- `GET /api/v1/files/public/decryptInfo`
+- `GET /api/v1/images/download/images/**`
+- `GET /api/v1/share/**`
+- `GET /api/v1/sse/connect` (still requires short-lived token)
+
+### 3) SSE dual-token flow
+
+- `POST /api/v1/auth/sse-token`: requires standard JWT
+- `GET /api/v1/sse/connect?token=...`: public route, but short-lived one-time token is mandatory
+
+## Endpoints by Module
+
+### Auth (`/api/v1/auth`)
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
+|------|------|------|
 | GET | `/api/v1/auth/ask-code` | Request email verification code |
-| POST | `/api/v1/auth/register` | User registration |
-| POST | `/api/v1/auth/reset-confirm` | Password reset confirmation |
+| POST | `/api/v1/auth/register` | Register user |
+| POST | `/api/v1/auth/reset-confirm` | Confirm password reset |
 | POST | `/api/v1/auth/reset-password` | Execute password reset |
 | POST | `/api/v1/auth/refresh` | Refresh access token |
-| POST | `/api/v1/auth/sse-token` | Get SSE short-lived token |
+| POST | `/api/v1/auth/sse-token` | Issue short-lived SSE token (JWT required) |
 
-> **Note**: Login is handled by Spring Security. User info is available at `/api/v1/users/info`
+> Login is handled by Spring Security: `POST /api/v1/auth/login`
 
-#### User Registration
-
-```http
-POST /api/v1/auth/register
-Content-Type: application/json
-
-{
-  "email": "user@example.com",
-  "code": "123456",
-  "username": "user1",
-  "password": "securepass",
-  "nickname": "Display Name"
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| email | string | Yes | User email address |
-| code | string | Yes | Email verification code |
-| username | string | Yes | Login username |
-| password | string | Yes | User password |
-| nickname | string | No | Display name (max 50 chars) |
-
-### Files
+### User (`/api/v1/users`)
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
+|------|------|------|
+| GET | `/api/v1/users/info` | Get user profile |
+| PUT | `/api/v1/users/info` | Update user profile |
+| POST | `/api/v1/users/modify-email` | Change email |
+| POST | `/api/v1/users/change-password` | Change password |
+
+### File Upload (`/api/v1/files/upload`)
+
+| Method | Endpoint | Description |
+|------|------|------|
 | POST | `/api/v1/files/upload/start` | Start chunked upload |
-| POST | `/api/v1/files/upload/chunk` | Upload file chunk |
-| POST | `/api/v1/files/upload/complete` | Complete chunked upload |
+| POST | `/api/v1/files/upload/chunk` | Upload chunk |
+| POST | `/api/v1/files/upload/complete` | Complete upload |
 | POST | `/api/v1/files/upload/pause` | Pause upload |
 | POST | `/api/v1/files/upload/resume` | Resume upload |
 | POST | `/api/v1/files/upload/cancel` | Cancel upload |
 | GET | `/api/v1/files/upload/check` | Check upload status |
-| GET | `/api/v1/files/upload/progress` | Get upload progress |
-| GET | `/api/v1/files/{id}` | Get file details by ID |
-| GET | `/api/v1/files/byHash` | Get file by hash (query param: hash) |
-| GET | `/api/v1/files/list` | Get user's file list |
-| GET | `/api/v1/files/page` | Get user's files (paginated) |
-| GET | `/api/v1/files/address` | Get file download address |
-| GET | `/api/v1/files/decryptInfo` | Get file decrypt info |
-| GET | `/api/v1/files/download` | Download file (query param: fileHash) |
-| DELETE | `/api/v1/files/delete` | Batch delete files (query param: identifiers; supports file hash or file id) |
+| GET | `/api/v1/files/upload/progress` | Query upload progress |
 
-### Images
+### Files and Sharing (`/api/v1/files`)
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/v1/images/upload/avatar` | Upload user avatar |
-| POST | `/api/v1/images/upload/image` | Upload image |
-| GET | `/api/v1/images/download/images/**` | Download image |
-
-### File Sharing
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/v1/share/{shareCode}/info` | Get share details (public, no auth required) |
-| POST | `/api/v1/files/share` | Create share link |
-| PUT | `/api/v1/files/share` | Update share (shareCode in body) |
+|------|------|------|
+| GET | `/api/v1/files/{id}` | File detail by ID |
+| GET | `/api/v1/files/byHash` | File detail by hash (`fileHash/hash`) |
+| GET | `/api/v1/files/list` | User file list |
+| GET | `/api/v1/files/page` | User file page |
+| GET | `/api/v1/files/stats` | User file stats |
+| GET | `/api/v1/files/address` | Fetch download URLs |
+| GET | `/api/v1/files/getTransaction` | Query blockchain transaction |
+| GET | `/api/v1/files/download` | Download file (authenticated) |
+| GET | `/api/v1/files/decryptInfo` | Decrypt info (authenticated) |
+| GET | `/api/v1/files/getSharingFiles` | Public share file list (public) |
+| GET | `/api/v1/files/shares` | My share list |
+| DELETE | `/api/v1/files/delete` | Batch delete (hash/id) |
+| DELETE | `/api/v1/files/deleteById` | Delete by file ID |
+| POST | `/api/v1/files/share` | Create share |
+| PUT | `/api/v1/files/share` | Update share |
 | DELETE | `/api/v1/files/share/{shareCode}` | Cancel share |
-| GET | `/api/v1/files/shares` | Get user's share list |
+| POST | `/api/v1/files/saveShareFile` | Save shared files to my space |
+| GET | `/api/v1/files/share/download` | Shared download (authenticated) |
+| GET | `/api/v1/files/share/decryptInfo` | Shared decrypt info (authenticated) |
+| GET | `/api/v1/files/share/{shareCode}/access-logs` | Share access logs (admin) |
+| GET | `/api/v1/files/share/{shareCode}/stats` | Share access stats (admin) |
+| GET | `/api/v1/files/{id}/provenance` | File provenance graph (admin) |
+| GET | `/api/v1/files/public/download` | Public shared download (public) |
+| GET | `/api/v1/files/public/decryptInfo` | Public decrypt info (public) |
 
-#### Get Share Details (Public)
-
-Public endpoint - no authentication required.
-
-```http
-GET /api/v1/share/{shareCode}/info
-```
-
-Returns share details including file list. Uses business codes for share status:
-
-| Business Code | Meaning |
-|---------------|---------|
-| 200 | Success |
-| 50009 | Share not found |
-| 50010 | Share cancelled |
-| 50011 | Share expired |
-
-Response:
-```json
-{
-  "code": 200,
-  "data": {
-    "shareCode": "abc123",
-    "shareType": 0,
-    "expireTime": "2025-01-15T00:00:00Z",
-    "files": [
-      {
-        "fileId": "...",
-        "fileName": "document.pdf",
-        "fileSize": 1024000
-      }
-    ]
-  }
-}
-```
-
-### Admin (File Management)
+### Admin File Audit (`/api/v1/admin/files`)
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/v1/admin/files` | Get all files (paginated) |
-| GET | `/api/v1/admin/files/{id}` | Get file details by ID |
+|------|------|------|
+| GET | `/api/v1/admin/files` | Get all files (paged) |
+| GET | `/api/v1/admin/files/{id}` | File detail with audit info |
 | PUT | `/api/v1/admin/files/{id}/status` | Update file status |
-| DELETE | `/api/v1/admin/files/{id}` | Force delete file |
-| GET | `/api/v1/admin/files/shares` | Get all shares list |
+| DELETE | `/api/v1/admin/files/{id}` | Force physical file deletion |
+| GET | `/api/v1/admin/files/shares` | Get all shares (paged) |
 | DELETE | `/api/v1/admin/files/shares/{shareCode}` | Force cancel share |
 | GET | `/api/v1/admin/files/shares/{shareCode}/logs` | Share access logs |
-| GET | `/api/v1/admin/files/shares/{shareCode}/stats` | Share access statistics |
+| GET | `/api/v1/admin/files/shares/{shareCode}/stats` | Share access stats |
 
-### Permissions (Admin Only)
+### Public Share Page (`/api/v1/share`)
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/v1/system/permissions` | Get permission tree |
-| GET | `/api/v1/system/permissions/list` | Get permissions (paginated) |
-| GET | `/api/v1/system/permissions/modules` | Get all module names |
+|------|------|------|
+| GET | `/api/v1/share/{shareCode}/info` | Get share info (public) |
+
+### Images (`/api/v1/images`)
+
+| Method | Endpoint | Description |
+|------|------|------|
+| POST | `/api/v1/images/upload/avatar` | Upload avatar |
+| POST | `/api/v1/images/upload/image` | Upload image |
+| GET | `/api/v1/images/download/images/**` | Download image (public) |
+
+### Friends (`/api/v1/friends`)
+
+| Method | Endpoint | Description |
+|------|------|------|
+| POST | `/api/v1/friends/requests` | Send friend request |
+| GET | `/api/v1/friends/requests/received` | Received requests |
+| GET | `/api/v1/friends/requests/sent` | Sent requests |
+| POST | `/api/v1/friends/requests/{requestId}/accept` | Accept request |
+| POST | `/api/v1/friends/requests/{requestId}/reject` | Reject request |
+| DELETE | `/api/v1/friends/requests/{requestId}` | Cancel request |
+| GET | `/api/v1/friends/requests/pending-count` | Pending request count |
+| GET | `/api/v1/friends` | Friend list (paged) |
+| GET | `/api/v1/friends/all` | Full friend list |
+| DELETE | `/api/v1/friends/{friendId}` | Remove friend |
+| PUT | `/api/v1/friends/{friendId}/remark` | Update friend remark |
+| GET | `/api/v1/friends/search` | Search users |
+
+### Friend Shares (`/api/v1/friend-shares`)
+
+| Method | Endpoint | Description |
+|------|------|------|
+| POST | `/api/v1/friend-shares` | Share files with friend |
+| GET | `/api/v1/friend-shares/received` | Received friend shares |
+| GET | `/api/v1/friend-shares/sent` | Sent friend shares |
+| GET | `/api/v1/friend-shares/{shareId}` | Share detail |
+| POST | `/api/v1/friend-shares/{shareId}/read` | Mark as read |
+| DELETE | `/api/v1/friend-shares/{shareId}` | Cancel share |
+| GET | `/api/v1/friend-shares/unread-count` | Unread count |
+
+### Conversations (`/api/v1/conversations`)
+
+| Method | Endpoint | Description |
+|------|------|------|
+| GET | `/api/v1/conversations` | Conversation list |
+| GET | `/api/v1/conversations/{id}` | Conversation detail + messages |
+| GET | `/api/v1/conversations/unread-count` | Unread conversation count |
+| POST | `/api/v1/conversations/{id}/read` | Mark conversation as read |
+| DELETE | `/api/v1/conversations/{id}` | Delete conversation |
+
+> `GET /api/v1/conversations/read` is a defensive fallback endpoint that intentionally returns 404.
+
+### Messages (`/api/v1/messages`)
+
+| Method | Endpoint | Description |
+|------|------|------|
+| POST | `/api/v1/messages` | Send private message |
+| POST | `/api/v1/messages/to/{receiverId}` | Send by receiver ID |
+| GET | `/api/v1/messages/unread-count` | Total unread messages |
+
+### Announcements (`/api/v1/announcements`)
+
+| Method | Endpoint | Description |
+|------|------|------|
+| GET | `/api/v1/announcements/latest` | Latest announcements |
+| GET | `/api/v1/announcements` | Announcement list |
+| GET | `/api/v1/announcements/{id}` | Announcement detail |
+| GET | `/api/v1/announcements/unread-count` | Unread announcement count |
+| POST | `/api/v1/announcements/{id}/read` | Mark one announcement as read |
+| POST | `/api/v1/announcements/read-all` | Mark all announcements as read |
+| GET | `/api/v1/announcements/admin/list` | Admin announcement list |
+| POST | `/api/v1/announcements` | Publish announcement (admin) |
+| PUT | `/api/v1/announcements/{id}` | Update announcement (admin) |
+| DELETE | `/api/v1/announcements/{id}` | Delete announcement (admin) |
+
+### Tickets (`/api/v1/tickets`)
+
+| Method | Endpoint | Description |
+|------|------|------|
+| GET | `/api/v1/tickets` | My ticket list |
+| GET | `/api/v1/tickets/{id}` | Ticket detail |
+| POST | `/api/v1/tickets` | Create ticket |
+| PUT | `/api/v1/tickets/{id}` | Update ticket |
+| POST | `/api/v1/tickets/{id}/reply` | Reply ticket |
+| POST | `/api/v1/tickets/{id}/close` | Close ticket |
+| POST | `/api/v1/tickets/{id}/confirm` | Confirm completion |
+| GET | `/api/v1/tickets/pending-count` | Pending ticket count (legacy) |
+| GET | `/api/v1/tickets/unread-count` | Unread ticket count |
+| GET | `/api/v1/tickets/admin/list` | Admin ticket list |
+| PUT | `/api/v1/tickets/admin/{id}/assign` | Assign ticket (admin) |
+| PUT | `/api/v1/tickets/admin/{id}/status` | Update status (admin) |
+| GET | `/api/v1/tickets/admin/pending-count` | Admin pending ticket count |
+
+### Permissions (`/api/v1/system/permissions`, admin)
+
+| Method | Endpoint | Description |
+|------|------|------|
+| GET | `/api/v1/system/permissions` | Permission tree |
+| GET | `/api/v1/system/permissions/list` | Permission page list |
+| GET | `/api/v1/system/permissions/modules` | Module list |
 | POST | `/api/v1/system/permissions` | Create permission |
 | PUT | `/api/v1/system/permissions/{id}` | Update permission |
 | DELETE | `/api/v1/system/permissions/{id}` | Delete permission |
-| GET | `/api/v1/system/permissions/roles/{role}` | Get permissions of a role |
-| POST | `/api/v1/system/permissions/roles/{role}/grant` | Grant permission to role |
-| DELETE | `/api/v1/system/permissions/roles/{role}/revoke` | Revoke permission from role (query param: permissionCode) |
+| GET | `/api/v1/system/permissions/roles/{role}` | Role permissions |
+| POST | `/api/v1/system/permissions/roles/{role}/grant` | Grant permission |
+| DELETE | `/api/v1/system/permissions/roles/{role}/revoke` | Revoke permission |
 
-### Tickets
+### System Monitoring (`/api/v1/system`)
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/v1/tickets` | Create support ticket |
-| GET | `/api/v1/tickets` | Get user's ticket list |
-| GET | `/api/v1/tickets/{id}` | Get ticket details |
-| POST | `/api/v1/tickets/{id}/reply` | Reply to ticket |
-| PUT | `/api/v1/tickets/{id}` | Update ticket |
-| POST | `/api/v1/tickets/{id}/close` | Close ticket |
-| POST | `/api/v1/tickets/{id}/confirm` | Confirm completion |
-| GET | `/api/v1/tickets/admin/list` | Get all tickets (admin) |
-| PUT | `/api/v1/tickets/admin/{id}/assign` | Assign handler (admin) |
-| PUT | `/api/v1/tickets/admin/{id}/status` | Update ticket status (admin) |
+|------|------|------|
+| GET | `/api/v1/system/stats` | System statistics |
+| GET | `/api/v1/system/chain-status` | Blockchain status |
+| GET | `/api/v1/system/health` | System health |
+| GET | `/api/v1/system/monitor` | Aggregated monitoring metrics |
 
-#### Create Ticket
+### System Audit (`/api/v1/system/audit`)
 
-```http
-POST /api/v1/tickets
-Content-Type: application/json
+| Method | Endpoint | Description |
+|------|------|------|
+| GET | `/api/v1/system/audit/overview` | Audit overview |
+| GET | `/api/v1/system/audit/logs/page` | Audit log page (GET) |
+| POST | `/api/v1/system/audit/logs/page` | Audit log page (POST) |
+| GET | `/api/v1/system/audit/logs/{id}` | Audit log detail |
+| POST | `/api/v1/system/audit/logs/export` | Export audit logs |
+| GET | `/api/v1/system/audit/high-frequency` | High-frequency operations |
+| POST | `/api/v1/system/audit/sensitive/page` | Sensitive operation page |
+| GET | `/api/v1/system/audit/error-stats` | Error stats |
+| GET | `/api/v1/system/audit/time-distribution` | Time distribution |
+| GET | `/api/v1/system/audit/configs` | Audit configs |
+| PUT | `/api/v1/system/audit/configs` | Update audit configs |
+| GET | `/api/v1/system/audit/check-anomalies` | Check anomalies |
+| POST | `/api/v1/system/audit/backup-logs` | Backup logs |
 
-{
-  "title": "Unable to upload large files",
-  "content": "When uploading files over 1GB, the upload fails...",
-  "priority": 1,
-  "category": 0,
-  "attachmentIds": ["file-id-1", "file-id-2"]
-}
+### SSE (`/api/v1/sse`)
+
+| Method | Endpoint | Description |
+|------|------|------|
+| GET | `/api/v1/sse/connect` | Establish SSE connection (short-lived token) |
+| DELETE | `/api/v1/sse/disconnect` | Disconnect |
+| GET | `/api/v1/sse/status` | Connection status |
+
+Recommended flow:
+
+```text
+1) POST /api/v1/auth/sse-token   (Authorization: Bearer <jwt>)
+2) GET  /api/v1/sse/connect?token=<sseToken>&connectionId=<optional>
 ```
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| title | string | Yes | Ticket title (max 200 chars) |
-| content | string | Yes | Ticket description |
-| priority | int | No | 0=Low, 1=Medium (default), 2=High |
-| category | int | No | See category table below (default: 99) |
-| attachmentIds | string[] | No | Related file IDs |
+Typical event types:
 
-#### Ticket Status
+- `connected`
+- `heartbeat`
+- `message-received`
+- `announcement-published`
+- `ticket-updated`
+- `friend-request`
+- `friend-accepted`
+- `friend-share`
+- `audit-alert`
 
-| Code | Status | Description |
-|------|--------|-------------|
-| 0 | PENDING | Awaiting processing |
-| 1 | PROCESSING | In progress |
-| 2 | CONFIRMING | Pending user confirmation |
-| 3 | COMPLETED | Resolved |
-| 4 | CLOSED | Closed |
-
-#### Ticket Priority
-
-| Code | Priority |
-|------|----------|
-| 0 | Low |
-| 1 | Medium |
-| 2 | High |
-
-#### Ticket Category
-
-| Code | Category |
-|------|----------|
-| 0 | Bug Report |
-| 1 | Feature Request |
-| 2 | Question |
-| 3 | Feedback |
-| 99 | Other |
-
-#### Reply to Ticket
-
-```http
-POST /api/v1/tickets/{id}/reply
-Content-Type: application/json
-
-{
-  "content": "Thank you for reporting. We are investigating...",
-  "attachmentIds": []
-}
-```
-
-### Friends
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/v1/friends/requests` | Send friend request |
-| GET | `/api/v1/friends/requests/received` | Get received requests |
-| GET | `/api/v1/friends/requests/sent` | Get sent requests |
-| POST | `/api/v1/friends/requests/{id}/accept` | Accept friend request |
-| POST | `/api/v1/friends/requests/{id}/reject` | Reject friend request |
-| DELETE | `/api/v1/friends/requests/{id}` | Cancel friend request |
-| GET | `/api/v1/friends/requests/pending-count` | Get pending request count |
-| GET | `/api/v1/friends` | Get friends list (paginated) |
-| GET | `/api/v1/friends/all` | Get all friends (for selector) |
-| DELETE | `/api/v1/friends/{id}` | Unfriend |
-| PUT | `/api/v1/friends/{id}/remark` | Update friend remark |
-| GET | `/api/v1/friends/search` | Search users |
-
-#### Send Friend Request
-
-```http
-POST /api/v1/friends/requests
-Content-Type: application/json
-
-{
-  "addresseeId": "user-external-id",
-  "message": "Hi, let's be friends!"
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| addresseeId | string | Yes | Target user's external ID |
-| message | string | No | Request message (max 255 chars) |
-
-#### Friend Request Status
-
-| Code | Status | Description |
-|------|--------|-------------|
-| 0 | PENDING | Awaiting response |
-| 1 | ACCEPTED | Request accepted |
-| 2 | REJECTED | Request rejected |
-| 3 | CANCELLED | Request cancelled by sender |
-
-### Friend File Shares
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/v1/friend-shares` | Share files to friend |
-| GET | `/api/v1/friend-shares/received` | Get received friend shares |
-| GET | `/api/v1/friend-shares/sent` | Get sent friend shares |
-| GET | `/api/v1/friend-shares/{shareId}` | Get share details |
-| POST | `/api/v1/friend-shares/{shareId}/read` | Mark share as read |
-| DELETE | `/api/v1/friend-shares/{shareId}` | Cancel share |
-| GET | `/api/v1/friend-shares/unread-count` | Get unread count |
-
-#### Share Files to Friend
-
-```http
-POST /api/v1/friend-shares
-Content-Type: application/json
-
-{
-  "friendId": "friend-external-id",
-  "fileHashes": ["hash1", "hash2"],
-  "message": "Check out these files!"
-}
-```
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| friendId | string | Yes | Friend's external ID |
-| fileHashes | string[] | Yes | Array of file hashes to share |
-| message | string | No | Share message (max 255 chars) |
-
-### Conversations
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/v1/conversations` | Get conversation list (paginated) |
-| GET | `/api/v1/conversations/{id}` | Get conversation details with messages |
-| GET | `/api/v1/conversations/unread-count` | Get unread conversation count |
-| DELETE | `/api/v1/conversations/{id}` | Delete conversation |
-
-### Messages
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/v1/messages` | Send private message |
-| POST | `/api/v1/messages/to/{receiverId}` | Send private message (by receiverId) |
-| GET | `/api/v1/messages/unread-count` | Get total unread private messages |
-
-### Announcements
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/v1/announcements/latest` | Get latest announcement |
-| GET | `/api/v1/announcements` | Get announcement list (paginated) |
-| GET | `/api/v1/announcements/{id}` | Get announcement details |
-| GET | `/api/v1/announcements/unread-count` | Get unread announcement count |
-| POST | `/api/v1/announcements/{id}/read` | Mark announcement as read |
-| POST | `/api/v1/announcements` | Publish announcement (admin) |
-| PUT | `/api/v1/announcements/{id}` | Update announcement (admin) |
-
-### User Account
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/v1/users/info` | Get user info |
-| PUT | `/api/v1/users/info` | Update user info |
-| POST | `/api/v1/users/modify-email` | Modify email address |
-| POST | `/api/v1/users/change-password` | Change password |
-
-### SSE (Server-Sent Events)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/v1/sse/connect` | Subscribe to events |
-| DELETE | `/api/v1/sse/disconnect` | Disconnect SSE |
-| GET | `/api/v1/sse/status` | Check connection status |
-
-### System Monitoring (Admin Only)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/v1/system/stats` | Get system statistics (users, files, storage, transactions) |
-| GET | `/api/v1/system/chain-status` | Get blockchain status (block height, nodes, chain type) |
-| GET | `/api/v1/system/health` | Get system health status (database, Redis, blockchain, storage) |
-| GET | `/api/v1/system/monitor` | Get aggregated monitor metrics |
-
-### System Audit (Admin Only)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/v1/system/audit/overview` | Get audit overview data |
-| GET | `/api/v1/system/audit/logs/page` | Query audit logs (paginated, GET params) |
-| POST | `/api/v1/system/audit/logs/page` | Query audit logs (paginated, POST body) |
-| GET | `/api/v1/system/audit/logs/{id}` | Get log details by ID |
-| POST | `/api/v1/system/audit/logs/export` | Export audit logs to Excel |
-| GET | `/api/v1/system/audit/high-frequency` | Get high frequency operations |
-| POST | `/api/v1/system/audit/sensitive/page` | Get sensitive operations (paginated) |
-| GET | `/api/v1/system/audit/error-stats` | Get error operation statistics |
-| GET | `/api/v1/system/audit/time-distribution` | Get user time distribution |
-| GET | `/api/v1/system/audit/configs` | Get audit configurations |
-| PUT | `/api/v1/system/audit/configs` | Update audit configuration |
-| GET | `/api/v1/system/audit/check-anomalies` | Check for operation anomalies |
-| POST | `/api/v1/system/audit/backup-logs` | Backup old logs |
-
-> **Note**: For comprehensive REST API documentation with all endpoints, request/response examples, and detailed field descriptions, see [API_DOCUMENTATION.md](https://github.com/SoarCollab/RecordPlatform/blob/main/API_DOCUMENTATION.md) in the project root.
-
-## Response Format
-
-All responses follow this structure:
+## Unified Response Format
 
 ```json
 {
   "code": 200,
   "message": "success",
-  "data": { ... }
+  "data": {}
 }
 ```
 
-### Status Codes
-
-| Code | Meaning |
-|------|---------|
-| 200 | Success |
-| 400 | Bad Request |
-| 401 | Unauthorized |
-| 403 | Forbidden |
-| 404 | Not Found |
-| 429 | Rate Limited |
-| 500 | Server Error |
-
-### Error Response
-
-```json
-{
-  "code": 400,
-  "message": "Validation failed",
-  "data": null
-}
-```
-
-## Pagination
-
-List endpoints support pagination:
-
-```http
-GET /file/list?page=1&size=20&sort=createdAt,desc
-```
-
-Response includes pagination info:
-```json
-{
-  "code": 200,
-  "data": {
-    "records": [...],
-    "total": 100,
-    "current": 1,
-    "size": 20,
-    "pages": 5
-  }
-}
-```
-
-## File Upload
-
-### Single File Upload
-
-```http
-POST /file/upload
-Content-Type: multipart/form-data
-
-file: <binary>
-```
-
-### Chunked Upload
-
-For large files (>10MB), use chunked upload with dynamic chunk sizing:
-
-#### Dynamic Chunk Size Strategy
-
-The system supports dynamic chunk sizing based on file size for optimal performance:
-
-| File Size | Recommended Chunk Size |
-|-----------|------------------------|
-| < 10MB    | 2MB                    |
-| < 100MB   | 5MB                    |
-| < 500MB   | 10MB                   |
-| < 2GB     | 20MB                   |
-| >= 2GB    | 50MB                   |
-
-**Maximum chunk size limit: 80MB** (Dubbo payload limit is 100MB)
-
-#### Start Chunked Upload
-
-```http
-POST /file/upload/start
-Content-Type: application/json
-
-{
-  "fileName": "large-file.zip",
-  "fileSize": 1073741824,
-  "contentType": "application/zip",
-  "chunkSize": 20971520,
-  "totalChunks": 52
-}
-```
-
-#### Upload Chunk
-
-```http
-POST /file/upload/chunk
-Content-Type: multipart/form-data
-
-chunk: <binary>
-chunkNumber: 1
-totalChunks: 10
-fileHash: abc123...
-```
-
-#### Complete Upload
-
-After all chunks are uploaded:
-```http
-POST /api/v1/files/upload/complete
-Content-Type: application/x-www-form-urlencoded
-
-clientId=abc123...
-```
-
-## Rate Limiting
-
-API requests are rate-limited per user:
-
-| Endpoint Category | Limit |
-|-------------------|-------|
-| Authentication | 10/min |
-| File Upload | 20/min |
-| File Download | 100/min |
-| Other | 60/min |
-
-Rate limit headers:
-```http
-X-RateLimit-Limit: 60
-X-RateLimit-Remaining: 55
-X-RateLimit-Reset: 1609459200
-```
-
-## Dubbo Services
-
-Internal services use Dubbo Triple protocol (not REST).
-
-### BlockChainService
-
-```java
-// Store file on blockchain
-SharingVO storeFile(String fileHash, String fileKey, String fileName);
-
-// Query blockchain record
-SharingVO queryFile(String txHash);
-
-// Delete blockchain record
-void deleteFile(String txHash);
-```
-
-### DistributedStorageService
-
-```java
-// Upload file chunk
-void uploadChunk(String bucket, String objectKey, byte[] data);
-
-// Download file
-byte[] downloadFile(String bucket, String objectKey);
-
-// Delete file
-void deleteFile(String bucket, String objectKey);
-
-// Check file exists
-boolean exists(String bucket, String objectKey);
-```
-
-## WebSocket Events (SSE)
-
-Subscribe to real-time events:
-
-```javascript
-const eventSource = new EventSource('/record-platform/api/v1/sse/connect', {
-  headers: { 'Authorization': 'Bearer <token>' }
-});
-
-eventSource.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log(data.type, data.payload);
-};
-```
-
-> **Note**: Native EventSource doesn't support custom headers. The platform uses a short-lived token passed via query parameter for authenticated SSE connections.
-
-Event types (kebab-case format):
-- `message-received` - New private message
-- `announcement-published` - New system announcement
-- `ticket-updated` - Ticket status update or reply
-- `friend-request` - New friend request received
-- `friend-accepted` - Friend request accepted
-- `friend-share` - Friend shared files with you
-- `heartbeat` - Connection heartbeat
-- `connected` - Connection established
+- For business error codes: `/docs/en/api/error-codes.md`
+- For fuller module-level details: `/API_DOCUMENTATION.md`

@@ -13,7 +13,7 @@
 ## 核心特性
 
 - **区块链存证** - 文件元数据上链至 FISCO BCOS，确保不可篡改和可追溯
-- **分布式存储** - 多副本冗余，故障域隔离，一致性哈希，仲裁写入，降级写入支持，备用池自动提升，N-1 节点容错
+- **分布式存储** - 支持 1~N 活跃域 + 可选备用域，一致性哈希，仲裁写入，降级写入，自动提升，N-1 节点容错
 - **分片上传** - 支持断点续传，AES-GCM/ChaCha20-Poly1305 可配置加密
 - **文件分享** - 生成带访问次数和有效期限制的分享码
 - **分享审计与溯源** - 记录访问、下载、保存操作，支持多级溯源链（A→B→C），完整分享访问日志
@@ -63,6 +63,9 @@ mvn -f platform-storage/pom.xml clean package -DskipTests
 java -jar "$(ls platform-storage/target/platform-storage-*.jar | head -n 1)" --spring.profiles.active=local
 java -jar "$(ls platform-fisco/target/platform-fisco-*.jar | head -n 1)" --spring.profiles.active=local
 java -jar "$(ls platform-backend/backend-web/target/backend-web-*.jar | head -n 1)" --spring.profiles.active=local
+
+# 启动前端开发服务（可选但推荐）
+cd platform-frontend && pnpm install && pnpm dev
 ```
 
 > 详细配置请参阅 [快速开始指南](docs/zh/getting-started/index.md)
@@ -111,7 +114,8 @@ java -jar "$(ls platform-backend/backend-web/target/backend-web-*.jar | head -n 
 | [架构设计](docs/zh/architecture/index.md)    | 系统架构、分布式存储、区块链、安全机制 |
 | [部署运维](docs/zh/deployment/index.md)      | Docker 部署、生产环境、监控告警        |
 | [故障排查](docs/zh/troubleshooting/index.md) | 常见问题与解决方案                     |
-| [API 参考](docs/zh/api/index.md)             | REST API 接口文档                      |
+| [API 参考](docs/zh/api/index.md)             | 与 Controller 对齐的 REST API 索引与鉴权说明 |
+| [完整 API 文档](API_DOCUMENTATION.md)        | 面向模块的完整接口清单与关键请求示例   |
 
 ## 技术栈
 

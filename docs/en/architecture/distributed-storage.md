@@ -24,7 +24,7 @@ The system supports **N active domains + 1 optional standby domain** with flexib
 ### How It Works
 
 - Each file chunk is written to **N active domains** (one copy per domain)
-- Replication factor defaults to active domain count, adjustable via `replication-factor`
+- Replication factor defaults to active domain count, adjustable via `storage.replication.factor`
 - **N-1 domain tolerance**: System remains available if any N-1 domains fail
 - Standby nodes are automatically promoted when active domain is degraded
 
@@ -69,7 +69,7 @@ flowchart LR
 | Property              | Default             | Description                                    |
 | --------------------- | ------------------- | ---------------------------------------------- |
 | `virtualNodesPerNode` | 150                 | Virtual nodes per physical node                |
-| `replicationFactor`   | Active domain count | Total replicas (capped at active domain count) |
+| `replication.factor`  | Active domain count | Total replicas (capped at active domain count) |
 | `weight`              | 100                 | Node weight (affects vnode count)              |
 
 ### Benefits
@@ -279,7 +279,8 @@ storage:
     - dc-us-west
     - dc-eu-west
   standby-domain: standby
-  replication-factor: 3
+  replication:
+    factor: 3
 
   nodes:
     - name: us-east-node1

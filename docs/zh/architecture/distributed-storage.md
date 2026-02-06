@@ -24,7 +24,7 @@ RecordPlatform 采用故障域感知的分布式存储架构以实现高可用�
 ### 工作原理
 
 - 每个文件分片写入 **N 个活跃域**（每域一份）
-- 副本因子默认等于活跃域数量，可通过 `replication-factor` 调整
+- 副本因子默认等于活跃域数量，可通过 `storage.replication.factor` 调整
 - **N-1 域容错**：任意 N-1 个域故障时系统仍可用
 - 活跃域性能下降时，备用域节点自动提升
 
@@ -69,7 +69,7 @@ flowchart LR
 | 属性                  | 默认值     | 说明                         |
 | --------------------- | ---------- | ---------------------------- |
 | `virtualNodesPerNode` | 150        | 每个物理节点的虚拟节点数     |
-| `replicationFactor`   | 活跃域数量 | 总副本数（不超过活跃域数量） |
+| `replication.factor`  | 活跃域数量 | 总副本数（不超过活跃域数量） |
 | `weight`              | 100        | 节点权重（影响虚拟节点数）   |
 
 ### 优势
@@ -278,7 +278,8 @@ storage:
     - dc-shanghai
     - dc-shenzhen
   standby-domain: standby
-  replication-factor: 3
+  replication:
+    factor: 3
 
   nodes:
     - name: bj-node1

@@ -19,7 +19,7 @@ features:
     details: File metadata stored on FISCO BCOS, ensuring immutability and traceability for all your documents.
   - icon: 💾
     title: Distributed Storage
-    details: Dual-replica redundancy with fault domain isolation and automatic failover for high availability.
+    details: Configurable active fault domains with quorum writes, degraded write support, and standby auto-promotion.
   - icon: 🔒
     title: End-to-End Encryption
     details: Chunked uploads with AES-GCM or ChaCha20-Poly1305 encryption for maximum security.

@@ -21,7 +21,7 @@ features:
     linkText: Learn more
   - icon: 💾
     title: Distributed Storage
-    details: Dual-replica redundancy with fault domain isolation and automatic failover for enterprise-grade high availability.
+    details: Configurable active fault domains with quorum writes, degraded writes, and standby auto-promotion for enterprise-grade availability.
     link: /en/architecture/distributed-storage
     linkText: Learn more
   - icon: 🔒

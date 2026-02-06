@@ -97,8 +97,8 @@ Solutions for frequently encountered problems.
    **Solution**: Restart the offline node or wait for failover.
 
 2. **Insufficient replicas**
-   - Not enough healthy nodes for replication factor
-   - **Solution**: Ensure at least `replicationFactor` nodes are online.
+   - Healthy nodes cannot satisfy effective quorum or degraded-write minimum replicas
+   - **Solution**: Ensure online nodes satisfy `storage.replication.quorum` and are not below `storage.degraded-write.min-replicas`.
 
 3. **Bucket not exists**
    ```
@@ -326,4 +326,3 @@ Solutions for frequently encountered problems.
            retry:
              max-attempts: 5
    ```
-

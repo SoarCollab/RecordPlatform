@@ -62,13 +62,13 @@ Authorization: Bearer <your_jwt_token>
 Call the login endpoint to obtain a JWT token:
 
 ```
-POST /api/auth/login
+POST /api/v1/auth/login
 ```
 
 ### Public Endpoints (No Auth Required)
 
-- `POST /api/auth/login` - User login
-- `GET /api/auth/logout` - User logout
+- `POST /api/v1/auth/login` - User login
+- `POST /api/v1/auth/logout` - User logout
 - `GET /api/v1/auth/ask-code` - Request verification code
 - `POST /api/v1/auth/register` - User registration
 - `POST /api/v1/auth/reset-confirm` - Confirm password reset
@@ -216,14 +216,14 @@ All API responses use a unified `Result<T>` wrapper:
 
 ## 1. Auth Module
 
-Base Path: `/api/v1/auth` (and `/api/auth` for login/logout)
+Base Path: `/api/v1/auth` (login handled by Spring Security at `/api/v1/auth/login`)
 
 ### 1.1 Login
 
 Authenticate user and obtain JWT token.
 
 ```
-POST /api/auth/login
+POST /api/v1/auth/login
 ```
 
 **Authentication**: None
@@ -266,7 +266,7 @@ POST /api/auth/login
 Invalidate current JWT token.
 
 ```
-GET /api/auth/logout
+POST /api/v1/auth/logout
 ```
 
 **Authentication**: Bearer Token
@@ -2726,6 +2726,163 @@ Returns aggregated monitoring metrics combining system stats, chain status, and 
 ```
 
 ---
+
+
+## 15. Controller-Aligned Endpoint Checklist
+
+> This checklist summarizes current backend routes for fast validation. It is authoritative for path/method parity and complements module details above.
+
+### 15.1 Auth / User
+
+- `POST /api/v1/auth/login`
+- `GET /api/v1/auth/ask-code`
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/reset-confirm`
+- `POST /api/v1/auth/reset-password`
+- `POST /api/v1/auth/refresh`
+- `POST /api/v1/auth/sse-token`
+- `GET /api/v1/users/info`
+- `PUT /api/v1/users/info`
+- `POST /api/v1/users/modify-email`
+- `POST /api/v1/users/change-password`
+
+### 15.2 Files / Sharing
+
+- `GET /api/v1/files/{id}`
+- `GET /api/v1/files/byHash`
+- `GET /api/v1/files/list`
+- `GET /api/v1/files/page`
+- `GET /api/v1/files/stats`
+- `GET /api/v1/files/address`
+- `GET /api/v1/files/getTransaction`
+- `GET /api/v1/files/download`
+- `GET /api/v1/files/decryptInfo`
+- `GET /api/v1/files/getSharingFiles`
+- `GET /api/v1/files/shares`
+- `DELETE /api/v1/files/delete`
+- `DELETE /api/v1/files/deleteById`
+- `POST /api/v1/files/share`
+- `PUT /api/v1/files/share`
+- `DELETE /api/v1/files/share/{shareCode}`
+- `POST /api/v1/files/saveShareFile`
+- `GET /api/v1/files/share/download`
+- `GET /api/v1/files/share/decryptInfo`
+- `GET /api/v1/files/share/{shareCode}/access-logs`
+- `GET /api/v1/files/share/{shareCode}/stats`
+- `GET /api/v1/files/{id}/provenance`
+- `GET /api/v1/files/public/download`
+- `GET /api/v1/files/public/decryptInfo`
+- `GET /api/v1/share/{shareCode}/info`
+
+### 15.3 Friends / Messaging
+
+- `POST /api/v1/friends/requests`
+- `GET /api/v1/friends/requests/received`
+- `GET /api/v1/friends/requests/sent`
+- `POST /api/v1/friends/requests/{requestId}/accept`
+- `POST /api/v1/friends/requests/{requestId}/reject`
+- `DELETE /api/v1/friends/requests/{requestId}`
+- `GET /api/v1/friends/requests/pending-count`
+- `GET /api/v1/friends`
+- `GET /api/v1/friends/all`
+- `DELETE /api/v1/friends/{friendId}`
+- `PUT /api/v1/friends/{friendId}/remark`
+- `GET /api/v1/friends/search`
+- `POST /api/v1/friend-shares`
+- `GET /api/v1/friend-shares/received`
+- `GET /api/v1/friend-shares/sent`
+- `GET /api/v1/friend-shares/{shareId}`
+- `POST /api/v1/friend-shares/{shareId}/read`
+- `DELETE /api/v1/friend-shares/{shareId}`
+- `GET /api/v1/friend-shares/unread-count`
+- `GET /api/v1/conversations`
+- `GET /api/v1/conversations/{id}`
+- `GET /api/v1/conversations/unread-count`
+- `POST /api/v1/conversations/{id}/read`
+- `DELETE /api/v1/conversations/{id}`
+- `POST /api/v1/messages`
+- `POST /api/v1/messages/to/{receiverId}`
+- `GET /api/v1/messages/unread-count`
+
+### 15.4 Announcement / Ticket / Admin / System
+
+- `GET /api/v1/announcements/latest`
+- `GET /api/v1/announcements`
+- `GET /api/v1/announcements/{id}`
+- `GET /api/v1/announcements/unread-count`
+- `POST /api/v1/announcements/{id}/read`
+- `POST /api/v1/announcements/read-all`
+- `GET /api/v1/announcements/admin/list`
+- `POST /api/v1/announcements`
+- `PUT /api/v1/announcements/{id}`
+- `DELETE /api/v1/announcements/{id}`
+- `GET /api/v1/tickets`
+- `GET /api/v1/tickets/{id}`
+- `POST /api/v1/tickets`
+- `PUT /api/v1/tickets/{id}`
+- `POST /api/v1/tickets/{id}/reply`
+- `POST /api/v1/tickets/{id}/close`
+- `POST /api/v1/tickets/{id}/confirm`
+- `GET /api/v1/tickets/pending-count`
+- `GET /api/v1/tickets/unread-count`
+- `GET /api/v1/tickets/admin/list`
+- `PUT /api/v1/tickets/admin/{id}/assign`
+- `PUT /api/v1/tickets/admin/{id}/status`
+- `GET /api/v1/tickets/admin/pending-count`
+- `GET /api/v1/admin/files`
+- `GET /api/v1/admin/files/{id}`
+- `PUT /api/v1/admin/files/{id}/status`
+- `DELETE /api/v1/admin/files/{id}`
+- `GET /api/v1/admin/files/shares`
+- `DELETE /api/v1/admin/files/shares/{shareCode}`
+- `GET /api/v1/admin/files/shares/{shareCode}/logs`
+- `GET /api/v1/admin/files/shares/{shareCode}/stats`
+- `GET /api/v1/system/permissions`
+- `GET /api/v1/system/permissions/list`
+- `GET /api/v1/system/permissions/modules`
+- `POST /api/v1/system/permissions`
+- `PUT /api/v1/system/permissions/{id}`
+- `DELETE /api/v1/system/permissions/{id}`
+- `GET /api/v1/system/permissions/roles/{role}`
+- `POST /api/v1/system/permissions/roles/{role}/grant`
+- `DELETE /api/v1/system/permissions/roles/{role}/revoke`
+- `GET /api/v1/system/stats`
+- `GET /api/v1/system/chain-status`
+- `GET /api/v1/system/health`
+- `GET /api/v1/system/monitor`
+- `GET /api/v1/system/audit/overview`
+- `GET /api/v1/system/audit/logs/page`
+- `POST /api/v1/system/audit/logs/page`
+- `GET /api/v1/system/audit/logs/{id}`
+- `POST /api/v1/system/audit/logs/export`
+- `GET /api/v1/system/audit/high-frequency`
+- `POST /api/v1/system/audit/sensitive/page`
+- `GET /api/v1/system/audit/error-stats`
+- `GET /api/v1/system/audit/time-distribution`
+- `GET /api/v1/system/audit/configs`
+- `PUT /api/v1/system/audit/configs`
+- `GET /api/v1/system/audit/check-anomalies`
+- `POST /api/v1/system/audit/backup-logs`
+
+### 15.5 SSE Handshake and Event Types
+
+SSE should be connected with short-lived token flow:
+
+1. `POST /api/v1/auth/sse-token` with JWT
+2. `GET /api/v1/sse/connect?token=<sseToken>&connectionId=<optional>`
+
+Current event types include:
+
+- `connected`
+- `heartbeat`
+- `message-received`
+- `announcement-published`
+- `ticket-updated`
+- `friend-request`
+- `friend-accepted`
+- `friend-share`
+- `audit-alert`
+
 
 ## Appendix
 

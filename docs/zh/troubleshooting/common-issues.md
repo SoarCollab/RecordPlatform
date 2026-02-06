@@ -97,8 +97,8 @@
    **解决方案**：重启离线节点或等待故障转移。
 
 2. **副本数不足**
-   - 健康节点数少于复制因子
-   - **解决方案**：确保至少 `replicationFactor` 个节点在线。
+   - 健康节点数无法满足有效仲裁或降级写入最小副本要求
+   - **解决方案**：确保在线节点满足 `storage.replication.quorum`，并且不低于 `storage.degraded-write.min-replicas`。
 
 3. **存储桶不存在**
    ```
@@ -326,4 +326,3 @@
            retry:
              max-attempts: 5
    ```
-

@@ -318,7 +318,7 @@ flowchart LR
 | 组件 | 职责 |
 |------|------|
 | `OutboxService` | 在业务事务中追加事件 |
-| `OutboxPublisher` | 后台轮询和发布（30秒间隔）|
+| `OutboxPublisher` | 后台轮询和发布（2 秒间隔）|
 | `outbox_event` 表 | 带租户隔离的持久化事件存储 |
 
 ### 保证
@@ -331,10 +331,14 @@ flowchart LR
 
 ```yaml
 outbox:
-  enabled: true
-  poll-interval: 30s
-  batch-size: 100
-  retention-days: 7  # 7 天后自动清理
+  publisher:
+    batch-size: 100
+    poll-interval-ms: 2000
+    max-retries: 5
+  cleanup:
+    sent-retention-days: 7
+    failed-retention-days: 30
+    cron: 0 0 3 * * ?
 ```
 
 ## CQRS 架构
@@ -450,7 +454,9 @@ flowchart LR
 | 每用户最大连接数 | 5 | 超出时关闭最旧连接 |
 | 心跳间隔 | 30 秒 | 保活信号 |
 | 连接超时 | 30 分钟 | 无活动后自动关闭 |
-| 重连延迟 | 1 秒 | 客户端重连退避 |
+| 重连延迟（基础） | 2 秒 | 客户端指数退避重连基础间隔 |
+| 重连延迟（上限） | 30 秒 | 客户端指数退避重连上限 |
+| 最大重连次数 | 5 | 达到上限后转为手动重连 |
 
 ### 事件类型
 
@@ -463,6 +469,36 @@ flowchart LR
 | `announcement-published` | `{ id, title }` | 系统公告 |
 | `ticket-updated` | `{ ticketId, status }` | 工单状态变更 |
 | `badge-update` | `{ unreadMessages, tickets }` | UI 徽章数量更新 |
+| `friend-request` | `{ requesterName, ... }` | 新好友请求 |
+| `friend-accepted` | `{ friendName, ... }` | 好友请求被接受 |
+| `friend-share` | `{ sharerName, fileCount, ... }` | 好友文件分享 |
+| `audit-alert` | `{ type, message, details, severity }` | 审计异常告警（管理员/监控员） |
+
+### SSE 认证握手
+
+SSE 连接采用短期一次性令牌：
+
+1. 登录态下调用 `POST /api/v1/auth/sse-token` 获取短期令牌（需常规 JWT）
+2. 使用 `GET /api/v1/sse/connect?token={sseToken}&connectionId={optional}` 建立连接
+
+> `GET /api/v1/sse/connect` 为公开端点，但依赖短期令牌完成认证；不是匿名开放连接。
+
+### 下载策略（前端）
+
+前端按文件大小和浏览器能力动态选择下载策略：
+
+- 小文件：内存下载（in-memory）
+- 大文件：优先流式下载（streaming）
+- 超大文件或浏览器能力不足：后端代理或阻断并提示
+
+默认阈值（`platform-frontend/src/lib/utils/fileSize.ts`）：
+
+| 阈值常量 | 默认值 |
+|----------|--------|
+| `LARGE_FILE_WARNING_THRESHOLD` | 500MB |
+| `STREAMING_RECOMMENDED_THRESHOLD` | 1GB |
+| `MAX_SAFE_INMEMORY_SIZE` | 2GB |
+| `MAX_DOWNLOADABLE_SIZE` | 100GB |
 
 ### 前端 Leader 选举
 

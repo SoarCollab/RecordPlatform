@@ -305,7 +305,7 @@ flowchart LR
 | Component | Responsibility |
 |-----------|----------------|
 | `OutboxService` | Appends events within business transaction |
-| `OutboxPublisher` | Background polling and publishing (30s interval) |
+| `OutboxPublisher` | Background polling and publishing (2s interval) |
 | `outbox_event` table | Persistent event store with tenant isolation |
 
 ### Guarantees
@@ -318,10 +318,14 @@ flowchart LR
 
 ```yaml
 outbox:
-  enabled: true
-  poll-interval: 30s
-  batch-size: 100
-  retention-days: 7  # Auto-cleanup after 7 days
+  publisher:
+    batch-size: 100
+    poll-interval-ms: 2000
+    max-retries: 5
+  cleanup:
+    sent-retention-days: 7
+    failed-retention-days: 30
+    cron: 0 0 3 * * ?
 ```
 
 ## CQRS Architecture
@@ -437,7 +441,9 @@ flowchart LR
 | Max connections per user | 5 | Oldest connection closed when exceeded |
 | Heartbeat interval | 30s | Keep-alive signal |
 | Connection timeout | 30m | Auto-close after inactivity |
-| Reconnect delay | 1s | Client reconnect backoff |
+| Reconnect delay (base) | 2s | Base delay for exponential client reconnect |
+| Reconnect delay (max) | 30s | Upper bound for reconnect backoff |
+| Max reconnect attempts | 5 | Falls back to manual reconnect after limit |
 
 ### Event Types
 
@@ -450,6 +456,36 @@ flowchart LR
 | `announcement-published` | `{ id, title }` | System announcement |
 | `ticket-updated` | `{ ticketId, status }` | Ticket status change |
 | `badge-update` | `{ unreadMessages, tickets }` | UI badge count update |
+| `friend-request` | `{ requesterName, ... }` | New friend request |
+| `friend-accepted` | `{ friendName, ... }` | Friend request accepted |
+| `friend-share` | `{ sharerName, fileCount, ... }` | Friend file sharing |
+| `audit-alert` | `{ type, message, details, severity }` | Audit anomaly alert (admin/monitor) |
+
+### SSE Authentication Handshake
+
+SSE connections use a short-lived one-time token:
+
+1. Call `POST /api/v1/auth/sse-token` with regular JWT auth
+2. Connect via `GET /api/v1/sse/connect?token={sseToken}&connectionId={optional}`
+
+> `GET /api/v1/sse/connect` is publicly exposed in Spring Security but still requires valid short-lived token authentication.
+
+### Download Strategy (Frontend)
+
+Frontend selects download strategy by file size and browser capability:
+
+- Small files: in-memory download
+- Large files: prefer streaming download
+- Very large files or unsupported browsers: backend proxy / guarded fallback
+
+Default thresholds (`platform-frontend/src/lib/utils/fileSize.ts`):
+
+| Threshold Constant | Default |
+|--------------------|---------|
+| `LARGE_FILE_WARNING_THRESHOLD` | 500MB |
+| `STREAMING_RECOMMENDED_THRESHOLD` | 1GB |
+| `MAX_SAFE_INMEMORY_SIZE` | 2GB |
+| `MAX_DOWNLOADABLE_SIZE` | 100GB |
 
 ### Frontend Leader Election
 

@@ -25,7 +25,7 @@ Technical architecture documentation for RecordPlatform.
 
 ### 3. High Availability
 
-- Fault domain isolation (A/B active + STANDBY pool)
+- Fault domain isolation (1~N active domains + optional STANDBY pool)
 - Consistent hashing for data distribution
 - Automatic failover and rebalancing
 
@@ -47,4 +47,3 @@ Technical architecture documentation for RecordPlatform.
 | Blockchain | FISCO BCOS | Immutable attestation |
 | Caching | Caffeine + Redis | Multi-level caching |
 | Resilience | Resilience4j | Circuit breaker, retry |
-
