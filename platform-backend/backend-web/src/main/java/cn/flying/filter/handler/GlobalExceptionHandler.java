@@ -24,6 +24,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentConversionNotSupportedException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
@@ -88,6 +90,37 @@ public class GlobalExceptionHandler {
         String detail = "请求必须是 multipart/form-data";
         log.warn("请求格式错误(MultipartException): detail={}, error={}, traceId={}", detail, ex.getMessage(), traceId);
         return Result.error(ResultEnum.PARAM_NOT_COMPLETE, withTrace(detail));
+    }
+
+    /**
+     * 处理路径参数/请求参数类型不匹配异常（如 chunkNumber=not-a-number）。
+     *
+     * @param ex 参数类型不匹配异常
+     * @return 400 BAD_REQUEST 的统一错误响应
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<?> handleMethodArgumentTypeMismatchException(MethodArgumentTypeMismatchException ex) {
+        String traceId = currentTraceId();
+        String detail = formatTypeMismatchDetail(ex.getName(), ex.getRequiredType(), ex.getValue());
+        log.warn("参数类型不匹配(MethodArgumentTypeMismatchException): detail={}, traceId={}", detail, traceId);
+        return Result.error(ResultEnum.PARAM_IS_INVALID, withTrace(detail));
+    }
+
+    /**
+     * 处理参数无法转换为目标类型的异常（如类型转换器不支持）。
+     *
+     * @param ex 参数转换不支持异常
+     * @return 400 BAD_REQUEST 的统一错误响应
+     */
+    @ExceptionHandler(MethodArgumentConversionNotSupportedException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<?> handleMethodArgumentConversionNotSupportedException(
+            MethodArgumentConversionNotSupportedException ex) {
+        String traceId = currentTraceId();
+        String detail = formatTypeMismatchDetail(ex.getName(), ex.getRequiredType(), ex.getValue());
+        log.warn("参数转换失败(MethodArgumentConversionNotSupportedException): detail={}, traceId={}", detail, traceId);
+        return Result.error(ResultEnum.PARAM_IS_INVALID, withTrace(detail));
     }
 
     /**
@@ -304,6 +337,21 @@ public class GlobalExceptionHandler {
             return message.isEmpty() ? "参数无效" : message;
         }
         return message.isEmpty() ? path : (path + ": " + message);
+    }
+
+    /**
+     * 组装参数类型不匹配错误详情。
+     *
+     * @param name         参数名
+     * @param requiredType 期望类型
+     * @param value        实际值
+     * @return 可读错误详情文本
+     */
+    private String formatTypeMismatchDetail(String name, Class<?> requiredType, Object value) {
+        String fieldName = (name == null || name.isBlank()) ? "unknown" : name;
+        String expectedType = requiredType == null ? "unknown" : requiredType.getSimpleName();
+        String actualValue = value == null ? "null" : String.valueOf(value);
+        return "参数类型不匹配: " + fieldName + "，期望类型=" + expectedType + "，实际值=" + actualValue;
     }
 
     /**

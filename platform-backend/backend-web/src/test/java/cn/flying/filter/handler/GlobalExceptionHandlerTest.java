@@ -7,6 +7,8 @@ import cn.flying.common.exception.GeneralException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.method.annotation.MethodArgumentConversionNotSupportedException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
@@ -76,5 +78,57 @@ class GlobalExceptionHandlerTest {
         assertInstanceOf(ErrorPayload.class, result.getData());
         ErrorPayload payload = (ErrorPayload) result.getData();
         assertEquals("请求必须是 multipart/form-data", payload.getDetail());
+    }
+
+    /**
+     * 验证路径参数类型不匹配时会返回 400 与 PARAM_IS_INVALID 业务码。
+     */
+    @Test
+    @DisplayName("should return bad request for method argument type mismatch")
+    void shouldReturnBadRequestForMethodArgumentTypeMismatch() {
+        GlobalExceptionHandler handler = new GlobalExceptionHandler();
+        MethodArgumentTypeMismatchException ex = new MethodArgumentTypeMismatchException(
+                "not-a-number",
+                Integer.class,
+                "chunkNumber",
+                null,
+                new NumberFormatException("For input string: not-a-number")
+        );
+
+        Result<?> result = handler.handleMethodArgumentTypeMismatchException(ex);
+
+        assertNotNull(result);
+        assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), result.getCode());
+        assertInstanceOf(ErrorPayload.class, result.getData());
+        ErrorPayload payload = (ErrorPayload) result.getData();
+        assertInstanceOf(String.class, payload.getDetail());
+        assertTrue(((String) payload.getDetail()).contains("chunkNumber"));
+        assertTrue(((String) payload.getDetail()).contains("Integer"));
+    }
+
+    /**
+     * 验证参数转换不支持时会返回 400 与 PARAM_IS_INVALID 业务码。
+     */
+    @Test
+    @DisplayName("should return bad request for method argument conversion not supported")
+    void shouldReturnBadRequestForMethodArgumentConversionNotSupported() {
+        GlobalExceptionHandler handler = new GlobalExceptionHandler();
+        MethodArgumentConversionNotSupportedException ex = new MethodArgumentConversionNotSupportedException(
+                "abc",
+                Long.class,
+                "clientId",
+                null,
+                new IllegalStateException("Conversion not supported")
+        );
+
+        Result<?> result = handler.handleMethodArgumentConversionNotSupportedException(ex);
+
+        assertNotNull(result);
+        assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), result.getCode());
+        assertInstanceOf(ErrorPayload.class, result.getData());
+        ErrorPayload payload = (ErrorPayload) result.getData();
+        assertInstanceOf(String.class, payload.getDetail());
+        assertTrue(((String) payload.getDetail()).contains("clientId"));
+        assertTrue(((String) payload.getDetail()).contains("Long"));
     }
 }
