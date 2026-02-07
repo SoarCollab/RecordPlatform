@@ -90,7 +90,7 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
     }
 
     /**
-     * 在 Redis 中写入邮件验证码，模拟 /api/v1/auth/ask-code 写入的验证码键。
+     * 在 Redis 中写入邮件验证码，模拟 /api/v1/auth/verification-codes 写入的验证码键。
      *
      * @param email 邮箱
      * @param code  验证码
@@ -105,9 +105,9 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
     class AskVerifyCodeTests {
 
         @Test
-        @DisplayName("GET /ask-code - Should request registration code for new email")
+        @DisplayName("POST /verification-codes - Should request registration code for new email")
         void askCode_shouldRequestRegistrationCodeForNewEmail() throws Exception {
-            mockMvc.perform(get(BASE_URL + "/ask-code")
+            mockMvc.perform(post(BASE_URL + "/verification-codes")
                             .param("email", "newuser@test.com")
                             .param("type", "register")
                             .header(HEADER_TENANT_ID, testTenantId))
@@ -116,9 +116,9 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("GET /ask-code - Should return 400 for invalid email format")
+        @DisplayName("POST /verification-codes - Should return 400 for invalid email format")
         void askCode_shouldReturn400ForInvalidEmail() throws Exception {
-            mockMvc.perform(get(BASE_URL + "/ask-code")
+            mockMvc.perform(post(BASE_URL + "/verification-codes")
                             .param("email", "invalid-email")
                             .param("type", "register")
                             .header(HEADER_TENANT_ID, testTenantId))
@@ -126,9 +126,9 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("GET /ask-code - Should return 400 for invalid type")
+        @DisplayName("POST /verification-codes - Should return 400 for invalid type")
         void askCode_shouldReturn400ForInvalidType() throws Exception {
-            mockMvc.perform(get(BASE_URL + "/ask-code")
+            mockMvc.perform(post(BASE_URL + "/verification-codes")
                             .param("email", "test@test.com")
                             .param("type", "invalid")
                             .header(HEADER_TENANT_ID, testTenantId))
@@ -136,9 +136,9 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("GET /ask-code - Should accept reset type for existing email")
+        @DisplayName("POST /verification-codes - Should accept reset type for existing email")
         void askCode_shouldAcceptResetTypeForExistingEmail() throws Exception {
-            mockMvc.perform(get(BASE_URL + "/ask-code")
+            mockMvc.perform(post(BASE_URL + "/verification-codes")
                             .param("email", existingAccount.getEmail())
                             .param("type", "reset")
                             .header(HEADER_TENANT_ID, testTenantId))
@@ -147,9 +147,9 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("GET /ask-code - Should accept modify type")
+        @DisplayName("POST /verification-codes - Should accept modify type")
         void askCode_shouldAcceptModifyType() throws Exception {
-            mockMvc.perform(get(BASE_URL + "/ask-code")
+            mockMvc.perform(post(BASE_URL + "/verification-codes")
                             .param("email", existingAccount.getEmail())
                             .param("type", "modify")
                             .header(HEADER_TENANT_ID, testTenantId))
@@ -294,13 +294,13 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
     class ResetConfirmTests {
 
         @Test
-        @DisplayName("POST /reset-confirm - Should confirm reset with valid code")
+        @DisplayName("POST /password-resets/confirm - Should confirm reset with valid code")
         void resetConfirm_shouldConfirmWithValidCode() throws Exception {
             setVerificationCode(existingAccount.getEmail(), "123456");
 
             ConfirmResetVO confirmVO = new ConfirmResetVO(existingAccount.getEmail(), "123456");
 
-            mockMvc.perform(post(BASE_URL + "/reset-confirm")
+            mockMvc.perform(post(BASE_URL + "/password-resets/confirm")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(confirmVO))
                             .header(HEADER_TENANT_ID, testTenantId))
@@ -309,11 +309,11 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("POST /reset-confirm - Should return 400 for invalid email format")
+        @DisplayName("POST /password-resets/confirm - Should return 400 for invalid email format")
         void resetConfirm_shouldReturn400ForInvalidEmail() throws Exception {
             ConfirmResetVO confirmVO = new ConfirmResetVO("invalid-email", "123456");
 
-            mockMvc.perform(post(BASE_URL + "/reset-confirm")
+            mockMvc.perform(post(BASE_URL + "/password-resets/confirm")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(confirmVO))
                             .header(HEADER_TENANT_ID, testTenantId))
@@ -321,11 +321,11 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("POST /reset-confirm - Should return 400 for code length not 6")
+        @DisplayName("POST /password-resets/confirm - Should return 400 for code length not 6")
         void resetConfirm_shouldReturn400ForInvalidCodeLength() throws Exception {
             ConfirmResetVO confirmVO = new ConfirmResetVO(existingAccount.getEmail(), "12345");
 
-            mockMvc.perform(post(BASE_URL + "/reset-confirm")
+            mockMvc.perform(post(BASE_URL + "/password-resets/confirm")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(confirmVO))
                             .header(HEADER_TENANT_ID, testTenantId))
@@ -338,7 +338,7 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
     class ResetPasswordTests {
 
         @Test
-        @DisplayName("POST /reset-password - Should reset password successfully")
+        @DisplayName("PUT /password-resets - Should reset password successfully")
         void resetPassword_shouldResetSuccessfully() throws Exception {
             setVerificationCode(existingAccount.getEmail(), "123456");
 
@@ -347,7 +347,7 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
             resetVO.setCode("123456");
             resetVO.setPassword("newPassword123");
 
-            mockMvc.perform(post(BASE_URL + "/reset-password")
+            mockMvc.perform(put(BASE_URL + "/password-resets")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(resetVO))
                             .header(HEADER_TENANT_ID, testTenantId))
@@ -360,14 +360,14 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("POST /reset-password - Should return 400 for invalid email")
+        @DisplayName("PUT /password-resets - Should return 400 for invalid email")
         void resetPassword_shouldReturn400ForInvalidEmail() throws Exception {
             EmailResetVO resetVO = new EmailResetVO();
             resetVO.setEmail("invalid-email");
             resetVO.setCode("123456");
             resetVO.setPassword("newPassword123");
 
-            mockMvc.perform(post(BASE_URL + "/reset-password")
+            mockMvc.perform(put(BASE_URL + "/password-resets")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(resetVO))
                             .header(HEADER_TENANT_ID, testTenantId))
@@ -375,14 +375,14 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("POST /reset-password - Should return 400 for password too short")
+        @DisplayName("PUT /password-resets - Should return 400 for password too short")
         void resetPassword_shouldReturn400ForPasswordTooShort() throws Exception {
             EmailResetVO resetVO = new EmailResetVO();
             resetVO.setEmail(existingAccount.getEmail());
             resetVO.setCode("123456");
             resetVO.setPassword("12345"); // Less than 6 chars
 
-            mockMvc.perform(post(BASE_URL + "/reset-password")
+            mockMvc.perform(put(BASE_URL + "/password-resets")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(resetVO))
                             .header(HEADER_TENANT_ID, testTenantId))
@@ -390,14 +390,14 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("POST /reset-password - Should return 400 for password too long")
+        @DisplayName("PUT /password-resets - Should return 400 for password too long")
         void resetPassword_shouldReturn400ForPasswordTooLong() throws Exception {
             EmailResetVO resetVO = new EmailResetVO();
             resetVO.setEmail(existingAccount.getEmail());
             resetVO.setCode("123456");
             resetVO.setPassword("a".repeat(21)); // More than 20 chars
 
-            mockMvc.perform(post(BASE_URL + "/reset-password")
+            mockMvc.perform(put(BASE_URL + "/password-resets")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(resetVO))
                             .header(HEADER_TENANT_ID, testTenantId))
@@ -410,9 +410,9 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
     class RefreshTokenTests {
 
         @Test
-        @DisplayName("POST /refresh - Should refresh token successfully")
+        @DisplayName("POST /tokens/refresh - Should refresh token successfully")
         void refreshToken_shouldRefreshSuccessfully() throws Exception {
-            mockMvc.perform(post(BASE_URL + "/refresh")
+            mockMvc.perform(post(BASE_URL + "/tokens/refresh")
                             .header("Authorization", "Bearer " + testToken)
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isOk())
@@ -423,28 +423,28 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("POST /refresh - Should return 401 without token")
+        @DisplayName("POST /tokens/refresh - Should return 401 without token")
         void refreshToken_shouldReturn401WithoutToken() throws Exception {
-            mockMvc.perform(post(BASE_URL + "/refresh")
+            mockMvc.perform(post(BASE_URL + "/tokens/refresh")
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isUnauthorized());
         }
 
         @Test
-        @DisplayName("POST /refresh - Should return 401 for expired token")
+        @DisplayName("POST /tokens/refresh - Should return 401 for expired token")
         void refreshToken_shouldReturn401ForExpiredToken() throws Exception {
             String expiredToken = JwtTestSupport.generateExpiredToken(testUserId);
 
-            mockMvc.perform(post(BASE_URL + "/refresh")
+            mockMvc.perform(post(BASE_URL + "/tokens/refresh")
                             .header("Authorization", "Bearer " + expiredToken)
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isUnauthorized());
         }
 
         @Test
-        @DisplayName("POST /refresh - Should return 401 for invalid token")
+        @DisplayName("POST /tokens/refresh - Should return 401 for invalid token")
         void refreshToken_shouldReturn401ForInvalidToken() throws Exception {
-            mockMvc.perform(post(BASE_URL + "/refresh")
+            mockMvc.perform(post(BASE_URL + "/tokens/refresh")
                             .header("Authorization", "Bearer invalid-token")
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isUnauthorized());
@@ -456,9 +456,9 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
     class SseTokenTests {
 
         @Test
-        @DisplayName("POST /sse-token - Should generate SSE token successfully")
+        @DisplayName("POST /tokens/sse - Should generate SSE token successfully")
         void getSseToken_shouldGenerateSuccessfully() throws Exception {
-            mockMvc.perform(post(BASE_URL + "/sse-token")
+            mockMvc.perform(post(BASE_URL + "/tokens/sse")
                             .header("Authorization", "Bearer " + testToken)
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isOk())
@@ -468,19 +468,19 @@ class AuthorizeControllerIntegrationTest extends BaseControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("POST /sse-token - Should return 401 without authentication")
+        @DisplayName("POST /tokens/sse - Should return 401 without authentication")
         void getSseToken_shouldReturn401WithoutAuth() throws Exception {
-            mockMvc.perform(post(BASE_URL + "/sse-token")
+            mockMvc.perform(post(BASE_URL + "/tokens/sse")
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isUnauthorized());
         }
 
         @Test
-        @DisplayName("POST /sse-token - Should return 401 for expired token")
+        @DisplayName("POST /tokens/sse - Should return 401 for expired token")
         void getSseToken_shouldReturn401ForExpiredToken() throws Exception {
             String expiredToken = JwtTestSupport.generateExpiredToken(testUserId);
 
-            mockMvc.perform(post(BASE_URL + "/sse-token")
+            mockMvc.perform(post(BASE_URL + "/tokens/sse")
                             .header("Authorization", "Bearer " + expiredToken)
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isUnauthorized());

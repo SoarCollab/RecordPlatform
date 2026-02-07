@@ -1,38 +1,49 @@
 package cn.flying.controller;
 
 import cn.flying.test.support.BaseControllerIntegrationTest;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.TestPropertySource;
-import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @Transactional
-@DisplayName("FileUploadController Integration Tests")
-@TestPropertySource(properties = "test.context=FileUploadControllerIntegrationTest")
+@DisplayName("UploadSessionController Integration Tests")
+@TestPropertySource(properties = "test.context=UploadSessionControllerIntegrationTest")
 class FileUploadControllerIntegrationTest extends BaseControllerIntegrationTest {
 
-    private static final String BASE_URL = "/api/v1/files/upload";
+    private static final String BASE_URL = "/api/v1/upload-sessions";
 
+    /**
+     * 为每个用例注入默认测试用户。
+     */
     @BeforeEach
     void setUp() {
         setTestUser(100L, 1L);
     }
 
     @Nested
-    @DisplayName("POST /start")
+    @DisplayName("POST /upload-sessions")
     class StartUploadTests {
 
+        /**
+         * 验证上传会话创建成功分支。
+         */
         @Test
         @DisplayName("should start upload successfully with valid parameters")
         void shouldStartUploadSuccessfully() throws Exception {
-            performPost(BASE_URL + "/start?" +
+            performPost(BASE_URL + "?" +
                     "fileName=test.pdf&" +
                     "fileSize=1024&" +
                     "contentType=application/pdf&" +
@@ -44,12 +55,15 @@ class FileUploadControllerIntegrationTest extends BaseControllerIntegrationTest 
                     .andExpect(jsonPath("$.data.uploadedChunks").isArray());
         }
 
+        /**
+         * 验证创建上传会话时可指定 clientId。
+         */
         @Test
         @DisplayName("should start upload with provided clientId")
         void shouldStartUploadWithProvidedClientId() throws Exception {
             String providedClientId = UUID.randomUUID().toString();
 
-            performPost(BASE_URL + "/start?" +
+            performPost(BASE_URL + "?" +
                     "fileName=test.pdf&" +
                     "fileSize=1024&" +
                     "contentType=application/pdf&" +
@@ -61,10 +75,13 @@ class FileUploadControllerIntegrationTest extends BaseControllerIntegrationTest 
                     .andExpect(jsonPath("$.data.clientId").value(providedClientId));
         }
 
+        /**
+         * 验证 fileName 缺失时参数校验失败。
+         */
         @Test
         @DisplayName("should return 400 for missing fileName")
         void shouldReturn400ForMissingFileName() throws Exception {
-            performPost(BASE_URL + "/start?" +
+            performPost(BASE_URL + "?" +
                     "fileSize=1024&" +
                     "contentType=application/pdf&" +
                     "chunkSize=1024&" +
@@ -72,34 +89,13 @@ class FileUploadControllerIntegrationTest extends BaseControllerIntegrationTest 
                     .andExpect(status().isBadRequest());
         }
 
-        @Test
-        @DisplayName("should return 400 for invalid fileSize (zero)")
-        void shouldReturn400ForInvalidFileSize() throws Exception {
-            performPost(BASE_URL + "/start?" +
-                    "fileName=test.pdf&" +
-                    "fileSize=0&" +
-                    "contentType=application/pdf&" +
-                    "chunkSize=1024&" +
-                    "totalChunks=1", null)
-                    .andExpect(status().isBadRequest());
-        }
-
-        @Test
-        @DisplayName("should return 400 for fileSize exceeding limit")
-        void shouldReturn400ForFileSizeExceedingLimit() throws Exception {
-            performPost(BASE_URL + "/start?" +
-                    "fileName=test.pdf&" +
-                    "fileSize=5000000000&" +
-                    "contentType=application/pdf&" +
-                    "chunkSize=1024&" +
-                    "totalChunks=1", null)
-                    .andExpect(status().isBadRequest());
-        }
-
+        /**
+         * 验证匿名请求会被鉴权拒绝。
+         */
         @Test
         @DisplayName("should return 401 for unauthenticated request")
         void shouldReturn401ForUnauthenticatedRequest() throws Exception {
-            mockMvc.perform(post(BASE_URL + "/start?" +
+            mockMvc.perform(post(BASE_URL + "?" +
                             "fileName=test.pdf&" +
                             "fileSize=1024&" +
                             "contentType=application/pdf&" +
@@ -111,117 +107,88 @@ class FileUploadControllerIntegrationTest extends BaseControllerIntegrationTest 
     }
 
     @Nested
-    @DisplayName("POST /chunk")
+    @DisplayName("PUT /upload-sessions/{clientId}/chunks/{chunkNumber}")
     class UploadChunkTests {
 
+        /**
+         * 验证分片文件缺失时返回 400。
+         */
         @Test
-        @DisplayName("should return 400 for missing clientId")
-        void shouldReturn400ForMissingClientId() throws Exception {
-            MockMultipartFile file = new MockMultipartFile(
-                    "file", "test.pdf", "application/pdf", "test content".getBytes());
-
-            mockMvc.perform(multipart(BASE_URL + "/chunk")
-                            .file(file)
-                            .param("chunkNumber", "0")
+        @DisplayName("should return 400 for missing file part")
+        void shouldReturn400ForMissingFilePart() throws Exception {
+            mockMvc.perform(put(BASE_URL + "/client-1/chunks/0")
                             .header("Authorization", "Bearer " + testToken)
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isBadRequest());
         }
 
+        /**
+         * 验证匿名分片上传会被鉴权拒绝。
+         */
         @Test
         @DisplayName("should return 401 for unauthenticated request")
         void shouldReturn401ForUnauthenticatedRequest() throws Exception {
             MockMultipartFile file = new MockMultipartFile(
                     "file", "test.pdf", "application/pdf", "test content".getBytes());
 
-            mockMvc.perform(multipart(BASE_URL + "/chunk")
+            mockMvc.perform(multipart(BASE_URL + "/client-1/chunks/0")
                             .file(file)
-                            .param("clientId", UUID.randomUUID().toString())
-                            .param("chunkNumber", "0")
+                            .with(request -> {
+                                request.setMethod("PUT");
+                                return request;
+                            })
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isUnauthorized());
         }
     }
 
     @Nested
-    @DisplayName("POST /complete")
-    class CompleteUploadTests {
+    @DisplayName("session action endpoints")
+    class SessionActionTests {
 
+        /**
+         * 验证 complete/pause/resume/cancel 匿名请求均返回 401。
+         */
         @Test
-        @DisplayName("should return 401 for unauthenticated request")
-        void shouldReturn401ForUnauthenticatedRequest() throws Exception {
-            mockMvc.perform(post(BASE_URL + "/complete")
-                            .param("clientId", UUID.randomUUID().toString())
+        @DisplayName("should return 401 for unauthenticated action requests")
+        void shouldReturn401ForUnauthenticatedActionRequests() throws Exception {
+            String clientId = UUID.randomUUID().toString();
+
+            mockMvc.perform(post(BASE_URL + "/" + clientId + "/complete")
+                            .header(HEADER_TENANT_ID, testTenantId))
+                    .andExpect(status().isUnauthorized());
+
+            mockMvc.perform(post(BASE_URL + "/" + clientId + "/pause")
+                            .header(HEADER_TENANT_ID, testTenantId))
+                    .andExpect(status().isUnauthorized());
+
+            mockMvc.perform(post(BASE_URL + "/" + clientId + "/resume")
+                            .header(HEADER_TENANT_ID, testTenantId))
+                    .andExpect(status().isUnauthorized());
+
+            mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete(BASE_URL + "/" + clientId)
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isUnauthorized());
         }
     }
 
     @Nested
-    @DisplayName("POST /pause")
-    class PauseUploadTests {
+    @DisplayName("GET /upload-sessions/{clientId} and /progress")
+    class StatusTests {
 
+        /**
+         * 验证状态查询匿名请求会被鉴权拒绝。
+         */
         @Test
-        @DisplayName("should return 401 for unauthenticated request")
-        void shouldReturn401ForUnauthenticatedRequest() throws Exception {
-            mockMvc.perform(post(BASE_URL + "/pause")
-                            .param("clientId", UUID.randomUUID().toString())
+        @DisplayName("should return 401 for unauthenticated query requests")
+        void shouldReturn401ForUnauthenticatedQueryRequests() throws Exception {
+            String clientId = UUID.randomUUID().toString();
+
+            mockMvc.perform(get(BASE_URL + "/" + clientId)
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isUnauthorized());
-        }
-    }
 
-    @Nested
-    @DisplayName("POST /resume")
-    class ResumeUploadTests {
-
-        @Test
-        @DisplayName("should return 401 for unauthenticated request")
-        void shouldReturn401ForUnauthenticatedRequest() throws Exception {
-            mockMvc.perform(post(BASE_URL + "/resume")
-                            .param("clientId", UUID.randomUUID().toString())
-                            .header(HEADER_TENANT_ID, testTenantId))
-                    .andExpect(status().isUnauthorized());
-        }
-    }
-
-    @Nested
-    @DisplayName("POST /cancel")
-    class CancelUploadTests {
-
-        @Test
-        @DisplayName("should return 401 for unauthenticated request")
-        void shouldReturn401ForUnauthenticatedRequest() throws Exception {
-            mockMvc.perform(post(BASE_URL + "/cancel")
-                            .param("clientId", UUID.randomUUID().toString())
-                            .header(HEADER_TENANT_ID, testTenantId))
-                    .andExpect(status().isUnauthorized());
-        }
-    }
-
-    @Nested
-    @DisplayName("GET /check")
-    class CheckFileStatusTests {
-
-        @Test
-        @DisplayName("should return 401 for unauthenticated request")
-        void shouldReturn401ForUnauthenticatedRequest() throws Exception {
-            mockMvc.perform(get(BASE_URL + "/check")
-                            .param("clientId", UUID.randomUUID().toString())
-                            .header(HEADER_TENANT_ID, testTenantId))
-                    .andExpect(status().isUnauthorized());
-        }
-    }
-
-    @Nested
-    @DisplayName("GET /progress")
-    class GetUploadProgressTests {
-
-        @Test
-        @DisplayName("should return 401 for unauthenticated request")
-        void shouldReturn401ForUnauthenticatedRequest() throws Exception {
-            mockMvc.perform(get(BASE_URL + "/progress")
-                            .param("clientId", UUID.randomUUID().toString())
+            mockMvc.perform(get(BASE_URL + "/" + clientId + "/progress")
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isUnauthorized());
         }

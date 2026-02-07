@@ -70,13 +70,17 @@ describe("friends endpoints", () => {
       "/friends/requests/sent",
       { params: { pageNum: 1 } },
     );
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(
-      2,
-      "/friends/requests/req-1/accept",
+    expect(clientMocks.api.put).toHaveBeenNthCalledWith(
+      1,
+      "/friends/requests/req-1/status",
+      null,
+      { params: { status: "accept" } },
     );
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(
-      3,
-      "/friends/requests/req-1/reject",
+    expect(clientMocks.api.put).toHaveBeenNthCalledWith(
+      2,
+      "/friends/requests/req-1/status",
+      null,
+      { params: { status: "reject" } },
     );
     expect(clientMocks.api.delete).toHaveBeenNthCalledWith(
       1,
@@ -91,7 +95,8 @@ describe("friends endpoints", () => {
     });
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(5, "/friends/all");
     expect(clientMocks.api.delete).toHaveBeenNthCalledWith(2, "/friends/friend-1");
-    expect(clientMocks.api.put).toHaveBeenCalledWith(
+    expect(clientMocks.api.put).toHaveBeenNthCalledWith(
+      3,
       "/friends/friend-1/remark",
       { remark: "备注" },
     );
@@ -99,7 +104,7 @@ describe("friends endpoints", () => {
       params: { keyword: "alice" },
     });
     expect(clientMocks.api.post).toHaveBeenNthCalledWith(
-      4,
+      2,
       "/friend-shares",
       { friendId: "f1", fileHashes: ["file-1"] },
     );
@@ -112,9 +117,9 @@ describe("friends endpoints", () => {
       params: { pageNum: 1 },
     });
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(9, "/friend-shares/share-1");
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(
-      5,
-      "/friend-shares/share-1/read",
+    expect(clientMocks.api.put).toHaveBeenNthCalledWith(
+      4,
+      "/friend-shares/share-1/read-status",
     );
     expect(clientMocks.api.delete).toHaveBeenNthCalledWith(
       3,

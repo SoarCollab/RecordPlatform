@@ -11,6 +11,16 @@ export interface Result<T> {
 }
 
 /**
+ * 统一错误负载（后端 ErrorPayload）
+ */
+export interface ErrorPayload {
+  traceId?: string;
+  detail?: unknown;
+  retryable?: boolean;
+  retryAfterSeconds?: number;
+}
+
+/**
  * 分页响应格式
  * @see MyBatis Plus IPage
  */

@@ -19,17 +19,23 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.Set;
 
 /**
- * 权限管理控制器
- * 提供权限定义和角色权限映射的管理接口
+ * 权限管理控制器。
  */
 @RestController
 @RequestMapping("/api/v1/system/permissions")
@@ -46,8 +52,11 @@ public class PermissionController {
     @Resource
     private PermissionService permissionService;
 
-    // ==================== 权限定义管理 ====================
-
+    /**
+     * 获取权限树。
+     *
+     * @return 权限列表
+     */
     @GetMapping
     @Operation(summary = "获取权限树")
     public Result<List<SysPermission>> getPermissionTree() {
@@ -59,6 +68,14 @@ public class PermissionController {
         return Result.success(permissionMapper.selectList(wrapper));
     }
 
+    /**
+     * 获取权限列表（分页）。
+     *
+     * @param module   模块名（可选）
+     * @param pageNum  页码
+     * @param pageSize 每页数量
+     * @return 权限分页
+     */
     @GetMapping("/list")
     @Operation(summary = "获取权限列表（分页）")
     @OperationLog(module = "权限管理", operationType = "查询", description = "获取权限列表")
@@ -66,7 +83,6 @@ public class PermissionController {
             @Parameter(description = "模块名") @RequestParam(required = false) String module,
             @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer pageNum,
             @Parameter(description = "每页数量") @RequestParam(defaultValue = "20") Integer pageSize) {
-
         Long tenantId = SecurityUtils.getTenantId();
         Page<SysPermission> page = new Page<>(pageNum, pageSize);
 
@@ -81,6 +97,11 @@ public class PermissionController {
         return Result.success(page);
     }
 
+    /**
+     * 获取所有权限模块。
+     *
+     * @return 模块名称列表
+     */
     @GetMapping("/modules")
     @Operation(summary = "获取所有模块名列表")
     public Result<List<String>> listModules() {
@@ -98,6 +119,12 @@ public class PermissionController {
         return Result.success(modules);
     }
 
+    /**
+     * 创建权限定义。
+     *
+     * @param vo 权限创建参数
+     * @return 权限实体
+     */
     @PostMapping
     @Operation(summary = "创建权限定义")
     @OperationLog(module = "权限管理", operationType = "新增", description = "创建权限定义")
@@ -114,6 +141,13 @@ public class PermissionController {
         return Result.success(permission);
     }
 
+    /**
+     * 更新权限定义。
+     *
+     * @param id 权限外部 ID
+     * @param vo 更新参数
+     * @return 权限实体
+     */
     @PutMapping("/{id}")
     @Operation(summary = "更新权限定义")
     @OperationLog(module = "权限管理", operationType = "修改", description = "更新权限定义")
@@ -138,13 +172,16 @@ public class PermissionController {
         }
 
         permissionMapper.updateById(permission);
-
-        // 清除缓存
         permissionService.evictAllCache(SecurityUtils.getTenantId());
-
         return Result.success(permission);
     }
 
+    /**
+     * 删除权限定义。
+     *
+     * @param id 权限外部 ID
+     * @return 操作结果
+     */
     @DeleteMapping("/{id}")
     @Operation(summary = "删除权限定义")
     @OperationLog(module = "权限管理", operationType = "删除", description = "删除权限定义")
@@ -153,22 +190,22 @@ public class PermissionController {
 
         Long permissionId = IdUtils.fromExternalId(id);
 
-        // 先删除关联的角色权限映射
         LambdaQueryWrapper<SysRolePermission> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SysRolePermission::getPermissionId, permissionId);
         rolePermissionMapper.delete(wrapper);
 
-        // 删除权限定义
         permissionMapper.deleteById(permissionId);
-
-        // 清除缓存
         permissionService.evictAllCache(SecurityUtils.getTenantId());
 
         return Result.success("删除成功");
     }
 
-    // ==================== 角色权限映射管理 ====================
-
+    /**
+     * 获取角色权限码列表。
+     *
+     * @param role 角色名
+     * @return 权限码集合
+     */
     @GetMapping("/roles/{role}")
     @Operation(summary = "获取角色的权限列表")
     public Result<Set<String>> getRolePermissions(
@@ -179,71 +216,9 @@ public class PermissionController {
         return Result.success(permissions);
     }
 
-    @PostMapping("/roles/{role}/grant")
-    @Operation(summary = "为角色授予权限")
-    @OperationLog(module = "权限管理", operationType = "授权", description = "为角色授予权限")
-    public Result<String> grantPermission(
-            @Parameter(description = "角色名") @PathVariable String role,
-            @Valid @RequestBody GrantPermissionVO vo) {
-
-        Long tenantId = SecurityUtils.getTenantId();
-
-        // 查找权限
-        SysPermission permission = permissionMapper.selectByCode(vo.getPermissionCode(), tenantId);
-        if (permission == null) {
-            return Result.error("权限码不存在: " + vo.getPermissionCode());
-        }
-
-        // 检查是否已存在
-        int count = rolePermissionMapper.countByRoleAndPermission(role, vo.getPermissionCode(), tenantId);
-        if (count > 0) {
-            return Result.error("该角色已拥有此权限");
-        }
-
-        // 创建映射
-        SysRolePermission mapping = new SysRolePermission()
-                .setRole(role)
-                .setPermissionId(permission.getId());
-
-        rolePermissionMapper.insert(mapping);
-
-        // 清除缓存
-        permissionService.evictCache(role, tenantId);
-
-        return Result.success("授权成功");
-    }
-
-    @DeleteMapping("/roles/{role}/revoke")
-    @Operation(summary = "撤销角色的权限")
-    @OperationLog(module = "权限管理", operationType = "撤销", description = "撤销角色权限")
-    public Result<String> revokePermission(
-            @Parameter(description = "角色名") @PathVariable String role,
-            @Parameter(description = "权限码") @RequestParam String permissionCode) {
-
-        Long tenantId = SecurityUtils.getTenantId();
-
-        // 查找权限
-        SysPermission permission = permissionMapper.selectByCode(permissionCode, tenantId);
-        if (permission == null) {
-            return Result.error("权限码不存在: " + permissionCode);
-        }
-
-        // 删除映射
-        LambdaQueryWrapper<SysRolePermission> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(SysRolePermission::getRole, role)
-                .eq(SysRolePermission::getPermissionId, permission.getId())
-                .eq(SysRolePermission::getTenantId, tenantId);
-
-        rolePermissionMapper.delete(wrapper);
-
-        // 清除缓存
-        permissionService.evictCache(role, tenantId);
-
-        return Result.success("撤销成功");
-    }
-
-    // ==================== VO 定义 ====================
-
+    /**
+     * 权限创建请求体。
+     */
     @Data
     public static class PermissionCreateVO {
         @NotBlank(message = "权限码不能为空")
@@ -261,16 +236,13 @@ public class PermissionController {
         private String description;
     }
 
+    /**
+     * 权限更新请求体。
+     */
     @Data
     public static class PermissionUpdateVO {
         private String name;
         private String description;
         private Integer status;
-    }
-
-    @Data
-    public static class GrantPermissionVO {
-        @NotBlank(message = "权限码不能为空")
-        private String permissionCode;
     }
 }

@@ -30,20 +30,20 @@ Authorization: Bearer <token>
 Based on `SecurityConfiguration`:
 
 - `POST /api/v1/auth/login`
-- `GET /api/v1/auth/ask-code`
+- `POST /api/v1/auth/verification-codes`
 - `POST /api/v1/auth/register`
-- `POST /api/v1/auth/reset-confirm`
-- `POST /api/v1/auth/reset-password`
-- `GET /api/v1/files/getSharingFiles`
-- `GET /api/v1/files/public/download`
-- `GET /api/v1/files/public/decryptInfo`
+- `POST /api/v1/auth/password-resets/confirm`
+- `PUT /api/v1/auth/password-resets`
+- `GET /api/v1/shares/{shareCode}/files`
+- `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`
+- `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`
 - `GET /api/v1/images/download/images/**`
 - `GET /api/v1/share/**`
 - `GET /api/v1/sse/connect` (still requires short-lived token)
 
 ### 3) SSE dual-token flow
 
-- `POST /api/v1/auth/sse-token`: requires standard JWT
+- `POST /api/v1/auth/tokens/sse`: requires standard JWT
 - `GET /api/v1/sse/connect?token=...`: public route, but short-lived one-time token is mandatory
 
 ## Endpoints by Module
@@ -52,12 +52,12 @@ Based on `SecurityConfiguration`:
 
 | Method | Endpoint | Description |
 |------|------|------|
-| GET | `/api/v1/auth/ask-code` | Request email verification code |
+| POST | `/api/v1/auth/verification-codes` | Request email verification code |
 | POST | `/api/v1/auth/register` | Register user |
-| POST | `/api/v1/auth/reset-confirm` | Confirm password reset |
-| POST | `/api/v1/auth/reset-password` | Execute password reset |
-| POST | `/api/v1/auth/refresh` | Refresh access token |
-| POST | `/api/v1/auth/sse-token` | Issue short-lived SSE token (JWT required) |
+| POST | `/api/v1/auth/password-resets/confirm` | Confirm password reset |
+| PUT | `/api/v1/auth/password-resets` | Execute password reset |
+| POST | `/api/v1/auth/tokens/refresh` | Refresh access token |
+| POST | `/api/v1/auth/tokens/sse` | Issue short-lived SSE token (JWT required) |
 
 > Login is handled by Spring Security: `POST /api/v1/auth/login`
 
@@ -67,50 +67,50 @@ Based on `SecurityConfiguration`:
 |------|------|------|
 | GET | `/api/v1/users/info` | Get user profile |
 | PUT | `/api/v1/users/info` | Update user profile |
-| POST | `/api/v1/users/modify-email` | Change email |
-| POST | `/api/v1/users/change-password` | Change password |
+| PUT | `/api/v1/users/email` | Change email |
+| PUT | `/api/v1/users/password` | Change password |
 
-### File Upload (`/api/v1/files/upload`)
+### File Upload (`/api/v1/upload-sessions`)
 
 | Method | Endpoint | Description |
 |------|------|------|
-| POST | `/api/v1/files/upload/start` | Start chunked upload |
-| POST | `/api/v1/files/upload/chunk` | Upload chunk |
-| POST | `/api/v1/files/upload/complete` | Complete upload |
-| POST | `/api/v1/files/upload/pause` | Pause upload |
-| POST | `/api/v1/files/upload/resume` | Resume upload |
-| POST | `/api/v1/files/upload/cancel` | Cancel upload |
-| GET | `/api/v1/files/upload/check` | Check upload status |
-| GET | `/api/v1/files/upload/progress` | Query upload progress |
+| POST | `/api/v1/upload-sessions` | Start chunked upload |
+| PUT | `/api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}` | Upload chunk |
+| POST | `/api/v1/upload-sessions/{clientId}/complete` | Complete upload |
+| POST | `/api/v1/upload-sessions/{clientId}/pause` | Pause upload |
+| POST | `/api/v1/upload-sessions/{clientId}/resume` | Resume upload |
+| DELETE | `/api/v1/upload-sessions/{clientId}` | Cancel upload |
+| GET | `/api/v1/upload-sessions/{clientId}` | Check upload status |
+| GET | `/api/v1/upload-sessions/{clientId}/progress` | Query upload progress |
 
 ### Files and Sharing (`/api/v1/files`)
 
 | Method | Endpoint | Description |
 |------|------|------|
 | GET | `/api/v1/files/{id}` | File detail by ID |
-| GET | `/api/v1/files/byHash` | File detail by hash (`fileHash/hash`) |
-| GET | `/api/v1/files/list` | User file list |
-| GET | `/api/v1/files/page` | User file page |
+| GET | `/api/v1/files/hash/{fileHash}` | File detail by hash |
+| GET | `/api/v1/files` | User file list |
+| GET | `/api/v1/files` | User file page |
 | GET | `/api/v1/files/stats` | User file stats |
-| GET | `/api/v1/files/address` | Fetch download URLs |
-| GET | `/api/v1/files/getTransaction` | Query blockchain transaction |
-| GET | `/api/v1/files/download` | Download file (authenticated) |
-| GET | `/api/v1/files/decryptInfo` | Decrypt info (authenticated) |
-| GET | `/api/v1/files/getSharingFiles` | Public share file list (public) |
+| GET | `/api/v1/files/hash/{fileHash}/addresses` | Fetch download URLs |
+| GET | `/api/v1/transactions/{transactionHash}` | Query blockchain transaction |
+| GET | `/api/v1/files/hash/{fileHash}/chunks` | Download file (authenticated) |
+| GET | `/api/v1/files/hash/{fileHash}/decrypt-info` | Decrypt info (authenticated) |
+| GET | `/api/v1/shares/{shareCode}/files` | Public share file list (public) |
 | GET | `/api/v1/files/shares` | My share list |
 | DELETE | `/api/v1/files/delete` | Batch delete (hash/id) |
 | DELETE | `/api/v1/files/deleteById` | Delete by file ID |
-| POST | `/api/v1/files/share` | Create share |
-| PUT | `/api/v1/files/share` | Update share |
+| POST | `/api/v1/shares` | Create share |
+| PATCH | `/api/v1/shares/{shareCode}` | Update share |
 | DELETE | `/api/v1/files/share/{shareCode}` | Cancel share |
-| POST | `/api/v1/files/saveShareFile` | Save shared files to my space |
-| GET | `/api/v1/files/share/download` | Shared download (authenticated) |
-| GET | `/api/v1/files/share/decryptInfo` | Shared decrypt info (authenticated) |
+| POST | `/api/v1/shares/{shareCode}/files/save` | Save shared files to my space |
+| GET | `/api/v1/shares/{shareCode}/files/{fileHash}/chunks` | Shared download (authenticated) |
+| GET | `/api/v1/shares/{shareCode}/files/{fileHash}/decrypt-info` | Shared decrypt info (authenticated) |
 | GET | `/api/v1/files/share/{shareCode}/access-logs` | Share access logs (admin) |
 | GET | `/api/v1/files/share/{shareCode}/stats` | Share access stats (admin) |
 | GET | `/api/v1/files/{id}/provenance` | File provenance graph (admin) |
-| GET | `/api/v1/files/public/download` | Public shared download (public) |
-| GET | `/api/v1/files/public/decryptInfo` | Public decrypt info (public) |
+| GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/chunks` | Public shared download (public) |
+| GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info` | Public decrypt info (public) |
 
 ### Admin File Audit (`/api/v1/admin/files`)
 
@@ -146,8 +146,8 @@ Based on `SecurityConfiguration`:
 | POST | `/api/v1/friends/requests` | Send friend request |
 | GET | `/api/v1/friends/requests/received` | Received requests |
 | GET | `/api/v1/friends/requests/sent` | Sent requests |
-| POST | `/api/v1/friends/requests/{requestId}/accept` | Accept request |
-| POST | `/api/v1/friends/requests/{requestId}/reject` | Reject request |
+| PUT | `/api/v1/friends/requests/{requestId}/status` | Accept request |
+| PUT | `/api/v1/friends/requests/{requestId}/status` | Reject request |
 | DELETE | `/api/v1/friends/requests/{requestId}` | Cancel request |
 | GET | `/api/v1/friends/requests/pending-count` | Pending request count |
 | GET | `/api/v1/friends` | Friend list (paged) |
@@ -164,7 +164,7 @@ Based on `SecurityConfiguration`:
 | GET | `/api/v1/friend-shares/received` | Received friend shares |
 | GET | `/api/v1/friend-shares/sent` | Sent friend shares |
 | GET | `/api/v1/friend-shares/{shareId}` | Share detail |
-| POST | `/api/v1/friend-shares/{shareId}/read` | Mark as read |
+| PUT | `/api/v1/friend-shares/{shareId}/read-status` | Mark as read |
 | DELETE | `/api/v1/friend-shares/{shareId}` | Cancel share |
 | GET | `/api/v1/friend-shares/unread-count` | Unread count |
 
@@ -175,17 +175,14 @@ Based on `SecurityConfiguration`:
 | GET | `/api/v1/conversations` | Conversation list |
 | GET | `/api/v1/conversations/{id}` | Conversation detail + messages |
 | GET | `/api/v1/conversations/unread-count` | Unread conversation count |
-| POST | `/api/v1/conversations/{id}/read` | Mark conversation as read |
+| PUT | `/api/v1/conversations/{id}/read-status` | Mark conversation as read |
 | DELETE | `/api/v1/conversations/{id}` | Delete conversation |
-
-> `GET /api/v1/conversations/read` is a defensive fallback endpoint that intentionally returns 404.
 
 ### Messages (`/api/v1/messages`)
 
 | Method | Endpoint | Description |
 |------|------|------|
 | POST | `/api/v1/messages` | Send private message |
-| POST | `/api/v1/messages/to/{receiverId}` | Send by receiver ID |
 | GET | `/api/v1/messages/unread-count` | Total unread messages |
 
 ### Announcements (`/api/v1/announcements`)
@@ -196,9 +193,9 @@ Based on `SecurityConfiguration`:
 | GET | `/api/v1/announcements` | Announcement list |
 | GET | `/api/v1/announcements/{id}` | Announcement detail |
 | GET | `/api/v1/announcements/unread-count` | Unread announcement count |
-| POST | `/api/v1/announcements/{id}/read` | Mark one announcement as read |
-| POST | `/api/v1/announcements/read-all` | Mark all announcements as read |
-| GET | `/api/v1/announcements/admin/list` | Admin announcement list |
+| PUT | `/api/v1/announcements/{id}/read-status` | Mark one announcement as read |
+| PUT | `/api/v1/announcements/read-status` | Mark all announcements as read |
+| GET | `/api/v1/admin/announcements` | Admin announcement list |
 | POST | `/api/v1/announcements` | Publish announcement (admin) |
 | PUT | `/api/v1/announcements/{id}` | Update announcement (admin) |
 | DELETE | `/api/v1/announcements/{id}` | Delete announcement (admin) |
@@ -216,10 +213,10 @@ Based on `SecurityConfiguration`:
 | POST | `/api/v1/tickets/{id}/confirm` | Confirm completion |
 | GET | `/api/v1/tickets/pending-count` | Pending ticket count (legacy) |
 | GET | `/api/v1/tickets/unread-count` | Unread ticket count |
-| GET | `/api/v1/tickets/admin/list` | Admin ticket list |
-| PUT | `/api/v1/tickets/admin/{id}/assign` | Assign ticket (admin) |
-| PUT | `/api/v1/tickets/admin/{id}/status` | Update status (admin) |
-| GET | `/api/v1/tickets/admin/pending-count` | Admin pending ticket count |
+| GET | `/api/v1/admin/tickets` | Admin ticket list |
+| PUT | `/api/v1/admin/tickets/{id}/assignee` | Assign ticket (admin) |
+| PUT | `/api/v1/admin/tickets/{id}/status` | Update status (admin) |
+| GET | `/api/v1/admin/tickets/pending-count` | Admin pending ticket count |
 
 ### Permissions (`/api/v1/system/permissions`, admin)
 
@@ -232,8 +229,8 @@ Based on `SecurityConfiguration`:
 | PUT | `/api/v1/system/permissions/{id}` | Update permission |
 | DELETE | `/api/v1/system/permissions/{id}` | Delete permission |
 | GET | `/api/v1/system/permissions/roles/{role}` | Role permissions |
-| POST | `/api/v1/system/permissions/roles/{role}/grant` | Grant permission |
-| DELETE | `/api/v1/system/permissions/roles/{role}/revoke` | Revoke permission |
+| POST | `/api/v1/system/roles/{role}/permissions` | Grant permission |
+| DELETE | `/api/v1/system/roles/{role}/permissions/{permissionCode}` | Revoke permission |
 
 ### System Monitoring (`/api/v1/system`)
 
@@ -250,8 +247,8 @@ Based on `SecurityConfiguration`:
 | Method | Endpoint | Description |
 |------|------|------|
 | GET | `/api/v1/system/audit/overview` | Audit overview |
-| GET | `/api/v1/system/audit/logs/page` | Audit log page (GET) |
-| POST | `/api/v1/system/audit/logs/page` | Audit log page (POST) |
+| GET | `/api/v1/system/audit/logs` | Audit log page (GET) |
+| POST | `/api/v1/system/audit/logs/query` | Audit log page (POST) |
 | GET | `/api/v1/system/audit/logs/{id}` | Audit log detail |
 | POST | `/api/v1/system/audit/logs/export` | Export audit logs |
 | GET | `/api/v1/system/audit/high-frequency` | High-frequency operations |
@@ -260,8 +257,8 @@ Based on `SecurityConfiguration`:
 | GET | `/api/v1/system/audit/time-distribution` | Time distribution |
 | GET | `/api/v1/system/audit/configs` | Audit configs |
 | PUT | `/api/v1/system/audit/configs` | Update audit configs |
-| GET | `/api/v1/system/audit/check-anomalies` | Check anomalies |
-| POST | `/api/v1/system/audit/backup-logs` | Backup logs |
+| POST | `/api/v1/system/audit/anomalies/check` | Check anomalies |
+| POST | `/api/v1/system/audit/logs/backups` | Backup logs |
 
 ### SSE (`/api/v1/sse`)
 
@@ -274,7 +271,7 @@ Based on `SecurityConfiguration`:
 Recommended flow:
 
 ```text
-1) POST /api/v1/auth/sse-token   (Authorization: Bearer <jwt>)
+1) POST /api/v1/auth/tokens/sse   (Authorization: Bearer <jwt>)
 2) GET  /api/v1/sse/connect?token=<sseToken>&connectionId=<optional>
 ```
 

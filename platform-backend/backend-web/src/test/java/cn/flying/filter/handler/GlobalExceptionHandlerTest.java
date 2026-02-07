@@ -1,5 +1,6 @@
 package cn.flying.filter.handler;
 
+import cn.flying.common.constant.ErrorPayload;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
@@ -34,10 +35,8 @@ class GlobalExceptionHandlerTest {
         assertEquals(ResultEnum.FILE_UPLOAD_ERROR.getCode(), result.getCode());
         assertEquals("上传失败", result.getMessage());
 
-        assertInstanceOf(Map.class, result.getData());
-        @SuppressWarnings("unchecked")
-        Map<String, Object> payload = (Map<String, Object>) result.getData();
-        assertEquals(data, payload.get("detail"));
+        assertInstanceOf(ErrorPayload.class, result.getData());
+        ErrorPayload payload = (ErrorPayload) result.getData();
+        assertEquals(data, payload.getDetail());
     }
 }
-

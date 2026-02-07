@@ -76,6 +76,22 @@ class TenantFilterTest {
     }
 
     /**
+     * REST 公开分享文件列表路径无需租户头，应放行。
+     */
+    @Test
+    @DisplayName("should allow public share files endpoint without tenant header")
+    void shouldAllowPublicShareFilesEndpointWithoutTenantHeader() throws ServletException, IOException {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/shares/share123/files");
+        request.setServletPath("/api/v1/shares/share123/files");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilterInternal(request, response, filterChain);
+
+        verify(filterChain).doFilter(request, response);
+        assertNull(TenantContext.getTenantId());
+    }
+
+    /**
      * 白名单路径不强制要求租户头，但若主动携带租户头，应写入 TenantContext 与 request attribute，
      * 以便后续 MyBatis-Plus 租户拦截器能正确注入 tenant_id 条件。
      */
@@ -107,8 +123,8 @@ class TenantFilterTest {
     @Test
     @DisplayName("should reject missing tenant header for protected path")
     void shouldRejectMissingTenantHeaderForProtectedPath() throws ServletException, IOException {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/files/list");
-        request.setServletPath("/api/v1/files/list");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/files");
+        request.setServletPath("/api/v1/files");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         TenantContext.setTenantId(999L);
@@ -122,13 +138,30 @@ class TenantFilterTest {
     }
 
     /**
+     * /api/v1/shares 下除公开文件列表外的路径必须携带租户头，防止绕过租户校验。
+     */
+    @Test
+    @DisplayName("should reject missing tenant header for protected shares path")
+    void shouldRejectMissingTenantHeaderForProtectedSharesPath() throws ServletException, IOException {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/shares");
+        request.setServletPath("/api/v1/shares");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilterInternal(request, response, filterChain);
+
+        verify(filterChain, never()).doFilter(request, response);
+        assertEquals(400, response.getStatus());
+        assertTrue(response.getContentAsString().contains(String.valueOf(ResultEnum.PARAM_IS_INVALID.getCode())));
+    }
+
+    /**
      * 租户头不是数字时应返回 400，并且不进入后续过滤器链。
      */
     @Test
     @DisplayName("should reject invalid tenant header value")
     void shouldRejectInvalidTenantHeaderValue() throws ServletException, IOException {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/files/list");
-        request.setServletPath("/api/v1/files/list");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/files");
+        request.setServletPath("/api/v1/files");
         request.addHeader("X-Tenant-ID", "abc");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
@@ -149,8 +182,8 @@ class TenantFilterTest {
     @Test
     @DisplayName("should set tenant context and request attribute when tenant header present")
     void shouldSetTenantContextAndRequestAttributeWhenTenantHeaderPresent() throws ServletException, IOException {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/files/list");
-        request.setServletPath("/api/v1/files/list");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/files");
+        request.setServletPath("/api/v1/files");
         request.addHeader("X-Tenant-ID", "12");
         MockHttpServletResponse response = new MockHttpServletResponse();
 

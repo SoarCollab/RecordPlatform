@@ -1,9 +1,11 @@
 package cn.flying.filter;
 
+import cn.flying.common.constant.ErrorPayload;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
+import cn.flying.common.util.ErrorPayloadFactory;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,8 +20,6 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -49,10 +49,7 @@ public class TenantFilter extends OncePerRequestFilter {
             "/favicon.ico",
             "/error",
             // 公开分享相关端点
-            "/api/v1/share",
-            "/api/v1/files/getSharingFiles",
-            "/api/v1/files/public/download",
-            "/api/v1/files/public/decryptInfo",
+            "/api/v1/public/shares",
             // 图片下载端点（img 标签无法携带自定义 header）
             "/api/v1/images/download"
     );
@@ -146,6 +143,15 @@ public class TenantFilter extends OncePerRequestFilter {
      * 检查路径是否在白名单中
      */
     private boolean isWhitelisted(String uri) {
+        if (uri == null) {
+            return false;
+        }
+        if (uri.startsWith("/api/v1/share/")) {
+            return true;
+        }
+        if (uri.matches("^/api/v1/shares/[^/]+/files/?$")) {
+            return true;
+        }
         return WHITELIST_PATHS.stream().anyMatch(uri::startsWith);
     }
 
@@ -156,12 +162,8 @@ public class TenantFilter extends OncePerRequestFilter {
         response.setContentType("application/json;charset=utf-8");
         response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
 
-        Map<String, Object> payload = new LinkedHashMap<>();
         String traceId = MDC.get(Const.TRACE_ID);
-        if (traceId != null && !traceId.isEmpty()) {
-            payload.put("traceId", traceId);
-        }
-        payload.put("detail", message);
+        ErrorPayload payload = ErrorPayloadFactory.of(traceId, message);
 
         PrintWriter writer = response.getWriter();
         writer.write(Result.error(resultEnum, payload).toJson());

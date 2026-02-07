@@ -49,6 +49,7 @@ describe("messages endpoints", () => {
     vi.clearAllMocks();
     clientMocks.api.get.mockResolvedValue({});
     clientMocks.api.post.mockResolvedValue({});
+    clientMocks.api.put.mockResolvedValue({});
     clientMocks.api.delete.mockResolvedValue(undefined);
   });
 
@@ -65,13 +66,16 @@ describe("messages endpoints", () => {
       params: { pageNum: 1, pageSize: 5 },
     });
     expect(clientMocks.api.delete).toHaveBeenCalledWith("/conversations/c3");
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(1, "/conversations/c4/read");
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(2, "/messages", {
+    expect(clientMocks.api.put).toHaveBeenNthCalledWith(
+      1,
+      "/conversations/c4/read-status",
+    );
+    expect(clientMocks.api.post).toHaveBeenNthCalledWith(1, "/messages", {
       receiverId: "u2",
       content: "hello",
       contentType: "text",
     });
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(3, "/messages", {
+    expect(clientMocks.api.post).toHaveBeenNthCalledWith(2, "/messages", {
       receiverId: "u2",
       content: "rich",
       contentType: "markdown",
@@ -92,10 +96,13 @@ describe("messages endpoints", () => {
       9,
       "/announcements/unread-count",
     );
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(4, "/announcements/a2/read");
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(
-      5,
-      "/announcements/read-all",
+    expect(clientMocks.api.put).toHaveBeenNthCalledWith(
+      2,
+      "/announcements/a2/read-status",
+    );
+    expect(clientMocks.api.put).toHaveBeenNthCalledWith(
+      3,
+      "/announcements/read-status",
     );
   });
 });

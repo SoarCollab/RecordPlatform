@@ -67,24 +67,24 @@ describe("tickets endpoints", () => {
     expect(clientMocks.api.post).toHaveBeenNthCalledWith(4, "/tickets/t1/confirm");
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(3, "/tickets/pending-count");
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(4, "/tickets/unread-count");
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(5, "/tickets/admin/list", {
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(5, "/admin/tickets", {
       params: { pageNum: 1, pageSize: 10 },
     });
     expect(clientMocks.api.put).toHaveBeenNthCalledWith(
       2,
-      "/tickets/admin/t1/assign",
+      "/admin/tickets/t1/assignee",
       null,
       { params: { assigneeId: "u1" } },
     );
     expect(clientMocks.api.put).toHaveBeenNthCalledWith(
       3,
-      "/tickets/admin/t1/status",
+      "/admin/tickets/t1/status",
       null,
       { params: { status: 2 } },
     );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       6,
-      "/tickets/admin/pending-count",
+      "/admin/tickets/pending-count",
     );
   });
 

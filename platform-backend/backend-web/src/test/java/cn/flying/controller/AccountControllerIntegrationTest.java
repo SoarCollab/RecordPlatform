@@ -167,13 +167,13 @@ class AccountControllerIntegrationTest extends BaseControllerIntegrationTest {
     class ChangePasswordTests {
 
         @Test
-        @DisplayName("POST /change-password - Should change password successfully")
+        @DisplayName("PUT /password - Should change password successfully")
         void changePassword_shouldChangeSuccessfully() throws Exception {
             ChangePasswordVO changeVO = new ChangePasswordVO();
             changeVO.setPassword("password123");
             changeVO.setNew_password("newPassword123");
 
-            performPost(BASE_URL + "/change-password", changeVO)
+            performPut(BASE_URL + "/password", changeVO)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
 
@@ -183,36 +183,36 @@ class AccountControllerIntegrationTest extends BaseControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("POST /change-password - Should return business error for wrong old password")
+        @DisplayName("PUT /password - Should return business error for wrong old password")
         void changePassword_shouldReturnBusinessErrorForWrongOldPassword() throws Exception {
             ChangePasswordVO changeVO = new ChangePasswordVO();
             changeVO.setPassword("wrongPassword");
             changeVO.setNew_password("newPassword123");
 
-            performPost(BASE_URL + "/change-password", changeVO)
+            performPut(BASE_URL + "/password", changeVO)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(10001));
         }
 
         @Test
-        @DisplayName("POST /change-password - Should return 400 for password too short")
+        @DisplayName("PUT /password - Should return 400 for password too short")
         void changePassword_shouldReturn400ForPasswordTooShort() throws Exception {
             ChangePasswordVO changeVO = new ChangePasswordVO();
             changeVO.setPassword("password123");
             changeVO.setNew_password("12345"); // Less than 6 characters
 
-            performPost(BASE_URL + "/change-password", changeVO)
+            performPut(BASE_URL + "/password", changeVO)
                     .andExpect(status().isBadRequest());
         }
 
         @Test
-        @DisplayName("POST /change-password - Should return 400 for password too long")
+        @DisplayName("PUT /password - Should return 400 for password too long")
         void changePassword_shouldReturn400ForPasswordTooLong() throws Exception {
             ChangePasswordVO changeVO = new ChangePasswordVO();
             changeVO.setPassword("password123");
             changeVO.setNew_password("a".repeat(21)); // More than 20 characters
 
-            performPost(BASE_URL + "/change-password", changeVO)
+            performPut(BASE_URL + "/password", changeVO)
                     .andExpect(status().isBadRequest());
         }
     }
@@ -222,35 +222,35 @@ class AccountControllerIntegrationTest extends BaseControllerIntegrationTest {
     class ModifyEmailTests {
 
         @Test
-        @DisplayName("POST /modify-email - Should return 400 for invalid email format")
+        @DisplayName("PUT /email - Should return 400 for invalid email format")
         void modifyEmail_shouldReturn400ForInvalidEmailFormat() throws Exception {
             ModifyEmailVO modifyVO = new ModifyEmailVO();
             modifyVO.setEmail("invalid-email");
             modifyVO.setCode("123456");
 
-            performPost(BASE_URL + "/modify-email", modifyVO)
+            performPut(BASE_URL + "/email", modifyVO)
                     .andExpect(status().isBadRequest());
         }
 
         @Test
-        @DisplayName("POST /modify-email - Should return 400 for invalid verification code length")
+        @DisplayName("PUT /email - Should return 400 for invalid verification code length")
         void modifyEmail_shouldReturn400ForInvalidCodeLength() throws Exception {
             ModifyEmailVO modifyVO = new ModifyEmailVO();
             modifyVO.setEmail("new@test.com");
             modifyVO.setCode("12345"); // Should be exactly 6 characters
 
-            performPost(BASE_URL + "/modify-email", modifyVO)
+            performPut(BASE_URL + "/email", modifyVO)
                     .andExpect(status().isBadRequest());
         }
 
         @Test
-        @DisplayName("POST /modify-email - Should return 400 for code too long")
+        @DisplayName("PUT /email - Should return 400 for code too long")
         void modifyEmail_shouldReturn400ForCodeTooLong() throws Exception {
             ModifyEmailVO modifyVO = new ModifyEmailVO();
             modifyVO.setEmail("new@test.com");
             modifyVO.setCode("1234567"); // More than 6 characters
 
-            performPost(BASE_URL + "/modify-email", modifyVO)
+            performPut(BASE_URL + "/email", modifyVO)
                     .andExpect(status().isBadRequest());
         }
     }
@@ -299,13 +299,13 @@ class AccountControllerIntegrationTest extends BaseControllerIntegrationTest {
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isUnauthorized());
 
-            mockMvc.perform(post(BASE_URL + "/change-password")
+            mockMvc.perform(put(BASE_URL + "/password")
                             .contentType("application/json")
                             .content("{}")
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isUnauthorized());
 
-            mockMvc.perform(post(BASE_URL + "/modify-email")
+            mockMvc.perform(put(BASE_URL + "/email")
                             .contentType("application/json")
                             .content("{}")
                             .header(HEADER_TENANT_ID, testTenantId))

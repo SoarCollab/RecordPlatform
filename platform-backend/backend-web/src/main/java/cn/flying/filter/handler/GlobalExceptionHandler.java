@@ -1,9 +1,11 @@
 package cn.flying.filter.handler;
 
+import cn.flying.common.constant.ErrorPayload;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.exception.RetryableException;
+import cn.flying.common.util.ErrorPayloadFactory;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -24,8 +26,6 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.io.IOException;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -166,7 +166,7 @@ public class GlobalExceptionHandler {
         }
 
         Object detail = ex.getData() != null ? ex.getData() : message;
-        Map<String, Object> payload = withTrace(detail);
+        ErrorPayload payload = withTrace(detail);
         Result<?> result = new Result<>(code, message, payload);
 
         // 约定：业务异常保持 HTTP 200，通过 Result.code 表达具体错误
@@ -183,9 +183,7 @@ public class GlobalExceptionHandler {
         log.warn("可重试异常: message={}, suggestedRetryAfter={}s, traceId={}",
                 ex.getMessage(), ex.getSuggestedRetryAfterSeconds(), traceId);
 
-        Map<String, Object> payload = withTrace(ex.getData());
-        payload.put("retryable", true);
-        payload.put("retryAfterSeconds", ex.getSuggestedRetryAfterSeconds());
+        ErrorPayload payload = retryableWithTrace(ex.getData(), ex.getSuggestedRetryAfterSeconds());
 
         Result<?> result;
         if (ex.getResultEnum() != null) {
@@ -257,7 +255,7 @@ public class GlobalExceptionHandler {
         String traceId = currentTraceId();
         log.error("系统异常: traceId={}", traceId, ex);
 
-        Map<String, Object> payload = withTrace("服务器内部错误，请联系管理员");
+        ErrorPayload payload = withTrace("服务器内部错误，请联系管理员");
         return Result.error(ResultEnum.FAIL, payload);
     }
 
@@ -276,16 +274,25 @@ public class GlobalExceptionHandler {
         return message.isEmpty() ? path : (path + ": " + message);
     }
 
-    private Map<String, Object> withTrace(Object detail) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        String traceId = currentTraceId();
-        if (traceId != null) {
-            payload.put("traceId", traceId);
-        }
-        if (detail != null) {
-            payload.put("detail", detail);
-        }
-        return payload;
+    /**
+     * 组装普通错误响应载荷，统一包含 traceId 与 detail 字段。
+     *
+     * @param detail 错误细节
+     * @return 统一错误载荷
+     */
+    private ErrorPayload withTrace(Object detail) {
+        return ErrorPayloadFactory.of(currentTraceId(), detail);
+    }
+
+    /**
+     * 组装可重试错误响应载荷，统一补充 retryable 与 retryAfterSeconds 字段。
+     *
+     * @param detail            错误细节
+     * @param retryAfterSeconds 建议重试间隔（秒）
+     * @return 统一错误载荷
+     */
+    private ErrorPayload retryableWithTrace(Object detail, int retryAfterSeconds) {
+        return ErrorPayloadFactory.retryable(currentTraceId(), detail, retryAfterSeconds);
     }
 
     private String currentTraceId() {

@@ -491,6 +491,43 @@ describe("API Client", () => {
         });
       });
 
+      it("should preserve structured error detail payload", async () => {
+        const mockFetch = vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({
+              code: ResultCode.SERVICE_UNAVAILABLE,
+              message: "服务暂时不可用",
+              data: {
+                traceId: "trace-1",
+                detail: {
+                  message: "请在 5 秒后重试",
+                  reason: "rate-limit",
+                },
+                retryable: true,
+                retryAfterSeconds: 5,
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+        const api = createApiClient({
+          baseUrl: "https://api.test.com",
+          fetch: mockFetch,
+        });
+
+        await expect(api.get("/test", { retries: 0 })).rejects.toMatchObject({
+          code: ResultCode.SERVICE_UNAVAILABLE,
+          message: "请在 5 秒后重试",
+          traceId: "trace-1",
+          detail: {
+            message: "请在 5 秒后重试",
+            reason: "rate-limit",
+          },
+          retryable: true,
+          retryAfterSeconds: 5,
+        });
+      });
+
       it("should throw ApiError on non-JSON response", async () => {
         const mockFetch = vi.fn().mockResolvedValue(
           new Response("<html>Error</html>", {

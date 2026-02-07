@@ -1,9 +1,13 @@
 package cn.flying.filter.handler;
 
+import cn.flying.common.constant.ErrorPayload;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.util.Const;
+import cn.flying.common.util.ErrorPayloadFactory;
 import jakarta.validation.ValidationException;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -20,8 +24,9 @@ public class ValidationController {
      * @return 校验结果
      */
     @ExceptionHandler(ValidationException.class)
-    public Result<String> validateError(ValidationException exception) {
+    public Result<ErrorPayload> validateError(ValidationException exception) {
         log.warn("Resolved [{}: {}]", exception.getClass().getName(), exception.getMessage());
-        return Result.error(ResultEnum.PARAM_IS_INVALID);
+        ErrorPayload payload = ErrorPayloadFactory.of(MDC.get(Const.TRACE_ID), exception.getMessage());
+        return Result.error(ResultEnum.PARAM_IS_INVALID, payload);
     }
 }

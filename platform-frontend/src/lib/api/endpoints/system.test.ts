@@ -102,13 +102,12 @@ describe("system endpoints", () => {
     );
     expect(clientMocks.api.post).toHaveBeenNthCalledWith(
       2,
-      "/system/permissions/roles/admin/grant",
+      "/system/roles/admin/permissions",
       { permissionCode: "p:read" },
     );
     expect(clientMocks.api.delete).toHaveBeenNthCalledWith(
       2,
-      "/system/permissions/roles/admin/revoke",
-      { params: { permissionCode: "p:read" } },
+      "/system/roles/admin/permissions/p:read",
     );
   });
 
@@ -138,7 +137,7 @@ describe("system endpoints", () => {
     await systemApi.checkAuditAnomalies();
     await systemApi.backupAuditLogs({ days: 7, deleteAfterBackup: false });
 
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(1, "/system/audit/logs/page", {
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(1, "/system/audit/logs", {
       params: { pageNum: 1, pageSize: 20, module: "files" },
     });
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(2, "/system/audit/logs/log-1");
@@ -156,10 +155,13 @@ describe("system endpoints", () => {
       "/system/audit/configs",
       { id: 1, configKey: "k", configValue: "v" },
     );
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(8, "/system/audit/check-anomalies");
     expect(clientMocks.api.post).toHaveBeenNthCalledWith(
       2,
-      "/system/audit/backup-logs",
+      "/system/audit/anomalies/check",
+    );
+    expect(clientMocks.api.post).toHaveBeenNthCalledWith(
+      3,
+      "/system/audit/logs/backups",
       null,
       { params: { days: 7, deleteAfterBackup: false } },
     );

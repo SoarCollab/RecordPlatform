@@ -1,9 +1,11 @@
 package cn.flying.filter;
 
+import cn.flying.common.constant.ErrorPayload;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.DistributedRateLimiter;
+import cn.flying.common.util.ErrorPayloadFactory;
 import cn.flying.common.util.DistributedRateLimiter.RateLimitResult;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
@@ -13,6 +15,7 @@ import jakarta.servlet.http.HttpFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -167,7 +170,10 @@ public class FlowLimitingFilter extends HttpFilter {
         // HTTP 429 Too Many Requests
         response.setStatus(429);
         response.setContentType("application/json;charset=utf-8");
+        String detail = result == RateLimitResult.BLOCKED ? "请求已被限流封禁，请稍后重试" : "请求频率过高，请稍后重试";
+        ErrorPayload payload = ErrorPayloadFactory.of(MDC.get(Const.TRACE_ID), detail);
         PrintWriter writer = response.getWriter();
-        writer.write(Result.error(ResultEnum.PERMISSION_LIMIT).toString());
+        writer.write(Result.error(ResultEnum.PERMISSION_LIMIT, payload).toJson());
+        writer.flush();
     }
 }

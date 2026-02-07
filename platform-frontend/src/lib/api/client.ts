@@ -2,6 +2,7 @@ import { goto } from "$app/navigation";
 import { browser } from "$app/environment";
 import { env } from "$env/dynamic/public";
 import {
+  type ErrorPayload,
   type Result,
   ResultCode,
   UNAUTHORIZED_CODES,
@@ -88,15 +89,25 @@ export class ApiError extends Error {
   code: number;
   isUnauthorized: boolean;
   isRateLimited: boolean;
+  traceId?: string;
+  detail?: unknown;
+  retryable?: boolean;
+  retryAfterSeconds?: number;
 
-  constructor(code: number, message: string) {
+  constructor(code: number, message: string, payload?: ErrorPayload) {
     super(message);
     this.name = "ApiError";
     this.code = code;
+    this.traceId = payload?.traceId;
+    this.detail = payload?.detail;
+    this.retryable = payload?.retryable;
+    this.retryAfterSeconds = payload?.retryAfterSeconds;
     this.isUnauthorized = (UNAUTHORIZED_CODES as readonly number[]).includes(
       code,
     );
-    this.isRateLimited = (RETRYABLE_CODES as readonly number[]).includes(code);
+    this.isRateLimited =
+      payload?.retryable === true ||
+      (RETRYABLE_CODES as readonly number[]).includes(code);
   }
 }
 
@@ -176,6 +187,51 @@ async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * 将响应中的 data 尝试解析为 ErrorPayload。
+ *
+ * @param data 响应 data 字段
+ * @returns 解析出的 ErrorPayload，无法识别时返回 undefined
+ */
+function toErrorPayload(data: unknown): ErrorPayload | undefined {
+  if (!data || typeof data !== "object") {
+    return undefined;
+  }
+  const maybe = data as Record<string, unknown>;
+  return {
+    traceId: typeof maybe.traceId === "string" ? maybe.traceId : undefined,
+    detail: Object.prototype.hasOwnProperty.call(maybe, "detail")
+      ? maybe.detail
+      : undefined,
+    retryable: typeof maybe.retryable === "boolean" ? maybe.retryable : undefined,
+    retryAfterSeconds:
+      typeof maybe.retryAfterSeconds === "number"
+        ? maybe.retryAfterSeconds
+        : undefined,
+  };
+}
+
+/**
+ * 从错误细节中提取可展示消息。
+ *
+ * @param fallback 后端 message 字段
+ * @param detail 错误细节（可能是字符串或对象）
+ * @returns 优先返回可读的 detail 文本，否则回退 fallback
+ */
+function resolveErrorMessage(fallback: string, detail: unknown): string {
+  if (typeof detail === "string" && detail.trim().length > 0) {
+    return detail;
+  }
+  if (detail && typeof detail === "object") {
+    const maybe = detail as Record<string, unknown>;
+    const objectMessage = maybe.message;
+    if (typeof objectMessage === "string" && objectMessage.trim().length > 0) {
+      return objectMessage;
+    }
+  }
+  return fallback;
+}
+
 // ===== API Client Factory =====
 
 export function createApiClient(clientConfig: ApiClientConfig = {}) {
@@ -253,7 +309,9 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
           return result.data;
         }
 
-        const error = new ApiError(result.code, result.message);
+        const payload = toErrorPayload(result.data);
+        const message = resolveErrorMessage(result.message, payload?.detail);
+        const error = new ApiError(result.code, message, payload);
 
         if (error.isUnauthorized) {
           await onUnauthorized();
@@ -261,7 +319,10 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
         }
 
         if (error.isRateLimited && attempt < requestMaxRetries) {
-          const delay = retryDelayBase * Math.pow(2, attempt);
+          const delay =
+            (payload?.retryAfterSeconds && payload.retryAfterSeconds > 0
+              ? payload.retryAfterSeconds * 1000
+              : retryDelayBase * Math.pow(2, attempt));
           console.warn(`Rate limited, retrying in ${delay}ms...`);
           await sleep(delay);
           lastError = error;

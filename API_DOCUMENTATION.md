@@ -69,12 +69,13 @@ POST /api/v1/auth/login
 
 - `POST /api/v1/auth/login` - User login
 - `POST /api/v1/auth/logout` - User logout
-- `GET /api/v1/auth/ask-code` - Request verification code
+- `POST /api/v1/auth/verification-codes` - Request verification code
 - `POST /api/v1/auth/register` - User registration
-- `POST /api/v1/auth/reset-confirm` - Confirm password reset
-- `POST /api/v1/auth/reset-password` - Reset password
-- `GET /api/v1/files/getSharingFiles` - Get shared files by code
-- `POST /api/v1/files/saveShareFile` - Save shared files
+- `POST /api/v1/auth/password-resets/confirm` - Confirm password reset
+- `PUT /api/v1/auth/password-resets` - Reset password
+- `GET /api/v1/shares/{shareCode}/files` - Get shared files by code
+- `POST /api/v1/shares/{shareCode}/files/save` - Save shared files
+- `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks` - Public share download
 - `GET /api/v1/images/download/images/**` - Download images
 
 ---
@@ -97,6 +98,8 @@ All API responses use a unified `Result<T>` wrapper:
 | `message` | String  | Human-readable message         |
 | `data`    | T       | Response payload (can be null) |
 
+Business errors keep `HTTP 200` and are distinguished by `Result.code`.
+
 ### Success Response Example
 
 ```json
@@ -118,7 +121,12 @@ All API responses use a unified `Result<T>` wrapper:
 {
   "code": 20002,
   "message": "账号不存在或密码错误",
-  "data": null
+  "data": {
+    "traceId": "9f3a2e63f8ac4cdb",
+    "detail": "账号不存在或密码错误",
+    "retryable": false,
+    "retryAfterSeconds": null
+  }
 }
 ```
 
@@ -288,7 +296,7 @@ POST /api/v1/auth/logout
 Send verification code to email.
 
 ```
-GET /api/v1/auth/ask-code
+POST /api/v1/auth/verification-codes
 ```
 
 **Authentication**: None
@@ -357,7 +365,7 @@ POST /api/v1/auth/register
 Verify email and code before resetting password.
 
 ```
-POST /api/v1/auth/reset-confirm
+POST /api/v1/auth/password-resets/confirm
 ```
 
 **Authentication**: None
@@ -378,7 +386,7 @@ POST /api/v1/auth/reset-confirm
 Reset user password with verification code.
 
 ```
-POST /api/v1/auth/reset-password
+PUT /api/v1/auth/password-resets
 ```
 
 **Authentication**: None
@@ -444,7 +452,7 @@ GET /api/v1/users/info
 Change user's email address.
 
 ```
-POST /api/v1/users/modify-email
+PUT /api/v1/users/email
 ```
 
 **Authentication**: Bearer Token
@@ -465,7 +473,7 @@ POST /api/v1/users/modify-email
 Change user's password.
 
 ```
-POST /api/v1/users/change-password
+PUT /api/v1/users/password
 ```
 
 **Authentication**: Bearer Token
@@ -483,17 +491,17 @@ POST /api/v1/users/change-password
 
 ## 3. File Upload Module
 
-Base Path: `/api/v1/files/upload`
+Base Path: `/api/v1/upload-sessions`
 
 This module implements chunked file upload with pause/resume support.
 
 ### Upload Flow
 
-1. Call `/upload/start` to initialize upload session
-2. Upload each chunk via `/upload/chunk`
-3. Monitor progress via `/upload/progress`
-4. Call `/upload/complete` when all chunks uploaded
-5. Optionally use `/upload/pause` and `/upload/resume` for pause/resume
+1. Call `POST /api/v1/upload-sessions` to initialize upload session
+2. Upload each chunk via `PUT /api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}`
+3. Monitor progress via `GET /api/v1/upload-sessions/{clientId}/progress`
+4. Call `POST /api/v1/upload-sessions/{clientId}/complete` when all chunks uploaded
+5. Optionally use `pause` and `resume` endpoints for interruption control
 
 ---
 
@@ -502,7 +510,7 @@ This module implements chunked file upload with pause/resume support.
 Initialize a new upload session.
 
 ```
-POST /api/v1/files/upload/upload/start
+POST /api/v1/upload-sessions
 ```
 
 **Authentication**: Bearer Token
@@ -542,18 +550,23 @@ POST /api/v1/files/upload/upload/start
 Upload a single file chunk.
 
 ```
-POST /api/v1/files/upload/upload/chunk
+PUT /api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}
 ```
 
 **Authentication**: Bearer Token
 
+**Path Parameters**:
+
+| Parameter   | Type   | Required | Description           |
+| ----------- | ------ | -------- | --------------------- |
+| clientId    | string | Yes      | Upload session ID     |
+| chunkNumber | int    | Yes      | Chunk index (0-based) |
+
 **Form Data**:
 
-| Parameter   | Type          | Required | Description           |
-| ----------- | ------------- | -------- | --------------------- |
-| file        | MultipartFile | Yes      | Chunk file data       |
-| clientId    | string        | Yes      | Upload session ID     |
-| chunkNumber | int           | Yes      | Chunk index (0-based) |
+| Parameter | Type          | Required | Description     |
+| --------- | ------------- | -------- | --------------- |
+| file      | MultipartFile | Yes      | Chunk file data |
 
 **Response**:
 
@@ -572,12 +585,12 @@ POST /api/v1/files/upload/upload/chunk
 Finalize the upload and trigger file processing.
 
 ```
-POST /api/v1/files/upload/upload/complete
+POST /api/v1/upload-sessions/{clientId}/complete
 ```
 
 **Authentication**: Bearer Token
 
-**Query Parameters**:
+**Path Parameters**:
 
 | Parameter | Type   | Required | Description       |
 | --------- | ------ | -------- | ----------------- |
@@ -590,10 +603,10 @@ POST /api/v1/files/upload/upload/complete
 Pause an ongoing upload.
 
 ```
-POST /api/v1/files/upload/upload/pause
+POST /api/v1/upload-sessions/{clientId}/pause
 ```
 
-**Query Parameters**:
+**Path Parameters**:
 
 | Parameter | Type   | Required | Description       |
 | --------- | ------ | -------- | ----------------- |
@@ -606,7 +619,7 @@ POST /api/v1/files/upload/upload/pause
 Resume a paused upload.
 
 ```
-POST /api/v1/files/upload/upload/resume
+POST /api/v1/upload-sessions/{clientId}/resume
 ```
 
 **Response (ResumeUploadVO)**:
@@ -629,12 +642,12 @@ POST /api/v1/files/upload/upload/resume
 Cancel and clean up an upload session.
 
 ```
-POST /api/v1/files/upload/upload/cancel
+DELETE /api/v1/upload-sessions/{clientId}
 ```
 
 **Authentication**: Bearer Token
 
-**Query Parameters**:
+**Path Parameters**:
 
 | Parameter | Type   | Required | Description       |
 | --------- | ------ | -------- | ----------------- |
@@ -647,10 +660,10 @@ POST /api/v1/files/upload/upload/cancel
 Get current upload status.
 
 ```
-GET /api/v1/files/upload/upload/check
+GET /api/v1/upload-sessions/{clientId}
 ```
 
-**Query Parameters**:
+**Path Parameters**:
 
 | Parameter | Type   | Required | Description       |
 | --------- | ------ | -------- | ----------------- |
@@ -685,7 +698,7 @@ GET /api/v1/files/upload/upload/check
 Get detailed upload progress.
 
 ```
-GET /api/v1/files/upload/upload/progress
+GET /api/v1/upload-sessions/{clientId}/progress
 ```
 
 **Response (ProgressVO)**:
@@ -717,7 +730,7 @@ Base Path: `/api/v1/files`
 Get all user files (metadata only).
 
 ```
-GET /api/v1/files/list
+GET /api/v1/files
 ```
 
 **Authentication**: Bearer Token
@@ -750,7 +763,7 @@ GET /api/v1/files/list
 Get user files with pagination.
 
 ```
-GET /api/v1/files/page
+GET /api/v1/files
 ```
 
 **Query Parameters**:
@@ -819,7 +832,7 @@ DELETE /api/v1/files/deleteById
 Get pre-signed download URLs for file shards.
 
 ```
-GET /api/v1/files/address
+GET /api/v1/files/hash/{fileHash}/addresses
 ```
 
 **Authentication**: Bearer Token
@@ -850,7 +863,7 @@ GET /api/v1/files/address
 Get blockchain transaction details for a file.
 
 ```
-GET /api/v1/files/getTransaction
+GET /api/v1/transactions/{transactionHash}
 ```
 
 **Query Parameters**:
@@ -880,7 +893,7 @@ GET /api/v1/files/getTransaction
 Download file content (encrypted shards).
 
 ```
-GET /api/v1/files/download
+GET /api/v1/files/hash/{fileHash}/chunks
 ```
 
 **Authentication**: Bearer Token
@@ -931,7 +944,7 @@ POST /api/v1/files/share
 Get files by sharing code.
 
 ```
-GET /api/v1/files/getSharingFiles
+GET /api/v1/shares/{shareCode}/files
 ```
 
 **Authentication**: None
@@ -949,7 +962,7 @@ GET /api/v1/files/getSharingFiles
 Save shared files to current user's account.
 
 ```
-POST /api/v1/files/saveShareFile
+POST /api/v1/shares/{shareCode}/files/save
 ```
 
 **Request Body**:
@@ -1156,7 +1169,7 @@ GET /api/v1/conversations/unread-count
 Mark all messages in a conversation as read.
 
 ```
-POST /api/v1/conversations/{id}/read
+POST /api/v1/conversations/{id}/read-status
 ```
 
 ---
@@ -1226,7 +1239,7 @@ POST /api/v1/messages
 Send a message directly to a user by ID.
 
 ```
-POST /api/v1/messages/to/{receiverId}
+POST /api/v1/messages
 ```
 
 **Query Parameters**:
@@ -1322,7 +1335,7 @@ GET /api/v1/announcements/unread-count
 ### 8.4 Mark as Read
 
 ```
-POST /api/v1/announcements/{id}/read
+POST /api/v1/announcements/{id}/read-status
 ```
 
 ---
@@ -1330,7 +1343,7 @@ POST /api/v1/announcements/{id}/read
 ### 8.5 Mark All as Read
 
 ```
-POST /api/v1/announcements/read-all
+POST /api/v1/announcements/read-status
 ```
 
 ---
@@ -1338,7 +1351,7 @@ POST /api/v1/announcements/read-all
 ### 8.6 Get All Announcements (Admin)
 
 ```
-GET /api/v1/announcements/admin/list
+GET /api/v1/admin/announcements
 ```
 
 **Authentication**: Bearer Token + `announcement:admin` permission
@@ -1558,7 +1571,7 @@ GET /api/v1/tickets/pending-count
 ### 9.8 Get All Tickets (Admin)
 
 ```
-GET /api/v1/tickets/admin/list
+GET /api/v1/admin/tickets
 ```
 
 **Authentication**: Bearer Token + `ticket:admin` permission
@@ -1568,7 +1581,7 @@ GET /api/v1/tickets/admin/list
 ### 9.9 Assign Ticket (Admin)
 
 ```
-PUT /api/v1/tickets/admin/{id}/assign
+PUT /api/v1/admin/tickets/{id}/assignee
 ```
 
 **Query Parameters**:
@@ -1582,7 +1595,7 @@ PUT /api/v1/tickets/admin/{id}/assign
 ### 9.10 Update Ticket Status (Admin)
 
 ```
-PUT /api/v1/tickets/admin/{id}/status
+PUT /api/v1/admin/tickets/{id}/status
 ```
 
 **Query Parameters**:
@@ -1596,7 +1609,7 @@ PUT /api/v1/tickets/admin/{id}/status
 ### 9.11 Get Admin Pending Count
 
 ```
-GET /api/v1/tickets/admin/pending-count
+GET /api/v1/admin/tickets/pending-count
 ```
 
 ---
@@ -1684,7 +1697,7 @@ GET /api/v1/system/permissions/roles/{role}
 ### 10.7 Grant Permission to Role
 
 ```
-POST /api/v1/system/permissions/roles/{role}/grant
+POST /api/v1/system/roles/{role}/permissions
 ```
 
 **Request Body**:
@@ -1700,7 +1713,7 @@ POST /api/v1/system/permissions/roles/{role}/grant
 ### 10.8 Revoke Permission from Role
 
 ```
-DELETE /api/v1/system/permissions/roles/{role}/revoke
+DELETE /api/v1/system/roles/{role}/permissions/{permissionCode}
 ```
 
 **Query Parameters**:
@@ -1743,8 +1756,8 @@ GET /api/v1/system/audit/overview
 ### 11.2 Query Operation Logs
 
 ```
-GET /api/v1/system/audit/logs/page
-POST /api/v1/system/audit/logs/page
+GET /api/v1/system/audit/logs
+POST /api/v1/system/audit/logs
 ```
 
 **Request Query Parameters (GET /logs/page)**:
@@ -1980,7 +1993,7 @@ PUT /api/v1/system/audit/configs
 ### 11.11 Check Anomalies
 
 ```
-GET /api/v1/system/audit/check-anomalies
+POST /api/v1/system/audit/anomalies/check
 ```
 
 **Response Example**:
@@ -2008,7 +2021,7 @@ GET /api/v1/system/audit/check-anomalies
 ### 11.12 Backup Logs
 
 ```
-POST /api/v1/system/audit/backup-logs
+POST /api/v1/system/audit/logs/backups
 ```
 
 **Query Parameters**:
@@ -2034,7 +2047,7 @@ Establish SSE connection for real-time updates.
 GET /api/v1/sse/connect
 ```
 
-**Authentication**: Short-lived SSE token in query param (`token`), obtained via `POST /api/v1/auth/sse-token` with Bearer JWT.
+**Authentication**: Short-lived SSE token in query param (`token`), obtained via `POST /api/v1/auth/tokens/sse` with Bearer JWT.
 
 **Response**: `text/event-stream`
 
@@ -2795,146 +2808,69 @@ Returns aggregated monitoring metrics combining system stats, chain status, and 
 
 ## 15. Controller-Aligned Endpoint Checklist
 
-> This checklist summarizes current backend routes for fast validation. It is authoritative for path/method parity and complements module details above.
+> This checklist is the P1 governance baseline. New REST paths are primary; legacy paths remain available in transition mode.
 
-### 15.1 Auth / User
+### 15.1 Current Primary REST Endpoints
 
-- `POST /api/v1/auth/login`
-- `GET /api/v1/auth/ask-code`
-- `POST /api/v1/auth/register`
-- `POST /api/v1/auth/reset-confirm`
-- `POST /api/v1/auth/reset-password`
-- `POST /api/v1/auth/refresh`
-- `POST /api/v1/auth/sse-token`
-- `GET /api/v1/users/info`
-- `PUT /api/v1/users/info`
-- `POST /api/v1/users/modify-email`
-- `POST /api/v1/users/change-password`
-
-### 15.2 Files / Sharing
-
-- `GET /api/v1/files/{id}`
-- `GET /api/v1/files/byHash`
-- `GET /api/v1/files/list`
-- `GET /api/v1/files/page`
-- `GET /api/v1/files/stats`
-- `GET /api/v1/files/address`
-- `GET /api/v1/files/getTransaction`
-- `GET /api/v1/files/download`
-- `GET /api/v1/files/decryptInfo`
-- `GET /api/v1/files/getSharingFiles`
-- `GET /api/v1/files/shares`
-- `DELETE /api/v1/files/delete`
-- `DELETE /api/v1/files/deleteById`
-- `POST /api/v1/files/share`
-- `PUT /api/v1/files/share`
-- `DELETE /api/v1/files/share/{shareCode}`
-- `POST /api/v1/files/saveShareFile`
-- `GET /api/v1/files/share/download`
-- `GET /api/v1/files/share/decryptInfo`
-- `GET /api/v1/files/share/{shareCode}/access-logs`
-- `GET /api/v1/files/share/{shareCode}/stats`
-- `GET /api/v1/files/{id}/provenance`
-- `GET /api/v1/files/public/download`
-- `GET /api/v1/files/public/decryptInfo`
-- `GET /api/v1/share/{shareCode}/info`
-
-### 15.3 Friends / Messaging
-
-- `POST /api/v1/friends/requests`
-- `GET /api/v1/friends/requests/received`
-- `GET /api/v1/friends/requests/sent`
-- `POST /api/v1/friends/requests/{requestId}/accept`
-- `POST /api/v1/friends/requests/{requestId}/reject`
-- `DELETE /api/v1/friends/requests/{requestId}`
-- `GET /api/v1/friends/requests/pending-count`
-- `GET /api/v1/friends`
-- `GET /api/v1/friends/all`
-- `DELETE /api/v1/friends/{friendId}`
-- `PUT /api/v1/friends/{friendId}/remark`
-- `GET /api/v1/friends/search`
-- `POST /api/v1/friend-shares`
-- `GET /api/v1/friend-shares/received`
-- `GET /api/v1/friend-shares/sent`
-- `GET /api/v1/friend-shares/{shareId}`
-- `POST /api/v1/friend-shares/{shareId}/read`
-- `DELETE /api/v1/friend-shares/{shareId}`
-- `GET /api/v1/friend-shares/unread-count`
-- `GET /api/v1/conversations`
-- `GET /api/v1/conversations/{id}`
-- `GET /api/v1/conversations/unread-count`
-- `POST /api/v1/conversations/{id}/read`
-- `DELETE /api/v1/conversations/{id}`
+- `POST /api/v1/auth/verification-codes`
+- `POST /api/v1/auth/password-resets/confirm`
+- `PUT /api/v1/auth/password-resets`
+- `POST /api/v1/auth/tokens/refresh`
+- `POST /api/v1/auth/tokens/sse`
+- `PUT /api/v1/users/email`
+- `PUT /api/v1/users/password`
+- `GET /api/v1/files`
+- `GET /api/v1/files/hash/{fileHash}`
+- `GET /api/v1/files/hash/{fileHash}/addresses`
+- `GET /api/v1/files/hash/{fileHash}/chunks`
+- `GET /api/v1/files/hash/{fileHash}/decrypt-info`
+- `GET /api/v1/transactions/{transactionHash}`
+- `POST /api/v1/upload-sessions`
+- `PUT /api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}`
+- `POST /api/v1/upload-sessions/{clientId}/complete`
+- `POST /api/v1/upload-sessions/{clientId}/pause`
+- `POST /api/v1/upload-sessions/{clientId}/resume`
+- `DELETE /api/v1/upload-sessions/{clientId}`
+- `GET /api/v1/upload-sessions/{clientId}`
+- `GET /api/v1/upload-sessions/{clientId}/progress`
+- `POST /api/v1/shares`
+- `PATCH /api/v1/shares/{shareCode}`
+- `GET /api/v1/shares/{shareCode}/files`
+- `POST /api/v1/shares/{shareCode}/files/save`
+- `GET /api/v1/shares/{shareCode}/files/{fileHash}/chunks`
+- `GET /api/v1/shares/{shareCode}/files/{fileHash}/decrypt-info`
+- `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`
+- `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`
 - `POST /api/v1/messages`
-- `POST /api/v1/messages/to/{receiverId}`
-- `GET /api/v1/messages/unread-count`
-
-### 15.4 Announcement / Ticket / Admin / System
-
-- `GET /api/v1/announcements/latest`
-- `GET /api/v1/announcements`
-- `GET /api/v1/announcements/{id}`
-- `GET /api/v1/announcements/unread-count`
-- `POST /api/v1/announcements/{id}/read`
-- `POST /api/v1/announcements/read-all`
-- `GET /api/v1/announcements/admin/list`
-- `POST /api/v1/announcements`
-- `PUT /api/v1/announcements/{id}`
-- `DELETE /api/v1/announcements/{id}`
-- `GET /api/v1/tickets`
-- `GET /api/v1/tickets/{id}`
-- `POST /api/v1/tickets`
-- `PUT /api/v1/tickets/{id}`
-- `POST /api/v1/tickets/{id}/reply`
-- `POST /api/v1/tickets/{id}/close`
-- `POST /api/v1/tickets/{id}/confirm`
-- `GET /api/v1/tickets/pending-count`
-- `GET /api/v1/tickets/unread-count`
-- `GET /api/v1/tickets/admin/list`
-- `PUT /api/v1/tickets/admin/{id}/assign`
-- `PUT /api/v1/tickets/admin/{id}/status`
-- `GET /api/v1/tickets/admin/pending-count`
-- `GET /api/v1/admin/files`
-- `GET /api/v1/admin/files/{id}`
-- `PUT /api/v1/admin/files/{id}/status`
-- `DELETE /api/v1/admin/files/{id}`
-- `GET /api/v1/admin/files/shares`
-- `DELETE /api/v1/admin/files/shares/{shareCode}`
-- `GET /api/v1/admin/files/shares/{shareCode}/logs`
-- `GET /api/v1/admin/files/shares/{shareCode}/stats`
+- `PUT /api/v1/conversations/{id}/read-status`
+- `PUT /api/v1/announcements/{id}/read-status`
+- `PUT /api/v1/announcements/read-status`
+- `GET /api/v1/admin/announcements`
+- `GET /api/v1/admin/tickets`
+- `PUT /api/v1/admin/tickets/{id}/assignee`
+- `PUT /api/v1/admin/tickets/{id}/status`
+- `GET /api/v1/admin/tickets/pending-count`
+- `PUT /api/v1/friends/requests/{id}/status`
+- `PUT /api/v1/friend-shares/{id}/read-status`
 - `GET /api/v1/system/permissions`
-- `GET /api/v1/system/permissions/list`
-- `GET /api/v1/system/permissions/modules`
-- `POST /api/v1/system/permissions`
-- `PUT /api/v1/system/permissions/{id}`
-- `DELETE /api/v1/system/permissions/{id}`
-- `GET /api/v1/system/permissions/roles/{role}`
-- `POST /api/v1/system/permissions/roles/{role}/grant`
-- `DELETE /api/v1/system/permissions/roles/{role}/revoke`
-- `GET /api/v1/system/stats`
-- `GET /api/v1/system/chain-status`
-- `GET /api/v1/system/health`
-- `GET /api/v1/system/storage-capacity`
-- `GET /api/v1/system/monitor`
-- `GET /api/v1/system/audit/overview`
-- `GET /api/v1/system/audit/logs/page`
-- `POST /api/v1/system/audit/logs/page`
-- `GET /api/v1/system/audit/logs/{id}`
-- `POST /api/v1/system/audit/logs/export`
-- `GET /api/v1/system/audit/high-frequency`
-- `POST /api/v1/system/audit/sensitive/page`
-- `GET /api/v1/system/audit/error-stats`
-- `GET /api/v1/system/audit/time-distribution`
-- `GET /api/v1/system/audit/configs`
-- `PUT /api/v1/system/audit/configs`
-- `GET /api/v1/system/audit/check-anomalies`
-- `POST /api/v1/system/audit/backup-logs`
+- `POST /api/v1/system/roles/{role}/permissions`
+- `DELETE /api/v1/system/roles/{role}/permissions/{permissionCode}`
+- `GET /api/v1/system/audit/logs`
+- `POST /api/v1/system/audit/logs/query`
+- `POST /api/v1/system/audit/logs/backups`
+- `POST /api/v1/system/audit/anomalies/check`
 
-### 15.5 SSE Handshake and Event Types
+### 15.2 Legacy Removal Status
 
-SSE should be connected with short-lived token flow:
+- Legacy alias endpoints have been removed from backend controllers.
+- Frontend API callers now use REST paths only (no legacy fallback).
+- `Deprecation`/`Link` compatibility headers are no longer emitted.
 
-1. `POST /api/v1/auth/sse-token` with JWT
+### 15.3 SSE Handshake and Event Types
+
+SSE short-lived token flow:
+
+1. `POST /api/v1/auth/tokens/sse` with JWT
 2. `GET /api/v1/sse/connect?token=<sseToken>&connectionId=<optional>`
 
 Current event types include:

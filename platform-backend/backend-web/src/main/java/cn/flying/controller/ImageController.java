@@ -1,10 +1,12 @@
 package cn.flying.controller;
 
+import cn.flying.common.constant.ErrorPayload;
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.Const;
+import cn.flying.common.util.ErrorPayloadFactory;
 import cn.flying.service.ImageService;
 import io.minio.errors.ErrorResponseException;
 import io.swagger.v3.oas.annotations.Operation;
@@ -15,6 +17,7 @@ import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -50,9 +53,9 @@ public class ImageController {
     public Result<String> uploadAvatar(@Schema(description = "头像文件") @RequestParam("file") MultipartFile file,
                                        @RequestAttribute(Const.ATTR_USER_ID) Long userId) throws IOException {
         if (file.isEmpty()) {
-            return Result.error(ResultEnum.FILE_EMPTY);
+            throw new GeneralException(ResultEnum.FILE_EMPTY);
         } else if (file.getSize() > 100 * 1024) {
-            return Result.error("图片文件过大，请上传小于100KB的图片！");
+            throw new GeneralException(ResultEnum.FILE_MAX_SIZE_OVERFLOW, "图片文件过大，请上传小于100KB的图片！");
         }
         log.info("头像文件：{} 上传中", file.getOriginalFilename());
         String fileName = imageService.uploadAvatar(file, userId);
@@ -60,7 +63,7 @@ public class ImageController {
             log.info("头像文件上传成功，大小:{}", file.getSize());
             return Result.success(fileName);
         } else {
-             return Result.error(ResultEnum.FILE_UPLOAD_ERROR);
+             throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR);
         }
     }
     /**
@@ -77,9 +80,9 @@ public class ImageController {
                                         @RequestAttribute(Const.ATTR_USER_ID) Long userId,
                                         HttpServletResponse response) throws IOException {
         if (file.isEmpty()) {
-            return Result.error(ResultEnum.FILE_EMPTY);
+            throw new GeneralException(ResultEnum.FILE_EMPTY);
         } else if (file.getSize() > 5* 1024*1024) {
-            return Result.error(ResultEnum.FILE_MAX_SIZE_OVERFLOW);
+            throw new GeneralException(ResultEnum.FILE_MAX_SIZE_OVERFLOW);
         }
         log.info("图像文件：{} 上传中", file.getOriginalFilename());
         String fileName = imageService.uploadImage(file, userId);
@@ -88,7 +91,7 @@ public class ImageController {
             return Result.success(fileName);
         } else {
             response.setStatus(400);
-            return Result.error(ResultEnum.FILE_UPLOAD_ERROR);
+            throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR);
         }
     }
     /**
@@ -115,26 +118,20 @@ public class ImageController {
         // 注意：在 Spring Boot 默认 servlet 映射下，request.getServletPath() 可能为空，需使用 requestUri 解析
         String imagePath = extractImagePath(request);
         if (imagePath == null) {
-            response.setStatus(404);
-            response.setContentType("application/json");
-            response.getWriter().write(Result.error(ResultEnum.FILE_NOT_EXIST).toString());
+            writeJsonError(request, response, 404, ResultEnum.FILE_NOT_EXIST, "图片不存在");
             return;
         }
 
         // 安全验证：防止路径遍历攻击
         if (!isValidImagePath(imagePath)) {
             log.warn("检测到路径遍历攻击尝试: {}", imagePath);
-            response.setStatus(400);
-            response.setContentType("application/json");
-            response.getWriter().write(Result.error(ResultEnum.PARAM_IS_INVALID).toString());
+            writeJsonError(request, response, 400, ResultEnum.PARAM_IS_INVALID, "图片路径非法");
             return;
         }
 
         try (ServletOutputStream outputStream = response.getOutputStream()) {
             if (imagePath.length() <= 13) {
-                response.setStatus(404);
-                response.setContentType("application/json");
-                response.getWriter().write(Result.error(ResultEnum.FILE_NOT_EXIST).toString());
+                writeJsonError(request, response, 404, ResultEnum.FILE_NOT_EXIST, "图片不存在");
                 return;
             }
             imageService.fetchImage(outputStream, imagePath);
@@ -195,5 +192,40 @@ public class ImageController {
         }
         // 单段短路径用于返回 404（由长度校验处理），避免把所有未知路径都当作参数错误
         return imagePath.length() <= 13;
+    }
+
+    /**
+     * 向客户端写入统一错误 JSON 响应。
+     *
+     * @param request    当前请求
+     * @param response   当前响应
+     * @param status     HTTP 状态码
+     * @param resultEnum 业务错误码
+     * @param detail     错误细节
+     * @throws IOException IO 异常
+     */
+    private void writeJsonError(HttpServletRequest request,
+                                HttpServletResponse response,
+                                int status,
+                                ResultEnum resultEnum,
+                                Object detail) throws IOException {
+        response.setStatus(status);
+        response.setContentType("application/json;charset=utf-8");
+        ErrorPayload payload = ErrorPayloadFactory.of(resolveTraceId(request), detail);
+        response.getWriter().write(Result.error(resultEnum, payload).toJson());
+    }
+
+    /**
+     * 提取当前请求 traceId，优先读取请求属性，回退到 MDC。
+     *
+     * @param request 当前请求
+     * @return traceId
+     */
+    private String resolveTraceId(HttpServletRequest request) {
+        Object requestTraceId = request.getAttribute(Const.TRACE_ID);
+        if (requestTraceId != null) {
+            return String.valueOf(requestTraceId);
+        }
+        return MDC.get(Const.TRACE_ID);
     }
 }

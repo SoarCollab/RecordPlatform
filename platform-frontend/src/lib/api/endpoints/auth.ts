@@ -40,9 +40,11 @@ function normalizeAccountVO(account: AccountVO): AccountVO {
 }
 
 /**
- * 用户登录
+ * 用户登录。
+ *
  * @param data 登录凭证
  * @param rememberMe 是否记住登录状态
+ * @returns 鉴权结果
  */
 export async function login(
   data: LoginRequest,
@@ -56,19 +58,18 @@ export async function login(
 }
 
 /**
- * 用户注册
+ * 用户注册。
+ *
  * @param data 注册信息
- * @note Backend returns Result<String>, not AuthorizeVO. Use login() after registration to get token.
  */
 export async function register(data: RegisterRequest): Promise<void> {
   await api.post<string>(`${BASE}/register`, data, {
     skipAuth: true,
   });
-  // Registration only creates account, doesn't return token
 }
 
 /**
- * 用户登出
+ * 用户登出。
  */
 export async function logout(): Promise<void> {
   try {
@@ -79,7 +80,9 @@ export async function logout(): Promise<void> {
 }
 
 /**
- * 获取当前用户信息
+ * 获取当前用户信息。
+ *
+ * @returns 当前用户
  */
 export async function getCurrentUser(): Promise<AccountVO> {
   const account = await api.get<AccountVO>("/users/info");
@@ -87,20 +90,21 @@ export async function getCurrentUser(): Promise<AccountVO> {
 }
 
 /**
- * 修改密码
- * @see AccountController.changePassword
- * @note 字段名与后端 ChangePasswordVO 对齐: password, new_password
+ * 修改密码。
+ *
+ * @param data 修改参数
  */
 export async function changePassword(
   data: ChangePasswordRequest,
 ): Promise<void> {
-  return api.post("/users/change-password", data);
+  await api.put("/users/password", data);
 }
 
 /**
- * 更新用户信息
- * @see AccountController.update
- * @see UpdateUserVO.java
+ * 更新用户信息。
+ *
+ * @param data 更新参数
+ * @returns 更新后的用户信息
  */
 export async function updateUser(data: UpdateUserRequest): Promise<AccountVO> {
   const account = await api.put<AccountVO>("/users/info", data);
@@ -108,56 +112,65 @@ export async function updateUser(data: UpdateUserRequest): Promise<AccountVO> {
 }
 
 /**
- * 刷新 Token
- * @see AuthorizeController.refresh
- * @see RefreshTokenVO.java
+ * 刷新 Token。
+ *
+ * @returns 刷新结果
  */
 export async function refreshToken(): Promise<RefreshTokenVO> {
-  const result = await api.post<RefreshTokenVO>(`${BASE}/refresh`);
+  const result = await api.post<RefreshTokenVO>(`${BASE}/tokens/refresh`);
   setToken(result.token, result.expire);
   return result;
 }
 
 /**
- * 发送注册验证码
+ * 发送注册验证码。
+ *
+ * @param email 注册邮箱
  */
 export async function sendRegisterCode(email: string): Promise<void> {
-  await api.get(`${BASE}/ask-code`, {
+  await api.post(`${BASE}/verification-codes`, null, {
     params: { email, type: "register" },
     skipAuth: true,
   });
 }
 
 /**
- * 发送重置密码验证码
+ * 发送重置密码验证码。
+ *
+ * @param email 注册邮箱
  */
 export async function sendResetCode(email: string): Promise<void> {
-  await api.get(`${BASE}/ask-code`, {
+  await api.post(`${BASE}/verification-codes`, null, {
     params: { email, type: "reset" },
     skipAuth: true,
   });
 }
 
 /**
- * 确认重置验证码
+ * 确认重置验证码。
+ *
+ * @param data 验证参数
  */
 export async function confirmResetCode(
   data: ConfirmResetRequest,
 ): Promise<void> {
-  await api.post(`${BASE}/reset-confirm`, data, { skipAuth: true });
+  await api.post(`${BASE}/password-resets/confirm`, data, { skipAuth: true });
 }
 
 /**
- * 重置密码
+ * 重置密码。
+ *
+ * @param data 重置参数
  */
 export async function resetPassword(data: ResetPasswordRequest): Promise<void> {
-  await api.post(`${BASE}/reset-password`, data, { skipAuth: true });
+  await api.put(`${BASE}/password-resets`, data, { skipAuth: true });
 }
 
 /**
- * 获取 SSE 短期令牌
- * 用于建立 SSE 连接，有效期 30 秒，一次性使用
+ * 获取 SSE 短期令牌。
+ *
+ * @returns SSE token
  */
 export async function getSseToken(): Promise<SseTokenVO> {
-  return api.post<SseTokenVO>(`${BASE}/sse-token`);
+  return api.post<SseTokenVO>(`${BASE}/tokens/sse`);
 }

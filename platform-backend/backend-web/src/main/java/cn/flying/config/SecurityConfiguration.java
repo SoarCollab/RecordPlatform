@@ -1,9 +1,11 @@
 package cn.flying.config;
 
+import cn.flying.common.constant.ErrorPayload;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.constant.UserRole;
 import cn.flying.common.util.Const;
+import cn.flying.common.util.ErrorPayloadFactory;
 import cn.flying.common.util.JwtUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.vo.auth.AuthorizeVO;
@@ -42,8 +44,6 @@ import org.springframework.security.web.authentication.logout.LogoutSuccessEvent
 
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.util.LinkedHashMap;
-import java.util.Map;
 
 /**
  * @program: RecordPlatform
@@ -92,19 +92,18 @@ public class SecurityConfiguration {
                         // 公开端点
                         .requestMatchers(
                                 "/api/v1/auth/login",
-                                "/api/v1/auth/ask-code",
+                                "/api/v1/auth/verification-codes",
                                 "/api/v1/auth/register",
-                                "/api/v1/auth/reset-confirm",
-                                "/api/v1/auth/reset-password",
-                                "/api/v1/files/getSharingFiles",
-                                "/api/v1/files/public/download",
-                                "/api/v1/files/public/decryptInfo",
+                                "/api/v1/auth/password-resets/confirm",
+                                "/api/v1/auth/password-resets",
                                 "/error"
                         ).permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/shares/*/files").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/public/shares/**").permitAll()
                         .requestMatchers("/api/v1/images/download/images/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/share/**").permitAll()
                         // SSE 短期令牌发行需要用户已认证
-                        .requestMatchers("/api/v1/auth/sse-token").hasAnyRole(
+                        .requestMatchers("/api/v1/auth/tokens/sse").hasAnyRole(
                                 UserRole.ROLE_DEFAULT.getRole(),
                                 UserRole.ROLE_ADMINISTER.getRole(),
                                 UserRole.ROLE_MONITOR.getRole())
@@ -317,16 +316,16 @@ public class SecurityConfiguration {
         writer.write(Result.error(ResultEnum.PERMISSION_TOKEN_EXPIRED, tracePayload(request, null)).toJson());
     }
 
-    private Map<String, Object> tracePayload(HttpServletRequest request, Object detail) {
-        Map<String, Object> payload = new LinkedHashMap<>();
+    /**
+     * 组装鉴权链路错误响应载荷，统一透传 traceId 与 detail。
+     *
+     * @param request 当前请求
+     * @param detail  错误细节
+     * @return 统一错误载荷
+     */
+    private ErrorPayload tracePayload(HttpServletRequest request, Object detail) {
         Object requestTraceId = request.getAttribute(Const.TRACE_ID);
         String traceId = requestTraceId != null ? String.valueOf(requestTraceId) : MDC.get(Const.TRACE_ID);
-        if (traceId != null && !traceId.isEmpty()) {
-            payload.put("traceId", traceId);
-        }
-        if (detail != null) {
-            payload.put("detail", detail);
-        }
-        return payload;
+        return ErrorPayloadFactory.of(traceId, detail);
     }
 }

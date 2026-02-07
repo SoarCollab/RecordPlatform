@@ -89,31 +89,25 @@ describe("files endpoints", () => {
     await filesApi.getShareAccessStats("code1");
     await filesApi.getFileProvenance("file-id");
 
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(1, "/files/page", {
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(1, "/files", {
       params: { pageNum: 1, pageSize: 20 },
     });
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(2, "/files/stats");
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(3, "/files/f1");
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(4, "/files/byHash", {
-      params: { fileHash: "h1" },
-    });
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(5, "/files/download", {
-      params: { fileHash: "h1" },
-    });
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(6, "/files/decryptInfo", {
-      params: { fileHash: "h1" },
-    });
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(4, "/files/hash/h1");
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(5, "/files/hash/h1/chunks");
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      6,
+      "/files/hash/h1/decrypt-info",
+    );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(7, "/files/shares", {
       params: { pageNum: 1, pageSize: 5 },
     });
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(8, "/files/address", {
-      params: { fileHash: "h1" },
-    });
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
-      9,
-      "/files/getTransaction",
-      { params: { transactionHash: "tx-hash" } },
+      8,
+      "/files/hash/h1/addresses",
     );
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(9, "/transactions/tx-hash");
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       10,
       "/files/share/code1/access-logs",
@@ -133,7 +127,7 @@ describe("files endpoints", () => {
     clientMocks.api.post
       .mockResolvedValueOnce("share-code")
       .mockResolvedValueOnce(undefined);
-    clientMocks.api.put.mockResolvedValue(undefined);
+    clientMocks.api.patch.mockResolvedValue(undefined);
     clientMocks.api.delete.mockResolvedValue(undefined);
 
     await filesApi.createShare({ fileHash: ["h1"], expireMinutes: 30, shareType: ShareType.PUBLIC });
@@ -144,11 +138,11 @@ describe("files endpoints", () => {
 
     expect(clientMocks.api.post).toHaveBeenNthCalledWith(
       1,
-      "/files/share",
+      "/shares",
       expect.objectContaining({ fileHash: ["h1"], expireMinutes: 30 }),
     );
-    expect(clientMocks.api.put).toHaveBeenCalledWith(
-      "/files/share",
+    expect(clientMocks.api.patch).toHaveBeenCalledWith(
+      "/shares/code1",
       expect.objectContaining({ shareCode: "code1" }),
     );
     expect(clientMocks.api.delete).toHaveBeenNthCalledWith(1, "/files/delete", {
@@ -158,7 +152,7 @@ describe("files endpoints", () => {
       2,
       "/files/share/share-code",
     );
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(2, "/files/saveShareFile", {
+    expect(clientMocks.api.post).toHaveBeenNthCalledWith(2, "/shares/share-code/files/save", {
       sharingFileIdList: ["f1"],
       shareCode: "share-code",
     });
@@ -176,8 +170,7 @@ describe("files endpoints", () => {
     const result = await filesApi.getSharedFiles("code-a");
 
     expect(result).toEqual([{ id: "shared-1" }]);
-    expect(clientMocks.api.get).toHaveBeenCalledWith("/files/getSharingFiles", {
-      params: { sharingCode: "code-a" },
+    expect(clientMocks.api.get).toHaveBeenCalledWith("/shares/code-a/files", {
       skipAuth: true,
     });
   });
@@ -191,12 +184,14 @@ describe("files endpoints", () => {
 
     const result = await filesApi.downloadFile("hash-1");
 
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(1, "/files/download", {
-      params: { fileHash: "hash-1" },
-    });
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(2, "/files/decryptInfo", {
-      params: { fileHash: "hash-1" },
-    });
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      1,
+      "/files/hash/hash-1/chunks",
+    );
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      2,
+      "/files/hash/hash-1/decrypt-info",
+    );
     expect(cryptoMocks.decryptFile).toHaveBeenCalledWith(
       expect.any(Array),
       "k1",
@@ -218,17 +213,15 @@ describe("files endpoints", () => {
     const result = await filesApi.publicDownloadFile("share-public", "hash-2");
 
     expect(result).toBe(blob);
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(1, "/files/public/download", {
-      params: { shareCode: "share-public", fileHash: "hash-2" },
-      skipAuth: true,
-    });
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      1,
+      "/public/shares/share-public/files/hash-2/chunks",
+      { skipAuth: true },
+    );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       2,
-      "/files/public/decryptInfo",
-      {
-        params: { shareCode: "share-public", fileHash: "hash-2" },
-        skipAuth: true,
-      },
+      "/public/shares/share-public/files/hash-2/decrypt-info",
+      { skipAuth: true },
     );
   });
 
@@ -242,15 +235,13 @@ describe("files endpoints", () => {
     const result = await filesApi.shareDownloadFile("share-private", "hash-3");
 
     expect(result).toBe(blob);
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(1, "/files/share/download", {
-      params: { shareCode: "share-private", fileHash: "hash-3" },
-    });
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      1,
+      "/shares/share-private/files/hash-3/chunks",
+    );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       2,
-      "/files/share/decryptInfo",
-      {
-        params: { shareCode: "share-private", fileHash: "hash-3" },
-      },
+      "/shares/share-private/files/hash-3/decrypt-info",
     );
   });
 
@@ -268,7 +259,7 @@ describe("files endpoints", () => {
       return [call[0], normalizeParams(call[1])];
     });
 
-    expect(calls[0][0]).toBe("/files/public/download");
-    expect(calls[2][0]).toBe("/files/share/download");
+    expect(calls[0][0]).toBe("/public/shares/code-public/files/hash-p/chunks");
+    expect(calls[2][0]).toBe("/shares/code-private/files/hash-s/chunks");
   });
 });

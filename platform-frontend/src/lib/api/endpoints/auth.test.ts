@@ -154,7 +154,7 @@ describe("auth endpoints", () => {
 
     const result = await authApi.refreshToken();
 
-    expect(clientMocks.api.post).toHaveBeenCalledWith("/auth/refresh");
+    expect(clientMocks.api.post).toHaveBeenCalledWith("/auth/tokens/refresh");
     expect(clientMocks.setToken).toHaveBeenCalledWith(
       "refresh-token",
       "2099-12-31",
@@ -165,6 +165,7 @@ describe("auth endpoints", () => {
   it("验证码与重置相关接口应透传参数", async () => {
     clientMocks.api.get.mockResolvedValue(undefined);
     clientMocks.api.post.mockResolvedValue(undefined);
+    clientMocks.api.put.mockResolvedValue(undefined);
 
     await authApi.sendRegisterCode("u@example.com");
     await authApi.sendResetCode("u@example.com");
@@ -175,23 +176,23 @@ describe("auth endpoints", () => {
       password: "new-pass",
     });
 
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(1, "/auth/ask-code", {
+    expect(clientMocks.api.post).toHaveBeenNthCalledWith(1, "/auth/verification-codes", null, {
       params: { email: "u@example.com", type: "register" },
       skipAuth: true,
     });
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(2, "/auth/ask-code", {
+    expect(clientMocks.api.post).toHaveBeenNthCalledWith(2, "/auth/verification-codes", null, {
       params: { email: "u@example.com", type: "reset" },
       skipAuth: true,
     });
     expect(clientMocks.api.post).toHaveBeenNthCalledWith(
-      1,
-      "/auth/reset-confirm",
+      3,
+      "/auth/password-resets/confirm",
       { email: "u@example.com", code: "1111" },
       { skipAuth: true },
     );
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(
-      2,
-      "/auth/reset-password",
+    expect(clientMocks.api.put).toHaveBeenNthCalledWith(
+      1,
+      "/auth/password-resets",
       { email: "u@example.com", code: "1111", password: "new-pass" },
       { skipAuth: true },
     );
@@ -202,7 +203,7 @@ describe("auth endpoints", () => {
 
     const result = await authApi.getSseToken();
 
-    expect(clientMocks.api.post).toHaveBeenCalledWith("/auth/sse-token");
+    expect(clientMocks.api.post).toHaveBeenCalledWith("/auth/tokens/sse");
     expect(result.sseToken).toBe("sse-short-token");
   });
 });

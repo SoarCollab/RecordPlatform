@@ -24,95 +24,109 @@ export type { FileDecryptInfoVO } from "../types";
 const BASE = "/files";
 
 /**
- * 获取文件列表 (分页)
+ * 获取文件列表（分页）。
+ *
+ * @param params 查询参数
+ * @returns 文件分页
  */
 export async function getFiles(
   params?: PageParams & FileQueryParams,
 ): Promise<Page<FileVO>> {
-  return api.get<Page<FileVO>>(`${BASE}/page`, { params });
+  return api.get<Page<FileVO>>(BASE, { params });
 }
 
 /**
- * 获取用户文件统计信息（用于 Dashboard）
- * @see FileController.getUserFileStats
+ * 获取用户文件统计信息（用于 Dashboard）。
+ *
+ * @returns 统计信息
  */
 export async function getUserFileStats(): Promise<UserFileStatsVO> {
   return api.get<UserFileStatsVO>(`${BASE}/stats`);
 }
 
 /**
- * 获取单个文件信息
- * @see FileController.getFileById
+ * 获取单个文件信息。
+ *
+ * @param id 文件 ID
+ * @returns 文件详情
  */
 export async function getFile(id: string): Promise<FileVO> {
   return api.get<FileVO>(`${BASE}/${id}`);
 }
 
 /**
- * 通过哈希获取文件信息
- * @note 支持查询自己的文件与好友分享给自己的文件
+ * 通过哈希获取文件信息。
+ *
+ * @param hash 文件哈希
+ * @returns 文件详情
  */
 export async function getFileByHash(hash: string): Promise<FileVO> {
-  return api.get<FileVO>(`${BASE}/byHash`, { params: { fileHash: hash } });
+  return api.get<FileVO>(`${BASE}/hash/${hash}`);
 }
 
 /**
- * 删除文件
- * @note 后端接口: DELETE /files/delete (同时支持 hash 和 id)
- * @param fileHashOrId 文件哈希或文件ID
+ * 删除文件。
+ *
+ * @param fileHashOrId 文件哈希或文件 ID
  */
 export async function deleteFile(fileHashOrId: string): Promise<void> {
-  return api.delete(`${BASE}/delete`, {
+  await api.delete(`${BASE}/delete`, {
     params: { identifiers: [fileHashOrId] },
   });
 }
 
 /**
- * 下载文件（获取加密分片）
+ * 下载文件（获取加密分片）。
+ *
  * @param fileHash 文件哈希
- * @returns 加密分片的 Base64 字符串数组
+ * @returns 加密分片 Base64 数组
  */
 export async function downloadEncryptedChunks(
   fileHash: string,
 ): Promise<string[]> {
-  return api.get<string[]>(`${BASE}/download`, { params: { fileHash } });
+  return api.get<string[]>(`${BASE}/hash/${fileHash}/chunks`);
 }
 
 /**
- * 获取文件解密信息
+ * 获取文件解密信息。
+ *
  * @param fileHash 文件哈希
- * @returns 解密信息（包含初始密钥）
+ * @returns 解密信息
  */
 export async function getDecryptInfo(
   fileHash: string,
 ): Promise<FileDecryptInfoVO> {
-  return api.get<FileDecryptInfoVO>(`${BASE}/decryptInfo`, {
-    params: { fileHash },
-  });
+  return api.get<FileDecryptInfoVO>(`${BASE}/hash/${fileHash}/decrypt-info`);
 }
 
 /**
- * 创建文件分享
- * @see FileController.generateSharingCode
- * @returns 分享码字符串
+ * 创建文件分享。
+ *
+ * @param payload 分享参数
+ * @returns 分享码
  */
 export async function createShare(
   payload: CreateShareRequest,
 ): Promise<string> {
-  return api.post<string>(`${BASE}/share`, payload);
+  return api.post<string>("/shares", payload);
 }
 
 /**
- * 更新分享设置（类型/有效期）
- * @see FileController.updateShare
+ * 更新分享设置（类型/有效期）。
+ *
+ * @param payload 更新参数
  */
 export async function updateShare(payload: UpdateShareRequest): Promise<void> {
-  return api.put(`${BASE}/share`, payload);
+  if (!payload.shareCode) {
+    throw new Error("shareCode 不能为空");
+  }
+  await api.patch(`/shares/${payload.shareCode}`, payload);
 }
 
 /**
- * 获取分享信息
- * @deprecated 后端未提供此接口，请使用 getSharedFiles 获取分享的文件列表
+ * 获取分享信息。
+ *
+ * @deprecated 后端未提供此接口，请使用 getSharedFiles 获取分享文件列表
  */
 export async function getShareByCode(_code: string): Promise<FileShareVO> {
   throw new Error(
@@ -121,32 +135,33 @@ export async function getShareByCode(_code: string): Promise<FileShareVO> {
 }
 
 /**
- * 获取分享的文件列表
- * @see FileController.getShareFile
+ * 获取分享文件列表。
+ *
  * @param sharingCode 分享码
+ * @returns 分享文件列表
  */
 export async function getSharedFiles(
   sharingCode: string,
 ): Promise<SharedFileVO[]> {
-  return api.get<SharedFileVO[]>(`${BASE}/getSharingFiles`, {
-    params: { sharingCode },
+  return api.get<SharedFileVO[]>(`/shares/${sharingCode}/files`, {
     skipAuth: true,
   });
 }
 
 /**
- * 取消分享
- * @see FileController.cancelShare
+ * 取消分享。
+ *
  * @param shareCode 分享码
  */
 export async function cancelShare(shareCode: string): Promise<void> {
-  return api.delete(`${BASE}/share/${shareCode}`);
+  await api.delete(`${BASE}/share/${shareCode}`);
 }
 
 /**
- * 获取我的分享列表
- * @see FileController.getMyShares
- * @see FileShareVO.java
+ * 获取我的分享列表。
+ *
+ * @param params 分页参数
+ * @returns 分享分页
  */
 export async function getMyShares(
   params?: PageParams,
@@ -155,97 +170,103 @@ export async function getMyShares(
 }
 
 /**
- * 获取文件下载地址 (预签名URL列表)
+ * 获取文件下载地址（预签名 URL 列表）。
+ *
  * @param fileHash 文件哈希
+ * @returns 地址列表
  */
 export async function getDownloadAddress(fileHash: string): Promise<string[]> {
-  return api.get<string[]>(`${BASE}/address`, { params: { fileHash } });
+  return api.get<string[]>(`${BASE}/hash/${fileHash}/addresses`);
 }
 
 /**
- * 获取区块链交易记录
+ * 获取区块链交易记录。
+ *
  * @param transactionHash 交易哈希
+ * @returns 交易记录
  */
 export async function getTransaction(
   transactionHash: string,
 ): Promise<TransactionVO> {
-  return api.get<TransactionVO>(`${BASE}/getTransaction`, {
-    params: { transactionHash },
-  });
+  return api.get<TransactionVO>(`/transactions/${transactionHash}`);
 }
 
 /**
- * 保存分享的文件到我的账户
- * @param request 要保存的文件 ID 列表
+ * 保存分享文件到我的账户。
+ *
+ * @param request 保存参数
  */
 export async function saveSharedFiles(
   request: SaveShareFileRequest,
 ): Promise<void> {
-  return api.post(`${BASE}/saveShareFile`, request);
+  await api.post(`/shares/${request.shareCode}/files/save`, request);
 }
 
 /**
- * 下载并解密文件
+ * 下载并解密文件。
+ *
  * @param fileHash 文件哈希
  * @returns 解密后的 Blob
  */
 export async function downloadFile(fileHash: string): Promise<Blob> {
   const { decryptFile, arrayToBlob } = await import("$utils/crypto");
 
-  // 并行获取加密分片和解密信息
   const [chunksBase64, decryptInfo] = await Promise.all([
     downloadEncryptedChunks(fileHash),
     getDecryptInfo(fileHash),
   ]);
 
-  // Base64 解码为 Uint8Array
   const chunks = chunksBase64.map((base64) =>
     Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
   );
 
-  // 解密文件
   const decryptedData = await decryptFile(chunks, decryptInfo.initialKey);
-
-  // 转换为 Blob
   return arrayToBlob(decryptedData, decryptInfo.contentType);
 }
 
 // ==================== 公开分享端点（无需认证）====================
 
 /**
- * 公开分享下载加密分片（无需登录）
+ * 公开分享下载加密分片（无需登录）。
+ *
  * @param shareCode 分享码
  * @param fileHash 文件哈希
- * @returns 加密分片的 Base64 字符串数组
+ * @returns 分片数组
  */
 export async function publicDownloadEncryptedChunks(
   shareCode: string,
   fileHash: string,
 ): Promise<string[]> {
-  return api.get<string[]>(`${BASE}/public/download`, {
-    params: { shareCode, fileHash },
-    skipAuth: true,
-  });
+  return api.get<string[]>(
+    `/public/shares/${shareCode}/files/${fileHash}/chunks`,
+    {
+      skipAuth: true,
+    },
+  );
 }
 
 /**
- * 公开分享获取解密信息（无需登录）
+ * 公开分享获取解密信息（无需登录）。
+ *
  * @param shareCode 分享码
  * @param fileHash 文件哈希
- * @returns 解密信息（包含初始密钥）
+ * @returns 解密信息
  */
 export async function publicGetDecryptInfo(
   shareCode: string,
   fileHash: string,
 ): Promise<FileDecryptInfoVO> {
-  return api.get<FileDecryptInfoVO>(`${BASE}/public/decryptInfo`, {
-    params: { shareCode, fileHash },
-    skipAuth: true,
-  });
+  return api.get<FileDecryptInfoVO>(
+    `/public/shares/${shareCode}/files/${fileHash}/decrypt-info`,
+    {
+      skipAuth: true,
+    },
+  );
 }
 
 /**
- * 公开分享下载并解密文件（无需登录）
+ * 公开分享下载并解密文件（无需登录）。
+ *
  * @param shareCode 分享码
  * @param fileHash 文件哈希
  * @returns 解密后的 Blob
@@ -256,56 +277,52 @@ export async function publicDownloadFile(
 ): Promise<Blob> {
   const { decryptFile, arrayToBlob } = await import("$utils/crypto");
 
-  // 并行获取加密分片和解密信息
   const [chunksBase64, decryptInfo] = await Promise.all([
     publicDownloadEncryptedChunks(shareCode, fileHash),
     publicGetDecryptInfo(shareCode, fileHash),
   ]);
 
-  // Base64 解码为 Uint8Array
   const chunks = chunksBase64.map((base64) =>
     Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
   );
 
-  // 解密文件
   const decryptedData = await decryptFile(chunks, decryptInfo.initialKey);
-
-  // 转换为 Blob
   return arrayToBlob(decryptedData, decryptInfo.contentType);
 }
 
 /**
- * 登录用户分享下载加密分片（需要登录）
+ * 登录用户分享下载加密分片（需要登录）。
+ *
  * @param shareCode 分享码
  * @param fileHash 文件哈希
- * @returns 加密分片的 Base64 字符串数组
+ * @returns 分片数组
  */
 export async function shareDownloadEncryptedChunks(
   shareCode: string,
   fileHash: string,
 ): Promise<string[]> {
-  return api.get<string[]>(`${BASE}/share/download`, {
-    params: { shareCode, fileHash },
-  });
+  return api.get<string[]>(`/shares/${shareCode}/files/${fileHash}/chunks`);
 }
 
 /**
- * 登录用户分享获取解密信息（需要登录）
+ * 登录用户分享获取解密信息（需要登录）。
+ *
  * @param shareCode 分享码
  * @param fileHash 文件哈希
- * @returns 解密信息（包含初始密钥）
+ * @returns 解密信息
  */
 export async function shareGetDecryptInfo(
   shareCode: string,
   fileHash: string,
 ): Promise<FileDecryptInfoVO> {
-  return api.get<FileDecryptInfoVO>(`${BASE}/share/decryptInfo`, {
-    params: { shareCode, fileHash },
-  });
+  return api.get<FileDecryptInfoVO>(
+    `/shares/${shareCode}/files/${fileHash}/decrypt-info`,
+  );
 }
 
 /**
- * 登录用户通过分享码下载并解密文件（需要登录）
+ * 登录用户通过分享码下载并解密文件（需要登录）。
+ *
  * @param shareCode 分享码
  * @param fileHash 文件哈希
  * @returns 解密后的 Blob
@@ -326,12 +343,12 @@ export async function shareDownloadFile(
   );
 
   const decryptedData = await decryptFile(chunks, decryptInfo.initialKey);
-
   return arrayToBlob(decryptedData, decryptInfo.contentType);
 }
 
 /**
- * 根据分享类型选择下载方式
+ * 根据分享类型选择下载方式。
+ *
  * @param shareCode 分享码
  * @param fileHash 文件哈希
  * @param shareType 分享类型
@@ -344,18 +361,18 @@ export async function downloadSharedFile(
 ): Promise<Blob> {
   if (shareType === ShareType.PUBLIC) {
     return publicDownloadFile(shareCode, fileHash);
-  } else {
-    // 私密分享需要登录，通过分享码下载
-    return shareDownloadFile(shareCode, fileHash);
   }
+  return shareDownloadFile(shareCode, fileHash);
 }
 
 // ==================== 审计端点 ====================
 
 /**
- * 获取分享的访问日志
+ * 获取分享访问日志。
+ *
  * @param shareCode 分享码
  * @param params 分页参数
+ * @returns 访问日志分页
  */
 export async function getShareAccessLogs(
   shareCode: string,
@@ -370,8 +387,10 @@ export async function getShareAccessLogs(
 }
 
 /**
- * 获取分享的访问统计
+ * 获取分享访问统计。
+ *
  * @param shareCode 分享码
+ * @returns 统计数据
  */
 export async function getShareAccessStats(
   shareCode: string,
@@ -380,11 +399,11 @@ export async function getShareAccessStats(
 }
 
 /**
- * 获取文件的溯源信息
- * @param fileId 文件ID
+ * 获取文件溯源信息。
+ *
+ * @param fileId 文件 ID
+ * @returns 溯源信息
  */
-export async function getFileProvenance(
-  fileId: string,
-): Promise<FileProvenanceVO> {
+export async function getFileProvenance(fileId: string): Promise<FileProvenanceVO> {
   return api.get<FileProvenanceVO>(`${BASE}/${fileId}/provenance`);
 }

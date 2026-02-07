@@ -17,14 +17,19 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
 
 /**
- * 会话控制器
+ * 会话控制器。
  */
 @RestController
 @RequestMapping("/api/v1/conversations")
@@ -37,6 +42,14 @@ public class ConversationController {
     @Resource
     private MessageService messageService;
 
+    /**
+     * 获取会话列表。
+     *
+     * @param userId   当前用户 ID
+     * @param pageNum  页码
+     * @param pageSize 每页数量
+     * @return 会话分页
+     */
     @GetMapping
     @Operation(summary = "获取会话列表", description = "获取当前用户的所有会话（分页）")
     @OperationLog(module = "站内信", operationType = "查询", description = "获取会话列表")
@@ -49,6 +62,15 @@ public class ConversationController {
         return Result.success(result);
     }
 
+    /**
+     * 获取会话详情。
+     *
+     * @param userId   当前用户 ID
+     * @param id       会话外部 ID
+     * @param pageNum  消息页码
+     * @param pageSize 消息每页数量
+     * @return 会话详情
+     */
     @GetMapping("/{id}")
     @Operation(summary = "获取会话详情", description = "获取会话详情及消息列表")
     @OperationLog(module = "站内信", operationType = "查询", description = "获取会话详情")
@@ -67,6 +89,12 @@ public class ConversationController {
         return Result.success(result);
     }
 
+    /**
+     * 获取未读会话数量。
+     *
+     * @param userId 当前用户 ID
+     * @return 未读数量
+     */
     @GetMapping("/unread-count")
     @Operation(summary = "获取未读会话数")
     public Result<Map<String, Integer>> getUnreadCount(
@@ -75,10 +103,17 @@ public class ConversationController {
         return Result.success(Map.of("count", count));
     }
 
-    @PostMapping("/{id}/read")
-    @Operation(summary = "标记会话消息为已读")
-    @OperationLog(module = "站内信", operationType = "修改", description = "标记消息已读")
-    public Result<String> markAsRead(
+    /**
+     * 标记会话消息为已读（REST 新路径）。
+     *
+     * @param userId 当前用户 ID
+     * @param id     会话外部 ID
+     * @return 操作结果
+     */
+    @PutMapping("/{id}/read-status")
+    @Operation(summary = "标记会话消息为已读（REST）")
+    @OperationLog(module = "站内信", operationType = "修改", description = "标记消息已读（REST）")
+    public Result<String> updateReadStatus(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Parameter(description = "会话ID") @PathVariable String id) {
         Long conversationId;
@@ -91,6 +126,13 @@ public class ConversationController {
         return Result.success("已标记为已读");
     }
 
+    /**
+     * 删除会话。
+     *
+     * @param userId 当前用户 ID
+     * @param id     会话外部 ID
+     * @return 操作结果
+     */
     @DeleteMapping("/{id}")
     @Operation(summary = "删除会话")
     @OperationLog(module = "站内信", operationType = "删除", description = "删除会话")
@@ -105,15 +147,5 @@ public class ConversationController {
         }
         conversationService.deleteConversation(userId, conversationId);
         return Result.success("删除成功");
-    }
-
-    /**
-     * 兜底处理：避免路径被归一化后误匹配到 /{id}（例如 /conversations//read 可能变为 /conversations/read）。
-     *
-     * @return 404 Not Found
-     */
-    @GetMapping("/read")
-    public ResponseEntity<Void> readGetNotSupported() {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
     }
 }

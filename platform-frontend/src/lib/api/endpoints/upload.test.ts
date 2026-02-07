@@ -48,7 +48,7 @@ describe("upload endpoints", () => {
     const [, body] = clientMocks.api.post.mock.calls[0];
     const payload = paramsToObject(body as URLSearchParams);
     expect(clientMocks.api.post).toHaveBeenCalledWith(
-      "/files/upload/start",
+      "/upload-sessions",
       expect.any(URLSearchParams),
     );
     expect(payload).toEqual({
@@ -60,19 +60,17 @@ describe("upload endpoints", () => {
     });
   });
 
-  it("uploadChunk 应构建 FormData 并调用 upload", async () => {
-    clientMocks.api.upload.mockResolvedValue(undefined);
+  it("uploadChunk 应构建 FormData 并调用 PUT 新路径", async () => {
+    clientMocks.api.put.mockResolvedValue(undefined);
     const blob = new Blob(["abc"], { type: "text/plain" });
 
     await uploadApi.uploadChunk("client-1", 3, blob);
 
-    const [, formData] = clientMocks.api.upload.mock.calls[0];
-    expect(clientMocks.api.upload).toHaveBeenCalledWith(
-      "/files/upload/chunk",
+    const [, formData] = clientMocks.api.put.mock.calls[0];
+    expect(clientMocks.api.put).toHaveBeenCalledWith(
+      "/upload-sessions/client-1/chunks/3",
       expect.any(FormData),
     );
-    expect((formData as FormData).get("clientId")).toBe("client-1");
-    expect((formData as FormData).get("chunkNumber")).toBe("3");
     expect((formData as FormData).get("file")).toBeInstanceOf(Blob);
   });
 
@@ -80,8 +78,8 @@ describe("upload endpoints", () => {
     clientMocks.api.post
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce({ clientId: "client-1", processedChunks: [1] })
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ clientId: "client-1", processedChunks: [1] });
+    clientMocks.api.delete.mockResolvedValueOnce(undefined);
 
     await uploadApi.completeUpload("client-1");
     await uploadApi.pauseUpload("client-1");
@@ -90,27 +88,19 @@ describe("upload endpoints", () => {
 
     expect(clientMocks.api.post).toHaveBeenNthCalledWith(
       1,
-      "/files/upload/complete",
-      null,
-      { params: { clientId: "client-1" } },
+      "/upload-sessions/client-1/complete",
     );
     expect(clientMocks.api.post).toHaveBeenNthCalledWith(
       2,
-      "/files/upload/pause",
-      null,
-      { params: { clientId: "client-1" } },
+      "/upload-sessions/client-1/pause",
     );
     expect(clientMocks.api.post).toHaveBeenNthCalledWith(
       3,
-      "/files/upload/resume",
-      null,
-      { params: { clientId: "client-1" } },
+      "/upload-sessions/client-1/resume",
     );
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(
-      4,
-      "/files/upload/cancel",
-      null,
-      { params: { clientId: "client-1" } },
+    expect(clientMocks.api.delete).toHaveBeenNthCalledWith(
+      1,
+      "/upload-sessions/client-1",
     );
   });
 
@@ -122,11 +112,10 @@ describe("upload endpoints", () => {
     await uploadApi.checkUploadStatus("client-2");
     await uploadApi.getUploadProgress("client-2");
 
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(1, "/files/upload/check", {
-      params: { clientId: "client-2" },
-    });
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(2, "/files/upload/progress", {
-      params: { clientId: "client-2" },
-    });
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(1, "/upload-sessions/client-2");
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      2,
+      "/upload-sessions/client-2/progress",
+    );
   });
 });

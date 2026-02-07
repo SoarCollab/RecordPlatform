@@ -1,9 +1,11 @@
 package cn.flying.filter;
 
+import cn.flying.common.constant.ErrorPayload;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
+import cn.flying.common.util.ErrorPayloadFactory;
 import cn.flying.common.util.JwtUtils;
 import com.auth0.jwt.interfaces.DecodedJWT;
 import jakarta.annotation.Resource;
@@ -25,8 +27,6 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -137,12 +137,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType("application/json;charset=utf-8");
 
-            Map<String, Object> payload = new LinkedHashMap<>();
             String traceId = MDC.get(Const.TRACE_ID);
-            if (traceId != null && !traceId.isEmpty()) {
-                payload.put("traceId", traceId);
-            }
-            payload.put("detail", "令牌缺少租户信息");
+            ErrorPayload payload = ErrorPayloadFactory.of(traceId, "令牌缺少租户信息");
 
             PrintWriter writer = response.getWriter();
             writer.write(Result.error(ResultEnum.PERMISSION_UNAUTHORIZED, payload).toJson());
@@ -155,12 +151,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType("application/json;charset=utf-8");
 
-            Map<String, Object> payload = new LinkedHashMap<>();
             String traceId = MDC.get(Const.TRACE_ID);
-            if (traceId != null && !traceId.isEmpty()) {
-                payload.put("traceId", traceId);
-            }
-            payload.put("detail", "租户ID不匹配");
+            ErrorPayload payload = ErrorPayloadFactory.of(traceId, "租户ID不匹配");
 
             PrintWriter writer = response.getWriter();
             writer.write(Result.error(ResultEnum.PERMISSION_UNAUTHORIZED, payload).toJson());

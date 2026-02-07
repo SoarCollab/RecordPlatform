@@ -257,7 +257,7 @@ class FlowLimitingFilterTest {
             ReflectionTestUtils.setField(filter, "excludePatterns", List.of("/api/v1/public/**"));
             
             request.setMethod("GET");
-            request.setServletPath("/api/v1/public/download/file123");
+            request.setServletPath("/api/v1/public/shares/share123/files/file123/chunks");
             request.setRemoteAddr("192.168.1.1");
 
             filter.doFilter(request, response, filterChain);
@@ -271,7 +271,7 @@ class FlowLimitingFilterTest {
             ReflectionTestUtils.setField(filter, "excludePatterns", List.of("/api/v1/health/**"));
             
             request.setMethod("GET");
-            request.setServletPath("/api/v1/files/list");
+            request.setServletPath("/api/v1/files");
             request.setRemoteAddr("192.168.1.1");
             
             when(rateLimiter.tryAcquireWithBlock(anyString(), anyString(), anyInt(), anyInt(), anyInt()))

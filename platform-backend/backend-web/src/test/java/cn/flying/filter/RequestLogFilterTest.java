@@ -181,7 +181,7 @@ class RequestLogFilterTest {
         @Test
         @DisplayName("Should mask token parameter")
         void shouldMaskTokenParameter() throws ServletException, IOException {
-            request.setServletPath("/api/v1/auth/refresh");
+            request.setServletPath("/api/v1/auth/tokens/refresh");
             request.setMethod("POST");
             request.setParameter("token", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9");
 
@@ -205,7 +205,7 @@ class RequestLogFilterTest {
         @Test
         @DisplayName("Should mask new_password parameter")
         void shouldMaskNewPasswordParameter() throws ServletException, IOException {
-            request.setServletPath("/api/v1/users/change-password");
+            request.setServletPath("/api/v1/users/password");
             request.setMethod("POST");
             request.setParameter("old_password", "oldpass");
             request.setParameter("new_password", "newpass");
