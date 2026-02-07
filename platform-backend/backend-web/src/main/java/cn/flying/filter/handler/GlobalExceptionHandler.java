@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import java.io.IOException;
 import java.util.stream.Collectors;
@@ -55,6 +56,21 @@ public class GlobalExceptionHandler {
         String traceId = currentTraceId();
         String detail = "缺少参数: " + ex.getParameterName();
         log.warn("参数缺失(MissingServletRequestParameterException): detail={}, traceId={}", detail, traceId);
+        return Result.error(ResultEnum.PARAM_NOT_COMPLETE, withTrace(detail));
+    }
+
+    /**
+     * 处理 Multipart 请求中缺失分片参数（如缺少 file part）。
+     *
+     * @param ex 缺失分片异常
+     * @return 400 BAD_REQUEST 的统一错误响应
+     */
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<?> handleMissingServletRequestPartException(MissingServletRequestPartException ex) {
+        String traceId = currentTraceId();
+        String detail = "缺少分片参数: " + ex.getRequestPartName();
+        log.warn("参数缺失(MissingServletRequestPartException): detail={}, traceId={}", detail, traceId);
         return Result.error(ResultEnum.PARAM_NOT_COMPLETE, withTrace(detail));
     }
 

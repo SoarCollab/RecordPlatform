@@ -71,7 +71,7 @@ class FileShareE2ETest extends BaseControllerIntegrationTest {
             sharingVO.setExpireMinutes(60);
             sharingVO.setShareType(0);
 
-            MvcResult createResult = performPost(FILES_URL + "/share", sharingVO)
+            MvcResult createResult = performPost("/api/v1/shares", sharingVO)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data").isString())
@@ -104,7 +104,7 @@ class FileShareE2ETest extends BaseControllerIntegrationTest {
             sharingVO.setExpireMinutes(60);
             sharingVO.setShareType(0);
 
-            MvcResult createResult = performPost(FILES_URL + "/share", sharingVO)
+            MvcResult createResult = performPost("/api/v1/shares", sharingVO)
                     .andExpect(status().isOk())
                     .andReturn();
 
@@ -134,7 +134,7 @@ class FileShareE2ETest extends BaseControllerIntegrationTest {
             sharingVO.setExpireMinutes(60);
             sharingVO.setShareType(1);
 
-            MvcResult createResult = performPost(FILES_URL + "/share", sharingVO)
+            MvcResult createResult = performPost("/api/v1/shares", sharingVO)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data").isString())
@@ -160,7 +160,7 @@ class FileShareE2ETest extends BaseControllerIntegrationTest {
             sharingVO.setExpireMinutes(60);
             sharingVO.setShareType(0);
 
-            MvcResult createResult = performPost(FILES_URL + "/share", sharingVO)
+            MvcResult createResult = performPost("/api/v1/shares", sharingVO)
                     .andExpect(status().isOk())
                     .andReturn();
 
@@ -183,7 +183,7 @@ class FileShareE2ETest extends BaseControllerIntegrationTest {
             sharingVO.setExpireMinutes(10080);
             sharingVO.setShareType(0);
 
-            performPost(FILES_URL + "/share", sharingVO)
+            performPost("/api/v1/shares", sharingVO)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -203,7 +203,7 @@ class FileShareE2ETest extends BaseControllerIntegrationTest {
             sharingVO.setExpireMinutes(60);
             sharingVO.setShareType(0);
 
-            MvcResult createResult = performPost(FILES_URL + "/share", sharingVO)
+            MvcResult createResult = performPost("/api/v1/shares", sharingVO)
                     .andExpect(status().isOk())
                     .andReturn();
 
@@ -234,7 +234,7 @@ class FileShareE2ETest extends BaseControllerIntegrationTest {
             sharingVO.setExpireMinutes(60);
             sharingVO.setShareType(0);
 
-            MvcResult createResult = performPost(FILES_URL + "/share", sharingVO)
+            MvcResult createResult = performPost("/api/v1/shares", sharingVO)
                     .andExpect(status().isOk())
                     .andReturn();
 
@@ -267,7 +267,7 @@ class FileShareE2ETest extends BaseControllerIntegrationTest {
             sharingVO.setExpireMinutes(60);
             sharingVO.setShareType(0);
 
-            MvcResult createResult = performPost(FILES_URL + "/share", sharingVO)
+            MvcResult createResult = performPost("/api/v1/shares", sharingVO)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andReturn();
@@ -343,7 +343,7 @@ class FileShareE2ETest extends BaseControllerIntegrationTest {
             sharingVO.setExpireMinutes(60);
             sharingVO.setShareType(0);
 
-            MvcResult createResult = performPost(FILES_URL + "/share", sharingVO)
+            MvcResult createResult = performPost("/api/v1/shares", sharingVO)
                     .andExpect(status().isOk())
                     .andReturn();
 
@@ -373,7 +373,7 @@ class FileShareE2ETest extends BaseControllerIntegrationTest {
             sharingVO.setExpireMinutes(60);
             sharingVO.setShareType(0);
 
-            MvcResult result = performPost(FILES_URL + "/share", sharingVO)
+            MvcResult result = performPost("/api/v1/shares", sharingVO)
                     .andExpect(status().isOk())
                     .andReturn();
 
@@ -392,7 +392,7 @@ class FileShareE2ETest extends BaseControllerIntegrationTest {
             sharingVO.setExpireMinutes(60);
             sharingVO.setShareType(0);
 
-            MvcResult result = performPost(FILES_URL + "/share", sharingVO)
+            MvcResult result = performPost("/api/v1/shares", sharingVO)
                     .andExpect(status().isOk())
                     .andReturn();
 
@@ -409,7 +409,7 @@ class FileShareE2ETest extends BaseControllerIntegrationTest {
             sharingVO.setExpireMinutes(60);
             sharingVO.setShareType(0);
 
-            performPost(FILES_URL + "/share", sharingVO)
+            performPost("/api/v1/shares", sharingVO)
                     .andExpect(status().isBadRequest());
         }
 
@@ -447,7 +447,7 @@ class FileShareE2ETest extends BaseControllerIntegrationTest {
         sharingVO.setExpireMinutes(60);
         sharingVO.setShareType(0);
 
-        MvcResult result = performPost(FILES_URL + "/share", sharingVO)
+        MvcResult result = performPost("/api/v1/shares", sharingVO)
                 .andExpect(status().isOk())
                 .andReturn();
 

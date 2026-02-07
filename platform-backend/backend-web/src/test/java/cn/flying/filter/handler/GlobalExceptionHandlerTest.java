@@ -7,6 +7,7 @@ import cn.flying.common.exception.GeneralException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import java.util.Map;
 
@@ -38,5 +39,23 @@ class GlobalExceptionHandlerTest {
         assertInstanceOf(ErrorPayload.class, result.getData());
         ErrorPayload payload = (ErrorPayload) result.getData();
         assertEquals(data, payload.getDetail());
+    }
+
+    /**
+     * 验证 Multipart 缺失请求分片时会返回 400 对应的统一错误码与错误载荷。
+     */
+    @Test
+    @DisplayName("should return bad request result for missing multipart request part")
+    void shouldReturnBadRequestResultForMissingMultipartRequestPart() {
+        GlobalExceptionHandler handler = new GlobalExceptionHandler();
+
+        Result<?> result = handler.handleMissingServletRequestPartException(
+                new MissingServletRequestPartException("file"));
+
+        assertNotNull(result);
+        assertEquals(ResultEnum.PARAM_NOT_COMPLETE.getCode(), result.getCode());
+        assertInstanceOf(ErrorPayload.class, result.getData());
+        ErrorPayload payload = (ErrorPayload) result.getData();
+        assertEquals("缺少分片参数: file", payload.getDetail());
     }
 }

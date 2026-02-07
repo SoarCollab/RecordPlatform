@@ -30,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @TestPropertySource(properties = "test.context=FileUploadE2ETest")
 class FileUploadE2ETest extends BaseControllerIntegrationTest {
 
-    private static final String UPLOAD_URL = "/api/v1/files/upload";
+    private static final String UPLOAD_URL = "/api/v1/upload-sessions";
     private static final String FILES_URL = "/api/v1/files";
 
     @Autowired
@@ -55,7 +55,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
             byte[] content = "Hello, World!".getBytes();
             int fileSize = content.length;
 
-            MvcResult startResult = performPost(UPLOAD_URL + "/start?" +
+            MvcResult startResult = performPost(UPLOAD_URL + "?" +
                     "fileName=" + fileName + "&" +
                     "fileSize=" + fileSize + "&" +
                     "contentType=text/plain&" +
@@ -71,7 +71,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
 
             assertThat(clientId).isNotBlank();
 
-            MvcResult progressResult = performGet(UPLOAD_URL + "/progress?clientId=" + clientId)
+            MvcResult progressResult = performGet(UPLOAD_URL + "/" + clientId + "/progress")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andReturn();
@@ -88,7 +88,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
             String fileName = "test-resume-" + UUID.randomUUID() + ".txt";
             int fileSize = 1024;
 
-            performPost(UPLOAD_URL + "/start?" +
+            performPost(UPLOAD_URL + "?" +
                     "fileName=" + fileName + "&" +
                     "fileSize=" + fileSize + "&" +
                     "contentType=text/plain&" +
@@ -98,7 +98,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.data.clientId").value(clientId));
 
-            MvcResult resumeResult = performPost(UPLOAD_URL + "/start?" +
+            MvcResult resumeResult = performPost(UPLOAD_URL + "?" +
                     "fileName=" + fileName + "&" +
                     "fileSize=" + fileSize + "&" +
                     "contentType=text/plain&" +
@@ -120,7 +120,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
             String fileName = "test-pause-" + UUID.randomUUID() + ".txt";
             int fileSize = 2048;
 
-            MvcResult startResult = performPost(UPLOAD_URL + "/start?" +
+            MvcResult startResult = performPost(UPLOAD_URL + "?" +
                     "fileName=" + fileName + "&" +
                     "fileSize=" + fileSize + "&" +
                     "contentType=text/plain&" +
@@ -132,11 +132,11 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
             String clientId = objectMapper.readTree(startResult.getResponse().getContentAsString())
                     .get("data").get("clientId").asText();
 
-            performPost(UPLOAD_URL + "/pause?clientId=" + clientId, null)
+            performPost(UPLOAD_URL + "/" + clientId + "/pause", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
 
-            MvcResult pausedProgress = performGet(UPLOAD_URL + "/progress?clientId=" + clientId)
+            MvcResult pausedProgress = performGet(UPLOAD_URL + "/" + clientId + "/progress")
                     .andExpect(status().isOk())
                     .andReturn();
 
@@ -144,7 +144,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
                     .get("data");
             assertThat(progressData.get("status").asText()).isIn("paused", "pending", "uploading");
 
-            performPost(UPLOAD_URL + "/resume?clientId=" + clientId, null)
+            performPost(UPLOAD_URL + "/" + clientId + "/resume", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -155,7 +155,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
             String fileName = "test-cancel-" + UUID.randomUUID() + ".txt";
             int fileSize = 1024;
 
-            MvcResult startResult = performPost(UPLOAD_URL + "/start?" +
+            MvcResult startResult = performPost(UPLOAD_URL + "?" +
                     "fileName=" + fileName + "&" +
                     "fileSize=" + fileSize + "&" +
                     "contentType=text/plain&" +
@@ -167,7 +167,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
             String clientId = objectMapper.readTree(startResult.getResponse().getContentAsString())
                     .get("data").get("clientId").asText();
 
-            performPost(UPLOAD_URL + "/cancel?clientId=" + clientId, null)
+            performDelete(UPLOAD_URL + "/" + clientId)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -183,7 +183,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
             String clientId = UUID.randomUUID().toString();
             String fileName = "test-check-" + UUID.randomUUID() + ".txt";
 
-            performPost(UPLOAD_URL + "/start?" +
+            performPost(UPLOAD_URL + "?" +
                     "fileName=" + fileName + "&" +
                     "fileSize=1024&" +
                     "contentType=text/plain&" +
@@ -192,7 +192,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
                     "totalChunks=2", null)
                     .andExpect(status().isOk());
 
-            performGet(UPLOAD_URL + "/check?clientId=" + clientId)
+            performGet(UPLOAD_URL + "/" + clientId)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data").exists());
@@ -203,7 +203,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
         void shouldReturnErrorForNonExistentUpload() throws Exception {
             String fakeClientId = UUID.randomUUID().toString();
 
-            MvcResult result = performGet(UPLOAD_URL + "/check?clientId=" + fakeClientId)
+            MvcResult result = performGet(UPLOAD_URL + "/" + fakeClientId)
                     .andExpect(status().isOk())
                     .andReturn();
 
@@ -221,7 +221,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
         @Test
         @DisplayName("should reject file name with path traversal")
         void shouldRejectPathTraversal() throws Exception {
-            performPost(UPLOAD_URL + "/start?" +
+            performPost(UPLOAD_URL + "?" +
                     "fileName=../../../etc/passwd&" +
                     "fileSize=100&" +
                     "contentType=text/plain&" +
@@ -236,10 +236,12 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
             MockMultipartFile file = new MockMultipartFile(
                     "file", "test.txt", "text/plain", "test content".getBytes());
 
-            mockMvc.perform(multipart(UPLOAD_URL + "/chunk")
+            mockMvc.perform(multipart(UPLOAD_URL + "/" + UUID.randomUUID() + "/chunks/not-a-number")
                             .file(file)
-                            .param("clientId", UUID.randomUUID().toString())
-                            .param("chunkNumber", "-1")
+                            .with(request -> {
+                                request.setMethod("PUT");
+                                return request;
+                            })
                             .header("Authorization", "Bearer " + testToken)
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isBadRequest());
@@ -248,7 +250,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
         @Test
         @DisplayName("should reject empty file")
         void shouldRejectEmptyFile() throws Exception {
-            performPost(UPLOAD_URL + "/start?" +
+            performPost(UPLOAD_URL + "?" +
                     "fileName=empty.txt&" +
                     "fileSize=0&" +
                     "contentType=text/plain&" +
@@ -262,7 +264,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
         void shouldLimitFileSize() throws Exception {
             long oversizedFileSize = 5L * 1024 * 1024 * 1024;
             
-            performPost(UPLOAD_URL + "/start?" +
+            performPost(UPLOAD_URL + "?" +
                     "fileName=large.bin&" +
                     "fileSize=" + oversizedFileSize + "&" +
                     "contentType=application/octet-stream&" +
@@ -282,7 +284,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
             String user1ClientId = UUID.randomUUID().toString();
             String fileName = "shared-name-" + UUID.randomUUID() + ".txt";
 
-            performPost(UPLOAD_URL + "/start?" +
+            performPost(UPLOAD_URL + "?" +
                     "fileName=" + fileName + "&" +
                     "fileSize=1024&" +
                     "contentType=text/plain&" +
@@ -294,7 +296,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
             setTestUser(200L, 1L);
 
             String user2ClientId = UUID.randomUUID().toString();
-            performPost(UPLOAD_URL + "/start?" +
+            performPost(UPLOAD_URL + "?" +
                     "fileName=" + fileName + "&" +
                     "fileSize=1024&" +
                     "contentType=text/plain&" +
@@ -304,12 +306,12 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
                     .andExpect(status().isOk());
 
             setTestUser(100L, 1L);
-            performGet(UPLOAD_URL + "/progress?clientId=" + user1ClientId)
+            performGet(UPLOAD_URL + "/" + user1ClientId + "/progress")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
 
             setTestUser(200L, 1L);
-            performGet(UPLOAD_URL + "/progress?clientId=" + user2ClientId)
+            performGet(UPLOAD_URL + "/" + user2ClientId + "/progress")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -321,7 +323,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
             String fileName = "tenant-test-" + UUID.randomUUID() + ".txt";
 
             setTestUser(100L, 1L);
-            performPost(UPLOAD_URL + "/start?" +
+            performPost(UPLOAD_URL + "?" +
                     "fileName=" + fileName + "&" +
                     "fileSize=1024&" +
                     "contentType=text/plain&" +
@@ -331,7 +333,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
                     .andExpect(status().isOk());
 
             setTestUser(100L, 2L);
-            MvcResult result = performGet(UPLOAD_URL + "/progress?clientId=" + clientId)
+            MvcResult result = performGet(UPLOAD_URL + "/" + clientId + "/progress")
                     .andExpect(status().isOk())
                     .andReturn();
 
@@ -351,13 +353,13 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
         void shouldListUploadedFileAfterCompletion() throws Exception {
             File testFile = createTestFile();
 
-            MvcResult listResult = performGet(FILES_URL + "/list")
+            MvcResult listResult = performGet(FILES_URL + "?pageNum=1&pageSize=10")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andReturn();
 
             JsonNode files = objectMapper.readTree(listResult.getResponse().getContentAsString())
-                    .get("data");
+                    .get("data").get("records");
             assertThat(files.isArray()).isTrue();
 
             boolean found = false;
@@ -392,12 +394,12 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
 
-            MvcResult listResult = performGet(FILES_URL + "/list")
+            MvcResult listResult = performGet(FILES_URL + "?pageNum=1&pageSize=10")
                     .andExpect(status().isOk())
                     .andReturn();
 
             JsonNode files = objectMapper.readTree(listResult.getResponse().getContentAsString())
-                    .get("data");
+                    .get("data").get("records");
             for (JsonNode file : files) {
                 assertThat(file.get("fileHash").asText()).isNotEqualTo(testFile.getFileHash());
             }

@@ -387,7 +387,7 @@ class FriendFileShareControllerIntegrationTest extends BaseControllerIntegration
             FriendFileShare share = createFriendFileShare(friendAccount.getId(), testUserId, testTenantId,
                     "[\"" + fileHash + "\"]", FriendFileShare.STATUS_ACTIVE, 0);
 
-            performPost(BASE_URL + "/" + IdUtils.toExternalId(share.getId()) + "/read", null)
+            performPut(BASE_URL + "/" + IdUtils.toExternalId(share.getId()) + "/read-status", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -404,12 +404,12 @@ class FriendFileShareControllerIntegrationTest extends BaseControllerIntegration
             String externalId = IdUtils.toExternalId(share.getId());
 
             // First call
-            performPost(BASE_URL + "/" + externalId + "/read", null)
+            performPut(BASE_URL + "/" + externalId + "/read-status", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
 
             // Second call - should also succeed
-            performPost(BASE_URL + "/" + externalId + "/read", null)
+            performPut(BASE_URL + "/" + externalId + "/read-status", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -425,7 +425,7 @@ class FriendFileShareControllerIntegrationTest extends BaseControllerIntegration
             FriendFileShare share = createFriendFileShare(testUserId, friendAccount.getId(), testTenantId,
                     "[\"" + fileHash + "\"]", FriendFileShare.STATUS_ACTIVE, 0);
 
-            performPost(BASE_URL + "/" + IdUtils.toExternalId(share.getId()) + "/read", null)
+            performPut(BASE_URL + "/" + IdUtils.toExternalId(share.getId()) + "/read-status", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(60017)); // FRIEND_SHARE_UNAUTHORIZED
         }

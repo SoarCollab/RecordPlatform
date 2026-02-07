@@ -120,7 +120,7 @@ class ImageControllerIntegrationTest extends BaseControllerIntegrationTest {
                             .header("Authorization", "Bearer " + testToken)
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.code").value(500))
+                    .andExpect(jsonPath("$.code").value(40001))
                     .andExpect(jsonPath("$.message").value("图片文件过大，请上传小于100KB的图片！"));
         }
 

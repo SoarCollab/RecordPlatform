@@ -177,7 +177,7 @@ class TicketControllerIntegrationTest extends BaseControllerIntegrationTest {
         @Test
         @DisplayName("GET /admin/list - should require admin role")
         void shouldRequireAdminRole() throws Exception {
-            performGet(BASE_URL + "/admin/list?pageNum=1&pageSize=10")
+            performGet("/api/v1/admin/tickets?pageNum=1&pageSize=10")
                     .andExpect(status().isForbidden());
         }
 
@@ -186,7 +186,7 @@ class TicketControllerIntegrationTest extends BaseControllerIntegrationTest {
         void shouldReturnAllTicketsForAdmin() throws Exception {
             setTestAdmin(100L, 1L);
 
-            performGet(BASE_URL + "/admin/list?pageNum=1&pageSize=10")
+            performGet("/api/v1/admin/tickets?pageNum=1&pageSize=10")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data.records").isArray());
@@ -198,7 +198,7 @@ class TicketControllerIntegrationTest extends BaseControllerIntegrationTest {
             String externalId = IdUtils.toExternalId(testTicket.getId());
             String assigneeId = IdUtils.toExternalId(testUserId);
 
-            performPut(BASE_URL + "/admin/" + externalId + "/assign?assigneeId=" + assigneeId, null)
+            performPut("/api/v1/admin/tickets/" + externalId + "/assignee?assigneeId=" + assigneeId, null)
                     .andExpect(status().isForbidden());
         }
 
@@ -207,14 +207,14 @@ class TicketControllerIntegrationTest extends BaseControllerIntegrationTest {
         void updateStatusShouldRequireAdminRole() throws Exception {
             String externalId = IdUtils.toExternalId(testTicket.getId());
 
-            performPut(BASE_URL + "/admin/" + externalId + "/status?status=1", null)
+            performPut("/api/v1/admin/tickets/" + externalId + "/status?status=1", null)
                     .andExpect(status().isForbidden());
         }
 
         @Test
         @DisplayName("GET /admin/pending-count - should require admin role")
         void adminPendingCountShouldRequireAdminRole() throws Exception {
-            performGet(BASE_URL + "/admin/pending-count")
+            performGet("/api/v1/admin/tickets/pending-count")
                     .andExpect(status().isForbidden());
         }
     }

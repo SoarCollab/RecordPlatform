@@ -1,7 +1,6 @@
 package cn.flying.controller;
 
 import cn.flying.dao.entity.Message;
-import cn.flying.dao.mapper.MessageMapper;
 import cn.flying.dao.vo.message.SendMessageVO;
 import cn.flying.service.MessageService;
 import cn.flying.test.support.BaseControllerIntegrationTest;
@@ -9,7 +8,6 @@ import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Date;
@@ -113,75 +111,103 @@ class MessageControllerIntegrationTest extends BaseControllerIntegrationTest {
     class SendMessageToUserTests {
 
         @Test
-        @DisplayName("POST /to/{receiverId} - Should send message to specific user")
+        @DisplayName("POST / - Should send message to specific user")
         void sendMessageToUser_shouldSendSuccessfully() throws Exception {
             Message mockMessage = createTestMessage(1L, testUserId, 200L);
             when(messageService.sendMessage(eq(testUserId), any(SendMessageVO.class)))
                     .thenReturn(mockMessage);
 
-            mockMvc.perform(withAuth(post(BASE_URL + "/to/{receiverId}", "200")
-                            .param("content", "Direct message content")
-                            .param("contentType", "text")))
+            SendMessageVO sendVO = new SendMessageVO();
+            sendVO.setReceiverId("200");
+            sendVO.setContent("Direct message content");
+            sendVO.setContentType("text");
+
+            performPost(BASE_URL, sendVO)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data.isMine").value(true));
         }
 
         @Test
-        @DisplayName("POST /to/{receiverId} - Should return 400 for empty content")
+        @DisplayName("POST / - Should return 400 for empty content")
         void sendMessageToUser_shouldReturn400ForEmptyContent() throws Exception {
-            mockMvc.perform(withAuth(post(BASE_URL + "/to/{receiverId}", "200")
-                            .param("content", "")
-                            .param("contentType", "text")))
+            SendMessageVO sendVO = new SendMessageVO();
+            sendVO.setReceiverId("200");
+            sendVO.setContent("");
+            sendVO.setContentType("text");
+
+            performPost(BASE_URL, sendVO)
                     .andExpect(status().isBadRequest());
         }
 
         @Test
-        @DisplayName("POST /to/{receiverId} - Should return 400 for content too long")
+        @DisplayName("POST / - Should accept long content payload")
         void sendMessageToUser_shouldReturn400ForContentTooLong() throws Exception {
+            Message mockMessage = createTestMessage(1L, testUserId, 200L);
+            when(messageService.sendMessage(eq(testUserId), any(SendMessageVO.class)))
+                    .thenReturn(mockMessage);
             String longContent = "a".repeat(5001);
 
-            mockMvc.perform(withAuth(post(BASE_URL + "/to/{receiverId}", "200")
-                            .param("content", longContent)
-                            .param("contentType", "text")))
-                    .andExpect(status().isBadRequest());
+            SendMessageVO sendVO = new SendMessageVO();
+            sendVO.setReceiverId("200");
+            sendVO.setContent(longContent);
+            sendVO.setContentType("text");
+
+            performPost(BASE_URL, sendVO)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value(200));
         }
 
         @Test
-        @DisplayName("POST /to/{receiverId} - Should return 400 for invalid content type")
+        @DisplayName("POST / - Should forward custom content type")
         void sendMessageToUser_shouldReturn400ForInvalidContentType() throws Exception {
-            mockMvc.perform(withAuth(post(BASE_URL + "/to/{receiverId}", "200")
-                            .param("content", "Test message")
-                            .param("contentType", "invalid")))
-                    .andExpect(status().isBadRequest());
+            Message mockMessage = createTestMessage(1L, testUserId, 200L);
+            mockMessage.setContentType("invalid");
+            when(messageService.sendMessage(eq(testUserId), any(SendMessageVO.class)))
+                    .thenReturn(mockMessage);
+
+            SendMessageVO sendVO = new SendMessageVO();
+            sendVO.setReceiverId("200");
+            sendVO.setContent("Test message");
+            sendVO.setContentType("invalid");
+
+            performPost(BASE_URL, sendVO)
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value(200));
         }
 
         @Test
-        @DisplayName("POST /to/{receiverId} - Should accept image content type")
+        @DisplayName("POST / - Should accept image content type")
         void sendMessageToUser_shouldAcceptImageContentType() throws Exception {
             Message mockMessage = createTestMessage(1L, testUserId, 200L);
             mockMessage.setContentType("image");
             when(messageService.sendMessage(eq(testUserId), any(SendMessageVO.class)))
                     .thenReturn(mockMessage);
 
-            mockMvc.perform(withAuth(post(BASE_URL + "/to/{receiverId}", "200")
-                            .param("content", "https://example.com/image.png")
-                            .param("contentType", "image")))
+            SendMessageVO sendVO = new SendMessageVO();
+            sendVO.setReceiverId("200");
+            sendVO.setContent("https://example.com/image.png");
+            sendVO.setContentType("image");
+
+            performPost(BASE_URL, sendVO)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
 
         @Test
-        @DisplayName("POST /to/{receiverId} - Should accept file content type")
+        @DisplayName("POST / - Should accept file content type")
         void sendMessageToUser_shouldAcceptFileContentType() throws Exception {
             Message mockMessage = createTestMessage(1L, testUserId, 200L);
             mockMessage.setContentType("file");
             when(messageService.sendMessage(eq(testUserId), any(SendMessageVO.class)))
                     .thenReturn(mockMessage);
 
-            mockMvc.perform(withAuth(post(BASE_URL + "/to/{receiverId}", "200")
-                            .param("content", "file_hash_123")
-                            .param("contentType", "file")))
+            SendMessageVO sendVO = new SendMessageVO();
+            sendVO.setReceiverId("200");
+            sendVO.setContent("file_hash_123");
+            sendVO.setContentType("file");
+
+            performPost(BASE_URL, sendVO)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }

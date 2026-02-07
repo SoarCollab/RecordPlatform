@@ -250,7 +250,7 @@ class ConversationControllerIntegrationTest extends BaseControllerIntegrationTes
     }
 
     @Nested
-    @DisplayName("POST /{id}/read - Mark As Read")
+    @DisplayName("PUT /{id}/read-status - Mark As Read")
     class MarkAsReadTests {
 
         @Test
@@ -260,7 +260,7 @@ class ConversationControllerIntegrationTest extends BaseControllerIntegrationTes
             createMessage(conversation.getId(), otherAccount.getId(), testUserId,
                     testTenantId, "Unread message", 0);
 
-            performPost(BASE_URL + "/" + IdUtils.toExternalId(conversation.getId()) + "/read", null)
+            performPut(BASE_URL + "/" + IdUtils.toExternalId(conversation.getId()) + "/read-status", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data").value("已标记为已读"));
@@ -275,12 +275,12 @@ class ConversationControllerIntegrationTest extends BaseControllerIntegrationTes
             String externalId = IdUtils.toExternalId(conversation.getId());
 
             // First call
-            performPost(BASE_URL + "/" + externalId + "/read", null)
+            performPut(BASE_URL + "/" + externalId + "/read-status", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
 
             // Second call - should also succeed
-            performPost(BASE_URL + "/" + externalId + "/read", null)
+            performPut(BASE_URL + "/" + externalId + "/read-status", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -291,7 +291,7 @@ class ConversationControllerIntegrationTest extends BaseControllerIntegrationTes
             Account thirdUser = createTestAccount(300L, testTenantId, "thirduser");
             Conversation conversation = createConversation(otherAccount.getId(), thirdUser.getId(), testTenantId);
 
-            performPost(BASE_URL + "/" + IdUtils.toExternalId(conversation.getId()) + "/read", null)
+            performPut(BASE_URL + "/" + IdUtils.toExternalId(conversation.getId()) + "/read-status", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(60002)); // CONVERSATION_NOT_FOUND (security: hide existence)
         }
@@ -382,8 +382,9 @@ class ConversationControllerIntegrationTest extends BaseControllerIntegrationTes
         @Test
         @DisplayName("should handle empty ID")
         void shouldHandleEmptyId() throws Exception {
-            mockMvc.perform(withAuth(get(BASE_URL + "//read")))
-                    .andExpect(status().isNotFound());
+            mockMvc.perform(withAuth(put(BASE_URL + "//read-status")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value(60002));
         }
     }
 

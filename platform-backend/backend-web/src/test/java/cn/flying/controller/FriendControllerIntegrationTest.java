@@ -136,23 +136,23 @@ class FriendControllerIntegrationTest extends BaseControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("POST /requests/{requestId}/accept - should accept friend request")
+        @DisplayName("PUT /requests/{requestId}/status?status=accept - should accept friend request")
         void shouldAcceptFriendRequest() throws Exception {
             FriendRequest request = createFriendRequest(friendAccount.getId(), testUserId, testTenantId, 0);
             String externalId = IdUtils.toExternalId(request.getId());
 
-            performPost(BASE_URL + "/requests/" + externalId + "/accept", null)
+            performPut(BASE_URL + "/requests/" + externalId + "/status?status=accept", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
 
         @Test
-        @DisplayName("POST /requests/{requestId}/reject - should reject friend request")
+        @DisplayName("PUT /requests/{requestId}/status?status=reject - should reject friend request")
         void shouldRejectFriendRequest() throws Exception {
             FriendRequest request = createFriendRequest(friendAccount.getId(), testUserId, testTenantId, 0);
             String externalId = IdUtils.toExternalId(request.getId());
 
-            performPost(BASE_URL + "/requests/" + externalId + "/reject", null)
+            performPut(BASE_URL + "/requests/" + externalId + "/status?status=reject", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }

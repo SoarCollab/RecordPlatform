@@ -370,7 +370,7 @@ class PermissionControllerIntegrationTest extends BaseControllerIntegrationTest 
             Map<String, Object> vo = new HashMap<>();
             vo.put("permissionCode", "grant:test");
 
-            performPost(BASE_URL + "/roles/user/grant", vo)
+            performPost("/api/v1/system/roles/user/permissions", vo)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data").value("授权成功"));
@@ -382,9 +382,9 @@ class PermissionControllerIntegrationTest extends BaseControllerIntegrationTest 
             Map<String, Object> vo = new HashMap<>();
             vo.put("permissionCode", "nonexistent:perm");
 
-            performPost(BASE_URL + "/roles/user/grant", vo)
+            performPost("/api/v1/system/roles/user/permissions", vo)
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.code").value(500)); // error
+                    .andExpect(jsonPath("$.code").value(50001)); // RESULT_DATA_NONE
         }
 
         @Test
@@ -404,9 +404,9 @@ class PermissionControllerIntegrationTest extends BaseControllerIntegrationTest 
             Map<String, Object> vo = new HashMap<>();
             vo.put("permissionCode", "duplicate:grant");
 
-            performPost(BASE_URL + "/roles/user/grant", vo)
+            performPost("/api/v1/system/roles/user/permissions", vo)
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.code").value(500));
+                    .andExpect(jsonPath("$.code").value(50003)); // DATA_ALREADY_EXISTED
         }
     }
 
@@ -427,7 +427,7 @@ class PermissionControllerIntegrationTest extends BaseControllerIntegrationTest 
             mapping.setCreateTime(new Date());
             rolePermissionMapper.insert(mapping);
 
-            performDelete(BASE_URL + "/roles/user/revoke?permissionCode=revoke:test")
+            performDelete("/api/v1/system/roles/user/permissions/revoke:test")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data").value("撤销成功"));
@@ -436,9 +436,9 @@ class PermissionControllerIntegrationTest extends BaseControllerIntegrationTest 
         @Test
         @DisplayName("should fail for non-existent permission code")
         void shouldFailForNonExistentPermissionCode() throws Exception {
-            performDelete(BASE_URL + "/roles/user/revoke?permissionCode=nonexistent:perm")
+            performDelete("/api/v1/system/roles/user/permissions/nonexistent:perm")
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.code").value(500));
+                    .andExpect(jsonPath("$.code").value(50001)); // RESULT_DATA_NONE
         }
     }
 

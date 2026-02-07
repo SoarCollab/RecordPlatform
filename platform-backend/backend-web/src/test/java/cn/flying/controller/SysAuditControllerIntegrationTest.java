@@ -184,7 +184,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
     }
 
     @Nested
-    @DisplayName("GET /logs/page - Get Audit Logs")
+    @DisplayName("GET /logs - Get Audit Logs")
     class GetAuditLogsTests {
 
         @Test
@@ -193,7 +193,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
             createTestLog(testUserId, "testuser", "file", "查询", 0);
             createTestLog(testUserId, "testuser", "file", "上传", 0);
 
-            performGet(BASE_URL + "/logs/page?pageNum=1&pageSize=20")
+            performGet(BASE_URL + "/logs?pageNum=1&pageSize=20")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data.records").isArray());
@@ -205,7 +205,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
             createTestLog(testUserId, "targetuser", "file", "查询", 0);
             createTestLog(200L, "otheruser", "file", "查询", 0);
 
-            performGet(BASE_URL + "/logs/page?pageNum=1&pageSize=20&username=targetuser")
+            performGet(BASE_URL + "/logs?pageNum=1&pageSize=20&username=targetuser")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -216,7 +216,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
             createTestLog(testUserId, "testuser", "file", "查询", 0);
             createTestLog(testUserId, "testuser", "ticket", "查询", 0);
 
-            performGet(BASE_URL + "/logs/page?pageNum=1&pageSize=20&module=file")
+            performGet(BASE_URL + "/logs?pageNum=1&pageSize=20&module=file")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -227,7 +227,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
             createTestLog(testUserId, "testuser", "file", "查询", 0);
             createTestLog(testUserId, "testuser", "file", "上传", 1);
 
-            performGet(BASE_URL + "/logs/page?pageNum=1&pageSize=20&status=0")
+            performGet(BASE_URL + "/logs?pageNum=1&pageSize=20&status=0")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -238,7 +238,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
             createTestLog(testUserId, "testuser", "file", "查询", 0);
             createTestLog(testUserId, "testuser", "file", "上传", 0);
 
-            performGet(BASE_URL + "/logs/page?pageNum=1&pageSize=20&operationType=查询")
+            performGet(BASE_URL + "/logs?pageNum=1&pageSize=20&operationType=查询")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -248,7 +248,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
         void shouldHandleTimeRangeFilter() throws Exception {
             createTestLog(testUserId, "testuser", "file", "查询", 0);
 
-            performGet(BASE_URL + "/logs/page?pageNum=1&pageSize=20&startTime=2020-01-01 00:00:00&endTime=2030-12-31 23:59:59")
+            performGet(BASE_URL + "/logs?pageNum=1&pageSize=20&startTime=2020-01-01 00:00:00&endTime=2030-12-31 23:59:59")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -428,13 +428,13 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
     }
 
     @Nested
-    @DisplayName("GET /check-anomalies - Check Anomalies")
+    @DisplayName("POST /anomalies/check - Check Anomalies")
     class CheckAnomaliesTests {
 
         @Test
         @DisplayName("should check anomalies")
         void shouldCheckAnomalies() throws Exception {
-            performGet(BASE_URL + "/check-anomalies")
+            performPost(BASE_URL + "/anomalies/check", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data").isMap());
@@ -442,13 +442,13 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
     }
 
     @Nested
-    @DisplayName("POST /backup-logs - Backup Logs")
+    @DisplayName("POST /logs/backups - Backup Logs")
     class BackupLogsTests {
 
         @Test
         @DisplayName("should backup logs with default parameters")
         void shouldBackupLogsWithDefaultParameters() throws Exception {
-            performPost(BASE_URL + "/backup-logs?days=180&deleteAfterBackup=false", null)
+            performPost(BASE_URL + "/logs/backups?days=180&deleteAfterBackup=false", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -456,7 +456,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
         @Test
         @DisplayName("should backup logs with custom days")
         void shouldBackupLogsWithCustomDays() throws Exception {
-            performPost(BASE_URL + "/backup-logs?days=30&deleteAfterBackup=false", null)
+            performPost(BASE_URL + "/logs/backups?days=30&deleteAfterBackup=false", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }

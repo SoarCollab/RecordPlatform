@@ -92,10 +92,10 @@ class FileControllerIntegrationTest extends BaseControllerIntegrationTest {
         @Test
         @DisplayName("should return user files list")
         void shouldReturnUserFilesList() throws Exception {
-            performGet(BASE_URL + "/list")
+            performGet(BASE_URL + "?pageNum=1&pageSize=10")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
-                    .andExpect(jsonPath("$.data").isArray());
+                    .andExpect(jsonPath("$.data.records").isArray());
         }
 
         @Test
@@ -103,12 +103,12 @@ class FileControllerIntegrationTest extends BaseControllerIntegrationTest {
         void shouldOnlyReturnFilesOwnedByCurrentUser() throws Exception {
             File otherUserFile = createTestFile(999L, testTenantId);
 
-            MvcResult result = performGet(BASE_URL + "/list")
+            MvcResult result = performGet(BASE_URL + "?pageNum=1&pageSize=10")
                     .andExpect(status().isOk())
                     .andReturn();
 
             String content = result.getResponse().getContentAsString();
-            JsonNode data = objectMapper.readTree(content).get("data");
+            JsonNode data = objectMapper.readTree(content).get("data").get("records");
 
             assertThat(data.isArray()).isTrue();
             for (JsonNode fileNode : data) {
@@ -125,7 +125,7 @@ class FileControllerIntegrationTest extends BaseControllerIntegrationTest {
         @Test
         @DisplayName("should return paginated files")
         void shouldReturnPaginatedFiles() throws Exception {
-            performGet(BASE_URL + "/page?pageNum=1&pageSize=10")
+            performGet(BASE_URL + "?pageNum=1&pageSize=10")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data.records").isArray());
@@ -179,7 +179,7 @@ class FileControllerIntegrationTest extends BaseControllerIntegrationTest {
             sharingVO.setExpireMinutes(60);
             sharingVO.setShareType(0);
 
-            MvcResult result = performPost(BASE_URL + "/share", sharingVO)
+            MvcResult result = performPost("/api/v1/shares", sharingVO)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data").isString())
@@ -198,7 +198,7 @@ class FileControllerIntegrationTest extends BaseControllerIntegrationTest {
             sharingVO.setExpireMinutes(120);
             sharingVO.setShareType(1);
 
-            performPost(BASE_URL + "/share", sharingVO)
+            performPost("/api/v1/shares", sharingVO)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data").isString());
@@ -217,7 +217,7 @@ class FileControllerIntegrationTest extends BaseControllerIntegrationTest {
             sharingVO.setExpireMinutes(60);
             sharingVO.setShareType(0);
 
-            MvcResult createResult = performPost(BASE_URL + "/share", sharingVO)
+            MvcResult createResult = performPost("/api/v1/shares", sharingVO)
                     .andExpect(status().isOk())
                     .andReturn();
 
@@ -276,7 +276,7 @@ class FileControllerIntegrationTest extends BaseControllerIntegrationTest {
             sharingVO.setExpireMinutes(60);
             sharingVO.setShareType(0);
 
-            MvcResult createResult = performPost(BASE_URL + "/share", sharingVO)
+            MvcResult createResult = performPost("/api/v1/shares", sharingVO)
                     .andExpect(status().isOk())
                     .andReturn();
 
@@ -297,12 +297,12 @@ class FileControllerIntegrationTest extends BaseControllerIntegrationTest {
         void shouldNotAccessFilesFromDifferentTenant() throws Exception {
             File otherTenantFile = createTestFile(testUserId, 999L);
 
-            MvcResult result = performGet(BASE_URL + "/list")
+            MvcResult result = performGet(BASE_URL + "?pageNum=1&pageSize=10")
                     .andExpect(status().isOk())
                     .andReturn();
 
             String content = result.getResponse().getContentAsString();
-            JsonNode data = objectMapper.readTree(content).get("data");
+            JsonNode data = objectMapper.readTree(content).get("data").get("records");
             
             for (JsonNode fileNode : data) {
                 String fileHash = fileNode.get("fileHash").asText();

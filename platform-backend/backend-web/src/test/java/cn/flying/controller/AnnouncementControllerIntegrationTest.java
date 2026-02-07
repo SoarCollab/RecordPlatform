@@ -125,7 +125,7 @@ class AnnouncementControllerIntegrationTest extends BaseControllerIntegrationTes
         void shouldMarkAsRead() throws Exception {
             String externalId = IdUtils.toExternalId(testAnnouncement.getId());
 
-            performPost(BASE_URL + "/" + externalId + "/read", null)
+            performPut(BASE_URL + "/" + externalId + "/read-status", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -133,7 +133,7 @@ class AnnouncementControllerIntegrationTest extends BaseControllerIntegrationTes
         @Test
         @DisplayName("POST /read-all - should mark all as read")
         void shouldMarkAllAsRead() throws Exception {
-            performPost(BASE_URL + "/read-all", null)
+            performPut(BASE_URL + "/read-status", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -146,7 +146,7 @@ class AnnouncementControllerIntegrationTest extends BaseControllerIntegrationTes
         @Test
         @DisplayName("GET /admin/list - should require admin role")
         void shouldRequireAdminRole() throws Exception {
-            performGet(BASE_URL + "/admin/list?pageNum=1&pageSize=10")
+            performGet("/api/v1/admin/announcements?pageNum=1&pageSize=10")
                     .andExpect(status().isForbidden());
         }
 
@@ -155,7 +155,7 @@ class AnnouncementControllerIntegrationTest extends BaseControllerIntegrationTes
         void shouldReturnListForAdmin() throws Exception {
             setTestAdmin(100L, 1L);
 
-            performGet(BASE_URL + "/admin/list?pageNum=1&pageSize=10")
+            performGet("/api/v1/admin/announcements?pageNum=1&pageSize=10")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data.records").isArray());
