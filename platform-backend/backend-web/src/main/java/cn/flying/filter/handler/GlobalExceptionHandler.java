@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import java.io.IOException;
@@ -71,6 +72,21 @@ public class GlobalExceptionHandler {
         String traceId = currentTraceId();
         String detail = "缺少分片参数: " + ex.getRequestPartName();
         log.warn("参数缺失(MissingServletRequestPartException): detail={}, traceId={}", detail, traceId);
+        return Result.error(ResultEnum.PARAM_NOT_COMPLETE, withTrace(detail));
+    }
+
+    /**
+     * 处理非 multipart/form-data 的分片上传请求（如 Content-Type 不正确导致的 MultipartException）。
+     *
+     * @param ex multipart 解析异常
+     * @return 400 BAD_REQUEST 的统一错误响应
+     */
+    @ExceptionHandler(MultipartException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<?> handleMultipartException(MultipartException ex) {
+        String traceId = currentTraceId();
+        String detail = "请求必须是 multipart/form-data";
+        log.warn("请求格式错误(MultipartException): detail={}, error={}, traceId={}", detail, ex.getMessage(), traceId);
         return Result.error(ResultEnum.PARAM_NOT_COMPLETE, withTrace(detail));
     }
 

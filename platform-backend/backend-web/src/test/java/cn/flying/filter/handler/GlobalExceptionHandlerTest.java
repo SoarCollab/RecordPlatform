@@ -7,6 +7,7 @@ import cn.flying.common.exception.GeneralException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import java.util.Map;
@@ -57,5 +58,23 @@ class GlobalExceptionHandlerTest {
         assertInstanceOf(ErrorPayload.class, result.getData());
         ErrorPayload payload = (ErrorPayload) result.getData();
         assertEquals("缺少分片参数: file", payload.getDetail());
+    }
+
+    /**
+     * 验证 Multipart 请求类型错误时会返回 400，并使用稳定的错误细节文本。
+     */
+    @Test
+    @DisplayName("should return bad request result for invalid multipart request")
+    void shouldReturnBadRequestResultForInvalidMultipartRequest() {
+        GlobalExceptionHandler handler = new GlobalExceptionHandler();
+
+        Result<?> result = handler.handleMultipartException(
+                new MultipartException("Current request is not a multipart request"));
+
+        assertNotNull(result);
+        assertEquals(ResultEnum.PARAM_NOT_COMPLETE.getCode(), result.getCode());
+        assertInstanceOf(ErrorPayload.class, result.getData());
+        ErrorPayload payload = (ErrorPayload) result.getData();
+        assertEquals("请求必须是 multipart/form-data", payload.getDetail());
     }
 }

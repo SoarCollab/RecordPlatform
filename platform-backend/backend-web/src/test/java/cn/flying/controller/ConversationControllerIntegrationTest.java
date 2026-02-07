@@ -379,12 +379,14 @@ class ConversationControllerIntegrationTest extends BaseControllerIntegrationTes
                     .andExpect(jsonPath("$.code").value(60002)); // CONVERSATION_NOT_FOUND (invalid ID parsed as non-existent)
         }
 
+        /**
+         * 验证空路径段请求由路由层拦截并返回 405。
+         */
         @Test
-        @DisplayName("should handle empty ID")
-        void shouldHandleEmptyId() throws Exception {
+        @DisplayName("should return 405 for empty path segment")
+        void shouldReturn405ForEmptyPathSegment() throws Exception {
             mockMvc.perform(withAuth(put(BASE_URL + "//read-status")))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.code").value(60002));
+                    .andExpect(status().isMethodNotAllowed());
         }
     }
 
