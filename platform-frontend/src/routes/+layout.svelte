@@ -49,8 +49,11 @@
         case "message-received":
           notifications.info("新消息", "您收到一条新消息");
           break;
-        case "file-processed":
-          notifications.success("文件处理完成", "您的文件已完成存证");
+        case "file-record-success":
+          notifications.success("文件存证成功", "您的文件已完成存证");
+          break;
+        case "file-record-failed":
+          notifications.error("文件存证失败", "文件存证过程中出错");
           break;
       }
     });

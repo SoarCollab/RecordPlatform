@@ -27,7 +27,8 @@ public interface ShareAccessLogMapper extends BaseMapper<ShareAccessLog> {
      * @param tenantId 租户ID
      * @return 访问日志列表
      */
-    @Select("SELECT * FROM share_access_log WHERE share_code = #{shareCode} AND tenant_id = #{tenantId} ORDER BY access_time DESC")
+    @Select("SELECT id, tenant_id, share_code, share_owner_id, action_type, actor_user_id, actor_ip, actor_ua, file_hash, file_name, access_time " +
+            "FROM share_access_log WHERE share_code = #{shareCode} AND tenant_id = #{tenantId} ORDER BY access_time DESC")
     List<ShareAccessLog> selectByShareCode(@Param("shareCode") String shareCode, @Param("tenantId") Long tenantId);
 
     /**
@@ -37,7 +38,8 @@ public interface ShareAccessLogMapper extends BaseMapper<ShareAccessLog> {
      * @param tenantId 租户ID
      * @return 访问日志列表
      */
-    @Select("SELECT * FROM share_access_log WHERE share_owner_id = #{shareOwnerId} AND tenant_id = #{tenantId} ORDER BY access_time DESC")
+    @Select("SELECT id, tenant_id, share_code, share_owner_id, action_type, actor_user_id, actor_ip, actor_ua, file_hash, file_name, access_time " +
+            "FROM share_access_log WHERE share_owner_id = #{shareOwnerId} AND tenant_id = #{tenantId} ORDER BY access_time DESC")
     List<ShareAccessLog> selectByShareOwnerId(@Param("shareOwnerId") Long shareOwnerId, @Param("tenantId") Long tenantId);
 
     /**
@@ -68,7 +70,8 @@ public interface ShareAccessLogMapper extends BaseMapper<ShareAccessLog> {
      * @param tenantId 租户ID
      * @return 操作日志列表
      */
-    @Select("SELECT * FROM share_access_log WHERE actor_user_id = #{actorUserId} AND tenant_id = #{tenantId} ORDER BY access_time DESC")
+    @Select("SELECT id, tenant_id, share_code, share_owner_id, action_type, actor_user_id, actor_ip, actor_ua, file_hash, file_name, access_time " +
+            "FROM share_access_log WHERE actor_user_id = #{actorUserId} AND tenant_id = #{tenantId} ORDER BY access_time DESC")
     List<ShareAccessLog> selectByActorUserId(@Param("actorUserId") Long actorUserId, @Param("tenantId") Long tenantId);
 
     /**

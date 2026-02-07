@@ -2034,15 +2034,24 @@ Establish SSE connection for real-time updates.
 GET /api/v1/sse/connect
 ```
 
-**Authentication**: Bearer Token
+**Authentication**: Short-lived SSE token in query param (`token`), obtained via `POST /api/v1/auth/sse-token` with Bearer JWT.
 
 **Response**: `text/event-stream`
 
 **Event Types**:
 
-- `message` - New private message
-- `announcement` - New announcement
-- `ticket` - Ticket update
+- `connected` - Connection established
+- `heartbeat` - Keepalive heartbeat
+- `message-received` - New private message
+- `file-record-success` - File attestation succeeded
+- `file-record-failed` - File attestation failed
+- `announcement-published` - New announcement
+- `ticket-updated` - Ticket update
+- `badge-update` - Badge count update
+- `friend-request` - New friend request
+- `friend-accepted` - Friend request accepted
+- `friend-share` - Friend share notification
+- `audit-alert` - Audit anomaly alert
 
 ---
 
@@ -2687,7 +2696,63 @@ Returns the health status of all system components including database, Redis, bl
 
 ---
 
-### 14.4 Get Monitor Metrics (Aggregated)
+### 14.4 Get Storage Capacity
+
+```
+GET /api/v1/system/storage-capacity
+```
+
+Returns storage capacity aggregation for cluster, nodes, and fault domains.
+
+**Response Example**:
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "totalCapacityBytes": 4398046511104,
+    "usedCapacityBytes": 1099511627776,
+    "availableCapacityBytes": 3298534883328,
+    "degraded": false,
+    "source": "prometheus",
+    "nodes": [
+      {
+        "nodeName": "node-a1",
+        "faultDomain": "domain-a",
+        "online": true,
+        "totalCapacityBytes": 1099511627776,
+        "usedCapacityBytes": 274877906944,
+        "usagePercent": 25.0
+      }
+    ],
+    "domains": [
+      {
+        "domainName": "domain-a",
+        "nodeCount": 1,
+        "onlineNodeCount": 1,
+        "totalCapacityBytes": 1099511627776,
+        "usedCapacityBytes": 274877906944,
+        "usagePercent": 25.0
+      }
+    ]
+  }
+}
+```
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| totalCapacityBytes | long | Cluster total capacity (bytes) |
+| usedCapacityBytes | long | Cluster used capacity (bytes) |
+| availableCapacityBytes | long | Cluster available capacity (bytes) |
+| degraded | boolean | True when partial metrics/fallback semantics are in effect |
+| source | string | Data source marker (`prometheus`, `prometheus-partial`, `fallback-estimate`) |
+| nodes | array | Node-level capacity details |
+| domains | array | Fault-domain-level capacity details |
+
+---
+
+### 14.5 Get Monitor Metrics (Aggregated)
 
 ```
 GET /api/v1/system/monitor
@@ -2849,6 +2914,7 @@ Returns aggregated monitoring metrics combining system stats, chain status, and 
 - `GET /api/v1/system/stats`
 - `GET /api/v1/system/chain-status`
 - `GET /api/v1/system/health`
+- `GET /api/v1/system/storage-capacity`
 - `GET /api/v1/system/monitor`
 - `GET /api/v1/system/audit/overview`
 - `GET /api/v1/system/audit/logs/page`
@@ -2876,8 +2942,11 @@ Current event types include:
 - `connected`
 - `heartbeat`
 - `message-received`
+- `file-record-success`
+- `file-record-failed`
 - `announcement-published`
 - `ticket-updated`
+- `badge-update`
 - `friend-request`
 - `friend-accepted`
 - `friend-share`

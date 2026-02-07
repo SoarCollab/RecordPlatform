@@ -32,7 +32,8 @@ public interface FriendshipMapper extends BaseMapper<Friendship> {
      * 根据两个用户查询好友关系
      */
     @Select("""
-        SELECT * FROM friendship
+        SELECT id, tenant_id, user_a, user_b, request_id, remark_a, remark_b, create_time, deleted
+        FROM friendship
         WHERE user_a = #{userA}
           AND user_b = #{userB}
           AND deleted = 0

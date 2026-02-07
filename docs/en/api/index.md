@@ -242,6 +242,7 @@ Based on `SecurityConfiguration`:
 | GET | `/api/v1/system/stats` | System statistics |
 | GET | `/api/v1/system/chain-status` | Blockchain status |
 | GET | `/api/v1/system/health` | System health |
+| GET | `/api/v1/system/storage-capacity` | Storage capacity aggregation (cluster/node/domain) |
 | GET | `/api/v1/system/monitor` | Aggregated monitoring metrics |
 
 ### System Audit (`/api/v1/system/audit`)
@@ -282,6 +283,8 @@ Typical event types:
 - `connected`
 - `heartbeat`
 - `message-received`
+- `file-record-success`
+- `file-record-failed`
 - `announcement-published`
 - `ticket-updated`
 - `friend-request`

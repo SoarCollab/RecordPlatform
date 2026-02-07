@@ -452,7 +452,8 @@ flowchart LR
 | `connected` | `{ connectionId }` | Initial connection confirmation |
 | `notification` | `{ title, content }` | General notification |
 | `message-received` | `{ conversationId, preview }` | New message in conversation |
-| `file-processed` | `{ fileId, status }` | File upload/processing complete |
+| `file-record-success` | `{ fileName, fileHash, status }` | File attestation success notification |
+| `file-record-failed` | `{ fileName, status, reason }` | File attestation failure notification |
 | `announcement-published` | `{ id, title }` | System announcement |
 | `ticket-updated` | `{ ticketId, status }` | Ticket status change |
 | `badge-update` | `{ unreadMessages, tickets }` | UI badge count update |
@@ -469,6 +470,20 @@ SSE connections use a short-lived one-time token:
 2. Connect via `GET /api/v1/sse/connect?token={sseToken}&connectionId={optional}`
 
 > `GET /api/v1/sse/connect` is publicly exposed in Spring Security but still requires valid short-lived token authentication.
+
+### Monitoring Capacity Semantics
+
+System monitoring now includes:
+
+- `GET /api/v1/system/storage-capacity`
+
+Response shape includes:
+
+- Cluster totals: `totalCapacityBytes`, `usedCapacityBytes`, `availableCapacityBytes`
+- Data quality flags: `degraded`, `source`
+- Detailed aggregates: `nodes[]`, `domains[]`
+
+`GET /api/v1/system/stats` now uses this capacity result for `totalStorage`. Only when Dubbo capacity RPC fails does it fall back to `totalFiles * 1MB`, logging marker `MONITOR_STORAGE_CAPACITY_FALLBACK`.
 
 ### Download Strategy (Frontend)
 

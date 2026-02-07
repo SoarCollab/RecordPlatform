@@ -28,7 +28,8 @@ public interface FileMapper extends BaseMapper<File> {
      * @param limit max number of files to return
      * @return list of files pending cleanup
      */
-    @Select("SELECT * FROM file WHERE deleted = 1 AND tenant_id = #{tenantId} AND create_time < #{cutoffDate} LIMIT #{limit}")
+    @Select("SELECT id, tenant_id, uid, origin, shared_from_user_id, file_name, classification, file_param, file_hash, transaction_hash, status, deleted, create_time " +
+            "FROM file WHERE deleted = 1 AND tenant_id = #{tenantId} AND create_time < #{cutoffDate} LIMIT #{limit}")
     List<File> selectDeletedFilesForCleanup(@Param("tenantId") Long tenantId,
                                             @Param("cutoffDate") Date cutoffDate,
                                             @Param("limit") int limit);
@@ -120,4 +121,3 @@ public interface FileMapper extends BaseMapper<File> {
             """)
     Long sumStorageByUserId(@Param("userId") Long userId, @Param("tenantId") Long tenantId);
 }
-

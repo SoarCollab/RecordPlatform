@@ -5,7 +5,8 @@ import { env } from "$env/dynamic/public";
 export type SSEEventType =
   | "notification"
   | "message-received"
-  | "file-processed"
+  | "file-record-success"
+  | "file-record-failed"
   | "heartbeat"
   | "announcement-published"
   | "ticket-updated"
@@ -96,7 +97,8 @@ export async function createSSEConnection(
     const eventTypes: SSEEventType[] = [
       "notification",
       "message-received",
-      "file-processed",
+      "file-record-success",
+      "file-record-failed",
       "announcement-published",
       "ticket-updated",
       "badge-update",

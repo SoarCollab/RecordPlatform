@@ -80,19 +80,20 @@ export function handleSseMessage(
       }
       break;
     }
-    case "file-processed": {
-      const data = message.data as { fileName?: string; status?: string };
-      if (data.status === "completed") {
-        notifications.success(
-          "文件处理完成",
-          data.fileName || "您的文件已处理完毕",
-        );
-      } else if (data.status === "failed") {
-        notifications.error(
-          "文件处理失败",
-          data.fileName || "文件处理过程中出错",
-        );
-      }
+    case "file-record-success": {
+      const data = message.data as { fileName?: string };
+      notifications.success(
+        "文件存证成功",
+        data.fileName || "您的文件已完成存证",
+      );
+      break;
+    }
+    case "file-record-failed": {
+      const data = message.data as { fileName?: string; reason?: string };
+      notifications.error(
+        "文件存证失败",
+        data.reason || data.fileName || "文件存证过程中出错",
+      );
       break;
     }
     case "badge-update": {

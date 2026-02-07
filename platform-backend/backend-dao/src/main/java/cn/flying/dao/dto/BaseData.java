@@ -11,6 +11,8 @@ import java.util.function.Consumer;
  * 用于DTO快速转换VO实现，只需将DTO类继承此类即可使用
  */
 public interface BaseData{
+    Logger LOGGER = LoggerFactory.getLogger(BaseData.class);
+
     /**
      * 创建指定的VO类并将当前DTO对象中的所有成员变量值直接复制到VO对象中
      * @param clazz 指定VO类型
@@ -38,8 +40,7 @@ public interface BaseData{
             Arrays.asList(fields).forEach(field -> convert(field, v));
             return v;
         } catch (ReflectiveOperationException exception) {
-            Logger logger = LoggerFactory.getLogger(BaseData.class);
-            logger.error("在VO与DTO转换时出现了一些错误", exception);
+            LOGGER.error("在VO与DTO转换时出现了一些错误", exception);
             throw new RuntimeException(exception.getMessage());
         }
     }
@@ -55,6 +56,13 @@ public interface BaseData{
             field.setAccessible(true);
             source.setAccessible(true);
             field.set(target, source.get(this));
-        } catch (IllegalAccessException | NoSuchFieldException ignored) {}
+        } catch (NoSuchFieldException exception) {
+            LOGGER.debug("DTO字段不存在，跳过映射: field={}, dtoClass={}, voClass={}",
+                    field.getName(), this.getClass().getName(), target.getClass().getName());
+        } catch (IllegalAccessException exception) {
+            LOGGER.error("DTO到VO字段映射失败: field={}, dtoClass={}, voClass={}",
+                    field.getName(), this.getClass().getName(), target.getClass().getName(), exception);
+            throw new IllegalStateException("DTO到VO字段映射失败: " + field.getName(), exception);
+        }
     }
 }

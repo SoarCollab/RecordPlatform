@@ -1,5 +1,6 @@
 package cn.flying.storage.service;
 
+import cn.flying.storage.config.NodeConfig;
 import cn.flying.storage.config.StorageProperties;
 import cn.flying.storage.core.FaultDomainManager;
 import cn.flying.storage.core.S3ClientManager;
@@ -8,6 +9,9 @@ import cn.flying.storage.tenant.TenantContextUtil;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.DistributedStorageService;
+import cn.flying.platformapi.response.StorageCapacityVO;
+import cn.flying.platformapi.response.StorageDomainCapacityVO;
+import cn.flying.platformapi.response.StorageNodeCapacityVO;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.annotation.Resource;
@@ -874,6 +878,141 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
 
         return Result.success(nodeStatus);
+    }
+
+    /**
+     * 聚合集群存储容量统计信息。
+     * <p>
+     * 该方法优先基于 S3Monitor 的 Prometheus 指标缓存构建容量结果；
+     * 当部分节点缺失容量指标时返回 degraded=true，并保留可计算的部分结果。
+     *
+     * @return 容量聚合结果
+     */
+    @Override
+    public Result<StorageCapacityVO> getStorageCapacity() {
+        try {
+            List<NodeConfig> configuredNodes = storageProperties.getNodes();
+            if (CollectionUtils.isEmpty(configuredNodes)) {
+                return Result.success(new StorageCapacityVO(
+                        0L,
+                        0L,
+                        0L,
+                        true,
+                        "prometheus-no-nodes",
+                        List.of(),
+                        List.of()
+                ));
+            }
+
+            long totalCapacityBytes = 0L;
+            long usedCapacityBytes = 0L;
+            boolean degraded = false;
+            List<StorageNodeCapacityVO> nodeSummaries = new ArrayList<>();
+            Map<String, DomainCapacityAccumulator> domainAccumulator = new LinkedHashMap<>();
+
+            for (NodeConfig node : configuredNodes) {
+                if (!Boolean.TRUE.equals(node.getEnabled())) {
+                    continue;
+                }
+
+                String nodeName = node.getName();
+                String faultDomain = (node.getFaultDomain() == null || node.getFaultDomain().isBlank())
+                        ? "UNKNOWN"
+                        : node.getFaultDomain();
+                boolean online = s3Monitor.isNodeOnline(nodeName);
+                S3Monitor.NodeMetrics nodeMetrics = s3Monitor.getNodeMetrics(nodeName);
+
+                long nodeTotalBytes = 0L;
+                long nodeUsedBytes = 0L;
+                if (nodeMetrics != null
+                        && nodeMetrics.getDiskTotalBytes() != null
+                        && nodeMetrics.getDiskUsedBytes() != null
+                        && nodeMetrics.getDiskTotalBytes() > 0) {
+                    nodeTotalBytes = nodeMetrics.getDiskTotalBytes();
+                    nodeUsedBytes = Math.max(0L, Math.min(nodeTotalBytes, nodeMetrics.getDiskUsedBytes()));
+                } else {
+                    degraded = true;
+                }
+
+                totalCapacityBytes += nodeTotalBytes;
+                usedCapacityBytes += nodeUsedBytes;
+
+                nodeSummaries.add(new StorageNodeCapacityVO(
+                        nodeName,
+                        faultDomain,
+                        online,
+                        nodeTotalBytes,
+                        nodeUsedBytes,
+                        calculateUsagePercent(nodeUsedBytes, nodeTotalBytes)
+                ));
+
+                DomainCapacityAccumulator accumulator = domainAccumulator.computeIfAbsent(
+                        faultDomain,
+                        key -> new DomainCapacityAccumulator()
+                );
+                accumulator.nodeCount++;
+                if (online) {
+                    accumulator.onlineNodeCount++;
+                }
+                accumulator.totalCapacityBytes += nodeTotalBytes;
+                accumulator.usedCapacityBytes += nodeUsedBytes;
+            }
+
+            nodeSummaries.sort(Comparator.comparing(StorageNodeCapacityVO::nodeName));
+            List<StorageDomainCapacityVO> domainSummaries = new ArrayList<>();
+            for (Map.Entry<String, DomainCapacityAccumulator> entry : domainAccumulator.entrySet()) {
+                DomainCapacityAccumulator aggregate = entry.getValue();
+                domainSummaries.add(new StorageDomainCapacityVO(
+                        entry.getKey(),
+                        aggregate.nodeCount,
+                        aggregate.onlineNodeCount,
+                        aggregate.totalCapacityBytes,
+                        aggregate.usedCapacityBytes,
+                        calculateUsagePercent(aggregate.usedCapacityBytes, aggregate.totalCapacityBytes)
+                ));
+            }
+            domainSummaries.sort(Comparator.comparing(StorageDomainCapacityVO::domainName));
+
+            long availableCapacityBytes = Math.max(0L, totalCapacityBytes - usedCapacityBytes);
+            String source = degraded ? "prometheus-partial" : "prometheus";
+
+            return Result.success(new StorageCapacityVO(
+                    totalCapacityBytes,
+                    usedCapacityBytes,
+                    availableCapacityBytes,
+                    degraded,
+                    source,
+                    nodeSummaries,
+                    domainSummaries
+            ));
+        } catch (Exception e) {
+            log.error("聚合存储容量信息失败", e);
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
+        }
+    }
+
+    /**
+     * 计算容量使用率百分比。
+     *
+     * @param usedBytes 已用容量
+     * @param totalBytes 总容量
+     * @return 使用率百分比（0-100）
+     */
+    private double calculateUsagePercent(long usedBytes, long totalBytes) {
+        if (totalBytes <= 0) {
+            return 0D;
+        }
+        return Math.min(100D, (usedBytes * 100D) / totalBytes);
+    }
+
+    /**
+     * 故障域聚合累加器。
+     */
+    private static final class DomainCapacityAccumulator {
+        private int nodeCount;
+        private int onlineNodeCount;
+        private long totalCapacityBytes;
+        private long usedCapacityBytes;
     }
 
     // ===== v3.0.0 新增：故障域管理 API 实现 =====

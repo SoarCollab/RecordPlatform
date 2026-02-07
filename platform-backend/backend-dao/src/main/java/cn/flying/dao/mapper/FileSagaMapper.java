@@ -16,13 +16,15 @@ public interface FileSagaMapper extends BaseMapper<FileSaga> {
     /**
      * 根据请求ID查询 Saga（带租户隔离）
      */
-    @Select("SELECT * FROM file_saga WHERE request_id = #{requestId} AND tenant_id = #{tenantId}")
+    @Select("SELECT id, tenant_id, file_id, request_id, user_id, file_name, current_step, status, payload, retry_count, last_error, next_retry_at, create_time, update_time " +
+            "FROM file_saga WHERE request_id = #{requestId} AND tenant_id = #{tenantId}")
     FileSaga selectByRequestId(@Param("requestId") String requestId, @Param("tenantId") Long tenantId);
 
     /**
      * 查询卡住的 Saga（定时任务按租户调用）
      */
-    @Select("SELECT * FROM file_saga WHERE status = #{status} AND tenant_id = #{tenantId} AND update_time < #{cutoffTime} LIMIT #{limit}")
+    @Select("SELECT id, tenant_id, file_id, request_id, user_id, file_name, current_step, status, payload, retry_count, last_error, next_retry_at, create_time, update_time " +
+            "FROM file_saga WHERE status = #{status} AND tenant_id = #{tenantId} AND update_time < #{cutoffTime} LIMIT #{limit}")
     List<FileSaga> selectStuckSagas(@Param("status") String status,
                                      @Param("tenantId") Long tenantId,
                                      @Param("cutoffTime") Date cutoffTime,
@@ -39,7 +41,8 @@ public interface FileSagaMapper extends BaseMapper<FileSaga> {
      * 使用 FOR UPDATE SKIP LOCKED 避免多实例重复处理同一记录
      * 定时任务按租户调用，需指定 tenantId
      */
-    @Select("SELECT * FROM file_saga WHERE status = 'PENDING_COMPENSATION' " +
+    @Select("SELECT id, tenant_id, file_id, request_id, user_id, file_name, current_step, status, payload, retry_count, last_error, next_retry_at, create_time, update_time " +
+            "FROM file_saga WHERE status = 'PENDING_COMPENSATION' " +
             "AND tenant_id = #{tenantId} " +
             "AND (next_retry_at IS NULL OR next_retry_at <= NOW()) " +
             "ORDER BY next_retry_at ASC LIMIT #{limit} " +

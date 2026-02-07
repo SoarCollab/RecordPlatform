@@ -95,6 +95,8 @@ public class S3Monitor {
     @Data
     public static class NodeMetrics {
         private Double diskUsagePercent;      // 磁盘使用率 (0-100)
+        private Long diskUsedBytes;           // 已用磁盘容量（字节）
+        private Long diskTotalBytes;          // 总磁盘容量（字节）
         private Integer apiInflightRequests;  // 正在处理的请求数
         private Integer apiWaitingRequests;   // 等待处理的请求数
         private Instant fetchTime;            // 指标获取时间
@@ -365,11 +367,21 @@ public class S3Monitor {
         Matcher usedMatcher = diskUsedPattern.matcher(metricsText);
         Matcher totalMatcher = diskTotalPattern.matcher(metricsText);
 
-        if (usedMatcher.find() && totalMatcher.find()) {
-            double used = Double.parseDouble(usedMatcher.group(1));
-            double total = Double.parseDouble(totalMatcher.group(1));
-            if (total > 0) {
-                metrics.setDiskUsagePercent((used / total) * 100);
+        double usedSum = 0D;
+        double totalSum = 0D;
+        while (usedMatcher.find()) {
+            usedSum += Double.parseDouble(usedMatcher.group(1));
+        }
+        while (totalMatcher.find()) {
+            totalSum += Double.parseDouble(totalMatcher.group(1));
+        }
+        if (totalSum > 0) {
+            long usedBytes = Math.max(0L, (long) usedSum);
+            long totalBytes = Math.max(0L, (long) totalSum);
+            metrics.setDiskUsedBytes(usedBytes);
+            metrics.setDiskTotalBytes(totalBytes);
+            if (totalBytes > 0) {
+                metrics.setDiskUsagePercent((usedSum / totalSum) * 100);
             }
         }
 

@@ -149,6 +149,43 @@ export interface MonitorMetrics {
   health: SystemHealth;
 }
 
+/**
+ * 存储节点容量统计
+ */
+export interface StorageNodeCapacity {
+  nodeName: string;
+  faultDomain: string;
+  online: boolean;
+  totalCapacityBytes: number | string;
+  usedCapacityBytes: number | string;
+  usagePercent: number;
+}
+
+/**
+ * 存储故障域容量统计
+ */
+export interface StorageDomainCapacity {
+  domainName: string;
+  nodeCount: number;
+  onlineNodeCount: number;
+  totalCapacityBytes: number | string;
+  usedCapacityBytes: number | string;
+  usagePercent: number;
+}
+
+/**
+ * 集群存储容量统计
+ */
+export interface StorageCapacity {
+  totalCapacityBytes: number | string;
+  usedCapacityBytes: number | string;
+  availableCapacityBytes: number | string;
+  degraded: boolean;
+  source: string;
+  nodes: StorageNodeCapacity[];
+  domains: StorageDomainCapacity[];
+}
+
 export type AuditOverview = Record<string, unknown>;
 
 export interface AuditConfigVO {

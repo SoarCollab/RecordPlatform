@@ -636,6 +636,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             if (CommonUtils.isNotEmpty(eventPublisher)) {
                 eventPublisher.publishEvent(new FileStorageEvent(
                         this,
+                        state.getTenantId(),
                         userId,
                         state.getFileName(),
                         SUID,

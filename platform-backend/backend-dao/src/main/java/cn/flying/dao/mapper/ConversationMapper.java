@@ -18,7 +18,8 @@ public interface ConversationMapper extends BaseMapper<Conversation> {
      * 根据参与者查询会话（带租户隔离）
      */
     @Select("""
-        SELECT * FROM conversation
+        SELECT id, tenant_id, participant_a, participant_b, last_message_id, last_message_at, create_time, update_time
+        FROM conversation
         WHERE participant_a = #{participantA}
           AND participant_b = #{participantB}
           AND tenant_id = #{tenantId}

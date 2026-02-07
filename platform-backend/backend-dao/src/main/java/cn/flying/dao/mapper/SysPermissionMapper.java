@@ -53,7 +53,8 @@ public interface SysPermissionMapper extends BaseMapper<SysPermission> {
      * 根据模块获取权限列表
      */
     @Select("""
-        SELECT * FROM sys_permission
+        SELECT id, tenant_id, code, name, module, action, description, status, create_time, update_time
+        FROM sys_permission
         WHERE module = #{module}
           AND status = 1
           AND (tenant_id = 0 OR tenant_id = #{tenantId})
@@ -65,7 +66,8 @@ public interface SysPermissionMapper extends BaseMapper<SysPermission> {
      * 根据权限码获取权限
      */
     @Select("""
-        SELECT * FROM sys_permission
+        SELECT id, tenant_id, code, name, module, action, description, status, create_time, update_time
+        FROM sys_permission
         WHERE code = #{code}
           AND status = 1
           AND (tenant_id = 0 OR tenant_id = #{tenantId})

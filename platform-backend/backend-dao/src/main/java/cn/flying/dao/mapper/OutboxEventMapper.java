@@ -17,7 +17,8 @@ public interface OutboxEventMapper extends BaseMapper<OutboxEvent> {
     /**
      * 获取待发送事件（定时任务按租户调用）
      */
-    @Select("SELECT * FROM outbox_event " +
+    @Select("SELECT id, tenant_id, trace_id, aggregate_type, aggregate_id, event_type, payload, status, next_attempt_at, retry_count, create_time, sent_time " +
+            "FROM outbox_event " +
             "WHERE status = 'PENDING' AND tenant_id = #{tenantId} AND next_attempt_at <= #{now} " +
             "ORDER BY create_time LIMIT #{limit} FOR UPDATE SKIP LOCKED")
     List<OutboxEvent> fetchPendingEvents(@Param("tenantId") Long tenantId,

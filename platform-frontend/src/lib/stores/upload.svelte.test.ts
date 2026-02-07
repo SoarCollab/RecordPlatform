@@ -315,7 +315,7 @@ describe("upload store extra branches", () => {
     const subscribeCallback = mocks.subscribe.mock.calls[0][0] as (
       message: { type: string },
     ) => void;
-    subscribeCallback({ type: "file-processed" });
+    subscribeCallback({ type: "file-record-success" });
 
     expect(mocks.getUploadProgress).toHaveBeenCalled();
   });

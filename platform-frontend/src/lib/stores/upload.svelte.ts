@@ -141,7 +141,10 @@ function ensureSideEffectsInitialized(): void {
 
   if (!unsubscribeSSE) {
     unsubscribeSSE = sse.subscribe((message) => {
-      if (message.type === "file-processed") {
+      if (
+        message.type === "file-record-success" ||
+        message.type === "file-record-failed"
+      ) {
         for (const t of tasks) {
           if (t.clientId && t.status === "processing") {
             startProgressPolling(t.id, true);

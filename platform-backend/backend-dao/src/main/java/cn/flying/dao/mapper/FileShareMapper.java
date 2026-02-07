@@ -24,7 +24,8 @@ public interface FileShareMapper extends BaseMapper<FileShare> {
      * @param shareCode 分享码
      * @return 分享记录
      */
-    @Select("SELECT * FROM file_share WHERE share_code = #{shareCode} AND deleted = 0")
+    @Select("SELECT id, tenant_id, user_id, share_code, share_type, file_hashes, expire_time, access_count, status, create_time, update_time, deleted " +
+            "FROM file_share WHERE share_code = #{shareCode} AND deleted = 0")
     FileShare selectByShareCode(@Param("shareCode") String shareCode);
 
     /**
@@ -71,6 +72,7 @@ public interface FileShareMapper extends BaseMapper<FileShare> {
      * @param userId 用户ID
      * @return 分享列表
      */
-    @Select("SELECT * FROM file_share WHERE tenant_id = #{tenantId} AND user_id = #{userId} AND deleted = 0 ORDER BY create_time DESC")
+    @Select("SELECT id, tenant_id, user_id, share_code, share_type, file_hashes, expire_time, access_count, status, create_time, update_time, deleted " +
+            "FROM file_share WHERE tenant_id = #{tenantId} AND user_id = #{userId} AND deleted = 0 ORDER BY create_time DESC")
     List<FileShare> selectByUserId(@Param("tenantId") Long tenantId, @Param("userId") Long userId);
 }

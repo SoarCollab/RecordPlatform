@@ -465,7 +465,8 @@ flowchart LR
 | `connected` | `{ connectionId }` | 连接确认 |
 | `notification` | `{ title, content }` | 通用通知 |
 | `message-received` | `{ conversationId, preview }` | 会话新消息 |
-| `file-processed` | `{ fileId, status }` | 文件上传/处理完成 |
+| `file-record-success` | `{ fileName, fileHash, status }` | 文件存证成功通知 |
+| `file-record-failed` | `{ fileName, status, reason }` | 文件存证失败通知 |
 | `announcement-published` | `{ id, title }` | 系统公告 |
 | `ticket-updated` | `{ ticketId, status }` | 工单状态变更 |
 | `badge-update` | `{ unreadMessages, tickets }` | UI 徽章数量更新 |
@@ -482,6 +483,20 @@ SSE 连接采用短期一次性令牌：
 2. 使用 `GET /api/v1/sse/connect?token={sseToken}&connectionId={optional}` 建立连接
 
 > `GET /api/v1/sse/connect` 为公开端点，但依赖短期令牌完成认证；不是匿名开放连接。
+
+### 监控容量口径
+
+系统监控新增容量聚合端点：
+
+- `GET /api/v1/system/storage-capacity`
+
+返回结构包含：
+
+- 集群维度：`totalCapacityBytes`、`usedCapacityBytes`、`availableCapacityBytes`
+- 数据质量：`degraded`、`source`
+- 细粒度明细：`nodes[]`、`domains[]`
+
+`GET /api/v1/system/stats` 的 `totalStorage` 已优先使用该容量聚合结果；当 Dubbo 调用失败时，回退到 `totalFiles * 1MB` 的估算逻辑，并输出固定日志标记 `MONITOR_STORAGE_CAPACITY_FALLBACK`。
 
 ### 下载策略（前端）
 

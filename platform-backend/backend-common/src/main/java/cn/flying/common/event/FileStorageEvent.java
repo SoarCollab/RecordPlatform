@@ -12,6 +12,7 @@ import java.util.List;
  */
 @Getter
 public class FileStorageEvent extends ApplicationEvent {
+    private final Long tenantId;         // 租户ID
     private final Long uid;              // 用户ID
     private final String fileName;         // 文件名
     private final String sessionId;        // 上传会话ID
@@ -20,11 +21,25 @@ public class FileStorageEvent extends ApplicationEvent {
     private final List<String> fileHashes;   // 文件哈希值列表
     private final String fileParam;          // 文件参数
 
-    public FileStorageEvent(Object source, Long uid, String fileName,
+    /**
+     * 构造文件存证事件。
+     *
+     * @param source 事件源
+     * @param tenantId 租户ID
+     * @param uid 用户ID
+     * @param fileName 文件名
+     * @param sessionId 上传会话ID
+     * @param clientId 客户端ID
+     * @param processedFiles 已处理文件列表
+     * @param fileHashes 文件哈希列表
+     * @param fileParam 文件参数
+     */
+    public FileStorageEvent(Object source, Long tenantId, Long uid, String fileName,
                             String sessionId, String clientId,
                             List<File> processedFiles, List<String> fileHashes,
                             String fileParam) {
         super(source);
+        this.tenantId = tenantId;
         this.uid = uid;
         this.fileName = fileName;
         this.sessionId = sessionId;

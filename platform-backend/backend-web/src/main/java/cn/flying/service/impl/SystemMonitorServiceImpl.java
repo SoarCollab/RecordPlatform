@@ -6,7 +6,9 @@ import cn.flying.dao.mapper.SysOperationLogMapper;
 import cn.flying.dao.vo.system.*;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.external.BlockChainService;
+import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.response.BlockChainMessage;
+import cn.flying.platformapi.response.StorageCapacityVO;
 import cn.flying.service.SystemMonitorService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.annotation.Resource;
@@ -44,8 +46,13 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
     @DubboReference(id = "blockChainServiceSystemMonitor", version = BlockChainService.VERSION, timeout = 3000, retries = 0, providedBy = "RecordPlatform_fisco")
     private BlockChainService blockChainService;
 
+    @DubboReference(id = "storageServiceSystemMonitor", version = DistributedStorageService.VERSION, timeout = 3000, retries = 0, providedBy = "RecordPlatform_storage")
+    private DistributedStorageService storageService;
+
     private static final int FALLBACK_CHAIN_NODE_COUNT = 0;
     private static final String FALLBACK_CHAIN_TYPE = "UNKNOWN";
+    private static final String STORAGE_CAPACITY_FALLBACK_MARKER = "MONITOR_STORAGE_CAPACITY_FALLBACK";
+    private static final long FILE_ESTIMATE_BYTES = 1024L * 1024L;
 
     // Health indicators injected by name
     @Resource(name = "database")
@@ -115,9 +122,8 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
                 log.warn("Failed to get chain transaction count: {}", e.getMessage());
             }
 
-            // 总存储容量 (暂时使用文件数量估算，实际应从存储服务获取)
-            // TODO: 从 S3 存储服务获取实际存储容量
-            long totalStorage = totalFiles * 1024 * 1024; // 临时估算值
+            StorageCapacityVO storageCapacity = getStorageCapacity();
+            long totalStorage = storageCapacity.usedCapacityBytes();
 
             return new SystemStatsVO(
                     totalUsers,
@@ -213,6 +219,27 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
         );
     }
 
+    /**
+     * 获取存储容量信息，失败时回退到基于文件数量的估算值。
+     *
+     * @return 存储容量统计
+     */
+    @Override
+    public StorageCapacityVO getStorageCapacity() {
+        try {
+            Result<StorageCapacityVO> result = storageService.getStorageCapacity();
+            if (result != null && result.isSuccess() && result.getData() != null) {
+                return result.getData();
+            }
+
+            String code = result == null ? "null" : String.valueOf(result.getCode());
+            String message = result == null ? "response is null" : result.getMessage();
+            return fallbackStorageCapacity(code, message);
+        } catch (Exception e) {
+            return fallbackStorageCapacity("exception", e.getMessage());
+        }
+    }
+
     @Override
     public MonitorMetricsVO getMonitorMetrics() {
         // 并发获取所有指标
@@ -261,5 +288,34 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
             return "DEGRADED";
         }
         return "UP";
+    }
+
+    /**
+     * 构建存储容量降级响应，并输出统一 marker 日志便于检索。
+     *
+     * @param reasonCode 降级原因编码
+     * @param reasonDetail 降级原因详情
+     * @return 降级容量信息
+     */
+    private StorageCapacityVO fallbackStorageCapacity(String reasonCode, String reasonDetail) {
+        long estimatedUsed = 0L;
+        try {
+            long totalFiles = fileMapper.selectCount(null);
+            estimatedUsed = totalFiles * FILE_ESTIMATE_BYTES;
+        } catch (Exception e) {
+            log.warn("[{}] failed to build estimate from file count, reason={}",
+                    STORAGE_CAPACITY_FALLBACK_MARKER, e.getMessage());
+        }
+        log.warn("[{}] fallback to estimated storage capacity, reasonCode={}, reasonDetail={}, estimatedUsed={}",
+                STORAGE_CAPACITY_FALLBACK_MARKER, reasonCode, reasonDetail, estimatedUsed);
+        return new StorageCapacityVO(
+                estimatedUsed,
+                estimatedUsed,
+                0L,
+                true,
+                "fallback-estimate",
+                List.of(),
+                List.of()
+        );
     }
 }

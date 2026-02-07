@@ -25,7 +25,8 @@ public interface FileSourceMapper extends BaseMapper<FileSource> {
      * @param tenantId 租户ID
      * @return 来源记录
      */
-    @Select("SELECT * FROM file_source WHERE file_id = #{fileId} AND tenant_id = #{tenantId}")
+    @Select("SELECT id, tenant_id, file_id, origin_file_id, source_file_id, source_user_id, share_code, depth, create_time " +
+            "FROM file_source WHERE file_id = #{fileId} AND tenant_id = #{tenantId}")
     FileSource selectByFileId(@Param("fileId") Long fileId, @Param("tenantId") Long tenantId);
 
     /**
@@ -35,7 +36,8 @@ public interface FileSourceMapper extends BaseMapper<FileSource> {
      * @param tenantId 租户ID
      * @return 来源记录
      */
-    @Select("SELECT * FROM file_source WHERE file_id = #{sourceFileId} AND tenant_id = #{tenantId}")
+    @Select("SELECT id, tenant_id, file_id, origin_file_id, source_file_id, source_user_id, share_code, depth, create_time " +
+            "FROM file_source WHERE file_id = #{sourceFileId} AND tenant_id = #{tenantId}")
     FileSource selectBySourceFileId(@Param("sourceFileId") Long sourceFileId, @Param("tenantId") Long tenantId);
 
     /**
@@ -49,15 +51,37 @@ public interface FileSourceMapper extends BaseMapper<FileSource> {
     @InterceptorIgnore(tenantLine = "true")
     @Select("""
         WITH RECURSIVE chain AS (
-            SELECT fs.*, 1 as level
+            SELECT
+                fs.id,
+                fs.tenant_id,
+                fs.file_id,
+                fs.origin_file_id,
+                fs.source_file_id,
+                fs.source_user_id,
+                fs.share_code,
+                fs.depth,
+                fs.create_time,
+                1 as level
             FROM file_source fs
             WHERE fs.file_id = #{fileId} AND fs.tenant_id = #{tenantId}
             UNION ALL
-            SELECT parent.*, chain.level + 1
+            SELECT
+                parent.id,
+                parent.tenant_id,
+                parent.file_id,
+                parent.origin_file_id,
+                parent.source_file_id,
+                parent.source_user_id,
+                parent.share_code,
+                parent.depth,
+                parent.create_time,
+                chain.level + 1
             FROM file_source parent
             INNER JOIN chain ON parent.file_id = chain.source_file_id AND parent.tenant_id = #{tenantId}
         )
-        SELECT * FROM chain ORDER BY level DESC
+        SELECT id, tenant_id, file_id, origin_file_id, source_file_id, source_user_id, share_code, depth, create_time
+        FROM chain
+        ORDER BY level DESC
         """)
     List<FileSource> selectProvenanceChain(@Param("fileId") Long fileId, @Param("tenantId") Long tenantId);
 
@@ -68,7 +92,8 @@ public interface FileSourceMapper extends BaseMapper<FileSource> {
      * @param tenantId 租户ID
      * @return 传播记录列表
      */
-    @Select("SELECT * FROM file_source WHERE origin_file_id = #{originFileId} AND tenant_id = #{tenantId} ORDER BY depth, create_time")
+    @Select("SELECT id, tenant_id, file_id, origin_file_id, source_file_id, source_user_id, share_code, depth, create_time " +
+            "FROM file_source WHERE origin_file_id = #{originFileId} AND tenant_id = #{tenantId} ORDER BY depth, create_time")
     List<FileSource> selectByOriginFileId(@Param("originFileId") Long originFileId, @Param("tenantId") Long tenantId);
 
     /**
@@ -78,6 +103,7 @@ public interface FileSourceMapper extends BaseMapper<FileSource> {
      * @param tenantId 租户ID
      * @return 保存记录列表
      */
-    @Select("SELECT * FROM file_source WHERE source_user_id = #{sourceUserId} AND tenant_id = #{tenantId} ORDER BY create_time DESC")
+    @Select("SELECT id, tenant_id, file_id, origin_file_id, source_file_id, source_user_id, share_code, depth, create_time " +
+            "FROM file_source WHERE source_user_id = #{sourceUserId} AND tenant_id = #{tenantId} ORDER BY create_time DESC")
     List<FileSource> selectBySourceUserId(@Param("sourceUserId") Long sourceUserId, @Param("tenantId") Long tenantId);
 }

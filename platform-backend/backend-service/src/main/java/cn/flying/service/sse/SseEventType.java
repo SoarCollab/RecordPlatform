@@ -44,6 +44,16 @@ public enum SseEventType {
     FRIEND_SHARE("friend-share", "好友文件分享"),
 
     /**
+     * 文件存证成功
+     */
+    FILE_RECORD_SUCCESS("file-record-success", "文件存证成功"),
+
+    /**
+     * 文件存证失败
+     */
+    FILE_RECORD_FAILED("file-record-failed", "文件存证失败"),
+
+    /**
      * 审计告警
      */
     AUDIT_ALERT("audit-alert", "审计告警"),

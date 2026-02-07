@@ -455,6 +455,91 @@ class DistributedStorageServiceImplTest {
     }
 
     @Nested
+    @DisplayName("Storage Capacity Tests")
+    class StorageCapacityTests {
+
+        /**
+         * 验证所有节点都有容量指标时，返回完整聚合结果且不降级。
+         */
+        @Test
+        @DisplayName("Should aggregate capacity when all nodes have metrics")
+        void shouldAggregateCapacityWhenAllNodesHaveMetrics() {
+            List<NodeConfig> nodes = Arrays.asList(
+                    createNodeConfig("node1", true, "A"),
+                    createNodeConfig("node2", true, "B")
+            );
+            when(storageProperties.getNodes()).thenReturn(nodes);
+            when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
+            when(s3Monitor.isNodeOnline("node2")).thenReturn(false);
+
+            S3Monitor.NodeMetrics node1Metrics = new S3Monitor.NodeMetrics();
+            node1Metrics.setDiskTotalBytes(1_000L);
+            node1Metrics.setDiskUsedBytes(400L);
+            S3Monitor.NodeMetrics node2Metrics = new S3Monitor.NodeMetrics();
+            node2Metrics.setDiskTotalBytes(2_000L);
+            node2Metrics.setDiskUsedBytes(1_500L);
+
+            when(s3Monitor.getNodeMetrics("node1")).thenReturn(node1Metrics);
+            when(s3Monitor.getNodeMetrics("node2")).thenReturn(node2Metrics);
+
+            Result<cn.flying.platformapi.response.StorageCapacityVO> result = storageService.getStorageCapacity();
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData()).isNotNull();
+            assertThat(result.getData().degraded()).isFalse();
+            assertThat(result.getData().source()).isEqualTo("prometheus");
+            assertThat(result.getData().totalCapacityBytes()).isEqualTo(3_000L);
+            assertThat(result.getData().usedCapacityBytes()).isEqualTo(1_900L);
+            assertThat(result.getData().availableCapacityBytes()).isEqualTo(1_100L);
+            assertThat(result.getData().nodes()).hasSize(2);
+            assertThat(result.getData().domains()).hasSize(2);
+        }
+
+        /**
+         * 验证部分节点缺失指标时，返回降级结果并标记 source=prometheus-partial。
+         */
+        @Test
+        @DisplayName("Should mark degraded when partial node metrics missing")
+        void shouldMarkDegradedWhenPartialNodeMetricsMissing() {
+            List<NodeConfig> nodes = Arrays.asList(
+                    createNodeConfig("node1", true, "A"),
+                    createNodeConfig("node2", true, "A")
+            );
+            when(storageProperties.getNodes()).thenReturn(nodes);
+            when(s3Monitor.isNodeOnline(anyString())).thenReturn(true);
+
+            S3Monitor.NodeMetrics node1Metrics = new S3Monitor.NodeMetrics();
+            node1Metrics.setDiskTotalBytes(1_000L);
+            node1Metrics.setDiskUsedBytes(500L);
+            when(s3Monitor.getNodeMetrics("node1")).thenReturn(node1Metrics);
+            when(s3Monitor.getNodeMetrics("node2")).thenReturn(null);
+
+            Result<cn.flying.platformapi.response.StorageCapacityVO> result = storageService.getStorageCapacity();
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData()).isNotNull();
+            assertThat(result.getData().degraded()).isTrue();
+            assertThat(result.getData().source()).isEqualTo("prometheus-partial");
+            assertThat(result.getData().totalCapacityBytes()).isEqualTo(1_000L);
+            assertThat(result.getData().usedCapacityBytes()).isEqualTo(500L);
+        }
+
+        /**
+         * 验证容量聚合出现异常时返回 FILE_SERVICE_ERROR。
+         */
+        @Test
+        @DisplayName("Should return error when storage capacity aggregation throws")
+        void shouldReturnErrorWhenStorageCapacityAggregationThrows() {
+            when(storageProperties.getNodes()).thenThrow(new RuntimeException("boom"));
+
+            Result<cn.flying.platformapi.response.StorageCapacityVO> result = storageService.getStorageCapacity();
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.FILE_SERVICE_ERROR.getCode());
+            assertThat(result.getData()).isNull();
+        }
+    }
+
+    @Nested
     @DisplayName("Domain Health Tests")
     class DomainHealthTests {
 
@@ -689,10 +774,30 @@ class DistributedStorageServiceImplTest {
         }
     }
 
+    /**
+     * 创建测试节点配置（默认无故障域）。
+     *
+     * @param name 节点名
+     * @param enabled 是否启用
+     * @return 节点配置
+     */
     private NodeConfig createNodeConfig(String name, Boolean enabled) {
+        return createNodeConfig(name, enabled, null);
+    }
+
+    /**
+     * 创建测试节点配置。
+     *
+     * @param name 节点名
+     * @param enabled 是否启用
+     * @param faultDomain 故障域
+     * @return 节点配置
+     */
+    private NodeConfig createNodeConfig(String name, Boolean enabled, String faultDomain) {
         NodeConfig config = new NodeConfig();
         config.setName(name);
         config.setEnabled(enabled);
+        config.setFaultDomain(faultDomain);
         return config;
     }
 }

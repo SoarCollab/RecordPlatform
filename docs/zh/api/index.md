@@ -242,6 +242,7 @@ Authorization: Bearer <token>
 | GET | `/api/v1/system/stats` | 系统统计 |
 | GET | `/api/v1/system/chain-status` | 链状态 |
 | GET | `/api/v1/system/health` | 健康状态 |
+| GET | `/api/v1/system/storage-capacity` | 存储容量聚合（集群/节点/故障域） |
 | GET | `/api/v1/system/monitor` | 聚合监控指标 |
 
 ### 系统审计（`/api/v1/system/audit`）
@@ -282,6 +283,8 @@ Authorization: Bearer <token>
 - `connected`
 - `heartbeat`
 - `message-received`
+- `file-record-success`
+- `file-record-failed`
 - `announcement-published`
 - `ticket-updated`
 - `friend-request`

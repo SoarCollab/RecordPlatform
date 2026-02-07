@@ -19,7 +19,8 @@ public interface AnnouncementMapper extends BaseMapper<Announcement> {
      * 查询需要自动发布的定时公告
      */
     @Select("""
-        SELECT * FROM announcement
+        SELECT id, tenant_id, title, content, priority, is_pinned, publish_time, expire_time, status, publisher_id, create_time, update_time, deleted
+        FROM announcement
         WHERE status = 0
           AND publish_time IS NOT NULL
           AND publish_time <= #{now}
@@ -31,7 +32,8 @@ public interface AnnouncementMapper extends BaseMapper<Announcement> {
      * 查询已过期的公告
      */
     @Select("""
-        SELECT * FROM announcement
+        SELECT id, tenant_id, title, content, priority, is_pinned, publish_time, expire_time, status, publisher_id, create_time, update_time, deleted
+        FROM announcement
         WHERE status = 1
           AND expire_time IS NOT NULL
           AND expire_time <= #{now}

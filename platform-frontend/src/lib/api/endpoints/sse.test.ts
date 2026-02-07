@@ -123,6 +123,17 @@ describe("sse endpoints", () => {
       }),
     );
 
+    es.emitNamedEvent(
+      "file-record-success",
+      JSON.stringify({ fileName: "contract.pdf" }),
+    );
+    expect(onMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "file-record-success",
+        data: { fileName: "contract.pdf" },
+      }),
+    );
+
     es.emitNamedEvent("friend-share", "bad-json");
     expect(errorSpy).toHaveBeenCalled();
 

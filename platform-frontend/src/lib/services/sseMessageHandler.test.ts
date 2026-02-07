@@ -146,21 +146,21 @@ describe("sseMessageHandler", () => {
     expect(badges.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("file-processed 应按状态分发成功/失败通知", () => {
+  it("file-record-success/file-record-failed 应分发存证结果通知", () => {
     const badges = createBadges();
     const notifications = createNotifications();
 
     handleSseMessage(
-      { type: "file-processed", data: { fileName: "a.pdf", status: "completed" }, timestamp: "t" },
+      { type: "file-record-success", data: { fileName: "c.pdf" }, timestamp: "t" },
       { pathname: "/files", badges, notifications },
     );
     handleSseMessage(
-      { type: "file-processed", data: { fileName: "b.pdf", status: "failed" }, timestamp: "t" },
+      { type: "file-record-failed", data: { reason: "区块链写入失败" }, timestamp: "t" },
       { pathname: "/files", badges, notifications },
     );
 
-    expect(notifications.success).toHaveBeenCalledWith("文件处理完成", "a.pdf");
-    expect(notifications.error).toHaveBeenCalledWith("文件处理失败", "b.pdf");
+    expect(notifications.success).toHaveBeenCalledWith("文件存证成功", "c.pdf");
+    expect(notifications.error).toHaveBeenCalledWith("文件存证失败", "区块链写入失败");
   });
 
   it("badge-update 应按字段选择性更新", () => {
@@ -277,7 +277,7 @@ describe("sseMessageHandler fallback message", () => {
 });
 
 describe("sseMessageHandler branch fill", () => {
-  it("应覆盖消息/公告/工单/通知的默认分支文案", () => {
+  it("应覆盖消息/公告/工单/通知与文件存证分支文案", () => {
     const badges = createBadges();
     const notifications = createNotifications();
 
@@ -298,15 +298,15 @@ describe("sseMessageHandler branch fill", () => {
       { pathname: "/dashboard", badges, notifications },
     );
     handleSseMessage(
-      { type: "file-processed", data: { status: "completed" }, timestamp: "t" },
-      { pathname: "/dashboard", badges, notifications },
-    );
-    handleSseMessage(
-      { type: "file-processed", data: { status: "failed" }, timestamp: "t" },
-      { pathname: "/dashboard", badges, notifications },
-    );
-    handleSseMessage(
       { type: "notification", data: {}, timestamp: "t" },
+      { pathname: "/dashboard", badges, notifications },
+    );
+    handleSseMessage(
+      { type: "file-record-success", data: {}, timestamp: "t" },
+      { pathname: "/dashboard", badges, notifications },
+    );
+    handleSseMessage(
+      { type: "file-record-failed", data: {}, timestamp: "t" },
       { pathname: "/dashboard", badges, notifications },
     );
     handleSseMessage(
@@ -318,9 +318,9 @@ describe("sseMessageHandler branch fill", () => {
     expect(notifications.info).toHaveBeenCalledWith("新公告", "系统发布了新公告");
     expect(notifications.info).toHaveBeenCalledWith("工单新回复", "A: 收到新的回复");
     expect(notifications.info).toHaveBeenCalledWith("工单状态更新", "closed");
-    expect(notifications.success).toHaveBeenCalledWith("文件处理完成", "您的文件已处理完毕");
-    expect(notifications.error).toHaveBeenCalledWith("文件处理失败", "文件处理过程中出错");
     expect(notifications.info).toHaveBeenCalledWith("通知", "");
+    expect(notifications.success).toHaveBeenCalledWith("文件存证成功", "您的文件已完成存证");
+    expect(notifications.error).toHaveBeenCalledWith("文件存证失败", "文件存证过程中出错");
     expect(notifications.info).toHaveBeenCalledWith("好友分享", "D 分享了 1 个文件给你");
   });
 });

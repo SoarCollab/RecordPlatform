@@ -4,6 +4,7 @@ import cn.flying.dao.vo.system.ChainStatusVO;
 import cn.flying.dao.vo.system.MonitorMetricsVO;
 import cn.flying.dao.vo.system.SystemHealthVO;
 import cn.flying.dao.vo.system.SystemStatsVO;
+import cn.flying.platformapi.response.StorageCapacityVO;
 import cn.flying.service.SystemMonitorService;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
@@ -96,6 +97,24 @@ public class TestApplication {
                     Collections.emptyMap(),
                     0L,
                     String.valueOf(System.currentTimeMillis())
+            );
+        }
+
+        /**
+         * 返回固定的存储容量信息，避免测试环境依赖远程存储服务。
+         *
+         * @return 存储容量 VO（默认值）
+         */
+        @Override
+        public StorageCapacityVO getStorageCapacity() {
+            return new StorageCapacityVO(
+                    0L,
+                    0L,
+                    0L,
+                    true,
+                    "test",
+                    Collections.emptyList(),
+                    Collections.emptyList()
             );
         }
 

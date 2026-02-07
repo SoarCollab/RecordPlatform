@@ -3,6 +3,7 @@ package cn.flying.controller;
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
 import cn.flying.dao.vo.system.*;
+import cn.flying.platformapi.response.StorageCapacityVO;
 import cn.flying.service.SystemMonitorService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -57,6 +58,17 @@ public class SystemController {
     @OperationLog(module = "系统监控", operationType = "查询", description = "获取系统健康状态")
     public Result<SystemHealthVO> getSystemHealth() {
         return Result.success(systemMonitorService.getSystemHealth());
+    }
+
+    /**
+     * 获取存储容量统计信息
+     */
+    @GetMapping("/storage-capacity")
+    @Operation(summary = "获取存储容量统计", description = "返回存储总容量、已用容量及节点/故障域维度汇总信息")
+    @PreAuthorize("isAdminOrMonitor()")
+    @OperationLog(module = "系统监控", operationType = "查询", description = "获取存储容量统计")
+    public Result<StorageCapacityVO> getStorageCapacity() {
+        return Result.success(systemMonitorService.getStorageCapacity());
     }
 
     /**

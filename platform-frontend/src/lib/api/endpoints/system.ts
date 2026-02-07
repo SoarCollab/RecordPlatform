@@ -10,6 +10,7 @@ import type {
   ChainStatus,
   SystemHealth,
   MonitorMetrics,
+  StorageCapacity,
   AuditOverview,
   AuditConfigVO,
   HighFrequencyOperationVO,
@@ -50,6 +51,13 @@ export async function getSystemHealth(): Promise<SystemHealth> {
  */
 export async function getMonitorMetrics(): Promise<MonitorMetrics> {
   return api.get<MonitorMetrics>("/system/monitor");
+}
+
+/**
+ * 获取存储容量统计
+ */
+export async function getStorageCapacity(): Promise<StorageCapacity> {
+  return api.get<StorageCapacity>("/system/storage-capacity");
 }
 
 // ===== Permissions =====

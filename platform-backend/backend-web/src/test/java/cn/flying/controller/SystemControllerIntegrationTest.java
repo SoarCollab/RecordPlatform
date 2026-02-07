@@ -98,6 +98,31 @@ class SystemControllerIntegrationTest extends BaseControllerIntegrationTest {
     }
 
     @Nested
+    @DisplayName("GET /storage-capacity")
+    class GetStorageCapacityTests {
+
+        @Test
+        @DisplayName("should require admin role")
+        void shouldRequireAdminRole() throws Exception {
+            performGet(BASE_URL + "/storage-capacity")
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("should return storage capacity for admin")
+        void shouldReturnStorageCapacityForAdmin() throws Exception {
+            setTestAdmin(100L, 1L);
+
+            performGet(BASE_URL + "/storage-capacity")
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value(200))
+                    .andExpect(jsonPath("$.data").exists())
+                    .andExpect(jsonPath("$.data.usedCapacityBytes").exists())
+                    .andExpect(jsonPath("$.data.degraded").exists());
+        }
+    }
+
+    @Nested
     @DisplayName("GET /monitor")
     class GetMonitorMetricsTests {
 

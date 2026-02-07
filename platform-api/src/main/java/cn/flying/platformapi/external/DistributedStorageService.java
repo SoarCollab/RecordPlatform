@@ -1,6 +1,7 @@
 package cn.flying.platformapi.external;
 
 import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.response.StorageCapacityVO;
 
 import java.util.List;
 import java.util.Map;
@@ -109,5 +110,17 @@ public interface DistributedStorageService {
      */
     default Result<Map<String, Object>> getRebalanceStatus() {
         return Result.success(Map.of());
+    }
+
+    /**
+     * 获取存储容量信息。
+     * <p>
+     * 该方法用于监控场景，返回集群总容量、已用容量以及节点/故障域维度汇总。
+     * 作为 default 方法提供，保证对已有 Provider 的非破坏性兼容。
+     *
+     * @return 存储容量信息
+     */
+    default Result<StorageCapacityVO> getStorageCapacity() {
+        return Result.success(null);
     }
 }

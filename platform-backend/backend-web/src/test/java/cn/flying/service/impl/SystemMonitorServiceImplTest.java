@@ -7,7 +7,9 @@ import cn.flying.dao.vo.system.*;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.BlockChainService;
+import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.response.BlockChainMessage;
+import cn.flying.platformapi.response.StorageCapacityVO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -22,6 +24,7 @@ import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -48,6 +51,9 @@ class SystemMonitorServiceImplTest {
     private BlockChainService blockChainService;
 
     @Mock
+    private DistributedStorageService storageService;
+
+    @Mock
     private HealthIndicator databaseHealthIndicator;
 
     @Mock
@@ -69,6 +75,19 @@ class SystemMonitorServiceImplTest {
 
         // 默认给监控聚合一个可控 Executor，避免测试环境依赖 commonPool
         ReflectionTestUtils.setField(systemMonitorService, "monitorMetricsExecutor", (java.util.concurrent.Executor) Runnable::run);
+
+        // 默认使用可用容量响应，避免无关测试因未设置存储服务 mock 进入降级分支。
+        lenient().when(storageService.getStorageCapacity()).thenReturn(
+                Result.success(new StorageCapacityVO(
+                        2_000_000L,
+                        1_000_000L,
+                        1_000_000L,
+                        false,
+                        "prometheus",
+                        List.of(),
+                        List.of()
+                ))
+        );
     }
 
     @Nested
@@ -247,6 +266,45 @@ class SystemMonitorServiceImplTest {
             assertThat(result).isNotNull();
             assertThat(result.getComponents()).containsKey("database");
             assertThat(result.getComponents().get("database").getStatus()).isEqualTo("DOWN");
+        }
+    }
+
+    @Nested
+    @DisplayName("getStorageCapacity Tests")
+    class GetStorageCapacityTests {
+
+        @Test
+        @DisplayName("should return storage capacity from remote service when available")
+        void shouldReturnStorageCapacityFromRemoteServiceWhenAvailable() {
+            StorageCapacityVO remoteCapacity = new StorageCapacityVO(
+                    3_000_000L,
+                    2_100_000L,
+                    900_000L,
+                    false,
+                    "prometheus",
+                    List.of(),
+                    List.of()
+            );
+            when(storageService.getStorageCapacity()).thenReturn(Result.success(remoteCapacity));
+
+            StorageCapacityVO result = systemMonitorService.getStorageCapacity();
+
+            assertThat(result).isEqualTo(remoteCapacity);
+            assertThat(result.degraded()).isFalse();
+            assertThat(result.source()).isEqualTo("prometheus");
+        }
+
+        @Test
+        @DisplayName("should fallback to estimate when remote service fails")
+        void shouldFallbackToEstimateWhenRemoteServiceFails() {
+            when(storageService.getStorageCapacity()).thenReturn(Result.error(ResultEnum.FILE_SERVICE_ERROR, null));
+            when(fileMapper.selectCount(any())).thenReturn(10L);
+
+            StorageCapacityVO result = systemMonitorService.getStorageCapacity();
+
+            assertThat(result.degraded()).isTrue();
+            assertThat(result.source()).isEqualTo("fallback-estimate");
+            assertThat(result.usedCapacityBytes()).isEqualTo(10L * 1024 * 1024);
         }
     }
 

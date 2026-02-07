@@ -17,7 +17,8 @@
 - **Chunked Upload** - Resumable uploads with AES-GCM/ChaCha20-Poly1305 encryption
 - **File Sharing** - Generate share codes with access limits and expiration
 - **Share Audit & Provenance** - Track access, downloads, and saves with multi-level provenance chain (A→B→C), full share access logging
-- **Real-time Notifications** - SSE push for file status changes and messages, multi-device support
+- **Real-time Notifications** - SSE push for messages, announcements, tickets, friend events, and file attestation (`file-record-success` / `file-record-failed`)
+- **Storage Capacity Observability** - `/api/v1/system/storage-capacity` provides cluster/node/domain capacity aggregates with `degraded` + `source` semantics; `/api/v1/system/stats` uses this data and falls back to estimate only when RPC fails
 - **RBAC Permissions** - Fine-grained access control with resource ownership verification
 - **Multi-tenancy** - Database, cache, and storage path isolation per tenant
 - **Support Tickets** - Built-in ticket system with categories, priorities, and admin management
