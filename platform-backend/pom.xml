@@ -20,6 +20,9 @@
         <mybatis-plus-bom.version>3.5.9</mybatis-plus-bom.version>
         <testcontainers.version>1.20.4</testcontainers.version>
         <jacoco.version>0.8.12</jacoco.version>
+        <backend-web.line-coverage.minimum>0.35</backend-web.line-coverage.minimum>
+        <backend-service.line-coverage.minimum>0.35</backend-service.line-coverage.minimum>
+        <backend-common.line-coverage.minimum>0.30</backend-common.line-coverage.minimum>
         <maven-failsafe-plugin.version>3.2.5</maven-failsafe-plugin.version>
         <!--
             Keep commons-compress consistent on test/runtime classpath.

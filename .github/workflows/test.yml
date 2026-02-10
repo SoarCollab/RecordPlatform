@@ -41,7 +41,7 @@ jobs:
         run: mvn -f platform-api/pom.xml clean install -DskipTests -q
 
       - name: Run Backend Tests
-        run: mvn -f platform-backend/pom.xml clean verify -pl backend-service,backend-web -am -Pit
+        run: mvn -f platform-backend/pom.xml clean verify -pl backend-common,backend-service,backend-web -am -Pit
 
       - name: Run FISCO Tests
         run: mvn -f platform-fisco/pom.xml test
@@ -49,12 +49,21 @@ jobs:
       - name: Run Storage Tests
         run: mvn -f platform-storage/pom.xml test
 
+      - name: Upload Backend OpenAPI Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-openapi
+          path: platform-backend/backend-web/target/openapi/openapi.json
+          if-no-files-found: error
+
       - name: Upload Backend Coverage Report
         uses: codecov/codecov-action@v4
         if: always()
         with:
           use_oidc: true
           files: |
+            platform-backend/backend-common/target/site/jacoco/jacoco.xml
             platform-backend/backend-service/target/site/jacoco/jacoco.xml
             platform-backend/backend-web/target/site/jacoco/jacoco.xml
           flags: backend
@@ -88,6 +97,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Run Lint
+        run: pnpm lint
+
+      - name: Run Type Check
+        run: pnpm check
+
       - name: Run Tests with Coverage
         run: pnpm test:coverage
 
@@ -100,10 +115,54 @@ jobs:
           flags: frontend
           fail_ci_if_error: false
 
+  contract-consistency:
+    name: Contract Consistency
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-test]
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Backend OpenAPI Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-openapi
+          path: backend-openapi
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: platform-frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: platform-frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Frontend API Types
+        working-directory: platform-frontend
+        run: OPENAPI_SOURCE=../backend-openapi/openapi.json pnpm types:gen
+
+      - name: Verify Generated Types Are Committed
+        run: |
+          if ! git diff --exit-code -- platform-frontend/src/lib/api/types/generated.ts; then
+            echo "::error::OpenAPI contract changed. Please regenerate and commit platform-frontend/src/lib/api/types/generated.ts"
+            git --no-pager diff -- platform-frontend/src/lib/api/types/generated.ts
+            exit 1
+          fi
+
   build-check:
     name: Build Verification
     runs-on: ubuntu-latest
-    needs: [backend-test, frontend-test]
+    needs: [backend-test, frontend-test, contract-consistency]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

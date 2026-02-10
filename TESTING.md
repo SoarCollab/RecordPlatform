@@ -253,8 +253,16 @@ mvn -f platform-storage/pom.xml test
   - 后端：`mvn -f platform-backend/pom.xml clean verify -pl backend-common,backend-service,backend-web -am -Pit`
   - FISCO：`mvn -f platform-fisco/pom.xml test`
   - Storage：`mvn -f platform-storage/pom.xml test`
-  - 前端：`pnpm test:coverage`
-- 后端覆盖率报告由 JaCoCo 生成，CI 中会上传 `jacoco.xml`（见 `.github/workflows/test.yml`）。
+  - 前端质量门禁：
+    - `pnpm lint`
+    - `pnpm check`
+    - `pnpm test:coverage`
+  - 契约一致性门禁：
+    - 后端导出 `platform-backend/backend-web/target/openapi/openapi.json`
+    - 前端执行 `OPENAPI_SOURCE=../backend-openapi/openapi.json pnpm types:gen`
+    - 校验 `platform-frontend/src/lib/api/types/generated.ts` 无未提交差异
+- 后端覆盖率报告由 JaCoCo 生成，CI 中会上传 `backend-common`、`backend-service`、`backend-web` 三模块的 `jacoco.xml`（见 `.github/workflows/test.yml`）。
+- 任一步骤失败都会阻断 PR 合并（包括 lint/check/contract-consistency）。
 
 ## 6. 新增测试的建议（保持"最少代码"）
 

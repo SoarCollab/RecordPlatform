@@ -205,7 +205,7 @@
                                         <limit>
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.35</minimum>
+                                            <minimum>${backend-web.line-coverage.minimum}</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
