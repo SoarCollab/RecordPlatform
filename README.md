@@ -117,6 +117,8 @@ cd platform-frontend && pnpm install && pnpm dev
 | [Troubleshooting](docs/en/troubleshooting/index.md) | Common issues and solutions                                |
 | [API Reference](docs/en/api/index.md)               | Controller-aligned REST API index and auth rules           |
 | [Comprehensive API Doc](API_DOCUMENTATION.md)       | Full module-level API checklist with key request examples  |
+| [Testing](TESTING.md)                               | Test strategy, coverage, and how to run tests              |
+| [Roadmap](ROADMAP.md)                               | Rolling governance roadmap and wave planning               |
 
 ## Tech Stack
 

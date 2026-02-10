@@ -117,6 +117,8 @@ cd platform-frontend && pnpm install && pnpm dev
 | [故障排查](docs/zh/troubleshooting/index.md) | 常见问题与解决方案                     |
 | [API 参考](docs/zh/api/index.md)             | 与 Controller 对齐的 REST API 索引与鉴权说明 |
 | [完整 API 文档](API_DOCUMENTATION.md)        | 面向模块的完整接口清单与关键请求示例   |
+| [测试策略](TESTING.md)                       | 测试分层、覆盖率、运行方式             |
+| [项目路线图](ROADMAP.md)                     | 滚动治理路线图与 Wave 规划             |
 
 ## 技术栈
 

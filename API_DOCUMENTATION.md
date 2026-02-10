@@ -23,6 +23,8 @@
   - [SSE Module](#12-sse-module)
   - [File Admin Module](#13-file-admin-module-admin)
   - [System Monitor Module](#14-system-monitor-module-admin)
+  - [Friend Module](#15-friend-module)
+  - [Friend File Share Module](#16-friend-file-share-module)
 - [Appendix](#appendix)
 
 ---
@@ -75,6 +77,7 @@ POST /api/v1/auth/login
 - `PUT /api/v1/auth/password-resets` - Reset password
 - `GET /api/v1/shares/{shareCode}/files` - Get shared files by code
 - `POST /api/v1/shares/{shareCode}/files/save` - Save shared files
+- `GET /api/v1/share/{shareCode}/info` - Get share basic info (public)
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks` - Public share download
 - `GET /api/v1/images/download/images/**` - Download images
 
@@ -400,6 +403,61 @@ PUT /api/v1/auth/password-resets
   "password": "newpassword123"
 }
 ```
+
+---
+
+### 1.7 Refresh Access Token
+
+Refresh the JWT access token.
+
+```
+POST /api/v1/auth/tokens/refresh
+```
+
+**Authentication**: Bearer Token
+
+**Response (RefreshTokenVO)**:
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiIs...",
+    "expire": "2025-01-17T14:00:00.000Z"
+  }
+}
+```
+
+---
+
+### 1.8 Get SSE Token
+
+Obtain a short-lived token for SSE connection.
+
+```
+POST /api/v1/auth/tokens/sse
+```
+
+**Authentication**: Bearer Token
+
+**Response (SseTokenVO)**:
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "token": "sse-short-lived-token-xxx",
+    "ttl": 30
+  }
+}
+```
+
+| Field | Type   | Description                       |
+| ----- | ------ | --------------------------------- |
+| token | string | Short-lived SSE connection token  |
+| ttl   | int    | Token time-to-live in seconds     |
 
 ---
 
@@ -2806,11 +2864,324 @@ Returns aggregated monitoring metrics combining system stats, chain status, and 
 ---
 
 
-## 15. Controller-Aligned Endpoint Checklist
+## 15. Friend Module
+
+Base Path: `/api/v1/friends`
+
+### 15.1 Send Friend Request
+
+```
+POST /api/v1/friends/requests
+```
+
+**Authentication**: Bearer Token
+
+**Request Body**:
+
+```json
+{
+  "targetUserId": "user456",
+  "message": "Hi, let's be friends!"
+}
+```
+
+---
+
+### 15.2 Get Received Friend Requests
+
+```
+GET /api/v1/friends/requests/received
+```
+
+**Authentication**: Bearer Token
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description                  |
+| --------- | ---- | -------- | ---------------------------- |
+| pageNum   | int  | No       | Page number (default: 1)     |
+| pageSize  | int  | No       | Items per page (default: 20) |
+
+---
+
+### 15.3 Get Sent Friend Requests
+
+```
+GET /api/v1/friends/requests/sent
+```
+
+**Authentication**: Bearer Token
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description                  |
+| --------- | ---- | -------- | ---------------------------- |
+| pageNum   | int  | No       | Page number (default: 1)     |
+| pageSize  | int  | No       | Items per page (default: 20) |
+
+---
+
+### 15.4 Update Friend Request Status
+
+Accept or reject a friend request.
+
+```
+PUT /api/v1/friends/requests/{requestId}/status
+```
+
+**Authentication**: Bearer Token
+
+**Path Parameters**:
+
+| Parameter | Type   | Description       |
+| --------- | ------ | ----------------- |
+| requestId | string | Friend request ID |
+
+**Query Parameters**:
+
+| Parameter | Type   | Required | Description                       |
+| --------- | ------ | -------- | --------------------------------- |
+| status    | string | Yes      | New status: `accepted`, `rejected` |
+
+---
+
+### 15.5 Cancel Friend Request
+
+```
+DELETE /api/v1/friends/requests/{requestId}
+```
+
+**Authentication**: Bearer Token
+
+---
+
+### 15.6 Get Pending Friend Request Count
+
+```
+GET /api/v1/friends/requests/pending-count
+```
+
+**Authentication**: Bearer Token
+
+**Response**:
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": 3
+}
+```
+
+---
+
+### 15.7 Get Friends List
+
+```
+GET /api/v1/friends
+```
+
+**Authentication**: Bearer Token
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description                  |
+| --------- | ---- | -------- | ---------------------------- |
+| pageNum   | int  | No       | Page number (default: 1)     |
+| pageSize  | int  | No       | Items per page (default: 20) |
+
+---
+
+### 15.8 Get All Friends (Selector)
+
+Get all friends without pagination (for friend selector UI).
+
+```
+GET /api/v1/friends/all
+```
+
+**Authentication**: Bearer Token
+
+---
+
+### 15.9 Unfriend
+
+Remove a friend.
+
+```
+DELETE /api/v1/friends/{friendId}
+```
+
+**Authentication**: Bearer Token
+
+**Path Parameters**:
+
+| Parameter | Type   | Description                |
+| --------- | ------ | -------------------------- |
+| friendId  | string | Friend's external user ID  |
+
+---
+
+### 15.10 Update Friend Remark
+
+```
+PUT /api/v1/friends/{friendId}/remark
+```
+
+**Authentication**: Bearer Token
+
+**Path Parameters**:
+
+| Parameter | Type   | Description                |
+| --------- | ------ | -------------------------- |
+| friendId  | string | Friend's external user ID  |
+
+**Query Parameters**:
+
+| Parameter | Type   | Required | Description  |
+| --------- | ------ | -------- | ------------ |
+| remark    | string | Yes      | Friend remark |
+
+---
+
+### 15.11 Search Users
+
+Search users by username or nickname.
+
+```
+GET /api/v1/friends/search
+```
+
+**Authentication**: Bearer Token
+
+**Query Parameters**:
+
+| Parameter | Type   | Required | Description    |
+| --------- | ------ | -------- | -------------- |
+| keyword   | string | Yes      | Search keyword |
+
+---
+
+## 16. Friend File Share Module
+
+Base Path: `/api/v1/friend-shares`
+
+### 16.1 Share File to Friend
+
+```
+POST /api/v1/friend-shares
+```
+
+**Authentication**: Bearer Token
+
+**Request Body**:
+
+```json
+{
+  "friendId": "user456",
+  "fileHash": "abc123hash",
+  "message": "Check out this file!"
+}
+```
+
+---
+
+### 16.2 Get Received Friend Shares
+
+```
+GET /api/v1/friend-shares/received
+```
+
+**Authentication**: Bearer Token
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description                  |
+| --------- | ---- | -------- | ---------------------------- |
+| pageNum   | int  | No       | Page number (default: 1)     |
+| pageSize  | int  | No       | Items per page (default: 20) |
+
+---
+
+### 16.3 Get Sent Friend Shares
+
+```
+GET /api/v1/friend-shares/sent
+```
+
+**Authentication**: Bearer Token
+
+**Query Parameters**:
+
+| Parameter | Type | Required | Description                  |
+| --------- | ---- | -------- | ---------------------------- |
+| pageNum   | int  | No       | Page number (default: 1)     |
+| pageSize  | int  | No       | Items per page (default: 20) |
+
+---
+
+### 16.4 Get Friend Share Details
+
+```
+GET /api/v1/friend-shares/{shareId}
+```
+
+**Authentication**: Bearer Token
+
+**Path Parameters**:
+
+| Parameter | Type   | Description     |
+| --------- | ------ | --------------- |
+| shareId   | string | Friend share ID |
+
+---
+
+### 16.5 Mark Friend Share as Read
+
+```
+PUT /api/v1/friend-shares/{shareId}/read-status
+```
+
+**Authentication**: Bearer Token
+
+---
+
+### 16.6 Cancel Friend Share
+
+```
+DELETE /api/v1/friend-shares/{shareId}
+```
+
+**Authentication**: Bearer Token
+
+---
+
+### 16.7 Get Unread Friend Shares Count
+
+```
+GET /api/v1/friend-shares/unread-count
+```
+
+**Authentication**: Bearer Token
+
+**Response**:
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": 5
+}
+```
+
+---
+
+
+## 17. Controller-Aligned Endpoint Checklist
 
 > This checklist is the P1 governance baseline. New REST paths are primary; legacy paths remain available in transition mode.
 
-### 15.1 Current Primary REST Endpoints
+### 17.1 Current Primary REST Endpoints
 
 - `POST /api/v1/auth/verification-codes`
 - `POST /api/v1/auth/password-resets/confirm`
@@ -2860,13 +3231,13 @@ Returns aggregated monitoring metrics combining system stats, chain status, and 
 - `POST /api/v1/system/audit/logs/backups`
 - `POST /api/v1/system/audit/anomalies/check`
 
-### 15.2 Legacy Removal Status
+### 17.2 Legacy Removal Status
 
 - Legacy alias endpoints have been removed from backend controllers.
 - Frontend API callers now use REST paths only (no legacy fallback).
 - `Deprecation`/`Link` compatibility headers are no longer emitted.
 
-### 15.3 SSE Handshake and Event Types
+### 17.3 SSE Handshake and Event Types
 
 SSE short-lived token flow:
 
@@ -3001,5 +3372,6 @@ The `provenanceChain` array in file details shows the complete path from origina
 
 ## Changelog
 
+- **v1.2** - Added Friend Module, Friend File Share Module, public share info endpoint, auth token endpoints
 - **v1.1** - Added File Admin Module for share audit and file provenance tracking
 - **v1.0** - Initial API documentation

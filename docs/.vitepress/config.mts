@@ -33,6 +33,8 @@ export default withMermaid(
             { text: "Architecture", link: "/en/architecture/", activeMatch: "/en/architecture/" },
             { text: "Deployment", link: "/en/deployment/", activeMatch: "/en/deployment/" },
             { text: "API", link: "/en/api/", activeMatch: "/en/api/" },
+            { text: "Performance", link: "/en/perf/k6-loadtest", activeMatch: "/en/perf/" },
+            { text: "Troubleshooting", link: "/en/troubleshooting/", activeMatch: "/en/troubleshooting/" },
           ],
           sidebar: {
             "/en/getting-started/": [
@@ -120,6 +122,18 @@ export default withMermaid(
                 ],
               },
             ],
+            "/en/perf/": [
+              {
+                text: "Performance",
+                collapsed: false,
+                items: [
+                  {
+                    text: "k6 Load Testing",
+                    link: "/en/perf/k6-loadtest",
+                  },
+                ],
+              },
+            ],
           },
         },
       },
@@ -133,6 +147,8 @@ export default withMermaid(
             { text: "架构", link: "/zh/architecture/", activeMatch: "/zh/architecture/" },
             { text: "部署", link: "/zh/deployment/", activeMatch: "/zh/deployment/" },
             { text: "API", link: "/zh/api/", activeMatch: "/zh/api/" },
+            { text: "性能测试", link: "/zh/perf/k6-loadtest", activeMatch: "/zh/perf/" },
+            { text: "故障排查", link: "/zh/troubleshooting/", activeMatch: "/zh/troubleshooting/" },
           ],
           sidebar: {
             "/zh/getting-started/": [
@@ -216,6 +232,18 @@ export default withMermaid(
                   {
                     text: "常见问题",
                     link: "/zh/troubleshooting/common-issues",
+                  },
+                ],
+              },
+            ],
+            "/zh/perf/": [
+              {
+                text: "性能测试",
+                collapsed: false,
+                items: [
+                  {
+                    text: "k6 压测",
+                    link: "/zh/perf/k6-loadtest",
                   },
                 ],
               },
