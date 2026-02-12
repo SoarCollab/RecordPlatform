@@ -12,10 +12,15 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.Date;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -53,7 +58,7 @@ class FileRestControllerTest {
         when(fileQueryService.getFileDecryptInfo(userId, fileHash))
                 .thenReturn(new FileDecryptInfoVO("k", "n", 1L, "text/plain", 1, fileHash));
 
-        Result<Page<File>> pageResult = controller.getFiles(userId, 1, 10, null, null);
+        Result<Page<File>> pageResult = controller.getFiles(userId, 1, 10, null, null, null, null);
         Result<File> byHashResult = controller.getFileByHash(userId, fileHash);
         Result<List<String>> addressResult = controller.getFileAddresses(userId, fileHash);
         Result<List<byte[]>> chunksResult = controller.getFileChunks(userId, fileHash);
@@ -68,5 +73,37 @@ class FileRestControllerTest {
         verify(fileQueryService).getFileAddress(userId, fileHash);
         verify(fileQueryService).getFile(userId, fileHash);
         verify(fileQueryService).getFileDecryptInfo(userId, fileHash);
+    }
+
+    /**
+     * 验证分页边界裁剪与时间参数透传。
+     */
+    @Test
+    void shouldNormalizePaginationAndForwardTimeRange() {
+        Long userId = 88L;
+        OffsetDateTime startTime = OffsetDateTime.of(2026, 2, 1, 0, 0, 0, 0, ZoneOffset.UTC);
+        OffsetDateTime endTime = OffsetDateTime.of(2026, 2, 10, 0, 0, 0, 0, ZoneOffset.UTC);
+
+        Result<Page<File>> result = controller.getFiles(
+                userId,
+                0,
+                1000,
+                "report",
+                1,
+                startTime,
+                endTime
+        );
+
+        assertNotNull(result.getData());
+        verify(fileQueryService).getUserFilesPage(
+                eq(userId),
+                any(Page.class),
+                eq("report"),
+                eq(1),
+                eq(Date.from(startTime.toInstant())),
+                eq(Date.from(endTime.toInstant()))
+        );
+        assertEquals(1, result.getData().getCurrent());
+        assertEquals(100, result.getData().getSize());
     }
 }

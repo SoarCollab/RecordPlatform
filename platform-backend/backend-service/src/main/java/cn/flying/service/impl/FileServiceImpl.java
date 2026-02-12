@@ -84,12 +84,24 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void prepareStoreFile(Long userId, String OriginFileName) {
+    public void prepareStoreFile(Long userId, String OriginFileName, long fileSize) {
         File file = new File()
                 .setUid(userId)
                 .setFileName(OriginFileName)
+                .setFileParam(buildPrepareFileParam(fileSize))
                 .setStatus(FileUploadStatus.PREPARE.getCode());
         this.saveOrUpdate(file);
+    }
+
+    /**
+     * 构造 PREPARE 阶段的最小 file_param，提前写入 fileSize 以参与配额统计。
+     *
+     * @param fileSize 文件大小（字节）
+     * @return file_param JSON 字符串
+     */
+    private String buildPrepareFileParam(long fileSize) {
+        long resolvedFileSize = Math.max(0L, fileSize);
+        return JsonConverter.toJson(Map.of("fileSize", resolvedFileSize));
     }
 
     /**

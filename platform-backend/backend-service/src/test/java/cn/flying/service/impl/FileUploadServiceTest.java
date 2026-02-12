@@ -1,5 +1,6 @@
 package cn.flying.service.impl;
 
+import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.lock.DistributedLock;
 import cn.flying.common.util.UidEncoder;
@@ -8,6 +9,7 @@ import cn.flying.dao.vo.file.ProgressVO;
 import cn.flying.dao.vo.file.ResumeUploadVO;
 import cn.flying.dao.vo.file.StartUploadVO;
 import cn.flying.service.FileService;
+import cn.flying.service.QuotaService;
 import cn.flying.service.assistant.FileUploadRedisStateManager;
 import cn.flying.service.encryption.EncryptionStrategyFactory;
 import cn.flying.test.builders.FileUploadStateTestBuilder;
@@ -19,10 +21,17 @@ import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -48,6 +57,15 @@ class FileUploadServiceTest {
 
     @Mock
     private ApplicationEventPublisher eventPublisher;
+
+    @Mock
+    private QuotaService quotaService;
+
+    @Mock
+    private RedissonClient redissonClient;
+
+    @Mock
+    private RLock quotaLock;
 
     @InjectMocks
     private FileUploadServiceImpl fileUploadService;
@@ -398,6 +416,154 @@ class FileUploadServiceTest {
 
             assertTrue(result);
             verify(redisStateManager).removeSession(CLIENT_ID, SUID);
+        }
+    }
+
+    @Nested
+    @DisplayName("Complete Upload Quota Guard")
+    class CompleteUploadQuotaGuard {
+
+        /**
+         * 反射调用 reserveQuotaAndPrepareStoreFile，便于单测覆盖幂等分支。
+         *
+         * @param userId 用户ID
+         * @param state 上传会话状态
+         */
+        private void invokeReserveQuotaAndPrepareStoreFile(Long userId, FileUploadState state) throws Exception {
+            Method method = FileUploadServiceImpl.class.getDeclaredMethod(
+                    "reserveQuotaAndPrepareStoreFile", Long.class, FileUploadState.class
+            );
+            method.setAccessible(true);
+            method.invoke(fileUploadService, userId, state);
+        }
+
+        /**
+         * 验证 completeUpload 在租户级锁内执行配额复核，并在超限时阻断 PREPARE 入库。
+         */
+        @Test
+        @DisplayName("should recheck quota under tenant lock before prepare")
+        void shouldRecheckQuotaUnderTenantLockBeforePrepare() {
+            String clientId = "quota-guard-client";
+            FileUploadState state = new FileUploadState(
+                    USER_ID,
+                    "quota-guard.bin",
+                    1024L,
+                    "application/octet-stream",
+                    clientId,
+                    256,
+                    0
+            );
+            state.setTenantId(77L);
+
+            when(redisStateManager.getState(clientId)).thenReturn(state);
+            when(redissonClient.getLock("distributed:lock:upload:quota:complete:tenant:77"))
+                    .thenReturn(quotaLock);
+            when(quotaLock.isHeldByCurrentThread()).thenReturn(true);
+            doThrow(new GeneralException(ResultEnum.QUOTA_EXCEEDED, "quota exceeded"))
+                    .when(quotaService).checkUploadQuota(77L, USER_ID, 1024L);
+
+            GeneralException ex = assertThrows(GeneralException.class, () ->
+                    fileUploadService.completeUpload(USER_ID, clientId));
+
+            assertEquals(ResultEnum.QUOTA_EXCEEDED, ex.getResultEnum());
+            verify(quotaLock).lock(60L, TimeUnit.SECONDS);
+            verify(quotaService).checkUploadQuota(77L, USER_ID, 1024L);
+            verify(fileService, never()).prepareStoreFile(anyLong(), anyString(), anyLong());
+            verify(quotaLock).unlock();
+        }
+
+        /**
+         * 验证首次预占位会写入 PREPARE 元数据并回写会话幂等标记。
+         */
+        @Test
+        @DisplayName("should mark prepare stored after reserve success")
+        void shouldMarkPrepareStoredAfterReserveSuccess() throws Exception {
+            FileUploadState state = new FileUploadState(
+                    USER_ID,
+                    "prepare-once.bin",
+                    2048L,
+                    "application/octet-stream",
+                    "prepare-once-client",
+                    256,
+                    0
+            );
+            state.setTenantId(77L);
+            state.setPrepareStored(false);
+
+            when(redissonClient.getLock("distributed:lock:upload:quota:complete:tenant:77"))
+                    .thenReturn(quotaLock);
+            when(quotaLock.isHeldByCurrentThread()).thenReturn(true);
+            when(redisStateManager.getState("prepare-once-client")).thenReturn(state);
+
+            invokeReserveQuotaAndPrepareStoreFile(USER_ID, state);
+
+            verify(quotaService).checkUploadQuota(77L, USER_ID, 2048L);
+            verify(fileService).prepareStoreFile(USER_ID, "prepare-once.bin", 2048L);
+            verify(redisStateManager).updateState(argThat(FileUploadState::isPrepareStored));
+            verify(quotaLock).unlock();
+        }
+
+        /**
+         * 验证会话已落库 PREPARE 时，重试调用不会重复计费或重复插入元数据。
+         */
+        @Test
+        @DisplayName("should skip duplicate prepare when already reserved")
+        void shouldSkipDuplicatePrepareWhenAlreadyReserved() throws Exception {
+            FileUploadState state = new FileUploadState(
+                    USER_ID,
+                    "prepare-retry.bin",
+                    2048L,
+                    "application/octet-stream",
+                    "prepare-retry-client",
+                    256,
+                    0
+            );
+            state.setTenantId(77L);
+            state.setPrepareStored(true);
+
+            when(redissonClient.getLock("distributed:lock:upload:quota:complete:tenant:77"))
+                    .thenReturn(quotaLock);
+            when(quotaLock.isHeldByCurrentThread()).thenReturn(true);
+            when(redisStateManager.getState("prepare-retry-client")).thenReturn(state);
+
+            invokeReserveQuotaAndPrepareStoreFile(USER_ID, state);
+
+            verify(quotaService, never()).checkUploadQuota(anyLong(), anyLong(), anyLong());
+            verify(fileService, never()).prepareStoreFile(anyLong(), anyString(), anyLong());
+            verify(redisStateManager, never()).updateState(any(FileUploadState.class));
+            verify(quotaLock).unlock();
+        }
+    }
+
+    @Nested
+    @DisplayName("NEXT_KEY Idempotency")
+    class NextKeyIdempotency {
+
+        /**
+         * 验证重复执行追加密钥时不会重复写入 NEXT_KEY 元数据。
+         */
+        @Test
+        @DisplayName("should append next key metadata only once")
+        void shouldAppendNextKeyMetadataOnlyOnce() throws Exception {
+            Path tempChunk = Files.createTempFile("chunk-next-key-", ".bin");
+            tempChunk.toFile().deleteOnExit();
+            Files.writeString(tempChunk, "cipher-data\n--HASH--\nhash-value", StandardCharsets.UTF_8);
+
+            byte[] nextKey = new byte[32];
+            Arrays.fill(nextKey, (byte) 7);
+
+            Method appendMethod = FileUploadServiceImpl.class.getDeclaredMethod(
+                    "appendKeyToFile", Path.class, byte[].class, int.class
+            );
+            appendMethod.setAccessible(true);
+
+            appendMethod.invoke(fileUploadService, tempChunk, nextKey, 0);
+            appendMethod.invoke(fileUploadService, tempChunk, nextKey, 0);
+
+            String content = Files.readString(tempChunk, StandardCharsets.UTF_8);
+            String separatorRegex = "\\Q\n--NEXT_KEY--\n\\E";
+            int separatorCount = content.split(separatorRegex, -1).length - 1;
+            assertEquals(1, separatorCount);
         }
     }
 

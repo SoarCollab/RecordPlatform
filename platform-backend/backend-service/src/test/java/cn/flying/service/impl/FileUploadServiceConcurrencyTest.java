@@ -5,6 +5,7 @@ import cn.flying.dao.vo.file.FileUploadState;
 import cn.flying.dao.vo.file.ProgressVO;
 import cn.flying.dao.vo.file.StartUploadVO;
 import cn.flying.service.FileService;
+import cn.flying.service.QuotaService;
 import cn.flying.service.assistant.FileUploadRedisStateManager;
 import cn.flying.service.encryption.EncryptionStrategyFactory;
 import cn.flying.test.builders.FileUploadStateTestBuilder;
@@ -43,6 +44,9 @@ class FileUploadServiceConcurrencyTest {
 
     @Mock
     private ApplicationEventPublisher eventPublisher;
+
+    @Mock
+    private QuotaService quotaService;
 
     @InjectMocks
     private FileUploadServiceImpl fileUploadService;

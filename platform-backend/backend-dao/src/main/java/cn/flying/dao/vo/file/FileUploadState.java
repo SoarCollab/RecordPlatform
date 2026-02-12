@@ -51,6 +51,8 @@ public class FileUploadState {
     private volatile long lastProgressLogTime;
     @Schema(description = "上传状态: pending, uploading, processing, paused, completed")
     private volatile String status = "uploading";
+    @Schema(description = "是否已完成 PREPARE 元数据落库（用于 completeUpload 幂等）")
+    private volatile boolean prepareStored;
 
     public FileUploadState(Long userId, String fileName, long fileSize, String contentType, String clientId, int chunkSize, int totalChunks) {
         this.userId = userId;

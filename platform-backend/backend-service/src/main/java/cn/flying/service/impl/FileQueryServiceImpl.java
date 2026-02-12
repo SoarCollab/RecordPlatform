@@ -209,8 +209,18 @@ public class FileQueryServiceImpl implements FileQueryService {
         return fileMapper.selectList(wrapper);
     }
 
+    /**
+     * 按用户分页查询文件，并支持 keyword/status/time-range 组合筛选。
+     *
+     * @param userId    用户ID
+     * @param page      分页对象
+     * @param keyword   文件名/哈希关键词
+     * @param status    文件状态
+     * @param startTime 起始时间（可选）
+     * @param endTime   结束时间（可选）
+     */
     @Override
-    public void getUserFilesPage(Long userId, Page<File> page, String keyword, Integer status) {
+    public void getUserFilesPage(Long userId, Page<File> page, String keyword, Integer status, Date startTime, Date endTime) {
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
         // 所有用户（包括管理员）只能查询自己的文件
         // 管理员查看所有文件请使用 FileAdminService.getAllFiles()
@@ -227,6 +237,17 @@ public class FileQueryServiceImpl implements FileQueryService {
         // 状态过滤
         if (status != null) {
             wrapper.eq(File::getStatus, status);
+        }
+
+        // 时间范围过滤
+        if (startTime != null && endTime != null && startTime.after(endTime)) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "startTime 不能晚于 endTime");
+        }
+        if (startTime != null) {
+            wrapper.ge(File::getCreateTime, startTime);
+        }
+        if (endTime != null) {
+            wrapper.le(File::getCreateTime, endTime);
         }
 
         // 按创建时间倒序排列

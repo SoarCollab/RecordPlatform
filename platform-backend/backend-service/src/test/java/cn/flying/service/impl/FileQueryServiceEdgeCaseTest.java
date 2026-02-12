@@ -11,6 +11,7 @@ import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.SharingVO;
 import cn.flying.service.FriendFileShareService;
 import cn.flying.service.remote.FileRemoteClient;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -159,6 +161,29 @@ class FileQueryServiceEdgeCaseTest {
             List<File> result = fileQueryService.getUserFilesList(0L);
 
             assertThat(result).isEmpty();
+        }
+
+        /**
+         * 验证时间范围非法（startTime > endTime）时会抛出参数异常。
+         */
+        @Test
+        @DisplayName("should throw when startTime is after endTime")
+        void shouldThrowWhenStartTimeIsAfterEndTime() {
+            Date startTime = new Date(2000L);
+            Date endTime = new Date(1000L);
+
+            GeneralException ex = assertThrows(GeneralException.class, () ->
+                    fileQueryService.getUserFilesPage(
+                            USER_ID,
+                            new Page<>(1, 10),
+                            null,
+                            null,
+                            startTime,
+                            endTime
+                    ));
+
+            assertThat(ex.getResultEnum()).isEqualTo(ResultEnum.PARAM_IS_INVALID);
+            verify(fileMapper, never()).selectPage(any(), any());
         }
     }
 

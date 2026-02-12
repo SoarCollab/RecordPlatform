@@ -19,11 +19,13 @@ import java.util.List;
 public interface FileService extends IService<File> {
 
     /**
-     * 在完成分片上传后预存储文件（此时设置文件状态为）
+     * 在完成分片上传后预存储文件（此时设置文件状态为 PREPARE）。
+     *
      * @param userId 用户ID
      * @param OriginFileName 原始文件名
+     * @param fileSize 文件大小（字节），用于配额预占位
      */
-    void prepareStoreFile(Long userId, String OriginFileName);
+    void prepareStoreFile(Long userId, String OriginFileName, long fileSize);
     /**
      * 存储文件
      * @param userId 用户ID

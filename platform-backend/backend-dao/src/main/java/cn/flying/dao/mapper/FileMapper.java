@@ -1,6 +1,7 @@
 package cn.flying.dao.mapper;
 
 import cn.flying.dao.dto.File;
+import cn.flying.dao.vo.file.QuotaUserUsageVO;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
@@ -120,4 +121,136 @@ public interface FileMapper extends BaseMapper<File> {
             </script>
             """)
     Long sumStorageByUserId(@Param("userId") Long userId, @Param("tenantId") Long tenantId);
+
+    /**
+     * 统计用户在配额口径下的文件数量（仅 PREPARE/SUCCESS）。
+     *
+     * @param userId 用户ID
+     * @param tenantId 租户ID
+     * @return 配额口径文件数量
+     */
+    @Select("SELECT COUNT(*) FROM file WHERE uid = #{userId} AND tenant_id = #{tenantId} AND deleted = 0 AND status IN (0, 1)")
+    Long countQuotaByUserId(@Param("userId") Long userId, @Param("tenantId") Long tenantId);
+
+    /**
+     * 统计用户在配额口径下的总存储（仅 PREPARE/SUCCESS）。
+     *
+     * @param userId 用户ID
+     * @param tenantId 租户ID
+     * @return 配额口径总存储（字节）
+     */
+    @Select("""
+            SELECT COALESCE(SUM(
+                CASE
+                    WHEN file_param IS NOT NULL AND JSON_VALID(file_param)
+                    THEN CAST(JSON_UNQUOTE(JSON_EXTRACT(file_param, '$.fileSize')) AS UNSIGNED)
+                    ELSE 0
+                END
+            ), 0)
+            FROM file
+            WHERE uid = #{userId} AND tenant_id = #{tenantId} AND deleted = 0 AND status IN (0, 1)
+            """)
+    Long sumQuotaStorageByUserId(@Param("userId") Long userId, @Param("tenantId") Long tenantId);
+
+    /**
+     * 统计租户文件数量。
+     *
+     * @param tenantId 租户ID
+     * @return 文件数量
+     */
+    @Select("SELECT COUNT(*) FROM file WHERE tenant_id = #{tenantId} AND deleted = 0")
+    Long countByTenantId(@Param("tenantId") Long tenantId);
+
+    /**
+     * 统计租户在配额口径下的文件数量（仅 PREPARE/SUCCESS）。
+     *
+     * @param tenantId 租户ID
+     * @return 配额口径文件数量
+     */
+    @Select("SELECT COUNT(*) FROM file WHERE tenant_id = #{tenantId} AND deleted = 0 AND status IN (0, 1)")
+    Long countQuotaByTenantId(@Param("tenantId") Long tenantId);
+
+    /**
+     * 统计租户总存储量（字节）。
+     *
+     * @param tenantId 租户ID
+     * @return 总存储字节数
+     */
+    @Select("""
+            SELECT COALESCE(SUM(
+                CASE
+                    WHEN file_param IS NOT NULL AND JSON_VALID(file_param)
+                    THEN CAST(JSON_UNQUOTE(JSON_EXTRACT(file_param, '$.fileSize')) AS UNSIGNED)
+                    ELSE 0
+                END
+            ), 0)
+            FROM file
+            WHERE tenant_id = #{tenantId} AND deleted = 0
+            """)
+    Long sumStorageByTenantId(@Param("tenantId") Long tenantId);
+
+    /**
+     * 统计租户在配额口径下的总存储（仅 PREPARE/SUCCESS）。
+     *
+     * @param tenantId 租户ID
+     * @return 配额口径总存储（字节）
+     */
+    @Select("""
+            SELECT COALESCE(SUM(
+                CASE
+                    WHEN file_param IS NOT NULL AND JSON_VALID(file_param)
+                    THEN CAST(JSON_UNQUOTE(JSON_EXTRACT(file_param, '$.fileSize')) AS UNSIGNED)
+                    ELSE 0
+                END
+            ), 0)
+            FROM file
+            WHERE tenant_id = #{tenantId} AND deleted = 0 AND status IN (0, 1)
+            """)
+    Long sumQuotaStorageByTenantId(@Param("tenantId") Long tenantId);
+
+    /**
+     * 聚合租户下每个用户的文件使用量，用于配额快照对账。
+     *
+     * @param tenantId 租户ID
+     * @return 用户使用量列表
+     */
+    @Select("""
+            SELECT
+                uid AS userId,
+                COALESCE(SUM(
+                    CASE
+                        WHEN file_param IS NOT NULL AND JSON_VALID(file_param)
+                        THEN CAST(JSON_UNQUOTE(JSON_EXTRACT(file_param, '$.fileSize')) AS UNSIGNED)
+                        ELSE 0
+                    END
+                ), 0) AS usedStorageBytes,
+                COUNT(*) AS usedFileCount
+            FROM file
+            WHERE tenant_id = #{tenantId} AND deleted = 0
+            GROUP BY uid
+            """)
+    List<QuotaUserUsageVO> aggregateUserUsageByTenant(@Param("tenantId") Long tenantId);
+
+    /**
+     * 按配额口径聚合租户下每个用户的使用量（仅 PREPARE/SUCCESS）。
+     *
+     * @param tenantId 租户ID
+     * @return 用户配额口径使用量列表
+     */
+    @Select("""
+            SELECT
+                uid AS userId,
+                COALESCE(SUM(
+                    CASE
+                        WHEN file_param IS NOT NULL AND JSON_VALID(file_param)
+                        THEN CAST(JSON_UNQUOTE(JSON_EXTRACT(file_param, '$.fileSize')) AS UNSIGNED)
+                        ELSE 0
+                    END
+                ), 0) AS usedStorageBytes,
+                COUNT(*) AS usedFileCount
+            FROM file
+            WHERE tenant_id = #{tenantId} AND deleted = 0 AND status IN (0, 1)
+            GROUP BY uid
+            """)
+    List<QuotaUserUsageVO> aggregateQuotaUserUsageByTenant(@Param("tenantId") Long tenantId);
 }

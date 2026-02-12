@@ -13,11 +13,14 @@ import cn.flying.common.util.UidEncoder;
 import cn.flying.dao.vo.file.*;
 import cn.flying.service.FileService;
 import cn.flying.service.FileUploadService;
+import cn.flying.service.QuotaService;
 import cn.flying.service.assistant.FileUploadRedisStateManager;
 import cn.flying.service.encryption.*;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -65,6 +68,10 @@ public class FileUploadServiceImpl implements FileUploadService {
     private static final String HASH_ALGORITHM = "SHA-256"; // 哈希算法
     private static final String HASH_SEPARATOR = "\n--HASH--\n"; // 哈希值前的分隔符
     private static final String KEY_SEPARATOR = "\n--NEXT_KEY--\n"; // 下一个密钥前的分隔符
+    private static final byte[] KEY_SEPARATOR_BYTES = KEY_SEPARATOR.getBytes(StandardCharsets.UTF_8);
+    private static final int NEXT_KEY_TAIL_SCAN_BYTES = 512;
+    private static final String QUOTA_COMPLETE_LOCK_KEY_PREFIX = "distributed:lock:upload:quota:complete:tenant:";
+    private static final long QUOTA_COMPLETE_LOCK_LEASE_SECONDS = 60L;
     // --- 允许的文件类型 ---
     private static final Set<String> ALLOWED_FILE_EXTENSIONS = Set.of(
             "jpg", "jpeg", "png", "gif", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "zip", "rar", "7z"
@@ -98,6 +105,12 @@ public class FileUploadServiceImpl implements FileUploadService {
 
     @Resource
     private FileService fileService;
+
+    @Resource
+    private QuotaService quotaService;
+
+    @Resource
+    private RedissonClient redissonClient;
 
     @PostConstruct
     public void initialize() {
@@ -355,6 +368,9 @@ public class FileUploadServiceImpl implements FileUploadService {
             clientId = UidEncoder.encodeCid(SUID);
         }
 
+        // 仅在创建新上传会话时执行配额检查；恢复会话不重复计入。
+        quotaService.checkUploadQuota(tenantId, userId, fileSize);
+
         log.info("处理上传开始请求: 文件名={}, 文件大小={}, 内容类型={}, 用户SUID={}, 客户端ID={}",
                 fileName, fileSize, contentType, SUID, clientId);
 
@@ -584,6 +600,9 @@ public class FileUploadServiceImpl implements FileUploadService {
         }
 
         try {
+            // 在不可逆文件变更前先做一次配额复核，避免超限时污染分片尾部元数据。
+            recheckQuotaBeforeFinalProcessing(userId, state);
+
             // --- 执行最终步骤 (追加下一个分片的密钥) ---
             completeFileProcessing(SUID, state);
 
@@ -592,8 +611,8 @@ public class FileUploadServiceImpl implements FileUploadService {
             cleanupDirectory(uploadSessionDir);
             log.info("原始上传分片目录已清理: {}", uploadSessionDir);
 
-            // 调用文件服务初始化文件元信息
-            fileService.prepareStoreFile(userId, state.getFileName());
+            // 在租户级锁内完成“配额复核 + PREPARE 入库”，避免并发完成阶段绕过限额。
+            reserveQuotaAndPrepareStoreFile(userId, state);
 
             log.info("文件上传和处理流程完成: 客户端ID={}, 文件名={}", clientId, state.getFileName());
 
@@ -689,6 +708,91 @@ public class FileUploadServiceImpl implements FileUploadService {
             }
             throw new RuntimeException("完成处理时发生未知错误：" + e.getMessage(), e);
         }
+    }
+
+    /**
+     * 在租户级分布式锁内执行配额复核并写入 PREPARE 元数据，保证完成阶段的原子性。
+     *
+     * @param userId 用户ID
+     * @param state 上传会话状态
+     */
+    private void reserveQuotaAndPrepareStoreFile(Long userId, FileUploadState state) {
+        Long tenantId = resolveTenantId(state);
+        String lockKey = QUOTA_COMPLETE_LOCK_KEY_PREFIX + tenantId;
+        RLock lock = redissonClient.getLock(lockKey);
+        lock.lock(QUOTA_COMPLETE_LOCK_LEASE_SECONDS, TimeUnit.SECONDS);
+        try {
+            FileUploadState latestState = resolveLatestUploadState(state);
+            if (latestState.isPrepareStored()) {
+                log.info("上传会话已完成 PREPARE 落库，跳过重复预占位: clientId={}", latestState.getClientId());
+                return;
+            }
+
+            quotaService.checkUploadQuota(tenantId, userId, latestState.getFileSize());
+            fileService.prepareStoreFile(userId, latestState.getFileName(), latestState.getFileSize());
+            latestState.setPrepareStored(true);
+            redisStateManager.updateState(latestState);
+        } finally {
+            if (lock.isHeldByCurrentThread()) {
+                try {
+                    lock.unlock();
+                } catch (IllegalMonitorStateException ex) {
+                    log.warn("上传完成配额锁释放异常: lockKey={}", lockKey, ex);
+                }
+            }
+        }
+    }
+
+    /**
+     * 获取上传会话的最新状态，优先从 Redis 重新读取，避免并发重试时使用过期快照。
+     *
+     * @param fallbackState 当前调用链中的状态快照
+     * @return 最新状态；Redis 缺失时回退传入快照
+     */
+    private FileUploadState resolveLatestUploadState(FileUploadState fallbackState) {
+        if (fallbackState == null || CommonUtils.isEmpty(fallbackState.getClientId())) {
+            return fallbackState;
+        }
+        FileUploadState latestState = redisStateManager.getState(fallbackState.getClientId());
+        return latestState != null ? latestState : fallbackState;
+    }
+
+    /**
+     * 在完成阶段的不可逆文件变更前复核配额。
+     * 该检查只做判定不写库，用于提前失败，降低重试时重复写尾部元数据的风险。
+     *
+     * @param userId 用户ID
+     * @param state 上传会话状态
+     */
+    private void recheckQuotaBeforeFinalProcessing(Long userId, FileUploadState state) {
+        Long tenantId = resolveTenantId(state);
+        String lockKey = QUOTA_COMPLETE_LOCK_KEY_PREFIX + tenantId;
+        RLock lock = redissonClient.getLock(lockKey);
+        lock.lock(QUOTA_COMPLETE_LOCK_LEASE_SECONDS, TimeUnit.SECONDS);
+        try {
+            quotaService.checkUploadQuota(tenantId, userId, state.getFileSize());
+        } finally {
+            if (lock.isHeldByCurrentThread()) {
+                try {
+                    lock.unlock();
+                } catch (IllegalMonitorStateException ex) {
+                    log.warn("上传完成前置配额锁释放异常: lockKey={}", lockKey, ex);
+                }
+            }
+        }
+    }
+
+    /**
+     * 解析上传会话所属租户ID，优先使用会话中的 tenantId，不存在时回退当前上下文默认租户。
+     *
+     * @param state 上传会话状态
+     * @return 租户ID
+     */
+    private Long resolveTenantId(FileUploadState state) {
+        if (state.getTenantId() != null) {
+            return state.getTenantId();
+        }
+        return TenantContext.getTenantIdOrDefault();
     }
 
     /**
@@ -943,6 +1047,7 @@ public class FileUploadServiceImpl implements FileUploadService {
 
     /**
      * 文件处理的最后一步：追加下一个分片的密钥。
+     * 该步骤支持幂等重入，避免 completeUpload 重试时重复追加 NEXT_KEY 元数据。
      */
     private void completeFileProcessing(String SUID, FileUploadState state) throws IOException {
         log.info("------------开始最终处理步骤 (追加下一个分片密钥): 客户端ID={}--------------", state.getClientId());
@@ -984,10 +1089,20 @@ public class FileUploadServiceImpl implements FileUploadService {
     }
 
     /**
-     * 辅助方法：追加密钥到文件
+     * 辅助方法：追加密钥到文件。
+     * 若检测到 NEXT_KEY 已存在，则跳过写入，保证重复调用不会污染分片尾部格式。
+     *
+     * @param filePath 分片文件路径
+     * @param keyBytes 待追加密钥
+     * @param chunkIndex 分片序号
+     * @throws IOException 文件读写异常
      */
     private void appendKeyToFile(Path filePath, byte[] keyBytes, int chunkIndex) throws IOException {
         if (Files.exists(filePath)) {
+            if (isNextKeyAlreadyAppended(filePath)) {
+                log.info("分片 {} 已存在 NEXT_KEY 元数据，跳过重复追加: {}", chunkIndex, filePath);
+                return;
+            }
             try {
                 String keyBase64 = Base64.getEncoder().encodeToString(keyBytes);
                 byte[] dataToAppend = (KEY_SEPARATOR + keyBase64).getBytes(StandardCharsets.UTF_8);
@@ -1003,6 +1118,106 @@ public class FileUploadServiceImpl implements FileUploadService {
             log.error("处理后的分片文件未找到，无法追加密钥: {}", filePath);
             throw new FileNotFoundException("处理后的分片文件未找到: " + filePath.getFileName());
         }
+    }
+
+    /**
+     * 判断分片尾部是否已包含 NEXT_KEY 元数据。
+     * 通过扫描文件尾部字节并校验 Base64 密钥格式，实现低成本幂等检测。
+     *
+     * @param filePath 分片文件路径
+     * @return true 表示已追加 NEXT_KEY；false 表示尚未追加
+     */
+    private boolean isNextKeyAlreadyAppended(Path filePath) {
+        try {
+            long fileSize = Files.size(filePath);
+            if (fileSize <= KEY_SEPARATOR_BYTES.length) {
+                return false;
+            }
+
+            int scanSize = (int) Math.min(fileSize, NEXT_KEY_TAIL_SCAN_BYTES);
+            byte[] tailBytes = readFileTail(filePath, scanSize);
+            int separatorIndex = findLastBytesIndex(tailBytes, KEY_SEPARATOR_BYTES);
+            if (separatorIndex < 0) {
+                return false;
+            }
+
+            int keyStart = separatorIndex + KEY_SEPARATOR_BYTES.length;
+            if (keyStart >= tailBytes.length) {
+                return false;
+            }
+
+            String encodedKey = new String(tailBytes, keyStart, tailBytes.length - keyStart, StandardCharsets.UTF_8).trim();
+            if (encodedKey.isEmpty()) {
+                return false;
+            }
+
+            byte[] decodedKey = Base64.getDecoder().decode(encodedKey);
+            return decodedKey.length == 32;
+        } catch (IOException | IllegalArgumentException ex) {
+            log.debug("检测 NEXT_KEY 元数据失败，按未追加处理: {}", filePath, ex);
+            return false;
+        }
+    }
+
+    /**
+     * 读取文件尾部固定字节数。
+     *
+     * @param filePath 文件路径
+     * @param length 读取长度
+     * @return 尾部字节数组
+     * @throws IOException 文件读写异常
+     */
+    private byte[] readFileTail(Path filePath, int length) throws IOException {
+        long fileSize = Files.size(filePath);
+        int resolvedLength = (int) Math.min(fileSize, Math.max(length, 0));
+        byte[] result = new byte[resolvedLength];
+        if (resolvedLength == 0) {
+            return result;
+        }
+
+        try (InputStream inputStream = Files.newInputStream(filePath, StandardOpenOption.READ)) {
+            long bytesToSkip = fileSize - resolvedLength;
+            while (bytesToSkip > 0) {
+                long skipped = inputStream.skip(bytesToSkip);
+                if (skipped <= 0) {
+                    throw new EOFException("无法定位到文件尾部指定位置");
+                }
+                bytesToSkip -= skipped;
+            }
+
+            int offset = 0;
+            while (offset < resolvedLength) {
+                int read = inputStream.read(result, offset, resolvedLength - offset);
+                if (read < 0) {
+                    throw new EOFException("读取文件尾部数据时提前结束");
+                }
+                offset += read;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 从字节数组末尾查找目标子序列。
+     *
+     * @param source 源字节数组
+     * @param target 目标子序列
+     * @return 命中起始索引，未命中返回 -1
+     */
+    private int findLastBytesIndex(byte[] source, byte[] target) {
+        if (source == null || target == null || source.length < target.length || target.length == 0) {
+            return -1;
+        }
+        outer:
+        for (int i = source.length - target.length; i >= 0; i--) {
+            for (int j = 0; j < target.length; j++) {
+                if (source[i + j] != target[j]) {
+                    continue outer;
+                }
+            }
+            return i;
+        }
+        return -1;
     }
 
     /**

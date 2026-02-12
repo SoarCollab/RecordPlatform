@@ -6,6 +6,7 @@ import cn.flying.dao.vo.file.UserFileStatsVO;
 import cn.flying.platformapi.response.TransactionVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 
+import java.util.Date;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
@@ -64,14 +65,16 @@ public interface FileQueryService {
     List<File> getUserFilesList(Long userId);
 
     /**
-     * 分页获取用户文件列表
+     * 分页获取用户文件列表（支持组合检索）
      *
-     * @param userId  用户ID
-     * @param page    分页参数（传入后会被填充结果）
-     * @param keyword 搜索关键词（可选，匹配文件名或文件哈希）
-     * @param status  文件状态过滤（可选）
+     * @param userId    用户ID
+     * @param page      分页参数（传入后会被填充结果）
+     * @param keyword   搜索关键词（可选，匹配文件名或文件哈希）
+     * @param status    文件状态过滤（可选）
+     * @param startTime 上传开始时间（可选，闭区间）
+     * @param endTime   上传结束时间（可选，闭区间）
      */
-    void getUserFilesPage(Long userId, Page<File> page, String keyword, Integer status);
+    void getUserFilesPage(Long userId, Page<File> page, String keyword, Integer status, Date startTime, Date endTime);
 
     /**
      * 获取文件分片存储地址（预签名URL）

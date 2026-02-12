@@ -17,6 +17,7 @@ import cn.flying.controller.FriendFileShareController;
 import cn.flying.controller.ImageController;
 import cn.flying.controller.MessageController;
 import cn.flying.controller.PermissionController;
+import cn.flying.controller.QuotaController;
 import cn.flying.controller.RolePermissionController;
 import cn.flying.controller.ShareController;
 import cn.flying.controller.ShareRestController;
@@ -41,6 +42,7 @@ import cn.flying.service.FriendService;
 import cn.flying.service.ImageService;
 import cn.flying.service.MessageService;
 import cn.flying.service.PermissionService;
+import cn.flying.service.QuotaService;
 import cn.flying.service.ShareAuditService;
 import cn.flying.service.SysAuditService;
 import cn.flying.service.SystemMonitorService;
@@ -155,6 +157,9 @@ class OpenApiContractExportTest {
     private PermissionService permissionService;
 
     @MockBean
+    private QuotaService quotaService;
+
+    @MockBean
     private FileMapper fileMapper;
 
     @MockBean
@@ -248,6 +253,7 @@ class OpenApiContractExportTest {
             ImageController.class,
             MessageController.class,
             PermissionController.class,
+            QuotaController.class,
             RolePermissionController.class,
             ShareController.class,
             ShareRestController.class,
