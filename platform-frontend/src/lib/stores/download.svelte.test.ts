@@ -74,6 +74,25 @@ async function waitForStatus(
 }
 
 /**
+ * 轮询等待批次任务到达目标状态。
+ *
+ * @param getBatchStatus 读取批次状态的方法。
+ * @param expected 目标状态。
+ */
+async function waitForBatchStatus(
+  getBatchStatus: () => string | undefined,
+  expected: string,
+): Promise<void> {
+  for (let i = 0; i < 60; i++) {
+    if (getBatchStatus() === expected) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  expect(getBatchStatus()).toBe(expected);
+}
+
+/**
  * 构造标准 Blob 结果。
  *
  * @returns 可复用 Blob。
@@ -336,6 +355,86 @@ describe("download store", () => {
 
     download.setConcurrency(4);
     expect(download.concurrency).toBe(4);
+  });
+
+  it("startBatchDownload 应按批次并发执行并产出汇总", async () => {
+    const download = await loadDownloadStore();
+
+    const batch = await download.startBatchDownload(
+      [
+        { fileHash: "hash-batch-1", fileName: "b1.pdf", fileSize: 1024 },
+        { fileHash: "hash-batch-2", fileName: "b2.pdf", fileSize: 2048 },
+      ],
+      { concurrency: 2, retryTimes: 2 },
+    );
+
+    await waitForBatchStatus(() => download.batchState?.status, "completed");
+
+    expect(batch.status).toBe("completed");
+    expect(batch.total).toBe(2);
+    expect(batch.successCount).toBe(2);
+    expect(batch.failedCount).toBe(0);
+  });
+
+  it("批量下载中出现 paused 任务时应结束批次并标记失败", async () => {
+    const deferred = createDeferred<Uint8Array[]>();
+    mocks.chunkDownloader.downloadAllChunks.mockImplementationOnce(
+      async () => deferred.promise,
+    );
+
+    const download = await loadDownloadStore();
+    const batchPromise = download.startBatchDownload(
+      [{ fileHash: "hash-paused", fileName: "paused.bin", fileSize: 1024 }],
+      { concurrency: 1, retryTimes: 0 },
+    );
+
+    await waitForStatus(
+      () => download.tasks[0]?.status,
+      "downloading",
+    );
+
+    download.pauseDownload(download.tasks[0].id);
+    deferred.resolve([new Uint8Array([1])]);
+
+    const batch = await batchPromise;
+    expect(batch.status).toBe("completed");
+    expect(batch.failedCount).toBe(1);
+    expect(batch.failures[0].reason).toBe("下载已暂停");
+  });
+
+  it("批量下载失败项应自动重试 2 次并支持 retryBatchFailed", async () => {
+    let failCalls = 0;
+    mocks.fileApi.getDownloadAddress.mockImplementation(async (fileHash: string) => {
+      if (fileHash === "hash-fail") {
+        failCalls++;
+        throw new Error("network_error");
+      }
+      return ["u1"];
+    });
+
+    const download = await loadDownloadStore();
+
+    const firstBatch = await download.startBatchDownload(
+      [
+        { fileHash: "hash-fail", fileName: "failed.bin", fileSize: 1024 },
+        { fileHash: "hash-ok", fileName: "ok.bin", fileSize: 1024 },
+      ],
+      { concurrency: 2, retryTimes: 2 },
+    );
+
+    expect(firstBatch.status).toBe("completed");
+    expect(firstBatch.successCount).toBe(1);
+    expect(firstBatch.failedCount).toBe(1);
+    expect(firstBatch.failures[0].fileHash).toBe("hash-fail");
+    expect(failCalls).toBe(3);
+
+    mocks.fileApi.getDownloadAddress.mockResolvedValue(["u1"]);
+    const retryBatch = await download.retryBatchFailed();
+
+    expect(retryBatch).not.toBeNull();
+    expect(retryBatch?.status).toBe("completed");
+    expect(retryBatch?.failedCount).toBe(0);
+    expect(retryBatch?.successCount).toBe(1);
   });
 });
 

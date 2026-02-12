@@ -88,6 +88,33 @@ export interface DownloadTask {
   strategy: DownloadStrategy;
 }
 
+export interface BatchDownloadItem {
+  fileHash: string;
+  fileName: string;
+  fileSize?: number;
+  source?: DownloadSource;
+}
+
+export interface BatchDownloadFailure extends BatchDownloadItem {
+  reason: string;
+  attempts: number;
+}
+
+export type BatchDownloadStatus = "idle" | "running" | "completed";
+
+export interface BatchDownloadState {
+  id: string;
+  status: BatchDownloadStatus;
+  total: number;
+  completedCount: number;
+  activeCount: number;
+  successCount: number;
+  failedCount: number;
+  failures: BatchDownloadFailure[];
+  startedAt: number;
+  completedAt: number | null;
+}
+
 // ===== Pre-download Check Result =====
 
 export interface PreDownloadCheckResult {
@@ -100,6 +127,9 @@ export interface PreDownloadCheckResult {
 // ===== Configuration =====
 
 const DEFAULT_CONCURRENCY = 3;
+const DEFAULT_BATCH_CONCURRENCY = 3;
+const MAX_BATCH_FILES = 100;
+const DEFAULT_BATCH_RETRIES = 2;
 const URL_EXPIRY_BUFFER_MS = 60 * 60 * 1000; // 1 hour buffer before 24h expiry
 const PRESIGNED_URL_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -108,6 +138,7 @@ const PRESIGNED_URL_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 let tasks = $state<DownloadTask[]>([]);
 let concurrency = $state(DEFAULT_CONCURRENCY);
 let initialized = $state(false);
+let batchState = $state<BatchDownloadState | null>(null);
 
 // Track downloaded chunks in memory for active downloads
 const downloadedChunksMap = new Map<string, Map<number, Uint8Array>>();
@@ -149,6 +180,140 @@ function areUrlsExpired(urlsFetchedAt: number | null): boolean {
   if (!urlsFetchedAt) return true;
   const age = Date.now() - urlsFetchedAt;
   return age > PRESIGNED_URL_TTL_MS - URL_EXPIRY_BUFFER_MS;
+}
+
+/**
+ * 生成批量下载批次 ID。
+ *
+ * @returns 批次唯一标识。
+ */
+function generateBatchId(): string {
+  return `batch-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/**
+ * 休眠指定时长，用于批量重试退避。
+ *
+ * @param ms 休眠毫秒数。
+ */
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * 获取批量任务最终失败原因，优先返回任务错误信息。
+ *
+ * @param taskId 下载任务 ID。
+ * @returns 失败原因文本。
+ */
+function getTaskFailureReason(taskId: string): string {
+  const task = getTask(taskId);
+  if (!task) return "任务不存在";
+  return task.error ?? "下载失败";
+}
+
+/**
+ * 等待下载任务进入终态（completed/failed/cancelled）。
+ *
+ * @param taskId 下载任务 ID。
+ * @returns 终态任务快照，不存在时返回 undefined。
+ */
+async function waitForTaskTerminal(taskId: string): Promise<DownloadTask | undefined> {
+  while (true) {
+    const task = getTask(taskId);
+    if (!task) return undefined;
+    if (
+      task.status === "completed" ||
+      task.status === "failed" ||
+      task.status === "cancelled" ||
+      task.status === "paused"
+    ) {
+      return task;
+    }
+    await sleep(120);
+  }
+}
+
+/**
+ * 更新当前批次进度快照。
+ *
+ * @param activeCount 当前活跃任务数。
+ * @param completedCount 已完成任务数。
+ * @param successCount 成功任务数。
+ * @param failures 失败任务列表。
+ */
+function updateBatchProgress(
+  activeCount: number,
+  completedCount: number,
+  successCount: number,
+  failures: BatchDownloadFailure[],
+): void {
+  if (!batchState) return;
+  batchState = {
+    ...batchState,
+    activeCount,
+    completedCount,
+    successCount,
+    failedCount: failures.length,
+    failures: [...failures],
+  };
+}
+
+/**
+ * 在批量下载中执行单文件下载，并按策略进行自动重试。
+ *
+ * @param item 批量项。
+ * @param retryTimes 最大重试次数（不含首次尝试）。
+ * @returns 结果对象（成功或失败原因）。
+ */
+async function executeBatchItem(
+  item: BatchDownloadItem,
+  retryTimes: number,
+): Promise<{ success: true } | { success: false; reason: string; attempts: number }> {
+  let taskId: string | null = null;
+  let attempts = 0;
+
+  while (attempts <= retryTimes) {
+    attempts++;
+    try {
+      if (!taskId) {
+        taskId = await startDownload(
+          item.fileHash,
+          item.fileName,
+          item.source ?? { type: "owned" },
+          item.fileSize,
+          "inmemory",
+        );
+      } else {
+        await retryDownload(taskId);
+      }
+
+      const terminalTask = await waitForTaskTerminal(taskId);
+      if (terminalTask?.status === "completed") {
+        return { success: true };
+      }
+      if (terminalTask?.status === "paused") {
+        return {
+          success: false,
+          reason: terminalTask.error ?? "下载已暂停",
+          attempts,
+        };
+      }
+    } catch (error) {
+      if (attempts > retryTimes) {
+        const reason = (error as Error).message || "下载失败";
+        return { success: false, reason, attempts };
+      }
+    }
+
+    if (attempts <= retryTimes) {
+      const backoff = 500 * 2 ** (attempts - 1);
+      await sleep(backoff);
+    }
+  }
+
+  const fallbackReason = taskId ? getTaskFailureReason(taskId) : "下载失败";
+  return { success: false, reason: fallbackReason, attempts };
 }
 
 // ===== Core Download Logic =====
@@ -650,6 +815,131 @@ async function startDownload(
 }
 
 /**
+ * 启动批量下载任务，采用批次内并发调度并对单文件自动重试。
+ *
+ * @param items 批量文件列表。
+ * @param options 调度选项（并发与重试次数）。
+ * @returns 最终批次状态。
+ */
+async function startBatchDownload(
+  items: BatchDownloadItem[],
+  options?: { concurrency?: number; retryTimes?: number },
+): Promise<BatchDownloadState> {
+  if (items.length === 0) {
+    throw new Error("至少选择一个文件");
+  }
+  if (items.length > MAX_BATCH_FILES) {
+    throw new Error(`批量下载文件数不能超过 ${MAX_BATCH_FILES} 个`);
+  }
+  if (batchState?.status === "running") {
+    throw new Error("已有批量下载正在执行");
+  }
+
+  const batchId = generateBatchId();
+  const batchConcurrency = Math.max(
+    1,
+    Math.min(10, options?.concurrency ?? DEFAULT_BATCH_CONCURRENCY),
+  );
+  const retryTimes = Math.max(0, options?.retryTimes ?? DEFAULT_BATCH_RETRIES);
+  const queue = [...items];
+  const failures: BatchDownloadFailure[] = [];
+  let cursor = 0;
+  let activeCount = 0;
+  let completedCount = 0;
+  let successCount = 0;
+
+  batchState = {
+    id: batchId,
+    status: "running",
+    total: queue.length,
+    completedCount: 0,
+    activeCount: 0,
+    successCount: 0,
+    failedCount: 0,
+    failures: [],
+    startedAt: Date.now(),
+    completedAt: null,
+  };
+
+  /**
+   * 单 worker 循环拉取队列并执行下载，直到队列耗尽。
+   */
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const index = cursor++;
+      if (index >= queue.length) {
+        return;
+      }
+      const item = queue[index];
+      activeCount++;
+      updateBatchProgress(activeCount, completedCount, successCount, failures);
+
+      const result = await executeBatchItem(item, retryTimes);
+
+      activeCount--;
+      completedCount++;
+      if (result.success) {
+        successCount++;
+      } else {
+        failures.push({
+          ...item,
+          reason: result.reason,
+          attempts: result.attempts,
+        });
+      }
+      updateBatchProgress(activeCount, completedCount, successCount, failures);
+    }
+  };
+
+  const workers = Array.from(
+    { length: Math.min(batchConcurrency, queue.length) },
+    () => worker(),
+  );
+  await Promise.all(workers);
+
+  updateBatchProgress(0, completedCount, successCount, failures);
+  if (batchState) {
+    batchState = {
+      ...batchState,
+      status: "completed",
+      completedAt: Date.now(),
+    };
+    return batchState;
+  }
+
+  // 理论上不会进入此分支，仅作为类型兜底。
+  throw new Error("批量下载状态异常");
+}
+
+/**
+ * 基于最近一个批次的失败清单，重新发起批量重试。
+ *
+ * @returns 新批次状态；无失败项时返回 null。
+ */
+async function retryBatchFailed(): Promise<BatchDownloadState | null> {
+  if (!batchState || batchState.failures.length === 0) {
+    return null;
+  }
+  const retryItems = batchState.failures.map((failure) => ({
+    fileHash: failure.fileHash,
+    fileName: failure.fileName,
+    fileSize: failure.fileSize,
+    source: failure.source,
+  }));
+  return startBatchDownload(retryItems, {
+    concurrency: DEFAULT_BATCH_CONCURRENCY,
+    retryTimes: DEFAULT_BATCH_RETRIES,
+  });
+}
+
+/**
+ * 清空批次状态，便于页面在完成后手动重置展示。
+ */
+function clearBatchState(): void {
+  batchState = null;
+}
+
+/**
  * Pause a downloading task
  */
 function pauseDownload(id: string): void {
@@ -898,9 +1188,15 @@ export function useDownload() {
     get initialized() {
       return initialized;
     },
+    get batchState() {
+      return batchState;
+    },
 
     // Actions
     startDownload,
+    startBatchDownload,
+    retryBatchFailed,
+    clearBatchState,
     pauseDownload,
     resumeDownload,
     cancelDownload,

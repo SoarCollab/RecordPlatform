@@ -7,7 +7,7 @@
   import { useDownload } from "$stores/download.svelte";
   import { useUpload } from "$stores/upload.svelte";
   import { formatFileSize, formatDateTime } from "$utils/format";
-  import { getFiles, deleteFile, createShare } from "$api/endpoints/files";
+  import { getFiles, deleteFile, createShare, getDecryptInfo } from "$api/endpoints/files";
   import {
     FileStatus,
     FileStatusLabel,
@@ -36,6 +36,13 @@
   let pageSize = $state(10);
   let keyword = $state("");
   let statusFilter = $state<FileStatus | undefined>(undefined);
+  let startTime = $state("");
+  let endTime = $state("");
+  let selectedFileIds = $state<Set<string>>(new Set());
+  let isBatchStarting = $state(false);
+
+  const MAX_BATCH_FILES = 100;
+  const MAX_BATCH_TOTAL_SIZE = 500 * 1024 * 1024;
 
   // 分享对话框状态
   let shareDialogOpen = $state(false);
@@ -67,7 +74,29 @@
     return () => clearInterval(interval);
   });
 
+  let selectableFiles = $derived(
+    files.filter((file) => file.status === FileStatus.COMPLETED)
+  );
+  let selectedCount = $derived(
+    selectableFiles.filter((file) => selectedFileIds.has(file.id)).length
+  );
+  let allCurrentPageSelected = $derived(
+    selectableFiles.length > 0 &&
+      selectableFiles.every((file) => selectedFileIds.has(file.id))
+  );
+
   async function loadFiles(silent = false) {
+    if (
+      startTime &&
+      endTime &&
+      new Date(startTime).getTime() > new Date(endTime).getTime()
+    ) {
+      if (!silent) {
+        notifications.warning("时间范围无效", "开始时间不能晚于结束时间");
+      }
+      return;
+    }
+
     if (!silent) loading = true;
     try {
       const result = await getFiles({
@@ -75,9 +104,12 @@
         pageSize,
         keyword: keyword || undefined,
         status: statusFilter,
+        startTime: toQueryDateTime(startTime),
+        endTime: toQueryDateTime(endTime),
       });
       files = result.records;
       total = result.total;
+      pruneSelectedFiles();
     } catch (err) {
       if (!silent)
         notifications.error(
@@ -86,6 +118,177 @@
         );
     } finally {
       if (!silent) loading = false;
+    }
+  }
+
+  /**
+   * 将 datetime-local 值转换为 ISO-8601 文本，用于后端查询参数。
+   *
+   * @param value 输入框值。
+   * @returns ISO 字符串；空值或非法值返回 undefined。
+   */
+  function toQueryDateTime(value: string): string | undefined {
+    if (!value) return undefined;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return undefined;
+    }
+    return date.toISOString();
+  }
+
+  /**
+   * 保留当前页仍存在且可下载的选中项，防止翻页后产生脏选择。
+   */
+  function pruneSelectedFiles(): void {
+    const downloadableIdSet = new Set(
+      files
+        .filter((file) => file.status === FileStatus.COMPLETED)
+        .map((file) => file.id)
+    );
+    selectedFileIds = new Set(
+      [...selectedFileIds].filter((id) => downloadableIdSet.has(id))
+    );
+  }
+
+  /**
+   * 切换当前页“全选可下载项”状态。
+   *
+   * @param checked 是否选中。
+   */
+  function toggleSelectAll(checked: boolean): void {
+    if (!checked) {
+      selectedFileIds = new Set();
+      return;
+    }
+    selectedFileIds = new Set(selectableFiles.map((file) => file.id));
+  }
+
+  /**
+   * 切换单个文件的选中状态。
+   *
+   * @param file 待切换文件。
+   * @param checked 是否选中。
+   */
+  function toggleFileSelection(file: FileVO, checked: boolean): void {
+    if (file.status !== FileStatus.COMPLETED) {
+      return;
+    }
+    const next = new Set(selectedFileIds);
+    if (checked) {
+      next.add(file.id);
+    } else {
+      next.delete(file.id);
+    }
+    selectedFileIds = next;
+  }
+
+  /**
+   * 解析批量下载目标文件大小，未知大小时补拉解密信息确保校验准确。
+   *
+   * @returns 带已解析大小的文件数组。
+   */
+  async function resolveBatchFileSizes(): Promise<Array<FileVO & { resolvedSize: number }>> {
+    const selectedFiles = files.filter((file) => selectedFileIds.has(file.id));
+    return Promise.all(
+      selectedFiles.map(async (file) => {
+        if (file.fileSize && file.fileSize > 0) {
+          return { ...file, resolvedSize: file.fileSize };
+        }
+        const decryptInfo = await getDecryptInfo(file.fileHash);
+        const resolvedSize = Number(decryptInfo.fileSize);
+        if (!Number.isFinite(resolvedSize) || resolvedSize <= 0) {
+          throw new Error(`文件“${file.fileName}”缺少有效大小信息，无法加入批量下载`);
+        }
+        return { ...file, resolvedSize };
+      })
+    );
+  }
+
+  /**
+   * 发起批量下载并给出批次汇总结果。
+   */
+  async function startBatchDownload(): Promise<void> {
+    if (isBatchStarting || selectedCount === 0) return;
+
+    isBatchStarting = true;
+    try {
+      const selectedFiles = await resolveBatchFileSizes();
+      if (selectedFiles.length > MAX_BATCH_FILES) {
+        notifications.warning("批量下载受限", `单次最多选择 ${MAX_BATCH_FILES} 个文件`);
+        return;
+      }
+
+      const totalSize = selectedFiles.reduce(
+        (sum, file) => sum + file.resolvedSize,
+        0
+      );
+      if (totalSize > MAX_BATCH_TOTAL_SIZE) {
+        notifications.warning(
+          "批量下载受限",
+          `总大小不能超过 ${formatFileSize(MAX_BATCH_TOTAL_SIZE)}`
+        );
+        return;
+      }
+
+      const summary = await download.startBatchDownload(
+        selectedFiles.map((file) => ({
+          fileHash: file.fileHash,
+          fileName: file.fileName,
+          fileSize: file.resolvedSize,
+          source: { type: "owned" as const },
+        })),
+        { concurrency: 3, retryTimes: 2 }
+      );
+
+      selectedFileIds = new Set();
+      if (summary.failedCount === 0) {
+        notifications.success(
+          "批量下载完成",
+          `成功 ${summary.successCount}/${summary.total}`
+        );
+      } else {
+        const topReasons = summary.failures
+          .slice(0, 3)
+          .map((failure) => `${failure.fileName}: ${failure.reason}`)
+          .join("；");
+        notifications.warning(
+          "批量下载部分失败",
+          `成功 ${summary.successCount}，失败 ${summary.failedCount}${topReasons ? `。${topReasons}` : ""}`
+        );
+      }
+    } catch (err) {
+      notifications.error(
+        "批量下载失败",
+        err instanceof Error ? err.message : "请稍后重试"
+      );
+    } finally {
+      isBatchStarting = false;
+    }
+  }
+
+  /**
+   * 一键重试最近批次中的失败项。
+   */
+  async function retryBatchFailed(): Promise<void> {
+    try {
+      const summary = await download.retryBatchFailed();
+      if (!summary) {
+        notifications.info("没有可重试的失败项");
+        return;
+      }
+      if (summary.failedCount === 0) {
+        notifications.success("失败项已全部重试成功");
+      } else {
+        notifications.warning(
+          "仍有失败项",
+          `成功 ${summary.successCount}，失败 ${summary.failedCount}`
+        );
+      }
+    } catch (err) {
+      notifications.error(
+        "重试失败",
+        err instanceof Error ? err.message : "请稍后重试"
+      );
     }
   }
 
@@ -109,6 +312,9 @@
       await deleteFile(deleteTarget.id);
       notifications.success("删除成功");
       deleteDialogOpen = false;
+      selectedFileIds = new Set(
+        [...selectedFileIds].filter((id) => id !== deleteTarget?.id)
+      );
       deleteTarget = null;
       await loadFiles();
     } catch (err) {
@@ -290,11 +496,90 @@
         <option value={Number(value)}>{label}</option>
       {/each}
     </select>
+    <Input
+      type="datetime-local"
+      bind:value={startTime}
+      class="w-full sm:w-auto"
+      aria-label="开始时间"
+    />
+    <Input
+      type="datetime-local"
+      bind:value={endTime}
+      class="w-full sm:w-auto"
+      aria-label="结束时间"
+    />
     <Button variant="outline" onclick={() => {
         page = 1;
         loadFiles();
       }}>搜索</Button>
+    <Button
+      variant="outline"
+      onclick={() => {
+        keyword = "";
+        statusFilter = undefined;
+        startTime = "";
+        endTime = "";
+        page = 1;
+        selectedFileIds = new Set();
+        loadFiles();
+      }}
+    >
+      重置
+    </Button>
+    <Button
+      disabled={selectedCount === 0 || isBatchStarting}
+      onclick={startBatchDownload}
+    >
+      {#if isBatchStarting}
+        批量下载中...
+      {:else}
+        批量下载 ({selectedCount})
+      {/if}
+    </Button>
   </div>
+
+  {#if download.batchState}
+    <Card.Root class="border-sky-200 bg-sky-50/40 dark:border-sky-900 dark:bg-sky-950/20">
+      <Card.Content class="space-y-3 p-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="text-sm">
+            批次状态：{download.batchState.status === "running" ? "执行中" : "已完成"}，
+            成功 {download.batchState.successCount}，
+            失败 {download.batchState.failedCount}
+          </div>
+          <div class="flex gap-2">
+            {#if download.batchState.status === "completed" && download.batchState.failedCount > 0}
+              <Button size="sm" variant="outline" onclick={retryBatchFailed}>
+                重试失败项
+              </Button>
+            {/if}
+            {#if download.batchState.status === "completed"}
+              <Button size="sm" variant="ghost" onclick={() => download.clearBatchState()}>
+                清空批次
+              </Button>
+            {/if}
+          </div>
+        </div>
+
+        {#if download.batchState.total > 0}
+          <div class="h-2 overflow-hidden rounded-full bg-sky-200/70 dark:bg-sky-900/60">
+            <div
+              class="h-full bg-sky-500 transition-all duration-300 dark:bg-sky-400"
+              style="width: {(download.batchState.completedCount / download.batchState.total) * 100}%"
+            ></div>
+          </div>
+        {/if}
+
+        {#if download.batchState.failures.length > 0}
+          <div class="space-y-1 text-xs text-muted-foreground">
+            {#each download.batchState.failures as failure}
+              <p>{failure.fileName}：{failure.reason}</p>
+            {/each}
+          </div>
+        {/if}
+      </Card.Content>
+    </Card.Root>
+  {/if}
 
   <Card.Root>
     <Card.Content class="p-0">
@@ -325,6 +610,17 @@
         <Table.Root>
           <Table.Header>
             <Table.Row>
+              <Table.Head class="w-12">
+                <input
+                  type="checkbox"
+                  checked={allCurrentPageSelected}
+                  disabled={selectableFiles.length === 0}
+                  onchange={(event) =>
+                    toggleSelectAll((event.currentTarget as HTMLInputElement).checked)
+                  }
+                  aria-label="全选可下载文件"
+                />
+              </Table.Head>
               <Table.Head>文件名</Table.Head>
               <Table.Head>大小</Table.Head>
               <Table.Head>状态</Table.Head>
@@ -335,6 +631,20 @@
           <Table.Body>
             {#each files as file (file.id)}
               <Table.Row>
+                <Table.Cell>
+                  <input
+                    type="checkbox"
+                    checked={selectedFileIds.has(file.id)}
+                    disabled={file.status !== FileStatus.COMPLETED}
+                    onchange={(event) =>
+                      toggleFileSelection(
+                        file,
+                        (event.currentTarget as HTMLInputElement).checked
+                      )
+                    }
+                    aria-label={`选择文件 ${file.fileName}`}
+                  />
+                </Table.Cell>
                 <Table.Cell>
                   <div class="flex items-center gap-3">
                     <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">

@@ -65,6 +65,7 @@ describe("files endpoints", () => {
     clientMocks.api.get
       .mockResolvedValueOnce({ records: [], total: 0 })
       .mockResolvedValueOnce({ totalFiles: 10 })
+      .mockResolvedValueOnce({ enforcementMode: "SHADOW" })
       .mockResolvedValueOnce({ id: "f1" })
       .mockResolvedValueOnce({ hash: "h1" })
       .mockResolvedValueOnce(["u1"])
@@ -76,8 +77,14 @@ describe("files endpoints", () => {
       .mockResolvedValueOnce({ count: 1 })
       .mockResolvedValueOnce({ path: [] });
 
-    await filesApi.getFiles({ pageNum: 1, pageSize: 20 });
+    await filesApi.getFiles({
+      pageNum: 1,
+      pageSize: 20,
+      startTime: "2026-02-01T00:00:00.000Z",
+      endTime: "2026-02-10T00:00:00.000Z",
+    });
     await filesApi.getUserFileStats();
+    await filesApi.getQuotaStatus();
     await filesApi.getFile("f1");
     await filesApi.getFileByHash("h1");
     await filesApi.downloadEncryptedChunks("h1");
@@ -90,35 +97,44 @@ describe("files endpoints", () => {
     await filesApi.getFileProvenance("file-id");
 
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(1, "/files", {
-      params: { pageNum: 1, pageSize: 20 },
+      params: {
+        pageNum: 1,
+        pageSize: 20,
+        startTime: "2026-02-01T00:00:00.000Z",
+        endTime: "2026-02-10T00:00:00.000Z",
+      },
     });
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(2, "/files/stats");
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(3, "/files/f1");
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(4, "/files/hash/h1");
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(5, "/files/hash/h1/chunks");
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(3, "/files/quota");
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(4, "/files/f1");
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(5, "/files/hash/h1");
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       6,
+      "/files/hash/h1/chunks",
+    );
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      7,
       "/files/hash/h1/decrypt-info",
     );
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(7, "/files/shares", {
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(8, "/files/shares", {
       params: { pageNum: 1, pageSize: 5 },
     });
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
-      8,
+      9,
       "/files/hash/h1/addresses",
     );
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(9, "/transactions/tx-hash");
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(10, "/transactions/tx-hash");
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
-      10,
+      11,
       "/files/share/code1/access-logs",
       { params: { pageNum: 2 } },
     );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
-      11,
+      12,
       "/files/share/code1/stats",
     );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
-      12,
+      13,
       "/files/file-id/provenance",
     );
   });

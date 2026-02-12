@@ -35,6 +35,24 @@ export interface UserFileStatsVO {
 }
 
 /**
+ * 配额状态信息
+ * @see QuotaStatusVO.java
+ */
+export interface QuotaStatusVO {
+  tenantId: number;
+  userId: number;
+  enforcementMode: "SHADOW" | "ENFORCE";
+  userUsedStorageBytes: number;
+  userMaxStorageBytes: number;
+  userUsedFileCount: number;
+  userMaxFileCount: number;
+  tenantUsedStorageBytes: number;
+  tenantMaxStorageBytes: number;
+  tenantUsedFileCount: number;
+  tenantMaxFileCount: number;
+}
+
+/**
  * 文件状态枚举（与后端 FileUploadStatus 对齐）
  * @see FileUploadStatus.java
  *

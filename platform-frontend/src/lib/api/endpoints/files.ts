@@ -12,6 +12,7 @@ import type {
   CreateShareRequest,
   UpdateShareRequest,
   UserFileStatsVO,
+  QuotaStatusVO,
   ShareAccessLogVO,
   ShareAccessStatsVO,
   FileProvenanceVO,
@@ -42,6 +43,15 @@ export async function getFiles(
  */
 export async function getUserFileStats(): Promise<UserFileStatsVO> {
   return api.get<UserFileStatsVO>(`${BASE}/stats`);
+}
+
+/**
+ * 获取当前配额状态。
+ *
+ * @returns 配额状态
+ */
+export async function getQuotaStatus(): Promise<QuotaStatusVO> {
+  return api.get<QuotaStatusVO>(`${BASE}/quota`);
 }
 
 /**

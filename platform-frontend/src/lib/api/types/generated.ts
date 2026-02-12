@@ -742,6 +742,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/files/quota": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询当前配额状态 */
+        get: operations["getQuotaStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/files/share/{shareCode}": {
         parameters: {
             query?: never;
@@ -3418,6 +3435,61 @@ export interface components {
             /** @description 用户名 */
             userName?: string;
         };
+        /** @description 当前配额状态 */
+        QuotaStatusVO: {
+            /** @description 配额执行模式：SHADOW/ENFORCE */
+            enforcementMode?: string;
+            /**
+             * Format: int64
+             * @description 租户ID
+             */
+            tenantId?: number;
+            /**
+             * Format: int64
+             * @description 租户文件数上限
+             */
+            tenantMaxFileCount?: number;
+            /**
+             * Format: int64
+             * @description 租户存储上限（字节）
+             */
+            tenantMaxStorageBytes?: number;
+            /**
+             * Format: int64
+             * @description 租户已使用文件数
+             */
+            tenantUsedFileCount?: number;
+            /**
+             * Format: int64
+             * @description 租户已使用存储（字节）
+             */
+            tenantUsedStorageBytes?: number;
+            /**
+             * Format: int64
+             * @description 用户ID
+             */
+            userId?: number;
+            /**
+             * Format: int64
+             * @description 用户文件数上限
+             */
+            userMaxFileCount?: number;
+            /**
+             * Format: int64
+             * @description 用户存储上限（字节）
+             */
+            userMaxStorageBytes?: number;
+            /**
+             * Format: int64
+             * @description 用户已使用文件数
+             */
+            userUsedFileCount?: number;
+            /**
+             * Format: int64
+             * @description 用户已使用存储（字节）
+             */
+            userUsedStorageBytes?: number;
+        };
         /** @description Token刷新响应 */
         RefreshTokenVO: {
             /**
@@ -3937,6 +4009,17 @@ export interface components {
              */
             code?: number;
             data?: components["schemas"]["ProgressVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultQuotaStatusVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["QuotaStatusVO"];
             /** @description 提示信息 */
             message?: string;
         };
@@ -5663,6 +5746,10 @@ export interface operations {
                 keyword?: string;
                 /** @description 文件状态 */
                 status?: number;
+                /** @description 开始时间（ISO-8601） */
+                startTime?: string;
+                /** @description 结束时间（ISO-8601） */
+                endTime?: string;
             };
             header?: never;
             path?: never;
@@ -5811,6 +5898,26 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultFileDecryptInfoVO"];
+                };
+            };
+        };
+    };
+    getQuotaStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultQuotaStatusVO"];
                 };
             };
         };
