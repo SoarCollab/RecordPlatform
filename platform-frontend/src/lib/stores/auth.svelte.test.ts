@@ -136,6 +136,30 @@ describe("auth store", () => {
     expect(auth.isLoading).toBe(false);
   });
 
+  it("login 在 rememberMe 未传时应默认传 true", async () => {
+    mocks.getToken.mockReturnValue("jwt");
+    mocks.getCurrentUser.mockResolvedValue(createUser("user"));
+
+    const auth = await loadAuthStore();
+    await auth.login({ username: "alice", password: "pass" });
+
+    expect(mocks.login).toHaveBeenCalledWith(
+      { username: "alice", password: "pass" },
+      true,
+    );
+  });
+
+  it("login 捕获非 Error 异常时应设置默认错误文案", async () => {
+    mocks.login.mockRejectedValue("network-down");
+
+    const auth = await loadAuthStore();
+    await expect(
+      auth.login({ username: "alice", password: "pass" }),
+    ).rejects.toBe("network-down");
+
+    expect(auth.error).toBe("登录失败");
+  });
+
   it("register 成功后应走自动登录链路", async () => {
     mocks.getToken.mockReturnValue("jwt");
     mocks.getCurrentUser.mockResolvedValue(createUser("user"));
@@ -178,6 +202,42 @@ describe("auth store", () => {
     expect(auth.error).toBe("register failed");
   });
 
+  it("register 在 rememberMe 未传时应默认传 true", async () => {
+    mocks.getToken.mockReturnValue("jwt");
+    mocks.getCurrentUser.mockResolvedValue(createUser("user"));
+
+    const auth = await loadAuthStore();
+    await auth.register({
+      username: "default-remember",
+      password: "p",
+      nickname: "n",
+      email: "n@test.com",
+      code: "123456",
+    });
+
+    expect(mocks.login).toHaveBeenCalledWith(
+      { username: "default-remember", password: "p" },
+      true,
+    );
+  });
+
+  it("register 捕获非 Error 异常时应设置默认错误文案", async () => {
+    mocks.register.mockRejectedValue("register-timeout");
+
+    const auth = await loadAuthStore();
+    await expect(
+      auth.register({
+        username: "u",
+        password: "p",
+        nickname: "n",
+        email: "e@test.com",
+        code: "1",
+      }),
+    ).rejects.toBe("register-timeout");
+
+    expect(auth.error).toBe("注册失败");
+  });
+
   it("logout 即使接口失败也应清空用户并跳转登录页", async () => {
     mocks.logout.mockRejectedValue(new Error("logout failed"));
     mocks.getToken.mockReturnValue("jwt");
@@ -208,4 +268,21 @@ describe("auth store", () => {
     auth.clearError();
     expect(auth.error).toBeNull();
   });
+
+  it("fetchUser/updateProfile 捕获非 Error 异常时应走默认文案分支", async () => {
+    mocks.getToken.mockReturnValue("jwt");
+    mocks.getCurrentUser.mockRejectedValue({ reason: "non-error" });
+
+    const auth = await loadAuthStore();
+    await auth.fetchUser();
+
+    expect(auth.error).toBe("获取用户信息失败");
+
+    mocks.updateUser.mockRejectedValue({ reason: "non-error" });
+    await expect(auth.updateProfile({ nickname: "x" })).rejects.toEqual({
+      reason: "non-error",
+    });
+    expect(auth.error).toBe("更新失败");
+  });
+
 });
