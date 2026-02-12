@@ -64,6 +64,26 @@ function createUser(role: string = "user") {
   };
 }
 
+/**
+ * 构造最小化用户对象，用于覆盖 displayName/username 的回退分支。
+ *
+ * @param options 用户名与昵称覆盖项。
+ * @returns 可注入 authApi.getCurrentUser 的用户对象。
+ */
+function createUserWithNameFallback(options: {
+  username?: string;
+  nickname?: string;
+  role?: string;
+}) {
+  return {
+    id: "u-fallback",
+    username: options.username ?? "fallback-user",
+    nickname: options.nickname,
+    role: options.role ?? "user",
+    registerTime: "2025-01-01",
+  };
+}
+
 describe("auth store", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -285,4 +305,47 @@ describe("auth store", () => {
     expect(auth.error).toBe("更新失败");
   });
 
+  it("派生字段 getter 与 displayName 回退分支应可访问", async () => {
+    mocks.getToken.mockReturnValue("jwt");
+
+    const auth = await loadAuthStore();
+
+    mocks.getCurrentUser.mockResolvedValue(
+      createUserWithNameFallback({
+        username: "admin-user",
+        nickname: "Admin Nick",
+        role: "admin",
+      }),
+    );
+    await auth.fetchUser();
+    expect(auth.user?.role).toBe("admin");
+    expect(typeof auth.isAdmin).toBe("boolean");
+    expect(typeof auth.isMonitor).toBe("boolean");
+    expect(typeof auth.isAdminOrMonitor).toBe("boolean");
+    expect(typeof auth.username).toBe("string");
+    expect(typeof auth.displayName).toBe("string");
+
+    mocks.getCurrentUser.mockResolvedValue(
+      createUserWithNameFallback({
+        username: "monitor-user",
+        nickname: "",
+        role: "monitor",
+      }),
+    );
+    await auth.fetchUser();
+    expect(auth.user?.role).toBe("monitor");
+    expect(typeof auth.displayName).toBe("string");
+
+    mocks.getCurrentUser.mockResolvedValue(
+      createUserWithNameFallback({
+        username: "",
+        nickname: "",
+        role: "user",
+      }),
+    );
+    await auth.fetchUser();
+    expect(auth.user?.role).toBe("user");
+    expect(typeof auth.username).toBe("string");
+    expect(typeof auth.displayName).toBe("string");
+  });
 });
