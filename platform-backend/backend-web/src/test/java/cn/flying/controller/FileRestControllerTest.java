@@ -2,7 +2,9 @@ package cn.flying.controller;
 
 import cn.flying.common.constant.Result;
 import cn.flying.dao.dto.File;
+import cn.flying.dao.vo.file.BatchDownloadMetricsReportVO;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.service.DownloadBatchMetricsService;
 import cn.flying.service.FileQueryService;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,6 +35,9 @@ class FileRestControllerTest {
     @Mock
     private FileQueryService fileQueryService;
 
+    @Mock
+    private DownloadBatchMetricsService downloadBatchMetricsService;
+
     private FileRestController controller;
 
     /**
@@ -42,6 +47,7 @@ class FileRestControllerTest {
     void setUp() {
         controller = new FileRestController();
         ReflectionTestUtils.setField(controller, "fileQueryService", fileQueryService);
+        ReflectionTestUtils.setField(controller, "downloadBatchMetricsService", downloadBatchMetricsService);
     }
 
     /**
@@ -105,5 +111,26 @@ class FileRestControllerTest {
         );
         assertEquals(1, result.getData().getCurrent());
         assertEquals(100, result.getData().getSize());
+    }
+
+    /**
+     * 验证批量下载指标上报接口会委托到服务层。
+     */
+    @Test
+    void shouldDelegateBatchMetricsReportToService() {
+        BatchDownloadMetricsReportVO report = new BatchDownloadMetricsReportVO(
+                "batch-1",
+                10,
+                8,
+                2,
+                3,
+                1500L,
+                java.util.Map.of("network_error", 2)
+        );
+
+        Result<String> result = controller.reportDownloadBatchMetrics(88L, 1L, report);
+
+        assertEquals("ok", result.getData());
+        verify(downloadBatchMetricsService).reportBatchMetrics(1L, 88L, report);
     }
 }

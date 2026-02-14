@@ -12,15 +12,19 @@ import cn.flying.dao.mapper.TenantMapper;
 import cn.flying.dao.vo.file.QuotaStatusVO;
 import cn.flying.dao.vo.file.QuotaUserUsageVO;
 import cn.flying.service.QuotaService;
+import cn.flying.service.monitor.QuotaMetrics;
 import cn.flying.service.quota.QuotaDecision;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * 配额服务实现。
@@ -34,6 +38,12 @@ public class QuotaServiceImpl implements QuotaService {
     private static final String MODE_ENFORCE = "ENFORCE";
     private static final String SCOPE_USER = "USER";
     private static final String SCOPE_TENANT = "TENANT";
+    private static final String ROLLOUT_STRATEGY_TENANT_WHITELIST = "TENANT_WHITELIST";
+    private static final String ROLLOUT_STRATEGY_ALL = "ALL";
+    private static final String DRIFT_SCOPE_TENANT = "TENANT";
+    private static final String DRIFT_SCOPE_USER = "USER";
+    private static final String DRIFT_REASON_STORAGE = "storage_drift";
+    private static final String DRIFT_REASON_FILE_COUNT = "file_count_drift";
 
     @Resource
     private FileMapper fileMapper;
@@ -47,8 +57,29 @@ public class QuotaServiceImpl implements QuotaService {
     @Resource
     private TenantMapper tenantMapper;
 
+    @Resource
+    private QuotaMetrics quotaMetrics;
+
     @Value("${quota.enforcement-mode:SHADOW}")
     private String enforcementMode;
+
+    @Value("${quota.rollout.strategy:TENANT_WHITELIST}")
+    private String rolloutStrategy;
+
+    @Value("${quota.rollout.enforce-tenant-whitelist:}")
+    private String enforceTenantWhitelist;
+
+    @Value("${quota.rollout.force-shadow:false}")
+    private boolean forceShadow;
+
+    @Value("${quota.alert.enabled:true}")
+    private boolean alertEnabled;
+
+    @Value("${quota.alert.storage-drift-ratio-threshold:0.01}")
+    private double storageDriftRatioThreshold;
+
+    @Value("${quota.alert.file-count-drift-threshold:1}")
+    private long fileCountDriftThreshold;
 
     @Value("${quota.default.user.max-storage-bytes:5368709120}")
     private long defaultUserMaxStorageBytes;
@@ -125,11 +156,13 @@ public class QuotaServiceImpl implements QuotaService {
     @Override
     public void checkUploadQuota(Long tenantId, Long userId, long incomingFileSizeBytes) {
         QuotaDecision decision = evaluateUploadQuota(tenantId, userId, incomingFileSizeBytes);
+        String mode = getEffectiveEnforcementMode(tenantId);
+        quotaMetrics.recordQuotaDecision(mode, decision.exceeded());
+
         if (!decision.exceeded()) {
             return;
         }
 
-        String mode = getEnforcementMode();
         if (MODE_ENFORCE.equals(mode)) {
             throw new GeneralException(ResultEnum.QUOTA_EXCEEDED, decision.reason());
         }
@@ -151,7 +184,7 @@ public class QuotaServiceImpl implements QuotaService {
         return new QuotaStatusVO(
                 tenantId,
                 userId,
-                getEnforcementMode(),
+                getEffectiveEnforcementMode(tenantId),
                 decision.userUsedStorageBytes(),
                 decision.userMaxStorageBytes(),
                 decision.userUsedFileCount(),
@@ -238,6 +271,81 @@ public class QuotaServiceImpl implements QuotaService {
     }
 
     /**
+     * 按租户解析当前生效的配额执行模式。
+     * 优先级：force-shadow > 全局 enforcement-mode > rollout strategy。
+     *
+     * @param tenantId 租户ID
+     * @return 生效模式（SHADOW/ENFORCE）
+     */
+    private String getEffectiveEnforcementMode(Long tenantId) {
+        if (forceShadow) {
+            return MODE_SHADOW;
+        }
+
+        if (!MODE_ENFORCE.equals(getEnforcementMode())) {
+            return MODE_SHADOW;
+        }
+
+        String strategy = normalizeRolloutStrategy();
+        if (ROLLOUT_STRATEGY_ALL.equals(strategy)) {
+            return MODE_ENFORCE;
+        }
+
+        if (isTenantEnforceEnabled(tenantId)) {
+            return MODE_ENFORCE;
+        }
+
+        return MODE_SHADOW;
+    }
+
+    /**
+     * 归一化灰度策略配置，不识别的值自动降级为租户白名单模式。
+     *
+     * @return 归一化策略值
+     */
+    private String normalizeRolloutStrategy() {
+        if (!StringUtils.hasText(rolloutStrategy)) {
+            return ROLLOUT_STRATEGY_TENANT_WHITELIST;
+        }
+        String normalized = rolloutStrategy.trim().toUpperCase();
+        return ROLLOUT_STRATEGY_ALL.equals(normalized) ? ROLLOUT_STRATEGY_ALL : ROLLOUT_STRATEGY_TENANT_WHITELIST;
+    }
+
+    /**
+     * 判定租户是否命中 ENFORCE 灰度白名单。
+     *
+     * @param tenantId 租户ID
+     * @return true 表示命中灰度范围
+     */
+    private boolean isTenantEnforceEnabled(Long tenantId) {
+        if (tenantId == null) {
+            return false;
+        }
+        return parseTenantWhitelist().contains(tenantId);
+    }
+
+    /**
+     * 解析租户白名单配置。
+     *
+     * @return 白名单租户ID集合
+     */
+    private Set<Long> parseTenantWhitelist() {
+        if (!StringUtils.hasText(enforceTenantWhitelist)) {
+            return Set.of();
+        }
+
+        Set<Long> tenantIds = new HashSet<>();
+        for (String raw : StringUtils.commaDelimitedListToSet(enforceTenantWhitelist)) {
+            try {
+                tenantIds.add(Long.parseLong(raw.trim()));
+            } catch (NumberFormatException ex) {
+                log.warn("[quota-rollout] invalid tenant id in whitelist: {}", raw);
+            }
+        }
+        return tenantIds;
+    }
+
+    /**
      * 查询策略，优先匹配精确 scopeId，其次匹配 scopeId=0 的租户默认策略。
      *
      * @param tenantId 租户ID
@@ -279,12 +387,71 @@ public class QuotaServiceImpl implements QuotaService {
         if (snapshot == null) {
             return;
         }
-        long storageDiff = Math.abs(nvl(snapshot.getUsedStorageBytes()) - actualStorage);
-        long countDiff = Math.abs(nvl(snapshot.getUsedFileCount()) - actualCount);
+        long snapshotStorage = nvl(snapshot.getUsedStorageBytes());
+        long snapshotCount = nvl(snapshot.getUsedFileCount());
+        long storageDiff = Math.abs(snapshotStorage - actualStorage);
+        long countDiff = Math.abs(snapshotCount - actualCount);
         if (storageDiff > 0 || countDiff > 0) {
             log.info("[quota-reconcile] drift detected: tenantId={}, userId={}, storageDiff={}, countDiff={}",
                     tenantId, userId, storageDiff, countDiff);
         }
+
+        if (!isDriftAlertTriggered(storageDiff, actualStorage, countDiff)) {
+            return;
+        }
+
+        String scope = userId != null && userId == 0L ? DRIFT_SCOPE_TENANT : DRIFT_SCOPE_USER;
+        double storageDriftRatio = calculateStorageDriftRatio(storageDiff, actualStorage);
+        if (storageDriftRatio >= storageDriftRatioThreshold) {
+            quotaMetrics.recordDriftAlert(scope, DRIFT_REASON_STORAGE);
+        }
+        if (countDiff >= fileCountDriftThreshold) {
+            quotaMetrics.recordDriftAlert(scope, DRIFT_REASON_FILE_COUNT);
+        }
+
+        log.warn("[quota-drift-alert] tenantId={}, userId={}, snapshotStorage={}, actualStorage={}, storageDiff={}, "
+                        + "storageDriftRatio={}, snapshotCount={}, actualCount={}, countDiff={}, ratioThreshold={}, "
+                        + "countThreshold={}",
+                tenantId,
+                userId,
+                snapshotStorage,
+                actualStorage,
+                storageDiff,
+                storageDriftRatio,
+                snapshotCount,
+                actualCount,
+                countDiff,
+                storageDriftRatioThreshold,
+                fileCountDriftThreshold
+        );
+    }
+
+    /**
+     * 判断当前偏差是否触发告警条件。
+     *
+     * @param storageDiff 存储偏差值
+     * @param actualStorage 实际存储值
+     * @param countDiff 文件数偏差值
+     * @return true 表示达到告警阈值
+     */
+    private boolean isDriftAlertTriggered(long storageDiff, long actualStorage, long countDiff) {
+        if (!alertEnabled) {
+            return false;
+        }
+        double storageDriftRatio = calculateStorageDriftRatio(storageDiff, actualStorage);
+        return storageDriftRatio >= storageDriftRatioThreshold || countDiff >= fileCountDriftThreshold;
+    }
+
+    /**
+     * 计算存储偏差比例。
+     *
+     * @param storageDiff 存储偏差值
+     * @param actualStorage 实际存储值
+     * @return 偏差比例
+     */
+    private double calculateStorageDriftRatio(long storageDiff, long actualStorage) {
+        double denominator = Math.max(1D, actualStorage);
+        return storageDiff / denominator;
     }
 
     /**

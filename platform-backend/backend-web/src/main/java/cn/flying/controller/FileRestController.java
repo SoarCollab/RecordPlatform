@@ -2,18 +2,24 @@ package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
 import cn.flying.dao.dto.File;
+import cn.flying.dao.vo.file.BatchDownloadMetricsReportVO;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.service.DownloadBatchMetricsService;
 import cn.flying.service.FileQueryService;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
+import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -36,6 +42,9 @@ public class FileRestController {
 
     @Resource
     private FileQueryService fileQueryService;
+
+    @Resource
+    private DownloadBatchMetricsService downloadBatchMetricsService;
 
     /**
      * 获取文件分页列表（REST 新路径）。
@@ -169,5 +178,25 @@ public class FileRestController {
     public Result<FileDecryptInfoVO> getFileDecryptInfo(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
                                                         @PathVariable String fileHash) {
         return Result.success(fileQueryService.getFileDecryptInfo(userId, fileHash));
+    }
+
+    /**
+     * 上报批量下载质量指标，用于前后端统一质量观测。
+     *
+     * @param userId 当前用户ID
+     * @param tenantId 当前租户ID
+     * @param report 批次质量指标
+     * @return 固定响应
+     */
+    @PostMapping("/download-batches/report")
+    @Operation(summary = "上报批量下载质量指标")
+    @OperationLog(module = "文件操作", operationType = "上报", description = "上报批量下载质量指标")
+    public Result<String> reportDownloadBatchMetrics(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @RequestAttribute(value = Const.ATTR_TENANT_ID, required = false) Long tenantId,
+            @RequestBody @Valid BatchDownloadMetricsReportVO report) {
+        Long resolvedTenantId = tenantId != null ? tenantId : TenantContext.getTenantIdOrDefault();
+        downloadBatchMetricsService.reportBatchMetrics(resolvedTenantId, userId, report);
+        return Result.success("ok");
     }
 }

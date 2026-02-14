@@ -33,6 +33,7 @@ import cn.flying.dao.mapper.SysRolePermissionMapper;
 import cn.flying.service.AccountService;
 import cn.flying.service.AnnouncementService;
 import cn.flying.service.ConversationService;
+import cn.flying.service.DownloadBatchMetricsService;
 import cn.flying.service.FileAdminService;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
@@ -137,6 +138,9 @@ class OpenApiContractExportTest {
 
     @MockBean
     private FileService fileService;
+
+    @MockBean
+    private DownloadBatchMetricsService downloadBatchMetricsService;
 
     @MockBean
     private FriendService friendService;

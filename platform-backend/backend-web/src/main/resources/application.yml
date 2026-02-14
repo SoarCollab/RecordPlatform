@@ -177,6 +177,14 @@ file:
 # Quota governance configuration
 quota:
   enforcement-mode: SHADOW
+  rollout:
+    strategy: TENANT_WHITELIST
+    enforce-tenant-whitelist:
+    force-shadow: false
+  alert:
+    enabled: true
+    storage-drift-ratio-threshold: 0.01
+    file-count-drift-threshold: 1
   default:
     user:
       max-storage-bytes: 5368709120

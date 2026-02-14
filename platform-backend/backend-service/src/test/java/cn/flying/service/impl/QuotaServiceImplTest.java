@@ -6,8 +6,10 @@ import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.QuotaPolicyMapper;
 import cn.flying.dao.mapper.QuotaUsageSnapshotMapper;
 import cn.flying.dao.mapper.TenantMapper;
+import cn.flying.dao.entity.QuotaUsageSnapshot;
 import cn.flying.dao.vo.file.QuotaStatusVO;
 import cn.flying.dao.vo.file.QuotaUserUsageVO;
+import cn.flying.service.monitor.QuotaMetrics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -26,7 +28,10 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.mockStatic;
@@ -50,6 +55,9 @@ class QuotaServiceImplTest {
     @Mock
     private TenantMapper tenantMapper;
 
+    @Mock
+    private QuotaMetrics quotaMetrics;
+
     @InjectMocks
     private QuotaServiceImpl quotaService;
 
@@ -62,6 +70,12 @@ class QuotaServiceImplTest {
         ReflectionTestUtils.setField(quotaService, "defaultUserMaxFileCount", 10L);
         ReflectionTestUtils.setField(quotaService, "defaultTenantMaxStorageBytes", 5000L);
         ReflectionTestUtils.setField(quotaService, "defaultTenantMaxFileCount", 100L);
+        ReflectionTestUtils.setField(quotaService, "rolloutStrategy", "TENANT_WHITELIST");
+        ReflectionTestUtils.setField(quotaService, "enforceTenantWhitelist", "");
+        ReflectionTestUtils.setField(quotaService, "forceShadow", false);
+        ReflectionTestUtils.setField(quotaService, "alertEnabled", true);
+        ReflectionTestUtils.setField(quotaService, "storageDriftRatioThreshold", 0.01D);
+        ReflectionTestUtils.setField(quotaService, "fileCountDriftThreshold", 1L);
 
         when(quotaPolicyMapper.selectActivePolicy(anyLong(), org.mockito.ArgumentMatchers.anyString(), anyLong()))
                 .thenReturn(null);
@@ -82,6 +96,7 @@ class QuotaServiceImplTest {
         when(fileMapper.sumQuotaStorageByUserId(2L, 1L)).thenReturn(950L);
 
         assertDoesNotThrow(() -> quotaService.checkUploadQuota(1L, 2L, 200L));
+        verify(quotaMetrics).recordQuotaDecision("SHADOW", true);
     }
 
     /**
@@ -90,12 +105,59 @@ class QuotaServiceImplTest {
     @Test
     void shouldRejectUploadWhenOverQuotaInEnforceMode() {
         ReflectionTestUtils.setField(quotaService, "enforcementMode", "ENFORCE");
+        ReflectionTestUtils.setField(quotaService, "rolloutStrategy", "ALL");
         when(fileMapper.sumQuotaStorageByUserId(3L, 1L)).thenReturn(980L);
 
         GeneralException ex = assertThrows(GeneralException.class, () ->
                 quotaService.checkUploadQuota(1L, 3L, 200L));
 
         assertEquals(50013, ex.getResultEnum().getCode());
+        verify(quotaMetrics).recordQuotaDecision("ENFORCE", true);
+    }
+
+    /**
+     * 验证租户在白名单内时 ENFORCE 生效。
+     */
+    @Test
+    void shouldEnforceWhenTenantInWhitelist() {
+        ReflectionTestUtils.setField(quotaService, "enforcementMode", "ENFORCE");
+        ReflectionTestUtils.setField(quotaService, "rolloutStrategy", "TENANT_WHITELIST");
+        ReflectionTestUtils.setField(quotaService, "enforceTenantWhitelist", "1,2");
+        when(fileMapper.sumQuotaStorageByUserId(3L, 1L)).thenReturn(980L);
+
+        GeneralException ex = assertThrows(GeneralException.class, () ->
+                quotaService.checkUploadQuota(1L, 3L, 200L));
+
+        assertEquals(50013, ex.getResultEnum().getCode());
+        verify(quotaMetrics).recordQuotaDecision("ENFORCE", true);
+    }
+
+    /**
+     * 验证租户不在白名单时强制回退 SHADOW。
+     */
+    @Test
+    void shouldFallbackToShadowWhenTenantNotInWhitelist() {
+        ReflectionTestUtils.setField(quotaService, "enforcementMode", "ENFORCE");
+        ReflectionTestUtils.setField(quotaService, "rolloutStrategy", "TENANT_WHITELIST");
+        ReflectionTestUtils.setField(quotaService, "enforceTenantWhitelist", "2,3");
+        when(fileMapper.sumQuotaStorageByUserId(3L, 1L)).thenReturn(980L);
+
+        assertDoesNotThrow(() -> quotaService.checkUploadQuota(1L, 3L, 200L));
+        verify(quotaMetrics).recordQuotaDecision("SHADOW", true);
+    }
+
+    /**
+     * 验证 force-shadow 可覆盖所有 ENFORCE 灰度配置。
+     */
+    @Test
+    void shouldForceShadowWhenForceShadowEnabled() {
+        ReflectionTestUtils.setField(quotaService, "enforcementMode", "ENFORCE");
+        ReflectionTestUtils.setField(quotaService, "rolloutStrategy", "ALL");
+        ReflectionTestUtils.setField(quotaService, "forceShadow", true);
+        when(fileMapper.sumQuotaStorageByUserId(3L, 1L)).thenReturn(980L);
+
+        assertDoesNotThrow(() -> quotaService.checkUploadQuota(1L, 3L, 200L));
+        verify(quotaMetrics).recordQuotaDecision("SHADOW", true);
     }
 
     /**
@@ -103,13 +165,15 @@ class QuotaServiceImplTest {
      */
     @Test
     void shouldReturnCurrentQuotaStatus() {
-        ReflectionTestUtils.setField(quotaService, "enforcementMode", "SHADOW");
+        ReflectionTestUtils.setField(quotaService, "enforcementMode", "ENFORCE");
+        ReflectionTestUtils.setField(quotaService, "rolloutStrategy", "TENANT_WHITELIST");
+        ReflectionTestUtils.setField(quotaService, "enforceTenantWhitelist", "1");
 
         QuotaStatusVO status = quotaService.getCurrentQuotaStatus(1L, 2L);
 
         assertEquals(1L, status.tenantId());
         assertEquals(2L, status.userId());
-        assertEquals("SHADOW", status.enforcementMode());
+        assertEquals("ENFORCE", status.enforcementMode());
         assertEquals(200L, status.userUsedStorageBytes());
     }
 
@@ -130,6 +194,48 @@ class QuotaServiceImplTest {
         verify(quotaUsageSnapshotMapper).resetMissingUserSnapshots(eq(1L), eq(List.of(2L, 3L)), eq("RECON"));
         verify(quotaUsageSnapshotMapper).upsertSnapshot(eq(1L), eq(2L), eq(300L), eq(2L), eq("RECON"));
         verify(quotaUsageSnapshotMapper).upsertSnapshot(eq(1L), eq(3L), eq(500L), eq(3L), eq("RECON"));
+    }
+
+    /**
+     * 验证对账偏差超阈值时会记录告警指标。
+     */
+    @Test
+    void shouldRecordDriftAlertWhenThresholdExceeded() {
+        QuotaUsageSnapshot tenantSnapshot = new QuotaUsageSnapshot();
+        tenantSnapshot.setUsedStorageBytes(1000L);
+        tenantSnapshot.setUsedFileCount(8L);
+        when(quotaUsageSnapshotMapper.selectByScope(1L, 0L)).thenReturn(tenantSnapshot);
+
+        when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(1L));
+        when(fileMapper.sumQuotaStorageByTenantId(1L)).thenReturn(1200L);
+        when(fileMapper.countQuotaByTenantId(1L)).thenReturn(12L);
+        when(fileMapper.aggregateQuotaUserUsageByTenant(1L)).thenReturn(List.of());
+
+        quotaService.reconcileUsageSnapshots();
+
+        verify(quotaMetrics).recordDriftAlert("TENANT", "storage_drift");
+        verify(quotaMetrics).recordDriftAlert("TENANT", "file_count_drift");
+    }
+
+    /**
+     * 验证告警关闭时不记录漂移告警指标。
+     */
+    @Test
+    void shouldSkipDriftAlertWhenAlertDisabled() {
+        QuotaUsageSnapshot tenantSnapshot = new QuotaUsageSnapshot();
+        tenantSnapshot.setUsedStorageBytes(1000L);
+        tenantSnapshot.setUsedFileCount(8L);
+        when(quotaUsageSnapshotMapper.selectByScope(1L, 0L)).thenReturn(tenantSnapshot);
+
+        when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(1L));
+        when(fileMapper.sumQuotaStorageByTenantId(1L)).thenReturn(1200L);
+        when(fileMapper.countQuotaByTenantId(1L)).thenReturn(12L);
+        when(fileMapper.aggregateQuotaUserUsageByTenant(1L)).thenReturn(List.of());
+        ReflectionTestUtils.setField(quotaService, "alertEnabled", false);
+
+        quotaService.reconcileUsageSnapshots();
+
+        verify(quotaMetrics, never()).recordDriftAlert(anyString(), anyString());
     }
 
     /**
