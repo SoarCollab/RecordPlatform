@@ -129,8 +129,9 @@ export function getGlobalThresholds() {
  */
 export function getQueryThresholds() {
   return {
-    'http_req_duration{endpoint:files_page}': ['p(95)<800'],
-    'http_req_duration{endpoint:files_list}': ['p(95)<800'],
+    'http_req_duration{endpoint:files_basic}': ['p(95)<800'],
+    'http_req_duration{endpoint:files_keyword}': ['p(95)<800'],
+    'http_req_duration{endpoint:files_combo}': ['p(95)<1000'],
     'http_req_duration{endpoint:files_stats}': ['p(95)<800'],
   };
 }

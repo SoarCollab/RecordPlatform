@@ -26,37 +26,101 @@ export const options = createConstantVusOptions(
 );
 
 /**
- * 执行文件查询三连请求（page/list/stats）。
+ * 将查询参数对象编码为 URL 查询串。
+ *
+ * @param {Record<string, string|number|undefined|null>} query 查询参数
+ * @returns {string} 编码后的查询串
+ */
+function buildQueryString(query) {
+  return Object.entries(query || {})
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+    .join('&');
+}
+
+/**
+ * 执行 `/files` 查询并按 endpoint 标签记录指标。
  *
  * @param {{config:{baseUrl:string, tenantId:string}, token:string}} context 压测上下文
  * @param {string} scenarioName 场景名
- * @returns {boolean} 三个请求是否全部成功
+ * @param {string} endpointTag endpoint 标签
+ * @param {Record<string, string|number|undefined|null>} query 查询参数
+ * @param {string} label 断言标签
+ * @returns {boolean} 请求是否成功
+ */
+function runFilesQuery(context, scenarioName, endpointTag, query, label) {
+  const headers = buildAuthHeaders(context.config.tenantId, context.token);
+  const tags = buildRequestTags(scenarioName, endpointTag, 'GET');
+  const queryString = buildQueryString(query);
+  const url = queryString
+    ? `${context.config.baseUrl}/files?${queryString}`
+    : `${context.config.baseUrl}/files`;
+  const response = get(url, {
+    headers,
+    tags,
+  });
+  return checkApiSuccess(response, label, tags);
+}
+
+/**
+ * 执行文件查询四类场景（basic/keyword/combo/stats）。
+ *
+ * @param {{config:{baseUrl:string, tenantId:string}, token:string}} context 压测上下文
+ * @param {string} scenarioName 场景名
+ * @returns {boolean} 四个请求是否全部成功
  */
 export function runFileQueryFlow(context, scenarioName = 'file-query') {
-  const headers = buildAuthHeaders(context.config.tenantId, context.token);
+  const now = new Date();
+  const startTime = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const endTime = now.toISOString();
+  const keyword = `k6-${context.config.runId}`;
 
-  const pageTags = buildRequestTags(scenarioName, 'files_page', 'GET');
-  const pageRes = get(`${context.config.baseUrl}/files/page?pageNum=1&pageSize=10`, {
-    headers,
-    tags: pageTags,
-  });
-  const pageOk = checkApiSuccess(pageRes, 'files/page', pageTags);
+  const basicOk = runFilesQuery(
+    context,
+    scenarioName,
+    'files_basic',
+    {
+      pageNum: 1,
+      pageSize: 10,
+    },
+    'files basic',
+  );
 
-  const listTags = buildRequestTags(scenarioName, 'files_list', 'GET');
-  const listRes = get(`${context.config.baseUrl}/files/list`, {
-    headers,
-    tags: listTags,
-  });
-  const listOk = checkApiSuccess(listRes, 'files/list', listTags);
+  const keywordOk = runFilesQuery(
+    context,
+    scenarioName,
+    'files_keyword',
+    {
+      pageNum: 1,
+      pageSize: 10,
+      keyword,
+    },
+    'files keyword',
+  );
+
+  const comboOk = runFilesQuery(
+    context,
+    scenarioName,
+    'files_combo',
+    {
+      pageNum: 1,
+      pageSize: 10,
+      keyword,
+      status: 1,
+      startTime,
+      endTime,
+    },
+    'files combo',
+  );
 
   const statsTags = buildRequestTags(scenarioName, 'files_stats', 'GET');
   const statsRes = get(`${context.config.baseUrl}/files/stats`, {
-    headers,
+    headers: buildAuthHeaders(context.config.tenantId, context.token),
     tags: statsTags,
   });
   const statsOk = checkApiSuccess(statsRes, 'files/stats', statsTags);
 
-  return pageOk && listOk && statsOk;
+  return basicOk && keywordOk && comboOk && statsOk;
 }
 
 /**

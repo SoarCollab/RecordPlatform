@@ -33,8 +33,8 @@ function extractIdentifiers(records) {
  * @returns {{records:any[], pages:number, ok:boolean}} 查询结果
  */
 function queryFilesByKeyword(config, token, keyword, pageNum) {
-  const tags = buildRequestTags('teardown_cleanup', 'files_page', 'GET');
-  const url = `${config.baseUrl}/files/page?pageNum=${pageNum}&pageSize=100&keyword=${encodeURIComponent(keyword)}`;
+  const tags = buildRequestTags('teardown_cleanup', 'files_cleanup_query', 'GET');
+  const url = `${config.baseUrl}/files?pageNum=${pageNum}&pageSize=100&keyword=${encodeURIComponent(keyword)}`;
 
   const response = get(url, {
     headers: buildAuthHeaders(config.tenantId, token),

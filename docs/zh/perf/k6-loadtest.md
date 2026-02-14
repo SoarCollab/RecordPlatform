@@ -69,8 +69,9 @@ bash tools/k6/run-local.sh --profile load --scenario chunk-upload
 - 必须携带 `X-Tenant-ID`
 
 ### 4.2 查询链路
-- `GET /api/v1/files/page?pageNum=1&pageSize=10`
-- `GET /api/v1/files/list`
+- `GET /api/v1/files?pageNum=1&pageSize=10`（basic）
+- `GET /api/v1/files?pageNum=1&pageSize=10&keyword=...`（keyword）
+- `GET /api/v1/files?pageNum=1&pageSize=10&keyword=...&status=1&startTime=...&endTime=...`（combo）
 - `GET /api/v1/files/stats`
 
 ### 4.3 上传链路
@@ -92,8 +93,9 @@ bash tools/k6/run-local.sh --profile load --scenario chunk-upload
 - `checks > 99%`
 
 查询链路：
-- `files_page p95 < 800ms`
-- `files_list p95 < 800ms`
+- `files_basic p95 < 800ms`
+- `files_keyword p95 < 800ms`
+- `files_combo p95 < 1000ms`
 - `files_stats p95 < 800ms`
 
 上传链路：

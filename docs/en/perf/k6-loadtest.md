@@ -69,8 +69,9 @@ bash tools/k6/run-local.sh --profile load --scenario chunk-upload
 - Must include `X-Tenant-ID` header
 
 ### 4.2 Query chain
-- `GET /api/v1/files/page?pageNum=1&pageSize=10`
-- `GET /api/v1/files/list`
+- `GET /api/v1/files?pageNum=1&pageSize=10` (basic)
+- `GET /api/v1/files?pageNum=1&pageSize=10&keyword=...` (keyword)
+- `GET /api/v1/files?pageNum=1&pageSize=10&keyword=...&status=1&startTime=...&endTime=...` (combo)
 - `GET /api/v1/files/stats`
 
 ### 4.3 Upload chain
@@ -92,8 +93,9 @@ Global:
 - `checks > 99%`
 
 Query chain:
-- `files_page p95 < 800ms`
-- `files_list p95 < 800ms`
+- `files_basic p95 < 800ms`
+- `files_keyword p95 < 800ms`
+- `files_combo p95 < 1000ms`
 - `files_stats p95 < 800ms`
 
 Upload chain:

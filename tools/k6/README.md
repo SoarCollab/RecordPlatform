@@ -1,7 +1,7 @@
 # K6 压测框架（本地 + CI）
 
 本目录提供可复用、可门禁、可归档的 K6 压测框架，覆盖：
-- 读路径：`/files/page`、`/files/list`、`/files/stats`
+- 读路径：`/files`（`basic/keyword/combo`）与 `/files/stats`
 - 写路径：`/files/upload/start`、`/files/upload/chunk`、`/files/upload/complete`、`/files/upload/progress`
 - 混合路径：70% 查询 + 30% 上传
 
@@ -96,8 +96,9 @@ bash tools/k6/run-local.sh --profile load --scenario chunk-upload
 - `checks > 99%`
 
 查询链路：
-- `files_page p95 < 800ms`
-- `files_list p95 < 800ms`
+- `files_basic p95 < 800ms`
+- `files_keyword p95 < 800ms`
+- `files_combo p95 < 1000ms`
 - `files_stats p95 < 800ms`
 
 上传链路：
