@@ -53,6 +53,27 @@ export interface QuotaStatusVO {
 }
 
 /**
+ * 批量下载指标上报请求。
+ * @see BatchDownloadMetricsReportVO.java
+ */
+export interface BatchDownloadMetricsReportRequest {
+  /** 批次 ID */
+  batchId: string;
+  /** 批次总文件数 */
+  total: number;
+  /** 成功文件数 */
+  successCount: number;
+  /** 失败文件数 */
+  failedCount: number;
+  /** 累计重试次数（不含首次尝试） */
+  retryCount: number;
+  /** 批次耗时（毫秒） */
+  durationMs: number;
+  /** 失败原因分布（reason -> count） */
+  failureReasons: Record<string, number>;
+}
+
+/**
  * 文件状态枚举（与后端 FileUploadStatus 对齐）
  * @see FileUploadStatus.java
  *

@@ -142,7 +142,8 @@ describe("files endpoints", () => {
   it("写操作接口应透传路径与负载", async () => {
     clientMocks.api.post
       .mockResolvedValueOnce("share-code")
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce("ok");
     clientMocks.api.patch.mockResolvedValue(undefined);
     clientMocks.api.delete.mockResolvedValue(undefined);
 
@@ -151,6 +152,15 @@ describe("files endpoints", () => {
     await filesApi.deleteFile("file-id");
     await filesApi.cancelShare("share-code");
     await filesApi.saveSharedFiles({ sharingFileIdList: ["f1"], shareCode: "share-code" });
+    await filesApi.reportBatchDownloadMetrics({
+      batchId: "batch-1",
+      total: 2,
+      successCount: 1,
+      failedCount: 1,
+      retryCount: 1,
+      durationMs: 1200,
+      failureReasons: { network_error: 1 },
+    });
 
     expect(clientMocks.api.post).toHaveBeenNthCalledWith(
       1,
@@ -172,6 +182,19 @@ describe("files endpoints", () => {
       sharingFileIdList: ["f1"],
       shareCode: "share-code",
     });
+    expect(clientMocks.api.post).toHaveBeenNthCalledWith(
+      3,
+      "/files/download-batches/report",
+      {
+        batchId: "batch-1",
+        total: 2,
+        successCount: 1,
+        failedCount: 1,
+        retryCount: 1,
+        durationMs: 1200,
+        failureReasons: { network_error: 1 },
+      },
+    );
   });
 
   it("getShareByCode 应抛出后端未实现错误", async () => {

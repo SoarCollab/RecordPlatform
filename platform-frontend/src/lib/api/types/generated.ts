@@ -674,6 +674,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/files/download-batches/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 上报批量下载质量指标 */
+        post: operations["reportDownloadBatchMetrics"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/files/hash/{fileHash}": {
         parameters: {
             query?: never;
@@ -2662,6 +2679,40 @@ export interface components {
             userId?: string;
             /** @description 用户名 */
             username?: string;
+        };
+        /** @description 批量下载质量指标上报请求 */
+        BatchDownloadMetricsReportVO: {
+            /** @description 批次ID */
+            batchId: string;
+            /**
+             * Format: int64
+             * @description 批次耗时（毫秒）
+             */
+            durationMs: number;
+            /**
+             * Format: int32
+             * @description 失败文件数
+             */
+            failedCount: number;
+            /** @description 失败原因分布（reason -> count） */
+            failureReasons?: {
+                [key: string]: number;
+            };
+            /**
+             * Format: int32
+             * @description 累计重试次数（不含首次尝试）
+             */
+            retryCount: number;
+            /**
+             * Format: int32
+             * @description 成功文件数
+             */
+            successCount: number;
+            /**
+             * Format: int32
+             * @description 批次总文件数
+             */
+            total: number;
         };
         /** @description 区块链状态信息 */
         ChainStatusVO: {
@@ -5802,6 +5853,30 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultString"];
+                };
+            };
+        };
+    };
+    reportDownloadBatchMetrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchDownloadMetricsReportVO"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {

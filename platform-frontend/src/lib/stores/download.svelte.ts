@@ -260,6 +260,74 @@ function updateBatchProgress(
 }
 
 /**
+ * 计算单任务重试次数（不含首次尝试）。
+ *
+ * @param attempts 实际尝试次数（含首次）。
+ * @returns 重试次数。
+ */
+function calculateRetryCount(attempts: number): number {
+  return Math.max(0, attempts - 1);
+}
+
+/**
+ * 聚合批次失败原因分布。
+ *
+ * @param failures 批次失败列表。
+ * @returns 原因分布映射。
+ */
+function buildFailureReasonsDistribution(
+  failures: BatchDownloadFailure[],
+): Record<string, number> {
+  const distribution: Record<string, number> = {};
+  for (const failure of failures) {
+    const reason = (failure.reason ?? "unknown").trim() || "unknown";
+    distribution[reason] = (distribution[reason] ?? 0) + 1;
+  }
+  return distribution;
+}
+
+/**
+ * 构建批量下载指标上报载荷。
+ *
+ * @param snapshot 批次完成快照。
+ * @param retryCount 累计重试次数。
+ * @returns 上报请求对象。
+ */
+function buildBatchMetricsPayload(
+  snapshot: BatchDownloadState,
+  retryCount: number,
+): Parameters<typeof fileApi.reportBatchDownloadMetrics>[0] {
+  const completedAt = snapshot.completedAt ?? Date.now();
+  return {
+    batchId: snapshot.id,
+    total: snapshot.total,
+    successCount: snapshot.successCount,
+    failedCount: snapshot.failedCount,
+    retryCount,
+    durationMs: Math.max(0, completedAt - snapshot.startedAt),
+    failureReasons: buildFailureReasonsDistribution(snapshot.failures),
+  };
+}
+
+/**
+ * 异步上报批量下载指标，失败仅记录告警，不影响主下载流程。
+ *
+ * @param snapshot 批次完成快照。
+ * @param retryCount 累计重试次数。
+ */
+async function reportBatchMetricsInBackground(
+  snapshot: BatchDownloadState,
+  retryCount: number,
+): Promise<void> {
+  try {
+    const payload = buildBatchMetricsPayload(snapshot, retryCount);
+    await fileApi.reportBatchDownloadMetrics(payload);
+  } catch (error) {
+    console.warn("[download-batch-metrics] report failed", error);
+  }
+}
+
+/**
  * 在批量下载中执行单文件下载，并按策略进行自动重试。
  *
  * @param item 批量项。
@@ -269,7 +337,9 @@ function updateBatchProgress(
 async function executeBatchItem(
   item: BatchDownloadItem,
   retryTimes: number,
-): Promise<{ success: true } | { success: false; reason: string; attempts: number }> {
+): Promise<
+  { success: true; attempts: number } | { success: false; reason: string; attempts: number }
+> {
   let taskId: string | null = null;
   let attempts = 0;
 
@@ -290,7 +360,7 @@ async function executeBatchItem(
 
       const terminalTask = await waitForTaskTerminal(taskId);
       if (terminalTask?.status === "completed") {
-        return { success: true };
+        return { success: true, attempts };
       }
       if (terminalTask?.status === "paused") {
         return {
@@ -847,6 +917,7 @@ async function startBatchDownload(
   let activeCount = 0;
   let completedCount = 0;
   let successCount = 0;
+  let totalRetryCount = 0;
 
   batchState = {
     id: batchId,
@@ -875,6 +946,7 @@ async function startBatchDownload(
       updateBatchProgress(activeCount, completedCount, successCount, failures);
 
       const result = await executeBatchItem(item, retryTimes);
+      totalRetryCount += calculateRetryCount(result.attempts);
 
       activeCount--;
       completedCount++;
@@ -899,12 +971,14 @@ async function startBatchDownload(
 
   updateBatchProgress(0, completedCount, successCount, failures);
   if (batchState) {
-    batchState = {
+    const completedSnapshot: BatchDownloadState = {
       ...batchState,
       status: "completed",
       completedAt: Date.now(),
     };
-    return batchState;
+    batchState = completedSnapshot;
+    void reportBatchMetricsInBackground(completedSnapshot, totalRetryCount);
+    return completedSnapshot;
   }
 
   // 理论上不会进入此分支，仅作为类型兜底。

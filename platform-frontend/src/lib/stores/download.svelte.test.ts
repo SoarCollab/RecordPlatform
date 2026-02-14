@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
       publicDownloadFile: vi.fn(),
       shareDownloadFile: vi.fn(),
       downloadFile: vi.fn(),
+      reportBatchDownloadMetrics: vi.fn(),
     },
     chunkDownloader: {
       downloadAllChunks: vi.fn(),
@@ -129,6 +130,8 @@ describe("download store", () => {
     mocks.fileApi.publicDownloadFile.mockResolvedValue(createBlob());
     mocks.fileApi.shareDownloadFile.mockResolvedValue(createBlob());
     mocks.fileApi.downloadFile.mockResolvedValue(createBlob());
+    mocks.fileApi.reportBatchDownloadMetrics.mockResolvedValue("ok");
+    mocks.fileApi.reportBatchDownloadMetrics.mockResolvedValue("ok");
 
     mocks.chunkDownloader.downloadAllChunks.mockImplementation(
       async (_urls: string[], options: { onChunkComplete?: (result: { index: number; data: Uint8Array }) => Promise<void>; onProgress?: (progress: { completed: number; total: number }) => void }) => {
@@ -374,6 +377,36 @@ describe("download store", () => {
     expect(batch.total).toBe(2);
     expect(batch.successCount).toBe(2);
     expect(batch.failedCount).toBe(0);
+    expect(mocks.fileApi.reportBatchDownloadMetrics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        batchId: batch.id,
+        total: 2,
+        successCount: 2,
+        failedCount: 0,
+        retryCount: 0,
+        failureReasons: {},
+      }),
+    );
+  });
+
+  it("批次指标上报失败不应影响批量下载主流程", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.fileApi.reportBatchDownloadMetrics.mockRejectedValueOnce(
+      new Error("report failed"),
+    );
+
+    const download = await loadDownloadStore();
+    const batch = await download.startBatchDownload(
+      [{ fileHash: "hash-batch-report", fileName: "r1.pdf", fileSize: 1024 }],
+      { concurrency: 1, retryTimes: 1 },
+    );
+
+    await waitForBatchStatus(() => download.batchState?.status, "completed");
+
+    expect(batch.status).toBe("completed");
+    expect(batch.successCount).toBe(1);
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 
   it("批量下载中出现 paused 任务时应结束批次并标记失败", async () => {
@@ -427,6 +460,16 @@ describe("download store", () => {
     expect(firstBatch.failedCount).toBe(1);
     expect(firstBatch.failures[0].fileHash).toBe("hash-fail");
     expect(failCalls).toBe(3);
+    expect(mocks.fileApi.reportBatchDownloadMetrics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        batchId: firstBatch.id,
+        total: 2,
+        successCount: 1,
+        failedCount: 1,
+        retryCount: 2,
+        failureReasons: { network_error: 1 },
+      }),
+    );
 
     mocks.fileApi.getDownloadAddress.mockResolvedValue(["u1"]);
     const retryBatch = await download.retryBatchFailed();

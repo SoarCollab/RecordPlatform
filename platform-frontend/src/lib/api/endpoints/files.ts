@@ -13,6 +13,7 @@ import type {
   UpdateShareRequest,
   UserFileStatsVO,
   QuotaStatusVO,
+  BatchDownloadMetricsReportRequest,
   ShareAccessLogVO,
   ShareAccessStatsVO,
   FileProvenanceVO,
@@ -187,6 +188,18 @@ export async function getMyShares(
  */
 export async function getDownloadAddress(fileHash: string): Promise<string[]> {
   return api.get<string[]>(`${BASE}/hash/${fileHash}/addresses`);
+}
+
+/**
+ * 上报批量下载质量指标。
+ *
+ * @param payload 批次质量聚合指标。
+ * @returns 后端固定响应 `ok`。
+ */
+export async function reportBatchDownloadMetrics(
+  payload: BatchDownloadMetricsReportRequest,
+): Promise<string> {
+  return api.post<string>(`${BASE}/download-batches/report`, payload);
 }
 
 /**
