@@ -83,11 +83,12 @@ function parseMetricTags(metricKey) {
  * 从指标中提取阈值结果。
  *
  * @param {Record<string, any>} metrics 指标对象
- * @returns {{lines:string[], failed:number}} 阈值汇总
+ * @returns {{lines:string[], failed:number, items:Array<{metric:string, threshold:string, ok:boolean}>}} 阈值汇总
  */
 function collectThresholdStatus(metrics) {
   const lines = [];
   let failed = 0;
+  const items = [];
 
   for (const [metricName, metricData] of Object.entries(metrics || {})) {
     const thresholds = metricData.thresholds || {};
@@ -97,10 +98,15 @@ function collectThresholdStatus(metrics) {
         failed += 1;
       }
       lines.push(`${ok ? 'PASS' : 'FAIL'} | ${metricName} | ${thresholdName}`);
+      items.push({
+        metric: metricName,
+        threshold: thresholdName,
+        ok,
+      });
     }
   }
 
-  return { lines, failed };
+  return { lines, failed, items };
 }
 
 /**
@@ -158,6 +164,31 @@ function buildEndpointMetricLines(endpointStats) {
 
     return `${endpoint} -> p50=${formatMs(durationValues['p(50)'])}, p90=${formatMs(durationValues['p(90)'])}, p95=${formatMs(durationValues['p(95)'])}, error=${formatRate(errorRate)}, requests=${formatCount(stat.requests)}`;
   });
+}
+
+/**
+ * 构建 endpoint 维度结构化快照，供报告自动回填使用。
+ *
+ * @param {Record<string, {durationValues:Record<string,number>, requests:number, failures:number}>} endpointStats 端点聚合结果
+ * @returns {Record<string, {p50:number|null, p90:number|null, p95:number|null, errorRate:number|null, requests:number, failures:number}>} endpoint 快照
+ */
+function buildEndpointMetricSnapshot(endpointStats) {
+  const snapshot = {};
+  for (const endpoint of Object.keys(endpointStats || {}).sort()) {
+    const stat = endpointStats[endpoint];
+    const durationValues = stat.durationValues || {};
+    const errorRate = stat.requests > 0 ? stat.failures / stat.requests : null;
+
+    snapshot[endpoint] = {
+      p50: durationValues['p(50)'] ?? null,
+      p90: durationValues['p(90)'] ?? null,
+      p95: durationValues['p(95)'] ?? null,
+      errorRate,
+      requests: stat.requests,
+      failures: stat.failures,
+    };
+  }
+  return snapshot;
 }
 
 /**
@@ -315,6 +346,30 @@ function buildTextSummary(data, suiteName, config) {
 }
 
 /**
+ * 构建可直接回填检索基线报告的结构化 JSON 快照。
+ *
+ * @param {any} data k6 summary 数据
+ * @param {string} suiteName 套件名
+ * @param {{runId:string, profile:string, scenario:string}} config 配置
+ * @returns {{runId:string, profile:string, scenario:string, suite:string, generatedAt:string, thresholdFailedCount:number, thresholds:Array<{metric:string, threshold:string, ok:boolean}>, endpoints:Record<string, {p50:number|null, p90:number|null, p95:number|null, errorRate:number|null, requests:number, failures:number}>}} 基线快照
+ */
+function buildQueryBaselineSnapshot(data, suiteName, config) {
+  const metrics = data.metrics || {};
+  const thresholdStatus = collectThresholdStatus(metrics);
+  const endpointStats = collectEndpointStats(metrics);
+  return {
+    runId: config.runId,
+    profile: config.profile,
+    scenario: config.scenario,
+    suite: suiteName,
+    generatedAt: new Date().toISOString(),
+    thresholdFailedCount: thresholdStatus.failed,
+    thresholds: thresholdStatus.items,
+    endpoints: buildEndpointMetricSnapshot(endpointStats),
+  };
+}
+
+/**
  * 创建统一 handleSummary 处理器。
  *
  * @param {{resultDir:string, runId:string, profile:string, scenario:string}} config 配置
@@ -327,11 +382,13 @@ export function createSummaryHandler(config, suiteName) {
   return function handleSummary(data) {
     const textSummary = buildTextSummary(data, suiteName, config);
     const metricsSnapshot = buildMetricsSnapshot(data.metrics || {});
+    const queryBaselineSnapshot = buildQueryBaselineSnapshot(data, suiteName, config);
 
     return {
       [buildResultPath(outputDir, 'summary.txt')]: textSummary,
       [buildResultPath(outputDir, 'summary.json')]: JSON.stringify(data, null, 2),
       [buildResultPath(outputDir, 'metrics.json')]: JSON.stringify(metricsSnapshot, null, 2),
+      [buildResultPath(outputDir, 'query-baseline.json')]: JSON.stringify(queryBaselineSnapshot, null, 2),
       stdout: textSummary,
     };
   };

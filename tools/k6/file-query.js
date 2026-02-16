@@ -94,6 +94,7 @@ export function runFileQueryFlow(context, scenarioName = 'file-query') {
       pageNum: 1,
       pageSize: 10,
       keyword,
+      keywordMode: 'PREFIX',
     },
     'files keyword',
   );
@@ -106,6 +107,7 @@ export function runFileQueryFlow(context, scenarioName = 'file-query') {
       pageNum: 1,
       pageSize: 10,
       keyword,
+      keywordMode: 'PREFIX',
       status: 1,
       startTime,
       endTime,

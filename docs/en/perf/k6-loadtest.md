@@ -33,6 +33,8 @@ http://localhost:8000/record-platform/api/v1
 brew install k6
 ```
 
+If local `k6` is unavailable, use `--engine auto` to fall back to Docker (`grafana/k6:0.49.0`).
+
 ## 3. Quick Run
 
 ### 3.1 Smoke regression (recommended)
@@ -40,7 +42,7 @@ brew install k6
 When `K6_SCENARIO=all` (default), runs `file-query + core-mixed`.
 
 ```bash
-bash tools/k6/run-local.sh --profile smoke --scenario all
+bash tools/k6/run-local.sh --profile smoke --scenario all --engine auto
 ```
 
 ### 3.2 Load test
@@ -48,16 +50,16 @@ bash tools/k6/run-local.sh --profile smoke --scenario all
 When `K6_SCENARIO=all` (default), runs `file-query + chunk-upload`.
 
 ```bash
-bash tools/k6/run-local.sh --profile load --scenario all
+bash tools/k6/run-local.sh --profile load --scenario all --engine auto
 ```
 
 ### 3.3 Single scenario
 
 ```bash
-bash tools/k6/run-local.sh --profile smoke --scenario file-query
-bash tools/k6/run-local.sh --profile smoke --scenario core-mixed
-bash tools/k6/run-local.sh --profile smoke --scenario chunk-upload
-bash tools/k6/run-local.sh --profile load --scenario chunk-upload
+bash tools/k6/run-local.sh --profile smoke --scenario file-query --engine auto
+bash tools/k6/run-local.sh --profile smoke --scenario core-mixed --engine auto
+bash tools/k6/run-local.sh --profile smoke --scenario chunk-upload --engine auto
+bash tools/k6/run-local.sh --profile load --scenario chunk-upload --engine auto
 ```
 
 ## 4. API Contract (per backend code)
@@ -70,8 +72,8 @@ bash tools/k6/run-local.sh --profile load --scenario chunk-upload
 
 ### 4.2 Query chain
 - `GET /api/v1/files?pageNum=1&pageSize=10` (basic)
-- `GET /api/v1/files?pageNum=1&pageSize=10&keyword=...` (keyword)
-- `GET /api/v1/files?pageNum=1&pageSize=10&keyword=...&status=1&startTime=...&endTime=...` (combo)
+- `GET /api/v1/files?pageNum=1&pageSize=10&keyword=...&keywordMode=PREFIX` (keyword)
+- `GET /api/v1/files?pageNum=1&pageSize=10&keyword=...&keywordMode=PREFIX&status=1&startTime=...&endTime=...` (combo)
 - `GET /api/v1/files/stats`
 
 ### 4.3 Upload chain
@@ -110,6 +112,8 @@ Each run outputs to `RESULT_DIR`:
 - `summary.txt` (includes per-endpoint p50/p90/p95, error rate, request count, threshold results, failed samples)
 - `summary.json`
 - `metrics.json`
+- `query-baseline.json` (structured endpoint metrics + threshold results for report backfill)
+- `run-meta.json` (`runId/profile/scenario/engine/timestamp/baseUrlMask`)
 
 Default directory: `tools/k6/results/<RUN_ID>/`
 

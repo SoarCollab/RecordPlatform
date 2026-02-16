@@ -33,6 +33,8 @@ http://localhost:8000/record-platform/api/v1
 brew install k6
 ```
 
+若本机未安装 `k6`，可使用 `--engine auto` 自动回退到 Docker（`grafana/k6:0.49.0`）。
+
 ## 3. 快速运行
 
 ### 3.1 smoke 回归（推荐）
@@ -40,7 +42,7 @@ brew install k6
 默认 `K6_SCENARIO=all` 时，执行 `file-query + core-mixed`。
 
 ```bash
-bash tools/k6/run-local.sh --profile smoke --scenario all
+bash tools/k6/run-local.sh --profile smoke --scenario all --engine auto
 ```
 
 ### 3.2 load 压测
@@ -48,16 +50,16 @@ bash tools/k6/run-local.sh --profile smoke --scenario all
 默认 `K6_SCENARIO=all` 时，执行 `file-query + chunk-upload`。
 
 ```bash
-bash tools/k6/run-local.sh --profile load --scenario all
+bash tools/k6/run-local.sh --profile load --scenario all --engine auto
 ```
 
 ### 3.3 指定单场景
 
 ```bash
-bash tools/k6/run-local.sh --profile smoke --scenario file-query
-bash tools/k6/run-local.sh --profile smoke --scenario core-mixed
-bash tools/k6/run-local.sh --profile smoke --scenario chunk-upload
-bash tools/k6/run-local.sh --profile load --scenario chunk-upload
+bash tools/k6/run-local.sh --profile smoke --scenario file-query --engine auto
+bash tools/k6/run-local.sh --profile smoke --scenario core-mixed --engine auto
+bash tools/k6/run-local.sh --profile smoke --scenario chunk-upload --engine auto
+bash tools/k6/run-local.sh --profile load --scenario chunk-upload --engine auto
 ```
 
 ## 4. 接口契约（按后端代码）
@@ -70,8 +72,8 @@ bash tools/k6/run-local.sh --profile load --scenario chunk-upload
 
 ### 4.2 查询链路
 - `GET /api/v1/files?pageNum=1&pageSize=10`（basic）
-- `GET /api/v1/files?pageNum=1&pageSize=10&keyword=...`（keyword）
-- `GET /api/v1/files?pageNum=1&pageSize=10&keyword=...&status=1&startTime=...&endTime=...`（combo）
+- `GET /api/v1/files?pageNum=1&pageSize=10&keyword=...&keywordMode=PREFIX`（keyword）
+- `GET /api/v1/files?pageNum=1&pageSize=10&keyword=...&keywordMode=PREFIX&status=1&startTime=...&endTime=...`（combo）
 - `GET /api/v1/files/stats`
 
 ### 4.3 上传链路
@@ -110,6 +112,8 @@ bash tools/k6/run-local.sh --profile load --scenario chunk-upload
 - `summary.txt`（含 endpoint 的 p50/p90/p95、错误率、请求量、阈值结果、失败样本）
 - `summary.json`
 - `metrics.json`
+- `query-baseline.json`（endpoint 指标 + 阈值结果，便于报告回填）
+- `run-meta.json`（`runId/profile/scenario/engine/timestamp/baseUrlMask`）
 
 默认目录：`tools/k6/results/<RUN_ID>/`
 

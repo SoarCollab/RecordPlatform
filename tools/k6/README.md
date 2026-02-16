@@ -23,6 +23,8 @@ tools/k6/
 │   ├── ci-smoke.js
 │   ├── local-load.js
 │   └── local-smoke.js
+├── scripts/
+│   └── render-query-baseline.mjs
 ├── chunk-upload.js
 ├── file-query.js
 ├── run-ci.sh
@@ -32,11 +34,14 @@ tools/k6/
 ## 前置条件
 
 - 后端服务可访问（默认：`http://localhost:8000/record-platform/api/v1`）
-- 已安装 K6（macOS）：
+- 至少具备一种执行引擎：
+  - 本地 `k6`（macOS）：
 
 ```bash
 brew install k6
 ```
+
+- 或 Docker Desktop（脚本会使用 `grafana/k6:0.49.0` 自动回退执行）。
 
 > 注意：`X-Tenant-ID` 对 `/api/v1/auth/login` 也必填。
 
@@ -51,6 +56,7 @@ brew install k6
 框架变量：
 - `K6_PROFILE=smoke|load`
 - `K6_SCENARIO=all|file-query|chunk-upload|core-mixed`
+- `K6_ENGINE=auto|local|docker`（默认 `auto`）
 - `RUN_ID`（默认当前时间戳）
 - `RESULT_DIR`（默认 `tools/k6/results/<RUN_ID>`）
 
@@ -69,7 +75,7 @@ brew install k6
 默认 `K6_SCENARIO=all` 时只跑 `file-query + core-mixed`。
 
 ```bash
-bash tools/k6/run-local.sh --profile smoke --scenario all
+bash tools/k6/run-local.sh --profile smoke --scenario all --engine auto
 ```
 
 ### 2) load 档位（查询/上传控速）
@@ -77,16 +83,16 @@ bash tools/k6/run-local.sh --profile smoke --scenario all
 默认 `K6_SCENARIO=all` 时跑 `file-query + chunk-upload`。
 
 ```bash
-bash tools/k6/run-local.sh --profile load --scenario all
+bash tools/k6/run-local.sh --profile load --scenario all --engine auto
 ```
 
 ### 3) 指定单场景
 
 ```bash
-bash tools/k6/run-local.sh --profile smoke --scenario file-query
-bash tools/k6/run-local.sh --profile smoke --scenario core-mixed
-bash tools/k6/run-local.sh --profile smoke --scenario chunk-upload
-bash tools/k6/run-local.sh --profile load --scenario chunk-upload
+bash tools/k6/run-local.sh --profile smoke --scenario file-query --engine auto
+bash tools/k6/run-local.sh --profile smoke --scenario core-mixed --engine auto
+bash tools/k6/run-local.sh --profile smoke --scenario chunk-upload --engine auto
+bash tools/k6/run-local.sh --profile load --scenario chunk-upload --engine auto
 ```
 
 ## 固定门禁阈值
@@ -113,6 +119,23 @@ bash tools/k6/run-local.sh --profile load --scenario chunk-upload
 - `summary.txt`：可读摘要（含 endpoint 的 p50/p90/p95、错误率、请求量、阈值结果、失败样本）
 - `summary.json`：完整 k6 summary
 - `metrics.json`：精简指标快照
+- `query-baseline.json`：检索基线结构化快照（endpoint 指标 + 阈值结果，便于文档回填）
+- `run-meta.json`：运行元数据（`runId/profile/scenario/engine/timestamp/baseUrlMask`）
+
+## 基线回填自动汇总
+
+当 smoke/load 都有结果目录后，可使用脚本一键生成 Markdown 回填片段：
+
+```bash
+node tools/k6/scripts/render-query-baseline.mjs \
+  --smoke-dir tools/k6/results/<SMOKE_RUN_ID> \
+  --load-dir tools/k6/results/<LOAD_RUN_ID> \
+  --output tools/k6/results/query-baseline-snippet.md
+```
+
+脚本会读取两个目录下的 `query-baseline.json`，输出：
+- “结果回填模板”表格（RUN_ID / 阈值结论）
+- “指标摘录”表格（endpoint 的 p50/p90/p95/errorRate/requests）
 
 ## CI 说明
 
@@ -125,6 +148,9 @@ bash tools/k6/run-local.sh --profile load --scenario chunk-upload
 - `TENANT_ID`
 - `USERNAME`
 - `PASSWORD`
+
+可选参数：
+- `--engine auto|local|docker`（默认 `auto`）
 
 GitHub Actions Secrets（与统一变量同名）：
 - `BASE_URL`
