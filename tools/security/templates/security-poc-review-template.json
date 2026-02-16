@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0.0",
+  "description": "安全 PoC 人工复核模板。status 仅允许 TRUE_POSITIVE/FALSE_POSITIVE/ACCEPTED_RISK/NOT_REVIEWED；误报率口径使用 TRUE_POSITIVE + FALSE_POSITIVE。",
+  "reviewEntries": [],
+  "entryTemplate": {
+    "scanner": "semgrep",
+    "ruleId": "",
+    "target": "",
+    "severity": "HIGH",
+    "status": "NOT_REVIEWED",
+    "reviewer": "",
+    "reviewedAt": "",
+    "note": ""
+  }
+}

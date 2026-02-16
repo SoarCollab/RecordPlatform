@@ -1,0 +1,257 @@
+name: Security PoC
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  semgrep-sast:
+    name: Semgrep SAST (Informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Mark scan start
+        run: |
+          echo "SCAN_START_TS=$(date -u +%s)" >> "$GITHUB_ENV"
+          echo "SCAN_START_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Run Semgrep Scan (SARIF + JSON)
+        run: |
+          mkdir -p security-artifacts/semgrep
+          set +e
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src \
+            semgrep/semgrep:1.112.0 \
+            semgrep --config auto --metrics=off --sarif --output security-artifacts/semgrep/semgrep.sarif
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src \
+            semgrep/semgrep:1.112.0 \
+            semgrep --config auto --metrics=off --json --output security-artifacts/semgrep/semgrep.json
+          set -e
+
+      - name: Write Semgrep run meta
+        if: always()
+        run: |
+          mkdir -p security-artifacts/semgrep
+          END_TS="$(date -u +%s)"
+          END_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          START_TS="${SCAN_START_TS:-$END_TS}"
+          START_AT="${SCAN_START_AT:-$END_AT}"
+          DURATION_SECONDS="$((END_TS - START_TS))"
+          if [ "$DURATION_SECONDS" -lt 0 ]; then
+            DURATION_SECONDS=0
+          fi
+          cat > security-artifacts/semgrep/run-meta.json <<EOF
+          {
+            "scanner": "semgrep",
+            "startAt": "${START_AT}",
+            "endAt": "${END_AT}",
+            "durationSeconds": ${DURATION_SECONDS}
+          }
+          EOF
+
+      - name: Upload Semgrep Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-poc-semgrep
+          path: security-artifacts/semgrep
+          if-no-files-found: warn
+
+  trivy-sca:
+    name: Trivy SCA (Informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Mark scan start
+        run: |
+          echo "SCAN_START_TS=$(date -u +%s)" >> "$GITHUB_ENV"
+          echo "SCAN_START_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Prepare artifact directory
+        run: mkdir -p security-artifacts/trivy
+
+      - name: Run Trivy SCA (SARIF)
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: security-artifacts/trivy/trivy.sarif
+          severity: CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN
+          ignore-unfixed: true
+          vuln-type: os,library
+          exit-code: '0'
+
+      - name: Run Trivy SCA (JSON)
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: json
+          output: security-artifacts/trivy/trivy.json
+          severity: CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN
+          ignore-unfixed: true
+          vuln-type: os,library
+          exit-code: '0'
+
+      - name: Write Trivy run meta
+        if: always()
+        run: |
+          mkdir -p security-artifacts/trivy
+          END_TS="$(date -u +%s)"
+          END_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          START_TS="${SCAN_START_TS:-$END_TS}"
+          START_AT="${SCAN_START_AT:-$END_AT}"
+          DURATION_SECONDS="$((END_TS - START_TS))"
+          if [ "$DURATION_SECONDS" -lt 0 ]; then
+            DURATION_SECONDS=0
+          fi
+          cat > security-artifacts/trivy/run-meta.json <<EOF
+          {
+            "scanner": "trivy",
+            "startAt": "${START_AT}",
+            "endAt": "${END_AT}",
+            "durationSeconds": ${DURATION_SECONDS}
+          }
+          EOF
+
+      - name: Upload Trivy Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-poc-trivy
+          path: security-artifacts/trivy
+          if-no-files-found: warn
+
+  sbom:
+    name: CycloneDX SBOM (Informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Mark scan start
+        run: |
+          echo "SCAN_START_TS=$(date -u +%s)" >> "$GITHUB_ENV"
+          echo "SCAN_START_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Prepare artifact directory
+        run: mkdir -p security-artifacts/sbom
+
+      - name: Generate CycloneDX SBOM
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: cyclonedx
+          output: security-artifacts/sbom/sbom.cdx.json
+          exit-code: '0'
+
+      - name: Write SBOM run meta
+        if: always()
+        run: |
+          mkdir -p security-artifacts/sbom
+          END_TS="$(date -u +%s)"
+          END_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          START_TS="${SCAN_START_TS:-$END_TS}"
+          START_AT="${SCAN_START_AT:-$END_AT}"
+          DURATION_SECONDS="$((END_TS - START_TS))"
+          if [ "$DURATION_SECONDS" -lt 0 ]; then
+            DURATION_SECONDS=0
+          fi
+          cat > security-artifacts/sbom/run-meta.json <<EOF
+          {
+            "scanner": "sbom",
+            "startAt": "${START_AT}",
+            "endAt": "${END_AT}",
+            "durationSeconds": ${DURATION_SECONDS}
+          }
+          EOF
+
+      - name: Upload SBOM Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-poc-sbom
+          path: security-artifacts/sbom
+          if-no-files-found: warn
+
+  security-observation-summary:
+    name: Security Observation Summary (Informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    needs:
+      - semgrep-sast
+      - trivy-sca
+      - sbom
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Semgrep artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: security-poc-semgrep
+          path: security-artifacts/semgrep
+
+      - name: Download Trivy artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: security-poc-trivy
+          path: security-artifacts/trivy
+
+      - name: Download SBOM artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: security-poc-sbom
+          path: security-artifacts/sbom
+
+      - name: Render security observation report
+        if: always()
+        run: |
+          mkdir -p security-artifacts/summary
+          node tools/security/scripts/render-security-poc-observation.mjs \
+            --semgrep security-artifacts/semgrep/semgrep.json \
+            --trivy security-artifacts/trivy/trivy.json \
+            --sbom security-artifacts/sbom/sbom.cdx.json \
+            --review tools/security/templates/security-poc-review-template.json \
+            --output-md security-artifacts/summary/security-poc-observation.md \
+            --output-json security-artifacts/summary/security-poc-observation.json
+
+      - name: Publish step summary
+        if: always()
+        run: |
+          if [ -f security-artifacts/summary/security-poc-observation.md ]; then
+            cat security-artifacts/summary/security-poc-observation.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "security-poc-observation.md 未生成，请检查上游扫描产物。" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload observation summary artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-poc-summary
+          path: security-artifacts/summary
+          if-no-files-found: warn
