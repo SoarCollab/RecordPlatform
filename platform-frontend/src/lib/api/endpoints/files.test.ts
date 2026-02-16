@@ -80,6 +80,7 @@ describe("files endpoints", () => {
     await filesApi.getFiles({
       pageNum: 1,
       pageSize: 20,
+      keywordMode: "PREFIX",
       startTime: "2026-02-01T00:00:00.000Z",
       endTime: "2026-02-10T00:00:00.000Z",
     });
@@ -100,6 +101,7 @@ describe("files endpoints", () => {
       params: {
         pageNum: 1,
         pageSize: 20,
+        keywordMode: "PREFIX",
         startTime: "2026-02-01T00:00:00.000Z",
         endTime: "2026-02-10T00:00:00.000Z",
       },

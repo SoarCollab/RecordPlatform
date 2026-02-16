@@ -44,6 +44,15 @@ public class QuotaServiceImpl implements QuotaService {
     private static final String DRIFT_SCOPE_USER = "USER";
     private static final String DRIFT_REASON_STORAGE = "storage_drift";
     private static final String DRIFT_REASON_FILE_COUNT = "file_count_drift";
+    private static final String ACTION_ALLOW = "ALLOW";
+    private static final String ACTION_BLOCK = "BLOCK";
+    private static final String ACTION_SHADOW_ALLOW = "SHADOW_ALLOW";
+    private static final String ROLLOUT_REASON_OK = "ok";
+    private static final String ROLLOUT_REASON_USER_STORAGE = "user_storage_exceeded";
+    private static final String ROLLOUT_REASON_USER_FILE_COUNT = "user_file_count_exceeded";
+    private static final String ROLLOUT_REASON_TENANT_STORAGE = "tenant_storage_exceeded";
+    private static final String ROLLOUT_REASON_TENANT_FILE_COUNT = "tenant_file_count_exceeded";
+    private static final String ROLLOUT_REASON_UNKNOWN = "unknown_exceeded";
 
     @Resource
     private FileMapper fileMapper;
@@ -71,6 +80,9 @@ public class QuotaServiceImpl implements QuotaService {
 
     @Value("${quota.rollout.force-shadow:false}")
     private boolean forceShadow;
+
+    @Value("${quota.rollout.batch-id:default}")
+    private String rolloutBatchId;
 
     @Value("${quota.alert.enabled:true}")
     private boolean alertEnabled;
@@ -157,16 +169,25 @@ public class QuotaServiceImpl implements QuotaService {
     public void checkUploadQuota(Long tenantId, Long userId, long incomingFileSizeBytes) {
         QuotaDecision decision = evaluateUploadQuota(tenantId, userId, incomingFileSizeBytes);
         String mode = getEffectiveEnforcementMode(tenantId);
+        String batchId = resolveRolloutBatchId();
+        String rolloutReason = resolveRolloutReason(decision);
         quotaMetrics.recordQuotaDecision(mode, decision.exceeded());
 
         if (!decision.exceeded()) {
+            quotaMetrics.recordRolloutDecision(batchId, mode, ACTION_ALLOW, ROLLOUT_REASON_OK);
             return;
         }
 
         if (MODE_ENFORCE.equals(mode)) {
+            quotaMetrics.recordRolloutDecision(batchId, mode, ACTION_BLOCK, rolloutReason);
+            log.warn("[quota-rollout] batchId={}, tenantId={}, userId={}, mode={}, action={}, reason={}, incomingSize={}",
+                    batchId, tenantId, userId, mode, ACTION_BLOCK, rolloutReason, incomingFileSizeBytes);
             throw new GeneralException(ResultEnum.QUOTA_EXCEEDED, decision.reason());
         }
 
+        quotaMetrics.recordRolloutDecision(batchId, mode, ACTION_SHADOW_ALLOW, rolloutReason);
+        log.warn("[quota-rollout] batchId={}, tenantId={}, userId={}, mode={}, action={}, reason={}, incomingSize={}",
+                batchId, tenantId, userId, mode, ACTION_SHADOW_ALLOW, rolloutReason, incomingFileSizeBytes);
         log.warn("[quota-shadow] tenantId={}, userId={}, reason={}, incomingSize={}",
                 tenantId, userId, decision.reason(), incomingFileSizeBytes);
     }
@@ -452,6 +473,43 @@ public class QuotaServiceImpl implements QuotaService {
     private double calculateStorageDriftRatio(long storageDiff, long actualStorage) {
         double denominator = Math.max(1D, actualStorage);
         return storageDiff / denominator;
+    }
+
+    /**
+     * 获取当前灰度批次ID，空白值自动回退为 default。
+     *
+     * @return 灰度批次ID
+     */
+    private String resolveRolloutBatchId() {
+        if (!StringUtils.hasText(rolloutBatchId)) {
+            return "default";
+        }
+        return rolloutBatchId.trim();
+    }
+
+    /**
+     * 归一化配额超限原因，控制指标标签基数。
+     *
+     * @param decision 配额判定结果
+     * @return 归一化原因标签
+     */
+    private String resolveRolloutReason(QuotaDecision decision) {
+        if (!decision.exceeded()) {
+            return ROLLOUT_REASON_OK;
+        }
+        if (decision.userStorageExceeded()) {
+            return ROLLOUT_REASON_USER_STORAGE;
+        }
+        if (decision.userFileCountExceeded()) {
+            return ROLLOUT_REASON_USER_FILE_COUNT;
+        }
+        if (decision.tenantStorageExceeded()) {
+            return ROLLOUT_REASON_TENANT_STORAGE;
+        }
+        if (decision.tenantFileCountExceeded()) {
+            return ROLLOUT_REASON_TENANT_FILE_COUNT;
+        }
+        return ROLLOUT_REASON_UNKNOWN;
     }
 
     /**

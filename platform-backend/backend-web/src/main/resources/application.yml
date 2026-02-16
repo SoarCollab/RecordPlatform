@@ -181,6 +181,7 @@ quota:
     strategy: TENANT_WHITELIST
     enforce-tenant-whitelist:
     force-shadow: false
+    batch-id: default
   alert:
     enabled: true
     storage-drift-ratio-threshold: 0.01

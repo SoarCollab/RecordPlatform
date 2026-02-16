@@ -20,10 +20,10 @@ export interface paths {
         post: {
             parameters: {
                 query: {
-                    /** @description 用户名 */
-                    username: string;
                     /** @description 密码 */
                     password: string;
+                    /** @description 用户名 */
+                    username: string;
                 };
                 header?: never;
                 path?: never;
@@ -261,6 +261,24 @@ export interface paths {
         /** 更新文件状态 */
         put: operations["updateFileStatus"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/quota/rollout/audits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询配额灰度审计记录 */
+        get: operations["getQuotaRolloutAudit"];
+        put?: never;
+        /** 写入或更新配额灰度审计记录 */
+        post: operations["upsertQuotaRolloutAudit"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3486,6 +3504,110 @@ export interface components {
             /** @description 用户名 */
             userName?: string;
         };
+        /** @description 配额灰度扩容审计写入请求 */
+        QuotaRolloutAuditUpsertVO: {
+            /** @description 灰度批次ID */
+            batchId: string;
+            /** @description 证据链接（工单/文档/CI） */
+            evidenceLink?: string;
+            /**
+             * Format: int64
+             * @description 超限命中数
+             */
+            exceededRequestCount: number;
+            /**
+             * Format: int64
+             * @description 误判数
+             */
+            falsePositiveCount: number;
+            /**
+             * Format: date-time
+             * @description 观察窗口结束时间
+             */
+            observationEndTime: string;
+            /**
+             * Format: date-time
+             * @description 观察窗口开始时间
+             */
+            observationStartTime: string;
+            /** @description 回滚决策：KEEP_ENFORCE/FORCE_SHADOW/EXTEND_OBSERVATION */
+            rollbackDecision: string;
+            /** @description 回滚或延长观察原因 */
+            rollbackReason?: string;
+            /**
+             * Format: int64
+             * @description 观察样本请求数
+             */
+            sampledRequestCount: number;
+            /**
+             * Format: int64
+             * @description 租户ID
+             */
+            tenantId: number;
+        };
+        /** @description 配额灰度扩容审计响应 */
+        QuotaRolloutAuditVO: {
+            /** @description 灰度批次ID */
+            batchId?: string;
+            /**
+             * Format: date-time
+             * @description 创建时间
+             */
+            createTime?: string;
+            /** @description 证据链接 */
+            evidenceLink?: string;
+            /**
+             * Format: int64
+             * @description 超限命中数
+             */
+            exceededRequestCount?: number;
+            /**
+             * Format: int64
+             * @description 误判数
+             */
+            falsePositiveCount?: number;
+            /**
+             * Format: double
+             * @description 误判率（0~1）
+             */
+            falsePositiveRate?: number;
+            /**
+             * Format: int64
+             * @description 主键ID
+             */
+            id?: number;
+            /**
+             * Format: date-time
+             * @description 观察窗口结束时间
+             */
+            observationEndTime?: string;
+            /**
+             * Format: date-time
+             * @description 观察窗口开始时间
+             */
+            observationStartTime?: string;
+            /** @description 提交人标识 */
+            operatorName?: string;
+            /** @description 回滚决策 */
+            rollbackDecision?: string;
+            /** @description 回滚或延长观察原因 */
+            rollbackReason?: string;
+            /**
+             * Format: int64
+             * @description 观察样本请求数
+             */
+            sampledRequestCount?: number;
+            /**
+             * Format: int64
+             * @description 租户ID
+             */
+            tenantId?: number;
+            /**
+             * Format: date-time
+             * @description 更新时间
+             */
+            updateTime?: string;
+        };
         /** @description 当前配额状态 */
         QuotaStatusVO: {
             /** @description 配额执行模式：SHADOW/ENFORCE */
@@ -4060,6 +4182,17 @@ export interface components {
              */
             code?: number;
             data?: components["schemas"]["ProgressVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultQuotaRolloutAuditVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["QuotaRolloutAuditVO"];
             /** @description 提示信息 */
             message?: string;
         };
@@ -5023,11 +5156,11 @@ export interface operations {
     getAllFiles: {
         parameters: {
             query: {
-                param: components["schemas"]["AdminFileQueryParam"];
                 /** @description 页码 */
                 pageNum?: number;
                 /** @description 每页数量 */
                 pageSize?: number;
+                param: components["schemas"]["AdminFileQueryParam"];
             };
             header?: never;
             path?: never;
@@ -5049,11 +5182,11 @@ export interface operations {
     getAllShares: {
         parameters: {
             query: {
-                param: components["schemas"]["AdminShareQueryParam"];
                 /** @description 页码 */
                 pageNum?: number;
                 /** @description 每页数量 */
                 pageSize?: number;
+                param: components["schemas"]["AdminShareQueryParam"];
             };
             header?: never;
             path?: never;
@@ -5225,14 +5358,63 @@ export interface operations {
             };
         };
     };
+    getQuotaRolloutAudit: {
+        parameters: {
+            query: {
+                /** @description 灰度批次ID */
+                batchId: string;
+                /** @description 租户ID */
+                tenantId: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultQuotaRolloutAuditVO"];
+                };
+            };
+        };
+    };
+    upsertQuotaRolloutAudit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotaRolloutAuditUpsertVO"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultQuotaRolloutAuditVO"];
+                };
+            };
+        };
+    };
     getAdminTickets: {
         parameters: {
             query: {
-                query: components["schemas"]["TicketQueryVO"];
                 /** @description 页码 */
                 pageNum?: number;
                 /** @description 每页数量 */
                 pageSize?: number;
+                query: components["schemas"]["TicketQueryVO"];
             };
             header?: never;
             path?: never;
@@ -5789,18 +5971,20 @@ export interface operations {
     getFiles: {
         parameters: {
             query?: {
+                /** @description 结束时间（ISO-8601） */
+                endTime?: string;
+                /** @description 搜索关键词 */
+                keyword?: string;
+                /** @description 关键词匹配模式：FUZZY/PREFIX/EXACT_HASH/AUTO */
+                keywordMode?: string;
                 /** @description 页码 */
                 pageNum?: number;
                 /** @description 每页数量 */
                 pageSize?: number;
-                /** @description 搜索关键词 */
-                keyword?: string;
-                /** @description 文件状态 */
-                status?: number;
                 /** @description 开始时间（ISO-8601） */
                 startTime?: string;
-                /** @description 结束时间（ISO-8601） */
-                endTime?: string;
+                /** @description 文件状态 */
+                status?: number;
             };
             header?: never;
             path?: never;
@@ -6701,8 +6885,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                shareCode: string;
                 fileHash: string;
+                shareCode: string;
             };
             cookie?: never;
         };
@@ -6724,10 +6908,10 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description 分享码 */
-                shareCode: string;
                 /** @description 文件哈希 */
                 fileHash: string;
+                /** @description 分享码 */
+                shareCode: string;
             };
             cookie?: never;
         };
@@ -6870,8 +7054,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                shareCode: string;
                 fileHash: string;
+                shareCode: string;
             };
             cookie?: never;
         };
@@ -6893,8 +7077,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                shareCode: string;
                 fileHash: string;
+                shareCode: string;
             };
             cookie?: never;
         };
@@ -6914,8 +7098,8 @@ export interface operations {
     connect: {
         parameters: {
             query: {
-                token: string;
                 connectionId?: string;
+                token: string;
             };
             header?: never;
             path?: never;
@@ -7513,10 +7697,10 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description 角色名 */
-                role: string;
                 /** @description 权限码 */
                 permissionCode: string;
+                /** @description 角色名 */
+                role: string;
             };
             cookie?: never;
         };
@@ -7576,11 +7760,11 @@ export interface operations {
     getMyTickets: {
         parameters: {
             query: {
-                query: components["schemas"]["TicketQueryVO"];
                 /** @description 页码 */
                 pageNum?: number;
                 /** @description 每页数量 */
                 pageSize?: number;
+                query: components["schemas"]["TicketQueryVO"];
             };
             header?: never;
             path?: never;
@@ -7811,16 +7995,16 @@ export interface operations {
     createUploadSession: {
         parameters: {
             query: {
+                /** @description 分片大小 */
+                chunkSize: string;
+                /** @description 客户端ID */
+                clientId?: string;
+                /** @description 文件类型 */
+                contentType: string;
                 /** @description 文件名 */
                 fileName: string;
                 /** @description 文件大小 */
                 fileSize: string;
-                /** @description 文件类型 */
-                contentType: string;
-                /** @description 客户端ID */
-                clientId?: string;
-                /** @description 分片大小 */
-                chunkSize: string;
                 /** @description 分片总数 */
                 totalChunks: string;
             };
@@ -7890,8 +8074,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                clientId: string;
                 chunkNumber: number;
+                clientId: string;
             };
             cookie?: never;
         };

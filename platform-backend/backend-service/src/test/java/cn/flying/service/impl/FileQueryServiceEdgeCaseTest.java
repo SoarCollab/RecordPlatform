@@ -28,6 +28,7 @@ import java.util.Date;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -178,8 +179,50 @@ class FileQueryServiceEdgeCaseTest {
                             new Page<>(1, 10),
                             null,
                             null,
+                            null,
                             startTime,
                             endTime
+                    ));
+
+            assertThat(ex.getResultEnum()).isEqualTo(ResultEnum.PARAM_IS_INVALID);
+            verify(fileMapper, never()).selectPage(any(), any());
+        }
+
+        /**
+         * 验证 AUTO 模式可被正常解析并继续执行查询。
+         */
+        @Test
+        @DisplayName("should accept auto keyword mode")
+        void shouldAcceptAutoKeywordMode() {
+            assertDoesNotThrow(() ->
+                    fileQueryService.getUserFilesPage(
+                            USER_ID,
+                            new Page<>(1, 10),
+                            "abc1234",
+                            "AUTO",
+                            null,
+                            null,
+                            null
+                    ));
+
+            verify(fileMapper).selectPage(any(), any());
+        }
+
+        /**
+         * 验证非法 keywordMode 会抛出参数异常并阻止查询落库。
+         */
+        @Test
+        @DisplayName("should throw when keywordMode is invalid")
+        void shouldThrowWhenKeywordModeIsInvalid() {
+            GeneralException ex = assertThrows(GeneralException.class, () ->
+                    fileQueryService.getUserFilesPage(
+                            USER_ID,
+                            new Page<>(1, 10),
+                            "report",
+                            "UNKNOWN_MODE",
+                            null,
+                            null,
+                            null
                     ));
 
             assertThat(ex.getResultEnum()).isEqualTo(ResultEnum.PARAM_IS_INVALID);

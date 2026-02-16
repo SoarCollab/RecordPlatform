@@ -1,6 +1,7 @@
 package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
+import cn.flying.common.constant.FileKeywordMode;
 import cn.flying.common.constant.Result;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.OffsetDateTime;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 文件 REST 新路径控制器。
@@ -53,6 +55,7 @@ public class FileRestController {
      * @param pageNum  页码
      * @param pageSize 每页大小
      * @param keyword  关键词
+     * @param keywordMode 关键词匹配模式（FUZZY/PREFIX/EXACT_HASH/AUTO）
      * @param status   状态
      * @param startTime 开始时间（可选，ISO-8601）
      * @param endTime   结束时间（可选，ISO-8601）
@@ -65,6 +68,8 @@ public class FileRestController {
                                        @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer pageNum,
                                        @Parameter(description = "每页数量") @RequestParam(defaultValue = "10") Integer pageSize,
                                        @Parameter(description = "搜索关键词") @RequestParam(required = false) String keyword,
+                                       @Parameter(description = "关键词匹配模式：FUZZY/PREFIX/EXACT_HASH/AUTO")
+                                       @RequestParam(required = false) String keywordMode,
                                        @Parameter(description = "文件状态") @RequestParam(required = false) Integer status,
                                        @Parameter(description = "开始时间（ISO-8601）")
                                        @RequestParam(required = false)
@@ -76,8 +81,17 @@ public class FileRestController {
                                        OffsetDateTime endTime) {
         int normalizedPageNum = normalizePageNum(pageNum);
         int normalizedPageSize = normalizePageSize(pageSize);
+        String normalizedKeywordMode = normalizeKeywordMode(keywordMode);
         Page<File> page = new Page<>(normalizedPageNum, normalizedPageSize);
-        fileQueryService.getUserFilesPage(userId, page, keyword, status, toDate(startTime), toDate(endTime));
+        fileQueryService.getUserFilesPage(
+                userId,
+                page,
+                keyword,
+                normalizedKeywordMode,
+                status,
+                toDate(startTime),
+                toDate(endTime)
+        );
         return Result.success(page);
     }
 
@@ -105,6 +119,19 @@ public class FileRestController {
             return 10;
         }
         return Math.min(pageSize, 100);
+    }
+
+    /**
+     * 规范化关键词匹配模式；空值默认回落 FUZZY，并统一为大写。
+     *
+     * @param keywordMode 原始关键词匹配模式
+     * @return 规范化后的模式值
+     */
+    private String normalizeKeywordMode(String keywordMode) {
+        if (keywordMode == null || keywordMode.isBlank()) {
+            return FileKeywordMode.FUZZY.name();
+        }
+        return keywordMode.trim().toUpperCase(Locale.ROOT);
     }
 
     /**

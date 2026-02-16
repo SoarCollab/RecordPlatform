@@ -70,11 +70,18 @@ public interface FileQueryService {
      * @param userId    用户ID
      * @param page      分页参数（传入后会被填充结果）
      * @param keyword   搜索关键词（可选，匹配文件名或文件哈希）
+     * @param keywordMode 关键词匹配模式（FUZZY/PREFIX/EXACT_HASH/AUTO）
      * @param status    文件状态过滤（可选）
      * @param startTime 上传开始时间（可选，闭区间）
      * @param endTime   上传结束时间（可选，闭区间）
      */
-    void getUserFilesPage(Long userId, Page<File> page, String keyword, Integer status, Date startTime, Date endTime);
+    void getUserFilesPage(Long userId,
+                          Page<File> page,
+                          String keyword,
+                          String keywordMode,
+                          Integer status,
+                          Date startTime,
+                          Date endTime);
 
     /**
      * 获取文件分片存储地址（预签名URL）

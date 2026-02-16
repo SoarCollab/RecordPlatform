@@ -1,6 +1,7 @@
 package cn.flying.service.impl;
 
 import cn.flying.api.utils.ResultUtils;
+import cn.flying.common.constant.FileKeywordMode;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.constant.ShareType;
 import cn.flying.common.exception.GeneralException;
@@ -215,24 +216,25 @@ public class FileQueryServiceImpl implements FileQueryService {
      * @param userId    用户ID
      * @param page      分页对象
      * @param keyword   文件名/哈希关键词
+     * @param keywordMode 关键词匹配模式（FUZZY/PREFIX/EXACT_HASH/AUTO）
      * @param status    文件状态
      * @param startTime 起始时间（可选）
      * @param endTime   结束时间（可选）
      */
     @Override
-    public void getUserFilesPage(Long userId, Page<File> page, String keyword, Integer status, Date startTime, Date endTime) {
+    public void getUserFilesPage(Long userId,
+                                 Page<File> page,
+                                 String keyword,
+                                 String keywordMode,
+                                 Integer status,
+                                 Date startTime,
+                                 Date endTime) {
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
         // 所有用户（包括管理员）只能查询自己的文件
         // 管理员查看所有文件请使用 FileAdminService.getAllFiles()
         wrapper.eq(File::getUid, userId);
 
-        // 关键词搜索（匹配文件名或文件哈希）
-        if (StringUtils.hasText(keyword)) {
-            wrapper.and(w -> w
-                    .like(File::getFileName, keyword)
-                    .or()
-                    .like(File::getFileHash, keyword));
-        }
+        applyKeywordFilter(wrapper, keyword, keywordMode);
 
         // 状态过滤
         if (status != null) {
@@ -550,6 +552,38 @@ public class FileQueryServiceImpl implements FileQueryService {
     }
 
     // ==================== 私有辅助方法 ====================
+
+    /**
+     * 根据关键词匹配模式构建查询条件。
+     *
+     * @param wrapper 查询构造器
+     * @param keyword 原始关键词
+     * @param keywordMode 关键词匹配模式
+     */
+    private void applyKeywordFilter(LambdaQueryWrapper<File> wrapper, String keyword, String keywordMode) {
+        if (!StringUtils.hasText(keyword)) {
+            return;
+        }
+        String normalizedKeyword = keyword.trim();
+        if (normalizedKeyword.isEmpty()) {
+            return;
+        }
+
+        FileKeywordMode effectiveMode = FileKeywordMode.parseOrDefault(keywordMode)
+                .resolveEffectiveMode(normalizedKeyword);
+        switch (effectiveMode) {
+            case FUZZY -> wrapper.and(w -> w
+                    .like(File::getFileName, normalizedKeyword)
+                    .or()
+                    .like(File::getFileHash, normalizedKeyword));
+            case PREFIX -> wrapper.and(w -> w
+                    .likeRight(File::getFileName, normalizedKeyword)
+                    .or()
+                    .eq(File::getFileHash, normalizedKeyword));
+            case EXACT_HASH -> wrapper.eq(File::getFileHash, normalizedKeyword);
+            default -> throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "未知 keywordMode");
+        }
+    }
 
     /**
      * 合并验证与解析：校验文件所有权并解析区块链查询用的userId

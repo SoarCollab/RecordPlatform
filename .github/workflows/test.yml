@@ -147,17 +147,23 @@ jobs:
         working-directory: platform-frontend
         run: pnpm install --frozen-lockfile
 
-      - name: Generate Frontend API Types
+      - name: Generate And Verify Frontend API Types
         working-directory: platform-frontend
-        run: OPENAPI_SOURCE=../backend-openapi/openapi.json pnpm types:gen
+        run: OPENAPI_SOURCE=../backend-openapi/openapi.json pnpm types:gen:check
 
-      - name: Verify Generated Types Are Committed
+      - name: Generate Contract Fingerprints
         run: |
-          if ! git diff --exit-code -- platform-frontend/src/lib/api/types/generated.ts; then
-            echo "::error::OpenAPI contract changed. Please regenerate and commit platform-frontend/src/lib/api/types/generated.ts"
-            git --no-pager diff -- platform-frontend/src/lib/api/types/generated.ts
-            exit 1
-          fi
+          mkdir -p contract-fingerprint
+          shasum -a 256 backend-openapi/openapi.json | awk '{print $1}' > contract-fingerprint/openapi.sha256
+          shasum -a 256 platform-frontend/src/lib/api/types/generated.ts | awk '{print $1}' > contract-fingerprint/generated-ts.sha256
+
+      - name: Upload Contract Fingerprints
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contract-fingerprint
+          path: contract-fingerprint
+          if-no-files-found: error
 
   build-check:
     name: Build Verification

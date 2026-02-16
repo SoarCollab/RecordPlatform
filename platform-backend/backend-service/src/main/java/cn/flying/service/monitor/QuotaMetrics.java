@@ -36,6 +36,27 @@ public class QuotaMetrics {
     }
 
     /**
+     * 记录一次灰度扩容决策指标。
+     *
+     * @param batchId 灰度批次ID
+     * @param mode 当前生效模式（SHADOW/ENFORCE）
+     * @param action 决策动作（ALLOW/BLOCK/SHADOW_ALLOW）
+     * @param reason 决策原因（如 user_storage_exceeded）
+     */
+    public void recordRolloutDecision(String batchId, String mode, String action, String reason) {
+        Counter.builder("quota.rollout.decision.total")
+                .description("配额灰度扩容决策总次数")
+                .tags(List.of(
+                        Tag.of("batch", safeTag(batchId)),
+                        Tag.of("mode", safeTag(mode)),
+                        Tag.of("action", safeTag(action)),
+                        Tag.of("reason", safeTag(reason))
+                ))
+                .register(meterRegistry)
+                .increment();
+    }
+
+    /**
      * 记录一次配额漂移告警。
      *
      * @param scope 告警范围（TENANT/USER）

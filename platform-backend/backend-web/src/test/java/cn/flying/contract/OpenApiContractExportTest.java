@@ -17,6 +17,7 @@ import cn.flying.controller.FriendFileShareController;
 import cn.flying.controller.ImageController;
 import cn.flying.controller.MessageController;
 import cn.flying.controller.PermissionController;
+import cn.flying.controller.QuotaAdminController;
 import cn.flying.controller.QuotaController;
 import cn.flying.controller.RolePermissionController;
 import cn.flying.controller.ShareController;
@@ -43,6 +44,7 @@ import cn.flying.service.FriendService;
 import cn.flying.service.ImageService;
 import cn.flying.service.MessageService;
 import cn.flying.service.PermissionService;
+import cn.flying.service.QuotaRolloutAuditService;
 import cn.flying.service.QuotaService;
 import cn.flying.service.ShareAuditService;
 import cn.flying.service.SysAuditService;
@@ -68,7 +70,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.List;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -164,6 +170,9 @@ class OpenApiContractExportTest {
     private QuotaService quotaService;
 
     @MockBean
+    private QuotaRolloutAuditService quotaRolloutAuditService;
+
+    @MockBean
     private FileMapper fileMapper;
 
     @MockBean
@@ -188,6 +197,33 @@ class OpenApiContractExportTest {
      */
     @Test
     void shouldExportOpenApiDocument() throws Exception {
+        JsonNode normalizedNode = fetchAndNormalizeOpenApiDocument();
+        writeOpenApiArtifact(normalizedNode);
+    }
+
+    /**
+     * 验证在同一测试上下文中，规范化 OpenAPI 文档的哈希值保持稳定。
+     *
+     * @throws Exception 请求或哈希计算失败时抛出
+     */
+    @Test
+    void shouldGenerateDeterministicCanonicalOpenApiHash() throws Exception {
+        JsonNode firstNormalizedNode = fetchAndNormalizeOpenApiDocument();
+        JsonNode secondNormalizedNode = fetchAndNormalizeOpenApiDocument();
+
+        String firstHash = sha256Hex(canonicalJson(firstNormalizedNode));
+        String secondHash = sha256Hex(canonicalJson(secondNormalizedNode));
+
+        assertThat(firstHash).isEqualTo(secondHash);
+    }
+
+    /**
+     * 拉取并规范化 OpenAPI 文档，用于导出与一致性校验。
+     *
+     * @return 规范化后的 OpenAPI 节点
+     * @throws Exception 请求或 JSON 解析失败时抛出
+     */
+    private JsonNode fetchAndNormalizeOpenApiDocument() throws Exception {
         String openApiContent = mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
                 .andReturn()
@@ -197,8 +233,18 @@ class OpenApiContractExportTest {
         JsonNode rootNode = objectMapper.readTree(openApiContent);
         assertThat(rootNode.path("openapi").asText()).isNotBlank();
         assertThat(rootNode.path("paths").has("/api/v1/files")).isTrue();
+        assertThat(rootNode.path("paths").has("/api/v1/admin/quota/rollout/audits")).isTrue();
 
-        JsonNode normalizedNode = normalizeOpenApiDocument(rootNode);
+        return normalizeOpenApiDocument(rootNode);
+    }
+
+    /**
+     * 将规范化后的 OpenAPI 文档写入构建产物目录。
+     *
+     * @param normalizedNode 规范化后的 OpenAPI 节点
+     * @throws Exception 文件写入失败时抛出
+     */
+    private void writeOpenApiArtifact(JsonNode normalizedNode) throws Exception {
         Path outputPath = Path.of("target", "openapi", "openapi.json");
         Files.createDirectories(outputPath.getParent());
         Files.writeString(
@@ -217,24 +263,91 @@ class OpenApiContractExportTest {
      * @return 键顺序稳定的 OpenAPI 节点
      */
     private JsonNode normalizeOpenApiDocument(JsonNode node) {
+        return normalizeOpenApiDocument(node, "");
+    }
+
+    /**
+     * 递归稳定化 OpenAPI 文档键顺序，并对已知无序数组执行可重复排序。
+     *
+     * @param node 当前 JSON 节点
+     * @param fieldName 当前节点在父级对象中的字段名
+     * @return 规范化后的 JSON 节点
+     */
+    private JsonNode normalizeOpenApiDocument(JsonNode node, String fieldName) {
         if (node.isObject()) {
             ObjectNode sortedNode = objectMapper.createObjectNode();
             List<String> fieldNames = new ArrayList<>();
             node.fieldNames().forEachRemaining(fieldNames::add);
             Collections.sort(fieldNames);
-            for (String fieldName : fieldNames) {
-                sortedNode.set(fieldName, normalizeOpenApiDocument(node.get(fieldName)));
+            for (String childFieldName : fieldNames) {
+                sortedNode.set(childFieldName, normalizeOpenApiDocument(node.get(childFieldName), childFieldName));
             }
             return sortedNode;
         }
         if (node.isArray()) {
-            ArrayNode sortedArrayNode = objectMapper.createArrayNode();
+            List<JsonNode> normalizedChildren = new ArrayList<>();
             for (JsonNode childNode : node) {
-                sortedArrayNode.add(normalizeOpenApiDocument(childNode));
+                normalizedChildren.add(normalizeOpenApiDocument(childNode, fieldName));
             }
+            sortKnownUnorderedArrays(fieldName, normalizedChildren);
+
+            ArrayNode sortedArrayNode = objectMapper.createArrayNode();
+            normalizedChildren.forEach(sortedArrayNode::add);
             return sortedArrayNode;
         }
         return node;
+    }
+
+    /**
+     * 对已知无序数组进行稳定排序，避免文档导出产生伪差异。
+     *
+     * @param fieldName 数组字段名
+     * @param normalizedChildren 已规范化的数组子节点
+     */
+    private void sortKnownUnorderedArrays(String fieldName, List<JsonNode> normalizedChildren) {
+        if ("required".equals(fieldName) && normalizedChildren.stream().allMatch(JsonNode::isTextual)) {
+            normalizedChildren.sort(Comparator.comparing(JsonNode::asText));
+            return;
+        }
+
+        if (("tags".equals(fieldName) || "parameters".equals(fieldName))
+                && normalizedChildren.stream().allMatch(JsonNode::isObject)) {
+            normalizedChildren.sort(
+                    Comparator.comparing((JsonNode node) -> node.path("name").asText(""))
+                            .thenComparing(node -> node.path("in").asText(""))
+                            .thenComparing(this::canonicalJson)
+            );
+        }
+    }
+
+    /**
+     * 将 JSON 节点序列化为无格式化 canonical 字符串，用于哈希比较。
+     *
+     * @param node JSON 节点
+     * @return canonical JSON 字符串
+     */
+    private String canonicalJson(JsonNode node) {
+        try {
+            return objectMapper.writeValueAsString(node);
+        } catch (Exception exception) {
+            throw new IllegalStateException("序列化 canonical OpenAPI JSON 失败", exception);
+        }
+    }
+
+    /**
+     * 计算输入内容的 SHA-256 十六进制摘要。
+     *
+     * @param content 待计算内容
+     * @return SHA-256 十六进制字符串
+     */
+    private String sha256Hex(String content) {
+        try {
+            MessageDigest messageDigest = MessageDigest.getInstance("SHA-256");
+            byte[] digest = messageDigest.digest(content.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("JDK 未提供 SHA-256 算法实现", exception);
+        }
     }
 
     /**
@@ -257,6 +370,7 @@ class OpenApiContractExportTest {
             ImageController.class,
             MessageController.class,
             PermissionController.class,
+            QuotaAdminController.class,
             QuotaController.class,
             RolePermissionController.class,
             ShareController.class,

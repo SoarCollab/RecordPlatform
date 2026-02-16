@@ -23,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -64,7 +65,7 @@ class FileRestControllerTest {
         when(fileQueryService.getFileDecryptInfo(userId, fileHash))
                 .thenReturn(new FileDecryptInfoVO("k", "n", 1L, "text/plain", 1, fileHash));
 
-        Result<Page<File>> pageResult = controller.getFiles(userId, 1, 10, null, null, null, null);
+        Result<Page<File>> pageResult = controller.getFiles(userId, 1, 10, null, null, null, null, null);
         Result<File> byHashResult = controller.getFileByHash(userId, fileHash);
         Result<List<String>> addressResult = controller.getFileAddresses(userId, fileHash);
         Result<List<byte[]>> chunksResult = controller.getFileChunks(userId, fileHash);
@@ -95,6 +96,7 @@ class FileRestControllerTest {
                 0,
                 1000,
                 "report",
+                "prefix",
                 1,
                 startTime,
                 endTime
@@ -105,12 +107,43 @@ class FileRestControllerTest {
                 eq(userId),
                 any(Page.class),
                 eq("report"),
+                eq("PREFIX"),
                 eq(1),
                 eq(Date.from(startTime.toInstant())),
                 eq(Date.from(endTime.toInstant()))
         );
         assertEquals(1, result.getData().getCurrent());
         assertEquals(100, result.getData().getSize());
+    }
+
+    /**
+     * 验证 keywordMode 为空时会回落为 FUZZY。
+     */
+    @Test
+    void shouldFallbackKeywordModeToFuzzyWhenBlank() {
+        Long userId = 90L;
+
+        Result<Page<File>> result = controller.getFiles(
+                userId,
+                1,
+                10,
+                "invoice",
+                "   ",
+                null,
+                null,
+                null
+        );
+
+        assertNotNull(result.getData());
+        verify(fileQueryService).getUserFilesPage(
+                eq(userId),
+                any(Page.class),
+                eq("invoice"),
+                eq("FUZZY"),
+                isNull(),
+                isNull(),
+                isNull()
+        );
     }
 
     /**

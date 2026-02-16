@@ -73,6 +73,7 @@ class QuotaServiceImplTest {
         ReflectionTestUtils.setField(quotaService, "rolloutStrategy", "TENANT_WHITELIST");
         ReflectionTestUtils.setField(quotaService, "enforceTenantWhitelist", "");
         ReflectionTestUtils.setField(quotaService, "forceShadow", false);
+        ReflectionTestUtils.setField(quotaService, "rolloutBatchId", "batch-w2-gray");
         ReflectionTestUtils.setField(quotaService, "alertEnabled", true);
         ReflectionTestUtils.setField(quotaService, "storageDriftRatioThreshold", 0.01D);
         ReflectionTestUtils.setField(quotaService, "fileCountDriftThreshold", 1L);
@@ -97,6 +98,7 @@ class QuotaServiceImplTest {
 
         assertDoesNotThrow(() -> quotaService.checkUploadQuota(1L, 2L, 200L));
         verify(quotaMetrics).recordQuotaDecision("SHADOW", true);
+        verify(quotaMetrics).recordRolloutDecision("batch-w2-gray", "SHADOW", "SHADOW_ALLOW", "user_storage_exceeded");
     }
 
     /**
@@ -113,6 +115,7 @@ class QuotaServiceImplTest {
 
         assertEquals(50013, ex.getResultEnum().getCode());
         verify(quotaMetrics).recordQuotaDecision("ENFORCE", true);
+        verify(quotaMetrics).recordRolloutDecision("batch-w2-gray", "ENFORCE", "BLOCK", "user_storage_exceeded");
     }
 
     /**
@@ -130,6 +133,7 @@ class QuotaServiceImplTest {
 
         assertEquals(50013, ex.getResultEnum().getCode());
         verify(quotaMetrics).recordQuotaDecision("ENFORCE", true);
+        verify(quotaMetrics).recordRolloutDecision("batch-w2-gray", "ENFORCE", "BLOCK", "user_storage_exceeded");
     }
 
     /**
@@ -144,6 +148,7 @@ class QuotaServiceImplTest {
 
         assertDoesNotThrow(() -> quotaService.checkUploadQuota(1L, 3L, 200L));
         verify(quotaMetrics).recordQuotaDecision("SHADOW", true);
+        verify(quotaMetrics).recordRolloutDecision("batch-w2-gray", "SHADOW", "SHADOW_ALLOW", "user_storage_exceeded");
     }
 
     /**
@@ -158,6 +163,23 @@ class QuotaServiceImplTest {
 
         assertDoesNotThrow(() -> quotaService.checkUploadQuota(1L, 3L, 200L));
         verify(quotaMetrics).recordQuotaDecision("SHADOW", true);
+        verify(quotaMetrics).recordRolloutDecision("batch-w2-gray", "SHADOW", "SHADOW_ALLOW", "user_storage_exceeded");
+    }
+
+    /**
+     * 验证未超限时会记录 ALLOW 决策标签。
+     */
+    @Test
+    void shouldRecordAllowDecisionWhenWithinQuota() {
+        ReflectionTestUtils.setField(quotaService, "enforcementMode", "ENFORCE");
+        ReflectionTestUtils.setField(quotaService, "rolloutStrategy", "ALL");
+        when(fileMapper.sumQuotaStorageByUserId(7L, 1L)).thenReturn(200L);
+        when(fileMapper.countQuotaByUserId(7L, 1L)).thenReturn(1L);
+
+        quotaService.checkUploadQuota(1L, 7L, 100L);
+
+        verify(quotaMetrics).recordQuotaDecision("ENFORCE", false);
+        verify(quotaMetrics).recordRolloutDecision("batch-w2-gray", "ENFORCE", "ALLOW", "ok");
     }
 
     /**

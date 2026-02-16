@@ -11,6 +11,7 @@
     "format": "prettier --write .",
     "lint": "eslint .",
     "types:gen": "openapi-typescript \"${OPENAPI_SOURCE:-http://localhost:8000/record-platform/v3/api-docs}\" -o src/lib/api/types/generated.ts",
+    "types:gen:check": "pnpm types:gen && git diff --exit-code -- src/lib/api/types/generated.ts",
     "test": "svelte-kit sync && vitest run",
     "test:watch": "svelte-kit sync && vitest",
     "test:coverage": "svelte-kit sync && vitest run --coverage"
@@ -34,7 +35,7 @@
     "globals": "^15.12.0",
     "jsdom": "^25.0.1",
     "msw": "^2.7.0",
-    "openapi-typescript": "^7.10.1",
+    "openapi-typescript": "7.10.1",
     "prettier": "^3.7.4",
     "prettier-plugin-svelte": "^3.4.1",
     "prettier-plugin-tailwindcss": "^0.7.2",

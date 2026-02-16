@@ -312,10 +312,16 @@ export interface UpdateShareRequest {
 }
 
 /**
+ * 文件关键词匹配模式。
+ */
+export type FileKeywordMode = "FUZZY" | "PREFIX" | "EXACT_HASH" | "AUTO";
+
+/**
  * 文件查询参数
  */
 export interface FileQueryParams {
   keyword?: string;
+  keywordMode?: FileKeywordMode;
   status?: FileStatus;
   startTime?: string;
   endTime?: string;
