@@ -6,7 +6,7 @@ This page documents all error codes returned by the RecordPlatform API.
 
 | Range | Category |
 |-------|----------|
-| 200 | Success |
+| 200, 500 | General Status Codes |
 | 10000-19999 | Parameter Validation Errors |
 | 20000-29999 | User/Authentication Errors |
 | 30000-39999 | External Service Errors (Blockchain, Storage) |
@@ -15,11 +15,12 @@ This page documents all error codes returned by the RecordPlatform API.
 | 60000-69999 | Messaging Service Errors |
 | 70000-79999 | Permission Errors |
 
-## Success
+## General Status Codes
 
 | Code | Name | Description |
 |------|------|-------------|
 | 200 | SUCCESS | Operation successful |
+| 500 | FAIL | Server internal error |
 
 ## Parameter Errors (10000-19999)
 
@@ -62,6 +63,17 @@ This page documents all error codes returned by the RecordPlatform API.
 | 30013 | STORAGE_INSUFFICIENT_REPLICAS | Insufficient storage nodes available |
 | 30014 | STORAGE_DEGRADED_WRITE | Storage wrote in degraded mode, will sync when nodes recover |
 
+### Blockchain Provider Errors (Dubbo provider-side)
+
+The following error codes are defined in `platform-api` (the Dubbo provider interface module) and are returned by the blockchain provider (`platform-fisco`). They are not present in `backend-common` because the REST consumer translates provider failures into `30006 BLOCKCHAIN_ERROR` or circuit breaker codes (`30010`/`30011`).
+
+| Code (platform-api) | Name | Description |
+|------|------|-------------|
+| 30012 | BLOCKCHAIN_TIMEOUT | Blockchain service response timeout |
+| 30013 | BLOCKCHAIN_UNREACHABLE | Blockchain node connection failed |
+
+> **Note:** The storage error codes (`STORAGE_QUORUM_NOT_REACHED`, `STORAGE_INSUFFICIENT_REPLICAS`, `STORAGE_DEGRADED_WRITE`) have different numeric assignments between `platform-api` (30014-30016) and `backend-common` (30012-30014). The REST API returns `backend-common` codes as documented in the table above. This numbering discrepancy is tracked for a future code-level fix.
+
 ## System Errors (40000-49999)
 
 | Code | Name | Description |
@@ -71,6 +83,7 @@ This page documents all error codes returned by the RecordPlatform API.
 | 40003 | SYSTEM_BUSY | System busy, please retry later |
 | 40004 | RATE_LIMIT_EXCEEDED | Request rate limit exceeded |
 | 40005 | SERVICE_UNAVAILABLE | Service temporarily unavailable |
+| 40006 | UPLOAD_SESSION_NOT_FOUND | Upload session not found or expired |
 
 ## Business Data Errors (50000-59999)
 
@@ -88,6 +101,7 @@ This page documents all error codes returned by the RecordPlatform API.
 | 50010 | FILE_RECORD_ERROR | File attestation failed |
 | 50011 | SHARE_CANCELLED | Share link has been cancelled |
 | 50012 | SHARE_EXPIRED | Share has expired |
+| 50013 | QUOTA_EXCEEDED | Storage quota exceeded |
 
 ## Messaging Errors (60000-69999)
 
@@ -161,3 +175,12 @@ When receiving `70004` (TOKEN_EXPIRED), the client should:
 ### Storage Degraded Mode
 
 `30014` (STORAGE_DEGRADED_WRITE) indicates the write succeeded but with fewer replicas than configured. The system will automatically sync when nodes recover. This is not a failure but a warning.
+
+### Quota Enforcement
+
+`50013` (QUOTA_EXCEEDED) behavior depends on the quota enforcement mode:
+
+- **SHADOW mode** (default): The upload proceeds normally. The quota violation is logged and an alert is emitted, but the request is not rejected. Use this mode during rollout to observe impact before enforcing.
+- **ENFORCE mode**: The upload is rejected with `50013 QUOTA_EXCEEDED`. The client should display a quota exceeded message and guide the user to free up space or contact an administrator.
+
+Quota enforcement mode is controlled by the `quota.enforcement-mode` configuration property and can be toggled per-tenant via the rollout strategy (`TENANT_WHITELIST`).

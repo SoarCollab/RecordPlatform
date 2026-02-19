@@ -59,7 +59,7 @@ Based on `SecurityConfiguration`:
 | POST | `/api/v1/auth/tokens/refresh` | Refresh access token |
 | POST | `/api/v1/auth/tokens/sse` | Issue short-lived SSE token (JWT required) |
 
-> Login is handled by Spring Security: `POST /api/v1/auth/login`
+> Login/logout are handled by Spring Security (non-controller endpoints): `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`
 
 ### User (`/api/v1/users`)
 
@@ -89,8 +89,7 @@ Based on `SecurityConfiguration`:
 |------|------|------|
 | GET | `/api/v1/files/{id}` | File detail by ID |
 | GET | `/api/v1/files/hash/{fileHash}` | File detail by hash |
-| GET | `/api/v1/files` | User file list |
-| GET | `/api/v1/files` | User file page |
+| GET | `/api/v1/files` | User file page (supports `keyword`, `keywordMode=FUZZY/PREFIX/EXACT_HASH/AUTO`, `status`, `startTime`, `endTime`) |
 | GET | `/api/v1/files/stats` | User file stats |
 | GET | `/api/v1/files/hash/{fileHash}/addresses` | Fetch download URLs |
 | GET | `/api/v1/transactions/{transactionHash}` | Query blockchain transaction |
@@ -111,6 +110,7 @@ Based on `SecurityConfiguration`:
 | GET | `/api/v1/files/{id}/provenance` | File provenance graph (admin) |
 | GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/chunks` | Public shared download (public) |
 | GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info` | Public decrypt info (public) |
+| POST | `/api/v1/files/download-batches/report` | Report batch download quality metrics |
 
 ### Admin File Audit (`/api/v1/admin/files`)
 
@@ -124,6 +124,14 @@ Based on `SecurityConfiguration`:
 | DELETE | `/api/v1/admin/files/shares/{shareCode}` | Force cancel share |
 | GET | `/api/v1/admin/files/shares/{shareCode}/logs` | Share access logs |
 | GET | `/api/v1/admin/files/shares/{shareCode}/stats` | Share access stats |
+
+### Quota (`/api/v1/files/quota`, `/api/v1/admin/quota`)
+
+| Method | Endpoint | Description |
+|------|------|------|
+| GET | `/api/v1/files/quota` | Get current user quota status |
+| POST | `/api/v1/admin/quota/rollout/audits` | Upsert quota rollout audit record (admin) |
+| GET | `/api/v1/admin/quota/rollout/audits` | Query quota rollout audit record (admin, params: `batchId`, `tenantId`) |
 
 ### Public Share Page (`/api/v1/share`)
 
@@ -214,8 +222,8 @@ Based on `SecurityConfiguration`:
 | GET | `/api/v1/tickets/pending-count` | Pending ticket count (legacy) |
 | GET | `/api/v1/tickets/unread-count` | Unread ticket count |
 | GET | `/api/v1/admin/tickets` | Admin ticket list |
-| PUT | `/api/v1/admin/tickets/{id}/assignee` | Assign ticket (admin) |
-| PUT | `/api/v1/admin/tickets/{id}/status` | Update status (admin) |
+| PUT | `/api/v1/admin/tickets/{ticketId}/assignee` | Assign ticket (admin) |
+| PUT | `/api/v1/admin/tickets/{ticketId}/status` | Update status (admin) |
 | GET | `/api/v1/admin/tickets/pending-count` | Admin pending ticket count |
 
 ### Permissions (`/api/v1/system/permissions`, admin)

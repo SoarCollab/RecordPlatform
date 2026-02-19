@@ -59,7 +59,7 @@ Authorization: Bearer <token>
 | POST | `/api/v1/auth/tokens/refresh` | 刷新访问令牌 |
 | POST | `/api/v1/auth/tokens/sse` | 获取 SSE 短期令牌（需 JWT） |
 
-> 登录接口由 Spring Security 处理：`POST /api/v1/auth/login`
+> 登录/登出接口由 Spring Security 处理（非 Controller 直接声明）：`POST /api/v1/auth/login`、`POST /api/v1/auth/logout`
 
 ### 用户（`/api/v1/users`）
 
@@ -89,8 +89,7 @@ Authorization: Bearer <token>
 |------|------|------|
 | GET | `/api/v1/files/{id}` | 按文件 ID 查询详情 |
 | GET | `/api/v1/files/hash/{fileHash}` | 按文件哈希查询详情 |
-| GET | `/api/v1/files` | 用户文件列表 |
-| GET | `/api/v1/files` | 用户文件分页 |
+| GET | `/api/v1/files` | 用户文件分页（支持 `keyword`、`keywordMode=FUZZY/PREFIX/EXACT_HASH/AUTO`、`status`、`startTime`、`endTime`） |
 | GET | `/api/v1/files/stats` | 用户文件统计 |
 | GET | `/api/v1/files/hash/{fileHash}/addresses` | 获取下载地址 |
 | GET | `/api/v1/transactions/{transactionHash}` | 查询链上交易信息 |
@@ -111,6 +110,7 @@ Authorization: Bearer <token>
 | GET | `/api/v1/files/{id}/provenance` | 文件溯源链路（管理员） |
 | GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/chunks` | 公开分享下载（公开） |
 | GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info` | 公开分享解密信息（公开） |
+| POST | `/api/v1/files/download-batches/report` | 上报批量下载质量指标 |
 
 ### 管理员文件审计（`/api/v1/admin/files`）
 
@@ -124,6 +124,14 @@ Authorization: Bearer <token>
 | DELETE | `/api/v1/admin/files/shares/{shareCode}` | 强制取消分享 |
 | GET | `/api/v1/admin/files/shares/{shareCode}/logs` | 分享访问日志 |
 | GET | `/api/v1/admin/files/shares/{shareCode}/stats` | 分享访问统计 |
+
+### 配额（`/api/v1/files/quota`、`/api/v1/admin/quota`）
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/v1/files/quota` | 查询当前用户配额状态 |
+| POST | `/api/v1/admin/quota/rollout/audits` | 写入或更新配额灰度审计记录（管理员） |
+| GET | `/api/v1/admin/quota/rollout/audits` | 查询配额灰度审计记录（管理员，参数：`batchId`、`tenantId`） |
 
 ### 公开分享页（`/api/v1/share`）
 
@@ -214,8 +222,8 @@ Authorization: Bearer <token>
 | GET | `/api/v1/tickets/pending-count` | 待处理工单数（兼容） |
 | GET | `/api/v1/tickets/unread-count` | 未读工单数 |
 | GET | `/api/v1/admin/tickets` | 管理员工单列表 |
-| PUT | `/api/v1/admin/tickets/{id}/assignee` | 分配处理人（管理员） |
-| PUT | `/api/v1/admin/tickets/{id}/status` | 更新状态（管理员） |
+| PUT | `/api/v1/admin/tickets/{ticketId}/assignee` | 分配处理人（管理员） |
+| PUT | `/api/v1/admin/tickets/{ticketId}/status` | 更新状态（管理员） |
 | GET | `/api/v1/admin/tickets/pending-count` | 管理员待处理工单数 |
 
 ### 权限（`/api/v1/system/permissions`，管理员）

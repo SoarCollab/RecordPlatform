@@ -158,9 +158,9 @@ The upload system uses dynamic chunk sizing:
 
 Upload process:
 1. Calculate optimal chunk size
-2. Start upload session (`/api/v1/files/upload/start`)
+2. Start upload session (`/api/v1/upload-sessions`)
 3. Upload chunks with progress tracking
-4. Complete upload (`/api/v1/files/upload/complete`)
+4. Complete upload (`/api/v1/upload-sessions/{clientId}/complete`)
 
 ## Build for Production
 

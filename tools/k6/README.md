@@ -2,8 +2,10 @@
 
 本目录提供可复用、可门禁、可归档的 K6 压测框架，覆盖：
 - 读路径：`/files`（`basic/keyword/combo`）与 `/files/stats`
-- 写路径：`/files/upload/start`、`/files/upload/chunk`、`/files/upload/complete`、`/files/upload/progress`
+- 写路径：`/upload-sessions`、`/upload-sessions/{clientId}/chunks/{chunkNumber}`、`/upload-sessions/{clientId}/complete`、`/upload-sessions/{clientId}/progress`
 - 混合路径：70% 查询 + 30% 上传
+
+> 规范文档口径以后端 OpenAPI/Controller 为准；若个别压测脚本仍使用 legacy 上传路由，视为待迁移实现，不作为文档标准口径。
 
 ## 目录结构
 

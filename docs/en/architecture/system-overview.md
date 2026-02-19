@@ -133,7 +133,7 @@ sequenceDiagram
     participant S3 as S3 Cluster
 
     Note over Client, Backend: Phase 1: Get Download Info
-    Client->>Backend: GET /api/v1/files/address
+    Client->>Backend: GET /api/v1/files/hash/{fileHash}/addresses
     Backend->>Backend: Verify permissions & get file metadata
     Backend->>Storage: RPC: generatePresignedUrls()
     Storage->>S3: Generate presigned URLs
@@ -142,7 +142,7 @@ sequenceDiagram
     Backend-->>Client: 200 OK (URLs, ChunkInfo)
 
     Note over Client, Backend: Phase 1.5: Get Decrypt Info
-    Client->>Backend: GET /api/v1/files/decryptInfo
+    Client->>Backend: GET /api/v1/files/hash/{fileHash}/decrypt-info
     Backend-->>Client: 200 OK (DecryptKeys)
 
     Note over Client, S3: Phase 2: Concurrent Chunk Download
@@ -187,7 +187,7 @@ sequenceDiagram
     participant Visitor
 
     Note over Owner, Chain: Phase 1: Generate Share
-    Owner->>Backend: POST /api/v1/files/share
+    Owner->>Backend: POST /api/v1/shares
     Backend->>Chain: RPC: generateSharingCode()
     Chain->>Chain: Generate share code & store metadata
     Chain-->>Backend: ShareCode
@@ -235,7 +235,7 @@ sequenceDiagram
     Backend-->>Friend: 200 OK (SharedFiles)
 
     Note over Friend, Backend: Phase 3: Download Shared File
-    Friend->>Backend: GET /api/v1/files/address (with shared file hash)
+    Friend->>Backend: GET /api/v1/files/hash/{fileHash}/addresses (with shared file hash)
     Backend->>Backend: Query file using original uploader ID
     Backend-->>Friend: 200 OK (DownloadInfo)
 ```
@@ -466,7 +466,7 @@ flowchart LR
 
 SSE connections use a short-lived one-time token:
 
-1. Call `POST /api/v1/auth/sse-token` with regular JWT auth
+1. Call `POST /api/v1/auth/tokens/sse` with regular JWT auth
 2. Connect via `GET /api/v1/sse/connect?token={sseToken}&connectionId={optional}`
 
 > `GET /api/v1/sse/connect` is publicly exposed in Spring Security but still requires valid short-lived token authentication.
@@ -501,6 +501,54 @@ Default thresholds (`platform-frontend/src/lib/utils/fileSize.ts`):
 | `STREAMING_RECOMMENDED_THRESHOLD` | 1GB |
 | `MAX_SAFE_INMEMORY_SIZE` | 2GB |
 | `MAX_DOWNLOADABLE_SIZE` | 100GB |
+
+### Quota Governance
+
+The platform enforces per-user and per-tenant storage quotas with two enforcement modes:
+
+- **SHADOW** (default): Quota violations are logged and alerted but uploads are not blocked. Use during rollout to observe impact.
+- **ENFORCE**: Uploads exceeding quota are rejected with `50013 QUOTA_EXCEEDED`.
+
+**Rollout Strategy:**
+
+| Property | Description |
+|----------|-------------|
+| `quota.enforcement-mode` | Global mode: `SHADOW` or `ENFORCE` |
+| `quota.rollout.strategy` | `TENANT_WHITELIST` — only whitelisted tenants use ENFORCE |
+| `quota.rollout.enforce-tenant-whitelist` | Comma-separated tenant IDs for ENFORCE mode |
+| `quota.rollout.force-shadow` | Override to force SHADOW for all tenants |
+
+**Reconciliation**: A scheduled job (`quota.reconcile.cron`, default every 30 minutes) recalculates usage snapshots to correct any drift between cached and actual usage.
+
+**API Endpoints:**
+
+- `GET /api/v1/files/quota` — Current user quota status
+- `POST /api/v1/admin/quota/rollout/audits` — Write rollout audit record (admin)
+- `GET /api/v1/admin/quota/rollout/audits` — Query rollout audit record (admin)
+
+### Batch Download
+
+The frontend supports selecting multiple files for batch download:
+
+1. **Select**: User selects files from the file list
+2. **Parallel Download**: Files are downloaded concurrently (up to configurable concurrency limit)
+3. **Auto-Retry**: Failed downloads are automatically retried
+4. **Metrics Report**: After completion, the frontend reports batch quality metrics via `POST /api/v1/files/download-batches/report`
+
+The report payload includes total files, successful/failed counts, retry count, total duration, and error type breakdown — used for backend quality observability.
+
+### Keyword Search Modes
+
+File queries (`GET /api/v1/files`) support a `keywordMode` parameter that controls how the `keyword` is matched:
+
+| Mode | File Name Matching | File Hash Matching | Use Case |
+|------|--------------------|--------------------|----------|
+| `FUZZY` (default) | `LIKE %keyword%` | `LIKE %keyword%` | General search |
+| `PREFIX` | `LIKE keyword%` | Exact match | Faster indexed lookup |
+| `EXACT_HASH` | Not searched | Exact match only | Direct hash lookup |
+| `AUTO` | Depends on keyword | Depends on keyword | Smart detection |
+
+**AUTO mode** inspects the keyword: if it matches the hex hash pattern (`/^[0-9a-fA-F]{32,128}$/`), it resolves to `EXACT_HASH`; otherwise it resolves to `PREFIX`.
 
 ### Frontend Leader Election
 

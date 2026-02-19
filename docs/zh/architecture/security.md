@@ -24,7 +24,7 @@ RecordPlatform 的全面安全机制。
 EventSource 不支持自定义 Header，因此 SSE 使用 URL Token：
 
 ```
-1. POST /api/v1/auth/sse-token → 获取短期 Token（30 秒，一次性）
+1. POST /api/v1/auth/tokens/sse → 获取短期 Token（30 秒，一次性）
 2. GET /api/v1/sse/connect?token=<token> → 建立 SSE 连接
 ```
 

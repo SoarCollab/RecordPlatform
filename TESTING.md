@@ -2,7 +2,9 @@
 
 本项目采用"单元测试优先 + 少量高价值集成测试"的策略，目标是在 CI 中尽早发现回归，同时保持本地开发的执行成本足够低。
 
-## 当前测试覆盖（120 test files: 82 backend + 6 storage + 32 frontend）
+## 当前测试覆盖（126 test files: 88 backend + 6 storage + 32 frontend）
+
+> 当前后端口径拆分：`backend-common=10`、`backend-service=29`、`backend-web=49`（合计 88）。
 
 ### 后端单元测试（backend-common，10 个测试类）
 
@@ -19,7 +21,7 @@
 | DistributedRateLimiterPerformanceTest | 限流性能基准 |
 | DistributedLockAspectTest | 分布式锁 AOP 切面 |
 
-### 后端单元测试（backend-service，26 个测试类）
+### 后端单元测试（backend-service，29 个测试类）
 
 | 测试类 | 覆盖范围 |
 |--------|----------|
@@ -50,7 +52,7 @@
 | ChunkDecryptionServiceTest | 分片解密服务 |
 | SseEmitterManagerTest | SSE 连接管理、并发 |
 
-### 后端测试（backend-web，46 个测试文件）
+### 后端测试（backend-web，49 个测试文件）
 
 #### 控制器集成测试
 

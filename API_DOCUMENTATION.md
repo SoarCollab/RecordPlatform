@@ -69,17 +69,19 @@ POST /api/v1/auth/login
 
 ### Public Endpoints (No Auth Required)
 
-- `POST /api/v1/auth/login` - User login
-- `POST /api/v1/auth/logout` - User logout
+- `POST /api/v1/auth/login` - User login (handled by Spring Security filter chain)
 - `POST /api/v1/auth/verification-codes` - Request verification code
 - `POST /api/v1/auth/register` - User registration
 - `POST /api/v1/auth/password-resets/confirm` - Confirm password reset
 - `PUT /api/v1/auth/password-resets` - Reset password
 - `GET /api/v1/shares/{shareCode}/files` - Get shared files by code
-- `POST /api/v1/shares/{shareCode}/files/save` - Save shared files
-- `GET /api/v1/share/{shareCode}/info` - Get share basic info (public)
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks` - Public share download
+- `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info` - Public share decrypt metadata
 - `GET /api/v1/images/download/images/**` - Download images
+- `GET /api/v1/share/{shareCode}/info` - Get share basic info (public)
+- `GET /api/v1/sse/connect?token=...` - SSE connect entry (short-lived token required)
+
+`POST /api/v1/auth/logout` is also handled by Spring Security (non-controller endpoint) and requires authenticated context.
 
 ---
 
@@ -227,7 +229,7 @@ Business errors keep `HTTP 200` and are distinguished by `Result.code`.
 
 ## 1. Auth Module
 
-Base Path: `/api/v1/auth` (login handled by Spring Security at `/api/v1/auth/login`)
+Base Path: `/api/v1/auth` (login/logout handled by Spring Security filter chain, not directly declared in controllers)
 
 ### 1.1 Login
 
@@ -236,6 +238,8 @@ Authenticate user and obtain JWT token.
 ```
 POST /api/v1/auth/login
 ```
+
+> Spring Security managed endpoint (non-controller declaration).
 
 **Authentication**: None
 
@@ -279,6 +283,8 @@ Invalidate current JWT token.
 ```
 POST /api/v1/auth/logout
 ```
+
+> Spring Security managed endpoint (non-controller declaration).
 
 **Authentication**: Bearer Token
 
@@ -971,7 +977,7 @@ GET /api/v1/files/hash/{fileHash}/chunks
 Generate a sharing code for files.
 
 ```
-POST /api/v1/files/share
+POST /api/v1/shares
 ```
 
 **Authentication**: Bearer Token
@@ -1033,6 +1039,25 @@ POST /api/v1/shares/{shareCode}/files/save
 
 ---
 
+### 4.11 Additional Controller-Aligned Endpoints (Current Baseline)
+
+The following REST endpoints are also active in current controllers/OpenAPI and should be treated as canonical:
+
+| Method | Endpoint | Description |
+| ------ | -------- | ----------- |
+| GET | `/api/v1/files/{id}` | Get file detail by ID |
+| GET | `/api/v1/files/stats` | Get user file statistics |
+| GET | `/api/v1/files/shares` | Get current user's share list |
+| DELETE | `/api/v1/files/share/{shareCode}` | Cancel share by code |
+| GET | `/api/v1/files/{id}/provenance` | Get file provenance chain (admin) |
+| GET | `/api/v1/tickets/unread-count` | Get unread ticket count |
+| GET | `/api/v1/files/quota` | Get current user quota status |
+| POST | `/api/v1/admin/quota/rollout/audits` | Upsert quota rollout audit record (admin) |
+| GET | `/api/v1/admin/quota/rollout/audits` | Query quota rollout audit records (admin) |
+| POST | `/api/v1/files/download-batches/report` | Report batch download quality metrics |
+
+---
+
 ## 5. Image Module
 
 Base Path: `/api/v1/images`
@@ -1088,7 +1113,7 @@ POST /api/v1/images/upload/image
 Download an image by path.
 
 ```
-GET /api/v1/images/download/images/{imagePath}
+GET /api/v1/images/download/images/**
 ```
 
 **Authentication**: None
@@ -1227,7 +1252,7 @@ GET /api/v1/conversations/unread-count
 Mark all messages in a conversation as read.
 
 ```
-POST /api/v1/conversations/{id}/read-status
+PUT /api/v1/conversations/{id}/read-status
 ```
 
 ---
@@ -1393,7 +1418,7 @@ GET /api/v1/announcements/unread-count
 ### 8.4 Mark as Read
 
 ```
-POST /api/v1/announcements/{id}/read-status
+PUT /api/v1/announcements/{id}/read-status
 ```
 
 ---
@@ -1401,7 +1426,7 @@ POST /api/v1/announcements/{id}/read-status
 ### 8.5 Mark All as Read
 
 ```
-POST /api/v1/announcements/read-status
+PUT /api/v1/announcements/read-status
 ```
 
 ---
@@ -1639,7 +1664,7 @@ GET /api/v1/admin/tickets
 ### 9.9 Assign Ticket (Admin)
 
 ```
-PUT /api/v1/admin/tickets/{id}/assignee
+PUT /api/v1/admin/tickets/{ticketId}/assignee
 ```
 
 **Query Parameters**:
@@ -1653,7 +1678,7 @@ PUT /api/v1/admin/tickets/{id}/assignee
 ### 9.10 Update Ticket Status (Admin)
 
 ```
-PUT /api/v1/admin/tickets/{id}/status
+PUT /api/v1/admin/tickets/{ticketId}/status
 ```
 
 **Query Parameters**:
@@ -1815,10 +1840,10 @@ GET /api/v1/system/audit/overview
 
 ```
 GET /api/v1/system/audit/logs
-POST /api/v1/system/audit/logs
+POST /api/v1/system/audit/logs/query
 ```
 
-**Request Query Parameters (GET /logs/page)**:
+**Request Query Parameters (GET /logs)**:
 
 | Parameter     | Type    | Required | Description                             |
 | ------------- | ------- | -------- | --------------------------------------- |
@@ -1833,7 +1858,7 @@ POST /api/v1/system/audit/logs
 | startTime     | string  | No       | Start time (yyyy-MM-dd HH:mm:ss)        |
 | endTime       | string  | No       | End time (yyyy-MM-dd HH:mm:ss)          |
 
-**Request Body (POST /logs/page, AuditLogQueryVO)**:
+**Request Body (POST /logs/query, AuditLogQueryVO)**:
 
 ```json
 {
@@ -3183,6 +3208,8 @@ GET /api/v1/friend-shares/unread-count
 
 ### 17.1 Current Primary REST Endpoints
 
+- `POST /api/v1/auth/login` (Spring Security managed endpoint)
+- `POST /api/v1/auth/logout` (Spring Security managed endpoint)
 - `POST /api/v1/auth/verification-codes`
 - `POST /api/v1/auth/password-resets/confirm`
 - `PUT /api/v1/auth/password-resets`
@@ -3192,9 +3219,13 @@ GET /api/v1/friend-shares/unread-count
 - `PUT /api/v1/users/password`
 - `GET /api/v1/files`
 - `GET /api/v1/files/hash/{fileHash}`
+- `GET /api/v1/files/{id}`
 - `GET /api/v1/files/hash/{fileHash}/addresses`
 - `GET /api/v1/files/hash/{fileHash}/chunks`
 - `GET /api/v1/files/hash/{fileHash}/decrypt-info`
+- `GET /api/v1/files/stats`
+- `GET /api/v1/files/shares`
+- `GET /api/v1/files/{id}/provenance`
 - `GET /api/v1/transactions/{transactionHash}`
 - `POST /api/v1/upload-sessions`
 - `PUT /api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}`
@@ -3208,21 +3239,27 @@ GET /api/v1/friend-shares/unread-count
 - `PATCH /api/v1/shares/{shareCode}`
 - `GET /api/v1/shares/{shareCode}/files`
 - `POST /api/v1/shares/{shareCode}/files/save`
+- `DELETE /api/v1/files/share/{shareCode}`
 - `GET /api/v1/shares/{shareCode}/files/{fileHash}/chunks`
 - `GET /api/v1/shares/{shareCode}/files/{fileHash}/decrypt-info`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`
+- `POST /api/v1/files/download-batches/report`
+- `GET /api/v1/files/quota`
+- `POST /api/v1/admin/quota/rollout/audits`
+- `GET /api/v1/admin/quota/rollout/audits`
 - `POST /api/v1/messages`
 - `PUT /api/v1/conversations/{id}/read-status`
 - `PUT /api/v1/announcements/{id}/read-status`
 - `PUT /api/v1/announcements/read-status`
+- `GET /api/v1/tickets/unread-count`
 - `GET /api/v1/admin/announcements`
 - `GET /api/v1/admin/tickets`
-- `PUT /api/v1/admin/tickets/{id}/assignee`
-- `PUT /api/v1/admin/tickets/{id}/status`
+- `PUT /api/v1/admin/tickets/{ticketId}/assignee`
+- `PUT /api/v1/admin/tickets/{ticketId}/status`
 - `GET /api/v1/admin/tickets/pending-count`
-- `PUT /api/v1/friends/requests/{id}/status`
-- `PUT /api/v1/friend-shares/{id}/read-status`
+- `PUT /api/v1/friends/requests/{requestId}/status`
+- `PUT /api/v1/friend-shares/{shareId}/read-status`
 - `GET /api/v1/system/permissions`
 - `POST /api/v1/system/roles/{role}/permissions`
 - `DELETE /api/v1/system/roles/{role}/permissions/{permissionCode}`

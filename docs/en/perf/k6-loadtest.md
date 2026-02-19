@@ -45,6 +45,12 @@ When `K6_SCENARIO=all` (default), runs `file-query + core-mixed`.
 bash tools/k6/run-local.sh --profile smoke --scenario all --engine auto
 ```
 
+The `core-mixed` scenario combines file query and chunk upload flows in a weighted mix. By default, 70% of iterations run query flows and 30% run upload flows. Control the query/upload ratio with the `MIX_QUERY_WEIGHT` environment variable (0-100, default 70):
+
+```bash
+MIX_QUERY_WEIGHT=50 bash tools/k6/run-local.sh --profile smoke --scenario core-mixed --engine auto
+```
+
 ### 3.2 Load test
 
 When `K6_SCENARIO=all` (default), runs `file-query + chunk-upload`.
@@ -77,12 +83,14 @@ bash tools/k6/run-local.sh --profile load --scenario chunk-upload --engine auto
 - `GET /api/v1/files/stats`
 
 ### 4.3 Upload chain
-- `POST /api/v1/files/upload/start` (`@RequestParam`)
+- `POST /api/v1/upload-sessions` (`@RequestParam`)
   - `fileName/fileSize/contentType/chunkSize/totalChunks` (optional `clientId`)
-- `POST /api/v1/files/upload/chunk` (`multipart/form-data`)
+- `PUT /api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}` (`multipart/form-data`)
   - `file/clientId/chunkNumber`
-- `POST /api/v1/files/upload/complete` (`clientId`)
-- `GET /api/v1/files/upload/progress?clientId=...`
+- `POST /api/v1/upload-sessions/{clientId}/complete` (`clientId`)
+- `GET /api/v1/upload-sessions/{clientId}/progress`
+
+> Documentation baseline follows backend OpenAPI/controllers. If a k6 script still calls legacy upload routes, treat it as pending migration code rather than documentation standard.
 
 ### 4.4 Cleanup chain
 - `DELETE /api/v1/files/delete?identifiers=...`

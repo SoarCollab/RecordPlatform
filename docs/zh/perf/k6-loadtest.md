@@ -45,6 +45,12 @@ brew install k6
 bash tools/k6/run-local.sh --profile smoke --scenario all --engine auto
 ```
 
+`core-mixed` 场景将文件查询和分片上传流程按权重混合执行。默认 70% 迭代执行查询流程，30% 执行上传流程。可通过 `MIX_QUERY_WEIGHT` 环境变量控制查询/上传比例（0-100，默认 70）：
+
+```bash
+MIX_QUERY_WEIGHT=50 bash tools/k6/run-local.sh --profile smoke --scenario core-mixed --engine auto
+```
+
 ### 3.2 load 压测
 
 默认 `K6_SCENARIO=all` 时，执行 `file-query + chunk-upload`。
@@ -77,12 +83,14 @@ bash tools/k6/run-local.sh --profile load --scenario chunk-upload --engine auto
 - `GET /api/v1/files/stats`
 
 ### 4.3 上传链路
-- `POST /api/v1/files/upload/start`（`@RequestParam`）
+- `POST /api/v1/upload-sessions`（`@RequestParam`）
   - `fileName/fileSize/contentType/chunkSize/totalChunks`（可选 `clientId`）
-- `POST /api/v1/files/upload/chunk`（`multipart/form-data`）
+- `PUT /api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}`（`multipart/form-data`）
   - `file/clientId/chunkNumber`
-- `POST /api/v1/files/upload/complete`（`clientId`）
-- `GET /api/v1/files/upload/progress?clientId=...`
+- `POST /api/v1/upload-sessions/{clientId}/complete`（`clientId`）
+- `GET /api/v1/upload-sessions/{clientId}/progress`
+
+> 文档口径以后端 OpenAPI/Controller 为准。若 k6 脚本仍调用 legacy 上传路由，应视为待迁移代码，而非文档标准。
 
 ### 4.4 清理链路
 - `DELETE /api/v1/files/delete?identifiers=...`

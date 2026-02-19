@@ -61,10 +61,10 @@ Fault domain configuration is managed through Nacos and supports runtime refresh
 
 | Variable | Description |
 |----------|-------------|
-| `SERVER_SSL_KEY_STORE` | Keystore path |
-| `SERVER_SSL_KEY_STORE_PASSWORD` | Keystore password |
-| `SECURITY_REQUIRE_SSL` | Force HTTPS (true/false) |
-| `SECURITY_HTTP_REDIRECT_PORT` | HTTP redirect port |
+| `SSL_KEY_STORE` | Keystore path |
+| `SSL_KEY_STORE_PASSWORD` | Keystore password |
+| `REQUIRE_SSL` | Force HTTPS (true/false) |
+| `HTTP_REDIRECT_PORT` | HTTP redirect port |
 
 ### Service Port Configuration
 

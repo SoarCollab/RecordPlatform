@@ -18,7 +18,11 @@
 - **文件分享** - 生成带访问次数和有效期限制的分享码
 - **分享审计与溯源** - 记录访问、下载、保存操作，支持多级溯源链（A→B→C），完整分享访问日志
 - **实时通知** - SSE 推送消息、公告、工单、好友动态及文件存证结果（`file-record-success` / `file-record-failed`）
-- **容量可观测性** - `/api/v1/system/storage-capacity` 提供集群/节点/故障域容量聚合及 `degraded`、`source` 语义；`/api/v1/system/stats` 优先使用真实容量，RPC 失败时才降级估算
+- **容量可观测性** - `/api/v1/system/storage-capacity` 提供集群/节点/故障域容量聚合及 `degraded`、`source` 语义
+- **配额治理** - 按用户和租户维度的存储配额管控，支持 SHADOW/ENFORCE 两种执行模式和基于租户白名单的灰度发布
+- **批量下载** - 多选文件并行下载，支持自动重试和下载质量指标上报
+- **关键词搜索模式** - 文件查询支持 `FUZZY`、`PREFIX`、`EXACT_HASH`、`AUTO` 四种关键词匹配模式
+- **流式下载** - 大文件下载使用 StreamSaver.js 实现低内存流式传输；根据文件大小和浏览器能力自动选择下载策略
 - **RBAC 权限** - 细粒度权限控制，资源所有权校验
 - **多租户隔离** - 数据库、缓存、存储路径按租户隔离
 - **工单系统** - 内置工单系统，支持分类、优先级和管理员处理
@@ -117,6 +121,7 @@ cd platform-frontend && pnpm install && pnpm dev
 | [故障排查](docs/zh/troubleshooting/index.md) | 常见问题与解决方案                     |
 | [API 参考](docs/zh/api/index.md)             | 与 Controller 对齐的 REST API 索引与鉴权说明 |
 | [完整 API 文档](API_DOCUMENTATION.md)        | 面向模块的完整接口清单与关键请求示例   |
+| [文档一致性校验](tools/docs/check_consistency.py) | 本地文档/API/环境变量/路线图一致性校验脚本 |
 | [测试策略](TESTING.md)                       | 测试分层、覆盖率、运行方式             |
 | [项目路线图](ROADMAP.md)                     | 滚动治理路线图与 Wave 规划             |
 
@@ -153,6 +158,9 @@ RecordPlatform/
 │   └── tenant/            # 多租户支持
 ├── platform-frontend/     # Svelte 5 + SvelteKit 前端
 ├── scripts/               # 部署脚本
+├── tools/                 # 开发与测试工具
+│   ├── k6/                # k6 压测（smoke、load、mixed 场景）
+│   └── security/          # 安全 PoC 脚本与模板
 └── docs/                  # 文档 (en/zh)
 ```
 

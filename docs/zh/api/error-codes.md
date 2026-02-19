@@ -6,7 +6,7 @@
 
 | 范围 | 类别 |
 |------|------|
-| 200 | 成功 |
+| 200, 500 | 通用状态码 |
 | 10000-19999 | 参数校验错误 |
 | 20000-29999 | 用户/认证错误 |
 | 30000-39999 | 外部服务错误（区块链、存储）|
@@ -15,11 +15,12 @@
 | 60000-69999 | 消息服务错误 |
 | 70000-79999 | 权限错误 |
 
-## 成功
+## 通用状态码
 
 | 代码 | 名称 | 说明 |
 |------|------|------|
 | 200 | SUCCESS | 操作成功 |
+| 500 | FAIL | 服务器内部错误 |
 
 ## 参数错误（10000-19999）
 
@@ -62,6 +63,17 @@
 | 30013 | STORAGE_INSUFFICIENT_REPLICAS | 可用存储节点不足 |
 | 30014 | STORAGE_DEGRADED_WRITE | 存储以降级模式写入，节点恢复后自动同步 |
 
+### 区块链 Provider 错误（Dubbo provider 侧）
+
+以下错误码定义在 `platform-api`（Dubbo provider 接口模块），由区块链提供者（`platform-fisco`）返回。它们不在 `backend-common` 中，因为 REST 消费端会将 provider 失败转换为 `30006 BLOCKCHAIN_ERROR` 或熔断码（`30010`/`30011`）。
+
+| 代码 (platform-api) | 名称 | 说明 |
+|------|------|------|
+| 30012 | BLOCKCHAIN_TIMEOUT | 区块链服务响应超时 |
+| 30013 | BLOCKCHAIN_UNREACHABLE | 区块链节点连接失败 |
+
+> **注意：** 存储错误码（`STORAGE_QUORUM_NOT_REACHED`、`STORAGE_INSUFFICIENT_REPLICAS`、`STORAGE_DEGRADED_WRITE`）在 `platform-api`（30014-30016）和 `backend-common`（30012-30014）之间编号不一致。REST API 返回的是上表中 `backend-common` 的编号。此编号差异已记录，待后续代码层面修复。
+
 ## 系统错误（40000-49999）
 
 | 代码 | 名称 | 说明 |
@@ -71,6 +83,7 @@
 | 40003 | SYSTEM_BUSY | 系统繁忙，请稍后重试 |
 | 40004 | RATE_LIMIT_EXCEEDED | 请求过于频繁 |
 | 40005 | SERVICE_UNAVAILABLE | 服务暂时不可用 |
+| 40006 | UPLOAD_SESSION_NOT_FOUND | 上传会话不存在或已过期 |
 
 ## 业务数据错误（50000-59999）
 
@@ -88,6 +101,7 @@
 | 50010 | FILE_RECORD_ERROR | 文件存证失败 |
 | 50011 | SHARE_CANCELLED | 分享链接已被取消 |
 | 50012 | SHARE_EXPIRED | 分享已过期 |
+| 50013 | QUOTA_EXCEEDED | 配额超限 |
 
 ## 消息服务错误（60000-69999）
 
@@ -161,3 +175,12 @@
 ### 存储降级模式
 
 `30014`（STORAGE_DEGRADED_WRITE）表示写入成功，但副本数少于配置值。系统会在节点恢复后自动同步。这不是失败，而是警告。
+
+### 配额执行
+
+`50013`（QUOTA_EXCEEDED）的行为取决于配额执行模式：
+
+- **SHADOW 模式**（默认）：上传正常进行。配额违规会被记录并发出告警，但请求不会被拒绝。在正式执行前使用此模式观察影响。
+- **ENFORCE 模式**：上传被拒绝，返回 `50013 QUOTA_EXCEEDED`。客户端应显示配额超限提示，引导用户释放空间或联系管理员。
+
+配额执行模式由 `quota.enforcement-mode` 配置属性控制，可通过灰度策略（`TENANT_WHITELIST`）按租户切换。

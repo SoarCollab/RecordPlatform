@@ -61,10 +61,10 @@ S3 兼容存储通过 Nacos 配置。基本环境变量：
 
 | 变量 | 说明 |
 |------|------|
-| `SERVER_SSL_KEY_STORE` | 密钥库路径 |
-| `SERVER_SSL_KEY_STORE_PASSWORD` | 密钥库密码 |
-| `SECURITY_REQUIRE_SSL` | 强制 HTTPS (true/false) |
-| `SECURITY_HTTP_REDIRECT_PORT` | HTTP 重定向端口 |
+| `SSL_KEY_STORE` | 密钥库路径 |
+| `SSL_KEY_STORE_PASSWORD` | 密钥库密码 |
+| `REQUIRE_SSL` | 强制 HTTPS (true/false) |
+| `HTTP_REDIRECT_PORT` | HTTP 重定向端口 |
 
 ### 服务端口配置
 

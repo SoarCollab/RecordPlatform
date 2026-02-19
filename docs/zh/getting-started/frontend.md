@@ -158,9 +158,9 @@ const result = await filesApi.upload(file, {
 
 上传流程：
 1. 计算最优分块大小
-2. 启动上传会话（`/api/v1/files/upload/start`）
+2. 启动上传会话（`/api/v1/upload-sessions`）
 3. 上传分块并跟踪进度
-4. 完成上传（`/api/v1/files/upload/complete`）
+4. 完成上传（`/api/v1/upload-sessions/{clientId}/complete`）
 
 ## 生产构建
 

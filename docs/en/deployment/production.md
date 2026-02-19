@@ -159,14 +159,14 @@ keytool -genkeypair -alias recordplatform \
 server:
   port: 443
   ssl:
-    enabled: true
-    key-store: classpath:keystore.p12
-    key-store-password: ${SERVER_SSL_KEY_STORE_PASSWORD}
-    key-store-type: PKCS12
+    enabled: ${SSL_ENABLED:true}
+    key-store: ${SSL_KEY_STORE:classpath:keystore.p12}
+    key-store-password: ${SSL_KEY_STORE_PASSWORD}
+    key-store-type: ${SSL_KEY_STORE_TYPE:PKCS12}
 
 security:
-  require-ssl: true
-  http-redirect-port: 80
+  require-ssl: ${REQUIRE_SSL:true}
+  http-redirect-port: ${HTTP_REDIRECT_PORT:80}
 ```
 
 ## JVM Tuning

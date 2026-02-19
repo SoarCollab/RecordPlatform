@@ -109,13 +109,13 @@ sequenceDiagram
     participant Chain as FISCO BCOS
 
     Note over Client, Backend: 阶段 1: 初始化上传
-    Client->>Backend: POST /api/v1/files/upload/start
+    Client->>Backend: POST /api/v1/upload-sessions
     Backend->>Backend: 校验配额 & 文件是否存在
     Backend-->>Client: 200 OK (ClientId, ChunkSize)
 
     Note over Client, S3: 阶段 2: 分片上传
     loop 每个分片
-        Client->>Backend: POST /api/v1/files/upload/chunk
+        Client->>Backend: PUT /api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}
         Backend->>Storage: RPC: storeChunk()
         Storage->>S3: PutObject (加密)
         S3-->>Storage: 成功
@@ -124,7 +124,7 @@ sequenceDiagram
     end
 
     Note over Client, Chain: 阶段 3: 存证 & 确认
-    Client->>Backend: POST /api/v1/files/upload/complete
+    Client->>Backend: POST /api/v1/upload-sessions/{clientId}/complete
     Backend->>Backend: 合并分片元数据
     Backend->>Chain: 异步 Transaction (Saga)
     Chain-->>Backend: TxHash
@@ -146,7 +146,7 @@ sequenceDiagram
     participant S3 as S3 Cluster
 
     Note over Client, Backend: 阶段 1: 获取下载信息
-    Client->>Backend: GET /api/v1/files/address
+    Client->>Backend: GET /api/v1/files/hash/{fileHash}/addresses
     Backend->>Backend: 校验权限 & 获取文件元数据
     Backend->>Storage: RPC: generatePresignedUrls()
     Storage->>S3: 生成预签名 URL
@@ -155,7 +155,7 @@ sequenceDiagram
     Backend-->>Client: 200 OK (URLs, ChunkInfo)
 
     Note over Client, Backend: 阶段 1.5: 获取解密信息
-    Client->>Backend: GET /api/v1/files/decryptInfo
+    Client->>Backend: GET /api/v1/files/hash/{fileHash}/decrypt-info
     Backend-->>Client: 200 OK (DecryptKeys)
 
     Note over Client, S3: 阶段 2: 并发下载分片
@@ -200,7 +200,7 @@ sequenceDiagram
     participant Visitor as 访问者
 
     Note over Owner, Chain: 阶段 1: 生成分享
-    Owner->>Backend: POST /api/v1/files/share
+    Owner->>Backend: POST /api/v1/shares
     Backend->>Chain: RPC: generateSharingCode()
     Chain->>Chain: 生成分享码 & 存储元数据
     Chain-->>Backend: ShareCode
@@ -248,7 +248,7 @@ sequenceDiagram
     Backend-->>Friend: 200 OK (SharedFiles)
 
     Note over Friend, Backend: 阶段 3: 下载分享文件
-    Friend->>Backend: GET /api/v1/files/address (使用分享文件哈希)
+    Friend->>Backend: GET /api/v1/files/hash/{fileHash}/addresses (使用分享文件哈希)
     Backend->>Backend: 使用原上传者 ID 查询文件
     Backend-->>Friend: 200 OK (DownloadInfo)
 ```
@@ -479,7 +479,7 @@ flowchart LR
 
 SSE 连接采用短期一次性令牌：
 
-1. 登录态下调用 `POST /api/v1/auth/sse-token` 获取短期令牌（需常规 JWT）
+1. 登录态下调用 `POST /api/v1/auth/tokens/sse` 获取短期令牌（需常规 JWT）
 2. 使用 `GET /api/v1/sse/connect?token={sseToken}&connectionId={optional}` 建立连接
 
 > `GET /api/v1/sse/connect` 为公开端点，但依赖短期令牌完成认证；不是匿名开放连接。
@@ -514,6 +514,54 @@ SSE 连接采用短期一次性令牌：
 | `STREAMING_RECOMMENDED_THRESHOLD` | 1GB |
 | `MAX_SAFE_INMEMORY_SIZE` | 2GB |
 | `MAX_DOWNLOADABLE_SIZE` | 100GB |
+
+### 配额治理
+
+平台支持按用户和租户维度的存储配额管控，提供两种执行模式：
+
+- **SHADOW**（默认）：配额违规仅记录和告警，不阻止上传。在正式执行前用于观察影响。
+- **ENFORCE**：超出配额的上传会被拒绝，返回 `50013 QUOTA_EXCEEDED`。
+
+**灰度策略：**
+
+| 属性 | 说明 |
+|------|------|
+| `quota.enforcement-mode` | 全局模式：`SHADOW` 或 `ENFORCE` |
+| `quota.rollout.strategy` | `TENANT_WHITELIST` — 仅白名单内租户使用 ENFORCE |
+| `quota.rollout.enforce-tenant-whitelist` | 逗号分隔的 ENFORCE 模式租户 ID 列表 |
+| `quota.rollout.force-shadow` | 强制所有租户使用 SHADOW 模式 |
+
+**对账**：定时任务（`quota.reconcile.cron`，默认每 30 分钟）重新计算使用量快照，修正缓存与实际使用量之间的偏差。
+
+**API 端点：**
+
+- `GET /api/v1/files/quota` — 查询当前用户配额状态
+- `POST /api/v1/admin/quota/rollout/audits` — 写入灰度审计记录（管理员）
+- `GET /api/v1/admin/quota/rollout/audits` — 查询灰度审计记录（管理员）
+
+### 批量下载
+
+前端支持多选文件批量下载：
+
+1. **选择**：用户从文件列表中选择多个文件
+2. **并行下载**：文件按可配置的并发数同时下载
+3. **自动重试**：下载失败的文件自动重试
+4. **指标上报**：完成后，前端通过 `POST /api/v1/files/download-batches/report` 上报批量下载质量指标
+
+上报载荷包含总文件数、成功/失败数、重试次数、总耗时、错误类型分布等，用于后端质量可观测。
+
+### 关键词搜索模式
+
+文件查询（`GET /api/v1/files`）支持 `keywordMode` 参数控制 `keyword` 的匹配方式：
+
+| 模式 | 文件名匹配 | 文件哈希匹配 | 适用场景 |
+|------|------------|-------------|----------|
+| `FUZZY`（默认） | `LIKE %keyword%` | `LIKE %keyword%` | 通用搜索 |
+| `PREFIX` | `LIKE keyword%` | 精确匹配 | 索引加速查询 |
+| `EXACT_HASH` | 不搜索 | 仅精确匹配 | 哈希直查 |
+| `AUTO` | 取决于关键词 | 取决于关键词 | 智能检测 |
+
+**AUTO 模式**会检查关键词：如果匹配十六进制哈希模式（`/^[0-9a-fA-F]{32,128}$/`），则解析为 `EXACT_HASH`；否则解析为 `PREFIX`。
 
 ### 前端 Leader 选举
 

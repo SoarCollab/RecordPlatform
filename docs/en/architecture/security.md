@@ -24,7 +24,7 @@ Comprehensive security mechanisms in RecordPlatform.
 EventSource doesn't support custom headers, so SSE uses URL token:
 
 ```
-1. POST /api/v1/auth/sse-token → Get short-lived token (30s, single-use)
+1. POST /api/v1/auth/tokens/sse → Get short-lived token (30s, single-use)
 2. GET /api/v1/sse/connect?token=<token> → Establish SSE connection
 ```
 

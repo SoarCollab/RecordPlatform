@@ -18,7 +18,11 @@
 - **File Sharing** - Generate share codes with access limits and expiration
 - **Share Audit & Provenance** - Track access, downloads, and saves with multi-level provenance chain (A→B→C), full share access logging
 - **Real-time Notifications** - SSE push for messages, announcements, tickets, friend events, and file attestation (`file-record-success` / `file-record-failed`)
-- **Storage Capacity Observability** - `/api/v1/system/storage-capacity` provides cluster/node/domain capacity aggregates with `degraded` + `source` semantics; `/api/v1/system/stats` uses this data and falls back to estimate only when RPC fails
+- **Storage Capacity Observability** - `/api/v1/system/storage-capacity` provides cluster/node/domain capacity aggregates with `degraded` + `source` semantics
+- **Quota Governance** - Per-user and per-tenant storage quota enforcement with SHADOW/ENFORCE modes and gradual rollout via tenant whitelist
+- **Batch Download** - Select multiple files for parallel download with automatic retry and quality metrics reporting
+- **Keyword Search Modes** - File query supports `FUZZY`, `PREFIX`, `EXACT_HASH`, and `AUTO` keyword matching modes for flexible search
+- **Streaming Downloads** - Large file downloads use StreamSaver.js for low-memory streaming; automatic strategy selection based on file size and browser capability
 - **RBAC Permissions** - Fine-grained access control with resource ownership verification
 - **Multi-tenancy** - Database, cache, and storage path isolation per tenant
 - **Support Tickets** - Built-in ticket system with categories, priorities, and admin management
@@ -117,6 +121,7 @@ cd platform-frontend && pnpm install && pnpm dev
 | [Troubleshooting](docs/en/troubleshooting/index.md) | Common issues and solutions                                |
 | [API Reference](docs/en/api/index.md)               | Controller-aligned REST API index and auth rules           |
 | [Comprehensive API Doc](API_DOCUMENTATION.md)       | Full module-level API checklist with key request examples  |
+| [Docs Consistency Check](tools/docs/check_consistency.py) | Local doc/API/env/roadmap consistency gate script |
 | [Testing](TESTING.md)                               | Test strategy, coverage, and how to run tests              |
 | [Roadmap](ROADMAP.md)                               | Rolling governance roadmap and wave planning               |
 
@@ -153,6 +158,9 @@ RecordPlatform/
 │   └── tenant/            # Multi-tenant support
 ├── platform-frontend/     # Svelte 5 + SvelteKit frontend
 ├── scripts/               # Deployment scripts
+├── tools/                 # Development & testing tools
+│   ├── k6/                # k6 load testing (smoke, load, mixed scenarios)
+│   └── security/          # Security PoC scripts and templates
 └── docs/                  # Documentation (en/zh)
 ```
 
