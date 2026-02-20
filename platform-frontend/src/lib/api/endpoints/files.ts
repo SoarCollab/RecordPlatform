@@ -135,17 +135,6 @@ export async function updateShare(payload: UpdateShareRequest): Promise<void> {
 }
 
 /**
- * 获取分享信息。
- *
- * @deprecated 后端未提供此接口，请使用 getSharedFiles 获取分享文件列表
- */
-export async function getShareByCode(_code: string): Promise<FileShareVO> {
-  throw new Error(
-    "后端未提供 GET /files/share/{code} 接口，请使用 getSharedFiles",
-  );
-}
-
-/**
  * 获取分享文件列表。
  *
  * @param sharingCode 分享码

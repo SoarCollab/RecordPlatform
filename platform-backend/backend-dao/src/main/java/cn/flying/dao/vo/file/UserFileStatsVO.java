@@ -20,20 +20,4 @@ public record UserFileStatsVO(
         @Schema(description = "今日上传数")
         Long todayUploads
 ) {
-
-    public Long getTotalFiles() {
-        return totalFiles;
-    }
-
-    public Long getTotalStorage() {
-        return totalStorage;
-    }
-
-    public Long getSharedFiles() {
-        return sharedFiles;
-    }
-
-    public Long getTodayUploads() {
-        return todayUploads;
-    }
 }

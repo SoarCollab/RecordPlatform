@@ -199,12 +199,6 @@ describe("files endpoints", () => {
     );
   });
 
-  it("getShareByCode 应抛出后端未实现错误", async () => {
-    await expect(filesApi.getShareByCode("abc")).rejects.toThrow(
-      "后端未提供 GET /files/share/{code} 接口",
-    );
-  });
-
   it("getSharedFiles 应携带 skipAuth", async () => {
     clientMocks.api.get.mockResolvedValue([{ id: "shared-1" }]);
 

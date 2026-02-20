@@ -21,28 +21,4 @@ public record FileDecryptInfoVO(
         @Schema(description = "文件哈希")
         String fileHash
 ) {
-
-    public String getInitialKey() {
-        return initialKey;
-    }
-
-    public String getFileName() {
-        return fileName;
-    }
-
-    public Long getFileSize() {
-        return fileSize;
-    }
-
-    public String getContentType() {
-        return contentType;
-    }
-
-    public Integer getChunkCount() {
-        return chunkCount;
-    }
-
-    public String getFileHash() {
-        return fileHash;
-    }
 }

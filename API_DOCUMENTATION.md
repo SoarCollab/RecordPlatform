@@ -3268,13 +3268,7 @@ GET /api/v1/friend-shares/unread-count
 - `POST /api/v1/system/audit/logs/backups`
 - `POST /api/v1/system/audit/anomalies/check`
 
-### 17.2 Legacy Removal Status
-
-- Legacy alias endpoints have been removed from backend controllers.
-- Frontend API callers now use REST paths only (no legacy fallback).
-- `Deprecation`/`Link` compatibility headers are no longer emitted.
-
-### 17.3 SSE Handshake and Event Types
+### 17.2 SSE Handshake and Event Types
 
 SSE short-lived token flow:
 

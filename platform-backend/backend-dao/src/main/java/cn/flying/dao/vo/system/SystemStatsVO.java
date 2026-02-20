@@ -20,28 +20,4 @@ public record SystemStatsVO(
         @Schema(description = "今日下载次数")
         Long todayDownloads
 ) {
-
-    public Long getTotalUsers() {
-        return totalUsers;
-    }
-
-    public Long getTotalFiles() {
-        return totalFiles;
-    }
-
-    public Long getTotalStorage() {
-        return totalStorage;
-    }
-
-    public Long getTotalTransactions() {
-        return totalTransactions;
-    }
-
-    public Long getTodayUploads() {
-        return todayUploads;
-    }
-
-    public Long getTodayDownloads() {
-        return todayDownloads;
-    }
 }

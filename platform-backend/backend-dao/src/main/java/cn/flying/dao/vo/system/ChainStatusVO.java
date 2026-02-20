@@ -22,32 +22,4 @@ public record ChainStatusVO(
         @Schema(description = "最后更新时间戳（毫秒）")
         Long lastUpdateTime
 ) {
-
-    public Long getBlockNumber() {
-        return blockNumber;
-    }
-
-    public Long getTransactionCount() {
-        return transactionCount;
-    }
-
-    public Long getFailedTransactionCount() {
-        return failedTransactionCount;
-    }
-
-    public Integer getNodeCount() {
-        return nodeCount;
-    }
-
-    public String getChainType() {
-        return chainType;
-    }
-
-    public Boolean getHealthy() {
-        return healthy;
-    }
-
-    public Long getLastUpdateTime() {
-        return lastUpdateTime;
-    }
 }

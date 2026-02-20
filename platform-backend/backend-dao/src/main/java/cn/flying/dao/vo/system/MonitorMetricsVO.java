@@ -14,16 +14,4 @@ public record MonitorMetricsVO(
         @Schema(description = "系统健康状态")
         SystemHealthVO health
 ) {
-
-    public SystemStatsVO getSystemStats() {
-        return systemStats;
-    }
-
-    public ChainStatusVO getChainStatus() {
-        return chainStatus;
-    }
-
-    public SystemHealthVO getHealth() {
-        return health;
-    }
 }

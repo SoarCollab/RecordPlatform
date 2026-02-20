@@ -247,9 +247,9 @@ public class QuotaServiceImpl implements QuotaService {
             }
             resetMissingUserSnapshots(tenantId, usageList, "RECON");
             for (QuotaUserUsageVO usage : usageList) {
-                Long userId = usage.getUserId();
-                long usedStorage = nvl(usage.getUsedStorageBytes());
-                long usedCount = nvl(usage.getUsedFileCount());
+                Long userId = usage.userId();
+                long usedStorage = nvl(usage.usedStorageBytes());
+                long usedCount = nvl(usage.usedFileCount());
                 logSnapshotDrift(tenantId, userId, usedStorage, usedCount);
                 upsertSnapshot(tenantId, userId, usedStorage, usedCount, "RECON");
             }
@@ -265,7 +265,7 @@ public class QuotaServiceImpl implements QuotaService {
      */
     private void resetMissingUserSnapshots(Long tenantId, List<QuotaUserUsageVO> usageList, String source) {
         List<Long> activeUserIds = usageList.stream()
-                .map(QuotaUserUsageVO::getUserId)
+                .map(QuotaUserUsageVO::userId)
                 .filter(Objects::nonNull)
                 .distinct()
                 .toList();

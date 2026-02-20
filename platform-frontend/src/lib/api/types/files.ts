@@ -274,22 +274,6 @@ export const ShareTypeDesc: Record<ShareType, string> = {
 };
 
 /**
- * 分享信息 (创建分享响应)
- * @deprecated 后端 POST /files/share 仅返回分享码字符串
- * @note 保留此类型用于兼容，但实际 createShare 返回 string
- */
-export interface SharingVO {
-  id: string;
-  shareCode: string;
-  fileId: string;
-  fileName: string;
-  expireTime: string;
-  maxDownloads?: number;
-  downloadCount: number;
-  createTime: string;
-}
-
-/**
  * 创建分享请求
  */
 export interface CreateShareRequest {

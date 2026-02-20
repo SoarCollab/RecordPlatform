@@ -251,9 +251,9 @@ class ShareAuditServiceImplTest {
 
             FileProvenanceVO result = shareAuditService.getFileProvenance(FILE_ID);
 
-            assertTrue(result.getIsOriginal());
-            assertEquals(0, result.getDepth());
-            assertTrue(result.getChain().isEmpty());
+            assertTrue(result.isOriginal());
+            assertEquals(0, result.depth());
+            assertTrue(result.chain().isEmpty());
         }
 
         @Test
@@ -281,8 +281,8 @@ class ShareAuditServiceImplTest {
 
             FileProvenanceVO result = shareAuditService.getFileProvenance(FILE_ID);
 
-            assertFalse(result.getIsOriginal());
-            assertEquals(1, result.getDepth());
+            assertFalse(result.isOriginal());
+            assertEquals(1, result.depth());
         }
     }
 

@@ -23,28 +23,4 @@ public record ShareAccessStatsVO(
         @Schema(description = "总访问次数")
         Long totalAccess
 ) {
-
-    public String getShareCode() {
-        return shareCode;
-    }
-
-    public Long getViewCount() {
-        return viewCount;
-    }
-
-    public Long getDownloadCount() {
-        return downloadCount;
-    }
-
-    public Long getSaveCount() {
-        return saveCount;
-    }
-
-    public Long getUniqueActors() {
-        return uniqueActors;
-    }
-
-    public Long getTotalAccess() {
-        return totalAccess;
-    }
 }

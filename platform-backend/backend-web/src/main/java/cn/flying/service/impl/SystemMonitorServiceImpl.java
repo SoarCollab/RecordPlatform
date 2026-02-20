@@ -115,7 +115,7 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
             try {
                 Result<BlockChainMessage> chainResult = blockChainService.getCurrentBlockChainMessage();
                 if (chainResult != null && chainResult.getData() != null) {
-                    Long txCount = chainResult.getData().getTransactionCount();
+                    Long txCount = chainResult.getData().transactionCount();
                     totalTransactions = txCount != null ? txCount : 0L;
                 }
             } catch (Exception e) {
@@ -157,13 +157,13 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
             }
 
             BlockChainMessage message = result.getData();
-            Long blockNumber = message.getBlockNumber() != null ? message.getBlockNumber() : 0L;
-            Long transactionCount = message.getTransactionCount() != null ? message.getTransactionCount() : 0L;
-            Long failedTransactionCount = message.getFailedTransactionCount() != null ? message.getFailedTransactionCount() : 0L;
-            Integer nodeCount = message.getNodeCount() != null ? message.getNodeCount() : FALLBACK_CHAIN_NODE_COUNT;
-            String chainType = message.getChainType() != null ? message.getChainType() : FALLBACK_CHAIN_TYPE;
+            Long blockNumber = message.blockNumber() != null ? message.blockNumber() : 0L;
+            Long transactionCount = message.transactionCount() != null ? message.transactionCount() : 0L;
+            Long failedTransactionCount = message.failedTransactionCount() != null ? message.failedTransactionCount() : 0L;
+            Integer nodeCount = message.nodeCount() != null ? message.nodeCount() : FALLBACK_CHAIN_NODE_COUNT;
+            String chainType = message.chainType() != null ? message.chainType() : FALLBACK_CHAIN_TYPE;
 
-            boolean healthy = message.getBlockNumber() != null;
+            boolean healthy = message.blockNumber() != null;
             return new ChainStatusVO(
                     blockNumber,
                     transactionCount,
@@ -275,9 +275,9 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
         boolean anyDegraded = false;
 
         for (ComponentHealthVO component : components.values()) {
-            if ("DOWN".equals(component.getStatus())) {
+            if ("DOWN".equals(component.status())) {
                 anyDown = true;
-            } else if ("DEGRADED".equals(component.getStatus())) {
+            } else if ("DEGRADED".equals(component.status())) {
                 anyDegraded = true;
             }
         }

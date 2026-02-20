@@ -54,18 +54,18 @@ public class FiscoHealthIndicator implements HealthIndicator {
             }
 
             BlockChainMessage message = result.getData();
-            if (message.getBlockNumber() == null || message.getTransactionCount() == null || message.getFailedTransactionCount() == null) {
+            if (message.blockNumber() == null || message.transactionCount() == null || message.failedTransactionCount() == null) {
                 return Health.down()
                         .withDetail("reason", "Blockchain status incomplete")
                         .build();
             }
 
-            BigInteger blockNumber = BigInteger.valueOf(message.getBlockNumber());
+            BigInteger blockNumber = BigInteger.valueOf(message.blockNumber());
 
             Health.Builder builder = Health.up()
-                    .withDetail("blockNumber", message.getBlockNumber())
-                    .withDetail("transactionCount", message.getTransactionCount())
-                    .withDetail("failedTransactionCount", message.getFailedTransactionCount());
+                    .withDetail("blockNumber", message.blockNumber())
+                    .withDetail("transactionCount", message.transactionCount())
+                    .withDetail("failedTransactionCount", message.failedTransactionCount());
 
             if (blockNumber.compareTo(BigInteger.ZERO) <= 0) {
                 return builder.status("DEGRADED")

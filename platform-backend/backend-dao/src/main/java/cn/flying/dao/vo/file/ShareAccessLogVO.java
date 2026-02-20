@@ -34,46 +34,6 @@ public record ShareAccessLogVO(
         Date accessTime
 ) {
 
-    public String getId() {
-        return id;
-    }
-
-    public String getShareCode() {
-        return shareCode;
-    }
-
-    public Integer getActionType() {
-        return actionType;
-    }
-
-    public String getActionTypeDesc() {
-        return actionTypeDesc;
-    }
-
-    public String getActorUserId() {
-        return actorUserId;
-    }
-
-    public String getActorUserName() {
-        return actorUserName;
-    }
-
-    public String getActorIp() {
-        return actorIp;
-    }
-
-    public String getFileHash() {
-        return fileHash;
-    }
-
-    public String getFileName() {
-        return fileName;
-    }
-
-    public Date getAccessTime() {
-        return accessTime;
-    }
-
     /**
      * 获取操作类型描述
      */

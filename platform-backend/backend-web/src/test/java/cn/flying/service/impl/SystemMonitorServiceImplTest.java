@@ -101,16 +101,16 @@ class SystemMonitorServiceImplTest {
             when(fileMapper.selectCount(any())).thenReturn(500L);
             when(operationLogMapper.selectOperationsBetween(any(), any())).thenReturn(50L);
 
-            BlockChainMessage chainMessage = new BlockChainMessage(null, 1000L, null);
+            BlockChainMessage chainMessage = new BlockChainMessage(null, 1000L, null, null, null);
             when(blockChainService.getCurrentBlockChainMessage()).thenReturn(Result.success(chainMessage));
 
             SystemStatsVO result = systemMonitorService.getSystemStats();
 
             assertThat(result).isNotNull();
-            assertThat(result.getTotalUsers()).isEqualTo(100L);
-            assertThat(result.getTotalFiles()).isEqualTo(500L);
-            assertThat(result.getTodayDownloads()).isEqualTo(50L);
-            assertThat(result.getTotalTransactions()).isEqualTo(1000L);
+            assertThat(result.totalUsers()).isEqualTo(100L);
+            assertThat(result.totalFiles()).isEqualTo(500L);
+            assertThat(result.todayDownloads()).isEqualTo(50L);
+            assertThat(result.totalTransactions()).isEqualTo(1000L);
         }
 
         @Test
@@ -124,7 +124,7 @@ class SystemMonitorServiceImplTest {
             SystemStatsVO result = systemMonitorService.getSystemStats();
 
             assertThat(result).isNotNull();
-            assertThat(result.getTotalTransactions()).isEqualTo(0L);
+            assertThat(result.totalTransactions()).isEqualTo(0L);
         }
 
         @Test
@@ -138,7 +138,7 @@ class SystemMonitorServiceImplTest {
             SystemStatsVO result = systemMonitorService.getSystemStats();
 
             assertThat(result).isNotNull();
-            assertThat(result.getTotalTransactions()).isEqualTo(0L);
+            assertThat(result.totalTransactions()).isEqualTo(0L);
         }
 
         @Test
@@ -149,8 +149,8 @@ class SystemMonitorServiceImplTest {
             SystemStatsVO result = systemMonitorService.getSystemStats();
 
             assertThat(result).isNotNull();
-            assertThat(result.getTotalUsers()).isEqualTo(0L);
-            assertThat(result.getTotalFiles()).isEqualTo(0L);
+            assertThat(result.totalUsers()).isEqualTo(0L);
+            assertThat(result.totalFiles()).isEqualTo(0L);
         }
     }
 
@@ -167,12 +167,12 @@ class SystemMonitorServiceImplTest {
             ChainStatusVO result = systemMonitorService.getChainStatus();
 
             assertThat(result).isNotNull();
-            assertThat(result.getBlockNumber()).isEqualTo(12345L);
-            assertThat(result.getTransactionCount()).isEqualTo(10000L);
-            assertThat(result.getFailedTransactionCount()).isEqualTo(5L);
-            assertThat(result.getNodeCount()).isEqualTo(4);
-            assertThat(result.getChainType()).isEqualTo("BSN_FISCO");
-            assertThat(result.getHealthy()).isTrue();
+            assertThat(result.blockNumber()).isEqualTo(12345L);
+            assertThat(result.transactionCount()).isEqualTo(10000L);
+            assertThat(result.failedTransactionCount()).isEqualTo(5L);
+            assertThat(result.nodeCount()).isEqualTo(4);
+            assertThat(result.chainType()).isEqualTo("BSN_FISCO");
+            assertThat(result.healthy()).isTrue();
         }
 
         @Test
@@ -184,10 +184,10 @@ class SystemMonitorServiceImplTest {
             ChainStatusVO result = systemMonitorService.getChainStatus();
 
             assertThat(result).isNotNull();
-            assertThat(result.getBlockNumber()).isEqualTo(0L);
-            assertThat(result.getNodeCount()).isEqualTo(1);
-            assertThat(result.getChainType()).isEqualTo("LOCAL_FISCO");
-            assertThat(result.getHealthy()).isTrue();
+            assertThat(result.blockNumber()).isEqualTo(0L);
+            assertThat(result.nodeCount()).isEqualTo(1);
+            assertThat(result.chainType()).isEqualTo("LOCAL_FISCO");
+            assertThat(result.healthy()).isTrue();
         }
 
         @Test
@@ -199,7 +199,7 @@ class SystemMonitorServiceImplTest {
             ChainStatusVO result = systemMonitorService.getChainStatus();
 
             assertThat(result).isNotNull();
-            assertThat(result.getHealthy()).isFalse();
+            assertThat(result.healthy()).isFalse();
         }
 
         @Test
@@ -210,8 +210,8 @@ class SystemMonitorServiceImplTest {
             ChainStatusVO result = systemMonitorService.getChainStatus();
 
             assertThat(result).isNotNull();
-            assertThat(result.getBlockNumber()).isEqualTo(0L);
-            assertThat(result.getHealthy()).isFalse();
+            assertThat(result.blockNumber()).isEqualTo(0L);
+            assertThat(result.healthy()).isFalse();
         }
     }
 
@@ -231,9 +231,9 @@ class SystemMonitorServiceImplTest {
              SystemHealthVO result = systemMonitorService.getSystemHealth();
 
              assertThat(result).isNotNull();
-             assertThat(result.getStatus()).isEqualTo("UP");
+             assertThat(result.status()).isEqualTo("UP");
              // 运行时间为秒级，极短进程在测试中可能为 0，保证非负即可
-             assertThat(result.getUptime()).isGreaterThanOrEqualTo(0);
+             assertThat(result.uptime()).isGreaterThanOrEqualTo(0);
          }
 
         @Test
@@ -249,7 +249,7 @@ class SystemMonitorServiceImplTest {
             SystemHealthVO result = systemMonitorService.getSystemHealth();
 
             assertThat(result).isNotNull();
-            assertThat(result.getStatus()).isEqualTo("DOWN");
+            assertThat(result.status()).isEqualTo("DOWN");
         }
 
         @Test
@@ -264,8 +264,8 @@ class SystemMonitorServiceImplTest {
             SystemHealthVO result = systemMonitorService.getSystemHealth();
 
             assertThat(result).isNotNull();
-            assertThat(result.getComponents()).containsKey("database");
-            assertThat(result.getComponents().get("database").getStatus()).isEqualTo("DOWN");
+            assertThat(result.components()).containsKey("database");
+            assertThat(result.components().get("database").status()).isEqualTo("DOWN");
         }
     }
 
@@ -319,7 +319,7 @@ class SystemMonitorServiceImplTest {
             when(fileMapper.selectCount(any())).thenReturn(500L);
             when(operationLogMapper.selectOperationsBetween(any(), any())).thenReturn(50L);
 
-            BlockChainMessage chainMessage = new BlockChainMessage(100L, 1000L, null);
+            BlockChainMessage chainMessage = new BlockChainMessage(100L, 1000L, null, null, null);
             when(blockChainService.getCurrentBlockChainMessage()).thenReturn(Result.success(chainMessage));
 
             Health upHealth = Health.up().build();
@@ -331,9 +331,9 @@ class SystemMonitorServiceImplTest {
             MonitorMetricsVO result = systemMonitorService.getMonitorMetrics();
 
             assertThat(result).isNotNull();
-            assertThat(result.getSystemStats()).isNotNull();
-            assertThat(result.getChainStatus()).isNotNull();
-            assertThat(result.getHealth()).isNotNull();
+            assertThat(result.systemStats()).isNotNull();
+            assertThat(result.chainStatus()).isNotNull();
+            assertThat(result.health()).isNotNull();
         }
 
         @Test
@@ -349,7 +349,7 @@ class SystemMonitorServiceImplTest {
             when(accountMapper.selectCount(any())).thenReturn(1L);
             when(fileMapper.selectCount(any())).thenReturn(1L);
             when(operationLogMapper.selectOperationsBetween(any(), any())).thenReturn(0L);
-            when(blockChainService.getCurrentBlockChainMessage()).thenReturn(Result.success(new BlockChainMessage(null, null, null)));
+            when(blockChainService.getCurrentBlockChainMessage()).thenReturn(Result.success(new BlockChainMessage(null, null, null, null, null)));
 
             Health upHealth = Health.up().build();
             when(databaseHealthIndicator.health()).thenReturn(upHealth);

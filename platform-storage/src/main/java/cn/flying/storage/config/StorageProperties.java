@@ -16,7 +16,7 @@ import java.util.List;
  * <ul>
  *   <li>单域模式：开发环境，无副本</li>
  *   <li>双域模式：标准生产配置</li>
- *   <li>多域模式：高可用场景，按 replicationFactor 配置副本数</li>
+ *   <li>多域模式：高可用场景，按 replication.factor 配置副本数</li>
  * </ul>
  * <p>
  * v3.1.0 新增：
@@ -120,7 +120,7 @@ public class StorageProperties {
     /**
      * 活跃域名称列表（按优先级排序，必须配置）
      * <p>
-     * 当 replicationFactor < activeDomains.size() 时，按此列表顺序选择前 N 个域写入。
+     * 当 replication.factor < activeDomains.size() 时，按此列表顺序选择前 N 个域写入。
      * 单域模式只需配置一个域名。
      */
     private List<String> activeDomains;
@@ -140,21 +140,6 @@ public class StorageProperties {
      * 默认值: 150
      */
     private Integer virtualNodesPerNode = 150;
-
-    /**
-     * 每个分片的总副本数
-     * <p>
-     * 规则：
-     * <ul>
-     *   <li>默认值：等于活跃域数量（全副本）</li>
-     *   <li>最小值：1</li>
-     *   <li>最大值：活跃域数量（超出时自动调整）</li>
-     * </ul>
-     *
-     * @deprecated 请使用 {@link #replication} 配置块中的 factor
-     */
-    @Deprecated
-    private Integer replicationFactor;
 
     /**
      * 副本策略配置（v3.1.0 新增）
@@ -202,8 +187,7 @@ public class StorageProperties {
      * <p>
      * 规则：
      * <ul>
-     *   <li>优先使用 replication.factor 配置</li>
-     *   <li>兼容旧的 replicationFactor 配置</li>
+     *   <li>使用 replication.factor 配置</li>
      *   <li>如果未配置或超出活跃域数量，返回活跃域数量</li>
      *   <li>最小返回 1</li>
      * </ul>
@@ -216,10 +200,7 @@ public class StorageProperties {
             return 1;
         }
 
-        // 优先使用新配置，兼容旧配置
-        Integer configuredFactor = replication != null && replication.getFactor() != null
-                ? replication.getFactor()
-                : replicationFactor;
+        Integer configuredFactor = replication != null ? replication.getFactor() : null;
 
         if (configuredFactor == null || configuredFactor > activeDomainCount) {
             return activeDomainCount;
@@ -302,12 +283,6 @@ public class StorageProperties {
                             "Data will NOT be replicated across domains. " +
                             "This is suitable for development only.",
                     activeDomains.getFirst());
-        }
-
-        // 副本因子调整警告
-        if (replicationFactor != null && replicationFactor > activeDomains.size()) {
-            log.warn("replicationFactor ({}) exceeds active domain count ({}), will use {}",
-                    replicationFactor, activeDomains.size(), effectiveReplicationFactor);
         }
 
         // v3.1.0 新增配置日志

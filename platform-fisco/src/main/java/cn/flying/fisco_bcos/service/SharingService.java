@@ -60,21 +60,6 @@ public class SharingService {
   }
 
   /**
-   * 查询分享文件信息
-   * 使用 sendCall 实现只读查询，不消耗 Gas
-   *
-   * @deprecated 请使用 {@link #getSharedFilesReadOnly(SharingGetSharedFilesInputBO)} 替代
-   * @param input 分享码输入
-   * @return 交易响应（实际为只读调用结果）
-   */
-  @Deprecated(forRemoval = true)
-  public TransactionResponse getSharedFiles(SharingGetSharedFilesInputBO input) throws Exception {
-    // 注意：此方法保留仅为兼容性考虑，内部已改为只读调用
-    // 返回类型保持 TransactionResponse 但实际不产生交易
-    throw new UnsupportedOperationException("请使用 getSharedFilesReadOnly 方法");
-  }
-
-  /**
    * 查询分享文件信息 (只读操作)
    * 使用 sendCall 而非 sendTransaction，不消耗 Gas，适用于查询场景
    *

@@ -18,20 +18,4 @@ public record SystemHealthVO(
         @Schema(description = "检查时间戳")
         String timestamp
 ) {
-
-    public String getStatus() {
-        return status;
-    }
-
-    public Map<String, ComponentHealthVO> getComponents() {
-        return components;
-    }
-
-    public Long getUptime() {
-        return uptime;
-    }
-
-    public String getTimestamp() {
-        return timestamp;
-    }
 }

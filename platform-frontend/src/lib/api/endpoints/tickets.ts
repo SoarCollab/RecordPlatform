@@ -3,7 +3,6 @@ import type {
   Page,
   PageParams,
   TicketVO,
-  TicketReplyVO,
   CreateTicketRequest,
   UpdateTicketRequest,
   TicketReplyRequest,
@@ -68,20 +67,6 @@ export async function updateTicket(
  */
 export async function closeTicket(id: string): Promise<void> {
   await api.post(`${BASE}/${id}/close`);
-}
-
-/**
- * 获取工单回复列表。
- *
- * @deprecated 后端未提供独立接口，请使用 getTicket 返回结果中的 replies
- */
-export async function getTicketReplies(
-  _ticketId: string,
-  _params?: PageParams,
-): Promise<Page<TicketReplyVO>> {
-  throw new Error(
-    "后端未提供独立的回复列表接口，请从 getTicket 返回的 replies 字段获取",
-  );
 }
 
 /**

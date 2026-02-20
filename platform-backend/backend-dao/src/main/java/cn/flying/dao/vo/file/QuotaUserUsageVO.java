@@ -18,16 +18,4 @@ public record QuotaUserUsageVO(
         @Schema(description = "已使用文件数")
         Long usedFileCount
 ) {
-
-    public Long getUserId() {
-        return userId;
-    }
-
-    public Long getUsedStorageBytes() {
-        return usedStorageBytes;
-    }
-
-    public Long getUsedFileCount() {
-        return usedFileCount;
-    }
 }

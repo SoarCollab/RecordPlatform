@@ -88,9 +88,4 @@ describe("tickets endpoints", () => {
     );
   });
 
-  it("getTicketReplies 应抛出未实现错误", async () => {
-    await expect(ticketApi.getTicketReplies("t1", { pageNum: 1 })).rejects.toThrow(
-      "后端未提供独立的回复列表接口",
-    );
-  });
 });

@@ -33,7 +33,7 @@ import java.util.stream.Collectors;
  * <p>支持模式:
  * <ul>
  *   <li>单域模式：开发环境，无跨域副本</li>
- *   <li>多域模式：生产环境，按 replicationFactor 配置副本数</li>
+ *   <li>多域模式：生产环境，按 replication.factor 配置副本数</li>
  * </ul>
  */
 @Slf4j
@@ -181,7 +181,7 @@ public class FaultDomainManager {
      * 按配置的活跃域顺序和副本因子选择目标节点
      *
      * @param chunkHash 分片哈希值
-     * @return 目标节点列表（数量由 replicationFactor 决定）
+     * @return 目标节点列表（数量由 replication.factor 决定）
      */
     public List<String> getTargetNodes(String chunkHash) {
         List<String> targets = new ArrayList<>();

@@ -30,48 +30,4 @@ public record QuotaStatusVO(
         @Schema(description = "租户文件数上限")
         Long tenantMaxFileCount
 ) {
-
-    public Long getTenantId() {
-        return tenantId;
-    }
-
-    public Long getUserId() {
-        return userId;
-    }
-
-    public String getEnforcementMode() {
-        return enforcementMode;
-    }
-
-    public Long getUserUsedStorageBytes() {
-        return userUsedStorageBytes;
-    }
-
-    public Long getUserMaxStorageBytes() {
-        return userMaxStorageBytes;
-    }
-
-    public Long getUserUsedFileCount() {
-        return userUsedFileCount;
-    }
-
-    public Long getUserMaxFileCount() {
-        return userMaxFileCount;
-    }
-
-    public Long getTenantUsedStorageBytes() {
-        return tenantUsedStorageBytes;
-    }
-
-    public Long getTenantMaxStorageBytes() {
-        return tenantMaxStorageBytes;
-    }
-
-    public Long getTenantUsedFileCount() {
-        return tenantUsedFileCount;
-    }
-
-    public Long getTenantMaxFileCount() {
-        return tenantMaxFileCount;
-    }
 }

@@ -13,14 +13,6 @@ import java.util.List;
 /**
  * 区块链调用接口 v2.0.0
  * 提供文件存证、查询、删除、分享等区块链操作。
- *
- * <p>v2.0.0 破坏性变更：
- * <ul>
- *   <li>移除 deleteFile(单个) 方法，统一使用 deleteFiles</li>
- *   <li>storeFile 改用 StoreFileRequest/StoreFileResponse DTO</li>
- *   <li>deleteFiles 改用 DeleteFilesRequest DTO</li>
- *   <li>shareFiles 改用 ShareFilesRequest DTO</li>
- * </ul>
  */
 public interface BlockChainService {
 

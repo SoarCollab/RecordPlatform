@@ -14,12 +14,4 @@ public record ComponentHealthVO(
         @Schema(description = "详细信息")
         Map<String, Object> details
 ) {
-
-    public String getStatus() {
-        return status;
-    }
-
-    public Map<String, Object> getDetails() {
-        return details;
-    }
 }

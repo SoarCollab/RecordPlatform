@@ -17,12 +17,6 @@ import java.util.Map;
  *   <li>一致性哈希均匀分布</li>
  *   <li>新增域健康监控 API</li>
  * </ul>
- *
- * <p>v2.0.0 破坏性变更：
- * <ul>
- *   <li>移除已弃用的 storeFile(List, List) 批量存储方法</li>
- *   <li>统一使用 storeFileChunk 进行单文件块存储</li>
- * </ul>
  */
 public interface DistributedStorageService {
 
@@ -79,9 +73,7 @@ public interface DistributedStorageService {
      * @return 域名称到健康信息的映射
      *         格式: {domainName -> {healthyNodes: n, totalNodes: m, status: "healthy"|"degraded"}}
      */
-    default Result<Map<String, Map<String, Object>>> getDomainHealth() {
-        return Result.success(Map.of());
-    }
+    Result<Map<String, Map<String, Object>>> getDomainHealth();
 
     /**
      * 获取分片的存储位置
@@ -89,9 +81,7 @@ public interface DistributedStorageService {
      * @param chunkHash 分片哈希
      * @return 分片所在的节点列表
      */
-    default Result<List<String>> getChunkLocations(String chunkHash) {
-        return Result.success(List.of());
-    }
+    Result<List<String>> getChunkLocations(String chunkHash);
 
     /**
      * 触发手动再平衡
@@ -99,28 +89,21 @@ public interface DistributedStorageService {
      * @param targetDomain 目标域（可选，null 表示全部域）
      * @return 再平衡任务 ID
      */
-    default Result<String> triggerRebalance(String targetDomain) {
-        return Result.success(null);
-    }
+    Result<String> triggerRebalance(String targetDomain);
 
     /**
      * 获取再平衡状态
      *
      * @return 再平衡状态信息
      */
-    default Result<Map<String, Object>> getRebalanceStatus() {
-        return Result.success(Map.of());
-    }
+    Result<Map<String, Object>> getRebalanceStatus();
 
     /**
      * 获取存储容量信息。
      * <p>
      * 该方法用于监控场景，返回集群总容量、已用容量以及节点/故障域维度汇总。
-     * 作为 default 方法提供，保证对已有 Provider 的非破坏性兼容。
      *
      * @return 存储容量信息
      */
-    default Result<StorageCapacityVO> getStorageCapacity() {
-        return Result.success(null);
-    }
+    Result<StorageCapacityVO> getStorageCapacity();
 }

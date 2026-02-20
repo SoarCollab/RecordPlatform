@@ -308,9 +308,9 @@ class FileQueryServiceTest {
 
                 // Then
                 assertNotNull(result);
-                assertEquals("dGVzdGtleQ==", result.getInitialKey());
-                assertEquals(1024L, result.getFileSize());
-                assertEquals(FILE_HASH, result.getFileHash());
+                assertEquals("dGVzdGtleQ==", result.initialKey());
+                assertEquals(1024L, result.fileSize());
+                assertEquals(FILE_HASH, result.fileHash());
 
                 // Verify friend share service was called
                 verify(friendFileShareService).getSharerIdForFile(USER_ID, FILE_HASH);
@@ -383,7 +383,7 @@ class FileQueryServiceTest {
 
                 // Then
                 assertNotNull(result);
-                assertEquals("YWRtaW5rZXk=", result.getInitialKey());
+                assertEquals("YWRtaW5rZXk=", result.initialKey());
                 // Should not call friendFileShareService for admin
                 verify(friendFileShareService, never()).getSharerIdForFile(any(), any());
             }
@@ -433,11 +433,11 @@ class FileQueryServiceTest {
 
                 // Then
                 assertNotNull(result);
-                assertEquals("c2VjcmV0a2V5", result.getInitialKey());
-                assertEquals(4096L, result.getFileSize());
-                assertEquals("application/pdf", result.getContentType());
-                assertEquals(2, result.getChunkCount());
-                assertEquals(FILE_HASH, result.getFileHash());
+                assertEquals("c2VjcmV0a2V5", result.initialKey());
+                assertEquals(4096L, result.fileSize());
+                assertEquals("application/pdf", result.contentType());
+                assertEquals(2, result.chunkCount());
+                assertEquals(FILE_HASH, result.fileHash());
             }
         }
 
@@ -461,7 +461,7 @@ class FileQueryServiceTest {
                 var result = fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH);
 
                 // Then
-                assertEquals("entity_name.txt", result.getFileName());
+                assertEquals("entity_name.txt", result.fileName());
             }
         }
 

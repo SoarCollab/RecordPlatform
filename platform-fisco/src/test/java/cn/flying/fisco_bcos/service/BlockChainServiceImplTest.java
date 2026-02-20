@@ -557,8 +557,8 @@ class BlockChainServiceImplTest {
             Result<BlockChainMessage> result = blockChainService.getCurrentBlockChainMessage();
             
             assertThat(result.getCode()).isEqualTo(200);
-            assertThat(result.getData().getBlockNumber()).isEqualTo(12345L);
-            assertThat(result.getData().getTransactionCount()).isEqualTo(1000L);
+            assertThat(result.getData().blockNumber()).isEqualTo(12345L);
+            assertThat(result.getData().transactionCount()).isEqualTo(1000L);
         }
 
         /**

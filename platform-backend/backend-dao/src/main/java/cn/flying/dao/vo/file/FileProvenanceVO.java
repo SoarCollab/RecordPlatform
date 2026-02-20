@@ -39,54 +39,6 @@ public record FileProvenanceVO(
         List<ProvenanceNode> chain
 ) {
 
-    public String getFileId() {
-        return fileId;
-    }
-
-    public String getFileHash() {
-        return fileHash;
-    }
-
-    public String getFileName() {
-        return fileName;
-    }
-
-    public Boolean getIsOriginal() {
-        return isOriginal;
-    }
-
-    public String getOriginUserId() {
-        return originUserId;
-    }
-
-    public String getOriginUserName() {
-        return originUserName;
-    }
-
-    public String getSharedFromUserId() {
-        return sharedFromUserId;
-    }
-
-    public String getSharedFromUserName() {
-        return sharedFromUserName;
-    }
-
-    public Integer getDepth() {
-        return depth;
-    }
-
-    public Date getSaveTime() {
-        return saveTime;
-    }
-
-    public String getShareCode() {
-        return shareCode;
-    }
-
-    public List<ProvenanceNode> getChain() {
-        return chain;
-    }
-
     /**
      * 分享链路节点
      */
@@ -105,29 +57,5 @@ public record FileProvenanceVO(
             @Schema(description = "获取时间")
             Date time
     ) {
-
-        public String getUserId() {
-            return userId;
-        }
-
-        public String getUserName() {
-            return userName;
-        }
-
-        public String getFileId() {
-            return fileId;
-        }
-
-        public Integer getDepth() {
-            return depth;
-        }
-
-        public String getShareCode() {
-            return shareCode;
-        }
-
-        public Date getTime() {
-            return time;
-        }
     }
 }
