@@ -2074,7 +2074,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 创建上传会话（REST） */
+        /** 创建上传会话 */
         post: operations["createUploadSession"];
         delete?: never;
         options?: never;
@@ -2089,11 +2089,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询上传会话状态（REST） */
+        /** 查询上传会话状态 */
         get: operations["getUploadSession"];
         put?: never;
         post?: never;
-        /** 取消上传（REST） */
+        /** 取消上传 */
         delete: operations["cancelUpload"];
         options?: never;
         head?: never;
@@ -2108,7 +2108,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** 上传分片（REST） */
+        /** 上传分片 */
         put: operations["uploadChunk"];
         post?: never;
         delete?: never;
@@ -2126,7 +2126,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 完成上传（REST） */
+        /** 完成上传 */
         post: operations["completeUpload"];
         delete?: never;
         options?: never;
@@ -2143,7 +2143,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 暂停上传（REST） */
+        /** 暂停上传 */
         post: operations["pauseUpload"];
         delete?: never;
         options?: never;
@@ -2158,7 +2158,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 查询上传进度（REST） */
+        /** 查询上传进度 */
         get: operations["getUploadProgress"];
         put?: never;
         post?: never;
@@ -2177,7 +2177,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** 恢复上传（REST） */
+        /** 恢复上传 */
         post: operations["resumeUpload"];
         delete?: never;
         options?: never;
