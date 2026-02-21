@@ -1,0 +1,26 @@
+codecov:
+  require_ci_to_pass: true
+
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        target: 80%
+        threshold: 5%
+
+comment:
+  layout: "condensed_header, diff, flags, components"
+  require_changes: true
+
+flags:
+  backend:
+    paths:
+      - platform-backend/
+    carryforward: true
+  frontend:
+    paths:
+      - platform-frontend/src/
+    carryforward: true
