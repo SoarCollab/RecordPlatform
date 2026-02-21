@@ -186,7 +186,7 @@
                     </dependency>
                 </dependencies>
             </plugin>
-            <!-- backend-web 覆盖率门禁：P1 要求行覆盖率不低于 35% -->
+            <!-- backend-web 覆盖率门禁：行覆盖率阈值由父 POM 的 backend-web.line-coverage.minimum 控制 -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
