@@ -60,7 +60,7 @@ jobs:
           EOF
 
       - name: Upload Semgrep Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: security-poc-semgrep
@@ -131,7 +131,7 @@ jobs:
           EOF
 
       - name: Upload Trivy Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: security-poc-trivy
@@ -186,7 +186,7 @@ jobs:
           EOF
 
       - name: Upload SBOM Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: security-poc-sbom
@@ -249,7 +249,7 @@ jobs:
           fi
 
       - name: Upload observation summary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: security-poc-summary

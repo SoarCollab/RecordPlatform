@@ -54,7 +54,7 @@ jobs:
           test
 
       - name: Upload OpenAPI artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: backend-openapi
           path: platform-backend/backend-web/target/openapi/openapi.json
