@@ -5,8 +5,6 @@
 - 写路径：`/upload-sessions`、`/upload-sessions/{clientId}/chunks/{chunkNumber}`、`/upload-sessions/{clientId}/complete`、`/upload-sessions/{clientId}/progress`
 - 混合路径：70% 查询 + 30% 上传
 
-> 规范文档口径以后端 OpenAPI/Controller 为准；若个别压测脚本仍使用 legacy 上传路由，视为待迁移实现，不作为文档标准口径。
-
 ## 目录结构
 
 ```text
@@ -167,4 +165,4 @@ GitHub Actions Secrets（与统一变量同名）：
 - `401 Unauthorized`：检查 `Authorization` 与登录账号是否正确。
 - `400 缺少租户标识`：检查是否携带 `X-Tenant-ID`。
 - `429 Too Many Requests`：触发全局限流，建议降低 `VUS` 或 arrival `rate`。
-- 上传失败：确认 `chunk` 请求为 `multipart/form-data`，并包含 `file/clientId/chunkNumber`。
+- 上传失败：确认 `chunk` 请求为 `PUT multipart/form-data`，路径包含 `clientId` 和 `chunkNumber`。

@@ -81,6 +81,18 @@ export function post(url, body, params = {}) {
 }
 
 /**
+ * 发送 PUT 请求并自动合并 tags。
+ *
+ * @param {string} url 请求地址
+ * @param {*} body 请求体
+ * @param {{headers?: Record<string,string>, tags?: Record<string,string>}} params 请求参数
+ * @returns {import('k6/http').RefinedResponse<'text'>} HTTP 响应
+ */
+export function put(url, body, params = {}) {
+  return http.put(url, body, params);
+}
+
+/**
  * 发送 DELETE 请求并自动合并 tags。
  *
  * @param {string} url 请求地址

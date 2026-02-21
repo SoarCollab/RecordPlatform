@@ -16,7 +16,7 @@ import { loginOrFail } from './lib/auth.js';
 import { checkApiSuccess, checkFieldPresent } from './lib/assertions.js';
 import { cleanupRunFiles } from './lib/cleanup.js';
 import { recordUploadE2e, recordUploadFile } from './lib/metrics.js';
-import { buildAuthHeaders, get, post, postForm } from './lib/http.js';
+import { buildAuthHeaders, get, post, postForm, put } from './lib/http.js';
 import { createSummaryHandler } from './lib/summary.js';
 
 const baseConfig = getBaseConfig();
@@ -45,7 +45,7 @@ export function runChunkUploadFlow(context, scenarioName = 'chunk-upload') {
 
   const startTags = buildRequestTags(scenarioName, 'upload_start', 'POST');
   const startRes = postForm(
-    `${context.config.baseUrl}/files/upload/start`,
+    `${context.config.baseUrl}/upload-sessions`,
     {
       fileName,
       fileSize: String(fileSize),
@@ -71,27 +71,29 @@ export function runChunkUploadFlow(context, scenarioName = 'chunk-upload') {
 
   let chunksOk = true;
   for (let chunkIndex = 0; chunkIndex < uploadConfig.totalChunks; chunkIndex += 1) {
-    const chunkTags = buildRequestTags(scenarioName, 'upload_chunk', 'POST');
+    const chunkTags = buildRequestTags(scenarioName, 'upload_chunk', 'PUT');
     const bytes = randomBytes(uploadConfig.chunkSize);
     const payload = {
       file: http.file(bytes, `chunk-${chunkIndex}.bin`, 'application/octet-stream'),
-      clientId: String(clientId),
-      chunkNumber: String(chunkIndex),
     };
 
-    const chunkRes = post(`${context.config.baseUrl}/files/upload/chunk`, payload, {
-      headers,
-      tags: chunkTags,
-    });
+    const chunkRes = put(
+      `${context.config.baseUrl}/upload-sessions/${clientId}/chunks/${chunkIndex}`,
+      payload,
+      {
+        headers,
+        tags: chunkTags,
+      },
+    );
 
     const chunkOk = checkApiSuccess(chunkRes, 'upload/chunk', chunkTags);
     chunksOk = chunksOk && chunkOk;
   }
 
   const completeTags = buildRequestTags(scenarioName, 'upload_complete', 'POST');
-  const completeRes = postForm(
-    `${context.config.baseUrl}/files/upload/complete`,
-    { clientId: String(clientId) },
+  const completeRes = post(
+    `${context.config.baseUrl}/upload-sessions/${clientId}/complete`,
+    null,
     {
       headers,
       tags: completeTags,
@@ -101,7 +103,7 @@ export function runChunkUploadFlow(context, scenarioName = 'chunk-upload') {
 
   const progressTags = buildRequestTags(scenarioName, 'upload_progress', 'GET');
   const progressRes = get(
-    `${context.config.baseUrl}/files/upload/progress?clientId=${encodeURIComponent(clientId)}`,
+    `${context.config.baseUrl}/upload-sessions/${clientId}/progress`,
     {
       headers,
       tags: progressTags,

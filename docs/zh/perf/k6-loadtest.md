@@ -90,8 +90,6 @@ bash tools/k6/run-local.sh --profile load --scenario chunk-upload --engine auto
 - `POST /api/v1/upload-sessions/{clientId}/complete`（`clientId`）
 - `GET /api/v1/upload-sessions/{clientId}/progress`
 
-> 文档口径以后端 OpenAPI/Controller 为准。若 k6 脚本仍调用 legacy 上传路由，应视为待迁移代码，而非文档标准。
-
 ### 4.4 清理链路
 - `DELETE /api/v1/files/delete?identifiers=...`
 - teardown 会按 `runId` 搜索并批量逻辑删除。

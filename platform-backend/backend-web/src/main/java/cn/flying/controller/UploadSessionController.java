@@ -31,19 +31,19 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
- * 上传会话 REST 控制器。
+ * 上传会话控制器。
  */
 @RestController
 @Validated
 @RequestMapping("/api/v1/upload-sessions")
-@Tag(name = "上传会话（REST）", description = "分片上传 REST 新路径")
+@Tag(name = "上传会话", description = "分片上传会话管理")
 public class UploadSessionController {
 
     @Resource
     private FileUploadService fileUploadService;
 
     /**
-     * 创建上传会话（REST 新路径）。
+     * 创建上传会话。
      *
      * @param userId           用户 ID
      * @param fileName         文件名
@@ -55,8 +55,8 @@ public class UploadSessionController {
      * @return 上传会话信息
      */
     @PostMapping("")
-    @Operation(summary = "创建上传会话（REST）")
-    @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "创建上传会话（REST）")
+    @Operation(summary = "创建上传会话")
+    @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "创建上传会话")
     public Result<StartUploadVO> createUploadSession(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Schema(description = "文件名") @RequestParam("fileName") @NotBlank @Size(max = 255)
@@ -74,7 +74,7 @@ public class UploadSessionController {
     }
 
     /**
-     * 上传分片（REST 新路径）。
+     * 上传分片。
      *
      * @param userId      用户 ID
      * @param clientId    客户端会话 ID
@@ -83,7 +83,7 @@ public class UploadSessionController {
      * @return 处理结果
      */
     @PutMapping("/{clientId}/chunks/{chunkNumber}")
-    @Operation(summary = "上传分片（REST）")
+    @Operation(summary = "上传分片")
     public Result<String> uploadChunk(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
                                       @PathVariable String clientId,
                                       @PathVariable int chunkNumber,
@@ -93,15 +93,15 @@ public class UploadSessionController {
     }
 
     /**
-     * 完成上传（REST 新路径）。
+     * 完成上传。
      *
      * @param userId   用户 ID
      * @param clientId 客户端会话 ID
      * @return 处理结果
      */
     @PostMapping("/{clientId}/complete")
-    @Operation(summary = "完成上传（REST）")
-    @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "完成上传（REST）")
+    @Operation(summary = "完成上传")
+    @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "完成上传")
     public Result<String> completeUpload(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
                                          @PathVariable String clientId) {
         fileUploadService.completeUpload(userId, clientId);
@@ -109,14 +109,14 @@ public class UploadSessionController {
     }
 
     /**
-     * 暂停上传（REST 新路径）。
+     * 暂停上传。
      *
      * @param userId   用户 ID
      * @param clientId 客户端会话 ID
      * @return 处理结果
      */
     @PostMapping("/{clientId}/pause")
-    @Operation(summary = "暂停上传（REST）")
+    @Operation(summary = "暂停上传")
     public Result<String> pauseUpload(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
                                       @PathVariable String clientId) {
         fileUploadService.pauseUpload(userId, clientId);
@@ -124,29 +124,29 @@ public class UploadSessionController {
     }
 
     /**
-     * 恢复上传（REST 新路径）。
+     * 恢复上传。
      *
      * @param userId   用户 ID
      * @param clientId 客户端会话 ID
      * @return 恢复结果
      */
     @PostMapping("/{clientId}/resume")
-    @Operation(summary = "恢复上传（REST）")
+    @Operation(summary = "恢复上传")
     public Result<ResumeUploadVO> resumeUpload(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
                                                @PathVariable String clientId) {
         return Result.success(fileUploadService.resumeUpload(userId, clientId));
     }
 
     /**
-     * 取消上传（REST 新路径）。
+     * 取消上传。
      *
      * @param userId   用户 ID
      * @param clientId 客户端会话 ID
      * @return 处理结果
      */
     @DeleteMapping("/{clientId}")
-    @Operation(summary = "取消上传（REST）")
-    @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "取消上传（REST）")
+    @Operation(summary = "取消上传")
+    @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "取消上传")
     public Result<String> cancelUpload(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
                                        @PathVariable String clientId) {
         boolean cancelled = fileUploadService.cancelUpload(userId, clientId);
@@ -157,28 +157,28 @@ public class UploadSessionController {
     }
 
     /**
-     * 查询上传会话状态（REST 新路径）。
+     * 查询上传会话状态。
      *
      * @param userId   用户 ID
      * @param clientId 客户端会话 ID
      * @return 会话状态
      */
     @GetMapping("/{clientId}")
-    @Operation(summary = "查询上传会话状态（REST）")
+    @Operation(summary = "查询上传会话状态")
     public Result<FileUploadStatusVO> getUploadSession(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
                                                        @PathVariable String clientId) {
         return Result.success(fileUploadService.checkFileStatus(userId, clientId));
     }
 
     /**
-     * 查询上传进度（REST 新路径）。
+     * 查询上传进度。
      *
      * @param userId   用户 ID
      * @param clientId 客户端会话 ID
      * @return 上传进度
      */
     @GetMapping("/{clientId}/progress")
-    @Operation(summary = "查询上传进度（REST）")
+    @Operation(summary = "查询上传进度")
     public Result<ProgressVO> getUploadProgress(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
                                                 @PathVariable String clientId) {
         return Result.success(fileUploadService.getUploadProgress(userId, clientId));

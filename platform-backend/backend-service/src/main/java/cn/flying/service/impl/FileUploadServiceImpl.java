@@ -934,7 +934,7 @@ public class FileUploadServiceImpl implements FileUploadService {
         return extension != null && ALLOWED_FILE_EXTENSIONS.contains(extension);
     }
 
-    // 创建 /upload/start 的恢复会话响应 DTO
+    // 创建恢复会话响应 DTO
     private StartUploadVO createResumeDto(FileUploadState state) {
         // 恢复时同时返回 uploadedChunks / processedChunks，便于客户端决定跳过上传或仅等待服务端处理
         return new StartUploadVO(state.getClientId(),
@@ -945,7 +945,7 @@ public class FileUploadServiceImpl implements FileUploadService {
         );
     }
 
-    // 创建 /upload/start 的新会话响应 DTO
+    // 创建新会话响应 DTO
     private StartUploadVO createNewSessionDto(FileUploadState state) {
         return new StartUploadVO(
                 state.getClientId(),

@@ -112,7 +112,7 @@
 | FileMapperIT | File Mapper 集成 |
 | BaseMapperIT | Mapper 基础设施 |
 | BaseDataTest | DTO/VO 数据结构验证 |
-| RecordJacksonCompatibilityTest | Record 类 Jackson 序列化兼容性 |
+| RecordJacksonSerializationTest | Record 类 Jackson 序列化验证 |
 | SystemMonitorServiceImplTest | 系统监控服务单元测试 |
 | RabbitMQHealthIndicatorTest | RabbitMQ 健康检查 |
 | FileStorageEventListenerTest | 文件存储事件监听 |

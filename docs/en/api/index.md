@@ -219,7 +219,7 @@ Based on `SecurityConfiguration`:
 | POST | `/api/v1/tickets/{id}/reply` | Reply ticket |
 | POST | `/api/v1/tickets/{id}/close` | Close ticket |
 | POST | `/api/v1/tickets/{id}/confirm` | Confirm completion |
-| GET | `/api/v1/tickets/pending-count` | Pending ticket count (legacy) |
+| GET | `/api/v1/tickets/pending-count` | Pending ticket count |
 | GET | `/api/v1/tickets/unread-count` | Unread ticket count |
 | GET | `/api/v1/admin/tickets` | Admin ticket list |
 | PUT | `/api/v1/admin/tickets/{ticketId}/assignee` | Assign ticket (admin) |

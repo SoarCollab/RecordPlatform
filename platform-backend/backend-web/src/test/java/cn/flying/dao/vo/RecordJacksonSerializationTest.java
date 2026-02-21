@@ -19,7 +19,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class RecordJacksonCompatibilityTest {
+class RecordJacksonSerializationTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 

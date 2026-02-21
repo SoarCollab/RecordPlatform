@@ -90,8 +90,6 @@ bash tools/k6/run-local.sh --profile load --scenario chunk-upload --engine auto
 - `POST /api/v1/upload-sessions/{clientId}/complete` (`clientId`)
 - `GET /api/v1/upload-sessions/{clientId}/progress`
 
-> Documentation baseline follows backend OpenAPI/controllers. If a k6 script still calls legacy upload routes, treat it as pending migration code rather than documentation standard.
-
 ### 4.4 Cleanup chain
 - `DELETE /api/v1/files/delete?identifiers=...`
 - Teardown searches by `runId` and batch soft-deletes.

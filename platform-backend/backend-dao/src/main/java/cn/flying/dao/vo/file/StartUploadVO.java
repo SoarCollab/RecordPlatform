@@ -9,7 +9,7 @@ import lombok.Setter;
 import java.util.List;
 
 /**
- * /upload/start 接口响应 DTO
+ * POST /upload-sessions 接口响应 DTO
  */
 @Getter
 @Setter

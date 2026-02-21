@@ -7,7 +7,7 @@ import lombok.Setter;
 
 /**
  * @program: RecordPlatform
- * @description: /upload/progress 接口响应 DTO
+ * @description: GET /upload-sessions/{clientId}/progress 接口响应 DTO
  * @author flyingcoding
  * @create: 2025-04-01 13:45
  */
