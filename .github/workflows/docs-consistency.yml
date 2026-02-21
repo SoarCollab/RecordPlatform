@@ -7,7 +7,6 @@ on:
       - 'README_CN.md'
       - 'API_DOCUMENTATION.md'
       - 'TESTING.md'
-      - 'ROADMAP.md'
       - 'docs/**'
       - 'scripts/*.md'
       - 'tools/k6/README.md'
@@ -81,7 +80,7 @@ jobs:
           python-version: '3.11'
 
       - name: Run consistency checks
-        run: python3 tools/docs/check_consistency.py
+        run: python3 tools/docs/check_consistency.py --check-routes --check-env
 
   docs-build:
     name: Build Docs Site
