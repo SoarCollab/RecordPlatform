@@ -115,7 +115,7 @@ public interface TicketService extends IService<Ticket> {
     int getUserUnreadCount(Long userId);
 
     /**
-     * 获取用户待处理工单数量 (Legacy)
+     * 获取用户待处理工单数量
      * @param userId 用户ID
      * @return 待处理数量
      */

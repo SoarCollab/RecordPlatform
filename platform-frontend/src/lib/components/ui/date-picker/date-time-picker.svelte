@@ -57,7 +57,7 @@
 
   function updateValue() {
     if (date) {
-      // 为兼容后端，将 T 替换回空格
+      // 后端期望日期时间用空格分隔
       value = date.toString().replace("T", " ");
     } else {
       value = "";

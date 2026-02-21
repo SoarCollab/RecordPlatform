@@ -33,8 +33,6 @@ vim .env
 | `RECORD_PLATFORM_UID_SALT` | Salt for UID obfuscation | Recommended 8–16 random chars |
 | `RECORD_PLATFORM_CLIENT_KEY` | Client key for UID obfuscation | Recommended 16–32 random chars |
 
-> **Note**: `ID_SECURITY_KEY` is deprecated since v2.0. ID encryption keys are now derived from `JWT_KEY`.
-
 ### Storage Configuration
 
 S3-compatible storage is configured via Nacos. Basic environment variables:

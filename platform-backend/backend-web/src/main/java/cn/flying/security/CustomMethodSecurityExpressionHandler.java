@@ -87,7 +87,7 @@ public class CustomMethodSecurityExpressionHandler extends DefaultMethodSecurity
     }
 
     /**
-     * 构建自定义表达式根（兼容旧的认证对象入口）。
+     * 构建自定义表达式根。
      *
      * @param authentication 认证信息
      * @param invocation 方法调用

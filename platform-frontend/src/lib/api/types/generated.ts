@@ -3164,11 +3164,6 @@ export interface components {
         IPageAdminFileVO: {
             /** Format: int64 */
             current?: number;
-            /**
-             * Format: int64
-             * @deprecated
-             */
-            pages?: number;
             records?: components["schemas"]["AdminFileVO"][];
             /** Format: int64 */
             size?: number;
@@ -3179,11 +3174,6 @@ export interface components {
         IPageAdminShareVO: {
             /** Format: int64 */
             current?: number;
-            /**
-             * Format: int64
-             * @deprecated
-             */
-            pages?: number;
             records?: components["schemas"]["AdminShareVO"][];
             /** Format: int64 */
             size?: number;
@@ -3194,11 +3184,6 @@ export interface components {
         IPageAnnouncementVO: {
             /** Format: int64 */
             current?: number;
-            /**
-             * Format: int64
-             * @deprecated
-             */
-            pages?: number;
             records?: components["schemas"]["AnnouncementVO"][];
             /** Format: int64 */
             size?: number;
@@ -3209,11 +3194,6 @@ export interface components {
         IPageAuditLogVO: {
             /** Format: int64 */
             current?: number;
-            /**
-             * Format: int64
-             * @deprecated
-             */
-            pages?: number;
             records?: components["schemas"]["AuditLogVO"][];
             /** Format: int64 */
             size?: number;
@@ -3224,11 +3204,6 @@ export interface components {
         IPageConversationVO: {
             /** Format: int64 */
             current?: number;
-            /**
-             * Format: int64
-             * @deprecated
-             */
-            pages?: number;
             records?: components["schemas"]["ConversationVO"][];
             /** Format: int64 */
             size?: number;
@@ -3239,11 +3214,6 @@ export interface components {
         IPageFileShareVO: {
             /** Format: int64 */
             current?: number;
-            /**
-             * Format: int64
-             * @deprecated
-             */
-            pages?: number;
             records?: components["schemas"]["FileShareVO"][];
             /** Format: int64 */
             size?: number;
@@ -3254,11 +3224,6 @@ export interface components {
         IPageFriendFileShareDetailVO: {
             /** Format: int64 */
             current?: number;
-            /**
-             * Format: int64
-             * @deprecated
-             */
-            pages?: number;
             records?: components["schemas"]["FriendFileShareDetailVO"][];
             /** Format: int64 */
             size?: number;
@@ -3269,11 +3234,6 @@ export interface components {
         IPageFriendRequestDetailVO: {
             /** Format: int64 */
             current?: number;
-            /**
-             * Format: int64
-             * @deprecated
-             */
-            pages?: number;
             records?: components["schemas"]["FriendRequestDetailVO"][];
             /** Format: int64 */
             size?: number;
@@ -3284,11 +3244,6 @@ export interface components {
         IPageFriendVO: {
             /** Format: int64 */
             current?: number;
-            /**
-             * Format: int64
-             * @deprecated
-             */
-            pages?: number;
             records?: components["schemas"]["FriendVO"][];
             /** Format: int64 */
             size?: number;
@@ -3299,11 +3254,6 @@ export interface components {
         IPageMessageVO: {
             /** Format: int64 */
             current?: number;
-            /**
-             * Format: int64
-             * @deprecated
-             */
-            pages?: number;
             records?: components["schemas"]["MessageVO"][];
             /** Format: int64 */
             size?: number;
@@ -3314,11 +3264,6 @@ export interface components {
         IPageShareAccessLogVO: {
             /** Format: int64 */
             current?: number;
-            /**
-             * Format: int64
-             * @deprecated
-             */
-            pages?: number;
             records?: components["schemas"]["ShareAccessLogVO"][];
             /** Format: int64 */
             size?: number;
@@ -3329,11 +3274,6 @@ export interface components {
         IPageSysPermission: {
             /** Format: int64 */
             current?: number;
-            /**
-             * Format: int64
-             * @deprecated
-             */
-            pages?: number;
             records?: components["schemas"]["SysPermission"][];
             /** Format: int64 */
             size?: number;
@@ -3344,11 +3284,6 @@ export interface components {
         IPageSys_operation_log: {
             /** Format: int64 */
             current?: number;
-            /**
-             * Format: int64
-             * @deprecated
-             */
-            pages?: number;
             records?: components["schemas"]["sys_operation_log"][];
             /** Format: int64 */
             size?: number;
@@ -3359,11 +3294,6 @@ export interface components {
         IPageTicketVO: {
             /** Format: int64 */
             current?: number;
-            /**
-             * Format: int64
-             * @deprecated
-             */
-            pages?: number;
             records?: components["schemas"]["TicketVO"][];
             /** Format: int64 */
             size?: number;
@@ -3421,11 +3351,6 @@ export interface components {
             optimizeCountSql?: components["schemas"]["PageFile"];
             optimizeJoinOfCountSql?: boolean;
             orders?: components["schemas"]["OrderItem"][];
-            /**
-             * Format: int64
-             * @deprecated
-             */
-            pages?: number;
             records?: components["schemas"]["file"][];
             searchCount?: components["schemas"]["PageFile"];
             /** Format: int64 */

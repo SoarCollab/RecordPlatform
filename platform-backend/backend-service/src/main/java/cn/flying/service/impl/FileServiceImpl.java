@@ -945,7 +945,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     /**
-     * 验证分享访问权限并解析分享上下文（支持数据库与区块链回退）
+     * 验证分享访问权限并解析分享上下文
      */
     private ShareAccessContext resolveShareAccess(String shareCode, String fileHash, ShareType requiredType) {
         FileShare fileShare = fileShareMapper.selectByShareCode(shareCode);
@@ -978,35 +978,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             return new ShareAccessContext(fileShare.getUserId(), fileShare);
         }
 
-        // 数据库未命中时回退到区块链分享信息（兼容历史分享）
-        Result<SharingVO> shareInfoResult = fileRemoteClient.getShareInfo(shareCode);
-        SharingVO shareInfo = ResultUtils.getData(shareInfoResult);
-        if (shareInfo == null) {
-            throw new GeneralException(ResultEnum.FAIL, "分享不存在");
-        }
-
-        if (shareInfo.isValid() != null && !shareInfo.isValid()) {
-            throw new GeneralException(ResultEnum.SHARE_CANCELLED);
-        }
-
-        if (shareInfo.expirationTime() != null && shareInfo.expirationTime() < System.currentTimeMillis()) {
-            throw new GeneralException(ResultEnum.SHARE_EXPIRED);
-        }
-
-        List<String> fileHashes = shareInfo.fileHashList() != null ? shareInfo.fileHashList() : List.of();
-        if (!fileHashes.contains(fileHash)) {
-            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "该文件不在此分享中");
-        }
-
-        long ownerId;
-        try {
-            ownerId = Long.parseLong(shareInfo.uploader());
-        } catch (NumberFormatException e) {
-            log.warn("分享上传者ID格式不正确: {}", shareInfo.uploader());
-            throw new GeneralException(ResultEnum.FAIL, "分享数据异常");
-        }
-
-        return new ShareAccessContext(ownerId, null);
+        throw new GeneralException(ResultEnum.FAIL, "分享不存在");
     }
 
     /**

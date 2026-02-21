@@ -32,9 +32,9 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 文件 REST 新路径控制器。
+ * 基于文件哈希的查询控制器。
  * <p>
- * 在兼容期内与旧路径并行，面向新前端调用，不改变底层业务语义。
+ * 与 FileController（基于文件 ID 的操作）互补。
  * </p>
  */
 @RestController

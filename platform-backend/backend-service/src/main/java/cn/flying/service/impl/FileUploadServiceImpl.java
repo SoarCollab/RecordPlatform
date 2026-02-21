@@ -1006,7 +1006,7 @@ public class FileUploadServiceImpl implements FileUploadService {
                 try (InputStream fis = Files.newInputStream(chunkPath);
                      OutputStream fos = Files.newOutputStream(processedChunkPath, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
 
-                    // 写入版本头（标识加密算法，支持后向兼容）
+                    // 写入版本头（标识加密算法版本）
                     byte[] header = ChunkFileHeader.createHeader(strategy);
                     fos.write(header);
 

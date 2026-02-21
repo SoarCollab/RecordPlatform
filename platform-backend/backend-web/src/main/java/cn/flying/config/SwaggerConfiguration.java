@@ -78,7 +78,26 @@ public class SwaggerConfiguration {
      */
     @Bean
     public OpenApiCustomizer customerGlobalHeaderOpenApiCustomizer() {
-        return api -> this.authorizePathItems().forEach(api.getPaths()::addPathItem);
+        return api -> {
+            this.authorizePathItems().forEach(api.getPaths()::addPathItem);
+            this.removeDeprecatedPageFields(api);
+        };
+    }
+
+    /**
+     * 移除 MyBatis-Plus IPage 中已废弃的 pages 字段
+     */
+    private void removeDeprecatedPageFields(io.swagger.v3.oas.models.OpenAPI api) {
+        if (api.getComponents() == null || api.getComponents().getSchemas() == null) {
+            return;
+        }
+        api.getComponents().getSchemas().forEach((name, schema) -> {
+            @SuppressWarnings("unchecked")
+            Map<String, Schema<?>> properties = schema.getProperties();
+            if (properties != null) {
+                properties.remove("pages");
+            }
+        });
     }
 
     /**

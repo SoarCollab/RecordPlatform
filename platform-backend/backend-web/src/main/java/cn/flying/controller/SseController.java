@@ -58,7 +58,7 @@ public class SseController {
             return ResponseEntity.status(401).build();
         }
 
-        // 如果未提供 connectionId，则生成一个（向后兼容）
+        // 如果未提供 connectionId，则自动生成
         if (connectionId == null || connectionId.isBlank()) {
             connectionId = UUID.randomUUID().toString().replace("-", "");
         }

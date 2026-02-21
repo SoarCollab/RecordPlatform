@@ -24,15 +24,9 @@ vi.mock("../client", () => ({
 import type { AccountVO } from "../types";
 import * as authApi from "./auth";
 
-/**
- * 构造标准化前的账户对象，便于测试 id/externalId 兼容逻辑。
- *
- * @param overrides 字段覆盖。
- * @returns 可被后续 normalize 处理的账户对象。
- */
-function createRawAccount(overrides: Partial<AccountVO> = {}): AccountVO {
+function createAccount(overrides: Partial<AccountVO> = {}): AccountVO {
   return {
-    id: "",
+    id: "user-1",
     username: "alice",
     role: "user",
     registerTime: "2025-01-01",
@@ -110,40 +104,27 @@ describe("auth endpoints", () => {
     expect(clientMocks.clearToken).toHaveBeenCalledTimes(1);
   });
 
-  it("getCurrentUser: 优先使用 id 字段", async () => {
-    clientMocks.api.get.mockResolvedValue(
-      createRawAccount({ id: "id-1", externalId: "ext-1" } as AccountVO),
-    );
+  it("getCurrentUser 应返回用户信息", async () => {
+    const account = createAccount({ id: "id-1" });
+    clientMocks.api.get.mockResolvedValue(account);
 
     const result = await authApi.getCurrentUser();
 
+    expect(clientMocks.api.get).toHaveBeenCalledWith("/users/info");
     expect(result.id).toBe("id-1");
-    expect((result as AccountVO & { externalId?: string }).externalId).toBe(
-      "ext-1",
-    );
+    expect(result.username).toBe("alice");
   });
 
-  it("getCurrentUser: 当 id 缺失时回退 externalId", async () => {
-    clientMocks.api.get.mockResolvedValue(
-      createRawAccount({ id: undefined as unknown as string, externalId: "ext-2" }),
-    );
-
-    const result = await authApi.getCurrentUser();
-
-    expect(result.id).toBe("ext-2");
-  });
-
-  it("updateUser: 当 id/externalId 都缺失时回退空串", async () => {
-    clientMocks.api.put.mockResolvedValue(
-      createRawAccount({ id: undefined as unknown as string, externalId: undefined }),
-    );
+  it("updateUser 应更新并返回用户信息", async () => {
+    const account = createAccount({ nickname: "new-name" });
+    clientMocks.api.put.mockResolvedValue(account);
 
     const result = await authApi.updateUser({ nickname: "new-name" });
 
     expect(clientMocks.api.put).toHaveBeenCalledWith("/users/info", {
       nickname: "new-name",
     });
-    expect(result.id).toBe("");
+    expect(result.username).toBe("alice");
   });
 
   it("refreshToken 应更新存储中的 token", async () => {

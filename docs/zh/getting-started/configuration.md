@@ -33,8 +33,6 @@ vim .env
 | `RECORD_PLATFORM_UID_SALT` | UID 混淆用盐值 | 建议 8–16 字符随机字符串 |
 | `RECORD_PLATFORM_CLIENT_KEY` | UID 混淆用客户端密钥 | 建议 16–32 字符随机字符串 |
 
-> **注意**: `ID_SECURITY_KEY` 自 v2.0 起已弃用，ID 加密密钥现在从 `JWT_KEY` 派生。
-
 ### 存储配置
 
 S3 兼容存储通过 Nacos 配置。基本环境变量：

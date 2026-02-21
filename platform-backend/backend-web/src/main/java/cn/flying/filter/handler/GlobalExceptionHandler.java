@@ -216,7 +216,7 @@ public class GlobalExceptionHandler {
 
         int code;
         if (ex.getResultEnum() != null) {
-            // 兼容历史约定：权限不足统一用 403（而不是 70002）
+            // 权限不足返回 HTTP 403（RESTful 规范）
             if (ex.getResultEnum() == ResultEnum.PERMISSION_UNAUTHORIZED) {
                 code = 403;
             } else {

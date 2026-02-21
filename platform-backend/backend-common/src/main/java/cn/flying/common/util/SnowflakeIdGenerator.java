@@ -10,7 +10,6 @@ import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.util.Enumeration;
-import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -267,14 +266,9 @@ public class SnowflakeIdGenerator implements InitializingBean {
         return ThreadLocalRandom.current().nextInt(MAX_WORKER_ID + 1);
     }
 
-    /** 获取进程ID（兼容不同JDK版本） */
+    /** 获取当前进程 ID */
     private static int getProcessId() {
-        try {
-            String processName = java.lang.management.ManagementFactory.getRuntimeMXBean().getName();
-            return Integer.parseInt(processName.split("@")[0]);
-        } catch (Exception e) {
-            return new Random().nextInt(1000);
-        }
+        return (int) ProcessHandle.current().pid();
     }
 
     private void validateIds() {

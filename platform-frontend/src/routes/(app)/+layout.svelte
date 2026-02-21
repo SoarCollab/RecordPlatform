@@ -35,7 +35,7 @@
     unsubscribeSSE?.();
   });
 
-  // 用户可用时初始化 SSE（兼容首次加载与用户变更）
+  // 用户可用时初始化 SSE（处理首次加载与用户变更）
   $effect(() => {
     if (auth.user?.id && auth.initialized) {
       sse.init(auth.user.id);

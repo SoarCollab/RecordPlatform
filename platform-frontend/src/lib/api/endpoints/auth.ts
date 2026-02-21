@@ -15,31 +15,6 @@ import type {
 const BASE = "/auth";
 
 /**
- * 规范化后端返回的用户对象：将 `externalId` 兼容映射为前端通用的 `id`。
- *
- * @param account 后端返回的用户信息
- * @returns 统一包含 `id` 的用户信息
- */
-function normalizeAccountVO(account: AccountVO): AccountVO {
-  const anyAccount = account as AccountVO & {
-    externalId?: unknown;
-    id?: unknown;
-  };
-  const idFromId =
-    typeof anyAccount.id === "string" ? anyAccount.id : undefined;
-  const idFromExternalId =
-    typeof anyAccount.externalId === "string"
-      ? anyAccount.externalId
-      : undefined;
-
-  return {
-    ...account,
-    id: idFromId || idFromExternalId || "",
-    externalId: idFromExternalId,
-  };
-}
-
-/**
  * 用户登录。
  *
  * @param data 登录凭证
@@ -85,8 +60,7 @@ export async function logout(): Promise<void> {
  * @returns 当前用户
  */
 export async function getCurrentUser(): Promise<AccountVO> {
-  const account = await api.get<AccountVO>("/users/info");
-  return normalizeAccountVO(account);
+  return api.get<AccountVO>("/users/info");
 }
 
 /**
@@ -107,8 +81,7 @@ export async function changePassword(
  * @returns 更新后的用户信息
  */
 export async function updateUser(data: UpdateUserRequest): Promise<AccountVO> {
-  const account = await api.put<AccountVO>("/users/info", data);
-  return normalizeAccountVO(account);
+  return api.put<AccountVO>("/users/info", data);
 }
 
 /**
