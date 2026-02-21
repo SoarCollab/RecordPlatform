@@ -200,6 +200,20 @@ storage:
 
 > **Note**: `active-domains` is required and validated at startup. For single-domain development mode, configure only one domain.
 
+### Quota Governance
+
+Per-user and per-tenant storage quota enforcement:
+
+| Property | Description | Default |
+|----------|-------------|---------|
+| `quota.enforcement-mode` | Enforcement mode | `SHADOW` (log only, no rejection) |
+| `quota.rollout.strategy` | Rollout strategy | `TENANT_WHITELIST` |
+| `quota.rollout.enforce-tenant-whitelist` | Tenant IDs to enforce (comma-separated) | _(empty = all SHADOW)_ |
+| `quota.rollout.force-shadow` | Force SHADOW mode for all tenants | `false` |
+
+> **Tip**: Start with `SHADOW` mode to observe quota usage without rejecting uploads.
+> Switch to `ENFORCE` by adding tenant IDs to `enforce-tenant-whitelist`.
+
 ## Scheduled Tasks Configuration
 
 ### Share Cleanup

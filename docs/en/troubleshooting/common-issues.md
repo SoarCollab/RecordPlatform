@@ -326,3 +326,16 @@ Solutions for frequently encountered problems.
            retry:
              max-attempts: 5
    ```
+
+## Quota Issues
+
+### Upload Fails with QUOTA_EXCEEDED
+
+**Symptom**: Upload rejected with error code `50013` (QUOTA_EXCEEDED).
+
+**Cause**: The tenant/user has exceeded their storage quota and enforcement mode is `ENFORCE`.
+
+**Solution**:
+1. Check current quota status via `GET /api/v1/files/quota`
+2. If in SHADOW mode, uploads are allowed but logged — verify `quota.enforcement-mode` in config
+3. To increase quota limits, contact the admin or adjust `quota_policy` table

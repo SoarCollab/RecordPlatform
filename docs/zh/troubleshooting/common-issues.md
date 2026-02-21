@@ -326,3 +326,16 @@
            retry:
              max-attempts: 5
    ```
+
+## 配额问题
+
+### 上传失败，提示 QUOTA_EXCEEDED
+
+**症状**：上传被拒绝，错误码为 `50013`（QUOTA_EXCEEDED）。
+
+**原因**：租户/用户已超出存储配额，且执行模式为 `ENFORCE`。
+
+**解决方案**：
+1. 通过 `GET /api/v1/files/quota` 查询当前配额状态
+2. 如果处于 SHADOW 模式，上传不会被拒绝但会记录日志——检查配置中的 `quota.enforcement-mode`
+3. 如需增加配额限制，请联系管理员或调整 `quota_policy` 表

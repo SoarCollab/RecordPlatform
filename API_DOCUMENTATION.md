@@ -25,6 +25,7 @@
   - [System Monitor Module](#14-system-monitor-module-admin)
   - [Friend Module](#15-friend-module)
   - [Friend File Share Module](#16-friend-file-share-module)
+  - [Quota Module](#17-quota-module)
 - [Appendix](#appendix)
 
 ---
@@ -170,56 +171,89 @@ Business errors keep `HTTP 200` and are distinguished by `Result.code`.
 
 ### External Service Errors (30000-39999)
 
-| Code  | Name                  | Description                       |
-| ----- | --------------------- | --------------------------------- |
-| 30001 | CONTRACT_ERROR        | Smart contract call failed        |
-| 30006 | BLOCKCHAIN_ERROR      | Blockchain service request failed |
-| 30007 | TRANSACTION_NOT_FOUND | Transaction record not found      |
-| 30009 | FILE_SERVICE_ERROR    | File service request failed       |
-| 30010 | SERVICE_CIRCUIT_OPEN  | Service temporarily unavailable   |
-| 30011 | SERVICE_TIMEOUT       | Service response timeout          |
+| Code  | Name                          | Description                                                      |
+| ----- | ----------------------------- | ---------------------------------------------------------------- |
+| 30001 | CONTRACT_ERROR                | Smart contract call failed                                       |
+| 30002 | INVALID_RETURN_VALUE          | Invalid contract return value                                    |
+| 30003 | GET_USER_FILE_ERROR           | Failed to get user file                                          |
+| 30004 | DELETE_USER_FILE_ERROR        | Failed to delete user file                                       |
+| 30005 | GET_USER_SHARE_FILE_ERROR     | Failed to get shared file                                        |
+| 30006 | BLOCKCHAIN_ERROR              | Blockchain service request failed                                |
+| 30007 | TRANSACTION_NOT_FOUND         | Transaction record not found                                     |
+| 30008 | TRANSACTION_RECEIPT_NOT_FOUND | Transaction receipt not found                                    |
+| 30009 | FILE_SERVICE_ERROR            | File service request failed                                      |
+| 30010 | SERVICE_CIRCUIT_OPEN          | Service temporarily unavailable (circuit breaker)                |
+| 30011 | SERVICE_TIMEOUT               | Service response timeout                                         |
+| 30012 | STORAGE_QUORUM_NOT_REACHED    | Storage write quorum not reached                                 |
+| 30013 | STORAGE_INSUFFICIENT_REPLICAS | Insufficient storage nodes available                             |
+| 30014 | STORAGE_DEGRADED_WRITE        | Storage wrote in degraded mode, will sync when nodes recover     |
 
 ### System Errors (40000-49999)
 
-| Code  | Name                    | Description               |
-| ----- | ----------------------- | ------------------------- |
-| 40001 | FILE_MAX_SIZE_OVERFLOW  | File size exceeds limit   |
-| 40002 | FILE_ACCEPT_NOT_SUPPORT | File format not supported |
-| 40003 | SYSTEM_BUSY             | System busy               |
-| 40004 | RATE_LIMIT_EXCEEDED     | Rate limit exceeded       |
+| Code  | Name                     | Description                          |
+| ----- | ------------------------ | ------------------------------------ |
+| 40001 | FILE_MAX_SIZE_OVERFLOW   | File size exceeds limit              |
+| 40002 | FILE_ACCEPT_NOT_SUPPORT  | File format not supported            |
+| 40003 | SYSTEM_BUSY              | System busy                          |
+| 40004 | RATE_LIMIT_EXCEEDED      | Rate limit exceeded                  |
+| 40005 | SERVICE_UNAVAILABLE      | Service temporarily unavailable      |
+| 40006 | UPLOAD_SESSION_NOT_FOUND | Upload session not found or expired  |
 
 ### Data Errors (50000-59999)
 
 | Code  | Name                | Description             |
 | ----- | ------------------- | ----------------------- |
 | 50001 | RESULT_DATA_NONE    | Data not found          |
+| 50002 | DATA_IS_WRONG       | Data error              |
+| 50003 | DATA_ALREADY_EXISTED| Data already exists     |
 | 50004 | AUTH_CODE_ERROR     | Verification code error |
 | 50005 | FILE_UPLOAD_ERROR   | File upload failed      |
 | 50006 | FILE_DOWNLOAD_ERROR | File download failed    |
+| 50007 | FILE_DELETE_ERROR   | File delete failed      |
 | 50008 | FILE_NOT_EXIST      | File does not exist     |
 | 50009 | FILE_EMPTY          | File is empty           |
+| 50010 | FILE_RECORD_ERROR   | File attestation failed |
+| 50011 | SHARE_CANCELLED     | Share link has been cancelled |
+| 50012 | SHARE_EXPIRED       | Share has expired       |
+| 50013 | QUOTA_EXCEEDED      | Storage quota exceeded  |
 
 ### Message Service Errors (60000-69999)
 
-| Code  | Name                   | Description                          |
-| ----- | ---------------------- | ------------------------------------ |
-| 60001 | MESSAGE_NOT_FOUND      | Message not found                    |
-| 60002 | CONVERSATION_NOT_FOUND | Conversation not found               |
-| 60003 | CANNOT_MESSAGE_SELF    | Cannot send message to yourself      |
-| 60004 | ANNOUNCEMENT_NOT_FOUND | Announcement not found               |
-| 60005 | TICKET_NOT_FOUND       | Ticket not found                     |
-| 60006 | TICKET_ALREADY_CLOSED  | Ticket already closed                |
-| 60007 | TICKET_NOT_OWNER       | No permission to operate this ticket |
+| Code  | Name                      | Description                          |
+| ----- | ------------------------- | ------------------------------------ |
+| 60001 | MESSAGE_NOT_FOUND         | Message not found                    |
+| 60002 | CONVERSATION_NOT_FOUND    | Conversation not found               |
+| 60003 | CANNOT_MESSAGE_SELF       | Cannot send message to yourself      |
+| 60004 | ANNOUNCEMENT_NOT_FOUND    | Announcement not found               |
+| 60005 | TICKET_NOT_FOUND          | Ticket not found                     |
+| 60006 | TICKET_ALREADY_CLOSED     | Ticket already closed                |
+| 60007 | TICKET_NOT_OWNER          | No permission to operate this ticket |
+| 60008 | INVALID_TICKET_STATUS     | Invalid ticket status                |
+| 60009 | ATTACHMENT_LIMIT_EXCEEDED | Attachment count exceeds limit       |
+
+### Friend System Errors (60010-60019)
+
+| Code  | Name                       | Description                               |
+| ----- | -------------------------- | ----------------------------------------- |
+| 60010 | NOT_FRIENDS                | Not friends, cannot send message          |
+| 60011 | FRIEND_REQUEST_EXISTS      | Friend request already sent               |
+| 60012 | ALREADY_FRIENDS            | Already friends                           |
+| 60013 | CANNOT_ADD_SELF            | Cannot add yourself as friend             |
+| 60014 | FRIEND_REQUEST_NOT_FOUND   | Friend request not found                  |
+| 60015 | FRIEND_REQUEST_PROCESSED   | Friend request already processed          |
+| 60016 | FRIEND_SHARE_NOT_FOUND     | Friend share not found                    |
+| 60017 | FRIEND_SHARE_UNAUTHORIZED  | No permission to operate friend share     |
 
 ### Permission Errors (70000-79999)
 
-| Code  | Name                       | Description             |
-| ----- | -------------------------- | ----------------------- |
-| 70001 | PERMISSION_UNAUTHENTICATED | Authentication required |
-| 70002 | PERMISSION_UNAUTHORIZED    | Permission denied       |
-| 70004 | PERMISSION_TOKEN_EXPIRED   | Token expired           |
-| 70005 | PERMISSION_LIMIT           | Access limit reached    |
-| 70006 | PERMISSION_TOKEN_INVALID   | Invalid token           |
+| Code  | Name                       | Description                |
+| ----- | -------------------------- | -------------------------- |
+| 70001 | PERMISSION_UNAUTHENTICATED | Authentication required    |
+| 70002 | PERMISSION_UNAUTHORIZED    | Permission denied          |
+| 70004 | PERMISSION_TOKEN_EXPIRED   | Token expired              |
+| 70005 | PERMISSION_LIMIT           | Access limit reached       |
+| 70006 | PERMISSION_TOKEN_INVALID   | Invalid token              |
+| 70007 | PERMISSION_SIGNATURE_ERROR | Signature verification failed |
 
 ---
 
@@ -1051,10 +1085,64 @@ The following REST endpoints are also active in current controllers/OpenAPI and 
 | DELETE | `/api/v1/files/share/{shareCode}` | Cancel share by code |
 | GET | `/api/v1/files/{id}/provenance` | Get file provenance chain (admin) |
 | GET | `/api/v1/tickets/unread-count` | Get unread ticket count |
-| GET | `/api/v1/files/quota` | Get current user quota status |
-| POST | `/api/v1/admin/quota/rollout/audits` | Upsert quota rollout audit record (admin) |
-| GET | `/api/v1/admin/quota/rollout/audits` | Query quota rollout audit records (admin) |
-| POST | `/api/v1/files/download-batches/report` | Report batch download quality metrics |
+
+> Quota endpoints are documented in [Section 17: Quota Module](#17-quota-module).
+> Batch download metrics reporting is documented in [Section 4.12](#412-report-batch-download-metrics).
+
+---
+
+### 4.12 Report Batch Download Metrics
+
+Report quality metrics for a batch download session. Metrics are written to Micrometer and do not affect the download flow — failures in reporting do not block the download.
+
+```
+POST /api/v1/files/download-batches/report
+```
+
+**Authentication**: Bearer Token
+
+**Request Body (BatchDownloadMetricsReportVO)**:
+
+```json
+{
+  "batchId": "batch-abc-123",
+  "total": 5,
+  "successCount": 4,
+  "failedCount": 1,
+  "retryCount": 2,
+  "durationMs": 12500,
+  "failureReasons": {
+    "network": 1
+  }
+}
+```
+
+| Field          | Type                | Required | Description                                      |
+| -------------- | ------------------- | -------- | ------------------------------------------------ |
+| batchId        | string              | Yes      | Unique batch identifier                          |
+| total          | int                 | Yes      | Total files in batch (1-100)                     |
+| successCount   | int                 | Yes      | Successfully downloaded files (≥0)               |
+| failedCount    | int                 | Yes      | Failed files (≥0, successCount + failedCount = total) |
+| retryCount     | int                 | Yes      | Total retry attempts excluding first try (≥0)    |
+| durationMs     | long                | Yes      | Total batch duration in milliseconds (≥0)        |
+| failureReasons | map\<string, int\>  | No       | Failure reason distribution (reason → count). Reasons are normalized to: `quota`, `network`, `decrypt`, `cancelled`, `auth`, `other` |
+
+**Validation Rules**:
+- `successCount + failedCount` must equal `total`
+- Sum of all `failureReasons` values must equal `failedCount`
+- Each `failureReasons` count must be a positive integer
+
+**Response**:
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": "ok"
+}
+```
+
+> **Note**: This endpoint is fire-and-forget from the client perspective. Reporting failures should be silently ignored by the client to avoid blocking the download flow.
 
 ---
 
@@ -3202,11 +3290,157 @@ GET /api/v1/friend-shares/unread-count
 ---
 
 
-## 17. Controller-Aligned Endpoint Checklist
+## 17. Quota Module
+
+Base Path: `/api/v1/files` (user) and `/api/v1/admin/quota` (admin)
+
+### 17.1 Get Current Quota Status
+
+Query the current user's storage and file count quota status.
+
+```
+GET /api/v1/files/quota
+```
+
+**Authentication**: Bearer Token
+
+**Response (QuotaStatusVO)**:
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "tenantId": 1,
+    "userId": 100,
+    "enforcementMode": "SHADOW",
+    "userUsedStorageBytes": 52428800,
+    "userMaxStorageBytes": 1073741824,
+    "userUsedFileCount": 15,
+    "userMaxFileCount": 1000,
+    "tenantUsedStorageBytes": 524288000,
+    "tenantMaxStorageBytes": 10737418240,
+    "tenantUsedFileCount": 150,
+    "tenantMaxFileCount": 10000
+  }
+}
+```
+
+**Response Fields**:
+
+| Field                  | Type   | Description                                        |
+| ---------------------- | ------ | -------------------------------------------------- |
+| tenantId               | long   | Tenant ID                                          |
+| userId                 | long   | User ID                                            |
+| enforcementMode        | string | Quota enforcement mode: `SHADOW` or `ENFORCE`      |
+| userUsedStorageBytes   | long   | User's used storage in bytes                       |
+| userMaxStorageBytes    | long   | User's storage quota limit in bytes                |
+| userUsedFileCount      | long   | User's current file count                          |
+| userMaxFileCount       | long   | User's file count quota limit                      |
+| tenantUsedStorageBytes | long   | Tenant's total used storage in bytes               |
+| tenantMaxStorageBytes  | long   | Tenant's storage quota limit in bytes              |
+| tenantUsedFileCount    | long   | Tenant's total file count                          |
+| tenantMaxFileCount     | long   | Tenant's file count quota limit                    |
+
+> **Enforcement Modes**: In `SHADOW` mode, quota violations are logged but uploads proceed normally. In `ENFORCE` mode, uploads exceeding quota are rejected with error code `50013 QUOTA_EXCEEDED`.
+
+---
+
+### 17.2 Upsert Quota Rollout Audit Record (Admin)
+
+Write or update a quota rollout audit record for governance tracking during gradual quota enforcement rollout.
+
+```
+POST /api/v1/admin/quota/rollout/audits
+```
+
+**Authentication**: Bearer Token + Admin role (`@PreAuthorize("isAdmin()")`)
+
+**Request Body (QuotaRolloutAuditUpsertVO)**:
+
+```json
+{
+  "batchId": "batch-2026-02-01",
+  "tenantId": 1,
+  "observationStartTime": "2026-02-01T00:00:00",
+  "observationEndTime": "2026-02-07T23:59:59",
+  "sampledRequestCount": 5000,
+  "exceededRequestCount": 120,
+  "falsePositiveCount": 3,
+  "rollbackDecision": "KEEP_ENFORCE",
+  "rollbackReason": null,
+  "evidenceLink": "https://internal.example.com/ticket/123"
+}
+```
+
+| Field                 | Type     | Required | Validation                  | Description                                         |
+| --------------------- | -------- | -------- | --------------------------- | --------------------------------------------------- |
+| batchId               | string   | Yes      | max 64 chars                | Rollout batch identifier                            |
+| tenantId              | long     | Yes      | positive                    | Target tenant ID                                    |
+| observationStartTime  | datetime | Yes      |                             | Observation window start                            |
+| observationEndTime    | datetime | Yes      |                             | Observation window end                              |
+| sampledRequestCount   | long     | Yes      | ≥0                          | Total sampled requests during observation           |
+| exceededRequestCount  | long     | Yes      | ≥0                          | Requests that exceeded quota                        |
+| falsePositiveCount    | long     | Yes      | ≥0                          | False positive count                                |
+| rollbackDecision      | string   | Yes      | max 32 chars                | Decision: `KEEP_ENFORCE`, `FORCE_SHADOW`, or `EXTEND_OBSERVATION` |
+| rollbackReason        | string   | No       | max 255 chars               | Reason for rollback or observation extension         |
+| evidenceLink          | string   | No       | max 512 chars               | Link to supporting evidence (ticket/doc/CI)          |
+
+**Response (QuotaRolloutAuditVO)**:
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "id": 1,
+    "batchId": "batch-2026-02-01",
+    "tenantId": 1,
+    "observationStartTime": "2026-02-01T00:00:00",
+    "observationEndTime": "2026-02-07T23:59:59",
+    "sampledRequestCount": 5000,
+    "exceededRequestCount": 120,
+    "falsePositiveCount": 3,
+    "falsePositiveRate": 0.025,
+    "rollbackDecision": "KEEP_ENFORCE",
+    "rollbackReason": null,
+    "evidenceLink": "https://internal.example.com/ticket/123",
+    "operatorName": "admin",
+    "createTime": "2026-02-08T10:00:00",
+    "updateTime": "2026-02-08T10:00:00"
+  }
+}
+```
+
+---
+
+### 17.3 Query Quota Rollout Audit Records (Admin)
+
+Query audit records for a specific tenant and rollout batch.
+
+```
+GET /api/v1/admin/quota/rollout/audits
+```
+
+**Authentication**: Bearer Token + Admin role (`@PreAuthorize("isAdmin()")`)
+
+**Query Parameters**:
+
+| Parameter | Type   | Required | Description       |
+| --------- | ------ | -------- | ----------------- |
+| batchId   | string | Yes      | Rollout batch ID  |
+| tenantId  | long   | Yes      | Target tenant ID  |
+
+**Response (QuotaRolloutAuditVO)**: Same structure as 17.2 response.
+
+---
+
+
+## 18. Controller-Aligned Endpoint Checklist
 
 > This checklist is the P1 governance baseline. All endpoints use REST-style paths.
 
-### 17.1 Current Primary REST Endpoints
+### 18.1 Current Primary REST Endpoints
 
 - `POST /api/v1/auth/login` (Spring Security managed endpoint)
 - `POST /api/v1/auth/logout` (Spring Security managed endpoint)
@@ -3268,7 +3502,7 @@ GET /api/v1/friend-shares/unread-count
 - `POST /api/v1/system/audit/logs/backups`
 - `POST /api/v1/system/audit/anomalies/check`
 
-### 17.2 SSE Handshake and Event Types
+### 18.2 SSE Handshake and Event Types
 
 SSE short-lived token flow:
 
@@ -3403,6 +3637,7 @@ The `provenanceChain` array in file details shows the complete path from origina
 
 ## Changelog
 
+- **v1.3** - Added Quota Module (user quota query, admin rollout audit), batch download metrics reporting endpoint, Friend System error codes (60010-60019), storage/system/data/permission error code additions (28 new codes total)
 - **v1.2** - Added Friend Module, Friend File Share Module, public share info endpoint, auth token endpoints
 - **v1.1** - Added File Admin Module for share audit and file provenance tracking
 - **v1.0** - Initial API documentation

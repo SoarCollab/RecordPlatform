@@ -173,6 +173,17 @@ security:
   http-redirect-port: 80
 ```
 
+## CI Security Pipeline
+
+Automated security observation is configured as a GitHub Actions workflow:
+
+- **Workflow**: `.github/workflows/security-poc.yml`
+- **Scope**: SAST static analysis, SCA dependency scanning, SBOM generation
+- **Current status**: Observation mode (informational, not blocking PRs)
+- **Tooling**: Scripts and templates in `tools/security/`
+
+> This pipeline is planned to be promoted to release-blocking in a future wave.
+
 ## Security Checklist
 
 - [ ] `JWT_KEY` is ≥32 characters with high entropy

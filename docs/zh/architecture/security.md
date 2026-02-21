@@ -173,6 +173,17 @@ security:
   http-redirect-port: 80
 ```
 
+## CI 安全流水线
+
+自动化安全检测已配置为 GitHub Actions 工作流：
+
+- **工作流**：`.github/workflows/security-poc.yml`
+- **范围**：SAST 静态分析、SCA 依赖扫描、SBOM 生成
+- **当前状态**：观察模式（仅提供信息，不阻塞 PR 合并）
+- **工具链**：脚本和模板位于 `tools/security/`
+
+> 该流水线计划在后续迭代中升级为发布阻断级别。
+
 ## 安全检查清单
 
 - [ ] `JWT_KEY` ≥32 字符且具有高熵值

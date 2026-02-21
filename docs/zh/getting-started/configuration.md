@@ -200,6 +200,20 @@ storage:
 
 > **注意**: `active-domains` 为必填项，启动时会校验。单域开发模式只需配置一个域名。
 
+### 配额治理
+
+按用户和按租户的存储配额管控：
+
+| 属性 | 说明 | 默认值 |
+|------|------|--------|
+| `quota.enforcement-mode` | 执行模式 | `SHADOW`（仅记录日志，不拒绝） |
+| `quota.rollout.strategy` | 灰度策略 | `TENANT_WHITELIST` |
+| `quota.rollout.enforce-tenant-whitelist` | 执行配额的租户 ID（逗号分隔） | _（空 = 全部 SHADOW）_ |
+| `quota.rollout.force-shadow` | 强制所有租户使用 SHADOW 模式 | `false` |
+
+> **提示**：建议先使用 `SHADOW` 模式观察配额使用情况，不会拒绝上传。
+> 通过将租户 ID 加入 `enforce-tenant-whitelist` 切换为 `ENFORCE` 模式。
+
 ## 定时任务配置
 
 ### 分享清理
