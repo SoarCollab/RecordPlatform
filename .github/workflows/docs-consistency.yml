@@ -10,7 +10,6 @@ on:
       - 'ROADMAP.md'
       - 'docs/**'
       - 'scripts/*.md'
-      - 'scripts/daytona/*.md'
       - 'tools/k6/README.md'
       - 'tools/docs/**'
       - '.env.example'
