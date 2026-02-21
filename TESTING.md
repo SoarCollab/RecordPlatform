@@ -51,6 +51,9 @@
 | ChunkEncryptionStrategyTest | AES-GCM/ChaCha20 加密（参数化） |
 | ChunkDecryptionServiceTest | 分片解密服务 |
 | SseEmitterManagerTest | SSE 连接管理、并发 |
+| DownloadBatchMetricsServiceImplTest | 批量下载指标上报与聚合 |
+| QuotaServiceImplTest | 配额查询与执行逻辑 |
+| QuotaRolloutAuditServiceImplTest | 配额灰度审计服务 |
 
 ### 后端测试（backend-web，49 个测试文件）
 
@@ -84,6 +87,8 @@
 | FileAdminControllerIntegrationTest | 管理员文件管理端点 |
 | AdminAndTransactionControllerTest | 管理员与交易端点 |
 | ControllerCoverageBoostTest | 控制器覆盖补充 |
+| QuotaAdminControllerTest | 配额管理员端点 |
+| QuotaControllerTest | 配额查询端点 |
 
 #### 过滤器与安全测试
 
@@ -114,6 +119,7 @@
 | LoadTestSeedRunnerTest | 压测数据 Seed 初始化 |
 | BaseIntegrationTest | 集成测试基类 |
 | BaseControllerIntegrationTest | 控制器集成测试基类 |
+| OpenApiContractExportTest | OpenAPI 契约导出与稳定性校验 |
 
 ### 前端测试（platform-frontend，32 个测试文件）
 
@@ -177,6 +183,9 @@
 | FileUploadStateTestBuilder | 上传状态测试数据构建器 |
 | AccountTestBuilder | Account 实体测试数据构建器 |
 | FriendRequestTestBuilder | 好友请求测试数据构建器 |
+| FileShareTestBuilder | 文件分享测试数据构建器 |
+| FriendFileShareTestBuilder | 好友文件分享测试数据构建器 |
+| TicketTestBuilder | 工单测试数据构建器 |
 
 ## 1. 测试分层约定
 
@@ -224,6 +233,13 @@ pnpm test:coverage
 ```bash
 mvn -f platform-fisco/pom.xml test
 ```
+
+#### FISCO 服务测试覆盖
+
+| 测试类 | 类型 | 覆盖范围 |
+|--------|------|----------|
+| FiscoTest | 单元 | FISCO SDK 连接与基础操作 |
+| BlockChainServiceImplTest | 单元 | 区块链服务接口实现 |
 
 ### 4.2 存储服务（platform-storage）
 

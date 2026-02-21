@@ -3204,7 +3204,7 @@ GET /api/v1/friend-shares/unread-count
 
 ## 17. Controller-Aligned Endpoint Checklist
 
-> This checklist is the P1 governance baseline. New REST paths are primary; legacy paths remain available in transition mode.
+> This checklist is the P1 governance baseline. All endpoints use REST-style paths.
 
 ### 17.1 Current Primary REST Endpoints
 

@@ -159,6 +159,7 @@ RecordPlatform/
 ├── platform-frontend/     # Svelte 5 + SvelteKit frontend
 ├── scripts/               # Deployment scripts
 ├── tools/                 # Development & testing tools
+│   ├── docs/              # Documentation consistency checking
 │   ├── k6/                # k6 load testing (smoke, load, mixed scenarios)
 │   └── security/          # Security PoC scripts and templates
 └── docs/                  # Documentation (en/zh)

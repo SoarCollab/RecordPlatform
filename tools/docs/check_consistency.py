@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Iterable
 
 
-CORE_WORKFLOWS = ("test.yml", "perf-smoke.yml", "docs.yml", "security-poc.yml")
+CORE_WORKFLOWS = ("test.yml", "perf-smoke.yml", "docs.yml", "security-poc.yml", "docs-consistency.yml")
 
 ROUTE_DOC_TARGETS = (
     "README.md",

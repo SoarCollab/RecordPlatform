@@ -159,6 +159,7 @@ RecordPlatform/
 ├── platform-frontend/     # Svelte 5 + SvelteKit 前端
 ├── scripts/               # 部署脚本
 ├── tools/                 # 开发与测试工具
+│   ├── docs/              # 文档一致性校验
 │   ├── k6/                # k6 压测（smoke、load、mixed 场景）
 │   └── security/          # 安全 PoC 脚本与模板
 └── docs/                  # 文档 (en/zh)
