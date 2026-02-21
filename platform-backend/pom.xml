@@ -16,14 +16,14 @@
     <description>存证平台后端服务</description>
     <properties>
         <java.version>21</java.version>
-        <hutool.version>5.8.32</hutool.version>
-        <mybatis-plus-bom.version>3.5.9</mybatis-plus-bom.version>
+        <hutool.version>5.8.43</hutool.version>
+        <mybatis-plus-bom.version>3.5.16</mybatis-plus-bom.version>
         <testcontainers.version>1.20.4</testcontainers.version>
-        <jacoco.version>0.8.12</jacoco.version>
+        <jacoco.version>0.8.14</jacoco.version>
         <backend-web.line-coverage.minimum>0.40</backend-web.line-coverage.minimum>
         <backend-service.line-coverage.minimum>0.45</backend-service.line-coverage.minimum>
         <backend-common.line-coverage.minimum>0.40</backend-common.line-coverage.minimum>
-        <maven-failsafe-plugin.version>3.2.5</maven-failsafe-plugin.version>
+        <maven-failsafe-plugin.version>3.5.5</maven-failsafe-plugin.version>
         <!--
             Keep commons-compress consistent on test/runtime classpath.
             Testcontainers may pull an older commons-compress which can break Apache POI at runtime (NoSuchMethodError).
@@ -33,12 +33,12 @@
             Keep commons-io consistent on test/runtime classpath.
             Apache POI may pull an older commons-io which can break Testcontainers file copy (NoSuchMethodError: FileTimes.toUnixTime).
          -->
-        <commons-io.version>2.20.0</commons-io.version>
+        <commons-io.version>2.21.0</commons-io.version>
         <!--
             commons-compress 1.28+ requires commons-lang3 containing ArrayFill (>= 3.14.0).
             Testcontainers (docker-java) may require SystemProperties.getUserName(String) (>= 3.17.0).
          -->
-        <commons-lang3.version>3.18.0</commons-lang3.version>
+        <commons-lang3.version>3.20.0</commons-lang3.version>
         <!--
             Mockito inline mock maker relies on Byte Buddy instrumentation.
             On some macOS/JDK builds, runtime self-attach is not available; pre-attaching the agent fixes it.
@@ -131,7 +131,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
-                <version>3.5.0</version>
+                <version>3.6.2</version>
                 <executions>
                     <execution>
                         <id>enforce-java-21</id>
