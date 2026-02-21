@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Java 21
         uses: actions/setup-java@v4
@@ -66,7 +66,7 @@ jobs:
     needs: export-openapi
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download OpenAPI artifact
         uses: actions/download-artifact@v4
@@ -88,7 +88,7 @@ jobs:
     needs: docs-consistency
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
