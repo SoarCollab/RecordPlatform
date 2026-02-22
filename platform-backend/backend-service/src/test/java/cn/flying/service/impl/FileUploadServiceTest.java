@@ -26,6 +26,7 @@ import org.redisson.api.RedissonClient;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -725,6 +726,39 @@ class FileUploadServiceTest {
 
             verify(redisStateManager).removePausedSession(clientId);
             verify(redisStateManager, never()).removeSession(eq(clientId), anyString());
+        }
+    }
+
+    @Nested
+    @DisplayName("Path Traversal Validation")
+    class PathTraversalValidation {
+
+        @Test
+        @DisplayName("should reject path traversal in clientId during startUpload")
+        void shouldRejectPathTraversalInClientId() {
+            String traversalClientId = "../../malicious";
+
+            GeneralException ex = assertThrows(GeneralException.class, () ->
+                    fileUploadService.startUpload(
+                            USER_ID, "test.pdf", 1024 * 1024, "application/pdf",
+                            traversalClientId, 256 * 1024, 4));
+
+            assertEquals(ResultEnum.PARAM_IS_INVALID, ex.getResultEnum());
+        }
+
+        @Test
+        @DisplayName("should reject path traversal in getProcessedSessionDir")
+        void shouldRejectPathTraversalInProcessedSessionDir() throws Exception {
+            Method method = FileUploadServiceImpl.class.getDeclaredMethod(
+                    "getProcessedSessionDir", String.class, String.class);
+            method.setAccessible(true);
+
+            InvocationTargetException thrown = assertThrows(InvocationTargetException.class, () ->
+                    method.invoke(fileUploadService, SUID, "../../malicious"));
+
+            assertInstanceOf(GeneralException.class, thrown.getCause());
+            assertEquals(ResultEnum.PARAM_IS_INVALID,
+                    ((GeneralException) thrown.getCause()).getResultEnum());
         }
     }
 }

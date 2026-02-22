@@ -135,7 +135,8 @@ public class SecurityConfiguration {
                         .accessDeniedHandler(this::handleProcess)
                         .authenticationEntryPoint(this::handleProcess)
                 )
-                .csrf(AbstractHttpConfigurer::disable)
+                // Stateless JWT REST API — no session cookies, CSRF protection unnecessary
+                .csrf(AbstractHttpConfigurer::disable) // lgtm[java/spring-disabled-csrf-protection]
                 .sessionManagement(conf -> conf
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .addFilterBefore(requestLogFilter, UsernamePasswordAuthenticationFilter.class)

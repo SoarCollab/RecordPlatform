@@ -250,7 +250,12 @@ public class FileUploadServiceImpl implements FileUploadService {
 
     // === 路径构建辅助方法 ===
     private Path getUploadSessionDir(String SUID, String clientId) {
-        return Paths.get(UPLOAD_BASE_DIR, SUID, clientId).toAbsolutePath().normalize();
+        Path base = Paths.get(UPLOAD_BASE_DIR).toAbsolutePath().normalize();
+        Path resolved = base.resolve(SUID).resolve(clientId).normalize();
+        if (!resolved.startsWith(base)) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID);
+        }
+        return resolved;
     }
 
     /**
@@ -271,7 +276,12 @@ public class FileUploadServiceImpl implements FileUploadService {
     }
 
     private Path getProcessedSessionDir(String SUID, String clientId) {
-        return Paths.get(PROCESSED_BASE_DIR, SUID, clientId).toAbsolutePath().normalize();
+        Path base = Paths.get(PROCESSED_BASE_DIR).toAbsolutePath().normalize();
+        Path resolved = base.resolve(SUID).resolve(clientId).normalize();
+        if (!resolved.startsWith(base)) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID);
+        }
+        return resolved;
     }
 
     /**
