@@ -64,7 +64,8 @@ public class UploadSessionController {
             String fileName,
             @Schema(description = "文件大小") @RequestParam("fileSize") @Min(1) @Max(4294967296L) long fileSize,
             @Schema(description = "文件类型") @RequestParam(value = "contentType") @NotBlank String contentType,
-            @Schema(description = "客户端ID") @RequestParam(value = "clientId", required = false) String providedClientId,
+            @Schema(description = "客户端ID") @RequestParam(value = "clientId", required = false)
+            @Pattern(regexp = "^[A-Za-z0-9-]{1,64}$", message = "clientId 格式无效") String providedClientId,
             @Schema(description = "分片大小") @RequestParam(value = "chunkSize") @Min(1) @Max(83886080) int chunkSize,
             @Schema(description = "分片总数") @RequestParam(value = "totalChunks") @Min(1) @Max(10000) int totalChunks) {
         StartUploadVO uploadVO = fileUploadService.startUpload(
@@ -85,7 +86,7 @@ public class UploadSessionController {
     @PutMapping("/{clientId}/chunks/{chunkNumber}")
     @Operation(summary = "上传分片")
     public Result<String> uploadChunk(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
-                                      @PathVariable String clientId,
+                                      @PathVariable @Pattern(regexp = "^[A-Za-z0-9-]{1,64}$", message = "clientId 格式无效") String clientId,
                                       @PathVariable int chunkNumber,
                                       @RequestParam("file") MultipartFile file) {
         fileUploadService.uploadChunk(userId, clientId, chunkNumber, file);
@@ -103,7 +104,7 @@ public class UploadSessionController {
     @Operation(summary = "完成上传")
     @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "完成上传")
     public Result<String> completeUpload(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
-                                         @PathVariable String clientId) {
+                                         @PathVariable @Pattern(regexp = "^[A-Za-z0-9-]{1,64}$", message = "clientId 格式无效") String clientId) {
         fileUploadService.completeUpload(userId, clientId);
         return Result.success("文件处理完成");
     }
@@ -118,7 +119,7 @@ public class UploadSessionController {
     @PostMapping("/{clientId}/pause")
     @Operation(summary = "暂停上传")
     public Result<String> pauseUpload(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
-                                      @PathVariable String clientId) {
+                                      @PathVariable @Pattern(regexp = "^[A-Za-z0-9-]{1,64}$", message = "clientId 格式无效") String clientId) {
         fileUploadService.pauseUpload(userId, clientId);
         return Result.success("上传已暂停");
     }
@@ -133,7 +134,7 @@ public class UploadSessionController {
     @PostMapping("/{clientId}/resume")
     @Operation(summary = "恢复上传")
     public Result<ResumeUploadVO> resumeUpload(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
-                                               @PathVariable String clientId) {
+                                               @PathVariable @Pattern(regexp = "^[A-Za-z0-9-]{1,64}$", message = "clientId 格式无效") String clientId) {
         return Result.success(fileUploadService.resumeUpload(userId, clientId));
     }
 
@@ -148,7 +149,7 @@ public class UploadSessionController {
     @Operation(summary = "取消上传")
     @OperationLog(module = "文件分片上传模块", operationType = "上传", description = "取消上传")
     public Result<String> cancelUpload(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
-                                       @PathVariable String clientId) {
+                                       @PathVariable @Pattern(regexp = "^[A-Za-z0-9-]{1,64}$", message = "clientId 格式无效") String clientId) {
         boolean cancelled = fileUploadService.cancelUpload(userId, clientId);
         if (!cancelled) {
             return Result.error(ResultEnum.RESULT_DATA_NONE);
@@ -166,7 +167,7 @@ public class UploadSessionController {
     @GetMapping("/{clientId}")
     @Operation(summary = "查询上传会话状态")
     public Result<FileUploadStatusVO> getUploadSession(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
-                                                       @PathVariable String clientId) {
+                                                       @PathVariable @Pattern(regexp = "^[A-Za-z0-9-]{1,64}$", message = "clientId 格式无效") String clientId) {
         return Result.success(fileUploadService.checkFileStatus(userId, clientId));
     }
 
@@ -180,7 +181,7 @@ public class UploadSessionController {
     @GetMapping("/{clientId}/progress")
     @Operation(summary = "查询上传进度")
     public Result<ProgressVO> getUploadProgress(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
-                                                @PathVariable String clientId) {
+                                                @PathVariable @Pattern(regexp = "^[A-Za-z0-9-]{1,64}$", message = "clientId 格式无效") String clientId) {
         return Result.success(fileUploadService.getUploadProgress(userId, clientId));
     }
 }
