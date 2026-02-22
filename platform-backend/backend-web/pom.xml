@@ -13,7 +13,7 @@
 
     <properties>
         <java.version>21</java.version>
-        <flyway.version>9.22.3</flyway.version>
+        <flyway.version>12.0.2</flyway.version>
         <poi.version>5.4.0</poi.version>
         <logstash.encoder.version>7.4</logstash.encoder.version>
         <skywalking.version>9.5.0</skywalking.version>
