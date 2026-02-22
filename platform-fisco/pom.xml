@@ -18,7 +18,7 @@
         <!-- Mockito inline mock maker relies on Byte Buddy instrumentation -->
         <byte-buddy-agent.version>1.14.19</byte-buddy-agent.version>
         <fisco.bcos.version>3.8.0</fisco.bcos.version>
-        <web3j.version>4.9.8</web3j.version>
+        <web3j.version>5.0.2</web3j.version>
         <jakarta.servlet-api.version>6.0.0</jakarta.servlet-api.version>
         <resilience4j.version>2.2.0</resilience4j.version>
         <dubbo.version>3.3.3</dubbo.version>
