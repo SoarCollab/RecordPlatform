@@ -22,7 +22,7 @@
         <aws.sdk.version>2.29.30</aws.sdk.version>
         <hutool.version>5.8.32</hutool.version>
         <redisson.version>3.35.0</redisson.version>
-        <spring-cloud-alibaba-dependencies.version>2023.0.3.2</spring-cloud-alibaba-dependencies.version>
+        <spring-cloud-alibaba-dependencies.version>2025.1.0.0</spring-cloud-alibaba-dependencies.version>
         <logstash.logback.version>7.4</logstash.logback.version>
         <skywalking.toolkit.version>9.3.0</skywalking.toolkit.version>
     </properties>
