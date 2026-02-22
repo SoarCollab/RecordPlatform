@@ -16,7 +16,7 @@
         <jaxb-api.version>2.4.0-b180830.0359</jaxb-api.version>
         <knife4j.version>4.4.0</knife4j.version>
         <java-jwt.version>4.3.0</java-jwt.version>
-        <minio.sdk.version>RELEASE</minio.sdk.version>
+        <minio.sdk.version>8.6.0</minio.sdk.version>
         <redisson.version>3.35.0</redisson.version>
     </properties>
 
