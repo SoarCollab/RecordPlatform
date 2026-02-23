@@ -23,7 +23,7 @@
         <hutool.version>5.8.32</hutool.version>
         <redisson.version>3.35.0</redisson.version>
         <spring-cloud-alibaba-dependencies.version>2023.0.3.2</spring-cloud-alibaba-dependencies.version>
-        <logstash.logback.version>7.4</logstash.logback.version>
+        <logstash.logback.version>9.0</logstash.logback.version>
         <skywalking.toolkit.version>9.3.0</skywalking.toolkit.version>
     </properties>
     <dependencies>
