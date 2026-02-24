@@ -3,14 +3,8 @@ name: Test Suite
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
 
 concurrency:
   group: test-${{ github.ref }}
@@ -20,8 +14,35 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'platform-api/**'
+              - 'platform-backend/**'
+              - 'platform-fisco/**'
+              - 'platform-storage/**'
+              - 'pom.xml'
+              - '.github/workflows/**'
+            frontend:
+              - 'platform-frontend/**'
+              - '.github/workflows/**'
+
   backend-test:
     name: Backend Tests
+    needs: [changes]
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -71,6 +92,8 @@ jobs:
 
   frontend-test:
     name: Frontend Tests
+    needs: [changes]
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -118,7 +141,8 @@ jobs:
   contract-consistency:
     name: Contract Consistency
     runs-on: ubuntu-latest
-    needs: [backend-test, frontend-test]
+    needs: [changes, backend-test]
+    if: needs.changes.outputs.backend == 'true'
     permissions:
       contents: read
     steps:
@@ -167,6 +191,8 @@ jobs:
 
   security-scan:
     name: Security Scan
+    needs: [changes]
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -186,7 +212,8 @@ jobs:
   build-check:
     name: Build Verification
     runs-on: ubuntu-latest
-    needs: [backend-test, frontend-test, contract-consistency]
+    needs: [changes, backend-test, frontend-test, contract-consistency]
+    if: always() && !failure() && !cancelled() && (needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
