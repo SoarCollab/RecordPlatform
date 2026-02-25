@@ -157,14 +157,24 @@ describe("auth endpoints", () => {
       password: "new-pass",
     });
 
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(1, "/auth/verification-codes", null, {
-      params: { email: "u@example.com", type: "register" },
-      skipAuth: true,
-    });
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(2, "/auth/verification-codes", null, {
-      params: { email: "u@example.com", type: "reset" },
-      skipAuth: true,
-    });
+    expect(clientMocks.api.post).toHaveBeenNthCalledWith(
+      1,
+      "/auth/verification-codes",
+      null,
+      {
+        params: { email: "u@example.com", type: "register" },
+        skipAuth: true,
+      },
+    );
+    expect(clientMocks.api.post).toHaveBeenNthCalledWith(
+      2,
+      "/auth/verification-codes",
+      null,
+      {
+        params: { email: "u@example.com", type: "reset" },
+        skipAuth: true,
+      },
+    );
     expect(clientMocks.api.post).toHaveBeenNthCalledWith(
       3,
       "/auth/password-resets/confirm",

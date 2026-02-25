@@ -59,12 +59,20 @@ describe("messages endpoints", () => {
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(1, "/conversations", {
       params: { pageNum: 1, pageSize: 20 },
     });
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(2, "/conversations/c1", {
-      params: { pageNum: 2, pageSize: 10 },
-    });
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(3, "/conversations/c2", {
-      params: { pageNum: 1, pageSize: 5 },
-    });
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      2,
+      "/conversations/c1",
+      {
+        params: { pageNum: 2, pageSize: 10 },
+      },
+    );
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      3,
+      "/conversations/c2",
+      {
+        params: { pageNum: 1, pageSize: 5 },
+      },
+    );
     expect(clientMocks.api.delete).toHaveBeenCalledWith("/conversations/c3");
     expect(clientMocks.api.put).toHaveBeenNthCalledWith(
       1,
@@ -80,7 +88,10 @@ describe("messages endpoints", () => {
       content: "rich",
       contentType: "markdown",
     });
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(4, "/messages/unread-count");
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      4,
+      "/messages/unread-count",
+    );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       5,
       "/conversations/unread-count",
@@ -89,9 +100,13 @@ describe("messages endpoints", () => {
       params: { pageNum: 1 },
     });
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(7, "/announcements/a1");
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(8, "/announcements/latest", {
-      params: { limit: 3 },
-    });
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      8,
+      "/announcements/latest",
+      {
+        params: { limit: 3 },
+      },
+    );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       9,
       "/announcements/unread-count",

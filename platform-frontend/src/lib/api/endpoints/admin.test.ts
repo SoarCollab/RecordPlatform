@@ -48,16 +48,23 @@ describe("admin endpoints", () => {
       params: { pageNum: 1, pageSize: 10 },
     });
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(2, "/admin/files/f1");
-    expect(clientMocks.api.put).toHaveBeenCalledWith(
-      "/admin/files/f1/status",
-      { status: 1 },
+    expect(clientMocks.api.put).toHaveBeenCalledWith("/admin/files/f1/status", {
+      status: 1,
+    });
+    expect(clientMocks.api.delete).toHaveBeenNthCalledWith(
+      1,
+      "/admin/files/f1",
+      {
+        params: { reason: "违规文件" },
+      },
     );
-    expect(clientMocks.api.delete).toHaveBeenNthCalledWith(1, "/admin/files/f1", {
-      params: { reason: "违规文件" },
-    });
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(3, "/admin/files/shares", {
-      params: { pageNum: 1, pageSize: 10 },
-    });
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      3,
+      "/admin/files/shares",
+      {
+        params: { pageNum: 1, pageSize: 10 },
+      },
+    );
     expect(clientMocks.api.delete).toHaveBeenNthCalledWith(
       2,
       "/admin/files/shares/code-1",

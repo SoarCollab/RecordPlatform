@@ -60,13 +60,29 @@ describe("tickets endpoints", () => {
     expect(clientMocks.api.put).toHaveBeenNthCalledWith(1, "/tickets/t1", {
       title: "new title",
     });
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(2, "/tickets/t1/close");
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(3, "/tickets/t1/reply", {
-      content: "reply",
-    });
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(4, "/tickets/t1/confirm");
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(3, "/tickets/pending-count");
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(4, "/tickets/unread-count");
+    expect(clientMocks.api.post).toHaveBeenNthCalledWith(
+      2,
+      "/tickets/t1/close",
+    );
+    expect(clientMocks.api.post).toHaveBeenNthCalledWith(
+      3,
+      "/tickets/t1/reply",
+      {
+        content: "reply",
+      },
+    );
+    expect(clientMocks.api.post).toHaveBeenNthCalledWith(
+      4,
+      "/tickets/t1/confirm",
+    );
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      3,
+      "/tickets/pending-count",
+    );
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      4,
+      "/tickets/unread-count",
+    );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(5, "/admin/tickets", {
       params: { pageNum: 1, pageSize: 10 },
     });
@@ -87,5 +103,4 @@ describe("tickets endpoints", () => {
       "/admin/tickets/pending-count",
     );
   });
-
 });

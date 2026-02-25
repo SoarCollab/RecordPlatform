@@ -96,7 +96,10 @@ describe("sse-leader store", () => {
     postChannelMessage("u3", { type: "leader-confirm", tabId: "other-tab" });
     await vi.advanceTimersByTimeAsync(1);
 
-    postChannelMessage("u3", { type: "sse-message", message: { type: "notification" } });
+    postChannelMessage("u3", {
+      type: "sse-message",
+      message: { type: "notification" },
+    });
     postChannelMessage("u3", { type: "sse-status", status: "connected" });
     await vi.advanceTimersByTimeAsync(1);
 
@@ -155,7 +158,8 @@ describe("sse-leader store", () => {
   });
 
   it("BroadcastChannel 不可用时应直接退化为 leader", async () => {
-    const original = (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel;
+    const original = (globalThis as { BroadcastChannel?: unknown })
+      .BroadcastChannel;
 
     try {
       delete (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel;
@@ -169,7 +173,8 @@ describe("sse-leader store", () => {
 
       leader.cleanup();
     } finally {
-      (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel = original;
+      (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel =
+        original;
     }
   });
 });
@@ -298,7 +303,10 @@ describe("sse-leader store extra branches", () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(leader.role).toBe("follower");
 
-      postChannelMessage("u11", { type: "leader-step-down", tabId: "leader-1" });
+      postChannelMessage("u11", {
+        type: "leader-step-down",
+        tabId: "leader-1",
+      });
       await vi.advanceTimersByTimeAsync(200);
 
       expect(["electing", "leader"]).toContain(leader.role);

@@ -132,7 +132,10 @@ describe("auth store", () => {
     mocks.getCurrentUser.mockResolvedValue(createUser("monitor"));
 
     const auth = await loadAuthStore();
-    await auth.login({ username: "alice", password: "pass" }, { rememberMe: false });
+    await auth.login(
+      { username: "alice", password: "pass" },
+      { rememberMe: false },
+    );
 
     expect(mocks.login).toHaveBeenCalledWith(
       { username: "alice", password: "pass" },

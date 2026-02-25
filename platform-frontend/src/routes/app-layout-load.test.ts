@@ -26,7 +26,10 @@ async function loadLayoutModule(options: {
 
 describe("(app) +layout load", () => {
   it("浏览器环境且无 token 时应抛出重定向", async () => {
-    const { mod, redirect } = await loadLayoutModule({ browser: true, token: null });
+    const { mod, redirect } = await loadLayoutModule({
+      browser: true,
+      token: null,
+    });
 
     await expect(mod.load({} as never)).rejects.toEqual({
       __redirect: true,

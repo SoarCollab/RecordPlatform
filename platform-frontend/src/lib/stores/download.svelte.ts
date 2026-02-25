@@ -218,7 +218,9 @@ function getTaskFailureReason(taskId: string): string {
  * @param taskId 下载任务 ID。
  * @returns 终态任务快照，不存在时返回 undefined。
  */
-async function waitForTaskTerminal(taskId: string): Promise<DownloadTask | undefined> {
+async function waitForTaskTerminal(
+  taskId: string,
+): Promise<DownloadTask | undefined> {
   while (true) {
     const task = getTask(taskId);
     if (!task) return undefined;
@@ -338,7 +340,8 @@ async function executeBatchItem(
   item: BatchDownloadItem,
   retryTimes: number,
 ): Promise<
-  { success: true; attempts: number } | { success: false; reason: string; attempts: number }
+  | { success: true; attempts: number }
+  | { success: false; reason: string; attempts: number }
 > {
   let taskId: string | null = null;
   let attempts = 0;

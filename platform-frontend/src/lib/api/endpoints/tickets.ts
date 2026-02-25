@@ -127,7 +127,9 @@ export async function assignTicket(
   ticketId: string,
   assigneeId: string,
 ): Promise<void> {
-  await api.put(`${ADMIN_BASE}/${ticketId}/assignee`, null, { params: { assigneeId } });
+  await api.put(`${ADMIN_BASE}/${ticketId}/assignee`, null, {
+    params: { assigneeId },
+  });
 }
 
 /**
@@ -140,7 +142,9 @@ export async function updateTicketStatus(
   ticketId: string,
   status: number,
 ): Promise<void> {
-  await api.put(`${ADMIN_BASE}/${ticketId}/status`, null, { params: { status } });
+  await api.put(`${ADMIN_BASE}/${ticketId}/status`, null, {
+    params: { status },
+  });
 }
 
 /**

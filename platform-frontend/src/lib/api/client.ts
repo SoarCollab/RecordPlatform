@@ -203,7 +203,8 @@ function toErrorPayload(data: unknown): ErrorPayload | undefined {
     detail: Object.prototype.hasOwnProperty.call(maybe, "detail")
       ? maybe.detail
       : undefined,
-    retryable: typeof maybe.retryable === "boolean" ? maybe.retryable : undefined,
+    retryable:
+      typeof maybe.retryable === "boolean" ? maybe.retryable : undefined,
     retryAfterSeconds:
       typeof maybe.retryAfterSeconds === "number"
         ? maybe.retryAfterSeconds
@@ -320,9 +321,9 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
 
         if (error.isRateLimited && attempt < requestMaxRetries) {
           const delay =
-            (payload?.retryAfterSeconds && payload.retryAfterSeconds > 0
+            payload?.retryAfterSeconds && payload.retryAfterSeconds > 0
               ? payload.retryAfterSeconds * 1000
-              : retryDelayBase * Math.pow(2, attempt));
+              : retryDelayBase * Math.pow(2, attempt);
           console.warn(`Rate limited, retrying in ${delay}ms...`);
           await sleep(delay);
           lastError = error;
