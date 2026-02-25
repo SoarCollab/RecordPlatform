@@ -130,11 +130,11 @@ cd platform-frontend && pnpm install && pnpm dev
 | Category      | Technology                        | Version                  |
 | ------------- | --------------------------------- | ------------------------ |
 | Backend       | Java, Spring Boot                 | 21, 3.2.11               |
-| Microservices | Apache Dubbo (Triple), Nacos      | 3.3.3                    |
+| Microservices | Apache Dubbo (Triple), Nacos      | 3.3.6                    |
 | Blockchain    | FISCO BCOS, Solidity              | 3.8.0, ^0.8.11           |
-| Storage       | S3-compatible, MySQL, Redis       | AWS SDK 2.29, 8.0+, 7.0+ |
-| Frontend      | Svelte 5, SvelteKit, Tailwind CSS, ECharts, Vite | 5.46+, 2.49+, 4.1+, 6.0+, 6.0+ |
-| Resilience    | Resilience4j                      | 2.2.0                    |
+| Storage       | S3-compatible, MySQL, Redis       | AWS SDK 2.41, 8.0+, 7.0+ |
+| Frontend      | Svelte 5, SvelteKit, Tailwind CSS, ECharts, Vite | 5.53+, 2.52+, 4.2+, 6.0+, 6.0+ |
+| Resilience    | Resilience4j                      | 2.3.0                    |
 | Monitoring    | Micrometer, Prometheus            | -                        |
 
 ## Project Structure

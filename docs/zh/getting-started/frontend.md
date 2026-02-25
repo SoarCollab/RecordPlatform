@@ -6,9 +6,9 @@
 
 | 类别 | 技术 | 版本 |
 |------|------|------|
-| 框架 | Svelte 5 + SvelteKit 2 | 5.46+ / 2.49+ |
+| 框架 | Svelte 5 + SvelteKit 2 | 5.53+ / 2.52+ |
 | 语言 | TypeScript | 5.9+ |
-| 样式 | Tailwind CSS | 4.1+ |
+| 样式 | Tailwind CSS | 4.2+ |
 | 构建工具 | Vite | 6.0+ |
 | 包管理器 | pnpm | 10.26+ |
 | UI 组件 | Bits UI + Lucide Icons | - |
