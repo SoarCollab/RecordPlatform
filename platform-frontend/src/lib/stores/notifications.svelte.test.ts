@@ -19,7 +19,12 @@ describe("notifications store", () => {
   it("add/success/warning/info/error 应正确入队通知", async () => {
     const notifications = await loadNotificationsStore();
 
-    const id1 = notifications.add({ type: "info", title: "t1", message: "m1", duration: 0 });
+    const id1 = notifications.add({
+      type: "info",
+      title: "t1",
+      message: "m1",
+      duration: 0,
+    });
     const id2 = notifications.success("ok", "done", 0);
     const id3 = notifications.warning("warn", "care", 0);
     const id4 = notifications.info("tip", "check", 0);

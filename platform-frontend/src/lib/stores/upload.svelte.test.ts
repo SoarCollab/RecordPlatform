@@ -84,7 +84,10 @@ describe("upload store", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.subscribe.mockReturnValue(() => {});
-    mocks.startUpload.mockResolvedValue({ clientId: "c1", processedChunks: [] });
+    mocks.startUpload.mockResolvedValue({
+      clientId: "c1",
+      processedChunks: [],
+    });
     mocks.uploadChunk.mockResolvedValue(undefined);
     mocks.completeUpload.mockResolvedValue(undefined);
     mocks.pauseUpload.mockResolvedValue(undefined);
@@ -234,16 +237,21 @@ function findTask(
   upload: ReturnType<typeof Object>,
   id: string,
 ): { id: string; status: string; clientId: string | null } | undefined {
-  return (upload as { tasks: Array<{ id: string; status: string; clientId: string | null }> }).tasks.find(
-    (task) => task.id === id,
-  );
+  return (
+    upload as {
+      tasks: Array<{ id: string; status: string; clientId: string | null }>;
+    }
+  ).tasks.find((task) => task.id === id);
 }
 
 describe("upload store extra branches", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.subscribe.mockReturnValue(() => {});
-    mocks.startUpload.mockResolvedValue({ clientId: "c3", processedChunks: [] });
+    mocks.startUpload.mockResolvedValue({
+      clientId: "c3",
+      processedChunks: [],
+    });
     mocks.uploadChunk.mockResolvedValue(undefined);
     mocks.completeUpload.mockResolvedValue(undefined);
     mocks.pauseUpload.mockResolvedValue(undefined);
@@ -300,21 +308,31 @@ describe("upload store extra branches", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    const task = (upload as { tasks: Array<{ id: string; status: string; clientId: string | null }> }).tasks.find(
-      (item) => item.id === id,
-    );
+    const task = (
+      upload as {
+        tasks: Array<{ id: string; status: string; clientId: string | null }>;
+      }
+    ).tasks.find((item) => item.id === id);
 
     if (task) {
       task.status = "processing";
       task.clientId = "c3";
     }
 
-    (globalThis as unknown as { __setDocumentVisibility?: (state: DocumentVisibilityState) => void }).__setDocumentVisibility?.("hidden");
-    (globalThis as unknown as { __setDocumentVisibility?: (state: DocumentVisibilityState) => void }).__setDocumentVisibility?.("visible");
+    (
+      globalThis as unknown as {
+        __setDocumentVisibility?: (state: DocumentVisibilityState) => void;
+      }
+    ).__setDocumentVisibility?.("hidden");
+    (
+      globalThis as unknown as {
+        __setDocumentVisibility?: (state: DocumentVisibilityState) => void;
+      }
+    ).__setDocumentVisibility?.("visible");
 
-    const subscribeCallback = mocks.subscribe.mock.calls[0][0] as (
-      message: { type: string },
-    ) => void;
+    const subscribeCallback = mocks.subscribe.mock.calls[0][0] as (message: {
+      type: string;
+    }) => void;
     subscribeCallback({ type: "file-record-success" });
 
     expect(mocks.getUploadProgress).toHaveBeenCalled();

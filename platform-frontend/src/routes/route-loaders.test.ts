@@ -12,7 +12,10 @@ import { load as loadSharePage } from "./share/[code]/+page";
  * @param params 页面参数。
  * @returns 仅包含 params/url 的最小事件对象。
  */
-function createPageEvent(params: Record<string, string> = {}, url = "http://localhost/") {
+function createPageEvent(
+  params: Record<string, string> = {},
+  url = "http://localhost/",
+) {
   return {
     params,
     url: new URL(url),
@@ -36,8 +39,12 @@ describe("route +page.ts loaders", () => {
   });
 
   it("messages/new 应从 query 读取 receiverId", () => {
-    const withTo = loadMessageNew(createPageEvent({}, "http://localhost/messages/new?to=u-1"));
-    const withoutTo = loadMessageNew(createPageEvent({}, "http://localhost/messages/new"));
+    const withTo = loadMessageNew(
+      createPageEvent({}, "http://localhost/messages/new?to=u-1"),
+    );
+    const withoutTo = loadMessageNew(
+      createPageEvent({}, "http://localhost/messages/new"),
+    );
 
     expect(withTo).toEqual({ receiverId: "u-1" });
     expect(withoutTo).toEqual({ receiverId: "" });

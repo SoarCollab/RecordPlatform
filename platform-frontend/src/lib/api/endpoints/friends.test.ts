@@ -56,10 +56,14 @@ describe("friends endpoints", () => {
   it("应覆盖好友与好友分享模块全部导出函数路径", async () => {
     await callAllFriendApis();
 
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(1, "/friends/requests", {
-      addresseeId: "u2",
-      message: "hi",
-    });
+    expect(clientMocks.api.post).toHaveBeenNthCalledWith(
+      1,
+      "/friends/requests",
+      {
+        addresseeId: "u2",
+        message: "hi",
+      },
+    );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       1,
       "/friends/requests/received",
@@ -94,7 +98,10 @@ describe("friends endpoints", () => {
       params: { pageNum: 1, pageSize: 10 },
     });
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(5, "/friends/all");
-    expect(clientMocks.api.delete).toHaveBeenNthCalledWith(2, "/friends/friend-1");
+    expect(clientMocks.api.delete).toHaveBeenNthCalledWith(
+      2,
+      "/friends/friend-1",
+    );
     expect(clientMocks.api.put).toHaveBeenNthCalledWith(
       3,
       "/friends/friend-1/remark",
@@ -103,20 +110,26 @@ describe("friends endpoints", () => {
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(6, "/friends/search", {
       params: { keyword: "alice" },
     });
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(
-      2,
-      "/friend-shares",
-      { friendId: "f1", fileHashes: ["file-1"] },
-    );
+    expect(clientMocks.api.post).toHaveBeenNthCalledWith(2, "/friend-shares", {
+      friendId: "f1",
+      fileHashes: ["file-1"],
+    });
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       7,
       "/friend-shares/received",
       { params: { pageNum: 1 } },
     );
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(8, "/friend-shares/sent", {
-      params: { pageNum: 1 },
-    });
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(9, "/friend-shares/share-1");
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      8,
+      "/friend-shares/sent",
+      {
+        params: { pageNum: 1 },
+      },
+    );
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      9,
+      "/friend-shares/share-1",
+    );
     expect(clientMocks.api.put).toHaveBeenNthCalledWith(
       4,
       "/friend-shares/share-1/read-status",

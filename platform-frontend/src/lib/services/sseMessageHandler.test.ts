@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { handleSseMessage, type BadgeController, type NotificationController } from "./sseMessageHandler";
+import {
+  handleSseMessage,
+  type BadgeController,
+  type NotificationController,
+} from "./sseMessageHandler";
 
 /**
  * 创建可观测的 badges mock，便于断言计数更新行为。
@@ -52,7 +56,10 @@ describe("sseMessageHandler", () => {
     );
 
     expect(badges.updateMessageCount).toHaveBeenCalledWith(2);
-    expect(notifications.info).toHaveBeenCalledWith("来自 alice 的新消息", "hello");
+    expect(notifications.info).toHaveBeenCalledWith(
+      "来自 alice 的新消息",
+      "hello",
+    );
   });
 
   it("message-received: 消息页应抑制通知", () => {
@@ -121,12 +128,18 @@ describe("sseMessageHandler", () => {
     );
 
     expect(badges.fetch).toHaveBeenCalledTimes(3);
-    expect(notifications.info).toHaveBeenCalledWith("工单新回复", "#1001 Bob: 已处理");
+    expect(notifications.info).toHaveBeenCalledWith(
+      "工单新回复",
+      "#1001 Bob: 已处理",
+    );
     expect(notifications.info).toHaveBeenCalledWith(
       "工单状态更新",
       "#1002 open → closed",
     );
-    expect(notifications.info).toHaveBeenCalledWith("工单更新", "你的工单有新的动态");
+    expect(notifications.info).toHaveBeenCalledWith(
+      "工单更新",
+      "你的工单有新的动态",
+    );
   });
 
   it("ticket-updated: 工单页应抑制通知", () => {
@@ -151,16 +164,27 @@ describe("sseMessageHandler", () => {
     const notifications = createNotifications();
 
     handleSseMessage(
-      { type: "file-record-success", data: { fileName: "c.pdf" }, timestamp: "t" },
+      {
+        type: "file-record-success",
+        data: { fileName: "c.pdf" },
+        timestamp: "t",
+      },
       { pathname: "/files", badges, notifications },
     );
     handleSseMessage(
-      { type: "file-record-failed", data: { reason: "区块链写入失败" }, timestamp: "t" },
+      {
+        type: "file-record-failed",
+        data: { reason: "区块链写入失败" },
+        timestamp: "t",
+      },
       { pathname: "/files", badges, notifications },
     );
 
     expect(notifications.success).toHaveBeenCalledWith("文件存证成功", "c.pdf");
-    expect(notifications.error).toHaveBeenCalledWith("文件存证失败", "区块链写入失败");
+    expect(notifications.error).toHaveBeenCalledWith(
+      "文件存证失败",
+      "区块链写入失败",
+    );
   });
 
   it("badge-update 应按字段选择性更新", () => {
@@ -186,19 +210,35 @@ describe("sseMessageHandler", () => {
     const notifications = createNotifications();
 
     handleSseMessage(
-      { type: "notification", data: { title: "t1", message: "m1", type: "error" }, timestamp: "t" },
+      {
+        type: "notification",
+        data: { title: "t1", message: "m1", type: "error" },
+        timestamp: "t",
+      },
       { pathname: "/dashboard", badges, notifications },
     );
     handleSseMessage(
-      { type: "notification", data: { title: "t2", message: "m2", type: "warning" }, timestamp: "t" },
+      {
+        type: "notification",
+        data: { title: "t2", message: "m2", type: "warning" },
+        timestamp: "t",
+      },
       { pathname: "/dashboard", badges, notifications },
     );
     handleSseMessage(
-      { type: "notification", data: { title: "t3", message: "m3", type: "success" }, timestamp: "t" },
+      {
+        type: "notification",
+        data: { title: "t3", message: "m3", type: "success" },
+        timestamp: "t",
+      },
       { pathname: "/dashboard", badges, notifications },
     );
     handleSseMessage(
-      { type: "notification", data: { title: "t4", message: "m4", type: "unknown" }, timestamp: "t" },
+      {
+        type: "notification",
+        data: { title: "t4", message: "m4", type: "unknown" },
+        timestamp: "t",
+      },
       { pathname: "/dashboard", badges, notifications },
     );
 
@@ -213,7 +253,11 @@ describe("sseMessageHandler", () => {
     const notifications = createNotifications();
 
     handleSseMessage(
-      { type: "friend-request", data: { requesterName: "Alice" }, timestamp: "t" },
+      {
+        type: "friend-request",
+        data: { requesterName: "Alice" },
+        timestamp: "t",
+      },
       { pathname: "/dashboard", badges, notifications },
     );
 
@@ -223,16 +267,29 @@ describe("sseMessageHandler", () => {
     );
 
     handleSseMessage(
-      { type: "friend-share", data: { sharerName: "Cindy", fileCount: 2 }, timestamp: "t" },
+      {
+        type: "friend-share",
+        data: { sharerName: "Cindy", fileCount: 2 },
+        timestamp: "t",
+      },
       { pathname: "/dashboard", badges, notifications },
     );
 
     expect(badges.updateFriendRequestCount).toHaveBeenCalledWith(5);
     expect(badges.fetch).toHaveBeenCalledTimes(1);
     expect(badges.updateFriendShareCount).toHaveBeenCalledWith(6);
-    expect(notifications.info).toHaveBeenCalledWith("新好友请求", "Alice 请求添加你为好友");
-    expect(notifications.success).toHaveBeenCalledWith("好友添加成功", "Bob 已接受你的好友请求");
-    expect(notifications.info).toHaveBeenCalledWith("好友分享", "Cindy 分享了 2 个文件给你");
+    expect(notifications.info).toHaveBeenCalledWith(
+      "新好友请求",
+      "Alice 请求添加你为好友",
+    );
+    expect(notifications.success).toHaveBeenCalledWith(
+      "好友添加成功",
+      "Bob 已接受你的好友请求",
+    );
+    expect(notifications.info).toHaveBeenCalledWith(
+      "好友分享",
+      "Cindy 分享了 2 个文件给你",
+    );
   });
 
   it("friend-request/friend-share 在 friends 页面应抑制通知", () => {
@@ -270,9 +327,18 @@ describe("sseMessageHandler fallback message", () => {
       { pathname: "/dashboard", badges, notifications },
     );
 
-    expect(notifications.info).toHaveBeenCalledWith("新好友请求", "收到新的好友请求");
-    expect(notifications.success).toHaveBeenCalledWith("好友添加成功", "你们已成为好友");
-    expect(notifications.info).toHaveBeenCalledWith("好友分享", "收到好友分享的文件");
+    expect(notifications.info).toHaveBeenCalledWith(
+      "新好友请求",
+      "收到新的好友请求",
+    );
+    expect(notifications.success).toHaveBeenCalledWith(
+      "好友添加成功",
+      "你们已成为好友",
+    );
+    expect(notifications.info).toHaveBeenCalledWith(
+      "好友分享",
+      "收到好友分享的文件",
+    );
   });
 });
 
@@ -315,12 +381,27 @@ describe("sseMessageHandler branch fill", () => {
     );
 
     expect(notifications.info).toHaveBeenCalledWith("收到新消息", "点击查看");
-    expect(notifications.info).toHaveBeenCalledWith("新公告", "系统发布了新公告");
-    expect(notifications.info).toHaveBeenCalledWith("工单新回复", "A: 收到新的回复");
+    expect(notifications.info).toHaveBeenCalledWith(
+      "新公告",
+      "系统发布了新公告",
+    );
+    expect(notifications.info).toHaveBeenCalledWith(
+      "工单新回复",
+      "A: 收到新的回复",
+    );
     expect(notifications.info).toHaveBeenCalledWith("工单状态更新", "closed");
     expect(notifications.info).toHaveBeenCalledWith("通知", "");
-    expect(notifications.success).toHaveBeenCalledWith("文件存证成功", "您的文件已完成存证");
-    expect(notifications.error).toHaveBeenCalledWith("文件存证失败", "文件存证过程中出错");
-    expect(notifications.info).toHaveBeenCalledWith("好友分享", "D 分享了 1 个文件给你");
+    expect(notifications.success).toHaveBeenCalledWith(
+      "文件存证成功",
+      "您的文件已完成存证",
+    );
+    expect(notifications.error).toHaveBeenCalledWith(
+      "文件存证失败",
+      "文件存证过程中出错",
+    );
+    expect(notifications.info).toHaveBeenCalledWith(
+      "好友分享",
+      "D 分享了 1 个文件给你",
+    );
   });
 });

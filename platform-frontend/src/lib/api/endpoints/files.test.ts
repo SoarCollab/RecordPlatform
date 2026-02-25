@@ -125,7 +125,10 @@ describe("files endpoints", () => {
       9,
       "/files/hash/h1/addresses",
     );
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(10, "/transactions/tx-hash");
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      10,
+      "/transactions/tx-hash",
+    );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       11,
       "/files/share/code1/access-logs",
@@ -149,11 +152,21 @@ describe("files endpoints", () => {
     clientMocks.api.patch.mockResolvedValue(undefined);
     clientMocks.api.delete.mockResolvedValue(undefined);
 
-    await filesApi.createShare({ fileHash: ["h1"], expireMinutes: 30, shareType: ShareType.PUBLIC });
-    await filesApi.updateShare({ shareCode: "code1", shareType: ShareType.PRIVATE });
+    await filesApi.createShare({
+      fileHash: ["h1"],
+      expireMinutes: 30,
+      shareType: ShareType.PUBLIC,
+    });
+    await filesApi.updateShare({
+      shareCode: "code1",
+      shareType: ShareType.PRIVATE,
+    });
     await filesApi.deleteFile("file-id");
     await filesApi.cancelShare("share-code");
-    await filesApi.saveSharedFiles({ sharingFileIdList: ["f1"], shareCode: "share-code" });
+    await filesApi.saveSharedFiles({
+      sharingFileIdList: ["f1"],
+      shareCode: "share-code",
+    });
     await filesApi.reportBatchDownloadMetrics({
       batchId: "batch-1",
       total: 2,
@@ -180,10 +193,14 @@ describe("files endpoints", () => {
       2,
       "/files/share/share-code",
     );
-    expect(clientMocks.api.post).toHaveBeenNthCalledWith(2, "/shares/share-code/files/save", {
-      sharingFileIdList: ["f1"],
-      shareCode: "share-code",
-    });
+    expect(clientMocks.api.post).toHaveBeenNthCalledWith(
+      2,
+      "/shares/share-code/files/save",
+      {
+        sharingFileIdList: ["f1"],
+        shareCode: "share-code",
+      },
+    );
     expect(clientMocks.api.post).toHaveBeenNthCalledWith(
       3,
       "/files/download-batches/report",
@@ -241,9 +258,10 @@ describe("files endpoints", () => {
   it("publicDownloadFile 应走公开接口链路", async () => {
     const blob = createBlob();
     cryptoMocks.arrayToBlob.mockReturnValue(blob);
-    clientMocks.api.get
-      .mockResolvedValueOnce(["AQID"])
-      .mockResolvedValueOnce({ initialKey: "k2", contentType: "application/pdf" });
+    clientMocks.api.get.mockResolvedValueOnce(["AQID"]).mockResolvedValueOnce({
+      initialKey: "k2",
+      contentType: "application/pdf",
+    });
 
     const result = await filesApi.publicDownloadFile("share-public", "hash-2");
 
@@ -263,9 +281,10 @@ describe("files endpoints", () => {
   it("shareDownloadFile 应走私密分享接口链路", async () => {
     const blob = createBlob();
     cryptoMocks.arrayToBlob.mockReturnValue(blob);
-    clientMocks.api.get
-      .mockResolvedValueOnce(["AQID"])
-      .mockResolvedValueOnce({ initialKey: "k3", contentType: "application/zip" });
+    clientMocks.api.get.mockResolvedValueOnce(["AQID"]).mockResolvedValueOnce({
+      initialKey: "k3",
+      contentType: "application/zip",
+    });
 
     const result = await filesApi.shareDownloadFile("share-private", "hash-3");
 
@@ -287,8 +306,16 @@ describe("files endpoints", () => {
       .mockResolvedValueOnce(["AQID"])
       .mockResolvedValueOnce({ initialKey: "k5", contentType: "text/plain" });
 
-    await filesApi.downloadSharedFile("code-public", "hash-p", ShareType.PUBLIC);
-    await filesApi.downloadSharedFile("code-private", "hash-s", ShareType.PRIVATE);
+    await filesApi.downloadSharedFile(
+      "code-public",
+      "hash-p",
+      ShareType.PUBLIC,
+    );
+    await filesApi.downloadSharedFile(
+      "code-private",
+      "hash-s",
+      ShareType.PRIVATE,
+    );
 
     const calls = clientMocks.api.get.mock.calls.map((call) => {
       return [call[0], normalizeParams(call[1])];

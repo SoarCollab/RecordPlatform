@@ -2,9 +2,9 @@
 
 本项目采用"单元测试优先 + 少量高价值集成测试"的策略，目标是在 CI 中尽早发现回归，同时保持本地开发的执行成本足够低。
 
-## 当前测试覆盖（126 test files: 88 backend + 6 storage + 32 frontend）
+## 当前测试覆盖（128 test files: 90 backend + 6 storage + 32 frontend）
 
-> 当前后端口径拆分：`backend-common=10`、`backend-service=29`、`backend-web=49`（合计 88）。
+> 当前后端口径拆分：`backend-common=10`、`backend-service=29`、`backend-web=51`（合计 90）。
 
 ### 后端单元测试（backend-common，10 个测试类）
 
@@ -55,7 +55,7 @@
 | QuotaServiceImplTest | 配额查询与执行逻辑 |
 | QuotaRolloutAuditServiceImplTest | 配额灰度审计服务 |
 
-### 后端测试（backend-web，49 个测试文件）
+### 后端测试（backend-web，51 个测试文件）
 
 #### 控制器集成测试
 
@@ -102,6 +102,8 @@
 | FlowLimitingFilterTest | 接口限流 |
 | GlobalExceptionHandlerTest | 全局异常处理 |
 | CustomMethodSecurityExpressionRootTest | 自定义权限表达式 |
+| CustomMethodSecurityExpressionHandlerTest | 自定义方法安全表达式处理器 |
+| ValidationControllerTest | 参数校验控制器端点 |
 
 #### 其他后端测试
 

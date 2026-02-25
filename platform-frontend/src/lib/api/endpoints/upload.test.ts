@@ -35,7 +35,10 @@ describe("upload endpoints", () => {
   });
 
   it("startUpload 应使用 URLSearchParams 适配后端 @RequestParam", async () => {
-    clientMocks.api.post.mockResolvedValue({ clientId: "c1", processedChunks: [] });
+    clientMocks.api.post.mockResolvedValue({
+      clientId: "c1",
+      processedChunks: [],
+    });
 
     await uploadApi.startUpload({
       fileName: "report.pdf",
@@ -107,12 +110,19 @@ describe("upload endpoints", () => {
   it("checkUploadStatus/getUploadProgress 应走 GET 并透传 clientId", async () => {
     clientMocks.api.get
       .mockResolvedValueOnce({ status: "uploading" })
-      .mockResolvedValueOnce({ progress: 80, uploadProgress: 80, processProgress: 0 });
+      .mockResolvedValueOnce({
+        progress: 80,
+        uploadProgress: 80,
+        processProgress: 0,
+      });
 
     await uploadApi.checkUploadStatus("client-2");
     await uploadApi.getUploadProgress("client-2");
 
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(1, "/upload-sessions/client-2");
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      1,
+      "/upload-sessions/client-2",
+    );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       2,
       "/upload-sessions/client-2/progress",

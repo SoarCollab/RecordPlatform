@@ -161,7 +161,11 @@ describe("sse store", () => {
     expect(mocks.createSSEConnection).toHaveBeenCalledTimes(1);
 
     callbacks.onMessage({ type: "notification", data: {}, timestamp: "t" });
-    expect(sse.lastMessage).toEqual({ type: "notification", data: {}, timestamp: "t" });
+    expect(sse.lastMessage).toEqual({
+      type: "notification",
+      data: {},
+      timestamp: "t",
+    });
 
     callbacks.onStatusChange("error");
     expect(sse.status).toBe("error");
@@ -179,8 +183,16 @@ describe("sse store", () => {
     let options = getLatestConnectionOptions();
     options.onError?.(new Event("error"));
 
-    (globalThis as unknown as { __setDocumentVisibility?: (state: DocumentVisibilityState) => void }).__setDocumentVisibility?.("hidden");
-    (globalThis as unknown as { __setDocumentVisibility?: (state: DocumentVisibilityState) => void }).__setDocumentVisibility?.("visible");
+    (
+      globalThis as unknown as {
+        __setDocumentVisibility?: (state: DocumentVisibilityState) => void;
+      }
+    ).__setDocumentVisibility?.("hidden");
+    (
+      globalThis as unknown as {
+        __setDocumentVisibility?: (state: DocumentVisibilityState) => void;
+      }
+    ).__setDocumentVisibility?.("visible");
 
     expect(mocks.createSSEConnection.mock.calls.length).toBeGreaterThan(1);
 

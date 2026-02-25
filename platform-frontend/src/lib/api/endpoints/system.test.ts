@@ -67,16 +67,31 @@ describe("system endpoints", () => {
 
     await systemApi.getPermissionTree();
     await systemApi.listPermissionModules();
-    await systemApi.listPermissions({ module: "files", pageNum: 1, pageSize: 10 });
-    await systemApi.createPermission({ code: "perm:1", name: "perm-1", module: "files", action: "read" });
+    await systemApi.listPermissions({
+      module: "files",
+      pageNum: 1,
+      pageSize: 10,
+    });
+    await systemApi.createPermission({
+      code: "perm:1",
+      name: "perm-1",
+      module: "files",
+      action: "read",
+    });
     await systemApi.updatePermission("id-1", { name: "new-name" });
     await systemApi.deletePermission("id-2");
     await systemApi.getRolePermissions("admin");
     await systemApi.grantRolePermission("admin", { permissionCode: "p:read" });
     await systemApi.revokeRolePermission("admin", "p:read");
 
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(1, "/system/permissions");
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(2, "/system/permissions/modules");
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      1,
+      "/system/permissions",
+    );
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      2,
+      "/system/permissions/modules",
+    );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       3,
       "/system/permissions/list",
@@ -122,7 +137,9 @@ describe("system endpoints", () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({});
-    clientMocks.api.post.mockResolvedValueOnce({ records: [], total: 0 }).mockResolvedValueOnce("backup-id");
+    clientMocks.api.post
+      .mockResolvedValueOnce({ records: [], total: 0 })
+      .mockResolvedValueOnce("backup-id");
     clientMocks.api.put.mockResolvedValue(true);
 
     await systemApi.getAuditLogs({ pageNum: 1, pageSize: 20, module: "files" });
@@ -133,28 +150,55 @@ describe("system endpoints", () => {
     await systemApi.getErrorOperationStats();
     await systemApi.getUserTimeDistribution();
     await systemApi.getAuditConfigs();
-    await systemApi.updateAuditConfig({ id: 1, configKey: "k", configValue: "v" });
+    await systemApi.updateAuditConfig({
+      id: 1,
+      configKey: "k",
+      configValue: "v",
+    });
     await systemApi.checkAuditAnomalies();
     await systemApi.backupAuditLogs({ days: 7, deleteAfterBackup: false });
 
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(1, "/system/audit/logs", {
-      params: { pageNum: 1, pageSize: 20, module: "files" },
-    });
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(2, "/system/audit/logs/log-1");
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(3, "/system/audit/overview");
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(4, "/system/audit/high-frequency");
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      1,
+      "/system/audit/logs",
+      {
+        params: { pageNum: 1, pageSize: 20, module: "files" },
+      },
+    );
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      2,
+      "/system/audit/logs/log-1",
+    );
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      3,
+      "/system/audit/overview",
+    );
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      4,
+      "/system/audit/high-frequency",
+    );
     expect(clientMocks.api.post).toHaveBeenNthCalledWith(
       1,
       "/system/audit/sensitive/page",
       { pageNum: 1, pageSize: 5 },
     );
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(5, "/system/audit/error-stats");
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(6, "/system/audit/time-distribution");
-    expect(clientMocks.api.get).toHaveBeenNthCalledWith(7, "/system/audit/configs");
-    expect(clientMocks.api.put).toHaveBeenCalledWith(
-      "/system/audit/configs",
-      { id: 1, configKey: "k", configValue: "v" },
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      5,
+      "/system/audit/error-stats",
     );
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      6,
+      "/system/audit/time-distribution",
+    );
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      7,
+      "/system/audit/configs",
+    );
+    expect(clientMocks.api.put).toHaveBeenCalledWith("/system/audit/configs", {
+      id: 1,
+      configKey: "k",
+      configValue: "v",
+    });
     expect(clientMocks.api.post).toHaveBeenNthCalledWith(
       2,
       "/system/audit/anomalies/check",
@@ -183,9 +227,9 @@ describe("system endpoints", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response("failed", { status: 500 }));
 
-    await expect(systemApi.exportAuditLogs({ username: "abc" })).rejects.toThrow(
-      "导出失败",
-    );
+    await expect(
+      systemApi.exportAuditLogs({ username: "abc" }),
+    ).rejects.toThrow("导出失败");
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [url, init] = fetchSpy.mock.calls[0];
@@ -206,11 +250,17 @@ describe("system endpoints", () => {
       blob: vi.fn().mockResolvedValue(expectedBlob),
     } as unknown as Response);
 
-    const result = await systemApi.exportAuditLogs({ username: "u", status: 1 });
+    const result = await systemApi.exportAuditLogs({
+      username: "u",
+      status: 1,
+    });
 
     expect(result).toBe(expectedBlob);
     const [, init] = fetchSpy.mock.calls[0];
-    expect(JSON.parse(String(init?.body))).toEqual({ username: "u", status: 1 });
+    expect(JSON.parse(String(init?.body))).toEqual({
+      username: "u",
+      status: 1,
+    });
 
     fetchSpy.mockRestore();
   });

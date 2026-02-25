@@ -416,6 +416,8 @@ export async function getShareAccessStats(
  * @param fileId 文件 ID
  * @returns 溯源信息
  */
-export async function getFileProvenance(fileId: string): Promise<FileProvenanceVO> {
+export async function getFileProvenance(
+  fileId: string,
+): Promise<FileProvenanceVO> {
   return api.get<FileProvenanceVO>(`${BASE}/${fileId}/provenance`);
 }

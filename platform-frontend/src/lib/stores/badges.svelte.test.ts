@@ -63,7 +63,9 @@ describe("badges store", () => {
 
   it("Promise.allSettled 局部失败时应保留已成功计数", async () => {
     endpointMocks.getUnreadConversationCount.mockResolvedValue({ count: 7 });
-    endpointMocks.getUnreadAnnouncementCount.mockRejectedValue(new Error("fail"));
+    endpointMocks.getUnreadAnnouncementCount.mockRejectedValue(
+      new Error("fail"),
+    );
     endpointMocks.getUnreadCount.mockResolvedValue({ count: 9 });
     endpointMocks.getPendingRequestCount.mockRejectedValue(new Error("fail"));
     endpointMocks.getUnreadFriendShareCount.mockResolvedValue({ count: 11 });

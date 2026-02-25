@@ -130,11 +130,11 @@ cd platform-frontend && pnpm install && pnpm dev
 | 分类     | 技术                              | 版本                     |
 | -------- | --------------------------------- | ------------------------ |
 | 后端     | Java, Spring Boot                 | 21, 3.2.11               |
-| 微服务   | Apache Dubbo (Triple), Nacos      | 3.3.3                    |
+| 微服务   | Apache Dubbo (Triple), Nacos      | 3.3.6                    |
 | 区块链   | FISCO BCOS, Solidity              | 3.8.0, ^0.8.11           |
-| 存储     | S3 兼容存储, MySQL, Redis         | AWS SDK 2.29, 8.0+, 7.0+ |
-| 前端     | Svelte 5, SvelteKit, Tailwind CSS, ECharts, Vite | 5.46+, 2.49+, 4.1+, 6.0+, 6.0+ |
-| 弹性设计 | Resilience4j                      | 2.2.0                    |
+| 存储     | S3 兼容存储, MySQL, Redis         | AWS SDK 2.41, 8.0+, 7.0+ |
+| 前端     | Svelte 5, SvelteKit, Tailwind CSS, ECharts, Vite | 5.53+, 2.52+, 4.2+, 6.0+, 6.0+ |
+| 弹性设计 | Resilience4j                      | 2.3.0                    |
 | 监控     | Micrometer, Prometheus            | -                        |
 
 ## 项目结构

@@ -134,7 +134,16 @@ describe("download store", () => {
     mocks.fileApi.reportBatchDownloadMetrics.mockResolvedValue("ok");
 
     mocks.chunkDownloader.downloadAllChunks.mockImplementation(
-      async (_urls: string[], options: { onChunkComplete?: (result: { index: number; data: Uint8Array }) => Promise<void>; onProgress?: (progress: { completed: number; total: number }) => void }) => {
+      async (
+        _urls: string[],
+        options: {
+          onChunkComplete?: (result: {
+            index: number;
+            data: Uint8Array;
+          }) => Promise<void>;
+          onProgress?: (progress: { completed: number; total: number }) => void;
+        },
+      ) => {
         const data = new Uint8Array([1]);
         await options.onChunkComplete?.({ index: 0, data });
         options.onProgress?.({ completed: 1, total: 1 });
@@ -185,7 +194,13 @@ describe("download store", () => {
   it("owned 文件默认应走内存下载并最终 completed", async () => {
     const download = await loadDownloadStore();
 
-    const id = await download.startDownload("hash-1", "report.pdf", { type: "owned" }, 1024, "inmemory");
+    const id = await download.startDownload(
+      "hash-1",
+      "report.pdf",
+      { type: "owned" },
+      1024,
+      "inmemory",
+    );
 
     await waitForStatus(
       () => download.tasks.find((task) => task.id === id)?.status,
@@ -203,11 +218,10 @@ describe("download store", () => {
   it("public/private share 应走 backend proxy 下载分支", async () => {
     const download = await loadDownloadStore();
 
-    const publicId = await download.startDownload(
-      "hash-public",
-      "public.pdf",
-      { type: "public_share", shareCode: "share-public" },
-    );
+    const publicId = await download.startDownload("hash-public", "public.pdf", {
+      type: "public_share",
+      shareCode: "share-public",
+    });
 
     const privateId = await download.startDownload(
       "hash-private",
@@ -251,7 +265,9 @@ describe("download store", () => {
     );
 
     expect(mocks.streaming.executeBufferedStreamingDownload).toHaveBeenCalled();
-    expect(mocks.fileApi.getDownloadAddress).toHaveBeenCalledWith("hash-stream");
+    expect(mocks.fileApi.getDownloadAddress).toHaveBeenCalledWith(
+      "hash-stream",
+    );
   });
 
   it("streaming 失败为用户取消时应标记 cancelled", async () => {
@@ -279,23 +295,45 @@ describe("download store", () => {
     const deferred = createDeferred<Uint8Array[]>();
     mocks.chunkDownloader.downloadAllChunks
       .mockImplementationOnce(async () => deferred.promise)
-      .mockImplementation(async (_urls: string[], options: { onChunkComplete?: (result: { index: number; data: Uint8Array }) => Promise<void>; onProgress?: (progress: { completed: number; total: number }) => void }) => {
-        const data = new Uint8Array([1]);
-        await options.onChunkComplete?.({ index: 0, data });
-        options.onProgress?.({ completed: 1, total: 1 });
-        return [data];
-      });
+      .mockImplementation(
+        async (
+          _urls: string[],
+          options: {
+            onChunkComplete?: (result: {
+              index: number;
+              data: Uint8Array;
+            }) => Promise<void>;
+            onProgress?: (progress: {
+              completed: number;
+              total: number;
+            }) => void;
+          },
+        ) => {
+          const data = new Uint8Array([1]);
+          await options.onChunkComplete?.({ index: 0, data });
+          options.onProgress?.({ completed: 1, total: 1 });
+          return [data];
+        },
+      );
 
     const download = await loadDownloadStore();
 
-    const id = await download.startDownload("hash-ops", "ops.bin", { type: "owned" }, 1024, "inmemory");
+    const id = await download.startDownload(
+      "hash-ops",
+      "ops.bin",
+      { type: "owned" },
+      1024,
+      "inmemory",
+    );
     await waitForStatus(
       () => download.tasks.find((task) => task.id === id)?.status,
       "downloading",
     );
 
     download.pauseDownload(id);
-    expect(download.tasks.find((task) => task.id === id)?.status).toBe("paused");
+    expect(download.tasks.find((task) => task.id === id)?.status).toBe(
+      "paused",
+    );
 
     deferred.resolve([new Uint8Array([1])]);
 
@@ -306,7 +344,9 @@ describe("download store", () => {
     );
 
     await download.cancelDownload(id);
-    expect(download.tasks.find((task) => task.id === id)?.status).toBe("cancelled");
+    expect(download.tasks.find((task) => task.id === id)?.status).toBe(
+      "cancelled",
+    );
 
     await download.retryDownload(id);
     await waitForStatus(
@@ -315,7 +355,9 @@ describe("download store", () => {
     );
 
     download.clearCompleted();
-    expect(download.tasks.some((task) => task.status === "completed")).toBe(false);
+    expect(download.tasks.some((task) => task.status === "completed")).toBe(
+      false,
+    );
 
     await download.removeTask(id);
     expect(download.tasks.some((task) => task.id === id)).toBe(false);
@@ -337,7 +379,9 @@ describe("download store", () => {
         createdAt: Date.now(),
       },
     ]);
-    mocks.downloadStorage.getChunks.mockResolvedValue(new Map([[0, new Uint8Array([1])]]));
+    mocks.downloadStorage.getChunks.mockResolvedValue(
+      new Map([[0, new Uint8Array([1])]]),
+    );
 
     const download = await loadDownloadStore();
     await download.restoreTasks();
@@ -421,10 +465,7 @@ describe("download store", () => {
       { concurrency: 1, retryTimes: 0 },
     );
 
-    await waitForStatus(
-      () => download.tasks[0]?.status,
-      "downloading",
-    );
+    await waitForStatus(() => download.tasks[0]?.status, "downloading");
 
     download.pauseDownload(download.tasks[0].id);
     deferred.resolve([new Uint8Array([1])]);
@@ -437,13 +478,15 @@ describe("download store", () => {
 
   it("批量下载失败项应自动重试 2 次并支持 retryBatchFailed", async () => {
     let failCalls = 0;
-    mocks.fileApi.getDownloadAddress.mockImplementation(async (fileHash: string) => {
-      if (fileHash === "hash-fail") {
-        failCalls++;
-        throw new Error("network_error");
-      }
-      return ["u1"];
-    });
+    mocks.fileApi.getDownloadAddress.mockImplementation(
+      async (fileHash: string) => {
+        if (fileHash === "hash-fail") {
+          failCalls++;
+          throw new Error("network_error");
+        }
+        return ["u1"];
+      },
+    );
 
     const download = await loadDownloadStore();
 
@@ -497,7 +540,9 @@ describe("download store extra branches", () => {
     mocks.fileApi.shareDownloadFile.mockResolvedValue(createBlob());
     mocks.fileApi.downloadFile.mockResolvedValue(createBlob());
 
-    mocks.chunkDownloader.downloadAllChunks.mockResolvedValue([new Uint8Array([1])]);
+    mocks.chunkDownloader.downloadAllChunks.mockResolvedValue([
+      new Uint8Array([1]),
+    ]);
     mocks.downloadStorage.saveTask.mockResolvedValue(undefined);
     mocks.downloadStorage.saveChunk.mockResolvedValue(undefined);
     mocks.downloadStorage.getChunks.mockResolvedValue(new Map());
@@ -527,11 +572,9 @@ describe("download store extra branches", () => {
 
   it("backend proxy 在 shareCode 缺失时应回退 downloadFile", async () => {
     const download = await loadDownloadStore();
-    const id = await download.startDownload(
-      "hash-fallback",
-      "fallback.bin",
-      { type: "private_share" },
-    );
+    const id = await download.startDownload("hash-fallback", "fallback.bin", {
+      type: "private_share",
+    });
 
     await waitForStatus(
       () => download.tasks.find((task) => task.id === id)?.status,
@@ -543,7 +586,11 @@ describe("download store extra branches", () => {
 
   it("streaming 选择文件阶段 AbortError 应标记 cancelled", async () => {
     Object.defineProperty(window, "showSaveFilePicker", {
-      value: vi.fn().mockRejectedValue(Object.assign(new Error("abort"), { name: "AbortError" })),
+      value: vi
+        .fn()
+        .mockRejectedValue(
+          Object.assign(new Error("abort"), { name: "AbortError" }),
+        ),
       configurable: true,
     });
 
@@ -590,7 +637,13 @@ describe("download store extra branches", () => {
     );
 
     const download = await loadDownloadStore();
-    const id = await download.startDownload("hash-cancel2", "c.bin", { type: "owned" }, 1024, "inmemory");
+    const id = await download.startDownload(
+      "hash-cancel2",
+      "c.bin",
+      { type: "owned" },
+      1024,
+      "inmemory",
+    );
 
     await waitForStatus(
       () => download.tasks.find((task) => task.id === id)?.status,
@@ -598,7 +651,9 @@ describe("download store extra branches", () => {
     );
 
     await download.cancelDownload(id);
-    expect(download.tasks.find((task) => task.id === id)?.status).toBe("cancelled");
+    expect(download.tasks.find((task) => task.id === id)?.status).toBe(
+      "cancelled",
+    );
 
     deferred.resolve([new Uint8Array([1])]);
 
@@ -615,7 +670,13 @@ describe("download store extra branches", () => {
     );
 
     const download = await loadDownloadStore();
-    const id = await download.startDownload("hash-remove", "r.bin", { type: "owned" }, 1024, "inmemory");
+    const id = await download.startDownload(
+      "hash-remove",
+      "r.bin",
+      { type: "owned" },
+      1024,
+      "inmemory",
+    );
 
     await waitForStatus(
       () => download.tasks.find((task) => task.id === id)?.status,
@@ -630,7 +691,9 @@ describe("download store extra branches", () => {
 
   it("restoreTasks 出错时应记录日志并完成初始化", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    mocks.downloadStorage.cleanupExpiredData.mockRejectedValue(new Error("db failed"));
+    mocks.downloadStorage.cleanupExpiredData.mockRejectedValue(
+      new Error("db failed"),
+    );
 
     const download = await loadDownloadStore();
     await download.restoreTasks();
@@ -674,5 +737,7 @@ it("restoreTasks 在 totalChunks=0 时进度应回退为 0", async () => {
   const download = await loadDownloadStore();
   await download.restoreTasks();
 
-  expect(download.tasks.find((task) => task.id === "restored-zero")?.progress).toBe(0);
+  expect(
+    download.tasks.find((task) => task.id === "restored-zero")?.progress,
+  ).toBe(0);
 });

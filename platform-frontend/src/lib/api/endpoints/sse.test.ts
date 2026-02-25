@@ -102,7 +102,9 @@ describe("sse endpoints", () => {
     es.emitOpen();
     expect(onOpen).toHaveBeenCalledTimes(1);
 
-    es.emitMessage(JSON.stringify({ type: "notification", data: { a: 1 }, timestamp: "t" }));
+    es.emitMessage(
+      JSON.stringify({ type: "notification", data: { a: 1 }, timestamp: "t" }),
+    );
     expect(onMessage).toHaveBeenCalledWith({
       type: "notification",
       data: { a: 1 },
