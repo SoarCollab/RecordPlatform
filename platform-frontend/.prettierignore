@@ -1,0 +1,6 @@
+.svelte-kit
+node_modules
+dist
+coverage
+pnpm-lock.yaml
+src/lib/api/types/generated.ts
