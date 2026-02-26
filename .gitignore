@@ -68,3 +68,5 @@ App.java
 
 /tools/k6/results/
 /.claude/settings.json
+/node_modules/
+package-lock.json

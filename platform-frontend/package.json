@@ -9,6 +9,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "lint": "eslint .",
     "types:gen": "openapi-typescript \"${OPENAPI_SOURCE:-http://localhost:8000/record-platform/v3/api-docs}\" -o src/lib/api/types/generated.ts",
     "types:gen:check": "pnpm types:gen && git diff --exit-code -- src/lib/api/types/generated.ts",
@@ -34,6 +35,7 @@
     "fake-indexeddb": "^6.2.5",
     "globals": "^15.12.0",
     "jsdom": "^25.0.1",
+    "lint-staged": "^16.2.7",
     "msw": "^2.12.10",
     "openapi-typescript": "7.13.0",
     "prettier": "^3.8.1",
@@ -56,5 +58,9 @@
     "tailwind-merge": "^3.5.0"
   },
   "type": "module",
+  "lint-staged": {
+    "*.{js,ts,svelte,html,css,json}": "prettier --write",
+    "*.{js,ts,svelte}": "eslint --fix"
+  },
   "packageManager": "pnpm@10.26.1+sha512.664074abc367d2c9324fdc18037097ce0a8f126034160f709928e9e9f95d98714347044e5c3164d65bd5da6c59c6be362b107546292a8eecb7999196e5ce58fa"
 }
