@@ -6,7 +6,6 @@ import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.mapper.FileMapper;
-import cn.flying.service.saga.FileSagaOrchestrator;
 import cn.flying.test.builders.FileTestBuilder;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
@@ -15,6 +14,7 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -26,6 +26,7 @@ import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -222,6 +223,70 @@ class FileVersionServiceTest {
             assertEquals(ResultEnum.VERSION_SOURCE_INVALID.getCode(), ex.getResultEnum().getCode());
             verify(fileMapper, never()).clearLatestInChain(anyLong(), anyLong());
             verify(fileMapper, never()).insert(any(File.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("Mark Upload Failed")
+    class MarkUploadFailed {
+
+        /**
+         * 验证版本上传失败时，会将失败版本降级并恢复父版本为 latest。
+         */
+        @Test
+        @DisplayName("should restore parent as latest when version upload fails")
+        void shouldRestoreParentAsLatestWhenVersionUploadFails() {
+            File failedVersion = FileTestBuilder.aFile(f -> {
+                f.setId(10L);
+                f.setUid(USER_ID);
+                f.setStatus(FileUploadStatus.PREPARE.getCode());
+                f.setIsLatest(1);
+                f.setParentVersionId(9L);
+            });
+            File parentVersion = FileTestBuilder.aFile(f -> {
+                f.setId(9L);
+                f.setUid(USER_ID);
+                f.setStatus(FileUploadStatus.SUCCESS.getCode());
+                f.setIsLatest(0);
+            });
+
+            when(fileMapper.selectById(10L)).thenReturn(failedVersion);
+            when(fileMapper.selectById(9L)).thenReturn(parentVersion);
+            when(fileMapper.update(any(File.class), any())).thenReturn(1);
+
+            fileService.markFileUploadFailed(USER_ID, 10L);
+
+            ArgumentCaptor<File> updateCaptor = ArgumentCaptor.forClass(File.class);
+            verify(fileMapper, times(2)).update(updateCaptor.capture(), any());
+
+            List<File> updates = updateCaptor.getAllValues();
+            File failedUpdate = updates.get(0);
+            File parentUpdate = updates.get(1);
+            assertEquals(FileUploadStatus.FAIL.getCode(), failedUpdate.getStatus());
+            assertEquals(0, failedUpdate.getIsLatest());
+            assertNull(parentUpdate.getStatus());
+            assertEquals(1, parentUpdate.getIsLatest());
+        }
+
+        /**
+         * 验证普通文件失败仅更新状态，不触发父版本 latest 恢复。
+         */
+        @Test
+        @DisplayName("should only set fail status for non-version file")
+        void shouldOnlySetFailStatusForNonVersionFile() {
+            File normalFile = FileTestBuilder.aFile(f -> {
+                f.setId(20L);
+                f.setUid(USER_ID);
+                f.setParentVersionId(null);
+                f.setIsLatest(1);
+            });
+            when(fileMapper.selectById(20L)).thenReturn(normalFile);
+            when(fileMapper.update(any(File.class), any())).thenReturn(1);
+
+            fileService.markFileUploadFailed(USER_ID, 20L);
+
+            verify(fileMapper, times(1)).update(any(File.class), any());
+            verify(fileMapper, times(1)).selectById(20L);
         }
     }
 }

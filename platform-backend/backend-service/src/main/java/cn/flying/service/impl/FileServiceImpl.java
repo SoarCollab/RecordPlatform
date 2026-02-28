@@ -318,6 +318,61 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         this.update(file, wrapper);
     }
 
+    /**
+     * 将目标文件标记为失败；若该文件为版本链最新节点，则恢复其父版本为 latest。
+     *
+     * @param userId 用户ID
+     * @param fileId 目标文件ID
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    public void markFileUploadFailed(Long userId, Long fileId) {
+        if (fileId == null) {
+            return;
+        }
+
+        File targetFile = this.getById(fileId);
+        if (targetFile == null || !Objects.equals(targetFile.getUid(), userId)) {
+            return;
+        }
+
+        boolean shouldRestoreParentLatest = targetFile.getParentVersionId() != null
+                && Objects.equals(targetFile.getIsLatest(), 1);
+
+        File failUpdate = new File().setStatus(FileUploadStatus.FAIL.getCode());
+        if (shouldRestoreParentLatest) {
+            failUpdate.setIsLatest(0);
+        }
+        LambdaUpdateWrapper<File> failWrapper = new LambdaUpdateWrapper<File>()
+                .eq(File::getId, targetFile.getId())
+                .eq(File::getUid, userId);
+        this.update(failUpdate, failWrapper);
+
+        if (shouldRestoreParentLatest) {
+            restoreParentVersionAsLatest(targetFile);
+        }
+    }
+
+    /**
+     * 将失败版本的父版本恢复为 latest，确保版本链仍有可用的最新成功版本。
+     *
+     * @param failedVersion 失败版本记录
+     */
+    private void restoreParentVersionAsLatest(File failedVersion) {
+        Long parentVersionId = failedVersion.getParentVersionId();
+        if (parentVersionId == null) {
+            return;
+        }
+
+        LambdaUpdateWrapper<File> parentWrapper = new LambdaUpdateWrapper<File>()
+                .eq(File::getId, parentVersionId)
+                .eq(File::getUid, failedVersion.getUid())
+                .eq(File::getStatus, FileUploadStatus.SUCCESS.getCode());
+        File parentUpdate = new File().setIsLatest(1);
+        this.update(parentUpdate, parentWrapper);
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     @CacheEvict(cacheNames = "userFiles", key = "#userId")

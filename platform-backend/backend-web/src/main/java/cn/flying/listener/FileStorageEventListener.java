@@ -105,7 +105,7 @@ public class FileStorageEventListener {
      */
     private void handleStorageFailure(FileStorageEvent event, String reason) {
         if (event.getFileId() != null) {
-            fileService.changeFileStatusById(event.getUid(), event.getFileId(), FileUploadStatus.FAIL.getCode());
+            fileService.markFileUploadFailed(event.getUid(), event.getFileId());
         } else {
             fileService.changeFileStatusByName(event.getUid(), event.getFileName(), FileUploadStatus.FAIL.getCode());
         }

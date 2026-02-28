@@ -82,6 +82,7 @@ class FileStorageEventListenerTest {
         assertThat(eventCaptor.getValue().getType()).isEqualTo("file-record-success");
         verify(fileService, never()).changeFileStatusByName(anyLong(), anyString(), anyInt());
         verify(fileService, never()).changeFileStatusById(anyLong(), anyLong(), anyInt());
+        verify(fileService, never()).markFileUploadFailed(anyLong(), anyLong());
         verify(redisStateManager, never()).removeSession(anyString(), anyString());
         verify(redisStateManager, never()).removeSessionByFileName(anyLong(), anyString());
     }
@@ -94,11 +95,8 @@ class FileStorageEventListenerTest {
 
         listener.handleFileStorageEvent(buildEvent());
 
-        verify(fileService, times(1)).changeFileStatusById(
-                100L,
-                9527L,
-                FileUploadStatus.FAIL.getCode()
-        );
+        verify(fileService, times(1)).markFileUploadFailed(100L, 9527L);
+        verify(fileService, never()).changeFileStatusById(anyLong(), anyLong(), eq(FileUploadStatus.FAIL.getCode()));
         verify(redisStateManager, times(1)).removeSession("client-1", "session-1");
         verify(redisStateManager, never()).removeSessionByFileName(anyLong(), anyString());
 

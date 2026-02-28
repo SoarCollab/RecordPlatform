@@ -408,8 +408,8 @@ public class FileUploadServiceImpl implements FileUploadService {
             clientId = UidEncoder.encodeCid(SUID);
         }
 
-        // 仅在创建新上传会话时执行配额检查；恢复会话不重复计入。
-        quotaService.checkUploadQuota(tenantId, userId, fileSize);
+        // 仅在创建新上传会话时执行配额检查；版本续传（绑定 targetFileId）已完成预占位，不重复计费。
+        checkQuotaForNewUploadSession(tenantId, userId, fileSize, targetFileId);
 
         log.info("处理上传开始请求: 文件名={}, 文件大小={}, 内容类型={}, 用户SUID={}, 客户端ID={}",
                 fileName, fileSize, contentType, SUID, clientId);
@@ -488,7 +488,7 @@ public class FileUploadServiceImpl implements FileUploadService {
      */
     private void markUploadTargetFailed(Long userId, FileUploadState state) {
         if (state.getTargetFileId() != null) {
-            fileService.changeFileStatusById(userId, state.getTargetFileId(), FileUploadStatus.FAIL.getCode());
+            fileService.markFileUploadFailed(userId, state.getTargetFileId());
             return;
         }
         fileService.changeFileStatusByName(userId, state.getFileName(), FileUploadStatus.FAIL.getCode());
@@ -828,7 +828,9 @@ public class FileUploadServiceImpl implements FileUploadService {
                 return;
             }
 
-            quotaService.checkUploadQuota(tenantId, userId, latestState.getFileSize());
+            if (shouldCheckQuotaForSession(latestState)) {
+                quotaService.checkUploadQuota(tenantId, userId, latestState.getFileSize());
+            }
             fileService.prepareStoreFile(
                     userId,
                     latestState.getTargetFileId(),
@@ -875,7 +877,9 @@ public class FileUploadServiceImpl implements FileUploadService {
         RLock lock = redissonClient.getLock(lockKey);
         lock.lock(QUOTA_COMPLETE_LOCK_LEASE_SECONDS, TimeUnit.SECONDS);
         try {
-            quotaService.checkUploadQuota(tenantId, userId, state.getFileSize());
+            if (shouldCheckQuotaForSession(state)) {
+                quotaService.checkUploadQuota(tenantId, userId, state.getFileSize());
+            }
         } finally {
             if (lock.isHeldByCurrentThread()) {
                 try {
@@ -885,6 +889,33 @@ public class FileUploadServiceImpl implements FileUploadService {
                 }
             }
         }
+    }
+
+    /**
+     * 对新建上传会话执行配额校验。
+     * 版本续传场景使用既有 PREPARE 记录，不再重复执行增量配额校验。
+     *
+     * @param tenantId 租户ID
+     * @param userId 用户ID
+     * @param fileSize 文件大小
+     * @param targetFileId 目标文件ID（版本续传场景）
+     */
+    private void checkQuotaForNewUploadSession(Long tenantId, Long userId, long fileSize, Long targetFileId) {
+        if (targetFileId != null) {
+            return;
+        }
+        quotaService.checkUploadQuota(tenantId, userId, fileSize);
+    }
+
+    /**
+     * 判断当前会话是否需要执行增量配额校验。
+     * 当会话绑定了目标版本文件时，配额已由既有 PREPARE 记录体现，应跳过重复校验。
+     *
+     * @param state 上传会话状态
+     * @return true 表示需要执行配额校验
+     */
+    private boolean shouldCheckQuotaForSession(FileUploadState state) {
+        return state != null && state.getTargetFileId() == null;
     }
 
     /**

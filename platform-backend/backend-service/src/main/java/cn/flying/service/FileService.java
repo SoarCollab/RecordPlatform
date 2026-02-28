@@ -86,6 +86,14 @@ public interface FileService extends IService<File> {
     void changeFileStatusById(Long userId, Long fileId, Integer fileStatus);
 
     /**
+     * 将指定文件标记为上传失败，并在版本链场景下恢复上一成功版本为 latest。
+     *
+     * @param userId 用户ID
+     * @param fileId 目标文件ID
+     */
+    void markFileUploadFailed(Long userId, Long fileId);
+
+    /**
      * 批量删除文件
      * 支持通过文件哈希或文件ID进行删除
      * @param userId 用户ID

@@ -4,6 +4,7 @@ import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.util.CommonUtils;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.vo.file.FileUploadStatusVO;
@@ -72,7 +73,13 @@ public class UploadSessionController {
             @Schema(description = "分片大小") @RequestParam(value = "chunkSize") @Min(1) @Max(83886080) int chunkSize,
             @Schema(description = "分片总数") @RequestParam(value = "totalChunks") @Min(1) @Max(10000) int totalChunks,
             @Schema(description = "目标文件ID（可选）") @RequestParam(value = "fileId", required = false) String fileId) {
-        Long targetFileId = CommonUtils.isNotEmpty(fileId) ? IdUtils.fromExternalId(fileId) : null;
+        Long targetFileId = null;
+        if (CommonUtils.isNotEmpty(fileId)) {
+            targetFileId = IdUtils.fromExternalId(fileId);
+            if (targetFileId == null) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "fileId 无效");
+            }
+        }
         StartUploadVO uploadVO = fileUploadService.startUpload(
                 userId, fileName, fileSize, contentType, providedClientId, chunkSize, totalChunks, targetFileId
         );
