@@ -2,6 +2,7 @@ package cn.flying.service;
 
 import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.FileVersionVO;
 import cn.flying.dao.vo.file.UserFileStatsVO;
 import cn.flying.platformapi.response.TransactionVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -145,6 +146,15 @@ public interface FileQueryService {
      * @return 文件统计信息
      */
     UserFileStatsVO getUserFileStats(Long userId);
+
+    /**
+     * 获取文件版本历史
+     *
+     * @param userId 用户ID（用于权限校验）
+     * @param fileId 文件ID（版本链中任意一个文件）
+     * @return 版本历史列表（按版本号倒序）
+     */
+    List<FileVersionVO> getFileVersionHistory(Long userId, Long fileId);
 
     // ==================== 异步查询方法（Virtual Thread 优化）====================
 

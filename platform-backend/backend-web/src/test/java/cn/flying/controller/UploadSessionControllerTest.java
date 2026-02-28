@@ -2,6 +2,9 @@ package cn.flying.controller;
 
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
+import cn.flying.common.util.SecureIdCodec;
+import cn.flying.common.util.IdUtils;
 import cn.flying.dao.vo.file.FileUploadStatusVO;
 import cn.flying.dao.vo.file.ProgressVO;
 import cn.flying.dao.vo.file.ResumeUploadVO;
@@ -19,8 +22,10 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -57,13 +62,13 @@ class UploadSessionControllerTest {
         FileUploadStatusVO statusVO = new FileUploadStatusVO("f", 100L, clientId, false, "UPLOADING", 50, List.of(1), 1, 2);
         ProgressVO progressVO = new ProgressVO(50, 50, 0, 1, 0, 2, clientId, "uploading");
 
-        when(fileUploadService.startUpload(userId, "a.txt", 100L, "text/plain", null, 1024, 2)).thenReturn(startUploadVO);
+        when(fileUploadService.startUpload(userId, "a.txt", 100L, "text/plain", null, 1024, 2, null)).thenReturn(startUploadVO);
         when(fileUploadService.resumeUpload(userId, clientId)).thenReturn(resumeUploadVO);
         when(fileUploadService.checkFileStatus(userId, clientId)).thenReturn(statusVO);
         when(fileUploadService.getUploadProgress(userId, clientId)).thenReturn(progressVO);
         when(fileUploadService.cancelUpload(userId, clientId)).thenReturn(true);
 
-        Result<StartUploadVO> startResult = controller.createUploadSession(userId, "a.txt", 100L, "text/plain", null, 1024, 2);
+        Result<StartUploadVO> startResult = controller.createUploadSession(userId, "a.txt", 100L, "text/plain", null, 1024, 2, null);
         Result<String> uploadResult = controller.uploadChunk(
                 userId,
                 clientId,
@@ -99,5 +104,29 @@ class UploadSessionControllerTest {
         when(fileUploadService.cancelUpload(30L, "client-x")).thenReturn(false);
         Result<String> result = controller.cancelUpload(30L, "client-x");
         assertEquals(ResultEnum.RESULT_DATA_NONE.getCode(), result.getCode());
+    }
+
+    /**
+     * 验证提供非法 fileId 时会直接返回参数错误，而不是退化为普通上传。
+     */
+    @Test
+    void shouldRejectInvalidExternalFileId() {
+        SecureIdCodec codec = mock(SecureIdCodec.class);
+        ReflectionTestUtils.setField(IdUtils.class, "secureIdCodec", codec);
+        when(codec.fromExternalId("invalid_external_id")).thenReturn(null);
+
+        GeneralException ex = assertThrows(GeneralException.class, () ->
+                controller.createUploadSession(
+                        20L,
+                        "a.txt",
+                        100L,
+                        "text/plain",
+                        null,
+                        1024,
+                        2,
+                        "invalid_external_id"
+                ));
+
+        assertEquals(ResultEnum.PARAM_ERROR.getCode(), ex.getResultEnum().getCode());
     }
 }

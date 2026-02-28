@@ -26,6 +26,21 @@ public interface FileUploadService {
      * @return
      */
     StartUploadVO startUpload(Long userId, String fileName, long fileSize, String contentType, String clientId, int chunkSize, int totalChunks);
+
+    /**
+     * 开始上传（支持绑定目标文件ID）。
+     *
+     * @param userId 用户ID
+     * @param fileName 文件名
+     * @param fileSize 文件大小
+     * @param contentType 文件类型
+     * @param clientId 上传客户端ID
+     * @param chunkSize 分片大小
+     * @param totalChunks 分片总数
+     * @param targetFileId 目标文件ID（为空表示普通上传）
+     * @return 上传会话信息
+     */
+    StartUploadVO startUpload(Long userId, String fileName, long fileSize, String contentType, String clientId, int chunkSize, int totalChunks, Long targetFileId);
     /**
      * 上传分片
      * @param uid 用户ID

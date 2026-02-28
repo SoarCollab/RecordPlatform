@@ -1,9 +1,11 @@
 package cn.flying.service.impl;
 
+import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.lock.DistributedLock;
 import cn.flying.common.util.UidEncoder;
+import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.FileUploadState;
 import cn.flying.dao.vo.file.ProgressVO;
 import cn.flying.dao.vo.file.ResumeUploadVO;
@@ -32,6 +34,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -127,6 +130,38 @@ class FileUploadServiceTest {
             assertTrue(result.getProcessedChunks().isEmpty());
 
             verify(redisStateManager).saveNewState(any(FileUploadState.class), eq(SUID));
+        }
+
+        /**
+         * 验证版本续传（绑定 targetFileId）创建会话时不会重复执行增量配额校验。
+         */
+        @Test
+        @DisplayName("should skip quota check for target version upload session")
+        void shouldSkipQuotaCheckForTargetVersionUploadSession() {
+            String fileName = "version-v2.txt";
+            long fileSize = 2048L;
+            Long targetFileId = 9527L;
+
+            File targetFile = new File()
+                    .setId(targetFileId)
+                    .setUid(USER_ID)
+                    .setStatus(FileUploadStatus.PREPARE.getCode())
+                    .setFileName(fileName)
+                    .setFileParam("{\"fileSize\":2048,\"contentType\":\"text/plain\"}");
+
+            when(redisStateManager.getSessionIdByFileClientKey(anyString(), anyString())).thenReturn(null);
+            when(fileService.getById(targetFileId)).thenReturn(targetFile);
+
+            StartUploadVO result = fileUploadService.startUpload(
+                    USER_ID, fileName, fileSize, "text/plain", null, 256, 8, targetFileId
+            );
+
+            assertNotNull(result);
+            verify(quotaService, never()).checkUploadQuota(anyLong(), anyLong(), anyLong());
+            verify(redisStateManager).saveNewState(
+                    argThat(state -> Objects.equals(state.getTargetFileId(), targetFileId)),
+                    eq(SUID)
+            );
         }
 
         @Test
@@ -469,7 +504,7 @@ class FileUploadServiceTest {
             assertEquals(ResultEnum.QUOTA_EXCEEDED, ex.getResultEnum());
             verify(quotaLock).lock(60L, TimeUnit.SECONDS);
             verify(quotaService).checkUploadQuota(77L, USER_ID, 1024L);
-            verify(fileService, never()).prepareStoreFile(anyLong(), anyString(), anyLong());
+            verify(fileService, never()).prepareStoreFile(anyLong(), any(), anyString(), anyLong());
             verify(quotaLock).unlock();
         }
 
@@ -499,7 +534,39 @@ class FileUploadServiceTest {
             invokeReserveQuotaAndPrepareStoreFile(USER_ID, state);
 
             verify(quotaService).checkUploadQuota(77L, USER_ID, 2048L);
-            verify(fileService).prepareStoreFile(USER_ID, "prepare-once.bin", 2048L);
+            verify(fileService).prepareStoreFile(USER_ID, null, "prepare-once.bin", 2048L);
+            verify(redisStateManager).updateState(argThat(FileUploadState::isPrepareStored));
+            verify(quotaLock).unlock();
+        }
+
+        /**
+         * 验证版本上传场景会将 PREPARE 预占位绑定到目标 fileId。
+         */
+        @Test
+        @DisplayName("should bind prepare reserve to target file id")
+        void shouldBindPrepareReserveToTargetFileId() throws Exception {
+            FileUploadState state = new FileUploadState(
+                    USER_ID,
+                    "version-v2.bin",
+                    4096L,
+                    "application/octet-stream",
+                    "version-client",
+                    256,
+                    0,
+                    9527L
+            );
+            state.setTenantId(77L);
+            state.setPrepareStored(false);
+
+            when(redissonClient.getLock("distributed:lock:upload:quota:complete:tenant:77"))
+                    .thenReturn(quotaLock);
+            when(quotaLock.isHeldByCurrentThread()).thenReturn(true);
+            when(redisStateManager.getState("version-client")).thenReturn(state);
+
+            invokeReserveQuotaAndPrepareStoreFile(USER_ID, state);
+
+            verify(quotaService, never()).checkUploadQuota(anyLong(), anyLong(), anyLong());
+            verify(fileService).prepareStoreFile(USER_ID, 9527L, "version-v2.bin", 4096L);
             verify(redisStateManager).updateState(argThat(FileUploadState::isPrepareStored));
             verify(quotaLock).unlock();
         }
@@ -530,7 +597,7 @@ class FileUploadServiceTest {
             invokeReserveQuotaAndPrepareStoreFile(USER_ID, state);
 
             verify(quotaService, never()).checkUploadQuota(anyLong(), anyLong(), anyLong());
-            verify(fileService, never()).prepareStoreFile(anyLong(), anyString(), anyLong());
+            verify(fileService, never()).prepareStoreFile(anyLong(), any(), anyString(), anyLong());
             verify(redisStateManager, never()).updateState(any(FileUploadState.class));
             verify(quotaLock).unlock();
         }

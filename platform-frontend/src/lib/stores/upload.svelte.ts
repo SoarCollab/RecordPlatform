@@ -17,6 +17,7 @@ export type UploadStatus =
 export interface UploadTask {
   id: string;
   file: File;
+  targetFileId: string | null;
   clientId: string | null;
   status: UploadStatus;
   progress: number;
@@ -29,6 +30,14 @@ export interface UploadTask {
   error: string | null;
   startTime: number | null;
   endTime: number | null;
+}
+
+/**
+ * 新建上传任务的可选参数。
+ */
+export interface AddFileOptions {
+  targetFileId?: string;
+  autoStart?: boolean;
 }
 
 // ===== Configuration =====
@@ -335,14 +344,26 @@ async function uploadChunks(task: UploadTask): Promise<void> {
 
 // ===== Actions =====
 
-async function addFile(file: File): Promise<string> {
+/**
+ * 添加单个上传任务并按需自动启动。
+ *
+ * @param file 待上传文件。
+ * @param options 可选参数（目标版本 fileId、是否自动启动）。
+ * @returns 新建任务 ID。
+ */
+async function addFile(
+  file: File,
+  options: AddFileOptions = {},
+): Promise<string> {
   const id = generateId();
   const chunkSize = calculateOptimalChunkSize(file.size);
   const totalChunks = calculateChunks(file.size, chunkSize);
+  const shouldAutoStart = options.autoStart ?? true;
 
   const task: UploadTask = {
     id,
     file,
+    targetFileId: options.targetFileId ?? null,
     clientId: null,
     status: "pending",
     progress: 0,
@@ -360,15 +381,25 @@ async function addFile(file: File): Promise<string> {
   tasks = [...tasks, task];
 
   // Auto start if below concurrent limit
-  if (activeTasks.length < MAX_CONCURRENT_UPLOADS) {
+  if (shouldAutoStart && activeTasks.length < MAX_CONCURRENT_UPLOADS) {
     startUpload(id);
   }
 
   return id;
 }
 
-async function addFiles(files: File[]): Promise<string[]> {
-  return Promise.all(files.map((f) => addFile(f)));
+/**
+ * 批量添加上传任务。
+ *
+ * @param files 待上传文件列表。
+ * @param options 任务可选参数，会应用到每个任务。
+ * @returns 任务 ID 列表。
+ */
+async function addFiles(
+  files: File[],
+  options?: AddFileOptions,
+): Promise<string[]> {
+  return Promise.all(files.map((f) => addFile(f, options)));
 }
 
 async function startUpload(id: string): Promise<void> {
@@ -391,6 +422,7 @@ async function startUpload(id: string): Promise<void> {
       contentType: task.file.type || "application/octet-stream",
       chunkSize: task.chunkSize,
       totalChunks: task.totalChunks,
+      fileId: task.targetFileId ?? undefined,
     });
 
     const initialProgress = Math.round(

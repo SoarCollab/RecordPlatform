@@ -25,6 +25,8 @@ public class FileUploadState {
     private Long userId;
     @Schema(description = "客户端ID（标识唯一的客户端会话）")
     private String clientId;
+    @Schema(description = "目标文件ID（版本上传时用于绑定既有 PREPARE 记录）")
+    private Long targetFileId;
     @Schema(description = "文件名")
     private String fileName;
     @Schema(description = "文件大小")
@@ -55,8 +57,26 @@ public class FileUploadState {
     private volatile boolean prepareStored;
 
     public FileUploadState(Long userId, String fileName, long fileSize, String contentType, String clientId, int chunkSize, int totalChunks) {
+        this(userId, fileName, fileSize, contentType, clientId, chunkSize, totalChunks, null);
+    }
+
+    /**
+     * 构造上传会话状态，支持绑定目标文件ID。
+     *
+     * @param userId 用户ID
+     * @param fileName 文件名
+     * @param fileSize 文件大小
+     * @param contentType 文件类型
+     * @param clientId 客户端会话ID
+     * @param chunkSize 分片大小
+     * @param totalChunks 分片总数
+     * @param targetFileId 目标文件ID
+     */
+    public FileUploadState(Long userId, String fileName, long fileSize, String contentType,
+                           String clientId, int chunkSize, int totalChunks, Long targetFileId) {
         this.userId = userId;
         this.clientId = clientId;
+        this.targetFileId = targetFileId;
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.contentType = contentType;

@@ -1,9 +1,12 @@
 package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
+import cn.flying.common.util.CommonUtils;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.Const;
+import cn.flying.common.util.IdUtils;
 import cn.flying.dao.vo.file.FileUploadStatusVO;
 import cn.flying.dao.vo.file.ProgressVO;
 import cn.flying.dao.vo.file.ResumeUploadVO;
@@ -52,6 +55,7 @@ public class UploadSessionController {
      * @param providedClientId 客户端会话 ID
      * @param chunkSize        分片大小
      * @param totalChunks      分片总数
+     * @param fileId           目标文件ID（版本上传场景可选）
      * @return 上传会话信息
      */
     @PostMapping("")
@@ -67,9 +71,17 @@ public class UploadSessionController {
             @Schema(description = "客户端ID") @RequestParam(value = "clientId", required = false)
             @Pattern(regexp = "^[A-Za-z0-9-]{1,64}$", message = "clientId 格式无效") String providedClientId,
             @Schema(description = "分片大小") @RequestParam(value = "chunkSize") @Min(1) @Max(83886080) int chunkSize,
-            @Schema(description = "分片总数") @RequestParam(value = "totalChunks") @Min(1) @Max(10000) int totalChunks) {
+            @Schema(description = "分片总数") @RequestParam(value = "totalChunks") @Min(1) @Max(10000) int totalChunks,
+            @Schema(description = "目标文件ID（可选）") @RequestParam(value = "fileId", required = false) String fileId) {
+        Long targetFileId = null;
+        if (CommonUtils.isNotEmpty(fileId)) {
+            targetFileId = IdUtils.fromExternalId(fileId);
+            if (targetFileId == null) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "fileId 无效");
+            }
+        }
         StartUploadVO uploadVO = fileUploadService.startUpload(
-                userId, fileName, fileSize, contentType, providedClientId, chunkSize, totalChunks
+                userId, fileName, fileSize, contentType, providedClientId, chunkSize, totalChunks, targetFileId
         );
         return Result.success(uploadVO);
     }
@@ -185,4 +197,3 @@ public class UploadSessionController {
         return Result.success(fileUploadService.getUploadProgress(userId, clientId));
     }
 }
-

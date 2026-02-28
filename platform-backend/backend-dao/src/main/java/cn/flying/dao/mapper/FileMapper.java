@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.Date;
 import java.util.List;
@@ -253,4 +254,35 @@ public interface FileMapper extends BaseMapper<File> {
             GROUP BY uid
             """)
     List<QuotaUserUsageVO> aggregateQuotaUserUsageByTenant(@Param("tenantId") Long tenantId);
+
+    /**
+     * 将版本链中所有文件的 is_latest 置为 0
+     *
+     * @param versionGroupId 版本链分组ID
+     * @param tenantId 租户ID
+     * @return 受影响行数
+     */
+    @Update("UPDATE file SET is_latest = 0 WHERE version_group_id = #{versionGroupId} AND tenant_id = #{tenantId} AND deleted = 0")
+    int clearLatestInChain(@Param("versionGroupId") Long versionGroupId, @Param("tenantId") Long tenantId);
+
+    /**
+     * 查询版本链中所有文件，按版本号倒序
+     *
+     * @param versionGroupId 版本链分组ID
+     * @param tenantId 租户ID
+     * @return 版本链文件列表
+     */
+    @Select("SELECT id, tenant_id, uid, file_name, file_param, file_hash, status, version, parent_version_id, is_latest, version_group_id, create_time " +
+            "FROM file WHERE version_group_id = #{versionGroupId} AND tenant_id = #{tenantId} AND deleted = 0 ORDER BY version DESC")
+    List<File> selectVersionChain(@Param("versionGroupId") Long versionGroupId, @Param("tenantId") Long tenantId);
+
+    /**
+     * 统计版本链中文件数量
+     *
+     * @param versionGroupId 版本链分组ID
+     * @param tenantId 租户ID
+     * @return 版本数量
+     */
+    @Select("SELECT COUNT(*) FROM file WHERE version_group_id = #{versionGroupId} AND tenant_id = #{tenantId} AND deleted = 0")
+    int countVersionsInChain(@Param("versionGroupId") Long versionGroupId, @Param("tenantId") Long tenantId);
 }

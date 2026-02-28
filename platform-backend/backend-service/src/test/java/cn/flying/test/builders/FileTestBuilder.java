@@ -16,13 +16,17 @@ public class FileTestBuilder {
     private static final AtomicLong idCounter = new AtomicLong(1L);
 
     public static File aFile() {
+        long id = idCounter.getAndIncrement();
         return new File()
-                .setId(idCounter.getAndIncrement())
+                .setId(id)
                 .setUid(100L)
                 .setFileName("test_file.txt")
                 .setFileHash("sha256_" + System.nanoTime())
                 .setFileParam("{\"fileSize\":1024,\"contentType\":\"text/plain\",\"initialKey\":\"dGVzdGtleQ==\"}")
                 .setStatus(FileUploadStatus.SUCCESS.getCode())
+                .setVersion(1)
+                .setIsLatest(1)
+                .setVersionGroupId(id)
                 .setCreateTime(new Date());
     }
 
@@ -50,6 +54,24 @@ public class FileTestBuilder {
 
     public static File aFileWithName(String name) {
         return aFile(f -> f.setFileName(name));
+    }
+
+    public static File aVersionedFile(Long versionGroupId, int version, int isLatest) {
+        return aFile(f -> f
+                .setVersionGroupId(versionGroupId)
+                .setVersion(version)
+                .setIsLatest(isLatest));
+    }
+
+    public static File aNewVersion(File parent) {
+        return aFile(f -> f
+                .setUid(parent.getUid())
+                .setTenantId(parent.getTenantId())
+                .setVersionGroupId(parent.getVersionGroupId())
+                .setVersion(parent.getVersion() + 1)
+                .setParentVersionId(parent.getId())
+                .setIsLatest(1)
+                .setStatus(FileUploadStatus.PREPARE.getCode()));
     }
 
     public static void resetIdCounter() {
