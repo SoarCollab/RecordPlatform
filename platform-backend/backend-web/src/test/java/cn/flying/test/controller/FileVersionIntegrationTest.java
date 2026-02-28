@@ -117,7 +117,7 @@ class FileVersionIntegrationTest extends BaseControllerIntegrationTest {
                     {"fileName":"v2.txt","fileSize":2048,"contentType":"text/plain"}
                     """;
 
-            MvcResult result = mockMvc.perform(withAuth(
+            mockMvc.perform(withAuth(
                     org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                             .post(API_PREFIX + "/{id}/versions", externalId))
                     .contentType(MediaType.APPLICATION_JSON)
