@@ -913,6 +913,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/files/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取文件版本历史 */
+        get: operations["getFileVersionHistory"];
+        put?: never;
+        /** 创建文件新版本 */
+        post: operations["createNewVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/friend-shares": {
         parameters: {
             query?: never;
@@ -2830,6 +2848,18 @@ export interface components {
              */
             unreadCount?: number;
         };
+        /** @description 创建新版本请求 */
+        CreateVersionVO: {
+            /** @description 文件类型 */
+            contentType: string;
+            /** @description 文件名称 */
+            fileName: string;
+            /**
+             * Format: int64
+             * @description 文件大小（字节）
+             */
+            fileSize: number;
+        };
         /** @description 用户注册表单信息 */
         EmailRegisterVO: {
             /** @description 验证码 */
@@ -3026,6 +3056,42 @@ export interface components {
              * @description 总分片数量
              */
             totalChunks?: number;
+        };
+        /** @description 文件版本信息 */
+        FileVersionVO: {
+            /** @description 文件类型 */
+            contentType?: string;
+            /**
+             * Format: date-time
+             * @description 创建时间
+             */
+            createTime?: string;
+            /** @description 文件哈希 */
+            fileHash?: string;
+            /** @description 文件ID（外部ID） */
+            fileId?: string;
+            /** @description 文件名称 */
+            fileName?: string;
+            /**
+             * Format: int64
+             * @description 文件大小（字节）
+             */
+            fileSize?: number;
+            /**
+             * Format: int32
+             * @description 是否最新版本
+             */
+            isLatest?: number;
+            /**
+             * Format: int32
+             * @description 文件状态
+             */
+            status?: number;
+            /**
+             * Format: int32
+             * @description 版本号
+             */
+            version?: number;
         };
         /** @description 好友文件分享详情 */
         FriendFileShareDetailVO: {
@@ -3963,6 +4029,18 @@ export interface components {
             code?: number;
             /** @description 结果数据 */
             data?: components["schemas"]["file"][];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultListFileVersionVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            /** @description 结果数据 */
+            data?: components["schemas"]["FileVersionVO"][];
             /** @description 提示信息 */
             message?: string;
         };
@@ -4959,6 +5037,11 @@ export interface components {
              */
             id?: number;
             /**
+             * Format: int32
+             * @description 是否最新版本：1=是，0=否
+             */
+            isLatest?: number;
+            /**
              * Format: int64
              * @description 来源Id(标识分享文件原始来源用户Id)
              */
@@ -4967,6 +5050,11 @@ export interface components {
             originOwnerName?: string;
             /** @description 文件所有者用户名（分享场景） */
             ownerName?: string;
+            /**
+             * Format: int64
+             * @description 上一版本文件ID
+             */
+            parentVersionId?: number;
             /**
              * Format: int64
              * @description 直接分享者用户ID
@@ -4991,6 +5079,16 @@ export interface components {
              * @description 用户ID
              */
             uid?: number;
+            /**
+             * Format: int32
+             * @description 版本号，从 1 开始
+             */
+            version?: number;
+            /**
+             * Format: int64
+             * @description 版本链分组ID
+             */
+            versionGroupId?: number;
         };
         /** @description 系统操作日志实体类 */
         sys_operation_log: {
@@ -6267,6 +6365,56 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultFileProvenanceVO"];
+                };
+            };
+        };
+    };
+    getFileVersionHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文件ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultListFileVersionVO"];
+                };
+            };
+        };
+    };
+    createNewVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 父版本文件ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateVersionVO"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultMapStringObject"];
                 };
             };
         };
@@ -7926,6 +8074,8 @@ export interface operations {
                 clientId?: string;
                 /** @description 文件类型 */
                 contentType: string;
+                /** @description 目标文件ID（可选） */
+                fileId?: string;
                 /** @description 文件名 */
                 fileName: string;
                 /** @description 文件大小 */
