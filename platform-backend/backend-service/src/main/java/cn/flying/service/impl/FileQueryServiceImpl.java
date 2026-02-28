@@ -7,6 +7,7 @@ import cn.flying.common.constant.ShareType;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.CommonUtils;
+import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.Account;
@@ -17,6 +18,7 @@ import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileShareVO;
+import cn.flying.dao.vo.file.FileVersionVO;
 import cn.flying.dao.vo.file.UserFileStatsVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.FileDetailVO;
@@ -206,7 +208,8 @@ public class FileQueryServiceImpl implements FileQueryService {
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
         // 所有用户（包括管理员）只能查询自己的文件
         // 管理员查看所有文件请使用 FileAdminService.getAllFiles()
-        wrapper.eq(File::getUid, userId);
+        wrapper.eq(File::getUid, userId)
+               .eq(File::getIsLatest, 1);
         return fileMapper.selectList(wrapper);
     }
 
@@ -232,7 +235,8 @@ public class FileQueryServiceImpl implements FileQueryService {
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
         // 所有用户（包括管理员）只能查询自己的文件
         // 管理员查看所有文件请使用 FileAdminService.getAllFiles()
-        wrapper.eq(File::getUid, userId);
+        wrapper.eq(File::getUid, userId)
+               .eq(File::getIsLatest, 1);
 
         applyKeywordFilter(wrapper, keyword, keywordMode);
 
@@ -522,6 +526,42 @@ public class FileQueryServiceImpl implements FileQueryService {
                 totalStorage != null ? totalStorage : 0L,
                 sharedFiles != null ? sharedFiles : 0L,
                 todayUploads != null ? todayUploads : 0L
+        );
+    }
+
+    @Override
+    public List<FileVersionVO> getFileVersionHistory(Long userId, Long fileId) {
+        File file = fileMapper.selectById(fileId);
+        if (file == null) {
+            throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
+        }
+
+        // 权限校验：owner 或 admin
+        if (!SecurityUtils.isAdmin() && !file.getUid().equals(userId)) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
+        }
+
+        Long versionGroupId = file.getVersionGroupId();
+        if (versionGroupId == null) {
+            // 遗留文件，无版本链，返回单条
+            return List.of(toFileVersionVO(file));
+        }
+
+        List<File> chain = fileMapper.selectVersionChain(versionGroupId, file.getTenantId());
+        return chain.stream().map(this::toFileVersionVO).toList();
+    }
+
+    private FileVersionVO toFileVersionVO(File file) {
+        return new FileVersionVO(
+                IdUtils.toExternalId(file.getId()),
+                file.getVersion() != null ? file.getVersion() : 1,
+                file.getFileName(),
+                file.getFileHash(),
+                file.getFileSize(),
+                file.getContentType(),
+                file.getIsLatest() != null ? file.getIsLatest() : 1,
+                file.getStatus(),
+                file.getCreateTime()
         );
     }
 

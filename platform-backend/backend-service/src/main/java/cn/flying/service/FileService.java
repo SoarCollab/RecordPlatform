@@ -194,4 +194,17 @@ public interface FileService extends IService<File> {
      */
     FileDecryptInfoVO getSharedFileDecryptInfo(Long userId, String shareCode, String fileHash);
 
+    /**
+     * 创建文件新版本（PREPARE 状态）
+     * 客户端后续拿返回的 fileId 走现有上传流程
+     *
+     * @param userId 用户ID
+     * @param parentFileId 父版本文件ID（内部ID）
+     * @param fileName 新版本文件名
+     * @param fileSize 文件大小（字节）
+     * @param contentType 文件类型
+     * @return PREPARE 状态的新版本 File
+     */
+    File createNewVersion(Long userId, Long parentFileId, String fileName, long fileSize, String contentType);
+
 }

@@ -129,6 +129,12 @@ public enum ResultEnum implements Serializable {
     SHARE_EXPIRED(50012, "分享已过期"),
     /** 配额超限 */
     QUOTA_EXCEEDED(50013, "配额超限"),
+    /** 版本链不存在 */
+    VERSION_CHAIN_NOT_FOUND(50014, "版本链不存在"),
+    /** 版本创建冲突 */
+    VERSION_CONFLICT(50015, "版本创建冲突，请重试"),
+    /** 源文件状态不允许创建新版本 */
+    VERSION_SOURCE_INVALID(50016, "源文件状态不允许创建新版本"),
 
     /* ==================== 消息服务错误：60000-69999 ==================== */
     /** 消息不存在 */

@@ -8,6 +8,7 @@ import cn.flying.common.exception.GeneralException;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.CommonUtils;
 import cn.flying.common.util.Const;
+import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.File;
@@ -38,6 +39,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.slf4j.MDC;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
@@ -53,6 +56,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @program: RecordPlatform
@@ -82,15 +86,23 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     @Resource
     private CacheManager cacheManager;
 
+    @Resource
+    private RedissonClient redissonClient;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void prepareStoreFile(Long userId, String OriginFileName, long fileSize) {
+        Long id = IdUtils.nextEntityId();
         File file = new File()
+                .setId(id)
                 .setUid(userId)
                 .setFileName(OriginFileName)
                 .setFileParam(buildPrepareFileParam(fileSize))
-                .setStatus(FileUploadStatus.PREPARE.getCode());
-        this.saveOrUpdate(file);
+                .setStatus(FileUploadStatus.PREPARE.getCode())
+                .setVersion(1)
+                .setIsLatest(1)
+                .setVersionGroupId(id);
+        this.save(file);
     }
 
     /**
@@ -294,7 +306,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
         // 所有用户（包括管理员）只能查询自己的文件
         // 管理员查看所有文件请使用 FileAdminService.getAllFiles()
-        wrapper.eq(File::getUid, userId);
+        wrapper.eq(File::getUid, userId)
+               .eq(File::getIsLatest, 1);
         return this.list(wrapper);
     }
 
@@ -303,7 +316,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
         // 所有用户（包括管理员）只能查询自己的文件
         // 管理员查看所有文件请使用 FileAdminService.getAllFiles()
-        wrapper.eq(File::getUid, userId);
+        wrapper.eq(File::getUid, userId)
+               .eq(File::getIsLatest, 1);
         this.page(page, wrapper);
     }
 
@@ -1046,5 +1060,67 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      * 分享访问上下文（包含分享拥有者与可选的数据库记录）
      */
     private record ShareAccessContext(Long ownerId, FileShare fileShare) {
+    }
+
+    @Override
+    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    public File createNewVersion(Long userId, Long parentFileId, String fileName, long fileSize, String contentType) {
+        // 校验父文件
+        File parentFile = this.getById(parentFileId);
+        if (parentFile == null) {
+            throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
+        }
+        if (!parentFile.getUid().equals(userId)) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
+        }
+        if (parentFile.getStatus() != FileUploadStatus.SUCCESS.getCode()) {
+            throw new GeneralException(ResultEnum.VERSION_SOURCE_INVALID);
+        }
+
+        Long versionGroupId = parentFile.getVersionGroupId() != null ? parentFile.getVersionGroupId() : parentFile.getId();
+        String lockKey = "file:version:" + versionGroupId;
+        RLock lock = redissonClient.getLock(lockKey);
+
+        try {
+            if (!lock.tryLock(5, 30, TimeUnit.SECONDS)) {
+                throw new GeneralException(ResultEnum.VERSION_CONFLICT);
+            }
+            try {
+                // 事务内操作
+                return doCreateNewVersion(userId, parentFile, versionGroupId, fileName, fileSize, contentType);
+            } finally {
+                if (lock.isHeldByCurrentThread()) {
+                    lock.unlock();
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new GeneralException(ResultEnum.VERSION_CONFLICT);
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    protected File doCreateNewVersion(Long userId, File parentFile, Long versionGroupId,
+                                       String fileName, long fileSize, String contentType) {
+        // 清除版本链中所有文件的 isLatest
+        baseMapper.clearLatestInChain(versionGroupId, parentFile.getTenantId());
+
+        // 创建新版本
+        Long newId = IdUtils.nextEntityId();
+        String fileParam = JsonConverter.toJson(Map.of("fileSize", Math.max(0L, fileSize), "contentType", contentType));
+        File newVersion = new File()
+                .setId(newId)
+                .setUid(userId)
+                .setTenantId(parentFile.getTenantId())
+                .setFileName(fileName)
+                .setFileParam(fileParam)
+                .setStatus(FileUploadStatus.PREPARE.getCode())
+                .setVersion(parentFile.getVersion() + 1)
+                .setParentVersionId(parentFile.getId())
+                .setIsLatest(1)
+                .setVersionGroupId(versionGroupId);
+        this.save(newVersion);
+
+        return newVersion;
     }
 }

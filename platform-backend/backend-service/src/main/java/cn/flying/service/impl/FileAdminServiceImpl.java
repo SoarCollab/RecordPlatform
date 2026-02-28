@@ -69,6 +69,7 @@ public class FileAdminServiceImpl implements FileAdminService {
 
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
                 .eq(File::getTenantId, tenantId)
+                .eq(File::getIsLatest, 1)
                 .orderByDesc(File::getCreateTime);
 
         // 关键词搜索
