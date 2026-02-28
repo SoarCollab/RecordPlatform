@@ -63,6 +63,26 @@ describe("upload endpoints", () => {
     });
   });
 
+  it("startUpload 在提供 fileId 时应透传参数", async () => {
+    clientMocks.api.post.mockResolvedValue({
+      clientId: "c2",
+      processedChunks: [],
+    });
+
+    await uploadApi.startUpload({
+      fileName: "report-v2.pdf",
+      fileSize: 2048,
+      contentType: "application/pdf",
+      totalChunks: 4,
+      chunkSize: 512,
+      fileId: "ext_file_id",
+    });
+
+    const [, body] = clientMocks.api.post.mock.calls[0];
+    const payload = paramsToObject(body as URLSearchParams);
+    expect(payload.fileId).toBe("ext_file_id");
+  });
+
   it("uploadChunk 应构建 FormData 并调用 PUT 新路径", async () => {
     clientMocks.api.put.mockResolvedValue(undefined);
     const blob = new Blob(["abc"], { type: "text/plain" });

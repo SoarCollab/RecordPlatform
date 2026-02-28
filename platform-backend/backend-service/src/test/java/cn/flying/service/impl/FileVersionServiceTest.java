@@ -22,6 +22,9 @@ import org.mockito.quality.Strictness;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.concurrent.TimeUnit;
 
@@ -46,6 +49,9 @@ class FileVersionServiceTest {
     @Mock
     private RLock rLock;
 
+    @Mock
+    private TransactionTemplate transactionTemplate;
+
     @InjectMocks
     private FileServiceImpl fileService;
 
@@ -63,6 +69,11 @@ class FileVersionServiceTest {
     void setUp() {
         FileTestBuilder.resetIdCounter();
         ReflectionTestUtils.setField(fileService, "baseMapper", fileMapper);
+        lenient().when(transactionTemplate.execute(any())).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            TransactionCallback<File> callback = invocation.getArgument(0);
+            return callback.doInTransaction(mock(TransactionStatus.class));
+        });
     }
 
     @Nested
@@ -183,6 +194,34 @@ class FileVersionServiceTest {
                     fileService.createNewVersion(USER_ID, 1L, "new.txt", 1024, "text/plain"));
 
             assertEquals(ResultEnum.VERSION_CONFLICT.getCode(), ex.getResultEnum().getCode());
+        }
+
+        @Test
+        @DisplayName("should throw VERSION_SOURCE_INVALID when parent is not latest")
+        void shouldThrowWhenParentIsNotLatest() throws Exception {
+            // Given
+            File parentFile = FileTestBuilder.aFile(f -> {
+                f.setId(1L);
+                f.setUid(USER_ID);
+                f.setTenantId(TENANT_ID);
+                f.setVersion(1);
+                f.setVersionGroupId(1L);
+                f.setStatus(FileUploadStatus.SUCCESS.getCode());
+                f.setIsLatest(0);
+            });
+
+            when(fileMapper.selectById(1L)).thenReturn(parentFile);
+            when(redissonClient.getLock(anyString())).thenReturn(rLock);
+            when(rLock.tryLock(anyLong(), anyLong(), any(TimeUnit.class))).thenReturn(true);
+            when(rLock.isHeldByCurrentThread()).thenReturn(true);
+
+            // When & Then
+            GeneralException ex = assertThrows(GeneralException.class, () ->
+                    fileService.createNewVersion(USER_ID, 1L, "new.txt", 1024, "text/plain"));
+
+            assertEquals(ResultEnum.VERSION_SOURCE_INVALID.getCode(), ex.getResultEnum().getCode());
+            verify(fileMapper, never()).clearLatestInChain(anyLong(), anyLong());
+            verify(fileMapper, never()).insert(any(File.class));
         }
     }
 }

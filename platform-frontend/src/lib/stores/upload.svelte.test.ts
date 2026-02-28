@@ -115,6 +115,20 @@ describe("upload store", () => {
     expect(upload.tasks.length).toBe(2);
   });
 
+  it("版本上传任务应将 targetFileId 透传到 startUpload", async () => {
+    const upload = await loadUploadStore();
+    await upload.addFile(createFile(1024), { targetFileId: "ext-version-id" });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mocks.startUpload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fileId: "ext-version-id",
+      }),
+    );
+  });
+
   it("startUpload 初始化失败时任务应进入 failed", async () => {
     mocks.startUpload.mockRejectedValue(new Error("start failed"));
 

@@ -172,6 +172,7 @@ export interface StartUploadRequest {
   contentType: string;
   chunkSize: number;
   totalChunks: number;
+  fileId?: string;
   fileHash?: string;
 }
 

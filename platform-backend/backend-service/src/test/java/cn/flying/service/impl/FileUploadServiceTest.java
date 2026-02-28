@@ -469,7 +469,7 @@ class FileUploadServiceTest {
             assertEquals(ResultEnum.QUOTA_EXCEEDED, ex.getResultEnum());
             verify(quotaLock).lock(60L, TimeUnit.SECONDS);
             verify(quotaService).checkUploadQuota(77L, USER_ID, 1024L);
-            verify(fileService, never()).prepareStoreFile(anyLong(), anyString(), anyLong());
+            verify(fileService, never()).prepareStoreFile(anyLong(), any(), anyString(), anyLong());
             verify(quotaLock).unlock();
         }
 
@@ -499,7 +499,39 @@ class FileUploadServiceTest {
             invokeReserveQuotaAndPrepareStoreFile(USER_ID, state);
 
             verify(quotaService).checkUploadQuota(77L, USER_ID, 2048L);
-            verify(fileService).prepareStoreFile(USER_ID, "prepare-once.bin", 2048L);
+            verify(fileService).prepareStoreFile(USER_ID, null, "prepare-once.bin", 2048L);
+            verify(redisStateManager).updateState(argThat(FileUploadState::isPrepareStored));
+            verify(quotaLock).unlock();
+        }
+
+        /**
+         * 验证版本上传场景会将 PREPARE 预占位绑定到目标 fileId。
+         */
+        @Test
+        @DisplayName("should bind prepare reserve to target file id")
+        void shouldBindPrepareReserveToTargetFileId() throws Exception {
+            FileUploadState state = new FileUploadState(
+                    USER_ID,
+                    "version-v2.bin",
+                    4096L,
+                    "application/octet-stream",
+                    "version-client",
+                    256,
+                    0,
+                    9527L
+            );
+            state.setTenantId(77L);
+            state.setPrepareStored(false);
+
+            when(redissonClient.getLock("distributed:lock:upload:quota:complete:tenant:77"))
+                    .thenReturn(quotaLock);
+            when(quotaLock.isHeldByCurrentThread()).thenReturn(true);
+            when(redisStateManager.getState("version-client")).thenReturn(state);
+
+            invokeReserveQuotaAndPrepareStoreFile(USER_ID, state);
+
+            verify(quotaService).checkUploadQuota(77L, USER_ID, 4096L);
+            verify(fileService).prepareStoreFile(USER_ID, 9527L, "version-v2.bin", 4096L);
             verify(redisStateManager).updateState(argThat(FileUploadState::isPrepareStored));
             verify(quotaLock).unlock();
         }
@@ -530,7 +562,7 @@ class FileUploadServiceTest {
             invokeReserveQuotaAndPrepareStoreFile(USER_ID, state);
 
             verify(quotaService, never()).checkUploadQuota(anyLong(), anyLong(), anyLong());
-            verify(fileService, never()).prepareStoreFile(anyLong(), anyString(), anyLong());
+            verify(fileService, never()).prepareStoreFile(anyLong(), any(), anyString(), anyLong());
             verify(redisStateManager, never()).updateState(any(FileUploadState.class));
             verify(quotaLock).unlock();
         }

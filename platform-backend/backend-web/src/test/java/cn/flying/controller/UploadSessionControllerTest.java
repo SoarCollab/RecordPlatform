@@ -57,13 +57,13 @@ class UploadSessionControllerTest {
         FileUploadStatusVO statusVO = new FileUploadStatusVO("f", 100L, clientId, false, "UPLOADING", 50, List.of(1), 1, 2);
         ProgressVO progressVO = new ProgressVO(50, 50, 0, 1, 0, 2, clientId, "uploading");
 
-        when(fileUploadService.startUpload(userId, "a.txt", 100L, "text/plain", null, 1024, 2)).thenReturn(startUploadVO);
+        when(fileUploadService.startUpload(userId, "a.txt", 100L, "text/plain", null, 1024, 2, null)).thenReturn(startUploadVO);
         when(fileUploadService.resumeUpload(userId, clientId)).thenReturn(resumeUploadVO);
         when(fileUploadService.checkFileStatus(userId, clientId)).thenReturn(statusVO);
         when(fileUploadService.getUploadProgress(userId, clientId)).thenReturn(progressVO);
         when(fileUploadService.cancelUpload(userId, clientId)).thenReturn(true);
 
-        Result<StartUploadVO> startResult = controller.createUploadSession(userId, "a.txt", 100L, "text/plain", null, 1024, 2);
+        Result<StartUploadVO> startResult = controller.createUploadSession(userId, "a.txt", 100L, "text/plain", null, 1024, 2, null);
         Result<String> uploadResult = controller.uploadChunk(
                 userId,
                 clientId,

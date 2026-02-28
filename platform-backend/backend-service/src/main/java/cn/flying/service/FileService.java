@@ -26,6 +26,17 @@ public interface FileService extends IService<File> {
      * @param fileSize 文件大小（字节），用于配额预占位
      */
     void prepareStoreFile(Long userId, String OriginFileName, long fileSize);
+
+    /**
+     * 在完成分片上传后预存储文件（支持绑定既有 PREPARE 记录）。
+     *
+     * @param userId 用户ID
+     * @param targetFileId 目标文件ID（为空时创建新 PREPARE；非空时复用该记录）
+     * @param originFileName 原始文件名
+     * @param fileSize 文件大小（字节），用于配额预占位
+     */
+    void prepareStoreFile(Long userId, Long targetFileId, String originFileName, long fileSize);
+
     /**
      * 存储文件
      * @param userId 用户ID
@@ -35,6 +46,19 @@ public interface FileService extends IService<File> {
      * @return
      */
     File storeFile(Long userId, String OriginFileName, List<java.io.File> fileList, List<String> fileHashList, String fileParam);
+
+    /**
+     * 存储文件（支持按目标 fileId 精确关联 PREPARE 记录）。
+     *
+     * @param userId 用户ID
+     * @param targetFileId 目标文件ID（为空时按 fileName 回溯 PREPARE）
+     * @param originFileName 原始文件名
+     * @param fileList 加密后的文件分片列表
+     * @param fileHashList 文件分片对应的哈希列表
+     * @param fileParam 文件参数(JSON)
+     * @return 已落库文件信息
+     */
+    File storeFile(Long userId, Long targetFileId, String originFileName, List<java.io.File> fileList, List<String> fileHashList, String fileParam);
 
     /**
      * 修改文件状态
@@ -51,6 +75,15 @@ public interface FileService extends IService<File> {
      * @param fileStatus
      */
     void changeFileStatusByHash(Long userId, String fileHash, Integer fileStatus);
+
+    /**
+     * 根据文件ID修改文件状态。
+     *
+     * @param userId 用户ID
+     * @param fileId 文件ID
+     * @param fileStatus 目标状态
+     */
+    void changeFileStatusById(Long userId, Long fileId, Integer fileStatus);
 
     /**
      * 批量删除文件

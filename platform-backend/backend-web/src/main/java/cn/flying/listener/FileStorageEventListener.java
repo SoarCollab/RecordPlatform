@@ -67,6 +67,7 @@ public class FileStorageEventListener {
             try {
                 File storedFile = fileService.storeFile(
                         event.getUid(),
+                        event.getFileId(),
                         event.getFileName(),
                         event.getProcessedFiles(),
                         event.getFileHashes(),
@@ -103,12 +104,21 @@ public class FileStorageEventListener {
      * @param reason 失败原因
      */
     private void handleStorageFailure(FileStorageEvent event, String reason) {
-        fileService.changeFileStatusByName(event.getUid(), event.getFileName(), FileUploadStatus.FAIL.getCode());
+        if (event.getFileId() != null) {
+            fileService.changeFileStatusById(event.getUid(), event.getFileId(), FileUploadStatus.FAIL.getCode());
+        } else {
+            fileService.changeFileStatusByName(event.getUid(), event.getFileName(), FileUploadStatus.FAIL.getCode());
+        }
 
         // 存证失败时清理Redis上传状态
         try {
-            redisStateManager.removeSessionByFileName(event.getUid(), event.getFileName());
-            log.info("存证失败，已清理Redis状态: 用户={}, 文件名={}", event.getUid(), event.getFileName());
+            if (CommonUtils.isNotEmpty(event.getClientId()) && CommonUtils.isNotEmpty(event.getSessionId())) {
+                redisStateManager.removeSession(event.getClientId(), event.getSessionId());
+            } else {
+                redisStateManager.removeSessionByFileName(event.getUid(), event.getFileName());
+            }
+            log.info("存证失败，已清理Redis状态: 用户={}, 文件名={}, fileId={}",
+                    event.getUid(), event.getFileName(), event.getFileId());
         } catch (Exception cleanupEx) {
             log.warn("存证失败时清理Redis状态异常: 用户={}, 文件名={}",
                     event.getUid(), event.getFileName(), cleanupEx);

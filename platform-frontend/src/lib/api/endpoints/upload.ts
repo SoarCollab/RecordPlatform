@@ -24,6 +24,9 @@ export async function startUpload(
   params.append("contentType", data.contentType);
   params.append("totalChunks", String(data.totalChunks));
   params.append("chunkSize", String(data.chunkSize));
+  if (data.fileId) {
+    params.append("fileId", data.fileId);
+  }
 
   return api.post<StartUploadVO>(BASE, params);
 }

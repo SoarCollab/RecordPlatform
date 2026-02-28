@@ -49,12 +49,14 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -89,20 +91,72 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     @Resource
     private RedissonClient redissonClient;
 
+    @Resource
+    private TransactionTemplate transactionTemplate;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void prepareStoreFile(Long userId, String OriginFileName, long fileSize) {
+        prepareStoreFile(userId, null, OriginFileName, fileSize);
+    }
+
+    /**
+     * 预存储文件元数据，支持复用既有 PREPARE 记录。
+     *
+     * @param userId 用户ID
+     * @param targetFileId 目标文件ID（为空时创建新 PREPARE）
+     * @param originFileName 原始文件名
+     * @param fileSize 文件大小
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void prepareStoreFile(Long userId, Long targetFileId, String originFileName, long fileSize) {
+        if (targetFileId != null) {
+            validatePreparedTargetFile(userId, targetFileId, originFileName, fileSize);
+            return;
+        }
+
         Long id = IdUtils.nextEntityId();
         File file = new File()
                 .setId(id)
                 .setUid(userId)
-                .setFileName(OriginFileName)
+                .setFileName(originFileName)
                 .setFileParam(buildPrepareFileParam(fileSize))
                 .setStatus(FileUploadStatus.PREPARE.getCode())
                 .setVersion(1)
                 .setIsLatest(1)
                 .setVersionGroupId(id);
         this.save(file);
+    }
+
+    /**
+     * 校验版本上传场景下绑定的 PREPARE 目标文件是否合法。
+     *
+     * @param userId 用户ID
+     * @param targetFileId 目标文件ID
+     * @param originFileName 原始文件名
+     * @param fileSize 文件大小
+     */
+    private void validatePreparedTargetFile(Long userId, Long targetFileId, String originFileName, long fileSize) {
+        File targetFile = this.getById(targetFileId);
+        if (targetFile == null) {
+            throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
+        }
+        if (!Objects.equals(targetFile.getUid(), userId)) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
+        }
+        if (!Objects.equals(targetFile.getStatus(), FileUploadStatus.PREPARE.getCode())) {
+            throw new GeneralException(ResultEnum.VERSION_SOURCE_INVALID, "目标版本状态不允许上传");
+        }
+        if (CommonUtils.isNotEmpty(originFileName) && !Objects.equals(targetFile.getFileName(), originFileName)) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "上传文件名与目标版本不一致");
+        }
+
+        Long targetFileSize = targetFile.getFileSize();
+        long resolvedSize = Math.max(0L, fileSize);
+        if (targetFileSize != null && targetFileSize > 0 && targetFileSize.longValue() != resolvedSize) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "上传文件大小与目标版本不一致");
+        }
     }
 
     /**
@@ -123,18 +177,29 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     @Override
     @CacheEvict(cacheNames = "userFiles", key = "#userId")
     public File storeFile(Long userId, String OriginFileName, List<java.io.File> fileList, List<String> fileHashList, String fileParam) {
+        return storeFile(userId, null, OriginFileName, fileList, fileHashList, fileParam);
+    }
+
+    /**
+     * 执行文件分片存储与上链，并将结果回写到目标 PREPARE 记录。
+     *
+     * @param userId 用户ID
+     * @param targetFileId 目标文件ID（为空时按 fileName 查找 PREPARE）
+     * @param originFileName 原始文件名
+     * @param fileList 分片文件列表
+     * @param fileHashList 分片哈希列表
+     * @param fileParam 文件参数
+     * @return 存储成功后的文件记录
+     */
+    @Override
+    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    public File storeFile(Long userId, Long targetFileId, String originFileName,
+                          List<java.io.File> fileList, List<String> fileHashList, String fileParam) {
         if (CommonUtils.isEmpty(fileList)) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "File list cannot be empty");
         }
 
-        LambdaQueryWrapper<File> fileQuery = new LambdaQueryWrapper<File>()
-                .eq(File::getUid, userId)
-                .eq(File::getFileName, OriginFileName)
-                .last("LIMIT 1");
-        File existingFile = this.getOne(fileQuery);
-        if (existingFile == null) {
-            throw new GeneralException(ResultEnum.FAIL, "File metadata not initialized for upload");
-        }
+        File existingFile = resolvePrepareFileForStore(userId, targetFileId, originFileName);
 
         String requestId = UUID.randomUUID().toString();
         FileUploadCommand cmd = FileUploadCommand.builder()
@@ -142,7 +207,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 .fileId(existingFile.getId())
                 .userId(userId)
                 .tenantId(existingFile.getTenantId())
-                .fileName(OriginFileName)
+                .fileName(existingFile.getFileName())
                 .fileParam(fileParam)
                 .fileList(fileList)
                 .fileHashList(fileHashList)
@@ -163,7 +228,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
         File file = new File()
                 .setUid(userId)
-                .setFileName(OriginFileName)
+                .setFileName(existingFile.getFileName())
                 .setFileHash(result.getFileHash())
                 .setTransactionHash(result.getTransactionHash())
                 .setFileParam(fileParam)
@@ -172,11 +237,43 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         boolean updated = this.update(file, wrapper);
         if (!updated) {
             log.warn("文件状态更新失败，可能已被其他操作修改: fileId={}, userId={}, fileName={}",
-                    existingFile.getId(), userId, OriginFileName);
+                    existingFile.getId(), userId, existingFile.getFileName());
             throw new GeneralException(ResultEnum.FAIL, "文件状态更新失败，请重试");
         }
 
         return file;
+    }
+
+    /**
+     * 解析并校验待回写的 PREPARE 记录。
+     *
+     * @param userId 用户ID
+     * @param targetFileId 指定目标文件ID（可为空）
+     * @param originFileName 文件名
+     * @return 匹配到的 PREPARE 记录
+     */
+    private File resolvePrepareFileForStore(Long userId, Long targetFileId, String originFileName) {
+        LambdaQueryWrapper<File> fileQuery = new LambdaQueryWrapper<File>()
+                .eq(File::getUid, userId)
+                .eq(File::getStatus, FileUploadStatus.PREPARE.getCode());
+
+        if (targetFileId != null) {
+            fileQuery.eq(File::getId, targetFileId);
+            if (CommonUtils.isNotEmpty(originFileName)) {
+                fileQuery.eq(File::getFileName, originFileName);
+            }
+        } else {
+            fileQuery.eq(File::getFileName, originFileName)
+                    .orderByDesc(File::getCreateTime)
+                    .orderByDesc(File::getId)
+                    .last("LIMIT 1");
+        }
+
+        File existingFile = this.getOne(fileQuery);
+        if (existingFile == null) {
+            throw new GeneralException(ResultEnum.FAIL, "File metadata not initialized for upload");
+        }
+        return existingFile;
     }
 
     @Override
@@ -201,6 +298,24 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         File file = new File()
                 .setStatus(fileStatus);
         this.update(file,wrapper);
+    }
+
+    /**
+     * 根据文件ID更新文件状态。
+     *
+     * @param userId 用户ID
+     * @param fileId 文件ID
+     * @param fileStatus 目标状态
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    public void changeFileStatusById(Long userId, Long fileId, Integer fileStatus) {
+        LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
+                .eq(File::getId, fileId)
+                .eq(File::getUid, userId);
+        File file = new File().setStatus(fileStatus);
+        this.update(file, wrapper);
     }
 
     @Override
@@ -1065,17 +1180,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     @Override
     @CacheEvict(cacheNames = "userFiles", key = "#userId")
     public File createNewVersion(Long userId, Long parentFileId, String fileName, long fileSize, String contentType) {
-        // 校验父文件
-        File parentFile = this.getById(parentFileId);
-        if (parentFile == null) {
-            throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
-        }
-        if (!parentFile.getUid().equals(userId)) {
-            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
-        }
-        if (parentFile.getStatus() != FileUploadStatus.SUCCESS.getCode()) {
-            throw new GeneralException(ResultEnum.VERSION_SOURCE_INVALID);
-        }
+        File parentFile = validateVersionSourceFile(userId, parentFileId);
 
         Long versionGroupId = parentFile.getVersionGroupId() != null ? parentFile.getVersionGroupId() : parentFile.getId();
         String lockKey = "file:version:" + versionGroupId;
@@ -1086,8 +1191,15 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 throw new GeneralException(ResultEnum.VERSION_CONFLICT);
             }
             try {
-                // 事务内操作
-                return doCreateNewVersion(userId, parentFile, versionGroupId, fileName, fileSize, contentType);
+                // 加锁后再次校验，防止并发下基于过期父版本创建新版本。
+                File latestParentFile = validateVersionSourceFile(userId, parentFileId);
+                File createdVersion = transactionTemplate.execute(
+                        status -> doCreateNewVersion(userId, latestParentFile, versionGroupId, fileName, fileSize, contentType)
+                );
+                if (createdVersion == null) {
+                    throw new GeneralException(ResultEnum.FAIL, "创建新版本失败");
+                }
+                return createdVersion;
             } finally {
                 if (lock.isHeldByCurrentThread()) {
                     lock.unlock();
@@ -1099,7 +1211,42 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         }
     }
 
-    @Transactional(rollbackFor = Exception.class)
+    /**
+     * 校验父版本文件是否允许创建新版本。
+     * 仅允许文件所有者基于 SUCCESS 且 is_latest=1 的记录创建新版本。
+     *
+     * @param userId 用户ID
+     * @param parentFileId 父版本文件ID
+     * @return 校验通过的父版本文件
+     */
+    private File validateVersionSourceFile(Long userId, Long parentFileId) {
+        File parentFile = this.getById(parentFileId);
+        if (parentFile == null) {
+            throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
+        }
+        if (!parentFile.getUid().equals(userId)) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
+        }
+        if (parentFile.getStatus() != FileUploadStatus.SUCCESS.getCode()) {
+            throw new GeneralException(ResultEnum.VERSION_SOURCE_INVALID);
+        }
+        if (parentFile.getIsLatest() != null && parentFile.getIsLatest() != 1) {
+            throw new GeneralException(ResultEnum.VERSION_SOURCE_INVALID, "只能基于最新版本创建新版本");
+        }
+        return parentFile;
+    }
+
+    /**
+     * 在事务内写入新版本记录，并将版本链中旧记录的 is_latest 置为 0。
+     *
+     * @param userId 用户ID
+     * @param parentFile 父版本文件
+     * @param versionGroupId 版本链分组ID
+     * @param fileName 新版本文件名
+     * @param fileSize 新版本文件大小
+     * @param contentType 新版本文件类型
+     * @return 新创建的版本记录
+     */
     protected File doCreateNewVersion(Long userId, File parentFile, Long versionGroupId,
                                        String fileName, long fileSize, String contentType) {
         // 清除版本链中所有文件的 isLatest
@@ -1108,6 +1255,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         // 创建新版本
         Long newId = IdUtils.nextEntityId();
         String fileParam = JsonConverter.toJson(Map.of("fileSize", Math.max(0L, fileSize), "contentType", contentType));
+        int parentVersion = parentFile.getVersion() != null ? parentFile.getVersion() : 1;
         File newVersion = new File()
                 .setId(newId)
                 .setUid(userId)
@@ -1115,7 +1263,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 .setFileName(fileName)
                 .setFileParam(fileParam)
                 .setStatus(FileUploadStatus.PREPARE.getCode())
-                .setVersion(parentFile.getVersion() + 1)
+                .setVersion(parentVersion + 1)
                 .setParentVersionId(parentFile.getId())
                 .setIsLatest(1)
                 .setVersionGroupId(versionGroupId);

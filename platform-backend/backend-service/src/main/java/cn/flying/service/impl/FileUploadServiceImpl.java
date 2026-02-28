@@ -306,7 +306,27 @@ public class FileUploadServiceImpl implements FileUploadService {
      * @throws GeneralException IO 操作失败
      */
     @Override
-    public StartUploadVO startUpload(Long userId, String fileName, long fileSize, String contentType, String clientId, int chunkSize, int totalChunks) {
+    public StartUploadVO startUpload(Long userId, String fileName, long fileSize, String contentType,
+                                     String clientId, int chunkSize, int totalChunks) {
+        return startUpload(userId, fileName, fileSize, contentType, clientId, chunkSize, totalChunks, null);
+    }
+
+    /**
+     * 处理开始上传请求（支持绑定目标文件ID）。
+     *
+     * @param userId 用户ID
+     * @param fileName 文件名
+     * @param fileSize 文件大小
+     * @param contentType 文件类型
+     * @param clientId 客户端ID
+     * @param chunkSize 分片大小
+     * @param totalChunks 分片总数
+     * @param targetFileId 目标文件ID（版本上传场景可选）
+     * @return 上传会话信息
+     */
+    @Override
+    public StartUploadVO startUpload(Long userId, String fileName, long fileSize, String contentType,
+                                     String clientId, int chunkSize, int totalChunks, Long targetFileId) {
 
         //获取加密后的uid，防止数据泄漏
         String uidStr = String.valueOf(userId);
@@ -330,6 +350,7 @@ public class FileUploadServiceImpl implements FileUploadService {
         if (!isFileTypeAllowed(fileName, contentType)) {
             throw new GeneralException("不支持的文件类型");
         }
+        validateUploadTargetFile(userId, fileName, fileSize, targetFileId);
 
         boolean hasProvidedClientId = !CommonUtils.isBlank(clientId);
 
@@ -340,6 +361,9 @@ public class FileUploadServiceImpl implements FileUploadService {
                 validateUploadOwnership(userId, existingByClientId, clientId);
                 if (!Objects.equals(existingByClientId.getFileName(), fileName) || existingByClientId.getFileSize() != fileSize) {
                     throw new GeneralException("客户端ID与上传会话不匹配");
+                }
+                if (!isSessionTargetMatched(existingByClientId, targetFileId)) {
+                    throw new GeneralException(ResultEnum.PARAM_ERROR, "客户端ID与上传目标不匹配");
                 }
 
                 log.info("发现可恢复的上传会话(显式 clientId): 客户端ID={}, 文件客户端键={}", clientId, fileClientKey);
@@ -360,15 +384,21 @@ public class FileUploadServiceImpl implements FileUploadService {
                         existingState = null;
                     }
                 }
-                if (existingState != null && existingState.getFileSize() == fileSize) {
+                if (existingState != null && existingState.getFileSize() == fileSize
+                        && isSessionTargetMatched(existingState, targetFileId)) {
                     log.info("发现可恢复的上传会话: 客户端ID={}, 文件客户端键={}", existClientId, fileClientKey);
                     redisStateManager.removePausedSession(existClientId); // 恢复会话（如果之前暂停了）
                     redisStateManager.updateLastActivityTime(existClientId);
                     // 返回恢复成功的 DTO
                     return createResumeDto(existingState);
                 } else {
-                    log.warn("发现旧会话但无法恢复 (状态丢失或文件大小不匹配): 旧客户端ID={}, 文件客户端键={}", existClientId, fileClientKey);
-                    if (existingState != null) {
+                    if (existingState != null && existingState.getFileSize() == fileSize
+                            && !isSessionTargetMatched(existingState, targetFileId)) {
+                        log.info("发现旧会话但目标文件不匹配，跳过恢复: 旧客户端ID={}, 文件客户端键={}", existClientId, fileClientKey);
+                    } else {
+                        log.warn("发现旧会话但无法恢复 (状态丢失或文件大小不匹配): 旧客户端ID={}, 文件客户端键={}", existClientId, fileClientKey);
+                    }
+                    if (existingState != null && existingState.getFileSize() != fileSize) {
                         cleanupUploadSessionInternal(SUID, existClientId); // 主动清理旧状态
                     }
                 }
@@ -386,7 +416,9 @@ public class FileUploadServiceImpl implements FileUploadService {
 
         // --- 创建新会话 ---
         try {
-            FileUploadState newState = new FileUploadState(userId, fileName, fileSize, contentType, clientId, chunkSize, totalChunks);
+            FileUploadState newState = new FileUploadState(
+                    userId, fileName, fileSize, contentType, clientId, chunkSize, totalChunks, targetFileId
+            );
             newState.setTenantId(tenantId);
             redisStateManager.saveNewState(newState, SUID);
 
@@ -403,6 +435,63 @@ public class FileUploadServiceImpl implements FileUploadService {
             // 包装成自定义异常，方便 Controller 统一处理
             throw new GeneralException("创建上传会话失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * 校验版本上传场景中绑定的目标文件是否合法。
+     *
+     * @param userId 用户ID
+     * @param fileName 上传文件名
+     * @param fileSize 上传文件大小
+     * @param targetFileId 目标文件ID
+     */
+    private void validateUploadTargetFile(Long userId, String fileName, long fileSize, Long targetFileId) {
+        if (targetFileId == null) {
+            return;
+        }
+        cn.flying.dao.dto.File targetFile = fileService.getById(targetFileId);
+        if (targetFile == null) {
+            throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
+        }
+        if (!Objects.equals(targetFile.getUid(), userId)) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
+        }
+        if (!Objects.equals(targetFile.getStatus(), FileUploadStatus.PREPARE.getCode())) {
+            throw new GeneralException(ResultEnum.VERSION_SOURCE_INVALID, "目标版本状态不允许上传");
+        }
+        if (!Objects.equals(targetFile.getFileName(), fileName)) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "上传文件名与目标版本不一致");
+        }
+
+        Long targetFileSize = targetFile.getFileSize();
+        if (targetFileSize != null && targetFileSize > 0 && targetFileSize.longValue() != fileSize) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "上传文件大小与目标版本不一致");
+        }
+    }
+
+    /**
+     * 判断上传会话绑定的目标文件是否与当前请求一致。
+     *
+     * @param state 上传会话状态
+     * @param targetFileId 请求中目标文件ID
+     * @return 是否一致
+     */
+    private boolean isSessionTargetMatched(FileUploadState state, Long targetFileId) {
+        return Objects.equals(state.getTargetFileId(), targetFileId);
+    }
+
+    /**
+     * 将上传目标文件回写为失败状态。
+     *
+     * @param userId 用户ID
+     * @param state 上传会话状态
+     */
+    private void markUploadTargetFailed(Long userId, FileUploadState state) {
+        if (state.getTargetFileId() != null) {
+            fileService.changeFileStatusById(userId, state.getTargetFileId(), FileUploadStatus.FAIL.getCode());
+            return;
+        }
+        fileService.changeFileStatusByName(userId, state.getFileName(), FileUploadStatus.FAIL.getCode());
     }
 
     /**
@@ -631,7 +720,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             if (processedFiles == null) {
                 log.error("收集处理后的文件失败，无法继续存证流程: 客户端ID={}, 文件名={}", clientId, state.getFileName());
                 // 更新文件状态为失败
-                fileService.changeFileStatusByName(userId, state.getFileName(), FileUploadStatus.FAIL.getCode());
+                markUploadTargetFailed(userId, state);
                 // 清理Redis状态
                 redisStateManager.removeSession(state.getClientId(), SUID);
                 throw new GeneralException("收集处理后的文件失败，文件存证中止");
@@ -641,7 +730,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             if (fileHashes == null) {
                 log.error("收集文件哈希值失败，无法继续存证流程: 客户端ID={}, 文件名={}", clientId, state.getFileName());
                 // 更新文件状态为失败
-                fileService.changeFileStatusByName(userId, state.getFileName(), FileUploadStatus.FAIL.getCode());
+                markUploadTargetFailed(userId, state);
                 // 清理Redis状态
                 redisStateManager.removeSession(state.getClientId(), SUID);
                 throw new GeneralException("收集文件哈希值失败，文件存证中止");
@@ -652,7 +741,7 @@ public class FileUploadServiceImpl implements FileUploadService {
                 log.error("处理后的文件数量({})与哈希值数量({})不匹配: 客户端ID={}, 文件名={}",
                         processedFiles.size(), fileHashes.size(), clientId, state.getFileName());
                 // 更新文件状态为失败
-                fileService.changeFileStatusByName(userId, state.getFileName(), FileUploadStatus.FAIL.getCode());
+                markUploadTargetFailed(userId, state);
                 // 清理Redis状态
                 redisStateManager.removeSession(state.getClientId(), SUID);
                 throw new GeneralException("文件数量与哈希数量不匹配，文件存证中止");
@@ -667,6 +756,7 @@ public class FileUploadServiceImpl implements FileUploadService {
                         this,
                         state.getTenantId(),
                         userId,
+                        state.getTargetFileId(),
                         state.getFileName(),
                         SUID,
                         state.getClientId(),
@@ -687,7 +777,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             } else {
                 log.error("事件发布器未初始化，无法发送文件存证事件: 客户端ID={}, 文件名={}", clientId, state.getFileName());
                 // 更新文件状态为失败
-                fileService.changeFileStatusByName(userId, state.getFileName(), FileUploadStatus.FAIL.getCode());
+                markUploadTargetFailed(userId, state);
                 // 事件发布器未初始化时也清理Redis状态
                 redisStateManager.removeSession(state.getClientId(), SUID);
                 throw new GeneralException("事件发布器未初始化，文件存证中止");
@@ -739,7 +829,12 @@ public class FileUploadServiceImpl implements FileUploadService {
             }
 
             quotaService.checkUploadQuota(tenantId, userId, latestState.getFileSize());
-            fileService.prepareStoreFile(userId, latestState.getFileName(), latestState.getFileSize());
+            fileService.prepareStoreFile(
+                    userId,
+                    latestState.getTargetFileId(),
+                    latestState.getFileName(),
+                    latestState.getFileSize()
+            );
             latestState.setPrepareStored(true);
             redisStateManager.updateState(latestState);
         } finally {
