@@ -1,5 +1,6 @@
 package cn.flying.test.controller;
 
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.mapper.FileMapper;
@@ -130,6 +131,8 @@ class FileVersionIntegrationTest extends BaseControllerIntegrationTest {
                     .andReturn();
 
             // Verify is_latest was flipped in DB
+            // MockMvc request clears TenantContext via TenantFilter; restore it for direct mapper calls
+            TenantContext.setTenantId(testTenantId);
             File reloadedV1 = fileMapper.selectById(v1.getId());
             org.junit.jupiter.api.Assertions.assertEquals(0, reloadedV1.getIsLatest());
         }
