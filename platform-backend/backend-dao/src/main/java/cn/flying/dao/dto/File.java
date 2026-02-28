@@ -80,6 +80,18 @@ public class File implements Serializable {
     @Schema(description = "逻辑删除字段：0—>未删除 , 1->已删除")
     private Integer deleted;
 
+    @Schema(description = "版本号，从 1 开始")
+    private Integer version;
+
+    @Schema(description = "上一版本文件ID")
+    private Long parentVersionId;
+
+    @Schema(description = "是否最新版本：1=是，0=否")
+    private Integer isLatest;
+
+    @Schema(description = "版本链分组ID")
+    private Long versionGroupId;
+
     @TableField(fill = FieldFill.INSERT)
     @Schema(description = "创建时间")
     private Date createTime;

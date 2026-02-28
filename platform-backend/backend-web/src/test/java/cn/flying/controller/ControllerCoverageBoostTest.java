@@ -95,6 +95,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -411,7 +412,7 @@ class ControllerCoverageBoostTest {
         assertEquals(7, ticketController.getUnreadCount(1L).getData().get("count"));
 
         StartUploadVO startUploadVO = new StartUploadVO("client-1", 1024, 4, false, List.of(1), List.of(1), false);
-        when(fileUploadService.startUpload(eq(1L), eq("file.txt"), eq(2048L), eq("text/plain"), eq("client-1"), eq(1024), eq(4)))
+        when(fileUploadService.startUpload(eq(1L), eq("file.txt"), eq(2048L), eq("text/plain"), eq("client-1"), eq(1024), eq(4), isNull()))
                 .thenReturn(startUploadVO);
         assertEquals(ResultEnum.SUCCESS.getCode(), uploadSessionController.createUploadSession(
                 1L,
@@ -420,7 +421,8 @@ class ControllerCoverageBoostTest {
                 "text/plain",
                 "client-1",
                 1024,
-                4
+                4,
+                null
         ).getCode());
 
         MockMultipartFile chunk = new MockMultipartFile("file", "chunk.bin", "application/octet-stream", "abc".getBytes());

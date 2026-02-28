@@ -58,6 +58,7 @@ class FileStorageEventListenerTest {
                 this,
                 1L,
                 100L,
+                9527L,
                 "contract.pdf",
                 "session-1",
                 "client-1",
@@ -72,7 +73,7 @@ class FileStorageEventListenerTest {
     void successPathShouldSendFileRecordSuccessEvent() {
         File storedFile = new File();
         storedFile.setFileHash("hash-1");
-        when(fileService.storeFile(anyLong(), anyString(), anyList(), anyList(), anyString())).thenReturn(storedFile);
+        when(fileService.storeFile(anyLong(), any(Long.class), anyString(), anyList(), anyList(), anyString())).thenReturn(storedFile);
 
         listener.handleFileStorageEvent(buildEvent());
 
@@ -80,23 +81,24 @@ class FileStorageEventListenerTest {
         verify(sseEmitterManager, times(1)).sendToUser(eq(1L), eq(100L), eventCaptor.capture());
         assertThat(eventCaptor.getValue().getType()).isEqualTo("file-record-success");
         verify(fileService, never()).changeFileStatusByName(anyLong(), anyString(), anyInt());
+        verify(fileService, never()).changeFileStatusById(anyLong(), anyLong(), anyInt());
+        verify(fileService, never()).markFileUploadFailed(anyLong(), anyLong());
+        verify(redisStateManager, never()).removeSession(anyString(), anyString());
         verify(redisStateManager, never()).removeSessionByFileName(anyLong(), anyString());
     }
 
     @Test
     @DisplayName("failure path should send file-record-failed and keep cleanup behavior")
     void failurePathShouldSendFileRecordFailedAndKeepCleanupBehavior() {
-        when(fileService.storeFile(anyLong(), anyString(), anyList(), anyList(), anyString()))
+        when(fileService.storeFile(anyLong(), any(Long.class), anyString(), anyList(), anyList(), anyString()))
                 .thenThrow(new RuntimeException("chain write failed"));
 
         listener.handleFileStorageEvent(buildEvent());
 
-        verify(fileService, times(1)).changeFileStatusByName(
-                100L,
-                "contract.pdf",
-                FileUploadStatus.FAIL.getCode()
-        );
-        verify(redisStateManager, times(1)).removeSessionByFileName(100L, "contract.pdf");
+        verify(fileService, times(1)).markFileUploadFailed(100L, 9527L);
+        verify(fileService, never()).changeFileStatusById(anyLong(), anyLong(), eq(FileUploadStatus.FAIL.getCode()));
+        verify(redisStateManager, times(1)).removeSession("client-1", "session-1");
+        verify(redisStateManager, never()).removeSessionByFileName(anyLong(), anyString());
 
         ArgumentCaptor<SseEvent> eventCaptor = ArgumentCaptor.forClass(SseEvent.class);
         verify(sseEmitterManager, times(1)).sendToUser(eq(1L), eq(100L), eventCaptor.capture());

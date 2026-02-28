@@ -5,8 +5,10 @@ import cn.flying.common.constant.Result;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.File;
+import cn.flying.dao.vo.file.CreateVersionVO;
 import cn.flying.dao.vo.file.FileProvenanceVO;
 import cn.flying.dao.vo.file.FileShareVO;
+import cn.flying.dao.vo.file.FileVersionVO;
 import cn.flying.dao.vo.file.ShareAccessLogVO;
 import cn.flying.dao.vo.file.ShareAccessStatsVO;
 import cn.flying.dao.vo.file.UserFileStatsVO;
@@ -20,17 +22,21 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 文件操作相关接口。
@@ -208,5 +214,49 @@ public class FileController {
         Long fileId = IdUtils.fromExternalId(id);
         FileProvenanceVO provenance = shareAuditService.getFileProvenance(fileId);
         return Result.success(provenance);
+    }
+
+    /**
+     * 获取文件版本历史。
+     *
+     * @param userId 用户 ID
+     * @param id     文件外部 ID（版本链中任意一个文件）
+     * @return 版本历史列表
+     */
+    @GetMapping("/{id}/versions")
+    @Operation(summary = "获取文件版本历史")
+    @OperationLog(module = "文件操作", operationType = "查询", description = "获取文件版本历史")
+    public Result<List<FileVersionVO>> getFileVersionHistory(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Parameter(description = "文件ID") @PathVariable String id) {
+        Long fileId = IdUtils.fromExternalId(id);
+        List<FileVersionVO> versions = fileQueryService.getFileVersionHistory(userId, fileId);
+        return Result.success(versions);
+    }
+
+    /**
+     * 创建文件新版本。
+     * 返回 PREPARE 状态的新文件，客户端拿 fileId 走现有上传流程。
+     *
+     * @param userId 用户 ID
+     * @param id     父版本文件外部 ID
+     * @param vo     创建参数
+     * @return 新版本信息（fileId、version、versionGroupId 均为外部 ID）
+     */
+    @PostMapping("/{id}/versions")
+    @Operation(summary = "创建文件新版本")
+    @OperationLog(module = "文件操作", operationType = "新增", description = "创建文件新版本")
+    public Result<Map<String, Object>> createNewVersion(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Parameter(description = "父版本文件ID") @PathVariable String id,
+            @Valid @RequestBody CreateVersionVO vo) {
+        Long parentFileId = IdUtils.fromExternalId(id);
+        File newVersion = fileService.createNewVersion(userId, parentFileId, vo.fileName(), vo.fileSize(), vo.contentType());
+        Map<String, Object> result = Map.of(
+                "fileId", IdUtils.toExternalId(newVersion.getId()),
+                "version", newVersion.getVersion(),
+                "versionGroupId", IdUtils.toExternalId(newVersion.getVersionGroupId())
+        );
+        return Result.success(result);
     }
 }

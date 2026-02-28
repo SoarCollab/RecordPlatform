@@ -1,13 +1,16 @@
 package cn.flying.service.impl;
 
+import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
+import cn.flying.dao.vo.file.FileVersionVO;
 import cn.flying.service.FriendFileShareService;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.test.builders.AccountTestBuilder;
@@ -555,6 +558,156 @@ class FileQueryServiceTest {
 
                 assertEquals(ResultEnum.FAIL.getCode(), ex.getResultEnum().getCode());
             }
+        }
+    }
+
+    // ================== File Version History Tests ==================
+
+    @Nested
+    @DisplayName("File Version History")
+    class FileVersionHistory {
+
+        @Test
+        @DisplayName("owner should view version history")
+        void ownerShouldViewVersionHistory() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class);
+                 MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                // Given
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                idUtilsMock.when(() -> IdUtils.toExternalId(any())).thenReturn("ext_id");
+
+                Long versionGroupId = 10L;
+                File file = FileTestBuilder.aFile(f -> {
+                    f.setId(FILE_ID);
+                    f.setUid(USER_ID);
+                    f.setTenantId(1L);
+                    f.setVersionGroupId(versionGroupId);
+                    f.setVersion(2);
+                    f.setIsLatest(1);
+                });
+
+                File v1 = FileTestBuilder.aFile(f -> {
+                    f.setId(2L);
+                    f.setUid(USER_ID);
+                    f.setTenantId(1L);
+                    f.setVersionGroupId(versionGroupId);
+                    f.setVersion(1);
+                    f.setIsLatest(0);
+                    f.setFileName("v1.txt");
+                    f.setStatus(FileUploadStatus.SUCCESS.getCode());
+                });
+
+                when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+                when(fileMapper.selectVersionChain(versionGroupId, 1L)).thenReturn(List.of(file, v1));
+
+                // When
+                List<FileVersionVO> result = fileQueryService.getFileVersionHistory(USER_ID, FILE_ID);
+
+                // Then
+                assertNotNull(result);
+                assertEquals(2, result.size());
+                assertEquals(2, result.get(0).version());
+                assertEquals(1, result.get(1).version());
+            }
+        }
+
+        @Test
+        @DisplayName("admin should view any user's version history")
+        void adminShouldViewAnyVersionHistory() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class);
+                 MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                // Given
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(true);
+                idUtilsMock.when(() -> IdUtils.toExternalId(any())).thenReturn("ext_id");
+
+                Long versionGroupId = 10L;
+                File file = FileTestBuilder.aFile(f -> {
+                    f.setId(FILE_ID);
+                    f.setUid(OTHER_USER_ID); // Different user
+                    f.setTenantId(1L);
+                    f.setVersionGroupId(versionGroupId);
+                    f.setVersion(1);
+                    f.setIsLatest(1);
+                });
+
+                when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+                when(fileMapper.selectVersionChain(versionGroupId, 1L)).thenReturn(List.of(file));
+
+                // When
+                List<FileVersionVO> result = fileQueryService.getFileVersionHistory(USER_ID, FILE_ID);
+
+                // Then
+                assertNotNull(result);
+                assertEquals(1, result.size());
+            }
+        }
+
+        @Test
+        @DisplayName("non-owner non-admin should be rejected")
+        void nonOwnerNonAdminShouldBeRejected() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                // Given
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+
+                File file = FileTestBuilder.aFile(f -> {
+                    f.setId(FILE_ID);
+                    f.setUid(OTHER_USER_ID); // Different user
+                    f.setVersionGroupId(10L);
+                });
+
+                when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+
+                // When & Then
+                GeneralException ex = assertThrows(GeneralException.class, () ->
+                        fileQueryService.getFileVersionHistory(USER_ID, FILE_ID));
+
+                assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), ex.getResultEnum().getCode());
+            }
+        }
+
+        @Test
+        @DisplayName("legacy file without versionGroupId should return single entry")
+        void legacyFileShouldReturnSingleEntry() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class);
+                 MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                // Given
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                idUtilsMock.when(() -> IdUtils.toExternalId(any())).thenReturn("ext_id");
+
+                File file = FileTestBuilder.aFile(f -> {
+                    f.setId(FILE_ID);
+                    f.setUid(USER_ID);
+                    f.setVersionGroupId(null); // Legacy file
+                    f.setVersion(null);
+                    f.setIsLatest(null);
+                });
+
+                when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+
+                // When
+                List<FileVersionVO> result = fileQueryService.getFileVersionHistory(USER_ID, FILE_ID);
+
+                // Then
+                assertNotNull(result);
+                assertEquals(1, result.size());
+                assertEquals(1, result.get(0).version()); // Default to 1
+                assertEquals(1, result.get(0).isLatest()); // Default to 1
+                // Should not call selectVersionChain
+                verify(fileMapper, never()).selectVersionChain(any(), any());
+            }
+        }
+
+        @Test
+        @DisplayName("should throw FILE_NOT_EXIST when file not found")
+        void shouldThrowWhenFileNotFound() {
+            // Given
+            when(fileMapper.selectById(999L)).thenReturn(null);
+
+            // When & Then
+            GeneralException ex = assertThrows(GeneralException.class, () ->
+                    fileQueryService.getFileVersionHistory(USER_ID, 999L));
+
+            assertEquals(ResultEnum.FILE_NOT_EXIST.getCode(), ex.getResultEnum().getCode());
         }
     }
 }
