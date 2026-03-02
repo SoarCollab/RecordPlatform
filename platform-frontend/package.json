@@ -27,7 +27,7 @@
     "@tailwindcss/vite": "^4.2.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/svelte": "^5.2.7",
-    "@types/node": "^22.10.1",
+    "@types/node": "^25.3.3",
     "@vitest/coverage-v8": "^2.1.8",
     "bits-ui": "^2.16.2",
     "eslint": "^9.39.2",
