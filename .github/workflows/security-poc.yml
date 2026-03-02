@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  security-events: write
 
 jobs:
   semgrep-sast:
@@ -58,6 +59,13 @@ jobs:
             "durationSeconds": ${DURATION_SECONDS}
           }
           EOF
+
+      - name: Upload Semgrep SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: security-artifacts/semgrep/semgrep.sarif
+          category: semgrep
 
       - name: Upload Semgrep Artifacts
         uses: actions/upload-artifact@v4
@@ -129,6 +137,13 @@ jobs:
             "durationSeconds": ${DURATION_SECONDS}
           }
           EOF
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: security-artifacts/trivy/trivy.sarif
+          category: trivy-sca
 
       - name: Upload Trivy Artifacts
         uses: actions/upload-artifact@v4
