@@ -71,7 +71,7 @@ jobs:
         run: mvn -f platform-storage/pom.xml test
 
       - name: Upload Backend OpenAPI Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: backend-openapi
@@ -185,7 +185,7 @@ jobs:
           shasum -a 256 platform-frontend/src/lib/api/types/generated.ts | awk '{print $1}' > contract-fingerprint/generated-ts.sha256
 
       - name: Upload Contract Fingerprints
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: contract-fingerprint
