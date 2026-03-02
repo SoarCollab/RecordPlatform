@@ -21,7 +21,7 @@
         <prometheus.version>0.16.0</prometheus.version>
         <aws.sdk.version>2.42.4</aws.sdk.version>
         <hutool.version>5.8.43</hutool.version>
-        <redisson.version>3.35.0</redisson.version>
+        <redisson.version>4.3.0</redisson.version>
         <spring-cloud-alibaba-dependencies.version>2023.0.3.2</spring-cloud-alibaba-dependencies.version>
         <logstash.logback.version>7.4</logstash.logback.version>
         <skywalking.toolkit.version>9.6.0</skywalking.toolkit.version>
