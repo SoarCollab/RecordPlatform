@@ -199,6 +199,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
       - name: Run Trivy vulnerability scan
@@ -211,6 +212,25 @@ jobs:
           ignore-unfixed: true
           vuln-type: os,library
           exit-code: '0'
+
+      - name: Run Trivy SARIF output
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-pr.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          vuln-type: os,library
+          exit-code: '0'
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-pr.sarif
+          category: trivy-pr
 
   build-check:
     name: Build Verification
