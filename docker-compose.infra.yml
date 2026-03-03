@@ -1,0 +1,138 @@
+# ==============================================================================
+# RecordPlatform Infrastructure Services
+# ==============================================================================
+#
+# Usage:
+#   cp .env.example .env   # edit credentials as needed
+#   docker compose -f docker-compose.infra.yml up -d
+#   docker compose -f docker-compose.infra.yml up -d --wait  # wait for healthy
+#
+# Included: Nacos, MySQL, Redis, RabbitMQ, MinIO (x2)
+# NOT included: FISCO BCOS (requires native node setup, see docs)
+#
+# ==============================================================================
+
+services:
+  nacos:
+    image: nacos/nacos-server:v2.3.0
+    container_name: nacos
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    environment:
+      - MODE=standalone
+      - NACOS_AUTH_ENABLE=true
+      - NACOS_AUTH_TOKEN=${NACOS_AUTH_TOKEN:-c2VjcmV0VG9rZW5Gb3JSZWNvcmRQbGF0Zm9ybQ==}
+      - NACOS_AUTH_IDENTITY_KEY=serverIdentity
+      - NACOS_AUTH_IDENTITY_VALUE=security
+    volumes:
+      - nacos_data:/home/nacos/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8848/nacos/v1/console/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD:-recordplatform}
+      - MYSQL_DATABASE=RecordPlatform
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${DB_PASSWORD:-recordplatform}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redis123}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis123}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USERNAME:-rabbitmq}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-rabbitmq}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  minio-a:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    container_name: minio-a
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=${S3_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:-minioadmin}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_a_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  minio-b:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    container_name: minio-b
+    ports:
+      - "9010:9000"
+      - "9011:9001"
+    environment:
+      - MINIO_ROOT_USER=${S3_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:-minioadmin}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_b_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  nacos_data:
+  mysql_data:
+  redis_data:
+  rabbitmq_data:
+  minio_a_data:
+  minio_b_data:
