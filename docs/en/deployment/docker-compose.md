@@ -13,8 +13,6 @@ Deploy RecordPlatform using Docker Compose.
 Create `docker-compose.infra.yml`:
 
 ```yaml
-version: '3.8'
-
 services:
   nacos:
     image: nacos/nacos-server:v2.3.0
@@ -28,6 +26,12 @@ services:
       - NACOS_AUTH_TOKEN=your-secret-token
     volumes:
       - nacos_data:/home/nacos/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8848/nacos/v1/console/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   mysql:
@@ -41,6 +45,12 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${DB_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     restart: unless-stopped
 
   redis:
@@ -51,6 +61,12 @@ services:
     command: redis-server --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
     restart: unless-stopped
 
   rabbitmq:
@@ -64,10 +80,16 @@ services:
       - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   minio-a:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
     container_name: minio-a
     ports:
       - "9000:9000"
@@ -78,10 +100,16 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - minio_a_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   minio-b:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
     container_name: minio-b
     ports:
       - "9010:9000"
@@ -92,6 +120,12 @@ services:
     command: server /data --console-address ":9001"
     volumes:
       - minio_b_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
 volumes:
@@ -112,8 +146,6 @@ In Docker environments, Dubbo provider services (storage, fisco) must register w
 :::
 
 ```yaml
-version: '3.8'
-
 services:
   storage:
     build:

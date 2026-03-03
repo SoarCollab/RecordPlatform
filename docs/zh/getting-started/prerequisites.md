@@ -37,7 +37,7 @@ mvn -version
 
 ### Node.js（前端开发）
 
-- **要求**: Node.js 18+ 和 pnpm
+- **要求**: Node.js 20+ 和 pnpm
 
 ```bash
 # 验证 Node.js
@@ -53,7 +53,6 @@ npm install -g pnpm
 
 ```yaml
 # docker-compose.yml（仅基础设施）
-version: '3.8'
 services:
   nacos:
     image: nacos/nacos-server:v2.3.0
@@ -81,11 +80,21 @@ services:
       - "5672:5672"
       - "15672:15672"
 
-  minio:
-    image: minio/minio:latest
+  minio-a:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
     ports:
       - "9000:9000"
       - "9001:9001"
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+
+  minio-b:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    ports:
+      - "9010:9000"
+      - "9011:9001"
     command: server /data --console-address ":9001"
     environment:
       - MINIO_ROOT_USER=minioadmin
