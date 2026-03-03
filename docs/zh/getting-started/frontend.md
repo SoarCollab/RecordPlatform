@@ -18,7 +18,7 @@
 
 ### 前置条件
 
-- Node.js 18+
+- Node.js 20+
 - pnpm 10+
 
 ### 开发环境设置
@@ -55,7 +55,7 @@ pnpm dev
 |------|------|------|
 | `PUBLIC_API_BASE_URL` | 后端 API 地址 | `http://localhost:8000/record-platform` |
 | `PUBLIC_ENV` | 环境名称 | `development` |
-| `PUBLIC_TENANT_ID` | 默认租户 ID | `1` |
+| `PUBLIC_TENANT_ID` | 默认租户 ID | `0` |
 
 ## 项目结构
 

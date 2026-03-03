@@ -37,7 +37,7 @@ mvn -version
 
 ### Node.js (for frontend)
 
-- **Required**: Node.js 18+ and pnpm
+- **Required**: Node.js 20+ and pnpm
 
 ```bash
 # Verify Node.js
@@ -53,7 +53,6 @@ For development, you can start all infrastructure services using Docker Compose:
 
 ```yaml
 # docker-compose.yml (infrastructure only)
-version: '3.8'
 services:
   nacos:
     image: nacos/nacos-server:v2.3.0
@@ -81,11 +80,21 @@ services:
       - "5672:5672"
       - "15672:15672"
 
-  minio:
-    image: minio/minio:latest
+  minio-a:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
     ports:
       - "9000:9000"
       - "9001:9001"
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+
+  minio-b:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    ports:
+      - "9010:9000"
+      - "9011:9001"
     command: server /data --console-address ":9001"
     environment:
       - MINIO_ROOT_USER=minioadmin

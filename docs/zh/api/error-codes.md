@@ -102,6 +102,9 @@
 | 50011 | SHARE_CANCELLED | 分享链接已被取消 |
 | 50012 | SHARE_EXPIRED | 分享已过期 |
 | 50013 | QUOTA_EXCEEDED | 配额超限 |
+| 50014 | VERSION_CHAIN_NOT_FOUND | 版本链不存在 |
+| 50015 | VERSION_CONFLICT | 版本创建冲突，请重试 |
+| 50016 | VERSION_SOURCE_INVALID | 源文件状态不允许创建新版本 |
 
 ## 消息服务错误（60000-69999）
 

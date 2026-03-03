@@ -102,6 +102,9 @@ The following error codes are defined in `platform-api` (the Dubbo provider inte
 | 50011 | SHARE_CANCELLED | Share link has been cancelled |
 | 50012 | SHARE_EXPIRED | Share has expired |
 | 50013 | QUOTA_EXCEEDED | Storage quota exceeded |
+| 50014 | VERSION_CHAIN_NOT_FOUND | Version chain not found |
+| 50015 | VERSION_CONFLICT | Version creation conflict, please retry |
+| 50016 | VERSION_SOURCE_INVALID | Source file state does not allow creating new version |
 
 ## Messaging Errors (60000-69999)
 
