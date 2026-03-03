@@ -62,13 +62,13 @@ jobs:
 
       - name: Upload Semgrep SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: security-artifacts/semgrep/semgrep.sarif
           category: semgrep
 
       - name: Upload Semgrep Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: security-poc-semgrep
@@ -140,13 +140,13 @@ jobs:
 
       - name: Upload Trivy SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: security-artifacts/trivy/trivy.sarif
           category: trivy-sca
 
       - name: Upload Trivy Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: security-poc-trivy
@@ -201,7 +201,7 @@ jobs:
           EOF
 
       - name: Upload SBOM Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: security-poc-sbom
@@ -222,21 +222,21 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download Semgrep artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           name: security-poc-semgrep
           path: security-artifacts/semgrep
 
       - name: Download Trivy artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           name: security-poc-trivy
           path: security-artifacts/trivy
 
       - name: Download SBOM artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           name: security-poc-sbom
@@ -264,7 +264,7 @@ jobs:
           fi
 
       - name: Upload observation summary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: security-poc-summary
