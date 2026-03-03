@@ -71,7 +71,7 @@ jobs:
         run: mvn -f platform-storage/pom.xml test
 
       - name: Upload Backend OpenAPI Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: backend-openapi
@@ -153,7 +153,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download Backend OpenAPI Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: backend-openapi
           path: backend-openapi
@@ -185,7 +185,7 @@ jobs:
           shasum -a 256 platform-frontend/src/lib/api/types/generated.ts | awk '{print $1}' > contract-fingerprint/generated-ts.sha256
 
       - name: Upload Contract Fingerprints
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: contract-fingerprint
@@ -227,7 +227,7 @@ jobs:
 
       - name: Upload Trivy SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-pr.sarif
           category: trivy-pr
