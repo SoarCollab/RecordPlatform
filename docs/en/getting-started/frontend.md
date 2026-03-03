@@ -18,7 +18,7 @@ This guide covers development setup for the RecordPlatform frontend application.
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20+
 - pnpm 10+
 
 ### Development Setup
@@ -55,7 +55,7 @@ Create `.env` file in `platform-frontend/`:
 |----------|-------------|---------|
 | `PUBLIC_API_BASE_URL` | Backend API URL | `http://localhost:8000/record-platform` |
 | `PUBLIC_ENV` | Environment name | `development` |
-| `PUBLIC_TENANT_ID` | Default tenant ID | `1` |
+| `PUBLIC_TENANT_ID` | Default tenant ID | `0` |
 
 ## Project Structure
 

@@ -4,6 +4,7 @@ Deployment and operations guide for RecordPlatform.
 
 ## Contents
 
+- [Environment Setup](environment-setup) - Complete environment setup from scratch
 - [Docker Compose](docker-compose) - Container-based deployment
 - [Production](production.md) - Production environment setup
 - [Monitoring](monitoring) - Metrics, alerts, and health checks
