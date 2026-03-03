@@ -91,6 +91,10 @@ export default withMermaid(
                 items: [
                   { text: "Overview", link: "/en/deployment/" },
                   {
+                    text: "Environment Setup",
+                    link: "/en/deployment/environment-setup",
+                  },
+                  {
                     text: "Docker Compose",
                     link: "/en/deployment/docker-compose",
                   },
@@ -204,6 +208,10 @@ export default withMermaid(
                 collapsed: false,
                 items: [
                   { text: "概述", link: "/zh/deployment/" },
+                  {
+                    text: "环境搭建",
+                    link: "/zh/deployment/environment-setup",
+                  },
                   {
                     text: "Docker Compose",
                     link: "/zh/deployment/docker-compose",
