@@ -55,7 +55,8 @@ public class RabbitMQHealthIndicator implements HealthIndicator {
                     .withDetail("reason", "Health check timed out after " + TIMEOUT_SECONDS + "s")
                     .build();
         } catch (Exception e) {
-            log.error("RabbitMQ health check failed", e);
+            log.warn("RabbitMQ health check failed: {}", e.getMessage());
+            log.debug("RabbitMQ health check failed stack trace", e);
             return Health.down()
                     .withException(e)
                     .build();
@@ -91,7 +92,8 @@ public class RabbitMQHealthIndicator implements HealthIndicator {
                 return builder.build();
             });
         } catch (Exception e) {
-            log.error("RabbitMQ health check error", e);
+            log.warn("RabbitMQ health check error: {}", e.getMessage());
+            log.debug("RabbitMQ health check error stack trace", e);
             return Health.down()
                     .withDetail("reason", "Failed to connect to RabbitMQ")
                     .withException(e)

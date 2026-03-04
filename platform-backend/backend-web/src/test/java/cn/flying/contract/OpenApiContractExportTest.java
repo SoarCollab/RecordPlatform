@@ -87,6 +87,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         classes = OpenApiContractExportTest.OpenApiContractTestApplication.class,
         properties = {
                 "spring.main.banner-mode=off",
+                "logging.config=classpath:logback-test.xml",
                 "spring.config.import=",
                 "spring.cloud.nacos.config.enabled=false",
                 "spring.cloud.nacos.discovery.enabled=false",

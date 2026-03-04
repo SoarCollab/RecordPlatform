@@ -75,6 +75,16 @@
             <artifactId>protobuf-java-util</artifactId>
             <version>${protobuf.version}</version>
         </dependency>
+        <!--
+            RebalanceService relies on Guava RateLimiter.
+            protobuf-java-util 4.x no longer provides guava transitively,
+            so keep this dependency explicit to prevent transitive drift.
+         -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>32.0.1-jre</version>
+        </dependency>
 
         <!-- api -->
         <dependency>

@@ -1,32 +1,14 @@
-package cn.flying.service.encryption;
+package cn.flying.health;
 
+import cn.flying.service.encryption.ChunkEncryptionStrategy;
+import cn.flying.service.encryption.EncryptionStrategyFactory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.stereotype.Component;
 
 /**
- * 加密策略健康检查指示器
- *
- * <p>通过 /actuator/health 端点展示当前加密配置状态。</p>
- *
- * <h3>健康检查输出示例：</h3>
- * <pre>
- * {
- *   "encryption": {
- *     "status": "UP",
- *     "details": {
- *       "algorithm": "ChaCha20-Poly1305",
- *       "selectionReason": "explicitly configured",
- *       "ivSize": 12,
- *       "tagBitLength": 128
- *     }
- *   }
- * }
- * </pre>
- *
- * @author flyingcoding
- * @since 2.0.0
+ * Exposes current encryption strategy status through Actuator health.
  */
 @Component("encryptionHealthIndicator")
 @RequiredArgsConstructor
@@ -34,6 +16,11 @@ public class EncryptionHealthIndicator implements HealthIndicator {
 
     private final EncryptionStrategyFactory strategyFactory;
 
+    /**
+     * Builds encryption health details from the currently selected strategy.
+     *
+     * @return UP with encryption details or DOWN when strategy resolution fails
+     */
     @Override
     public Health health() {
         try {
