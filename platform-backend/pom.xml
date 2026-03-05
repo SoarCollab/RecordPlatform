@@ -39,6 +39,10 @@
             Testcontainers (docker-java) may require SystemProperties.getUserName(String) (>= 3.17.0).
          -->
         <commons-lang3.version>3.20.0</commons-lang3.version>
+        <netty.version>4.1.129.Final</netty.version>
+        <logback.version>1.5.25</logback.version>
+        <jackson-bom.version>2.18.6</jackson-bom.version>
+        <tomcat.embed.version>10.1.49</tomcat.embed.version>
         <!--
             Mockito inline mock maker relies on Byte Buddy instrumentation.
             On some macOS/JDK builds, runtime self-attach is not available; pre-attaching the agent fixes it.
@@ -97,6 +101,20 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-bom</artifactId>
+                <version>${netty.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${jackson-bom.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <!-- TestContainers BOM -->
             <dependency>
                 <groupId>org.testcontainers</groupId>
@@ -104,6 +122,21 @@
                 <version>${testcontainers.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>ch.qos.logback</groupId>
+                <artifactId>logback-core</artifactId>
+                <version>${logback.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ch.qos.logback</groupId>
+                <artifactId>logback-classic</artifactId>
+                <version>${logback.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-core</artifactId>
+                <version>${tomcat.embed.version}</version>
             </dependency>
             <!-- Force commons-compress version to avoid POI runtime incompatibility in tests -->
             <dependency>

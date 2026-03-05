@@ -25,6 +25,9 @@
         <spring-cloud-alibaba-dependencies.version>2023.0.3.2</spring-cloud-alibaba-dependencies.version>
         <logstash.logback.version>7.4</logstash.logback.version>
         <skywalking.toolkit.version>9.6.0</skywalking.toolkit.version>
+        <netty.version>4.1.129.Final</netty.version>
+        <logback.version>1.5.25</logback.version>
+        <jackson-bom.version>2.18.6</jackson-bom.version>
     </properties>
     <dependencies>
         <dependency>
@@ -183,6 +186,30 @@
                 <version>${spring-cloud-alibaba-dependencies.version}</version> <!-- Ensure compatibility with your Spring Boot version -->
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-bom</artifactId>
+                <version>${netty.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${jackson-bom.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>ch.qos.logback</groupId>
+                <artifactId>logback-core</artifactId>
+                <version>${logback.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ch.qos.logback</groupId>
+                <artifactId>logback-classic</artifactId>
+                <version>${logback.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
