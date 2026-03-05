@@ -116,6 +116,22 @@ class RabbitMQHealthIndicatorTest {
         }
 
         @Test
+        @DisplayName("should return DOWN when future.get throws execution exception")
+        void shouldReturnDownWhenFutureGetThrowsExecutionException() {
+            RabbitTemplate rabbitTemplate = Mockito.mock(RabbitTemplate.class);
+            when(rabbitTemplate.execute(any())).thenThrow(new AssertionError("fatal"));
+
+            ExecutorService executor = new SynchronousExecutorService();
+            RabbitMQHealthIndicator indicator = new RabbitMQHealthIndicator(rabbitTemplate, executor);
+            ReflectionTestUtils.setField(indicator, "healthQueue", "");
+
+            Health health = indicator.health();
+
+            assertThat(health.getStatus()).isEqualTo(Status.DOWN);
+            assertThat(health.getDetails()).containsKey("error");
+        }
+
+        @Test
         @DisplayName("should degrade when queue probe fails but channel is open")
         void shouldReturnDegradedWhenQueueProbeFails() {
             RabbitTemplate rabbitTemplate = Mockito.mock(RabbitTemplate.class);
