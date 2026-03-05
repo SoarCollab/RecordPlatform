@@ -66,10 +66,11 @@ dubbo:
 
 # Logging configuration for tests
 logging:
+  config: classpath:logback-test.xml
   level:
-    cn.flying: INFO
-    org.springframework.test: INFO
-    org.testcontainers: INFO
+    root: WARN
+    org.springframework.test: WARN
+    org.testcontainers: WARN
     com.github.dockerjava: WARN
 
 # Disable scheduled tasks in tests

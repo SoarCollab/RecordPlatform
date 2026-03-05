@@ -1,5 +1,6 @@
 package cn.flying.health;
 
+import com.rabbitmq.client.Channel;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @DisplayName("RabbitMQHealthIndicator Tests")
@@ -111,6 +113,46 @@ class RabbitMQHealthIndicatorTest {
 
             assertThat(health.getStatus()).isEqualTo(Status.DOWN);
             assertThat(health.getDetails()).containsKey("reason");
+        }
+
+        @Test
+        @DisplayName("should return DOWN when future.get throws execution exception")
+        void shouldReturnDownWhenFutureGetThrowsExecutionException() {
+            RabbitTemplate rabbitTemplate = Mockito.mock(RabbitTemplate.class);
+            when(rabbitTemplate.execute(any())).thenThrow(new AssertionError("fatal"));
+
+            ExecutorService executor = new SynchronousExecutorService();
+            RabbitMQHealthIndicator indicator = new RabbitMQHealthIndicator(rabbitTemplate, executor);
+            ReflectionTestUtils.setField(indicator, "healthQueue", "");
+
+            Health health = indicator.health();
+
+            assertThat(health.getStatus()).isEqualTo(Status.DOWN);
+            assertThat(health.getDetails()).containsKey("error");
+        }
+
+        @Test
+        @DisplayName("should degrade when queue probe fails but channel is open")
+        void shouldReturnDegradedWhenQueueProbeFails() {
+            RabbitTemplate rabbitTemplate = Mockito.mock(RabbitTemplate.class);
+            when(rabbitTemplate.execute(any())).thenAnswer(invocation -> {
+                @SuppressWarnings("unchecked")
+                var callback = (org.springframework.amqp.rabbit.core.ChannelCallback<Health>) invocation.getArgument(0);
+                Channel channel = mock(Channel.class);
+                when(channel.isOpen()).thenReturn(true);
+                when(channel.queueDeclarePassive("file.stored")).thenThrow(new RuntimeException("queue not found"));
+                return callback.doInRabbit(channel);
+            });
+
+            ExecutorService executor = new SynchronousExecutorService();
+            RabbitMQHealthIndicator indicator = new RabbitMQHealthIndicator(rabbitTemplate, executor);
+            ReflectionTestUtils.setField(indicator, "healthQueue", "file.stored");
+
+            Health health = indicator.health();
+
+            assertThat(health.getStatus().getCode()).isEqualTo("DEGRADED");
+            assertThat(health.getDetails()).containsEntry("queue", "file.stored");
+            assertThat((String) health.getDetails().get("warning")).contains("Queue probe failed");
         }
     }
 
