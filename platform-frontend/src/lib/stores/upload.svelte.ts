@@ -469,9 +469,13 @@ async function startUpload(id: string): Promise<void> {
   }
 
   // Start next pending upload
-  const next = pendingTasks[0];
-  if (next && activeTasks.length < MAX_CONCURRENT_UPLOADS) {
-    startUpload(next.id);
+  const next = tasks.find((t) => t.status === "pending");
+  if (
+    next &&
+    tasks.filter((t) => t.status === "uploading").length <
+      MAX_CONCURRENT_UPLOADS
+  ) {
+    void startUpload(next.id);
   }
 }
 

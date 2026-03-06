@@ -361,8 +361,9 @@ describe("upload store extra branches", () => {
       type: string;
     }) => void;
     subscribeCallback({ type: "file-record-success" });
+    subscribeCallback({ type: "file-record-failed" });
 
-    expect(mocks.getUploadProgress).toHaveBeenCalled();
+    expect(mocks.getUploadProgress.mock.calls.length).toBeGreaterThan(0);
   });
 
   it("clearCompleted/clearFailedAndCancelled/批量操作应覆盖空与非空路径", async () => {
@@ -390,5 +391,102 @@ describe("upload store extra branches", () => {
     upload.removeTask(failedId);
 
     expect(upload.tasks.some((task) => task.status === "failed")).toBe(false);
+  });
+
+  it("startUpload 失败后应自动拉起下一个 pending 任务", async () => {
+    const firstStart = createDeferred<{
+      clientId: string;
+      processedChunks: number[];
+    }>();
+
+    mocks.startUpload
+      .mockImplementationOnce(() => firstStart.promise)
+      .mockResolvedValueOnce({
+        clientId: "c-next",
+        processedChunks: [],
+      });
+
+    const upload = await loadUploadStore();
+    const firstId = await upload.addFile(createFile(1024));
+    const secondId = await upload.addFile(createFile(2048), {
+      autoStart: false,
+    });
+
+    firstStart.reject(new Error("first failed"));
+
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(findTask(upload, firstId)?.status).toBe("failed");
+    expect(mocks.startUpload).toHaveBeenCalledTimes(2);
+    expect(findTask(upload, secondId)?.status).not.toBe("pending");
+  });
+
+  it("resumeUpload 成功后应完成上传并切换到 processing", async () => {
+    const upload = await loadUploadStore();
+    const id = await upload.addFile(createFile(3 * 1024 * 1024), {
+      autoStart: false,
+    });
+
+    const task = findTask(upload, id);
+    if (task) {
+      task.status = "paused";
+      task.clientId = "resume-client";
+    }
+
+    mocks.getUploadProgress.mockImplementation(() => new Promise(() => {}));
+    await upload.resumeUpload(id);
+
+    expect(mocks.completeUpload).toHaveBeenCalledWith("resume-client");
+    expect(findTask(upload, id)?.status).toBe("processing");
+  });
+
+  it("cleanup 应解除监听并清理轮询定时器", async () => {
+    vi.useFakeTimers();
+    const unsubscribe = vi.fn();
+    const removeListenerSpy = vi.spyOn(document, "removeEventListener");
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+
+    try {
+      mocks.subscribe.mockReturnValue(unsubscribe);
+      mocks.getUploadProgress.mockResolvedValue({
+        status: "uploading",
+        progress: 0,
+        uploadProgress: 0,
+        processProgress: 0,
+      });
+
+      const upload = await loadUploadStore();
+      await upload.addFile(createFile(1024));
+
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      upload.cleanup();
+
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+      expect(removeListenerSpy).toHaveBeenCalledWith(
+        "visibilitychange",
+        expect.any(Function),
+      );
+      expect(clearTimeoutSpy).toHaveBeenCalled();
+
+      mocks.getUploadProgress.mockClear();
+      (
+        globalThis as unknown as {
+          __setDocumentVisibility?: (state: DocumentVisibilityState) => void;
+        }
+      ).__setDocumentVisibility?.("visible");
+      await Promise.resolve();
+
+      upload.cleanup();
+      expect(unsubscribe).toHaveBeenCalledTimes(1);
+    } finally {
+      removeListenerSpy.mockRestore();
+      clearTimeoutSpy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });
