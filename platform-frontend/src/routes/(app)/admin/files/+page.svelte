@@ -705,7 +705,7 @@
                     </span>
                   </div>
                   <Badge variant={getStatusBadgeVariant(share.status)}>
-                    {share.status === 0 ? "已取消" : share.status === 1 ? "有效" : "已过期"}
+                    {share.status === AdminShareStatus.CANCELLED ? "已取消" : share.status === AdminShareStatus.ACTIVE ? "有效" : "已过期"}
                   </Badge>
                 </div>
               {/each}

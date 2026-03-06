@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { useNotifications } from '$stores/notifications.svelte';
-	import { sendResetCode, confirmResetCode, resetPassword } from '$lib/api/endpoints/auth';
+	import { sendResetCode, confirmResetCode, resetPassword } from '$api/endpoints/auth';
 	import { goto } from '$app/navigation';
 	import * as validation from '$utils/validation';
 
@@ -94,7 +94,7 @@
 
 		const passwordResult = validation.password(password);
 		if (!passwordResult.valid) {
-			notifications.warning('密码格式错误', passwordResult.message);
+			notifications.warning('密码强度不足', passwordResult.message);
 			return;
 		}
 
@@ -239,7 +239,7 @@
 					id="password"
 					bind:value={password}
 					class="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-					placeholder="请输入新密码（至少6位）"
+					placeholder="请输入新密码（至少8位，包含字母和数字）"
 					disabled={isSubmitting}
 				/>
 			</div>

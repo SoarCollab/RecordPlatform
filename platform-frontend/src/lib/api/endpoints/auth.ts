@@ -1,4 +1,4 @@
-import { api, setToken, clearToken } from "../client";
+import { api, setToken, clearToken, wasRememberMeSelected } from "../client";
 import type {
   AuthorizeVO,
   AccountVO,
@@ -91,7 +91,7 @@ export async function updateUser(data: UpdateUserRequest): Promise<AccountVO> {
  */
 export async function refreshToken(): Promise<RefreshTokenVO> {
   const result = await api.post<RefreshTokenVO>(`${BASE}/tokens/refresh`);
-  setToken(result.token, result.expire);
+  setToken(result.token, result.expire, wasRememberMeSelected());
   return result;
 }
 

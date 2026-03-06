@@ -14,6 +14,7 @@ export interface Notification {
 
 let notifications = $state<Notification[]>([]);
 const DEFAULT_DURATION = 5000;
+const timeoutMap = new Map<string, ReturnType<typeof setTimeout>>();
 
 // ===== Actions =====
 
@@ -27,21 +28,31 @@ function add(notification: Omit<Notification, "id">): string {
 
   notifications = [...notifications, { ...notification, id }];
 
-  // Auto dismiss
   if (duration > 0) {
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      timeoutMap.delete(id);
       dismiss(id);
     }, duration);
+    timeoutMap.set(id, timer);
   }
 
   return id;
 }
 
 function dismiss(id: string): void {
+  const timer = timeoutMap.get(id);
+  if (timer) {
+    clearTimeout(timer);
+    timeoutMap.delete(id);
+  }
   notifications = notifications.filter((n) => n.id !== id);
 }
 
 function dismissAll(): void {
+  for (const timer of timeoutMap.values()) {
+    clearTimeout(timer);
+  }
+  timeoutMap.clear();
   notifications = [];
 }
 

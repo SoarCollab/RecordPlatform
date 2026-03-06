@@ -270,7 +270,7 @@
 		role="button"
 		tabindex="0"
 		onclick={() => fileInput.click()}
-		onkeypress={(e) => e.key === 'Enter' && fileInput.click()}
+		onkeydown={(e) => e.key === 'Enter' && fileInput.click()}
 	>
 		<input
 			type="file"

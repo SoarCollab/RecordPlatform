@@ -165,7 +165,7 @@
                 onclick={() => openDetail(row)}
                 role="button"
                 tabindex={0}
-                onkeypress={(e) => e.key === "Enter" && openDetail(row)}
+                onkeydown={(e) => e.key === "Enter" && openDetail(row)}
               >
                 <Table.Cell class="whitespace-nowrap">{row.operationTime ? formatDateTime(String(row.operationTime)) : "-"}</Table.Cell>
                 <Table.Cell>{row.username || row.userId || "-"}</Table.Cell>

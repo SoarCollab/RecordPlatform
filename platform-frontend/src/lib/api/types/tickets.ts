@@ -89,6 +89,16 @@ export const TicketStatusLabel: Record<TicketStatus, string> = {
 };
 
 /**
+ * 工单详情（包含回复列表）
+ * @see TicketDetailVO.java
+ */
+export interface TicketDetailVO extends TicketVO {
+  content: string;
+  category: TicketCategory;
+  replies: TicketReplyVO[];
+}
+
+/**
  * 工单回复
  * @see TicketReplyVO.java
  */

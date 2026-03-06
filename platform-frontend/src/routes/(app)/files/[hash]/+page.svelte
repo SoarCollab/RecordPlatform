@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { browser } from "$app/environment";
   import { goto } from "$app/navigation";
   import { page as appPage } from "$app/state";
@@ -85,6 +85,12 @@
 
   onMount(() => {
     loadFileDetail();
+  });
+
+  onDestroy(() => {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
   });
 
   async function loadFileDetail() {
@@ -263,6 +269,10 @@
 
   function closePreview() {
     showPreview = false;
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      previewUrl = null;
+    }
   }
 
   function getStatusVariant(

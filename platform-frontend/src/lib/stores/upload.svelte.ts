@@ -120,6 +120,7 @@ function calculateChunks(
 const sse = useSSE();
 let unsubscribeSSE: (() => void) | null = null;
 let visibilityListenerBound = false;
+let visibilityHandler: (() => void) | null = null;
 
 const progressPollTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 const VISIBLE_POLL_INTERVAL_MS = 1500;
@@ -133,7 +134,7 @@ function ensureSideEffectsInitialized(): void {
   if (!browser) return;
 
   if (!visibilityListenerBound) {
-    document.addEventListener("visibilitychange", () => {
+    visibilityHandler = () => {
       if (document.visibilityState === "visible") {
         for (const t of tasks) {
           if (
@@ -144,7 +145,8 @@ function ensureSideEffectsInitialized(): void {
           }
         }
       }
-    });
+    };
+    document.addEventListener("visibilitychange", visibilityHandler);
     visibilityListenerBound = true;
   }
 
@@ -632,6 +634,21 @@ async function cancelAllActiveAndProcessing(): Promise<number> {
   return ids.length;
 }
 
+function cleanup(): void {
+  if (unsubscribeSSE) {
+    unsubscribeSSE();
+    unsubscribeSSE = null;
+  }
+  if (visibilityHandler) {
+    document.removeEventListener("visibilitychange", visibilityHandler);
+    visibilityHandler = null;
+    visibilityListenerBound = false;
+  }
+  for (const [id] of progressPollTimeouts) {
+    stopProgressPolling(id);
+  }
+}
+
 // ===== Export Hook =====
 
 export function useUpload() {
@@ -678,5 +695,6 @@ export function useUpload() {
     removeTask,
     clearCompleted,
     clearFailedAndCancelled,
+    cleanup,
   };
 }

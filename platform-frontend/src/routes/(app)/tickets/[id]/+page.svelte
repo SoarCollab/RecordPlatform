@@ -11,7 +11,7 @@
     closeTicket,
     confirmTicket,
   } from "$api/endpoints/tickets";
-  import type { TicketVO, TicketReplyVO } from "$api/types";
+  import type { TicketDetailVO, TicketReplyVO } from "$api/types";
   import type { SSEMessage } from "$api/endpoints/sse";
   import {
     TicketStatusLabel,
@@ -33,7 +33,7 @@
 
   let unsubscribeSSE: (() => void) | null = null;
 
-  let ticket = $state<TicketVO | null>(null);
+  let ticket = $state<TicketDetailVO | null>(null);
   let replies = $state<TicketReplyVO[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -93,13 +93,9 @@
     error = null;
 
     try {
-      // 后端 getTicket 返回 TicketDetailVO，包含 replies 字段
-      const ticketData = await getTicket(data.ticketId);
+      const ticketData = await getTicket(data.ticketId) as TicketDetailVO;
       ticket = ticketData;
-      // 重新加载徽标以清除未读数（后端在 getTicket 时会更新查看时间）
       badges.fetch();
-      // 从 TicketDetailVO 中获取回复列表（如果后端返回）
-      // @ts-expect-error - TicketDetailVO 包含 replies，但前端 TicketVO 类型未定义
       replies = ticketData.replies || [];
     } catch (err) {
       error = err instanceof Error ? err.message : "加载失败";
@@ -141,8 +137,7 @@
       await closeTicket(ticket.id);
       notifications.success("工单已关闭");
       closeDialogOpen = false;
-      // 重新加载工单
-      ticket = await getTicket(data.ticketId);
+      ticket = await getTicket(data.ticketId) as TicketDetailVO;
     } catch (err) {
       notifications.error(
         "关闭失败",
@@ -161,8 +156,7 @@
       await confirmTicket(ticket.id);
       notifications.success("已确认问题解决");
       confirmDialogOpen = false;
-      // 重新加载工单
-      ticket = await getTicket(data.ticketId);
+      ticket = await getTicket(data.ticketId) as TicketDetailVO;
     } catch (err) {
       notifications.error(
         "确认失败",

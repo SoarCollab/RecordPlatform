@@ -208,7 +208,7 @@
 							onclick={() => goto(`/messages/${conv.id}`)}
 							role="button"
 							tabindex="0"
-							onkeypress={(e) => e.key === 'Enter' && goto(`/messages/${conv.id}`)}
+							onkeydown={(e) => e.key === 'Enter' && goto(`/messages/${conv.id}`)}
 						>
 							<!-- 头像 -->
 							<div class="relative">

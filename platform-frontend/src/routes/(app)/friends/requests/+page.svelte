@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { useNotifications } from '$stores/notifications.svelte';
 	import { formatRelativeTime } from '$utils/format';
 	import { getAvatarUrl } from '$utils/avatar';
@@ -15,6 +16,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as Avatar from '$lib/components/ui/avatar';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	const notifications = useNotifications();
 
@@ -25,7 +27,10 @@
 	let page = $state(1);
 	let total = $state(0);
 	let pageSize = $state(20);
-	let busyRequestId = $state<string | null>(null);
+	let cancelConfirmOpen = $state(false);
+	let cancelTarget = $state<FriendRequestDetailVO | null>(null);
+	let cancellingRequest = $state(false);
+	let processingRequestId = $state<string | null>(null);
 
 	onMount(() => {
 		loadRequests();
@@ -57,7 +62,7 @@
 	}
 
 	async function handleAccept(request: FriendRequestDetailVO) {
-		busyRequestId = request.id;
+		processingRequestId = request.id;
 		try {
 			await acceptFriendRequest(request.id);
 			notifications.success('已添加好友');
@@ -65,12 +70,12 @@
 		} catch (err) {
 			notifications.error('操作失败', err instanceof Error ? err.message : '请稍后重试');
 		} finally {
-			busyRequestId = null;
+			processingRequestId = null;
 		}
 	}
 
 	async function handleReject(request: FriendRequestDetailVO) {
-		busyRequestId = request.id;
+		processingRequestId = request.id;
 		try {
 			await rejectFriendRequest(request.id);
 			notifications.success('已拒绝请求');
@@ -78,21 +83,28 @@
 		} catch (err) {
 			notifications.error('操作失败', err instanceof Error ? err.message : '请稍后重试');
 		} finally {
-			busyRequestId = null;
+			processingRequestId = null;
 		}
 	}
 
-	async function handleCancel(request: FriendRequestDetailVO) {
-		if (!confirm('确定要取消这个好友请求吗？')) return;
-		busyRequestId = request.id;
+	function handleCancel(request: FriendRequestDetailVO) {
+		cancelTarget = request;
+		cancelConfirmOpen = true;
+	}
+
+	async function executeCancel() {
+		if (!cancelTarget) return;
+		cancellingRequest = true;
 		try {
-			await cancelFriendRequest(request.id);
+			await cancelFriendRequest(cancelTarget.id);
 			notifications.success('已取消请求');
+			cancelConfirmOpen = false;
+			cancelTarget = null;
 			await loadRequests();
 		} catch (err) {
 			notifications.error('操作失败', err instanceof Error ? err.message : '请稍后重试');
 		} finally {
-			busyRequestId = null;
+			cancellingRequest = false;
 		}
 	}
 
@@ -129,7 +141,7 @@
 			<h1 class="text-2xl font-bold">好友请求</h1>
 			<p class="text-muted-foreground">管理好友请求</p>
 		</div>
-		<Button variant="outline" onclick={() => history.back()}>
+		<Button variant="outline" onclick={() => goto('/friends')}>
 			返回
 		</Button>
 	</div>
@@ -199,15 +211,15 @@
 									{#if request.status === FriendRequestStatus.PENDING}
 										<div class="flex gap-2">
 											{#if activeTab === 'received'}
-												<Button size="sm" onclick={() => handleAccept(request)} disabled={busyRequestId !== null}>
-													{busyRequestId === request.id ? '处理中...' : '接受'}
+												<Button size="sm" onclick={() => handleAccept(request)} disabled={processingRequestId === request.id}>
+													{processingRequestId === request.id ? '处理中...' : '接受'}
 												</Button>
-												<Button size="sm" variant="outline" onclick={() => handleReject(request)} disabled={busyRequestId !== null}>
-													{busyRequestId === request.id ? '处理中...' : '拒绝'}
+												<Button size="sm" variant="outline" onclick={() => handleReject(request)} disabled={processingRequestId === request.id}>
+													拒绝
 												</Button>
 											{:else}
-												<Button size="sm" variant="outline" onclick={() => handleCancel(request)} disabled={busyRequestId !== null}>
-													{busyRequestId === request.id ? '处理中...' : '取消'}
+												<Button size="sm" variant="outline" onclick={() => handleCancel(request)} disabled={processingRequestId === request.id}>
+													取消
 												</Button>
 											{/if}
 										</div>
@@ -243,3 +255,12 @@
 		</div>
 	</Tabs.Root>
 </div>
+
+<ConfirmDialog
+	bind:open={cancelConfirmOpen}
+	title="取消好友请求"
+	description="确定要取消这个好友请求吗？"
+	confirmText="取消请求"
+	loading={cancellingRequest}
+	onConfirm={executeCancel}
+/>

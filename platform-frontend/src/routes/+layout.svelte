@@ -18,48 +18,16 @@
   const auth = useAuth();
   const download = useDownload();
 
-  // 登录后连接 SSE
   $effect(() => {
     if (browser && auth.isAuthenticated) {
       sse.connect();
     }
   });
 
-  // 显示前清理文本（转义 HTML 实体）
-  function sanitizeText(text: unknown): string {
-    const str = String(text ?? "");
-    return str
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
-
-  // 处理 SSE 消息并恢复下载任务
   onMount(() => {
-    // 从 IndexedDB 恢复待处理的下载任务
     download.restoreTasks();
 
-    const unsubscribe = sse.subscribe((message) => {
-      switch (message.type) {
-        case "notification":
-          notifications.info("系统通知", sanitizeText(message.data));
-          break;
-        case "message-received":
-          notifications.info("新消息", "您收到一条新消息");
-          break;
-        case "file-record-success":
-          notifications.success("文件存证成功", "您的文件已完成存证");
-          break;
-        case "file-record-failed":
-          notifications.error("文件存证失败", "文件存证过程中出错");
-          break;
-      }
-    });
-
     return () => {
-      unsubscribe();
       sse.disconnect();
     };
   });

@@ -2,6 +2,7 @@ import { browser } from "$app/environment";
 import { goto } from "$app/navigation";
 import { getToken } from "$api/client";
 import * as authApi from "$api/endpoints/auth";
+import { useBadges } from "$stores/badges.svelte";
 import type {
   AccountVO,
   LoginRequest,
@@ -43,14 +44,7 @@ async function login(
   error = null;
 
   try {
-    const result = await authApi.login(credentials, rememberMe);
-    user = {
-      id: "",
-      username: result.username,
-      role: result.role,
-      registerTime: "",
-    };
-    // Fetch full user info
+    await authApi.login(credentials, rememberMe);
     await fetchUser();
   } catch (err) {
     error = err instanceof Error ? err.message : "登录失败";
@@ -98,6 +92,7 @@ async function logout(): Promise<void> {
   } finally {
     user = null;
     isLoading = false;
+    useBadges().reset();
     if (browser) {
       await goto("/login");
     }

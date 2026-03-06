@@ -76,25 +76,6 @@
 		}
 	}
 
-	function _getStatusVariant(
-		status: TicketStatus
-	): 'default' | 'secondary' | 'destructive' | 'outline' {
-		switch (status) {
-			case TicketStatus.PENDING:
-				return 'secondary';
-			case TicketStatus.PROCESSING:
-				return 'default';
-			case TicketStatus.CONFIRMING:
-				return 'outline';
-			case TicketStatus.COMPLETED:
-				return 'default';
-			case TicketStatus.CLOSED:
-				return 'secondary';
-			default:
-				return 'secondary';
-		}
-	}
-
 	function getStatusClass(status: TicketStatus): string {
 		switch (status) {
 			case TicketStatus.PENDING:
@@ -195,6 +176,15 @@
 		>
 			已解决
 		</button>
+		<button
+			class="rounded-full px-3 py-1 text-sm transition-colors {statusFilter ===
+			TicketStatus.CLOSED
+				? 'bg-primary text-primary-foreground'
+				: 'bg-muted hover:bg-muted/80'}"
+			onclick={() => handleFilterChange(TicketStatus.CLOSED)}
+		>
+			已关闭
+		</button>
 	</div>
 
 	{#if loading}
@@ -257,7 +247,7 @@
 							onclick={() => goto(`/tickets/${ticket.id}`)}
 							role="button"
 							tabindex="0"
-							onkeypress={(e) => e.key === 'Enter' && goto(`/tickets/${ticket.id}`)}
+							onkeydown={(e) => e.key === 'Enter' && goto(`/tickets/${ticket.id}`)}
 						>
 							<div class="min-w-0 flex-1">
 								<div class="mb-1 flex items-center gap-2">
@@ -267,7 +257,7 @@
 											{TicketCategoryLabel[ticket.category]}
 										</span>
 									{/if}
-									{#if ticket.priority >= TicketPriority.HIGH}
+									{#if ticket.priority !== undefined && ticket.priority >= TicketPriority.HIGH}
 										<span class="text-xs {getPriorityClass(ticket.priority)}">
 											{TicketPriorityLabel[ticket.priority]}优先级
 										</span>
