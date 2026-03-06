@@ -54,7 +54,9 @@
   let shareExpireHours = $state(72);
   let shareType = $state<ShareType>(ShareType.PUBLIC);
   let shareCode = $state("");
-  let shareLink = $derived(shareCode ? `${appPage.url.origin}/share/${shareCode}` : "");
+  let shareLink = $derived(
+    shareCode ? `${appPage.url.origin}/share/${shareCode}` : "",
+  );
   let isSharing = $state(false);
 
   // 好友分享对话框状态
@@ -120,7 +122,12 @@
     if (!file) return;
 
     // 使用新的下载管理器（预签名 URL）
-    download.startDownload(file.fileHash, file.fileName, { type: "owned" }, file.fileSize);
+    download.startDownload(
+      file.fileHash,
+      file.fileName,
+      { type: "owned" },
+      file.fileSize,
+    );
     notifications.info("下载已开始", "可在右下角查看下载进度");
   }
 
@@ -139,7 +146,7 @@
     } catch (err) {
       notifications.error(
         "创建分享失败",
-        err instanceof Error ? err.message : "请稍后重试"
+        err instanceof Error ? err.message : "请稍后重试",
       );
     } finally {
       isSharing = false;
@@ -192,7 +199,10 @@
       try {
         friends = await getAllFriends();
       } catch (err) {
-        notifications.error("加载好友失败", err instanceof Error ? err.message : "请稍后重试");
+        notifications.error(
+          "加载好友失败",
+          err instanceof Error ? err.message : "请稍后重试",
+        );
       } finally {
         loadingFriends = false;
       }
@@ -215,18 +225,21 @@
     isSharingToFriend = true;
     try {
       // 逐个分享给选中的好友
-      const sharePromises = Array.from(selectedFriends).map(friendId =>
+      const sharePromises = Array.from(selectedFriends).map((friendId) =>
         shareToFriend({
           friendId,
           fileHashes: [file!.fileHash],
-          message: friendShareMessage || undefined
-        })
+          message: friendShareMessage || undefined,
+        }),
       );
       await Promise.all(sharePromises);
       notifications.success(`已分享给 ${selectedFriends.size} 位好友`);
       friendShareDialogOpen = false;
     } catch (err) {
-      notifications.error("分享失败", err instanceof Error ? err.message : "请稍后重试");
+      notifications.error(
+        "分享失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
     } finally {
       isSharingToFriend = false;
     }
@@ -238,12 +251,17 @@
 
   const filteredFriends = $derived(
     friendSearchKeyword.trim()
-      ? friends.filter(f =>
-          f.username.toLowerCase().includes(friendSearchKeyword.toLowerCase()) ||
-          (f.nickname?.toLowerCase().includes(friendSearchKeyword.toLowerCase())) ||
-          (f.remark?.toLowerCase().includes(friendSearchKeyword.toLowerCase()))
+      ? friends.filter(
+          (f) =>
+            f.username
+              .toLowerCase()
+              .includes(friendSearchKeyword.toLowerCase()) ||
+            f.nickname
+              ?.toLowerCase()
+              .includes(friendSearchKeyword.toLowerCase()) ||
+            f.remark?.toLowerCase().includes(friendSearchKeyword.toLowerCase()),
         )
-      : friends
+      : friends,
   );
 
   async function handlePreview() {
@@ -260,7 +278,7 @@
     } catch (err) {
       notifications.error(
         "加载预览失败",
-        err instanceof Error ? err.message : "请稍后重试"
+        err instanceof Error ? err.message : "请稍后重试",
       );
     } finally {
       loadingPreview = false;
@@ -276,7 +294,7 @@
   }
 
   function getStatusVariant(
-    status: FileStatus
+    status: FileStatus,
   ): "default" | "secondary" | "destructive" | "outline" {
     switch (status) {
       case FileStatus.COMPLETED:
@@ -297,7 +315,7 @@
   <!-- 返回按钮 -->
   <a
     href="/files"
-    class="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+    class="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-sm"
   >
     <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
@@ -314,7 +332,7 @@
     <Card.Root>
       <Card.Content class="flex items-center justify-center p-12">
         <div
-          class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"
+          class="border-primary h-8 w-8 animate-spin rounded-full border-4 border-t-transparent"
         ></div>
       </Card.Content>
     </Card.Root>
@@ -322,10 +340,10 @@
     <Card.Root>
       <Card.Content class="p-12 text-center">
         <div
-          class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10"
+          class="bg-destructive/10 mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full"
         >
           <svg
-            class="h-8 w-8 text-destructive"
+            class="text-destructive h-8 w-8"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -351,7 +369,7 @@
         <div class="flex items-start justify-between">
           <div class="flex items-center gap-4">
             <div
-              class="flex h-14 w-14 items-center justify-center rounded-lg bg-primary/10 text-primary"
+              class="bg-primary/10 text-primary flex h-14 w-14 items-center justify-center rounded-lg"
             >
               <svg
                 class="h-7 w-7"
@@ -382,11 +400,11 @@
       <Card.Content class="space-y-4">
         <div class="grid gap-4 sm:grid-cols-2">
           <div>
-            <p class="text-sm font-medium text-muted-foreground">文件哈希</p>
-            <p class="mt-1 break-all font-mono text-sm">{file.fileHash}</p>
+            <p class="text-muted-foreground text-sm font-medium">文件哈希</p>
+            <p class="mt-1 font-mono text-sm break-all">{file.fileHash}</p>
           </div>
           <div>
-            <p class="text-sm font-medium text-muted-foreground">上传时间</p>
+            <p class="text-muted-foreground text-sm font-medium">上传时间</p>
             <p class="mt-1 text-sm">{formatDateTime(file.createTime)}</p>
           </div>
         </div>
@@ -409,7 +427,9 @@
               />
             </svg>
             <span class="text-sm">
-              分享自 <span class="font-medium text-blue-600">{file.sharedFromUserName}</span>
+              分享自 <span class="font-medium text-blue-600"
+                >{file.sharedFromUserName}</span
+              >
             </span>
           </div>
         {/if}
@@ -489,10 +509,7 @@
               </svg>
               分享链接
             </Button>
-            <Button
-              variant="outline"
-              onclick={openFriendShareDialog}
-            >
+            <Button variant="outline" onclick={openFriendShareDialog}>
               <svg
                 class="mr-2 h-4 w-4"
                 fill="none"
@@ -519,7 +536,7 @@
         <Card.Header>
           <Card.Title class="flex items-center gap-2">
             <svg
-              class="h-5 w-5 text-primary"
+              class="text-primary h-5 w-5"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -536,20 +553,20 @@
           <Card.Description>文件已上链存证，不可篡改</Card.Description>
         </Card.Header>
         <Card.Content class="space-y-4">
-          <div class="rounded-lg bg-muted/50 p-4">
+          <div class="bg-muted/50 rounded-lg p-4">
             <div class="grid gap-4">
               <div>
-                <p class="text-sm font-medium text-muted-foreground">
+                <p class="text-muted-foreground text-sm font-medium">
                   交易哈希
                 </p>
-                <p class="mt-1 break-all font-mono text-sm">
+                <p class="mt-1 font-mono text-sm break-all">
                   {file.transactionHash}
                 </p>
               </div>
               {#if transaction}
                 <div class="grid gap-4 sm:grid-cols-2">
                   <div>
-                    <p class="text-sm font-medium text-muted-foreground">
+                    <p class="text-muted-foreground text-sm font-medium">
                       区块号
                     </p>
                     <p class="mt-1 font-mono text-sm">
@@ -557,7 +574,7 @@
                     </p>
                   </div>
                   <div>
-                    <p class="text-sm font-medium text-muted-foreground">
+                    <p class="text-muted-foreground text-sm font-medium">
                       存证时间
                     </p>
                     <p class="mt-1 text-sm">
@@ -567,7 +584,7 @@
                 </div>
               {:else if file.blockNumber}
                 <div>
-                  <p class="text-sm font-medium text-muted-foreground">
+                  <p class="text-muted-foreground text-sm font-medium">
                     区块号
                   </p>
                   <p class="mt-1 font-mono text-sm">{file.blockNumber}</p>
@@ -576,7 +593,7 @@
             </div>
           </div>
 
-          <div class="flex items-center gap-2 text-sm text-muted-foreground">
+          <div class="text-muted-foreground flex items-center gap-2 text-sm">
             <svg
               class="h-4 w-4 text-green-500"
               fill="none"
@@ -598,11 +615,11 @@
       <Card.Root>
         <Card.Content class="flex items-center gap-4 p-6">
           <div
-            class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"
+            class="border-primary h-8 w-8 animate-spin rounded-full border-4 border-t-transparent"
           ></div>
           <div>
             <p class="font-medium">正在处理中</p>
-            <p class="text-sm text-muted-foreground">
+            <p class="text-muted-foreground text-sm">
               {FileStatusLabel[file.status]}，请稍候...
             </p>
           </div>
@@ -617,7 +634,7 @@
           <div class="flex items-center justify-between">
             <Card.Title class="flex items-center gap-2">
               <svg
-                class="h-5 w-5 text-primary"
+                class="text-primary h-5 w-5"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -683,23 +700,23 @@
     {#if shareCode}
       <div class="space-y-4">
         <div class="flex gap-2">
-          <Input
-            readonly
-            value={shareLink}
-            class="flex-1 font-mono text-sm"
-          />
+          <Input readonly value={shareLink} class="flex-1 font-mono text-sm" />
           <Button onclick={copyShareLink}>复制</Button>
         </div>
       </div>
     {:else}
       <div class="space-y-4">
         <div>
-          <label for="share-type" class="mb-2 block text-sm font-medium">分享类型</label>
+          <label for="share-type" class="mb-2 block text-sm font-medium"
+            >分享类型</label
+          >
           <div class="flex gap-3">
             {#each [ShareType.PUBLIC, ShareType.PRIVATE] as type}
               <label
                 class="flex flex-1 cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors
-                  {shareType === type ? 'border-primary bg-primary/5' : 'border-border hover:bg-accent/50'}"
+                  {shareType === type
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border hover:bg-accent/50'}"
               >
                 <input
                   type="radio"
@@ -710,7 +727,9 @@
                 />
                 <div>
                   <div class="font-medium">{ShareTypeLabel[type]}</div>
-                  <div class="text-xs text-muted-foreground">{ShareTypeDesc[type]}</div>
+                  <div class="text-muted-foreground text-xs">
+                    {ShareTypeDesc[type]}
+                  </div>
                 </div>
               </label>
             {/each}
@@ -723,7 +742,7 @@
           <select
             id="share-expire"
             bind:value={shareExpireHours}
-            class="w-full rounded-lg border bg-background px-3 py-2 text-sm"
+            class="bg-background w-full rounded-lg border px-3 py-2 text-sm"
           >
             <option value={24}>24 小时</option>
             <option value={72}>3 天</option>
@@ -752,26 +771,30 @@
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
       <Dialog.Title>分享给好友</Dialog.Title>
-      <Dialog.Description>
-        选择好友直接分享文件
-      </Dialog.Description>
+      <Dialog.Description>选择好友直接分享文件</Dialog.Description>
     </Dialog.Header>
 
     <div class="space-y-4">
-      <Input
-        bind:value={friendSearchKeyword}
-        placeholder="搜索好友..."
-      />
+      <Input bind:value={friendSearchKeyword} placeholder="搜索好友..." />
 
       {#if loadingFriends}
         <div class="flex items-center justify-center p-8">
-          <div class="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+          <div
+            class="border-primary h-6 w-6 animate-spin rounded-full border-2 border-t-transparent"
+          ></div>
         </div>
       {:else if filteredFriends.length === 0}
-        <div class="p-8 text-center text-muted-foreground">
+        <div class="text-muted-foreground p-8 text-center">
           {#if friends.length === 0}
             <p>暂无好友</p>
-            <Button variant="link" class="mt-2" onclick={() => { friendShareDialogOpen = false; goto('/friends'); }}>
+            <Button
+              variant="link"
+              class="mt-2"
+              onclick={() => {
+                friendShareDialogOpen = false;
+                goto("/friends");
+              }}
+            >
               去添加好友
             </Button>
           {:else}
@@ -779,27 +802,50 @@
           {/if}
         </div>
       {:else}
-        <div class="max-h-48 overflow-y-auto space-y-2">
+        <div class="max-h-48 space-y-2 overflow-y-auto">
           {#each filteredFriends as friend}
             <button
-              class="w-full flex items-center gap-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors text-left {selectedFriends.has(friend.id) ? 'border-primary bg-primary/5' : ''}"
+              class="hover:bg-muted/50 flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors {selectedFriends.has(
+                friend.id,
+              )
+                ? 'border-primary bg-primary/5'
+                : ''}"
               onclick={() => toggleFriendSelection(friend.id)}
             >
               <Avatar.Root class="h-10 w-10">
                 {#if friend.avatar}
-                  <Avatar.Image src={getAvatarUrl(friend.avatar)} alt={friend.username} />
+                  <Avatar.Image
+                    src={getAvatarUrl(friend.avatar)}
+                    alt={friend.username}
+                  />
                 {/if}
-                <Avatar.Fallback>{friend.username.charAt(0).toUpperCase()}</Avatar.Fallback>
+                <Avatar.Fallback
+                  >{friend.username.charAt(0).toUpperCase()}</Avatar.Fallback
+                >
               </Avatar.Root>
-              <div class="flex-1 min-w-0">
-                <div class="font-medium truncate">{getDisplayFriendName(friend)}</div>
+              <div class="min-w-0 flex-1">
+                <div class="truncate font-medium">
+                  {getDisplayFriendName(friend)}
+                </div>
                 {#if friend.remark || friend.nickname}
-                  <div class="text-xs text-muted-foreground truncate">@{friend.username}</div>
+                  <div class="text-muted-foreground truncate text-xs">
+                    @{friend.username}
+                  </div>
                 {/if}
               </div>
               {#if selectedFriends.has(friend.id)}
-                <svg class="h-5 w-5 text-primary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                <svg
+                  class="text-primary h-5 w-5 flex-shrink-0"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M5 13l4 4L19 7"
+                  />
                 </svg>
               {/if}
             </button>
@@ -809,7 +855,9 @@
 
       {#if selectedFriends.size > 0}
         <div class="space-y-2">
-          <label for="friend-share-message" class="text-sm font-medium">留言（可选）</label>
+          <label for="friend-share-message" class="text-sm font-medium"
+            >留言（可选）</label
+          >
           <Textarea
             id="friend-share-message"
             bind:value={friendShareMessage}

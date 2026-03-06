@@ -1,1 +1,1 @@
-cd platform-frontend && npx lint-staged
+cd platform-frontend && pnpm exec lint-staged
