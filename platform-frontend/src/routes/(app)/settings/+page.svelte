@@ -41,6 +41,14 @@
     }
   });
 
+  $effect(() => {
+    if (!showPasswordDialog) {
+      oldPassword = "";
+      newPassword = "";
+      confirmPwd = "";
+    }
+  });
+
   async function handleAvatarClick() {
     fileInput?.click();
   }

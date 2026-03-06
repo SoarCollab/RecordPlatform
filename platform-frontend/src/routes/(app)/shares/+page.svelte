@@ -11,6 +11,7 @@
 		ShareTypeDesc,
 		type FileShareVO,
 	} from '$api/types';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	const notifications = useNotifications();
 
@@ -19,6 +20,10 @@
 	let page = $state(1);
 	let total = $state(0);
 	let pageSize = $state(10);
+
+	let confirmOpen = $state(false);
+	let confirmTarget = $state<FileShareVO | null>(null);
+	let cancelling = $state(false);
 
 	// 编辑对话框状态
 	let editDialogOpen = $state(false);
@@ -120,17 +125,24 @@
 		}
 	}
 
-	async function handleCancelShare(share: FileShareVO) {
-		if (!confirm(`确定要取消分享 "${share.fileNames.join(', ')}" 吗？取消后他人将无法通过此链接访问。`)) {
-			return;
-		}
+	function handleCancelShare(share: FileShareVO) {
+		confirmTarget = share;
+		confirmOpen = true;
+	}
 
+	async function executeCancelShare() {
+		if (!confirmTarget) return;
+		cancelling = true;
 		try {
-			await cancelShare(share.sharingCode);
+			await cancelShare(confirmTarget.sharingCode);
 			notifications.success('分享已取消');
+			confirmOpen = false;
+			confirmTarget = null;
 			await loadShares();
 		} catch (err) {
 			notifications.error('取消失败', err instanceof Error ? err.message : '请稍后重试');
+		} finally {
+			cancelling = false;
 		}
 	}
 
@@ -229,6 +241,7 @@
 											<button
 												class="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
 												title="复制链接"
+												aria-label="复制链接"
 												onclick={() => copyShareLink(share.sharingCode)}
 											>
 												<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -238,6 +251,7 @@
 											<button
 												class="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
 												title="编辑"
+												aria-label="编辑分享设置"
 												onclick={() => openEditDialog(share)}
 											>
 												<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -247,6 +261,7 @@
 											<button
 												class="rounded p-1.5 text-destructive hover:bg-destructive/10"
 												title="取消分享"
+												aria-label="取消分享"
 												onclick={() => handleCancelShare(share)}
 											>
 												<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -296,6 +311,15 @@
 </div>
 
 <!-- 编辑对话框 -->
+<ConfirmDialog
+	bind:open={confirmOpen}
+	title="取消分享"
+	description={confirmTarget ? `确定要取消分享 "${confirmTarget.fileNames.join(', ')}" 吗？取消后他人将无法通过此链接访问。` : ''}
+	confirmText="取消分享"
+	loading={cancelling}
+	onConfirm={executeCancelShare}
+/>
+
 {#if editDialogOpen}
 	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 	<div

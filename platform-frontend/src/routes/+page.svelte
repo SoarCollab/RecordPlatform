@@ -1,7 +1,16 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { fly } from "svelte/transition";
+  import { useAuth } from "$stores/auth.svelte";
   import logo from "$lib/assets/logo.png";
+
+  const auth = useAuth();
+
+  $effect(() => {
+    if (auth.isAuthenticated) {
+      goto("/dashboard", { replaceState: true });
+    }
+  });
 
   const features = [
     {
@@ -152,7 +161,7 @@
     <div
       class="container mx-auto px-4 text-center text-sm text-muted-foreground"
     >
-      <p>&copy; 2024 存证平台. All rights reserved.</p>
+      <p>&copy; {new Date().getFullYear()} 存证平台. All rights reserved.</p>
     </div>
   </footer>
 </div>

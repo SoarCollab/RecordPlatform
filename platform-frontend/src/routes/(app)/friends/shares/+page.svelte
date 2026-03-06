@@ -15,6 +15,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import * as Avatar from '$lib/components/ui/avatar';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	const notifications = useNotifications();
 
@@ -25,6 +26,10 @@
 	let page = $state(1);
 	let total = $state(0);
 	let pageSize = $state(20);
+
+	let cancelConfirmOpen = $state(false);
+	let cancelTarget = $state<FriendFileShareDetailVO | null>(null);
+	let cancellingShare = $state(false);
 
 	onMount(() => {
 		loadShares();
@@ -58,21 +63,32 @@
 	async function handleMarkAsRead(share: FriendFileShareDetailVO) {
 		try {
 			await markFriendShareAsRead(share.id);
-			share.isRead = true;
-			receivedShares = [...receivedShares];
+			receivedShares = receivedShares.map(s =>
+				s.id === share.id ? { ...s, isRead: true } : s
+			);
 		} catch (err) {
 			notifications.error('操作失败', err instanceof Error ? err.message : '请稍后重试');
 		}
 	}
 
-	async function handleCancel(share: FriendFileShareDetailVO) {
-		if (!confirm('确定要取消这个分享吗？')) return;
+	function handleCancel(share: FriendFileShareDetailVO) {
+		cancelTarget = share;
+		cancelConfirmOpen = true;
+	}
+
+	async function executeCancel() {
+		if (!cancelTarget) return;
+		cancellingShare = true;
 		try {
-			await cancelFriendShare(share.id);
+			await cancelFriendShare(cancelTarget.id);
 			notifications.success('已取消分享');
+			cancelConfirmOpen = false;
+			cancelTarget = null;
 			await loadShares();
 		} catch (err) {
 			notifications.error('操作失败', err instanceof Error ? err.message : '请稍后重试');
+		} finally {
+			cancellingShare = false;
 		}
 	}
 
@@ -93,7 +109,7 @@
 			<h1 class="text-2xl font-bold">好友分享</h1>
 			<p class="text-muted-foreground">好友直接分享给你的文件</p>
 		</div>
-		<Button variant="outline" onclick={() => history.back()}>
+		<Button variant="outline" onclick={() => goto('/friends')}>
 			返回
 		</Button>
 	</div>
@@ -209,7 +225,7 @@
 					<div class="flex justify-center gap-2 mt-6">
 						<Button
 							variant="outline"
-							disabled={page <= 1}
+							disabled={page <= 1 || loading}
 							onclick={() => { page--; loadShares(); }}
 						>
 							上一页
@@ -219,7 +235,7 @@
 						</span>
 						<Button
 							variant="outline"
-							disabled={page >= Math.ceil(total / pageSize)}
+							disabled={page >= Math.ceil(total / pageSize) || loading}
 							onclick={() => { page++; loadShares(); }}
 						>
 							下一页
@@ -230,3 +246,12 @@
 		</div>
 	</Tabs.Root>
 </div>
+
+<ConfirmDialog
+	bind:open={cancelConfirmOpen}
+	title="取消分享"
+	description="确定要取消这个分享吗？"
+	confirmText="取消分享"
+	loading={cancellingShare}
+	onConfirm={executeCancel}
+/>

@@ -12,6 +12,7 @@ const clientMocks = vi.hoisted(() => {
     },
     setToken: vi.fn(),
     clearToken: vi.fn(),
+    wasRememberMeSelected: vi.fn(),
   };
 });
 
@@ -19,6 +20,7 @@ vi.mock("../client", () => ({
   api: clientMocks.api,
   setToken: clientMocks.setToken,
   clearToken: clientMocks.clearToken,
+  wasRememberMeSelected: clientMocks.wasRememberMeSelected,
 }));
 
 import type { AccountVO } from "../types";
@@ -37,6 +39,7 @@ function createAccount(overrides: Partial<AccountVO> = {}): AccountVO {
 describe("auth endpoints", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clientMocks.wasRememberMeSelected.mockReturnValue(true);
   });
 
   it("login 应调用登录接口并设置 token（默认 rememberMe=true）", async () => {
@@ -139,6 +142,7 @@ describe("auth endpoints", () => {
     expect(clientMocks.setToken).toHaveBeenCalledWith(
       "refresh-token",
       "2099-12-31",
+      true,
     );
     expect(result.token).toBe("refresh-token");
   });

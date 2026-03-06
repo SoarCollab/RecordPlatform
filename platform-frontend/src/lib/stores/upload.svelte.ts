@@ -120,6 +120,7 @@ function calculateChunks(
 const sse = useSSE();
 let unsubscribeSSE: (() => void) | null = null;
 let visibilityListenerBound = false;
+let visibilityHandler: (() => void) | null = null;
 
 const progressPollTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 const VISIBLE_POLL_INTERVAL_MS = 1500;
@@ -133,7 +134,7 @@ function ensureSideEffectsInitialized(): void {
   if (!browser) return;
 
   if (!visibilityListenerBound) {
-    document.addEventListener("visibilitychange", () => {
+    visibilityHandler = () => {
       if (document.visibilityState === "visible") {
         for (const t of tasks) {
           if (
@@ -144,7 +145,8 @@ function ensureSideEffectsInitialized(): void {
           }
         }
       }
-    });
+    };
+    document.addEventListener("visibilitychange", visibilityHandler);
     visibilityListenerBound = true;
   }
 
@@ -467,9 +469,13 @@ async function startUpload(id: string): Promise<void> {
   }
 
   // Start next pending upload
-  const next = pendingTasks[0];
-  if (next && activeTasks.length < MAX_CONCURRENT_UPLOADS) {
-    startUpload(next.id);
+  const next = tasks.find((t) => t.status === "pending");
+  if (
+    next &&
+    tasks.filter((t) => t.status === "uploading").length <
+      MAX_CONCURRENT_UPLOADS
+  ) {
+    void startUpload(next.id);
   }
 }
 
@@ -481,11 +487,7 @@ async function pauseUpload(id: string): Promise<void> {
   stopProgressPolling(id);
 
   if (task.clientId) {
-    try {
-      await uploadApi.pauseUpload(task.clientId);
-    } catch {
-      // Ignore pause errors
-    }
+    await uploadApi.pauseUpload(task.clientId);
   }
 }
 
@@ -504,8 +506,11 @@ async function resumeUpload(id: string): Promise<void> {
           (result.processedChunks.length / task.totalChunks) * 100,
         ),
       });
-    } catch {
-      // Continue with existing state
+    } catch (err) {
+      updateTask(id, {
+        error: err instanceof Error ? err.message : "恢复失败",
+      });
+      throw err;
     }
   }
 
@@ -534,11 +539,7 @@ async function cancelUpload(id: string): Promise<void> {
   stopProgressPolling(id);
 
   if (task.clientId) {
-    try {
-      await uploadApi.cancelUpload(task.clientId);
-    } catch {
-      // Ignore cancel errors
-    }
+    await uploadApi.cancelUpload(task.clientId);
   }
 }
 
@@ -631,6 +632,21 @@ async function cancelAllActiveAndProcessing(): Promise<number> {
   return ids.length;
 }
 
+function cleanup(): void {
+  if (unsubscribeSSE) {
+    unsubscribeSSE();
+    unsubscribeSSE = null;
+  }
+  if (visibilityHandler) {
+    document.removeEventListener("visibilitychange", visibilityHandler);
+    visibilityHandler = null;
+    visibilityListenerBound = false;
+  }
+  for (const [id] of progressPollTimeouts) {
+    stopProgressPolling(id);
+  }
+}
+
 // ===== Export Hook =====
 
 export function useUpload() {
@@ -677,5 +693,6 @@ export function useUpload() {
     removeTask,
     clearCompleted,
     clearFailedAndCancelled,
+    cleanup,
   };
 }

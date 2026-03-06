@@ -17,6 +17,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Input } from '$lib/components/ui/input';
 	import * as Avatar from '$lib/components/ui/avatar';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	const notifications = useNotifications();
 
@@ -31,6 +32,7 @@
 	let searchKeyword = $state('');
 	let searchResults = $state<UserSearchVO[]>([]);
 	let searching = $state(false);
+	let sendingRequest = $state(false);
 	let requestMessage = $state('');
 	let selectedUser = $state<UserSearchVO | null>(null);
 
@@ -38,6 +40,12 @@
 	let editRemarkOpen = $state(false);
 	let editingFriend = $state<FriendVO | null>(null);
 	let newRemark = $state('');
+	let savingRemark = $state(false);
+
+	// 删除好友确认对话框
+	let unfriendConfirmOpen = $state(false);
+	let unfriendTarget = $state<FriendVO | null>(null);
+	let unfriending = $state(false);
 
 	onMount(() => {
 		loadFriends();
@@ -73,6 +81,7 @@
 
 	async function handleSendRequest() {
 		if (!selectedUser) return;
+		sendingRequest = true;
 		try {
 			await sendFriendRequest({
 				addresseeId: selectedUser.id,
@@ -86,17 +95,29 @@
 			searchResults = [];
 		} catch (err) {
 			notifications.error('发送失败', err instanceof Error ? err.message : '请稍后重试');
+		} finally {
+			sendingRequest = false;
 		}
 	}
 
-	async function handleUnfriend(friend: FriendVO) {
-		if (!confirm(`确定要删除好友 "${friend.remark || friend.nickname || friend.username}" 吗？`)) return;
+	function handleUnfriend(friend: FriendVO) {
+		unfriendTarget = friend;
+		unfriendConfirmOpen = true;
+	}
+
+	async function executeUnfriend() {
+		if (!unfriendTarget) return;
+		unfriending = true;
 		try {
-			await unfriend(friend.id);
+			await unfriend(unfriendTarget.id);
 			notifications.success('已删除好友');
+			unfriendConfirmOpen = false;
+			unfriendTarget = null;
 			await loadFriends();
 		} catch (err) {
 			notifications.error('删除失败', err instanceof Error ? err.message : '请稍后重试');
+		} finally {
+			unfriending = false;
 		}
 	}
 
@@ -108,6 +129,7 @@
 
 	async function handleSaveRemark() {
 		if (!editingFriend) return;
+		savingRemark = true;
 		try {
 			await updateFriendRemark(editingFriend.id, { remark: newRemark || undefined });
 			notifications.success('备注已更新');
@@ -115,6 +137,8 @@
 			await loadFriends();
 		} catch (err) {
 			notifications.error('更新失败', err instanceof Error ? err.message : '请稍后重试');
+		} finally {
+			savingRemark = false;
 		}
 	}
 
@@ -220,7 +244,7 @@
 			<div class="flex justify-center gap-2">
 				<Button
 					variant="outline"
-					disabled={page <= 1}
+					disabled={page <= 1 || loading}
 					onclick={() => { page--; loadFriends(); }}
 				>
 					上一页
@@ -230,7 +254,7 @@
 				</span>
 				<Button
 					variant="outline"
-					disabled={page >= Math.ceil(total / pageSize)}
+					disabled={page >= Math.ceil(total / pageSize) || loading}
 					onclick={() => { page++; loadFriends(); }}
 				>
 					下一页
@@ -286,6 +310,8 @@
 						</button>
 					{/each}
 				</div>
+			{:else if searchKeyword.trim() && !searching}
+				<div class="text-center text-sm text-muted-foreground p-4">未找到匹配用户</div>
 			{/if}
 
 			{#if selectedUser && !selectedUser.isFriend && !selectedUser.hasPendingRequest}
@@ -304,13 +330,22 @@
 			<Button variant="outline" onclick={() => addFriendOpen = false}>取消</Button>
 			<Button
 				onclick={handleSendRequest}
-				disabled={!selectedUser || selectedUser.isFriend || selectedUser.hasPendingRequest}
+				disabled={!selectedUser || selectedUser.isFriend || selectedUser.hasPendingRequest || sendingRequest}
 			>
-				发送请求
+				{sendingRequest ? '发送中...' : '发送请求'}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
+
+<ConfirmDialog
+	bind:open={unfriendConfirmOpen}
+	title="删除好友"
+	description={unfriendTarget ? `确定要删除好友 "${unfriendTarget.remark || unfriendTarget.nickname || unfriendTarget.username}" 吗？` : ''}
+	confirmText="删除"
+	loading={unfriending}
+	onConfirm={executeUnfriend}
+/>
 
 <!-- 编辑备注对话框 -->
 <Dialog.Root bind:open={editRemarkOpen}>
@@ -329,8 +364,10 @@
 			/>
 		</div>
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => editRemarkOpen = false}>取消</Button>
-			<Button onclick={handleSaveRemark}>保存</Button>
+			<Button variant="outline" onclick={() => editRemarkOpen = false} disabled={savingRemark}>取消</Button>
+			<Button onclick={handleSaveRemark} disabled={savingRemark}>
+				{savingRemark ? '保存中...' : '保存'}
+			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

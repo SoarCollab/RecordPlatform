@@ -266,10 +266,13 @@
     }
   }
 
+  let isRetryingFailed = $state(false);
+
   /**
    * 一键重试最近批次中的失败项。
    */
   async function retryBatchFailed(): Promise<void> {
+    isRetryingFailed = true;
     try {
       const summary = await download.retryBatchFailed();
       if (!summary) {
@@ -289,6 +292,8 @@
         "重试失败",
         err instanceof Error ? err.message : "请稍后重试"
       );
+    } finally {
+      isRetryingFailed = false;
     }
   }
 
@@ -549,8 +554,8 @@
           </div>
           <div class="flex gap-2">
             {#if download.batchState.status === "completed" && download.batchState.failedCount > 0}
-              <Button size="sm" variant="outline" onclick={retryBatchFailed}>
-                重试失败项
+              <Button size="sm" variant="outline" onclick={retryBatchFailed} disabled={isRetryingFailed}>
+                {isRetryingFailed ? "重试中..." : "重试失败项"}
               </Button>
             {/if}
             {#if download.batchState.status === "completed"}

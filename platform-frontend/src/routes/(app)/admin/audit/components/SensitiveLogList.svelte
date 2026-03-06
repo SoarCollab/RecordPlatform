@@ -9,6 +9,9 @@
   import * as Card from "$lib/components/ui/card";
   import DateTimePicker from "$lib/components/ui/date-picker/date-time-picker.svelte";
   import LogDetailDialog from "./dialogs/LogDetailDialog.svelte";
+  import { useNotifications } from "$stores/notifications.svelte";
+
+  const notifications = useNotifications();
 
   let sensitive = $state<SysOperationLog[]>([]);
   let loading = $state(false);
@@ -44,6 +47,8 @@
       const result = await getSensitiveOperations(query);
       sensitive = result.records;
       total = result.total;
+    } catch (err) {
+      notifications.error("加载失败", err instanceof Error ? err.message : "请稍后重试");
     } finally {
       loading = false;
     }
@@ -160,7 +165,7 @@
                 onclick={() => openDetail(row)}
                 role="button"
                 tabindex={0}
-                onkeypress={(e) => e.key === "Enter" && openDetail(row)}
+                onkeydown={(e) => e.key === "Enter" && openDetail(row)}
               >
                 <Table.Cell class="whitespace-nowrap">{row.operationTime ? formatDateTime(String(row.operationTime)) : "-"}</Table.Cell>
                 <Table.Cell>{row.username || row.userId || "-"}</Table.Cell>

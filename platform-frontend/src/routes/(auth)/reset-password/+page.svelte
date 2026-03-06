@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { useNotifications } from '$stores/notifications.svelte';
-	import { sendResetCode, confirmResetCode, resetPassword } from '$lib/api/endpoints/auth';
+	import { sendResetCode, confirmResetCode, resetPassword } from '$api/endpoints/auth';
 	import { goto } from '$app/navigation';
+	import * as validation from '$utils/validation';
 
 	const notifications = useNotifications();
 
@@ -31,8 +32,9 @@
 	async function handleSendCode(e: Event) {
 		e.preventDefault();
 
-		if (!email) {
-			notifications.warning('请输入邮箱', '邮箱地址不能为空');
+		const emailResult = validation.email(email);
+		if (!emailResult.valid) {
+			notifications.warning('邮箱格式错误', emailResult.message);
 			return;
 		}
 
@@ -90,13 +92,15 @@
 	async function handleResetPassword(e: Event) {
 		e.preventDefault();
 
-		if (!password || password.length < 6) {
-			notifications.warning('密码太短', '密码长度至少6位');
+		const passwordResult = validation.password(password);
+		if (!passwordResult.valid) {
+			notifications.warning('密码强度不足', passwordResult.message);
 			return;
 		}
 
-		if (password !== confirmPassword) {
-			notifications.warning('密码不一致', '两次输入的密码不一致');
+		const confirmResult = validation.confirmPassword(confirmPassword, password);
+		if (!confirmResult.valid) {
+			notifications.warning('密码不一致', confirmResult.message);
 			return;
 		}
 
@@ -235,7 +239,7 @@
 					id="password"
 					bind:value={password}
 					class="w-full rounded-lg border bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-					placeholder="请输入新密码（至少6位）"
+					placeholder="请输入新密码（至少8位，包含字母和数字）"
 					disabled={isSubmitting}
 				/>
 			</div>

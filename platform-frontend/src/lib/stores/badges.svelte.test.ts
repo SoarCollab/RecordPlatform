@@ -123,6 +123,18 @@ describe("badges store", () => {
     expect(badges.lastFetched).toBeNull();
   });
 
+  it("仅工单未读时 hasUnread 应保持 true", async () => {
+    const badges = await loadBadgesStore();
+
+    badges.updateTicketCount(1);
+
+    expect(badges.pendingTickets).toBe(1);
+    expect(badges.hasUnread).toBe(true);
+
+    badges.reset();
+    expect(badges.hasUnread).toBe(false);
+  });
+
   it("startAutoRefresh 应幂等，stopAutoRefresh 应停止定时任务", async () => {
     vi.useFakeTimers();
 

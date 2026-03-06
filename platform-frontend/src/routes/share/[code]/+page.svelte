@@ -91,10 +91,10 @@
       } catch (err) {
         const needsLogin =
           err instanceof ApiError &&
-          (err.code === ResultCode.PERMISSION_UNAUTHORIZED ||
+          (err.isUnauthorized ||
+            err.code === ResultCode.PERMISSION_UNAUTHORIZED ||
             err.code === ResultCode.PERMISSION_UNAUTHENTICATED ||
-            err.code === ResultCode.USER_NOT_LOGGED_IN) &&
-          err.message.includes("登录");
+            err.code === ResultCode.USER_NOT_LOGGED_IN);
         if (needsLogin) {
           notifications.info("请先登录", "私密分享需要登录后才能下载");
           await goto(`/login?redirect=/share/${data.code}`);

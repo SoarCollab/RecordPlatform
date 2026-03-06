@@ -13,7 +13,7 @@ import {
 
 let unreadMessages = $state(0);
 let unreadAnnouncements = $state(0);
-let pendingTickets = $state(0);
+let unreadTickets = $state(0);
 let pendingFriendRequests = $state(0);
 let unreadFriendShares = $state(0);
 let isLoading = $state(false);
@@ -53,7 +53,7 @@ async function fetchBadgeCounts() {
     }
 
     if (ticketsResult.status === "fulfilled") {
-      pendingTickets = ticketsResult.value.count;
+      unreadTickets = ticketsResult.value.count;
     }
 
     if (friendRequestsResult.status === "fulfilled") {
@@ -81,7 +81,7 @@ function updateAnnouncementCount(count: number) {
 }
 
 function updateTicketCount(count: number) {
-  pendingTickets = count;
+  unreadTickets = count;
 }
 
 function updateFriendRequestCount(count: number) {
@@ -107,7 +107,7 @@ function decrementAnnouncements() {
 function reset() {
   unreadMessages = 0;
   unreadAnnouncements = 0;
-  pendingTickets = 0;
+  unreadTickets = 0;
   pendingFriendRequests = 0;
   unreadFriendShares = 0;
   lastFetched = null;
@@ -145,7 +145,7 @@ export function useBadges() {
       return unreadAnnouncements;
     },
     get pendingTickets() {
-      return pendingTickets;
+      return unreadTickets;
     },
     get pendingFriendRequests() {
       return pendingFriendRequests;
@@ -170,7 +170,7 @@ export function useBadges() {
       return (
         unreadMessages > 0 ||
         unreadAnnouncements > 0 ||
-        pendingTickets > 0 ||
+        unreadTickets > 0 ||
         pendingFriendRequests > 0 ||
         unreadFriendShares > 0
       );

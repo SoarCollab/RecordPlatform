@@ -81,12 +81,20 @@
   }
 
   async function handleSaveConfig(config: AuditConfigVO) {
-    const ok = await updateAuditConfig(config);
-    if (!ok) {
-      throw new Error("更新失败");
+    try {
+      const ok = await updateAuditConfig(config);
+      if (!ok) {
+        notifications.error("更新失败", "配置保存失败，请稍后重试");
+        return;
+      }
+      auditConfigs = auditConfigs.map((c) => (c.id === config.id ? config : c));
+      notifications.success("更新成功");
+    } catch (err) {
+      notifications.error(
+        "更新失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
     }
-    auditConfigs = auditConfigs.map((c) => (c.id === config.id ? config : c));
-    notifications.success("更新成功");
   }
 
   async function handleCheckAnomalies() {

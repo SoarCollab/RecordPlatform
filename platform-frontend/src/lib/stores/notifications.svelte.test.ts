@@ -85,4 +85,30 @@ describe("notifications store", () => {
       vi.useRealTimers();
     }
   });
+
+  it("dismiss 与 dismissAll 应清理已注册的定时器", async () => {
+    vi.useFakeTimers();
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+
+    try {
+      const notifications = await loadNotificationsStore();
+      const infoId = notifications.info("auto", "remove");
+      notifications.error("err", "persist");
+
+      expect(notifications.notifications).toHaveLength(2);
+
+      notifications.dismiss(infoId);
+      expect(notifications.notifications).toHaveLength(1);
+
+      notifications.dismissAll();
+      expect(notifications.notifications).toHaveLength(0);
+      expect(clearTimeoutSpy).toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(8000);
+      expect(notifications.notifications).toHaveLength(0);
+    } finally {
+      clearTimeoutSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
 });

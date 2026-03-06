@@ -59,8 +59,8 @@
   },
   "type": "module",
   "lint-staged": {
-    "*.{js,ts,svelte,html,css,json}": "prettier --write",
-    "*.{js,ts,svelte}": "eslint --fix"
+    "*.{js,ts,svelte,html,css,json}": "node scripts/lint-staged-prettier.mjs",
+    "*.{js,ts,svelte}": "node scripts/lint-staged-eslint.mjs"
   },
   "pnpm": {
     "overrides": {

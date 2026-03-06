@@ -75,6 +75,22 @@
   let logsShareCode = $state("");
   let accessLogs = $state<ShareAccessLogVO[]>([]);
   let logsLoading = $state(false);
+  let logsPageNum = $state(1);
+  let logsTotalPages = $state(1);
+  let logsPageSize = 20;
+
+  async function loadLogsPage() {
+    logsLoading = true;
+    try {
+      const result = await getShareAccessLogs(logsShareCode, { pageNum: logsPageNum, pageSize: logsPageSize });
+      accessLogs = result.records;
+      logsTotalPages = Math.max(1, Math.ceil(result.total / logsPageSize));
+    } catch (err) {
+      notifications.error("加载日志失败", err instanceof Error ? err.message : "请稍后重试");
+    } finally {
+      logsLoading = false;
+    }
+  }
 
   onMount(() => {
     loadFiles();
@@ -95,7 +111,7 @@
         endTime: filesEndTime || undefined,
       });
       files = result.records;
-      filesTotalPages = Math.ceil(result.total / 20);
+      filesTotalPages = Math.max(1, Math.ceil(result.total / 20));
     } catch (err) {
       notifications.error("加载失败", err instanceof Error ? err.message : "请稍后重试");
     } finally {
@@ -117,7 +133,7 @@
         endTime: sharesEndTime || undefined,
       });
       shares = result.records;
-      sharesTotalPages = Math.ceil(result.total / 20);
+      sharesTotalPages = Math.max(1, Math.ceil(result.total / 20));
     } catch (err) {
       notifications.error("加载失败", err instanceof Error ? err.message : "请稍后重试");
     } finally {
@@ -170,7 +186,10 @@
     }
   }
 
+  let statusUpdatingId = $state<string | null>(null);
+
   async function handleUpdateStatus(fileId: string, newStatus: number) {
+    statusUpdatingId = fileId;
     try {
       await updateFileStatus(fileId, { status: newStatus });
       notifications.success("状态更新成功");
@@ -180,6 +199,8 @@
       }
     } catch (err) {
       notifications.error("更新失败", err instanceof Error ? err.message : "请稍后重试");
+    } finally {
+      statusUpdatingId = null;
     }
   }
 
@@ -213,15 +234,8 @@
   async function handleViewLogs(shareCode: string) {
     logsShareCode = shareCode;
     logsDialogOpen = true;
-    logsLoading = true;
-    try {
-      const result = await getShareAccessLogs(shareCode, { pageNum: 1, pageSize: 50 });
-      accessLogs = result.records;
-    } catch (err) {
-      notifications.error("加载日志失败", err instanceof Error ? err.message : "请稍后重试");
-    } finally {
-      logsLoading = false;
-    }
+    logsPageNum = 1;
+    await loadLogsPage();
   }
 
   function handleTabChange(tab: string) {
@@ -691,7 +705,7 @@
                     </span>
                   </div>
                   <Badge variant={getStatusBadgeVariant(share.status)}>
-                    {share.status === 0 ? "已取消" : share.status === 1 ? "有效" : "已过期"}
+                    {share.status === AdminShareStatus.CANCELLED ? "已取消" : share.status === AdminShareStatus.ACTIVE ? "有效" : "已过期"}
                   </Badge>
                 </div>
               {/each}
@@ -725,15 +739,17 @@
             <Button
               variant="outline"
               onclick={() => handleUpdateStatus(selectedFile!.id, AdminFileStatus.DELETED)}
+              disabled={statusUpdatingId === selectedFile!.id}
             >
-              标记删除
+              {statusUpdatingId === selectedFile!.id ? "处理中..." : "标记删除"}
             </Button>
           {:else if selectedFile.status === AdminFileStatus.DELETED}
             <Button
               variant="outline"
               onclick={() => handleUpdateStatus(selectedFile!.id, AdminFileStatus.COMPLETED)}
+              disabled={statusUpdatingId === selectedFile!.id}
             >
-              恢复文件
+              {statusUpdatingId === selectedFile!.id ? "处理中..." : "恢复文件"}
             </Button>
           {/if}
           <Button
@@ -817,6 +833,32 @@
           </div>
         {/each}
       </div>
+
+      {#if logsTotalPages > 1}
+        <div class="mt-4 flex items-center justify-between border-t pt-4">
+          <span class="text-sm text-muted-foreground">
+            第 {logsPageNum} / {logsTotalPages} 页
+          </span>
+          <div class="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={logsPageNum <= 1 || logsLoading}
+              onclick={() => { logsPageNum--; loadLogsPage(); }}
+            >
+              上一页
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={logsPageNum >= logsTotalPages || logsLoading}
+              onclick={() => { logsPageNum++; loadLogsPage(); }}
+            >
+              下一页
+            </Button>
+          </div>
+        </div>
+      {/if}
     {/if}
 
     <Dialog.Footer>
