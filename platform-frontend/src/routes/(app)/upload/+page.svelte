@@ -134,6 +134,8 @@
 		setBusy(id, true);
 		try {
 			await upload.pauseUpload(id);
+		} catch (err) {
+			notifications.error('暂停失败', err instanceof Error ? err.message : '请稍后重试');
 		} finally {
 			setBusy(id, false);
 		}
@@ -144,6 +146,8 @@
 		setBusy(id, true);
 		try {
 			await upload.resumeUpload(id);
+		} catch (err) {
+			notifications.error('恢复失败', err instanceof Error ? err.message : '请稍后重试');
 		} finally {
 			setBusy(id, false);
 		}
@@ -154,10 +158,23 @@
 		setBusy(id, true);
 		try {
 			await upload.retryUpload(id);
+		} catch (err) {
+			notifications.error('重试失败', err instanceof Error ? err.message : '请稍后重试');
 		} finally {
 			setBusy(id, false);
 		}
 	}
+
+	let prevCompletedIds = new Set<string>();
+	$effect(() => {
+		const currentIds = new Set(upload.completedTasks.map(t => t.id));
+		for (const task of upload.completedTasks) {
+			if (!prevCompletedIds.has(task.id)) {
+				notifications.success('上传完成', task.file.name);
+			}
+		}
+		prevCompletedIds = currentIds;
+	});
 
 	function handleDrop(e: DragEvent) {
 		e.preventDefault();

@@ -39,6 +39,10 @@
 	let editingFriend = $state<FriendVO | null>(null);
 	let newRemark = $state('');
 
+	// Loading states
+	let isSending = $state(false);
+	let savingRemark = $state(false);
+
 	onMount(() => {
 		loadFriends();
 	});
@@ -73,6 +77,7 @@
 
 	async function handleSendRequest() {
 		if (!selectedUser) return;
+		isSending = true;
 		try {
 			await sendFriendRequest({
 				addresseeId: selectedUser.id,
@@ -86,6 +91,8 @@
 			searchResults = [];
 		} catch (err) {
 			notifications.error('发送失败', err instanceof Error ? err.message : '请稍后重试');
+		} finally {
+			isSending = false;
 		}
 	}
 
@@ -108,6 +115,7 @@
 
 	async function handleSaveRemark() {
 		if (!editingFriend) return;
+		savingRemark = true;
 		try {
 			await updateFriendRemark(editingFriend.id, { remark: newRemark || undefined });
 			notifications.success('备注已更新');
@@ -115,6 +123,8 @@
 			await loadFriends();
 		} catch (err) {
 			notifications.error('更新失败', err instanceof Error ? err.message : '请稍后重试');
+		} finally {
+			savingRemark = false;
 		}
 	}
 
@@ -220,7 +230,7 @@
 			<div class="flex justify-center gap-2">
 				<Button
 					variant="outline"
-					disabled={page <= 1}
+					disabled={page <= 1 || loading}
 					onclick={() => { page--; loadFriends(); }}
 				>
 					上一页
@@ -230,7 +240,7 @@
 				</span>
 				<Button
 					variant="outline"
-					disabled={page >= Math.ceil(total / pageSize)}
+					disabled={page >= Math.ceil(total / pageSize) || loading}
 					onclick={() => { page++; loadFriends(); }}
 				>
 					下一页
@@ -286,6 +296,8 @@
 						</button>
 					{/each}
 				</div>
+			{:else if searchKeyword.trim() && !searching}
+				<div class="text-center text-sm text-muted-foreground p-4">未找到匹配用户</div>
 			{/if}
 
 			{#if selectedUser && !selectedUser.isFriend && !selectedUser.hasPendingRequest}
@@ -304,9 +316,9 @@
 			<Button variant="outline" onclick={() => addFriendOpen = false}>取消</Button>
 			<Button
 				onclick={handleSendRequest}
-				disabled={!selectedUser || selectedUser.isFriend || selectedUser.hasPendingRequest}
+				disabled={!selectedUser || selectedUser.isFriend || selectedUser.hasPendingRequest || isSending}
 			>
-				发送请求
+				{isSending ? '发送中...' : '发送请求'}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
@@ -330,7 +342,9 @@
 		</div>
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => editRemarkOpen = false}>取消</Button>
-			<Button onclick={handleSaveRemark}>保存</Button>
+			<Button onclick={handleSaveRemark} disabled={savingRemark}>
+				{savingRemark ? '保存中...' : '保存'}
+			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

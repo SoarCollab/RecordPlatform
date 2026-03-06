@@ -483,8 +483,8 @@ async function pauseUpload(id: string): Promise<void> {
   if (task.clientId) {
     try {
       await uploadApi.pauseUpload(task.clientId);
-    } catch {
-      // Ignore pause errors
+    } catch (err) {
+      throw err;
     }
   }
 }
@@ -504,8 +504,9 @@ async function resumeUpload(id: string): Promise<void> {
           (result.processedChunks.length / task.totalChunks) * 100,
         ),
       });
-    } catch {
-      // Continue with existing state
+    } catch (err) {
+      updateTask(id, { error: err instanceof Error ? err.message : "恢复失败" });
+      throw err;
     }
   }
 
@@ -536,8 +537,8 @@ async function cancelUpload(id: string): Promise<void> {
   if (task.clientId) {
     try {
       await uploadApi.cancelUpload(task.clientId);
-    } catch {
-      // Ignore cancel errors
+    } catch (err) {
+      throw err;
     }
   }
 }

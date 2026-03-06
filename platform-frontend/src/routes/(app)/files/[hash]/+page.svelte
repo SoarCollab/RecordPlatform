@@ -98,8 +98,8 @@
       if (file.transactionHash) {
         try {
           transaction = await getTransaction(file.transactionHash);
-        } catch {
-          // 交易信息可能尚未生成
+        } catch (err) {
+          notifications.warning("区块链信息加载失败", "交易详情暂时不可用");
         }
       }
     } catch (err) {

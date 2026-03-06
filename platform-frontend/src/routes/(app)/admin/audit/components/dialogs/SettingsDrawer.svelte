@@ -4,6 +4,9 @@
   import * as Dialog from "$lib/components/ui/dialog";
   import * as Table from "$lib/components/ui/table";
   import type { AuditConfigVO } from "$api/types";
+  import { useNotifications } from "$stores/notifications.svelte";
+
+  const notifications = useNotifications();
 
   interface Props {
     open: boolean;
@@ -70,6 +73,8 @@
       });
       configDialogOpen = false;
       editingConfig = null;
+    } catch (err) {
+      notifications.error("保存配置失败", err instanceof Error ? err.message : "请稍后重试");
     } finally {
       savingConfig = false;
     }

@@ -295,7 +295,7 @@
 					<Button
 						variant="outline"
 						size="sm"
-						disabled={page <= 1}
+						disabled={page <= 1 || loading}
 						onclick={() => {
 							page--;
 							loadTickets();
@@ -306,7 +306,7 @@
 					<Button
 						variant="outline"
 						size="sm"
-						disabled={page >= Math.ceil(total / pageSize)}
+						disabled={page >= Math.ceil(total / pageSize) || loading}
 						onclick={() => {
 							page++;
 							loadTickets();

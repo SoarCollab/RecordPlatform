@@ -209,7 +209,7 @@
 					<div class="flex justify-center gap-2 mt-6">
 						<Button
 							variant="outline"
-							disabled={page <= 1}
+							disabled={page <= 1 || loading}
 							onclick={() => { page--; loadShares(); }}
 						>
 							上一页
@@ -219,7 +219,7 @@
 						</span>
 						<Button
 							variant="outline"
-							disabled={page >= Math.ceil(total / pageSize)}
+							disabled={page >= Math.ceil(total / pageSize) || loading}
 							onclick={() => { page++; loadShares(); }}
 						>
 							下一页

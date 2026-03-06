@@ -9,6 +9,9 @@
   import * as Card from "$lib/components/ui/card";
   import DateTimePicker from "$lib/components/ui/date-picker/date-time-picker.svelte";
   import LogDetailDialog from "./dialogs/LogDetailDialog.svelte";
+  import { useNotifications } from "$stores/notifications.svelte";
+
+  const notifications = useNotifications();
 
   let logs = $state<AuditLogVO[]>([]);
   let loading = $state(false);
@@ -43,6 +46,8 @@
       const result = await getAuditLogs(params);
       logs = result.records;
       total = result.total;
+    } catch (err) {
+      notifications.error("加载失败", err instanceof Error ? err.message : "请稍后重试");
     } finally {
       loading = false;
     }

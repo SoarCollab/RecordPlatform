@@ -25,6 +25,7 @@
 	let page = $state(1);
 	let total = $state(0);
 	let pageSize = $state(20);
+	let busyRequestId = $state<string | null>(null);
 
 	onMount(() => {
 		loadRequests();
@@ -56,33 +57,42 @@
 	}
 
 	async function handleAccept(request: FriendRequestDetailVO) {
+		busyRequestId = request.id;
 		try {
 			await acceptFriendRequest(request.id);
 			notifications.success('已添加好友');
 			await loadRequests();
 		} catch (err) {
 			notifications.error('操作失败', err instanceof Error ? err.message : '请稍后重试');
+		} finally {
+			busyRequestId = null;
 		}
 	}
 
 	async function handleReject(request: FriendRequestDetailVO) {
+		busyRequestId = request.id;
 		try {
 			await rejectFriendRequest(request.id);
 			notifications.success('已拒绝请求');
 			await loadRequests();
 		} catch (err) {
 			notifications.error('操作失败', err instanceof Error ? err.message : '请稍后重试');
+		} finally {
+			busyRequestId = null;
 		}
 	}
 
 	async function handleCancel(request: FriendRequestDetailVO) {
 		if (!confirm('确定要取消这个好友请求吗？')) return;
+		busyRequestId = request.id;
 		try {
 			await cancelFriendRequest(request.id);
 			notifications.success('已取消请求');
 			await loadRequests();
 		} catch (err) {
 			notifications.error('操作失败', err instanceof Error ? err.message : '请稍后重试');
+		} finally {
+			busyRequestId = null;
 		}
 	}
 
@@ -189,15 +199,15 @@
 									{#if request.status === FriendRequestStatus.PENDING}
 										<div class="flex gap-2">
 											{#if activeTab === 'received'}
-												<Button size="sm" onclick={() => handleAccept(request)}>
-													接受
+												<Button size="sm" onclick={() => handleAccept(request)} disabled={busyRequestId !== null}>
+													{busyRequestId === request.id ? '处理中...' : '接受'}
 												</Button>
-												<Button size="sm" variant="outline" onclick={() => handleReject(request)}>
-													拒绝
+												<Button size="sm" variant="outline" onclick={() => handleReject(request)} disabled={busyRequestId !== null}>
+													{busyRequestId === request.id ? '处理中...' : '拒绝'}
 												</Button>
 											{:else}
-												<Button size="sm" variant="outline" onclick={() => handleCancel(request)}>
-													取消
+												<Button size="sm" variant="outline" onclick={() => handleCancel(request)} disabled={busyRequestId !== null}>
+													{busyRequestId === request.id ? '处理中...' : '取消'}
 												</Button>
 											{/if}
 										</div>
@@ -212,7 +222,7 @@
 					<div class="flex justify-center gap-2 mt-6">
 						<Button
 							variant="outline"
-							disabled={page <= 1}
+							disabled={page <= 1 || loading}
 							onclick={() => { page--; loadRequests(); }}
 						>
 							上一页
@@ -222,7 +232,7 @@
 						</span>
 						<Button
 							variant="outline"
-							disabled={page >= Math.ceil(total / pageSize)}
+							disabled={page >= Math.ceil(total / pageSize) || loading}
 							onclick={() => { page++; loadRequests(); }}
 						>
 							下一页

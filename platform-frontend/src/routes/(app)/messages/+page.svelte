@@ -271,7 +271,7 @@
 					<Button
 						variant="outline"
 						size="sm"
-						disabled={page <= 1}
+						disabled={page <= 1 || loading}
 						onclick={() => { page--; loadConversations(); }}
 					>
 						上一页
@@ -279,7 +279,7 @@
 					<Button
 						variant="outline"
 						size="sm"
-						disabled={page >= Math.ceil(total / pageSize)}
+						disabled={page >= Math.ceil(total / pageSize) || loading}
 						onclick={() => { page++; loadConversations(); }}
 					>
 						下一页
