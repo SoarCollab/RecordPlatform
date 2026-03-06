@@ -250,10 +250,22 @@ describe("upload store", () => {
 function findTask(
   upload: ReturnType<typeof Object>,
   id: string,
-): { id: string; status: string; clientId: string | null } | undefined {
+):
+  | {
+      id: string;
+      status: string;
+      clientId: string | null;
+      error?: string | null;
+    }
+  | undefined {
   return (
     upload as {
-      tasks: Array<{ id: string; status: string; clientId: string | null }>;
+      tasks: Array<{
+        id: string;
+        status: string;
+        clientId: string | null;
+        error?: string | null;
+      }>;
     }
   ).tasks.find((task) => task.id === id);
 }
@@ -302,16 +314,17 @@ describe("upload store extra branches", () => {
     await Promise.resolve();
 
     mocks.pauseUpload.mockRejectedValueOnce(new Error("pause failed"));
-    await upload.pauseUpload(id);
+    await expect(upload.pauseUpload(id)).rejects.toThrow("pause failed");
 
     const task = findTask(upload, id);
     expect(task?.status).toBe("paused");
 
     mocks.resumeUpload.mockRejectedValueOnce(new Error("resume failed"));
-    await upload.resumeUpload(id);
+    await expect(upload.resumeUpload(id)).rejects.toThrow("resume failed");
+    expect(findTask(upload, id)?.error).toBe("resume failed");
 
     mocks.cancelUpload.mockRejectedValueOnce(new Error("cancel failed"));
-    await upload.cancelUpload(id);
+    await expect(upload.cancelUpload(id)).rejects.toThrow("cancel failed");
     expect(findTask(upload, id)?.status).toBe("cancelled");
   });
 

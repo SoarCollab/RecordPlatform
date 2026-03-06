@@ -104,7 +104,7 @@
       if (file.transactionHash) {
         try {
           transaction = await getTransaction(file.transactionHash);
-        } catch (err) {
+        } catch {
           notifications.warning("区块链信息加载失败", "交易详情暂时不可用");
         }
       }

@@ -483,11 +483,7 @@ async function pauseUpload(id: string): Promise<void> {
   stopProgressPolling(id);
 
   if (task.clientId) {
-    try {
-      await uploadApi.pauseUpload(task.clientId);
-    } catch (err) {
-      throw err;
-    }
+    await uploadApi.pauseUpload(task.clientId);
   }
 }
 
@@ -507,7 +503,9 @@ async function resumeUpload(id: string): Promise<void> {
         ),
       });
     } catch (err) {
-      updateTask(id, { error: err instanceof Error ? err.message : "恢复失败" });
+      updateTask(id, {
+        error: err instanceof Error ? err.message : "恢复失败",
+      });
       throw err;
     }
   }
@@ -537,11 +535,7 @@ async function cancelUpload(id: string): Promise<void> {
   stopProgressPolling(id);
 
   if (task.clientId) {
-    try {
-      await uploadApi.cancelUpload(task.clientId);
-    } catch (err) {
-      throw err;
-    }
+    await uploadApi.cancelUpload(task.clientId);
   }
 }
 
