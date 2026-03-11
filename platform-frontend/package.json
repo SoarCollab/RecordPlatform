@@ -31,7 +31,7 @@
     "@vitest/coverage-v8": "^2.1.8",
     "bits-ui": "^2.16.3",
     "eslint": "^9.39.2",
-    "eslint-plugin-svelte": "^3.15.1",
+    "eslint-plugin-svelte": "^2.46.0",
     "fake-indexeddb": "^6.2.5",
     "globals": "^17.4.0",
     "jsdom": "^25.0.1",
