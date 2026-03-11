@@ -25,6 +25,8 @@ export default tseslint.config(
     rules: {
       // shadcn-svelte 组件使用 $props() rest 模式，非 custom element 无需此规则
       "svelte/valid-compile": ["error", { ignoreWarnings: true }],
+      // eslint-plugin-svelte v3.15.1 crashes on this rule (TypeError: Cannot read properties of undefined)
+      "svelte/no-navigation-without-resolve": "off",
     },
   },
   {
