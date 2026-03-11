@@ -14,7 +14,7 @@
     <properties>
         <java.version>21</java.version>
         <!-- Keep Flyway aligned with Spring Boot managed API surface to avoid NoSuchMethodError -->
-        <flyway.version>9.22.3</flyway.version>
+        <flyway.version>12.1.0</flyway.version>
         <poi.version>5.5.1</poi.version>
         <logstash.encoder.version>9.0</logstash.encoder.version>
         <tools.jackson.version>3.1.0</tools.jackson.version>
