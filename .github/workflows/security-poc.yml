@@ -93,7 +93,7 @@ jobs:
 
       - name: Run Trivy SCA (SARIF)
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: fs
           scan-ref: .
@@ -106,7 +106,7 @@ jobs:
 
       - name: Run Trivy SCA (JSON)
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: fs
           scan-ref: .
@@ -171,7 +171,7 @@ jobs:
 
       - name: Generate CycloneDX SBOM
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: fs
           scan-ref: .
