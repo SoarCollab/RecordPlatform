@@ -42,7 +42,7 @@
         <netty.version>4.2.10.Final</netty.version>
         <logback.version>1.5.32</logback.version>
         <jackson-bom.version>2.21.1</jackson-bom.version>
-        <tomcat.embed.version>11.0.18</tomcat.embed.version>
+        <tomcat.embed.version>10.1.49</tomcat.embed.version>
         <!--
             Mockito inline mock maker relies on Byte Buddy instrumentation.
             On some macOS/JDK builds, runtime self-attach is not available; pre-attaching the agent fixes it.
