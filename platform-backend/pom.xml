@@ -39,9 +39,9 @@
             Testcontainers (docker-java) may require SystemProperties.getUserName(String) (>= 3.17.0).
          -->
         <commons-lang3.version>3.20.0</commons-lang3.version>
-        <netty.version>4.1.129.Final</netty.version>
-        <logback.version>1.5.25</logback.version>
-        <jackson-bom.version>2.18.6</jackson-bom.version>
+        <netty.version>4.2.10.Final</netty.version>
+        <logback.version>1.5.32</logback.version>
+        <jackson-bom.version>2.21.1</jackson-bom.version>
         <tomcat.embed.version>10.1.49</tomcat.embed.version>
         <!--
             Mockito inline mock maker relies on Byte Buddy instrumentation.
