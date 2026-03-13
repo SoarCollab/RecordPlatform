@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/projects/jdk/21/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2-green.svg)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-green.svg)](https://spring.io/projects/spring-boot)
 
 基于区块链和分布式存储的**企业级文件存证平台**。
 
@@ -129,7 +129,7 @@ cd platform-frontend && pnpm install && pnpm dev
 
 | 分类     | 技术                              | 版本                     |
 | -------- | --------------------------------- | ------------------------ |
-| 后端     | Java, Spring Boot                 | 21, 3.2.11               |
+| 后端     | Java, Spring Boot                 | 21, 3.5.11               |
 | 微服务   | Apache Dubbo (Triple), Nacos      | 3.3.6                    |
 | 区块链   | FISCO BCOS, Solidity              | 3.8.0, ^0.8.11           |
 | 存储     | S3 兼容存储, MySQL, Redis         | AWS SDK 2.41, 8.0+, 7.0+ |

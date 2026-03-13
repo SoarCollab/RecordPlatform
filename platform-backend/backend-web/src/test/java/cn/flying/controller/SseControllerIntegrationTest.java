@@ -5,8 +5,8 @@ import cn.flying.service.sse.SseEmitterManager;
 import cn.flying.test.support.BaseControllerIntegrationTest;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.boot.test.mock.mockito.SpyBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
@@ -25,10 +25,10 @@ class SseControllerIntegrationTest extends BaseControllerIntegrationTest {
 
     private static final String BASE_URL = "/api/v1/sse";
 
-    @SpyBean
+    @MockitoSpyBean
     private JwtUtils jwtUtils;
 
-    @MockBean
+    @MockitoBean
     private SseEmitterManager sseEmitterManager;
 
     @BeforeEach

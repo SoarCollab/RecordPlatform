@@ -14,13 +14,13 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -30,11 +30,21 @@ public class SseEmitterManager {
     private static final long SSE_TIMEOUT = 30 * 60 * 1000L;
     private static final int MAX_CONNECTIONS_PER_USER = 5;
 
+    /**
+     * Holds a user's connection map together with its lock.
+     * Replaces Collections.synchronizedMap to avoid virtual-thread pinning.
+     */
+    private record UserConnections(Map<String, SseEmitter> map, ReentrantLock lock) {
+        UserConnections() {
+            this(new LinkedHashMap<>(), new ReentrantLock());
+        }
+    }
+
     @Resource
     private AccountMapper accountMapper;
 
-    // tenantId -> userId -> connectionId -> emitter
-    private final Map<Long, Map<Long, Map<String, SseEmitter>>> emittersByTenant = new ConcurrentHashMap<>();
+    // tenantId -> userId -> UserConnections(connectionId -> emitter, lock)
+    private final Map<Long, Map<Long, UserConnections>> emittersByTenant = new ConcurrentHashMap<>();
     private final Map<Long, Set<Long>> onlineUsersByTenant = new ConcurrentHashMap<>();
 
     /**
@@ -48,18 +58,21 @@ public class SseEmitterManager {
     public SseEmitter createConnection(Long tenantId, Long userId, String connectionId) {
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT);
 
-        // 使用同步块确保 size 检查和添加是原子操作
-        Map<String, SseEmitter> userConnections = getOrCreateUserConnections(tenantId, userId);
+        // 使用锁确保 size 检查和添加是原子操作
+        UserConnections uc = getOrCreateUserConnections(tenantId, userId);
         List<SseEmitter> emittersToComplete = new ArrayList<>();
-        synchronized (userConnections) {
+        uc.lock().lock();
+        try {
             // 限制每个用户的最大连接数，防止滥用
-            while (userConnections.size() >= MAX_CONNECTIONS_PER_USER) {
-                SseEmitter oldEmitter = removeOldestConnectionLocked(tenantId, userId, userConnections);
+            while (uc.map().size() >= MAX_CONNECTIONS_PER_USER) {
+                SseEmitter oldEmitter = removeOldestConnectionLocked(tenantId, userId, uc.map());
                 if (oldEmitter != null) {
                     emittersToComplete.add(oldEmitter);
                 }
             }
-            userConnections.put(connectionId, emitter);
+            uc.map().put(connectionId, emitter);
+        } finally {
+            uc.lock().unlock();
         }
 
         // 在锁外完成旧的 emitter，避免死锁（complete() 会触发 onCompletion 回调）
@@ -90,7 +103,7 @@ public class SseEmitterManager {
         getTenantOnlineUsers(tenantId).add(userId);
 
         log.info("SSE 连接建立: tenantId={}, userId={}, connectionId={}, 用户连接数={}, 租户在线用户数={}",
-                tenantId, userId, connectionId, userConnections.size(), getOnlineCount(tenantId));
+                tenantId, userId, connectionId, uc.map().size(), getOnlineCount(tenantId));
 
         sendToConnection(emitter, SseEvent.connected());
 
@@ -98,13 +111,13 @@ public class SseEmitterManager {
     }
 
     /**
-     * 获取或创建用户的连接 Map
-     * 使用 synchronizedMap 包装 LinkedHashMap 保证线程安全和插入顺序
+     * 获取或创建用户的连接容器
+     * 使用 ReentrantLock 保护 LinkedHashMap，避免 synchronized 导致虚拟线程 pinning
      */
-    private Map<String, SseEmitter> getOrCreateUserConnections(Long tenantId, Long userId) {
+    private UserConnections getOrCreateUserConnections(Long tenantId, Long userId) {
         return emittersByTenant
                 .computeIfAbsent(tenantId, id -> new ConcurrentHashMap<>())
-                .computeIfAbsent(userId, id -> Collections.synchronizedMap(new LinkedHashMap<>()));
+                .computeIfAbsent(userId, id -> new UserConnections());
     }
 
     /**
@@ -127,7 +140,7 @@ public class SseEmitterManager {
         return null;
     }
 
-    private Map<Long, Map<String, SseEmitter>> getTenantEmitters(Long tenantId) {
+    private Map<Long, UserConnections> getTenantEmitters(Long tenantId) {
         return emittersByTenant.computeIfAbsent(tenantId, id -> new ConcurrentHashMap<>());
     }
 
@@ -139,17 +152,20 @@ public class SseEmitterManager {
      * 移除指定连接
      */
     public void removeConnection(Long tenantId, Long userId, String connectionId) {
-        Map<Long, Map<String, SseEmitter>> tenantEmitters = emittersByTenant.get(tenantId);
+        Map<Long, UserConnections> tenantEmitters = emittersByTenant.get(tenantId);
         if (tenantEmitters == null) return;
 
-        Map<String, SseEmitter> userConnections = tenantEmitters.get(userId);
-        if (userConnections == null) return;
+        UserConnections uc = tenantEmitters.get(userId);
+        if (uc == null) return;
 
         SseEmitter emitter;
         boolean isEmpty;
-        synchronized (userConnections) {
-            emitter = userConnections.remove(connectionId);
-            isEmpty = userConnections.isEmpty();
+        uc.lock().lock();
+        try {
+            emitter = uc.map().remove(connectionId);
+            isEmpty = uc.map().isEmpty();
+        } finally {
+            uc.lock().unlock();
         }
 
         if (emitter != null) {
@@ -160,7 +176,7 @@ public class SseEmitterManager {
             }
         }
 
-        // 清理空的 map（在同步块外执行，减少锁持有时间）
+        // 清理空的 map（在锁外执行，减少锁持有时间）
         if (isEmpty) {
             tenantEmitters.remove(userId);
             getTenantOnlineUsers(tenantId).remove(userId);
@@ -176,16 +192,19 @@ public class SseEmitterManager {
      * 避免在连接已处于错误状态时触发 AsyncRequestNotUsableException
      */
     private void removeConnectionSilently(Long tenantId, Long userId, String connectionId) {
-        Map<Long, Map<String, SseEmitter>> tenantEmitters = emittersByTenant.get(tenantId);
+        Map<Long, UserConnections> tenantEmitters = emittersByTenant.get(tenantId);
         if (tenantEmitters == null) return;
 
-        Map<String, SseEmitter> userConnections = tenantEmitters.get(userId);
-        if (userConnections == null) return;
+        UserConnections uc = tenantEmitters.get(userId);
+        if (uc == null) return;
 
         boolean isEmpty;
-        synchronized (userConnections) {
-            userConnections.remove(connectionId);
-            isEmpty = userConnections.isEmpty();
+        uc.lock().lock();
+        try {
+            uc.map().remove(connectionId);
+            isEmpty = uc.map().isEmpty();
+        } finally {
+            uc.lock().unlock();
         }
 
         // 清理空的 map
@@ -215,17 +234,20 @@ public class SseEmitterManager {
      * 发送事件到用户的所有连接（广播到所有设备/标签页）
      */
     public void sendToUser(Long tenantId, Long userId, SseEvent event) {
-        Map<Long, Map<String, SseEmitter>> tenantEmitters = emittersByTenant.get(tenantId);
+        Map<Long, UserConnections> tenantEmitters = emittersByTenant.get(tenantId);
         if (tenantEmitters == null) return;
 
-        Map<String, SseEmitter> userConnections = tenantEmitters.get(userId);
-        if (userConnections == null) return;
+        UserConnections uc = tenantEmitters.get(userId);
+        if (uc == null) return;
 
-        // 在同步块中创建快照
+        // 在锁中创建快照
         List<Map.Entry<String, SseEmitter>> snapshot;
-        synchronized (userConnections) {
-            if (userConnections.isEmpty()) return;
-            snapshot = new ArrayList<>(userConnections.entrySet());
+        uc.lock().lock();
+        try {
+            if (uc.map().isEmpty()) return;
+            snapshot = new ArrayList<>(uc.map().entrySet());
+        } finally {
+            uc.lock().unlock();
         }
 
         String eventData = JsonConverter.toJson(event.getPayload());
@@ -257,7 +279,7 @@ public class SseEmitterManager {
     }
 
     public void broadcastToTenant(Long tenantId, SseEvent event) {
-        Map<Long, Map<String, SseEmitter>> tenantEmitters = emittersByTenant.get(tenantId);
+        Map<Long, UserConnections> tenantEmitters = emittersByTenant.get(tenantId);
         if (tenantEmitters == null || tenantEmitters.isEmpty()) return;
 
         String eventData = JsonConverter.toJson(event.getPayload());
@@ -266,13 +288,16 @@ public class SseEmitterManager {
         // 遍历所有用户
         for (var userEntry : new ArrayList<>(tenantEmitters.entrySet())) {
             Long userId = userEntry.getKey();
-            Map<String, SseEmitter> userConnections = userEntry.getValue();
+            UserConnections uc = userEntry.getValue();
 
-            // 在同步块中创建用户连接的快照
+            // 在锁中创建用户连接的快照
             List<Map.Entry<String, SseEmitter>> snapshot;
-            synchronized (userConnections) {
-                if (userConnections.isEmpty()) continue;
-                snapshot = new ArrayList<>(userConnections.entrySet());
+            uc.lock().lock();
+            try {
+                if (uc.map().isEmpty()) continue;
+                snapshot = new ArrayList<>(uc.map().entrySet());
+            } finally {
+                uc.lock().unlock();
             }
 
             for (var connEntry : snapshot) {
@@ -314,12 +339,15 @@ public class SseEmitterManager {
      * 获取用户的连接数
      */
     public int getUserConnectionCount(Long tenantId, Long userId) {
-        Map<Long, Map<String, SseEmitter>> tenantEmitters = emittersByTenant.get(tenantId);
+        Map<Long, UserConnections> tenantEmitters = emittersByTenant.get(tenantId);
         if (tenantEmitters == null) return 0;
-        Map<String, SseEmitter> userConnections = tenantEmitters.get(userId);
-        if (userConnections == null) return 0;
-        synchronized (userConnections) {
-            return userConnections.size();
+        UserConnections uc = tenantEmitters.get(userId);
+        if (uc == null) return 0;
+        uc.lock().lock();
+        try {
+            return uc.map().size();
+        } finally {
+            uc.lock().unlock();
         }
     }
 
@@ -334,17 +362,20 @@ public class SseEmitterManager {
         // 遍历所有租户和用户
         for (var tenantEntry : new ArrayList<>(emittersByTenant.entrySet())) {
             Long tenantId = tenantEntry.getKey();
-            Map<Long, Map<String, SseEmitter>> tenantEmitters = tenantEntry.getValue();
+            Map<Long, UserConnections> tenantEmitters = tenantEntry.getValue();
 
             for (var userEntry : new ArrayList<>(tenantEmitters.entrySet())) {
                 Long userId = userEntry.getKey();
-                Map<String, SseEmitter> userConnections = userEntry.getValue();
+                UserConnections uc = userEntry.getValue();
 
-                // 在同步块中创建用户连接的快照
+                // 在锁中创建用户连接的快照
                 List<Map.Entry<String, SseEmitter>> snapshot;
-                synchronized (userConnections) {
-                    if (userConnections.isEmpty()) continue;
-                    snapshot = new ArrayList<>(userConnections.entrySet());
+                uc.lock().lock();
+                try {
+                    if (uc.map().isEmpty()) continue;
+                    snapshot = new ArrayList<>(uc.map().entrySet());
+                } finally {
+                    uc.lock().unlock();
                 }
 
                 for (var connEntry : snapshot) {
@@ -387,7 +418,7 @@ public class SseEmitterManager {
     private int getTotalConnectionCount() {
         return emittersByTenant.values().stream()
                 .flatMap(tenantEmitters -> tenantEmitters.values().stream())
-                .mapToInt(Map::size)
+                .mapToInt(uc -> uc.map().size())
                 .sum();
     }
 

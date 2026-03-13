@@ -5,7 +5,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.2.11</version>
+        <version>3.5.11</version>
         <relativePath/>
         <!-- lookup parent from repository -->
     </parent>
@@ -16,7 +16,7 @@
     <description>存证平台后端服务</description>
     <properties>
         <java.version>21</java.version>
-        <hutool.version>5.8.43</hutool.version>
+        <hutool.version>5.8.44</hutool.version>
         <mybatis-plus-bom.version>3.5.16</mybatis-plus-bom.version>
         <testcontainers.version>1.20.4</testcontainers.version>
         <jacoco.version>0.8.14</jacoco.version>
@@ -40,14 +40,18 @@
          -->
         <commons-lang3.version>3.20.0</commons-lang3.version>
         <netty.version>4.2.10.Final</netty.version>
-        <logback.version>1.5.32</logback.version>
-        <jackson-bom.version>2.21.1</jackson-bom.version>
-        <tomcat.embed.version>10.1.49</tomcat.embed.version>
+        <!--
+            OkHttp 5.x is a Kotlin Multiplatform artifact (empty JVM jar).
+            MinIO SDK 8.6.0 requires OkHttp 4.x Java classes (okhttp3.HttpUrl, etc.).
+         -->
+        <okhttp.version>4.12.0</okhttp.version>
         <!--
             Mockito inline mock maker relies on Byte Buddy instrumentation.
             On some macOS/JDK builds, runtime self-attach is not available; pre-attaching the agent fixes it.
+            Use ${byte-buddy.version} from Spring Boot BOM so the agent path in argLine always matches
+            the version Maven actually resolves transitively.
          -->
-        <byte-buddy-agent.version>1.14.19</byte-buddy-agent.version>
+        <!-- byte-buddy-agent.version intentionally removed; use ${byte-buddy.version} from Spring Boot BOM -->
     </properties>
     <!--  设置打包方式pom  -->
     <packaging>pom</packaging>
@@ -88,6 +92,12 @@
                 <artifactId>backend-web</artifactId>
                 <version>0.0.1-SNAPSHOT</version>
             </dependency>
+            <!-- Pin OkHttp to 4.x for MinIO SDK compatibility -->
+            <dependency>
+                <groupId>com.squareup.okhttp3</groupId>
+                <artifactId>okhttp</artifactId>
+                <version>${okhttp.version}</version>
+            </dependency>
             <!--     共享库     -->
             <dependency>
                 <groupId>cn.hutool</groupId>
@@ -108,13 +118,6 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <dependency>
-                <groupId>com.fasterxml.jackson</groupId>
-                <artifactId>jackson-bom</artifactId>
-                <version>${jackson-bom.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
             <!-- TestContainers BOM -->
             <dependency>
                 <groupId>org.testcontainers</groupId>
@@ -122,21 +125,6 @@
                 <version>${testcontainers.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>ch.qos.logback</groupId>
-                <artifactId>logback-core</artifactId>
-                <version>${logback.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>ch.qos.logback</groupId>
-                <artifactId>logback-classic</artifactId>
-                <version>${logback.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.tomcat.embed</groupId>
-                <artifactId>tomcat-embed-core</artifactId>
-                <version>${tomcat.embed.version}</version>
             </dependency>
             <!-- Force commons-compress version to avoid POI runtime incompatibility in tests -->
             <dependency>
@@ -189,7 +177,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <argLine>${argLine} -javaagent:${settings.localRepository}/net/bytebuddy/byte-buddy-agent/${byte-buddy-agent.version}/byte-buddy-agent-${byte-buddy-agent.version}.jar -Djdk.attach.allowAttachSelf=true -XX:+EnableDynamicAgentLoading</argLine>
+                    <argLine>${argLine} -javaagent:${settings.localRepository}/net/bytebuddy/byte-buddy-agent/${byte-buddy.version}/byte-buddy-agent-${byte-buddy.version}.jar -Djdk.attach.allowAttachSelf=true -XX:+EnableDynamicAgentLoading</argLine>
                 </configuration>
             </plugin>
             <!-- JaCoCo for test coverage -->

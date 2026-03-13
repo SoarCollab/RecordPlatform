@@ -18,7 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,10 +49,10 @@ class FileAdminControllerIntegrationTest extends BaseControllerIntegrationTest {
     private static final String TEST_FILE_ID = "EXT_FILE_1";
     private static final String TEST_SHARE_CODE = "SHARE001";
 
-    @MockBean
+    @MockitoBean
     private FileAdminService fileAdminService;
 
-    @MockBean
+    @MockitoBean
     private ShareAuditService shareAuditService;
 
     /**

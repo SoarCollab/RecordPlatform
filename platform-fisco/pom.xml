@@ -5,7 +5,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.2.11</version>
+        <version>3.5.11</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>cn.flying</groupId>
@@ -15,19 +15,19 @@
     <description>fisco</description>
     <properties>
         <java.version>21</java.version>
-        <!-- Mockito inline mock maker relies on Byte Buddy instrumentation -->
-        <byte-buddy-agent.version>1.14.19</byte-buddy-agent.version>
+        <!--
+            byte-buddy-agent.version intentionally removed; use ${byte-buddy.version} from Spring Boot BOM
+            so the agent path in argLine always matches the version Maven resolves transitively.
+        -->
         <fisco.bcos.version>3.8.0</fisco.bcos.version>
         <web3j.version>4.9.8</web3j.version>
         <jakarta.servlet-api.version>6.1.0</jakarta.servlet-api.version>
         <resilience4j.version>2.3.0</resilience4j.version>
         <dubbo.version>3.3.6</dubbo.version>
         <protobuf.version>4.34.0</protobuf.version>
-        <logstash.logback.version>7.4</logstash.logback.version>
+        <logstash.logback.version>9.0</logstash.logback.version>
         <skywalking.toolkit.version>9.6.0</skywalking.toolkit.version>
         <netty.version>4.2.10.Final</netty.version>
-        <logback.version>1.5.32</logback.version>
-        <jackson-bom.version>2.21.1</jackson-bom.version>
         <commons-io.version>2.21.0</commons-io.version>
         <commons-lang3.version>3.20.0</commons-lang3.version>
         <bcprov.version>1.83</bcprov.version>
@@ -163,23 +163,6 @@
                 <scope>import</scope>
             </dependency>
             <dependency>
-                <groupId>com.fasterxml.jackson</groupId>
-                <artifactId>jackson-bom</artifactId>
-                <version>${jackson-bom.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>ch.qos.logback</groupId>
-                <artifactId>logback-core</artifactId>
-                <version>${logback.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>ch.qos.logback</groupId>
-                <artifactId>logback-classic</artifactId>
-                <version>${logback.version}</version>
-            </dependency>
-            <dependency>
                 <groupId>commons-io</groupId>
                 <artifactId>commons-io</artifactId>
                 <version>${commons-io.version}</version>
@@ -202,7 +185,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <argLine>-javaagent:${settings.localRepository}/net/bytebuddy/byte-buddy-agent/${byte-buddy-agent.version}/byte-buddy-agent-${byte-buddy-agent.version}.jar -Djdk.attach.allowAttachSelf=true -XX:+EnableDynamicAgentLoading</argLine>
+                    <argLine>-javaagent:${settings.localRepository}/net/bytebuddy/byte-buddy-agent/${byte-buddy.version}/byte-buddy-agent-${byte-buddy.version}.jar -Djdk.attach.allowAttachSelf=true -XX:+EnableDynamicAgentLoading</argLine>
                     <systemPropertyVariables>
                         <!--
                             WedPR Crypto SDK 会在 ${user.home}/.fisco 下解压/写入 native 依赖。

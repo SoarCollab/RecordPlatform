@@ -3,7 +3,7 @@ package cn.flying.storage;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RedissonClient;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 @SpringBootTest(properties = {
         "dubbo.protocol.name=injvm",
@@ -15,7 +15,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 })
 class StorageApplicationTests {
 
-    @MockBean
+    @MockitoBean
     private RedissonClient redissonClient;
 
     /**

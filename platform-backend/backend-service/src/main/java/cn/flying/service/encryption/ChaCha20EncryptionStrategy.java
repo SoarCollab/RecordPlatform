@@ -52,10 +52,19 @@ public class ChaCha20EncryptionStrategy implements ChunkEncryptionStrategy {
      */
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
-    /**
-     *  flyingcoding
-     */
-    private static final ThreadLocal<KeyGenerator> KEY_GENERATOR_CACHE = ThreadLocal.withInitial(() -> {
+    public ChaCha20EncryptionStrategy() {
+        // 启动时验证算法可用性
+        try {
+            Cipher.getInstance(CIPHER_TRANSFORMATION);
+            KeyGenerator.getInstance(KEY_ALGORITHM);
+        } catch (Exception e) {
+            throw new IllegalStateException(
+                    "ChaCha20-Poly1305 requires JDK 11+. Current JDK: " + System.getProperty("java.version"), e);
+        }
+        log.info("ChaCha20-Poly1305 encryption strategy initialized");
+    }
+
+    private static KeyGenerator createKeyGenerator() {
         try {
             KeyGenerator keyGen = KeyGenerator.getInstance(KEY_ALGORITHM);
             keyGen.init(KEY_SIZE_BITS, SECURE_RANDOM);
@@ -63,35 +72,13 @@ public class ChaCha20EncryptionStrategy implements ChunkEncryptionStrategy {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("ChaCha20 algorithm not available (requires JDK 11+)", e);
         }
-    });
+    }
 
-    /**
-     *  flyingcoding
-     */
-    private static final ThreadLocal<Cipher> CIPHER_CACHE = ThreadLocal.withInitial(() -> {
+    private static Cipher createCipher() {
         try {
             return Cipher.getInstance(CIPHER_TRANSFORMATION);
         } catch (Exception e) {
             throw new IllegalStateException("ChaCha20-Poly1305 cipher not available (requires JDK 11+)", e);
-        }
-    });
-
-    public ChaCha20EncryptionStrategy() {
-        // 验证 JDK 版本支持
-        validateJdkSupport();
-        log.info("ChaCha20-Poly1305 encryption strategy initialized (optimized with ThreadLocal caching)");
-    }
-
-    /**
-     * 验证 JDK 是否支持 ChaCha20-Poly1305
-     */
-    private void validateJdkSupport() {
-        try {
-            Cipher.getInstance(CIPHER_TRANSFORMATION);
-            KeyGenerator.getInstance(KEY_ALGORITHM);
-        } catch (Exception e) {
-            throw new IllegalStateException(
-                    "ChaCha20-Poly1305 requires JDK 11+. Current JDK: " + System.getProperty("java.version"), e);
         }
     }
 
@@ -112,7 +99,7 @@ public class ChaCha20EncryptionStrategy implements ChunkEncryptionStrategy {
 
     @Override
     public SecretKey generateKey() {
-        return KEY_GENERATOR_CACHE.get().generateKey();
+        return createKeyGenerator().generateKey();
     }
 
     @Override
@@ -125,7 +112,7 @@ public class ChaCha20EncryptionStrategy implements ChunkEncryptionStrategy {
     @Override
     public byte[] encrypt(byte[] plaintext, SecretKey key, byte[] iv) throws EncryptionException {
         try {
-            Cipher cipher = CIPHER_CACHE.get();
+            Cipher cipher = createCipher();
             IvParameterSpec ivSpec = new IvParameterSpec(iv);
             cipher.init(Cipher.ENCRYPT_MODE, key, ivSpec);
             return cipher.doFinal(plaintext);
@@ -137,7 +124,7 @@ public class ChaCha20EncryptionStrategy implements ChunkEncryptionStrategy {
     @Override
     public byte[] decrypt(byte[] ciphertext, SecretKey key, byte[] iv) throws EncryptionException {
         try {
-            Cipher cipher = CIPHER_CACHE.get();
+            Cipher cipher = createCipher();
             IvParameterSpec ivSpec = new IvParameterSpec(iv);
             cipher.init(Cipher.DECRYPT_MODE, key, ivSpec);
             return cipher.doFinal(ciphertext);
