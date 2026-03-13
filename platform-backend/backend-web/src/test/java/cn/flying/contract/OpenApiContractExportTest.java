@@ -61,7 +61,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -113,82 +113,82 @@ class OpenApiContractExportTest {
     @Autowired
     private ObjectMapper objectMapper;
 
-    @MockBean
+    @MockitoBean
     private AccountService accountService;
 
-    @MockBean
+    @MockitoBean
     private ControllerUtils controllerUtils;
 
-    @MockBean
+    @MockitoBean
     private AnnouncementService announcementService;
 
-    @MockBean
+    @MockitoBean
     private TicketService ticketService;
 
-    @MockBean
+    @MockitoBean
     private JwtUtils jwtUtils;
 
-    @MockBean
+    @MockitoBean
     private ConversationService conversationService;
 
-    @MockBean
+    @MockitoBean
     private MessageService messageService;
 
-    @MockBean
+    @MockitoBean
     private FileAdminService fileAdminService;
 
-    @MockBean
+    @MockitoBean
     private ShareAuditService shareAuditService;
 
-    @MockBean
+    @MockitoBean
     private FileQueryService fileQueryService;
 
-    @MockBean
+    @MockitoBean
     private FileService fileService;
 
-    @MockBean
+    @MockitoBean
     private DownloadBatchMetricsService downloadBatchMetricsService;
 
-    @MockBean
+    @MockitoBean
     private FriendService friendService;
 
-    @MockBean
+    @MockitoBean
     private FriendFileShareService friendFileShareService;
 
-    @MockBean
+    @MockitoBean
     private ImageService imageService;
 
-    @MockBean
+    @MockitoBean
     private SysPermissionMapper sysPermissionMapper;
 
-    @MockBean
+    @MockitoBean
     private SysRolePermissionMapper sysRolePermissionMapper;
 
-    @MockBean
+    @MockitoBean
     private PermissionService permissionService;
 
-    @MockBean
+    @MockitoBean
     private QuotaService quotaService;
 
-    @MockBean
+    @MockitoBean
     private QuotaRolloutAuditService quotaRolloutAuditService;
 
-    @MockBean
+    @MockitoBean
     private FileMapper fileMapper;
 
-    @MockBean
+    @MockitoBean
     private SseEmitterManager sseEmitterManager;
 
-    @MockBean
+    @MockitoBean
     private SysAuditService sysAuditService;
 
-    @MockBean
+    @MockitoBean
     private SystemMonitorService systemMonitorService;
 
-    @MockBean
+    @MockitoBean
     private FileUploadService fileUploadService;
 
-    @MockBean
+    @MockitoBean
     private RedissonClient redissonClient;
 
     /**

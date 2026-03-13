@@ -5,7 +5,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.2.11</version>
+        <version>3.5.11</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>cn.flying</groupId>
@@ -23,11 +23,9 @@
         <resilience4j.version>2.3.0</resilience4j.version>
         <dubbo.version>3.3.6</dubbo.version>
         <protobuf.version>4.34.0</protobuf.version>
-        <logstash.logback.version>7.4</logstash.logback.version>
+        <logstash.logback.version>9.0</logstash.logback.version>
         <skywalking.toolkit.version>9.6.0</skywalking.toolkit.version>
         <netty.version>4.1.129.Final</netty.version>
-        <logback.version>1.5.25</logback.version>
-        <jackson-bom.version>2.18.6</jackson-bom.version>
         <commons-io.version>2.14.0</commons-io.version>
         <commons-lang3.version>3.18.0</commons-lang3.version>
         <bcprov.version>1.78</bcprov.version>
@@ -161,23 +159,6 @@
                 <version>${netty.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>com.fasterxml.jackson</groupId>
-                <artifactId>jackson-bom</artifactId>
-                <version>${jackson-bom.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>ch.qos.logback</groupId>
-                <artifactId>logback-core</artifactId>
-                <version>${logback.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>ch.qos.logback</groupId>
-                <artifactId>logback-classic</artifactId>
-                <version>${logback.version}</version>
             </dependency>
             <dependency>
                 <groupId>commons-io</groupId>

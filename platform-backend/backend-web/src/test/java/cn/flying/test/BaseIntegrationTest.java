@@ -13,7 +13,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.test.annotation.DirtiesContext;
@@ -51,16 +51,16 @@ import static org.mockito.ArgumentMatchers.any;
 public abstract class BaseIntegrationTest {
 
     // Mock JavaMailSender to avoid SMTP connection attempts during tests
-    @MockBean
+    @MockitoBean
     protected JavaMailSender javaMailSender;
 
     // Mock RabbitTemplate to prevent actual message sending to RabbitMQ
     // This avoids MailQueueListener being triggered and potentially blocking tests
-    @MockBean
+    @MockitoBean
     protected RabbitTemplate rabbitTemplate;
 
     // Mock FileRemoteClient (replaces the excluded one)
-    @MockBean
+    @MockitoBean
     protected FileRemoteClient fileRemoteClient;
 
     // Mock Dubbo services - injected from MockDubboServicesConfig
@@ -184,7 +184,7 @@ public abstract class BaseIntegrationTest {
     /**
      * 为集成测试提供 FileRemoteClient 的默认行为。
      * <p>
-     * CI 环境不会连接真实的区块链/存储 Dubbo 服务，本项目通过 @MockBean 注入 FileRemoteClient。
+     * CI 环境不会连接真实的区块链/存储 Dubbo 服务，本项目通过 @MockitoBean 注入 FileRemoteClient。
      * 这里为常用的“分享/取消分享”链路提供成功返回，避免因未 stub 导致返回 null 触发 NPE。
      * 业务侧仍然以区块链调用为核心能力：生产环境不做降级，失败应直接返回错误。
      * </p>

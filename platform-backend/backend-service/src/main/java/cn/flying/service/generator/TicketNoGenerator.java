@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 分布式工单编号生成器
@@ -26,6 +27,8 @@ public class TicketNoGenerator {
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final String REDIS_KEY_PREFIX = "ticket:seq:";
     private static final String TICKET_NO_PREFIX = "TK";
+
+    private final ReentrantLock dbFallbackLock = new ReentrantLock();
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
@@ -63,12 +66,18 @@ public class TicketNoGenerator {
     }
 
     /**
-     * 从数据库获取最大序列号（Redis 不可用时的回退方案）
+     * 从数据库获取最大序列号（Redis 不可用时的回退方案）。
+     * 使用 ReentrantLock 替代 synchronized 以避免虚拟线程载体钉住。
      */
-    private synchronized String generateFromDatabase(String datePrefix) {
-        Integer maxSeq = ticketMapper.getMaxDailySequence(datePrefix);
-        int nextSeq = (maxSeq == null ? 0 : maxSeq) + 1;
-        return formatTicketNo(datePrefix, nextSeq);
+    private String generateFromDatabase(String datePrefix) {
+        dbFallbackLock.lock();
+        try {
+            Integer maxSeq = ticketMapper.getMaxDailySequence(datePrefix);
+            int nextSeq = (maxSeq == null ? 0 : maxSeq) + 1;
+            return formatTicketNo(datePrefix, nextSeq);
+        } finally {
+            dbFallbackLock.unlock();
+        }
     }
 
     private String formatTicketNo(String dateStr, int sequence) {

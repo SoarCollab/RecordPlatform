@@ -14,7 +14,7 @@
     <properties>
         <java.version>21</java.version>
         <mysql.connector.version>8.4.0</mysql.connector.version>
-        <druid.version>1.2.27</druid.version>
+        <druid.version>1.2.28</druid.version>
     </properties>
 
     <dependencies>

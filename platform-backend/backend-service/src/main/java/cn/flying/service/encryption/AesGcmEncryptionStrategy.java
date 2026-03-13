@@ -16,9 +16,8 @@ import java.security.SecureRandom;
  *
  * <h3>优化点：</h3>
  * <ul>
- *   <li>ThreadLocal 缓存 Cipher 和 KeyGenerator，避免重复实例化</li>
  *   <li>复用 SecureRandom 实例</li>
- *   <li>预初始化 KeyGenerator 参数</li>
+ *   <li>Cipher/KeyGenerator 按需创建，兼容虚拟线程（无 ThreadLocal 开销）</li>
  * </ul>
  *
  * <h3>安全特性：</h3>
@@ -46,10 +45,18 @@ public class AesGcmEncryptionStrategy implements ChunkEncryptionStrategy {
      */
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
-    /**
-     *  flyingcoding
-     */
-    private static final ThreadLocal<KeyGenerator> KEY_GENERATOR_CACHE = ThreadLocal.withInitial(() -> {
+    public AesGcmEncryptionStrategy() {
+        // 启动时验证算法可用性
+        try {
+            Cipher.getInstance(CIPHER_TRANSFORMATION);
+            KeyGenerator.getInstance(KEY_ALGORITHM);
+        } catch (Exception e) {
+            throw new IllegalStateException("AES-GCM algorithm not available", e);
+        }
+        log.info("AES-256-GCM encryption strategy initialized");
+    }
+
+    private static KeyGenerator createKeyGenerator() {
         try {
             KeyGenerator keyGen = KeyGenerator.getInstance(KEY_ALGORITHM);
             keyGen.init(KEY_SIZE_BITS, SECURE_RANDOM);
@@ -57,22 +64,14 @@ public class AesGcmEncryptionStrategy implements ChunkEncryptionStrategy {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("AES algorithm not available", e);
         }
-    });
+    }
 
-    /**
-     *  flyingcoding
-     * 注意：每次使用前仍需 init()，但避免了 getInstance() 的开销
-     */
-    private static final ThreadLocal<Cipher> CIPHER_CACHE = ThreadLocal.withInitial(() -> {
+    private static Cipher createCipher() {
         try {
             return Cipher.getInstance(CIPHER_TRANSFORMATION);
         } catch (Exception e) {
             throw new IllegalStateException("AES/GCM cipher not available", e);
         }
-    });
-
-    public AesGcmEncryptionStrategy() {
-        log.info("AES-256-GCM encryption strategy initialized (optimized with ThreadLocal caching)");
     }
 
     @Override
@@ -92,7 +91,7 @@ public class AesGcmEncryptionStrategy implements ChunkEncryptionStrategy {
 
     @Override
     public SecretKey generateKey() {
-        return KEY_GENERATOR_CACHE.get().generateKey();
+        return createKeyGenerator().generateKey();
     }
 
     @Override
@@ -105,7 +104,7 @@ public class AesGcmEncryptionStrategy implements ChunkEncryptionStrategy {
     @Override
     public byte[] encrypt(byte[] plaintext, SecretKey key, byte[] iv) throws EncryptionException {
         try {
-            Cipher cipher = CIPHER_CACHE.get();
+            Cipher cipher = createCipher();
             GCMParameterSpec gcmSpec = new GCMParameterSpec(TAG_BIT_LENGTH, iv);
             cipher.init(Cipher.ENCRYPT_MODE, key, gcmSpec);
             return cipher.doFinal(plaintext);
@@ -117,7 +116,7 @@ public class AesGcmEncryptionStrategy implements ChunkEncryptionStrategy {
     @Override
     public byte[] decrypt(byte[] ciphertext, SecretKey key, byte[] iv) throws EncryptionException {
         try {
-            Cipher cipher = CIPHER_CACHE.get();
+            Cipher cipher = createCipher();
             GCMParameterSpec gcmSpec = new GCMParameterSpec(TAG_BIT_LENGTH, iv);
             cipher.init(Cipher.DECRYPT_MODE, key, gcmSpec);
             return cipher.doFinal(ciphertext);

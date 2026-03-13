@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/projects/jdk/21/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2-green.svg)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-green.svg)](https://spring.io/projects/spring-boot)
 
 **Enterprise-grade file attestation platform** powered by blockchain and distributed storage.
 
@@ -129,7 +129,7 @@ cd platform-frontend && pnpm install && pnpm dev
 
 | Category      | Technology                        | Version                  |
 | ------------- | --------------------------------- | ------------------------ |
-| Backend       | Java, Spring Boot                 | 21, 3.2.11               |
+| Backend       | Java, Spring Boot                 | 21, 3.5.11               |
 | Microservices | Apache Dubbo (Triple), Nacos      | 3.3.6                    |
 | Blockchain    | FISCO BCOS, Solidity              | 3.8.0, ^0.8.11           |
 | Storage       | S3-compatible, MySQL, Redis       | AWS SDK 2.41, 8.0+, 7.0+ |
