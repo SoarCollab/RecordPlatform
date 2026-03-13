@@ -39,7 +39,7 @@
             Testcontainers (docker-java) may require SystemProperties.getUserName(String) (>= 3.17.0).
          -->
         <commons-lang3.version>3.20.0</commons-lang3.version>
-        <netty.version>4.1.129.Final</netty.version>
+        <netty.version>4.2.10.Final</netty.version>
         <!--
             OkHttp 5.x is a Kotlin Multiplatform artifact (empty JVM jar).
             MinIO SDK 8.6.0 requires OkHttp 4.x Java classes (okhttp3.HttpUrl, etc.).

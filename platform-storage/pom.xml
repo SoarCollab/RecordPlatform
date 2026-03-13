@@ -18,13 +18,13 @@
         <dubbo.version>3.3.6</dubbo.version>
         <protobuf.version>4.34.0</protobuf.version>
         <prometheus.version>0.16.0</prometheus.version>
-        <aws.sdk.version>2.42.4</aws.sdk.version>
+        <aws.sdk.version>2.42.8</aws.sdk.version>
         <hutool.version>5.8.44</hutool.version>
         <redisson.version>4.3.0</redisson.version>
         <spring-cloud-alibaba-dependencies.version>2025.0.0.0</spring-cloud-alibaba-dependencies.version>
         <logstash.logback.version>9.0</logstash.logback.version>
         <skywalking.toolkit.version>9.6.0</skywalking.toolkit.version>
-        <netty.version>4.1.129.Final</netty.version>
+        <netty.version>4.2.10.Final</netty.version>
     </properties>
     <dependencies>
         <dependency>
@@ -83,7 +83,7 @@
         <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
-            <version>32.0.1-jre</version>
+            <version>33.5.0-jre</version>
         </dependency>
 
         <!-- api -->

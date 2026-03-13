@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   semgrep-sast:
@@ -60,13 +59,6 @@ jobs:
           }
           EOF
 
-      - name: Upload Semgrep SARIF
-        if: always()
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: security-artifacts/semgrep/semgrep.sarif
-          category: semgrep
-
       - name: Upload Semgrep Artifacts
         uses: actions/upload-artifact@v7
         if: always()
@@ -93,7 +85,7 @@ jobs:
 
       - name: Run Trivy SCA (SARIF)
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: fs
           scan-ref: .
@@ -106,7 +98,7 @@ jobs:
 
       - name: Run Trivy SCA (JSON)
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: fs
           scan-ref: .
@@ -138,13 +130,6 @@ jobs:
           }
           EOF
 
-      - name: Upload Trivy SARIF
-        if: always()
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: security-artifacts/trivy/trivy.sarif
-          category: trivy-sca
-
       - name: Upload Trivy Artifacts
         uses: actions/upload-artifact@v7
         if: always()
@@ -171,7 +156,7 @@ jobs:
 
       - name: Generate CycloneDX SBOM
         continue-on-error: true
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: fs
           scan-ref: .
