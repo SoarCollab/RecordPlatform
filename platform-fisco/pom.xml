@@ -35,6 +35,17 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
         </dependency>
+        <!--
+            Explicitly declare byte-buddy-agent so Maven downloads the exact version referenced
+            in the surefire argLine path. Without this, Spring Boot BOM resolves a newer version
+            and the hardcoded 1.14.19 path in argLine will not exist in .m2.
+        -->
+        <dependency>
+            <groupId>net.bytebuddy</groupId>
+            <artifactId>byte-buddy-agent</artifactId>
+            <version>${byte-buddy-agent.version}</version>
+            <scope>test</scope>
+        </dependency>
 
         <!-- Logstash Logback Encoder for JSON logging -->
         <dependency>
