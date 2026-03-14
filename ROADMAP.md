@@ -64,8 +64,8 @@
 
 | 缺失项 | 影响 |
 |--------|------|
-| 容器镜像构建 | Dockerfile 尚未创建；基础设施 compose 已就位（`docker-compose.infra.yml`），应用服务 compose 模板存在于文档中 |
-| 自动化发布 / Changelog | 每次发布需手动操作 |
+| ~~容器镜像构建~~ | ~~已完成（P1-3）：4 个多阶段 Dockerfile（`platform-backend/Dockerfile`、`platform-fisco/Dockerfile`、`platform-storage/Dockerfile`、`platform-frontend/Dockerfile`）~~ |
+| ~~自动化发布 / Changelog~~ | ~~已完成（P1-3）：`.github/workflows/release.yml`，tag push 触发，自动生成 Release Notes + SBOM 附件 + 四镜像推送 ghcr.io~~ |
 | ~~GitHub 分支保护 required checks~~ | ~~已完成：required checks 已启用（Backend Tests, Frontend Tests, Contract Consistency, Build Verification）~~ |
 | 智能合约部署自动化 | 合约编译和部署完全手动；ABI 文件作为静态资源签入，无工具链保障 ABI 与链上合约一致 |
 
@@ -123,12 +123,19 @@
 - **涉及文件**：`platform-backend/backend-web/src/test/java/cn/flying/test/fault/` 新增 4 个测试类
 - **当前状态**：已完成。新增 `FaultInjectionBaseIT`（抽象基类）、`SagaCompensationIT`（5 个场景：S3/链上失败补偿、重试持久化、死信事件、REQUIRES_NEW 独立提交语义）、`OutboxPublisherIT`（5 个场景：发布成功、RabbitMQ 不可达退避、指数退避上限、多租户隔离）、`ResilienceConfigIT`（5 个配置校验）。共 15 个集成测试，无 Docker 时优雅跳过
 
-**P1-3：自动化发布流程**
+**P1-3：自动化发布流程** ✅
 
 - **What**：新建 `.github/workflows/release.yml`，tag push 触发：自动生成 Release Notes + 构建 SBOM 附件 + 构建容器镜像推送 ghcr.io
 - **自动化收益**：消除手动编写 Changelog、手动构建部署包、手动生成 SBOM
 - **涉及文件**：新建 `.github/workflows/release.yml`、新建各模块 `Dockerfile`
-- **前置依赖**：需先创建各模块 Dockerfile（当前仓库中尚不存在）
+- **当前状态**：已完成。交付物：
+  - `.dockerignore`：排除 git、docs、target 等非必要文件，缩小构建上下文
+  - `platform-backend/Dockerfile`：maven:3.9-eclipse-temurin-21 多阶段构建，runtime `eclipse-temurin:21-jre-noble`，非 root 用户，EXPOSE 8000
+  - `platform-fisco/Dockerfile`：同上，额外创建 `/app/conf/` 挂载点（TLS 证书），用户 home 可写（FISCO SDK 解压 native libs），EXPOSE 8091
+  - `platform-storage/Dockerfile`：同上，EXPOSE 8092
+  - `platform-frontend/Dockerfile`：node:20-alpine + pnpm 10 构建，nginx:1.27-alpine runtime，EXPOSE 80
+  - `platform-frontend/nginx.conf`：gzip_static、SPA 路由回退、`/_app/` 不可变长缓存、`index.html` no-cache、安全头
+  - `.github/workflows/release.yml`：tag push 触发，单 job（共享 Maven 缓存），Trivy CycloneDX SBOM，四镜像 ghcr.io 推送（semver + major.minor + sha tags），`softprops/action-gh-release@v2` 自动 Release Notes
 
 **P1-4：服务器环境引导与验证** ✅
 

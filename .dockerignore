@@ -1,0 +1,65 @@
+# VCS
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+docs/
+*.md
+!platform-frontend/package.json
+!platform-frontend/pnpm-lock.yaml
+
+# Plans and scripts
+plan/
+scripts/
+tools/
+
+# IDE and OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Environment files (secrets must not enter image)
+.env
+.env.*
+!.env.example
+
+# Logs and runtime
+log/
+logs/
+run/
+*.log
+
+# Node
+node_modules/
+platform-frontend/node_modules/
+
+# Maven build outputs
+**/target/
+!platform-api/**/target/
+!platform-backend/**/target/
+!platform-fisco/target/
+!platform-storage/target/
+
+# Frontend build output (only needed for runtime stage)
+# kept so multi-stage COPY can work
+# platform-frontend/dist/  <-- intentionally NOT ignored
+
+# Test artifacts
+**/src/test/
+**/*.test.ts
+**/*.spec.ts
+**/coverage/
+
+# GitHub Actions (not needed in image)
+.github/
+
+# Security artifacts
+security-artifacts/
+
+# Misc
+processed/
+jars/
+agent/
