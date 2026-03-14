@@ -1,6 +1,6 @@
 # RecordPlatform 演进路线图
 
-> 最后更新：2026-03-02
+> 最后更新：2026-03-14
 > 定位：个人维护的开源项目，以自动化流程替代人工管理
 
 ## 1. 文档目标
@@ -22,16 +22,16 @@
 
 | 领域 | 趋势 | 与本项目的关联 |
 |------|------|----------------|
-| 区块链存证市场 | 全球市场 CAGR 36.7%，FISCO BCOS 生态 600+ 产业案例，WeBASE 中间件已成熟 | 验证技术选型方向正确；WeBASE 可辅助合约生命周期管理（→ P1-5） |
-| 分布式存储 | 趋向混合架构（热数据 S3 + 冷数据 IPFS/Filecoin），内容寻址和可验证存储成为行业标准 | 当前 S3 架构可作为热存储层；冷数据层为远期演进方向（→ P3-1） |
-| 隐私增强技术 | ZKP 市场 $1.5B → $7.6B，zk-STARKs 具备后量子安全特性，无需可信设置 | "证明文件存在但不泄露内容"场景价值高（→ P3-2） |
-| 后量子密码学 | NIST 已发布 FIPS 203/204/205，HQC 2025 年入选第五算法，迁移时间线 2030-2035 | 当前对称加密量子安全，密钥交换需评估（→ P2-3） |
-| 可观测性 | OTel Java Agent 自动注入已成为微服务可观测性标准方案 | 三个 Dubbo 服务可零代码改动接入（→ P2-2） |
+| 区块链存证市场 | 全球市场 CAGR 36.7%，FISCO BCOS 生态扩展至 5000+ 机构、10 万开发者、600+ 标杆案例，最新体验版 v3.16.4；WeBASE 中间件已成熟 | 验证技术选型方向正确；WeBASE 可辅助合约生命周期管理（→ P1-5） |
+| 分布式存储 | 趋向混合架构（热数据 S3 + 冷数据 IPFS/Filecoin）；新增具体方案：s3x（MinIO fork，S3 API → IPFS 透明转换）、go-ds-s3（IPFS 官方 S3 后端）、ipfs_kit_py（分层混合：本地→S3→IPFS） | 当前 S3 架构可作为热存储层；冷数据层为远期演进方向（→ P3-1） |
+| 隐私增强技术 | ZKP 市场 $1.5B → $7.6B，zk-STARKs 具备后量子安全特性，无需可信设置；BBS+ 签名支持 W3C VC 2.0 选择性披露；Verkle 树（Merkle 变体，更小证明体积） | "证明文件存在但不泄露内容"场景价值高（→ P3-2）；选择性披露与 VC 2.0 结合（→ P3-4） |
+| 后量子密码学 | NIST 已发布 FIPS 203/204/205；HQC 已于 2025-03 正式入选第五算法（基于码的 KEM，作为 ML-KEM 备选），迁移时间线 2030-2035 | 当前对称加密量子安全，密钥交换需评估（→ P2-3） |
+| 可观测性 | OTel Java Agent 已原生支持 Dubbo 自动注入（consumer/provider span + RPC metrics），W3C Trace Context 自动传播，无需代码改动 | 三个 Dubbo 服务可零代码改动全链路接入（→ P2-2）；Dubbo 自动注入降低实施成本 |
 | 智能合约安全 | 业界采用 Slither 静态分析 + Echidna/Foundry 模糊测试作为 CI 标配 | 合约逻辑复杂度增加时应引入（→ P2-4） |
 | 国内存证行业生态 | 至信链对接 31 省 300+ 法院、蚁链 TEE+MPC 隐私计算、长安链 10 万+ TPS 高性能共识 [置信度: Medium] | 验证联盟链选型方向；司法互认通道为远期跨链参考（→ P3-3） |
-| 开源存证参考项目 | OpenTimestamps（比特币锚定）、OpenAttestation（Merkle Root 批量存证）、evidenceSample（FISCO 存证工厂）、WeIdentity（DID 全栈） [置信度: High] | P2-5 Merkle 聚合、P2-8 多方签名、P3-4 DID/VC 参考实现 |
+| 开源存证参考项目 | OpenTimestamps（比特币锚定）；OpenAttestation 已于 2025-10 归档，迁移至 TrustVC.io；EAS（9.1M attestations，12+ 链，ZK attestation 研究中）；ProofPack（JSON 可验证数据交换）；Blockcerts v3（W3C VC 兼容 Merkle 批量）；TradeTrust（新加坡政府文档存证，OpenAttestation 后继）；evidenceSample（FISCO 存证工厂）；WeIdentity（DID 全栈） [置信度: High] | P2-5 Merkle 聚合、P2-8 多方签名、P3-4 DID/VC 参考实现 |
 | 可验证存储 | Filecoin PDP 周期性存储证明、Storacha IPFS 热层 + UCAN 授权网关 [置信度: Medium] | 存储完整性校验参考（→ P2-7）；冷热混合架构演进（→ P3-1） |
-| 数字身份标准 | W3C VC 2.0 已发布正式推荐标准、WeIdentity 提供 FISCO 上 DID 全栈实现 [置信度: High] | 存证结果封装为可验证凭证（→ P3-4） |
+| 数字身份标准 | W3C VC 2.0 已于 2025-05-15 正式发布为 Recommendation（7 项规范），WeIdentity 提供 FISCO 上 DID 全栈实现 [置信度: High] | 存证结果封装为可验证凭证（→ P3-4） |
 
 ---
 
@@ -95,7 +95,7 @@
 **P0-3：安全扫描升级为 PR 阻断** ✅
 
 - **What**：在 `test.yml` 新增 `security-scan` job（PR 触发），Trivy `exit-code: 1` 仅对 HIGH/CRITICAL 阻断；保留 `security-poc.yml` 作为每周全量深度扫描
-- **当前状态**：观测汇总链路已就位（`tools/security/scripts/render-security-poc-observation.mjs`），下一步是校准阈值后升级为阻断
+- **当前状态**：已完成（PR #108）。`security-scan` job 已就位于 `test.yml`，PR 触发时 Trivy HIGH/CRITICAL 自动阻断；`security-poc.yml` 保留每周全量深度扫描（信息级）
 - **自动化收益**：高危漏洞在 PR 阶段自动拦截，无需人工定期检查
 - **完成标准**：引入已知 CVE 依赖的 PR 被 CI 阻断
 - **涉及文件**：`.github/workflows/test.yml`、`.github/workflows/security-poc.yml`
@@ -185,9 +185,9 @@
 
 **P2-1：文件版本治理 MVP** ✅
 
-- **What**：实现 `plan/w4-file-versioning-rfc.md` 设计的版本链 schema
+- **What**：实现文件版本链 schema，支持版本历史查询与版本派生
 - **前置条件**：P0 门禁全部就位后再实施
-- **涉及文件**：`plan/w4-file-versioning-rfc.md`、`plan/w4-file-versioning-migration-draft.sql`
+- **涉及文件**：DB 迁移 `V1.4.0__file_version_chain.sql`（RFC 已归档删除）
 - **当前状态**：已完成（PR #68, commit `9fa95a8`）。实现证据：
   - DB 迁移：`V1.4.0__file_version_chain.sql`（正式 Flyway 迁移，取代草案脚本）
   - 并发控制：Redisson `RLock` 分布式锁防止同一版本链并发写入
@@ -199,8 +199,8 @@
 
 - **What**：三个 Java 服务接入 OTel Java Agent，替换可选的 SkyWalking
 - **实施方案**：
-  - **接入方式**：`-javaagent:opentelemetry-javaagent.jar` 自动注入，无需代码改动即可采集 HTTP/gRPC/JDBC/Redis span
-  - **传播协议**：W3C Trace Context（`traceparent`, `tracestate` 头），Dubbo Triple 协议原生支持
+  - **接入方式**：`-javaagent:opentelemetry-javaagent.jar` 自动注入，无需代码改动即可采集 HTTP/gRPC/JDBC/Redis span；**OTel Java Agent 已原生支持 Dubbo consumer/provider span + RPC metrics 自动注入**，无需额外插件 [置信度: High]
+  - **传播协议**：W3C Trace Context（`traceparent`, `tracestate` 头），Dubbo Triple 协议自动传播
   - **采样策略**：`ParentBased` + `TraceIdRatio`（初始 10%），错误请求始终采样（`alwaysOn` for error spans）
   - **语义约定**：Span 命名遵循 `{verb} {object}` 格式（如 `POST /files`, `SELECT file_record`）
   - **业务上下文**：自定义属性 `tenant.id`, `user.id`, `file.hash` 注入 span，便于业务关联查询
@@ -217,7 +217,7 @@
   - **FIPS 203 (ML-KEM)**：基于格的密钥封装机制，已发布最终标准
   - **FIPS 204 (ML-DSA)**：基于格的数字签名，已发布最终标准
   - **FIPS 205 (SLH-DSA)**：基于哈希的数字签名（无状态），已发布最终标准
-  - **HQC**：2025 年 3 月入选第五算法（基于码的 KEM，作为 ML-KEM 的备选方案）
+  - **HQC**：已于 2025-03 正式入选第五算法（基于码的 KEM，作为 ML-KEM 的备选方案）
 - **影响评估**：
   - **对称加密（AES-256）**：量子安全，无需迁移
   - **文件哈希（SHA-256）**：Grover 算法降低安全性至 128-bit，仍在安全范围内
@@ -246,8 +246,12 @@
   - 单文件验证：提供 Merkle Proof（O(log N) 个中间哈希），链下可独立验证文件归属
   - 参考方案：
     - OpenTimestamps Calendar Server 聚合模式：将多个时间戳请求批量锚定到比特币区块，日均处理数万请求仅消耗 1 笔链上交易 [置信度: High]
-    - OpenAttestation Merkle Root 批量存证 SDK：新加坡政府使用，支持文档批量哈希聚合与独立验证 [置信度: High]
+    - Blockcerts v3：W3C VC 兼容批量 Merkle 存证，支持批量发行与独立验证 [置信度: High]
+    - EAS（Ethereum Attestation Service）：9.1M attestations，12+ 链，batch attestation 模式，ZK attestation 研究中 [置信度: High]
+    - OpenAttestation（已于 2025-10 归档，迁移至 TrustVC.io）：原新加坡政府存证 SDK，TradeTrust 为后继 [置信度: High]
     - Merkle Mountain Ranges（MMR）：支持流式追加场景（无需预知叶节点总数），适用于持续写入的存证流水 [置信度: Medium]
+    - Verkle 树：Merkle 变体，证明体积比标准 Merkle Proof 更小（接近固定大小），适用于高频批量验证场景 [置信度: Medium]
+    - BBS+ 签名：W3C VC 2.0 选择性披露方案，可在 Merkle 聚合存证基础上实现隐私保护验证 [置信度: Medium]
 - **触发条件**：批量上传场景增多，或链上交易成本/频率成为瓶颈时
 - **自动化收益**：链上交易数从 O(N) 降至 O(1)；审计验证保持 O(log N) 效率
 - **涉及文件**：`platform-fisco/` 新增 Merkle Tree 工具类、`platform-backend/backend-service/` 批量存证逻辑
@@ -302,6 +306,8 @@
   - 内容寻址（CID）：基于文件内容生成唯一标识，天然支持跨租户去重和完整性验证
   - 可验证存储：Filecoin 的 Proof-of-Spacetime 提供链上存储证明
   - **Storacha**（原 web3.storage）：基于 UCAN 授权的 IPFS 热存储网关，提供 S3 兼容 API + IPFS CID 双寻址，可作为 S3→IPFS 过渡方案 [置信度: Medium]
+  - **s3x**：MinIO fork，实现 S3 API → IPFS 透明转换，现有 S3 客户端无需改动即可写入 IPFS [置信度: Medium]
+  - **go-ds-s3**：IPFS 官方 S3 数据存储后端，将 S3 作为 IPFS 节点的持久化层 [置信度: High]
   - **Filecoin PDP**（Provable Data Possession）：周期性存储证明，验证存储提供者确实持有数据 [置信度: High]
   - **Filecoin F3**（Fast Finality）：将最终确认时间从 ~30 分钟降至 ~5 秒，大幅改善存储交易体验 [置信度: Medium]
 - **触发条件**：存储成本优化需求明确，或可验证存储成为合规要求时
@@ -338,7 +344,7 @@
 
 - **What**：基于 W3C DID + Verifiable Credentials 2.0 标准，将存证结果封装为可验证凭证，支持跨平台独立验证
 - **技术要点**：
-  - **W3C VC 2.0**：已发布正式推荐标准，定义凭证数据模型和验证协议 [置信度: High]
+  - **W3C VC 2.0**：已于 2025-05-15 正式发布为 W3C Recommendation（7 项规范），定义凭证数据模型、验证协议及 BBS+ 选择性披露 [置信度: High]
   - **WeIdentity**：微众银行开源的 FISCO BCOS DID 全栈实现，可复用现有 FISCO 基础设施 [置信度: High]
   - 存证结果封装为 VC：包含文件哈希、时间戳、签发者 DID、链上交易 ID
   - 验证方无需接入本平台即可独立验证 VC 签名和链上锚定
@@ -355,7 +361,7 @@
 | 策略 | 说明 |
 |------|------|
 | 安全补丁 | Dependabot PR 自动创建，及时合并 |
-| LTS 版本 | 评估并在发布后一个月内采纳 |
+| LTS 版本 | 评估并在发布后一个月内采纳；当前已跟踪 Spring Boot 3.5.11、Java 21 |
 | EOL 依赖 | 在 EOL 前规划迁移 |
 | 中间版本 | 不追非 LTS 中间版本 |
 
@@ -389,11 +395,11 @@
 
 | 组件 | 当前版本 | 下一目标版本 | 备注 |
 |------|----------|-------------|------|
-| Java | 21 (LTS) | 25 (LTS, 2025-09) | 评估 Virtual Threads 深度采用 |
-| Spring Boot | 3.2.11 | 3.4.x | 跟踪 3.4 LTS |
+| Java | 21 (LTS) | 25 (LTS, 2025-09-16 已发布) | 评估 Gatherer/Structured Concurrency 等新 API |
+| Spring Boot | 3.5.11 | 4.0.x (2025-11 已发布) | 跟踪 4.0；Virtual Threads 已启用 |
 | Dubbo | 3.3.6 (Triple) | 3.3.x | 保持 Triple 协议 |
-| Svelte | 5.53.3 | 5.x | Runes API 已稳定 |
-| SvelteKit | 2.52.2 | 2.x | — |
+| Svelte | 5.53+ | 5.x | Runes API 已稳定 |
+| SvelteKit | 2.53+ | 2.x | — |
 | MySQL | 8.0 | 8.0 / 9.x | 评估 9.x 新特性 |
 | Redis | 7 | 7.x | — |
 | RabbitMQ | 3 | 3.x / 4.x | 跟踪 4.0 发布 |
@@ -409,8 +415,6 @@
 | RFC 文件 | 状态 | 关联优先级 | 说明 |
 |----------|------|-----------|------|
 | `plan/gate-policy.md` | 活跃 | P0 全量 | 门禁分层策略，定义 PR 阻断 / 发布阻断 / 人工检查分级 |
-| `plan/w4-file-versioning-rfc.md` | 已实现 | P2-1 ✅ | 文件版本治理 MVP 设计（版本链 schema），PR #68 实现 |
-| `plan/w4-file-versioning-migration-draft.sql` | 已废弃 | P2-1 ✅ | 迁移草案，已被正式迁移 `V1.4.0__file_version_chain.sql` 取代 |
 
 ### 附录 B：术语表
 
@@ -441,10 +445,16 @@
 | 项目 | 简介 | 关联方向 | 参考价值 |
 |------|------|---------|---------|
 | [OpenTimestamps](https://opentimestamps.org/) | 比特币区块链时间戳锚定，Calendar Server 批量聚合 | P2-5 | Merkle 聚合模式、日均处理量参考 |
-| [OpenAttestation](https://www.openattestation.com/) | 新加坡政府使用的文档存证框架，Merkle Root 批量存证 | P2-5 | 批量存证 SDK 设计、政府级部署案例 |
+| [OpenAttestation](https://www.openattestation.com/) | ⚠️ 已于 2025-10 归档，推荐迁移至 TrustVC.io；原新加坡政府文档存证框架，Merkle Root 批量存证 | P2-5 | 批量存证 SDK 设计历史参考；后继项目为 TradeTrust |
+| [TradeTrust](https://www.tradetrust.io/) | 新加坡政府文档存证框架（OpenAttestation 后继），政府级部署 | P2-5 | 批量存证 + 可验证文档 + TrustVC 凭证 |
+| [EAS](https://attest.org/) | Ethereum Attestation Service，9.1M attestations，12+ 链，ZK attestation 研究中 | P2-5 | Batch attestation 模式、链上/链下 attestation 数据模型 |
+| [ProofPack](https://proofpack.dev/) | JSON 可验证数据交换格式，轻量化存证封装 | P2-5, P3-4 | 存证结果的轻量化封装与跨平台交换 |
+| [Blockcerts](https://www.blockcerts.org/) | W3C VC 兼容批量 Merkle 存证，OpenBadges 兼容 | P2-5 | Merkle 批量发行、W3C VC 2.0 集成参考 |
 | [evidenceSample](https://github.com/FISCO-BCOS/evidenceSample) | FISCO BCOS 官方存证合约示例，工厂模式创建存证 | P2-8 | 多方签名合约模式、FISCO 合约最佳实践 |
 | [WeBASE](https://github.com/WeBankBlockchain/WeBASE) | 微众银行区块链中间件平台，合约管理 + 交易审计 | P1-5 | 合约生命周期管理、可视化运维 |
 | [WeIdentity](https://github.com/WeBankBlockchain/WeIdentity) | FISCO BCOS 上的 DID + VC 全栈实现 | P3-4 | DID 注册、VC 签发验证、可复用 FISCO 基础设施 |
 | [Storacha](https://storacha.network/) | 原 web3.storage，UCAN 授权 + IPFS 热存储网关 | P3-1 | S3 兼容 API → IPFS CID 过渡方案 |
+| [s3x](https://github.com/minio/s3x) | MinIO fork，S3 API → IPFS 透明转换，现有 S3 客户端无需改动 | P3-1 | S3 到 IPFS 无缝迁移路径 |
+| [go-ds-s3](https://github.com/ipfs/go-ds-s3) | IPFS 官方 S3 数据存储后端 | P3-1 | 将 S3 作为 IPFS 持久化层的参考实现 |
 | 至信链 | 腾讯联合多家法院建设的司法联盟链，31 省 300+ 法院互认 | P3-3 | 司法互认通道、电子证据采信标准 |
 | 长安链 | 国家级区块链基础设施，10 万+ TPS，SPV 轻节点跨链 | P3-3 | 高性能共识参考、跨链验证方案 |
