@@ -22,6 +22,9 @@ export default withMermaid(
     // Ignore localhost links (development environment URLs)
     ignoreDeadLinks: [/^http:\/\/localhost/],
 
+    // Exclude implementation plan files from VitePress processing
+    srcExclude: ["**/superpowers/**"],
+
     locales: {
       en: {
         label: "English",
