@@ -1,81 +1,80 @@
+<div align="center">
+
 # RecordPlatform
 
+**基于区块链和分布式存储的企业级文件存证平台**
+
+[![Build](https://github.com/SoarCollab/RecordPlatform/actions/workflows/test.yml/badge.svg)](https://github.com/SoarCollab/RecordPlatform/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/projects/jdk/21/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-green.svg)](https://spring.io/projects/spring-boot)
+[![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
+[![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white)](https://svelte.dev)
 
-基于区块链和分布式存储的**企业级文件存证平台**。
+[English](README.md) · [在线文档](https://soarcollab.github.io/RecordPlatform/) · [API 参考](docs/zh/api/index.md)
 
-[English](README.md)
+</div>
 
 ---
 
-## 核心特性
+## 什么是 RecordPlatform？
 
-- **区块链存证** - 文件元数据上链至 FISCO BCOS，确保不可篡改和可追溯
-- **分布式存储** - 支持 1~N 活跃域 + 可选备用域，一致性哈希，仲裁写入，降级写入，自动提升，N-1 节点容错
-- **分片上传** - 支持断点续传，AES-GCM/ChaCha20-Poly1305 可配置加密
-- **文件分享** - 生成带访问次数和有效期限制的分享码
-- **分享审计与溯源** - 记录访问、下载、保存操作，支持多级溯源链（A→B→C），完整分享访问日志
-- **实时通知** - SSE 推送消息、公告、工单、好友动态及文件存证结果（`file-record-success` / `file-record-failed`）
-- **容量可观测性** - `/api/v1/system/storage-capacity` 提供集群/节点/故障域容量聚合及 `degraded`、`source` 语义
-- **配额治理** - 按用户和租户维度的存储配额管控，支持 SHADOW/ENFORCE 两种执行模式和基于租户白名单的灰度发布
-- **批量下载** - 多选文件并行下载，支持自动重试和下载质量指标上报
-- **关键词搜索模式** - 文件查询支持 `FUZZY`、`PREFIX`、`EXACT_HASH`、`AUTO` 四种关键词匹配模式
-- **流式下载** - 大文件下载使用 StreamSaver.js 实现低内存流式传输；根据文件大小和浏览器能力自动选择下载策略
-- **RBAC 权限** - 细粒度权限控制，资源所有权校验
-- **多租户隔离** - 数据库、缓存、存储路径按租户隔离
-- **工单系统** - 内置工单系统，支持分类、优先级和管理员处理
-- **好友系统** - 好友间直接分享文件，好友请求支持 SSE 实时通知
+RecordPlatform 是一个开源的企业级文件存证平台，将**区块链不可篡改性**与**故障域感知的分布式存储**相结合。上传文件，将元数据通过 FISCO BCOS 链上存证，并以安全方式分享 — 具备来源可验证、完整性可证明、访问全程可审计的能力。
 
-## 快速开始
+专为以下需求而构建：
+- 📜 **可审计的溯源链** — 每次上传、分享、下载均可追踪并链上可验证
+- 🏢 **多租户隔离** — 按租户隔离存储、缓存和数据路径
+- 🔒 **端到端加密** — AES-GCM/ChaCha20-Poly1305，每个分片独立密钥链
 
-### 1. 前置依赖
+---
 
-确保以下服务已运行：
+## ✨ 核心特性
 
-| 服务        | 端口  | 用途               |
-| ----------- | ----- | ------------------ |
-| Nacos       | 8848  | 服务发现与配置中心 |
-| MySQL       | 3306  | 数据库             |
-| Redis       | 6379  | 缓存与分布式锁     |
-| RabbitMQ    | 5672  | 消息队列           |
-| S3 兼容存储 | 9000  | 对象存储           |
-| FISCO BCOS  | 20200 | 区块链节点         |
+<table>
+<tr>
+<td width="50%" valign="top">
 
-可选但推荐：复制 `.env.example` 为 `.env`，至少配置 `JWT_KEY`、`S3_*`，以及（开发环境）`KNIFE4J_*` 后再启动服务。
+### 🔐 存证与安全
+- **区块链存证** — 文件元数据上链至 FISCO BCOS，不可篡改可追溯
+- **文件加密** — AES-GCM / ChaCha20-Poly1305，分片独立密钥链
+- **RBAC + 归属校验** — 细粒度资源级权限控制
+- **ID 混淆** — AES-256-CTR 外部↔内部 ID 映射
 
-### 2. 构建
+</td>
+<td width="50%" valign="top">
 
-```bash
-# 安装共享接口（必须首先执行）
-mvn -f platform-api/pom.xml clean install
+### 📦 存储与传输
+- **分布式存储** — 1~N 活跃故障域，仲裁写入，N-1 容错，备用域自动提升
+- **分片上传** — 断点续传、并发上传、动态分片大小
+- **流式下载** — 大文件使用 StreamSaver.js，自动策略选择
+- **文件版本链** — 追踪文件历史，从已有文件派生新版本
 
-# 构建所有模块
-mvn -f platform-backend/pom.xml clean package -DskipTests
-mvn -f platform-fisco/pom.xml clean package -DskipTests
-mvn -f platform-storage/pom.xml clean package -DskipTests
-```
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
-### 2.5 测试
+### 👥 协作与分享
+- **文件分享** — 生成带访问次数、有效期、密码保护的分享码
+- **分享审计与溯源** — 多级溯源链（A→B→C），完整访问日志
+- **好友系统** — 好友间直接分享，SSE 实时通知
+- **工单系统** — 内置工单系统，支持分类、优先级、管理员处理
 
-测试命令矩阵（单元 + 集成）请参考 `TESTING.md`。
+</td>
+<td width="50%" valign="top">
 
-### 3. 启动
+### 📊 治理与可观测性
+- **配额治理** — 用户/租户级存储限额，SHADOW/ENFORCE 两种模式，灰度发布
+- **实时通知** — SSE 推送存证结果、工单动态、好友事件、系统公告
+- **存储容量 API** — 集群/域/节点容量聚合，含 `degraded`+`source` 语义
+- **多租户隔离** — 数据库、缓存、存储路径按租户独立隔离
 
-```bash
-# 按顺序启动服务（Provider 先于 Consumer）
-java -jar "$(ls platform-storage/target/platform-storage-*.jar | head -n 1)" --spring.profiles.active=local
-java -jar "$(ls platform-fisco/target/platform-fisco-*.jar | head -n 1)" --spring.profiles.active=local
-java -jar "$(ls platform-backend/backend-web/target/backend-web-*.jar | head -n 1)" --spring.profiles.active=local
+</td>
+</tr>
+</table>
 
-# 启动前端开发服务（可选但推荐）
-cd platform-frontend && pnpm install && pnpm dev
-```
+---
 
-> 详细配置请参阅 [快速开始指南](docs/zh/getting-started/index.md)
-
-## 系统架构
+## 🏗 系统架构
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -93,86 +92,162 @@ cd platform-frontend && pnpm install && pnpm dev
          ▼                    │                    ▼
 ┌─────────────────┐           │           ┌─────────────────┐
 │ platform-fisco  │           │           │ platform-storage│
-│ 区块链服务        │           │           │ 存储服务         │
+│  区块链服务      │           │           │   存储服务       │
 │ (端口 8091)      │           │           │ (端口 8092)     │
 └────────┬────────┘           │           └────────┬────────┘
          │         Dubbo RPC  │  Dubbo RPC         │
-         └────────────────────┼────────────────────┘
-                              ▼
-                    ┌─────────────────┐
-                    │ platform-backend│
-                    │ REST API :8000  │
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐
-                    │ FISCO BCOS 节点  │
-                    └─────────────────┘
+         │                    ▼                    │
+         │          ┌─────────────────┐            │
+         │          │ platform-backend│            │
+         │          │ REST API :8000  │            │
+         │          └─────────────────┘            │
+         │                                         │
+         ▼                                         ▼
+  ┌─────────────┐                        ┌────────────────┐
+  │ FISCO BCOS  │                        │   S3 集群      │
+  │    节点      │                        │ (MinIO / S3)  │
+  └─────────────┘                        └────────────────┘
 ```
 
-> 详细架构请参阅 [架构设计文档](docs/zh/architecture/index.md)
+> 含 Mermaid 流程图和数据流时序图的完整架构文档请参阅 [架构设计文档](docs/zh/architecture/index.md)
 
-## 文档导航
+---
 
-| 主题                                         | 说明                                   |
-| -------------------------------------------- | -------------------------------------- |
-| [快速开始](docs/zh/getting-started/index.md) | 前置依赖、安装部署、配置说明           |
-| [架构设计](docs/zh/architecture/index.md)    | 系统架构、分布式存储、区块链、安全机制 |
-| [部署运维](docs/zh/deployment/index.md)      | Docker 部署、生产环境、监控告警        |
-| [故障排查](docs/zh/troubleshooting/index.md) | 常见问题与解决方案                     |
-| [API 参考](docs/zh/api/index.md)             | 与 Controller 对齐的 REST API 索引与鉴权说明 |
-| [完整 API 文档](API_DOCUMENTATION.md)        | 面向模块的完整接口清单与关键请求示例   |
-| [文档一致性校验](tools/docs/check_consistency.py) | 本地文档/API/环境变量/路线图一致性校验脚本 |
-| [测试策略](TESTING.md)                       | 测试分层、覆盖率、运行方式             |
-| [项目路线图](ROADMAP.md)                     | 滚动治理路线图与 Wave 规划             |
+## ⚡ 快速开始
 
-## 技术栈
+### 1. 前置依赖
 
-| 分类     | 技术                              | 版本                     |
-| -------- | --------------------------------- | ------------------------ |
-| 后端     | Java, Spring Boot                 | 21, 3.5.11               |
-| 微服务   | Apache Dubbo (Triple), Nacos      | 3.3.6                    |
-| 区块链   | FISCO BCOS, Solidity              | 3.8.0, ^0.8.11           |
-| 存储     | S3 兼容存储, MySQL, Redis         | AWS SDK 2.41, 8.0+, 7.0+ |
-| 前端     | Svelte 5, SvelteKit, Tailwind CSS, ECharts, Vite | 5.53+, 2.52+, 4.2+, 6.0+, 6.0+ |
-| 弹性设计 | Resilience4j                      | 2.3.0                    |
-| 监控     | Micrometer, Prometheus            | -                        |
+启动前确保以下服务已运行：
 
-## 项目结构
+| 服务          | 端口  | 用途               |
+| ------------- | ----- | ------------------ |
+| Nacos         | 8848  | 服务发现与配置中心 |
+| MySQL         | 3306  | 数据库             |
+| Redis         | 6379  | 缓存与分布式锁     |
+| RabbitMQ      | 5672  | 消息队列           |
+| S3 兼容存储   | 9000  | 对象存储           |
+| FISCO BCOS    | 20200 | 区块链节点         |
+
+通过 Docker Compose 启动基础设施：
+
+```bash
+docker compose -f docker-compose.infra.yml up -d
+```
+
+复制 `.env.example` 为 `.env`，配置 `JWT_KEY`、`S3_*` 和 `FISCO_*` 后再启动服务。
+
+### 2. 构建
+
+```bash
+# 安装共享接口（必须首先执行）
+mvn -f platform-api/pom.xml clean install
+
+# 构建所有后端模块
+mvn -f platform-backend/pom.xml clean package -DskipTests
+mvn -f platform-fisco/pom.xml clean package -DskipTests
+mvn -f platform-storage/pom.xml clean package -DskipTests
+```
+
+### 3. 启动
+
+```bash
+# 按顺序启动（Provider 先于 Consumer）
+java -jar "$(ls platform-storage/target/platform-storage-*.jar)" --spring.profiles.active=local
+java -jar "$(ls platform-fisco/target/platform-fisco-*.jar)" --spring.profiles.active=local
+java -jar "$(ls platform-backend/backend-web/target/backend-web-*.jar)" --spring.profiles.active=local
+
+# 启动前端开发服务
+cd platform-frontend && pnpm install && pnpm dev
+```
+
+或使用统一启动脚本：
+
+```bash
+./scripts/start.sh start all
+```
+
+验证安装：
+- **Swagger UI**：http://localhost:8000/record-platform/swagger-ui.html
+- **健康检查**：http://localhost:8000/record-platform/actuator/health
+- **前端**：http://localhost:5173
+
+> 详细配置请参阅 [快速开始指南](docs/zh/getting-started/index.md)
+
+---
+
+## 🧱 技术栈
+
+| 分类     | 技术                                                    | 版本               |
+| -------- | ------------------------------------------------------- | ------------------ |
+| 后端     | Java + Spring Boot + Virtual Threads                    | 21, 3.5.11         |
+| 微服务   | Apache Dubbo (Triple 协议), Nacos                       | 3.3.6              |
+| 区块链   | FISCO BCOS, Solidity                                    | 3.8.0, ^0.8.11     |
+| 存储     | S3 兼容存储 (AWS SDK v2), MySQL, Redis (Redisson)        | 2.x, 8.0+, 7.0+    |
+| 前端     | Svelte 5 (Runes), SvelteKit, Tailwind CSS 4, bits-ui   | 5.53+, 2.53+, 4.2+ |
+| 弹性设计 | Resilience4j（熔断、重试）                               | 2.3.0              |
+| 监控     | Micrometer, Prometheus                                  | —                  |
+| 测试     | JUnit 5, Mockito, Testcontainers, Vitest                | —                  |
+
+---
+
+## 📚 文档导航
+
+| 指南 | 说明 |
+| ---- | ---- |
+| [快速开始](docs/zh/getting-started/index.md) | 前置依赖、安装部署、配置说明 |
+| [架构设计](docs/zh/architecture/index.md) | 系统架构、分布式存储、区块链、安全机制 |
+| [部署运维](docs/zh/deployment/index.md) | Docker Compose、生产环境、监控告警 |
+| [API 参考](docs/zh/api/index.md) | REST 端点、认证规则、错误码 |
+| [开发指南](docs/zh/development/index.md) | 贡献指南、本地开发、测试策略 |
+| [故障排查](docs/zh/troubleshooting/index.md) | 常见问题与解决方案 |
+
+---
+
+## 🗂 项目结构
 
 ```
 RecordPlatform/
 ├── platform-api/          # 共享 Dubbo 接口定义
-├── platform-backend/      # 后端服务 (Dubbo Consumer, REST API)
-│   ├── backend-web/       # 控制器、过滤器、安全配置
-│   ├── backend-service/   # 业务逻辑、Saga、Outbox
-│   ├── backend-dao/       # MyBatis Plus 映射、实体
-│   ├── backend-api/       # 内部 API 接口
-│   └── backend-common/    # 工具类、常量
-├── platform-fisco/        # 区块链服务 (Dubbo Provider)
-├── platform-storage/      # 存储服务 (Dubbo Provider)
-│   ├── config/            # 节点与故障域配置
-│   ├── core/              # 一致性哈希、故障域管理
-│   ├── service/           # 存储、再平衡、备用池管理
-│   ├── event/             # 拓扑变更事件
-│   ├── health/            # 健康检查端点
-│   └── tenant/            # 多租户支持
+├── platform-backend/      # REST API 服务（Dubbo Consumer, :8000）
+│   ├── backend-web/       # 控制器、JWT 过滤器、限流
+│   ├── backend-service/   # 业务逻辑、Saga 编排、Outbox
+│   ├── backend-dao/       # MyBatis Plus 映射与实体
+│   ├── backend-api/       # 内部接口定义
+│   └── backend-common/    # 共享工具类与常量
+├── platform-fisco/        # 区块链服务（Dubbo Provider, :8091）
+├── platform-storage/      # 存储服务（Dubbo Provider, :8092）
 ├── platform-frontend/     # Svelte 5 + SvelteKit 前端
-├── scripts/               # 部署脚本
-├── tools/                 # 开发与测试工具
-│   ├── docs/              # 文档一致性校验
-│   ├── k6/                # k6 压测（smoke、load、mixed 场景）
-│   └── security/          # 安全 PoC 脚本与模板
-└── docs/                  # 文档 (en/zh)
+├── scripts/               # 启停脚本、环境预检
+├── tools/                 # k6 压测、安全 PoC、文档一致性校验
+├── docs/                  # VitePress 文档站（en/zh）
+└── docker-compose.infra.yml  # 基础设施服务（Nacos/MySQL/Redis/RabbitMQ/MinIO）
 ```
 
-## 参与贡献
+---
 
-1. Fork 本仓库
-2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'feat: add amazing feature'`)
-4. 推送分支 (`git push origin feature/amazing-feature`)
-5. 发起 Pull Request
+## 🛠 参与贡献
 
-## 许可证
+欢迎贡献！请在开始前阅读 [贡献指南](docs/zh/development/contributing.md)。
 
-本项目基于 Apache License 2.0 开源 - 详见 [LICENSE](LICENSE) 文件。
+```bash
+# 1. Fork 并克隆仓库
+git clone https://github.com/<your-fork>/RecordPlatform.git
+
+# 2. 创建功能分支
+git checkout -b feat/your-feature
+
+# 3. 修改代码，运行测试
+mvn -f platform-backend/pom.xml test
+
+# 4. 向 main 分支发起 Pull Request
+```
+
+**分支命名规范：** `feat/`、`fix/`、`refactor/`、`docs/`、`chore/`
+
+所有 PR 必须通过 CI 门禁：后端测试、前端测试、契约一致性检查、构建验证。详见 [CI 门禁](docs/zh/development/contributing.md#ci-门禁)。
+
+---
+
+## 📄 许可证
+
+本项目基于 Apache License 2.0 开源 — 详见 [LICENSE](LICENSE) 文件。
