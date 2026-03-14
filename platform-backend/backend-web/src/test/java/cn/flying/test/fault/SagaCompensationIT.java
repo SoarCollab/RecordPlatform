@@ -241,14 +241,15 @@ class SagaCompensationIT extends FaultInjectionBaseIT {
         // 开启外层事务
         TransactionStatus outerTx = transactionManager.getTransaction(new DefaultTransactionDefinition());
         try {
-            // 外层事务修改 status（将被回滚）
+            // REQUIRES_NEW：先提交 payload（独立事务，提交后释放行锁）
+            // 必须在外层事务修改同一行之前执行，避免行锁冲突导致等待超时
+            compensationHelper.persistPayloadInNewTransaction(saga, testPayload);
+
+            // 外层事务修改 status（REQUIRES_NEW 已释放锁，此处可正常获取锁）
             saga.setStatus(FileSagaStatus.COMPENSATING.name());
             sagaMapper.updateById(saga);
 
-            // REQUIRES_NEW：挂起外层，开启独立事务，提交 payload
-            compensationHelper.persistPayloadInNewTransaction(saga, testPayload);
-
-            // 回滚外层事务（status 变更将被撤销）
+            // 回滚外层事务（status 变更将被撤销；payload 已由 REQUIRES_NEW 独立提交）
             transactionManager.rollback(outerTx);
         } catch (Exception e) {
             transactionManager.rollback(outerTx);
