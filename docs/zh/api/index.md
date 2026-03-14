@@ -111,6 +111,8 @@ Authorization: Bearer <token>
 | GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/chunks` | 公开分享下载（公开） |
 | GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info` | 公开分享解密信息（公开） |
 | POST | `/api/v1/files/download-batches/report` | 上报批量下载质量指标 |
+| GET | `/api/v1/files/{id}/versions` | 查询文件版本链列表 |
+| POST | `/api/v1/files/{id}/versions` | 将文件标记为新版本的父版本 |
 
 ### 管理员文件审计（`/api/v1/admin/files`）
 

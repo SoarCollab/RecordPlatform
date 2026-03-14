@@ -22,6 +22,9 @@ export default withMermaid(
     // Ignore localhost links (development environment URLs)
     ignoreDeadLinks: [/^http:\/\/localhost/],
 
+    // Exclude implementation plan files from VitePress processing
+    srcExclude: ["**/superpowers/**"],
+
     locales: {
       en: {
         label: "English",
@@ -33,6 +36,7 @@ export default withMermaid(
             { text: "Architecture", link: "/en/architecture/", activeMatch: "/en/architecture/" },
             { text: "Deployment", link: "/en/deployment/", activeMatch: "/en/deployment/" },
             { text: "API", link: "/en/api/", activeMatch: "/en/api/" },
+            { text: "Development", link: "/en/development/", activeMatch: "/en/development/" },
             { text: "Performance", link: "/en/perf/k6-loadtest", activeMatch: "/en/perf/" },
             { text: "Troubleshooting", link: "/en/troubleshooting/", activeMatch: "/en/troubleshooting/" },
           ],
@@ -81,6 +85,19 @@ export default withMermaid(
                     link: "/en/architecture/blockchain-integration",
                   },
                   { text: "Security", link: "/en/architecture/security" },
+                  { text: "File Version Chain", link: "/en/architecture/file-version-chain" },
+                ],
+              },
+            ],
+            "/en/development/": [
+              {
+                text: "Development",
+                collapsed: false,
+                items: [
+                  { text: "Overview", link: "/en/development/" },
+                  { text: "Local Dev Setup", link: "/en/development/local-dev" },
+                  { text: "Contributing", link: "/en/development/contributing" },
+                  { text: "Testing", link: "/en/development/testing" },
                 ],
               },
             ],
@@ -151,6 +168,7 @@ export default withMermaid(
             { text: "架构", link: "/zh/architecture/", activeMatch: "/zh/architecture/" },
             { text: "部署", link: "/zh/deployment/", activeMatch: "/zh/deployment/" },
             { text: "API", link: "/zh/api/", activeMatch: "/zh/api/" },
+            { text: "开发指南", link: "/zh/development/", activeMatch: "/zh/development/" },
             { text: "性能测试", link: "/zh/perf/k6-loadtest", activeMatch: "/zh/perf/" },
             { text: "故障排查", link: "/zh/troubleshooting/", activeMatch: "/zh/troubleshooting/" },
           ],
@@ -199,6 +217,19 @@ export default withMermaid(
                     link: "/zh/architecture/blockchain-integration",
                   },
                   { text: "安全设计", link: "/zh/architecture/security" },
+                  { text: "文件版本链", link: "/zh/architecture/file-version-chain" },
+                ],
+              },
+            ],
+            "/zh/development/": [
+              {
+                text: "开发指南",
+                collapsed: false,
+                items: [
+                  { text: "概述", link: "/zh/development/" },
+                  { text: "本地开发环境", link: "/zh/development/local-dev" },
+                  { text: "贡献指南", link: "/zh/development/contributing" },
+                  { text: "测试策略", link: "/zh/development/testing" },
                 ],
               },
             ],

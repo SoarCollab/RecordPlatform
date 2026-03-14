@@ -8,6 +8,7 @@ Technical architecture documentation for RecordPlatform.
 - [Distributed Storage](distributed-storage) - Fault domains, consistent hashing, rebalancing
 - [Blockchain Integration](blockchain-integration) - Smart contracts, multi-chain adapters
 - [Security](security) - Authentication, authorization, encryption
+- [File Version Chain](file-version-chain) - Version chain model, API, upload integration
 
 ## Architecture Principles
 

@@ -1,81 +1,80 @@
+<div align="center">
+
 # RecordPlatform
 
+**Enterprise-grade file attestation platform powered by blockchain and distributed storage**
+
+[![Build](https://github.com/SoarCollab/RecordPlatform/actions/workflows/test.yml/badge.svg)](https://github.com/SoarCollab/RecordPlatform/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Java](https://img.shields.io/badge/Java-21-orange.svg)](https://openjdk.org/projects/jdk/21/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-green.svg)](https://spring.io/projects/spring-boot)
+[![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
+[![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white)](https://svelte.dev)
 
-**Enterprise-grade file attestation platform** powered by blockchain and distributed storage.
+[中文文档](README_CN.md) · [Documentation](https://soarcollab.github.io/RecordPlatform/) · [API Reference](docs/en/api/index.md)
 
-[中文文档](README_CN.md)
+</div>
 
 ---
 
-## Features
+## What is RecordPlatform?
 
-- **Blockchain Attestation** - File metadata stored on FISCO BCOS, ensuring immutability and traceability
-- **Distributed Storage** - Configurable 1~N active domains with optional standby domain, consistent hashing, quorum-based writes, degraded write support, auto-promotion, and N-1 fault tolerance
-- **Chunked Upload** - Resumable uploads with AES-GCM/ChaCha20-Poly1305 encryption
-- **File Sharing** - Generate share codes with access limits and expiration
-- **Share Audit & Provenance** - Track access, downloads, and saves with multi-level provenance chain (A→B→C), full share access logging
-- **Real-time Notifications** - SSE push for messages, announcements, tickets, friend events, and file attestation (`file-record-success` / `file-record-failed`)
-- **Storage Capacity Observability** - `/api/v1/system/storage-capacity` provides cluster/node/domain capacity aggregates with `degraded` + `source` semantics
-- **Quota Governance** - Per-user and per-tenant storage quota enforcement with SHADOW/ENFORCE modes and gradual rollout via tenant whitelist
-- **Batch Download** - Select multiple files for parallel download with automatic retry and quality metrics reporting
-- **Keyword Search Modes** - File query supports `FUZZY`, `PREFIX`, `EXACT_HASH`, and `AUTO` keyword matching modes for flexible search
-- **Streaming Downloads** - Large file downloads use StreamSaver.js for low-memory streaming; automatic strategy selection based on file size and browser capability
-- **RBAC Permissions** - Fine-grained access control with resource ownership verification
-- **Multi-tenancy** - Database, cache, and storage path isolation per tenant
-- **Support Tickets** - Built-in ticket system with categories, priorities, and admin management
-- **Friend System** - Direct file sharing with friends, friend requests with real-time SSE notifications
+RecordPlatform is an open-source, enterprise-grade file attestation platform that combines **blockchain immutability** with **fault-domain-aware distributed storage**. Upload files, have their metadata recorded on-chain via FISCO BCOS, and share them securely — with cryptographic proof of origin, integrity, and full access audit.
 
-## Quick Start
+Built for teams that need:
+- 📜 **Auditable provenance** — every upload, share, and download tracked and verifiable on-chain
+- 🏢 **Multi-tenant isolation** — separate storage, cache, and data paths per tenant
+- 🔒 **End-to-end encryption** — AES-GCM/ChaCha20-Poly1305 with per-chunk key chains
 
-### 1. Prerequisites
+---
 
-Ensure the following services are running:
+## ✨ Features
 
-| Service               | Port  | Purpose                    |
-| --------------------- | ----- | -------------------------- |
-| Nacos                 | 8848  | Service discovery & config |
-| MySQL                 | 3306  | Database                   |
-| Redis                 | 6379  | Cache & distributed locks  |
-| RabbitMQ              | 5672  | Message queue              |
-| S3-compatible storage | 9000  | Object storage             |
-| FISCO BCOS            | 20200 | Blockchain node            |
+<table>
+<tr>
+<td width="50%" valign="top">
 
-Optional but recommended: copy `.env.example` to `.env` and set at least `JWT_KEY`, `S3_*`, and (for dev) `KNIFE4J_*` before starting services.
+### 🔐 Attestation & Security
+- **Blockchain Attestation** — file metadata stored on FISCO BCOS, immutable and traceable
+- **File Encryption** — AES-GCM / ChaCha20-Poly1305, per-chunk independent key chains
+- **RBAC + Ownership** — fine-grained resource-level access control
+- **ID Obfuscation** — AES-256-CTR external↔internal ID mapping
 
-### 2. Build
+</td>
+<td width="50%" valign="top">
 
-```bash
-# Install shared interfaces (required first)
-mvn -f platform-api/pom.xml clean install
+### 📦 Storage & Transfer
+- **Distributed Storage** — 1~N active fault domains, quorum writes, N-1 fault tolerance, auto-promotion from standby
+- **Chunked Upload** — resumable, concurrent, dynamic chunk sizing
+- **Streaming Download** — StreamSaver.js for large files; auto strategy selection
+- **File Version Chain** — track history, derive new versions from existing files
 
-# Build all modules
-mvn -f platform-backend/pom.xml clean package -DskipTests
-mvn -f platform-fisco/pom.xml clean package -DskipTests
-mvn -f platform-storage/pom.xml clean package -DskipTests
-```
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
-### 2.5 Test
+### 👥 Collaboration & Sharing
+- **File Sharing** — generate share codes with access limits, expiry, and password protection
+- **Share Audit & Provenance** — multi-level chain tracking (A→B→C), full access logs
+- **Friend System** — direct file sharing with friends, real-time SSE notifications
+- **Support Tickets** — built-in ticket system with categories, priorities, admin management
 
-See `TESTING.md` for the recommended test matrix (unit + integration).
+</td>
+<td width="50%" valign="top">
 
-### 3. Run
+### 📊 Governance & Observability
+- **Quota Governance** — per-user and per-tenant limits, SHADOW/ENFORCE modes, gradual rollout
+- **Real-time Notifications** — SSE push for file attestation, tickets, friend events, announcements
+- **Storage Capacity API** — cluster/domain/node capacity aggregates with `degraded`+`source` semantics
+- **Multi-tenancy** — DB, cache, and storage path isolation per tenant
 
-```bash
-# Start services in order (providers before consumer)
-java -jar "$(ls platform-storage/target/platform-storage-*.jar | head -n 1)" --spring.profiles.active=local
-java -jar "$(ls platform-fisco/target/platform-fisco-*.jar | head -n 1)" --spring.profiles.active=local
-java -jar "$(ls platform-backend/backend-web/target/backend-web-*.jar | head -n 1)" --spring.profiles.active=local
+</td>
+</tr>
+</table>
 
-# Start frontend dev server (optional but recommended for local verification)
-cd platform-frontend && pnpm install && pnpm dev
-```
+---
 
-> For detailed setup, see [Getting Started Guide](docs/en/getting-started/index.md)
-
-## Architecture
+## 🏗 Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -97,82 +96,158 @@ cd platform-frontend && pnpm install && pnpm dev
 │ (Port 8091)     │           │           │ (Port 8092)     │
 └────────┬────────┘           │           └────────┬────────┘
          │         Dubbo RPC  │  Dubbo RPC         │
-         └────────────────────┼────────────────────┘
-                              ▼
-                    ┌─────────────────┐
-                    │ platform-backend│
-                    │ REST API :8000  │
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐
-                    │ FISCO BCOS Node │
-                    └─────────────────┘
+         │                    ▼                    │
+         │          ┌─────────────────┐            │
+         │          │ platform-backend│            │
+         │          │ REST API :8000  │            │
+         │          └─────────────────┘            │
+         │                                         │
+         ▼                                         ▼
+  ┌─────────────┐                        ┌────────────────┐
+  │ FISCO BCOS  │                        │   S3 Cluster   │
+  │    Node     │                        │ (MinIO / S3)   │
+  └─────────────┘                        └────────────────┘
 ```
 
-> For detailed architecture, see [Architecture Guide](docs/en/architecture/index.md)
+> For detailed architecture with Mermaid diagrams and data flow sequences, see [Architecture Guide](docs/en/architecture/index.md)
 
-## Documentation
+---
 
-| Topic                                               | Description                                                |
-| --------------------------------------------------- | ---------------------------------------------------------- |
-| [Getting Started](docs/en/getting-started/index.md) | Prerequisites, installation, configuration                 |
-| [Architecture](docs/en/architecture/index.md)       | System overview, distributed storage, blockchain, security |
-| [Deployment](docs/en/deployment/index.md)           | Docker, production setup, monitoring                       |
-| [Troubleshooting](docs/en/troubleshooting/index.md) | Common issues and solutions                                |
-| [API Reference](docs/en/api/index.md)               | Controller-aligned REST API index and auth rules           |
-| [Comprehensive API Doc](API_DOCUMENTATION.md)       | Full module-level API checklist with key request examples  |
-| [Docs Consistency Check](tools/docs/check_consistency.py) | Local doc/API/env/roadmap consistency gate script |
-| [Testing](TESTING.md)                               | Test strategy, coverage, and how to run tests              |
-| [Roadmap](ROADMAP.md)                               | Rolling governance roadmap and wave planning               |
+## ⚡ Quick Start
 
-## Tech Stack
+### 1. Prerequisites
 
-| Category      | Technology                        | Version                  |
-| ------------- | --------------------------------- | ------------------------ |
-| Backend       | Java, Spring Boot                 | 21, 3.5.11               |
-| Microservices | Apache Dubbo (Triple), Nacos      | 3.3.6                    |
-| Blockchain    | FISCO BCOS, Solidity              | 3.8.0, ^0.8.11           |
-| Storage       | S3-compatible, MySQL, Redis       | AWS SDK 2.41, 8.0+, 7.0+ |
-| Frontend      | Svelte 5, SvelteKit, Tailwind CSS, ECharts, Vite | 5.53+, 2.52+, 4.2+, 6.0+, 6.0+ |
-| Resilience    | Resilience4j                      | 2.3.0                    |
-| Monitoring    | Micrometer, Prometheus            | -                        |
+Ensure the following services are running before starting:
 
-## Project Structure
+| Service               | Port  | Purpose                    |
+| --------------------- | ----- | -------------------------- |
+| Nacos                 | 8848  | Service discovery & config |
+| MySQL                 | 3306  | Database                   |
+| Redis                 | 6379  | Cache & distributed locks  |
+| RabbitMQ              | 5672  | Message queue              |
+| S3-compatible storage | 9000  | Object storage             |
+| FISCO BCOS            | 20200 | Blockchain node            |
+
+Start infrastructure with Docker Compose:
+
+```bash
+docker compose -f docker-compose.infra.yml up -d
+```
+
+Copy `.env.example` to `.env` and configure `JWT_KEY`, `S3_*`, and `FISCO_*` before starting services.
+
+### 2. Build
+
+```bash
+# Install shared interfaces (required first)
+mvn -f platform-api/pom.xml clean install
+
+# Build all backend services
+mvn -f platform-backend/pom.xml clean package -DskipTests
+mvn -f platform-fisco/pom.xml clean package -DskipTests
+mvn -f platform-storage/pom.xml clean package -DskipTests
+```
+
+### 3. Run
+
+```bash
+# Start in order: providers before consumer
+java -jar "$(ls platform-storage/target/platform-storage-*.jar)" --spring.profiles.active=local
+java -jar "$(ls platform-fisco/target/platform-fisco-*.jar)" --spring.profiles.active=local
+java -jar "$(ls platform-backend/backend-web/target/backend-web-*.jar)" --spring.profiles.active=local
+
+# Frontend dev server
+cd platform-frontend && pnpm install && pnpm dev
+```
+
+Or use the unified start script:
+
+```bash
+./scripts/start.sh start all
+```
+
+Verify the installation at:
+- **Swagger UI**: http://localhost:8000/record-platform/swagger-ui.html
+- **Health check**: http://localhost:8000/record-platform/actuator/health
+- **Frontend**: http://localhost:5173
+
+> For detailed setup, see [Getting Started Guide](docs/en/getting-started/index.md)
+
+---
+
+## 🧱 Tech Stack
+
+| Category      | Technology                                              | Version               |
+| ------------- | ------------------------------------------------------- | --------------------- |
+| Backend       | Java + Spring Boot + Virtual Threads                    | 21, 3.5.11            |
+| Microservices | Apache Dubbo (Triple protocol), Nacos                   | 3.3.6                 |
+| Blockchain    | FISCO BCOS, Solidity                                    | 3.8.0, ^0.8.11        |
+| Storage       | S3-compatible (AWS SDK v2), MySQL, Redis (Redisson)     | 2.x, 8.0+, 7.0+       |
+| Frontend      | Svelte 5 (Runes), SvelteKit, Tailwind CSS 4, bits-ui   | 5.53+, 2.53+, 4.2+    |
+| Resilience    | Resilience4j (circuit breaker, retry)                   | 2.3.0                 |
+| Monitoring    | Micrometer, Prometheus                                  | —                     |
+| Testing       | JUnit 5, Mockito, Testcontainers, Vitest                | —                     |
+
+---
+
+## 📚 Documentation
+
+| Guide | Description |
+| ----- | ----------- |
+| [Getting Started](docs/en/getting-started/index.md) | Prerequisites, installation, configuration |
+| [Architecture](docs/en/architecture/index.md) | System overview, distributed storage, blockchain, security |
+| [Deployment](docs/en/deployment/index.md) | Docker Compose, production setup, monitoring |
+| [API Reference](docs/en/api/index.md) | REST endpoints, authentication, error codes |
+| [Development](docs/en/development/index.md) | Contributing, local dev, testing strategy |
+| [Troubleshooting](docs/en/troubleshooting/index.md) | Common issues and solutions |
+
+---
+
+## 🗂 Project Structure
 
 ```
 RecordPlatform/
 ├── platform-api/          # Shared Dubbo interface definitions
-├── platform-backend/      # Backend service (Dubbo Consumer, REST API)
-│   ├── backend-web/       # Controllers, filters, security
-│   ├── backend-service/   # Business logic, Saga, Outbox
-│   ├── backend-dao/       # MyBatis Plus mappers, entities
-│   ├── backend-api/       # Internal API interfaces
-│   └── backend-common/    # Utilities, constants
-├── platform-fisco/        # Blockchain service (Dubbo Provider)
-├── platform-storage/      # Storage service (Dubbo Provider)
-│   ├── config/            # Node & fault domain configuration
-│   ├── core/              # Consistent hashing, fault domain manager
-│   ├── service/           # Storage, rebalance, standby pool
-│   ├── event/             # Topology change events
-│   ├── health/            # Health check endpoints
-│   └── tenant/            # Multi-tenant support
+├── platform-backend/      # REST API service (Dubbo Consumer, :8000)
+│   ├── backend-web/       # Controllers, JWT filters, rate limiting
+│   ├── backend-service/   # Business logic, Saga orchestration, Outbox
+│   ├── backend-dao/       # MyBatis Plus mappers and entities
+│   ├── backend-api/       # Internal interface definitions
+│   └── backend-common/    # Shared utilities and constants
+├── platform-fisco/        # Blockchain service (Dubbo Provider, :8091)
+├── platform-storage/      # Storage service (Dubbo Provider, :8092)
 ├── platform-frontend/     # Svelte 5 + SvelteKit frontend
-├── scripts/               # Deployment scripts
-├── tools/                 # Development & testing tools
-│   ├── docs/              # Documentation consistency checking
-│   ├── k6/                # k6 load testing (smoke, load, mixed scenarios)
-│   └── security/          # Security PoC scripts and templates
-└── docs/                  # Documentation (en/zh)
+├── scripts/               # Start/stop scripts, env-check
+├── tools/                 # k6 load tests, security PoC, doc consistency
+├── docs/                  # VitePress documentation site (en/zh)
+└── docker-compose.infra.yml  # Infrastructure services (Nacos, MySQL, Redis, RabbitMQ, MinIO)
 ```
 
-## Contributing
+---
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+## 🛠 Contributing
 
-## License
+We welcome contributions! Please read the [Contributing Guide](docs/en/development/contributing.md) before getting started.
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+```bash
+# 1. Fork and clone the repository
+git clone https://github.com/<your-fork>/RecordPlatform.git
+
+# 2. Create a feature branch
+git checkout -b feat/your-feature
+
+# 3. Make changes, run tests
+mvn -f platform-backend/pom.xml test
+
+# 4. Open a Pull Request against main
+```
+
+**Branch naming:** `feat/`, `fix/`, `refactor/`, `docs/`, `chore/`
+
+All PRs must pass CI gates: backend tests, frontend tests, contract consistency check, and build verification. See [CI Gates](docs/en/development/contributing.md#ci-gates) for details.
+
+---
+
+## 📄 License
+
+This project is licensed under the Apache License 2.0 — see the [LICENSE](LICENSE) file for details.
