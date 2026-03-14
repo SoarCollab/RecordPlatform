@@ -73,7 +73,6 @@ class OutboxPublisherIT extends FaultInjectionBaseIT {
 
         long beforeMs = System.currentTimeMillis();
         outboxPublisher.publishSingleEvent(event);
-        long afterMs = System.currentTimeMillis();
 
         OutboxEvent updated = outboxMapper.selectById(event.getId());
         assertNotNull(updated);
