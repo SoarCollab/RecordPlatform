@@ -111,6 +111,8 @@ Based on `SecurityConfiguration`:
 | GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/chunks` | Public shared download (public) |
 | GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info` | Public decrypt info (public) |
 | POST | `/api/v1/files/download-batches/report` | Report batch download quality metrics |
+| GET | `/api/v1/files/{id}/versions` | List version chain for a file |
+| POST | `/api/v1/files/{id}/versions` | Mark file as parent for a new version upload |
 
 ### Admin File Audit (`/api/v1/admin/files`)
 

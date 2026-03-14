@@ -375,6 +375,23 @@ Query service provides async methods using Java 21 Virtual Threads:
 - `getFileAddressAsync()`
 - `getFileDecryptInfoAsync()`
 
+## File Version Chain
+
+The file version chain allows a single logical file to have multiple historical versions, linked together in a chain structure. See the dedicated [File Version Chain](file-version-chain) page for detailed design.
+
+### Core Fields
+
+| Field | Description |
+|-------|-------------|
+| `version_group_id` | Shared group ID across all versions of the same logical file |
+| `parent_version_id` | Parent version ID (`null` for first version) |
+| `is_latest` | Marks the latest version in the chain (only one `true` per group) |
+
+### Version API
+
+- `GET /api/v1/files/{id}/versions` — List the version chain for a file
+- `POST /api/v1/files/{id}/versions` — Mark an existing file as parent for a new upload (via `targetFileId`)
+
 ## Multi-tenancy
 
 ### Isolation Strategy

@@ -8,6 +8,7 @@ RecordPlatform 技术架构文档。
 - [分布式存储](distributed-storage) - 故障域、一致性哈希、再平衡
 - [区块链集成](blockchain-integration) - 智能合约、多链适配器
 - [安全机制](security) - 认证、授权、加密
+- [文件版本链](file-version-chain) - 版本链模型、API、上传集成
 
 ## 架构原则
 

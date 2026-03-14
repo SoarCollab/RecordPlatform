@@ -388,6 +388,23 @@ flowchart LR
 - `getFileAddressAsync()`
 - `getFileDecryptInfoAsync()`
 
+## 文件版本链
+
+文件版本链允许同一逻辑文件拥有多个历史版本，并通过链式结构追踪版本演进。详细设计请参阅 [文件版本链](file-version-chain) 专题文档。
+
+### 核心字段
+
+| 字段 | 说明 |
+|------|------|
+| `version_group_id` | 同一逻辑文件所有版本共享的分组 ID |
+| `parent_version_id` | 父版本 ID（首个版本为 `null`） |
+| `is_latest` | 标记当前链中最新版本（每个 group 仅一条为 true）|
+
+### 版本 API
+
+- `GET /api/v1/files/{id}/versions` — 查询版本链列表
+- `POST /api/v1/files/{id}/versions` — 将现有文件指定为新版本的父版本（上传时传入 `targetFileId`）
+
 ## 多租户
 
 ### 隔离策略
