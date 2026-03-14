@@ -12,6 +12,8 @@ import cn.flying.service.saga.FileUploadCommand;
 import cn.flying.service.saga.FileSagaOrchestrator;
 import cn.flying.service.saga.SagaCompensationHelper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +43,9 @@ class SagaCompensationIT extends FaultInjectionBaseIT {
 
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     // ──────────────────────────── Test 1 ────────────────────────────
 
@@ -232,7 +237,7 @@ class SagaCompensationIT extends FaultInjectionBaseIT {
      * REQUIRES_NEW 独立提交语义：外层事务回滚后，REQUIRES_NEW 提交的 payload 仍保留。
      */
     @Test
-    void persistPayloadInNewTransaction_survivesOuterRollback() {
+    void persistPayloadInNewTransaction_survivesOuterRollback() throws Exception {
         FileSaga saga = insertTestSaga(null, UUID.randomUUID().toString(),
                 FileSagaStatus.RUNNING.name(), FileSagaStep.S3_UPLOADED.name(), 0, null);
 
@@ -261,7 +266,10 @@ class SagaCompensationIT extends FaultInjectionBaseIT {
         // - status 由外层事务修改，外层回滚后恢复为 RUNNING
         FileSaga finalSaga = sagaMapper.selectByRequestId(saga.getRequestId(), TEST_TENANT_ID);
         assertNotNull(finalSaga);
-        assertEquals(testPayload, finalSaga.getPayload(),
+        // payload 经过 MyBatis Plus / Jackson 反序列化后可能格式化（加空格），用 JSON 语义比较
+        JsonNode expectedJson = objectMapper.readTree(testPayload);
+        JsonNode actualJson = objectMapper.readTree(finalSaga.getPayload());
+        assertEquals(expectedJson, actualJson,
                 "REQUIRES_NEW 提交的 payload 不应被外层回滚撤销");
         assertEquals(FileSagaStatus.RUNNING.name(), finalSaga.getStatus(),
                 "外层事务对 status 的修改应被回滚");
