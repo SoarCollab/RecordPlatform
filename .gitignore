@@ -67,6 +67,6 @@ App.java
 /.codex/environments/environment.toml
 
 /tools/k6/results/
-/.claude/settings.json
+/.claude/**
 /node_modules/
 package-lock.json
