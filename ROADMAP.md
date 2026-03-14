@@ -116,11 +116,12 @@
 - **涉及文件**：`.github/workflows/test.yml`、`.github/workflows/security-poc.yml`
 - **当前状态**：已完成（PR #73, commit `3afe670`）。三个 category 上传：`semgrep`（Semgrep SAST）、`trivy-sca`（Trivy 全量扫描）、`trivy-pr`（Trivy PR 级扫描），结果可在 GitHub Security → Code scanning alerts 面板查看
 
-**P1-2：故障注入集成测试**
+**P1-2：故障注入集成测试** ✅
 
 - **What**：新增 `*IT.java` 测试：(a) S3 节点故障（Testcontainers MinIO 中断）、(b) 区块链节点不可达（mock）、(c) RabbitMQ 断连期间的 Outbox 处理
 - **自动化收益**：Resilience4j 断路器、重试、Saga 补偿的行为在 CI 中持续验证
-- **涉及文件**：`platform-backend/backend-service/src/test/` 新增测试类
+- **涉及文件**：`platform-backend/backend-web/src/test/java/cn/flying/test/fault/` 新增 4 个测试类
+- **当前状态**：已完成。新增 `FaultInjectionBaseIT`（抽象基类）、`SagaCompensationIT`（5 个场景：S3/链上失败补偿、重试持久化、死信事件、REQUIRES_NEW 独立提交语义）、`OutboxPublisherIT`（5 个场景：发布成功、RabbitMQ 不可达退避、指数退避上限、多租户隔离）、`ResilienceConfigIT`（5 个配置校验）。共 15 个集成测试，无 Docker 时优雅跳过
 
 **P1-3：自动化发布流程**
 
