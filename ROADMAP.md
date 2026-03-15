@@ -170,7 +170,7 @@
   - `docs/zh/deployment/environment-setup.md` + `docs/en/deployment/environment-setup.md`：中英文环境搭建指南
   - `.env.example`：补充基础设施凭据变量（DB_PASSWORD, REDIS_*, RABBITMQ_*, NACOS_AUTH_TOKEN）
 
-**P1-5：智能合约生命周期工具**
+**P1-5：智能合约生命周期工具** ✅
 
 - **What**：创建 `scripts/contract-deploy.sh`，封装 FISCO BCOS 控制台命令：
   1. 检查 FISCO BCOS 控制台已安装且节点可达
@@ -182,6 +182,10 @@
   ABI 文件为静态签入，合约变更后无自动化路径从 `.sol` 到链上部署地址
 - **自动化收益**：将多步手动操作收敛为单脚本调用；消除 ABI/合约不匹配风险
 - **完成标准**：在已初始化的 FISCO BCOS 节点上运行脚本可完成双合约部署，输出地址可直接使用
+- **当前状态**：已完成（2026-03-15）。交付物：
+  - `scripts/contract-deploy.sh`：6 阶段自动化脚本（Pre-flight → Compile → Deploy → ABI Sync → Write-back → Verify）
+  - 支持 `--dry-run`、`--skip-verify`、`--console-dir`、`--env-file` 选项
+  - `scripts/README.md`：新增第 6 节合约部署使用说明
 - **涉及文件**：新建 `scripts/contract-deploy.sh`、`platform-fisco/contract/Storage.sol`、
   `platform-fisco/contract/Sharing.sol`
 - **可选增强**：
