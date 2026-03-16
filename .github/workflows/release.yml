@@ -79,7 +79,7 @@ jobs:
       # backend
       - name: Docker metadata -- backend
         id: meta-backend
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/recordplatform-backend
           tags: |
@@ -101,7 +101,7 @@ jobs:
       # fisco
       - name: Docker metadata -- fisco
         id: meta-fisco
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/recordplatform-fisco
           tags: |
@@ -123,7 +123,7 @@ jobs:
       # storage
       - name: Docker metadata -- storage
         id: meta-storage
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/recordplatform-storage
           tags: |
@@ -145,7 +145,7 @@ jobs:
       # frontend
       - name: Docker metadata -- frontend
         id: meta-frontend
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/recordplatform-frontend
           tags: |
