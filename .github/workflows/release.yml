@@ -88,7 +88,7 @@ jobs:
             type=sha,prefix=sha-,format=short
 
       - name: Build and push -- backend
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: platform-backend/Dockerfile
@@ -110,7 +110,7 @@ jobs:
             type=sha,prefix=sha-,format=short
 
       - name: Build and push -- fisco
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: platform-fisco/Dockerfile
@@ -132,7 +132,7 @@ jobs:
             type=sha,prefix=sha-,format=short
 
       - name: Build and push -- storage
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: platform-storage/Dockerfile
@@ -154,7 +154,7 @@ jobs:
             type=sha,prefix=sha-,format=short
 
       - name: Build and push -- frontend
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: platform-frontend
           file: platform-frontend/Dockerfile
