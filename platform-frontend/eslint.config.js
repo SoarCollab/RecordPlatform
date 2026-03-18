@@ -28,6 +28,16 @@ export default tseslint.config(
     },
   },
   {
+    // eslint-plugin-svelte v3 now parses .svelte.ts with svelte-eslint-parser;
+    // must configure TypeScript parser for these files
+    files: ["**/*.svelte.ts"],
+    languageOptions: {
+      parserOptions: {
+        parser: tseslint.parser,
+      },
+    },
+  },
+  {
     files: ["**/*.ts", "**/*.svelte"],
     rules: {
       // 允许以下划线开头的未使用变量
@@ -35,6 +45,14 @@ export default tseslint.config(
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
+    },
+  },
+  {
+    // eslint-plugin-svelte v3 新增规则，暂时关闭，后续逐步修复
+    rules: {
+      "svelte/no-navigation-without-resolve": "off",
+      "svelte/require-each-key": "off",
+      "svelte/prefer-svelte-reactivity": "off",
     },
   },
   {
