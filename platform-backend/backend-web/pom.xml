@@ -17,7 +17,7 @@
         <logstash.encoder.version>9.0</logstash.encoder.version>
         <tools.jackson.version>3.1.0</tools.jackson.version>
         <skywalking.version>9.6.0</skywalking.version>
-        <spring-cloud-alibaba-dependencies.version>2025.1.0.0</spring-cloud-alibaba-dependencies.version>
+        <spring-cloud-alibaba-dependencies.version>2025.0.0.0</spring-cloud-alibaba-dependencies.version>
     </properties>
 
     <dependencies>
