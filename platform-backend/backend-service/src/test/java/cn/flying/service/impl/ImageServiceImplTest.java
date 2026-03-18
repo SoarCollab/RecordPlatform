@@ -11,7 +11,6 @@ import io.minio.GetObjectResponse;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
-import okhttp3.Headers;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;

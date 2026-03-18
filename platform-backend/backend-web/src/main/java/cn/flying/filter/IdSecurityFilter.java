@@ -7,7 +7,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
-import org.jetbrains.annotations.NotNull;
+import org.springframework.lang.NonNull;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -32,9 +32,9 @@ public class IdSecurityFilter extends OncePerRequestFilter {
      */
     @Override
     protected void doFilterInternal(
-            @NotNull HttpServletRequest request,
-            @NotNull HttpServletResponse response,
-            @NotNull FilterChain filterChain) throws ServletException, IOException {
+            @NonNull HttpServletRequest request,
+            @NonNull HttpServletResponse response,
+            @NonNull FilterChain filterChain) throws ServletException, IOException {
         
         // 仅处理GET和对外API请求
         if (shouldProcess(request)) {
