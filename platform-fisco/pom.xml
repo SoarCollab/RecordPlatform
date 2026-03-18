@@ -22,7 +22,7 @@
         <fisco.bcos.version>3.8.0</fisco.bcos.version>
         <web3j.version>4.9.8</web3j.version>
         <jakarta.servlet-api.version>6.1.0</jakarta.servlet-api.version>
-        <resilience4j.version>2.3.0</resilience4j.version>
+        <resilience4j.version>2.4.0</resilience4j.version>
         <dubbo.version>3.3.6</dubbo.version>
         <protobuf.version>4.34.0</protobuf.version>
         <logstash.logback.version>9.0</logstash.logback.version>
