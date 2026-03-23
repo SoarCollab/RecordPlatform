@@ -16,7 +16,7 @@
         <knife4j.version>4.5.0</knife4j.version>
         <springdoc.version>2.8.16</springdoc.version>
         <java-jwt.version>4.5.1</java-jwt.version>
-        <minio.sdk.version>8.6.0</minio.sdk.version>
+        <minio.sdk.version>9.0.0</minio.sdk.version>
         <redisson.version>4.3.0</redisson.version>
     </properties>
 
