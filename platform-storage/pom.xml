@@ -16,12 +16,12 @@
     <properties>
         <java.version>21</java.version>
         <dubbo.version>3.3.6</dubbo.version>
-        <protobuf.version>4.34.0</protobuf.version>
+        <protobuf.version>4.34.1</protobuf.version>
         <prometheus.version>0.16.0</prometheus.version>
-        <aws.sdk.version>2.42.13</aws.sdk.version>
+        <aws.sdk.version>2.42.18</aws.sdk.version>
         <hutool.version>5.8.44</hutool.version>
         <redisson.version>4.3.0</redisson.version>
-        <spring-cloud-alibaba-dependencies.version>2025.0.0.0</spring-cloud-alibaba-dependencies.version>
+        <spring-cloud-alibaba-dependencies.version>2025.1.0.0</spring-cloud-alibaba-dependencies.version>
         <logstash.logback.version>9.0</logstash.logback.version>
         <skywalking.toolkit.version>9.6.0</skywalking.toolkit.version>
         <netty.version>4.2.10.Final</netty.version>
