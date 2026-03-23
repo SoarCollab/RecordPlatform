@@ -30,7 +30,7 @@
     "@types/node": "^25.5.0",
     "@vitest/coverage-v8": "^2.1.8",
     "bits-ui": "^2.16.3",
-    "eslint": "^9.39.2",
+    "eslint": "^10.1.0",
     "eslint-plugin-svelte": "^3.16.0",
     "fake-indexeddb": "^6.2.5",
     "globals": "^17.4.0",
