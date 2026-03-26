@@ -16,7 +16,6 @@
         <knife4j.version>4.5.0</knife4j.version>
         <springdoc.version>2.8.16</springdoc.version>
         <java-jwt.version>4.5.1</java-jwt.version>
-        <minio.sdk.version>8.6.0</minio.sdk.version>
         <redisson.version>4.3.0</redisson.version>
     </properties>
 
@@ -59,11 +58,14 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-amqp</artifactId>
         </dependency>
-        <!-- S3 兼容对象存储 (使用 MinIO SDK) -->
+        <!-- S3 兼容对象存储 (AWS SDK v2) -->
         <dependency>
-            <groupId>io.minio</groupId>
-            <artifactId>minio</artifactId>
-            <version>${minio.sdk.version}</version>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>apache-client</artifactId>
         </dependency>
         <!--    Redis交互模块    -->
         <dependency>

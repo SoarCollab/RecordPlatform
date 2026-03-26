@@ -5,9 +5,10 @@ import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.test.config.MockDubboServicesConfig;
-import io.minio.BucketExistsArgs;
-import io.minio.MakeBucketArgs;
-import io.minio.MinioClient;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
+import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
+import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -71,7 +72,7 @@ public abstract class BaseIntegrationTest {
     protected DistributedStorageService distributedStorageService;
 
     @Autowired
-    private MinioClient s3Client;
+    private S3Client s3Client;
 
     @Value("${s3.bucket-name}")
     private String s3BucketName;
@@ -212,18 +213,13 @@ public abstract class BaseIntegrationTest {
     }
 
     /**
-     * 确保测试环境下 MinIO 的 S3 bucket 已创建，避免图片上传等集成测试因 NoSuchBucket 失败。
+     * 确保测试环境下 S3 bucket 已创建，避免图片上传等集成测试因 NoSuchBucket 失败。
      */
     private void ensureS3BucketExists() {
         try {
-            boolean exists = s3Client.bucketExists(
-                    BucketExistsArgs.builder().bucket(s3BucketName).build()
-            );
-            if (!exists) {
-                s3Client.makeBucket(MakeBucketArgs.builder().bucket(s3BucketName).build());
-            }
-        } catch (Exception e) {
-            throw new IllegalStateException("Failed to ensure S3 bucket exists: " + s3BucketName, e);
+            s3Client.headBucket(HeadBucketRequest.builder().bucket(s3BucketName).build());
+        } catch (NoSuchBucketException e) {
+            s3Client.createBucket(CreateBucketRequest.builder().bucket(s3BucketName).build());
         }
     }
 }

@@ -6,11 +6,6 @@ import cn.flying.dao.dto.Account;
 import cn.flying.dao.dto.ImageStore;
 import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.mapper.ImageStoreMapper;
-import io.minio.GetObjectArgs;
-import io.minio.GetObjectResponse;
-import io.minio.MinioClient;
-import io.minio.PutObjectArgs;
-import io.minio.RemoveObjectArgs;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -23,11 +18,17 @@ import org.mockito.quality.Strictness;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.multipart.MultipartFile;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -48,7 +49,7 @@ import static org.mockito.Mockito.*;
 class ImageServiceImplTest {
 
     @Mock
-    private MinioClient s3Client;
+    private S3Client s3Client;
 
     @Mock
     private AccountMapper accountMapper;
@@ -83,12 +84,14 @@ class ImageServiceImplTest {
 
             when(accountMapper.selectById(USER_ID)).thenReturn(existingAccount);
             when(accountMapper.update(isNull(), any())).thenReturn(1);
+            when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                    .thenReturn(PutObjectResponse.builder().build());
 
             String result = imageService.uploadAvatar(file, USER_ID);
 
             assertThat(result).isNotNull();
             assertThat(result).startsWith("/avatar/");
-            verify(s3Client).putObject(any(PutObjectArgs.class));
+            verify(s3Client).putObject(any(PutObjectRequest.class), any(RequestBody.class));
             verify(accountMapper).update(isNull(), any());
         }
 
@@ -100,12 +103,14 @@ class ImageServiceImplTest {
 
             when(accountMapper.selectById(USER_ID)).thenReturn(existingAccount);
             when(accountMapper.update(isNull(), any())).thenReturn(1);
+            when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                    .thenReturn(PutObjectResponse.builder().build());
 
             imageService.uploadAvatar(file, USER_ID);
 
-            ArgumentCaptor<RemoveObjectArgs> captor = ArgumentCaptor.forClass(RemoveObjectArgs.class);
-            verify(s3Client).removeObject(captor.capture());
-            assertThat(captor.getValue().object()).isEqualTo("/avatar/old-avatar");
+            ArgumentCaptor<DeleteObjectRequest> captor = ArgumentCaptor.forClass(DeleteObjectRequest.class);
+            verify(s3Client).deleteObject(captor.capture());
+            assertThat(captor.getValue().key()).isEqualTo("/avatar/old-avatar");
         }
 
         @Test
@@ -116,10 +121,12 @@ class ImageServiceImplTest {
 
             when(accountMapper.selectById(USER_ID)).thenReturn(existingAccount);
             when(accountMapper.update(isNull(), any())).thenReturn(1);
+            when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                    .thenReturn(PutObjectResponse.builder().build());
 
             imageService.uploadAvatar(file, USER_ID);
 
-            verify(s3Client, never()).removeObject(any(RemoveObjectArgs.class));
+            verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
         }
 
         @Test
@@ -130,10 +137,12 @@ class ImageServiceImplTest {
 
             when(accountMapper.selectById(USER_ID)).thenReturn(existingAccount);
             when(accountMapper.update(isNull(), any())).thenReturn(1);
+            when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                    .thenReturn(PutObjectResponse.builder().build());
 
             imageService.uploadAvatar(file, USER_ID);
 
-            verify(s3Client, never()).removeObject(any(RemoveObjectArgs.class));
+            verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
         }
 
         @Test
@@ -144,6 +153,8 @@ class ImageServiceImplTest {
 
             when(accountMapper.selectById(USER_ID)).thenReturn(existingAccount);
             when(accountMapper.update(isNull(), any())).thenReturn(0);
+            when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                    .thenReturn(PutObjectResponse.builder().build());
 
             String result = imageService.uploadAvatar(file, USER_ID);
 
@@ -155,7 +166,8 @@ class ImageServiceImplTest {
         void uploadAvatar_returnNullWhenS3Fails() throws Exception {
             MultipartFile file = createMockFile("avatar.png", "image/png");
 
-            doThrow(new RuntimeException("S3 error")).when(s3Client).putObject(any(PutObjectArgs.class));
+            when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                    .thenThrow(new RuntimeException("S3 error"));
 
             String result = imageService.uploadAvatar(file, USER_ID);
 
@@ -171,6 +183,8 @@ class ImageServiceImplTest {
 
             when(accountMapper.selectById(USER_ID)).thenReturn(existingAccount);
             when(accountMapper.update(isNull(), any())).thenReturn(1);
+            when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                    .thenReturn(PutObjectResponse.builder().build());
 
             String result1 = imageService.uploadAvatar(file, USER_ID);
             String result2 = imageService.uploadAvatar(file, USER_ID);
@@ -190,13 +204,15 @@ class ImageServiceImplTest {
             String rateKey = Const.IMAGE_COUNTER + USER_ID;
 
             when(flowUtils.limitPeriodCountCheck(rateKey, 20, 3600)).thenReturn(true);
+            when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                    .thenReturn(PutObjectResponse.builder().build());
             doReturn(true).when(imageService).save(any(ImageStore.class));
 
             String result = imageService.uploadImage(file, USER_ID);
 
             assertThat(result).isNotNull();
             assertThat(result).startsWith("/cache");
-            verify(s3Client).putObject(any(PutObjectArgs.class));
+            verify(s3Client).putObject(any(PutObjectRequest.class), any(RequestBody.class));
             verify(imageService).save(any(ImageStore.class));
         }
 
@@ -211,7 +227,7 @@ class ImageServiceImplTest {
             String result = imageService.uploadImage(file, USER_ID);
 
             assertThat(result).isNull();
-            verify(s3Client, never()).putObject(any(PutObjectArgs.class));
+            verify(s3Client, never()).putObject(any(PutObjectRequest.class), any(RequestBody.class));
         }
 
         @Test
@@ -221,12 +237,14 @@ class ImageServiceImplTest {
             String rateKey = Const.IMAGE_COUNTER + USER_ID;
 
             when(flowUtils.limitPeriodCountCheck(rateKey, 20, 3600)).thenReturn(true);
+            when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                    .thenReturn(PutObjectResponse.builder().build());
             doReturn(false).when(imageService).save(any(ImageStore.class));
 
             String result = imageService.uploadImage(file, USER_ID);
 
             assertThat(result).isNull();
-            verify(s3Client).removeObject(any(RemoveObjectArgs.class));
+            verify(s3Client).deleteObject(any(DeleteObjectRequest.class));
         }
 
         @Test
@@ -236,7 +254,8 @@ class ImageServiceImplTest {
             String rateKey = Const.IMAGE_COUNTER + USER_ID;
 
             when(flowUtils.limitPeriodCountCheck(rateKey, 20, 3600)).thenReturn(true);
-            doThrow(new RuntimeException("S3 error")).when(s3Client).putObject(any(PutObjectArgs.class));
+            when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                    .thenThrow(new RuntimeException("S3 error"));
 
             String result = imageService.uploadImage(file, USER_ID);
 
@@ -250,6 +269,8 @@ class ImageServiceImplTest {
             String rateKey = Const.IMAGE_COUNTER + USER_ID;
 
             when(flowUtils.limitPeriodCountCheck(rateKey, 20, 3600)).thenReturn(true);
+            when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                    .thenReturn(PutObjectResponse.builder().build());
             doReturn(true).when(imageService).save(any(ImageStore.class));
 
             String result = imageService.uploadImage(file, USER_ID);
@@ -262,6 +283,7 @@ class ImageServiceImplTest {
     @DisplayName("fetchImage Tests")
     class FetchImageTests {
 
+        @SuppressWarnings("unchecked")
         @Test
         @DisplayName("should fetch image and write to output stream")
         void fetchImage_success() throws Exception {
@@ -269,39 +291,32 @@ class ImageServiceImplTest {
             byte[] imageData = "fake image data".getBytes();
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 
-            GetObjectResponse mockResponse = mock(GetObjectResponse.class);
-            when(mockResponse.read(any(byte[].class))).thenAnswer(invocation -> {
-                byte[] buffer = invocation.getArgument(0);
-                System.arraycopy(imageData, 0, buffer, 0, Math.min(imageData.length, buffer.length));
-                return imageData.length;
-            }).thenReturn(-1);
-            when(mockResponse.read(any(byte[].class), anyInt(), anyInt())).thenAnswer(invocation -> {
-                byte[] buffer = invocation.getArgument(0);
-                int offset = invocation.getArgument(1);
-                int length = invocation.getArgument(2);
-                int toCopy = Math.min(imageData.length, length);
-                System.arraycopy(imageData, 0, buffer, offset, toCopy);
-                return toCopy;
-            }).thenReturn(-1);
+            ResponseInputStream<GetObjectResponse> mockStream = mock(ResponseInputStream.class);
+            when(mockStream.transferTo(any())).thenAnswer(invocation -> {
+                java.io.OutputStream os = invocation.getArgument(0);
+                os.write(imageData);
+                return (long) imageData.length;
+            });
 
-            when(s3Client.getObject(any(GetObjectArgs.class))).thenReturn(mockResponse);
+            when(s3Client.getObject(any(GetObjectRequest.class))).thenReturn(mockStream);
 
             imageService.fetchImage(outputStream, imagePath);
 
-            ArgumentCaptor<GetObjectArgs> captor = ArgumentCaptor.forClass(GetObjectArgs.class);
+            ArgumentCaptor<GetObjectRequest> captor = ArgumentCaptor.forClass(GetObjectRequest.class);
             verify(s3Client).getObject(captor.capture());
-            assertThat(captor.getValue().object()).isEqualTo(imagePath);
+            assertThat(captor.getValue().key()).isEqualTo(imagePath);
             assertThat(captor.getValue().bucket()).isEqualTo(BUCKET_NAME);
+            assertThat(outputStream.toByteArray()).isEqualTo(imageData);
         }
 
         @Test
         @DisplayName("should throw exception when S3 object not found")
-        void fetchImage_throwsWhenNotFound() throws Exception {
+        void fetchImage_throwsWhenNotFound() {
             String imagePath = "/avatar/nonexistent";
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 
-            doThrow(new RuntimeException("Object not found"))
-                    .when(s3Client).getObject(any(GetObjectArgs.class));
+            when(s3Client.getObject(any(GetObjectRequest.class)))
+                    .thenThrow(new RuntimeException("Object not found"));
 
             Assertions.assertThrows(Exception.class, () ->
                     imageService.fetchImage(outputStream, imagePath));
@@ -354,11 +369,13 @@ class ImageServiceImplTest {
 
             when(accountMapper.selectById(USER_ID)).thenReturn(existingAccount);
             when(accountMapper.update(isNull(), any())).thenReturn(1);
+            when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                    .thenReturn(PutObjectResponse.builder().build());
 
             String result = imageService.uploadAvatar(file, USER_ID);
 
             // Should still attempt upload
-            verify(s3Client).putObject(any(PutObjectArgs.class));
+            verify(s3Client).putObject(any(PutObjectRequest.class), any(RequestBody.class));
         }
 
         @Test
@@ -369,7 +386,10 @@ class ImageServiceImplTest {
 
             when(accountMapper.selectById(USER_ID)).thenReturn(existingAccount);
             when(accountMapper.update(isNull(), any())).thenReturn(1);
-            doThrow(new RuntimeException("Delete error")).when(s3Client).removeObject(any(RemoveObjectArgs.class));
+            when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+                    .thenReturn(PutObjectResponse.builder().build());
+            when(s3Client.deleteObject(any(DeleteObjectRequest.class)))
+                    .thenThrow(new RuntimeException("Delete error"));
 
             // Should not throw, deletion error is logged but not propagated
             String result = imageService.uploadAvatar(file, USER_ID);
