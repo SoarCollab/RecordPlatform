@@ -14,7 +14,7 @@
     <properties>
         <java.version>21</java.version>
         <dubbo.version>3.3.6</dubbo.version>
-        <protobuf.version>4.34.0</protobuf.version>
+        <protobuf.version>4.34.1</protobuf.version>
     </properties>
 
     <dependencies>
