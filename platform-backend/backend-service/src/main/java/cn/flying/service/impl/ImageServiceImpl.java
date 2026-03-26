@@ -9,13 +9,18 @@ import cn.flying.dao.mapper.ImageStoreMapper;
 import cn.flying.service.ImageService;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import io.minio.*;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.io.IOUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -35,7 +40,7 @@ public class ImageServiceImpl extends ServiceImpl<ImageStoreMapper, ImageStore> 
     @Value("${s3.bucket-name}")
     String bucketName;
     @Resource
-    MinioClient s3Client;
+    S3Client s3Client;
     @Resource
     AccountMapper accountMapper;
     @Resource
@@ -44,13 +49,13 @@ public class ImageServiceImpl extends ServiceImpl<ImageStoreMapper, ImageStore> 
     @Override
     public String uploadAvatar(MultipartFile file, Long userId) throws IOException {
         String imageName= "/avatar/"+UUID.randomUUID().toString().replace("-","");
-        PutObjectArgs objectArgs= PutObjectArgs.builder()
+        PutObjectRequest putRequest = PutObjectRequest.builder()
                 .bucket(bucketName)
-                .stream(file.getInputStream(),file.getSize(),-1)
-                .object(imageName)
+                .key(imageName)
+                .contentType(file.getContentType())
                 .build();
         try {
-            s3Client.putObject(objectArgs);
+            s3Client.putObject(putRequest, RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
             String avatar =accountMapper.selectById(userId).getAvatar();
             this.deleteOldImage(avatar);
             if(accountMapper.update(null, Wrappers.<Account>update()
@@ -73,13 +78,13 @@ public class ImageServiceImpl extends ServiceImpl<ImageStoreMapper, ImageStore> 
         String imageName= UUID.randomUUID().toString().replace("-","");
         Date data=new Date();
         imageName="/cache"+format.format(data)+"/"+imageName;
-        PutObjectArgs objectArgs= PutObjectArgs.builder()
+        PutObjectRequest putRequest = PutObjectRequest.builder()
                 .bucket(bucketName)
-                .stream(file.getInputStream(),file.getSize(),-1)
-                .object(imageName)
+                .key(imageName)
+                .contentType(file.getContentType())
                 .build();
         try {
-            s3Client.putObject(objectArgs);
+            s3Client.putObject(putRequest, RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
             String imageUid = UUID.randomUUID().toString().replace("-", "");
             if (this.save(new ImageStore(imageUid, imageName, data)))
                 return imageName;
@@ -95,22 +100,23 @@ public class ImageServiceImpl extends ServiceImpl<ImageStoreMapper, ImageStore> 
 
     @Override
     public void fetchImage(OutputStream outputStream, String imagePath) throws Exception {
-        GetObjectArgs args= GetObjectArgs.builder()
+        GetObjectRequest getRequest = GetObjectRequest.builder()
                 .bucket(bucketName)
-                .object(imagePath)
+                .key(imagePath)
                 .build();
-        GetObjectResponse object = s3Client.getObject(args);
-        IOUtils.copy(object,outputStream);
+        try (ResponseInputStream<GetObjectResponse> object = s3Client.getObject(getRequest)) {
+            object.transferTo(outputStream);
+        }
     }
     private void deleteOldImage(String avatar){
         if (avatar==null||avatar.isEmpty())
             return ;
-        RemoveObjectArgs args= RemoveObjectArgs.builder()
+        DeleteObjectRequest deleteRequest = DeleteObjectRequest.builder()
                 .bucket(bucketName)
-                .object(avatar)
+                .key(avatar)
                 .build();
         try {
-            s3Client.removeObject(args);
+            s3Client.deleteObject(deleteRequest);
         }catch (Exception e){
             log.error("图片删除失败:{}", e.getMessage(), e);
         }

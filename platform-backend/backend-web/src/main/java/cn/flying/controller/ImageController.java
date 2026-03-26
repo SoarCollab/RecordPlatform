@@ -8,7 +8,7 @@ import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.ErrorPayloadFactory;
 import cn.flying.service.ImageService;
-import io.minio.errors.ErrorResponseException;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -136,13 +136,11 @@ public class ImageController {
             }
             imageService.fetchImage(outputStream, imagePath);
             response.setHeader("Cache-Control", "max-age=2592000");
-        } catch (ErrorResponseException e) {
-            if (e.response() != null && e.response().code() == 404) {
-                throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
-            } else {
-                log.error("从 S3 存储读取图片出现异常：{}", e.getMessage(), e);
-                throw new GeneralException(ResultEnum.FAIL);
-            }
+        } catch (NoSuchKeyException e) {
+            throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
+        } catch (Exception e) {
+            log.error("从 S3 存储读取图片出现异常：{}", e.getMessage(), e);
+            throw new GeneralException(ResultEnum.FAIL);
         }
     }
 
