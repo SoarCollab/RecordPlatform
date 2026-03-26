@@ -4004,7 +4004,7 @@ export interface components {
              */
             code?: number;
             /** @description 结果数据 */
-            data?: string[];
+            data?: string[][];
             /** @description 提示信息 */
             message?: string;
         };
