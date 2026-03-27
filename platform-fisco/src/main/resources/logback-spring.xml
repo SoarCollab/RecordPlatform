@@ -4,8 +4,8 @@
 
     <property name="SERVICE_NAME" value="record-platform-fisco"/>
     <property name="LOG_PATH" value="${LOG_PATH:-log}"/>
-    <property name="CONSOLE_LOG_PATTERN" value="%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p})  %clr([%15.15t]){faint} %clr([tid=%tid tenant=%X{tenantId:-0} trace=%X{traceId:-}]){faint} %clr(--){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
-    <property name="FILE_LOG_PATTERN" value="%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} ${PID:- } --- [%t] [tid=%tid tenant=%X{tenantId:-0} trace=%X{traceId:-}] %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
+    <property name="CONSOLE_LOG_PATTERN" value="%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p})  %clr([%15.15t]){faint} %clr([tid=%tid tenant=%X{tenantId:-0} trace=%X{traceId:-}]){faint} %clr([otel-trace=%X{trace_id:-} otel-span=%X{span_id:-}]){faint} %clr(--){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
+    <property name="FILE_LOG_PATTERN" value="%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd HH:mm:ss.SSS}} ${LOG_LEVEL_PATTERN:-%5p} ${PID:- } --- [%t] [tid=%tid tenant=%X{tenantId:-0} trace=%X{traceId:-}] [otel-trace=%X{trace_id:-} otel-span=%X{span_id:-}] %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
 
     <!-- Console Appender - for all environments -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
@@ -45,6 +45,10 @@
             <includeMdcKeyName>reqId</includeMdcKeyName>
             <includeMdcKeyName>fileHash</includeMdcKeyName>
             <includeMdcKeyName>sagaId</includeMdcKeyName>
+            <!-- OpenTelemetry trace context (auto-injected by OTel Java Agent) -->
+            <includeMdcKeyName>trace_id</includeMdcKeyName>
+            <includeMdcKeyName>span_id</includeMdcKeyName>
+            <includeMdcKeyName>trace_flags</includeMdcKeyName>
             <!-- Field naming for ELK compatibility -->
             <fieldNames>
                 <timestamp>@timestamp</timestamp>
