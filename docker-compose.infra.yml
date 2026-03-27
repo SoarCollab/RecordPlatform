@@ -129,28 +129,38 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  # ── Observability: OpenTelemetry Collector + Jaeger ────────────────────────
+  # ── Observability (OpenTelemetry) ──────────────────────────────────────────
+
   jaeger:
-    image: jaegertracing/all-in-one:latest
+    image: jaegertracing/all-in-one:1.68
     container_name: jaeger
     ports:
-      - "16686:16686"  # Jaeger UI
+      - "16686:16686"   # Jaeger UI
+      - "4317"          # OTLP gRPC (internal, used by otel-collector)
+      - "4318"          # OTLP HTTP
+      - "14269"         # Admin / health
     environment:
       - COLLECTOR_OTLP_ENABLED=true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:14269/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    image: otel/opentelemetry-collector-contrib:0.123.0
     container_name: otel-collector
-    command: ["--config=/etc/otelcol/config.yaml"]
-    volumes:
-      - ./config/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
     ports:
-      - "4317:4317"   # OTLP gRPC
-      - "4318:4318"   # OTLP HTTP
-      - "8889:8889"   # Prometheus metrics exporter
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+      - "8889:8889"     # Prometheus metrics
+    volumes:
+      - ./config/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
     depends_on:
-      - jaeger
+      jaeger:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

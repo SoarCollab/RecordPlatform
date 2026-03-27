@@ -184,6 +184,12 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# 互斥检查: SkyWalking 和 OTel 不能同时启用
+if [ "$ENABLE_SKYWALKING" = true ] && [ "$ENABLE_OTEL" = true ]; then
+    echo "错误: --skywalking 和 --otel 不能同时启用（双 agent 会导致冲突）"
+    exit 1
+fi
+
 # 验证命令是否已指定
 if [ -z "$COMMAND" ]; then
     echo "错误: 请指定命令 (start/stop/restart/status)"

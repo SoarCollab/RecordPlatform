@@ -14,14 +14,13 @@ import cn.flying.dao.mapper.IntegrityAlertMapper;
 import cn.flying.dao.mapper.TenantMapper;
 import cn.flying.dao.vo.file.IntegrityCheckStatsVO;
 import cn.flying.platformapi.constant.Result;
-import cn.flying.platformapi.external.BlockChainService;
-import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.service.sse.SseEmitterManager;
 import cn.flying.service.sse.SseEvent;
 import cn.flying.service.sse.SseEventType;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
@@ -29,18 +28,15 @@ import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Periodically re-hashes stored files and compares them with on-chain records
+ * Periodically verifies stored files against on-chain records
  * to detect silent data corruption or tampering.
  */
 @Slf4j
@@ -49,6 +45,7 @@ import java.util.concurrent.TimeUnit;
 public class IntegrityCheckService {
 
     private static final String LOCK_KEY = "integrity-check-lock";
+    private static final String S3_PATH_FORMAT = "storage/tenant/%d/chunk/%s";
 
     private final FileMapper fileMapper;
     private final IntegrityAlertMapper integrityAlertMapper;
@@ -74,30 +71,7 @@ public class IntegrityCheckService {
      */
     @TenantScope(ignoreIsolation = true)
     public IntegrityCheckStatsVO checkIntegrity() {
-        RLock lock = redissonClient.getLock(LOCK_KEY);
-        boolean acquired = false;
-        try {
-            acquired = lock.tryLock(0, lockTimeoutSeconds, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.warn("[integrity-check] interrupted while acquiring lock");
-            return new IntegrityCheckStatsVO(0, 0, 0);
-        }
-
-        if (!acquired) {
-            log.info("[integrity-check] lock already held, skipping this run");
-            return new IntegrityCheckStatsVO(0, 0, 0);
-        }
-
-        try {
-            return doCheckAllTenants();
-        } finally {
-            try {
-                lock.unlock();
-            } catch (Exception e) {
-                log.warn("[integrity-check] failed to release lock: {}", e.getMessage());
-            }
-        }
+        return executeWithLock(this::doCheckAllTenants);
     }
 
     /**
@@ -109,8 +83,10 @@ public class IntegrityCheckService {
     @TenantScope(ignoreIsolation = true)
     public IntegrityCheckStatsVO triggerManualCheck(Long tenantId) {
         log.info("[integrity-check] manual check triggered for tenantId={}", tenantId);
-        List<File> files = querySuccessFiles(tenantId);
-        return checkFiles(files, tenantId);
+        return executeWithLock(() -> {
+            List<File> files = querySuccessFilesPaged(tenantId);
+            return checkFiles(files, tenantId);
+        });
     }
 
     /**
@@ -151,6 +127,27 @@ public class IntegrityCheckService {
 
     // ========== Internal ==========
 
+    private IntegrityCheckStatsVO executeWithLock(java.util.function.Supplier<IntegrityCheckStatsVO> task) {
+        RLock lock = redissonClient.getLock(LOCK_KEY);
+        boolean acquired = false;
+        try {
+            acquired = lock.tryLock(0, lockTimeoutSeconds, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("[integrity-check] interrupted while acquiring lock");
+            return new IntegrityCheckStatsVO(0, 0, 0);
+        }
+        if (!acquired) {
+            log.info("[integrity-check] lock already held, skipping this run");
+            return new IntegrityCheckStatsVO(0, 0, 0);
+        }
+        try {
+            return task.get();
+        } finally {
+            try { lock.unlock(); } catch (Exception e) { log.warn("[integrity-check] failed to release lock: {}", e.getMessage()); }
+        }
+    }
+
     private IntegrityCheckStatsVO doCheckAllTenants() {
         List<Long> tenantIds = tenantMapper.selectActiveTenantIds();
         if (tenantIds == null || tenantIds.isEmpty()) {
@@ -163,7 +160,7 @@ public class IntegrityCheckService {
         long totalErrors = 0;
 
         for (Long tenantId : tenantIds) {
-            List<File> files = querySuccessFiles(tenantId);
+            List<File> files = querySuccessFilesPaged(tenantId);
             List<File> sampled = sampleFiles(files);
             if (sampled.isEmpty()) {
                 continue;
@@ -178,13 +175,21 @@ public class IntegrityCheckService {
         return new IntegrityCheckStatsVO(totalChecked, totalMismatches, totalErrors);
     }
 
-    private List<File> querySuccessFiles(Long tenantId) {
-        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(File::getTenantId, tenantId)
-                .eq(File::getStatus, FileUploadStatus.SUCCESS.getCode())
-                .eq(File::getDeleted, 0)
-                .select(File::getId, File::getTenantId, File::getUid, File::getFileHash, File::getFileParam, File::getFileName);
-        return fileMapper.selectList(wrapper);
+    private List<File> querySuccessFilesPaged(Long tenantId) {
+        List<File> allFiles = new ArrayList<>();
+        long current = 1;
+        Page<File> page;
+        do {
+            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(File::getTenantId, tenantId)
+                    .eq(File::getStatus, FileUploadStatus.SUCCESS.getCode())
+                    .eq(File::getDeleted, 0)
+                    .select(File::getId, File::getTenantId, File::getUid, File::getFileHash, File::getFileParam, File::getFileName);
+            page = fileMapper.selectPage(new Page<>(current, 500, false), wrapper);
+            allFiles.addAll(page.getRecords());
+            current++;
+        } while (page.getRecords().size() == 500);
+        return allFiles;
     }
 
     private List<File> sampleFiles(List<File> files) {
@@ -210,10 +215,10 @@ public class IntegrityCheckService {
             for (File file : batch) {
                 checked++;
                 try {
-                    AlertType alertType = verifyFile(file);
-                    if (alertType != null) {
+                    VerifyResult result = verifyFile(file);
+                    if (result != null) {
                         mismatches++;
-                        createAlert(file, alertType, tenantId);
+                        createAlert(file, result.alertType(), tenantId, result.chainHash());
                     }
                 } catch (Exception e) {
                     errors++;
@@ -225,14 +230,15 @@ public class IntegrityCheckService {
         return new IntegrityCheckStatsVO(checked, mismatches, errors);
     }
 
+    private record VerifyResult(AlertType alertType, String chainHash) {}
+
     /**
-     * Verify a single file against S3 content and on-chain record.
+     * Verify a single file: existence in S3, then DB hash vs on-chain hash.
      *
-     * @return the alert type if a problem is found, or null if the file is consistent
+     * @return a VerifyResult if a problem is found, or null if the file is consistent
      */
-    private AlertType verifyFile(File file) {
-        // 1. Download file from S3 and compute hash
-        String actualHash;
+    private VerifyResult verifyFile(File file) {
+        // 1. Verify file exists in S3
         try {
             String filePath = buildFilePath(file);
             Result<List<byte[]>> storageResult = fileRemoteClient.getFileListByHash(
@@ -240,49 +246,42 @@ public class IntegrityCheckService {
             if (!storageResult.isSuccess() || storageResult.getData() == null || storageResult.getData().isEmpty()
                     || storageResult.getData().get(0) == null || storageResult.getData().get(0).length == 0) {
                 log.warn("[integrity-check] file not found in S3: fileId={}, hash={}", file.getId(), file.getFileHash());
-                return AlertType.FILE_NOT_FOUND;
+                return new VerifyResult(AlertType.FILE_NOT_FOUND, null);
             }
-            actualHash = computeSha256(storageResult.getData().get(0));
         } catch (Exception e) {
             log.warn("[integrity-check] failed to download file from S3: fileId={}, error={}", file.getId(), e.getMessage());
-            return AlertType.FILE_NOT_FOUND;
+            return new VerifyResult(AlertType.FILE_NOT_FOUND, null);
         }
 
-        // 2. Compare with expected hash
-        if (!actualHash.equalsIgnoreCase(file.getFileHash())) {
-            log.warn("[integrity-check] hash mismatch: fileId={}, expected={}, actual={}",
-                    file.getId(), file.getFileHash(), actualHash);
-            return AlertType.HASH_MISMATCH;
-        }
-
-        // 3. Verify against on-chain record
+        // 2. Compare DB hash with on-chain record
         try {
             String uploader = String.valueOf(file.getUid());
             Result<FileDetailVO> chainResult = fileRemoteClient.getFile(uploader, file.getFileHash());
             if (!chainResult.isSuccess() || chainResult.getData() == null) {
                 log.warn("[integrity-check] chain record not found: fileId={}, hash={}", file.getId(), file.getFileHash());
-                return AlertType.CHAIN_NOT_FOUND;
+                return new VerifyResult(AlertType.CHAIN_NOT_FOUND, null);
             }
 
             String chainHash = chainResult.getData().fileHash();
             if (!file.getFileHash().equalsIgnoreCase(chainHash)) {
                 log.warn("[integrity-check] chain hash mismatch: fileId={}, dbHash={}, chainHash={}",
                         file.getId(), file.getFileHash(), chainHash);
-                return AlertType.HASH_MISMATCH;
+                return new VerifyResult(AlertType.HASH_MISMATCH, chainHash);
             }
         } catch (Exception e) {
             log.warn("[integrity-check] failed to query chain: fileId={}, error={}", file.getId(), e.getMessage());
-            return AlertType.CHAIN_NOT_FOUND;
+            return new VerifyResult(AlertType.CHAIN_NOT_FOUND, null);
         }
 
         return null;
     }
 
-    private void createAlert(File file, AlertType alertType, Long tenantId) {
+    private void createAlert(File file, AlertType alertType, Long tenantId, String chainHash) {
         IntegrityAlert alert = new IntegrityAlert()
                 .setTenantId(tenantId)
                 .setFileId(file.getId())
                 .setFileHash(file.getFileHash())
+                .setChainHash(chainHash)
                 .setAlertType(alertType.name())
                 .setStatus(AlertStatus.PENDING.getCode());
         integrityAlertMapper.insert(alert);
@@ -309,16 +308,6 @@ public class IntegrityCheckService {
     }
 
     private String buildFilePath(File file) {
-        return file.getTenantId() + "/" + file.getUid() + "/" + file.getFileHash();
-    }
-
-    static String computeSha256(byte[] data) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(data);
-            return HexFormat.of().formatHex(hash);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 not available", e);
-        }
+        return String.format(S3_PATH_FORMAT, file.getTenantId(), file.getFileHash());
     }
 }

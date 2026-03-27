@@ -27,6 +27,7 @@ WORKDIR /app
 
 # Download OpenTelemetry Java Agent
 ADD https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.26.1/opentelemetry-javaagent.jar /opt/otel/opentelemetry-javaagent.jar
+RUN chmod 644 /opt/otel/opentelemetry-javaagent.jar
 
 COPY --from=build /workspace/platform-fisco/target/platform-fisco-0.0.1-SNAPSHOT.jar app.jar
 
@@ -38,7 +39,7 @@ EXPOSE 8091
 
 ENV SPRING_PROFILES_ACTIVE=prod
 
-# OTel Java Agent configuration (JAVA_TOOL_OPTIONS auto-applies the agent)
+# OTel Java Agent configuration
 ENV OTEL_SERVICE_NAME=record-platform-fisco
 ENV OTEL_TRACES_EXPORTER=otlp
 ENV OTEL_METRICS_EXPORTER=otlp
@@ -46,8 +47,9 @@ ENV OTEL_LOGS_EXPORTER=none
 ENV OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
 ENV OTEL_TRACES_SAMPLER=parentbased_traceidratio
 ENV OTEL_TRACES_SAMPLER_ARG=0.1
-ENV JAVA_TOOL_OPTIONS="-javaagent:/opt/otel/opentelemetry-javaagent.jar"
+ENV OTEL_JAVAAGENT_ENABLED=true
 
-ENTRYPOINT ["java", \
-  "-Xms512m", "-Xmx1024m", "-XX:+UseG1GC", \
-  "-jar", "app.jar"]
+ENTRYPOINT ["sh", "-c", "exec java \
+  -Xms512m -Xmx1024m -XX:+UseG1GC \
+  ${OTEL_JAVAAGENT_ENABLED:+-javaagent:/opt/otel/opentelemetry-javaagent.jar} \
+  -jar app.jar"]

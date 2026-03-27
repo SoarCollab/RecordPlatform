@@ -32,8 +32,6 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.security.MessageDigest;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -103,8 +101,7 @@ class IntegrityCheckServiceTest {
         when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
         when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
 
-        byte[] fileContent = "hello world".getBytes();
-        String hash = computeHash(fileContent);
+        String hash = "abc123def456";
 
         File file = FileTestBuilder.aFile(f -> {
             f.setTenantId(TENANT_ID);
@@ -113,9 +110,12 @@ class IntegrityCheckServiceTest {
             f.setStatus(FileUploadStatus.SUCCESS.getCode());
         });
 
-        when(fileMapper.selectList(any())).thenReturn(List.of(file));
+        when(fileMapper.selectPage(any(), any())).thenReturn(
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<File>() {{
+                    setRecords(List.of(file));
+                }});
 
-        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of(fileContent));
+        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of(new byte[]{1, 2, 3}));
         when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
 
         FileDetailVO chainDetail = new FileDetailVO(
@@ -132,25 +132,35 @@ class IntegrityCheckServiceTest {
     }
 
     @Test
-    @DisplayName("Hash mismatch detected - alert created and SSE sent")
+    @DisplayName("Hash mismatch detected - alert created with chainHash and SSE sent")
     void checkIntegrity_hashMismatch_alertCreated() throws Exception {
         when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
         when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
 
-        byte[] fileContent = "hello world".getBytes();
-        String expectedHash = "wrong_hash_value";
+        String dbHash = "db_hash_value";
+        String onChainHash = "different_chain_hash";
 
         File file = FileTestBuilder.aFile(f -> {
             f.setTenantId(TENANT_ID);
             f.setUid(USER_ID);
-            f.setFileHash(expectedHash);
+            f.setFileHash(dbHash);
             f.setStatus(FileUploadStatus.SUCCESS.getCode());
         });
 
-        when(fileMapper.selectList(any())).thenReturn(List.of(file));
+        when(fileMapper.selectPage(any(), any())).thenReturn(
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<File>() {{
+                    setRecords(List.of(file));
+                }});
 
-        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of(fileContent));
+        // Storage returns non-empty bytes (file exists)
+        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of(new byte[]{1, 2, 3}));
         when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
+
+        // Chain returns a different hash than DB
+        FileDetailVO chainDetail = new FileDetailVO(
+                String.valueOf(USER_ID), "test.txt", "{}", "", onChainHash, "2025-01-01", 0L, 1024L, "text/plain");
+        Result<FileDetailVO> chainResult = new Result<>(ResultEnum.SUCCESS, chainDetail);
+        when(fileRemoteClient.getFile(anyString(), eq(dbHash))).thenReturn(chainResult);
 
         var stats = integrityCheckService.checkIntegrity();
 
@@ -161,7 +171,8 @@ class IntegrityCheckServiceTest {
         verify(integrityAlertMapper).insert(alertCaptor.capture());
         IntegrityAlert alert = alertCaptor.getValue();
         assertEquals(IntegrityAlert.AlertType.HASH_MISMATCH.name(), alert.getAlertType());
-        assertEquals(expectedHash, alert.getFileHash());
+        assertEquals(dbHash, alert.getFileHash());
+        assertEquals(onChainHash, alert.getChainHash());
 
         verify(sseEmitterManager).broadcastToAdmins(eq(TENANT_ID), any(SseEvent.class));
     }
@@ -178,7 +189,10 @@ class IntegrityCheckServiceTest {
             f.setStatus(FileUploadStatus.SUCCESS.getCode());
         });
 
-        when(fileMapper.selectList(any())).thenReturn(List.of(file));
+        when(fileMapper.selectPage(any(), any())).thenReturn(
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<File>() {{
+                    setRecords(List.of(file));
+                }});
 
         // Return empty result from storage
         Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of());
@@ -200,8 +214,7 @@ class IntegrityCheckServiceTest {
         when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
         when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
 
-        byte[] fileContent = "hello world".getBytes();
-        String hash = computeHash(fileContent);
+        String hash = "some_file_hash";
 
         File file = FileTestBuilder.aFile(f -> {
             f.setTenantId(TENANT_ID);
@@ -210,9 +223,13 @@ class IntegrityCheckServiceTest {
             f.setStatus(FileUploadStatus.SUCCESS.getCode());
         });
 
-        when(fileMapper.selectList(any())).thenReturn(List.of(file));
+        when(fileMapper.selectPage(any(), any())).thenReturn(
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<File>() {{
+                    setRecords(List.of(file));
+                }});
 
-        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of(fileContent));
+        // Storage returns non-empty bytes (file exists)
+        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of(new byte[]{1, 2, 3}));
         when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
 
         // Chain returns failure
@@ -239,7 +256,7 @@ class IntegrityCheckServiceTest {
         assertEquals(0, stats.totalChecked());
         assertEquals(0, stats.mismatchesFound());
         assertEquals(0, stats.errorsEncountered());
-        verify(fileMapper, never()).selectList(any());
+        verify(fileMapper, never()).selectPage(any(), any());
     }
 
     @Test
@@ -247,7 +264,10 @@ class IntegrityCheckServiceTest {
     void checkIntegrity_emptyFileList_noop() throws Exception {
         when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
         when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
-        when(fileMapper.selectList(any())).thenReturn(List.of());
+        when(fileMapper.selectPage(any(), any())).thenReturn(
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<File>() {{
+                    setRecords(List.of());
+                }});
 
         var stats = integrityCheckService.checkIntegrity();
 
@@ -317,11 +337,5 @@ class IntegrityCheckServiceTest {
         assertEquals(0, stats.totalChecked());
         assertEquals(0, stats.mismatchesFound());
         assertEquals(0, stats.errorsEncountered());
-    }
-
-    private String computeHash(byte[] data) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        byte[] hash = digest.digest(data);
-        return HexFormat.of().formatHex(hash);
     }
 }

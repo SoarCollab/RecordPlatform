@@ -83,7 +83,7 @@ get_skywalking_opts() {
 # ================================
 # OpenTelemetry 配置
 # ================================
-export OTEL_AGENT_HOME="${OTEL_AGENT_HOME:-$PROJECT_ROOT/agent}"
+export OTEL_AGENT_HOME="${OTEL_AGENT_HOME:-$PROJECT_ROOT/agent/otel}"
 export OTEL_EXPORTER_OTLP_ENDPOINT="${OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4317}"
 export OTEL_TRACES_SAMPLER="${OTEL_TRACES_SAMPLER:-parentbased_traceidratio}"
 export OTEL_TRACES_SAMPLER_ARG="${OTEL_TRACES_SAMPLER_ARG:-0.1}"
