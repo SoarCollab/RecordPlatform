@@ -59,6 +59,11 @@ public enum SseEventType {
     AUDIT_ALERT("audit-alert", "审计告警"),
 
     /**
+     * 存储完整性告警
+     */
+    INTEGRITY_ALERT("integrity-alert", "存储完整性告警"),
+
+    /**
      * 心跳
      */
     HEARTBEAT("heartbeat", "心跳"),
