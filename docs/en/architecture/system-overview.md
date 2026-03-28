@@ -44,8 +44,8 @@ flowchart TB
 
     %% Service to Infra %%
     Backend --> MySQL & Redis & RabbitMQ
-    Fisco --> MySQL & Redis
-    Storage --> MySQL & Redis
+    Fisco -->|Channel/RPC| BCOS
+    Storage --> Redis
 
     %% Service Registry %%
     Backend -.->|Register/Discover| Nacos
@@ -53,7 +53,6 @@ flowchart TB
     Storage -.->|Register| Nacos
 
     %% Service to External %%
-    Fisco -->|Channel/RPC| BCOS
     Storage -->|S3 API| S3
 
     %% Tracing %%
