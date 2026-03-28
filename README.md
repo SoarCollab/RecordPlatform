@@ -67,6 +67,8 @@ Built for teams that need:
 - **Real-time Notifications** — SSE push for file attestation, tickets, friend events, announcements
 - **Storage Capacity API** — cluster/domain/node capacity aggregates with `degraded`+`source` semantics
 - **Multi-tenancy** — DB, cache, and storage path isolation per tenant
+- **Storage Integrity Check** — scheduled verification of S3 files against blockchain records
+- **Distributed Tracing** — OpenTelemetry auto-instrumentation with Jaeger visualization
 
 </td>
 </tr>
@@ -79,7 +81,7 @@ Built for teams that need:
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                       Infrastructure                            │
-│  Nacos    MySQL    RabbitMQ    Redis    S3 Storage Cluster     │
+│  Nacos  MySQL  RabbitMQ  Redis  S3 Cluster  OTel  Jaeger      │
 └─────────────────────────────────────────────────────────────────┘
                               │
               ┌───────────────┴───────────────┐
@@ -127,6 +129,8 @@ Ensure the following services are running before starting:
 | RabbitMQ              | 5672  | Message queue              |
 | S3-compatible storage | 9000  | Object storage             |
 | FISCO BCOS            | 20200 | Blockchain node            |
+| OTel Collector        | 4317  | Trace & metrics pipeline   |
+| Jaeger                | 16686 | Tracing UI                 |
 
 Start infrastructure with Docker Compose:
 
@@ -185,7 +189,7 @@ Verify the installation at:
 | Storage       | S3-compatible (AWS SDK v2), MySQL, Redis (Redisson)     | 2.x, 8.0+, 7.0+       |
 | Frontend      | Svelte 5 (Runes), SvelteKit, Tailwind CSS 4, bits-ui   | 5.53+, 2.53+, 4.2+    |
 | Resilience    | Resilience4j (circuit breaker, retry)                   | 2.3.0                 |
-| Monitoring    | Micrometer, Prometheus                                  | —                     |
+| Monitoring    | Micrometer, Prometheus, OpenTelemetry, Jaeger           | —                     |
 | Testing       | JUnit 5, Mockito, Testcontainers, Vitest                | —                     |
 
 ---

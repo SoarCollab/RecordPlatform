@@ -67,6 +67,8 @@ RecordPlatform 是一个开源的企业级文件存证平台，将**区块链不
 - **实时通知** — SSE 推送存证结果、工单动态、好友事件、系统公告
 - **存储容量 API** — 集群/域/节点容量聚合，含 `degraded`+`source` 语义
 - **多租户隔离** — 数据库、缓存、存储路径按租户独立隔离
+- **存储完整性校验** — 定时验证 S3 文件与区块链记录的一致性
+- **分布式追踪** — OpenTelemetry 自动注入，Jaeger 可视化
 
 </td>
 </tr>
@@ -79,7 +81,7 @@ RecordPlatform 是一个开源的企业级文件存证平台，将**区块链不
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                          基础设施层                               │
-│  Nacos    MySQL    RabbitMQ    Redis    S3 存储集群               │
+│  Nacos  MySQL  RabbitMQ  Redis  S3 存储集群  OTel  Jaeger        │
 └─────────────────────────────────────────────────────────────────┘
                               │
               ┌───────────────┴───────────────┐
@@ -127,6 +129,8 @@ RecordPlatform 是一个开源的企业级文件存证平台，将**区块链不
 | RabbitMQ      | 5672  | 消息队列           |
 | S3 兼容存储   | 9000  | 对象存储           |
 | FISCO BCOS    | 20200 | 区块链节点         |
+| OTel Collector        | 4317  | 追踪与指标管道             |
+| Jaeger                | 16686 | 追踪可视化 UI              |
 
 通过 Docker Compose 启动基础设施：
 
@@ -185,7 +189,7 @@ cd platform-frontend && pnpm install && pnpm dev
 | 存储     | S3 兼容存储 (AWS SDK v2), MySQL, Redis (Redisson)        | 2.x, 8.0+, 7.0+    |
 | 前端     | Svelte 5 (Runes), SvelteKit, Tailwind CSS 4, bits-ui   | 5.53+, 2.53+, 4.2+ |
 | 弹性设计 | Resilience4j（熔断、重试）                               | 2.3.0              |
-| 监控     | Micrometer, Prometheus                                  | —                  |
+| 监控     | Micrometer, Prometheus, OpenTelemetry, Jaeger           | —                  |
 | 测试     | JUnit 5, Mockito, Testcontainers, Vitest                | —                  |
 
 ---

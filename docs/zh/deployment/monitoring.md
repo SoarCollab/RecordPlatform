@@ -176,6 +176,78 @@ groups:
    - 熔断器状态
    - 重试次数
 
+## 分布式追踪 (OpenTelemetry)
+
+项目已集成 OpenTelemetry Java Agent v2.26.1，三个 Java 服务自动采集 traces 和 metrics。
+
+### 基础设施
+
+| 组件 | 端口 | 说明 |
+|------|------|------|
+| OTel Collector | 4317 (gRPC), 4318 (HTTP), 8889 (Prometheus) | 数据收集与转发 |
+| Jaeger | 16686 | 追踪可视化 UI |
+
+### 启用方式
+
+**Docker 部署**：设置 `OTEL_JAVAAGENT_ENABLED=true`（默认启用）
+
+**本地开发**：
+
+```bash
+./scripts/start.sh start --otel all
+```
+
+> `--otel` 与 `--skywalking` 互斥，不能同时启用。
+
+### 配置
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | Collector 地址 |
+| `OTEL_TRACES_SAMPLER` | `parentbased_traceidratio` | 采样策略 |
+| `OTEL_TRACES_SAMPLER_ARG` | `0.1` | 采样率 (10%) |
+
+W3C Trace Context 标准传播，支持跨服务链路追踪。
+
+### Jaeger UI
+
+访问 http://localhost:16686 查看追踪数据。
+
+## 存储完整性校验
+
+系统定期验证 S3 存储文件与区块链记录的一致性。
+
+### 工作原理
+
+1. 每天凌晨 2 点自动执行，采样 1% 的文件
+2. 验证文件在 S3 中的存在性
+3. 比对数据库哈希与链上哈希的一致性
+4. 发现异常时创建告警并通过 SSE 通知管理员
+
+> 由于文件存储层采用加密，校验不会重新计算文件内容哈希，而是验证 S3 文件存在性 + DB 与链上哈希的一致性。
+
+### 配置
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `integrity.check.enabled` | `true` | 是否启用 |
+| `integrity.check.cron` | `0 0 2 * * ?` | 执行时间 |
+| `integrity.check.sample-rate` | `0.01` | 采样率 |
+| `integrity.check.batch-size` | `50` | 批次大小 |
+
+### 管理接口
+
+| 端点 | 说明 |
+|------|------|
+| `GET /api/v1/admin/integrity-alerts` | 查询告警列表 |
+| `POST /api/v1/admin/integrity-alerts/check` | 手动触发校验 |
+| `PUT /api/v1/admin/integrity-alerts/{id}/acknowledge` | 确认告警 |
+| `PUT /api/v1/admin/integrity-alerts/{id}/resolve` | 解决告警 |
+
+### 告警通知
+
+发现完整性异常时，系统通过 SSE 推送 `INTEGRITY_ALERT` 事件通知管理员，告警记录存储在 `integrity_alert` 表中。分布式锁（Redisson）确保不会并发执行多个校验任务。
+
 ## SkyWalking 集成
 
 ### 配置

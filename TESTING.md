@@ -54,6 +54,7 @@
 | DownloadBatchMetricsServiceImplTest | 批量下载指标上报与聚合 |
 | QuotaServiceImplTest | 配额查询与执行逻辑 |
 | QuotaRolloutAuditServiceImplTest | 配额灰度审计服务 |
+| IntegrityCheckServiceTest | 存储完整性校验（S3 存在性 + DB-链上哈希一致性） |
 
 ### 后端测试（backend-web，51 个测试文件）
 
@@ -89,6 +90,7 @@
 | ControllerCoverageBoostTest | 控制器覆盖补充 |
 | QuotaAdminControllerTest | 配额管理员端点 |
 | QuotaControllerTest | 配额查询端点 |
+| IntegrityAlertControllerIT | 完整性告警管理端点（列表、触发、确认、解决） |
 
 #### 过滤器与安全测试
 
@@ -284,7 +286,21 @@ mvn -f platform-storage/pom.xml test
 - 后端覆盖率报告由 JaCoCo 生成，CI 中会上传 `backend-common`、`backend-service`、`backend-web` 三模块的 `jacoco.xml`（见 `.github/workflows/test.yml`）。
 - 任一步骤失败都会阻断 PR 合并（包括 lint/check/contract-consistency）。
 
-## 6. 新增测试的建议（保持"最少代码"）
+## 6. 存储完整性校验测试
+
+### 单元测试（`IntegrityCheckServiceTest`）
+
+- S3 文件存在性验证 + 数据库与链上哈希一致性比对
+- 告警生命周期（创建、确认、解决）
+- 分布式锁行为（Redisson 锁获取与冲突）
+- 边界场景（空文件列表、无租户数据、锁冲突）
+
+### 集成测试（`IntegrityAlertControllerIT`）
+
+- 管理员 REST API 端点（列表查询、手动触发校验、确认告警、解决告警）
+- 认证与授权校验（非管理员拒绝访问）
+
+## 7. 新增测试的建议（保持"最少代码"）
 
 - 优先给 **纯业务逻辑** 写单元测试：无 Spring 上下文、无外部依赖、直接 new / Mockito 即可
 - 只为最关键链路写少量集成测试：数据库迁移 + ORM 映射 + 关键 AOP/拦截器

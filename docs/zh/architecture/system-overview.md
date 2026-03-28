@@ -27,6 +27,8 @@ flowchart TB
         MySQL[("MySQL<br/>(业务数据)")]:::infra
         Redis[("Redis<br/>(缓存)")]:::infra
         RabbitMQ["RabbitMQ<br/>(异步消息)"]:::infra
+        OTel["OTel Collector<br/>(追踪收集)"]:::infra
+        Jaeger["Jaeger<br/>(追踪可视化)"]:::infra
     end
 
     subgraph ExternalLayer["外部依赖层"]
@@ -53,6 +55,12 @@ flowchart TB
     %% Service to External %%
     Fisco -->|通道/RPC| BCOS
     Storage -->|S3 接口| S3
+
+    %% Tracing %%
+    Backend -.->|OTLP| OTel
+    Fisco -.->|OTLP| OTel
+    Storage -.->|OTLP| OTel
+    OTel -->|Traces| Jaeger
 ```
 
 ## 模块职责
@@ -491,6 +499,7 @@ flowchart LR
 | `friend-accepted` | `{ friendName, ... }` | 好友请求被接受 |
 | `friend-share` | `{ sharerName, fileCount, ... }` | 好友文件分享 |
 | `audit-alert` | `{ type, message, details, severity }` | 审计异常告警（管理员/监控员） |
+| `integrity-alert` | `{ alertType, fileHash, details }` | 存储完整性异常告警（管理员） |
 
 ### SSE 认证握手
 

@@ -196,6 +196,15 @@ quota:
   reconcile:
     cron: 0 0/30 * * * ?
 
+# Storage integrity check
+integrity:
+  check:
+    enabled: true
+    cron: "0 0 2 * * ?"
+    sample-rate: 0.01
+    batch-size: 50
+    lock-timeout-seconds: 1800
+
 # Outbox publisher configuration
 outbox:
   publisher:

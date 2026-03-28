@@ -267,6 +267,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/integrity-alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List integrity alerts (paginated) */
+        get: operations["listAlerts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/integrity-alerts/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Trigger manual integrity check */
+        post: operations["triggerManualCheck"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/integrity-alerts/{id}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Acknowledge an integrity alert */
+        put: operations["acknowledgeAlert"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/integrity-alerts/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Resolve an integrity alert */
+        put: operations["resolveAlert"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/quota/rollout/audits": {
         parameters: {
             query?: never;
@@ -3316,6 +3384,16 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
+        /** @description 结果数据 */
+        IPageIntegrityAlert: {
+            /** Format: int64 */
+            current?: number;
+            records?: components["schemas"]["IntegrityAlert"][];
+            /** Format: int64 */
+            size?: number;
+            /** Format: int64 */
+            total?: number;
+        };
         /** @description 消息分页数据 */
         IPageMessageVO: {
             /** Format: int64 */
@@ -3365,6 +3443,36 @@ export interface components {
             size?: number;
             /** Format: int64 */
             total?: number;
+        };
+        IntegrityAlert: {
+            actualHash?: string;
+            alertType?: string;
+            chainHash?: string;
+            /** Format: date-time */
+            createTime?: string;
+            fileHash?: string;
+            /** Format: int64 */
+            fileId?: number;
+            /** Format: int64 */
+            id?: number;
+            note?: string;
+            /** Format: date-time */
+            resolvedAt?: string;
+            /** Format: int64 */
+            resolvedBy?: number;
+            /** Format: int32 */
+            status?: number;
+            /** Format: int64 */
+            tenantId?: number;
+        };
+        /** @description 结果数据 */
+        IntegrityCheckStatsVO: {
+            /** Format: int64 */
+            errorsEncountered?: number;
+            /** Format: int64 */
+            mismatchesFound?: number;
+            /** Format: int64 */
+            totalChecked?: number;
         };
         /** @description 消息信息 */
         MessageVO: {
@@ -3696,6 +3804,9 @@ export interface components {
              */
             status?: number;
         };
+        ResolveAlertVO: {
+            note: string;
+        };
         /** @description 返回结果封装 */
         ResultAccountVO: {
             /**
@@ -3929,6 +4040,17 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
+        ResultIPageIntegrityAlert: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["IPageIntegrityAlert"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
         ResultIPageShareAccessLogVO: {
             /**
              * Format: int32
@@ -3969,6 +4091,17 @@ export interface components {
              */
             code?: number;
             data?: components["schemas"]["IPageTicketVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultIntegrityCheckStatsVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["IntegrityCheckStatsVO"];
             /** @description 提示信息 */
             message?: string;
         };
@@ -5367,6 +5500,105 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["UpdateFileStatusVO"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultString"];
+                };
+            };
+        };
+    };
+    listAlerts: {
+        parameters: {
+            query?: {
+                /** @description Alert type filter */
+                alertType?: string;
+                /** @description Page number */
+                pageNum?: number;
+                /** @description Page size */
+                pageSize?: number;
+                /** @description Alert status filter */
+                status?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultIPageIntegrityAlert"];
+                };
+            };
+        };
+    };
+    triggerManualCheck: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultIntegrityCheckStatsVO"];
+                };
+            };
+        };
+    };
+    acknowledgeAlert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Alert ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultString"];
+                };
+            };
+        };
+    };
+    resolveAlert: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Alert ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveAlertVO"];
             };
         };
         responses: {

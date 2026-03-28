@@ -13,6 +13,15 @@ Before running RecordPlatform, ensure the following infrastructure services are 
 | **S3-compatible Storage** | - | 9000 | Object storage (MinIO recommended) |
 | **FISCO BCOS** | 3.x | 20200 | Blockchain node |
 
+### Optional Services (Recommended)
+
+| Service | Version | Default Port | Purpose |
+|---------|---------|--------------|---------|
+| **OTel Collector** | - | 4317, 4318 | Distributed tracing data pipeline |
+| **Jaeger** | - | 16686 | Tracing visualization UI |
+
+> These services are optional and do not affect core functionality, but are recommended in both development and production environments for full observability.
+
 ## Development Environment
 
 ### JDK

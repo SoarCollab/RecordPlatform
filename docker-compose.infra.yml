@@ -7,7 +7,7 @@
 #   docker compose -f docker-compose.infra.yml up -d
 #   docker compose -f docker-compose.infra.yml up -d --wait  # wait for healthy
 #
-# Included: Nacos, MySQL, Redis, RabbitMQ, MinIO (x2)
+# Included: Nacos, MySQL, Redis, RabbitMQ, MinIO (x2), OTel Collector, Jaeger
 # NOT included: FISCO BCOS (requires native node setup, see docs)
 #
 # ==============================================================================
@@ -127,6 +127,40 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    restart: unless-stopped
+
+  # ── Observability (OpenTelemetry) ──────────────────────────────────────────
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.68
+    container_name: jaeger
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317"          # OTLP gRPC (internal, used by otel-collector)
+      - "4318"          # OTLP HTTP
+      - "14269"         # Admin / health
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:14269/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.123.0
+    container_name: otel-collector
+    ports:
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+      - "8889:8889"     # Prometheus metrics
+    volumes:
+      - ./config/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    depends_on:
+      jaeger:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

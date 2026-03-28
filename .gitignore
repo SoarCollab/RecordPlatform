@@ -70,3 +70,6 @@ App.java
 /.claude/**
 /node_modules/
 package-lock.json
+/plan/
+/.claude/
+/.codex/

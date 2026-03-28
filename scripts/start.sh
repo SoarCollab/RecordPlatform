@@ -16,6 +16,7 @@
 #
 # 选项:
 #   --skywalking    启用 SkyWalking 链路追踪
+#   --otel          启用 OpenTelemetry 链路追踪
 #   --foreground    前台运行 (仅对单服务 start 有效)
 #   --profile=xxx   指定 Spring Profile (默认 prod)
 #   --help          显示帮助信息
@@ -76,6 +77,7 @@ show_help() {
     echo ""
     echo "选项:"
     echo "  --skywalking    启用 SkyWalking 链路追踪"
+    echo "  --otel          启用 OpenTelemetry 链路追踪"
     echo "  --foreground    前台运行 (仅对单服务 start 有效)"
     echo "  --profile=xxx   Spring Profile (默认 prod)"
     echo "  --profile xxx   Spring Profile (默认 prod)"
@@ -87,6 +89,7 @@ show_help() {
     echo "  $0 stop all                 # 停止全部服务"
     echo "  $0 status                   # 查看所有服务状态"
     echo "  $0 start --skywalking       # 启用 SkyWalking 启动"
+    echo "  $0 start --otel             # 启用 OpenTelemetry 启动"
 }
 
 # 无参数时显示帮助
@@ -101,6 +104,7 @@ fi
 COMMAND=""
 SERVICES=()
 ENABLE_SKYWALKING=false
+ENABLE_OTEL=false
 FOREGROUND=false
 HAS_ALL_SERVICE=false
 
@@ -144,6 +148,10 @@ while [ $# -gt 0 ]; do
             ENABLE_SKYWALKING=true
             shift
             ;;
+        --otel)
+            ENABLE_OTEL=true
+            shift
+            ;;
         --foreground)
             FOREGROUND=true
             shift
@@ -175,6 +183,12 @@ while [ $# -gt 0 ]; do
             ;;
     esac
 done
+
+# 互斥检查: SkyWalking 和 OTel 不能同时启用
+if [ "$ENABLE_SKYWALKING" = true ] && [ "$ENABLE_OTEL" = true ]; then
+    echo "错误: --skywalking 和 --otel 不能同时启用（双 agent 会导致冲突）"
+    exit 1
+fi
 
 # 验证命令是否已指定
 if [ -z "$COMMAND" ]; then
@@ -321,7 +335,7 @@ start_service() {
     fi
 
     local java_opts="$COMMON_JVM_OPTS"
-    
+
     if [ "$ENABLE_SKYWALKING" = true ]; then
         local sw_opts=$(get_skywalking_opts "$sw_name" "$(hostname -s)")
         if [ -n "$sw_opts" ]; then
@@ -329,6 +343,17 @@ start_service() {
             echo "  SkyWalking: 已启用"
         else
             echo "  SkyWalking: Agent 未找到"
+        fi
+    fi
+
+    if [ "$ENABLE_OTEL" = true ]; then
+        local otel_name="${OTEL_NAMES[$svc]:-$sw_name}"
+        local otel_opts=$(get_otel_opts "$otel_name")
+        if [ -n "$otel_opts" ]; then
+            java_opts="$java_opts $otel_opts"
+            echo "  OpenTelemetry: 已启用 (service=$otel_name)"
+        else
+            echo "  OpenTelemetry: Agent 未找到"
         fi
     fi
 

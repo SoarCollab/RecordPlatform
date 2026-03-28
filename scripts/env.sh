@@ -81,6 +81,50 @@ get_skywalking_opts() {
 }
 
 # ================================
+# OpenTelemetry 配置
+# ================================
+export OTEL_AGENT_HOME="${OTEL_AGENT_HOME:-$PROJECT_ROOT/agent/otel}"
+export OTEL_EXPORTER_OTLP_ENDPOINT="${OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4317}"
+export OTEL_TRACES_SAMPLER="${OTEL_TRACES_SAMPLER:-parentbased_traceidratio}"
+export OTEL_TRACES_SAMPLER_ARG="${OTEL_TRACES_SAMPLER_ARG:-0.1}"
+
+declare -A OTEL_NAMES=(
+    ["storage"]="record-platform-storage"
+    ["fisco"]="record-platform-fisco"
+    ["backend"]="record-platform-web"
+)
+
+# 检查 OpenTelemetry Agent
+check_otel_agent() {
+    if [ -f "${OTEL_AGENT_HOME}/opentelemetry-javaagent.jar" ]; then
+        return 0
+    elif [ -f "/opt/otel/opentelemetry-javaagent.jar" ]; then
+        export OTEL_AGENT_HOME="/opt/otel"
+        return 0
+    else
+        return 1
+    fi
+}
+
+# 生成 OpenTelemetry JVM 选项
+get_otel_opts() {
+    local service_name=$1
+
+    if check_otel_agent; then
+        echo "-javaagent:${OTEL_AGENT_HOME}/opentelemetry-javaagent.jar \
+            -Dotel.service.name=${service_name} \
+            -Dotel.traces.exporter=otlp \
+            -Dotel.metrics.exporter=otlp \
+            -Dotel.logs.exporter=none \
+            -Dotel.exporter.otlp.endpoint=${OTEL_EXPORTER_OTLP_ENDPOINT} \
+            -Dotel.traces.sampler=${OTEL_TRACES_SAMPLER} \
+            -Dotel.traces.sampler.arg=${OTEL_TRACES_SAMPLER_ARG}"
+    else
+        echo ""
+    fi
+}
+
+# ================================
 # 通用 JVM 配置
 # ================================
 export COMMON_JVM_OPTS="-Xms512m -Xmx1024m -XX:+UseG1GC -DLOG_PATH=$LOG_DIR"

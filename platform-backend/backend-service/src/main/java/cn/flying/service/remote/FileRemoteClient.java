@@ -61,7 +61,7 @@ public class FileRemoteClient {
 
     private Result<FileDetailVO> getFileFallback(String userId, String fileHash, Throwable t) {
         log.error("BlockChain service getFile failed, userId={}, fileHash={}", userId, fileHash, t);
-        return new Result<>(ResultEnum.GET_USER_FILE_ERROR, null);
+        return new Result<>(ResultEnum.BLOCKCHAIN_ERROR, null);
     }
 
     @CircuitBreaker(name = "storageService", fallbackMethod = "getFileUrlListFallback")
