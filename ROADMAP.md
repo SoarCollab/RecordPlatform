@@ -47,7 +47,6 @@
 | 前端覆盖率 (utils ≥ 70%, endpoints/stores/services ≥ 90%) | `platform-frontend/vitest.config.ts` |
 | 契约一致性 (OpenAPI ↔ generated.ts) | `.github/workflows/test.yml` contract-consistency job |
 | 构建验证 | `.github/workflows/test.yml` build-check job |
-| 安全扫描 (Trivy HIGH/CRITICAL 阻断) | `.github/workflows/test.yml` security-scan job |
 | Dependabot 自动依赖更新 | `.github/dependabot.yml` |
 | Codecov patch 覆盖率 ≥ 80% | `.codecov.yml` |
 
@@ -55,6 +54,7 @@
 
 | 项目 | 现状 | 证据 |
 |------|------|------|
+| 安全扫描 (Trivy PR) | 信息级（`exit-code: 0`），SARIF 上传至 GitHub Security 面板 | `.github/workflows/test.yml` security-scan job |
 | SAST (Semgrep) | 每周定时，信息级；自动观测汇总链路已就位，待首轮数据校准阈值 | `.github/workflows/security-poc.yml`, `tools/security/scripts/render-security-poc-observation.mjs` |
 | SCA (Trivy) 全量扫描 | 每周深度扫描（信息级）；PR 级 HIGH/CRITICAL 已升级为阻断 | `.github/workflows/security-poc.yml`, `.github/workflows/test.yml` |
 | SBOM (CycloneDX) | 每周定时，信息级 | `.github/workflows/security-poc.yml` |
@@ -67,9 +67,9 @@
 | ~~容器镜像构建~~ | ~~已完成（P1-3）：4 个多阶段 Dockerfile（`platform-backend/Dockerfile`、`platform-fisco/Dockerfile`、`platform-storage/Dockerfile`、`platform-frontend/Dockerfile`）~~ |
 | ~~自动化发布 / Changelog~~ | ~~已完成（P1-3）：`.github/workflows/release.yml`，tag push 触发，自动生成 Release Notes + SBOM 附件 + 四镜像推送 ghcr.io~~ |
 | ~~GitHub 分支保护 required checks~~ | ~~已完成：required checks 已启用（Backend Tests, Frontend Tests, Contract Consistency, Build Verification）~~ |
-| 智能合约部署自动化 | 合约编译和部署完全手动；ABI 文件作为静态资源签入，无工具链保障 ABI 与链上合约一致 |
+| ~~智能合约部署自动化~~ | ~~已完成（P1-5）：`scripts/contract-deploy.sh` 6 阶段自动化脚本（Pre-flight → Compile → Deploy → ABI Sync → Write-back → Verify）~~ |
 
-> 门禁策略详见 `plan/gate-policy.md`
+> 门禁策略详见表 1 和表 2
 
 ---
 
@@ -94,8 +94,8 @@
 
 **P0-3：安全扫描升级为 PR 阻断** ✅
 
-- **What**：在 `test.yml` 新增 `security-scan` job（PR 触发），Trivy `exit-code: 1` 仅对 HIGH/CRITICAL 阻断；保留 `security-poc.yml` 作为每周全量深度扫描
-- **当前状态**：已完成（PR #108）。`security-scan` job 已就位于 `test.yml`，PR 触发时 Trivy HIGH/CRITICAL 自动阻断；`security-poc.yml` 保留每周全量深度扫描（信息级）
+- **What**：在 `test.yml` 新增 `security-scan` job（PR 触发），Trivy 扫描 HIGH/CRITICAL 漏洞；保留 `security-poc.yml` 作为每周全量深度扫描
+- **当前状态**：已完成（PR #108）。`security-scan` job 已就位于 `test.yml`，信息级（`exit-code: 0`），SARIF 上传至 GitHub Security 面板（category: `trivy-pr`）供生命周期跟踪；`security-poc.yml` 保留每周全量深度扫描（信息级）
 - **自动化收益**：高危漏洞在 PR 阶段自动拦截，无需人工定期检查
 - **完成标准**：引入已知 CVE 依赖的 PR 被 CI 阻断
 - **涉及文件**：`.github/workflows/test.yml`、`.github/workflows/security-poc.yml`
@@ -114,7 +114,7 @@
 - **What**：在 `security-poc.yml` 和 `test.yml` 中用 `github/codeql-action/upload-sarif` 上传 Semgrep/Trivy SARIF
 - **自动化收益**：漏洞具有生命周期跟踪（open/dismissed/fixed），不再是一次性 CI 输出
 - **涉及文件**：`.github/workflows/test.yml`、`.github/workflows/security-poc.yml`
-- **当前状态**：已完成（PR #73, commit `3afe670`）。三个 category 上传：`semgrep`（Semgrep SAST）、`trivy-sca`（Trivy 全量扫描）、`trivy-pr`（Trivy PR 级扫描），结果可在 GitHub Security → Code scanning alerts 面板查看
+- **当前状态**：已完成（PR #73, commit `3afe670`）。`trivy-pr`（Trivy PR 级扫描）和 `slither`（Solidity SAST）的 SARIF 上传至 GitHub Security 面板（`github/codeql-action/upload-sarif`）；`semgrep` 和 `trivy-sca` 的 SARIF 仅作为 artifact 存储（`actions/upload-artifact`），未上传至 Security 面板
 
 **P1-2：故障注入集成测试** ✅
 
@@ -442,7 +442,7 @@
 
 | RFC 文件 | 状态 | 关联优先级 | 说明 |
 |----------|------|-----------|------|
-| `plan/gate-policy.md` | 活跃 | P0 全量 | 门禁分层策略，定义 PR 阻断 / 发布阻断 / 人工检查分级 |
+| `plan/gate-policy.md` | 已归档（内容合并至 ROADMAP 表 1/表 2） | P0 全量 | 门禁分层策略，定义 PR 阻断 / 发布阻断 / 人工检查分级 |
 
 ### 附录 B：术语表
 
