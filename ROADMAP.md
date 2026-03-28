@@ -59,6 +59,7 @@
 | SCA (Trivy) 全量扫描 | 每周深度扫描（信息级）；PR 级 HIGH/CRITICAL 已升级为阻断 | `.github/workflows/security-poc.yml`, `.github/workflows/test.yml` |
 | SBOM (CycloneDX) | 每周定时，信息级 | `.github/workflows/security-poc.yml` |
 | 性能 smoke (k6) | 手动触发；k6 脚本已现代化，渲染管线就绪，待在线实测回填 | `.github/workflows/perf-smoke.yml`, `tools/k6/file-query.js`, `tools/k6/scripts/render-query-baseline.mjs` |
+| Slither (Solidity SAST) | PR 触发（`.sol` 变更）+ 手动，信息级 | `.github/workflows/contract-security.yml` |
 
 ### 表 3：尚未实现
 
@@ -245,7 +246,7 @@
 - **迁移时间线**：参考 NIST 建议 2030-2035 完成迁移；当前阶段为调研和算法评估
 - **触发条件**：监管要求出现，或 Java 生态 PQC 库（如 Bouncy Castle PQC）达到生产就绪时
 
-**P2-4：智能合约安全测试增强**
+**P2-4：智能合约安全测试增强** ✅
 
 - **What**：在 CI 中集成 Slither 静态分析 + Echidna/Foundry 模糊测试，覆盖 `.sol` 合约变更
 - **实施方案**：
@@ -256,6 +257,12 @@
 - **触发条件**：合约逻辑复杂度增加时（如新增合约或修改核心存证/分享逻辑）
 - **自动化收益**：合约安全检查从人工审计变为 CI 自动执行
 - **涉及文件**：新建 `.github/workflows/contract-security.yml`、`platform-fisco/contract/`
+- **当前状态**：已完成。交付物：
+  - `.github/workflows/contract-security.yml`：PR 触发（`.sol` 变更）+ 手动触发
+  - Slither 静态分析：`solc-select` 指定 0.8.11 版本，排除 informational/optimization 级别
+  - SARIF 上传至 GitHub Security 面板（category: `slither`）
+  - CI Step Summary 生成 Markdown 报告
+  - 信息级不阻断 PR（`continue-on-error: true`）
 
 **P2-5：文件完整性批量验证（Merkle Tree）**
 
@@ -275,7 +282,7 @@
 - **自动化收益**：链上交易数从 O(N) 降至 O(1)；审计验证保持 O(log N) 效率
 - **涉及文件**：`platform-fisco/` 新增 Merkle Tree 工具类、`platform-backend/backend-service/` 批量存证逻辑
 
-**P2-6：可观测性驱动 SLO/SLI 体系**
+**P2-6：可观测性驱动 SLO/SLI 体系** ✅
 
 - **What**：基于 OTel 指标定义 SLI/SLO，建立燃尽率告警机制
 - **实施方案**：
@@ -287,6 +294,11 @@
 - **前置依赖**：P2-2（OpenTelemetry 统一追踪）
 - **自动化收益**：从"感觉系统不稳"变为"SLO 预算还剩 X%"的量化决策
 - **涉及文件**：告警规则配置、Grafana 仪表盘 JSON、OTel Collector 配置
+- **当前状态**：已完成。交付物：
+  - `config/prometheus/recording-rules.yml`：SLI 预计算规则（上传成功率、存证延迟、存储可用性、API 错误率），多窗口（5m/30m/1h/6h/1d/30d）
+  - `config/prometheus/alerting-rules.yml`：燃尽率告警（critical/warning/info 三级）+ 错误预算耗尽告警 + 断路器告警
+  - `config/grafana/slo-dashboard.json`：Grafana SLO Overview 仪表盘（7 行面板：总览、错误预算、上传成功率、存证延迟、存储可用性、API 错误率、断路器）
+  - 纯配置文件交付，无 Java/TypeScript 代码改动
 
 **P2-7：存储完整性周期校验** ✅
 
