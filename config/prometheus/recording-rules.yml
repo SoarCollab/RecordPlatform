@@ -103,30 +103,28 @@ groups:
   # ============================================================================
   # Attestation (Blockchain) Latency — P99 pre-computation
   # SLO target: P99 <= 5s for storeFile operation
+  #
+  # NOTE: FiscoMetrics uses Micrometer .publishPercentiles(0.5, 0.95, 0.99)
+  # which produces pre-computed client-side quantiles (not histogram buckets).
+  # These quantiles are NOT aggregatable across multiple service instances.
+  # If multi-instance aggregation is needed, add .publishPercentileHistogram(true)
+  # to FiscoMetrics.java timer builders and switch to histogram_quantile().
   # ============================================================================
   - name: sli:attestation_latency
     interval: 30s
     rules:
-      # P99 over 5-minute window
+      # P99 — direct from Micrometer pre-computed quantile (instant value)
       - record: sli:attestation_latency:p99_5m
         expr: |
-          histogram_quantile(0.99,
-            sum(rate(blockchain_operation_duration_seconds_bucket{operation="storeFile"}[5m])) by (le)
-          )
+          max(blockchain_operation_duration_seconds{operation="storeFile",quantile="0.99"})
 
-      # P99 over 30-minute window
       - record: sli:attestation_latency:p99_30m
         expr: |
-          histogram_quantile(0.99,
-            sum(rate(blockchain_operation_duration_seconds_bucket{operation="storeFile"}[30m])) by (le)
-          )
+          max(blockchain_operation_duration_seconds{operation="storeFile",quantile="0.99"})
 
-      # P99 over 1-hour window
       - record: sli:attestation_latency:p99_1h
         expr: |
-          histogram_quantile(0.99,
-            sum(rate(blockchain_operation_duration_seconds_bucket{operation="storeFile"}[1h])) by (le)
-          )
+          max(blockchain_operation_duration_seconds{operation="storeFile",quantile="0.99"})
 
   # ============================================================================
   # Storage Availability — node online ratio
