@@ -43,6 +43,8 @@ fix: some bug fixes        # 过于模糊
 | **Frontend Tests** | lint + type check + vitest 覆盖率 |
 | **Contract Consistency** | OpenAPI ↔ `generated.ts` 无差异 |
 | **Build Verification** | 后端构建 + 前端 `pnpm build` |
+| **Security Scan** | Trivy 漏洞扫描（HIGH/CRITICAL） |
+| **Contract Security** | Slither 智能合约静态分析（`.sol` 变更时触发，信息级） |
 
 ### 修改 REST 接口后必须更新契约
 
