@@ -1,0 +1,217 @@
+# ==============================================================================
+# Prometheus SLI Recording Rules — RecordPlatform
+# ==============================================================================
+#
+# Purpose:
+#   Pre-compute SLI (Service Level Indicator) metrics at multiple time windows
+#   to power SLO dashboards and burn-rate alerting without expensive real-time
+#   aggregation on every Grafana panel load.
+#
+# How to load:
+#   Add this file to your Prometheus configuration:
+#
+#     rule_files:
+#       - /etc/prometheus/recording-rules.yml
+#       - /etc/prometheus/alerting-rules.yml
+#
+#   Then reload Prometheus: kill -HUP $(pidof prometheus)
+#   or POST /-/reload if --web.enable-lifecycle is set.
+#
+# Metric sources:
+#   saga_total_total{status}         — Micrometer counter (SagaMetrics.java)
+#                                      status: started | completed | compensated | failed
+#   blockchain_operation_duration_seconds_bucket — Micrometer timer histogram (FiscoMetrics.java)
+#                                      operation: storeFile | queryFile | deleteFile | shareFile
+#   s3_node_online_status{node}      — raw Prometheus gauge (S3Monitor.java), 1=online 0=offline
+#   http_server_requests_seconds_count{status} — Spring Boot Actuator (Micrometer)
+# ==============================================================================
+
+groups:
+  # ============================================================================
+  # Upload Success Ratio — multi-window pre-computation
+  # SLO target: 99.5% upload success rate
+  # ============================================================================
+  - name: sli:upload_success
+    interval: 30s
+    rules:
+      # 5-minute window
+      - record: sli:upload_success:ratio_rate5m
+        expr: |
+          sum(rate(saga_total_total{status="completed"}[5m]))
+          /
+          (
+            sum(rate(saga_total_total{status="completed"}[5m]))
+            + sum(rate(saga_total_total{status="failed"}[5m]))
+            + sum(rate(saga_total_total{status="compensated"}[5m]))
+          )
+
+      # 30-minute window
+      - record: sli:upload_success:ratio_rate30m
+        expr: |
+          sum(rate(saga_total_total{status="completed"}[30m]))
+          /
+          (
+            sum(rate(saga_total_total{status="completed"}[30m]))
+            + sum(rate(saga_total_total{status="failed"}[30m]))
+            + sum(rate(saga_total_total{status="compensated"}[30m]))
+          )
+
+      # 1-hour window
+      - record: sli:upload_success:ratio_rate1h
+        expr: |
+          sum(rate(saga_total_total{status="completed"}[1h]))
+          /
+          (
+            sum(rate(saga_total_total{status="completed"}[1h]))
+            + sum(rate(saga_total_total{status="failed"}[1h]))
+            + sum(rate(saga_total_total{status="compensated"}[1h]))
+          )
+
+      # 6-hour window
+      - record: sli:upload_success:ratio_rate6h
+        expr: |
+          sum(rate(saga_total_total{status="completed"}[6h]))
+          /
+          (
+            sum(rate(saga_total_total{status="completed"}[6h]))
+            + sum(rate(saga_total_total{status="failed"}[6h]))
+            + sum(rate(saga_total_total{status="compensated"}[6h]))
+          )
+
+      # 1-day window
+      - record: sli:upload_success:ratio_rate1d
+        expr: |
+          sum(rate(saga_total_total{status="completed"}[1d]))
+          /
+          (
+            sum(rate(saga_total_total{status="completed"}[1d]))
+            + sum(rate(saga_total_total{status="failed"}[1d]))
+            + sum(rate(saga_total_total{status="compensated"}[1d]))
+          )
+
+      # 30-day window (rolling SLO compliance)
+      - record: sli:upload_success:ratio_rate30d
+        expr: |
+          sum(rate(saga_total_total{status="completed"}[30d]))
+          /
+          (
+            sum(rate(saga_total_total{status="completed"}[30d]))
+            + sum(rate(saga_total_total{status="failed"}[30d]))
+            + sum(rate(saga_total_total{status="compensated"}[30d]))
+          )
+
+  # ============================================================================
+  # Attestation (Blockchain) Latency — P99 pre-computation
+  # SLO target: P99 <= 5s for storeFile operation
+  # ============================================================================
+  - name: sli:attestation_latency
+    interval: 30s
+    rules:
+      # P99 over 5-minute window
+      - record: sli:attestation_latency:p99_5m
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(blockchain_operation_duration_seconds_bucket{operation="storeFile"}[5m])) by (le)
+          )
+
+      # P99 over 30-minute window
+      - record: sli:attestation_latency:p99_30m
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(blockchain_operation_duration_seconds_bucket{operation="storeFile"}[30m])) by (le)
+          )
+
+      # P99 over 1-hour window
+      - record: sli:attestation_latency:p99_1h
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(blockchain_operation_duration_seconds_bucket{operation="storeFile"}[1h])) by (le)
+          )
+
+  # ============================================================================
+  # Storage Availability — node online ratio
+  # SLO target: >= 99.9% storage availability
+  # ============================================================================
+  - name: sli:storage_availability
+    interval: 30s
+    rules:
+      - record: sli:storage_availability:ratio
+        expr: |
+          count(s3_node_online_status == 1)
+          /
+          count(s3_node_online_status)
+
+  # ============================================================================
+  # API Error Rate (5xx) — multi-window pre-computation
+  # SLO target: <= 0.5% 5xx error rate
+  # ============================================================================
+  - name: sli:api_error
+    interval: 30s
+    rules:
+      # 5-minute window
+      - record: sli:api_error:ratio_rate5m
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+          /
+          sum(rate(http_server_requests_seconds_count[5m]))
+
+      # 30-minute window
+      - record: sli:api_error:ratio_rate30m
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[30m]))
+          /
+          sum(rate(http_server_requests_seconds_count[30m]))
+
+      # 1-hour window
+      - record: sli:api_error:ratio_rate1h
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[1h]))
+          /
+          sum(rate(http_server_requests_seconds_count[1h]))
+
+      # 6-hour window
+      - record: sli:api_error:ratio_rate6h
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[6h]))
+          /
+          sum(rate(http_server_requests_seconds_count[6h]))
+
+      # 1-day window
+      - record: sli:api_error:ratio_rate1d
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[1d]))
+          /
+          sum(rate(http_server_requests_seconds_count[1d]))
+
+      # 30-day window (rolling SLO compliance)
+      - record: sli:api_error:ratio_rate30d
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[30d]))
+          /
+          sum(rate(http_server_requests_seconds_count[30d]))
+
+  # ============================================================================
+  # Error Budget Remaining
+  # Budget = 1 - (actual_error_rate / allowed_error_rate)
+  # Values: 1.0 = full budget, 0.0 = exhausted, negative = over-budget
+  # ============================================================================
+  - name: sli:error_budget
+    interval: 1m
+    rules:
+      # Upload error budget (target 99.5% => allowed failure rate 0.5%)
+      - record: sli:upload_success:error_budget_remaining
+        expr: |
+          1 - (
+            (1 - sli:upload_success:ratio_rate30d)
+            /
+            (1 - 0.995)
+          )
+
+      # API error budget (target <= 0.5% 5xx rate)
+      - record: sli:api_error:error_budget_remaining
+        expr: |
+          1 - (
+            sli:api_error:ratio_rate30d
+            /
+            0.005
+          )
