@@ -53,8 +53,8 @@ class S3MonitorTest {
     }
 
     @Test
-    @DisplayName("Should keep offline status metrics when node config list is empty")
-    void shouldKeepOfflineStatusMetricsWhenNodeConfigListIsEmpty() {
+    @DisplayName("Should clear cached capacity metrics when node config list is empty")
+    void shouldClearCachedCapacityMetricsWhenNodeConfigListIsEmpty() {
         String nodeName = "node-a";
         S3Monitor.NodeMetrics metrics = createMetrics(1_024L, 256L);
         knownNodes().add(nodeName);
@@ -68,7 +68,7 @@ class S3MonitorTest {
 
         assertThat(onlineNodes()).doesNotContain(nodeName);
         assertThat(knownNodes()).contains(nodeName);
-        assertThat(monitor.getNodeMetrics(nodeName)).isSameAs(metrics);
+        assertThat(monitor.getNodeMetrics(nodeName)).isNull();
         assertThat(sampleValue("s3_node_online_status", nodeName)).isEqualTo(0D);
         assertThat(sampleValue("s3_node_load_score", nodeName)).isNull();
     }

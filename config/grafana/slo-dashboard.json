@@ -164,12 +164,12 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
-          "expr": "sli:storage_availability:ratio",
-          "legendFormat": "Storage Availability",
+          "expr": "sli:storage_availability:ratio_rolling30d",
+          "legendFormat": "Storage Availability (30d rolling)",
           "refId": "A"
         }
       ],
-      "title": "Storage Availability",
+      "title": "Storage Availability (30d rolling)",
       "type": "stat"
     },
     {
@@ -435,19 +435,19 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
-          "expr": "blockchain_operation_duration_seconds{operation=\"storeFile\",quantile=\"0.5\"}",
+          "expr": "otel_blockchain_operation_duration_seconds{operation=\"storeFile\",quantile=\"0.5\"}",
           "legendFormat": "P50",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
-          "expr": "blockchain_operation_duration_seconds{operation=\"storeFile\",quantile=\"0.95\"}",
+          "expr": "otel_blockchain_operation_duration_seconds{operation=\"storeFile\",quantile=\"0.95\"}",
           "legendFormat": "P95",
           "refId": "B"
         },
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
-          "expr": "blockchain_operation_duration_seconds{operation=\"storeFile\",quantile=\"0.99\"}",
+          "expr": "otel_blockchain_operation_duration_seconds{operation=\"storeFile\",quantile=\"0.99\"}",
           "legendFormat": "P99",
           "refId": "C"
         }
@@ -510,12 +510,12 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
-          "expr": "sli:storage_availability:ratio",
-          "legendFormat": "Storage Availability",
+          "expr": "sli:storage_availability:ratio_rolling30d",
+          "legendFormat": "Storage Availability (30d rolling)",
           "refId": "A"
         }
       ],
-      "title": "Storage Availability",
+      "title": "Storage Availability (30d rolling)",
       "type": "timeseries"
     },
     {
@@ -562,7 +562,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
-          "expr": "s3_node_online_status",
+          "expr": "max by (node, fault_domain) (s3_node_online_status{fault_domain=~\".+\"})",
           "format": "table",
           "instant": true,
           "legendFormat": "{{node}}",

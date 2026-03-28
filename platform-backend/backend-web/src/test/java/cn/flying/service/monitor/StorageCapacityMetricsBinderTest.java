@@ -58,20 +58,20 @@ class StorageCapacityMetricsBinderTest {
     }
 
     @Test
-    @DisplayName("Should keep last bridged metrics when fallback snapshot has no node breakdown")
-    void shouldKeepLastBridgedMetricsWhenFallbackSnapshotHasNoNodeBreakdown() {
+    @DisplayName("Should remove bridged metrics when storage capacity falls back to estimate")
+    void shouldRemoveBridgedMetricsWhenStorageCapacityFallsBackToEstimate() {
         when(systemMonitorService.getStorageCapacity())
                 .thenReturn(storageCapacity(
                         "prometheus",
                         List.of(new StorageNodeCapacityVO("node-a", "domain-a", true, 100L, 55L, 55D))
                 ))
-                .thenReturn(storageCapacity("fallback", List.of()));
+                .thenReturn(storageCapacity("fallback-estimate", true, List.of()));
 
         binder.refreshStorageNodeMetrics();
         binder.refreshStorageNodeMetrics();
 
-        assertThat(gaugeValue("s3.node.online.status", "node-a", "domain-a")).isEqualTo(1D);
-        assertThat(gaugeValue("s3.node.usage.percent", "node-a", "domain-a")).isEqualTo(55D);
+        assertThat(gaugeValue("s3.node.online.status", "node-a", "domain-a")).isNull();
+        assertThat(gaugeValue("s3.node.usage.percent", "node-a", "domain-a")).isNull();
     }
 
     @Test
@@ -91,11 +91,54 @@ class StorageCapacityMetricsBinderTest {
         assertThat(gaugeValue("s3.node.usage.percent", "node-a", "domain-a")).isNull();
     }
 
+    @Test
+    @DisplayName("Should remove bridged metrics when prometheus snapshot contains no managed nodes")
+    void shouldRemoveBridgedMetricsWhenPrometheusSnapshotContainsNoManagedNodes() {
+        when(systemMonitorService.getStorageCapacity())
+                .thenReturn(storageCapacity(
+                        "prometheus",
+                        List.of(new StorageNodeCapacityVO("node-a", "domain-a", true, 100L, 35L, 35D))
+                ))
+                .thenReturn(storageCapacity("prometheus", false, List.of()));
+
+        binder.refreshStorageNodeMetrics();
+        binder.refreshStorageNodeMetrics();
+
+        assertThat(gaugeValue("s3.node.online.status", "node-a", "domain-a")).isNull();
+        assertThat(gaugeValue("s3.node.usage.percent", "node-a", "domain-a")).isNull();
+    }
+
+    @Test
+    @DisplayName("Should publish NaN usage when degraded snapshot lacks capacity sample for a node")
+    void shouldPublishNaNUsageWhenDegradedSnapshotLacksCapacitySampleForNode() {
+        when(systemMonitorService.getStorageCapacity()).thenReturn(storageCapacity(
+                "prometheus-partial",
+                true,
+                List.of(
+                        new StorageNodeCapacityVO("node-a", "domain-a", true, 0L, 0L, 0D),
+                        new StorageNodeCapacityVO("node-b", "domain-b", true, 100L, 64L, 64D)
+                )
+        ));
+
+        binder.refreshStorageNodeMetrics();
+
+        assertThat(gaugeValue("s3.node.online.status", "node-a", "domain-a")).isEqualTo(1D);
+        assertThat(gaugeValue("s3.node.usage.percent", "node-a", "domain-a")).isNaN();
+        assertThat(gaugeValue("s3.node.usage.percent", "node-b", "domain-b")).isEqualTo(64D);
+    }
+
     /**
      * 构造最小化的存储容量快照，供桥接逻辑验证使用。
      */
     private StorageCapacityVO storageCapacity(String source, List<StorageNodeCapacityVO> nodes) {
-        return new StorageCapacityVO(0L, 0L, 0L, false, source, nodes, List.of());
+        return storageCapacity(source, false, nodes);
+    }
+
+    /**
+     * 构造带降级标记的最小化存储容量快照，供空节点语义验证使用。
+     */
+    private StorageCapacityVO storageCapacity(String source, boolean degraded, List<StorageNodeCapacityVO> nodes) {
+        return new StorageCapacityVO(0L, 0L, 0L, degraded, source, nodes, List.of());
     }
 
     /**

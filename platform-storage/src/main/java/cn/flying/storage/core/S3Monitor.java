@@ -183,6 +183,9 @@ public class S3Monitor {
             log.debug("没有为运行状况检查配置 S3 节点。");
             Set<String> knownNodeSnapshot = Set.copyOf(knownNodes);
             onlineNodes.clear();
+            // 配置为空意味着当前没有受管节点，必须丢弃旧容量快照，
+            // 避免配置恢复后同名节点短暂继承退役节点的容量数据。
+            nodeMetricsCache.clear();
             knownNodeSnapshot.forEach(node -> {
                 nodeOnlineStatus.labels(node).set(0);
                 nodeLoadScoreGauge.remove(node);

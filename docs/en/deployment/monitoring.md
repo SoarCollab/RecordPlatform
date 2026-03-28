@@ -300,8 +300,8 @@ output {
 | SLI | Metric Source | Calculation |
 |-----|--------------|-------------|
 | **Upload Success Rate** | `saga_total_total{status}` | completed / (completed + failed + compensated) |
-| **Attestation P99 Latency** | `blockchain_operation_duration_seconds{quantile="0.99"}` | `max_over_time(...[window])` over exported P99 samples |
-| **Storage Availability** | `s3_node_online_status` | online configured nodes / configured nodes |
+| **Attestation P99 Latency** | `otel_blockchain_operation_duration_seconds{quantile="0.99"}` | `max_over_time(...[window])` over collector-exported P99 samples |
+| **Storage Availability** | `s3_node_online_status` | 30-day rolling average of the deduplicated online-node ratio (`max by (node, fault_domain)`) |
 | **API Error Rate** | `http_server_requests_seconds_count{status}` | 5xx count / total count |
 
 ### Service Level Objectives (SLO)
@@ -349,8 +349,8 @@ Import `config/grafana/slo-dashboard.json` into Grafana. The dashboard includes:
 | Error Budget | Upload and API error budget remaining gauges |
 | Upload Success | Time series with 99.5% SLO threshold line |
 | Attestation Latency | P50/P95/P99 time series with 5s threshold |
-| Storage Availability | Availability ratio + per-node status table |
+| Storage Availability | 30-day rolling availability ratio + per-node status table |
 | API Error Rate | Error rate time series + top-5 error endpoints |
 | Resilience4j | Circuit breaker states + retry counts |
 
-> **Note:** Attestation latency uses Micrometer pre-computed client-side quantiles (`.publishPercentiles()`), so the SLO rules roll up window-specific values with `max_over_time(...)` instead of `histogram_quantile(...)`. These quantiles are not aggregatable across multiple service instances. For multi-instance deployments, add `.publishPercentileHistogram(true)` to `FiscoMetrics.java` timer builders.
+> **Note:** Attestation latency is scraped from the OTel Collector Prometheus exporter, so the metric carries the collector namespace prefix (`otel_`). It still uses Micrometer pre-computed client-side quantiles (`.publishPercentiles()`), so the SLO rules roll up window-specific values with `max_over_time(...)` instead of `histogram_quantile(...)`. These quantiles are not aggregatable across multiple service instances. For multi-instance deployments, add `.publishPercentileHistogram(true)` to `FiscoMetrics.java` timer builders.

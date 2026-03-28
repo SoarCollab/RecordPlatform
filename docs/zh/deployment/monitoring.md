@@ -299,8 +299,8 @@ output {
 | SLI | 指标来源 | 计算方式 |
 |-----|---------|---------|
 | **上传成功率** | `saga_total_total{status}` | completed / (completed + failed + compensated) |
-| **存证 P99 延迟** | `blockchain_operation_duration_seconds{quantile="0.99"}` | 基于导出的 P99 样本做 `max_over_time(...[window])` 窗口汇总 |
-| **存储可用性** | `s3_node_online_status` | 当前配置节点中的在线节点数 / 当前配置节点总数 |
+| **存证 P99 延迟** | `otel_blockchain_operation_duration_seconds{quantile="0.99"}` | 基于 Collector 导出的 P99 样本做 `max_over_time(...[window])` 窗口汇总 |
+| **存储可用性** | `s3_node_online_status` | 对按 `(node, fault_domain)` 去重后的瞬时在线节点占比做 30 天滚动平均 |
 | **API 错误率** | `http_server_requests_seconds_count{status}` | 5xx 数量 / 总请求数 |
 
 ### 服务级别目标（SLO）
@@ -348,8 +348,8 @@ rule_files:
 | 错误预算 | 上传和 API 错误预算剩余仪表 |
 | 上传成功率 | 时序图，含 99.5% SLO 阈值线 |
 | 存证延迟 | P50/P95/P99 时序图，含 5s 阈值线 |
-| 存储可用性 | 可用性比率 + 节点状态表格 |
+| 存储可用性 | 30 天滚动可用性比率 + 节点状态表格 |
 | API 错误率 | 错误率时序图 + Top-5 错误端点 |
 | Resilience4j | 断路器状态 + 重试次数 |
 
-> **注意**：存证延迟使用 Micrometer 预计算的客户端分位数（`.publishPercentiles()`），因此当前 SLO 规则用 `max_over_time(...)` 对导出的 P99 样本做窗口汇总，而不是 `histogram_quantile(...)`。这些分位数不可跨多实例聚合。如需多实例部署，请在 `FiscoMetrics.java` 的 Timer builder 中添加 `.publishPercentileHistogram(true)`。
+> **注意**：存证延迟通过 OTel Collector 的 Prometheus exporter 暴露，因此指标名带有 `otel_` 前缀。它仍然使用 Micrometer 预计算的客户端分位数（`.publishPercentiles()`），因此当前 SLO 规则用 `max_over_time(...)` 对导出的 P99 样本做窗口汇总，而不是 `histogram_quantile(...)`。这些分位数不可跨多实例聚合。如需多实例部署，请在 `FiscoMetrics.java` 的 Timer builder 中添加 `.publishPercentileHistogram(true)`。

@@ -28,6 +28,8 @@ public class StorageCapacityMetricsBinder {
     private static final String ONLINE_STATUS_METRIC = "s3.node.online.status";
     private static final String USAGE_PERCENT_METRIC = "s3.node.usage.percent";
     private static final String UNKNOWN_FAULT_DOMAIN = "UNKNOWN";
+    private static final String NO_NODES_SOURCE = "prometheus-no-nodes";
+    private static final String FALLBACK_ESTIMATE_SOURCE = "fallback-estimate";
 
     private final MeterRegistry meterRegistry;
     private final SystemMonitorService systemMonitorService;
@@ -66,7 +68,7 @@ public class StorageCapacityMetricsBinder {
                 continue;
             }
             activeNodeNames.add(node.nodeName());
-            upsertNodeGauge(node);
+            upsertNodeGauge(storageCapacity, node);
         }
 
         removeStaleNodeGauges(activeNodeNames);
@@ -76,7 +78,7 @@ public class StorageCapacityMetricsBinder {
      * 处理没有节点明细的快照，避免把短暂回退结果误写成“全节点离线”。
      */
     private void handleEmptySnapshot(StorageCapacityVO storageCapacity) {
-        if ("prometheus-no-nodes".equals(storageCapacity.source())) {
+        if (shouldClearForEmptyPrometheusSnapshot(storageCapacity)) {
             clearAllNodeGauges();
             return;
         }
@@ -84,9 +86,23 @@ public class StorageCapacityMetricsBinder {
     }
 
     /**
+     * 判断空节点快照是否代表“当前没有受管节点”，此时需要清空 bridge gauge。
+     *
+     * @param storageCapacity 存储容量快照
+     * @return 若应清空全部 bridge gauge 则返回 true
+     */
+    private boolean shouldClearForEmptyPrometheusSnapshot(StorageCapacityVO storageCapacity) {
+        String source = storageCapacity.source();
+        if (NO_NODES_SOURCE.equals(source) || FALLBACK_ESTIMATE_SOURCE.equals(source)) {
+            return true;
+        }
+        return "prometheus".equals(source) && !storageCapacity.degraded();
+    }
+
+    /**
      * 按节点名更新或重建对应 gauge，并同步最新在线状态与容量使用率。
      */
-    private void upsertNodeGauge(StorageNodeCapacityVO node) {
+    private void upsertNodeGauge(StorageCapacityVO storageCapacity, StorageNodeCapacityVO node) {
         String nodeName = node.nodeName();
         String faultDomain = normalizeFaultDomain(node.faultDomain());
         NodeGaugeHandle currentHandle = nodeGaugeHandles.get(nodeName);
@@ -99,7 +115,7 @@ public class StorageCapacityMetricsBinder {
         }
 
         currentHandle.onlineStatus().set(node.online() ? 1 : 0);
-        currentHandle.usagePercent().set(sanitizeUsagePercent(node.usagePercent()));
+        currentHandle.usagePercent().set(resolvePublishedUsagePercent(storageCapacity, node));
     }
 
     /**
@@ -159,6 +175,23 @@ public class StorageCapacityMetricsBinder {
             return Double.NaN;
         }
         return Math.max(0D, Math.min(100D, usagePercent));
+    }
+
+    /**
+     * 仅在节点具备有效容量样本时发布磁盘使用率；缺样本场景导出 NaN，避免把“未知”误写成 0%。
+     */
+    private double resolvePublishedUsagePercent(StorageCapacityVO storageCapacity, StorageNodeCapacityVO node) {
+        if (storageCapacity.degraded() && !hasCapacitySample(node)) {
+            return Double.NaN;
+        }
+        return sanitizeUsagePercent(node.usagePercent());
+    }
+
+    /**
+     * 判断节点是否携带了可用的容量样本。
+     */
+    private boolean hasCapacitySample(StorageNodeCapacityVO node) {
+        return node.totalCapacityBytes() > 0;
     }
 
     /**

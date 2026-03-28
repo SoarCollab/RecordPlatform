@@ -131,10 +131,10 @@ groups:
   # ============================================================================
   - name: slo:storage_availability
     rules:
-      # Critical: storage availability below 99.9%
+      # Critical: 30-day rolling storage availability below 99.9%
       - alert: StorageAvailabilityCritical
         expr: |
-          sli:storage_availability:ratio < 0.999
+          sli:storage_availability:ratio_rolling30d < 0.999
         for: 5m
         labels:
           severity: critical
@@ -142,21 +142,27 @@ groups:
         annotations:
           summary: "Storage availability below 99.9% SLO"
           description: >-
-            S3 storage node availability has dropped below the 99.9% SLO target.
-            Current ratio: {{ $value | humanizePercentage }}.
+            30-day rolling S3 storage availability has dropped below the 99.9%
+            SLO target. Current 30d rolling ratio: {{ $value | humanizePercentage }}.
             Check S3Monitor health checks and node connectivity.
           runbook: "https://wiki.internal/runbooks/storage-availability-slo"
 
       # Warning: individual node disk usage is high
-      # NOTE: s3_node_usage_percent and s3_node_online_status with fault_domain
-      # label come from backend-web (StorageCapacityMetricsBinder). If scraping
-      # platform-storage directly, its S3Monitor exports s3_node_online_status
-      # without fault_domain — the on() join below will silently exclude those.
+      # NOTE:
+      #   - backend-web bridge gauges are emitted once per backend-web instance,
+      #     so aggregate by node/fault_domain before joining to avoid many-to-many
+      #     matches in HA deployments.
+      #   - Micrometer appends the gauge base unit suffix, so
+      #     "s3.node.usage.percent" is exposed as "s3_node_usage_percent_percent".
       - alert: StorageNodeHighUsage
         expr: |
-          s3_node_usage_percent > 85
+          max by (node, fault_domain) (
+            s3_node_usage_percent_percent{fault_domain=~".+"}
+          ) > 85
           and on(node, fault_domain)
-          s3_node_online_status == 1
+          max by (node, fault_domain) (
+            s3_node_online_status{fault_domain=~".+"}
+          ) == 1
         for: 10m
         labels:
           severity: warning
