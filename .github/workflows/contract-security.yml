@@ -1,0 +1,146 @@
+name: Smart Contract Security
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'platform-fisco/contract/**/*.sol'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  slither:
+    name: Slither Analysis (Informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Slither and solc
+        run: |
+          pip install slither-analyzer solc-select
+          solc-select install 0.8.11
+          solc-select use 0.8.11
+
+      - name: Run Slither on Storage.sol
+        continue-on-error: true
+        run: |
+          mkdir -p slither-results
+          slither platform-fisco/contract/Storage.sol \
+            --solc-solcs-select 0.8.11 \
+            --sarif slither-results/storage.sarif \
+            --json slither-results/storage.json \
+            --exclude-informational \
+            --exclude-optimization \
+            || true
+
+      - name: Run Slither on Sharing.sol
+        continue-on-error: true
+        run: |
+          slither platform-fisco/contract/Sharing.sol \
+            --solc-solcs-select 0.8.11 \
+            --sarif slither-results/sharing.sarif \
+            --json slither-results/sharing.json \
+            --exclude-informational \
+            --exclude-optimization \
+            || true
+
+      - name: Merge SARIF results
+        if: always()
+        run: |
+          python3 << 'PYEOF'
+          import json, glob, os
+
+          merged = {
+              "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+              "version": "2.1.0",
+              "runs": []
+          }
+
+          for path in sorted(glob.glob("slither-results/*.sarif")):
+              try:
+                  with open(path) as f:
+                      data = json.load(f)
+                  if "runs" in data and isinstance(data["runs"], list):
+                      merged["runs"].extend(data["runs"])
+                  print(f"Merged {len(data.get('runs', []))} run(s) from {os.path.basename(path)}")
+              except (json.JSONDecodeError, IOError) as e:
+                  print(f"Skipping {os.path.basename(path)}: {e}")
+
+          if not merged["runs"]:
+              merged["runs"].append({"tool": {"driver": {"name": "slither", "rules": []}}, "results": []})
+              print("No valid SARIF runs found; wrote empty placeholder")
+
+          with open("slither-results/merged.sarif", "w") as f:
+              json.dump(merged, f, indent=2)
+          print(f"Wrote merged.sarif with {len(merged['runs'])} run(s)")
+          PYEOF
+
+      - name: Upload SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: slither-results/merged.sarif
+          category: slither
+
+      - name: Generate Step Summary
+        if: always()
+        run: |
+          python3 << 'PYEOF'
+          import json, glob, os
+
+          findings = {"High": [], "Medium": [], "Low": []}
+          total = 0
+
+          for path in sorted(glob.glob("slither-results/*.json")):
+              try:
+                  with open(path) as f:
+                      data = json.load(f)
+                  detectors = data if isinstance(data, list) else data.get("results", data.get("detectors", []))
+                  if not isinstance(detectors, list):
+                      continue
+                  for d in detectors:
+                      impact = d.get("impact", "Low").capitalize()
+                      if impact not in findings:
+                          impact = "Low"
+                      check = d.get("check", "unknown")
+                      desc = d.get("description", "").strip().split("\n")[0][:200]
+                      findings[impact].append({"check": check, "description": desc})
+                      total += 1
+              except (json.JSONDecodeError, IOError) as e:
+                  print(f"Skipping {os.path.basename(path)}: {e}")
+
+          summary_file = os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null")
+          with open(summary_file, "a") as f:
+              f.write("## Slither Smart Contract Analysis\n\n")
+              f.write(f"**Total findings: {total}**\n\n")
+              for severity in ["High", "Medium", "Low"]:
+                  items = findings[severity]
+                  f.write(f"### {severity} ({len(items)})\n\n")
+                  if items:
+                      f.write("| Check | Description |\n|-------|-------------|\n")
+                      for item in items:
+                          desc = item['description'].replace('|', '\\|')
+                          f.write(f"| `{item['check']}` | {desc} |\n")
+                  else:
+                      f.write("No findings.\n")
+                  f.write("\n")
+          print(f"Summary: {total} total findings (High={len(findings['High'])}, Medium={len(findings['Medium'])}, Low={len(findings['Low'])})")
+          PYEOF
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: slither-results
+          path: slither-results
+          if-no-files-found: warn
