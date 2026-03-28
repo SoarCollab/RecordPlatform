@@ -166,7 +166,7 @@
 - **涉及文件**：新建 `scripts/env-check.sh`、新建 `docker-compose.infra.yml`、
   更新 `docs/zh/deployment/`、更新 `docs/en/deployment/`
 - **当前状态**：已完成。交付物：
-  - `docker-compose.infra.yml`：根目录可执行 compose 文件，含 6 个服务（Nacos/MySQL/Redis/RabbitMQ/MinIO x2），全部配置 healthcheck + env 默认值
+  - `docker-compose.infra.yml`：根目录可执行 compose 文件，含 8 个服务（Nacos/MySQL/Redis/RabbitMQ/MinIO x2/OTel Collector/Jaeger），全部配置 healthcheck + env 默认值
   - `scripts/env-check.sh`：8 项环境预检脚本，支持 `--fix` 自动修复和 `--service` 单项检查
   - `docs/zh/deployment/environment-setup.md` + `docs/en/deployment/environment-setup.md`：中英文环境搭建指南
   - `.env.example`：补充基础设施凭据变量（DB_PASSWORD, REDIS_*, RABBITMQ_*, NACOS_AUTH_TOKEN）

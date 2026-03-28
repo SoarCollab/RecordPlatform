@@ -76,6 +76,8 @@ Included services:
 | RabbitMQ | 5672 | http://localhost:15672 |
 | MinIO-A | 9000 | http://localhost:9001 |
 | MinIO-B | 9010 | http://localhost:9011 |
+| OTel Collector | 4317/4318/8889 | — |
+| Jaeger | 16686 | http://localhost:16686 |
 
 Verify status:
 
