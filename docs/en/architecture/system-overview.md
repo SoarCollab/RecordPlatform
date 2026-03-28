@@ -27,6 +27,8 @@ flowchart TB
         MySQL[("MySQL<br/>(Business Data)")]:::infra
         Redis[("Redis<br/>(Cache)")]:::infra
         RabbitMQ["RabbitMQ<br/>(Async Messaging)"]:::infra
+        OTel["OTel Collector<br/>(Trace Collection)"]:::infra
+        Jaeger["Jaeger<br/>(Trace Visualization)"]:::infra
     end
 
     subgraph ExternalLayer["External Dependencies"]
@@ -53,6 +55,12 @@ flowchart TB
     %% Service to External %%
     Fisco -->|Channel/RPC| BCOS
     Storage -->|S3 API| S3
+
+    %% Tracing %%
+    Backend -.->|OTLP| OTel
+    Fisco -.->|OTLP| OTel
+    Storage -.->|OTLP| OTel
+    OTel -->|Traces| Jaeger
 ```
 
 ## Module Responsibilities
@@ -478,6 +486,7 @@ flowchart LR
 | `friend-accepted` | `{ friendName, ... }` | Friend request accepted |
 | `friend-share` | `{ sharerName, fileCount, ... }` | Friend file sharing |
 | `audit-alert` | `{ type, message, details, severity }` | Audit anomaly alert (admin/monitor) |
+| `integrity-alert` | `{ alertType, fileHash, details }` | Storage integrity anomaly alert (admin) |
 
 ### SSE Authentication Handshake
 

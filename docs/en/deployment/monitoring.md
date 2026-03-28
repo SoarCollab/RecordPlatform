@@ -176,6 +176,78 @@ groups:
    - Circuit breaker status
    - Retry counts
 
+## Distributed Tracing (OpenTelemetry)
+
+The project integrates OpenTelemetry Java Agent v2.26.1 for automatic trace and metrics collection across all three Java services.
+
+### Infrastructure
+
+| Component | Port | Description |
+|-----------|------|-------------|
+| OTel Collector | 4317 (gRPC), 4318 (HTTP), 8889 (Prometheus) | Trace and metrics pipeline |
+| Jaeger | 16686 | Tracing visualization UI |
+
+### Enabling
+
+**Docker deployment**: Set `OTEL_JAVAAGENT_ENABLED=true` (enabled by default)
+
+**Local development**:
+
+```bash
+./scripts/start.sh start --otel all
+```
+
+> `--otel` and `--skywalking` are mutually exclusive and cannot be enabled simultaneously.
+
+### Configuration
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | Collector endpoint |
+| `OTEL_TRACES_SAMPLER` | `parentbased_traceidratio` | Sampling strategy |
+| `OTEL_TRACES_SAMPLER_ARG` | `0.1` | Sampling rate (10%) |
+
+Uses W3C Trace Context propagation for cross-service distributed tracing.
+
+### Jaeger UI
+
+Visit http://localhost:16686 to view trace data.
+
+## Storage Integrity Check
+
+The system periodically verifies the consistency of S3-stored files against blockchain records.
+
+### How It Works
+
+1. Runs daily at 2:00 AM, sampling 1% of files
+2. Verifies file existence in S3
+3. Compares database hash against on-chain hash
+4. Creates alerts and notifies admins via SSE when anomalies are found
+
+> Due to storage-layer encryption, the check does not re-hash file contents. Instead it verifies S3 file existence + DB-to-chain hash consistency.
+
+### Configuration
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `integrity.check.enabled` | `true` | Enable/disable check |
+| `integrity.check.cron` | `0 0 2 * * ?` | Execution schedule |
+| `integrity.check.sample-rate` | `0.01` | Sampling rate |
+| `integrity.check.batch-size` | `50` | Batch size |
+
+### Admin Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/v1/admin/integrity-alerts` | List integrity alerts |
+| `POST /api/v1/admin/integrity-alerts/check` | Trigger manual check |
+| `PUT /api/v1/admin/integrity-alerts/{id}/acknowledge` | Acknowledge an alert |
+| `PUT /api/v1/admin/integrity-alerts/{id}/resolve` | Resolve an alert |
+
+### Alert Notifications
+
+When integrity anomalies are detected, the system pushes `INTEGRITY_ALERT` events to admins via SSE. Alert records are stored in the `integrity_alert` table. A distributed lock (Redisson) ensures no concurrent check executions.
+
 ## SkyWalking Integration
 
 ### Configuration
