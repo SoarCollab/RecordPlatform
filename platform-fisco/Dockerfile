@@ -49,7 +49,9 @@ ENV OTEL_TRACES_SAMPLER=parentbased_traceidratio
 ENV OTEL_TRACES_SAMPLER_ARG=0.1
 ENV OTEL_JAVAAGENT_ENABLED=true
 
-ENTRYPOINT ["sh", "-c", "exec java \
-  -Xms512m -Xmx1024m -XX:+UseG1GC \
-  ${OTEL_JAVAAGENT_ENABLED:+-javaagent:/opt/otel/opentelemetry-javaagent.jar} \
-  -jar app.jar"]
+ENTRYPOINT ["sh", "-c", "if [ \"${OTEL_JAVAAGENT_ENABLED:-true}\" = \"true\" ]; then \
+    OTEL_AGENT_OPT='-javaagent:/opt/otel/opentelemetry-javaagent.jar'; \
+  else \
+    OTEL_AGENT_OPT=''; \
+  fi; \
+  exec java -Xms512m -Xmx1024m -XX:+UseG1GC ${OTEL_AGENT_OPT} -jar app.jar"]

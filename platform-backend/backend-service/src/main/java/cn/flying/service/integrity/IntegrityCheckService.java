@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
@@ -184,7 +185,8 @@ public class IntegrityCheckService {
             wrapper.eq(File::getTenantId, tenantId)
                     .eq(File::getStatus, FileUploadStatus.SUCCESS.getCode())
                     .eq(File::getDeleted, 0)
-                    .select(File::getId, File::getTenantId, File::getUid, File::getFileHash, File::getFileParam, File::getFileName);
+                    .select(File::getId, File::getTenantId, File::getUid, File::getOrigin,
+                            File::getFileHash, File::getFileParam, File::getFileName);
             page = fileMapper.selectPage(new Page<>(current, 500, false), wrapper);
             allFiles.addAll(page.getRecords());
             current++;
@@ -233,47 +235,73 @@ public class IntegrityCheckService {
     private record VerifyResult(AlertType alertType, String chainHash) {}
 
     /**
+     * Raised when the integrity check cannot reach required downstream services.
+     * These cases should be counted as execution errors instead of persisted alerts.
+     */
+    private static final class IntegrityCheckDependencyException extends RuntimeException {
+        private IntegrityCheckDependencyException(String message) {
+            super(message);
+        }
+    }
+
+    /**
      * Verify a single file: existence in S3, then DB hash vs on-chain hash.
      *
      * @return a VerifyResult if a problem is found, or null if the file is consistent
      */
     private VerifyResult verifyFile(File file) {
         // 1. Verify file exists in S3
-        try {
-            String filePath = buildFilePath(file);
-            Result<List<byte[]>> storageResult = fileRemoteClient.getFileListByHash(
-                    List.of(filePath), List.of(file.getFileHash()));
-            if (!storageResult.isSuccess() || storageResult.getData() == null || storageResult.getData().isEmpty()
-                    || storageResult.getData().get(0) == null || storageResult.getData().get(0).length == 0) {
-                log.warn("[integrity-check] file not found in S3: fileId={}, hash={}", file.getId(), file.getFileHash());
-                return new VerifyResult(AlertType.FILE_NOT_FOUND, null);
-            }
-        } catch (Exception e) {
-            log.warn("[integrity-check] failed to download file from S3: fileId={}, error={}", file.getId(), e.getMessage());
+        String filePath = buildFilePath(file);
+        Result<List<byte[]>> storageResult = fileRemoteClient.getFileListByHash(
+                List.of(filePath), List.of(file.getFileHash()));
+        if (storageResult == null || !storageResult.isSuccess()) {
+            throw new IntegrityCheckDependencyException(String.format(
+                    "storage lookup failed for fileId=%d, code=%s",
+                    file.getId(), storageResult != null ? storageResult.getCode() : "null"));
+        }
+        if (storageResult.getData() == null || storageResult.getData().isEmpty()
+                || storageResult.getData().get(0) == null || storageResult.getData().get(0).length == 0) {
+            log.warn("[integrity-check] file not found in S3: fileId={}, hash={}", file.getId(), file.getFileHash());
             return new VerifyResult(AlertType.FILE_NOT_FOUND, null);
         }
 
         // 2. Compare DB hash with on-chain record
-        try {
-            String uploader = String.valueOf(file.getUid());
-            Result<FileDetailVO> chainResult = fileRemoteClient.getFile(uploader, file.getFileHash());
-            if (!chainResult.isSuccess() || chainResult.getData() == null) {
-                log.warn("[integrity-check] chain record not found: fileId={}, hash={}", file.getId(), file.getFileHash());
-                return new VerifyResult(AlertType.CHAIN_NOT_FOUND, null);
-            }
-
-            String chainHash = chainResult.getData().fileHash();
-            if (!file.getFileHash().equalsIgnoreCase(chainHash)) {
-                log.warn("[integrity-check] chain hash mismatch: fileId={}, dbHash={}, chainHash={}",
-                        file.getId(), file.getFileHash(), chainHash);
-                return new VerifyResult(AlertType.HASH_MISMATCH, chainHash);
-            }
-        } catch (Exception e) {
-            log.warn("[integrity-check] failed to query chain: fileId={}, error={}", file.getId(), e.getMessage());
+        String uploader = String.valueOf(resolveBlockchainUploaderId(file));
+        Result<FileDetailVO> chainResult = fileRemoteClient.getFile(uploader, file.getFileHash());
+        if (isBlockchainDependencyFailure(chainResult)) {
+            throw new IntegrityCheckDependencyException(String.format(
+                    "blockchain lookup failed for fileId=%d, code=%s",
+                    file.getId(), chainResult != null ? chainResult.getCode() : "null"));
+        }
+        if (chainResult == null || !chainResult.isSuccess() || chainResult.getData() == null) {
+            log.warn("[integrity-check] chain record not found: fileId={}, hash={}", file.getId(), file.getFileHash());
             return new VerifyResult(AlertType.CHAIN_NOT_FOUND, null);
         }
 
+        String chainHash = chainResult.getData().fileHash();
+        if (!file.getFileHash().equalsIgnoreCase(chainHash)) {
+            log.warn("[integrity-check] chain hash mismatch: fileId={}, dbHash={}, chainHash={}",
+                    file.getId(), file.getFileHash(), chainHash);
+            return new VerifyResult(AlertType.HASH_MISMATCH, chainHash);
+        }
+
         return null;
+    }
+
+    /**
+     * Distinguish downstream availability problems from actual "record not found" results.
+     * Only the latter should create integrity alerts.
+     */
+    private boolean isBlockchainDependencyFailure(Result<FileDetailVO> chainResult) {
+        if (chainResult == null) {
+            return true;
+        }
+        Integer code = chainResult.getCode();
+        return Objects.equals(code, cn.flying.platformapi.constant.ResultEnum.BLOCKCHAIN_ERROR.getCode())
+                || Objects.equals(code, cn.flying.platformapi.constant.ResultEnum.BLOCKCHAIN_TIMEOUT.getCode())
+                || Objects.equals(code, cn.flying.platformapi.constant.ResultEnum.BLOCKCHAIN_UNREACHABLE.getCode())
+                || Objects.equals(code, cn.flying.platformapi.constant.ResultEnum.SERVICE_CIRCUIT_OPEN.getCode())
+                || Objects.equals(code, cn.flying.platformapi.constant.ResultEnum.SERVICE_TIMEOUT.getCode());
     }
 
     private void createAlert(File file, AlertType alertType, Long tenantId, String chainHash) {
@@ -305,6 +333,23 @@ public class IntegrityCheckService {
         }
 
         log.warn("[integrity-check] alert created: type={}, fileId={}, tenantId={}", alertType, file.getId(), tenantId);
+    }
+
+    /**
+     * Resolve the uploader identity used by blockchain file queries.
+     * Share-saved files must be queried with the original uploader rather than the recipient.
+     *
+     * @param file current file record under integrity check
+     * @return uploader user ID for blockchain queries
+     */
+    private Long resolveBlockchainUploaderId(File file) {
+        if (file.getOrigin() != null) {
+            File originFile = fileMapper.selectByIdIncludeDeleted(file.getOrigin());
+            if (originFile != null && originFile.getUid() != null) {
+                return originFile.getUid();
+            }
+        }
+        return file.getUid();
     }
 
     private String buildFilePath(File file) {

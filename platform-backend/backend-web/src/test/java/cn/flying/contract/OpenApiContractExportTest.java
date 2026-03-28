@@ -15,6 +15,7 @@ import cn.flying.controller.FileRestController;
 import cn.flying.controller.FriendController;
 import cn.flying.controller.FriendFileShareController;
 import cn.flying.controller.ImageController;
+import cn.flying.controller.IntegrityAlertController;
 import cn.flying.controller.MessageController;
 import cn.flying.controller.PermissionController;
 import cn.flying.controller.QuotaAdminController;
@@ -29,6 +30,7 @@ import cn.flying.controller.TicketController;
 import cn.flying.controller.TransactionController;
 import cn.flying.controller.UploadSessionController;
 import cn.flying.dao.mapper.FileMapper;
+import cn.flying.dao.mapper.IntegrityAlertMapper;
 import cn.flying.dao.mapper.SysPermissionMapper;
 import cn.flying.dao.mapper.SysRolePermissionMapper;
 import cn.flying.service.AccountService;
@@ -42,6 +44,7 @@ import cn.flying.service.FileUploadService;
 import cn.flying.service.FriendFileShareService;
 import cn.flying.service.FriendService;
 import cn.flying.service.ImageService;
+import cn.flying.service.integrity.IntegrityCheckService;
 import cn.flying.service.MessageService;
 import cn.flying.service.PermissionService;
 import cn.flying.service.QuotaRolloutAuditService;
@@ -159,6 +162,12 @@ class OpenApiContractExportTest {
     private ImageService imageService;
 
     @MockitoBean
+    private IntegrityCheckService integrityCheckService;
+
+    @MockitoBean
+    private IntegrityAlertMapper integrityAlertMapper;
+
+    @MockitoBean
     private SysPermissionMapper sysPermissionMapper;
 
     @MockitoBean
@@ -235,6 +244,7 @@ class OpenApiContractExportTest {
         assertThat(rootNode.path("openapi").asText()).isNotBlank();
         assertThat(rootNode.path("paths").has("/api/v1/files")).isTrue();
         assertThat(rootNode.path("paths").has("/api/v1/admin/quota/rollout/audits")).isTrue();
+        assertThat(rootNode.path("paths").has("/api/v1/admin/integrity-alerts")).isTrue();
 
         return normalizeOpenApiDocument(rootNode);
     }
@@ -369,6 +379,7 @@ class OpenApiContractExportTest {
             FriendController.class,
             FriendFileShareController.class,
             ImageController.class,
+            IntegrityAlertController.class,
             MessageController.class,
             PermissionController.class,
             QuotaAdminController.class,

@@ -209,6 +209,34 @@ class IntegrityCheckServiceTest {
     }
 
     @Test
+    @DisplayName("Storage service failure counts as execution error instead of alert")
+    void checkIntegrity_storageServiceFailure_countsAsError() throws Exception {
+        when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
+        when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
+
+        File file = FileTestBuilder.aFile(f -> {
+            f.setTenantId(TENANT_ID);
+            f.setUid(USER_ID);
+            f.setStatus(FileUploadStatus.SUCCESS.getCode());
+        });
+
+        when(fileMapper.selectPage(any(), any())).thenReturn(
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<File>() {{
+                    setRecords(List.of(file));
+                }});
+
+        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.FILE_SERVICE_ERROR, List.of());
+        when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
+
+        var stats = integrityCheckService.checkIntegrity();
+
+        assertEquals(1, stats.totalChecked());
+        assertEquals(0, stats.mismatchesFound());
+        assertEquals(1, stats.errorsEncountered());
+        verify(integrityAlertMapper, never()).insert(any(IntegrityAlert.class));
+    }
+
+    @Test
     @DisplayName("Chain record not found - CHAIN_NOT_FOUND alert")
     void checkIntegrity_chainNotFound_alert() throws Exception {
         when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
@@ -244,6 +272,88 @@ class IntegrityCheckServiceTest {
         ArgumentCaptor<IntegrityAlert> alertCaptor = ArgumentCaptor.forClass(IntegrityAlert.class);
         verify(integrityAlertMapper).insert(alertCaptor.capture());
         assertEquals(IntegrityAlert.AlertType.CHAIN_NOT_FOUND.name(), alertCaptor.getValue().getAlertType());
+    }
+
+    @Test
+    @DisplayName("Blockchain service failure counts as execution error instead of alert")
+    void checkIntegrity_blockchainServiceFailure_countsAsError() throws Exception {
+        when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
+        when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
+
+        String hash = "chain_service_failure_hash";
+
+        File file = FileTestBuilder.aFile(f -> {
+            f.setTenantId(TENANT_ID);
+            f.setUid(USER_ID);
+            f.setFileHash(hash);
+            f.setStatus(FileUploadStatus.SUCCESS.getCode());
+        });
+
+        when(fileMapper.selectPage(any(), any())).thenReturn(
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<File>() {{
+                    setRecords(List.of(file));
+                }});
+
+        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of(new byte[]{1, 2, 3}));
+        when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
+
+        Result<FileDetailVO> chainResult = new Result<>(ResultEnum.BLOCKCHAIN_ERROR, null);
+        when(fileRemoteClient.getFile(anyString(), eq(hash))).thenReturn(chainResult);
+
+        var stats = integrityCheckService.checkIntegrity();
+
+        assertEquals(1, stats.totalChecked());
+        assertEquals(0, stats.mismatchesFound());
+        assertEquals(1, stats.errorsEncountered());
+        verify(integrityAlertMapper, never()).insert(any(IntegrityAlert.class));
+    }
+
+    @Test
+    @DisplayName("Share-saved file resolves origin uploader for chain lookup")
+    void checkIntegrity_shareSavedFile_usesOriginUploader() throws Exception {
+        when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
+        when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
+
+        Long recipientUserId = 200L;
+        Long originFileId = 999L;
+        String hash = "shared_file_hash";
+
+        File sharedFile = FileTestBuilder.aFile(f -> {
+            f.setTenantId(TENANT_ID);
+            f.setUid(recipientUserId);
+            f.setOrigin(originFileId);
+            f.setFileHash(hash);
+            f.setStatus(FileUploadStatus.SUCCESS.getCode());
+        });
+        File originFile = FileTestBuilder.aFile(f -> {
+            f.setId(originFileId);
+            f.setUid(USER_ID);
+            f.setTenantId(TENANT_ID);
+            f.setFileHash(hash);
+        });
+
+        when(fileMapper.selectPage(any(), any())).thenReturn(
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<File>() {{
+                    setRecords(List.of(sharedFile));
+                }});
+        when(fileMapper.selectByIdIncludeDeleted(originFileId)).thenReturn(originFile);
+
+        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of(new byte[]{1, 2, 3}));
+        when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
+
+        FileDetailVO chainDetail = new FileDetailVO(
+                String.valueOf(USER_ID), "test.txt", "{}", "", hash, "2025-01-01", 0L, 1024L, "text/plain");
+        Result<FileDetailVO> chainResult = new Result<>(ResultEnum.SUCCESS, chainDetail);
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), hash)).thenReturn(chainResult);
+
+        var stats = integrityCheckService.checkIntegrity();
+
+        assertEquals(1, stats.totalChecked());
+        assertEquals(0, stats.mismatchesFound());
+        assertEquals(0, stats.errorsEncountered());
+        verify(fileRemoteClient).getFile(String.valueOf(USER_ID), hash);
+        verify(fileRemoteClient, never()).getFile(String.valueOf(recipientUserId), hash);
+        verify(integrityAlertMapper, never()).insert(any(IntegrityAlert.class));
     }
 
     @Test
