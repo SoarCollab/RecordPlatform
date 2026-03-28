@@ -1,6 +1,6 @@
 # RecordPlatform 演进路线图
 
-> 最后更新：2026-03-14
+> 最后更新：2026-03-28
 > 定位：个人维护的开源项目，以自动化流程替代人工管理
 
 ## 1. 文档目标
@@ -207,7 +207,7 @@
   - 前端：上传流支持 `targetFileId` 参数触发版本续写
   - 测试覆盖：`FileVersionServiceTest`（单元）、`FileVersionIntegrationTest`（集成）
 
-**P2-2：OpenTelemetry 统一追踪**
+**P2-2：OpenTelemetry 统一追踪** ✅
 
 - **What**：三个 Java 服务接入 OTel Java Agent，替换可选的 SkyWalking
 - **实施方案**：
@@ -221,6 +221,13 @@
 - **触发条件**：跨服务问题排查成本明显增加时
 - **自动化收益**：零代码改动获得全链路追踪；故障定位从"翻日志"变为"看 trace"
 - **涉及文件**：各服务 `Dockerfile` 或启动脚本（添加 `-javaagent`）、Nacos 配置（采样率）
+- **当前状态**：已完成。实现证据：
+  - OTel Java Agent v2.26.1 集成至三个服务 Dockerfile
+  - `scripts/start.sh` 新增 `--otel` 启动选项（与 `--skywalking` 互斥）
+  - 三个 `logback-spring.xml` 新增 OTel trace context MDC 字段
+  - `docker-compose.infra.yml` 新增 OTel Collector + Jaeger 服务
+  - `backend-web` 补齐 `micrometer-registry-prometheus` 依赖
+  - OTel Collector 配置：`config/otel-collector-config.yaml`
 
 **P2-3：后量子密码学准备**
 
@@ -281,7 +288,7 @@
 - **自动化收益**：从"感觉系统不稳"变为"SLO 预算还剩 X%"的量化决策
 - **涉及文件**：告警规则配置、Grafana 仪表盘 JSON、OTel Collector 配置
 
-**P2-7：存储完整性周期校验**
+**P2-7：存储完整性周期校验** ✅
 
 - **What**：后台定时任务对 S3 存储文件进行 re-hash 校验，比对链上哈希，检测静默数据损坏（bit rot）或篡改
 - **实施方案**：
@@ -292,6 +299,15 @@
 - **触发条件**：存储节点故障恢复后需验证数据完整性，或合规审计要求提供存储证明时
 - **自动化收益**：从"出问题才发现数据损坏"变为"持续自动检测"；合规审计可一键出报告
 - **涉及文件**：`platform-backend/backend-service/` 新增定时任务与校验服务、`platform-backend/backend-dao/` 告警记录表
+- **当前状态**：已完成。实现证据：
+  - DB 迁移：`V1.5.0__integrity_alert.sql`（告警记录表）
+  - 核心服务：`IntegrityCheckService.java`（S3 存在性检查 + DB-链上哈希比对）
+  - 定时调度：`IntegrityCheckScheduler.java`（默认每天凌晨 2 点，采样率 1%）
+  - REST API：`IntegrityAlertController.java`（告警查询/确认/解决/手动触发）
+  - SSE 通知：新增 `INTEGRITY_ALERT` 事件类型，实时推送管理员
+  - 分布式锁：Redisson 防止多实例并发执行
+  - 测试覆盖：`IntegrityCheckServiceTest`（11 个单元测试）、`IntegrityAlertControllerIT`（集成测试）
+  - 注意：因 S3 存储加密内容，采用"存在性验证 + DB-链哈希比对"策略，而非内容 re-hash
 
 **P2-8：多方签名存证**
 
