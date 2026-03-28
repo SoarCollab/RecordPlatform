@@ -1,0 +1,275 @@
+# ==============================================================================
+# Prometheus SLO Alerting Rules — RecordPlatform
+# ==============================================================================
+#
+# Multi-window, multi-burn-rate alerting based on Google SRE methodology.
+#
+# Burn-rate model:
+#   A "burn rate" of 1x means the error budget is consumed evenly over the SLO
+#   compliance window (30 days). Higher burn rates indicate faster exhaustion:
+#
+#     Burn Rate | Budget consumed in | Short window | Long window | Severity
+#     ----------|--------------------|--------------|--------------|---------
+#       14.4x   |     2 days         |     5m       |     1h       | critical
+#        6.0x   |     5 days         |    30m       |     6h       | warning
+#        3.0x   |    10 days         |     1h       |     1d       | info
+#
+#   Both short AND long windows must exceed the threshold to fire, preventing
+#   false positives from brief spikes (short-only) or stale data (long-only).
+#
+# SLO targets:
+#   - Upload success rate:    >= 99.5%  (error budget = 0.5%)
+#   - Attestation P99 latency: <= 5s
+#   - Storage availability:   >= 99.9%
+#   - API 5xx error rate:     <= 0.5%
+#
+# How to load:
+#   Add this file to your Prometheus configuration under rule_files:
+#     rule_files:
+#       - /etc/prometheus/recording-rules.yml
+#       - /etc/prometheus/alerting-rules.yml
+# ==============================================================================
+
+groups:
+  # ============================================================================
+  # Upload Success Rate — burn-rate alerts
+  # ============================================================================
+  - name: slo:upload_success
+    rules:
+      # Critical: 14.4x burn rate — budget exhausted in ~2 days
+      - alert: UploadSuccessRateBurnCritical
+        expr: |
+          (1 - sli:upload_success:ratio_rate5m) > (14.4 * 0.005)
+          and
+          (1 - sli:upload_success:ratio_rate1h) > (14.4 * 0.005)
+        for: 2m
+        labels:
+          severity: critical
+          slo: upload_success
+        annotations:
+          summary: "Upload success rate burning error budget at 14.4x (critical)"
+          description: >-
+            Upload success rate is consuming error budget at 14.4x the sustainable
+            rate. At this pace the 30-day budget will be exhausted in ~2 days.
+            Current 5m failure rate: {{ $value | humanizePercentage }}.
+          runbook: "https://wiki.internal/runbooks/upload-success-slo"
+
+      # Warning: 6x burn rate — budget exhausted in ~5 days
+      - alert: UploadSuccessRateBurnWarning
+        expr: |
+          (1 - sli:upload_success:ratio_rate30m) > (6 * 0.005)
+          and
+          (1 - sli:upload_success:ratio_rate6h) > (6 * 0.005)
+        for: 5m
+        labels:
+          severity: warning
+          slo: upload_success
+        annotations:
+          summary: "Upload success rate burning error budget at 6x (warning)"
+          description: >-
+            Upload success rate is consuming error budget at 6x the sustainable
+            rate. At this pace the 30-day budget will be exhausted in ~5 days.
+            Current 30m failure rate: {{ $value | humanizePercentage }}.
+          runbook: "https://wiki.internal/runbooks/upload-success-slo"
+
+      # Info: 3x burn rate — budget exhausted in ~10 days
+      - alert: UploadSuccessRateBurnInfo
+        expr: |
+          (1 - sli:upload_success:ratio_rate1h) > (3 * 0.005)
+          and
+          (1 - sli:upload_success:ratio_rate1d) > (3 * 0.005)
+        for: 15m
+        labels:
+          severity: info
+          slo: upload_success
+        annotations:
+          summary: "Upload success rate burning error budget at 3x (info)"
+          description: >-
+            Upload success rate is consuming error budget at 3x the sustainable
+            rate. At this pace the 30-day budget will be exhausted in ~10 days.
+            Current 1h failure rate: {{ $value | humanizePercentage }}.
+
+  # ============================================================================
+  # Attestation (Blockchain) Latency — threshold alerts
+  # ============================================================================
+  - name: slo:attestation_latency
+    rules:
+      # Critical: P99 exceeds 5s across both short and long windows
+      - alert: AttestationLatencyBurnCritical
+        expr: |
+          sli:attestation_latency:p99_5m > 5
+          and
+          sli:attestation_latency:p99_1h > 5
+        for: 2m
+        labels:
+          severity: critical
+          slo: attestation_latency
+        annotations:
+          summary: "Attestation P99 latency exceeds 5s SLO (critical)"
+          description: >-
+            Blockchain storeFile P99 latency has exceeded the 5-second SLO target
+            in both 5m and 1h windows. Current 5m P99: {{ $value | humanizeDuration }}.
+          runbook: "https://wiki.internal/runbooks/attestation-latency-slo"
+
+      # Warning: P99 exceeds 5s in 30m window
+      - alert: AttestationLatencyBurnWarning
+        expr: |
+          sli:attestation_latency:p99_30m > 5
+        for: 5m
+        labels:
+          severity: warning
+          slo: attestation_latency
+        annotations:
+          summary: "Attestation P99 latency exceeds 5s SLO (warning)"
+          description: >-
+            Blockchain storeFile P99 latency has exceeded the 5-second SLO target
+            in the 30m window. Current 30m P99: {{ $value | humanizeDuration }}.
+          runbook: "https://wiki.internal/runbooks/attestation-latency-slo"
+
+  # ============================================================================
+  # Storage Availability — threshold alerts
+  # ============================================================================
+  - name: slo:storage_availability
+    rules:
+      # Critical: storage availability below 99.9%
+      - alert: StorageAvailabilityCritical
+        expr: |
+          sli:storage_availability:ratio < 0.999
+        for: 5m
+        labels:
+          severity: critical
+          slo: storage_availability
+        annotations:
+          summary: "Storage availability below 99.9% SLO"
+          description: >-
+            S3 storage node availability has dropped below the 99.9% SLO target.
+            Current ratio: {{ $value | humanizePercentage }}.
+            Check S3Monitor health checks and node connectivity.
+          runbook: "https://wiki.internal/runbooks/storage-availability-slo"
+
+      # Warning: individual node under high load
+      - alert: StorageNodeHighLoad
+        expr: |
+          s3_node_load_score > 0.85
+        for: 10m
+        labels:
+          severity: warning
+          slo: storage_availability
+        annotations:
+          summary: "S3 node {{ $labels.node }} under high load"
+          description: >-
+            S3 node {{ $labels.node }} has a load score of {{ $value | humanize }}
+            (threshold: 0.85). High load may degrade upload/download performance
+            and eventually impact storage availability.
+
+  # ============================================================================
+  # API Error Rate (5xx) — burn-rate alerts
+  # ============================================================================
+  - name: slo:api_error
+    rules:
+      # Critical: 14.4x burn rate
+      - alert: ApiErrorRateBurnCritical
+        expr: |
+          sli:api_error:ratio_rate5m > (14.4 * 0.005)
+          and
+          sli:api_error:ratio_rate1h > (14.4 * 0.005)
+        for: 2m
+        labels:
+          severity: critical
+          slo: api_error
+        annotations:
+          summary: "API 5xx error rate burning error budget at 14.4x (critical)"
+          description: >-
+            API 5xx error rate is consuming error budget at 14.4x the sustainable
+            rate. At this pace the 30-day budget will be exhausted in ~2 days.
+            Current 5m error rate: {{ $value | humanizePercentage }}.
+          runbook: "https://wiki.internal/runbooks/api-error-rate-slo"
+
+      # Warning: 6x burn rate
+      - alert: ApiErrorRateBurnWarning
+        expr: |
+          sli:api_error:ratio_rate30m > (6 * 0.005)
+          and
+          sli:api_error:ratio_rate6h > (6 * 0.005)
+        for: 5m
+        labels:
+          severity: warning
+          slo: api_error
+        annotations:
+          summary: "API 5xx error rate burning error budget at 6x (warning)"
+          description: >-
+            API 5xx error rate is consuming error budget at 6x the sustainable
+            rate. At this pace the 30-day budget will be exhausted in ~5 days.
+            Current 30m error rate: {{ $value | humanizePercentage }}.
+          runbook: "https://wiki.internal/runbooks/api-error-rate-slo"
+
+      # Info: 3x burn rate
+      - alert: ApiErrorRateBurnInfo
+        expr: |
+          sli:api_error:ratio_rate1h > (3 * 0.005)
+          and
+          sli:api_error:ratio_rate1d > (3 * 0.005)
+        for: 15m
+        labels:
+          severity: info
+          slo: api_error
+        annotations:
+          summary: "API 5xx error rate burning error budget at 3x (info)"
+          description: >-
+            API 5xx error rate is consuming error budget at 3x the sustainable
+            rate. At this pace the 30-day budget will be exhausted in ~10 days.
+            Current 1h error rate: {{ $value | humanizePercentage }}.
+
+  # ============================================================================
+  # Error Budget Exhaustion — absolute budget depletion
+  # ============================================================================
+  - name: slo:error_budget_exhaustion
+    rules:
+      - alert: UploadErrorBudgetExhausted
+        expr: |
+          sli:upload_success:error_budget_remaining < 0
+        for: 5m
+        labels:
+          severity: critical
+          slo: upload_success
+        annotations:
+          summary: "Upload SLO error budget exhausted"
+          description: >-
+            The 30-day upload success rate error budget has been fully consumed.
+            Remaining budget: {{ $value | humanizePercentage }}.
+            Immediate action required to restore upload reliability.
+          runbook: "https://wiki.internal/runbooks/upload-success-slo"
+
+      - alert: ApiErrorBudgetExhausted
+        expr: |
+          sli:api_error:error_budget_remaining < 0
+        for: 5m
+        labels:
+          severity: critical
+          slo: api_error
+        annotations:
+          summary: "API error rate SLO error budget exhausted"
+          description: >-
+            The 30-day API 5xx error rate error budget has been fully consumed.
+            Remaining budget: {{ $value | humanizePercentage }}.
+            Immediate action required to reduce 5xx error rate.
+          runbook: "https://wiki.internal/runbooks/api-error-rate-slo"
+
+  # ============================================================================
+  # Resilience — circuit breaker state alerts
+  # ============================================================================
+  - name: slo:resilience
+    rules:
+      - alert: CircuitBreakerOpen
+        expr: |
+          resilience4j_circuitbreaker_state{state="open"} == 1
+        for: 1m
+        labels:
+          severity: warning
+          slo: resilience
+        annotations:
+          summary: "Circuit breaker {{ $labels.name }} is OPEN"
+          description: >-
+            Resilience4j circuit breaker "{{ $labels.name }}" has been in OPEN
+            state for over 1 minute. Downstream service calls are being rejected.
+            Check the target service health and recent error rates.
