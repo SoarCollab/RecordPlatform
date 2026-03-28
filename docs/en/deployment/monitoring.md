@@ -296,3 +296,65 @@ output {
 }
 ```
 
+## SLO/SLI Observability
+
+### Service Level Indicators (SLI)
+
+| SLI | Metric Source | Calculation |
+|-----|--------------|-------------|
+| **Upload Success Rate** | `saga_total_total{status}` | completed / (completed + failed + compensated) |
+| **Attestation P99 Latency** | `blockchain_operation_duration_seconds{quantile="0.99"}` | Pre-computed client-side percentile |
+| **Storage Availability** | `s3_node_online_status` | online nodes / total nodes |
+| **API Error Rate** | `http_server_requests_seconds_count{status}` | 5xx count / total count |
+
+### Service Level Objectives (SLO)
+
+| SLO | Target | Window | Error Budget (30d) |
+|-----|--------|--------|--------------------|
+| Upload Success Rate | >= 99.5% | 30-day rolling | 0.5% (~216 min) |
+| Attestation P99 Latency | <= 5s | 30-day rolling | — |
+| Storage Availability | >= 99.9% | 30-day rolling | 0.1% (~43 min) |
+| API Error Rate | <= 0.5% | 30-day rolling | 0.5% (~216 min) |
+
+### Burn-Rate Alerting
+
+Uses the Google SRE multi-window burn-rate model. Both short AND long windows must fire simultaneously to reduce false positives.
+
+| Severity | Short Window | Long Window | Burn Rate | Action |
+|----------|-------------|-------------|-----------|--------|
+| **Critical** | 5 min | 1 hour | 14.4x | Page immediately |
+| **Warning** | 30 min | 6 hours | 6x | Same-day ticket |
+| **Info** | 2 hours | 1 day | 3x | Review next week |
+
+### Configuration Files
+
+| File | Purpose |
+|------|---------|
+| `config/prometheus/recording-rules.yml` | SLI pre-computation at multiple time windows |
+| `config/prometheus/alerting-rules.yml` | Burn-rate alerts + error budget exhaustion alerts |
+| `config/grafana/slo-dashboard.json` | Grafana v10+ SLO overview dashboard |
+
+Load in Prometheus via:
+
+```yaml
+rule_files:
+  - "config/prometheus/recording-rules.yml"
+  - "config/prometheus/alerting-rules.yml"
+```
+
+### Grafana Dashboard
+
+Import `config/grafana/slo-dashboard.json` into Grafana. The dashboard includes:
+
+| Row | Content |
+|-----|---------|
+| SLO Overview | 4 stat panels showing current SLI values vs targets |
+| Error Budget | Upload and API error budget remaining gauges |
+| Upload Success | Time series with 99.5% SLO threshold line |
+| Attestation Latency | P50/P95/P99 time series with 5s threshold |
+| Storage Availability | Availability ratio + per-node status table |
+| API Error Rate | Error rate time series + top-5 error endpoints |
+| Resilience4j | Circuit breaker states + retry counts |
+
+> **Note:** Attestation latency uses Micrometer pre-computed client-side quantiles (`.publishPercentiles()`), which are not aggregatable across multiple service instances. For multi-instance deployments, add `.publishPercentileHistogram(true)` to `FiscoMetrics.java` timer builders.
+

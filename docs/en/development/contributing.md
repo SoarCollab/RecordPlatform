@@ -43,6 +43,8 @@ All PRs must pass these checks before merging:
 | **Frontend Tests** | lint + type check + vitest coverage |
 | **Contract Consistency** | OpenAPI ↔ `generated.ts` diff must be empty |
 | **Build Verification** | Backend build + frontend `pnpm build` |
+| **Security Scan** | Trivy vulnerability scan (HIGH/CRITICAL) |
+| **Contract Security** | Slither static analysis on `.sol` changes (informational) |
 
 ### After modifying REST endpoints
 

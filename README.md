@@ -69,6 +69,7 @@ Built for teams that need:
 - **Multi-tenancy** — DB, cache, and storage path isolation per tenant
 - **Storage Integrity Check** — scheduled verification of S3 files against blockchain records
 - **Distributed Tracing** — OpenTelemetry auto-instrumentation with Jaeger visualization
+- **SLO/SLI Observability** — Prometheus recording rules, burn-rate alerting, Grafana SLO dashboard
 
 </td>
 </tr>
