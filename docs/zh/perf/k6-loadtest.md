@@ -141,7 +141,6 @@ GitHub Actions Secrets（与统一变量同名）：
 
 支持：
 - 手工触发 (`workflow_dispatch`)
-- 每日定时 (`schedule`)
 
 可选：
 - 手工触发时可选择是否包含 `chunk-upload` 场景（`include_chunk_upload=true`）。

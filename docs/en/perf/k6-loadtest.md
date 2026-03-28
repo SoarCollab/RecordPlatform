@@ -141,7 +141,6 @@ GitHub Actions Secrets (same names as unified variables):
 
 Supports:
 - Manual trigger (`workflow_dispatch`)
-- Scheduled (`schedule`)
 
 Optional:
 - When manually triggered, you can choose whether to include the `chunk-upload` scenario (`include_chunk_upload=true`).

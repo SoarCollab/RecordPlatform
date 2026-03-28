@@ -6,7 +6,7 @@ This guide covers development setup for the RecordPlatform frontend application.
 
 | Category | Technology | Version |
 |----------|------------|---------|
-| Framework | Svelte 5 + SvelteKit 2 | 5.53+ / 2.52+ |
+| Framework | Svelte 5 + SvelteKit 2 | 5.54+ / 2.55+ |
 | Language | TypeScript | 5.9+ |
 | Styling | Tailwind CSS | 4.2+ |
 | Build Tool | Vite | 6.0+ |
