@@ -109,15 +109,13 @@ scrape_configs:
     static_configs:
       - targets: ['backend:8000']
 
-  - job_name: 'recordplatform-storage'
-    metrics_path: '/actuator/prometheus'
+  # Storage and FISCO are Dubbo providers without embedded HTTP servers,
+  # so they do not expose /actuator/prometheus directly.
+  # Collect their metrics via the OTel Collector Prometheus exporter instead.
+  - job_name: 'otel-collector'
+    metrics_path: '/metrics'
     static_configs:
-      - targets: ['storage:8092']
-
-  - job_name: 'recordplatform-fisco'
-    metrics_path: '/actuator/prometheus'
-    static_configs:
-      - targets: ['fisco:8091']
+      - targets: ['otel-collector:8889']
 ```
 
 ### Alert Rules

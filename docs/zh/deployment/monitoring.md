@@ -109,15 +109,12 @@ scrape_configs:
     static_configs:
       - targets: ['backend:8000']
 
-  - job_name: 'recordplatform-storage'
-    metrics_path: '/actuator/prometheus'
+  # storage 和 fisco 是 Dubbo Provider，没有内嵌 HTTP 服务器，
+  # 不直接暴露 /actuator/prometheus。通过 OTel Collector 的 Prometheus 导出端点采集。
+  - job_name: 'otel-collector'
+    metrics_path: '/metrics'
     static_configs:
-      - targets: ['storage:8092']
-
-  - job_name: 'recordplatform-fisco'
-    metrics_path: '/actuator/prometheus'
-    static_configs:
-      - targets: ['fisco:8091']
+      - targets: ['otel-collector:8889']
 ```
 
 ### 告警规则

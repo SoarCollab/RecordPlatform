@@ -25,25 +25,23 @@ Diagnosing and resolving common issues in RecordPlatform.
 ### Check Service Health
 
 ```bash
-# Backend health
+# Backend health (includes downstream service status)
 curl http://localhost:8000/record-platform/actuator/health
-
-# Storage health
-curl http://localhost:8092/actuator/health
-
-# FISCO health
-curl http://localhost:8091/actuator/health
 ```
+
+> **Note:** `platform-storage` and `platform-fisco` are Dubbo providers without embedded HTTP servers, so they do not expose `/actuator/health` endpoints directly. Their health is reflected in the backend's `/actuator/health` response (e.g., the `s3Storage` component). You can also monitor them via the OTel Collector Prometheus endpoint at `localhost:8889`.
 
 ### Check Logs
 
 ```bash
-# View recent errors
-tail -f /var/log/recordplatform/backend/error.log
+# View recent errors (default LOG_PATH is ./log relative to each service's working directory)
+tail -f log/backend/error.log
 
 # Search for specific error
-grep -r "Exception" /var/log/recordplatform/
+grep -r "Exception" log/
 ```
+
+> Override `LOG_PATH` environment variable to change the log directory (e.g., `LOG_PATH=/var/log/recordplatform`).
 
 ### Check Dependencies
 

@@ -25,25 +25,23 @@ RecordPlatform 常见问题诊断与解决方案。
 ### 检查服务健康状态
 
 ```bash
-# 后端服务健康检查
+# 后端服务健康检查（包含下游服务状态）
 curl http://localhost:8000/record-platform/actuator/health
-
-# 存储服务健康检查
-curl http://localhost:8092/actuator/health
-
-# FISCO 服务健康检查
-curl http://localhost:8091/actuator/health
 ```
+
+> **注意：** `platform-storage` 和 `platform-fisco` 是 Dubbo Provider，没有内嵌 HTTP 服务器，因此不直接暴露 `/actuator/health` 端点。它们的健康状态通过 backend 的 `/actuator/health` 响应间接反映（如 `s3Storage` 组件）。也可通过 OTel Collector 的 Prometheus 端点 `localhost:8889` 监控。
 
 ### 查看日志
 
 ```bash
-# 查看最新错误日志
-tail -f /var/log/recordplatform/backend/error.log
+# 查看最新错误日志（默认 LOG_PATH 为各服务工作目录下的 ./log）
+tail -f log/backend/error.log
 
 # 搜索特定错误
-grep -r "Exception" /var/log/recordplatform/
+grep -r "Exception" log/
 ```
+
+> 通过 `LOG_PATH` 环境变量可自定义日志目录（如 `LOG_PATH=/var/log/recordplatform`）。
 
 ### 检查依赖服务
 
