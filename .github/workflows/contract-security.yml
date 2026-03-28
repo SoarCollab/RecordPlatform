@@ -4,6 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - '.github/workflows/contract-security.yml'
       - 'platform-fisco/contract/**/*.sol'
   workflow_dispatch:
 
@@ -32,33 +33,60 @@ jobs:
           solc-select use 0.8.11
 
       - name: Run Slither on Storage.sol
+        id: slither_storage
         continue-on-error: true
         run: |
           mkdir -p slither-results
+          set +e
           slither platform-fisco/contract/Storage.sol \
             --solc-solcs-select 0.8.11 \
             --sarif slither-results/storage.sarif \
             --json slither-results/storage.json \
             --exclude-informational \
-            --exclude-optimization \
-            || true
+            --exclude-optimization
+          slither_exit_code=$?
+          set -e
+
+          if [ ! -s slither-results/storage.sarif ] || [ ! -s slither-results/storage.json ]; then
+            echo "::error title=Storage.sol scan failed::Slither exited with ${slither_exit_code} and did not produce both SARIF and JSON outputs."
+            exit 1
+          fi
+
+          if [ "$slither_exit_code" -ne 0 ]; then
+            echo "::warning title=Storage.sol scan exited non-zero::Slither exited with ${slither_exit_code}, but SARIF and JSON outputs were generated."
+          fi
 
       - name: Run Slither on Sharing.sol
+        id: slither_sharing
         continue-on-error: true
         run: |
+          set +e
           slither platform-fisco/contract/Sharing.sol \
             --solc-solcs-select 0.8.11 \
             --sarif slither-results/sharing.sarif \
             --json slither-results/sharing.json \
             --exclude-informational \
-            --exclude-optimization \
-            || true
+            --exclude-optimization
+          slither_exit_code=$?
+          set -e
+
+          if [ ! -s slither-results/sharing.sarif ] || [ ! -s slither-results/sharing.json ]; then
+            echo "::error title=Sharing.sol scan failed::Slither exited with ${slither_exit_code} and did not produce both SARIF and JSON outputs."
+            exit 1
+          fi
+
+          if [ "$slither_exit_code" -ne 0 ]; then
+            echo "::warning title=Sharing.sol scan exited non-zero::Slither exited with ${slither_exit_code}, but SARIF and JSON outputs were generated."
+          fi
 
       - name: Merge SARIF results
         if: always()
+        env:
+          STORAGE_SCAN_OUTCOME: ${{ steps.slither_storage.outcome }}
+          SHARING_SCAN_OUTCOME: ${{ steps.slither_sharing.outcome }}
         run: |
           python3 << 'PYEOF'
-          import json, glob, os
+          import json, os, sys
 
           merged = {
               "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
@@ -66,27 +94,45 @@ jobs:
               "runs": []
           }
 
-          for path in sorted(glob.glob("slither-results/*.sarif")):
+          expected_outputs = {
+              "storage.sarif": os.environ.get("STORAGE_SCAN_OUTCOME", "unknown"),
+              "sharing.sarif": os.environ.get("SHARING_SCAN_OUTCOME", "unknown"),
+          }
+          failures = []
+
+          for filename, outcome in expected_outputs.items():
+              path = os.path.join("slither-results", filename)
+              if outcome != "success":
+                  failures.append(f"{filename} scan step ended with outcome={outcome}")
+                  continue
+              if not os.path.exists(path):
+                  failures.append(f"{filename} was not generated")
+                  continue
               try:
                   with open(path) as f:
                       data = json.load(f)
                   if "runs" in data and isinstance(data["runs"], list):
                       merged["runs"].extend(data["runs"])
-                  print(f"Merged {len(data.get('runs', []))} run(s) from {os.path.basename(path)}")
+                      print(f"Merged {len(data.get('runs', []))} run(s) from {filename}")
+                  else:
+                      failures.append(f"{filename} does not contain a valid SARIF runs array")
               except (json.JSONDecodeError, IOError) as e:
-                  print(f"Skipping {os.path.basename(path)}: {e}")
+                  failures.append(f"{filename} could not be parsed: {e}")
 
-          if not merged["runs"]:
-              merged["runs"].append({"tool": {"driver": {"name": "slither", "rules": []}}, "results": []})
-              print("No valid SARIF runs found; wrote empty placeholder")
+          if merged["runs"]:
+              with open("slither-results/merged.sarif", "w") as f:
+                  json.dump(merged, f, indent=2)
+              print(f"Wrote merged.sarif with {len(merged['runs'])} run(s)")
+          else:
+              failures.append("no valid SARIF runs were produced")
 
-          with open("slither-results/merged.sarif", "w") as f:
-              json.dump(merged, f, indent=2)
-          print(f"Wrote merged.sarif with {len(merged['runs'])} run(s)")
+          if failures:
+              print("::error title=Incomplete Slither coverage::" + "; ".join(failures))
+              sys.exit(1)
           PYEOF
 
       - name: Upload SARIF to GitHub Security
-        if: always()
+        if: always() && hashFiles('slither-results/merged.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: slither-results/merged.sarif
@@ -94,19 +140,39 @@ jobs:
 
       - name: Generate Step Summary
         if: always()
+        env:
+          STORAGE_SCAN_OUTCOME: ${{ steps.slither_storage.outcome }}
+          SHARING_SCAN_OUTCOME: ${{ steps.slither_sharing.outcome }}
         run: |
           python3 << 'PYEOF'
           import json, glob, os
 
           findings = {"High": [], "Medium": [], "Low": []}
           total = 0
+          issues = []
+
+          step_outcomes = {
+              "Storage.sol": os.environ.get("STORAGE_SCAN_OUTCOME", "unknown"),
+              "Sharing.sol": os.environ.get("SHARING_SCAN_OUTCOME", "unknown"),
+          }
+          for contract, outcome in step_outcomes.items():
+              if outcome != "success":
+                  issues.append(f"{contract} scan did not complete successfully (outcome={outcome}).")
 
           for path in sorted(glob.glob("slither-results/*.json")):
               try:
                   with open(path) as f:
                       data = json.load(f)
-                  detectors = data if isinstance(data, list) else data.get("results", data.get("detectors", []))
+                  if isinstance(data, list):
+                      detectors = data
+                  else:
+                      results = data.get("results", {})
+                      if isinstance(results, dict):
+                          detectors = results.get("detectors", [])
+                      else:
+                          detectors = data.get("detectors", [])
                   if not isinstance(detectors, list):
+                      issues.append(f"{os.path.basename(path)} does not contain a detectors list.")
                       continue
                   for d in detectors:
                       impact = d.get("impact", "Low").capitalize()
@@ -117,12 +183,17 @@ jobs:
                       findings[impact].append({"check": check, "description": desc})
                       total += 1
               except (json.JSONDecodeError, IOError) as e:
-                  print(f"Skipping {os.path.basename(path)}: {e}")
+                  issues.append(f"{os.path.basename(path)} could not be parsed: {e}")
 
           summary_file = os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null")
           with open(summary_file, "a") as f:
               f.write("## Slither Smart Contract Analysis\n\n")
               f.write(f"**Total findings: {total}**\n\n")
+              if issues:
+                  f.write("### Scan execution issues\n\n")
+                  for issue in issues:
+                      f.write(f"- {issue}\n")
+                  f.write("\n")
               for severity in ["High", "Medium", "Low"]:
                   items = findings[severity]
                   f.write(f"### {severity} ({len(items)})\n\n")
@@ -134,7 +205,10 @@ jobs:
                   else:
                       f.write("No findings.\n")
                   f.write("\n")
-          print(f"Summary: {total} total findings (High={len(findings['High'])}, Medium={len(findings['Medium'])}, Low={len(findings['Low'])})")
+          print(
+              f"Summary: {total} total findings "
+              f"(High={len(findings['High'])}, Medium={len(findings['Medium'])}, Low={len(findings['Low'])}, Issues={len(issues)})"
+          )
           PYEOF
 
       - name: Upload artifacts

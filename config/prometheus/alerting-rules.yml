@@ -147,20 +147,22 @@ groups:
             Check S3Monitor health checks and node connectivity.
           runbook: "https://wiki.internal/runbooks/storage-availability-slo"
 
-      # Warning: individual node under high load
-      - alert: StorageNodeHighLoad
+      # Warning: individual node disk usage is high
+      - alert: StorageNodeHighUsage
         expr: |
-          s3_node_load_score > 0.85
+          s3_node_usage_percent > 85
+          and on(node, fault_domain)
+          s3_node_online_status == 1
         for: 10m
         labels:
           severity: warning
           slo: storage_availability
         annotations:
-          summary: "S3 node {{ $labels.node }} under high load"
+          summary: "S3 node {{ $labels.node }} disk usage above 85%"
           description: >-
-            S3 node {{ $labels.node }} has a load score of {{ $value | humanize }}
-            (threshold: 0.85). High load may degrade upload/download performance
-            and eventually impact storage availability.
+            S3 node {{ $labels.node }} is at {{ printf "%.1f" $value }}% disk usage
+            (threshold: 85%). Sustained capacity pressure may degrade storage
+            availability and leave less room for replica repair.
 
   # ============================================================================
   # API Error Rate (5xx) — burn-rate alerts

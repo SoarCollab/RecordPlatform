@@ -755,8 +755,8 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
-          "expr": "resilience4j_circuitbreaker_state",
-          "legendFormat": "{{name}} ({{state}})",
+          "expr": "max by (name, instance) ((resilience4j_circuitbreaker_state{state=\"closed\"} * 0) or (resilience4j_circuitbreaker_state{state=\"open\"} * 1) or (resilience4j_circuitbreaker_state{state=\"half_open\"} * 2))",
+          "legendFormat": "{{name}} {{instance}}",
           "refId": "A"
         }
       ],

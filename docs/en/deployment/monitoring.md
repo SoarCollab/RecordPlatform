@@ -76,9 +76,8 @@ The `/actuator/health` endpoint includes:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `s3_node_online_status` | Gauge | Node online status (0/1) |
-| `s3_node_load_score` | Gauge | Node load score |
-| `s3_node_operations_total` | Counter | Operations per node |
+| `s3_node_online_status` | Gauge | Node online status (0/1), bridged via backend actuator from storage capacity snapshots |
+| `s3_node_usage_percent` | Gauge | Node disk usage percent (0-100), bridged via backend actuator from storage capacity snapshots |
 
 ## Health Thresholds
 
@@ -303,8 +302,8 @@ output {
 | SLI | Metric Source | Calculation |
 |-----|--------------|-------------|
 | **Upload Success Rate** | `saga_total_total{status}` | completed / (completed + failed + compensated) |
-| **Attestation P99 Latency** | `blockchain_operation_duration_seconds{quantile="0.99"}` | Pre-computed client-side percentile |
-| **Storage Availability** | `s3_node_online_status` | online nodes / total nodes |
+| **Attestation P99 Latency** | `blockchain_operation_duration_seconds{quantile="0.99"}` | `max_over_time(...[window])` over exported P99 samples |
+| **Storage Availability** | `s3_node_online_status` | online configured nodes / configured nodes |
 | **API Error Rate** | `http_server_requests_seconds_count{status}` | 5xx count / total count |
 
 ### Service Level Objectives (SLO)
@@ -324,7 +323,7 @@ Uses the Google SRE multi-window burn-rate model. Both short AND long windows mu
 |----------|-------------|-------------|-----------|--------|
 | **Critical** | 5 min | 1 hour | 14.4x | Page immediately |
 | **Warning** | 30 min | 6 hours | 6x | Same-day ticket |
-| **Info** | 2 hours | 1 day | 3x | Review next week |
+| **Info** | 1 hour | 1 day | 3x | Review next week |
 
 ### Configuration Files
 
@@ -356,5 +355,4 @@ Import `config/grafana/slo-dashboard.json` into Grafana. The dashboard includes:
 | API Error Rate | Error rate time series + top-5 error endpoints |
 | Resilience4j | Circuit breaker states + retry counts |
 
-> **Note:** Attestation latency uses Micrometer pre-computed client-side quantiles (`.publishPercentiles()`), which are not aggregatable across multiple service instances. For multi-instance deployments, add `.publishPercentileHistogram(true)` to `FiscoMetrics.java` timer builders.
-
+> **Note:** Attestation latency uses Micrometer pre-computed client-side quantiles (`.publishPercentiles()`), so the SLO rules roll up window-specific values with `max_over_time(...)` instead of `histogram_quantile(...)`. These quantiles are not aggregatable across multiple service instances. For multi-instance deployments, add `.publishPercentileHistogram(true)` to `FiscoMetrics.java` timer builders.

@@ -76,9 +76,8 @@ RecordPlatform 的监控、指标和健康检查。
 
 | 指标 | 类型 | 说明 |
 |------|------|------|
-| `s3_node_online_status` | Gauge | 节点在线状态 (0/1) |
-| `s3_node_load_score` | Gauge | 节点负载评分 |
-| `s3_node_operations_total` | Counter | 每节点操作数 |
+| `s3_node_online_status` | Gauge | 节点在线状态 (0/1)，由 backend actuator 基于存储容量快照桥接暴露 |
+| `s3_node_usage_percent` | Gauge | 节点磁盘使用率 (0-100)，由 backend actuator 基于存储容量快照桥接暴露 |
 
 ## 健康阈值
 
@@ -303,8 +302,8 @@ output {
 | SLI | 指标来源 | 计算方式 |
 |-----|---------|---------|
 | **上传成功率** | `saga_total_total{status}` | completed / (completed + failed + compensated) |
-| **存证 P99 延迟** | `blockchain_operation_duration_seconds{quantile="0.99"}` | Micrometer 预计算客户端分位数 |
-| **存储可用性** | `s3_node_online_status` | 在线节点数 / 总节点数 |
+| **存证 P99 延迟** | `blockchain_operation_duration_seconds{quantile="0.99"}` | 基于导出的 P99 样本做 `max_over_time(...[window])` 窗口汇总 |
+| **存储可用性** | `s3_node_online_status` | 当前配置节点中的在线节点数 / 当前配置节点总数 |
 | **API 错误率** | `http_server_requests_seconds_count{status}` | 5xx 数量 / 总请求数 |
 
 ### 服务级别目标（SLO）
@@ -324,7 +323,7 @@ output {
 |--------|--------|--------|--------|------|
 | **Critical** | 5 分钟 | 1 小时 | 14.4x | 立即处理 |
 | **Warning** | 30 分钟 | 6 小时 | 6x | 当日处理 |
-| **Info** | 2 小时 | 1 天 | 3x | 下周处理 |
+| **Info** | 1 小时 | 1 天 | 3x | 下周处理 |
 
 ### 配置文件
 
@@ -356,5 +355,4 @@ rule_files:
 | API 错误率 | 错误率时序图 + Top-5 错误端点 |
 | Resilience4j | 断路器状态 + 重试次数 |
 
-> **注意**：存证延迟使用 Micrometer 预计算的客户端分位数（`.publishPercentiles()`），不可跨多实例聚合。如需多实例部署，请在 `FiscoMetrics.java` 的 Timer builder 中添加 `.publishPercentileHistogram(true)`。
-
+> **注意**：存证延迟使用 Micrometer 预计算的客户端分位数（`.publishPercentiles()`），因此当前 SLO 规则用 `max_over_time(...)` 对导出的 P99 样本做窗口汇总，而不是 `histogram_quantile(...)`。这些分位数不可跨多实例聚合。如需多实例部署，请在 `FiscoMetrics.java` 的 Timer builder 中添加 `.publishPercentileHistogram(true)`。

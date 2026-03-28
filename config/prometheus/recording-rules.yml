@@ -20,9 +20,13 @@
 # Metric sources:
 #   saga_total_total{status}         — Micrometer counter (SagaMetrics.java)
 #                                      status: started | completed | compensated | failed
-#   blockchain_operation_duration_seconds_bucket — Micrometer timer histogram (FiscoMetrics.java)
+#   blockchain_operation_duration_seconds{operation,quantile}
+#                                    — Micrometer timer percentile samples (FiscoMetrics.java)
 #                                      operation: storeFile | queryFile | deleteFile | shareFile
-#   s3_node_online_status{node}      — raw Prometheus gauge (S3Monitor.java), 1=online 0=offline
+#   s3_node_online_status{node,fault_domain}
+#                                    — backend-web bridged gauge from StorageCapacityVO, 1=online 0=offline
+#   s3_node_usage_percent{node,fault_domain}
+#                                    — backend-web bridged gauge from StorageCapacityVO, value range 0-100
 #   http_server_requests_seconds_count{status} — Spring Boot Actuator (Micrometer)
 # ==============================================================================
 
@@ -113,18 +117,18 @@ groups:
   - name: sli:attestation_latency
     interval: 30s
     rules:
-      # P99 — direct from Micrometer pre-computed quantile (instant value)
+      # P99 — window-specific upper envelope over Micrometer-exported P99 samples
       - record: sli:attestation_latency:p99_5m
         expr: |
-          max(blockchain_operation_duration_seconds{operation="storeFile",quantile="0.99"})
+          max(max_over_time(blockchain_operation_duration_seconds{operation="storeFile",quantile="0.99"}[5m]))
 
       - record: sli:attestation_latency:p99_30m
         expr: |
-          max(blockchain_operation_duration_seconds{operation="storeFile",quantile="0.99"})
+          max(max_over_time(blockchain_operation_duration_seconds{operation="storeFile",quantile="0.99"}[30m]))
 
       - record: sli:attestation_latency:p99_1h
         expr: |
-          max(blockchain_operation_duration_seconds{operation="storeFile",quantile="0.99"})
+          max(max_over_time(blockchain_operation_duration_seconds{operation="storeFile",quantile="0.99"}[1h]))
 
   # ============================================================================
   # Storage Availability — node online ratio
@@ -133,6 +137,8 @@ groups:
   - name: sli:storage_availability
     interval: 30s
     rules:
+      # backend-web only keeps gauges for nodes present in the latest storage
+      # capacity snapshot, so the denominator reflects currently managed nodes.
       - record: sli:storage_availability:ratio
         expr: |
           count(s3_node_online_status == 1)

@@ -49,6 +49,8 @@ public class S3Monitor {
 
     // 存储当前在线的物理节点名称
     private final Set<String> onlineNodes = ConcurrentHashMap.newKeySet();
+    // 存储当前已知的节点名称，用于清理退役节点残留的指标标签
+    private final Set<String> knownNodes = ConcurrentHashMap.newKeySet();
 
     // 节点指标缓存
     private final Map<String, NodeMetrics> nodeMetricsCache = new ConcurrentHashMap<>();
@@ -130,6 +132,7 @@ public class S3Monitor {
     }
 
     private void markNodeOnline(String nodeName) {
+        knownNodes.add(nodeName);
         boolean newlyOnline = onlineNodes.add(nodeName);
         nodeOnlineStatus.labels(nodeName).set(1); // 更新 Prometheus 指标
         if (newlyOnline) {
@@ -144,9 +147,17 @@ public class S3Monitor {
         }
     }
 
+    /**
+     * 标记节点离线，但保留最近一次容量采样供聚合监控继续使用。
+     *
+     * @param nodeName 节点名称
+     * @param reason 离线原因
+     */
     private void markNodeOffline(String nodeName, String reason) {
+        knownNodes.add(nodeName);
         boolean wasOnline = onlineNodes.remove(nodeName);
         nodeOnlineStatus.labels(nodeName).set(0); // 更新 Prometheus 指标
+        nodeLoadScoreGauge.remove(nodeName);
         if (wasOnline) {
             log.warn("S3 节点 '{}' 现在处于离线状态，原因：{}", nodeName, reason);
             // 发布节点离线事件
@@ -170,11 +181,12 @@ public class S3Monitor {
         Map<String, NodeConfig> nodeConfigs = clientManager.getAllNodeConfigs();
         if (nodeConfigs.isEmpty()) {
             log.debug("没有为运行状况检查配置 S3 节点。");
-            Set<String> previouslyOnline = Set.copyOf(onlineNodes);
+            Set<String> knownNodeSnapshot = Set.copyOf(knownNodes);
             onlineNodes.clear();
-            nodeMetricsCache.clear();
-            // 将 Prometheus gauge （Prometheus 仪表） 设置为 0 （对于之前在线的节点）
-            previouslyOnline.forEach(node -> nodeOnlineStatus.labels(node).set(0));
+            knownNodeSnapshot.forEach(node -> {
+                nodeOnlineStatus.labels(node).set(0);
+                nodeLoadScoreGauge.remove(node);
+            });
             return;
         }
 
@@ -192,17 +204,13 @@ public class S3Monitor {
 
         // 清理不再配置的节点状态和指标
         Set<String> configuredNodeNames = nodeConfigs.keySet();
-        Set<String> nodesToRemove = onlineNodes.stream()
+        Set<String> nodesToRemove = knownNodes.stream()
                 .filter(node -> !configuredNodeNames.contains(node))
                 .collect(Collectors.toSet());
 
         if (!nodesToRemove.isEmpty()) {
             log.info("正在从应用列表中删除已被移除的节点：{}", nodesToRemove);
-            onlineNodes.removeAll(nodesToRemove);
-            nodesToRemove.forEach(node -> {
-                nodeOnlineStatus.labels(node).set(0);
-                nodeMetricsCache.remove(node);
-            });
+            nodesToRemove.forEach(this::purgeRetiredNodeMetrics);
         }
 
         log.debug("已完成计划的 S3 节点运行状况检查。联机节点数：{}", getOnlineNodes());
@@ -220,6 +228,19 @@ public class S3Monitor {
      */
     public Set<String> getOnlineNodes() {
         return Set.copyOf(onlineNodes);
+    }
+
+    /**
+     * 清理已退役节点的在线状态、负载指标和缓存，避免残留标签污染聚合口径。
+     *
+     * @param nodeName 已退役节点名称
+     */
+    private void purgeRetiredNodeMetrics(String nodeName) {
+        onlineNodes.remove(nodeName);
+        knownNodes.remove(nodeName);
+        nodeMetricsCache.remove(nodeName);
+        nodeOnlineStatus.remove(nodeName);
+        nodeLoadScoreGauge.remove(nodeName);
     }
 
     /**
