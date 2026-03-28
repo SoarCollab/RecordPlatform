@@ -127,6 +127,15 @@ Authorization: Bearer <token>
 | GET | `/api/v1/admin/files/shares/{shareCode}/logs` | 分享访问日志 |
 | GET | `/api/v1/admin/files/shares/{shareCode}/stats` | 分享访问统计 |
 
+### 管理员完整性告警（`/api/v1/admin/integrity-alerts`）
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/v1/admin/integrity-alerts` | 查询完整性告警（分页，支持 `status`、`alertType` 过滤） |
+| POST | `/api/v1/admin/integrity-alerts/check` | 手动触发完整性校验 |
+| PUT | `/api/v1/admin/integrity-alerts/{id}/acknowledge` | 确认完整性告警 |
+| PUT | `/api/v1/admin/integrity-alerts/{id}/resolve` | 解决完整性告警（附备注） |
+
 ### 配额（`/api/v1/files/quota`、`/api/v1/admin/quota`）
 
 | 方法 | 端点 | 说明 |

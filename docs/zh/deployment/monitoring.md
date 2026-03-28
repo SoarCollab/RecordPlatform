@@ -76,9 +76,8 @@ RecordPlatform 的监控、指标和健康检查。
 
 | 指标 | 类型 | 说明 |
 |------|------|------|
-| `s3_node_online_status` | Gauge | 节点在线状态 (0/1) |
-| `s3_node_load_score` | Gauge | 节点负载评分 |
-| `s3_node_operations_total` | Counter | 每节点操作数 |
+| `s3_node_online_status` | Gauge | 节点在线状态 (0/1)，由 backend actuator 基于存储容量快照桥接暴露 |
+| `s3_node_usage_percent` | Gauge | 节点磁盘使用率 (0-100)，由 backend actuator 基于存储容量快照桥接暴露 |
 
 ## 健康阈值
 
@@ -110,15 +109,12 @@ scrape_configs:
     static_configs:
       - targets: ['backend:8000']
 
-  - job_name: 'recordplatform-storage'
-    metrics_path: '/actuator/prometheus'
+  # storage 和 fisco 是 Dubbo Provider，没有内嵌 HTTP 服务器，
+  # 不直接暴露 /actuator/prometheus。通过 OTel Collector 的 Prometheus 导出端点采集。
+  - job_name: 'otel-collector'
+    metrics_path: '/metrics'
     static_configs:
-      - targets: ['storage:8092']
-
-  - job_name: 'recordplatform-fisco'
-    metrics_path: '/actuator/prometheus'
-    static_configs:
-      - targets: ['fisco:8091']
+      - targets: ['otel-collector:8889']
 ```
 
 ### 告警规则
@@ -296,3 +292,64 @@ output {
 }
 ```
 
+## SLO/SLI 可观测性
+
+### 服务级别指标（SLI）
+
+| SLI | 指标来源 | 计算方式 |
+|-----|---------|---------|
+| **上传成功率** | `saga_total_total{status}` | completed / (completed + failed + compensated) |
+| **存证 P99 延迟** | `otel_blockchain_operation_duration_seconds{quantile="0.99"}` | 基于 Collector 导出的 P99 样本做 `max_over_time(...[window])` 窗口汇总 |
+| **存储可用性** | `s3_node_online_status` | 对按 `(node, fault_domain)` 去重后的瞬时在线节点占比做 30 天滚动平均 |
+| **API 错误率** | `http_server_requests_seconds_count{status}` | 5xx 数量 / 总请求数 |
+
+### 服务级别目标（SLO）
+
+| SLO | 目标 | 窗口 | 错误预算（30 天） |
+|-----|------|------|-----------------|
+| 上传成功率 | >= 99.5% | 30 天滚动 | 0.5%（约 216 分钟） |
+| 存证 P99 延迟 | <= 5s | 30 天滚动 | — |
+| 存储可用性 | >= 99.9% | 30 天滚动 | 0.1%（约 43 分钟） |
+| API 错误率 | <= 0.5% | 30 天滚动 | 0.5%（约 216 分钟） |
+
+### 燃尽率告警
+
+采用 Google SRE 多窗口燃尽率模型。短窗口和长窗口必须同时触发，以减少误报。
+
+| 严重性 | 短窗口 | 长窗口 | 燃尽率 | 响应 |
+|--------|--------|--------|--------|------|
+| **Critical** | 5 分钟 | 1 小时 | 14.4x | 立即处理 |
+| **Warning** | 30 分钟 | 6 小时 | 6x | 当日处理 |
+| **Info** | 1 小时 | 1 天 | 3x | 下周处理 |
+
+### 配置文件
+
+| 文件 | 用途 |
+|------|------|
+| `config/prometheus/recording-rules.yml` | SLI 预计算规则（多时间窗口） |
+| `config/prometheus/alerting-rules.yml` | 燃尽率告警 + 错误预算耗尽告警 |
+| `config/grafana/slo-dashboard.json` | Grafana v10+ SLO 概览仪表盘 |
+
+在 Prometheus 中加载：
+
+```yaml
+rule_files:
+  - "config/prometheus/recording-rules.yml"
+  - "config/prometheus/alerting-rules.yml"
+```
+
+### Grafana 仪表盘
+
+将 `config/grafana/slo-dashboard.json` 导入 Grafana。仪表盘包含：
+
+| 面板行 | 内容 |
+|--------|------|
+| SLO 总览 | 4 个 Stat 面板，显示当前 SLI 值与目标对比 |
+| 错误预算 | 上传和 API 错误预算剩余仪表 |
+| 上传成功率 | 时序图，含 99.5% SLO 阈值线 |
+| 存证延迟 | P50/P95/P99 时序图，含 5s 阈值线 |
+| 存储可用性 | 30 天滚动可用性比率 + 节点状态表格 |
+| API 错误率 | 错误率时序图 + Top-5 错误端点 |
+| Resilience4j | 断路器状态 + 重试次数 |
+
+> **注意**：存证延迟通过 OTel Collector 的 Prometheus exporter 暴露，因此指标名带有 `otel_` 前缀。它仍然使用 Micrometer 预计算的客户端分位数（`.publishPercentiles()`），因此当前 SLO 规则用 `max_over_time(...)` 对导出的 P99 样本做窗口汇总，而不是 `histogram_quantile(...)`。这些分位数不可跨多实例聚合。如需多实例部署，请在 `FiscoMetrics.java` 的 Timer builder 中添加 `.publishPercentileHistogram(true)`。

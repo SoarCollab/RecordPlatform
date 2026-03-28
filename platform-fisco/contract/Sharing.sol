@@ -3,6 +3,9 @@ pragma solidity ^0.8.11;
 
 import "./Storage.sol";
 
+// Slither timestamp warning is intentionally disabled for this contract because
+// share expiry is an explicit time-based business rule and not a randomness source.
+// slither-disable-start timestamp
 contract Sharing is Storage {
     // 分享信息结构体
     struct ShareInfo {
@@ -30,26 +33,25 @@ contract Sharing is Storage {
     // 取消分享事件
     event ShareCancelled(string shareCode, string uploader);
     
-    // 生成随机分享码（基于区块信息与 difficulty）
-    function generateShareCode() private returns (string memory) {
+    // 生成分享码（基于合约上下文和递增 nonce，避免外部自调用依赖）
+    function generateShareCode(
+        string memory uploader,
+        bytes32[] memory fileHashes,
+        uint256 expireMinutes
+    ) private returns (string memory) {
         bytes memory code = new bytes(6);
         uint256 charsetLength = bytes(CHARSET).length;
-        
+        bytes32 entropy = keccak256(
+            abi.encode(address(this), uploader, fileHashes, expireMinutes, nonce)
+        );
+        uint256 seed = uint256(entropy);
+
         for(uint i = 0; i < 6; i++) {
-            // 使用区块信息、nonce和循环索引来生成伪随机数
-            uint256 randomIndex = uint256(
-                keccak256(
-                    abi.encodePacked(
-                        block.timestamp,
-                        block.difficulty,
-                        msg.sender,
-                        nonce,
-                        i
-                    )
-                )
-            ) % charsetLength;
-            
-            code[i] = bytes(CHARSET)[randomIndex];
+            code[i] = bytes(CHARSET)[seed % charsetLength];
+            seed /= charsetLength;
+            if (seed == 0 && i < 5) {
+                seed = uint256(keccak256(abi.encode(entropy, i)));
+            }
         }
         
         // 增加nonce以确保下次生成不同的随机数
@@ -72,22 +74,14 @@ contract Sharing is Storage {
         // 验证所有文件的所有权
         for(uint i = 0; i < fileHashes.length; i++) {
             bytes32 fileHash = fileHashes[i];
-            File memory file = this.getFile(uploader, fileHash);
-            require(
-                keccak256(abi.encodePacked(file.uploader)) == keccak256(abi.encodePacked(uploader)),
-                "Not owner of one of the files"
-            );
+            requireFileExists(fileHash, "One of the files does not exist");
+            requireFileOwner(fileHash, uploader, "Not owner of one of the files");
         }
         
         // 生成唯一的分享码
-        string memory shareCode;
-        bool isUnique = false;
-        
-        while(!isUnique) {
-            shareCode = generateShareCode();
-            if(!shareInfos[shareCode].isValid) {
-                isUnique = true;
-            }
+        string memory shareCode = generateShareCode(uploader, fileHashes, expireMinutes);
+        while(shareInfos[shareCode].isValid) {
+            shareCode = generateShareCode(uploader, fileHashes, expireMinutes);
         }
         
         // 计算过期时间（毫秒）
@@ -138,7 +132,10 @@ contract Sharing is Storage {
         // 获取所有分享的文件信息
         File[] memory sharedFiles = new File[](shareInfo.fileHashes.length);
         for(uint i = 0; i < shareInfo.fileHashes.length; i++) {
-            sharedFiles[i] = this.getFile(shareInfo.uploader, shareInfo.fileHashes[i]);
+            bytes32 fileHash = shareInfo.fileHashes[i];
+            requireFileExists(fileHash, "One of the shared files does not exist");
+            requireFileOwner(fileHash, shareInfo.uploader, "Shared file owner mismatch");
+            sharedFiles[i] = copyStoredFile(fileHash);
         }
         
         return (
@@ -195,3 +192,4 @@ contract Sharing is Storage {
         );
     }
 }
+// slither-disable-end timestamp

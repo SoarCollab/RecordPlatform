@@ -525,6 +525,28 @@ class DistributedStorageServiceImplTest {
         }
 
         /**
+         * 验证所有节点都被禁用时，返回无受管节点快照供 backend-web 清理桥接指标。
+         */
+        @Test
+        @DisplayName("Should return no-node snapshot when all configured nodes are disabled")
+        void shouldReturnNoNodeSnapshotWhenAllConfiguredNodesAreDisabled() {
+            List<NodeConfig> nodes = Arrays.asList(
+                    createNodeConfig("node1", false, "A"),
+                    createNodeConfig("node2", false, "B")
+            );
+            when(storageProperties.getNodes()).thenReturn(nodes);
+
+            Result<cn.flying.platformapi.response.StorageCapacityVO> result = storageService.getStorageCapacity();
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData()).isNotNull();
+            assertThat(result.getData().degraded()).isTrue();
+            assertThat(result.getData().source()).isEqualTo("prometheus-no-nodes");
+            assertThat(result.getData().nodes()).isEmpty();
+            assertThat(result.getData().domains()).isEmpty();
+        }
+
+        /**
          * 验证容量聚合出现异常时返回 FILE_SERVICE_ERROR。
          */
         @Test

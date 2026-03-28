@@ -893,15 +893,14 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         try {
             List<NodeConfig> configuredNodes = storageProperties.getNodes();
             if (CollectionUtils.isEmpty(configuredNodes)) {
-                return Result.success(new StorageCapacityVO(
-                        0L,
-                        0L,
-                        0L,
-                        true,
-                        "prometheus-no-nodes",
-                        List.of(),
-                        List.of()
-                ));
+                return Result.success(emptyStorageCapacitySnapshot());
+            }
+
+            List<NodeConfig> enabledNodes = configuredNodes.stream()
+                    .filter(node -> Boolean.TRUE.equals(node.getEnabled()))
+                    .toList();
+            if (enabledNodes.isEmpty()) {
+                return Result.success(emptyStorageCapacitySnapshot());
             }
 
             long totalCapacityBytes = 0L;
@@ -910,11 +909,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             List<StorageNodeCapacityVO> nodeSummaries = new ArrayList<>();
             Map<String, DomainCapacityAccumulator> domainAccumulator = new LinkedHashMap<>();
 
-            for (NodeConfig node : configuredNodes) {
-                if (!Boolean.TRUE.equals(node.getEnabled())) {
-                    continue;
-                }
-
+            for (NodeConfig node : enabledNodes) {
                 String nodeName = node.getName();
                 String faultDomain = (node.getFaultDomain() == null || node.getFaultDomain().isBlank())
                         ? "UNKNOWN"
@@ -989,6 +984,23 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             log.error("聚合存储容量信息失败", e);
             return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
         }
+    }
+
+    /**
+     * 构造“当前没有受管存储节点”的容量快照，供 backend-web 清理桥接指标。
+     *
+     * @return 无节点容量快照
+     */
+    private StorageCapacityVO emptyStorageCapacitySnapshot() {
+        return new StorageCapacityVO(
+                0L,
+                0L,
+                0L,
+                true,
+                "prometheus-no-nodes",
+                List.of(),
+                List.of()
+        );
     }
 
     /**

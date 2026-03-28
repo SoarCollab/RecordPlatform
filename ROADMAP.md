@@ -47,7 +47,6 @@
 | 前端覆盖率 (utils ≥ 70%, endpoints/stores/services ≥ 90%) | `platform-frontend/vitest.config.ts` |
 | 契约一致性 (OpenAPI ↔ generated.ts) | `.github/workflows/test.yml` contract-consistency job |
 | 构建验证 | `.github/workflows/test.yml` build-check job |
-| 安全扫描 (Trivy HIGH/CRITICAL 阻断) | `.github/workflows/test.yml` security-scan job |
 | Dependabot 自动依赖更新 | `.github/dependabot.yml` |
 | Codecov patch 覆盖率 ≥ 80% | `.codecov.yml` |
 
@@ -55,10 +54,12 @@
 
 | 项目 | 现状 | 证据 |
 |------|------|------|
+| 安全扫描 (Trivy PR) | 信息级（`exit-code: 0`），SARIF 上传至 GitHub Security 面板 | `.github/workflows/test.yml` security-scan job |
 | SAST (Semgrep) | 每周定时，信息级；自动观测汇总链路已就位，待首轮数据校准阈值 | `.github/workflows/security-poc.yml`, `tools/security/scripts/render-security-poc-observation.mjs` |
 | SCA (Trivy) 全量扫描 | 每周深度扫描（信息级）；PR 级 HIGH/CRITICAL 已升级为阻断 | `.github/workflows/security-poc.yml`, `.github/workflows/test.yml` |
 | SBOM (CycloneDX) | 每周定时，信息级 | `.github/workflows/security-poc.yml` |
 | 性能 smoke (k6) | 手动触发；k6 脚本已现代化，渲染管线就绪，待在线实测回填 | `.github/workflows/perf-smoke.yml`, `tools/k6/file-query.js`, `tools/k6/scripts/render-query-baseline.mjs` |
+| Slither (Solidity SAST) | PR 触发（`.sol` 变更或 workflow 自身变更）+ 手动，信息级 | `.github/workflows/contract-security.yml` |
 
 ### 表 3：尚未实现
 
@@ -67,9 +68,9 @@
 | ~~容器镜像构建~~ | ~~已完成（P1-3）：4 个多阶段 Dockerfile（`platform-backend/Dockerfile`、`platform-fisco/Dockerfile`、`platform-storage/Dockerfile`、`platform-frontend/Dockerfile`）~~ |
 | ~~自动化发布 / Changelog~~ | ~~已完成（P1-3）：`.github/workflows/release.yml`，tag push 触发，自动生成 Release Notes + SBOM 附件 + 四镜像推送 ghcr.io~~ |
 | ~~GitHub 分支保护 required checks~~ | ~~已完成：required checks 已启用（Backend Tests, Frontend Tests, Contract Consistency, Build Verification）~~ |
-| 智能合约部署自动化 | 合约编译和部署完全手动；ABI 文件作为静态资源签入，无工具链保障 ABI 与链上合约一致 |
+| ~~智能合约部署自动化~~ | ~~已完成（P1-5）：`scripts/contract-deploy.sh` 6 阶段自动化脚本（Pre-flight → Compile → Deploy → ABI Sync → Write-back → Verify）~~ |
 
-> 门禁策略详见 `plan/gate-policy.md`
+> 门禁策略详见表 1 和表 2
 
 ---
 
@@ -94,8 +95,8 @@
 
 **P0-3：安全扫描升级为 PR 阻断** ✅
 
-- **What**：在 `test.yml` 新增 `security-scan` job（PR 触发），Trivy `exit-code: 1` 仅对 HIGH/CRITICAL 阻断；保留 `security-poc.yml` 作为每周全量深度扫描
-- **当前状态**：已完成（PR #108）。`security-scan` job 已就位于 `test.yml`，PR 触发时 Trivy HIGH/CRITICAL 自动阻断；`security-poc.yml` 保留每周全量深度扫描（信息级）
+- **What**：在 `test.yml` 新增 `security-scan` job（PR 触发），Trivy 扫描 HIGH/CRITICAL 漏洞；保留 `security-poc.yml` 作为每周全量深度扫描
+- **当前状态**：已完成（PR #108）。`security-scan` job 已就位于 `test.yml`，信息级（`exit-code: 0`），SARIF 上传至 GitHub Security 面板（category: `trivy-pr`）供生命周期跟踪；`security-poc.yml` 保留每周全量深度扫描（信息级）
 - **自动化收益**：高危漏洞在 PR 阶段自动拦截，无需人工定期检查
 - **完成标准**：引入已知 CVE 依赖的 PR 被 CI 阻断
 - **涉及文件**：`.github/workflows/test.yml`、`.github/workflows/security-poc.yml`
@@ -114,7 +115,7 @@
 - **What**：在 `security-poc.yml` 和 `test.yml` 中用 `github/codeql-action/upload-sarif` 上传 Semgrep/Trivy SARIF
 - **自动化收益**：漏洞具有生命周期跟踪（open/dismissed/fixed），不再是一次性 CI 输出
 - **涉及文件**：`.github/workflows/test.yml`、`.github/workflows/security-poc.yml`
-- **当前状态**：已完成（PR #73, commit `3afe670`）。三个 category 上传：`semgrep`（Semgrep SAST）、`trivy-sca`（Trivy 全量扫描）、`trivy-pr`（Trivy PR 级扫描），结果可在 GitHub Security → Code scanning alerts 面板查看
+- **当前状态**：已完成（PR #73, commit `3afe670`）。`trivy-pr`（Trivy PR 级扫描）和 `slither`（Solidity SAST）的 SARIF 上传至 GitHub Security 面板（`github/codeql-action/upload-sarif`）；`semgrep` 和 `trivy-sca` 的 SARIF 仅作为 artifact 存储（`actions/upload-artifact`），未上传至 Security 面板
 
 **P1-2：故障注入集成测试** ✅
 
@@ -165,7 +166,7 @@
 - **涉及文件**：新建 `scripts/env-check.sh`、新建 `docker-compose.infra.yml`、
   更新 `docs/zh/deployment/`、更新 `docs/en/deployment/`
 - **当前状态**：已完成。交付物：
-  - `docker-compose.infra.yml`：根目录可执行 compose 文件，含 6 个服务（Nacos/MySQL/Redis/RabbitMQ/MinIO x2），全部配置 healthcheck + env 默认值
+  - `docker-compose.infra.yml`：根目录可执行 compose 文件，含 8 个服务（Nacos/MySQL/Redis/RabbitMQ/MinIO x2/OTel Collector/Jaeger），全部配置 healthcheck + env 默认值
   - `scripts/env-check.sh`：8 项环境预检脚本，支持 `--fix` 自动修复和 `--service` 单项检查
   - `docs/zh/deployment/environment-setup.md` + `docs/en/deployment/environment-setup.md`：中英文环境搭建指南
   - `.env.example`：补充基础设施凭据变量（DB_PASSWORD, REDIS_*, RABBITMQ_*, NACOS_AUTH_TOKEN）
@@ -245,17 +246,22 @@
 - **迁移时间线**：参考 NIST 建议 2030-2035 完成迁移；当前阶段为调研和算法评估
 - **触发条件**：监管要求出现，或 Java 生态 PQC 库（如 Bouncy Castle PQC）达到生产就绪时
 
-**P2-4：智能合约安全测试增强**
+**P2-4：智能合约安全测试增强** ✅
 
-- **What**：在 CI 中集成 Slither 静态分析 + Echidna/Foundry 模糊测试，覆盖 `.sol` 合约变更
+- **What**：在 CI 中集成 Slither 静态分析，覆盖 `.sol` 合约变更（Echidna/Foundry 模糊测试待 FISCO BCOS 编译器兼容性验证后引入）
 - **实施方案**：
   - `.sol` 文件变更时触发安全扫描 workflow
   - Slither 静态分析：检测重入攻击、整数溢出、未检查返回值等常见漏洞模式
-  - Echidna/Foundry 模糊测试：针对合约不变式（invariant）进行自动化属性测试
   - 初期信息级不阻断 PR，积累基线数据后评估升级为阻断
 - **触发条件**：合约逻辑复杂度增加时（如新增合约或修改核心存证/分享逻辑）
 - **自动化收益**：合约安全检查从人工审计变为 CI 自动执行
 - **涉及文件**：新建 `.github/workflows/contract-security.yml`、`platform-fisco/contract/`
+- **当前状态**：已完成。交付物：
+  - `.github/workflows/contract-security.yml`：PR 触发（`.sol` 变更或 workflow 自身变更）+ 手动触发
+  - Slither 静态分析：`solc-select` 指定 0.8.11 版本，排除 informational/optimization 级别
+  - SARIF 上传至 GitHub Security 面板（category: `slither`）
+  - CI Step Summary 生成 Markdown 报告
+  - 信息级不阻断 PR（`continue-on-error: true`）
 
 **P2-5：文件完整性批量验证（Merkle Tree）**
 
@@ -275,7 +281,7 @@
 - **自动化收益**：链上交易数从 O(N) 降至 O(1)；审计验证保持 O(log N) 效率
 - **涉及文件**：`platform-fisco/` 新增 Merkle Tree 工具类、`platform-backend/backend-service/` 批量存证逻辑
 
-**P2-6：可观测性驱动 SLO/SLI 体系**
+**P2-6：可观测性驱动 SLO/SLI 体系** ✅
 
 - **What**：基于 OTel 指标定义 SLI/SLO，建立燃尽率告警机制
 - **实施方案**：
@@ -286,7 +292,12 @@
 - **触发条件**：生产环境稳定运行且 P2-2 OTel 追踪就位后
 - **前置依赖**：P2-2（OpenTelemetry 统一追踪）
 - **自动化收益**：从"感觉系统不稳"变为"SLO 预算还剩 X%"的量化决策
-- **涉及文件**：告警规则配置、Grafana 仪表盘 JSON、OTel Collector 配置
+- **涉及文件**：告警规则配置、Grafana 仪表盘 JSON、OTel Collector 配置、`platform-storage` 指标导出清理逻辑
+- **当前状态**：已完成。交付物：
+  - `config/prometheus/recording-rules.yml`：SLI 预计算规则（上传成功率、存证延迟、存储可用性、API 错误率），多窗口（5m/30m/1h/6h/1d/30d）
+  - `config/prometheus/alerting-rules.yml`：燃尽率告警（critical/warning/info 三级）+ 错误预算耗尽告警 + 断路器告警
+  - `config/grafana/slo-dashboard.json`：Grafana SLO Overview 仪表盘（7 行面板：总览、错误预算、上传成功率、存证延迟、存储可用性、API 错误率、断路器）
+  - `platform-storage/src/main/java/cn/flying/storage/core/S3Monitor.java`：退役节点指标标签清理，避免旧节点污染存储可用性与负载告警口径
 
 **P2-7：存储完整性周期校验** ✅
 
@@ -442,7 +453,7 @@
 
 | RFC 文件 | 状态 | 关联优先级 | 说明 |
 |----------|------|-----------|------|
-| `plan/gate-policy.md` | 活跃 | P0 全量 | 门禁分层策略，定义 PR 阻断 / 发布阻断 / 人工检查分级 |
+| `plan/gate-policy.md` | 已归档（内容合并至 ROADMAP 表 1/表 2） | P0 全量 | 门禁分层策略，定义 PR 阻断 / 发布阻断 / 人工检查分级 |
 
 ### 附录 B：术语表
 

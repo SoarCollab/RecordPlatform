@@ -1,0 +1,286 @@
+name: Smart Contract Security
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/contract-security.yml'
+      - 'platform-fisco/contract/**/*.sol'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  slither:
+    name: Slither Analysis (Informational)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Slither and solc
+        run: |
+          pip install slither-analyzer solc-select
+          solc-select install 0.8.11
+          solc-select use 0.8.11
+
+      - name: Run Slither on Solidity contracts
+        id: slither_scan
+        continue-on-error: true
+        run: |
+          mkdir -p slither-results
+          python3 << 'PYEOF'
+          import json
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          contract_root = Path("platform-fisco/contract")
+          result_dir = Path("slither-results")
+          contracts = sorted(contract_root.rglob("*.sol"))
+          manifest = {
+              "contracts": [str(contract) for contract in contracts],
+              "scan_runs": [],
+              "issues": [],
+          }
+
+          if not contracts:
+              manifest["issues"].append(
+                  f"No Solidity files found under {contract_root}; scan skipped."
+              )
+              (result_dir / "scan-manifest.json").write_text(
+                  json.dumps(manifest, indent=2), encoding="utf-8"
+              )
+              print(
+                  "::notice title=No Solidity contracts found::"
+                  f"Skipping Slither scan because {contract_root} contains no *.sol files."
+              )
+              sys.exit(0)
+
+          sarif_path = (result_dir / "contracts.sarif").resolve()
+          json_path = (result_dir / "contracts.json").resolve()
+          log_path = (result_dir / "contracts.log").resolve()
+          command = [
+              "slither",
+              ".",
+              "--solc-solcs-select",
+              "0.8.11",
+              "--sarif",
+              str(sarif_path),
+              "--json",
+              str(json_path),
+              "--exclude-informational",
+              "--exclude-optimization",
+          ]
+          completed = subprocess.run(command, capture_output=True, text=True, cwd=contract_root)
+          log_path.write_text(
+              (completed.stdout or "")
+              + ("\n" if completed.stdout and completed.stderr else "")
+              + (completed.stderr or ""),
+              encoding="utf-8",
+          )
+
+          sarif_generated = sarif_path.exists() and sarif_path.stat().st_size > 0
+          json_generated = json_path.exists() and json_path.stat().st_size > 0
+          manifest["scan_runs"].append({
+              "target": str(contract_root),
+              "target_name": contract_root.as_posix(),
+              "sarif": str(sarif_path),
+              "json": str(json_path),
+              "log": str(log_path),
+              "exit_code": completed.returncode,
+              "sarif_generated": sarif_generated,
+              "json_generated": json_generated,
+          })
+
+          if not sarif_generated or not json_generated:
+              manifest["issues"].append(
+                  "Slither directory scan exited with "
+                  f"{completed.returncode} without generating both SARIF and JSON outputs."
+              )
+          elif completed.returncode != 0:
+              manifest["issues"].append(
+                  "Slither directory scan exited with "
+                  f"{completed.returncode}, but SARIF and JSON outputs were generated."
+              )
+
+          print(
+              f"Scanned {contract_root} ({len(contracts)} contract files) -> "
+              f"exit={completed.returncode}, sarif={sarif_generated}, json={json_generated}"
+          )
+
+          (result_dir / "scan-manifest.json").write_text(
+              json.dumps(manifest, indent=2), encoding="utf-8"
+          )
+
+          if not sarif_generated or not json_generated:
+              print(
+                  "::error title=Incomplete Slither outputs::"
+                  "The Solidity directory scan did not produce both SARIF and JSON artifacts."
+              )
+              sys.exit(1)
+          PYEOF
+
+      - name: Merge SARIF results
+        if: always()
+        run: |
+          python3 << 'PYEOF'
+          import json
+          import sys
+          from pathlib import Path
+
+          merged = {
+              "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+              "version": "2.1.0",
+              "runs": []
+          }
+          manifest_path = Path("slither-results/scan-manifest.json")
+          if not manifest_path.exists():
+              print("::notice title=Missing scan manifest::Skipping SARIF merge because the scan manifest was not generated.")
+              sys.exit(0)
+
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          scan_runs = manifest.get("scan_runs", [])
+          failures = []
+
+          for entry in scan_runs:
+              path = Path(entry["sarif"])
+              if not entry.get("sarif_generated"):
+                  failures.append(f"{entry['target_name']} did not generate SARIF output")
+                  continue
+              try:
+                  data = json.loads(path.read_text(encoding="utf-8"))
+                  if "runs" in data and isinstance(data["runs"], list):
+                      merged["runs"].extend(data["runs"])
+                      print(f"Merged {len(data.get('runs', []))} run(s) from {path.name}")
+                  else:
+                      failures.append(f"{path.name} does not contain a valid SARIF runs array")
+              except (json.JSONDecodeError, OSError) as e:
+                  failures.append(f"{path.name} could not be parsed: {e}")
+
+          if merged["runs"]:
+              Path("slither-results/merged.sarif").write_text(
+                  json.dumps(merged, indent=2), encoding="utf-8"
+              )
+              print(f"Wrote merged.sarif with {len(merged['runs'])} run(s)")
+          elif scan_runs:
+              failures.append("no valid SARIF runs were produced")
+          else:
+              print("No Solidity contracts were scanned; skipping merged SARIF output.")
+
+          if failures:
+              print("::error title=Incomplete Slither coverage::" + "; ".join(failures))
+              sys.exit(1)
+          PYEOF
+
+      - name: Upload SARIF to GitHub Security
+        if: always() && hashFiles('slither-results/merged.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: slither-results/merged.sarif
+          category: slither
+
+      - name: Generate Step Summary
+        if: always()
+        run: |
+          python3 << 'PYEOF'
+          import json
+          import os
+          from pathlib import Path
+
+          findings = {"High": [], "Medium": [], "Low": []}
+          total = 0
+          manifest_path = Path("slither-results/scan-manifest.json")
+          if manifest_path.exists():
+              manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          else:
+              manifest = {"contracts": [], "issues": ["Scan manifest was not generated."]}
+          issues = list(manifest.get("issues", []))
+
+          for entry in manifest.get("scan_runs", []):
+              path = Path(entry["json"])
+              if not entry.get("json_generated"):
+                  issues.append(f"{entry['target_name']} did not produce JSON output.")
+                  continue
+              try:
+                  data = json.loads(path.read_text(encoding="utf-8"))
+                  if isinstance(data, list):
+                      detectors = data
+                  else:
+                      results = data.get("results", {})
+                      if isinstance(results, dict):
+                          detectors = results.get("detectors", [])
+                      else:
+                          detectors = data.get("detectors", [])
+                  if not isinstance(detectors, list):
+                      issues.append(f"{path.name} does not contain a detectors list.")
+                      continue
+                  for d in detectors:
+                      impact = d.get("impact", "Low").capitalize()
+                      if impact not in findings:
+                          impact = "Low"
+                      check = d.get("check", "unknown")
+                      contract_name = entry["target_name"]
+                      for element in d.get("elements", []):
+                          source_mapping = element.get("source_mapping", {})
+                          filename = (
+                              source_mapping.get("filename_relative")
+                              or source_mapping.get("filename_short")
+                              or source_mapping.get("filename_absolute")
+                          )
+                          if filename:
+                              contract_name = Path(filename).name
+                              break
+                      desc = d.get("description", "").strip().split("\n")[0][:200]
+                      findings[impact].append({
+                          "contract": contract_name,
+                          "check": check,
+                          "description": desc,
+                      })
+                      total += 1
+              except (json.JSONDecodeError, OSError) as e:
+                  issues.append(f"{path.name} could not be parsed: {e}")
+
+          summary_file = os.environ.get("GITHUB_STEP_SUMMARY", "/dev/null")
+          with open(summary_file, "a") as f:
+              f.write("## Slither Smart Contract Analysis\n\n")
+              f.write(f"**Contracts scanned: {len(manifest.get('contracts', []))}**\n\n")
+              f.write(f"**Total findings: {total}**\n\n")
+              if issues:
+                  f.write("### Scan execution issues\n\n")
+                  for issue in issues:
+                      f.write(f"- {issue}\n")
+                  f.write("\n")
+              for severity in ["High", "Medium", "Low"]:
+                  items = findings[severity]
+                  f.write(f"### {severity} ({len(items)})\n\n")
+                  if items:
+                      f.write("| Contract | Check | Description |\n|----------|-------|-------------|\n")
+                      for item in items:
+                          desc = item['description'].replace('|', '\\|')
+                          contract = item['contract'].replace('|', '\\|')
+                          f.write(f"| `{contract}` | `{item['check']}` | {desc} |\n")
+                  else:
+                      f.write("No findings.\n")
+                  f.write("\n")
+          print(
+              f"Summary: {total} total findings "
+              f"(High={len(findings['High'])}, Medium={len(findings['Medium'])}, Low={len(findings['Low'])}, Issues={len(issues)})"
+          )
+          PYEOF
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: slither-results
+          path: slither-results
+          if-no-files-found: warn

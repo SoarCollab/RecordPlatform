@@ -181,6 +181,7 @@ Automated security observation is configured as a GitHub Actions workflow:
 - **Scope**: SAST static analysis, SCA dependency scanning, SBOM generation
 - **Current status**: Observation mode (informational, not blocking PRs)
 - **Tooling**: Scripts and templates in `tools/security/`
+- **Slither** (`.github/workflows/contract-security.yml`) — Solidity smart contract static analysis, triggered on `.sol` file changes or workflow updates, SARIF results uploaded to GitHub Security panel
 
 > This pipeline is planned to be promoted to release-blocking in a future wave.
 
@@ -194,4 +195,3 @@ Automated security observation is configured as a GitHub Actions workflow:
 - [ ] SQL injection prevention (parameterized queries)
 - [ ] XSS prevention (output encoding)
 - [ ] Sensitive data not logged
-

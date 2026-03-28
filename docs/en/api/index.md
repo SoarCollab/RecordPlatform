@@ -127,6 +127,15 @@ Based on `SecurityConfiguration`:
 | GET | `/api/v1/admin/files/shares/{shareCode}/logs` | Share access logs |
 | GET | `/api/v1/admin/files/shares/{shareCode}/stats` | Share access stats |
 
+### Admin Integrity Alerts (`/api/v1/admin/integrity-alerts`)
+
+| Method | Endpoint | Description |
+|------|------|------|
+| GET | `/api/v1/admin/integrity-alerts` | List integrity alerts (paginated, filters: `status`, `alertType`) |
+| POST | `/api/v1/admin/integrity-alerts/check` | Trigger manual integrity check |
+| PUT | `/api/v1/admin/integrity-alerts/{id}/acknowledge` | Acknowledge an integrity alert |
+| PUT | `/api/v1/admin/integrity-alerts/{id}/resolve` | Resolve an integrity alert (with note) |
+
 ### Quota (`/api/v1/files/quota`, `/api/v1/admin/quota`)
 
 | Method | Endpoint | Description |

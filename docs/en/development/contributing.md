@@ -43,6 +43,17 @@ All PRs must pass these checks before merging:
 | **Frontend Tests** | lint + type check + vitest coverage |
 | **Contract Consistency** | OpenAPI ↔ `generated.ts` diff must be empty |
 | **Build Verification** | Backend build + frontend `pnpm build` |
+| **Security Scan** | Trivy vulnerability scan (HIGH/CRITICAL) |
+| **Contract Security** | Slither static analysis on `.sol` changes (informational) |
+
+### Additional Workflows
+
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `release.yml` | Tag push (`v*.*.*`) | Build all modules, push Docker images to ghcr.io, generate SBOM, create GitHub Release |
+| `perf-smoke.yml` | Manual (`workflow_dispatch`) | k6 performance smoke tests |
+| `docs.yml` | Push to `main` (docs paths) | Deploy VitePress docs to GitHub Pages |
+| `docs-consistency.yml` | PR touching docs/code paths | Cross-check docs against code |
 
 ### After modifying REST endpoints
 

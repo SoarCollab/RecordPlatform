@@ -6,7 +6,7 @@
 
 | 类别 | 技术 | 版本 |
 |------|------|------|
-| 框架 | Svelte 5 + SvelteKit 2 | 5.53+ / 2.52+ |
+| 框架 | Svelte 5 + SvelteKit 2 | 5.54+ / 2.55+ |
 | 语言 | TypeScript | 5.9+ |
 | 样式 | Tailwind CSS | 4.2+ |
 | 构建工具 | Vite | 6.0+ |

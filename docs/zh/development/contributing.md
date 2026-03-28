@@ -43,6 +43,17 @@ fix: some bug fixes        # 过于模糊
 | **Frontend Tests** | lint + type check + vitest 覆盖率 |
 | **Contract Consistency** | OpenAPI ↔ `generated.ts` 无差异 |
 | **Build Verification** | 后端构建 + 前端 `pnpm build` |
+| **Security Scan** | Trivy 漏洞扫描（HIGH/CRITICAL） |
+| **Contract Security** | Slither 智能合约静态分析（`.sol` 变更时触发，信息级） |
+
+### 其他工作流
+
+| 工作流 | 触发方式 | 用途 |
+|--------|----------|------|
+| `release.yml` | Tag 推送 (`v*.*.*`) | 构建所有模块、推送 Docker 镜像至 ghcr.io、生成 SBOM、创建 GitHub Release |
+| `perf-smoke.yml` | 手动触发 (`workflow_dispatch`) | k6 性能冒烟测试 |
+| `docs.yml` | 推送至 `main`（docs 路径） | 部署 VitePress 文档至 GitHub Pages |
+| `docs-consistency.yml` | PR 涉及文档/代码路径 | 文档与代码交叉一致性检查 |
 
 ### 修改 REST 接口后必须更新契约
 
