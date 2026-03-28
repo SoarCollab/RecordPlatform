@@ -441,8 +441,8 @@
         },
         {
           "datasource": { "type": "prometheus", "uid": "$datasource" },
-          "expr": "blockchain_operation_duration_seconds{operation=\"storeFile\",quantile=\"0.95\"}",
-          "legendFormat": "P95",
+          "expr": "blockchain_operation_duration_seconds{operation=\"storeFile\",quantile=\"0.9\"}",
+          "legendFormat": "P90",
           "refId": "B"
         },
         {
