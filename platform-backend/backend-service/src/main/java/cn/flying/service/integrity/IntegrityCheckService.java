@@ -273,7 +273,7 @@ public class IntegrityCheckService {
                     "blockchain lookup failed for fileId=%d, code=%s",
                     file.getId(), chainResult != null ? chainResult.getCode() : "null"));
         }
-        if (chainResult == null || !chainResult.isSuccess() || chainResult.getData() == null) {
+        if (!chainResult.isSuccess() || chainResult.getData() == null) {
             log.warn("[integrity-check] chain record not found: fileId={}, hash={}", file.getId(), file.getFileHash());
             return new VerifyResult(AlertType.CHAIN_NOT_FOUND, null);
         }
