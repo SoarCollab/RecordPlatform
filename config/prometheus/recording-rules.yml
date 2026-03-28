@@ -139,6 +139,11 @@ groups:
     rules:
       # backend-web only keeps gauges for nodes present in the latest storage
       # capacity snapshot, so the denominator reflects currently managed nodes.
+      #
+      # IMPORTANT: s3_node_online_status is also exported by platform-storage
+      # (S3Monitor, raw Prometheus client, node label only). If Prometheus scrapes
+      # both services, add a job selector to avoid double-counting:
+      #   count(s3_node_online_status{job="backend-web"} == 1)
       - record: sli:storage_availability:ratio
         expr: |
           count(s3_node_online_status == 1)

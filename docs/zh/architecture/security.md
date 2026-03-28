@@ -181,6 +181,7 @@ security:
 - **范围**：SAST 静态分析、SCA 依赖扫描、SBOM 生成
 - **当前状态**：观察模式（仅提供信息，不阻塞 PR 合并）
 - **工具链**：脚本和模板位于 `tools/security/`
+- **Slither**（`.github/workflows/contract-security.yml`）— Solidity 智能合约静态分析，`.sol` 文件变更或 workflow 自身变更时触发，SARIF 结果上传至 GitHub Security 面板
 
 > 该流水线计划在后续迭代中升级为发布阻断级别。
 

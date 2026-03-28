@@ -148,6 +148,10 @@ groups:
           runbook: "https://wiki.internal/runbooks/storage-availability-slo"
 
       # Warning: individual node disk usage is high
+      # NOTE: s3_node_usage_percent and s3_node_online_status with fault_domain
+      # label come from backend-web (StorageCapacityMetricsBinder). If scraping
+      # platform-storage directly, its S3Monitor exports s3_node_online_status
+      # without fault_domain — the on() join below will silently exclude those.
       - alert: StorageNodeHighUsage
         expr: |
           s3_node_usage_percent > 85

@@ -60,6 +60,7 @@ jobs:
         id: slither_sharing
         continue-on-error: true
         run: |
+          mkdir -p slither-results
           set +e
           slither platform-fisco/contract/Sharing.sol \
             --solc-solcs-select 0.8.11 \

@@ -69,6 +69,7 @@ RecordPlatform 是一个开源的企业级文件存证平台，将**区块链不
 - **多租户隔离** — 数据库、缓存、存储路径按租户独立隔离
 - **存储完整性校验** — 定时验证 S3 文件与区块链记录的一致性
 - **分布式追踪** — OpenTelemetry 自动注入，Jaeger 可视化
+- **SLO/SLI 可观测性** — Prometheus 预计算规则、燃尽率告警、Grafana SLO 仪表盘
 
 </td>
 </tr>
