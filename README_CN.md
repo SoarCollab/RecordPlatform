@@ -176,6 +176,8 @@ cd platform-frontend && pnpm install && pnpm dev
 - **健康检查**：http://localhost:8000/record-platform/actuator/health
 - **前端**：http://localhost:5173
 
+> **注意：** `/record-platform` 上下文路径仅在 `prod` profile 下生效。使用 `--spring.profiles.active=local`（如上所示）时，URL 为 `http://localhost:8080/swagger-ui.html` 和 `http://localhost:8080/actuator/health`（端口和上下文路径取决于 profile 和 `SERVER_PORT` 配置）。
+
 > 详细配置请参阅 [快速开始指南](docs/zh/getting-started/index.md)
 
 ---
@@ -189,7 +191,7 @@ cd platform-frontend && pnpm install && pnpm dev
 | 区块链   | FISCO BCOS, Solidity                                    | 3.8.0, ^0.8.11     |
 | 存储     | S3 兼容存储 (AWS SDK v2), MySQL, Redis (Redisson)        | 2.x, 8.0+, 7.0+    |
 | 前端     | Svelte 5 (Runes), SvelteKit, Tailwind CSS 4, bits-ui   | 5.53+, 2.53+, 4.2+ |
-| 弹性设计 | Resilience4j（熔断、重试）                               | 2.3.0              |
+| 弹性设计 | Resilience4j（熔断、重试）                               | 2.4.0              |
 | 监控     | Micrometer, Prometheus, OpenTelemetry, Jaeger           | —                  |
 | 测试     | JUnit 5, Mockito, Testcontainers, Vitest                | —                  |
 

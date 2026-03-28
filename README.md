@@ -176,6 +176,8 @@ Verify the installation at:
 - **Health check**: http://localhost:8000/record-platform/actuator/health
 - **Frontend**: http://localhost:5173
 
+> **Note:** The `/record-platform` context path is only active under the `prod` profile. With `--spring.profiles.active=local` (as shown above), the URLs are `http://localhost:8080/swagger-ui.html` and `http://localhost:8080/actuator/health` (port and context path depend on profile and `SERVER_PORT` configuration).
+
 > For detailed setup, see [Getting Started Guide](docs/en/getting-started/index.md)
 
 ---
@@ -189,7 +191,7 @@ Verify the installation at:
 | Blockchain    | FISCO BCOS, Solidity                                    | 3.8.0, ^0.8.11        |
 | Storage       | S3-compatible (AWS SDK v2), MySQL, Redis (Redisson)     | 2.x, 8.0+, 7.0+       |
 | Frontend      | Svelte 5 (Runes), SvelteKit, Tailwind CSS 4, bits-ui   | 5.53+, 2.53+, 4.2+    |
-| Resilience    | Resilience4j (circuit breaker, retry)                   | 2.3.0                 |
+| Resilience    | Resilience4j (circuit breaker, retry)                   | 2.4.0                 |
 | Monitoring    | Micrometer, Prometheus, OpenTelemetry, Jaeger           | —                     |
 | Testing       | JUnit 5, Mockito, Testcontainers, Vitest                | —                     |
 
