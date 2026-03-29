@@ -4,6 +4,7 @@
   import * as Dialog from "$lib/components/ui/dialog";
   import * as Table from "$lib/components/ui/table";
   import type { AuditConfigVO } from "$api/types";
+  import { Checkbox } from "$lib/components/ui/checkbox";
   import { useNotifications } from "$stores/notifications.svelte";
 
   const notifications = useNotifications();
@@ -74,7 +75,10 @@
       configDialogOpen = false;
       editingConfig = null;
     } catch (err) {
-      notifications.error("保存配置失败", err instanceof Error ? err.message : "请稍后重试");
+      notifications.error(
+        "保存配置失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
     } finally {
       savingConfig = false;
     }
@@ -86,33 +90,57 @@
 </script>
 
 <Dialog.Root {open} {onOpenChange}>
-  <Dialog.Content class="max-w-2xl max-h-[85vh] overflow-y-auto">
+  <Dialog.Content class="max-h-[85vh] max-w-2xl overflow-y-auto">
     <Dialog.Header>
       <Dialog.Title class="flex items-center gap-2">
-        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+        <svg
+          class="h-5 w-5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+          />
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+          />
         </svg>
         审计设置
       </Dialog.Title>
       <Dialog.Description>管理审计配置、异常检查和日志备份</Dialog.Description>
     </Dialog.Header>
 
-    <div class="mt-4 flex gap-1 rounded-lg bg-muted/50 p-1">
+    <div class="bg-muted/50 mt-4 flex gap-1 rounded-lg p-1">
       <button
-        class="flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors {activeSection === 'configs' ? 'bg-background shadow' : 'hover:bg-background/50'}"
+        class="flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors {activeSection ===
+        'configs'
+          ? 'bg-background shadow'
+          : 'hover:bg-background/50'}"
         onclick={() => (activeSection = "configs")}
       >
         审计配置
       </button>
       <button
-        class="flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors {activeSection === 'anomaly' ? 'bg-background shadow' : 'hover:bg-background/50'}"
+        class="flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors {activeSection ===
+        'anomaly'
+          ? 'bg-background shadow'
+          : 'hover:bg-background/50'}"
         onclick={() => (activeSection = "anomaly")}
       >
         异常检查
       </button>
       <button
-        class="flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors {activeSection === 'backup' ? 'bg-background shadow' : 'hover:bg-background/50'}"
+        class="flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors {activeSection ===
+        'backup'
+          ? 'bg-background shadow'
+          : 'hover:bg-background/50'}"
         onclick={() => (activeSection = "backup")}
       >
         日志备份
@@ -122,18 +150,27 @@
     {#if activeSection === "configs"}
       <div class="mt-4 space-y-4">
         <div class="flex items-center justify-between">
-          <p class="text-sm text-muted-foreground">配置审计系统参数</p>
-          <Button variant="outline" size="sm" onclick={onRefreshConfigs} disabled={loadingConfigs}>
+          <p class="text-muted-foreground text-sm">配置审计系统参数</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onclick={onRefreshConfigs}
+            disabled={loadingConfigs}
+          >
             刷新
           </Button>
         </div>
 
         {#if loadingConfigs}
           <div class="flex items-center justify-center p-8">
-            <div class="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+            <div
+              class="border-primary h-6 w-6 animate-spin rounded-full border-2 border-t-transparent"
+            ></div>
           </div>
         {:else if configs.length === 0}
-          <div class="p-6 text-center text-sm text-muted-foreground">暂无配置</div>
+          <div class="text-muted-foreground p-6 text-center text-sm">
+            暂无配置
+          </div>
         {:else}
           <div class="rounded-lg border">
             <Table.Root>
@@ -151,13 +188,21 @@
                       <div>
                         <p class="font-mono text-xs">{cfg.configKey}</p>
                         {#if cfg.description}
-                          <p class="mt-0.5 text-xs text-muted-foreground">{cfg.description}</p>
+                          <p class="text-muted-foreground mt-0.5 text-xs">
+                            {cfg.description}
+                          </p>
                         {/if}
                       </div>
                     </Table.Cell>
-                    <Table.Cell class="font-mono text-xs">{cfg.configValue}</Table.Cell>
+                    <Table.Cell class="font-mono text-xs"
+                      >{cfg.configValue}</Table.Cell
+                    >
                     <Table.Cell class="text-right">
-                      <Button size="sm" variant="ghost" onclick={() => openEditConfig(cfg)}>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onclick={() => openEditConfig(cfg)}
+                      >
                         编辑
                       </Button>
                     </Table.Cell>
@@ -170,37 +215,48 @@
       </div>
     {:else if activeSection === "anomaly"}
       <div class="mt-4 space-y-4">
-        <p class="text-sm text-muted-foreground">检测系统中的异常操作行为</p>
+        <p class="text-muted-foreground text-sm">检测系统中的异常操作行为</p>
 
         <div class="flex gap-2">
           <Button onclick={onCheckAnomalies} disabled={checkingAnomalies}>
             {checkingAnomalies ? "检查中..." : "执行检查"}
           </Button>
-          <Button variant="outline" onclick={onClearAnomalies} disabled={!anomalies}>
+          <Button
+            variant="outline"
+            onclick={onClearAnomalies}
+            disabled={!anomalies}
+          >
             清空结果
           </Button>
         </div>
 
         {#if anomalies}
-          <pre class="max-h-[300px] overflow-auto rounded-lg border bg-muted/20 p-4 font-mono text-xs">{JSON.stringify(anomalies, null, 2)}</pre>
+          <pre
+            class="bg-muted/20 max-h-[300px] overflow-auto rounded-lg border p-4 font-mono text-xs">{JSON.stringify(
+              anomalies,
+              null,
+              2,
+            )}</pre>
         {/if}
       </div>
     {:else if activeSection === "backup"}
       <div class="mt-4 space-y-4">
-        <p class="text-sm text-muted-foreground">备份历史审计日志</p>
+        <p class="text-muted-foreground text-sm">备份历史审计日志</p>
 
         <div class="grid gap-4">
           <div class="grid gap-2">
             <label for="backupDays" class="text-sm">备份天数</label>
-            <Input id="backupDays" type="number" bind:value={backupDays} min={1} max={3650} />
+            <Input
+              id="backupDays"
+              type="number"
+              bind:value={backupDays}
+              min={1}
+              max={3650}
+            />
           </div>
 
           <label class="flex cursor-pointer items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              bind:checked={backupDeleteAfter}
-              class="h-4 w-4 rounded border accent-primary"
-            />
+            <Checkbox bind:checked={backupDeleteAfter} />
             <span>备份后删除原日志</span>
           </label>
 
@@ -208,13 +264,18 @@
             <Button onclick={handleBackup} disabled={backupRunning}>
               {backupRunning ? "执行中..." : "开始备份"}
             </Button>
-            <Button variant="outline" onclick={onClearBackupResult} disabled={!backupResult}>
+            <Button
+              variant="outline"
+              onclick={onClearBackupResult}
+              disabled={!backupResult}
+            >
               清空结果
             </Button>
           </div>
 
           {#if backupResult}
-            <pre class="max-h-[200px] overflow-auto rounded-lg border bg-muted/20 p-4 font-mono text-xs">{backupResult}</pre>
+            <pre
+              class="bg-muted/20 max-h-[200px] overflow-auto rounded-lg border p-4 font-mono text-xs">{backupResult}</pre>
           {/if}
         </div>
       </div>
@@ -228,16 +289,20 @@
     <Dialog.Header>
       <Dialog.Title>编辑配置</Dialog.Title>
       {#if editingConfig}
-        <Dialog.Description class="font-mono text-xs">{editingConfig.configKey}</Dialog.Description>
+        <Dialog.Description class="font-mono text-xs"
+          >{editingConfig.configKey}</Dialog.Description
+        >
       {/if}
     </Dialog.Header>
     <div class="space-y-4">
       {#if editingConfig?.description}
-        <p class="text-sm text-muted-foreground">{editingConfig.description}</p>
+        <p class="text-muted-foreground text-sm">{editingConfig.description}</p>
       {/if}
       <Input bind:value={editingConfigValue} placeholder="配置值" />
       <div class="flex justify-end gap-2">
-        <Button variant="secondary" onclick={() => (configDialogOpen = false)}>取消</Button>
+        <Button variant="secondary" onclick={() => (configDialogOpen = false)}
+          >取消</Button
+        >
         <Button onclick={handleSaveConfig} disabled={savingConfig}>
           {savingConfig ? "保存中..." : "保存"}
         </Button>

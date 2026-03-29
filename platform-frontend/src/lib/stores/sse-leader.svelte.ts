@@ -66,7 +66,11 @@ function init(
   }
 
   isInitialized = true;
-  tabId = crypto.randomUUID();
+  tabId =
+    crypto.randomUUID?.() ??
+    crypto
+      .getRandomValues(new Uint32Array(4))
+      .reduce((s, v) => s + v.toString(16).padStart(8, "0"), "");
   onBecomeLeader = callbacks.onBecomeLeader;
   onBecomeFollower = callbacks.onBecomeFollower;
   onMessage = callbacks.onMessage;

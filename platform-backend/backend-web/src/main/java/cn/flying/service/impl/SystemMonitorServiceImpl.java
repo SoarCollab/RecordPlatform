@@ -5,15 +5,13 @@ import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.SysOperationLogMapper;
 import cn.flying.dao.vo.system.*;
 import cn.flying.platformapi.constant.Result;
-import cn.flying.platformapi.external.BlockChainService;
-import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.response.BlockChainMessage;
 import cn.flying.platformapi.response.StorageCapacityVO;
 import cn.flying.service.SystemMonitorService;
+import cn.flying.service.remote.FileRemoteClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.boot.actuate.health.Status;
@@ -43,11 +41,8 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
     @Resource
     private SysOperationLogMapper operationLogMapper;
 
-    @DubboReference(id = "blockChainServiceSystemMonitor", version = BlockChainService.VERSION, timeout = 3000, retries = 0, providedBy = "RecordPlatform_fisco")
-    private BlockChainService blockChainService;
-
-    @DubboReference(id = "storageServiceSystemMonitor", version = DistributedStorageService.VERSION, timeout = 3000, retries = 0, providedBy = "RecordPlatform_storage")
-    private DistributedStorageService storageService;
+    @Resource
+    private FileRemoteClient fileRemoteClient;
 
     private static final int FALLBACK_CHAIN_NODE_COUNT = 0;
     private static final String FALLBACK_CHAIN_TYPE = "UNKNOWN";
@@ -113,7 +108,7 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
             // 区块链交易数
             long totalTransactions = 0;
             try {
-                Result<BlockChainMessage> chainResult = blockChainService.getCurrentBlockChainMessage();
+                Result<BlockChainMessage> chainResult = fileRemoteClient.getCurrentBlockChainMessage();
                 if (chainResult != null && chainResult.getData() != null) {
                     Long txCount = chainResult.getData().transactionCount();
                     totalTransactions = txCount != null ? txCount : 0L;
@@ -148,7 +143,7 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
     public ChainStatusVO getChainStatus() {
         long now = System.currentTimeMillis();
         try {
-            Result<BlockChainMessage> result = blockChainService.getCurrentBlockChainMessage();
+            Result<BlockChainMessage> result = fileRemoteClient.getCurrentBlockChainMessage();
             if (result == null || !result.isSuccess() || result.getData() == null) {
                 if (result != null && !result.isSuccess()) {
                     log.warn("Blockchain service returned non-success result: code={}, message={}", result.getCode(), result.getMessage());
@@ -227,7 +222,7 @@ public class SystemMonitorServiceImpl implements SystemMonitorService {
     @Override
     public StorageCapacityVO getStorageCapacity() {
         try {
-            Result<StorageCapacityVO> result = storageService.getStorageCapacity();
+            Result<StorageCapacityVO> result = fileRemoteClient.getStorageCapacity();
             if (result != null && result.isSuccess() && result.getData() != null) {
                 return result.getData();
             }

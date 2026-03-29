@@ -1,16 +1,14 @@
 package cn.flying.health;
 
 import cn.flying.platformapi.constant.Result;
-import cn.flying.platformapi.external.DistributedStorageService;
+import cn.flying.service.remote.FileRemoteClient;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
-import java.util.concurrent.*;
 
 /**
  * S3 兼容对象存储健康检查指示器
@@ -19,36 +17,13 @@ import java.util.concurrent.*;
 @Component("s3Storage")
 public class S3StorageHealthIndicator implements HealthIndicator {
 
-    @DubboReference(id = "storageServiceHealth", version = DistributedStorageService.VERSION, timeout = 3000, retries = 0, providedBy = "RecordPlatform_storage")
-    private DistributedStorageService storageService;
-
-    private static final int TIMEOUT_SECONDS = 3;
-
-    @Resource(name = "healthIndicatorExecutor")
-    private ExecutorService executor;
+    @Resource
+    private FileRemoteClient fileRemoteClient;
 
     @Override
     public Health health() {
-        Future<Health> future = executor.submit(this::checkS3Health);
         try {
-            return future.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        } catch (TimeoutException e) {
-            future.cancel(true);
-            log.warn("S3 storage health check timed out");
-            return Health.down()
-                    .withDetail("reason", "Health check timed out after " + TIMEOUT_SECONDS + "s")
-                    .build();
-        } catch (Exception e) {
-            log.error("S3 storage health check failed", e);
-            return Health.down()
-                    .withException(e)
-                    .build();
-        }
-    }
-
-    private Health checkS3Health() {
-        try {
-            Result<Map<String, Boolean>> result = storageService.getClusterHealth();
+            Result<Map<String, Boolean>> result = fileRemoteClient.getClusterHealth();
             if (result == null || result.getData() == null) {
                 return Health.down()
                         .withDetail("reason", "Unable to retrieve S3 storage cluster status")
@@ -85,7 +60,6 @@ public class S3StorageHealthIndicator implements HealthIndicator {
             log.error("S3 storage health check error", e);
             return Health.down()
                     .withDetail("reason", "Failed to connect to S3 storage cluster")
-                    .withException(e)
                     .build();
         }
     }

@@ -1,11 +1,10 @@
 <script lang="ts">
   import "../app.css";
   import { ModeWatcher } from "mode-watcher";
+  import { onNavigate } from "$app/navigation";
   import { useNotifications } from "$stores/notifications.svelte";
   import { useSSE } from "$stores/sse.svelte";
-  import { useAuth } from "$stores/auth.svelte";
   import { useDownload } from "$stores/download.svelte";
-  import { browser } from "$app/environment";
   import { onMount } from "svelte";
   import DownloadManager from "$lib/components/DownloadManager.svelte";
   import LoadingBar from "$lib/components/ui/LoadingBar.svelte";
@@ -15,14 +14,7 @@
 
   const notifications = useNotifications();
   const sse = useSSE();
-  const auth = useAuth();
   const download = useDownload();
-
-  $effect(() => {
-    if (browser && auth.isAuthenticated) {
-      sse.connect();
-    }
-  });
 
   onMount(() => {
     download.restoreTasks();
@@ -30,6 +22,18 @@
     return () => {
       sse.disconnect();
     };
+  });
+
+  // 页面切换动画 — 使用浏览器原生 View Transitions API
+  onNavigate((navigation) => {
+    if (!document.startViewTransition) return;
+
+    return new Promise((resolve) => {
+      document.startViewTransition(async () => {
+        resolve();
+        await navigation.complete;
+      });
+    });
   });
 </script>
 
@@ -39,7 +43,7 @@
   <link rel="icon" href={logo} />
   <link rel="apple-touch-icon" href={logo} />
 </svelte:head>
-<div class="min-h-screen bg-background">
+<div class="bg-background min-h-screen">
   {@render children()}
 </div>
 
@@ -51,7 +55,7 @@
   <div class="fixed bottom-4 left-4 z-50 flex flex-col gap-2">
     {#each notifications.notifications as notification (notification.id)}
       <div
-        class="flex items-start gap-3 rounded-lg border bg-card p-4 shadow-lg transition-all"
+        class="bg-card animate-in fade-in slide-in-from-left-4 flex items-start gap-3 rounded-lg border p-4 shadow-lg duration-300"
         class:border-green-500={notification.type === "success"}
         class:border-red-500={notification.type === "error"}
         class:border-yellow-500={notification.type === "warning"}
@@ -60,7 +64,7 @@
         <div class="flex-1">
           <p class="font-medium">{notification.title}</p>
           {#if notification.message}
-            <p class="text-sm text-muted-foreground">{notification.message}</p>
+            <p class="text-muted-foreground text-sm">{notification.message}</p>
           {/if}
         </div>
         <button

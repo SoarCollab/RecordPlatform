@@ -1,28 +1,23 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onDestroy } from "svelte";
   import * as echarts from "echarts";
 
   interface Props {
     data: Array<{ date: string; count: number }>;
     title?: string;
     loading?: boolean;
+    onDateClick?: (date: string) => void;
   }
 
-  let { data, title = "7天操作趋势", loading = false }: Props = $props();
+  let {
+    data,
+    title = "7天操作趋势",
+    loading = false,
+    onDateClick,
+  }: Props = $props();
 
-  let chartContainer: HTMLDivElement = $state()!;
   let chart: echarts.ECharts | null = null;
-
-  function initChart() {
-    if (!chartContainer || chart) return;
-    chart = echarts.init(chartContainer, undefined, { renderer: "canvas" });
-    updateChart();
-    window.addEventListener("resize", handleResize);
-  }
-
-  function handleResize() {
-    chart?.resize();
-  }
+  let resizeObserver: ResizeObserver | null = null;
 
   function updateChart() {
     if (!chart || !data.length) return;
@@ -92,34 +87,66 @@
     });
   }
 
+  function initAction(node: HTMLDivElement) {
+    resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      if (width === 0 || height === 0) return;
+
+      if (!chart) {
+        chart = echarts.init(node, undefined, { renderer: "canvas" });
+        chart.on("click", (params) => {
+          if (params.name && onDateClick) {
+            onDateClick(params.name as string);
+          }
+        });
+        updateChart();
+      } else {
+        chart.resize();
+      }
+    });
+    resizeObserver.observe(node);
+
+    return {
+      destroy() {
+        resizeObserver?.disconnect();
+        resizeObserver = null;
+        chart?.dispose();
+        chart = null;
+      },
+    };
+  }
+
   $effect(() => {
     if (data && chart) {
       updateChart();
     }
   });
 
-  onMount(() => {
-    initChart();
-  });
-
   onDestroy(() => {
-    window.removeEventListener("resize", handleResize);
+    resizeObserver?.disconnect();
+    resizeObserver = null;
     chart?.dispose();
     chart = null;
   });
 </script>
 
-<div class="rounded-xl border bg-card/50 p-4">
+<div class="bg-card/50 rounded-xl border p-4">
   <p class="text-sm font-medium">{title}</p>
   {#if loading}
     <div class="flex h-[200px] items-center justify-center">
-      <div class="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+      <div
+        class="border-primary h-6 w-6 animate-spin rounded-full border-2 border-t-transparent"
+      ></div>
     </div>
   {:else if data.length === 0}
-    <div class="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
+    <div
+      class="text-muted-foreground flex h-[200px] items-center justify-center text-sm"
+    >
       暂无趋势数据
     </div>
   {:else}
-    <div bind:this={chartContainer} class="mt-2 h-[200px] w-full"></div>
+    <div use:initAction class="mt-2 h-[200px] w-full"></div>
   {/if}
 </div>

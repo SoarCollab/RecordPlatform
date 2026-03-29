@@ -7,7 +7,12 @@
   import { useDownload } from "$stores/download.svelte";
   import { useUpload } from "$stores/upload.svelte";
   import { formatFileSize, formatDateTime } from "$utils/format";
-  import { getFiles, deleteFile, createShare, getDecryptInfo } from "$api/endpoints/files";
+  import {
+    getFiles,
+    deleteFile,
+    createShare,
+    getDecryptInfo,
+  } from "$api/endpoints/files";
   import {
     FileStatus,
     FileStatusLabel,
@@ -24,6 +29,8 @@
   import { Input } from "$lib/components/ui/input";
   import { Badge } from "$lib/components/ui/badge";
   import { Label } from "$lib/components/ui/label";
+  import { Checkbox } from "$lib/components/ui/checkbox";
+  import DateTimePicker from "$lib/components/ui/date-picker/date-time-picker.svelte";
 
   const notifications = useNotifications();
   const download = useDownload();
@@ -50,7 +57,9 @@
   let shareExpireHours = $state(72);
   let shareType = $state<ShareType>(ShareType.PUBLIC);
   let shareCode = $state("");
-  let shareLink = $derived(shareCode ? `${appPage.url.origin}/share/${shareCode}` : "");
+  let shareLink = $derived(
+    shareCode ? `${appPage.url.origin}/share/${shareCode}` : "",
+  );
   let isSharing = $state(false);
 
   // 删除对话框状态
@@ -65,7 +74,9 @@
       if (!browser) return;
       if (document.visibilityState !== "visible") return;
 
-      const hasProcessing = files.some((f) => f.status === FileStatus.PROCESSING);
+      const hasProcessing = files.some(
+        (f) => f.status === FileStatus.PROCESSING,
+      );
       if (hasProcessing) {
         loadFiles(true);
       }
@@ -75,14 +86,14 @@
   });
 
   let selectableFiles = $derived(
-    files.filter((file) => file.status === FileStatus.COMPLETED)
+    files.filter((file) => file.status === FileStatus.COMPLETED),
   );
   let selectedCount = $derived(
-    selectableFiles.filter((file) => selectedFileIds.has(file.id)).length
+    selectableFiles.filter((file) => selectedFileIds.has(file.id)).length,
   );
   let allCurrentPageSelected = $derived(
     selectableFiles.length > 0 &&
-      selectableFiles.every((file) => selectedFileIds.has(file.id))
+      selectableFiles.every((file) => selectedFileIds.has(file.id)),
   );
 
   async function loadFiles(silent = false) {
@@ -114,7 +125,7 @@
       if (!silent)
         notifications.error(
           "加载失败",
-          err instanceof Error ? err.message : "请稍后重试"
+          err instanceof Error ? err.message : "请稍后重试",
         );
     } finally {
       if (!silent) loading = false;
@@ -143,10 +154,10 @@
     const downloadableIdSet = new Set(
       files
         .filter((file) => file.status === FileStatus.COMPLETED)
-        .map((file) => file.id)
+        .map((file) => file.id),
     );
     selectedFileIds = new Set(
-      [...selectedFileIds].filter((id) => downloadableIdSet.has(id))
+      [...selectedFileIds].filter((id) => downloadableIdSet.has(id)),
     );
   }
 
@@ -187,7 +198,9 @@
    *
    * @returns 带已解析大小的文件数组。
    */
-  async function resolveBatchFileSizes(): Promise<Array<FileVO & { resolvedSize: number }>> {
+  async function resolveBatchFileSizes(): Promise<
+    Array<FileVO & { resolvedSize: number }>
+  > {
     const selectedFiles = files.filter((file) => selectedFileIds.has(file.id));
     return Promise.all(
       selectedFiles.map(async (file) => {
@@ -197,10 +210,12 @@
         const decryptInfo = await getDecryptInfo(file.fileHash);
         const resolvedSize = Number(decryptInfo.fileSize);
         if (!Number.isFinite(resolvedSize) || resolvedSize <= 0) {
-          throw new Error(`文件“${file.fileName}”缺少有效大小信息，无法加入批量下载`);
+          throw new Error(
+            `文件“${file.fileName}”缺少有效大小信息，无法加入批量下载`,
+          );
         }
         return { ...file, resolvedSize };
-      })
+      }),
     );
   }
 
@@ -214,18 +229,21 @@
     try {
       const selectedFiles = await resolveBatchFileSizes();
       if (selectedFiles.length > MAX_BATCH_FILES) {
-        notifications.warning("批量下载受限", `单次最多选择 ${MAX_BATCH_FILES} 个文件`);
+        notifications.warning(
+          "批量下载受限",
+          `单次最多选择 ${MAX_BATCH_FILES} 个文件`,
+        );
         return;
       }
 
       const totalSize = selectedFiles.reduce(
         (sum, file) => sum + file.resolvedSize,
-        0
+        0,
       );
       if (totalSize > MAX_BATCH_TOTAL_SIZE) {
         notifications.warning(
           "批量下载受限",
-          `总大小不能超过 ${formatFileSize(MAX_BATCH_TOTAL_SIZE)}`
+          `总大小不能超过 ${formatFileSize(MAX_BATCH_TOTAL_SIZE)}`,
         );
         return;
       }
@@ -237,14 +255,14 @@
           fileSize: file.resolvedSize,
           source: { type: "owned" as const },
         })),
-        { concurrency: 3, retryTimes: 2 }
+        { concurrency: 3, retryTimes: 2 },
       );
 
       selectedFileIds = new Set();
       if (summary.failedCount === 0) {
         notifications.success(
           "批量下载完成",
-          `成功 ${summary.successCount}/${summary.total}`
+          `成功 ${summary.successCount}/${summary.total}`,
         );
       } else {
         const topReasons = summary.failures
@@ -253,13 +271,13 @@
           .join("；");
         notifications.warning(
           "批量下载部分失败",
-          `成功 ${summary.successCount}，失败 ${summary.failedCount}${topReasons ? `。${topReasons}` : ""}`
+          `成功 ${summary.successCount}，失败 ${summary.failedCount}${topReasons ? `。${topReasons}` : ""}`,
         );
       }
     } catch (err) {
       notifications.error(
         "批量下载失败",
-        err instanceof Error ? err.message : "请稍后重试"
+        err instanceof Error ? err.message : "请稍后重试",
       );
     } finally {
       isBatchStarting = false;
@@ -284,19 +302,18 @@
       } else {
         notifications.warning(
           "仍有失败项",
-          `成功 ${summary.successCount}，失败 ${summary.failedCount}`
+          `成功 ${summary.successCount}，失败 ${summary.failedCount}`,
         );
       }
     } catch (err) {
       notifications.error(
         "重试失败",
-        err instanceof Error ? err.message : "请稍后重试"
+        err instanceof Error ? err.message : "请稍后重试",
       );
     } finally {
       isRetryingFailed = false;
     }
   }
-
 
   $effect(() => {
     if (upload.completedTasks.length > 0) {
@@ -318,14 +335,14 @@
       notifications.success("删除成功");
       deleteDialogOpen = false;
       selectedFileIds = new Set(
-        [...selectedFileIds].filter((id) => id !== deleteTarget?.id)
+        [...selectedFileIds].filter((id) => id !== deleteTarget?.id),
       );
       deleteTarget = null;
       await loadFiles();
     } catch (err) {
       notifications.error(
         "删除失败",
-        err instanceof Error ? err.message : "请稍后重试"
+        err instanceof Error ? err.message : "请稍后重试",
       );
     } finally {
       isDeleting = false;
@@ -333,7 +350,12 @@
   }
 
   async function handleDownload(file: FileVO) {
-    download.startDownload(file.fileHash, file.fileName, { type: "owned" }, file.fileSize);
+    download.startDownload(
+      file.fileHash,
+      file.fileName,
+      { type: "owned" },
+      file.fileSize,
+    );
     notifications.info("下载已开始", "可在右下角查看下载进度");
   }
 
@@ -359,7 +381,7 @@
     } catch (err) {
       notifications.error(
         "创建分享失败",
-        err instanceof Error ? err.message : "请稍后重试"
+        err instanceof Error ? err.message : "请稍后重试",
       );
     } finally {
       isSharing = false;
@@ -403,11 +425,15 @@
   }
 
   function getStatusColorClass(status: FileStatus): string {
-    switch(status) {
-      case FileStatus.COMPLETED: return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 hover:bg-green-100/80";
-      case FileStatus.FAILED: return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 hover:bg-red-100/80";
-      case FileStatus.PROCESSING: return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 hover:bg-yellow-100/80";
-      default: return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 hover:bg-gray-100/80";
+    switch (status) {
+      case FileStatus.COMPLETED:
+        return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 hover:bg-green-100/80";
+      case FileStatus.FAILED:
+        return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 hover:bg-red-100/80";
+      case FileStatus.PROCESSING:
+        return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300 hover:bg-yellow-100/80";
+      default:
+        return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300 hover:bg-gray-100/80";
     }
   }
 </script>
@@ -441,7 +467,9 @@
   </div>
 
   {#if upload.activeTasks.length > 0}
-    <Card.Root class="border-blue-200 bg-blue-50/50 dark:border-blue-800 dark:bg-blue-950/20">
+    <Card.Root
+      class="border-blue-200 bg-blue-50/50 dark:border-blue-800 dark:bg-blue-950/20"
+    >
       <Card.Content class="p-4">
         <div class="mb-3 flex items-center justify-between">
           <h3 class="text-sm font-medium text-blue-900 dark:text-blue-100">
@@ -455,14 +483,18 @@
           {#each upload.activeTasks as task (task.id)}
             <div>
               <div class="mb-1 flex justify-between text-xs">
-                <span class="truncate font-medium text-blue-800 dark:text-blue-200">
+                <span
+                  class="truncate font-medium text-blue-800 dark:text-blue-200"
+                >
                   {task.file.name}
                 </span>
                 <span class="text-blue-600 dark:text-blue-400">
                   {task.progress}%
                 </span>
               </div>
-              <div class="h-1.5 overflow-hidden rounded-full bg-blue-200 dark:bg-blue-900">
+              <div
+                class="h-1.5 overflow-hidden rounded-full bg-blue-200 dark:bg-blue-900"
+              >
                 <div
                   class="h-full bg-blue-500 transition-all duration-300 dark:bg-blue-400"
                   style="width: {task.progress}%"
@@ -494,29 +526,22 @@
         page = 1;
         loadFiles();
       }}
-      class="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      class="border-input bg-background ring-offset-background focus-visible:ring-ring h-10 rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
     >
       <option value={undefined}>全部状态</option>
       {#each Object.entries(FileStatusLabel) as [value, label]}
         <option value={Number(value)}>{label}</option>
       {/each}
     </select>
-    <Input
-      type="datetime-local"
-      bind:value={startTime}
-      class="w-full sm:w-auto"
-      aria-label="开始时间"
-    />
-    <Input
-      type="datetime-local"
-      bind:value={endTime}
-      class="w-full sm:w-auto"
-      aria-label="结束时间"
-    />
-    <Button variant="outline" onclick={() => {
+    <DateTimePicker bind:value={startTime} placeholder="开始时间" />
+    <DateTimePicker bind:value={endTime} placeholder="结束时间" />
+    <Button
+      variant="outline"
+      onclick={() => {
         page = 1;
         loadFiles();
-      }}>搜索</Button>
+      }}>搜索</Button
+    >
     <Button
       variant="outline"
       onclick={() => {
@@ -544,22 +569,34 @@
   </div>
 
   {#if download.batchState}
-    <Card.Root class="border-sky-200 bg-sky-50/40 dark:border-sky-900 dark:bg-sky-950/20">
+    <Card.Root
+      class="border-sky-200 bg-sky-50/40 dark:border-sky-900 dark:bg-sky-950/20"
+    >
       <Card.Content class="space-y-3 p-4">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="text-sm">
-            批次状态：{download.batchState.status === "running" ? "执行中" : "已完成"}，
-            成功 {download.batchState.successCount}，
-            失败 {download.batchState.failedCount}
+            批次状态：{download.batchState.status === "running"
+              ? "执行中"
+              : "已完成"}， 成功 {download.batchState.successCount}， 失败 {download
+              .batchState.failedCount}
           </div>
           <div class="flex gap-2">
             {#if download.batchState.status === "completed" && download.batchState.failedCount > 0}
-              <Button size="sm" variant="outline" onclick={retryBatchFailed} disabled={isRetryingFailed}>
+              <Button
+                size="sm"
+                variant="outline"
+                onclick={retryBatchFailed}
+                disabled={isRetryingFailed}
+              >
                 {isRetryingFailed ? "重试中..." : "重试失败项"}
               </Button>
             {/if}
             {#if download.batchState.status === "completed"}
-              <Button size="sm" variant="ghost" onclick={() => download.clearBatchState()}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onclick={() => download.clearBatchState()}
+              >
                 清空批次
               </Button>
             {/if}
@@ -567,16 +604,20 @@
         </div>
 
         {#if download.batchState.total > 0}
-          <div class="h-2 overflow-hidden rounded-full bg-sky-200/70 dark:bg-sky-900/60">
+          <div
+            class="h-2 overflow-hidden rounded-full bg-sky-200/70 dark:bg-sky-900/60"
+          >
             <div
               class="h-full bg-sky-500 transition-all duration-300 dark:bg-sky-400"
-              style="width: {(download.batchState.completedCount / download.batchState.total) * 100}%"
+              style="width: {(download.batchState.completedCount /
+                download.batchState.total) *
+                100}%"
             ></div>
           </div>
         {/if}
 
         {#if download.batchState.failures.length > 0}
-          <div class="space-y-1 text-xs text-muted-foreground">
+          <div class="text-muted-foreground space-y-1 text-xs">
             {#each download.batchState.failures as failure}
               <p>{failure.fileName}：{failure.reason}</p>
             {/each}
@@ -603,9 +644,21 @@
         </div>
       {:else if files.length === 0}
         <div class="p-12 text-center">
-          <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted">
-            <svg class="h-8 w-8 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+          <div
+            class="bg-muted mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full"
+          >
+            <svg
+              class="text-muted-foreground h-8 w-8"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+              />
             </svg>
           </div>
           <p class="text-muted-foreground">暂无文件</p>
@@ -616,13 +669,12 @@
           <Table.Header>
             <Table.Row>
               <Table.Head class="w-12">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={allCurrentPageSelected}
+                  indeterminate={selectedFileIds.size > 0 &&
+                    !allCurrentPageSelected}
                   disabled={selectableFiles.length === 0}
-                  onchange={(event) =>
-                    toggleSelectAll((event.currentTarget as HTMLInputElement).checked)
-                  }
+                  onchange={() => toggleSelectAll(!allCurrentPageSelected)}
                   aria-label="全选可下载文件"
                 />
               </Table.Head>
@@ -637,30 +689,40 @@
             {#each files as file (file.id)}
               <Table.Row>
                 <Table.Cell>
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={selectedFileIds.has(file.id)}
                     disabled={file.status !== FileStatus.COMPLETED}
-                    onchange={(event) =>
-                      toggleFileSelection(
-                        file,
-                        (event.currentTarget as HTMLInputElement).checked
-                      )
-                    }
+                    onchange={() =>
+                      toggleFileSelection(file, !selectedFileIds.has(file.id))}
                     aria-label={`选择文件 ${file.fileName}`}
                   />
                 </Table.Cell>
                 <Table.Cell>
                   <div class="flex items-center gap-3">
-                    <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                      <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    <div
+                      class="bg-primary/10 text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+                    >
+                      <svg
+                        class="h-5 w-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                        />
                       </svg>
                     </div>
-                    <div class="min-w-0 max-w-[200px] lg:max-w-xs">
+                    <div class="max-w-[200px] min-w-0 lg:max-w-xs">
                       <p class="truncate font-medium">{file.fileName}</p>
                       {#if file.transactionHash}
-                        <p class="truncate text-xs text-muted-foreground" title={file.transactionHash}>
+                        <p
+                          class="text-muted-foreground truncate text-xs"
+                          title={file.transactionHash}
+                        >
                           TX: {file.transactionHash.slice(0, 16)}...
                         </p>
                       {/if}
@@ -671,7 +733,10 @@
                   {formatFileSize(file.fileSize)}
                 </Table.Cell>
                 <Table.Cell>
-                  <Badge class={getStatusColorClass(file.status)} variant="outline">
+                  <Badge
+                    class={getStatusColorClass(file.status)}
+                    variant="outline"
+                  >
                     {FileStatusLabel[file.status]}
                   </Badge>
                 </Table.Cell>
@@ -680,10 +745,31 @@
                 </Table.Cell>
                 <Table.Cell class="text-right">
                   <div class="flex justify-end gap-2">
-                    <Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => goto(`/files/${file.fileHash}`)} title="详情">
-                      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="h-8 w-8"
+                      onclick={() => goto(`/files/${file.fileHash}`)}
+                      title="详情"
+                    >
+                      <svg
+                        class="h-4 w-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                        />
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                        />
                       </svg>
                     </Button>
                     {#if file.status === FileStatus.COMPLETED}
@@ -692,29 +778,90 @@
                           t.fileHash === file.fileHash &&
                           t.status !== "completed" &&
                           t.status !== "failed" &&
-                          t.status !== "cancelled"
+                          t.status !== "cancelled",
                       )}
-                      <Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => handleDownload(file)} disabled={isDownloading} title={isDownloading ? "下载中..." : "下载"}>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="h-8 w-8"
+                        onclick={() => handleDownload(file)}
+                        disabled={isDownloading}
+                        title={isDownloading ? "下载中..." : "下载"}
+                      >
                         {#if isDownloading}
                           <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            <circle
+                              class="opacity-25"
+                              cx="12"
+                              cy="12"
+                              r="10"
+                              stroke="currentColor"
+                              stroke-width="4"
+                              fill="none"
+                            ></circle>
+                            <path
+                              class="opacity-75"
+                              fill="currentColor"
+                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                            ></path>
                           </svg>
                         {:else}
-                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                          <svg
+                            class="h-4 w-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                            />
                           </svg>
                         {/if}
                       </Button>
-                      <Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => openShareDialog(file)} title="分享">
-                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        class="h-8 w-8"
+                        onclick={() => openShareDialog(file)}
+                        title="分享"
+                      >
+                        <svg
+                          class="h-4 w-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"
+                          />
                         </svg>
                       </Button>
                     {/if}
-                    <Button variant="ghost" size="icon" class="h-8 w-8 text-destructive hover:text-destructive" onclick={() => openDeleteDialog(file)} title="删除">
-                      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="text-destructive hover:text-destructive h-8 w-8"
+                      onclick={() => openDeleteDialog(file)}
+                      title="删除"
+                    >
+                      <svg
+                        class="h-4 w-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
                       </svg>
                     </Button>
                   </div>
@@ -726,7 +873,7 @@
 
         {#if total > pageSize}
           <div class="flex items-center justify-between border-t p-4">
-            <p class="text-sm text-muted-foreground">
+            <p class="text-muted-foreground text-sm">
               共 {total} 个文件
             </p>
             <div class="flex gap-2">
@@ -775,19 +922,18 @@
     </Dialog.Header>
     {#if shareCode}
       <div class="space-y-4 py-4">
-        <p class="text-sm text-muted-foreground">
+        <p class="text-muted-foreground text-sm">
           分享链接已创建，请复制以下链接：
         </p>
         <div class="flex gap-2">
-          <Input
-            readonly
-            value={shareLink}
-          />
+          <Input readonly value={shareLink} />
           <Button onclick={copyShareLink}>复制</Button>
         </div>
       </div>
       <Dialog.Footer>
-        <Button variant="secondary" onclick={() => (shareDialogOpen = false)}>关闭</Button>
+        <Button variant="secondary" onclick={() => (shareDialogOpen = false)}
+          >关闭</Button
+        >
       </Dialog.Footer>
     {:else}
       <div class="space-y-4 py-4">
@@ -796,7 +942,10 @@
           <div class="flex gap-3">
             {#each [ShareType.PUBLIC, ShareType.PRIVATE] as type}
               <button
-                class="flex flex-1 cursor-pointer items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:bg-accent/50 {shareType === type ? 'border-primary bg-primary/5' : ''}"
+                class="hover:bg-accent/50 flex flex-1 cursor-pointer items-start gap-3 rounded-lg border p-3 text-left transition-colors {shareType ===
+                type
+                  ? 'border-primary bg-primary/5'
+                  : ''}"
                 onclick={() => (shareType = type)}
               >
                 <input
@@ -807,7 +956,7 @@
                 />
                 <div>
                   <div class="font-medium">{ShareTypeLabel[type]}</div>
-                  <div class="text-xs text-muted-foreground">
+                  <div class="text-muted-foreground text-xs">
                     {ShareTypeDesc[type]}
                   </div>
                 </div>
@@ -821,7 +970,7 @@
           <select
             id="share-expire"
             bind:value={shareExpireHours}
-            class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            class="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
           >
             <option value={24}>24 小时</option>
             <option value={72}>3 天</option>
@@ -831,12 +980,26 @@
         </div>
       </div>
       <Dialog.Footer>
-        <Button variant="outline" onclick={() => (shareDialogOpen = false)}>取消</Button>
+        <Button variant="outline" onclick={() => (shareDialogOpen = false)}
+          >取消</Button
+        >
         <Button onclick={handleShare} disabled={isSharing}>
           {#if isSharing}
             <svg class="mr-2 h-4 w-4 animate-spin" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              <circle
+                class="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                stroke-width="4"
+                fill="none"
+              ></circle>
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
             </svg>
             创建中...
           {:else}
@@ -852,9 +1015,7 @@
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
       <Dialog.Title>确认删除</Dialog.Title>
-      <Dialog.Description>
-        此操作不可撤销，请确认。
-      </Dialog.Description>
+      <Dialog.Description>此操作不可撤销，请确认。</Dialog.Description>
     </Dialog.Header>
 
     <div class="space-y-2 py-4">
@@ -873,11 +1034,27 @@
       >
         取消
       </Button>
-      <Button variant="destructive" disabled={isDeleting} onclick={confirmDelete}>
+      <Button
+        variant="destructive"
+        disabled={isDeleting}
+        onclick={confirmDelete}
+      >
         {#if isDeleting}
           <svg class="mr-2 h-4 w-4 animate-spin" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            <circle
+              class="opacity-25"
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              stroke-width="4"
+              fill="none"
+            ></circle>
+            <path
+              class="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+            ></path>
           </svg>
           删除中...
         {:else}

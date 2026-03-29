@@ -14,8 +14,7 @@
     <properties>
         <java.version>21</java.version>
         <poi.version>5.5.1</poi.version>
-        <logstash.encoder.version>9.0</logstash.encoder.version>
-        <tools.jackson.version>3.1.0</tools.jackson.version>
+        <logstash.encoder.version>8.1</logstash.encoder.version>
         <skywalking.version>9.6.0</skywalking.version>
         <spring-cloud-alibaba-dependencies.version>2025.0.0.0</spring-cloud-alibaba-dependencies.version>
     </properties>
@@ -161,16 +160,7 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <dependency>
-                <groupId>tools.jackson.core</groupId>
-                <artifactId>jackson-core</artifactId>
-                <version>${tools.jackson.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>tools.jackson.core</groupId>
-                <artifactId>jackson-databind</artifactId>
-                <version>${tools.jackson.version}</version>
-            </dependency>
+            <!-- Jackson version managed by Spring Boot BOM -->
         </dependencies>
     </dependencyManagement>
 

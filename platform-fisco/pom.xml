@@ -27,7 +27,7 @@
         <protobuf.version>4.34.1</protobuf.version>
         <logstash.logback.version>9.0</logstash.logback.version>
         <skywalking.toolkit.version>9.6.0</skywalking.toolkit.version>
-        <netty.version>4.2.10.Final</netty.version>
+        <netty.version>4.1.132.Final</netty.version>
         <commons-io.version>2.21.0</commons-io.version>
         <commons-lang3.version>3.20.0</commons-lang3.version>
         <bcprov.version>1.83</bcprov.version>

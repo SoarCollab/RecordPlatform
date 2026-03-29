@@ -463,7 +463,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         Cache cache = cacheManager.getCache("fileDecryptInfo");
         if (cache != null && CommonUtils.isNotEmpty(files)) {
             for (File file : files) {
-                if (file.getFileHash() != null) {
+                if (file != null && file.getFileHash() != null) {
                     cache.evict(userId + ":" + file.getFileHash());
                 }
             }

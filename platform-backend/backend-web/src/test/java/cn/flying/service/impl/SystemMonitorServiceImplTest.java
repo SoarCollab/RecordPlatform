@@ -6,10 +6,9 @@ import cn.flying.dao.mapper.SysOperationLogMapper;
 import cn.flying.dao.vo.system.*;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
-import cn.flying.platformapi.external.BlockChainService;
-import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.response.BlockChainMessage;
 import cn.flying.platformapi.response.StorageCapacityVO;
+import cn.flying.service.remote.FileRemoteClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -48,10 +47,7 @@ class SystemMonitorServiceImplTest {
     private SysOperationLogMapper operationLogMapper;
 
     @Mock
-    private BlockChainService blockChainService;
-
-    @Mock
-    private DistributedStorageService storageService;
+    private FileRemoteClient fileRemoteClient;
 
     @Mock
     private HealthIndicator databaseHealthIndicator;
@@ -73,11 +69,9 @@ class SystemMonitorServiceImplTest {
         ExecutorService executor = Executors.newFixedThreadPool(4);
         ReflectionTestUtils.setField(systemMonitorService, "healthCheckExecutor", executor);
 
-        // 默认给监控聚合一个可控 Executor，避免测试环境依赖 commonPool
         ReflectionTestUtils.setField(systemMonitorService, "monitorMetricsExecutor", (java.util.concurrent.Executor) Runnable::run);
 
-        // 默认使用可用容量响应，避免无关测试因未设置存储服务 mock 进入降级分支。
-        lenient().when(storageService.getStorageCapacity()).thenReturn(
+        lenient().when(fileRemoteClient.getStorageCapacity()).thenReturn(
                 Result.success(new StorageCapacityVO(
                         2_000_000L,
                         1_000_000L,
@@ -102,7 +96,7 @@ class SystemMonitorServiceImplTest {
             when(operationLogMapper.selectOperationsBetween(any(), any())).thenReturn(50L);
 
             BlockChainMessage chainMessage = new BlockChainMessage(null, 1000L, null, null, null);
-            when(blockChainService.getCurrentBlockChainMessage()).thenReturn(Result.success(chainMessage));
+            when(fileRemoteClient.getCurrentBlockChainMessage()).thenReturn(Result.success(chainMessage));
 
             SystemStatsVO result = systemMonitorService.getSystemStats();
 
@@ -119,7 +113,7 @@ class SystemMonitorServiceImplTest {
             when(accountMapper.selectCount(any())).thenReturn(100L);
             when(fileMapper.selectCount(any())).thenReturn(500L);
             when(operationLogMapper.selectOperationsBetween(any(), any())).thenReturn(50L);
-            when(blockChainService.getCurrentBlockChainMessage()).thenThrow(new RuntimeException("Chain error"));
+            when(fileRemoteClient.getCurrentBlockChainMessage()).thenThrow(new RuntimeException("Chain error"));
 
             SystemStatsVO result = systemMonitorService.getSystemStats();
 
@@ -133,7 +127,7 @@ class SystemMonitorServiceImplTest {
             when(accountMapper.selectCount(any())).thenReturn(100L);
             when(fileMapper.selectCount(any())).thenReturn(500L);
             when(operationLogMapper.selectOperationsBetween(any(), any())).thenReturn(50L);
-            when(blockChainService.getCurrentBlockChainMessage()).thenReturn(null);
+            when(fileRemoteClient.getCurrentBlockChainMessage()).thenReturn(null);
 
             SystemStatsVO result = systemMonitorService.getSystemStats();
 
@@ -162,7 +156,7 @@ class SystemMonitorServiceImplTest {
         @DisplayName("should return healthy chain status when chain is active")
         void shouldReturnHealthyChainStatus() {
             BlockChainMessage chainMessage = new BlockChainMessage(12345L, 10000L, 5L, 4, "BSN_FISCO");
-            when(blockChainService.getCurrentBlockChainMessage()).thenReturn(Result.success(chainMessage));
+            when(fileRemoteClient.getCurrentBlockChainMessage()).thenReturn(Result.success(chainMessage));
 
             ChainStatusVO result = systemMonitorService.getChainStatus();
 
@@ -179,7 +173,7 @@ class SystemMonitorServiceImplTest {
         @DisplayName("should return healthy status when service is reachable even if block number is zero")
         void shouldReturnHealthyWhenBlockNumberIsZero() {
             BlockChainMessage chainMessage = new BlockChainMessage(0L, null, null, 1, "LOCAL_FISCO");
-            when(blockChainService.getCurrentBlockChainMessage()).thenReturn(Result.success(chainMessage));
+            when(fileRemoteClient.getCurrentBlockChainMessage()).thenReturn(Result.success(chainMessage));
 
             ChainStatusVO result = systemMonitorService.getChainStatus();
 
@@ -193,7 +187,7 @@ class SystemMonitorServiceImplTest {
         @Test
         @DisplayName("should return unhealthy status when blockchain service returns non-success result")
         void shouldReturnUnhealthyWhenResultNotSuccess() {
-            when(blockChainService.getCurrentBlockChainMessage())
+            when(fileRemoteClient.getCurrentBlockChainMessage())
                     .thenReturn(Result.error(ResultEnum.BLOCKCHAIN_ERROR, (BlockChainMessage) null));
 
             ChainStatusVO result = systemMonitorService.getChainStatus();
@@ -205,7 +199,7 @@ class SystemMonitorServiceImplTest {
         @Test
         @DisplayName("should return fallback chain status on error")
         void shouldReturnFallbackOnError() {
-            when(blockChainService.getCurrentBlockChainMessage()).thenThrow(new RuntimeException("Chain error"));
+            when(fileRemoteClient.getCurrentBlockChainMessage()).thenThrow(new RuntimeException("Chain error"));
 
             ChainStatusVO result = systemMonitorService.getChainStatus();
 
@@ -232,7 +226,6 @@ class SystemMonitorServiceImplTest {
 
              assertThat(result).isNotNull();
              assertThat(result.status()).isEqualTo("UP");
-             // 运行时间为秒级，极短进程在测试中可能为 0，保证非负即可
              assertThat(result.uptime()).isGreaterThanOrEqualTo(0);
          }
 
@@ -285,7 +278,7 @@ class SystemMonitorServiceImplTest {
                     List.of(),
                     List.of()
             );
-            when(storageService.getStorageCapacity()).thenReturn(Result.success(remoteCapacity));
+            when(fileRemoteClient.getStorageCapacity()).thenReturn(Result.success(remoteCapacity));
 
             StorageCapacityVO result = systemMonitorService.getStorageCapacity();
 
@@ -297,7 +290,7 @@ class SystemMonitorServiceImplTest {
         @Test
         @DisplayName("should fallback to estimate when remote service fails")
         void shouldFallbackToEstimateWhenRemoteServiceFails() {
-            when(storageService.getStorageCapacity()).thenReturn(Result.error(ResultEnum.FILE_SERVICE_ERROR, null));
+            when(fileRemoteClient.getStorageCapacity()).thenReturn(Result.error(ResultEnum.FILE_SERVICE_ERROR, null));
             when(fileMapper.selectCount(any())).thenReturn(10L);
 
             StorageCapacityVO result = systemMonitorService.getStorageCapacity();
@@ -320,7 +313,7 @@ class SystemMonitorServiceImplTest {
             when(operationLogMapper.selectOperationsBetween(any(), any())).thenReturn(50L);
 
             BlockChainMessage chainMessage = new BlockChainMessage(100L, 1000L, null, null, null);
-            when(blockChainService.getCurrentBlockChainMessage()).thenReturn(Result.success(chainMessage));
+            when(fileRemoteClient.getCurrentBlockChainMessage()).thenReturn(Result.success(chainMessage));
 
             Health upHealth = Health.up().build();
             when(databaseHealthIndicator.health()).thenReturn(upHealth);
@@ -349,7 +342,7 @@ class SystemMonitorServiceImplTest {
             when(accountMapper.selectCount(any())).thenReturn(1L);
             when(fileMapper.selectCount(any())).thenReturn(1L);
             when(operationLogMapper.selectOperationsBetween(any(), any())).thenReturn(0L);
-            when(blockChainService.getCurrentBlockChainMessage()).thenReturn(Result.success(new BlockChainMessage(null, null, null, null, null)));
+            when(fileRemoteClient.getCurrentBlockChainMessage()).thenReturn(Result.success(new BlockChainMessage(null, null, null, null, null)));
 
             Health upHealth = Health.up().build();
             when(databaseHealthIndicator.health()).thenReturn(upHealth);
