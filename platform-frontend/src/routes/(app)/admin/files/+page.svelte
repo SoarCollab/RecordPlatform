@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { useNotifications } from "$stores/notifications.svelte";
   import { formatFileSize, formatDateTime } from "$utils/format";
   import {
@@ -11,6 +11,7 @@
     forceCancelShare,
     getShareAccessLogs,
   } from "$api/endpoints/admin";
+  import { downloadFile } from "$api/endpoints/files";
   import {
     type AdminFileVO,
     type AdminFileDetailVO,
@@ -29,6 +30,7 @@
   import * as Table from "$lib/components/ui/table";
   import { Separator } from "$lib/components/ui/separator";
   import DateTimePicker from "$lib/components/ui/date-picker/date-time-picker.svelte";
+  import FilePreview from "$lib/components/FilePreview.svelte";
 
   const notifications = useNotifications();
 
@@ -66,7 +68,11 @@
 
   // 删除确认对话框
   let deleteDialogOpen = $state(false);
-  let deleteTarget = $state<{ type: "file" | "share"; id: string; name: string } | null>(null);
+  let deleteTarget = $state<{
+    type: "file" | "share";
+    id: string;
+    name: string;
+  } | null>(null);
   let deleteReason = $state("");
   let deleting = $state(false);
 
@@ -82,11 +88,17 @@
   async function loadLogsPage() {
     logsLoading = true;
     try {
-      const result = await getShareAccessLogs(logsShareCode, { pageNum: logsPageNum, pageSize: logsPageSize });
+      const result = await getShareAccessLogs(logsShareCode, {
+        pageNum: logsPageNum,
+        pageSize: logsPageSize,
+      });
       accessLogs = result.records;
       logsTotalPages = Math.max(1, Math.ceil(result.total / logsPageSize));
     } catch (err) {
-      notifications.error("加载日志失败", err instanceof Error ? err.message : "请稍后重试");
+      notifications.error(
+        "加载日志失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
     } finally {
       logsLoading = false;
     }
@@ -113,7 +125,10 @@
       files = result.records;
       filesTotalPages = Math.max(1, Math.ceil(result.total / 20));
     } catch (err) {
-      notifications.error("加载失败", err instanceof Error ? err.message : "请稍后重试");
+      notifications.error(
+        "加载失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
     } finally {
       filesLoading = false;
     }
@@ -135,7 +150,10 @@
       shares = result.records;
       sharesTotalPages = Math.max(1, Math.ceil(result.total / 20));
     } catch (err) {
-      notifications.error("加载失败", err instanceof Error ? err.message : "请稍后重试");
+      notifications.error(
+        "加载失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
     } finally {
       sharesLoading = false;
     }
@@ -179,7 +197,10 @@
     try {
       selectedFile = await getFileDetail(file.id);
     } catch (err) {
-      notifications.error("加载详情失败", err instanceof Error ? err.message : "请稍后重试");
+      notifications.error(
+        "加载详情失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
       detailDialogOpen = false;
     } finally {
       detailLoading = false;
@@ -195,10 +216,17 @@
       notifications.success("状态更新成功");
       loadFiles();
       if (selectedFile && selectedFile.id === fileId) {
-        selectedFile = { ...selectedFile, status: newStatus, statusDesc: AdminFileStatusLabel[newStatus] };
+        selectedFile = {
+          ...selectedFile,
+          status: newStatus,
+          statusDesc: AdminFileStatusLabel[newStatus],
+        };
       }
     } catch (err) {
-      notifications.error("更新失败", err instanceof Error ? err.message : "请稍后重试");
+      notifications.error(
+        "更新失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
     } finally {
       statusUpdatingId = null;
     }
@@ -225,7 +253,10 @@
       }
       deleteDialogOpen = false;
     } catch (err) {
-      notifications.error("操作失败", err instanceof Error ? err.message : "请稍后重试");
+      notifications.error(
+        "操作失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
     } finally {
       deleting = false;
     }
@@ -245,7 +276,90 @@
     }
   }
 
-  function getStatusBadgeVariant(status: number): "default" | "secondary" | "destructive" | "outline" {
+  // 预览状态
+  let previewDialogOpen = $state(false);
+  let previewUrl = $state("");
+  let previewContentType = $state("");
+  let previewFileName = $state("");
+  let previewLoading = $state(false);
+
+  // 下载状态
+  let downloadingHash = $state<string | null>(null);
+
+  async function handlePreview(
+    fileHash: string,
+    contentType: string,
+    fileName: string,
+  ) {
+    previewLoading = true;
+    previewDialogOpen = true;
+    previewContentType = contentType;
+    previewFileName = fileName;
+    previewUrl = "";
+    try {
+      const blob = await downloadFile(fileHash);
+      previewUrl = URL.createObjectURL(blob);
+    } catch (err) {
+      notifications.error(
+        "预览失败",
+        err instanceof Error ? err.message : "无法加载文件",
+      );
+      previewDialogOpen = false;
+    } finally {
+      previewLoading = false;
+    }
+  }
+
+  function closePreview() {
+    previewDialogOpen = false;
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      previewUrl = "";
+    }
+  }
+
+  async function handleDownload(fileHash: string, fileName: string) {
+    downloadingHash = fileHash;
+    try {
+      const blob = await downloadFile(fileHash);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      notifications.success("下载完成");
+    } catch (err) {
+      notifications.error(
+        "下载失败",
+        err instanceof Error ? err.message : "请稍后重试",
+      );
+    } finally {
+      downloadingHash = null;
+    }
+  }
+
+  onDestroy(() => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  });
+
+  function isPreviewable(contentType: string): boolean {
+    return (
+      contentType.startsWith("image/") ||
+      contentType.startsWith("video/") ||
+      contentType.startsWith("audio/") ||
+      contentType === "application/pdf" ||
+      contentType.startsWith("text/") ||
+      contentType === "application/json" ||
+      contentType === "application/xml"
+    );
+  }
+
+  function getStatusBadgeVariant(
+    status: number,
+  ): "default" | "secondary" | "destructive" | "outline" {
     switch (status) {
       case AdminFileStatus.COMPLETED:
       case AdminShareStatus.ACTIVE:
@@ -287,8 +401,10 @@
           </div>
 
           <!-- 筛选面板 -->
-          <div class="mt-4 rounded-lg border bg-muted/30 p-4">
-            <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div class="bg-muted/30 mt-4 rounded-lg border p-4">
+            <div
+              class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            >
               <Input
                 placeholder="搜索文件名或哈希..."
                 bind:value={filesKeyword}
@@ -297,7 +413,7 @@
 
               <select
                 bind:value={filesStatus}
-                class="h-9 w-full rounded-md border bg-background px-3 text-sm focus:border-primary focus:outline-none"
+                class="bg-background focus:border-primary h-9 w-full rounded-md border px-3 text-sm focus:outline-none"
               >
                 <option value="">全部状态</option>
                 <option value={0}>处理中</option>
@@ -308,7 +424,7 @@
 
               <select
                 bind:value={filesSourceType}
-                class="h-9 w-full rounded-md border bg-background px-3 text-sm focus:border-primary focus:outline-none"
+                class="bg-background focus:border-primary h-9 w-full rounded-md border px-3 text-sm focus:outline-none"
               >
                 <option value="">全部来源</option>
                 <option value="original">原始上传</option>
@@ -321,12 +437,20 @@
                 onkeydown={(e) => e.key === "Enter" && handleFilesSearch()}
               />
 
-              <DateTimePicker bind:value={filesStartTime} placeholder="开始时间" />
-              <DateTimePicker bind:value={filesEndTime} placeholder="结束时间" />
+              <DateTimePicker
+                bind:value={filesStartTime}
+                placeholder="开始时间"
+              />
+              <DateTimePicker
+                bind:value={filesEndTime}
+                placeholder="结束时间"
+              />
 
               <div class="flex gap-2">
                 <Button onclick={handleFilesSearch} class="flex-1">搜索</Button>
-                <Button variant="secondary" onclick={clearFilesFilters}>重置</Button>
+                <Button variant="secondary" onclick={clearFilesFilters}
+                  >重置</Button
+                >
               </div>
             </div>
           </div>
@@ -334,10 +458,12 @@
         <Card.Content>
           {#if filesLoading}
             <div class="flex items-center justify-center p-12">
-              <div class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+              <div
+                class="border-primary h-8 w-8 animate-spin rounded-full border-4 border-t-transparent"
+              ></div>
             </div>
           {:else if files.length === 0}
-            <div class="p-12 text-center text-muted-foreground">暂无文件</div>
+            <div class="text-muted-foreground p-12 text-center">暂无文件</div>
           {:else}
             <Table.Root>
               <Table.Header>
@@ -362,7 +488,7 @@
                       {#if file.isOriginal}
                         <Badge variant="outline">原始上传</Badge>
                       {:else}
-                        <span class="text-sm text-muted-foreground">
+                        <span class="text-muted-foreground text-sm">
                           来自 {file.sharedFromUserName || "未知"}
                         </span>
                       {/if}
@@ -373,19 +499,87 @@
                         {file.statusDesc}
                       </Badge>
                     </Table.Cell>
-                    <Table.Cell class="text-sm text-muted-foreground">
+                    <Table.Cell class="text-muted-foreground text-sm">
                       {formatDateTime(file.createTime)}
                     </Table.Cell>
                     <Table.Cell class="text-right">
                       <div class="flex justify-end gap-1">
-                        <Button variant="ghost" size="sm" onclick={() => handleViewDetail(file)}>
+                        {#if file.status === AdminFileStatus.COMPLETED && isPreviewable(file.contentType)}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="预览"
+                            onclick={() =>
+                              handlePreview(
+                                file.fileHash,
+                                file.contentType,
+                                file.fileName,
+                              )}
+                          >
+                            <svg
+                              class="h-4 w-4"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                              />
+                              <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                              />
+                            </svg>
+                          </Button>
+                        {/if}
+                        {#if file.status === AdminFileStatus.COMPLETED}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="下载"
+                            disabled={downloadingHash === file.fileHash}
+                            onclick={() =>
+                              handleDownload(file.fileHash, file.fileName)}
+                          >
+                            {#if downloadingHash === file.fileHash}
+                              <div
+                                class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+                              ></div>
+                            {:else}
+                              <svg
+                                class="h-4 w-4"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                  stroke-width="2"
+                                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                                />
+                              </svg>
+                            {/if}
+                          </Button>
+                        {/if}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onclick={() => handleViewDetail(file)}
+                        >
                           详情
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
                           class="text-destructive"
-                          onclick={() => confirmDelete("file", file.id, file.fileName)}
+                          onclick={() =>
+                            confirmDelete("file", file.id, file.fileName)}
                         >
                           删除
                         </Button>
@@ -398,7 +592,7 @@
 
             <!-- 分页 -->
             <div class="mt-4 flex items-center justify-between">
-              <span class="text-sm text-muted-foreground">
+              <span class="text-muted-foreground text-sm">
                 第 {filesPageNum} / {filesTotalPages} 页
               </span>
               <div class="flex gap-2">
@@ -440,8 +634,10 @@
           </div>
 
           <!-- 筛选面板 -->
-          <div class="mt-4 rounded-lg border bg-muted/30 p-4">
-            <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div class="bg-muted/30 mt-4 rounded-lg border p-4">
+            <div
+              class="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            >
               <Input
                 placeholder="搜索分享码或文件名..."
                 bind:value={sharesKeyword}
@@ -450,7 +646,7 @@
 
               <select
                 bind:value={sharesStatus}
-                class="h-9 w-full rounded-md border bg-background px-3 text-sm focus:border-primary focus:outline-none"
+                class="bg-background focus:border-primary h-9 w-full rounded-md border px-3 text-sm focus:outline-none"
               >
                 <option value="">全部状态</option>
                 <option value={1}>有效</option>
@@ -460,7 +656,7 @@
 
               <select
                 bind:value={sharesShareType}
-                class="h-9 w-full rounded-md border bg-background px-3 text-sm focus:border-primary focus:outline-none"
+                class="bg-background focus:border-primary h-9 w-full rounded-md border px-3 text-sm focus:outline-none"
               >
                 <option value="">全部类型</option>
                 <option value={0}>公开</option>
@@ -473,12 +669,21 @@
                 onkeydown={(e) => e.key === "Enter" && handleSharesSearch()}
               />
 
-              <DateTimePicker bind:value={sharesStartTime} placeholder="开始时间" />
-              <DateTimePicker bind:value={sharesEndTime} placeholder="结束时间" />
+              <DateTimePicker
+                bind:value={sharesStartTime}
+                placeholder="开始时间"
+              />
+              <DateTimePicker
+                bind:value={sharesEndTime}
+                placeholder="结束时间"
+              />
 
               <div class="flex gap-2">
-                <Button onclick={handleSharesSearch} class="flex-1">搜索</Button>
-                <Button variant="secondary" onclick={clearSharesFilters}>重置</Button>
+                <Button onclick={handleSharesSearch} class="flex-1">搜索</Button
+                >
+                <Button variant="secondary" onclick={clearSharesFilters}
+                  >重置</Button
+                >
               </div>
             </div>
           </div>
@@ -486,10 +691,12 @@
         <Card.Content>
           {#if sharesLoading}
             <div class="flex items-center justify-center p-12">
-              <div class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+              <div
+                class="border-primary h-8 w-8 animate-spin rounded-full border-4 border-t-transparent"
+              ></div>
             </div>
           {:else if shares.length === 0}
-            <div class="p-12 text-center text-muted-foreground">暂无分享</div>
+            <div class="text-muted-foreground p-12 text-center">暂无分享</div>
           {:else}
             <Table.Root>
               <Table.Header>
@@ -510,13 +717,17 @@
                     <Table.Cell class="font-mono">{share.shareCode}</Table.Cell>
                     <Table.Cell>{share.sharerName}</Table.Cell>
                     <Table.Cell>
-                      <Badge variant={share.shareType === 0 ? "default" : "secondary"}>
+                      <Badge
+                        variant={share.shareType === 0
+                          ? "default"
+                          : "secondary"}
+                      >
                         {share.shareTypeDesc}
                       </Badge>
                     </Table.Cell>
                     <Table.Cell>{share.fileCount} 个</Table.Cell>
                     <Table.Cell class="text-sm">
-                      <div class="flex gap-2 text-muted-foreground">
+                      <div class="text-muted-foreground flex gap-2">
                         <span>👁 {share.viewCount}</span>
                         <span>⬇ {share.downloadCount}</span>
                         <span>💾 {share.saveCount}</span>
@@ -527,12 +738,16 @@
                         {share.statusDesc}
                       </Badge>
                     </Table.Cell>
-                    <Table.Cell class="text-sm text-muted-foreground">
+                    <Table.Cell class="text-muted-foreground text-sm">
                       {formatDateTime(share.createTime)}
                     </Table.Cell>
                     <Table.Cell class="text-right">
                       <div class="flex justify-end gap-1">
-                        <Button variant="ghost" size="sm" onclick={() => handleViewLogs(share.shareCode)}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onclick={() => handleViewLogs(share.shareCode)}
+                        >
                           日志
                         </Button>
                         {#if share.status === AdminShareStatus.ACTIVE}
@@ -540,7 +755,12 @@
                             variant="ghost"
                             size="sm"
                             class="text-destructive"
-                            onclick={() => confirmDelete("share", share.shareCode, share.shareCode)}
+                            onclick={() =>
+                              confirmDelete(
+                                "share",
+                                share.shareCode,
+                                share.shareCode,
+                              )}
                           >
                             取消
                           </Button>
@@ -554,7 +774,7 @@
 
             <!-- 分页 -->
             <div class="mt-4 flex items-center justify-between">
-              <span class="text-sm text-muted-foreground">
+              <span class="text-muted-foreground text-sm">
                 第 {sharesPageNum} / {sharesTotalPages} 页
               </span>
               <div class="flex gap-2">
@@ -598,35 +818,37 @@
 
     {#if detailLoading}
       <div class="flex items-center justify-center p-12">
-        <div class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+        <div
+          class="border-primary h-8 w-8 animate-spin rounded-full border-4 border-t-transparent"
+        ></div>
       </div>
     {:else if selectedFile}
       <div class="space-y-6">
         <!-- 基本信息 -->
         <div>
           <h3 class="mb-3 font-semibold">基本信息</h3>
-          <div class="grid gap-4 rounded-lg bg-muted/50 p-4 sm:grid-cols-2">
+          <div class="bg-muted/50 grid gap-4 rounded-lg p-4 sm:grid-cols-2">
             <div>
-              <p class="text-sm text-muted-foreground">文件名</p>
+              <p class="text-muted-foreground text-sm">文件名</p>
               <p class="font-medium">{selectedFile.fileName}</p>
             </div>
             <div>
-              <p class="text-sm text-muted-foreground">大小</p>
+              <p class="text-muted-foreground text-sm">大小</p>
               <p class="font-medium">{formatFileSize(selectedFile.fileSize)}</p>
             </div>
             <div>
-              <p class="text-sm text-muted-foreground">类型</p>
+              <p class="text-muted-foreground text-sm">类型</p>
               <p class="font-medium">{selectedFile.contentType}</p>
             </div>
             <div>
-              <p class="text-sm text-muted-foreground">状态</p>
+              <p class="text-muted-foreground text-sm">状态</p>
               <Badge variant={getStatusBadgeVariant(selectedFile.status)}>
                 {selectedFile.statusDesc}
               </Badge>
             </div>
             <div class="sm:col-span-2">
-              <p class="text-sm text-muted-foreground">文件哈希</p>
-              <p class="break-all font-mono text-sm">{selectedFile.fileHash}</p>
+              <p class="text-muted-foreground text-sm">文件哈希</p>
+              <p class="font-mono text-sm break-all">{selectedFile.fileHash}</p>
             </div>
           </div>
         </div>
@@ -636,28 +858,34 @@
         <!-- 所有权信息 -->
         <div>
           <h3 class="mb-3 font-semibold">所有权信息</h3>
-          <div class="grid gap-4 rounded-lg bg-muted/50 p-4 sm:grid-cols-2">
+          <div class="bg-muted/50 grid gap-4 rounded-lg p-4 sm:grid-cols-2">
             <div>
-              <p class="text-sm text-muted-foreground">当前所有者</p>
+              <p class="text-muted-foreground text-sm">当前所有者</p>
               <p class="font-medium">{selectedFile.ownerName}</p>
             </div>
             <div>
-              <p class="text-sm text-muted-foreground">来源类型</p>
-              <Badge variant={selectedFile.isOriginal ? "default" : "secondary"}>
+              <p class="text-muted-foreground text-sm">来源类型</p>
+              <Badge
+                variant={selectedFile.isOriginal ? "default" : "secondary"}
+              >
                 {selectedFile.isOriginal ? "原始上传" : "分享保存"}
               </Badge>
             </div>
             {#if !selectedFile.isOriginal}
               <div>
-                <p class="text-sm text-muted-foreground">原始上传者</p>
-                <p class="font-medium">{selectedFile.originOwnerName || "未知"}</p>
+                <p class="text-muted-foreground text-sm">原始上传者</p>
+                <p class="font-medium">
+                  {selectedFile.originOwnerName || "未知"}
+                </p>
               </div>
               <div>
-                <p class="text-sm text-muted-foreground">直接分享者</p>
-                <p class="font-medium">{selectedFile.sharedFromUserName || "未知"}</p>
+                <p class="text-muted-foreground text-sm">直接分享者</p>
+                <p class="font-medium">
+                  {selectedFile.sharedFromUserName || "未知"}
+                </p>
               </div>
               <div>
-                <p class="text-sm text-muted-foreground">分享链路深度</p>
+                <p class="text-muted-foreground text-sm">分享链路深度</p>
                 <p class="font-medium">{selectedFile.depth} 级</p>
               </div>
             {/if}
@@ -672,12 +900,14 @@
             <div class="space-y-2">
               {#each selectedFile.provenanceChain as node, i}
                 <div class="flex items-center gap-2">
-                  <div class="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
+                  <div
+                    class="bg-primary text-primary-foreground flex h-6 w-6 items-center justify-center rounded-full text-xs"
+                  >
                     {node.depth}
                   </div>
                   <span class="font-medium">{node.userName}</span>
                   {#if node.shareCode}
-                    <span class="text-sm text-muted-foreground">
+                    <span class="text-muted-foreground text-sm">
                       (分享码: {node.shareCode})
                     </span>
                   {/if}
@@ -697,15 +927,21 @@
             <h3 class="mb-3 font-semibold">相关分享</h3>
             <div class="space-y-2">
               {#each selectedFile.relatedShares as share}
-                <div class="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                <div
+                  class="bg-muted/50 flex items-center justify-between rounded-lg p-3"
+                >
                   <div>
                     <span class="font-mono">{share.shareCode}</span>
-                    <span class="ml-2 text-sm text-muted-foreground">
+                    <span class="text-muted-foreground ml-2 text-sm">
                       by {share.sharerName}
                     </span>
                   </div>
                   <Badge variant={getStatusBadgeVariant(share.status)}>
-                    {share.status === AdminShareStatus.CANCELLED ? "已取消" : share.status === AdminShareStatus.ACTIVE ? "有效" : "已过期"}
+                    {share.status === AdminShareStatus.CANCELLED
+                      ? "已取消"
+                      : share.status === AdminShareStatus.ACTIVE
+                        ? "有效"
+                        : "已过期"}
                   </Badge>
                 </div>
               {/each}
@@ -720,12 +956,18 @@
             <h3 class="mb-3 font-semibold">最近访问日志</h3>
             <div class="space-y-2">
               {#each selectedFile.recentAccessLogs as log}
-                <div class="flex items-center justify-between rounded-lg bg-muted/50 p-3 text-sm">
+                <div
+                  class="bg-muted/50 flex items-center justify-between rounded-lg p-3 text-sm"
+                >
                   <div>
                     <span class="font-medium">{log.actorUserName}</span>
-                    <Badge variant="outline" class="ml-2">{log.actionTypeDesc}</Badge>
+                    <Badge variant="outline" class="ml-2"
+                      >{log.actionTypeDesc}</Badge
+                    >
                   </div>
-                  <span class="text-muted-foreground">{formatDateTime(log.accessTime)}</span>
+                  <span class="text-muted-foreground"
+                    >{formatDateTime(log.accessTime)}</span
+                  >
                 </div>
               {/each}
             </div>
@@ -734,35 +976,112 @@
 
         <!-- 操作按钮 -->
         <Separator />
-        <div class="flex justify-end gap-2">
-          {#if selectedFile.status === AdminFileStatus.COMPLETED}
+        <div class="flex items-center justify-between">
+          <div class="flex gap-2">
+            {#if selectedFile.status === AdminFileStatus.COMPLETED}
+              {#if isPreviewable(selectedFile.contentType)}
+                <Button
+                  variant="outline"
+                  onclick={() =>
+                    handlePreview(
+                      selectedFile!.fileHash,
+                      selectedFile!.contentType,
+                      selectedFile!.fileName,
+                    )}
+                >
+                  <svg
+                    class="mr-2 h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                    />
+                  </svg>
+                  预览
+                </Button>
+              {/if}
+              <Button
+                variant="outline"
+                disabled={downloadingHash === selectedFile.fileHash}
+                onclick={() =>
+                  handleDownload(
+                    selectedFile!.fileHash,
+                    selectedFile!.fileName,
+                  )}
+              >
+                {#if downloadingHash === selectedFile.fileHash}
+                  <div
+                    class="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+                  ></div>
+                {:else}
+                  <svg
+                    class="mr-2 h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                    />
+                  </svg>
+                {/if}
+                下载
+              </Button>
+            {/if}
+          </div>
+          <div class="flex gap-2">
+            {#if selectedFile.status === AdminFileStatus.COMPLETED}
+              <Button
+                variant="outline"
+                onclick={() =>
+                  handleUpdateStatus(selectedFile!.id, AdminFileStatus.DELETED)}
+                disabled={statusUpdatingId === selectedFile!.id}
+              >
+                {statusUpdatingId === selectedFile!.id
+                  ? "处理中..."
+                  : "标记删除"}
+              </Button>
+            {:else if selectedFile.status === AdminFileStatus.DELETED}
+              <Button
+                variant="outline"
+                onclick={() =>
+                  handleUpdateStatus(
+                    selectedFile!.id,
+                    AdminFileStatus.COMPLETED,
+                  )}
+                disabled={statusUpdatingId === selectedFile!.id}
+              >
+                {statusUpdatingId === selectedFile!.id
+                  ? "处理中..."
+                  : "恢复文件"}
+              </Button>
+            {/if}
             <Button
-              variant="outline"
-              onclick={() => handleUpdateStatus(selectedFile!.id, AdminFileStatus.DELETED)}
-              disabled={statusUpdatingId === selectedFile!.id}
+              variant="destructive"
+              onclick={() => {
+                if (selectedFile) {
+                  confirmDelete("file", selectedFile.id, selectedFile.fileName);
+                  detailDialogOpen = false;
+                }
+              }}
             >
-              {statusUpdatingId === selectedFile!.id ? "处理中..." : "标记删除"}
+              强制删除
             </Button>
-          {:else if selectedFile.status === AdminFileStatus.DELETED}
-            <Button
-              variant="outline"
-              onclick={() => handleUpdateStatus(selectedFile!.id, AdminFileStatus.COMPLETED)}
-              disabled={statusUpdatingId === selectedFile!.id}
-            >
-              {statusUpdatingId === selectedFile!.id ? "处理中..." : "恢复文件"}
-            </Button>
-          {/if}
-          <Button
-            variant="destructive"
-            onclick={() => {
-              if (selectedFile) {
-                confirmDelete("file", selectedFile.id, selectedFile.fileName);
-                detailDialogOpen = false;
-              }
-            }}
-          >
-            强制删除
-          </Button>
+          </div>
         </div>
       </div>
     {/if}
@@ -773,7 +1092,11 @@
 <Dialog.Root bind:open={deleteDialogOpen}>
   <Dialog.Content class="sm:max-w-md">
     <Dialog.Header>
-      <Dialog.Title>确认{deleteTarget?.type === "file" ? "删除文件" : "取消分享"}</Dialog.Title>
+      <Dialog.Title
+        >确认{deleteTarget?.type === "file"
+          ? "删除文件"
+          : "取消分享"}</Dialog.Title
+      >
       <Dialog.Description>
         {#if deleteTarget?.type === "file"}
           确定要永久删除文件 "{deleteTarget?.name}" 吗？此操作不可撤销。
@@ -785,13 +1108,21 @@
 
     <div class="space-y-4">
       <div>
-        <label for="delete-reason" class="mb-2 block text-sm font-medium">操作原因（可选）</label>
-        <Input id="delete-reason" bind:value={deleteReason} placeholder="请输入原因..." />
+        <label for="delete-reason" class="mb-2 block text-sm font-medium"
+          >操作原因（可选）</label
+        >
+        <Input
+          id="delete-reason"
+          bind:value={deleteReason}
+          placeholder="请输入原因..."
+        />
       </div>
     </div>
 
     <Dialog.Footer>
-      <Button variant="outline" onclick={() => (deleteDialogOpen = false)}>取消</Button>
+      <Button variant="outline" onclick={() => (deleteDialogOpen = false)}
+        >取消</Button
+      >
       <Button variant="destructive" onclick={executeDelete} disabled={deleting}>
         {deleting ? "处理中..." : "确认"}
       </Button>
@@ -809,25 +1140,29 @@
 
     {#if logsLoading}
       <div class="flex items-center justify-center p-12">
-        <div class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
+        <div
+          class="border-primary h-8 w-8 animate-spin rounded-full border-4 border-t-transparent"
+        ></div>
       </div>
     {:else if accessLogs.length === 0}
-      <div class="p-12 text-center text-muted-foreground">暂无访问日志</div>
+      <div class="text-muted-foreground p-12 text-center">暂无访问日志</div>
     {:else}
       <div class="space-y-2">
         {#each accessLogs as log}
-          <div class="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+          <div
+            class="bg-muted/50 flex items-center justify-between rounded-lg p-3"
+          >
             <div class="space-y-1">
               <div class="flex items-center gap-2">
                 <span class="font-medium">{log.actorUserName}</span>
                 <Badge variant="outline">{log.actionTypeDesc}</Badge>
               </div>
               {#if log.fileName}
-                <p class="text-sm text-muted-foreground">{log.fileName}</p>
+                <p class="text-muted-foreground text-sm">{log.fileName}</p>
               {/if}
-              <p class="text-xs text-muted-foreground">IP: {log.actorIp}</p>
+              <p class="text-muted-foreground text-xs">IP: {log.actorIp}</p>
             </div>
-            <span class="text-sm text-muted-foreground">
+            <span class="text-muted-foreground text-sm">
               {formatDateTime(log.accessTime)}
             </span>
           </div>
@@ -836,7 +1171,7 @@
 
       {#if logsTotalPages > 1}
         <div class="mt-4 flex items-center justify-between border-t pt-4">
-          <span class="text-sm text-muted-foreground">
+          <span class="text-muted-foreground text-sm">
             第 {logsPageNum} / {logsTotalPages} 页
           </span>
           <div class="flex gap-2">
@@ -844,7 +1179,10 @@
               variant="outline"
               size="sm"
               disabled={logsPageNum <= 1 || logsLoading}
-              onclick={() => { logsPageNum--; loadLogsPage(); }}
+              onclick={() => {
+                logsPageNum--;
+                loadLogsPage();
+              }}
             >
               上一页
             </Button>
@@ -852,7 +1190,10 @@
               variant="outline"
               size="sm"
               disabled={logsPageNum >= logsTotalPages || logsLoading}
-              onclick={() => { logsPageNum++; loadLogsPage(); }}
+              onclick={() => {
+                logsPageNum++;
+                loadLogsPage();
+              }}
             >
               下一页
             </Button>
@@ -863,6 +1204,38 @@
 
     <Dialog.Footer>
       <Button onclick={() => (logsDialogOpen = false)}>关闭</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
+<!-- 文件预览对话框 -->
+<Dialog.Root
+  open={previewDialogOpen}
+  onOpenChange={(open) => {
+    if (!open) closePreview();
+  }}
+>
+  <Dialog.Content class="max-h-[90vh] max-w-4xl overflow-y-auto">
+    <Dialog.Header>
+      <Dialog.Title>文件预览</Dialog.Title>
+      <Dialog.Description>{previewFileName}</Dialog.Description>
+    </Dialog.Header>
+    {#if previewLoading}
+      <div class="flex items-center justify-center p-16">
+        <div
+          class="border-primary h-8 w-8 animate-spin rounded-full border-4 border-t-transparent"
+        ></div>
+        <span class="text-muted-foreground ml-3 text-sm">加载中...</span>
+      </div>
+    {:else if previewUrl}
+      <FilePreview
+        url={previewUrl}
+        contentType={previewContentType}
+        fileName={previewFileName}
+      />
+    {/if}
+    <Dialog.Footer>
+      <Button variant="outline" onclick={closePreview}>关闭</Button>
     </Dialog.Footer>
   </Dialog.Content>
 </Dialog.Root>

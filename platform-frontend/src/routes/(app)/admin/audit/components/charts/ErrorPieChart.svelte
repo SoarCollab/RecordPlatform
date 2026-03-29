@@ -18,6 +18,7 @@
   }: Props = $props();
 
   let chart: echarts.ECharts | null = null;
+  let resizeObserver: ResizeObserver | null = null;
 
   const colors = [
     "#ef4444",
@@ -27,10 +28,6 @@
     "#3b82f6",
     "#8b5cf6",
   ];
-
-  function handleResize() {
-    chart?.resize();
-  }
 
   function updateChart() {
     if (!chart) return;
@@ -93,24 +90,30 @@
   }
 
   function initAction(node: HTMLDivElement) {
-    requestAnimationFrame(() => {
+    resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      if (width === 0 || height === 0) return;
+
       if (!chart) {
         chart = echarts.init(node, undefined, { renderer: "canvas" });
-
         chart.on("click", (params) => {
           if (params.dataIndex !== undefined && onItemClick) {
             onItemClick(data[params.dataIndex]);
           }
         });
-
         updateChart();
-        window.addEventListener("resize", handleResize);
+      } else {
+        chart.resize();
       }
     });
+    resizeObserver.observe(node);
 
     return {
       destroy() {
-        window.removeEventListener("resize", handleResize);
+        resizeObserver?.disconnect();
+        resizeObserver = null;
         chart?.dispose();
         chart = null;
       },
@@ -124,7 +127,8 @@
   });
 
   onDestroy(() => {
-    window.removeEventListener("resize", handleResize);
+    resizeObserver?.disconnect();
+    resizeObserver = null;
     chart?.dispose();
     chart = null;
   });

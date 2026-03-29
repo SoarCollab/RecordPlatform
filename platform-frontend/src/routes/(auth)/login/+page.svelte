@@ -8,6 +8,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
+  import { Checkbox } from "$lib/components/ui/checkbox";
 
   const auth = useAuth();
   const notifications = useNotifications();
@@ -40,7 +41,7 @@
     } catch (err) {
       notifications.error(
         "登录失败",
-        err instanceof Error ? err.message : "请检查用户名和密码"
+        err instanceof Error ? err.message : "请检查用户名和密码",
       );
     } finally {
       isSubmitting = false;
@@ -55,7 +56,9 @@
 <div in:fly={{ y: 20, duration: 400, delay: 100 }}>
   <Card.Root class="w-full shadow-lg">
     <Card.Header class="space-y-1 text-center">
-      <div class="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+      <div
+        class="bg-primary text-primary-foreground mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-lg"
+      >
         <svg
           class="h-6 w-6"
           fill="none"
@@ -101,16 +104,15 @@
 
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              id="remember"
-              bind:checked={rememberMe}
-              class="h-4 w-4 rounded border-primary text-primary focus:ring-primary"
-              disabled={isSubmitting}
-            />
-            <Label for="remember" class="text-sm font-normal cursor-pointer">记住我</Label>
+            <Checkbox bind:checked={rememberMe} disabled={isSubmitting} />
+            <Label for="remember" class="cursor-pointer text-sm font-normal"
+              >记住我</Label
+            >
           </div>
-          <a href="/reset-password" class="text-sm text-primary hover:underline">
+          <a
+            href="/reset-password"
+            class="text-primary text-sm hover:underline"
+          >
             忘记密码？
           </a>
         </div>
@@ -118,8 +120,20 @@
         <Button type="submit" class="w-full" disabled={isSubmitting}>
           {#if isSubmitting}
             <svg class="mr-2 h-4 w-4 animate-spin" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              <circle
+                class="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                stroke-width="4"
+                fill="none"
+              ></circle>
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
             </svg>
             登录中...
           {:else}
@@ -129,9 +143,11 @@
       </form>
     </Card.Content>
     <Card.Footer class="justify-center border-t p-4">
-      <div class="text-sm text-muted-foreground">
+      <div class="text-muted-foreground text-sm">
         还没有账户？
-        <a href="/register" class="text-primary font-medium hover:underline">立即注册</a>
+        <a href="/register" class="text-primary font-medium hover:underline"
+          >立即注册</a
+        >
       </div>
     </Card.Footer>
   </Card.Root>

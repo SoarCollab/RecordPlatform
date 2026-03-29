@@ -82,9 +82,79 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply rounded-full bg-border;
+  @apply bg-border rounded-full;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-muted-foreground/50;
+}
+
+/* ===== Keyframe Animations ===== */
+@keyframes enter-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes enter-slide-from-left {
+  from {
+    transform: translateX(-8px);
+  }
+}
+
+@keyframes enter-slide-from-bottom {
+  from {
+    transform: translateY(8px);
+  }
+}
+
+.animate-in {
+  animation-duration: 300ms;
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
+}
+
+.fade-in {
+  animation-name: enter-fade;
+}
+
+.slide-in-from-left-4 {
+  animation-name: enter-fade, enter-slide-from-left;
+}
+
+.slide-in-from-bottom-4 {
+  animation-name: enter-fade, enter-slide-from-bottom;
+}
+
+.duration-300 {
+  animation-duration: 300ms;
+}
+
+/* ===== View Transitions (page navigation) ===== */
+@keyframes page-fade-out {
+  to {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes page-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+::view-transition-old(page-content) {
+  animation: 100ms ease-out both page-fade-out;
+}
+
+::view-transition-new(page-content) {
+  animation: 200ms ease-out 50ms both page-fade-in;
+}
+
+/* 侧边栏和头部不参与页面切换动画 */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
 }

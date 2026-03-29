@@ -6,15 +6,18 @@
     data: Array<{ date: string; count: number }>;
     title?: string;
     loading?: boolean;
+    onDateClick?: (date: string) => void;
   }
 
-  let { data, title = "7天操作趋势", loading = false }: Props = $props();
+  let {
+    data,
+    title = "7天操作趋势",
+    loading = false,
+    onDateClick,
+  }: Props = $props();
 
   let chart: echarts.ECharts | null = null;
-
-  function handleResize() {
-    chart?.resize();
-  }
+  let resizeObserver: ResizeObserver | null = null;
 
   function updateChart() {
     if (!chart || !data.length) return;
@@ -85,18 +88,30 @@
   }
 
   function initAction(node: HTMLDivElement) {
-    // Defer to ensure the browser has computed layout dimensions
-    requestAnimationFrame(() => {
+    resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      if (width === 0 || height === 0) return;
+
       if (!chart) {
         chart = echarts.init(node, undefined, { renderer: "canvas" });
+        chart.on("click", (params) => {
+          if (params.name && onDateClick) {
+            onDateClick(params.name as string);
+          }
+        });
         updateChart();
-        window.addEventListener("resize", handleResize);
+      } else {
+        chart.resize();
       }
     });
+    resizeObserver.observe(node);
 
     return {
       destroy() {
-        window.removeEventListener("resize", handleResize);
+        resizeObserver?.disconnect();
+        resizeObserver = null;
         chart?.dispose();
         chart = null;
       },
@@ -110,7 +125,8 @@
   });
 
   onDestroy(() => {
-    window.removeEventListener("resize", handleResize);
+    resizeObserver?.disconnect();
+    resizeObserver = null;
     chart?.dispose();
     chart = null;
   });

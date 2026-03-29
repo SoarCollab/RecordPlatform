@@ -1,6 +1,7 @@
 <script lang="ts">
   import "../app.css";
   import { ModeWatcher } from "mode-watcher";
+  import { onNavigate } from "$app/navigation";
   import { useNotifications } from "$stores/notifications.svelte";
   import { useSSE } from "$stores/sse.svelte";
   import { useDownload } from "$stores/download.svelte";
@@ -22,6 +23,18 @@
       sse.disconnect();
     };
   });
+
+  // 页面切换动画 — 使用浏览器原生 View Transitions API
+  onNavigate((navigation) => {
+    if (!document.startViewTransition) return;
+
+    return new Promise((resolve) => {
+      document.startViewTransition(async () => {
+        resolve();
+        await navigation.complete;
+      });
+    });
+  });
 </script>
 
 <ModeWatcher />
@@ -42,7 +55,7 @@
   <div class="fixed bottom-4 left-4 z-50 flex flex-col gap-2">
     {#each notifications.notifications as notification (notification.id)}
       <div
-        class="bg-card flex items-start gap-3 rounded-lg border p-4 shadow-lg transition-all"
+        class="bg-card animate-in fade-in slide-in-from-left-4 flex items-start gap-3 rounded-lg border p-4 shadow-lg duration-300"
         class:border-green-500={notification.type === "success"}
         class:border-red-500={notification.type === "error"}
         class:border-yellow-500={notification.type === "warning"}

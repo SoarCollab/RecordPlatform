@@ -143,7 +143,10 @@
       />
 
       <!-- 页面内容 -->
-      <main class="bg-muted/30 flex-1 overflow-y-auto p-6">
+      <main
+        class="bg-muted/30 flex-1 overflow-y-auto p-6"
+        style="view-transition-name: page-content"
+      >
         <div class="h-full">
           {@render children()}
         </div>

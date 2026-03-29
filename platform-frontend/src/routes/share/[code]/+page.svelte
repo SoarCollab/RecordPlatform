@@ -15,6 +15,7 @@
   import * as Card from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
+  import { Checkbox } from "$lib/components/ui/checkbox";
 
   let { data } = $props();
 
@@ -31,7 +32,7 @@
   let isExpired = $state(false);
 
   const allSelected = $derived(
-    files.length > 0 && selectedFiles.size === files.length
+    files.length > 0 && selectedFiles.size === files.length,
   );
 
   onMount(() => {
@@ -103,7 +104,7 @@
 
         notifications.error(
           "下载失败",
-          err instanceof Error ? err.message : "请稍后重试"
+          err instanceof Error ? err.message : "请稍后重试",
         );
         return;
       }
@@ -113,10 +114,15 @@
     // 优先尝试公开分享；若用户已登录则回退到私密分享
     const sourceType = auth.isAuthenticated ? "private_share" : "public_share";
 
-    download.startDownload(file.fileHash, file.fileName, {
-      type: sourceType,
-      shareCode: data.code,
-    }, file.fileSize);
+    download.startDownload(
+      file.fileHash,
+      file.fileName,
+      {
+        type: sourceType,
+        shareCode: data.code,
+      },
+      file.fileSize,
+    );
 
     notifications.info("下载已开始", "可在右下角查看下载进度");
   }
@@ -141,7 +147,7 @@
       });
       notifications.success(
         "保存成功",
-        `已将 ${selectedFiles.size} 个文件保存到您的账户`
+        `已将 ${selectedFiles.size} 个文件保存到您的账户`,
       );
       selectedFiles = new Set();
     } catch (err) {
@@ -151,7 +157,7 @@
       } else {
         notifications.error(
           "保存失败",
-          err instanceof Error ? err.message : "请稍后重试"
+          err instanceof Error ? err.message : "请稍后重试",
         );
       }
     } finally {
@@ -164,12 +170,12 @@
   <title>分享文件 - 存证平台</title>
 </svelte:head>
 
-<div class="min-h-screen bg-muted/30">
+<div class="bg-muted/30 min-h-screen">
   <div class="mx-auto max-w-4xl p-6">
     <!-- 页头 -->
     <div class="mb-8 text-center">
       <div
-        class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary text-primary-foreground"
+        class="bg-primary text-primary-foreground mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full"
       >
         <svg
           class="h-8 w-8"
@@ -193,7 +199,7 @@
       <Card.Root>
         <Card.Content class="flex items-center justify-center p-12">
           <div
-            class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"
+            class="border-primary h-8 w-8 animate-spin rounded-full border-4 border-t-transparent"
           ></div>
         </Card.Content>
       </Card.Root>
@@ -240,7 +246,7 @@
             {:else}
               <!-- 警告图标 - 其他错误 -->
               <svg
-                class="h-8 w-8 text-destructive"
+                class="text-destructive h-8 w-8"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -255,9 +261,13 @@
             {/if}
           </div>
           <p class="font-medium">
-            {isCancelled ? "分享已取消" : isExpired ? "分享已过期" : "分享链接无效"}
+            {isCancelled
+              ? "分享已取消"
+              : isExpired
+                ? "分享已过期"
+                : "分享链接无效"}
           </p>
-          <p class="mt-1 text-muted-foreground">{error}</p>
+          <p class="text-muted-foreground mt-1">{error}</p>
           <div class="mt-6 flex justify-center gap-4">
             <Button variant="outline" onclick={() => goto("/")}>
               返回首页
@@ -272,10 +282,10 @@
       <Card.Root>
         <Card.Content class="p-12 text-center">
           <div
-            class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted"
+            class="bg-muted mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full"
           >
             <svg
-              class="h-8 w-8 text-muted-foreground"
+              class="text-muted-foreground h-8 w-8"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -297,11 +307,10 @@
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-4">
               <label class="flex cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={allSelected}
+                  indeterminate={selectedFiles.size > 0 && !allSelected}
                   onchange={toggleSelectAll}
-                  class="h-4 w-4 rounded border-border"
                 />
                 <span class="text-sm">全选</span>
               </label>
@@ -330,15 +339,13 @@
         <Card.Content class="p-0">
           <div class="divide-y">
             {#each files as file (file.id)}
-              <div class="flex items-center gap-4 p-4 hover:bg-muted/30">
-                <input
-                  type="checkbox"
+              <div class="hover:bg-muted/30 flex items-center gap-4 p-4">
+                <Checkbox
                   checked={selectedFiles.has(file.id)}
                   onchange={() => toggleSelect(file.id)}
-                  class="h-4 w-4 rounded border-border"
                 />
                 <div
-                  class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
+                  class="bg-primary/10 text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
                 >
                   <svg
                     class="h-5 w-5"
@@ -356,7 +363,7 @@
                 </div>
                 <div class="min-w-0 flex-1">
                   <p class="truncate font-medium">{file.fileName}</p>
-                  <p class="text-sm text-muted-foreground">
+                  <p class="text-muted-foreground text-sm">
                     {formatFileSize(file.fileSize)}
                     {#if file.ownerName}
                       · 来自 {file.ownerName}
@@ -395,7 +402,7 @@
           <Card.Content class="flex items-center justify-between p-6">
             <div>
               <p class="font-medium">登录后可保存文件</p>
-              <p class="text-sm text-muted-foreground">
+              <p class="text-muted-foreground text-sm">
                 将文件保存到您的账户，方便日后管理
               </p>
             </div>
@@ -409,7 +416,7 @@
 
     <!-- 页脚 -->
     <div class="mt-8 text-center">
-      <a href="/" class="text-sm text-muted-foreground hover:text-foreground">
+      <a href="/" class="text-muted-foreground hover:text-foreground text-sm">
         了解更多关于存证平台
       </a>
     </div>
