@@ -1,7 +1,6 @@
 <script lang="ts">
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
-  import { fly } from "svelte/transition";
   import { onMount, onDestroy } from "svelte";
   import { useAuth } from "$stores/auth.svelte";
   import { useSSE } from "$stores/sse.svelte";
@@ -55,9 +54,8 @@
     sidebarStorage.set(sidebarCollapsed);
   }
 
-
   function getBadgeCount(
-    key: "messages" | "announcements" | "tickets" | "friends" | null
+    key: "messages" | "announcements" | "tickets" | "friends" | null,
   ): number {
     if (!key) return 0;
     switch (key) {
@@ -76,35 +74,45 @@
 </script>
 
 {#if !auth.initialized}
-  <div class="flex h-screen items-center justify-center bg-background">
+  <div class="bg-background flex h-screen items-center justify-center">
     <div class="flex flex-col items-center gap-4">
       <div
-        class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"
+        class="border-primary h-8 w-8 animate-spin rounded-full border-4 border-t-transparent"
       ></div>
-      <p class="text-sm text-muted-foreground">正在加载用户信息...</p>
+      <p class="text-muted-foreground text-sm">正在加载用户信息...</p>
     </div>
   </div>
 {:else if auth.error && !auth.user}
-  <div class="flex h-screen items-center justify-center bg-background">
-    <div class="flex flex-col items-center gap-4 text-center max-w-sm px-4">
-      <div class="rounded-full bg-destructive/10 p-4 text-destructive mb-2">
-        <svg class="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+  <div class="bg-background flex h-screen items-center justify-center">
+    <div class="flex max-w-sm flex-col items-center gap-4 px-4 text-center">
+      <div class="bg-destructive/10 text-destructive mb-2 rounded-full p-4">
+        <svg
+          class="h-8 w-8"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+          />
         </svg>
       </div>
       <div>
-        <h2 class="text-xl font-semibold mb-2">会话加载失败</h2>
-        <p class="text-sm text-muted-foreground">{auth.error}</p>
+        <h2 class="mb-2 text-xl font-semibold">会话加载失败</h2>
+        <p class="text-muted-foreground text-sm">{auth.error}</p>
       </div>
-      <div class="flex gap-4 mt-6">
+      <div class="mt-6 flex gap-4">
         <button
-          class="rounded-lg bg-primary px-6 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          class="bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg px-6 py-2 text-sm font-medium"
           onclick={() => auth.fetchUser()}
         >
           重试
         </button>
         <button
-          class="rounded-lg border bg-background px-6 py-2 text-sm font-medium hover:bg-accent"
+          class="bg-background hover:bg-accent rounded-lg border px-6 py-2 text-sm font-medium"
           onclick={() => auth.logout()}
         >
           重新登录
@@ -119,28 +127,26 @@
       onToggle={toggleSidebar}
       pathname={$page.url.pathname}
       isAdmin={auth.isAdmin}
-      getBadgeCount={getBadgeCount}
+      {getBadgeCount}
     />
 
     <!-- 主内容 -->
     <div class="flex flex-1 flex-col overflow-hidden">
       <AppHeader
-        sidebarCollapsed={sidebarCollapsed}
+        {sidebarCollapsed}
         modeCurrent={mode.current ?? ""}
         onToggleMode={toggleMode}
-        sse={sse}
+        {sse}
         displayName={auth.displayName}
         onOpenSettings={() => goto("/settings")}
         onLogout={() => auth.logout()}
       />
 
       <!-- 页面内容 -->
-      <main class="flex-1 overflow-y-auto bg-muted/30 p-6">
-        {#key $page.url.pathname}
-          <div in:fly={{ y: 10, duration: 400, delay: 100 }} class="h-full">
-            {@render children()}
-          </div>
-        {/key}
+      <main class="bg-muted/30 flex-1 overflow-y-auto p-6">
+        <div class="h-full">
+          {@render children()}
+        </div>
       </main>
     </div>
   </div>

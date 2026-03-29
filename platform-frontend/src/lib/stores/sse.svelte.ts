@@ -205,7 +205,11 @@ function init(currentUserId: string): void {
   if (!browser || isInitialized) return;
 
   userId = currentUserId;
-  connectionId = crypto.randomUUID();
+  connectionId =
+    crypto.randomUUID?.() ??
+    crypto
+      .getRandomValues(new Uint32Array(4))
+      .reduce((s, v) => s + v.toString(16).padStart(8, "0"), "");
   isInitialized = true;
 
   setupVisibilityListener();

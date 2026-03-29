@@ -55,7 +55,7 @@ public class ImageServiceImpl extends ServiceImpl<ImageStoreMapper, ImageStore> 
                 .contentType(file.getContentType())
                 .build();
         try {
-            s3Client.putObject(putRequest, RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
+            s3Client.putObject(putRequest, RequestBody.fromBytes(file.getBytes()));
             String avatar =accountMapper.selectById(userId).getAvatar();
             this.deleteOldImage(avatar);
             if(accountMapper.update(null, Wrappers.<Account>update()
@@ -84,7 +84,7 @@ public class ImageServiceImpl extends ServiceImpl<ImageStoreMapper, ImageStore> 
                 .contentType(file.getContentType())
                 .build();
         try {
-            s3Client.putObject(putRequest, RequestBody.fromInputStream(file.getInputStream(), file.getSize()));
+            s3Client.putObject(putRequest, RequestBody.fromBytes(file.getBytes()));
             String imageUid = UUID.randomUUID().toString().replace("-", "");
             if (this.save(new ImageStore(imageUid, imageName, data)))
                 return imageName;

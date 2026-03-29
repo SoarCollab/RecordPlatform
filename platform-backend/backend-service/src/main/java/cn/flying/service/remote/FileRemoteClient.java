@@ -11,6 +11,8 @@ import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.SharingVO;
+import cn.flying.platformapi.response.BlockChainMessage;
+import cn.flying.platformapi.response.StorageCapacityVO;
 import cn.flying.platformapi.response.TransactionVO;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
@@ -172,5 +174,19 @@ public class FileRemoteClient {
     private Result<SharingVO> getShareInfoFallback(String shareCode, Throwable t) {
         log.error("BlockChain service getShareInfo failed, shareCode={}", shareCode, t);
         return new Result<>(ResultEnum.GET_USER_SHARE_FILE_ERROR, null);
+    }
+
+    // ===== Health check methods (reuse existing Dubbo connections) =====
+
+    public Result<Map<String, Boolean>> getClusterHealth() {
+        return storageService.getClusterHealth();
+    }
+
+    public Result<StorageCapacityVO> getStorageCapacity() {
+        return storageService.getStorageCapacity();
+    }
+
+    public Result<BlockChainMessage> getCurrentBlockChainMessage() {
+        return blockChainService.getCurrentBlockChainMessage();
     }
 }

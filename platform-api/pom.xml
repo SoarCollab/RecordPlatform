@@ -20,7 +20,7 @@
         <protobuf.version>4.34.1</protobuf.version>
         <dubbo-api-docs.version>2.7.8.1</dubbo-api-docs.version>
         <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
-        <netty.version>4.2.10.Final</netty.version>
+        <netty.version>4.1.132.Final</netty.version>
     </properties>
 
     <dependencies>

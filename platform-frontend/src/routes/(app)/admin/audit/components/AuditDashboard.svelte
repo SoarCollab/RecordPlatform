@@ -57,8 +57,10 @@
 
         const date =
           (typeof row["date"] === "string" && row["date"]) ||
-          (typeof row["operation_date"] === "string" && (row["operation_date"] as string)) ||
-          (typeof row["operationDate"] === "string" && (row["operationDate"] as string)) ||
+          (typeof row["operation_date"] === "string" &&
+            (row["operation_date"] as string)) ||
+          (typeof row["operationDate"] === "string" &&
+            (row["operationDate"] as string)) ||
           "";
 
         const count =
@@ -76,17 +78,20 @@
   async function loadAllData() {
     loading = true;
     try {
-      const [overviewRes, highFreqRes, errorStatsRes, timeDistRes] = await Promise.allSettled([
-        getAuditOverview(),
-        getHighFrequencyOperations(),
-        getErrorOperationStats(),
-        getUserTimeDistribution(),
-      ]);
+      const [overviewRes, highFreqRes, errorStatsRes, timeDistRes] =
+        await Promise.allSettled([
+          getAuditOverview(),
+          getHighFrequencyOperations(),
+          getErrorOperationStats(),
+          getUserTimeDistribution(),
+        ]);
 
       if (overviewRes.status === "fulfilled") overview = overviewRes.value;
       if (highFreqRes.status === "fulfilled") highFreq = highFreqRes.value;
-      if (errorStatsRes.status === "fulfilled") errorStats = errorStatsRes.value;
-      if (timeDistRes.status === "fulfilled") timeDistribution = timeDistRes.value;
+      if (errorStatsRes.status === "fulfilled")
+        errorStats = errorStatsRes.value;
+      if (timeDistRes.status === "fulfilled")
+        timeDistribution = timeDistRes.value;
 
       lastRefresh = new Date();
     } finally {
@@ -103,10 +108,18 @@
     if (refreshInterval) clearInterval(refreshInterval);
   });
 
-  const todayOperations = $derived(asNumber(overview?.["todayOperations"]) ?? 0);
-  const todayErrorOperations = $derived(asNumber(overview?.["todayErrorOperations"]) ?? 0);
-  const highFrequencyAlerts = $derived(asNumber(overview?.["highFrequencyAlerts"]) ?? 0);
-  const todayActiveUsers = $derived(asNumber(overview?.["todayActiveUsers"]) ?? 0);
+  const todayOperations = $derived(
+    asNumber(overview?.["todayOperations"]) ?? 0,
+  );
+  const todayErrorOperations = $derived(
+    asNumber(overview?.["todayErrorOperations"]) ?? 0,
+  );
+  const highFrequencyAlerts = $derived(
+    asNumber(overview?.["highFrequencyAlerts"]) ?? 0,
+  );
+  const todayActiveUsers = $derived(
+    asNumber(overview?.["todayActiveUsers"]) ?? 0,
+  );
   const dailyStats = $derived(overview ? normalizeDailyStats(overview) : []);
 </script>
 
@@ -114,17 +127,27 @@
   <div class="flex items-center justify-between">
     <div>
       <h2 class="text-lg font-semibold">审计仪表盘</h2>
-      <p class="text-sm text-muted-foreground">实时监控系统操作和异常行为</p>
+      <p class="text-muted-foreground text-sm">实时监控系统操作和异常行为</p>
     </div>
     <div class="flex items-center gap-3">
       {#if lastRefresh}
-        <span class="text-xs text-muted-foreground">
-          上次刷新: {lastRefresh.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}
+        <span class="text-muted-foreground text-xs">
+          上次刷新: {lastRefresh.toLocaleTimeString("zh-CN", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
         </span>
       {/if}
-      <Button variant="outline" size="sm" onclick={loadAllData} disabled={loading}>
+      <Button
+        variant="outline"
+        size="sm"
+        onclick={loadAllData}
+        disabled={loading}
+      >
         {#if loading}
-          <div class="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+          <div
+            class="mr-2 h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+          ></div>
         {/if}
         刷新
       </Button>
@@ -158,19 +181,25 @@
   <!-- 表格区域 -->
   <div class="grid gap-4 lg:grid-cols-2">
     <!-- 高频告警 -->
-    <div class="rounded-xl border bg-card/50 p-4">
+    <div class="bg-card/50 rounded-xl border p-4">
       <div class="mb-3 flex items-center justify-between">
         <p class="text-sm font-medium">高频操作告警</p>
         {#if highFreq.length > 0}
-          <Button variant="ghost" size="sm" onclick={onViewHighFreq}>查看全部</Button>
+          <Button variant="ghost" size="sm" onclick={onViewHighFreq}
+            >查看全部</Button
+          >
         {/if}
       </div>
       {#if loading}
         <div class="flex h-[160px] items-center justify-center">
-          <div class="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+          <div
+            class="border-primary h-5 w-5 animate-spin rounded-full border-2 border-t-transparent"
+          ></div>
         </div>
       {:else if highFreq.length === 0}
-        <div class="flex h-[160px] items-center justify-center text-sm text-muted-foreground">
+        <div
+          class="text-muted-foreground flex h-[160px] items-center justify-center text-sm"
+        >
           暂无高频告警
         </div>
       {:else}
@@ -186,9 +215,15 @@
             <Table.Body>
               {#each highFreq.slice(0, 3) as item (item.userId + item.requestIp)}
                 <Table.Row>
-                  <Table.Cell class="font-medium">{item.username || item.userId}</Table.Cell>
-                  <Table.Cell class="font-mono text-xs">{item.requestIp}</Table.Cell>
-                  <Table.Cell class="text-right font-mono text-sm">{formatNumber(item.operationCount)}</Table.Cell>
+                  <Table.Cell class="font-medium"
+                    >{item.username || item.userId}</Table.Cell
+                  >
+                  <Table.Cell class="font-mono text-xs"
+                    >{item.requestIp}</Table.Cell
+                  >
+                  <Table.Cell class="text-right font-mono text-sm"
+                    >{formatNumber(item.operationCount)}</Table.Cell
+                  >
                 </Table.Row>
               {/each}
             </Table.Body>
@@ -198,14 +233,18 @@
     </div>
 
     <!-- 错误统计前 5 -->
-    <div class="rounded-xl border bg-card/50 p-4">
+    <div class="bg-card/50 rounded-xl border p-4">
       <p class="mb-3 text-sm font-medium">错误统计 Top 5</p>
       {#if loading}
         <div class="flex h-[160px] items-center justify-center">
-          <div class="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+          <div
+            class="border-primary h-5 w-5 animate-spin rounded-full border-2 border-t-transparent"
+          ></div>
         </div>
       {:else if errorStats.length === 0}
-        <div class="flex h-[160px] items-center justify-center text-sm text-muted-foreground">
+        <div
+          class="text-muted-foreground flex h-[160px] items-center justify-center text-sm"
+        >
           暂无错误数据
         </div>
       {:else}
@@ -219,11 +258,13 @@
               </Table.Row>
             </Table.Header>
             <Table.Body>
-              {#each errorStats.slice(0, 5) as row (row.module + row.operationType)}
+              {#each errorStats.slice(0, 5) as row, i (i)}
                 <Table.Row>
                   <Table.Cell class="font-medium">{row.module}</Table.Cell>
                   <Table.Cell class="text-xs">{row.operationType}</Table.Cell>
-                  <Table.Cell class="text-right font-mono text-sm">{formatNumber(row.errorCount)}</Table.Cell>
+                  <Table.Cell class="text-right font-mono text-sm"
+                    >{formatNumber(row.errorCount)}</Table.Cell
+                  >
                 </Table.Row>
               {/each}
             </Table.Body>
