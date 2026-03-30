@@ -79,7 +79,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Backend Coverage Report
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v6
         if: always()
         with:
           use_oidc: true
@@ -133,7 +133,7 @@ jobs:
         run: pnpm test:coverage
 
       - name: Upload Frontend Coverage Report
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v6
         if: always()
         with:
           use_oidc: true
