@@ -251,13 +251,15 @@ export async function downloadAllChunks(
   } catch (error) {
     // If any worker fails, check if it's cancellation
     if (signal?.aborted) {
-      throw new Error("Download cancelled");
+      throw new Error("Download cancelled", { cause: error });
     }
 
     // Report which chunks failed
     if (errors.size > 0) {
       const failedChunks = Array.from(errors.keys()).join(", ");
-      throw new Error(`Failed to download chunks: ${failedChunks}`);
+      throw new Error(`Failed to download chunks: ${failedChunks}`, {
+        cause: error,
+      });
     }
 
     throw error;

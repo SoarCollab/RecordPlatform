@@ -578,7 +578,7 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
   const abortController = new AbortController();
   updateTask(taskId, { abortController });
 
-  let fileHandle: unknown | null = null;
+  let fileHandle: unknown;
 
   try {
     // Step 0: Prompt save picker immediately (preserve user activation)

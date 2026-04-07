@@ -17,9 +17,6 @@ let isLoading = $state(false);
 let error = $state<string | null>(null);
 let initialized = $state(false);
 
-// Non-reactive flag to prevent duplicate initialization
-let initStarted = false;
-
 // ===== Derived State =====
 
 const isAuthenticated = $derived(!!user && !!getToken());
@@ -138,9 +135,8 @@ function clearError(): void {
   error = null;
 }
 
-// Initialize on first load (use non-reactive flag to avoid Svelte 5 warning)
-if (browser && !initStarted) {
-  initStarted = true;
+// Initialize on first load (module-level code runs once per ESM import)
+if (browser) {
   fetchUser();
 }
 
