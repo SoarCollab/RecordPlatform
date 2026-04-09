@@ -22,9 +22,12 @@
   },
   "pnpm": {
     "overrides": {
+      "dompurify": ">=3.3.2",
       "esbuild@0.21.5": "0.25.0",
+      "lodash-es": ">=4.18.0",
       "preact": "10.28.4",
-      "rollup": "4.59.0"
+      "rollup": "4.59.0",
+      "vite": ">=6.4.2 <7"
     }
   }
 }

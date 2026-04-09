@@ -4,7 +4,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.5.11</version>
+        <version>3.5.12</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <modelVersion>4.0.0</modelVersion>
@@ -16,6 +16,7 @@
 
     <properties>
         <java.version>21</java.version>
+        <jackson-bom.version>2.21.1</jackson-bom.version>
         <dubbo.version>3.3.6</dubbo.version>
         <protobuf.version>4.34.1</protobuf.version>
         <dubbo-api-docs.version>2.7.8.1</dubbo-api-docs.version>
