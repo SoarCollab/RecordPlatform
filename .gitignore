@@ -74,3 +74,4 @@ package-lock.json
 /.claude/
 /.codex/
 /.trellis/
+/.sdkmanrc
