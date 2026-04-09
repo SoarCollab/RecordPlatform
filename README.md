@@ -82,7 +82,7 @@ Built for teams that need:
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                       Infrastructure                            │
-│  Nacos  MySQL  RabbitMQ  Redis  S3 Cluster  OTel  Jaeger      │
+│     Nacos  MySQL  RabbitMQ  Redis  S3 Cluster  OTel  Jaeger     │
 └─────────────────────────────────────────────────────────────────┘
                               │
               ┌───────────────┴───────────────┐
