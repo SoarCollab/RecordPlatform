@@ -18,7 +18,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -38,10 +38,12 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/tickets")
 @Tag(name = "工单管理", description = "工单的创建、查看、回复、状态管理等操作")
+
+
+@RequiredArgsConstructor
 public class TicketController {
 
-    @Resource
-    private TicketService ticketService;
+    private final TicketService ticketService;
 
     /**
      * 获取当前用户工单列表。
@@ -186,6 +188,7 @@ public class TicketController {
      * @param userId 当前用户 ID
      * @return 待处理数量
      */
+    @OperationLog(module = "工单模块", operationType = "查询", description = "获取待处理工单数")
     @GetMapping("/pending-count")
     @Operation(summary = "获取待处理工单数")
     public Result<Map<String, Integer>> getPendingCount(
@@ -200,6 +203,7 @@ public class TicketController {
      * @param userId 当前用户 ID
      * @return 未读数量
      */
+    @OperationLog(module = "工单模块", operationType = "查询", description = "获取未读工单数")
     @GetMapping("/unread-count")
     @Operation(summary = "获取未读工单数")
     public Result<Map<String, Integer>> getUnreadCount(

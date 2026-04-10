@@ -8,7 +8,7 @@
 
     <logger name="cn.flying.service.impl.FileUploadServiceImpl" level="ERROR"/>
     <logger name="cn.flying.service.impl.SystemMonitorServiceImpl" level="ERROR"/>
-    <logger name="cn.flying.common.exception.JsonParseException" level="WARN"/>
+    <logger name="cn.flying.common.util.JsonConverter" level="WARN"/>
     <logger name="org.springframework.test" level="WARN"/>
     <logger name="org.testcontainers" level="WARN"/>
     <logger name="com.github.dockerjava" level="WARN"/>

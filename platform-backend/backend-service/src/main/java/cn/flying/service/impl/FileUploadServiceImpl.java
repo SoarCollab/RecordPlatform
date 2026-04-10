@@ -17,8 +17,9 @@ import cn.flying.service.QuotaService;
 import cn.flying.service.assistant.FileUploadRedisStateManager;
 import cn.flying.service.encryption.*;
 import jakarta.annotation.PostConstruct;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.context.ApplicationEventPublisher;
@@ -54,6 +55,7 @@ import java.util.stream.Stream;
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class FileUploadServiceImpl implements FileUploadService {
 
     // --- 目录常量 ---
@@ -88,29 +90,18 @@ public class FileUploadServiceImpl implements FileUploadService {
             Map.entry("application/x-rar-compressed", "rar"), Map.entry("application/x-7z-compressed", "7z")
     );
     // --- 线程池配置 ---
-    @Resource(name = "fileProcessTaskExecutor")
-    private Executor fileProcessingExecutor;
-    @Resource
-    private ApplicationEventPublisher eventPublisher;
+    @Qualifier("fileProcessTaskExecutor")
+    private final Executor fileProcessingExecutor;
+    private final ApplicationEventPublisher eventPublisher;
     // Redis状态管理器
-    @Resource
-    private FileUploadRedisStateManager redisStateManager;
-
-    @Resource(name = "chunkProcessingWaitScheduler")
-    private ScheduledExecutorService chunkProcessingWaitScheduler;
-
+    private final FileUploadRedisStateManager redisStateManager;
+    @Qualifier("chunkProcessingWaitScheduler")
+    private final ScheduledExecutorService chunkProcessingWaitScheduler;
     // 加密策略工厂
-    @Resource
-    private EncryptionStrategyFactory encryptionStrategyFactory;
-
-    @Resource
-    private FileService fileService;
-
-    @Resource
-    private QuotaService quotaService;
-
-    @Resource
-    private RedissonClient redissonClient;
+    private final EncryptionStrategyFactory encryptionStrategyFactory;
+    private final FileService fileService;
+    private final QuotaService quotaService;
+    private final RedissonClient redissonClient;
 
     @PostConstruct
     public void initialize() {
@@ -1170,7 +1161,7 @@ public class FileUploadServiceImpl implements FileUploadService {
                 log.info("分片 {} 处理成功: 客户端ID={}, 处理后路径={}, 算法={}",
                         chunkNumber, clientId, processedChunkPath, strategy.getAlgorithmName());
 
-            } catch (EncryptionException e) {
+            } catch (GeneralException e) {
                 log.error("分片 {} 加密失败: 客户端ID={}, 算法={}", chunkNumber, clientId,
                         encryptionStrategyFactory.getCurrentAlgorithmName(), e);
                 tryDelete(processedChunkPath);

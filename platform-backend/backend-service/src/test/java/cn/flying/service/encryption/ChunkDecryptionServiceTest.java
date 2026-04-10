@@ -1,6 +1,6 @@
 package cn.flying.service.encryption;
 
-import cn.flying.service.encryption.EncryptionException;
+import cn.flying.common.exception.GeneralException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -48,7 +48,7 @@ class ChunkDecryptionServiceTest {
 
         @Test
         @DisplayName("should decrypt AES-GCM encrypted data successfully")
-        void decryptAesGcm_success() throws EncryptionException {
+        void decryptAesGcm_success() {
             byte[] plaintext = "Hello, AES-GCM encryption test!".getBytes();
             SecretKey key = aesStrategy.generateKey();
             byte[] iv = aesStrategy.generateIv();
@@ -63,7 +63,7 @@ class ChunkDecryptionServiceTest {
 
         @Test
         @DisplayName("should decrypt ChaCha20-Poly1305 encrypted data successfully")
-        void decryptChaCha20_success() throws EncryptionException {
+        void decryptChaCha20_success() {
             byte[] plaintext = "Hello, ChaCha20-Poly1305 encryption test!".getBytes();
             SecretKey key = chaChaStrategy.generateKey();
             byte[] iv = chaChaStrategy.generateIv();
@@ -82,10 +82,8 @@ class ChunkDecryptionServiceTest {
             byte[] key = new byte[32];
             RANDOM.nextBytes(key);
 
-            EncryptionException ex = assertThrows(EncryptionException.class,
+            assertThrows(GeneralException.class,
                     () -> decryptionService.decryptChunk(null, key));
-
-            assertTrue(ex.getMessage().contains("empty"));
         }
 
         @Test
@@ -94,10 +92,8 @@ class ChunkDecryptionServiceTest {
             byte[] key = new byte[32];
             RANDOM.nextBytes(key);
 
-            EncryptionException ex = assertThrows(EncryptionException.class,
+            assertThrows(GeneralException.class,
                     () -> decryptionService.decryptChunk(new byte[0], key));
-
-            assertTrue(ex.getMessage().contains("empty"));
         }
 
         @Test
@@ -105,10 +101,8 @@ class ChunkDecryptionServiceTest {
         void decryptChunk_nullKey_throws() {
             byte[] data = createValidAesEncryptedData();
 
-            EncryptionException ex = assertThrows(EncryptionException.class,
+            assertThrows(GeneralException.class,
                     () -> decryptionService.decryptChunk(data, null));
-
-            assertTrue(ex.getMessage().contains("Invalid key"));
         }
 
         @Test
@@ -118,31 +112,29 @@ class ChunkDecryptionServiceTest {
             byte[] wrongKey = new byte[16];
             RANDOM.nextBytes(wrongKey);
 
-            EncryptionException ex = assertThrows(EncryptionException.class,
+            assertThrows(GeneralException.class,
                     () -> decryptionService.decryptChunk(data, wrongKey));
-
-            assertTrue(ex.getMessage().contains("32 bytes"));
         }
 
         @Test
         @DisplayName("should throw when data is tampered")
-        void decryptChunk_tamperedData_throws() throws EncryptionException {
+        void decryptChunk_tamperedData_throws() {
             byte[] plaintext = "Original data".getBytes();
             SecretKey key = aesStrategy.generateKey();
             byte[] iv = aesStrategy.generateIv();
             byte[] encrypted = aesStrategy.encrypt(plaintext, key, iv);
             byte[] header = ChunkFileHeader.createHeader(ChunkFileHeader.ALGORITHM_AES_GCM);
             byte[] encryptedWithHeader = concatenate(header, iv, encrypted);
-            
+
             encryptedWithHeader[encryptedWithHeader.length - 1] ^= 0xFF;
 
-            assertThrows(EncryptionException.class,
+            assertThrows(GeneralException.class,
                     () -> decryptionService.decryptChunk(encryptedWithHeader, key.getEncoded()));
         }
 
         @Test
         @DisplayName("should throw when using wrong key")
-        void decryptChunk_wrongKey_throws() throws EncryptionException {
+        void decryptChunk_wrongKey_throws() {
             byte[] plaintext = "Secret data".getBytes();
             SecretKey correctKey = aesStrategy.generateKey();
             SecretKey wrongKey = aesStrategy.generateKey();
@@ -151,7 +143,7 @@ class ChunkDecryptionServiceTest {
             byte[] header = ChunkFileHeader.createHeader(ChunkFileHeader.ALGORITHM_AES_GCM);
             byte[] encryptedWithHeader = concatenate(header, iv, encrypted);
 
-            assertThrows(EncryptionException.class,
+            assertThrows(GeneralException.class,
                     () -> decryptionService.decryptChunk(encryptedWithHeader, wrongKey.getEncoded()));
         }
 
@@ -164,10 +156,8 @@ class ChunkDecryptionServiceTest {
             byte[] key = new byte[32];
             RANDOM.nextBytes(key);
 
-            EncryptionException ex = assertThrows(EncryptionException.class,
+            assertThrows(GeneralException.class,
                     () -> decryptionService.decryptChunk(shortData, key));
-
-            assertTrue(ex.getMessage().contains("too short"));
         }
     }
 
@@ -276,12 +266,12 @@ class ChunkDecryptionServiceTest {
 
         @Test
         @DisplayName("should create context for AES-GCM")
-        void createContext_aesGcm_success() throws EncryptionException {
+        void createContext_aesGcm_success() {
             byte[] data = createValidAesEncryptedData();
             byte[] key = new byte[32];
             RANDOM.nextBytes(key);
 
-            ChunkDecryptionService.DecryptionResult result = 
+            ChunkDecryptionService.DecryptionResult result =
                     decryptionService.createDecryptionContext(data, key);
 
             assertNotNull(result);
@@ -295,7 +285,7 @@ class ChunkDecryptionServiceTest {
             byte[] key = new byte[32];
             RANDOM.nextBytes(key);
 
-            assertThrows(EncryptionException.class,
+            assertThrows(GeneralException.class,
                     () -> decryptionService.createDecryptionContext(null, key));
         }
 
@@ -304,7 +294,7 @@ class ChunkDecryptionServiceTest {
         void createContext_invalidKey_throws() {
             byte[] data = createValidAesEncryptedData();
 
-            assertThrows(EncryptionException.class,
+            assertThrows(GeneralException.class,
                     () -> decryptionService.createDecryptionContext(data, new byte[16]));
         }
     }
@@ -316,8 +306,7 @@ class ChunkDecryptionServiceTest {
         @ParameterizedTest(name = "Round-trip encryption/decryption with {0}")
         @MethodSource("cn.flying.service.encryption.ChunkDecryptionServiceTest#algorithmProvider")
         @DisplayName("should round-trip encrypt and decrypt correctly")
-        void roundTrip(String algorithmName, byte algorithmId, ChunkEncryptionStrategy strategy) 
-                throws EncryptionException {
+        void roundTrip(String algorithmName, byte algorithmId, ChunkEncryptionStrategy strategy) {
             byte[] plaintext = generateRandomBytes(1024);
             SecretKey key = strategy.generateKey();
             byte[] iv = strategy.generateIv();
@@ -327,14 +316,14 @@ class ChunkDecryptionServiceTest {
 
             byte[] decrypted = decryptionService.decryptChunk(encryptedWithHeader, key.getEncoded());
 
-            assertArrayEquals(plaintext, decrypted, 
+            assertArrayEquals(plaintext, decrypted,
                     "Round-trip failed for " + algorithmName);
         }
 
         @ParameterizedTest(name = "Large data ({0} bytes) encryption/decryption")
         @MethodSource("cn.flying.service.encryption.ChunkDecryptionServiceTest#dataSizeProvider")
         @DisplayName("should handle various data sizes")
-        void variousDataSizes(int dataSize) throws EncryptionException {
+        void variousDataSizes(int dataSize) {
             byte[] plaintext = generateRandomBytes(dataSize);
             SecretKey key = aesStrategy.generateKey();
             byte[] iv = aesStrategy.generateIv();

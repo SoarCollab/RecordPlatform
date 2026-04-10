@@ -14,7 +14,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.util.StringUtils;
@@ -35,13 +35,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/admin/integrity-alerts")
 @PreAuthorize("isAdmin()")
 @Tag(name = "Admin - Integrity Alerts", description = "Storage integrity check alert management")
+
+
+@RequiredArgsConstructor
 public class IntegrityAlertController {
 
-    @Resource
-    private IntegrityCheckService integrityCheckService;
+    private final IntegrityCheckService integrityCheckService;
 
-    @Resource
-    private IntegrityAlertMapper integrityAlertMapper;
+    private final IntegrityAlertMapper integrityAlertMapper;
 
     /**
      * List integrity alerts with pagination and optional filters.

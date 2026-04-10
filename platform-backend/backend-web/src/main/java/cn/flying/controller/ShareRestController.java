@@ -15,7 +15,7 @@ import cn.flying.service.ShareAuditService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,16 +34,16 @@ import java.util.List;
  */
 @RestController
 @Tag(name = "分享操作（REST）", description = "分享链路 REST 新路径")
+
+
+@RequiredArgsConstructor
 public class ShareRestController {
 
-    @Resource
-    private FileService fileService;
+    private final FileService fileService;
 
-    @Resource
-    private FileQueryService fileQueryService;
+    private final FileQueryService fileQueryService;
 
-    @Resource
-    private ShareAuditService shareAuditService;
+    private final ShareAuditService shareAuditService;
 
     /**
      * 创建分享（REST 新路径）。
@@ -169,6 +169,7 @@ public class ShareRestController {
      * @param request   HTTP 请求
      * @return 文件分片
      */
+    @OperationLog(module = "文件操作", operationType = "查询", description = "公开分享下载文件")
     @GetMapping("/api/v1/public/shares/{shareCode}/files/{fileHash}/chunks")
     @RateLimit(limit = 30, type = RateLimit.LimitType.IP, key = "public:download")
     @Operation(summary = "公开分享下载文件（REST）")
@@ -187,6 +188,7 @@ public class ShareRestController {
      * @param fileHash  文件哈希
      * @return 解密信息
      */
+    @OperationLog(module = "文件操作", operationType = "查询", description = "获取公开分享文件解密信息")
     @GetMapping("/api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info")
     @RateLimit(limit = 30, type = RateLimit.LimitType.IP, key = "public:decryptInfo")
     @Operation(summary = "公开分享获取解密信息（REST）")

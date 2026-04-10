@@ -48,10 +48,7 @@ class ShareRestControllerTest {
      */
     @BeforeEach
     void setUp() {
-        controller = new ShareRestController();
-        ReflectionTestUtils.setField(controller, "fileService", fileService);
-        ReflectionTestUtils.setField(controller, "fileQueryService", fileQueryService);
-        ReflectionTestUtils.setField(controller, "shareAuditService", shareAuditService);
+        controller = new ShareRestController(fileService, fileQueryService, shareAuditService);
     }
 
     /**

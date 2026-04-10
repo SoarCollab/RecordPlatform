@@ -1,6 +1,7 @@
 package cn.flying.common.util;
 
-import cn.flying.common.exception.JsonParseException;
+import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -42,22 +43,24 @@ public class JsonConverter {
      * @param clazz 目标类型
      * @param <T> 泛型类型
      * @return 反序列化后的对象
-     * @throws JsonParseException 如果解析失败
      */
     @SuppressWarnings("unchecked")
-    public static <T> T parse(String json, Class<T> clazz) throws JsonParseException {
+    public static <T> T parse(String json, Class<T> clazz) {
         if (json == null || json.trim().isEmpty() || clazz == null) {
-            throw new JsonParseException("JSON/类型不能为空");
+            throw new GeneralException(ResultEnum.JSON_PARSE_ERROR, "JSON/类型不能为空");
         }
 
         try {
             return clazz == String.class ? (T) json : om.readValue(json, clazz);
         } catch (InvalidDefinitionException e) {
-            throw new JsonParseException("无效的JSON定义", e);
+            logger.error("无效的JSON定义", e);
+            throw new GeneralException(ResultEnum.JSON_PARSE_ERROR, "无效的JSON定义");
         } catch (JsonProcessingException e) {
-            throw new JsonParseException("JSON 解析失败", e);
+            logger.error("JSON 解析失败", e);
+            throw new GeneralException(ResultEnum.JSON_PARSE_ERROR, "JSON 解析失败");
         } catch (Exception e) {
-            throw new JsonParseException("JSON 反序列化失败", e);
+            logger.error("JSON 反序列化失败", e);
+            throw new GeneralException(ResultEnum.JSON_PARSE_ERROR, "JSON 反序列化失败");
         }
     }
 
@@ -140,4 +143,3 @@ public class JsonConverter {
     }
 
 }
-

@@ -8,7 +8,7 @@ import cn.flying.dao.vo.file.QuotaStatusVO;
 import cn.flying.service.QuotaService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -20,10 +20,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/files")
 @Tag(name = "文件配额", description = "文件配额状态查询")
+
+
+@RequiredArgsConstructor
 public class QuotaController {
 
-    @Resource
-    private QuotaService quotaService;
+    private final QuotaService quotaService;
 
     /**
      * 查询当前用户配额状态。

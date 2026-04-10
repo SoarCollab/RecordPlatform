@@ -15,7 +15,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,13 +35,14 @@ import java.util.List;
 @Validated
 @RequestMapping("/api/v1/share")
 @Tag(name = "分享相关接口", description = "用于分享详情查看等操作")
+
+
+@RequiredArgsConstructor
 public class ShareController {
 
-    @Resource
-    private FileService fileService;
+    private final FileService fileService;
 
-    @Resource
-    private FileMapper fileMapper;
+    private final FileMapper fileMapper;
 
     /**
      * 获取分享详情（包含分享文件列表）。

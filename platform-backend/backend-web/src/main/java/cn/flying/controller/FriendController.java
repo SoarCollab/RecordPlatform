@@ -18,7 +18,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.validation.annotation.Validated;
@@ -43,10 +43,12 @@ import java.util.Map;
 @RequestMapping("/api/v1/friends")
 @Tag(name = "好友管理", description = "好友请求、好友列表、用户搜索等操作")
 @Validated
+
+
+@RequiredArgsConstructor
 public class FriendController {
 
-    @Resource
-    private FriendService friendService;
+    private final FriendService friendService;
 
     /**
      * 发送好友请求。
@@ -82,6 +84,7 @@ public class FriendController {
      * @param pageSize 每页数量
      * @return 分页结果
      */
+    @OperationLog(module = "好友", operationType = "查询", description = "getReceivedRequests")
     @GetMapping("/requests/received")
     @Operation(summary = "获取收到的好友请求列表")
     public Result<IPage<FriendRequestDetailVO>> getReceivedRequests(
@@ -101,6 +104,7 @@ public class FriendController {
      * @param pageSize 每页数量
      * @return 分页结果
      */
+    @OperationLog(module = "好友", operationType = "查询", description = "getSentRequests")
     @GetMapping("/requests/sent")
     @Operation(summary = "获取发送的好友请求列表")
     public Result<IPage<FriendRequestDetailVO>> getSentRequests(
@@ -162,6 +166,7 @@ public class FriendController {
      * @param userId 当前用户 ID
      * @return 待处理数量
      */
+    @OperationLog(module = "好友", operationType = "查询", description = "获取待处理好友请求数量")
     @GetMapping("/requests/pending-count")
     @Operation(summary = "获取待处理的好友请求数量")
     public Result<Map<String, Integer>> getPendingCount(
@@ -178,6 +183,7 @@ public class FriendController {
      * @param pageSize 每页数量
      * @return 分页结果
      */
+    @OperationLog(module = "好友", operationType = "查询", description = "getFriends")
     @GetMapping
     @Operation(summary = "获取好友列表（分页）")
     public Result<IPage<FriendVO>> getFriends(
@@ -195,6 +201,7 @@ public class FriendController {
      * @param userId 当前用户 ID
      * @return 好友列表
      */
+    @OperationLog(module = "好友", operationType = "查询", description = "getAllFriends")
     @GetMapping("/all")
     @Operation(summary = "获取所有好友（用于选择器）")
     public Result<List<FriendVO>> getAllFriends(
@@ -246,6 +253,7 @@ public class FriendController {
      * @param keyword 关键词
      * @return 用户列表
      */
+    @OperationLog(module = "好友", operationType = "查询", description = "searchUsers")
     @GetMapping("/search")
     @Operation(summary = "搜索用户", description = "根据用户名或昵称搜索用户")
     public Result<List<UserSearchVO>> searchUsers(

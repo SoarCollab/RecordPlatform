@@ -14,7 +14,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
@@ -33,16 +33,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/system/roles")
 @Tag(name = "角色权限管理（REST）", description = "角色权限映射 REST 新路径")
 @PreAuthorize("hasPerm('system:admin')")
+
+
+@RequiredArgsConstructor
 public class RolePermissionController {
 
-    @Resource
-    private SysPermissionMapper permissionMapper;
+    private final SysPermissionMapper permissionMapper;
 
-    @Resource
-    private SysRolePermissionMapper rolePermissionMapper;
+    private final SysRolePermissionMapper rolePermissionMapper;
 
-    @Resource
-    private PermissionService permissionService;
+    private final PermissionService permissionService;
 
     /**
      * 为角色授予权限（REST 新路径）。

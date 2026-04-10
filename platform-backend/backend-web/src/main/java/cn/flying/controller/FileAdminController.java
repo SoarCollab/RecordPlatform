@@ -17,7 +17,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -43,13 +43,14 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1/admin/files")
 @PreAuthorize("isAdmin()")
 @Tag(name = "管理员-文件审计", description = "管理员专用的文件和分享管理接口")
+
+
+@RequiredArgsConstructor
 public class FileAdminController {
 
-    @Resource
-    private FileAdminService fileAdminService;
+    private final FileAdminService fileAdminService;
 
-    @Resource
-    private ShareAuditService shareAuditService;
+    private final ShareAuditService shareAuditService;
 
     // ==================== 文件管理 ====================
 

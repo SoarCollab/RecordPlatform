@@ -16,7 +16,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -34,13 +34,14 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/conversations")
 @Tag(name = "会话管理", description = "私信会话的查看、删除等操作")
+
+
+@RequiredArgsConstructor
 public class ConversationController {
 
-    @Resource
-    private ConversationService conversationService;
+    private final ConversationService conversationService;
 
-    @Resource
-    private MessageService messageService;
+    private final MessageService messageService;
 
     /**
      * 获取会话列表。
@@ -95,6 +96,7 @@ public class ConversationController {
      * @param userId 当前用户 ID
      * @return 未读数量
      */
+    @OperationLog(module = "站内信", operationType = "查询", description = "获取未读会话数")
     @GetMapping("/unread-count")
     @Operation(summary = "获取未读会话数")
     public Result<Map<String, Integer>> getUnreadCount(

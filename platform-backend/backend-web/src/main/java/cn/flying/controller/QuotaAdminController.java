@@ -9,7 +9,7 @@ import cn.flying.service.QuotaRolloutAuditService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -28,10 +28,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/admin/quota/rollout/audits")
 @PreAuthorize("isAdmin()")
 @Tag(name = "管理员-配额灰度审计", description = "配额灰度扩容审计管理")
+
+
+@RequiredArgsConstructor
 public class QuotaAdminController {
 
-    @Resource
-    private QuotaRolloutAuditService quotaRolloutAuditService;
+    private final QuotaRolloutAuditService quotaRolloutAuditService;
 
     /**
      * 写入或更新配额灰度扩容审计记录。

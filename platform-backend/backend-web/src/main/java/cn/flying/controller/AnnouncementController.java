@@ -13,7 +13,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -36,10 +36,12 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/announcements")
 @Tag(name = "公告管理", description = "系统公告的发布、查看、已读管理等操作")
+
+
+@RequiredArgsConstructor
 public class AnnouncementController {
 
-    @Resource
-    private AnnouncementService announcementService;
+    private final AnnouncementService announcementService;
 
     /**
      * 获取最新公告。
@@ -102,6 +104,7 @@ public class AnnouncementController {
      * @param userId 当前用户 ID
      * @return 未读数量
      */
+    @OperationLog(module = "公告模块", operationType = "查询", description = "获取未读公告数量")
     @GetMapping("/unread-count")
     @Operation(summary = "获取未读公告数量")
     public Result<Map<String, Integer>> getUnreadCount(

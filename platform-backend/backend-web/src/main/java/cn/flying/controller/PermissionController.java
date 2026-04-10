@@ -16,7 +16,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
@@ -41,22 +41,23 @@ import java.util.Set;
 @RequestMapping("/api/v1/system/permissions")
 @Tag(name = "权限管理", description = "权限定义和角色权限映射管理")
 @PreAuthorize("hasPerm('system:admin')")
+
+
+@RequiredArgsConstructor
 public class PermissionController {
 
-    @Resource
-    private SysPermissionMapper permissionMapper;
+    private final SysPermissionMapper permissionMapper;
 
-    @Resource
-    private SysRolePermissionMapper rolePermissionMapper;
+    private final SysRolePermissionMapper rolePermissionMapper;
 
-    @Resource
-    private PermissionService permissionService;
+    private final PermissionService permissionService;
 
     /**
      * 获取权限树。
      *
      * @return 权限列表
      */
+    @OperationLog(module = "权限管理", operationType = "查询", description = "getPermissionTree")
     @GetMapping
     @Operation(summary = "获取权限树")
     public Result<List<SysPermission>> getPermissionTree() {
@@ -102,6 +103,7 @@ public class PermissionController {
      *
      * @return 模块名称列表
      */
+    @OperationLog(module = "权限管理", operationType = "查询", description = "listModules")
     @GetMapping("/modules")
     @Operation(summary = "获取所有模块名列表")
     public Result<List<String>> listModules() {
@@ -206,6 +208,7 @@ public class PermissionController {
      * @param role 角色名
      * @return 权限码集合
      */
+    @OperationLog(module = "权限管理", operationType = "查询", description = "getRolePermissions")
     @GetMapping("/roles/{role}")
     @Operation(summary = "获取角色的权限列表")
     public Result<Set<String>> getRolePermissions(

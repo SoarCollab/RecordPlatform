@@ -19,7 +19,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
@@ -29,18 +29,14 @@ import java.util.Date;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Conversation>
         implements ConversationService {
 
-    @Resource
-    private MessageMapper messageMapper;
-
-    @Resource
-    private AccountService accountService;
-
+    private final MessageMapper messageMapper;
+    private final AccountService accountService;
     @Lazy
-    @Resource
-    private MessageService messageService;
+    private final MessageService messageService;
 
     @Override
     @Transactional

@@ -30,8 +30,9 @@ import cn.flying.service.remote.FileRemoteClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Service;
@@ -82,25 +83,16 @@ import java.util.concurrent.CompletableFuture;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class FileQueryServiceImpl implements FileQueryService {
 
-    @Resource
-    private FileMapper fileMapper;
-
-    @Resource
-    private AccountMapper accountMapper;
-
-    @Resource
-    private FileRemoteClient fileRemoteClient;
-
-    @Resource
-    private FileShareMapper fileShareMapper;
-
-    @Resource
-    private FriendFileShareService friendFileShareService;
-
-    @Resource(name = "virtualThreadExecutor")
-    private TaskExecutor virtualThreadExecutor;
+    private final FileMapper fileMapper;
+    private final AccountMapper accountMapper;
+    private final FileRemoteClient fileRemoteClient;
+    private final FileShareMapper fileShareMapper;
+    private final FriendFileShareService friendFileShareService;
+    @Qualifier("virtualThreadExecutor")
+    private final TaskExecutor virtualThreadExecutor;
 
     // ==================== 同步查询方法 ====================
 

@@ -13,7 +13,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -36,10 +36,12 @@ import java.util.Map;
 @RequestMapping("/api/v1/friend-shares")
 @Tag(name = "好友文件分享", description = "好友间直接分享文件的操作")
 @Validated
+
+
+@RequiredArgsConstructor
 public class FriendFileShareController {
 
-    @Resource
-    private FriendFileShareService friendFileShareService;
+    private final FriendFileShareService friendFileShareService;
 
     /**
      * 分享文件给好友。
@@ -67,6 +69,7 @@ public class FriendFileShareController {
      * @param pageSize 每页数量
      * @return 分页结果
      */
+    @OperationLog(module = "好友分享", operationType = "查询", description = "getReceivedShares")
     @GetMapping("/received")
     @Operation(summary = "获取收到的好友分享列表")
     public Result<IPage<FriendFileShareDetailVO>> getReceivedShares(
@@ -86,6 +89,7 @@ public class FriendFileShareController {
      * @param pageSize 每页数量
      * @return 分页结果
      */
+    @OperationLog(module = "好友分享", operationType = "查询", description = "getSentShares")
     @GetMapping("/sent")
     @Operation(summary = "获取发送的好友分享列表")
     public Result<IPage<FriendFileShareDetailVO>> getSentShares(
@@ -104,6 +108,7 @@ public class FriendFileShareController {
      * @param shareId 分享外部 ID
      * @return 分享详情
      */
+    @OperationLog(module = "好友分享", operationType = "查询", description = "getShareDetail")
     @GetMapping("/{shareId}")
     @Operation(summary = "获取好友分享详情")
     public Result<FriendFileShareDetailVO> getShareDetail(
@@ -120,6 +125,7 @@ public class FriendFileShareController {
      * @param shareId 分享外部 ID
      * @return 操作结果
      */
+    @OperationLog(module = "好友分享", operationType = "修改", description = "updateReadStatus")
     @PutMapping("/{shareId}/read-status")
     @Operation(summary = "标记分享为已读（REST）")
     public Result<String> updateReadStatus(
@@ -152,6 +158,7 @@ public class FriendFileShareController {
      * @param userId 当前用户 ID
      * @return 未读数量
      */
+    @OperationLog(module = "好友分享", operationType = "查询", description = "获取未读好友分享数量")
     @GetMapping("/unread-count")
     @Operation(summary = "获取未读好友分享数量")
     public Result<Map<String, Integer>> getUnreadCount(

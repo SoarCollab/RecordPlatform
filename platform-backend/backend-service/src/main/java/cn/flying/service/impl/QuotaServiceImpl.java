@@ -14,7 +14,7 @@ import cn.flying.dao.vo.file.QuotaUserUsageVO;
 import cn.flying.service.QuotaService;
 import cn.flying.service.monitor.QuotaMetrics;
 import cn.flying.service.quota.QuotaDecision;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -32,6 +32,7 @@ import java.util.Set;
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class QuotaServiceImpl implements QuotaService {
 
     private static final String MODE_SHADOW = "SHADOW";
@@ -54,20 +55,11 @@ public class QuotaServiceImpl implements QuotaService {
     private static final String ROLLOUT_REASON_TENANT_FILE_COUNT = "tenant_file_count_exceeded";
     private static final String ROLLOUT_REASON_UNKNOWN = "unknown_exceeded";
 
-    @Resource
-    private FileMapper fileMapper;
-
-    @Resource
-    private QuotaPolicyMapper quotaPolicyMapper;
-
-    @Resource
-    private QuotaUsageSnapshotMapper quotaUsageSnapshotMapper;
-
-    @Resource
-    private TenantMapper tenantMapper;
-
-    @Resource
-    private QuotaMetrics quotaMetrics;
+    private final FileMapper fileMapper;
+    private final QuotaPolicyMapper quotaPolicyMapper;
+    private final QuotaUsageSnapshotMapper quotaUsageSnapshotMapper;
+    private final TenantMapper tenantMapper;
+    private final QuotaMetrics quotaMetrics;
 
     @Value("${quota.enforcement-mode:SHADOW}")
     private String enforcementMode;

@@ -1,5 +1,6 @@
 package cn.flying.service.encryption;
 
+import cn.flying.common.exception.GeneralException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -90,7 +91,7 @@ class ChunkEncryptionStrategyTest {
         @ParameterizedTest(name = "{0}")
         @MethodSource("cn.flying.service.encryption.ChunkEncryptionStrategyTest#encryptionStrategies")
         @DisplayName("should encrypt and decrypt small data correctly")
-        void shouldRoundTripSmallData(ChunkEncryptionStrategy strategy) throws EncryptionException {
+        void shouldRoundTripSmallData(ChunkEncryptionStrategy strategy) {
             String plaintext = "Hello, World!";
             byte[] plaintextBytes = plaintext.getBytes(StandardCharsets.UTF_8);
 
@@ -107,7 +108,7 @@ class ChunkEncryptionStrategyTest {
         @ParameterizedTest(name = "{0}")
         @MethodSource("cn.flying.service.encryption.ChunkEncryptionStrategyTest#encryptionStrategies")
         @DisplayName("should encrypt and decrypt large data correctly")
-        void shouldRoundTripLargeData(ChunkEncryptionStrategy strategy) throws EncryptionException {
+        void shouldRoundTripLargeData(ChunkEncryptionStrategy strategy) {
             // 1MB of random data
             byte[] plaintext = new byte[1024 * 1024];
             new Random(42).nextBytes(plaintext);
@@ -124,7 +125,7 @@ class ChunkEncryptionStrategyTest {
         @ParameterizedTest(name = "{0}")
         @MethodSource("cn.flying.service.encryption.ChunkEncryptionStrategyTest#encryptionStrategies")
         @DisplayName("should encrypt and decrypt empty data")
-        void shouldRoundTripEmptyData(ChunkEncryptionStrategy strategy) throws EncryptionException {
+        void shouldRoundTripEmptyData(ChunkEncryptionStrategy strategy) {
             byte[] plaintext = new byte[0];
 
             SecretKey key = strategy.generateKey();
@@ -139,7 +140,7 @@ class ChunkEncryptionStrategyTest {
         @ParameterizedTest(name = "{0}")
         @MethodSource("cn.flying.service.encryption.ChunkEncryptionStrategyTest#encryptionStrategies")
         @DisplayName("ciphertext should be larger than plaintext due to auth tag")
-        void ciphertextShouldBeLargerThanPlaintext(ChunkEncryptionStrategy strategy) throws EncryptionException {
+        void ciphertextShouldBeLargerThanPlaintext(ChunkEncryptionStrategy strategy) {
             byte[] plaintext = "Test data".getBytes(StandardCharsets.UTF_8);
 
             SecretKey key = strategy.generateKey();
@@ -160,7 +161,7 @@ class ChunkEncryptionStrategyTest {
         @ParameterizedTest(name = "{0}")
         @MethodSource("cn.flying.service.encryption.ChunkEncryptionStrategyTest#encryptionStrategies")
         @DisplayName("should fail on tampered ciphertext")
-        void shouldFailOnTamperedCiphertext(ChunkEncryptionStrategy strategy) throws EncryptionException {
+        void shouldFailOnTamperedCiphertext(ChunkEncryptionStrategy strategy) {
             byte[] plaintext = "Sensitive data".getBytes(StandardCharsets.UTF_8);
 
             SecretKey key = strategy.generateKey();
@@ -171,7 +172,7 @@ class ChunkEncryptionStrategyTest {
             // Tamper with ciphertext (flip a bit)
             ciphertext[ciphertext.length / 2] ^= 0xFF;
 
-            assertThrows(EncryptionException.class, () ->
+            assertThrows(GeneralException.class, () ->
                     strategy.decrypt(ciphertext, key, iv)
             );
         }
@@ -179,7 +180,7 @@ class ChunkEncryptionStrategyTest {
         @ParameterizedTest(name = "{0}")
         @MethodSource("cn.flying.service.encryption.ChunkEncryptionStrategyTest#encryptionStrategies")
         @DisplayName("should fail on wrong key")
-        void shouldFailOnWrongKey(ChunkEncryptionStrategy strategy) throws EncryptionException {
+        void shouldFailOnWrongKey(ChunkEncryptionStrategy strategy) {
             byte[] plaintext = "Secret message".getBytes(StandardCharsets.UTF_8);
 
             SecretKey correctKey = strategy.generateKey();
@@ -188,7 +189,7 @@ class ChunkEncryptionStrategyTest {
 
             byte[] ciphertext = strategy.encrypt(plaintext, correctKey, iv);
 
-            assertThrows(EncryptionException.class, () ->
+            assertThrows(GeneralException.class, () ->
                     strategy.decrypt(ciphertext, wrongKey, iv)
             );
         }
@@ -196,7 +197,7 @@ class ChunkEncryptionStrategyTest {
         @ParameterizedTest(name = "{0}")
         @MethodSource("cn.flying.service.encryption.ChunkEncryptionStrategyTest#encryptionStrategies")
         @DisplayName("should fail on wrong IV")
-        void shouldFailOnWrongIv(ChunkEncryptionStrategy strategy) throws EncryptionException {
+        void shouldFailOnWrongIv(ChunkEncryptionStrategy strategy) {
             byte[] plaintext = "Protected content".getBytes(StandardCharsets.UTF_8);
 
             SecretKey key = strategy.generateKey();
@@ -205,7 +206,7 @@ class ChunkEncryptionStrategyTest {
 
             byte[] ciphertext = strategy.encrypt(plaintext, key, correctIv);
 
-            assertThrows(EncryptionException.class, () ->
+            assertThrows(GeneralException.class, () ->
                     strategy.decrypt(ciphertext, key, wrongIv)
             );
         }
@@ -282,7 +283,7 @@ class ChunkEncryptionStrategyTest {
         @ParameterizedTest(name = "{0}")
         @MethodSource("cn.flying.service.encryption.ChunkEncryptionStrategyTest#encryptionStrategies")
         @DisplayName("different IVs should produce different ciphertext")
-        void differentIvsShouldProduceDifferentCiphertext(ChunkEncryptionStrategy strategy) throws EncryptionException {
+        void differentIvsShouldProduceDifferentCiphertext(ChunkEncryptionStrategy strategy) {
             byte[] plaintext = "Same plaintext".getBytes(StandardCharsets.UTF_8);
 
             SecretKey key = strategy.generateKey();
@@ -299,7 +300,7 @@ class ChunkEncryptionStrategyTest {
         @ParameterizedTest(name = "{0}")
         @MethodSource("cn.flying.service.encryption.ChunkEncryptionStrategyTest#encryptionStrategies")
         @DisplayName("different keys should produce different ciphertext")
-        void differentKeysShouldProduceDifferentCiphertext(ChunkEncryptionStrategy strategy) throws EncryptionException {
+        void differentKeysShouldProduceDifferentCiphertext(ChunkEncryptionStrategy strategy) {
             byte[] plaintext = "Same plaintext".getBytes(StandardCharsets.UTF_8);
 
             SecretKey key1 = strategy.generateKey();
@@ -316,7 +317,7 @@ class ChunkEncryptionStrategyTest {
         @ParameterizedTest(name = "{0}")
         @MethodSource("cn.flying.service.encryption.ChunkEncryptionStrategyTest#encryptionStrategies")
         @DisplayName("ciphertext should not contain plaintext")
-        void ciphertextShouldNotContainPlaintext(ChunkEncryptionStrategy strategy) throws EncryptionException {
+        void ciphertextShouldNotContainPlaintext(ChunkEncryptionStrategy strategy) {
             String secret = "TopSecret123!";
             byte[] plaintext = secret.getBytes(StandardCharsets.UTF_8);
 

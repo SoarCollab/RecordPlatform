@@ -178,15 +178,33 @@ public class FileRemoteClient {
 
     // ===== Health check methods (reuse existing Dubbo connections) =====
 
+    @CircuitBreaker(name = "storageService", fallbackMethod = "getClusterHealthFallback")
     public Result<Map<String, Boolean>> getClusterHealth() {
         return storageService.getClusterHealth();
     }
 
+    private Result<Map<String, Boolean>> getClusterHealthFallback(Throwable t) {
+        log.error("Storage service getClusterHealth failed", t);
+        return new Result<>(ResultEnum.SERVICE_CIRCUIT_OPEN, Map.of());
+    }
+
+    @CircuitBreaker(name = "storageService", fallbackMethod = "getStorageCapacityFallback")
     public Result<StorageCapacityVO> getStorageCapacity() {
         return storageService.getStorageCapacity();
     }
 
+    private Result<StorageCapacityVO> getStorageCapacityFallback(Throwable t) {
+        log.error("Storage service getStorageCapacity failed", t);
+        return new Result<>(ResultEnum.SERVICE_CIRCUIT_OPEN, null);
+    }
+
+    @CircuitBreaker(name = "blockChainService", fallbackMethod = "getCurrentBlockChainMessageFallback")
     public Result<BlockChainMessage> getCurrentBlockChainMessage() {
         return blockChainService.getCurrentBlockChainMessage();
+    }
+
+    private Result<BlockChainMessage> getCurrentBlockChainMessageFallback(Throwable t) {
+        log.error("BlockChain service getCurrentBlockChainMessage failed", t);
+        return new Result<>(ResultEnum.SERVICE_CIRCUIT_OPEN, null);
     }
 }

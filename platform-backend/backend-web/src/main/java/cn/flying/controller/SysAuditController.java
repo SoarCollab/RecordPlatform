@@ -13,7 +13,7 @@ import cn.flying.service.SysAuditService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -50,12 +50,14 @@ import java.util.Objects;
 @RequestMapping("/api/v1/system/audit")
 @Tag(name = "系统审计", description = "系统审计相关接口，包括操作日志查询、高频操作监控、敏感操作审计等")
 @PreAuthorize("isAdminOrMonitor()")
+
+
+@RequiredArgsConstructor
 public class SysAuditController {
 
     private static final DateTimeFormatter DATETIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    @Resource
-    private SysAuditService auditService;
+    private final SysAuditService auditService;
 
     /**
      * 获取审计概览数据。
@@ -75,6 +77,7 @@ public class SysAuditController {
      * @param queryVO 查询条件
      * @return 分页结果
      */
+    @OperationLog(module = "系统审计", operationType = "查询", description = "getAuditLogs")
     @GetMapping("/logs")
     @Operation(summary = "分页查询审计日志（REST，GET）")
     public Result<IPage<AuditLogVO>> getAuditLogs(@ModelAttribute AuditLogQueryVO queryVO) {
@@ -87,6 +90,7 @@ public class SysAuditController {
      * @param queryVO 查询条件
      * @return 分页结果
      */
+    @OperationLog(module = "系统审计", operationType = "新增", description = "queryAuditLogsByBody")
     @PostMapping("/logs/query")
     @Operation(summary = "分页查询审计日志（REST，POST）")
     public Result<IPage<AuditLogVO>> queryAuditLogsByBody(@Valid @RequestBody AuditLogQueryVO queryVO) {
@@ -113,6 +117,7 @@ public class SysAuditController {
      * @param response HTTP 响应
      * @throws IOException IO 异常
      */
+    @OperationLog(module = "系统审计", operationType = "新增", description = "exportAuditLogsByBody")
     @PostMapping("/logs/export")
     @Operation(summary = "导出审计日志（POST Body）")
     public void exportAuditLogsByBody(@RequestBody(required = false) AuditLogQueryVO queryVO, HttpServletResponse response) throws IOException {

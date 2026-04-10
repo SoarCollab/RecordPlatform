@@ -46,9 +46,7 @@ class FileRestControllerTest {
      */
     @BeforeEach
     void setUp() {
-        controller = new FileRestController();
-        ReflectionTestUtils.setField(controller, "fileQueryService", fileQueryService);
-        ReflectionTestUtils.setField(controller, "downloadBatchMetricsService", downloadBatchMetricsService);
+        controller = new FileRestController(fileQueryService, downloadBatchMetricsService);
     }
 
     /**

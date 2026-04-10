@@ -235,16 +235,6 @@ public class IntegrityCheckService {
     private record VerifyResult(AlertType alertType, String chainHash) {}
 
     /**
-     * Raised when the integrity check cannot reach required downstream services.
-     * These cases should be counted as execution errors instead of persisted alerts.
-     */
-    private static final class IntegrityCheckDependencyException extends RuntimeException {
-        private IntegrityCheckDependencyException(String message) {
-            super(message);
-        }
-    }
-
-    /**
      * Verify a single file: existence in S3, then DB hash vs on-chain hash.
      *
      * @return a VerifyResult if a problem is found, or null if the file is consistent
@@ -255,9 +245,7 @@ public class IntegrityCheckService {
         Result<List<byte[]>> storageResult = fileRemoteClient.getFileListByHash(
                 List.of(filePath), List.of(file.getFileHash()));
         if (storageResult == null || !storageResult.isSuccess()) {
-            throw new IntegrityCheckDependencyException(String.format(
-                    "storage lookup failed for fileId=%d, code=%s",
-                    file.getId(), storageResult != null ? storageResult.getCode() : "null"));
+            throw new GeneralException(ResultEnum.FILE_SERVICE_ERROR);
         }
         if (storageResult.getData() == null || storageResult.getData().isEmpty()
                 || storageResult.getData().get(0) == null || storageResult.getData().get(0).length == 0) {
@@ -269,9 +257,7 @@ public class IntegrityCheckService {
         String uploader = String.valueOf(resolveBlockchainUploaderId(file));
         Result<FileDetailVO> chainResult = fileRemoteClient.getFile(uploader, file.getFileHash());
         if (isBlockchainDependencyFailure(chainResult)) {
-            throw new IntegrityCheckDependencyException(String.format(
-                    "blockchain lookup failed for fileId=%d, code=%s",
-                    file.getId(), chainResult != null ? chainResult.getCode() : "null"));
+            throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR);
         }
         if (!chainResult.isSuccess() || chainResult.getData() == null) {
             log.warn("[integrity-check] chain record not found: fileId={}, hash={}", file.getId(), file.getFileHash());

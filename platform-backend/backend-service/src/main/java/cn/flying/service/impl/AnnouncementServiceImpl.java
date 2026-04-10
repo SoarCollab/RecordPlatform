@@ -21,7 +21,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -38,23 +38,15 @@ import java.util.Set;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class AnnouncementServiceImpl extends ServiceImpl<AnnouncementMapper, Announcement>
         implements AnnouncementService {
 
-    @Resource
-    private AnnouncementReadMapper announcementReadMapper;
-
-    @Resource
-    private AccountService accountService;
-
-    @Resource
-    private SseEmitterManager sseEmitterManager;
-
-    @Resource
-    private TenantMapper tenantMapper;
-
-    @Resource
-    private TransactionTemplate transactionTemplate;
+    private final AnnouncementReadMapper announcementReadMapper;
+    private final AccountService accountService;
+    private final SseEmitterManager sseEmitterManager;
+    private final TenantMapper tenantMapper;
+    private final TransactionTemplate transactionTemplate;
 
     @Override
     @Transactional

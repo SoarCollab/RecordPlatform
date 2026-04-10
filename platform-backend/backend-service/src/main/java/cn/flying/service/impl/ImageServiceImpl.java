@@ -9,7 +9,7 @@ import cn.flying.dao.mapper.ImageStoreMapper;
 import cn.flying.service.ImageService;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -36,15 +36,13 @@ import java.util.UUID;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class ImageServiceImpl extends ServiceImpl<ImageStoreMapper, ImageStore> implements ImageService {
     @Value("${s3.bucket-name}")
     String bucketName;
-    @Resource
-    S3Client s3Client;
-    @Resource
-    AccountMapper accountMapper;
-    @Resource
-    FlowUtils flowUtils;
+    private final S3Client s3Client;
+    private final AccountMapper accountMapper;
+    private final FlowUtils flowUtils;
     private final SimpleDateFormat format= new SimpleDateFormat("yyyyMMdd");
     @Override
     public String uploadAvatar(MultipartFile file, Long userId) throws IOException {

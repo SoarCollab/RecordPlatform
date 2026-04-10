@@ -32,8 +32,7 @@ class QuotaControllerTest {
      */
     @BeforeEach
     void setUp() {
-        controller = new QuotaController();
-        ReflectionTestUtils.setField(controller, "quotaService", quotaService);
+        controller = new QuotaController(quotaService);
     }
 
     /**

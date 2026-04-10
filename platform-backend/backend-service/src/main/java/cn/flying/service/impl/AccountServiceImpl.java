@@ -10,7 +10,7 @@ import cn.flying.dao.vo.auth.*;
 import cn.flying.service.AccountService;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import org.springframework.amqp.core.AmqpTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -34,6 +34,7 @@ import java.util.stream.Collectors;
  * 账户信息处理相关服务
  */
 @Service
+@RequiredArgsConstructor
 public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> implements AccountService {
 
     private static final ConcurrentHashMap<String, ReentrantLock> ADDRESS_LOCKS = new ConcurrentHashMap<>();
@@ -42,17 +43,10 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
     @Value("${spring.web.verify.mail-limit}")
     int VERIFY_LIMIT;
 
-    @Resource
-    AmqpTemplate rabbitTemplate;
-
-    @Resource
-    StringRedisTemplate stringRedisTemplate;
-
-    @Resource
-    PasswordEncoder passwordEncoder;
-
-    @Resource
-    FlowUtils flow;
+    private final AmqpTemplate rabbitTemplate;
+    private final StringRedisTemplate stringRedisTemplate;
+    private final PasswordEncoder passwordEncoder;
+    private final FlowUtils flow;
 
     /**
      * 从数据库中通过用户名或邮箱查找用户详细信息

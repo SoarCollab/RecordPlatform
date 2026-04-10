@@ -25,7 +25,7 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -42,23 +42,15 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class TicketServiceImpl extends ServiceImpl<TicketMapper, Ticket>
         implements TicketService {
 
-    @Resource
-    private TicketReplyMapper ticketReplyMapper;
-
-    @Resource
-    private TicketAttachmentMapper ticketAttachmentMapper;
-
-    @Resource
-    private AccountService accountService;
-
-    @Resource
-    private ApplicationEventPublisher eventPublisher;
-
-    @Resource
-    private TicketNoGenerator ticketNoGenerator;
+    private final TicketReplyMapper ticketReplyMapper;
+    private final TicketAttachmentMapper ticketAttachmentMapper;
+    private final AccountService accountService;
+    private final ApplicationEventPublisher eventPublisher;
+    private final TicketNoGenerator ticketNoGenerator;
 
     @Override
     @Transactional

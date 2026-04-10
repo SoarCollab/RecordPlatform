@@ -21,7 +21,7 @@ import cn.flying.service.ShareAuditService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -40,22 +40,14 @@ import java.util.Map;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class ShareAuditServiceImpl implements ShareAuditService {
 
-    @Resource
-    private ShareAccessLogMapper shareAccessLogMapper;
-
-    @Resource
-    private FileSourceMapper fileSourceMapper;
-
-    @Resource
-    private FileShareMapper fileShareMapper;
-
-    @Resource
-    private FileMapper fileMapper;
-
-    @Resource
-    private AccountMapper accountMapper;
+    private final ShareAccessLogMapper shareAccessLogMapper;
+    private final FileSourceMapper fileSourceMapper;
+    private final FileShareMapper fileShareMapper;
+    private final FileMapper fileMapper;
+    private final AccountMapper accountMapper;
 
     // ==================== 访问日志记录 ====================
 

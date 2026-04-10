@@ -10,7 +10,7 @@ import cn.flying.dao.vo.message.SendMessageVO;
 import cn.flying.service.MessageService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,10 +29,12 @@ import java.util.Map;
 @RequestMapping("/api/v1/messages")
 @Tag(name = "私信管理", description = "私信的发送、查看等操作")
 @Validated
+
+
+@RequiredArgsConstructor
 public class MessageController {
 
-    @Resource
-    private MessageService messageService;
+    private final MessageService messageService;
 
     /**
      * 发送私信（REST 新路径）。
@@ -67,6 +69,7 @@ public class MessageController {
      * @param userId 当前用户 ID
      * @return 未读总数
      */
+    @OperationLog(module = "站内信", operationType = "查询", description = "获取未读私信总数")
     @GetMapping("/unread-count")
     @Operation(summary = "获取未读私信总数")
     public Result<Map<String, Integer>> getUnreadCount(

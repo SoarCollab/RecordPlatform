@@ -12,7 +12,7 @@ import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.servlet.ServletOutputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -34,9 +34,11 @@ import java.util.regex.Pattern;
 @RestController
 @Tag(name = "图片上传下载相关", description = "包括头像、图片等文件的上传下载操作。")
 @RequestMapping("/api/v1/images")
+
+
+@RequiredArgsConstructor
 public class ImageController {
-    @Resource
-    ImageService imageService;
+    private final ImageService imageService;
 
     private static final Pattern AVATAR_PATH_PATTERN = Pattern.compile("^/avatar/[0-9a-fA-F]{32}$");
     private static final Pattern CACHE_PATH_PATTERN = Pattern.compile("^/cache\\d{8}/[0-9a-fA-F]{32}$");

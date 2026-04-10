@@ -60,9 +60,8 @@ public interface ChunkEncryptionStrategy {
      * @param key       加密密钥
      * @param iv        初始化向量
      * @return 密文（包含认证标签）
-     * @throws EncryptionException 加密失败时抛出
      */
-    byte[] encrypt(byte[] plaintext, SecretKey key, byte[] iv) throws EncryptionException;
+    byte[] encrypt(byte[] plaintext, SecretKey key, byte[] iv);
 
     /**
      * 解密数据
@@ -71,9 +70,8 @@ public interface ChunkEncryptionStrategy {
      * @param key        解密密钥
      * @param iv         初始化向量
      * @return 明文数据
-     * @throws EncryptionException 解密失败或认证失败时抛出
      */
-    byte[] decrypt(byte[] ciphertext, SecretKey key, byte[] iv) throws EncryptionException;
+    byte[] decrypt(byte[] ciphertext, SecretKey key, byte[] iv);
 
     /**
      * 流式加密 - 更新操作
@@ -81,18 +79,16 @@ public interface ChunkEncryptionStrategy {
      * @param context 加密上下文
      * @param data    待加密数据块
      * @return 加密后的数据块（可能为空，取决于缓冲）
-     * @throws EncryptionException 加密失败时抛出
      */
-    byte[] encryptUpdate(EncryptionContext context, byte[] data, int offset, int length) throws EncryptionException;
+    byte[] encryptUpdate(EncryptionContext context, byte[] data, int offset, int length);
 
     /**
      * 流式加密 - 完成操作
      *
      * @param context 加密上下文
      * @return 最终加密块（包含填充和认证标签）
-     * @throws EncryptionException 加密失败时抛出
      */
-    byte[] encryptFinal(EncryptionContext context) throws EncryptionException;
+    byte[] encryptFinal(EncryptionContext context);
 
     /**
      * 创建加密上下文（用于流式加密）
@@ -100,9 +96,8 @@ public interface ChunkEncryptionStrategy {
      * @param key 加密密钥
      * @param iv  初始化向量
      * @return 加密上下文
-     * @throws EncryptionException 初始化失败时抛出
      */
-    EncryptionContext createEncryptionContext(SecretKey key, byte[] iv) throws EncryptionException;
+    EncryptionContext createEncryptionContext(SecretKey key, byte[] iv);
 
     /**
      * 流式解密 - 更新操作
@@ -110,18 +105,16 @@ public interface ChunkEncryptionStrategy {
      * @param context 解密上下文
      * @param data    待解密数据块
      * @return 解密后的数据块
-     * @throws EncryptionException 解密失败时抛出
      */
-    byte[] decryptUpdate(EncryptionContext context, byte[] data, int offset, int length) throws EncryptionException;
+    byte[] decryptUpdate(EncryptionContext context, byte[] data, int offset, int length);
 
     /**
      * 流式解密 - 完成操作
      *
      * @param context 解密上下文
      * @return 最终解密块
-     * @throws EncryptionException 解密失败或认证失败时抛出
      */
-    byte[] decryptFinal(EncryptionContext context) throws EncryptionException;
+    byte[] decryptFinal(EncryptionContext context);
 
     /**
      * 创建解密上下文（用于流式解密）
@@ -129,7 +122,6 @@ public interface ChunkEncryptionStrategy {
      * @param key 解密密钥
      * @param iv  初始化向量
      * @return 解密上下文
-     * @throws EncryptionException 初始化失败时抛出
      */
-    EncryptionContext createDecryptionContext(SecretKey key, byte[] iv) throws EncryptionException;
+    EncryptionContext createDecryptionContext(SecretKey key, byte[] iv);
 }
