@@ -18,7 +18,6 @@
         <jackson-bom.version>2.21.1</jackson-bom.version>
         <dubbo.version>3.3.6</dubbo.version>
         <protobuf.version>4.34.1</protobuf.version>
-        <prometheus.version>0.16.0</prometheus.version>
         <aws.sdk.version>2.42.28</aws.sdk.version>
         <hutool.version>5.8.44</hutool.version>
         <redisson.version>4.3.1</redisson.version>
@@ -107,21 +106,10 @@
             <version>4.2.1</version>
         </dependency>
 
-        <!-- Prometheus Client (for monitoring) -->
+        <!-- Micrometer Prometheus Registry (metrics export via Actuator) -->
         <dependency>
-            <groupId>io.prometheus</groupId>
-            <artifactId>simpleclient</artifactId>
-            <version>${prometheus.version}</version> <!-- Check for latest version -->
-        </dependency>
-        <dependency>
-            <groupId>io.prometheus</groupId>
-            <artifactId>simpleclient_common</artifactId>
-            <version>${prometheus.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>io.prometheus</groupId>
-            <artifactId>simpleclient_hotspot</artifactId>
-            <version>${prometheus.version}</version>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
 
         <!-- AWS SDK for Java v2 - S3 -->

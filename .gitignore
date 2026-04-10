@@ -75,3 +75,5 @@ package-lock.json
 /.codex/
 /.trellis/
 /.sdkmanrc
+/.remember
+/.remember

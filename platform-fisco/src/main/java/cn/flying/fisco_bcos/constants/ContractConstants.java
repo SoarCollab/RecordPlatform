@@ -12,17 +12,17 @@ public class ContractConstants {
 
   private static final Logger log = LoggerFactory.getLogger(ContractConstants.class);
 
-  public static String SharingAbi;
+  public static final String SharingAbi;
 
-  public static String SharingBinary;
+  public static final String SharingBinary;
 
-  public static String SharingGmBinary;
+  public static final String SharingGmBinary;
 
-  public static String StorageAbi;
+  public static final String StorageAbi;
 
-  public static String StorageBinary;
+  public static final String StorageBinary;
 
-  public static String StorageGmBinary;
+  public static final String StorageGmBinary;
 
   static {
     try {

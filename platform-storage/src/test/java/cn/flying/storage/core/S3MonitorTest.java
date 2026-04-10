@@ -2,9 +2,9 @@ package cn.flying.storage.core;
 
 import cn.flying.storage.config.NodeConfig;
 import cn.flying.storage.config.StorageProperties;
-import io.prometheus.client.CollectorRegistry;
-import io.prometheus.client.Gauge;
-import org.junit.jupiter.api.AfterEach;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -36,20 +36,17 @@ class S3MonitorTest {
     @Mock
     private StorageProperties storageProperties;
 
+    private MeterRegistry meterRegistry;
+
     private S3Monitor monitor;
 
     @BeforeEach
     void setUp() {
-        CollectorRegistry.defaultRegistry.clear();
-        monitor = new S3Monitor();
+        meterRegistry = new SimpleMeterRegistry();
+        monitor = new S3Monitor(meterRegistry);
         ReflectionTestUtils.setField(monitor, "clientManager", clientManager);
         ReflectionTestUtils.setField(monitor, "eventPublisher", eventPublisher);
         ReflectionTestUtils.setField(monitor, "storageProperties", storageProperties);
-    }
-
-    @AfterEach
-    void tearDown() {
-        CollectorRegistry.defaultRegistry.clear();
     }
 
     @Test
@@ -60,8 +57,11 @@ class S3MonitorTest {
         knownNodes().add(nodeName);
         onlineNodes().add(nodeName);
         nodeMetricsCache().put(nodeName, metrics);
-        nodeOnlineStatusGauge().labels(nodeName).set(1);
-        nodeLoadScoreGauge().labels(nodeName).set(0.75);
+
+        // Pre-register gauges by triggering online status
+        ReflectionTestUtils.invokeMethod(monitor, "getOrCreateOnlineStatusValue", nodeName);
+        ReflectionTestUtils.invokeMethod(monitor, "getOrCreateLoadScoreValue", nodeName);
+
         when(clientManager.getAllNodeConfigs()).thenReturn(Collections.emptyMap());
 
         monitor.scheduledCheckNodes();
@@ -69,8 +69,8 @@ class S3MonitorTest {
         assertThat(onlineNodes()).doesNotContain(nodeName);
         assertThat(knownNodes()).contains(nodeName);
         assertThat(monitor.getNodeMetrics(nodeName)).isNull();
-        assertThat(sampleValue("s3_node_online_status", nodeName)).isEqualTo(0D);
-        assertThat(sampleValue("s3_node_load_score", nodeName)).isNull();
+        assertThat(gaugeValue("s3_node_online_status", nodeName)).isEqualTo(0D);
+        assertThat(findGauge("s3_node_load_score", nodeName)).isNull();
     }
 
     @Test
@@ -81,8 +81,11 @@ class S3MonitorTest {
         knownNodes().add(nodeName);
         onlineNodes().add(nodeName);
         nodeMetricsCache().put(nodeName, metrics);
-        nodeOnlineStatusGauge().labels(nodeName).set(1);
-        nodeLoadScoreGauge().labels(nodeName).set(0.42);
+
+        // Pre-register gauges
+        ReflectionTestUtils.invokeMethod(monitor, "getOrCreateOnlineStatusValue", nodeName);
+        ReflectionTestUtils.invokeMethod(monitor, "getOrCreateLoadScoreValue", nodeName);
+
         when(storageProperties.getNodes()).thenReturn(List.of(createNode(nodeName, "domain-a")));
 
         ReflectionTestUtils.invokeMethod(monitor, "markNodeOffline", nodeName, "simulated outage");
@@ -90,8 +93,8 @@ class S3MonitorTest {
         assertThat(monitor.isNodeOnline(nodeName)).isFalse();
         assertThat(knownNodes()).contains(nodeName);
         assertThat(monitor.getNodeMetrics(nodeName)).isSameAs(metrics);
-        assertThat(sampleValue("s3_node_online_status", nodeName)).isEqualTo(0D);
-        assertThat(sampleValue("s3_node_load_score", nodeName)).isNull();
+        assertThat(gaugeValue("s3_node_online_status", nodeName)).isEqualTo(0D);
+        assertThat(findGauge("s3_node_load_score", nodeName)).isNull();
     }
 
     /**
@@ -132,18 +135,20 @@ class S3MonitorTest {
         return (Map<String, S3Monitor.NodeMetrics>) ReflectionTestUtils.getField(monitor, "nodeMetricsCache");
     }
 
-    private Gauge nodeOnlineStatusGauge() {
-        return (Gauge) ReflectionTestUtils.getField(monitor, "nodeOnlineStatus");
-    }
-
-    private Gauge nodeLoadScoreGauge() {
-        return (Gauge) ReflectionTestUtils.getField(monitor, "nodeLoadScoreGauge");
+    /**
+     * 从 Micrometer 注册表中查找 gauge 值
+     */
+    private Double gaugeValue(String metricName, String nodeName) {
+        Gauge gauge = findGauge(metricName, nodeName);
+        return gauge != null ? gauge.value() : null;
     }
 
     /**
-     * 读取默认 Prometheus 注册表中的节点标签样本值。
+     * 从 Micrometer 注册表中查找 gauge
      */
-    private Double sampleValue(String metricName, String nodeName) {
-        return CollectorRegistry.defaultRegistry.getSampleValue(metricName, new String[]{"node"}, new String[]{nodeName});
+    private Gauge findGauge(String metricName, String nodeName) {
+        return meterRegistry.find(metricName)
+                .tag("node", nodeName)
+                .gauge();
     }
 }
