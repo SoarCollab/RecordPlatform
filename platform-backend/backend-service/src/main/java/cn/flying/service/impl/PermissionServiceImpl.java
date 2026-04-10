@@ -8,7 +8,7 @@ import cn.flying.dao.entity.SysPermission;
 import cn.flying.dao.mapper.SysPermissionMapper;
 import cn.flying.dao.mapper.SysRolePermissionMapper;
 import cn.flying.service.PermissionService;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -20,16 +20,12 @@ import java.util.*;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class PermissionServiceImpl implements PermissionService {
 
-    @Resource
-    private SysPermissionMapper permissionMapper;
-
-    @Resource
-    private SysRolePermissionMapper rolePermissionMapper;
-
-    @Resource
-    private CacheUtils cacheUtils;
+    private final SysPermissionMapper permissionMapper;
+    private final SysRolePermissionMapper rolePermissionMapper;
+    private final CacheUtils cacheUtils;
 
     @Override
     public Set<String> getPermissionCodes(String role, Long tenantId) {

@@ -3,6 +3,7 @@ package cn.flying.service.impl;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.tenant.TenantContext;
+import cn.flying.common.util.IdUtils;
 import cn.flying.dao.entity.QuotaPolicy;
 import cn.flying.dao.entity.QuotaUsageSnapshot;
 import cn.flying.dao.mapper.FileMapper;
@@ -14,7 +15,7 @@ import cn.flying.dao.vo.file.QuotaUserUsageVO;
 import cn.flying.service.QuotaService;
 import cn.flying.service.monitor.QuotaMetrics;
 import cn.flying.service.quota.QuotaDecision;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -32,6 +33,7 @@ import java.util.Set;
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class QuotaServiceImpl implements QuotaService {
 
     private static final String MODE_SHADOW = "SHADOW";
@@ -54,20 +56,11 @@ public class QuotaServiceImpl implements QuotaService {
     private static final String ROLLOUT_REASON_TENANT_FILE_COUNT = "tenant_file_count_exceeded";
     private static final String ROLLOUT_REASON_UNKNOWN = "unknown_exceeded";
 
-    @Resource
-    private FileMapper fileMapper;
-
-    @Resource
-    private QuotaPolicyMapper quotaPolicyMapper;
-
-    @Resource
-    private QuotaUsageSnapshotMapper quotaUsageSnapshotMapper;
-
-    @Resource
-    private TenantMapper tenantMapper;
-
-    @Resource
-    private QuotaMetrics quotaMetrics;
+    private final FileMapper fileMapper;
+    private final QuotaPolicyMapper quotaPolicyMapper;
+    private final QuotaUsageSnapshotMapper quotaUsageSnapshotMapper;
+    private final TenantMapper tenantMapper;
+    private final QuotaMetrics quotaMetrics;
 
     @Value("${quota.enforcement-mode:SHADOW}")
     private String enforcementMode;
@@ -392,7 +385,7 @@ public class QuotaServiceImpl implements QuotaService {
      * @param source 快照来源
      */
     private void upsertSnapshot(Long tenantId, Long userId, long usedStorageBytes, long usedFileCount, String source) {
-        quotaUsageSnapshotMapper.upsertSnapshot(tenantId, userId, usedStorageBytes, usedFileCount, source);
+        quotaUsageSnapshotMapper.upsertSnapshot(IdUtils.nextEntityId(), tenantId, userId, usedStorageBytes, usedFileCount, source);
     }
 
     /**

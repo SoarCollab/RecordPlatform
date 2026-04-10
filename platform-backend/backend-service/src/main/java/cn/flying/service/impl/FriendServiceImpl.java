@@ -22,7 +22,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,17 +31,13 @@ import java.util.*;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class FriendServiceImpl extends ServiceImpl<FriendshipMapper, Friendship>
         implements FriendService {
 
-    @Resource
-    private FriendRequestMapper friendRequestMapper;
-
-    @Resource
-    private AccountService accountService;
-
-    @Resource
-    private SseEmitterManager sseEmitterManager;
+    private final FriendRequestMapper friendRequestMapper;
+    private final AccountService accountService;
+    private final SseEmitterManager sseEmitterManager;
 
     @Override
     public boolean areFriends(Long userA, Long userB) {

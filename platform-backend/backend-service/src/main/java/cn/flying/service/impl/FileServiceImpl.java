@@ -37,7 +37,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
@@ -68,31 +68,17 @@ import java.util.concurrent.TimeUnit;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements FileService {
 
-    @Resource
-    private FileRemoteClient fileRemoteClient;
-
-    @Resource
-    private FileSagaOrchestrator sagaOrchestrator;
-
-    @Resource
-    private FileShareMapper fileShareMapper;
-
-    @Resource
-    private FileSourceMapper fileSourceMapper;
-
-    @Resource
-    private ShareAuditService shareAuditService;
-
-    @Resource
-    private CacheManager cacheManager;
-
-    @Resource
-    private RedissonClient redissonClient;
-
-    @Resource
-    private TransactionTemplate transactionTemplate;
+    private final FileRemoteClient fileRemoteClient;
+    private final FileSagaOrchestrator sagaOrchestrator;
+    private final FileShareMapper fileShareMapper;
+    private final FileSourceMapper fileSourceMapper;
+    private final ShareAuditService shareAuditService;
+    private final CacheManager cacheManager;
+    private final RedissonClient redissonClient;
+    private final TransactionTemplate transactionTemplate;
 
     @Override
     @Transactional(rollbackFor = Exception.class)

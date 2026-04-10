@@ -1,5 +1,7 @@
 package cn.flying.service.encryption;
 
+import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.crypto.Cipher;
@@ -110,31 +112,33 @@ public class ChaCha20EncryptionStrategy implements ChunkEncryptionStrategy {
     }
 
     @Override
-    public byte[] encrypt(byte[] plaintext, SecretKey key, byte[] iv) throws EncryptionException {
+    public byte[] encrypt(byte[] plaintext, SecretKey key, byte[] iv) {
         try {
             Cipher cipher = createCipher();
             IvParameterSpec ivSpec = new IvParameterSpec(iv);
             cipher.init(Cipher.ENCRYPT_MODE, key, ivSpec);
             return cipher.doFinal(plaintext);
         } catch (Exception e) {
-            throw new EncryptionException("ChaCha20-Poly1305 encryption failed", e);
+            log.error("ChaCha20-Poly1305 encryption failed", e);
+            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR);
         }
     }
 
     @Override
-    public byte[] decrypt(byte[] ciphertext, SecretKey key, byte[] iv) throws EncryptionException {
+    public byte[] decrypt(byte[] ciphertext, SecretKey key, byte[] iv) {
         try {
             Cipher cipher = createCipher();
             IvParameterSpec ivSpec = new IvParameterSpec(iv);
             cipher.init(Cipher.DECRYPT_MODE, key, ivSpec);
             return cipher.doFinal(ciphertext);
         } catch (Exception e) {
-            throw new EncryptionException("ChaCha20-Poly1305 decryption failed (possible tampering or wrong key)", e);
+            log.error("ChaCha20-Poly1305 decryption failed (possible tampering or wrong key)", e);
+            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR);
         }
     }
 
     @Override
-    public EncryptionContext createEncryptionContext(SecretKey key, byte[] iv) throws EncryptionException {
+    public EncryptionContext createEncryptionContext(SecretKey key, byte[] iv) {
         try {
             // 流式操作需要独立的 Cipher 实例
             Cipher cipher = Cipher.getInstance(CIPHER_TRANSFORMATION);
@@ -142,59 +146,65 @@ public class ChaCha20EncryptionStrategy implements ChunkEncryptionStrategy {
             cipher.init(Cipher.ENCRYPT_MODE, key, ivSpec);
             return new EncryptionContext(cipher, ALGORITHM_NAME);
         } catch (Exception e) {
-            throw new EncryptionException("Failed to create ChaCha20-Poly1305 encryption context", e);
+            log.error("Failed to create ChaCha20-Poly1305 encryption context", e);
+            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR);
         }
     }
 
     @Override
-    public byte[] encryptUpdate(EncryptionContext context, byte[] data, int offset, int length) throws EncryptionException {
+    public byte[] encryptUpdate(EncryptionContext context, byte[] data, int offset, int length) {
         try {
             byte[] result = context.getCipher().update(data, offset, length);
             return result != null ? result : new byte[0];
         } catch (Exception e) {
-            throw new EncryptionException("ChaCha20-Poly1305 encryption update failed", e);
+            log.error("ChaCha20-Poly1305 encryption update failed", e);
+            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR);
         }
     }
 
     @Override
-    public byte[] encryptFinal(EncryptionContext context) throws EncryptionException {
+    public byte[] encryptFinal(EncryptionContext context) {
         try {
             byte[] result = context.getCipher().doFinal();
             return result != null ? result : new byte[0];
         } catch (Exception e) {
-            throw new EncryptionException("ChaCha20-Poly1305 encryption finalization failed", e);
+            log.error("ChaCha20-Poly1305 encryption finalization failed", e);
+            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR);
         }
     }
 
     @Override
-    public EncryptionContext createDecryptionContext(SecretKey key, byte[] iv) throws EncryptionException {
+    public EncryptionContext createDecryptionContext(SecretKey key, byte[] iv) {
         try {
             Cipher cipher = Cipher.getInstance(CIPHER_TRANSFORMATION);
             IvParameterSpec ivSpec = new IvParameterSpec(iv);
             cipher.init(Cipher.DECRYPT_MODE, key, ivSpec);
             return new EncryptionContext(cipher, ALGORITHM_NAME);
         } catch (Exception e) {
-            throw new EncryptionException("Failed to create ChaCha20-Poly1305 decryption context", e);
+            log.error("Failed to create ChaCha20-Poly1305 decryption context", e);
+            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR);
         }
     }
 
     @Override
-    public byte[] decryptUpdate(EncryptionContext context, byte[] data, int offset, int length) throws EncryptionException {
+    public byte[] decryptUpdate(EncryptionContext context, byte[] data, int offset, int length) {
         try {
             byte[] result = context.getCipher().update(data, offset, length);
             return result != null ? result : new byte[0];
         } catch (Exception e) {
-            throw new EncryptionException("ChaCha20-Poly1305 decryption update failed", e);
+            log.error("ChaCha20-Poly1305 decryption update failed", e);
+            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR);
         }
     }
 
     @Override
-    public byte[] decryptFinal(EncryptionContext context) throws EncryptionException {
+    public byte[] decryptFinal(EncryptionContext context) {
         try {
             byte[] result = context.getCipher().doFinal();
             return result != null ? result : new byte[0];
         } catch (Exception e) {
-            throw new EncryptionException("ChaCha20-Poly1305 decryption finalization failed (authentication tag mismatch)", e);
+            log.error("ChaCha20-Poly1305 decryption finalization failed (authentication tag mismatch)", e);
+            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR);
         }
     }
 }

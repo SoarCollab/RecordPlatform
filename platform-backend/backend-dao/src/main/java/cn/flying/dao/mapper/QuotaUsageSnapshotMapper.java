@@ -37,11 +37,12 @@ public interface QuotaUsageSnapshotMapper extends BaseMapper<QuotaUsageSnapshot>
      * @param source 快照来源（REALTIME/RECON）
      * @return 影响行数
      */
-    @Insert("INSERT INTO quota_usage_snapshot(tenant_id, user_id, used_storage_bytes, used_file_count, source, snapshot_time) " +
-            "VALUES(#{tenantId}, #{userId}, #{usedStorageBytes}, #{usedFileCount}, #{source}, NOW()) " +
+    @Insert("INSERT INTO quota_usage_snapshot(id, tenant_id, user_id, used_storage_bytes, used_file_count, source, snapshot_time) " +
+            "VALUES(#{id}, #{tenantId}, #{userId}, #{usedStorageBytes}, #{usedFileCount}, #{source}, NOW()) " +
             "ON DUPLICATE KEY UPDATE used_storage_bytes = VALUES(used_storage_bytes), " +
             "used_file_count = VALUES(used_file_count), source = VALUES(source), snapshot_time = NOW()")
-    int upsertSnapshot(@Param("tenantId") Long tenantId,
+    int upsertSnapshot(@Param("id") Long id,
+                       @Param("tenantId") Long tenantId,
                        @Param("userId") Long userId,
                        @Param("usedStorageBytes") Long usedStorageBytes,
                        @Param("usedFileCount") Long usedFileCount,

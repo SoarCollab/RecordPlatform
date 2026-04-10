@@ -8,11 +8,10 @@ import cn.flying.service.SysAuditService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
-
-import jakarta.annotation.Resource;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -26,12 +25,12 @@ import java.util.Map;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class SysAuditServiceImpl implements SysAuditService {
 
     private static final DateTimeFormatter DATETIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    @Resource
-    private SysOperationLogMapper operationLogMapper;
+    private final SysOperationLogMapper operationLogMapper;
     
     @Override
     public IPage<SysOperationLog> queryOperationLogs(AuditLogQueryVO queryVO) {

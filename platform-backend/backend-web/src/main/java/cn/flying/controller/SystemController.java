@@ -7,7 +7,7 @@ import cn.flying.platformapi.response.StorageCapacityVO;
 import cn.flying.service.SystemMonitorService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,10 +22,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/system")
 @Tag(name = "系统监控", description = "系统监控相关接口，包括系统统计、区块链状态、健康检查等")
+
+
+@RequiredArgsConstructor
 public class SystemController {
 
-    @Resource
-    private SystemMonitorService systemMonitorService;
+    private final SystemMonitorService systemMonitorService;
 
     /**
      * 获取系统统计信息

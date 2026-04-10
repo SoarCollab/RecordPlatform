@@ -14,7 +14,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -31,10 +31,12 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/admin/tickets")
 @Tag(name = "管理员工单（REST）", description = "工单管理 REST 新路径")
+
+
+@RequiredArgsConstructor
 public class AdminTicketController {
 
-    @Resource
-    private TicketService ticketService;
+    private final TicketService ticketService;
 
     /**
      * 获取管理员工单分页列表（REST 新路径）。
@@ -99,6 +101,7 @@ public class AdminTicketController {
      * @param adminId 当前管理员 ID
      * @return 数量
      */
+    @OperationLog(module = "工单模块", operationType = "查询", description = "获取管理员待处理工单数")
     @GetMapping("/pending-count")
     @Operation(summary = "获取管理员待处理工单数（REST）")
     @PreAuthorize("hasPerm('ticket:admin')")

@@ -1,5 +1,7 @@
 package cn.flying.common.lock;
 
+import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -53,7 +55,7 @@ public class DistributedLockAspect {
             if (!acquired) {
                 log.debug("获取分布式锁失败: key={}", lockKey);
                 if (distributedLock.throwOnFailure()) {
-                    throw new DistributedLockException("获取分布式锁失败: " + lockKey);
+                    throw new GeneralException(ResultEnum.SYSTEM_BUSY);
                 }
                 return null;
             }

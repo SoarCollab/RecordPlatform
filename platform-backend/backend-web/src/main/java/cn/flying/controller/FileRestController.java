@@ -14,7 +14,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -40,13 +40,14 @@ import java.util.Locale;
 @RestController
 @RequestMapping("/api/v1/files")
 @Tag(name = "文件操作（REST）", description = "文件查询 REST 新路径")
+
+
+@RequiredArgsConstructor
 public class FileRestController {
 
-    @Resource
-    private FileQueryService fileQueryService;
+    private final FileQueryService fileQueryService;
 
-    @Resource
-    private DownloadBatchMetricsService downloadBatchMetricsService;
+    private final DownloadBatchMetricsService downloadBatchMetricsService;
 
     /**
      * 获取文件分页列表（REST 新路径）。

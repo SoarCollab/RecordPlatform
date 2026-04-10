@@ -1,7 +1,6 @@
 package cn.flying.common.util;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.Random;
@@ -31,7 +30,6 @@ public class IdUtils {
     private static volatile long lastResetTime = System.currentTimeMillis();
     private static final long MONITOR_WINDOW_MS = 60_000; // 1分钟窗口
 
-    @Autowired
     public IdUtils(SnowflakeIdGenerator snowflakeIdGenerator, SecureIdCodec secureIdCodec) {
         IdUtils.snowflakeIdGenerator = snowflakeIdGenerator;
         IdUtils.secureIdCodec = secureIdCodec;

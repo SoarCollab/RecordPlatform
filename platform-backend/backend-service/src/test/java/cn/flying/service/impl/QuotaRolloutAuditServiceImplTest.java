@@ -1,15 +1,18 @@
 package cn.flying.service.impl;
 
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.util.IdUtils;
 import cn.flying.dao.entity.QuotaRolloutAudit;
 import cn.flying.dao.mapper.QuotaRolloutAuditMapper;
 import cn.flying.dao.vo.file.QuotaRolloutAuditUpsertVO;
 import cn.flying.dao.vo.file.QuotaRolloutAuditVO;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
@@ -19,6 +22,7 @@ import java.util.Date;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -34,6 +38,8 @@ class QuotaRolloutAuditServiceImplTest {
     @InjectMocks
     private QuotaRolloutAuditServiceImpl service;
 
+    private MockedStatic<IdUtils> idUtilsMock;
+
     private QuotaRolloutAuditUpsertVO request;
 
     /**
@@ -41,6 +47,9 @@ class QuotaRolloutAuditServiceImplTest {
      */
     @BeforeEach
     void setUp() {
+        idUtilsMock = mockStatic(IdUtils.class);
+        idUtilsMock.when(IdUtils::nextEntityId).thenReturn(1L);
+
         request = new QuotaRolloutAuditUpsertVO(
                 "batch-a",
                 1L,
@@ -53,6 +62,13 @@ class QuotaRolloutAuditServiceImplTest {
                 "持续观察无异常",
                 "https://example.com/evidence/1"
         );
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (idUtilsMock != null) {
+            idUtilsMock.close();
+        }
     }
 
     /**

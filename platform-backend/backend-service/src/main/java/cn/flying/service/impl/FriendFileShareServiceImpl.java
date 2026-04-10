@@ -24,7 +24,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
@@ -35,24 +35,16 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class FriendFileShareServiceImpl extends ServiceImpl<FriendFileShareMapper, FriendFileShare>
         implements FriendFileShareService {
 
-    @Resource
-    private AccountService accountService;
-
+    private final AccountService accountService;
     @Lazy
-    @Resource
-    private FriendService friendService;
-
-    @Resource
-    private FileMapper fileMapper;
-
-    @Resource
-    private SseEmitterManager sseEmitterManager;
-
-    @Resource
-    private ObjectMapper objectMapper;
+    private final FriendService friendService;
+    private final FileMapper fileMapper;
+    private final SseEmitterManager sseEmitterManager;
+    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional

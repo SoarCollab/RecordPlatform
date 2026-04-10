@@ -14,7 +14,7 @@ import cn.flying.service.AccountService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
@@ -35,14 +35,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/auth")
 @Tag(name = "登录校验相关", description = "包括用户登录、注册、验证码请求等操作。")
+
+
+@RequiredArgsConstructor
 public class AuthorizeController {
 
-    @Resource
-    AccountService accountService;
-    @Resource
-    ControllerUtils utils;
-    @Resource
-    JwtUtils jwtUtils;
+    private final AccountService accountService;
+    private final ControllerUtils utils;
+    private final JwtUtils jwtUtils;
 
     /**
      * 请求邮件验证码（REST 新路径）。
@@ -52,6 +52,7 @@ public class AuthorizeController {
      * @param request 当前请求
      * @return 处理结果
      */
+    @OperationLog(module = "登录校验模块", operationType = "新增", description = "createVerificationCode")
     @PostMapping("/verification-codes")
     @Operation(summary = "请求邮件验证码（REST）")
     public Result<String> createVerificationCode(@RequestParam @Email String email,
@@ -81,6 +82,7 @@ public class AuthorizeController {
      * @param vo 重置确认参数
      * @return 操作结果
      */
+    @OperationLog(module = "登录校验模块", operationType = "新增", description = "confirmPasswordReset")
     @PostMapping("/password-resets/confirm")
     @Operation(summary = "密码重置确认（REST）")
     public Result<String> confirmPasswordReset(@RequestBody @Valid ConfirmResetVO vo) {
@@ -93,6 +95,7 @@ public class AuthorizeController {
      * @param vo 密码重置信息
      * @return 操作结果
      */
+    @OperationLog(module = "登录校验模块", operationType = "修改", description = "updatePasswordByReset")
     @PutMapping("/password-resets")
     @Operation(summary = "密码重置操作（REST）")
     public Result<String> updatePasswordByReset(@RequestBody @Valid EmailResetVO vo) {
@@ -106,6 +109,7 @@ public class AuthorizeController {
      * @param request 当前请求
      * @return 新令牌信息
      */
+    @OperationLog(module = "登录校验模块", operationType = "新增", description = "refreshAccessToken")
     @PostMapping("/tokens/refresh")
     @Operation(summary = "刷新访问令牌（REST）")
     public Result<RefreshTokenVO> refreshAccessToken(HttpServletRequest request) {
@@ -123,6 +127,7 @@ public class AuthorizeController {
      * @param request 当前请求
      * @return SSE 短期令牌
      */
+    @OperationLog(module = "登录校验模块", operationType = "新增", description = "issueSseToken")
     @PostMapping("/tokens/sse")
     @Operation(summary = "获取SSE短期令牌（REST）")
     public Result<SseTokenVO> issueSseToken(HttpServletRequest request) {

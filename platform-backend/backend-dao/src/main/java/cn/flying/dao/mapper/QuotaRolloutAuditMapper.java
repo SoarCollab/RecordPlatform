@@ -32,10 +32,10 @@ public interface QuotaRolloutAuditMapper extends BaseMapper<QuotaRolloutAudit> {
      * @param audit 审计实体
      * @return 影响行数
      */
-    @Insert("INSERT INTO quota_rollout_audit(batch_id, tenant_id, observation_start_time, observation_end_time, "
+    @Insert("INSERT INTO quota_rollout_audit(id, batch_id, tenant_id, observation_start_time, observation_end_time, "
             + "sampled_request_count, exceeded_request_count, false_positive_count, rollback_decision, "
             + "rollback_reason, evidence_link, operator_name, create_time, update_time) "
-            + "VALUES(#{audit.batchId}, #{audit.tenantId}, #{audit.observationStartTime}, #{audit.observationEndTime}, "
+            + "VALUES(#{audit.id}, #{audit.batchId}, #{audit.tenantId}, #{audit.observationStartTime}, #{audit.observationEndTime}, "
             + "#{audit.sampledRequestCount}, #{audit.exceededRequestCount}, #{audit.falsePositiveCount}, "
             + "#{audit.rollbackDecision}, #{audit.rollbackReason}, #{audit.evidenceLink}, #{audit.operatorName}, NOW(), NOW()) "
             + "ON DUPLICATE KEY UPDATE observation_start_time = VALUES(observation_start_time), "

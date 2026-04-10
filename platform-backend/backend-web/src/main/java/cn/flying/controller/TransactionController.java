@@ -6,7 +6,7 @@ import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FileQueryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -18,10 +18,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/transactions")
 @Tag(name = "交易查询（REST）", description = "交易查询 REST 新路径")
+
+
+@RequiredArgsConstructor
 public class TransactionController {
 
-    @Resource
-    private FileQueryService fileQueryService;
+    private final FileQueryService fileQueryService;
 
     /**
      * 根据交易哈希查询交易详情。

@@ -44,10 +44,7 @@ class RolePermissionControllerTest {
      */
     @BeforeEach
     void setUp() {
-        controller = new RolePermissionController();
-        ReflectionTestUtils.setField(controller, "permissionMapper", permissionMapper);
-        ReflectionTestUtils.setField(controller, "rolePermissionMapper", rolePermissionMapper);
-        ReflectionTestUtils.setField(controller, "permissionService", permissionService);
+        controller = new RolePermissionController(permissionMapper, rolePermissionMapper, permissionService);
     }
 
     /**

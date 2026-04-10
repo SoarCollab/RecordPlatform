@@ -57,14 +57,9 @@ class AdminAndTransactionControllerTest {
                 new SecureIdCodec("SecureTestKey4UnitTests2026XyZ789AbCdEfGhIjKlMnOpQrStUvWxYz1234")
         );
 
-        adminAnnouncementController = new AdminAnnouncementController();
-        ReflectionTestUtils.setField(adminAnnouncementController, "announcementService", announcementService);
-
-        adminTicketController = new AdminTicketController();
-        ReflectionTestUtils.setField(adminTicketController, "ticketService", ticketService);
-
-        transactionController = new TransactionController();
-        ReflectionTestUtils.setField(transactionController, "fileQueryService", fileQueryService);
+        adminAnnouncementController = new AdminAnnouncementController(announcementService);
+        adminTicketController = new AdminTicketController(ticketService);
+        transactionController = new TransactionController(fileQueryService);
     }
 
     /**

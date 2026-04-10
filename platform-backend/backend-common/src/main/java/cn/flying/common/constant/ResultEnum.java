@@ -105,6 +105,8 @@ public enum ResultEnum implements Serializable {
     SERVICE_UNAVAILABLE(40005, "服务暂时不可用，请稍后重试"),
     /** 上传会话不存在或已过期 */
     UPLOAD_SESSION_NOT_FOUND(40006, "上传会话不存在或已过期"),
+    /** 加密/解密操作失败 */
+    ENCRYPTION_ERROR(40007, "加密/解密操作失败"),
 
     /* ==================== 数据错误：50000-59999 ==================== */
     /** 数据未找到 */

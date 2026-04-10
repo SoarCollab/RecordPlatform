@@ -21,7 +21,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
@@ -32,22 +32,16 @@ import java.util.Map;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
         implements MessageService {
 
     @Lazy
-    @Resource
-    private ConversationService conversationService;
-
-    @Resource
-    private AccountService accountService;
-
+    private final ConversationService conversationService;
+    private final AccountService accountService;
     @Lazy
-    @Resource
-    private FriendService friendService;
-
-    @Resource
-    private SseEmitterManager sseEmitterManager;
+    private final FriendService friendService;
+    private final SseEmitterManager sseEmitterManager;
 
     @Override
     @Transactional

@@ -10,7 +10,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -23,10 +23,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/admin/announcements")
 @Tag(name = "管理员公告（REST）", description = "公告管理 REST 新路径")
+
+
+@RequiredArgsConstructor
 public class AdminAnnouncementController {
 
-    @Resource
-    private AnnouncementService announcementService;
+    private final AnnouncementService announcementService;
 
     /**
      * 获取管理员公告分页列表（REST 新路径）。

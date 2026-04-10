@@ -28,7 +28,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -42,24 +42,16 @@ import java.util.*;
  * @since 2025-12-27
  */
 @Service
+@RequiredArgsConstructor
 public class FileAdminServiceImpl implements FileAdminService {
 
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(FileAdminServiceImpl.class);
 
-    @Resource
-    private FileMapper fileMapper;
-
-    @Resource
-    private FileShareMapper fileShareMapper;
-
-    @Resource
-    private FileSourceMapper fileSourceMapper;
-
-    @Resource
-    private ShareAccessLogMapper shareAccessLogMapper;
-
-    @Resource
-    private AccountMapper accountMapper;
+    private final FileMapper fileMapper;
+    private final FileShareMapper fileShareMapper;
+    private final FileSourceMapper fileSourceMapper;
+    private final ShareAccessLogMapper shareAccessLogMapper;
+    private final AccountMapper accountMapper;
 
     // ==================== 文件管理 ====================
 

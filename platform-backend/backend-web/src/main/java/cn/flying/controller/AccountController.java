@@ -12,7 +12,7 @@ import cn.flying.dao.vo.auth.UpdateUserVO;
 import cn.flying.service.AccountService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -30,11 +30,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/users")
 @Tag(name = "用户信息、隐私设置相关", description = "包括用户信息、详细信息、隐私设置等操作。")
+
+
+@RequiredArgsConstructor
 public class AccountController {
-    @Resource
-    AccountService accountService;
-    @Resource
-    ControllerUtils utils;
+    private final AccountService accountService;
+    private final ControllerUtils utils;
 
     /**
      * 获取用户信息。

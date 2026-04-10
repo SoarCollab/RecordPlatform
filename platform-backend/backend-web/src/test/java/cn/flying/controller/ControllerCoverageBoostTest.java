@@ -161,46 +161,17 @@ class ControllerCoverageBoostTest {
 
         ControllerUtils controllerUtils = new ControllerUtils();
 
-        authorizeController = new AuthorizeController();
-        ReflectionTestUtils.setField(authorizeController, "accountService", accountService);
-        ReflectionTestUtils.setField(authorizeController, "utils", controllerUtils);
-        ReflectionTestUtils.setField(authorizeController, "jwtUtils", jwtUtils);
-
-        accountController = new AccountController();
-        ReflectionTestUtils.setField(accountController, "accountService", accountService);
-        ReflectionTestUtils.setField(accountController, "utils", controllerUtils);
-
-        messageController = new MessageController();
-        ReflectionTestUtils.setField(messageController, "messageService", messageService);
-
-        conversationController = new ConversationController();
-        ReflectionTestUtils.setField(conversationController, "conversationService", conversationService);
-        ReflectionTestUtils.setField(conversationController, "messageService", messageService);
-
-        announcementController = new AnnouncementController();
-        ReflectionTestUtils.setField(announcementController, "announcementService", announcementService);
-
-        friendController = new FriendController();
-        ReflectionTestUtils.setField(friendController, "friendService", friendService);
-
-        ticketController = new TicketController();
-        ReflectionTestUtils.setField(ticketController, "ticketService", ticketService);
-
-        uploadSessionController = new UploadSessionController();
-        ReflectionTestUtils.setField(uploadSessionController, "fileUploadService", fileUploadService);
-
-        fileController = new FileController();
-        ReflectionTestUtils.setField(fileController, "fileQueryService", fileQueryService);
-        ReflectionTestUtils.setField(fileController, "fileService", fileService);
-        ReflectionTestUtils.setField(fileController, "shareAuditService", shareAuditService);
-
-        friendFileShareController = new FriendFileShareController();
-        ReflectionTestUtils.setField(friendFileShareController, "friendFileShareService", friendFileShareService);
-
-        permissionController = new PermissionController();
-        ReflectionTestUtils.setField(permissionController, "permissionMapper", permissionMapper);
-        ReflectionTestUtils.setField(permissionController, "rolePermissionMapper", rolePermissionMapper);
-        ReflectionTestUtils.setField(permissionController, "permissionService", permissionService);
+        authorizeController = new AuthorizeController(accountService, controllerUtils, jwtUtils);
+        accountController = new AccountController(accountService, controllerUtils);
+        messageController = new MessageController(messageService);
+        conversationController = new ConversationController(conversationService, messageService);
+        announcementController = new AnnouncementController(announcementService);
+        friendController = new FriendController(friendService);
+        ticketController = new TicketController(ticketService);
+        uploadSessionController = new UploadSessionController(fileUploadService);
+        fileController = new FileController(fileQueryService, fileService, shareAuditService);
+        friendFileShareController = new FriendFileShareController(friendFileShareService);
+        permissionController = new PermissionController(permissionMapper, rolePermissionMapper, permissionService);
     }
 
     /**

@@ -21,7 +21,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -49,16 +49,16 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/files")
 @Tag(name = "文件操作相关接口", description = "包括获取文件列表、删除文件、获取文件地址等操作。")
+
+
+@RequiredArgsConstructor
 public class FileController {
 
-    @Resource
-    private FileQueryService fileQueryService;
+    private final FileQueryService fileQueryService;
 
-    @Resource
-    private FileService fileService;
+    private final FileService fileService;
 
-    @Resource
-    private ShareAuditService shareAuditService;
+    private final ShareAuditService shareAuditService;
 
     /**
      * 根据文件 ID 获取文件详情。

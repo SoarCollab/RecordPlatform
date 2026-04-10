@@ -21,7 +21,7 @@ public class SysOperationLog {
     /**
      * 日志ID
      */
-    @TableId(value = "id", type = IdType.AUTO)
+    @TableId(value = "id", type = IdType.ASSIGN_ID)
     @Schema(description = "日志ID")
     private Long id;
     

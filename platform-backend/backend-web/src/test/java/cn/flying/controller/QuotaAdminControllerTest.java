@@ -43,8 +43,7 @@ class QuotaAdminControllerTest {
      */
     @BeforeEach
     void setUp() {
-        controller = new QuotaAdminController();
-        ReflectionTestUtils.setField(controller, "quotaRolloutAuditService", quotaRolloutAuditService);
+        controller = new QuotaAdminController(quotaRolloutAuditService);
     }
 
     /**

@@ -15,7 +15,7 @@ import cn.flying.service.FileUploadService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -40,10 +40,12 @@ import org.springframework.web.multipart.MultipartFile;
 @Validated
 @RequestMapping("/api/v1/upload-sessions")
 @Tag(name = "上传会话", description = "分片上传会话管理")
+
+
+@RequiredArgsConstructor
 public class UploadSessionController {
 
-    @Resource
-    private FileUploadService fileUploadService;
+    private final FileUploadService fileUploadService;
 
     /**
      * 创建上传会话。
@@ -95,6 +97,7 @@ public class UploadSessionController {
      * @param file        分片文件
      * @return 处理结果
      */
+    @OperationLog(module = "文件分片上传模块", operationType = "修改", description = "uploadChunk")
     @PutMapping("/{clientId}/chunks/{chunkNumber}")
     @Operation(summary = "上传分片")
     public Result<String> uploadChunk(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
@@ -128,6 +131,7 @@ public class UploadSessionController {
      * @param clientId 客户端会话 ID
      * @return 处理结果
      */
+    @OperationLog(module = "文件分片上传模块", operationType = "新增", description = "pauseUpload")
     @PostMapping("/{clientId}/pause")
     @Operation(summary = "暂停上传")
     public Result<String> pauseUpload(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
@@ -143,6 +147,7 @@ public class UploadSessionController {
      * @param clientId 客户端会话 ID
      * @return 恢复结果
      */
+    @OperationLog(module = "文件分片上传模块", operationType = "新增", description = "resumeUpload")
     @PostMapping("/{clientId}/resume")
     @Operation(summary = "恢复上传")
     public Result<ResumeUploadVO> resumeUpload(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
@@ -176,6 +181,7 @@ public class UploadSessionController {
      * @param clientId 客户端会话 ID
      * @return 会话状态
      */
+    @OperationLog(module = "文件分片上传模块", operationType = "查询", description = "getUploadSession")
     @GetMapping("/{clientId}")
     @Operation(summary = "查询上传会话状态")
     public Result<FileUploadStatusVO> getUploadSession(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
@@ -190,6 +196,7 @@ public class UploadSessionController {
      * @param clientId 客户端会话 ID
      * @return 上传进度
      */
+    @OperationLog(module = "文件分片上传模块", operationType = "查询", description = "getUploadProgress")
     @GetMapping("/{clientId}/progress")
     @Operation(summary = "查询上传进度")
     public Result<ProgressVO> getUploadProgress(@RequestAttribute(Const.ATTR_USER_ID) Long userId,

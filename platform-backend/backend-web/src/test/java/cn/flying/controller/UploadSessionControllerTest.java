@@ -45,8 +45,7 @@ class UploadSessionControllerTest {
      */
     @BeforeEach
     void setUp() {
-        controller = new UploadSessionController();
-        ReflectionTestUtils.setField(controller, "fileUploadService", fileUploadService);
+        controller = new UploadSessionController(fileUploadService);
     }
 
     /**

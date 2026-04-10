@@ -1,5 +1,7 @@
 package cn.flying.service.encryption;
 
+import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -47,14 +49,13 @@ public class ChunkDecryptionService {
      * @param encryptedData 加密的分片数据（包含头部、IV、密文、认证标签）
      * @param keyBytes      解密密钥字节数组（32 字节）
      * @return 解密后的明文数据
-     * @throws EncryptionException 解密失败时抛出
      */
-    public byte[] decryptChunk(byte[] encryptedData, byte[] keyBytes) throws EncryptionException {
+    public byte[] decryptChunk(byte[] encryptedData, byte[] keyBytes) {
         if (encryptedData == null || encryptedData.length == 0) {
-            throw new EncryptionException("Encrypted data is empty");
+            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR);
         }
         if (keyBytes == null || keyBytes.length != 32) {
-            throw new EncryptionException("Invalid key: expected 32 bytes, got " + (keyBytes == null ? "null" : keyBytes.length));
+            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR);
         }
 
         // 检测算法并获取对应策略
@@ -67,7 +68,7 @@ public class ChunkDecryptionService {
 
         // 提取 IV
         if (encryptedData.length < dataOffset + IV_SIZE) {
-            throw new EncryptionException("Data too short: cannot extract IV");
+            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR);
         }
         byte[] iv = Arrays.copyOfRange(encryptedData, dataOffset, dataOffset + IV_SIZE);
 
@@ -87,14 +88,13 @@ public class ChunkDecryptionService {
      * @param encryptedData 加密的分片数据
      * @param keyBytes      解密密钥字节数组
      * @return 解密上下文，用于流式处理
-     * @throws EncryptionException 初始化失败时抛出
      */
-    public DecryptionResult createDecryptionContext(byte[] encryptedData, byte[] keyBytes) throws EncryptionException {
+    public DecryptionResult createDecryptionContext(byte[] encryptedData, byte[] keyBytes) {
         if (encryptedData == null || encryptedData.length == 0) {
-            throw new EncryptionException("Encrypted data is empty");
+            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR);
         }
         if (keyBytes == null || keyBytes.length != 32) {
-            throw new EncryptionException("Invalid key: expected 32 bytes");
+            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR);
         }
 
         byte algorithmId = ChunkFileHeader.parseAlgorithm(encryptedData);
@@ -143,11 +143,11 @@ public class ChunkDecryptionService {
     /**
      * 根据算法 ID 获取对应的加密策略
      */
-    private ChunkEncryptionStrategy getStrategyById(byte algorithmId) throws EncryptionException {
+    private ChunkEncryptionStrategy getStrategyById(byte algorithmId) {
         return switch (algorithmId) {
             case ChunkFileHeader.ALGORITHM_AES_GCM -> new AesGcmEncryptionStrategy();
             case ChunkFileHeader.ALGORITHM_CHACHA20 -> new ChaCha20EncryptionStrategy();
-            default -> throw new EncryptionException("Unknown algorithm ID: " + algorithmId);
+            default -> throw new GeneralException(ResultEnum.ENCRYPTION_ERROR);
         };
     }
 

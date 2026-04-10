@@ -1,11 +1,12 @@
 package cn.flying.controller;
 
+import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.JwtUtils;
 import cn.flying.service.sse.SseEmitterManager;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.annotation.Resource;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -22,19 +23,19 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/sse")
 @Tag(name = "SSE推送", description = "服务端推送事件连接管理")
+@RequiredArgsConstructor
 public class SseController {
 
-    @Resource
-    private SseEmitterManager sseEmitterManager;
+    private final SseEmitterManager sseEmitterManager;
 
-    @Resource
-    private JwtUtils jwtUtils;
+    private final JwtUtils jwtUtils;
 
     /**
      * 建立 SSE 连接（使用短期令牌）
      * 该端点使用一次性短期令牌进行认证，不使用常规 JWT
      * 支持同一用户多个连接（多设备/多标签页），通过 connectionId 区分
      */
+    @OperationLog(module = "实时推送", operationType = "新增", description = "建立SSE连接")
     @GetMapping(value = "/connect", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(summary = "建立SSE连接", description = "使用短期SSE令牌建立长连接，接收实时消息推送。支持多设备/多标签页连接。")
     public ResponseEntity<SseEmitter> connect(
@@ -68,6 +69,7 @@ public class SseController {
         return ResponseEntity.ok(emitter);
     }
 
+    @OperationLog(module = "实时推送", operationType = "删除", description = "断开SSE连接")
     @DeleteMapping("/disconnect")
     @Operation(summary = "断开SSE连接", description = "断开指定的SSE连接。如不提供connectionId，则由客户端维护。")
     public void disconnect(
@@ -83,6 +85,7 @@ public class SseController {
         sseEmitterManager.removeConnection(tenantId, userId, connectionId);
     }
 
+    @OperationLog(module = "实时推送", operationType = "查询", description = "获取SSE连接状态")
     @GetMapping("/status")
     @Operation(summary = "获取SSE连接状态")
     public Map<String, Object> getStatus(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
