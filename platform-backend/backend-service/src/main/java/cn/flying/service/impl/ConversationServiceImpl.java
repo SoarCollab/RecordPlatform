@@ -25,6 +25,7 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.annotation.Resource;
 import java.util.Date;
 
 @Slf4j
@@ -35,8 +36,8 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
 
     private final MessageMapper messageMapper;
     private final AccountService accountService;
-    @Lazy
-    private final MessageService messageService;
+    @Lazy @Resource
+    private MessageService messageService;
 
     @Override
     @Transactional

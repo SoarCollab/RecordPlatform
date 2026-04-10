@@ -27,6 +27,7 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.annotation.Resource;
 import java.util.Date;
 import java.util.Map;
 
@@ -36,11 +37,11 @@ import java.util.Map;
 public class MessageServiceImpl extends ServiceImpl<MessageMapper, Message>
         implements MessageService {
 
-    @Lazy
-    private final ConversationService conversationService;
+    @Lazy @Resource
+    private ConversationService conversationService;
     private final AccountService accountService;
-    @Lazy
-    private final FriendService friendService;
+    @Lazy @Resource
+    private FriendService friendService;
     private final SseEmitterManager sseEmitterManager;
 
     @Override
