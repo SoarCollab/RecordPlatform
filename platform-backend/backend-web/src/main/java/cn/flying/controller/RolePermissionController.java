@@ -2,15 +2,8 @@ package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
-import cn.flying.common.constant.ResultEnum;
-import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.SecurityUtils;
-import cn.flying.dao.entity.SysPermission;
-import cn.flying.dao.entity.SysRolePermission;
-import cn.flying.dao.mapper.SysPermissionMapper;
-import cn.flying.dao.mapper.SysRolePermissionMapper;
 import cn.flying.service.PermissionService;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -38,10 +31,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class RolePermissionController {
 
-    private final SysPermissionMapper permissionMapper;
-
-    private final SysRolePermissionMapper rolePermissionMapper;
-
     private final PermissionService permissionService;
 
     /**
@@ -58,22 +47,7 @@ public class RolePermissionController {
             @Parameter(description = "角色名") @PathVariable String role,
             @Valid @RequestBody GrantPermissionVO vo) {
         Long tenantId = SecurityUtils.getTenantId();
-
-        SysPermission permission = permissionMapper.selectByCode(vo.getPermissionCode(), tenantId);
-        if (permission == null) {
-            throw new GeneralException(ResultEnum.RESULT_DATA_NONE, "权限码不存在: " + vo.getPermissionCode());
-        }
-
-        int count = rolePermissionMapper.countByRoleAndPermission(role, vo.getPermissionCode(), tenantId);
-        if (count > 0) {
-            throw new GeneralException(ResultEnum.DATA_ALREADY_EXISTED, "该角色已拥有此权限");
-        }
-
-        SysRolePermission mapping = new SysRolePermission()
-                .setRole(role)
-                .setPermissionId(permission.getId());
-        rolePermissionMapper.insert(mapping);
-        permissionService.evictCache(role, tenantId);
+        permissionService.assignPermissionToRole(role, vo.getPermissionCode(), tenantId);
         return Result.success("授权成功");
     }
 
@@ -91,18 +65,7 @@ public class RolePermissionController {
             @Parameter(description = "角色名") @PathVariable String role,
             @Parameter(description = "权限码") @PathVariable String permissionCode) {
         Long tenantId = SecurityUtils.getTenantId();
-
-        SysPermission permission = permissionMapper.selectByCode(permissionCode, tenantId);
-        if (permission == null) {
-            throw new GeneralException(ResultEnum.RESULT_DATA_NONE, "权限码不存在: " + permissionCode);
-        }
-
-        LambdaQueryWrapper<SysRolePermission> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(SysRolePermission::getRole, role)
-                .eq(SysRolePermission::getPermissionId, permission.getId())
-                .eq(SysRolePermission::getTenantId, tenantId);
-        rolePermissionMapper.delete(wrapper);
-        permissionService.evictCache(role, tenantId);
+        permissionService.revokePermissionFromRole(role, permissionCode, tenantId);
         return Result.success("撤销成功");
     }
 

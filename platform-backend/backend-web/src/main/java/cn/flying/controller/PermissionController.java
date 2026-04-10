@@ -3,14 +3,9 @@ package cn.flying.controller;
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
-import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.entity.SysPermission;
-import cn.flying.dao.entity.SysRolePermission;
-import cn.flying.dao.mapper.SysPermissionMapper;
-import cn.flying.dao.mapper.SysRolePermissionMapper;
 import cn.flying.service.PermissionService;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
@@ -46,10 +41,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class PermissionController {
 
-    private final SysPermissionMapper permissionMapper;
-
-    private final SysRolePermissionMapper rolePermissionMapper;
-
     private final PermissionService permissionService;
 
     /**
@@ -62,11 +53,7 @@ public class PermissionController {
     @Operation(summary = "获取权限树")
     public Result<List<SysPermission>> getPermissionTree() {
         Long tenantId = SecurityUtils.getTenantId();
-        LambdaQueryWrapper<SysPermission> wrapper = new LambdaQueryWrapper<>();
-        wrapper.and(w -> w.eq(SysPermission::getTenantId, 0L).or().eq(SysPermission::getTenantId, tenantId));
-        wrapper.eq(SysPermission::getStatus, 1);
-        wrapper.orderByAsc(SysPermission::getModule, SysPermission::getCode);
-        return Result.success(permissionMapper.selectList(wrapper));
+        return Result.success(permissionService.getPermissionTree(tenantId));
     }
 
     /**
@@ -86,16 +73,8 @@ public class PermissionController {
             @Parameter(description = "每页数量") @RequestParam(defaultValue = "20") Integer pageSize) {
         Long tenantId = SecurityUtils.getTenantId();
         Page<SysPermission> page = new Page<>(pageNum, pageSize);
-
-        LambdaQueryWrapper<SysPermission> wrapper = new LambdaQueryWrapper<>();
-        wrapper.and(w -> w.eq(SysPermission::getTenantId, 0L).or().eq(SysPermission::getTenantId, tenantId));
-        if (module != null && !module.isEmpty()) {
-            wrapper.eq(SysPermission::getModule, module);
-        }
-        wrapper.orderByAsc(SysPermission::getModule, SysPermission::getCode);
-
-        permissionMapper.selectPage(page, wrapper);
-        return Result.success(page);
+        IPage<SysPermission> result = permissionService.listPermissions(tenantId, module, page);
+        return Result.success(result);
     }
 
     /**
@@ -108,17 +87,7 @@ public class PermissionController {
     @Operation(summary = "获取所有模块名列表")
     public Result<List<String>> listModules() {
         Long tenantId = SecurityUtils.getTenantId();
-        LambdaQueryWrapper<SysPermission> wrapper = new LambdaQueryWrapper<>();
-        wrapper.and(w -> w.eq(SysPermission::getTenantId, 0L).or().eq(SysPermission::getTenantId, tenantId));
-        wrapper.select(SysPermission::getModule);
-        wrapper.groupBy(SysPermission::getModule);
-
-        List<SysPermission> permissions = permissionMapper.selectList(wrapper);
-        List<String> modules = permissions.stream()
-                .map(SysPermission::getModule)
-                .distinct()
-                .toList();
-        return Result.success(modules);
+        return Result.success(permissionService.listModules(tenantId));
     }
 
     /**
@@ -139,7 +108,7 @@ public class PermissionController {
                 .setDescription(vo.getDescription())
                 .setStatus(1);
 
-        permissionMapper.insert(permission);
+        permissionService.createPermission(permission);
         return Result.success(permission);
     }
 
@@ -157,24 +126,11 @@ public class PermissionController {
             @Parameter(description = "权限ID") @PathVariable String id,
             @Valid @RequestBody PermissionUpdateVO vo) {
 
-        Long permissionId = IdUtils.fromExternalId(id);
-        SysPermission permission = permissionMapper.selectById(permissionId);
+        Long tenantId = SecurityUtils.getTenantId();
+        SysPermission permission = permissionService.updatePermission(id, vo.getName(), vo.getDescription(), vo.getStatus(), tenantId);
         if (permission == null) {
             return Result.error(ResultEnum.RESULT_DATA_NONE, null);
         }
-
-        if (vo.getName() != null) {
-            permission.setName(vo.getName());
-        }
-        if (vo.getDescription() != null) {
-            permission.setDescription(vo.getDescription());
-        }
-        if (vo.getStatus() != null) {
-            permission.setStatus(vo.getStatus());
-        }
-
-        permissionMapper.updateById(permission);
-        permissionService.evictAllCache(SecurityUtils.getTenantId());
         return Result.success(permission);
     }
 
@@ -190,15 +146,8 @@ public class PermissionController {
     public Result<String> deletePermission(
             @Parameter(description = "权限ID") @PathVariable String id) {
 
-        Long permissionId = IdUtils.fromExternalId(id);
-
-        LambdaQueryWrapper<SysRolePermission> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(SysRolePermission::getPermissionId, permissionId);
-        rolePermissionMapper.delete(wrapper);
-
-        permissionMapper.deleteById(permissionId);
-        permissionService.evictAllCache(SecurityUtils.getTenantId());
-
+        Long tenantId = SecurityUtils.getTenantId();
+        permissionService.deletePermission(id, tenantId);
         return Result.success("删除成功");
     }
 

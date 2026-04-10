@@ -4,11 +4,9 @@ import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
 import cn.flying.common.util.Const;
 import cn.flying.dao.entity.IntegrityAlert;
-import cn.flying.dao.mapper.IntegrityAlertMapper;
 import cn.flying.dao.vo.file.IntegrityCheckStatsVO;
 import cn.flying.dao.vo.file.ResolveAlertVO;
 import cn.flying.service.integrity.IntegrityCheckService;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
@@ -17,7 +15,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -42,8 +39,6 @@ public class IntegrityAlertController {
 
     private final IntegrityCheckService integrityCheckService;
 
-    private final IntegrityAlertMapper integrityAlertMapper;
-
     /**
      * List integrity alerts with pagination and optional filters.
      */
@@ -57,18 +52,8 @@ public class IntegrityAlertController {
             @Parameter(description = "Page number") @RequestParam(defaultValue = "1") Integer pageNum,
             @Parameter(description = "Page size") @RequestParam(defaultValue = "20") Integer pageSize) {
 
-        LambdaQueryWrapper<IntegrityAlert> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(IntegrityAlert::getTenantId, tenantId);
-        if (status != null) {
-            wrapper.eq(IntegrityAlert::getStatus, status);
-        }
-        if (StringUtils.hasText(alertType)) {
-            wrapper.eq(IntegrityAlert::getAlertType, alertType);
-        }
-        wrapper.orderByDesc(IntegrityAlert::getCreateTime);
-
         Page<IntegrityAlert> page = new Page<>(pageNum, pageSize);
-        IPage<IntegrityAlert> result = integrityAlertMapper.selectPage(page, wrapper);
+        IPage<IntegrityAlert> result = integrityCheckService.listAlerts(tenantId, status, alertType, page);
         return Result.success(result);
     }
 

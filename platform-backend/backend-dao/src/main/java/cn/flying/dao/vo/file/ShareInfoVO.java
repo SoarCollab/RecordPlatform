@@ -18,6 +18,9 @@ import java.util.List;
 @Schema(description = "分享详情")
 public class ShareInfoVO {
 
+    /** 分享文件为空的内部状态标记 */
+    public static final int STATUS_EMPTY_FILES = -1;
+
     @Schema(description = "分享码")
     private String shareCode;
 
@@ -29,5 +32,8 @@ public class ShareInfoVO {
 
     @Schema(description = "分享文件列表")
     private List<File> files;
+
+    @Schema(description = "分享状态（服务层内部使用，用于标识异常状态）", hidden = true)
+    private Integer status;
 }
 
