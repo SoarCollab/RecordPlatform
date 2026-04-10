@@ -3817,6 +3817,8 @@ export interface components {
             data?: components["schemas"]["AccountVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultAdminFileDetailVO: {
@@ -3828,6 +3830,8 @@ export interface components {
             data?: components["schemas"]["AdminFileDetailVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultAnnouncementVO: {
@@ -3839,6 +3843,8 @@ export interface components {
             data?: components["schemas"]["AnnouncementVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultBoolean: {
@@ -3851,6 +3857,8 @@ export interface components {
             data?: boolean;
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultChainStatusVO: {
@@ -3862,6 +3870,8 @@ export interface components {
             data?: components["schemas"]["ChainStatusVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultConversationDetailVO: {
@@ -3873,6 +3883,8 @@ export interface components {
             data?: components["schemas"]["ConversationDetailVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultFile: {
@@ -3884,6 +3896,8 @@ export interface components {
             data?: components["schemas"]["file"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultFileDecryptInfoVO: {
@@ -3895,6 +3909,8 @@ export interface components {
             data?: components["schemas"]["FileDecryptInfoVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultFileProvenanceVO: {
@@ -3906,6 +3922,8 @@ export interface components {
             data?: components["schemas"]["FileProvenanceVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultFileUploadStatusVO: {
@@ -3917,6 +3935,8 @@ export interface components {
             data?: components["schemas"]["FileUploadStatusVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultFriendFileShareDetailVO: {
@@ -3928,6 +3948,8 @@ export interface components {
             data?: components["schemas"]["FriendFileShareDetailVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultFriendRequestDetailVO: {
@@ -3939,6 +3961,8 @@ export interface components {
             data?: components["schemas"]["FriendRequestDetailVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultIPageAdminFileVO: {
@@ -3950,6 +3974,8 @@ export interface components {
             data?: components["schemas"]["IPageAdminFileVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultIPageAdminShareVO: {
@@ -3961,6 +3987,8 @@ export interface components {
             data?: components["schemas"]["IPageAdminShareVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultIPageAnnouncementVO: {
@@ -3972,6 +4000,8 @@ export interface components {
             data?: components["schemas"]["IPageAnnouncementVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultIPageAuditLogVO: {
@@ -3983,6 +4013,8 @@ export interface components {
             data?: components["schemas"]["IPageAuditLogVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultIPageConversationVO: {
@@ -3994,6 +4026,8 @@ export interface components {
             data?: components["schemas"]["IPageConversationVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultIPageFileShareVO: {
@@ -4005,6 +4039,8 @@ export interface components {
             data?: components["schemas"]["IPageFileShareVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultIPageFriendFileShareDetailVO: {
@@ -4016,6 +4052,8 @@ export interface components {
             data?: components["schemas"]["IPageFriendFileShareDetailVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultIPageFriendRequestDetailVO: {
@@ -4027,6 +4065,8 @@ export interface components {
             data?: components["schemas"]["IPageFriendRequestDetailVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultIPageFriendVO: {
@@ -4038,6 +4078,8 @@ export interface components {
             data?: components["schemas"]["IPageFriendVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultIPageIntegrityAlert: {
@@ -4049,6 +4091,8 @@ export interface components {
             data?: components["schemas"]["IPageIntegrityAlert"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultIPageShareAccessLogVO: {
@@ -4060,6 +4104,8 @@ export interface components {
             data?: components["schemas"]["IPageShareAccessLogVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultIPageSysPermission: {
@@ -4071,6 +4117,8 @@ export interface components {
             data?: components["schemas"]["IPageSysPermission"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultIPageSys_operation_log: {
@@ -4082,6 +4130,8 @@ export interface components {
             data?: components["schemas"]["IPageSys_operation_log"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultIPageTicketVO: {
@@ -4093,6 +4143,8 @@ export interface components {
             data?: components["schemas"]["IPageTicketVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultIntegrityCheckStatsVO: {
@@ -4104,6 +4156,8 @@ export interface components {
             data?: components["schemas"]["IntegrityCheckStatsVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultListAnnouncementVO: {
@@ -4116,6 +4170,8 @@ export interface components {
             data?: components["schemas"]["AnnouncementVO"][];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultListAuditConfigVO: {
@@ -4128,6 +4184,8 @@ export interface components {
             data?: components["schemas"]["AuditConfigVO"][];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         "ResultListByte[]": {
@@ -4140,6 +4198,8 @@ export interface components {
             data?: string[][];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultListErrorOperationStatsVO: {
@@ -4152,6 +4212,8 @@ export interface components {
             data?: components["schemas"]["ErrorOperationStatsVO"][];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultListFile: {
@@ -4164,6 +4226,8 @@ export interface components {
             data?: components["schemas"]["file"][];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultListFileVersionVO: {
@@ -4176,6 +4240,8 @@ export interface components {
             data?: components["schemas"]["FileVersionVO"][];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultListFriendVO: {
@@ -4188,6 +4254,8 @@ export interface components {
             data?: components["schemas"]["FriendVO"][];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultListHighFrequencyOperationVO: {
@@ -4200,6 +4268,8 @@ export interface components {
             data?: components["schemas"]["HighFrequencyOperationVO"][];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultListString: {
@@ -4212,6 +4282,8 @@ export interface components {
             data?: string[];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultListSysPermission: {
@@ -4224,6 +4296,8 @@ export interface components {
             data?: components["schemas"]["SysPermission"][];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultListUserSearchVO: {
@@ -4236,6 +4310,8 @@ export interface components {
             data?: components["schemas"]["UserSearchVO"][];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultListUserTimeDistributionVO: {
@@ -4248,6 +4324,8 @@ export interface components {
             data?: components["schemas"]["UserTimeDistributionVO"][];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultMapStringInteger: {
@@ -4262,6 +4340,8 @@ export interface components {
             };
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultMapStringObject: {
@@ -4276,6 +4356,8 @@ export interface components {
             };
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultMessageVO: {
@@ -4287,6 +4369,8 @@ export interface components {
             data?: components["schemas"]["MessageVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultMonitorMetricsVO: {
@@ -4298,6 +4382,8 @@ export interface components {
             data?: components["schemas"]["MonitorMetricsVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultPageFile: {
@@ -4309,6 +4395,8 @@ export interface components {
             data?: components["schemas"]["PageFile"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultProgressVO: {
@@ -4320,6 +4408,8 @@ export interface components {
             data?: components["schemas"]["ProgressVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultQuotaRolloutAuditVO: {
@@ -4331,6 +4421,8 @@ export interface components {
             data?: components["schemas"]["QuotaRolloutAuditVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultQuotaStatusVO: {
@@ -4342,6 +4434,8 @@ export interface components {
             data?: components["schemas"]["QuotaStatusVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultRefreshTokenVO: {
@@ -4353,6 +4447,8 @@ export interface components {
             data?: components["schemas"]["RefreshTokenVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultResumeUploadVO: {
@@ -4364,6 +4460,8 @@ export interface components {
             data?: components["schemas"]["ResumeUploadVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultSetString: {
@@ -4376,6 +4474,8 @@ export interface components {
             data?: string[];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultShareAccessStatsVO: {
@@ -4387,6 +4487,8 @@ export interface components {
             data?: components["schemas"]["ShareAccessStatsVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultShareInfoVO: {
@@ -4398,6 +4500,8 @@ export interface components {
             data?: components["schemas"]["ShareInfoVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultSseTokenVO: {
@@ -4409,6 +4513,8 @@ export interface components {
             data?: components["schemas"]["SseTokenVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultStartUploadVO: {
@@ -4420,6 +4526,8 @@ export interface components {
             data?: components["schemas"]["StartUploadVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultStorageCapacityVO: {
@@ -4431,6 +4539,8 @@ export interface components {
             data?: components["schemas"]["StorageCapacityVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultString: {
@@ -4443,6 +4553,8 @@ export interface components {
             data?: string;
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultSysPermission: {
@@ -4454,6 +4566,8 @@ export interface components {
             data?: components["schemas"]["SysPermission"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultSys_operation_log: {
@@ -4465,6 +4579,8 @@ export interface components {
             data?: components["schemas"]["sys_operation_log"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultSystemHealthVO: {
@@ -4476,6 +4592,8 @@ export interface components {
             data?: components["schemas"]["SystemHealthVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultSystemStatsVO: {
@@ -4487,6 +4605,8 @@ export interface components {
             data?: components["schemas"]["SystemStatsVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultTicketDetailVO: {
@@ -4498,6 +4618,8 @@ export interface components {
             data?: components["schemas"]["TicketDetailVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultTransactionVO: {
@@ -4509,6 +4631,8 @@ export interface components {
             data?: components["schemas"]["TransactionVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 返回结果封装 */
         ResultUserFileStatsVO: {
@@ -4520,6 +4644,8 @@ export interface components {
             data?: components["schemas"]["UserFileStatsVO"];
             /** @description 提示信息 */
             message?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
         };
         /** @description 文件上传进度类 */
         ResumeUploadVO: {
