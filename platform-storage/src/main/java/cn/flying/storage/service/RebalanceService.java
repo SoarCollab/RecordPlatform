@@ -1,9 +1,9 @@
 package cn.flying.storage.service;
 
-import cn.flying.storage.config.StorageProperties;
 import cn.flying.storage.core.FaultDomainManager;
 import cn.flying.storage.core.S3ClientManager;
 import cn.flying.storage.core.S3Monitor;
+import cn.flying.storage.core.S3ObjectIterator;
 import cn.flying.storage.event.NodeTopologyChangeEvent;
 import com.google.common.util.concurrent.RateLimiter;
 import jakarta.annotation.Resource;
@@ -195,19 +195,23 @@ public class RebalanceService {
             return;
         }
 
-        // 4. 遍历源节点的对象，迁移到失败域的新目标节点
+        // 4. 逐页遍历源节点的对象，迁移到失败域的新目标节点
         for (String sourceNode : sourceNodes) {
             try {
-                Set<String> objects = listAllObjects(sourceNode);
-                log.info("从源节点 {} 获取到 {} 个对象", sourceNode, objects.size());
+                S3Client client = clientManager.getClient(sourceNode);
+                if (client == null || !S3ObjectIterator.bucketExists(client, sourceNode)) {
+                    log.debug("节点 {} 不可用或桶不存在，跳过", sourceNode);
+                    continue;
+                }
 
-                for (String objectPath : objects) {
+                log.info("开始逐页遍历源节点 {} 的对象", sourceNode);
+                S3ObjectIterator.forEachKey(client, sourceNode, objectPath -> {
                     rateLimiter.acquire();
 
                     // 使用一致性哈希确定该对象在失败域的新目标节点
                     String chunkHash = extractHashFromPath(objectPath);
                     if (chunkHash == null) {
-                        continue;
+                        return;
                     }
 
                     String newTargetNode = faultDomainManager.getTargetNodeInDomain(chunkHash, failedDomain);
@@ -222,7 +226,7 @@ public class RebalanceService {
                             currentStatus.getFailedCount().incrementAndGet();
                         }
                     }
-                }
+                });
             } catch (Exception e) {
                 log.error("从源节点 {} 迁移数据时发生错误: {}", sourceNode, e.getMessage(), e);
                 currentStatus.getFailedCount().incrementAndGet();
@@ -266,18 +270,22 @@ public class RebalanceService {
             return;
         }
 
-        // 4. 遍历对象，确定哪些应该复制到提升节点
+        // 4. 逐页遍历对象，确定哪些应该复制到提升节点
         for (String sourceNode : sourceNodes) {
             try {
-                Set<String> objects = listAllObjects(sourceNode);
-                log.info("从源节点 {} 获取到 {} 个对象", sourceNode, objects.size());
+                S3Client client = clientManager.getClient(sourceNode);
+                if (client == null || !S3ObjectIterator.bucketExists(client, sourceNode)) {
+                    log.debug("节点 {} 不可用或桶不存在，跳过", sourceNode);
+                    continue;
+                }
 
-                for (String objectPath : objects) {
+                log.info("开始逐页遍历源节点 {} 的对象", sourceNode);
+                S3ObjectIterator.forEachKey(client, sourceNode, objectPath -> {
                     rateLimiter.acquire();
 
                     String chunkHash = extractHashFromPath(objectPath);
                     if (chunkHash == null) {
-                        continue;
+                        return;
                     }
 
                     String targetNode = faultDomainManager.getTargetNodeInDomain(chunkHash, targetDomain);
@@ -291,7 +299,7 @@ public class RebalanceService {
                             currentStatus.getFailedCount().incrementAndGet();
                         }
                     }
-                }
+                });
             } catch (Exception e) {
                 log.error("从源节点 {} 复制数据时发生错误: {}", sourceNode, e.getMessage(), e);
                 currentStatus.getFailedCount().incrementAndGet();
@@ -323,18 +331,22 @@ public class RebalanceService {
             return;
         }
 
-        // 3. 遍历其他节点的对象，检查是否需要迁移到新节点
+        // 3. 逐页遍历其他节点的对象，检查是否需要迁移到新节点
         for (String sourceNode : otherNodesInDomain) {
             try {
-                Set<String> objects = listAllObjects(sourceNode);
-                log.info("从源节点 {} 获取到 {} 个对象", sourceNode, objects.size());
+                S3Client client = clientManager.getClient(sourceNode);
+                if (client == null || !S3ObjectIterator.bucketExists(client, sourceNode)) {
+                    log.debug("节点 {} 不可用或桶不存在，跳过", sourceNode);
+                    continue;
+                }
 
-                for (String objectPath : objects) {
+                log.info("开始逐页遍历源节点 {} 的对象", sourceNode);
+                S3ObjectIterator.forEachKey(client, sourceNode, objectPath -> {
                     rateLimiter.acquire();
 
                     String chunkHash = extractHashFromPath(objectPath);
                     if (chunkHash == null) {
-                        continue;
+                        return;
                     }
 
                     String targetNode = faultDomainManager.getTargetNodeInDomain(chunkHash, domain);
@@ -352,7 +364,7 @@ public class RebalanceService {
                             currentStatus.getFailedCount().incrementAndGet();
                         }
                     }
-                }
+                });
             } catch (Exception e) {
                 log.error("从源节点 {} 再平衡数据时发生错误: {}", sourceNode, e.getMessage(), e);
                 currentStatus.getFailedCount().incrementAndGet();
@@ -376,47 +388,6 @@ public class RebalanceService {
             return objectPath.substring(lastSlash + 1);
         }
         return objectPath;
-    }
-
-    /**
-     * 列出节点（桶）中的所有对象
-     */
-    private Set<String> listAllObjects(String nodeName) throws Exception {
-        Set<String> objects = new HashSet<>();
-
-        S3Client client = clientManager.getClient(nodeName);
-        if (client == null) {
-            log.warn("无法获取节点 {} 的 S3 客户端", nodeName);
-            return objects;
-        }
-
-        // 检查桶是否存在
-        try {
-            client.headBucket(HeadBucketRequest.builder().bucket(nodeName).build());
-        } catch (NoSuchBucketException e) {
-            log.debug("节点 {} 的桶不存在，返回空集合", nodeName);
-            return objects;
-        }
-
-        ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
-                .bucket(nodeName)
-                .build();
-
-        ListObjectsV2Response listResponse;
-        do {
-            listResponse = client.listObjectsV2(listRequest);
-            for (S3Object s3Object : listResponse.contents()) {
-                if (!s3Object.key().endsWith("/")) {
-                    objects.add(s3Object.key());
-                }
-            }
-
-            listRequest = listRequest.toBuilder()
-                    .continuationToken(listResponse.nextContinuationToken())
-                    .build();
-        } while (listResponse.isTruncated());
-
-        return objects;
     }
 
     /**
