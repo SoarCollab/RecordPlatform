@@ -1,6 +1,9 @@
 -- Remove AUTO_INCREMENT from all tables migrating to Snowflake ID (ASSIGN_ID).
 -- Existing sequential IDs coexist with future Snowflake IDs; no data migration needed.
 
+-- Drop FK before modifying sys_permission.id (referenced by sys_role_permission)
+ALTER TABLE `sys_role_permission` DROP FOREIGN KEY `fk_permission_id`;
+
 -- Entity violations (previously IdType.AUTO, now IdType.ASSIGN_ID)
 ALTER TABLE `quota_policy`          MODIFY COLUMN `id` BIGINT NOT NULL COMMENT '主键ID';
 ALTER TABLE `quota_usage_snapshot`  MODIFY COLUMN `id` BIGINT NOT NULL COMMENT '主键ID';
@@ -8,6 +11,10 @@ ALTER TABLE `quota_rollout_audit`   MODIFY COLUMN `id` BIGINT NOT NULL COMMENT '
 ALTER TABLE `sys_operation_log`     MODIFY COLUMN `id` BIGINT NOT NULL COMMENT 'Log ID';
 ALTER TABLE `sys_permission`        MODIFY COLUMN `id` BIGINT NOT NULL COMMENT 'Permission ID';
 ALTER TABLE `sys_role_permission`   MODIFY COLUMN `id` BIGINT NOT NULL COMMENT 'Mapping ID';
+
+-- Restore FK after column modification
+ALTER TABLE `sys_role_permission`
+    ADD CONSTRAINT `fk_permission_id` FOREIGN KEY (`permission_id`) REFERENCES `sys_permission` (`id`) ON DELETE CASCADE;
 
 -- DDL mismatch only (entity already ASSIGN_ID, DDL had AUTO_INCREMENT)
 ALTER TABLE `file`                  MODIFY COLUMN `id` BIGINT NOT NULL COMMENT 'File ID';
