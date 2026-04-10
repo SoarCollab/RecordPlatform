@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { useAuth } from "$stores/auth.svelte";
   import { useNotifications } from "$stores/notifications.svelte";
   import * as validation from "$utils/validation";
@@ -19,6 +20,7 @@
 
   // 资料状态
   let displayName = $state(auth.user?.nickname || "");
+  let profileDirty = $state(false);
   let isProfileSubmitting = $state(false);
 
   // 头像上传状态
@@ -34,20 +36,24 @@
   let confirmPwd = $state("");
   let isChangingPassword = $state(false);
 
+  // Sync displayName from auth when user hasn't started editing
   $effect(() => {
-    // 认证用户信息更新时同步本地状态
-    if (auth.user) {
-      displayName = auth.user.nickname || "";
+    const nickname = auth.user?.nickname || "";
+    if (!untrack(() => profileDirty)) {
+      displayName = nickname;
     }
   });
 
-  $effect(() => {
-    if (!showPasswordDialog) {
-      oldPassword = "";
-      newPassword = "";
-      confirmPwd = "";
-    }
-  });
+  function resetPasswordForm() {
+    oldPassword = "";
+    newPassword = "";
+    confirmPwd = "";
+  }
+
+  function handlePasswordDialogClose() {
+    showPasswordDialog = false;
+    resetPasswordForm();
+  }
 
   async function handleAvatarClick() {
     fileInput?.click();
@@ -86,6 +92,7 @@
     isProfileSubmitting = true;
     try {
       await auth.updateProfile({ nickname: displayName });
+      profileDirty = false;
       notifications.success("保存成功", "个人信息已更新");
     } catch (err) {
       notifications.error(
@@ -123,11 +130,7 @@
         new_password: newPassword,
       });
       notifications.success("密码修改成功", "请使用新密码重新登录");
-      showPasswordDialog = false;
-      // 重置表单
-      oldPassword = "";
-      newPassword = "";
-      confirmPwd = "";
+      handlePasswordDialogClose();
     } catch (err) {
       notifications.error(
         "修改失败",
@@ -215,6 +218,7 @@
                 <Input
                   id="displayName"
                   bind:value={displayName}
+                  oninput={() => { profileDirty = true; }}
                   class="max-w-md h-10 bg-background/50"
                 />
               </div>
@@ -341,7 +345,7 @@
 </div>
 
 <!-- 修改密码对话框 -->
-<Dialog.Root bind:open={showPasswordDialog}>
+<Dialog.Root open={showPasswordDialog} onOpenChange={(open) => { if (!open) handlePasswordDialogClose(); else showPasswordDialog = true; }}>
   <Dialog.Content>
     <Dialog.Header>
       <Dialog.Title>修改密码</Dialog.Title>
@@ -377,7 +381,7 @@
       </div>
     </div>
     <Dialog.Footer>
-      <Button variant="outline" onclick={() => (showPasswordDialog = false)}
+      <Button variant="outline" onclick={handlePasswordDialogClose}
         >取消</Button
       >
       <Button onclick={handleChangePassword} disabled={isChangingPassword}>

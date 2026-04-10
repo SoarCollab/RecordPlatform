@@ -4,13 +4,9 @@
 	import { formatFileSize, formatSpeed } from '$utils/format';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
+	import { untrack } from 'svelte';
 
 	const upload = useUpload();
-	const uploadOps = upload as unknown as {
-		clearFailedAndCancelled: () => void;
-		retryAllFailedAndCancelled: () => Promise<number>;
-		cancelAllActiveAndProcessing: () => Promise<number>;
-	};
 	const notifications = useNotifications();
 
 	const MAX_FILE_SIZE_BYTES = 4 * 1024 * 1024 * 1024;
@@ -39,20 +35,14 @@
 		return busyIds.has(id) || bulkBusy;
 	}
 
-	type UploadTaskView = Omit<UploadTask, 'status'> & {
-		status: string;
-		processProgress?: number;
-		serverProgress?: number;
-	};
-
 	let cancelledCount = $derived(
-		upload.tasks.filter((t) => (t as unknown as UploadTaskView).status === 'cancelled').length,
+		upload.tasks.filter((t) => t.status === 'cancelled').length,
 	);
 	let pausedCount = $derived(
-		upload.tasks.filter((t) => (t as unknown as UploadTaskView).status === 'paused').length,
+		upload.tasks.filter((t) => t.status === 'paused').length,
 	);
 	let processingCount = $derived(
-		upload.tasks.filter((t) => (t as unknown as UploadTaskView).status === 'processing').length,
+		upload.tasks.filter((t) => t.status === 'processing').length,
 	);
 	let retryableCount = $derived(upload.failedTasks.length + cancelledCount);
 	let cancelableCount = $derived(upload.activeTasks.length + processingCount + pausedCount);
@@ -86,7 +76,7 @@
 	}
 
 	function confirmClearFailedAndCancelled() {
-		uploadOps.clearFailedAndCancelled();
+		upload.clearFailedAndCancelled();
 		notifications.success('已清除失败/取消任务');
 		clearFailedDialogOpen = false;
 	}
@@ -98,7 +88,7 @@
 	async function confirmRetryAll() {
 		bulkBusy = true;
 		try {
-			const count = await uploadOps.retryAllFailedAndCancelled();
+			const count = await upload.retryAllFailedAndCancelled();
 			if (count > 0) {
 				notifications.success('已开始重试', `共 ${count} 个任务`);
 			}
@@ -117,7 +107,7 @@
 	async function confirmCancelAll() {
 		bulkBusy = true;
 		try {
-			const count = await uploadOps.cancelAllActiveAndProcessing();
+			const count = await upload.cancelAllActiveAndProcessing();
 			if (count > 0) {
 				notifications.success('已取消任务', `共 ${count} 个任务`);
 			}
@@ -167,9 +157,11 @@
 
 	let prevCompletedIds = new Set<string>();
 	$effect(() => {
-		const currentIds = new Set(upload.completedTasks.map(t => t.id));
-		for (const task of upload.completedTasks) {
-			if (!prevCompletedIds.has(task.id)) {
+		const completedTasks = upload.completedTasks;
+		const currentIds = new Set(completedTasks.map(t => t.id));
+		const prev = untrack(() => prevCompletedIds);
+		for (const task of completedTasks) {
+			if (!prev.has(task.id)) {
 				notifications.success('上传完成', task.file.name);
 			}
 		}
@@ -324,7 +316,7 @@
 
 			<div class="divide-y">
 				{#each upload.tasks as task (task.id)}
-					{@const t = task as unknown as UploadTaskView}
+					{@const t = task}
 					<div class="p-4">
 						<div class="flex items-start justify-between gap-4">
 							<div class="flex items-start gap-3">

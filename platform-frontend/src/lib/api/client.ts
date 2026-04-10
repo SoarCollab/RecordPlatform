@@ -355,6 +355,64 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
     throw lastError || new ApiError(ResultCode.UNKNOWN_ERROR, "未知错误");
   }
 
+  /**
+   * Send a raw request that returns a non-JSON response (text, blob, etc.).
+   * Handles auth headers and tenant ID but skips JSON parsing.
+   */
+  async function rawRequest(
+    method: string,
+    url: string,
+    body?: unknown,
+    config?: RequestConfig,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = config?.timeout ?? 30000;
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    const headers = buildHeaders(config, tenantId, tokenGetter);
+
+    if (body instanceof FormData) {
+      headers.delete("Content-Type");
+    } else if (body instanceof URLSearchParams) {
+      headers.set("Content-Type", "application/x-www-form-urlencoded");
+    }
+
+    // Determine if url is an absolute URL or a path relative to baseUrl
+    const resolvedUrl =
+      url.startsWith("http://") || url.startsWith("https://")
+        ? url
+        : buildUrl(baseUrl, url, config?.params);
+
+    try {
+      const response = await fetchFn(resolvedUrl, {
+        method,
+        headers,
+        body:
+          body instanceof FormData || body instanceof URLSearchParams
+            ? body
+            : body
+              ? JSON.stringify(body)
+              : undefined,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new ApiError(response.status, `请求失败 (${response.status})`);
+      }
+
+      return response;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err instanceof ApiError) throw err;
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw new ApiError(ResultCode.TIMEOUT_ERROR, "请求超时");
+      }
+      throw new ApiError(ResultCode.NETWORK_ERROR, "网络连接失败");
+    }
+  }
+
   return {
     get<T>(path: string, config?: RequestConfig): Promise<T> {
       return request<T>("GET", path, undefined, config);
@@ -382,6 +440,29 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
       config?: RequestConfig,
     ): Promise<T> {
       return request<T>("POST", path, formData, config);
+    },
+
+    /**
+     * Fetch a URL and return the response as text.
+     * Handles auth/tenant headers. Supports both absolute URLs and API paths.
+     */
+    async fetchText(url: string, config?: RequestConfig): Promise<string> {
+      const response = await rawRequest("GET", url, undefined, config);
+      return response.text();
+    },
+
+    /**
+     * Fetch a URL and return the response as a Blob.
+     * Handles auth/tenant headers. Supports both absolute URLs and API paths.
+     */
+    async fetchBlob(
+      method: string,
+      url: string,
+      body?: unknown,
+      config?: RequestConfig,
+    ): Promise<Blob> {
+      const response = await rawRequest(method, url, body, config);
+      return response.blob();
     },
   };
 }
