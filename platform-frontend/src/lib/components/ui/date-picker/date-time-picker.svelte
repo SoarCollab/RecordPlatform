@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import CalendarIcon from "@lucide/svelte/icons/calendar";
   import Clock from "@lucide/svelte/icons/clock";
   import {
@@ -34,32 +35,41 @@
     hour12: false,
   });
 
-  // 从 value 初始化
+  // Track the last value we wrote internally to avoid re-parsing our own output
+  let lastWrittenValue = "";
+
+  // Sync from external value prop into internal state (read direction only)
   $effect(() => {
-    if (value) {
+    const currentValue = value;
+    // Skip if this value was set by our own updateValue()
+    if (currentValue === untrack(() => lastWrittenValue)) return;
+
+    if (currentValue) {
       try {
-        // 处理 SQL 格式（将空格替换为 T 以便解析）
-        const isoValue = value.replace(" ", "T");
+        const isoValue = currentValue.replace(" ", "T");
         const parsed = parseDateTime(isoValue);
         date = parsed;
         hour = parsed.hour;
         minute = parsed.minute;
         second = parsed.second;
+        lastWrittenValue = currentValue;
       } catch {
-        // console.warn("日期解析错误", e);
+        // ignore parse errors
       }
     } else {
-      if (date && date.toString().replace("T", " ") !== value) {
-        date = undefined;
-      }
+      date = undefined;
+      lastWrittenValue = "";
     }
   });
 
   function updateValue() {
     if (date) {
       // 后端期望日期时间用空格分隔
-      value = date.toString().replace("T", " ");
+      const next = date.toString().replace("T", " ");
+      lastWrittenValue = next;
+      value = next;
     } else {
+      lastWrittenValue = "";
       value = "";
     }
   }

@@ -9,6 +9,8 @@ const clientMocks = vi.hoisted(() => {
       delete: vi.fn(),
       patch: vi.fn(),
       upload: vi.fn(),
+      fetchText: vi.fn(),
+      fetchBlob: vi.fn(),
     },
     getToken: vi.fn(),
   };
@@ -211,44 +213,25 @@ describe("system endpoints", () => {
     );
   });
 
-  it("exportAuditLogs: 未登录时应直接抛错", async () => {
-    clientMocks.getToken.mockReturnValue(null);
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-
-    await expect(systemApi.exportAuditLogs({})).rejects.toThrow("未登录");
-    expect(fetchSpy).not.toHaveBeenCalled();
-
-    fetchSpy.mockRestore();
-  });
-
   it("exportAuditLogs: 导出失败时应抛错", async () => {
-    clientMocks.getToken.mockReturnValue("jwt-token");
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response("failed", { status: 500 }));
+    clientMocks.api.fetchBlob.mockRejectedValueOnce(
+      new Error("请求失败 (500)"),
+    );
 
     await expect(
       systemApi.exportAuditLogs({ username: "abc" }),
-    ).rejects.toThrow("导出失败");
+    ).rejects.toThrow("请求失败 (500)");
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchSpy.mock.calls[0];
-    expect(String(url)).toContain("/system/audit/logs/export");
-    expect(init?.method).toBe("POST");
-    expect((init?.headers as Record<string, string>).Authorization).toBe(
-      "Bearer jwt-token",
+    expect(clientMocks.api.fetchBlob).toHaveBeenCalledWith(
+      "POST",
+      "/system/audit/logs/export",
+      { username: "abc" },
     );
-
-    fetchSpy.mockRestore();
   });
 
   it("exportAuditLogs: 成功时应返回 blob", async () => {
-    clientMocks.getToken.mockReturnValue("jwt-token");
     const expectedBlob = new Blob(["ok"], { type: "application/json" });
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      blob: vi.fn().mockResolvedValue(expectedBlob),
-    } as unknown as Response);
+    clientMocks.api.fetchBlob.mockResolvedValueOnce(expectedBlob);
 
     const result = await systemApi.exportAuditLogs({
       username: "u",
@@ -256,12 +239,10 @@ describe("system endpoints", () => {
     });
 
     expect(result).toBe(expectedBlob);
-    const [, init] = fetchSpy.mock.calls[0];
-    expect(JSON.parse(String(init?.body))).toEqual({
-      username: "u",
-      status: 1,
-    });
-
-    fetchSpy.mockRestore();
+    expect(clientMocks.api.fetchBlob).toHaveBeenCalledWith(
+      "POST",
+      "/system/audit/logs/export",
+      { username: "u", status: 1 },
+    );
   });
 });
