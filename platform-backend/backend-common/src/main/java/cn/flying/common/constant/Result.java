@@ -29,6 +29,10 @@ public class Result<T> implements Serializable {
     @Schema(description = "提示信息")
     private String message;
 
+    //交易返回值
+    @Schema(description = "交易哈希")
+    private String transactionHash;
+
     // 结果数据
     @Schema(description = "结果数据")
     private T data;

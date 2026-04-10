@@ -185,9 +185,11 @@ Business errors keep `HTTP 200` and are distinguished by `Result.code`.
 | 30009 | FILE_SERVICE_ERROR            | File service request failed                                      |
 | 30010 | SERVICE_CIRCUIT_OPEN          | Service temporarily unavailable (circuit breaker)                |
 | 30011 | SERVICE_TIMEOUT               | Service response timeout                                         |
-| 30012 | STORAGE_QUORUM_NOT_REACHED    | Storage write quorum not reached                                 |
-| 30013 | STORAGE_INSUFFICIENT_REPLICAS | Insufficient storage nodes available                             |
-| 30014 | STORAGE_DEGRADED_WRITE        | Storage wrote in degraded mode, will sync when nodes recover     |
+| 30012 | BLOCKCHAIN_TIMEOUT            | Blockchain service response timeout                              |
+| 30013 | BLOCKCHAIN_UNREACHABLE        | Blockchain node connection failed                                |
+| 30014 | STORAGE_QUORUM_NOT_REACHED    | Storage write quorum not reached                                 |
+| 30015 | STORAGE_INSUFFICIENT_REPLICAS | Insufficient storage nodes available                             |
+| 30016 | STORAGE_DEGRADED_WRITE        | Storage wrote in degraded mode, will sync when nodes recover     |
 
 ### System Errors (40000-49999)
 
@@ -251,6 +253,7 @@ Business errors keep `HTTP 200` and are distinguished by `Result.code`.
 | ----- | -------------------------- | -------------------------- |
 | 70001 | PERMISSION_UNAUTHENTICATED | Authentication required    |
 | 70002 | PERMISSION_UNAUTHORIZED    | Permission denied          |
+| 70003 | PERMISSION_EXPIRE          | Login session expired       |
 | 70004 | PERMISSION_TOKEN_EXPIRED   | Token expired              |
 | 70005 | PERMISSION_LIMIT           | Access limit reached       |
 | 70006 | PERMISSION_TOKEN_INVALID   | Invalid token              |

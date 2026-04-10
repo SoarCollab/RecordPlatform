@@ -59,20 +59,11 @@
 | 30009 | FILE_SERVICE_ERROR | 文件服务请求失败 |
 | 30010 | SERVICE_CIRCUIT_OPEN | 服务暂时不可用（熔断）|
 | 30011 | SERVICE_TIMEOUT | 服务响应超时 |
-| 30012 | STORAGE_QUORUM_NOT_REACHED | 存储写入未达到仲裁要求 |
-| 30013 | STORAGE_INSUFFICIENT_REPLICAS | 可用存储节点不足 |
-| 30014 | STORAGE_DEGRADED_WRITE | 存储以降级模式写入，节点恢复后自动同步 |
-
-### 区块链 Provider 错误（Dubbo provider 侧）
-
-以下错误码定义在 `platform-api`（Dubbo provider 接口模块），由区块链提供者（`platform-fisco`）返回。它们不在 `backend-common` 中，因为 REST 消费端会将 provider 失败转换为 `30006 BLOCKCHAIN_ERROR` 或熔断码（`30010`/`30011`）。
-
-| 代码 (platform-api) | 名称 | 说明 |
-|------|------|------|
 | 30012 | BLOCKCHAIN_TIMEOUT | 区块链服务响应超时 |
 | 30013 | BLOCKCHAIN_UNREACHABLE | 区块链节点连接失败 |
-
-> **注意：** 存储错误码（`STORAGE_QUORUM_NOT_REACHED`、`STORAGE_INSUFFICIENT_REPLICAS`、`STORAGE_DEGRADED_WRITE`）在 `platform-api`（30014-30016）和 `backend-common`（30012-30014）之间编号不一致。REST API 返回的是上表中 `backend-common` 的编号。此编号差异已记录，待后续代码层面修复。
+| 30014 | STORAGE_QUORUM_NOT_REACHED | 存储写入未达到仲裁要求 |
+| 30015 | STORAGE_INSUFFICIENT_REPLICAS | 可用存储节点不足 |
+| 30016 | STORAGE_DEGRADED_WRITE | 存储以降级模式写入，节点恢复后自动同步 |
 
 ## 系统错误（40000-49999）
 
@@ -139,6 +130,7 @@
 |------|------|------|
 | 70001 | PERMISSION_UNAUTHENTICATED | 此操作需要登录系统 |
 | 70002 | PERMISSION_UNAUTHORIZED | 权限不足，无权操作 |
+| 70003 | PERMISSION_EXPIRE | 登录状态过期 |
 | 70004 | PERMISSION_TOKEN_EXPIRED | Token 已过期 |
 | 70005 | PERMISSION_LIMIT | 访问次数受限制 |
 | 70006 | PERMISSION_TOKEN_INVALID | 无效 Token |
@@ -177,7 +169,7 @@
 
 ### 存储降级模式
 
-`30014`（STORAGE_DEGRADED_WRITE）表示写入成功，但副本数少于配置值。系统会在节点恢复后自动同步。这不是失败，而是警告。
+`30016`（STORAGE_DEGRADED_WRITE）表示写入成功，但副本数少于配置值。系统会在节点恢复后自动同步。这不是失败，而是警告。
 
 ### 配额执行
 

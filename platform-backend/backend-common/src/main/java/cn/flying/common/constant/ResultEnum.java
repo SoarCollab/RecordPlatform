@@ -81,12 +81,16 @@ public enum ResultEnum implements Serializable {
     SERVICE_CIRCUIT_OPEN(30010, "服务暂时不可用，请稍后重试"),
     /** 服务超时 */
     SERVICE_TIMEOUT(30011, "服务响应超时"),
+    /** 区块链服务超时 */
+    BLOCKCHAIN_TIMEOUT(30012, "区块链服务响应超时"),
+    /** 区块链节点不可达 */
+    BLOCKCHAIN_UNREACHABLE(30013, "区块链节点连接失败"),
     /** 存储仲裁失败 */
-    STORAGE_QUORUM_NOT_REACHED(30012, "存储写入未达到仲裁要求"),
+    STORAGE_QUORUM_NOT_REACHED(30014, "存储写入未达到仲裁要求"),
     /** 存储副本不足 */
-    STORAGE_INSUFFICIENT_REPLICAS(30013, "可用存储节点不足"),
+    STORAGE_INSUFFICIENT_REPLICAS(30015, "可用存储节点不足"),
     /** 降级写入成功 */
-    STORAGE_DEGRADED_WRITE(30014, "存储以降级模式写入，将在节点恢复后自动同步"),
+    STORAGE_DEGRADED_WRITE(30016, "存储以降级模式写入，将在节点恢复后自动同步"),
 
     /* ==================== 系统错误：40000-49999 ==================== */
     /** 文件大小超限 */
@@ -179,6 +183,8 @@ public enum ResultEnum implements Serializable {
     PERMISSION_UNAUTHENTICATED(70001, "此操作需要登录系统"),
     /** 权限不足 */
     PERMISSION_UNAUTHORIZED(70002, "权限不足，无权操作"),
+    /** 登录过期 */
+    PERMISSION_EXPIRE(70003, "登录状态过期"),
     /** Token过期 */
     PERMISSION_TOKEN_EXPIRED(70004, "Token已过期"),
     /** 访问受限 */
