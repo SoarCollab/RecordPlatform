@@ -59,20 +59,11 @@ This page documents all error codes returned by the RecordPlatform API.
 | 30009 | FILE_SERVICE_ERROR | File service request failed |
 | 30010 | SERVICE_CIRCUIT_OPEN | Service temporarily unavailable (circuit breaker) |
 | 30011 | SERVICE_TIMEOUT | Service response timeout |
-| 30012 | STORAGE_QUORUM_NOT_REACHED | Storage write quorum not reached |
-| 30013 | STORAGE_INSUFFICIENT_REPLICAS | Insufficient storage nodes available |
-| 30014 | STORAGE_DEGRADED_WRITE | Storage wrote in degraded mode, will sync when nodes recover |
-
-### Blockchain Provider Errors (Dubbo provider-side)
-
-The following error codes are defined in `platform-api` (the Dubbo provider interface module) and are returned by the blockchain provider (`platform-fisco`). They are not present in `backend-common` because the REST consumer translates provider failures into `30006 BLOCKCHAIN_ERROR` or circuit breaker codes (`30010`/`30011`).
-
-| Code (platform-api) | Name | Description |
-|------|------|-------------|
 | 30012 | BLOCKCHAIN_TIMEOUT | Blockchain service response timeout |
 | 30013 | BLOCKCHAIN_UNREACHABLE | Blockchain node connection failed |
-
-> **Note:** The storage error codes (`STORAGE_QUORUM_NOT_REACHED`, `STORAGE_INSUFFICIENT_REPLICAS`, `STORAGE_DEGRADED_WRITE`) have different numeric assignments between `platform-api` (30014-30016) and `backend-common` (30012-30014). The REST API returns `backend-common` codes as documented in the table above. This numbering discrepancy is tracked for a future code-level fix.
+| 30014 | STORAGE_QUORUM_NOT_REACHED | Storage write quorum not reached |
+| 30015 | STORAGE_INSUFFICIENT_REPLICAS | Insufficient storage nodes available |
+| 30016 | STORAGE_DEGRADED_WRITE | Storage wrote in degraded mode, will sync when nodes recover |
 
 ## System Errors (40000-49999)
 
@@ -139,6 +130,7 @@ The following error codes are defined in `platform-api` (the Dubbo provider inte
 |------|------|-------------|
 | 70001 | PERMISSION_UNAUTHENTICATED | Login required |
 | 70002 | PERMISSION_UNAUTHORIZED | Insufficient permissions |
+| 70003 | PERMISSION_EXPIRE | Login session expired |
 | 70004 | PERMISSION_TOKEN_EXPIRED | Token expired |
 | 70005 | PERMISSION_LIMIT | Access count limited |
 | 70006 | PERMISSION_TOKEN_INVALID | Invalid token |
@@ -177,7 +169,7 @@ When receiving `70004` (TOKEN_EXPIRED), the client should:
 
 ### Storage Degraded Mode
 
-`30014` (STORAGE_DEGRADED_WRITE) indicates the write succeeded but with fewer replicas than configured. The system will automatically sync when nodes recover. This is not a failure but a warning.
+`30016` (STORAGE_DEGRADED_WRITE) indicates the write succeeded but with fewer replicas than configured. The system will automatically sync when nodes recover. This is not a failure but a warning.
 
 ### Quota Enforcement
 
