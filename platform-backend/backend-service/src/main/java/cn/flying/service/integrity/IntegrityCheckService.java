@@ -20,6 +20,7 @@ import cn.flying.service.sse.SseEmitterManager;
 import cn.flying.service.sse.SseEvent;
 import cn.flying.service.sse.SseEventType;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,7 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Date;
@@ -88,6 +90,29 @@ public class IntegrityCheckService {
             List<File> files = querySuccessFilesPaged(tenantId);
             return checkFiles(files, tenantId);
         });
+    }
+
+    /**
+     * List integrity alerts with pagination and optional filters.
+     *
+     * @param tenantId  tenant ID
+     * @param status    alert status filter (optional)
+     * @param alertType alert type filter (optional)
+     * @param page      pagination parameters
+     * @return paginated alerts
+     */
+    public IPage<IntegrityAlert> listAlerts(Long tenantId, Integer status, String alertType,
+                                             Page<IntegrityAlert> page) {
+        LambdaQueryWrapper<IntegrityAlert> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(IntegrityAlert::getTenantId, tenantId);
+        if (status != null) {
+            wrapper.eq(IntegrityAlert::getStatus, status);
+        }
+        if (StringUtils.hasText(alertType)) {
+            wrapper.eq(IntegrityAlert::getAlertType, alertType);
+        }
+        wrapper.orderByDesc(IntegrityAlert::getCreateTime);
+        return integrityAlertMapper.selectPage(page, wrapper);
     }
 
     /**

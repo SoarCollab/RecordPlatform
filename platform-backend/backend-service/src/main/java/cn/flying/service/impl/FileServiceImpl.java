@@ -19,6 +19,7 @@ import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.mapper.FileSourceMapper;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileShareVO;
+import cn.flying.dao.vo.file.ShareInfoVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.request.CancelShareRequest;
@@ -945,6 +946,67 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             }
         }
         return fileShare;
+    }
+
+    @Override
+    public ShareInfoVO getShareInfo(String shareCode) {
+        FileShare fileShare = getShareByCode(shareCode);
+        if (fileShare == null) {
+            return null;
+        }
+
+        // 分享状态校验
+        if (fileShare.getStatus() != null) {
+            if (fileShare.getStatus() == FileShare.STATUS_CANCELLED) {
+                ShareInfoVO cancelled = new ShareInfoVO();
+                cancelled.setShareCode(shareCode);
+                cancelled.setStatus(FileShare.STATUS_CANCELLED);
+                return cancelled;
+            }
+            if (fileShare.getStatus() == FileShare.STATUS_EXPIRED) {
+                ShareInfoVO expired = new ShareInfoVO();
+                expired.setShareCode(shareCode);
+                expired.setStatus(FileShare.STATUS_EXPIRED);
+                return expired;
+            }
+        }
+
+        // 过期时间校验
+        if (fileShare.getExpireTime() != null && fileShare.getExpireTime().before(new Date())) {
+            ShareInfoVO expired = new ShareInfoVO();
+            expired.setShareCode(shareCode);
+            expired.setStatus(FileShare.STATUS_EXPIRED);
+            return expired;
+        }
+
+        // 解析文件哈希
+        List<String> fileHashes = parseFileHashes(fileShare.getFileHashes());
+        if (CommonUtils.isEmpty(fileHashes)) {
+            ShareInfoVO empty = new ShareInfoVO();
+            empty.setShareCode(shareCode);
+            empty.setStatus(ShareInfoVO.STATUS_EMPTY_FILES);
+            return empty;
+        }
+
+        // 查询文件列表
+        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                .eq(File::getUid, fileShare.getUserId())
+                .in(File::getFileHash, fileHashes);
+
+        List<File> files;
+        if (TenantContext.isSet()) {
+            files = baseMapper.selectList(wrapper);
+        } else {
+            Long shareTenantId = fileShare.getTenantId() != null ? fileShare.getTenantId() : 0L;
+            files = TenantContext.callWithTenant(shareTenantId, () -> baseMapper.selectList(wrapper));
+        }
+
+        ShareInfoVO info = new ShareInfoVO();
+        info.setShareCode(fileShare.getShareCode());
+        info.setShareType(fileShare.getShareType());
+        info.setExpireTime(fileShare.getExpireTime());
+        info.setFiles(files != null ? files : List.of());
+        return info;
     }
 
     @Override

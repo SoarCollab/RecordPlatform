@@ -1,16 +1,24 @@
 package cn.flying.service.impl;
 
+import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.CacheUtils;
 import cn.flying.common.util.Const;
+import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.SecurityUtils;
 import cn.flying.common.util.TenantKeyUtils;
 import cn.flying.dao.entity.SysPermission;
+import cn.flying.dao.entity.SysRolePermission;
 import cn.flying.dao.mapper.SysPermissionMapper;
 import cn.flying.dao.mapper.SysRolePermissionMapper;
 import cn.flying.service.PermissionService;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 
@@ -135,5 +143,121 @@ public class PermissionServiceImpl implements PermissionService {
             return new HashSet<>(cached);
         }
         return null;
+    }
+
+    // ==================== 权限 CRUD 操作 ====================
+
+    @Override
+    public List<SysPermission> getPermissionTree(Long tenantId) {
+        LambdaQueryWrapper<SysPermission> wrapper = new LambdaQueryWrapper<>();
+        wrapper.and(w -> w.eq(SysPermission::getTenantId, 0L).or().eq(SysPermission::getTenantId, tenantId));
+        wrapper.eq(SysPermission::getStatus, 1);
+        wrapper.orderByAsc(SysPermission::getModule, SysPermission::getCode);
+        return permissionMapper.selectList(wrapper);
+    }
+
+    @Override
+    public IPage<SysPermission> listPermissions(Long tenantId, String module, Page<SysPermission> page) {
+        LambdaQueryWrapper<SysPermission> wrapper = new LambdaQueryWrapper<>();
+        wrapper.and(w -> w.eq(SysPermission::getTenantId, 0L).or().eq(SysPermission::getTenantId, tenantId));
+        if (module != null && !module.isEmpty()) {
+            wrapper.eq(SysPermission::getModule, module);
+        }
+        wrapper.orderByAsc(SysPermission::getModule, SysPermission::getCode);
+        return permissionMapper.selectPage(page, wrapper);
+    }
+
+    @Override
+    public List<String> listModules(Long tenantId) {
+        LambdaQueryWrapper<SysPermission> wrapper = new LambdaQueryWrapper<>();
+        wrapper.and(w -> w.eq(SysPermission::getTenantId, 0L).or().eq(SysPermission::getTenantId, tenantId));
+        wrapper.select(SysPermission::getModule);
+        wrapper.groupBy(SysPermission::getModule);
+
+        List<SysPermission> permissions = permissionMapper.selectList(wrapper);
+        return permissions.stream()
+                .map(SysPermission::getModule)
+                .toList();
+    }
+
+    @Override
+    public SysPermission createPermission(SysPermission permission) {
+        permissionMapper.insert(permission);
+        return permission;
+    }
+
+    @Override
+    @Transactional
+    public SysPermission updatePermission(String externalId, String name, String description, Integer status, Long tenantId) {
+        Long permissionId = IdUtils.fromExternalId(externalId);
+        SysPermission permission = permissionMapper.selectById(permissionId);
+        if (permission == null) {
+            return null;
+        }
+
+        if (name != null) {
+            permission.setName(name);
+        }
+        if (description != null) {
+            permission.setDescription(description);
+        }
+        if (status != null) {
+            permission.setStatus(status);
+        }
+
+        permissionMapper.updateById(permission);
+        evictAllCache(tenantId);
+        return permission;
+    }
+
+    @Override
+    @Transactional
+    public void deletePermission(String externalId, Long tenantId) {
+        Long permissionId = IdUtils.fromExternalId(externalId);
+
+        LambdaQueryWrapper<SysRolePermission> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(SysRolePermission::getPermissionId, permissionId);
+        rolePermissionMapper.delete(wrapper);
+
+        permissionMapper.deleteById(permissionId);
+        evictAllCache(tenantId);
+    }
+
+    // ==================== 角色权限映射操作 ====================
+
+    @Override
+    @Transactional
+    public void assignPermissionToRole(String role, String permissionCode, Long tenantId) {
+        SysPermission permission = permissionMapper.selectByCode(permissionCode, tenantId);
+        if (permission == null) {
+            throw new GeneralException(ResultEnum.RESULT_DATA_NONE, "权限码不存在: " + permissionCode);
+        }
+
+        int count = rolePermissionMapper.countByRoleAndPermission(role, permissionCode, tenantId);
+        if (count > 0) {
+            throw new GeneralException(ResultEnum.DATA_ALREADY_EXISTED, "该角色已拥有此权限");
+        }
+
+        SysRolePermission mapping = new SysRolePermission()
+                .setRole(role)
+                .setPermissionId(permission.getId());
+        rolePermissionMapper.insert(mapping);
+        evictCache(role, tenantId);
+    }
+
+    @Override
+    @Transactional
+    public void revokePermissionFromRole(String role, String permissionCode, Long tenantId) {
+        SysPermission permission = permissionMapper.selectByCode(permissionCode, tenantId);
+        if (permission == null) {
+            throw new GeneralException(ResultEnum.RESULT_DATA_NONE, "权限码不存在: " + permissionCode);
+        }
+
+        LambdaQueryWrapper<SysRolePermission> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(SysRolePermission::getRole, role)
+                .eq(SysRolePermission::getPermissionId, permission.getId())
+                .eq(SysRolePermission::getTenantId, tenantId);
+        rolePermissionMapper.delete(wrapper);
+        evictCache(role, tenantId);
     }
 }

@@ -3,6 +3,7 @@ package cn.flying.service;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.ShareInfoVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.platformapi.response.TransactionVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -200,6 +201,17 @@ public interface FileService extends IService<File> {
      * @return 分享记录
      */
     FileShare getShareByCode(String shareCode);
+
+    /**
+     * 获取分享详情（包含分享文件列表）
+     * <p>
+     * 包含分享状态校验、过期检查、文件哈希解析和文件查询等完整业务逻辑。
+     * </p>
+     *
+     * @param shareCode 分享码
+     * @return 分享详情
+     */
+    ShareInfoVO getShareInfo(String shareCode);
 
     /**
      * 公开分享下载文件（无需认证）

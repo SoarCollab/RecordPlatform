@@ -3,36 +3,24 @@ package cn.flying.controller;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
-import cn.flying.dao.entity.SysPermission;
-import cn.flying.dao.entity.SysRolePermission;
-import cn.flying.dao.mapper.SysPermissionMapper;
-import cn.flying.dao.mapper.SysRolePermissionMapper;
 import cn.flying.service.PermissionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * RolePermissionController 单元测试。
  */
 @ExtendWith(MockitoExtension.class)
 class RolePermissionControllerTest {
-
-    @Mock
-    private SysPermissionMapper permissionMapper;
-
-    @Mock
-    private SysRolePermissionMapper rolePermissionMapper;
 
     @Mock
     private PermissionService permissionService;
@@ -44,7 +32,7 @@ class RolePermissionControllerTest {
      */
     @BeforeEach
     void setUp() {
-        controller = new RolePermissionController(permissionMapper, rolePermissionMapper, permissionService);
+        controller = new RolePermissionController(permissionService);
     }
 
     /**
@@ -55,21 +43,17 @@ class RolePermissionControllerTest {
         RolePermissionController.GrantPermissionVO vo = new RolePermissionController.GrantPermissionVO();
         vo.setPermissionCode("ticket:admin");
 
-        SysPermission permission = new SysPermission();
-        permission.setId(1L);
-
-        when(permissionMapper.selectByCode("ticket:admin", 0L)).thenReturn(permission);
-        when(rolePermissionMapper.countByRoleAndPermission("admin", "ticket:admin", 0L)).thenReturn(0);
+        doNothing().when(permissionService).assignPermissionToRole("admin", "ticket:admin", 0L);
 
         Result<String> grantResult = controller.grantRolePermission("admin", vo);
         assertEquals("授权成功", grantResult.getData());
-        verify(rolePermissionMapper).insert(any(SysRolePermission.class));
-        verify(permissionService).evictCache("admin", 0L);
+        verify(permissionService).assignPermissionToRole("admin", "ticket:admin", 0L);
 
-        when(permissionMapper.selectByCode("ticket:admin", 0L)).thenReturn(permission);
+        doNothing().when(permissionService).revokePermissionFromRole("admin", "ticket:admin", 0L);
+
         Result<String> revokeResult = controller.revokeRolePermission("admin", "ticket:admin");
         assertEquals("撤销成功", revokeResult.getData());
-        verify(rolePermissionMapper).delete(any());
+        verify(permissionService).revokePermissionFromRole("admin", "ticket:admin", 0L);
     }
 
     /**
@@ -80,10 +64,11 @@ class RolePermissionControllerTest {
         RolePermissionController.GrantPermissionVO vo = new RolePermissionController.GrantPermissionVO();
         vo.setPermissionCode("missing:perm");
 
-        when(permissionMapper.selectByCode("missing:perm", 0L)).thenReturn(null);
+        doThrow(new GeneralException(ResultEnum.RESULT_DATA_NONE, "权限码不存在: missing:perm"))
+                .when(permissionService).assignPermissionToRole("admin", "missing:perm", 0L);
 
         GeneralException ex = assertThrows(GeneralException.class, () -> controller.grantRolePermission("admin", vo));
         assertEquals(ResultEnum.RESULT_DATA_NONE, ex.getResultEnum());
-        verify(permissionMapper).selectByCode(eq("missing:perm"), eq(0L));
+        verify(permissionService).assignPermissionToRole("admin", "missing:perm", 0L);
     }
 }

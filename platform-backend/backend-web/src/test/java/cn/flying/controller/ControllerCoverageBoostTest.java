@@ -17,8 +17,6 @@ import cn.flying.dao.entity.FriendRequest;
 import cn.flying.dao.entity.Message;
 import cn.flying.dao.entity.SysPermission;
 import cn.flying.dao.entity.Ticket;
-import cn.flying.dao.mapper.SysPermissionMapper;
-import cn.flying.dao.mapper.SysRolePermissionMapper;
 import cn.flying.dao.vo.announcement.AnnouncementCreateVO;
 import cn.flying.dao.vo.announcement.AnnouncementVO;
 import cn.flying.dao.vo.auth.AccountVO;
@@ -128,10 +126,6 @@ class ControllerCoverageBoostTest {
     @Mock
     private FriendFileShareService friendFileShareService;
     @Mock
-    private SysPermissionMapper permissionMapper;
-    @Mock
-    private SysRolePermissionMapper rolePermissionMapper;
-    @Mock
     private PermissionService permissionService;
     @Mock
     private cn.flying.common.util.JwtUtils jwtUtils;
@@ -171,7 +165,7 @@ class ControllerCoverageBoostTest {
         uploadSessionController = new UploadSessionController(fileUploadService);
         fileController = new FileController(fileQueryService, fileService, shareAuditService);
         friendFileShareController = new FriendFileShareController(friendFileShareService);
-        permissionController = new PermissionController(permissionMapper, rolePermissionMapper, permissionService);
+        permissionController = new PermissionController(permissionService);
     }
 
     /**
@@ -513,6 +507,7 @@ class ControllerCoverageBoostTest {
         createVO.setModule("permission");
         createVO.setAction("create");
         createVO.setDescription("create desc");
+        when(permissionService.createPermission(any(SysPermission.class))).thenReturn(new SysPermission());
         assertEquals(ResultEnum.SUCCESS.getCode(), permissionController.createPermission(createVO).getCode());
 
         String permissionExternalId = IdUtils.toExternalId(30L);
@@ -521,13 +516,11 @@ class ControllerCoverageBoostTest {
         updateVO.setDescription("updated desc");
         updateVO.setStatus(0);
 
-        when(permissionMapper.selectById(30L)).thenReturn(permission);
+        when(permissionService.updatePermission(eq(permissionExternalId), eq("Updated Permission"), eq("updated desc"), eq(0), eq(1L))).thenReturn(permission);
         assertEquals(ResultEnum.SUCCESS.getCode(), permissionController.updatePermission(permissionExternalId, updateVO).getCode());
-        verify(permissionMapper).updateById(permission);
-        verify(permissionService).evictAllCache(1L);
 
-        when(permissionMapper.selectById(99L)).thenReturn(null);
         String missingPermissionId = IdUtils.toExternalId(99L);
+        when(permissionService.updatePermission(eq(missingPermissionId), eq("Updated Permission"), eq("updated desc"), eq(0), eq(1L))).thenReturn(null);
         assertEquals(ResultEnum.RESULT_DATA_NONE.getCode(), permissionController.updatePermission(missingPermissionId, updateVO).getCode());
 
         when(permissionService.getPermissionCodes("admin", 1L)).thenReturn(Set.of("system:admin"));
