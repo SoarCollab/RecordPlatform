@@ -3,11 +3,10 @@ package cn.flying.storage.core;
 import cn.flying.storage.config.NodeConfig;
 import cn.flying.storage.config.StorageProperties;
 import cn.flying.storage.event.NodeTopologyChangeEvent;
-import io.prometheus.client.Counter;
-import io.prometheus.client.Gauge;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PreDestroy;
 import jakarta.annotation.Resource;
-import lombok.Data;
 import org.slf4j.Logger;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Lazy;
@@ -25,6 +24,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -60,26 +60,13 @@ public class S3Monitor {
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
-    // 统计节点操作成功和失败的计数器
-    private final Counter nodeOperationCounter = Counter.build()
-            .name("s3_node_operations_total")
-            .help("Total operations attempted on S3 nodes")
-            .labelNames("node", "operation", "result")
-            .register();
+    private final MeterRegistry meterRegistry;
 
-    // Prometheus Gauge，用于公开节点在线状态
-    private final Gauge nodeOnlineStatus = Gauge.build()
-            .name("s3_node_online_status")
-            .help("Status of S3 nodes (1=online, 0=offline).")
-            .labelNames("node")
-            .register();
+    // 节点在线状态 gauge 值缓存 (node -> AtomicInteger)
+    private final Map<String, AtomicInteger> nodeOnlineStatusValues = new ConcurrentHashMap<>();
 
-    // 节点负载评分 Gauge
-    private final Gauge nodeLoadScoreGauge = Gauge.build()
-            .name("s3_node_load_score")
-            .help("Load score of S3 nodes (lower is better)")
-            .labelNames("node")
-            .register();
+    // 节点负载评分 gauge 值缓存 (node -> AtomicInteger, 存储 score * 10000 以保留精度)
+    private final Map<String, AtomicInteger> nodeLoadScoreValues = new ConcurrentHashMap<>();
 
     @Resource
     private S3ClientManager clientManager;
@@ -91,10 +78,14 @@ public class S3Monitor {
     @Resource
     private StorageProperties storageProperties;
 
+    public S3Monitor(MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
+    }
+
     /**
      * 节点指标数据
      */
-    @Data
+    @lombok.Data
     public static class NodeMetrics {
         private Double diskUsagePercent;      // 磁盘使用率 (0-100)
         private Long diskUsedBytes;           // 已用磁盘容量（字节）
@@ -110,6 +101,48 @@ public class S3Monitor {
     }
 
     /**
+     * 获取或创建节点操作计数器
+     */
+    private Counter getNodeOperationCounter(String nodeName, String operation, String result) {
+        return Counter.builder("s3_node_operations_total")
+                .description("Total operations attempted on S3 nodes")
+                .tag("node", nodeName)
+                .tag("operation", operation)
+                .tag("result", result)
+                .register(meterRegistry);
+    }
+
+    /**
+     * 获取或注册节点在线状态 gauge 的底层 AtomicInteger
+     */
+    private AtomicInteger getOrCreateOnlineStatusValue(String nodeName) {
+        return nodeOnlineStatusValues.computeIfAbsent(nodeName, name -> {
+            AtomicInteger value = new AtomicInteger(0);
+            io.micrometer.core.instrument.Gauge.builder("s3_node_online_status", value, AtomicInteger::get)
+                    .description("Status of S3 nodes (1=online, 0=offline).")
+                    .tag("node", name)
+                    .register(meterRegistry);
+            return value;
+        });
+    }
+
+    /**
+     * 获取或注册节点负载评分 gauge 的底层 AtomicInteger
+     * 使用 10000 倍放大存储以保留小数精度
+     */
+    private AtomicInteger getOrCreateLoadScoreValue(String nodeName) {
+        return nodeLoadScoreValues.computeIfAbsent(nodeName, name -> {
+            AtomicInteger value = new AtomicInteger(0);
+            io.micrometer.core.instrument.Gauge.builder("s3_node_load_score", value,
+                            v -> v.get() / 10000.0)
+                    .description("Load score of S3 nodes (lower is better)")
+                    .tag("node", name)
+                    .register(meterRegistry);
+            return value;
+        });
+    }
+
+    /**
      * 检查节点健康状况
      */
     private void checkNodeHealth(String nodeName, NodeConfig nodeConfig, S3Client client) {
@@ -121,20 +154,20 @@ public class S3Monitor {
         try {
             client.listBuckets();
             markNodeOnline(nodeName);
-            nodeOperationCounter.labels(nodeName, "health_check", "success").inc();
+            getNodeOperationCounter(nodeName, "health_check", "success").increment();
         } catch (S3Exception e) {
             markNodeOffline(nodeName, "S3 error: " + e.awsErrorDetails().errorCode());
-            nodeOperationCounter.labels(nodeName, "health_check", "failure").inc();
+            getNodeOperationCounter(nodeName, "health_check", "failure").increment();
         } catch (Exception e) {
             markNodeOffline(nodeName, "Connection error: " + e.getMessage());
-            nodeOperationCounter.labels(nodeName, "health_check", "failure").inc();
+            getNodeOperationCounter(nodeName, "health_check", "failure").increment();
         }
     }
 
     private void markNodeOnline(String nodeName) {
         knownNodes.add(nodeName);
         boolean newlyOnline = onlineNodes.add(nodeName);
-        nodeOnlineStatus.labels(nodeName).set(1); // 更新 Prometheus 指标
+        getOrCreateOnlineStatusValue(nodeName).set(1);
         if (newlyOnline) {
             log.info("S3 node '{}' is now ONLINE.", nodeName);
             // 发布节点上线事件
@@ -156,8 +189,8 @@ public class S3Monitor {
     private void markNodeOffline(String nodeName, String reason) {
         knownNodes.add(nodeName);
         boolean wasOnline = onlineNodes.remove(nodeName);
-        nodeOnlineStatus.labels(nodeName).set(0); // 更新 Prometheus 指标
-        nodeLoadScoreGauge.remove(nodeName);
+        getOrCreateOnlineStatusValue(nodeName).set(0);
+        removeLoadScoreGauge(nodeName);
         if (wasOnline) {
             log.warn("S3 节点 '{}' 现在处于离线状态，原因：{}", nodeName, reason);
             // 发布节点离线事件
@@ -170,6 +203,35 @@ public class S3Monitor {
         } else {
             log.debug("S3 节点 '{}' 仍处于离线状态，原因：{}", nodeName, reason);
         }
+    }
+
+    /**
+     * 移除节点的负载评分 gauge 值（设置为 0 并从缓存移除）
+     */
+    private void removeLoadScoreGauge(String nodeName) {
+        AtomicInteger value = nodeLoadScoreValues.remove(nodeName);
+        if (value != null) {
+            value.set(0);
+        }
+        // 从 MeterRegistry 中移除该 gauge
+        meterRegistry.find("s3_node_load_score")
+                .tags("node", nodeName)
+                .meters()
+                .forEach(meterRegistry::remove);
+    }
+
+    /**
+     * 移除节点的在线状态 gauge 值
+     */
+    private void removeOnlineStatusGauge(String nodeName) {
+        AtomicInteger value = nodeOnlineStatusValues.remove(nodeName);
+        if (value != null) {
+            value.set(0);
+        }
+        meterRegistry.find("s3_node_online_status")
+                .tags("node", nodeName)
+                .meters()
+                .forEach(meterRegistry::remove);
     }
 
     /**
@@ -187,8 +249,8 @@ public class S3Monitor {
             // 避免配置恢复后同名节点短暂继承退役节点的容量数据。
             nodeMetricsCache.clear();
             knownNodeSnapshot.forEach(node -> {
-                nodeOnlineStatus.labels(node).set(0);
-                nodeLoadScoreGauge.remove(node);
+                getOrCreateOnlineStatusValue(node).set(0);
+                removeLoadScoreGauge(node);
             });
             return;
         }
@@ -242,8 +304,8 @@ public class S3Monitor {
         onlineNodes.remove(nodeName);
         knownNodes.remove(nodeName);
         nodeMetricsCache.remove(nodeName);
-        nodeOnlineStatus.remove(nodeName);
-        nodeLoadScoreGauge.remove(nodeName);
+        removeOnlineStatusGauge(nodeName);
+        removeLoadScoreGauge(nodeName);
     }
 
     /**
@@ -289,13 +351,13 @@ public class S3Monitor {
     }
 
     /**
-     * 计算并更新节点负载分数到 Prometheus 指标
+     * 计算并更新节点负载分数到 Micrometer 指标
      * 仅在定时任务中调用，避免读取方法的副作用
      */
     private void updateNodeLoadScoreGauge(String nodeName) {
         double loadScore = getNodeLoadScore(nodeName);
         if (loadScore != Double.MAX_VALUE) {
-            nodeLoadScoreGauge.labels(nodeName).set(loadScore);
+            getOrCreateLoadScoreValue(nodeName).set((int) (loadScore * 10000));
         }
     }
 
@@ -313,7 +375,7 @@ public class S3Monitor {
                 log.debug("已更新节点 {} 的指标: disk={}%, inflight={}, waiting={}",
                         nodeName, metrics.getDiskUsagePercent(),
                         metrics.getApiInflightRequests(), metrics.getApiWaitingRequests());
-                // 在定时任务中更新 Prometheus 指标
+                // 在定时任务中更新 Micrometer 指标
                 updateNodeLoadScoreGauge(nodeName);
             }
         } catch (Exception e) {

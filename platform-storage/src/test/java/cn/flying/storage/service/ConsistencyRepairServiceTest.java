@@ -1,6 +1,5 @@
 package cn.flying.storage.service;
 
-import cn.flying.storage.config.StorageProperties;
 import cn.flying.storage.core.FaultDomainManager;
 import cn.flying.storage.core.S3ClientManager;
 import cn.flying.storage.core.S3Monitor;
@@ -33,9 +32,6 @@ class ConsistencyRepairServiceTest {
 
     @Mock
     private S3Monitor s3Monitor;
-
-    @Mock
-    private StorageProperties storageProperties;
 
     @Mock
     private FaultDomainManager faultDomainManager;
@@ -155,8 +151,8 @@ class ConsistencyRepairServiceTest {
         }
 
         @Test
-        @DisplayName("Should check consistency between two domains")
-        void shouldCheckConsistencyBetweenTwoDomains() throws Exception {
+        @DisplayName("Should check consistency between two domains with matching objects")
+        void shouldCheckConsistencyBetweenTwoDomains() {
             when(faultDomainManager.getActiveDomains()).thenReturn(Arrays.asList("domain-A", "domain-B"));
             when(faultDomainManager.getNodesInDomain("domain-A")).thenReturn(Set.of("node-a1"));
             when(faultDomainManager.getNodesInDomain("domain-B")).thenReturn(Set.of("node-b1"));
@@ -170,6 +166,7 @@ class ConsistencyRepairServiceTest {
             mockBucketExists(clientA, "node-a1");
             mockBucketExists(clientB, "node-b1");
 
+            // Both domains have the same objects
             ListObjectsV2Response responseA = ListObjectsV2Response.builder()
                     .contents(Arrays.asList(
                             S3Object.builder().key("file1.txt").build(),
@@ -189,6 +186,12 @@ class ConsistencyRepairServiceTest {
             when(clientA.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(responseA);
             when(clientB.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(responseB);
 
+            // headObject succeeds for objects that exist in the target domain
+            when(clientB.headObject(any(HeadObjectRequest.class)))
+                    .thenReturn(HeadObjectResponse.builder().build());
+            when(clientA.headObject(any(HeadObjectRequest.class)))
+                    .thenReturn(HeadObjectResponse.builder().build());
+
             ConsistencyRepairService.RepairStatistics stats = service.repairAllDomains();
 
             assertThat(stats.domainsChecked).isEqualTo(2);
@@ -197,7 +200,7 @@ class ConsistencyRepairServiceTest {
 
         @Test
         @DisplayName("Should detect and repair missing objects")
-        void shouldDetectAndRepairMissingObjects() throws Exception {
+        void shouldDetectAndRepairMissingObjects() {
             when(faultDomainManager.getActiveDomains()).thenReturn(Arrays.asList("domain-A", "domain-B"));
             when(faultDomainManager.getNodesInDomain("domain-A")).thenReturn(Set.of("node-a1"));
             when(faultDomainManager.getNodesInDomain("domain-B")).thenReturn(Set.of("node-b1"));
@@ -211,6 +214,7 @@ class ConsistencyRepairServiceTest {
             mockBucketExists(clientA, "node-a1");
             mockBucketExists(clientB, "node-b1");
 
+            // Domain A has file1 and file2
             ListObjectsV2Response responseA = ListObjectsV2Response.builder()
                     .contents(Arrays.asList(
                             S3Object.builder().key("file1.txt").build(),
@@ -219,6 +223,7 @@ class ConsistencyRepairServiceTest {
                     .isTruncated(false)
                     .build();
 
+            // Domain B has only file1
             ListObjectsV2Response responseB = ListObjectsV2Response.builder()
                     .contents(Arrays.asList(
                             S3Object.builder().key("file1.txt").build()
@@ -229,13 +234,28 @@ class ConsistencyRepairServiceTest {
             when(clientA.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(responseA);
             when(clientB.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(responseB);
 
-            when(faultDomainManager.getHealthyNodesInDomainList("domain-B")).thenReturn(Arrays.asList("node-b1"));
+            // When checking if objects exist in B: file1 exists, file2 does not
+            when(clientB.headObject(argThat((HeadObjectRequest req) ->
+                    req != null && "file1.txt".equals(req.key()))))
+                    .thenReturn(HeadObjectResponse.builder().build());
+            when(clientB.headObject(argThat((HeadObjectRequest req) ->
+                    req != null && "file2.txt".equals(req.key()))))
+                    .thenThrow(NoSuchKeyException.builder().message("Not found").build());
 
+            // When checking if objects exist in A: file1 exists
+            when(clientA.headObject(argThat((HeadObjectRequest req) ->
+                    req != null && "file1.txt".equals(req.key()) && "node-a1".equals(req.bucket()))))
+                    .thenReturn(HeadObjectResponse.builder().build());
+
+            // Mock the copy operation: headObject for source metadata
             HeadObjectResponse headResponse = HeadObjectResponse.builder()
                     .contentLength(100L)
                     .contentType("text/plain")
                     .build();
-            when(clientA.headObject(any(HeadObjectRequest.class))).thenReturn(headResponse);
+            // Use a broader mock for the copy source head request
+            when(clientA.headObject(argThat((HeadObjectRequest req) ->
+                    req != null && "file2.txt".equals(req.key()) && "node-a1".equals(req.bucket()))))
+                    .thenReturn(headResponse);
 
             ResponseInputStream<GetObjectResponse> mockStream = new ResponseInputStream<>(
                     GetObjectResponse.builder().build(),
@@ -253,7 +273,7 @@ class ConsistencyRepairServiceTest {
 
         @Test
         @DisplayName("Should skip directory entries")
-        void shouldSkipDirectoryEntries() throws Exception {
+        void shouldSkipDirectoryEntries() {
             when(faultDomainManager.getActiveDomains()).thenReturn(Arrays.asList("domain-A", "domain-B"));
             when(faultDomainManager.getNodesInDomain("domain-A")).thenReturn(Set.of("node-a1"));
             when(faultDomainManager.getNodesInDomain("domain-B")).thenReturn(Set.of("node-b1"));
@@ -267,6 +287,7 @@ class ConsistencyRepairServiceTest {
             mockBucketExists(clientA, "node-a1");
             mockBucketExists(clientB, "node-b1");
 
+            // Domain A has a directory entry and a file
             ListObjectsV2Response responseA = ListObjectsV2Response.builder()
                     .contents(Arrays.asList(
                             S3Object.builder().key("folder/").build(),
@@ -285,6 +306,12 @@ class ConsistencyRepairServiceTest {
             when(clientA.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(responseA);
             when(clientB.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(responseB);
 
+            // file1 exists in both domains
+            when(clientB.headObject(any(HeadObjectRequest.class)))
+                    .thenReturn(HeadObjectResponse.builder().build());
+            when(clientA.headObject(any(HeadObjectRequest.class)))
+                    .thenReturn(HeadObjectResponse.builder().build());
+
             ConsistencyRepairService.RepairStatistics stats = service.repairAllDomains();
 
             assertThat(stats.domainsChecked).isEqualTo(2);
@@ -292,7 +319,7 @@ class ConsistencyRepairServiceTest {
 
         @Test
         @DisplayName("Should handle pagination when listing objects")
-        void shouldHandlePaginationWhenListingObjects() throws Exception {
+        void shouldHandlePaginationWhenListingObjects() {
             when(faultDomainManager.getActiveDomains()).thenReturn(Arrays.asList("domain-A", "domain-B"));
             when(faultDomainManager.getNodesInDomain("domain-A")).thenReturn(Set.of("node-a1"));
             when(faultDomainManager.getNodesInDomain("domain-B")).thenReturn(Set.of("node-b1"));
@@ -306,6 +333,7 @@ class ConsistencyRepairServiceTest {
             mockBucketExists(clientA, "node-a1");
             mockBucketExists(clientB, "node-b1");
 
+            // Domain A: paginated response
             ListObjectsV2Response responsePage1 = ListObjectsV2Response.builder()
                     .contents(Arrays.asList(S3Object.builder().key("file1.txt").build()))
                     .isTruncated(true)
@@ -321,6 +349,7 @@ class ConsistencyRepairServiceTest {
                     .thenReturn(responsePage1)
                     .thenReturn(responsePage2);
 
+            // Domain B has both files
             ListObjectsV2Response responseB = ListObjectsV2Response.builder()
                     .contents(Arrays.asList(
                             S3Object.builder().key("file1.txt").build(),
@@ -329,6 +358,12 @@ class ConsistencyRepairServiceTest {
                     .isTruncated(false)
                     .build();
             when(clientB.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(responseB);
+
+            // All objects exist in the other domain
+            when(clientB.headObject(any(HeadObjectRequest.class)))
+                    .thenReturn(HeadObjectResponse.builder().build());
+            when(clientA.headObject(any(HeadObjectRequest.class)))
+                    .thenReturn(HeadObjectResponse.builder().build());
 
             ConsistencyRepairService.RepairStatistics stats = service.repairAllDomains();
 
@@ -368,6 +403,12 @@ class ConsistencyRepairServiceTest {
 
             when(clientA.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(responseA);
             when(clientB.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(responseB);
+
+            // file.txt exists in both domains
+            when(clientB.headObject(any(HeadObjectRequest.class)))
+                    .thenReturn(HeadObjectResponse.builder().build());
+            when(clientA.headObject(any(HeadObjectRequest.class)))
+                    .thenReturn(HeadObjectResponse.builder().build());
 
             ConsistencyRepairService.RepairStatistics stats = service.repairAllDomains();
 
@@ -531,7 +572,7 @@ class ConsistencyRepairServiceTest {
     }
 
     private void mockBucketExists(S3Client client, String bucketName) {
-        when(client.headBucket(argThat((HeadBucketRequest req) -> 
+        when(client.headBucket(argThat((HeadBucketRequest req) ->
                 req != null && bucketName.equals(req.bucket()))))
                 .thenReturn(HeadBucketResponse.builder().build());
     }
