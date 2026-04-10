@@ -2,6 +2,7 @@ package cn.flying.service.impl;
 
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.tenant.TenantContext;
+import cn.flying.common.util.IdUtils;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.QuotaPolicyMapper;
 import cn.flying.dao.mapper.QuotaUsageSnapshotMapper;
@@ -10,6 +11,7 @@ import cn.flying.dao.entity.QuotaUsageSnapshot;
 import cn.flying.dao.vo.file.QuotaStatusVO;
 import cn.flying.dao.vo.file.QuotaUserUsageVO;
 import cn.flying.service.monitor.QuotaMetrics;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -61,11 +63,15 @@ class QuotaServiceImplTest {
     @InjectMocks
     private QuotaServiceImpl quotaService;
 
+    private MockedStatic<IdUtils> idUtilsMock;
+
     /**
      * 初始化默认 mock 与配置字段。
      */
     @BeforeEach
     void setUp() {
+        idUtilsMock = mockStatic(IdUtils.class);
+        idUtilsMock.when(IdUtils::nextEntityId).thenReturn(1L);
         ReflectionTestUtils.setField(quotaService, "defaultUserMaxStorageBytes", 1000L);
         ReflectionTestUtils.setField(quotaService, "defaultUserMaxFileCount", 10L);
         ReflectionTestUtils.setField(quotaService, "defaultTenantMaxStorageBytes", 5000L);
@@ -84,8 +90,15 @@ class QuotaServiceImplTest {
         when(fileMapper.countQuotaByTenantId(anyLong())).thenReturn(10L);
         when(fileMapper.sumQuotaStorageByUserId(anyLong(), anyLong())).thenReturn(200L);
         when(fileMapper.sumQuotaStorageByTenantId(anyLong())).thenReturn(1200L);
-        when(quotaUsageSnapshotMapper.upsertSnapshot(anyLong(), anyLong(), anyLong(), anyLong(), org.mockito.ArgumentMatchers.anyString()))
+        when(quotaUsageSnapshotMapper.upsertSnapshot(anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), org.mockito.ArgumentMatchers.anyString()))
                 .thenReturn(1);
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (idUtilsMock != null) {
+            idUtilsMock.close();
+        }
     }
 
     /**
@@ -212,10 +225,10 @@ class QuotaServiceImplTest {
 
         quotaService.reconcileUsageSnapshots();
 
-        verify(quotaUsageSnapshotMapper).upsertSnapshot(1L, 0L, 1200L, 10L, "RECON");
+        verify(quotaUsageSnapshotMapper).upsertSnapshot(anyLong(), eq(1L), eq(0L), eq(1200L), eq(10L), eq("RECON"));
         verify(quotaUsageSnapshotMapper).resetMissingUserSnapshots(eq(1L), eq(List.of(2L, 3L)), eq("RECON"));
-        verify(quotaUsageSnapshotMapper).upsertSnapshot(eq(1L), eq(2L), eq(300L), eq(2L), eq("RECON"));
-        verify(quotaUsageSnapshotMapper).upsertSnapshot(eq(1L), eq(3L), eq(500L), eq(3L), eq("RECON"));
+        verify(quotaUsageSnapshotMapper).upsertSnapshot(anyLong(), eq(1L), eq(2L), eq(300L), eq(2L), eq("RECON"));
+        verify(quotaUsageSnapshotMapper).upsertSnapshot(anyLong(), eq(1L), eq(3L), eq(500L), eq(3L), eq("RECON"));
     }
 
     /**

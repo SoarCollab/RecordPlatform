@@ -2,6 +2,7 @@ package cn.flying.service.impl;
 
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.util.IdUtils;
 import cn.flying.dao.entity.QuotaRolloutAudit;
 import cn.flying.dao.mapper.QuotaRolloutAuditMapper;
 import cn.flying.dao.vo.file.QuotaRolloutAuditUpsertVO;
@@ -42,6 +43,7 @@ public class QuotaRolloutAuditServiceImpl implements QuotaRolloutAuditService {
         validateRequest(request);
 
         QuotaRolloutAudit audit = new QuotaRolloutAudit()
+                .setId(IdUtils.nextEntityId())
                 .setBatchId(request.batchId().trim())
                 .setTenantId(request.tenantId())
                 .setObservationStartTime(toDate(request.observationStartTime()))

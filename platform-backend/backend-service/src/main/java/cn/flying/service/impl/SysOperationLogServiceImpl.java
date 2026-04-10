@@ -5,7 +5,6 @@ import cn.flying.dao.mapper.SysOperationLogMapper;
 import cn.flying.service.SysOperationLogService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -16,7 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class SysOperationLogServiceImpl extends ServiceImpl<SysOperationLogMapper, SysOperationLog> implements SysOperationLogService {
 
     @Override
-    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class)
     public void saveOperationLog(SysOperationLog operationLog) {
         baseMapper.insert(operationLog);
     }

@@ -3,6 +3,7 @@ package cn.flying.service.impl;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.tenant.TenantContext;
+import cn.flying.common.util.IdUtils;
 import cn.flying.dao.entity.QuotaPolicy;
 import cn.flying.dao.entity.QuotaUsageSnapshot;
 import cn.flying.dao.mapper.FileMapper;
@@ -384,7 +385,7 @@ public class QuotaServiceImpl implements QuotaService {
      * @param source 快照来源
      */
     private void upsertSnapshot(Long tenantId, Long userId, long usedStorageBytes, long usedFileCount, String source) {
-        quotaUsageSnapshotMapper.upsertSnapshot(tenantId, userId, usedStorageBytes, usedFileCount, source);
+        quotaUsageSnapshotMapper.upsertSnapshot(IdUtils.nextEntityId(), tenantId, userId, usedStorageBytes, usedFileCount, source);
     }
 
     /**
