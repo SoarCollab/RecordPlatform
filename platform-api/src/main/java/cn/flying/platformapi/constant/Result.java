@@ -28,9 +28,6 @@ public class Result<T> implements Serializable {
     // 提示信息
     private String message;
 
-    //交易返回值
-    private String transactionHash;
-
     // 结果数据
     private T data;
 
