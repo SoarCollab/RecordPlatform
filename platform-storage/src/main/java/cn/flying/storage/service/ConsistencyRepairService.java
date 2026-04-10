@@ -1,9 +1,9 @@
 package cn.flying.storage.service;
 
-import cn.flying.storage.config.StorageProperties;
 import cn.flying.storage.core.FaultDomainManager;
 import cn.flying.storage.core.S3ClientManager;
 import cn.flying.storage.core.S3Monitor;
+import cn.flying.storage.core.S3ObjectIterator;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
@@ -11,7 +11,6 @@ import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.util.CollectionUtils;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -52,9 +51,6 @@ public class ConsistencyRepairService {
 
     @Resource
     private S3Monitor s3Monitor;
-
-    @Resource
-    private StorageProperties storageProperties;
 
     @Resource
     private FaultDomainManager faultDomainManager;
@@ -119,7 +115,9 @@ public class ConsistencyRepairService {
 
     /**
      * 修复所有故障域的副本一致性。
-     * 遍历所有活跃域对，确保每个对象在所有域都有副本。
+     * 以参考域为基准逐页遍历对象，检查其他域是否存在该对象，缺失则修复。
+     * 然后反向检查其他域是否有参考域不存在的对象。
+     * 避免将全量对象键加载到内存中，使用分页迭代。
      *
      * @return 修复统计信息
      */
@@ -134,90 +132,54 @@ public class ConsistencyRepairService {
             return stats;
         }
 
-        // 收集每个域的对象信息
-        Map<String, Map<String, Set<String>>> domainNodeObjects = new HashMap<>();
-        Map<String, Set<String>> domainAllObjects = new HashMap<>();
-        List<String> domainsWithData = new ArrayList<>();
+        // 收集每个域的健康节点和可用客户端
+        Map<String, List<NodeClientPair>> domainHealthyNodes = new LinkedHashMap<>();
 
         for (String domainName : activeDomains) {
             Set<String> domainNodes = faultDomainManager.getNodesInDomain(domainName);
-            List<String> healthyNodes = domainNodes.stream()
-                    .filter(s3Monitor::isNodeOnline)
-                    .toList();
+            List<NodeClientPair> healthyPairs = new ArrayList<>();
 
-            if (healthyNodes.isEmpty()) {
-                log.warn("域 {} 没有健康节点，跳过该域", domainName);
-                continue;
-            }
-
-            Map<String, Set<String>> nodeObjects = new HashMap<>();
-            Set<String> allObjectsInDomain = new HashSet<>();
-
-            for (String node : healthyNodes) {
+            for (String node : domainNodes) {
+                if (!s3Monitor.isNodeOnline(node)) {
+                    continue;
+                }
                 S3Client client = clientManager.getClient(node);
                 if (client != null) {
-                    try {
-                        Set<String> objects = listAllObjects(client, node);
-                        nodeObjects.put(node, objects);
-                        allObjectsInDomain.addAll(objects);
-                    } catch (Exception e) {
-                        log.error("列出节点 {} 对象时发生错误: {}", node, e.getMessage());
-                    }
+                    healthyPairs.add(new NodeClientPair(node, client));
                 }
             }
 
-            if (!allObjectsInDomain.isEmpty()) {
-                domainNodeObjects.put(domainName, nodeObjects);
-                domainAllObjects.put(domainName, allObjectsInDomain);
-                domainsWithData.add(domainName);
+            if (!healthyPairs.isEmpty()) {
+                domainHealthyNodes.put(domainName, healthyPairs);
+            } else {
+                log.warn("域 {} 没有健康节点，跳过该域", domainName);
             }
         }
 
-        stats.domainsChecked = domainsWithData.size();
+        List<String> domainsWithNodes = new ArrayList<>(domainHealthyNodes.keySet());
+        stats.domainsChecked = domainsWithNodes.size();
 
-        if (domainsWithData.size() < 2) {
-            log.info("有数据的域不足 2 个，跳过跨域修复");
+        if (domainsWithNodes.size() < 2) {
+            log.info("有健康节点的域不足 2 个，跳过跨域修复");
             return stats;
         }
 
-        log.info("开始跨域副本一致性检查：有数据的域={}", domainsWithData);
+        log.info("开始跨域副本一致性检查：有健康节点的域={}", domainsWithNodes);
 
-        // 两两比较所有域
-        for (int i = 0; i < domainsWithData.size(); i++) {
-            for (int j = i + 1; j < domainsWithData.size(); j++) {
-                String domainA = domainsWithData.get(i);
-                String domainB = domainsWithData.get(j);
+        // 两两比较所有域，使用分页遍历
+        for (int i = 0; i < domainsWithNodes.size(); i++) {
+            for (int j = i + 1; j < domainsWithNodes.size(); j++) {
+                String domainA = domainsWithNodes.get(i);
+                String domainB = domainsWithNodes.get(j);
 
-                Set<String> objectsInA = domainAllObjects.get(domainA);
-                Set<String> objectsInB = domainAllObjects.get(domainB);
+                List<NodeClientPair> nodesA = domainHealthyNodes.get(domainA);
+                List<NodeClientPair> nodesB = domainHealthyNodes.get(domainB);
 
-                // 找出仅在 A 域存在的对象
-                Set<String> onlyInA = new HashSet<>(objectsInA);
-                onlyInA.removeAll(objectsInB);
+                // A -> B: 遍历 A 域的对象，检查 B 域是否存在
+                repairDomainPair(nodesA, nodesB, domainA, domainB, stats);
 
-                // 找出仅在 B 域存在的对象
-                Set<String> onlyInB = new HashSet<>(objectsInB);
-                onlyInB.removeAll(objectsInA);
-
-                stats.filesChecked += objectsInA.size() + objectsInB.size();
-
-                if (onlyInA.isEmpty() && onlyInB.isEmpty()) {
-                    log.debug("域 {} 和域 {} 数据一致", domainA, domainB);
-                    continue;
-                }
-
-                log.info("发现跨域不一致 ({} <-> {}): 仅在{}存在 {} 个，仅在{}存在 {} 个",
-                        domainA, domainB, domainA, onlyInA.size(), domainB, onlyInB.size());
-
-                // 从 A 域复制到 B 域
-                if (!onlyInA.isEmpty()) {
-                    repairMissingObjects(onlyInA, domainNodeObjects.get(domainA), domainB, stats);
-                }
-
-                // 从 B 域复制到 A 域
-                if (!onlyInB.isEmpty()) {
-                    repairMissingObjects(onlyInB, domainNodeObjects.get(domainB), domainA, stats);
-                }
+                // B -> A: 遍历 B 域的对象，检查 A 域是否存在
+                repairDomainPair(nodesB, nodesA, domainB, domainA, stats);
             }
         }
 
@@ -225,95 +187,75 @@ public class ConsistencyRepairService {
     }
 
     /**
-     * 修复缺失的对象
+     * 以源域为基准，逐页遍历对象并检查目标域是否存在。
+     * 缺失的对象从源域复制到目标域。
      *
-     * @param missingObjects 缺失的对象集合
-     * @param sourceNodeObjects 源域节点对象映射
-     * @param targetDomain 目标域
+     * @param sourceNodes 源域的健康节点列表
+     * @param targetNodes 目标域的健康节点列表
+     * @param sourceDomain 源域名称
+     * @param targetDomain 目标域名称
      * @param stats 统计信息
      */
-    private void repairMissingObjects(Set<String> missingObjects,
-                                      Map<String, Set<String>> sourceNodeObjects,
-                                      String targetDomain,
-                                      RepairStatistics stats) {
-        // 获取目标域的健康节点
-        List<String> targetNodes = faultDomainManager.getHealthyNodesInDomainList(targetDomain);
-        if (targetNodes.isEmpty()) {
-            log.error("目标域 {} 没有健康节点，无法修复", targetDomain);
-            stats.failureCount += missingObjects.size();
-            return;
-        }
+    private void repairDomainPair(List<NodeClientPair> sourceNodes,
+                                  List<NodeClientPair> targetNodes,
+                                  String sourceDomain,
+                                  String targetDomain,
+                                  RepairStatistics stats) {
+        // 为目标域建立快速查找：收集第一个可用目标节点用于 headObject 检查
+        NodeClientPair targetPrimary = targetNodes.getFirst();
 
-        String targetNode = targetNodes.getFirst();
-
-        for (String objectName : missingObjects) {
-            String sourceNode = findNodeContainingObject(sourceNodeObjects, objectName);
-            if (sourceNode != null) {
-                boolean success = copyObjectBetweenNodes(objectName, sourceNode, targetNode);
-                if (success) {
-                    stats.filesRepaired++;
-                    log.debug("已将对象 {} 从 {} 复制到 {} (域 {})",
-                            objectName, sourceNode, targetNode, targetDomain);
-                } else {
-                    stats.failureCount++;
+        for (NodeClientPair source : sourceNodes) {
+            try {
+                if (!S3ObjectIterator.bucketExists(source.client, source.nodeName)) {
+                    log.debug("节点 {} 的桶不存在，跳过", source.nodeName);
+                    continue;
                 }
-            } else {
-                log.warn("无法找到对象 {} 的源节点", objectName);
-                stats.failureCount++;
+
+                S3ObjectIterator.forEachPage(source.client, source.nodeName, page -> {
+                    for (S3Object s3Object : page) {
+                        String key = s3Object.key();
+                        stats.filesChecked++;
+
+                        // 检查目标域是否存在该对象
+                        boolean existsInTarget = objectExistsInAnyNode(key, targetNodes);
+                        if (!existsInTarget) {
+                            // 从源节点复制到目标节点
+                            boolean success = copyObjectBetweenNodes(key, source.nodeName, targetPrimary.nodeName);
+                            if (success) {
+                                stats.filesRepaired++;
+                                log.debug("已将对象 {} 从 {} ({}) 复制到 {} ({})",
+                                        key, source.nodeName, sourceDomain,
+                                        targetPrimary.nodeName, targetDomain);
+                            } else {
+                                stats.failureCount++;
+                            }
+                        }
+                    }
+                });
+            } catch (Exception e) {
+                log.error("遍历节点 {} 对象时发生错误: {}", source.nodeName, e.getMessage());
             }
         }
     }
 
     /**
-     * 查找包含指定对象的节点
+     * 检查对象是否存在于任意目标节点
      */
-    private String findNodeContainingObject(Map<String, Set<String>> nodeObjects, String objectName) {
-        for (Map.Entry<String, Set<String>> entry : nodeObjects.entrySet()) {
-            if (entry.getValue().contains(objectName)) {
-                return entry.getKey();
+    private boolean objectExistsInAnyNode(String key, List<NodeClientPair> nodes) {
+        for (NodeClientPair node : nodes) {
+            try {
+                node.client.headObject(HeadObjectRequest.builder()
+                        .bucket(node.nodeName)
+                        .key(key)
+                        .build());
+                return true;
+            } catch (NoSuchKeyException | NoSuchBucketException e) {
+                // 该节点不存在此对象，继续检查下一个
+            } catch (Exception e) {
+                log.debug("检查对象 {} 在节点 {} 时出错: {}", key, node.nodeName, e.getMessage());
             }
         }
-        return null;
-    }
-
-    /**
-     * 列出节点（桶）中的所有对象。
-     *
-     * @param client   S3 客户端
-     * @param nodeName 节点名称（同时也是桶名）
-     * @return 对象名称集合
-     */
-    private Set<String> listAllObjects(S3Client client, String nodeName) throws Exception {
-        Set<String> objects = new HashSet<>();
-
-        // 检查桶是否存在
-        try {
-            client.headBucket(HeadBucketRequest.builder().bucket(nodeName).build());
-        } catch (NoSuchBucketException e) {
-            log.debug("节点 {} 的桶不存在，返回空集合", nodeName);
-            return objects;
-        }
-
-        ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
-                .bucket(nodeName)
-                .build();
-
-        ListObjectsV2Response listResponse;
-        do {
-            listResponse = client.listObjectsV2(listRequest);
-            for (S3Object s3Object : listResponse.contents()) {
-                if (!s3Object.key().endsWith("/")) {
-                    objects.add(s3Object.key());
-                }
-            }
-
-            listRequest = listRequest.toBuilder()
-                    .continuationToken(listResponse.nextContinuationToken())
-                    .build();
-        } while (listResponse.isTruncated());
-
-        log.debug("节点 {} 中共有 {} 个对象", nodeName, objects.size());
-        return objects;
+        return false;
     }
 
     /**
@@ -459,6 +401,11 @@ public class ConsistencyRepairService {
             }
         }
     }
+
+    /**
+     * 节点与客户端配对，避免重复查找
+     */
+    private record NodeClientPair(String nodeName, S3Client client) {}
 
     /**
      * 修复统计信息。

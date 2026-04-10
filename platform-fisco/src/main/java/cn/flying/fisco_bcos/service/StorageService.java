@@ -2,7 +2,7 @@ package cn.flying.fisco_bcos.service;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
-import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.fisco.bcos.sdk.v3.client.Client;
 import org.fisco.bcos.sdk.v3.transaction.manager.AssembleTransactionProcessor;
@@ -29,7 +29,7 @@ import org.springframework.stereotype.Service;
 @Service
 @ConditionalOnBean(Client.class)
 @NoArgsConstructor
-@Data
+@Getter
 public class StorageService {
   @Value("${contract.storageAddress}")
   private String address;
