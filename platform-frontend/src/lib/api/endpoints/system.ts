@@ -1,5 +1,4 @@
-import { api, getToken } from "../client";
-import { env } from "$env/dynamic/public";
+import { api } from "../client";
 import type {
   Page,
   PageParams,
@@ -301,28 +300,5 @@ export async function backupAuditLogs(params?: {
 export async function exportAuditLogs(
   params?: AuditLogQueryParams,
 ): Promise<Blob> {
-  const token = getToken();
-  if (!token) {
-    throw new Error("未登录");
-  }
-
-  const apiBase = import.meta.env.DEV
-    ? "/record-platform/api/v1"
-    : `${env.PUBLIC_API_BASE_URL || "/record-platform"}/api/v1`;
-
-  const response = await fetch(`${apiBase}${AUDIT_BASE}/logs/export`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      "X-Tenant-ID": env.PUBLIC_TENANT_ID || "",
-    },
-    body: JSON.stringify(params ?? {}),
-  });
-
-  if (!response.ok) {
-    throw new Error("导出失败");
-  }
-
-  return response.blob();
+  return api.fetchBlob("POST", `${AUDIT_BASE}/logs/export`, params ?? {});
 }

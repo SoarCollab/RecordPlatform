@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { api } from '$api/client';
 
 	interface Props {
 		url: string;
@@ -43,9 +44,7 @@
 		loadingText = true;
 		textError = null;
 		try {
-			const response = await fetch(url);
-			if (!response.ok) throw new Error('Failed to load file');
-			const text = await response.text();
+			const text = await api.fetchText(url);
 			// 为提升性能限制文本长度
 			textContent = text.length > 100000 ? text.slice(0, 100000) + '\n\n... (内容过长，已截断)' : text;
 		} catch (err) {
