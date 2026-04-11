@@ -47,7 +47,7 @@ public class ShareController {
     @OperationLog(module = "分享", operationType = "查询", description = "获取分享详情")
     public Result<ShareInfoVO> getShareInfo(@Parameter(description = "分享码") @PathVariable String shareCode) {
         if (CommonUtils.isBlank(shareCode) || shareCode.length() > 64) {
-            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+            return Result.failure(ResultEnum.PARAM_IS_INVALID.getCode(), "分享码格式错误");
         }
 
         ShareInfoVO info = fileService.getShareInfo(shareCode);
@@ -64,7 +64,7 @@ public class ShareController {
                 return Result.error(ResultEnum.SHARE_EXPIRED, null);
             }
             if (info.getStatus() == ShareInfoVO.STATUS_EMPTY_FILES) {
-                return Result.error(ResultEnum.FAIL, null);
+                return Result.failure(ResultEnum.FAIL.getCode(), "分享文件为空");
             }
         }
 

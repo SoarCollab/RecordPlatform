@@ -176,12 +176,12 @@ class ShareControllerIntegrationTest extends BaseControllerIntegrationTest {
     class ShareNotFoundTests {
 
         @Test
-        @DisplayName("should return 404 for non-existent share code")
+        @DisplayName("should return error for non-existent share code")
         void shouldReturn404ForNonExistentShareCode() throws Exception {
             mockMvc.perform(get(BASE_URL + "/NOTFOUND/info")
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.code").value(404))
+                    .andExpect(jsonPath("$.code").value(ResultEnum.SHARE_NOT_FOUND.getCode()))
                     .andExpect(jsonPath("$.message").value("分享不存在"));
         }
 
@@ -272,11 +272,11 @@ class ShareControllerIntegrationTest extends BaseControllerIntegrationTest {
         void shouldAcceptShareCodeWith64Characters() throws Exception {
             String shareCode64 = "A".repeat(64);
 
-            // Will return 404 (not found) rather than validation error
+            // Will return SHARE_NOT_FOUND rather than validation error
             mockMvc.perform(get(BASE_URL + "/" + shareCode64 + "/info")
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.code").value(404));
+                    .andExpect(jsonPath("$.code").value(ResultEnum.SHARE_NOT_FOUND.getCode()));
         }
     }
 
