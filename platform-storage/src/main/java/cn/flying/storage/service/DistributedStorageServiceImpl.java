@@ -99,6 +99,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         .build();
 
 
+    @Override
     public Result<List<byte[]>> getFileListByHash(List<String> filePathList, List<String> fileHashList) {
         if (CollectionUtils.isEmpty(filePathList) || CollectionUtils.isEmpty(fileHashList)) {
             log.warn("获取文件列表时传入Hash列表为空");

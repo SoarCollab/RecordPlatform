@@ -390,7 +390,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
         void shouldDeleteFileAfterUpload() throws Exception {
             File testFile = createTestFile();
 
-            performDelete(FILES_URL + "/delete?identifiers=" + testFile.getFileHash())
+            performDelete(FILES_URL + "?identifiers=" + testFile.getFileHash())
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
 

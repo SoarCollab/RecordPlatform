@@ -31,7 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @TestPropertySource(properties = "test.context=ShareControllerIntegrationTest")
 class ShareControllerIntegrationTest extends BaseControllerIntegrationTest {
 
-    private static final String BASE_URL = "/api/v1/share";
+    private static final String BASE_URL = "/api/v1/shares";
 
     @Autowired
     private AccountMapper accountMapper;
@@ -188,9 +188,10 @@ class ShareControllerIntegrationTest extends BaseControllerIntegrationTest {
         @Test
         @DisplayName("should return error for empty share code")
         void shouldReturnErrorForEmptyShareCode() throws Exception {
+            // Empty share code path doesn't match permitAll rule, returns 401
             mockMvc.perform(get(BASE_URL + "//info")
                             .header(HEADER_TENANT_ID, testTenantId))
-                    .andExpect(status().isNotFound());
+                    .andExpect(status().isUnauthorized());
         }
     }
 

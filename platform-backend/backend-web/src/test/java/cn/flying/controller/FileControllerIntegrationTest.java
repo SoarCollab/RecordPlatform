@@ -147,13 +147,13 @@ class FileControllerIntegrationTest extends BaseControllerIntegrationTest {
     }
 
     @Nested
-    @DisplayName("DELETE /files/delete")
+    @DisplayName("DELETE /files")
     class DeleteFilesTests {
 
         @Test
         @DisplayName("should delete files by identifiers")
         void shouldDeleteFilesByIdentifiers() throws Exception {
-            performDelete(BASE_URL + "/delete?identifiers=" + testFile.getFileHash())
+            performDelete(BASE_URL + "?identifiers=" + testFile.getFileHash())
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -161,7 +161,7 @@ class FileControllerIntegrationTest extends BaseControllerIntegrationTest {
         @Test
         @DisplayName("should return 401 for unauthenticated request")
         void shouldReturn401ForUnauthenticatedRequest() throws Exception {
-            mockMvc.perform(delete(BASE_URL + "/delete?identifiers=" + testFile.getFileHash())
+            mockMvc.perform(delete(BASE_URL + "?identifiers=" + testFile.getFileHash())
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isUnauthorized());
         }

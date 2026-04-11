@@ -31,7 +31,8 @@ public class DegradedWriteTracker {
 
     private static final String DEGRADED_WRITE_KEY = "storage:degraded_writes";
 
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    @Resource
+    private ObjectMapper objectMapper;
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;

@@ -52,11 +52,11 @@ LEGACY_ROUTE_RULES = (
 ALLOWED_NON_OPENAPI_METHOD_ROUTES = {
     ("POST", "/api/v1/auth/login"),
     ("POST", "/api/v1/auth/logout"),
-    ("GET", "/api/v1/share/**"),
+    ("GET", "/api/v1/shares/**"),
 }
 
 ALLOWED_NON_OPENAPI_PATHS = {
-    "/api/v1/share/**",
+    "/api/v1/shares/**",
 }
 
 FORBIDDEN_ENV_VARS = {

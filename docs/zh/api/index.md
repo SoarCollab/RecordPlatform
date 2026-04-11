@@ -38,7 +38,7 @@ Authorization: Bearer <token>
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`
 - `GET /api/v1/images/download/images/**`
-- `GET /api/v1/share/**`
+- `GET /api/v1/shares/**`
 - `GET /api/v1/sse/connect`（需短期令牌，见下文）
 
 ### 3) SSE 双令牌模式
@@ -97,8 +97,8 @@ Authorization: Bearer <token>
 | GET | `/api/v1/files/hash/{fileHash}/decrypt-info` | 获取解密信息（登录态） |
 | GET | `/api/v1/shares/{shareCode}/files` | 公开分享文件列表（公开） |
 | GET | `/api/v1/files/shares` | 获取我的分享列表 |
-| DELETE | `/api/v1/files/delete` | 批量删除（支持 hash/id） |
-| DELETE | `/api/v1/files/deleteById` | 按文件 ID 删除 |
+| DELETE | `/api/v1/files` | 批量删除（支持 hash/id） |
+| DELETE | `/api/v1/files/{id}` | 按文件 ID 删除（管理员） |
 | POST | `/api/v1/shares` | 创建分享 |
 | PATCH | `/api/v1/shares/{shareCode}` | 更新分享 |
 | DELETE | `/api/v1/files/share/{shareCode}` | 取消分享 |
@@ -144,11 +144,11 @@ Authorization: Bearer <token>
 | POST | `/api/v1/admin/quota/rollout/audits` | 写入或更新配额灰度审计记录（管理员） |
 | GET | `/api/v1/admin/quota/rollout/audits` | 查询配额灰度审计记录（管理员，参数：`batchId`、`tenantId`） |
 
-### 公开分享页（`/api/v1/share`）
+### 公开分享页（`/api/v1/shares`）
 
 | 方法 | 端点 | 说明 |
 |------|------|------|
-| GET | `/api/v1/share/{shareCode}/info` | 获取分享详情（公开） |
+| GET | `/api/v1/shares/{shareCode}/info` | 获取分享详情（公开） |
 
 ### 图片（`/api/v1/images`）
 

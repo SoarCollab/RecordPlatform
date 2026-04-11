@@ -215,7 +215,7 @@ sequenceDiagram
     Backend-->>Owner: 200 OK (ShareCode, ShareUrl)
 
     Note over Visitor, DB: 阶段 2: 访问分享
-    Visitor->>Backend: GET /api/v1/share/{shareCode}/info
+    Visitor->>Backend: GET /api/v1/shares/{shareCode}/info
     Backend->>DB: 查询分享记录
     alt 数据库命中
         DB-->>Backend: 分享信息

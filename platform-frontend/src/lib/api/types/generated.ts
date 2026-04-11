@@ -4,132 +4,6 @@
  */
 
 export interface paths {
-    "/api/auth/login": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * 登录验证接口
-         * @description 用户登录接口，返回JWT令牌
-         */
-        post: {
-            parameters: {
-                query: {
-                    /** @description 密码 */
-                    password: string;
-                    /** @description 用户名 */
-                    username: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 登录成功 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        /**
-                         * @example {
-                         *       "code": 200,
-                         *       "data": {},
-                         *       "message": "操作成功"
-                         *     }
-                         */
-                        "application/json": unknown;
-                    };
-                };
-                /** @description 登录失败 */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        /**
-                         * @example {
-                         *       "code": 500,
-                         *       "message": "用户名或密码错误"
-                         *     }
-                         */
-                        "application/json": unknown;
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/auth/logout": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 退出登录接口
-         * @description 用户退出登录，使当前JWT令牌失效
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description 退出成功 */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        /**
-                         * @example {
-                         *       "code": 200,
-                         *       "message": "操作成功"
-                         *     }
-                         */
-                        "application/json": unknown;
-                    };
-                };
-                /** @description 未授权 */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        /**
-                         * @example {
-                         *       "code": 500,
-                         *       "message": "用户未登录"
-                         *     }
-                         */
-                        "application/json": unknown;
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/admin/announcements": {
         parameters: {
             query?: never;
@@ -532,6 +406,132 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 登录验证接口
+         * @description 用户登录接口，返回JWT令牌
+         */
+        post: {
+            parameters: {
+                query: {
+                    /** @description 密码 */
+                    password: string;
+                    /** @description 用户名 */
+                    username: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 登录成功 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        /**
+                         * @example {
+                         *       "code": 200,
+                         *       "data": {},
+                         *       "message": "操作成功"
+                         *     }
+                         */
+                        "application/json": unknown;
+                    };
+                };
+                /** @description 登录失败 */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        /**
+                         * @example {
+                         *       "code": 500,
+                         *       "message": "用户名或密码错误"
+                         *     }
+                         */
+                        "application/json": unknown;
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 退出登录接口
+         * @description 用户退出登录，使当前JWT令牌失效
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 退出成功 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        /**
+                         * @example {
+                         *       "code": 200,
+                         *       "message": "操作成功"
+                         *     }
+                         */
+                        "application/json": unknown;
+                    };
+                };
+                /** @description 未授权 */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        /**
+                         * @example {
+                         *       "code": 500,
+                         *       "message": "用户未登录"
+                         *     }
+                         */
+                        "application/json": unknown;
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/password-resets": {
         parameters: {
             query?: never;
@@ -720,41 +720,8 @@ export interface paths {
         get: operations["getFiles"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/files/delete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
         /** 批量删除文件（支持通过文件哈希或文件ID） */
         delete: operations["deleteFiles"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/files/deleteById": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** 根据文件id列表批量删除文件（管理员专用） */
-        delete: operations["deleteFileById"];
         options?: never;
         head?: never;
         patch?: never;
@@ -958,7 +925,8 @@ export interface paths {
         get: operations["getFileById"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** 根据文件ID删除文件（管理员专用） */
+        delete: operations["deleteFileById"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1411,23 +1379,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/share/{shareCode}/info": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** 获取分享详情 */
-        get: operations["getShareInfo"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/shares": {
         parameters: {
             query?: never;
@@ -1522,6 +1473,23 @@ export interface paths {
         };
         /** 分享获取解密信息（REST，需登录） */
         get: operations["getSharedDecryptInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/shares/{shareCode}/info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取分享详情 */
+        get: operations["getShareInfo"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6327,29 +6295,6 @@ export interface operations {
             };
         };
     };
-    deleteFileById: {
-        parameters: {
-            query: {
-                /** @description 待删除文件Id列表 */
-                idList: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ResultString"];
-                };
-            };
-        };
-    };
     reportDownloadBatchMetrics: {
         parameters: {
             query?: never;
@@ -6620,6 +6565,29 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultFileVO"];
+                };
+            };
+        };
+    };
+    deleteFileById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 待删除文件ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultString"];
                 };
             };
         };
@@ -7279,29 +7247,6 @@ export interface operations {
             };
         };
     };
-    getShareInfo: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description 分享码 */
-                shareCode: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ResultShareInfoVO"];
-                };
-            };
-        };
-    };
     createShare: {
         parameters: {
             query?: never;
@@ -7446,6 +7391,29 @@ export interface operations {
             };
         };
     };
+    getShareInfo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 分享码 */
+                shareCode: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultShareInfoVO"];
+                };
+            };
+        };
+    };
     connect: {
         parameters: {
             query: {
@@ -7504,9 +7472,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": {
-                        [key: string]: Record<string, never>;
-                    };
+                    "*/*": components["schemas"]["ResultMapStringObject"];
                 };
             };
         };

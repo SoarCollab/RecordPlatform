@@ -120,7 +120,7 @@ public class FileController {
      * @param identifiers 文件哈希或文件 ID 列表
      * @return 操作结果
      */
-    @DeleteMapping("/delete")
+    @DeleteMapping
     @Operation(summary = "批量删除文件（支持通过文件哈希或文件ID）")
     @OperationLog(module = "文件操作", operationType = "删除", description = "批量删除文件")
     public Result<String> deleteFiles(
@@ -131,18 +131,18 @@ public class FileController {
     }
 
     /**
-     * 管理员按文件 ID 列表删除文件。
+     * 管理员按文件 ID 删除文件。
      *
-     * @param fileIdList 文件 ID 列表
+     * @param id 文件 ID
      * @return 操作结果
      */
-    @DeleteMapping("/deleteById")
-    @Operation(summary = "根据文件id列表批量删除文件（管理员专用）")
+    @DeleteMapping("/{id}")
+    @Operation(summary = "根据文件ID删除文件（管理员专用）")
     @PreAuthorize("hasPerm('file:admin')")
     @OperationLog(module = "文件操作", operationType = "删除", description = "删除文件")
     public Result<String> deleteFileById(
-            @Schema(description = "待删除文件Id列表") @RequestParam("idList") List<String> fileIdList) {
-        fileService.removeByIds(fileIdList);
+            @Schema(description = "待删除文件ID") @PathVariable("id") String id) {
+        fileService.removeByIds(List.of(id));
         return Result.success("文件删除成功");
     }
 

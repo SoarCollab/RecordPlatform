@@ -266,7 +266,7 @@ public class SysAuditServiceImpl implements SysAuditService {
      * @return 规范化后的分页大小（最小为 1）
      */
     private long normalizePageSize(Integer pageSize, int defaultSize) {
-        return pageSize != null && pageSize > 0 ? pageSize : defaultSize;
+        return pageSize != null && pageSize > 0 ? Math.min(pageSize, 100) : defaultSize;
     }
     
     /**

@@ -6,6 +6,7 @@ import org.fisco.bcos.sdk.v3.BcosSDK;
 import org.fisco.bcos.sdk.v3.client.Client;
 import org.fisco.bcos.sdk.v3.config.ConfigOption;
 import org.fisco.bcos.sdk.v3.config.model.ConfigProperty;
+import org.fisco.bcos.sdk.v3.model.CryptoType;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -50,7 +51,7 @@ public class SdkBeanConfig {
         log.info("Chain connect successful. Current block number {}", blockNumber);
 
         configCryptoKeyPair(client);
-        log.info("is Gm:{}, address:{}", client.getCryptoSuite().cryptoTypeConfig == 1, client.getCryptoSuite().getCryptoKeyPair().getAddress());
+        log.info("is Gm:{}, address:{}", client.getCryptoSuite().cryptoTypeConfig == CryptoType.SM_TYPE, client.getCryptoSuite().getCryptoKeyPair().getAddress());
         return client;
     }
 

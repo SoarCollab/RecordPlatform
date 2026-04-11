@@ -107,7 +107,7 @@ public class SwaggerConfiguration {
     private Map<String, PathItem> authorizePathItems(){
         Map<String, PathItem> map = new HashMap<>();
         // 登录接口
-        map.put("/api/auth/login", new PathItem()
+        map.put("/api/v1/auth/login", new PathItem()
                 .post(new Operation()
                         .tags(List.of("登录校验相关"))
                         .summary("登录验证接口")
@@ -144,7 +144,7 @@ public class SwaggerConfiguration {
         );
 
         // 退出登录接口
-        map.put("/api/auth/logout", new PathItem()
+        map.put("/api/v1/auth/logout", new PathItem()
                 .get(new Operation()
                         .tags(List.of("登录校验相关"))
                         .summary("退出登录接口")
