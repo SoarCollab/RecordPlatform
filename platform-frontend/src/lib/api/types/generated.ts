@@ -3125,6 +3125,58 @@ export interface components {
              */
             totalChunks?: number;
         };
+        /** @description 文件信息 */
+        FileVO: {
+            /** @description 文件分类 */
+            classification?: string;
+            /** @description 文件类型 */
+            contentType?: string;
+            /**
+             * Format: date-time
+             * @description 创建时间
+             */
+            createTime?: string;
+            /** @description 文件哈希 */
+            fileHash?: string;
+            /** @description 文件名称 */
+            fileName?: string;
+            /** @description 文件参数(JSON) */
+            fileParam?: string;
+            /**
+             * Format: int64
+             * @description 文件大小（字节）
+             */
+            fileSize?: number;
+            /** @description 文件ID（外部ID） */
+            id?: string;
+            /**
+             * Format: int32
+             * @description 是否最新版本：1=是，0=否
+             */
+            isLatest?: number;
+            /** @description 原上传者用户名（来自分享保存场景） */
+            originOwnerName?: string;
+            /** @description 文件所有者用户名（分享场景） */
+            ownerName?: string;
+            /** @description 上一版本文件ID（外部ID） */
+            parentVersionId?: string;
+            /** @description 直接分享者用户名 */
+            sharedFromUserName?: string;
+            /**
+             * Format: int32
+             * @description 文件上传状态
+             */
+            status?: number;
+            /** @description 交易哈希 */
+            transactionHash?: string;
+            /**
+             * Format: int32
+             * @description 版本号
+             */
+            version?: number;
+            /** @description 版本链分组ID（外部ID） */
+            versionGroupId?: string;
+        };
         /** @description 文件版本信息 */
         FileVersionVO: {
             /** @description 文件类型 */
@@ -3385,10 +3437,10 @@ export interface components {
             total?: number;
         };
         /** @description 结果数据 */
-        IPageIntegrityAlert: {
+        IPageIntegrityAlertVO: {
             /** Format: int64 */
             current?: number;
-            records?: components["schemas"]["IntegrityAlert"][];
+            records?: components["schemas"]["IntegrityAlertVO"][];
             /** Format: int64 */
             size?: number;
             /** Format: int64 */
@@ -3415,20 +3467,20 @@ export interface components {
             total?: number;
         };
         /** @description 结果数据 */
-        IPageSysPermission: {
+        IPageSysOperationLogVO: {
             /** Format: int64 */
             current?: number;
-            records?: components["schemas"]["SysPermission"][];
+            records?: components["schemas"]["SysOperationLogVO"][];
             /** Format: int64 */
             size?: number;
             /** Format: int64 */
             total?: number;
         };
         /** @description 结果数据 */
-        IPageSys_operation_log: {
+        IPageSysPermissionVO: {
             /** Format: int64 */
             current?: number;
-            records?: components["schemas"]["sys_operation_log"][];
+            records?: components["schemas"]["SysPermissionVO"][];
             /** Format: int64 */
             size?: number;
             /** Format: int64 */
@@ -3444,26 +3496,39 @@ export interface components {
             /** Format: int64 */
             total?: number;
         };
-        IntegrityAlert: {
+        /** @description 完整性告警信息 */
+        IntegrityAlertVO: {
+            /** @description 实际哈希 */
             actualHash?: string;
+            /** @description 告警类型 */
             alertType?: string;
+            /** @description 链上哈希 */
             chainHash?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description 创建时间
+             */
             createTime?: string;
+            /** @description 文件哈希 */
             fileHash?: string;
-            /** Format: int64 */
-            fileId?: number;
-            /** Format: int64 */
-            id?: number;
+            /** @description 文件ID（外部ID） */
+            fileId?: string;
+            /** @description 告警ID（外部ID） */
+            id?: string;
+            /** @description 处理备注 */
             note?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description 处理时间
+             */
             resolvedAt?: string;
-            /** Format: int64 */
-            resolvedBy?: number;
-            /** Format: int32 */
+            /** @description 处理人ID（外部ID） */
+            resolvedBy?: string;
+            /**
+             * Format: int32
+             * @description 告警状态
+             */
             status?: number;
-            /** Format: int64 */
-            tenantId?: number;
         };
         /** @description 结果数据 */
         IntegrityCheckStatsVO: {
@@ -3516,17 +3581,17 @@ export interface components {
             column?: string;
         };
         /** @description 结果数据 */
-        PageFile: {
+        PageFileVO: {
             countId?: string;
             /** Format: int64 */
             current?: number;
             /** Format: int64 */
             maxLimit?: number;
-            optimizeCountSql?: components["schemas"]["PageFile"];
+            optimizeCountSql?: components["schemas"]["PageFileVO"];
             optimizeJoinOfCountSql?: boolean;
             orders?: components["schemas"]["OrderItem"][];
-            records?: components["schemas"]["file"][];
-            searchCount?: components["schemas"]["PageFile"];
+            records?: components["schemas"]["FileVO"][];
+            searchCount?: components["schemas"]["PageFileVO"];
             /** Format: int64 */
             size?: number;
             /** Format: int64 */
@@ -3875,17 +3940,6 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
-        ResultFile: {
-            /**
-             * Format: int32
-             * @description 操作代码
-             */
-            code?: number;
-            data?: components["schemas"]["file"];
-            /** @description 提示信息 */
-            message?: string;
-        };
-        /** @description 返回结果封装 */
         ResultFileDecryptInfoVO: {
             /**
              * Format: int32
@@ -3915,6 +3969,17 @@ export interface components {
              */
             code?: number;
             data?: components["schemas"]["FileUploadStatusVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultFileVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["FileVO"];
             /** @description 提示信息 */
             message?: string;
         };
@@ -4040,13 +4105,13 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
-        ResultIPageIntegrityAlert: {
+        ResultIPageIntegrityAlertVO: {
             /**
              * Format: int32
              * @description 操作代码
              */
             code?: number;
-            data?: components["schemas"]["IPageIntegrityAlert"];
+            data?: components["schemas"]["IPageIntegrityAlertVO"];
             /** @description 提示信息 */
             message?: string;
         };
@@ -4062,24 +4127,24 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
-        ResultIPageSysPermission: {
+        ResultIPageSysOperationLogVO: {
             /**
              * Format: int32
              * @description 操作代码
              */
             code?: number;
-            data?: components["schemas"]["IPageSysPermission"];
+            data?: components["schemas"]["IPageSysOperationLogVO"];
             /** @description 提示信息 */
             message?: string;
         };
         /** @description 返回结果封装 */
-        ResultIPageSys_operation_log: {
+        ResultIPageSysPermissionVO: {
             /**
              * Format: int32
              * @description 操作代码
              */
             code?: number;
-            data?: components["schemas"]["IPageSys_operation_log"];
+            data?: components["schemas"]["IPageSysPermissionVO"];
             /** @description 提示信息 */
             message?: string;
         };
@@ -4214,14 +4279,14 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
-        ResultListSysPermission: {
+        ResultListSysPermissionVO: {
             /**
              * Format: int32
              * @description 操作代码
              */
             code?: number;
             /** @description 结果数据 */
-            data?: components["schemas"]["SysPermission"][];
+            data?: components["schemas"]["SysPermissionVO"][];
             /** @description 提示信息 */
             message?: string;
         };
@@ -4300,13 +4365,13 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
-        ResultPageFile: {
+        ResultPageFileVO: {
             /**
              * Format: int32
              * @description 操作代码
              */
             code?: number;
-            data?: components["schemas"]["PageFile"];
+            data?: components["schemas"]["PageFileVO"];
             /** @description 提示信息 */
             message?: string;
         };
@@ -4445,24 +4510,24 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
-        ResultSysPermission: {
+        ResultSysOperationLogVO: {
             /**
              * Format: int32
              * @description 操作代码
              */
             code?: number;
-            data?: components["schemas"]["SysPermission"];
+            data?: components["schemas"]["SysOperationLogVO"];
             /** @description 提示信息 */
             message?: string;
         };
         /** @description 返回结果封装 */
-        ResultSys_operation_log: {
+        ResultSysPermissionVO: {
             /**
              * Format: int32
              * @description 操作代码
              */
             code?: number;
-            data?: components["schemas"]["sys_operation_log"];
+            data?: components["schemas"]["SysPermissionVO"];
             /** @description 提示信息 */
             message?: string;
         };
@@ -4707,11 +4772,52 @@ export interface components {
             /** Format: int64 */
             usedCapacityBytes?: number;
         };
-        /** @description 权限定义实体 */
-        SysPermission: {
-            /** @description 操作类型：read, write, delete, admin等 */
+        /** @description 系统操作日志视图对象 */
+        SysOperationLogVO: {
+            /** @description 操作描述 */
+            description?: string;
+            /** @description 错误信息 */
+            errorMsg?: string;
+            /**
+             * Format: int64
+             * @description 执行时长（毫秒）
+             */
+            executionTime?: number;
+            /** @description 日志ID（外部ID） */
+            id?: string;
+            /** @description 请求方法 */
+            method?: string;
+            /** @description 操作模块 */
+            module?: string;
+            /** @description 操作时间 */
+            operationTime?: string;
+            /** @description 操作类型 */
+            operationType?: string;
+            /** @description 请求IP */
+            requestIp?: string;
+            /** @description 请求方式 */
+            requestMethod?: string;
+            /** @description 请求参数 */
+            requestParam?: string;
+            /** @description 请求URL */
+            requestUrl?: string;
+            /** @description 响应结果 */
+            responseResult?: string;
+            /**
+             * Format: int32
+             * @description 操作状态（0正常 1异常）
+             */
+            status?: number;
+            /** @description 操作用户ID */
+            userId?: string;
+            /** @description 操作用户名 */
+            username?: string;
+        };
+        /** @description 权限定义 */
+        SysPermissionVO: {
+            /** @description 操作类型 */
             action?: string;
-            /** @description 权限码，格式：module:action */
+            /** @description 权限码 */
             code?: string;
             /**
              * Format: date-time
@@ -4720,12 +4826,9 @@ export interface components {
             createTime?: string;
             /** @description 权限描述 */
             description?: string;
-            /**
-             * Format: int64
-             * @description 权限ID
-             */
-            id?: number;
-            /** @description 模块名：file, ticket, announcement, system等 */
+            /** @description 权限ID（外部ID） */
+            id?: string;
+            /** @description 模块名 */
             module?: string;
             /** @description 权限名称 */
             name?: string;
@@ -4734,11 +4837,6 @@ export interface components {
              * @description 状态：0-禁用，1-启用
              */
             status?: number;
-            /**
-             * Format: int64
-             * @description 租户ID（0表示全局权限）
-             */
-            tenantId?: number;
             /**
              * Format: date-time
              * @description 更新时间
@@ -5223,58 +5321,6 @@ export interface components {
              */
             versionGroupId?: number;
         };
-        /** @description 系统操作日志实体类 */
-        sys_operation_log: {
-            /** @description 操作描述 */
-            description?: string;
-            /** @description 错误信息 */
-            errorMsg?: string;
-            /**
-             * Format: int64
-             * @description 执行时长（毫秒）
-             */
-            executionTime?: number;
-            /**
-             * Format: int64
-             * @description 日志ID
-             */
-            id?: number;
-            /** @description 请求方法 */
-            method?: string;
-            /** @description 操作模块 */
-            module?: string;
-            /**
-             * Format: date-time
-             * @description 操作时间
-             */
-            operationTime?: string;
-            /** @description 操作类型 */
-            operationType?: string;
-            /** @description 请求IP */
-            requestIp?: string;
-            /** @description 请求方式 */
-            requestMethod?: string;
-            /** @description 请求参数 */
-            requestParam?: string;
-            /** @description 请求URL */
-            requestUrl?: string;
-            /** @description 响应结果 */
-            responseResult?: string;
-            /**
-             * Format: int32
-             * @description 操作状态（0正常 1异常）
-             */
-            status?: number;
-            /**
-             * Format: int64
-             * @description 租户ID
-             */
-            tenantId?: number;
-            /** @description 操作用户ID */
-            userId?: string;
-            /** @description 操作用户名 */
-            username?: string;
-        };
     };
     responses: never;
     parameters: never;
@@ -5538,7 +5584,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ResultIPageIntegrityAlert"];
+                    "*/*": components["schemas"]["ResultIPageIntegrityAlertVO"];
                 };
             };
         };
@@ -5569,7 +5615,7 @@ export interface operations {
             header?: never;
             path: {
                 /** @description Alert ID */
-                id: number;
+                id: string;
             };
             cookie?: never;
         };
@@ -5592,7 +5638,7 @@ export interface operations {
             header?: never;
             path: {
                 /** @description Alert ID */
-                id: number;
+                id: string;
             };
             cookie?: never;
         };
@@ -6253,7 +6299,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ResultPageFile"];
+                    "*/*": components["schemas"]["ResultPageFileVO"];
                 };
             };
         };
@@ -6345,7 +6391,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ResultFile"];
+                    "*/*": components["schemas"]["ResultFileVO"];
                 };
             };
         };
@@ -6573,7 +6619,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ResultFile"];
+                    "*/*": components["schemas"]["ResultFileVO"];
                 };
             };
         };
@@ -7665,7 +7711,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                id: number;
+                id: string;
             };
             cookie?: never;
         };
@@ -7677,7 +7723,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ResultSys_operation_log"];
+                    "*/*": components["schemas"]["ResultSysOperationLogVO"];
                 };
             };
         };
@@ -7721,7 +7767,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ResultIPageSys_operation_log"];
+                    "*/*": components["schemas"]["ResultIPageSysOperationLogVO"];
                 };
             };
         };
@@ -7821,7 +7867,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ResultListSysPermission"];
+                    "*/*": components["schemas"]["ResultListSysPermissionVO"];
                 };
             };
         };
@@ -7845,7 +7891,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ResultSysPermission"];
+                    "*/*": components["schemas"]["ResultSysPermissionVO"];
                 };
             };
         };
@@ -7872,7 +7918,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ResultIPageSysPermission"];
+                    "*/*": components["schemas"]["ResultIPageSysPermissionVO"];
                 };
             };
         };
@@ -7942,7 +7988,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ResultSysPermission"];
+                    "*/*": components["schemas"]["ResultSysPermissionVO"];
                 };
             };
         };
