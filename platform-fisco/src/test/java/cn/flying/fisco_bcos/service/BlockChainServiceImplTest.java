@@ -419,19 +419,19 @@ class BlockChainServiceImplTest {
         void cancelShare_shouldCancelSuccessfully() {
             CancelShareRequest request = new CancelShareRequest(
                     "SHARE_CODE_123",
-                    null
+                    "user1"
             );
-            
+
             ChainReceipt receipt = new ChainReceipt();
             receipt.setSuccess(true);
-            
-            when(chainAdapter.cancelShare("SHARE_CODE_123")).thenReturn(receipt);
-            
+
+            when(chainAdapter.cancelShare("SHARE_CODE_123", "user1")).thenReturn(receipt);
+
             Result<Boolean> result = blockChainService.cancelShare(request);
-            
+
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData()).isTrue();
-            
+
             verify(fiscoMetrics).recordSuccess();
         }
 
@@ -440,19 +440,19 @@ class BlockChainServiceImplTest {
         void cancelShare_shouldHandleFailure() {
             CancelShareRequest request = new CancelShareRequest(
                     "INVALID_CODE",
-                    null
+                    "user1"
             );
-            
+
             ChainReceipt receipt = new ChainReceipt();
             receipt.setSuccess(false);
             receipt.setErrorMessage("Share not found");
-            
-            when(chainAdapter.cancelShare(anyString())).thenReturn(receipt);
-            
+
+            when(chainAdapter.cancelShare(anyString(), anyString())).thenReturn(receipt);
+
             Result<Boolean> result = blockChainService.cancelShare(request);
-            
+
             assertThat(result.getCode()).isNotEqualTo(200);
-            
+
             verify(fiscoMetrics).recordFailure();
         }
 
@@ -465,10 +465,10 @@ class BlockChainServiceImplTest {
         void cancelShare_shouldHandleException() {
             CancelShareRequest request = new CancelShareRequest(
                     "ERR_CODE",
-                    null
+                    "user1"
             );
 
-            when(chainAdapter.cancelShare(anyString()))
+            when(chainAdapter.cancelShare(anyString(), anyString()))
                     .thenThrow(new RuntimeException("Cancel failed"));
 
             Result<Boolean> result = blockChainService.cancelShare(request);

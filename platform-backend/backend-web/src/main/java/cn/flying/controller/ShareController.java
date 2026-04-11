@@ -52,16 +52,16 @@ public class ShareController {
 
         ShareInfoVO info = fileService.getShareInfo(shareCode);
         if (info == null) {
-            return Result.failure(404, "分享不存在");
+            return Result.error(ResultEnum.SHARE_NOT_FOUND, null);
         }
 
         // 处理服务层返回的异常状态
         if (info.getStatus() != null) {
             if (info.getStatus() == FileShare.STATUS_CANCELLED) {
-                return Result.failure(ResultEnum.SHARE_CANCELLED.getCode(), ResultEnum.SHARE_CANCELLED.getMessage());
+                return Result.error(ResultEnum.SHARE_CANCELLED, null);
             }
             if (info.getStatus() == FileShare.STATUS_EXPIRED) {
-                return Result.failure(ResultEnum.SHARE_EXPIRED.getCode(), ResultEnum.SHARE_EXPIRED.getMessage());
+                return Result.error(ResultEnum.SHARE_EXPIRED, null);
             }
             if (info.getStatus() == ShareInfoVO.STATUS_EMPTY_FILES) {
                 return Result.failure(ResultEnum.FAIL.getCode(), "分享文件为空");

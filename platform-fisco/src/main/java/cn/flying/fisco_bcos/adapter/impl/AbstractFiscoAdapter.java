@@ -290,10 +290,10 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
     }
 
     @Override
-    public ChainReceipt cancelShare(String shareCode) {
+    public ChainReceipt cancelShare(String shareCode, String uploader) {
         try {
             TransactionResponse response = getSharingService().cancelShare(
-                    new SharingCancelShareInputBO(shareCode));
+                    new SharingCancelShareInputBO(shareCode, uploader));
 
             if (response == null) {
                 throw new ChainException(getChainType(), "cancelShare", "Response is null");

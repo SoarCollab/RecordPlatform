@@ -1,6 +1,7 @@
 package cn.flying.controller;
 
 import cn.flying.common.tenant.TenantContext;
+import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.dto.SysOperationLog;
 import cn.flying.dao.entity.SysPermission;
@@ -263,7 +264,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
         void shouldReturnLogDetail() throws Exception {
             SysOperationLog log = createTestLog(testUserId, "testuser", "file", "查询", 0);
 
-            performGet(BASE_URL + "/logs/" + log.getId())
+            performGet(BASE_URL + "/logs/" + IdUtils.toExternalId(log.getId()))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
         }
@@ -271,7 +272,7 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
         @Test
         @DisplayName("should return null for non-existent log")
         void shouldReturnNullForNonExistentLog() throws Exception {
-            performGet(BASE_URL + "/logs/999999")
+            performGet(BASE_URL + "/logs/" + IdUtils.toExternalId(999999L))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data").doesNotExist());
@@ -282,8 +283,8 @@ class SysAuditControllerIntegrationTest extends BaseControllerIntegrationTest {
     @DisplayName("should format date fields correctly")
     void shouldFormatDateFieldsCorrectly() throws Exception {
         SysOperationLog log = createTestLog(testUserId, "testuser", "file", "查询", 0);
-        
-        mockMvc.perform(get(BASE_URL + "/logs/" + log.getId())
+
+        mockMvc.perform(get(BASE_URL + "/logs/" + IdUtils.toExternalId(log.getId()))
                         .header("Authorization", "Bearer " + testToken)
                         .header(HEADER_TENANT_ID, testTenantId))
                 .andExpect(status().isOk())

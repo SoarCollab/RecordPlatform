@@ -5,9 +5,11 @@ import cn.flying.common.constant.FileKeywordMode;
 import cn.flying.common.constant.Result;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
+import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.BatchDownloadMetricsReportVO;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.FileVO;
 import cn.flying.service.DownloadBatchMetricsService;
 import cn.flying.service.FileQueryService;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -65,7 +67,7 @@ public class FileRestController {
     @GetMapping("")
     @Operation(summary = "获取文件分页列表（REST）")
     @OperationLog(module = "文件操作", operationType = "查询", description = "获取文件分页列表（REST）")
-    public Result<Page<File>> getFiles(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
+    public Result<Page<FileVO>> getFiles(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
                                        @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer pageNum,
                                        @Parameter(description = "每页数量") @RequestParam(defaultValue = "10") Integer pageSize,
                                        @Parameter(description = "搜索关键词") @RequestParam(required = false) String keyword,
@@ -93,7 +95,10 @@ public class FileRestController {
                 toDate(startTime),
                 toDate(endTime)
         );
-        return Result.success(page);
+        // Convert Page<File> to Page<FileVO>
+        Page<FileVO> voPage = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        voPage.setRecords(page.getRecords().stream().map(FileController::toFileVO).toList());
+        return Result.success(voPage);
     }
 
     /**
@@ -158,9 +163,9 @@ public class FileRestController {
     @GetMapping("/hash/{fileHash}")
     @Operation(summary = "通过哈希查询文件详情（REST）")
     @OperationLog(module = "文件操作", operationType = "查询", description = "通过哈希查询文件详情（REST）")
-    public Result<File> getFileByHash(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
+    public Result<FileVO> getFileByHash(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
                                       @PathVariable String fileHash) {
-        return Result.success(fileQueryService.getFileByHash(userId, fileHash));
+        return Result.success(FileController.toFileVO(fileQueryService.getFileByHash(userId, fileHash)));
     }
 
     /**

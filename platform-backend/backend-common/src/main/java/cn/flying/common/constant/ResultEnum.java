@@ -133,6 +133,8 @@ public enum ResultEnum implements Serializable {
     SHARE_CANCELLED(50011, "分享链接已被取消"),
     /** 分享已过期 */
     SHARE_EXPIRED(50012, "分享已过期"),
+    /** 分享不存在 */
+    SHARE_NOT_FOUND(50017, "分享不存在"),
     /** 配额超限 */
     QUOTA_EXCEEDED(50013, "配额超限"),
     /** 版本链不存在 */

@@ -403,11 +403,11 @@ public class BsnBesuAdapter implements BlockChainAdapter {
     }
 
     @Override
-    public ChainReceipt cancelShare(String shareCode) {
+    public ChainReceipt cancelShare(String shareCode, String uploader) {
         try {
             org.web3j.abi.datatypes.Function abiFunction = new org.web3j.abi.datatypes.Function(
                     "cancelShare",
-                    Collections.singletonList(new Utf8String(shareCode)),
+                    java.util.Arrays.asList(new Utf8String(shareCode), new Utf8String(uploader)),
                     Collections.emptyList()
             );
 

@@ -145,12 +145,14 @@ contract Sharing is Storage {
         );
     }
 
-    // 取消分享
-    function cancelShare(string memory shareCode) public {
+    // 取消分享（需验证调用者身份）
+    function cancelShare(string memory shareCode, string memory uploader) public {
         require(bytes(shareCode).length == 6, "Invalid share code length");
+        require(bytes(uploader).length > 0, "Uploader cannot be empty");
 
         ShareInfo storage shareInfo = shareInfos[shareCode];
         require(shareInfo.isValid, "Share not found or already cancelled");
+        require(keccak256(bytes(shareInfo.uploader)) == keccak256(bytes(uploader)), "Only uploader can cancel");
 
         // 设置分享为无效
         shareInfo.isValid = false;

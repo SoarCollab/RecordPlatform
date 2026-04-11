@@ -1,14 +1,19 @@
 package cn.flying.controller;
 
+import cn.flying.common.util.IdUtils;
+import cn.flying.common.util.SecureIdCodec;
+import cn.flying.common.util.SnowflakeIdGenerator;
 import cn.flying.dao.dto.SysOperationLog;
 import cn.flying.dao.vo.audit.AuditLogVO;
 import cn.flying.service.SysAuditService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
@@ -51,6 +56,15 @@ public class SysAuditControllerTest {
     @MockitoBean
     private cn.flying.common.util.JwtUtils jwtUtils;
 
+    @BeforeEach
+    void setUp() {
+        ReflectionTestUtils.setField(
+                IdUtils.class,
+                "secureIdCodec",
+                new SecureIdCodec("SecureTestKey4UnitTests2026XyZ789AbCdEfGhIjKlMnOpQrStUvWxYz1234")
+        );
+    }
+
     @Test
     @DisplayName("should serialize operationTime in SysOperationLog correctly")
     @WithMockUser(username = "admin", roles = {"ADMIN"})
@@ -64,11 +78,12 @@ public class SysAuditControllerTest {
         log.setOperationType("test");
         log.setStatus(0);
 
+        String externalId = IdUtils.toExternalId(1L);
         when(auditService.getLogDetail(1L)).thenReturn(log);
         when(distributedRateLimiter.tryAcquireWithBlock(anyString(), anyString(), anyInt(), anyInt(), anyInt()))
                 .thenReturn(RateLimitResult.ALLOWED);
 
-        mockMvc.perform(get("/api/v1/system/audit/logs/1")
+        mockMvc.perform(get("/api/v1/system/audit/logs/" + externalId)
                 .header("X-Tenant-ID", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
