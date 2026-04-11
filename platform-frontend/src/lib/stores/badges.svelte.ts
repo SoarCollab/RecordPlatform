@@ -66,7 +66,7 @@ async function fetchBadgeCounts() {
 
     lastFetched = new Date();
   } catch (err) {
-    console.error('fetchBadgeCounts failed:', err);
+    console.error("fetchBadgeCounts failed:", err);
   } finally {
     isLoading = false;
   }
