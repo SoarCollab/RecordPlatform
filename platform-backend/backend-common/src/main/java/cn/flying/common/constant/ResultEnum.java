@@ -26,6 +26,7 @@ public enum ResultEnum implements Serializable {
     /** 操作成功 */
     @Schema(description = "操作成功")
     SUCCESS(200, "操作成功"),
+    // TODO: FAIL 的 code=500 与 HTTP 状态码冲突，应迁移到 10000+ 范围（影响 60+ 处调用，需专项处理）
     /** 服务器内部错误 */
     @Schema(description = "服务器内部错误")
     FAIL(500, "服务器内部错误，请联系管理员"),
@@ -57,6 +58,8 @@ public enum ResultEnum implements Serializable {
     USER_HAS_EXISTED(20005, "用户已存在"),
     /** 账户已锁定 */
     USER_ACCOUNT_LOCKED(20006, "登录失败次数过多，账户已被临时锁定，请稍后重试"),
+    /** 验证码错误 */
+    AUTH_CODE_ERROR(20010, "验证码错误"),
 
     /* ==================== 外部服务错误：30000-39999 ==================== */
     /** 合约调用失败 */
@@ -115,8 +118,6 @@ public enum ResultEnum implements Serializable {
     DATA_IS_WRONG(50002, "数据有误"),
     /** 数据已存在 */
     DATA_ALREADY_EXISTED(50003, "数据已存在"),
-    /** 验证码错误 */
-    AUTH_CODE_ERROR(50004, "验证码错误"),
     /** 文件上传失败 */
     FILE_UPLOAD_ERROR(50005, "文件上传失败"),
     /** 文件下载失败 */

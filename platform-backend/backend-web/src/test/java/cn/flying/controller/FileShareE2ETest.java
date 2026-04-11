@@ -34,7 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class FileShareE2ETest extends BaseControllerIntegrationTest {
 
     private static final String FILES_URL = "/api/v1/files";
-    private static final String SHARE_URL = "/api/v1/share";
+    private static final String SHARE_URL = "/api/v1/shares";
 
     @Autowired
     private FileMapper fileMapper;

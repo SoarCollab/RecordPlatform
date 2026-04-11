@@ -80,12 +80,7 @@ public class ConversationController {
             @Parameter(description = "会话ID") @PathVariable String id,
             @Parameter(description = "消息页码") @RequestParam(defaultValue = "1") Integer pageNum,
             @Parameter(description = "消息每页数量") @RequestParam(defaultValue = "50") Integer pageSize) {
-        Long conversationId;
-        try {
-            conversationId = IdUtils.fromExternalId(id);
-        } catch (Exception e) {
-            throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
-        }
+        Long conversationId = parseConversationId(id);
         ConversationDetailVO result = conversationService.getConversationDetail(userId, conversationId, pageNum, pageSize);
         return Result.success(result);
     }
@@ -118,12 +113,7 @@ public class ConversationController {
     public Result<String> updateReadStatus(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Parameter(description = "会话ID") @PathVariable String id) {
-        Long conversationId;
-        try {
-            conversationId = IdUtils.fromExternalId(id);
-        } catch (Exception e) {
-            throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
-        }
+        Long conversationId = parseConversationId(id);
         messageService.markAsRead(userId, conversationId);
         return Result.success("已标记为已读");
     }
@@ -141,13 +131,24 @@ public class ConversationController {
     public Result<String> delete(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Parameter(description = "会话ID") @PathVariable String id) {
-        Long conversationId;
-        try {
-            conversationId = IdUtils.fromExternalId(id);
-        } catch (Exception e) {
-            throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
-        }
+        Long conversationId = parseConversationId(id);
         conversationService.deleteConversation(userId, conversationId);
         return Result.success("删除成功");
+    }
+
+    /**
+     * 解析会话外部 ID 为内部 ID。
+     * IdUtils.fromExternalId 在无效输入时返回 null，不抛异常。
+     *
+     * @param externalId 会话外部 ID
+     * @return 会话内部 ID
+     * @throws GeneralException 如果外部 ID 无效
+     */
+    private Long parseConversationId(String externalId) {
+        Long id = IdUtils.fromExternalId(externalId);
+        if (id == null) {
+            throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
+        }
+        return id;
     }
 }

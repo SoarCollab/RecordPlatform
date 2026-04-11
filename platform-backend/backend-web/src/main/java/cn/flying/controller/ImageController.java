@@ -79,8 +79,7 @@ public class ImageController {
     @Operation(summary = "上传图片")
     @OperationLog(module = "图片上传模块", operationType = "上传", description = "上传图片")
     public Result<String> uploadImage(@Schema(description = "图片文件") @RequestParam("file") MultipartFile file,
-                                        @RequestAttribute(Const.ATTR_USER_ID) Long userId,
-                                        HttpServletResponse response) throws IOException {
+                                        @RequestAttribute(Const.ATTR_USER_ID) Long userId) throws IOException {
         if (file.isEmpty()) {
             throw new GeneralException(ResultEnum.FILE_EMPTY);
         } else if (file.getSize() > 5* 1024*1024) {
@@ -92,7 +91,6 @@ public class ImageController {
             log.info("图像文件上传成功，大小:{}", file.getSize());
             return Result.success(fileName);
         } else {
-            response.setStatus(400);
             throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR);
         }
     }

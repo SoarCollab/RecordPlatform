@@ -82,7 +82,7 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
             throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
         }
 
-        Page<Message> messagePage = new Page<>(pageNum, pageSize);
+        Page<Message> messagePage = new Page<>(pageNum, Math.min(pageSize, 100));
         IPage<MessageVO> messages = messageService.getMessages(userId, conversationId, messagePage);
 
         ConversationVO conversationVO = convertToVO(conversation, userId);

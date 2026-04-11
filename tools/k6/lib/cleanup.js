@@ -72,7 +72,7 @@ function deleteFiles(config, token, identifiers) {
 
   const query = identifiers.map((identifier) => `identifiers=${encodeURIComponent(identifier)}`).join('&');
   const tags = buildRequestTags('teardown_cleanup', 'files_delete', 'DELETE');
-  const response = del(`${config.baseUrl}/files/delete?${query}`, {
+  const response = del(`${config.baseUrl}/files?${query}`, {
     headers: buildAuthHeaders(config.tenantId, token),
     tags,
   });

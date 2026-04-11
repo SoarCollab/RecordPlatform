@@ -1,6 +1,7 @@
 package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
+import cn.flying.common.constant.Result;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.JwtUtils;
 import cn.flying.service.sse.SseEmitterManager;
@@ -88,15 +89,15 @@ public class SseController {
     @OperationLog(module = "实时推送", operationType = "查询", description = "获取SSE连接状态")
     @GetMapping("/status")
     @Operation(summary = "获取SSE连接状态")
-    public Map<String, Object> getStatus(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
-                                         @RequestAttribute(Const.ATTR_TENANT_ID) Long tenantId) {
+    public Result<Map<String, Object>> getStatus(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
+                                                 @RequestAttribute(Const.ATTR_TENANT_ID) Long tenantId) {
         boolean online = sseEmitterManager.isOnline(tenantId, userId);
         int totalOnline = sseEmitterManager.getOnlineCount(tenantId);
         int userConnections = sseEmitterManager.getUserConnectionCount(tenantId, userId);
-        return Map.of(
+        return Result.success(Map.of(
                 "connected", online,
                 "connectionCount", userConnections,
                 "onlineCount", totalOnline
-        );
+        ));
     }
 }

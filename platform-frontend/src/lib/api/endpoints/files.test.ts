@@ -186,7 +186,7 @@ describe("files endpoints", () => {
       "/shares/code1",
       expect.objectContaining({ shareCode: "code1" }),
     );
-    expect(clientMocks.api.delete).toHaveBeenNthCalledWith(1, "/files/delete", {
+    expect(clientMocks.api.delete).toHaveBeenNthCalledWith(1, "/files", {
       params: { identifiers: ["file-id"] },
     });
     expect(clientMocks.api.delete).toHaveBeenNthCalledWith(

@@ -38,7 +38,7 @@ Based on `SecurityConfiguration`:
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`
 - `GET /api/v1/images/download/images/**`
-- `GET /api/v1/share/**`
+- `GET /api/v1/shares/**`
 - `GET /api/v1/sse/connect` (still requires short-lived token)
 
 ### 3) SSE dual-token flow
@@ -97,8 +97,8 @@ Based on `SecurityConfiguration`:
 | GET | `/api/v1/files/hash/{fileHash}/decrypt-info` | Decrypt info (authenticated) |
 | GET | `/api/v1/shares/{shareCode}/files` | Public share file list (public) |
 | GET | `/api/v1/files/shares` | My share list |
-| DELETE | `/api/v1/files/delete` | Batch delete (hash/id) |
-| DELETE | `/api/v1/files/deleteById` | Delete by file ID |
+| DELETE | `/api/v1/files` | Batch delete (hash/id) |
+| DELETE | `/api/v1/files/{id}` | Delete by file ID (admin) |
 | POST | `/api/v1/shares` | Create share |
 | PATCH | `/api/v1/shares/{shareCode}` | Update share |
 | DELETE | `/api/v1/files/share/{shareCode}` | Cancel share |
@@ -144,11 +144,11 @@ Based on `SecurityConfiguration`:
 | POST | `/api/v1/admin/quota/rollout/audits` | Upsert quota rollout audit record (admin) |
 | GET | `/api/v1/admin/quota/rollout/audits` | Query quota rollout audit record (admin, params: `batchId`, `tenantId`) |
 
-### Public Share Page (`/api/v1/share`)
+### Public Share Page (`/api/v1/shares`)
 
 | Method | Endpoint | Description |
 |------|------|------|
-| GET | `/api/v1/share/{shareCode}/info` | Get share info (public) |
+| GET | `/api/v1/shares/{shareCode}/info` | Get share info (public) |
 
 ### Images (`/api/v1/images`)
 

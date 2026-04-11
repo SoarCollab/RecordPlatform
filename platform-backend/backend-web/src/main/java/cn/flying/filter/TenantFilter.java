@@ -146,7 +146,7 @@ public class TenantFilter extends OncePerRequestFilter {
         if (uri == null) {
             return false;
         }
-        if (uri.startsWith("/api/v1/share/")) {
+        if (uri.startsWith("/api/v1/shares/") && uri.endsWith("/info")) {
             return true;
         }
         if (uri.matches("^/api/v1/shares/[^/]+/files/?$")) {

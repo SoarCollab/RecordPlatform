@@ -190,9 +190,10 @@ class SseControllerIntegrationTest extends BaseControllerIntegrationTest {
         void getStatus_shouldReturnConnectionStatus() throws Exception {
             performGet(BASE_URL + "/status")
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.connected").value(true))
-                    .andExpect(jsonPath("$.connectionCount").value(2))
-                    .andExpect(jsonPath("$.onlineCount").value(5));
+                    .andExpect(jsonPath("$.code").value(200))
+                    .andExpect(jsonPath("$.data.connected").value(true))
+                    .andExpect(jsonPath("$.data.connectionCount").value(2))
+                    .andExpect(jsonPath("$.data.onlineCount").value(5));
 
             verify(sseEmitterManager).isOnline(testTenantId, testUserId);
             verify(sseEmitterManager).getOnlineCount(testTenantId);
@@ -207,8 +208,9 @@ class SseControllerIntegrationTest extends BaseControllerIntegrationTest {
 
             performGet(BASE_URL + "/status")
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.connected").value(false))
-                    .andExpect(jsonPath("$.connectionCount").value(0));
+                    .andExpect(jsonPath("$.code").value(200))
+                    .andExpect(jsonPath("$.data.connected").value(false))
+                    .andExpect(jsonPath("$.data.connectionCount").value(0));
         }
 
         @Test

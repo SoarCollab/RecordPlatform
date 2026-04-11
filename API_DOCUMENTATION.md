@@ -80,7 +80,7 @@ POST /api/v1/auth/login
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks` - Public share download
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info` - Public share decrypt metadata
 - `GET /api/v1/images/download/images/**` - Download images
-- `GET /api/v1/share/{shareCode}/info` - Get share basic info (public)
+- `GET /api/v1/shares/{shareCode}/info` - Get share basic info (public)
 - `GET /api/v1/sse/connect?token=...` - SSE connect entry (short-lived token required)
 
 `POST /api/v1/auth/logout` is also handled by Spring Security (non-controller endpoint) and requires authenticated context.
@@ -898,7 +898,7 @@ GET /api/v1/files
 Delete files by their hash values or IDs.
 
 ```
-DELETE /api/v1/files/delete
+DELETE /api/v1/files
 ```
 
 **Authentication**: Bearer Token
@@ -911,21 +911,21 @@ DELETE /api/v1/files/delete
 
 ---
 
-### 4.4 Delete Files by ID (Admin)
+### 4.4 Delete File by ID (Admin)
 
-Delete files by their IDs (admin only).
+Delete a file by its ID (admin only).
 
 ```
-DELETE /api/v1/files/deleteById
+DELETE /api/v1/files/{id}
 ```
 
 **Authentication**: Bearer Token + `file:admin` permission
 
-**Query Parameters**:
+**Path Parameters**:
 
-| Parameter | Type     | Required | Description                |
-| --------- | -------- | -------- | -------------------------- |
-| idList    | string[] | Yes      | List of file IDs to delete |
+| Parameter | Type   | Required | Description        |
+| --------- | ------ | -------- | ------------------ |
+| id        | string | Yes      | File ID to delete  |
 
 ---
 

@@ -63,10 +63,10 @@ class TenantFilterTest {
     }
 
     @Test
-    @DisplayName("should allow share endpoint without tenant header")
+    @DisplayName("should allow share info endpoint without tenant header")
     void shouldAllowShareEndpointWithoutTenantHeader() throws ServletException, IOException {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/share/abc");
-        request.setServletPath("/api/v1/share/abc");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/shares/abc/info");
+        request.setServletPath("/api/v1/shares/abc/info");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         filter.doFilterInternal(request, response, filterChain);
@@ -98,8 +98,8 @@ class TenantFilterTest {
     @Test
     @DisplayName("should set tenant context for whitelisted path when tenant header present")
     void shouldSetTenantContextForWhitelistedPathWhenTenantHeaderPresent() throws ServletException, IOException {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/share/abc");
-        request.setServletPath("/api/v1/share/abc");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/shares/abc/info");
+        request.setServletPath("/api/v1/shares/abc/info");
         request.addHeader("X-Tenant-ID", "12");
         MockHttpServletResponse response = new MockHttpServletResponse();
 

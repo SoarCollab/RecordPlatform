@@ -53,6 +53,10 @@ public class Conversation implements Serializable {
     @Schema(description = "更新时间")
     private Date updateTime;
 
+    @TableLogic
+    @Schema(description = "逻辑删除标记 0=正常 1=已删除")
+    private Integer deleted;
+
     /**
      * 获取对方用户ID
      */

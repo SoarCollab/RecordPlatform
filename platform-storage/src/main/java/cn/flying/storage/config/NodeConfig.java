@@ -1,6 +1,7 @@
 package cn.flying.storage.config;
 
 import lombok.Data;
+import lombok.ToString;
 
 /**
  * 单个 S3 兼容存储物理节点配置
@@ -18,10 +19,12 @@ public class NodeConfig {
     /**
      * 访问密钥
      */
+    @ToString.Exclude
     private String accessKey;
     /**
      * 私有密钥
      */
+    @ToString.Exclude
     private String secretKey;
 
     // ===== 新增：故障域相关配置 =====
