@@ -1,11 +1,12 @@
 package cn.flying.controller;
 
+import cn.flying.common.util.IdUtils;
 import cn.flying.dao.entity.IntegrityAlert;
-import cn.flying.dao.mapper.IntegrityAlertMapper;
 import cn.flying.dao.vo.file.IntegrityCheckStatsVO;
 import cn.flying.dao.vo.file.ResolveAlertVO;
 import cn.flying.service.integrity.IntegrityCheckService;
 import cn.flying.test.support.BaseControllerIntegrationTest;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -15,8 +16,6 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
@@ -36,9 +35,6 @@ class IntegrityAlertControllerIT extends BaseControllerIntegrationTest {
 
     @MockitoBean
     private IntegrityCheckService integrityCheckService;
-
-    @MockitoBean
-    private IntegrityAlertMapper integrityAlertMapper;
 
     @BeforeEach
     void setUp() {
@@ -76,8 +72,8 @@ class IntegrityAlertControllerIT extends BaseControllerIntegrationTest {
         @Test
         @DisplayName("should return empty page initially")
         void shouldReturnEmptyPage() throws Exception {
-            when(integrityAlertMapper.selectPage(any(), any()))
-                    .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(1, 20));
+            when(integrityCheckService.listAlerts(eq(1L), any(), any(), any()))
+                    .thenReturn(new Page<>(1, 20));
 
             performGet(BASE_URL + "?pageNum=1&pageSize=20")
                     .andExpect(status().isOk())
@@ -87,8 +83,8 @@ class IntegrityAlertControllerIT extends BaseControllerIntegrationTest {
         @Test
         @DisplayName("should support status filter")
         void shouldSupportStatusFilter() throws Exception {
-            when(integrityAlertMapper.selectPage(any(), any()))
-                    .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(1, 20));
+            when(integrityCheckService.listAlerts(eq(1L), eq(0), any(), any()))
+                    .thenReturn(new Page<>(1, 20));
 
             performGet(BASE_URL + "?status=0&pageNum=1&pageSize=20")
                     .andExpect(status().isOk())
@@ -98,8 +94,8 @@ class IntegrityAlertControllerIT extends BaseControllerIntegrationTest {
         @Test
         @DisplayName("should support alertType filter")
         void shouldSupportAlertTypeFilter() throws Exception {
-            when(integrityAlertMapper.selectPage(any(), any()))
-                    .thenReturn(new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(1, 20));
+            when(integrityCheckService.listAlerts(eq(1L), any(), eq("HASH_MISMATCH"), any()))
+                    .thenReturn(new Page<>(1, 20));
 
             performGet(BASE_URL + "?alertType=HASH_MISMATCH&pageNum=1&pageSize=20")
                     .andExpect(status().isOk())
@@ -135,7 +131,7 @@ class IntegrityAlertControllerIT extends BaseControllerIntegrationTest {
         void shouldAcknowledgeAlert() throws Exception {
             doNothing().when(integrityCheckService).acknowledgeAlert(eq(1L), eq(100L));
 
-            performPut(BASE_URL + "/1/acknowledge", null)
+            performPut(BASE_URL + "/" + IdUtils.toExternalId(1L) + "/acknowledge", null)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data").value("Alert acknowledged"));
@@ -155,7 +151,7 @@ class IntegrityAlertControllerIT extends BaseControllerIntegrationTest {
 
             ResolveAlertVO body = new ResolveAlertVO("File re-uploaded");
 
-            performPut(BASE_URL + "/1/resolve", body)
+            performPut(BASE_URL + "/" + IdUtils.toExternalId(1L) + "/resolve", body)
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data").value("Alert resolved"));
