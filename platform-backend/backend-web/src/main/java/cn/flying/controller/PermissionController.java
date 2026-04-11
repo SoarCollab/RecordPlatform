@@ -3,8 +3,10 @@ package cn.flying.controller;
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.entity.SysPermission;
+import cn.flying.dao.vo.system.SysPermissionVO;
 import cn.flying.service.PermissionService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -51,9 +53,11 @@ public class PermissionController {
     @OperationLog(module = "权限管理", operationType = "查询", description = "getPermissionTree")
     @GetMapping
     @Operation(summary = "获取权限树")
-    public Result<List<SysPermission>> getPermissionTree() {
+    public Result<List<SysPermissionVO>> getPermissionTree() {
         Long tenantId = SecurityUtils.getTenantId();
-        return Result.success(permissionService.getPermissionTree(tenantId));
+        List<SysPermissionVO> voList = permissionService.getPermissionTree(tenantId)
+                .stream().map(PermissionController::toPermissionVO).toList();
+        return Result.success(voList);
     }
 
     /**
@@ -67,14 +71,15 @@ public class PermissionController {
     @GetMapping("/list")
     @Operation(summary = "获取权限列表（分页）")
     @OperationLog(module = "权限管理", operationType = "查询", description = "获取权限列表")
-    public Result<IPage<SysPermission>> listPermissions(
+    public Result<IPage<SysPermissionVO>> listPermissions(
             @Parameter(description = "模块名") @RequestParam(required = false) String module,
             @Parameter(description = "页码") @RequestParam(defaultValue = "1") Integer pageNum,
             @Parameter(description = "每页数量") @RequestParam(defaultValue = "20") Integer pageSize) {
         Long tenantId = SecurityUtils.getTenantId();
         Page<SysPermission> page = new Page<>(pageNum, pageSize);
         IPage<SysPermission> result = permissionService.listPermissions(tenantId, module, page);
-        return Result.success(result);
+        IPage<SysPermissionVO> voPage = result.convert(PermissionController::toPermissionVO);
+        return Result.success(voPage);
     }
 
     /**
@@ -99,7 +104,7 @@ public class PermissionController {
     @PostMapping
     @Operation(summary = "创建权限定义")
     @OperationLog(module = "权限管理", operationType = "新增", description = "创建权限定义")
-    public Result<SysPermission> createPermission(@Valid @RequestBody PermissionCreateVO vo) {
+    public Result<SysPermissionVO> createPermission(@Valid @RequestBody PermissionCreateVO vo) {
         SysPermission permission = new SysPermission()
                 .setCode(vo.getCode())
                 .setName(vo.getName())
@@ -109,7 +114,7 @@ public class PermissionController {
                 .setStatus(1);
 
         permissionService.createPermission(permission);
-        return Result.success(permission);
+        return Result.success(toPermissionVO(permission));
     }
 
     /**
@@ -122,7 +127,7 @@ public class PermissionController {
     @PutMapping("/{id}")
     @Operation(summary = "更新权限定义")
     @OperationLog(module = "权限管理", operationType = "修改", description = "更新权限定义")
-    public Result<SysPermission> updatePermission(
+    public Result<SysPermissionVO> updatePermission(
             @Parameter(description = "权限ID") @PathVariable String id,
             @Valid @RequestBody PermissionUpdateVO vo) {
 
@@ -131,7 +136,7 @@ public class PermissionController {
         if (permission == null) {
             return Result.error(ResultEnum.RESULT_DATA_NONE, null);
         }
-        return Result.success(permission);
+        return Result.success(toPermissionVO(permission));
     }
 
     /**
@@ -196,5 +201,25 @@ public class PermissionController {
         private String name;
         private String description;
         private Integer status;
+    }
+
+    /**
+     * Convert SysPermission entity to SysPermissionVO, excluding tenantId.
+     */
+    private static SysPermissionVO toPermissionVO(SysPermission p) {
+        if (p == null) {
+            return null;
+        }
+        return new SysPermissionVO(
+                IdUtils.toExternalId(p.getId()),
+                p.getCode(),
+                p.getName(),
+                p.getModule(),
+                p.getAction(),
+                p.getDescription(),
+                p.getStatus(),
+                p.getCreateTime(),
+                p.getUpdateTime()
+        );
     }
 }

@@ -2,8 +2,12 @@ package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
+import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.Const;
+import cn.flying.common.util.IdUtils;
 import cn.flying.dao.entity.IntegrityAlert;
+import cn.flying.dao.vo.file.IntegrityAlertVO;
 import cn.flying.dao.vo.file.IntegrityCheckStatsVO;
 import cn.flying.dao.vo.file.ResolveAlertVO;
 import cn.flying.service.integrity.IntegrityCheckService;
@@ -45,7 +49,7 @@ public class IntegrityAlertController {
     @GetMapping
     @Operation(summary = "List integrity alerts (paginated)")
     @OperationLog(module = "integrity", operationType = "query", description = "List integrity alerts")
-    public Result<IPage<IntegrityAlert>> listAlerts(
+    public Result<IPage<IntegrityAlertVO>> listAlerts(
             @RequestAttribute(Const.ATTR_TENANT_ID) Long tenantId,
             @Parameter(description = "Alert status filter") @RequestParam(required = false) Integer status,
             @Parameter(description = "Alert type filter") @RequestParam(required = false) String alertType,
@@ -54,7 +58,8 @@ public class IntegrityAlertController {
 
         Page<IntegrityAlert> page = new Page<>(pageNum, pageSize);
         IPage<IntegrityAlert> result = integrityCheckService.listAlerts(tenantId, status, alertType, page);
-        return Result.success(result);
+        IPage<IntegrityAlertVO> voPage = result.convert(IntegrityAlertController::toAlertVO);
+        return Result.success(voPage);
     }
 
     /**
@@ -76,9 +81,13 @@ public class IntegrityAlertController {
     @Operation(summary = "Acknowledge an integrity alert")
     @OperationLog(module = "integrity", operationType = "update", description = "Acknowledge integrity alert")
     public Result<String> acknowledgeAlert(
-            @Parameter(description = "Alert ID") @PathVariable Long id,
+            @Parameter(description = "Alert ID") @PathVariable String id,
             @RequestAttribute(Const.ATTR_USER_ID) Long userId) {
-        integrityCheckService.acknowledgeAlert(id, userId);
+        Long alertId = IdUtils.fromExternalId(id);
+        if (alertId == null) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID);
+        }
+        integrityCheckService.acknowledgeAlert(alertId, userId);
         return Result.success("Alert acknowledged");
     }
 
@@ -89,10 +98,36 @@ public class IntegrityAlertController {
     @Operation(summary = "Resolve an integrity alert")
     @OperationLog(module = "integrity", operationType = "update", description = "Resolve integrity alert")
     public Result<String> resolveAlert(
-            @Parameter(description = "Alert ID") @PathVariable Long id,
+            @Parameter(description = "Alert ID") @PathVariable String id,
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @RequestBody @Valid ResolveAlertVO request) {
-        integrityCheckService.resolveAlert(id, userId, request.note());
+        Long alertId = IdUtils.fromExternalId(id);
+        if (alertId == null) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID);
+        }
+        integrityCheckService.resolveAlert(alertId, userId, request.note());
         return Result.success("Alert resolved");
+    }
+
+    /**
+     * Convert IntegrityAlert entity to IntegrityAlertVO, using external IDs.
+     */
+    private static IntegrityAlertVO toAlertVO(IntegrityAlert alert) {
+        if (alert == null) {
+            return null;
+        }
+        return new IntegrityAlertVO(
+                IdUtils.toExternalId(alert.getId()),
+                IdUtils.toExternalId(alert.getFileId()),
+                alert.getFileHash(),
+                alert.getActualHash(),
+                alert.getChainHash(),
+                alert.getAlertType(),
+                alert.getStatus(),
+                IdUtils.toExternalId(alert.getResolvedBy()),
+                alert.getResolvedAt(),
+                alert.getNote(),
+                alert.getCreateTime()
+        );
     }
 }

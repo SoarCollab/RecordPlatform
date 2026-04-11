@@ -95,10 +95,11 @@ public interface BlockChainAdapter {
      * 取消分享
      *
      * @param shareCode 分享码
+     * @param uploader  上传者标识（用于身份验证）
      * @return 交易回执
      * @throws ChainException 链操作异常
      */
-    ChainReceipt cancelShare(String shareCode);
+    ChainReceipt cancelShare(String shareCode, String uploader);
 
     /**
      * 获取用户的所有分享码列表

@@ -1,9 +1,12 @@
 package cn.flying.controller;
 
 import cn.flying.common.constant.Result;
+import cn.flying.common.util.IdUtils;
+import cn.flying.common.util.SecureIdCodec;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.BatchDownloadMetricsReportVO;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.FileVO;
 import cn.flying.service.DownloadBatchMetricsService;
 import cn.flying.service.FileQueryService;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -46,6 +49,11 @@ class FileRestControllerTest {
      */
     @BeforeEach
     void setUp() {
+        ReflectionTestUtils.setField(
+                IdUtils.class,
+                "secureIdCodec",
+                new SecureIdCodec("SecureTestKey4UnitTests2026XyZ789AbCdEfGhIjKlMnOpQrStUvWxYz1234")
+        );
         controller = new FileRestController(fileQueryService, downloadBatchMetricsService);
     }
 
@@ -63,8 +71,8 @@ class FileRestControllerTest {
         when(fileQueryService.getFileDecryptInfo(userId, fileHash))
                 .thenReturn(new FileDecryptInfoVO("k", "n", 1L, "text/plain", 1, fileHash));
 
-        Result<Page<File>> pageResult = controller.getFiles(userId, 1, 10, null, null, null, null, null);
-        Result<File> byHashResult = controller.getFileByHash(userId, fileHash);
+        Result<Page<FileVO>> pageResult = controller.getFiles(userId, 1, 10, null, null, null, null, null);
+        Result<FileVO> byHashResult = controller.getFileByHash(userId, fileHash);
         Result<List<String>> addressResult = controller.getFileAddresses(userId, fileHash);
         Result<List<byte[]>> chunksResult = controller.getFileChunks(userId, fileHash);
         Result<FileDecryptInfoVO> decryptInfoResult = controller.getFileDecryptInfo(userId, fileHash);
@@ -89,7 +97,7 @@ class FileRestControllerTest {
         OffsetDateTime startTime = OffsetDateTime.of(2026, 2, 1, 0, 0, 0, 0, ZoneOffset.UTC);
         OffsetDateTime endTime = OffsetDateTime.of(2026, 2, 10, 0, 0, 0, 0, ZoneOffset.UTC);
 
-        Result<Page<File>> result = controller.getFiles(
+        Result<Page<FileVO>> result = controller.getFiles(
                 userId,
                 0,
                 1000,
@@ -121,7 +129,7 @@ class FileRestControllerTest {
     void shouldFallbackKeywordModeToFuzzyWhenBlank() {
         Long userId = 90L;
 
-        Result<Page<File>> result = controller.getFiles(
+        Result<Page<FileVO>> result = controller.getFiles(
                 userId,
                 1,
                 10,

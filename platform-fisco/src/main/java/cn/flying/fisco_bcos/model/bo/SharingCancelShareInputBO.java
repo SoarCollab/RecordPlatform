@@ -16,10 +16,12 @@ public class SharingCancelShareInputBO implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private String shareCode;
+    private String uploader;
 
     public List<Object> toArgs() {
         List<Object> args = new ArrayList<>();
         args.add(shareCode);
+        args.add(uploader);
         return args;
     }
 }

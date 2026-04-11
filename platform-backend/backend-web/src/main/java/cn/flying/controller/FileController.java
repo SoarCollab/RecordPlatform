@@ -8,6 +8,7 @@ import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.CreateVersionVO;
 import cn.flying.dao.vo.file.FileProvenanceVO;
 import cn.flying.dao.vo.file.FileShareVO;
+import cn.flying.dao.vo.file.FileVO;
 import cn.flying.dao.vo.file.FileVersionVO;
 import cn.flying.dao.vo.file.ShareAccessLogVO;
 import cn.flying.dao.vo.file.ShareAccessStatsVO;
@@ -70,12 +71,12 @@ public class FileController {
     @GetMapping("/{id}")
     @Operation(summary = "根据文件ID获取文件详情")
     @OperationLog(module = "文件操作", operationType = "查询", description = "根据ID获取文件详情")
-    public Result<File> getFileById(
+    public Result<FileVO> getFileById(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
             @Schema(description = "文件ID") @PathVariable String id) {
         Long fileId = IdUtils.fromExternalId(id);
         File file = fileQueryService.getFileById(userId, fileId);
-        return Result.success(file);
+        return Result.success(toFileVO(file));
     }
 
     /**
@@ -258,5 +259,33 @@ public class FileController {
                 "versionGroupId", IdUtils.toExternalId(newVersion.getVersionGroupId())
         );
         return Result.success(result);
+    }
+
+    /**
+     * Convert File entity to FileVO, mapping internal IDs to external IDs.
+     */
+    static FileVO toFileVO(File file) {
+        if (file == null) {
+            return null;
+        }
+        return new FileVO(
+                IdUtils.toExternalId(file.getId()),
+                file.getFileName(),
+                file.getClassification(),
+                file.getFileParam(),
+                file.getFileHash(),
+                file.getTransactionHash(),
+                file.getStatus(),
+                file.getFileSize(),
+                file.getContentType(),
+                file.getVersion(),
+                file.getIsLatest(),
+                IdUtils.toExternalId(file.getVersionGroupId()),
+                IdUtils.toExternalId(file.getParentVersionId()),
+                file.getOwnerName(),
+                file.getOriginOwnerName(),
+                file.getSharedFromUserName(),
+                file.getCreateTime()
+        );
     }
 }

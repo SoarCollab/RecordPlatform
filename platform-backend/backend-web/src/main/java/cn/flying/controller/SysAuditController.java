@@ -2,7 +2,11 @@ package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
+import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
+import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.SysOperationLog;
+import cn.flying.dao.vo.SysOperationLogVO;
 import cn.flying.dao.vo.audit.AuditConfigVO;
 import cn.flying.dao.vo.audit.AuditLogQueryVO;
 import cn.flying.dao.vo.audit.AuditLogVO;
@@ -106,8 +110,13 @@ public class SysAuditController {
     @GetMapping("/logs/{id}")
     @Operation(summary = "获取操作日志详情")
     @OperationLog(module = "系统审计", operationType = "查询", description = "获取操作日志详情")
-    public Result<SysOperationLog> getLogDetail(@PathVariable Long id) {
-        return Result.success(auditService.getLogDetail(id));
+    public Result<SysOperationLogVO> getLogDetail(@PathVariable String id) {
+        Long logId = IdUtils.fromExternalId(id);
+        if (logId == null) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID);
+        }
+        SysOperationLog log = auditService.getLogDetail(logId);
+        return Result.success(toLogVO(log));
     }
 
     /**
@@ -143,7 +152,7 @@ public class SysAuditController {
      */
     private AuditLogVO toAuditLogVO(SysOperationLog log) {
         return AuditLogVO.builder()
-                .id(String.valueOf(log.getId()))
+                .id(IdUtils.toExternalId(log.getId()))
                 .userId(log.getUserId())
                 .username(log.getUsername())
                 .action(log.getOperationType())
@@ -245,8 +254,10 @@ public class SysAuditController {
     @PostMapping("/sensitive/page")
     @Operation(summary = "获取敏感操作记录")
     @OperationLog(module = "系统审计", operationType = "查询", description = "获取敏感操作记录")
-    public Result<IPage<SysOperationLog>> getSensitiveOperations(@Valid @RequestBody AuditLogQueryVO queryVO) {
-        return Result.success(auditService.getSensitiveOperations(queryVO));
+    public Result<IPage<SysOperationLogVO>> getSensitiveOperations(@Valid @RequestBody AuditLogQueryVO queryVO) {
+        IPage<SysOperationLog> logPage = auditService.getSensitiveOperations(queryVO);
+        IPage<SysOperationLogVO> voPage = logPage.convert(this::toLogVO);
+        return Result.success(voPage);
     }
 
     /**
@@ -324,5 +335,33 @@ public class SysAuditController {
             @RequestParam(defaultValue = "180") Integer days,
             @RequestParam(defaultValue = "false") Boolean deleteAfterBackup) {
         return Result.success(auditService.backupLogs(days, deleteAfterBackup));
+    }
+
+    /**
+     * Convert SysOperationLog entity to SysOperationLogVO, using external ID.
+     */
+    private SysOperationLogVO toLogVO(SysOperationLog log) {
+        if (log == null) {
+            return null;
+        }
+        SysOperationLogVO vo = new SysOperationLogVO();
+        vo.setId(IdUtils.toExternalId(log.getId()));
+        vo.setModule(log.getModule());
+        vo.setOperationType(log.getOperationType());
+        vo.setDescription(log.getDescription());
+        vo.setMethod(log.getMethod());
+        vo.setRequestUrl(log.getRequestUrl());
+        vo.setRequestMethod(log.getRequestMethod());
+        vo.setRequestIp(log.getRequestIp());
+        vo.setStatus(log.getStatus());
+        vo.setUsername(log.getUsername());
+        vo.setUserId(log.getUserId());
+        vo.setOperationTime(log.getOperationTime() != null
+                ? DATETIME_FORMATTER.format(log.getOperationTime()) : null);
+        vo.setExecutionTime(log.getExecutionTime());
+        vo.setRequestParam(log.getRequestParam());
+        vo.setResponseResult(log.getResponseResult());
+        vo.setErrorMsg(log.getErrorMsg());
+        return vo;
     }
 }

@@ -266,7 +266,7 @@ public class BlockChainServiceImpl implements BlockChainService {
     @ApiDoc(value = "取消分享")
     public Result<Boolean> cancelShare(CancelShareRequest request) {
         try {
-            ChainReceipt receipt = chainAdapter.cancelShare(request.shareCode());
+            ChainReceipt receipt = chainAdapter.cancelShare(request.shareCode(), request.uploader());
 
             if (receipt.isSuccess()) {
                 fiscoMetrics.recordSuccess();

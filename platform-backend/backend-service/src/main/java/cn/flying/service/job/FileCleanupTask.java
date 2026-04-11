@@ -144,9 +144,16 @@ public class FileCleanupTask {
         String userId = String.valueOf(file.getUid());
         String fileHash = file.getFileHash();
 
-        // 检查是否有其他用户仍在使用该 fileHash（分享保存的文件）
+        // 检查是否有其他用户仍在使用该 fileHash（跨租户查询）
         // 如果有其他活跃引用，只删除数据库记录，保留存储和区块链数据
-        Long activeReferences = fileMapper.countActiveFilesByHash(fileHash, file.getId());
+        Long activeReferences;
+        boolean originalIgnoreIsolation = TenantContext.isIgnoreIsolation();
+        try {
+            TenantContext.setIgnoreIsolation(true);
+            activeReferences = fileMapper.countActiveFilesByHash(fileHash, file.getId());
+        } finally {
+            TenantContext.setIgnoreIsolation(originalIgnoreIsolation);
+        }
         boolean hasOtherReferences = activeReferences != null && activeReferences > 0;
 
         if (hasOtherReferences) {
