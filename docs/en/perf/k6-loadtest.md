@@ -91,7 +91,7 @@ bash tools/k6/run-local.sh --profile load --scenario chunk-upload --engine auto
 - `GET /api/v1/upload-sessions/{clientId}/progress`
 
 ### 4.4 Cleanup chain
-- `DELETE /api/v1/files/delete?identifiers=...`
+- `DELETE /api/v1/files?identifiers=...`
 - Teardown searches by `runId` and batch soft-deletes.
 
 ## 5. Gate Thresholds

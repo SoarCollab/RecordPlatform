@@ -202,7 +202,7 @@ sequenceDiagram
     Backend-->>Owner: 200 OK (ShareCode, ShareUrl)
 
     Note over Visitor, DB: Phase 2: Access Share
-    Visitor->>Backend: GET /api/v1/share/{shareCode}/info
+    Visitor->>Backend: GET /api/v1/shares/{shareCode}/info
     Backend->>DB: Query share record
     alt Database hit
         DB-->>Backend: Share info

@@ -31,7 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @TestPropertySource(properties = "test.context=ShareControllerIntegrationTest")
 class ShareControllerIntegrationTest extends BaseControllerIntegrationTest {
 
-    private static final String BASE_URL = "/api/v1/share";
+    private static final String BASE_URL = "/api/v1/shares";
 
     @Autowired
     private AccountMapper accountMapper;

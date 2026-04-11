@@ -91,7 +91,7 @@ bash tools/k6/run-local.sh --profile load --scenario chunk-upload --engine auto
 - `GET /api/v1/upload-sessions/{clientId}/progress`
 
 ### 4.4 清理链路
-- `DELETE /api/v1/files/delete?identifiers=...`
+- `DELETE /api/v1/files?identifiers=...`
 - teardown 会按 `runId` 搜索并批量逻辑删除。
 
 ## 5. 固定门禁阈值
