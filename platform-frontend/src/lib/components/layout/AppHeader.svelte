@@ -1,6 +1,6 @@
 <script lang="ts">
-  import AppIcon from "$components/ui/AppIcon.svelte";
-  import GlobalSearch from "$lib/components/GlobalSearch.svelte";
+  import { AppIcon } from "$components/ui/app-icon";
+  import GlobalSearch from "$components/GlobalSearch.svelte";
 
   type SseState = {
     status: string;

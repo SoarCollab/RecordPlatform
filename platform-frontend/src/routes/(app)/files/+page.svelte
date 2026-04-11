@@ -21,16 +21,16 @@
     ShareTypeDesc,
     type FileVO,
   } from "$api/types";
-  import Skeleton from "$lib/components/ui/Skeleton.svelte";
-  import * as Card from "$lib/components/ui/card";
-  import * as Table from "$lib/components/ui/table";
-  import * as Dialog from "$lib/components/ui/dialog";
-  import { Button } from "$lib/components/ui/button";
-  import { Input } from "$lib/components/ui/input";
-  import { Badge } from "$lib/components/ui/badge";
-  import { Label } from "$lib/components/ui/label";
-  import { Checkbox } from "$lib/components/ui/checkbox";
-  import DateTimePicker from "$lib/components/ui/date-picker/date-time-picker.svelte";
+  import { Skeleton } from "$components/ui/skeleton";
+  import * as Card from "$components/ui/card";
+  import * as Table from "$components/ui/table";
+  import * as Dialog from "$components/ui/dialog";
+  import { Button } from "$components/ui/button";
+  import { Input } from "$components/ui/input";
+  import { Badge } from "$components/ui/badge";
+  import { Label } from "$components/ui/label";
+  import { Checkbox } from "$components/ui/checkbox";
+  import DateTimePicker from "$components/ui/date-picker/date-time-picker.svelte";
 
   const notifications = useNotifications();
   const download = useDownload();

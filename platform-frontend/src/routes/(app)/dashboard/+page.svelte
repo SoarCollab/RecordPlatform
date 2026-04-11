@@ -12,12 +12,11 @@
   import type { FileVO } from "$api/types";
   import { FileStatus, FileStatusLabel } from "$api/types";
   import { fly } from "svelte/transition";
-  import AppIcon from "$components/ui/AppIcon.svelte";
-  import { appIconMap } from "$components/ui/appIcon";
-  import Skeleton from "$lib/components/ui/Skeleton.svelte";
-  import * as Card from "$lib/components/ui/card";
-  import { Button } from "$lib/components/ui/button";
-  import { Badge } from "$lib/components/ui/badge";
+  import { AppIcon, appIconMap } from "$components/ui/app-icon";
+  import { Skeleton } from "$components/ui/skeleton";
+  import * as Card from "$components/ui/card";
+  import { Button } from "$components/ui/button";
+  import { Badge } from "$components/ui/badge";
 
   const auth = useAuth();
   const notifications = useNotifications();

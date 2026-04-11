@@ -84,8 +84,8 @@ async function logout(): Promise<void> {
 
   try {
     await authApi.logout();
-  } catch {
-    // Ignore logout errors
+  } catch (err) {
+    console.error('logout failed:', err);
   } finally {
     user = null;
     isLoading = false;

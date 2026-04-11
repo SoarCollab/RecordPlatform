@@ -12,12 +12,12 @@
 		sendFriendRequest
 	} from '$api/endpoints/friends';
 	import type { FriendVO, UserSearchVO } from '$api/types';
-	import * as Card from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
-	import * as Dialog from '$lib/components/ui/dialog';
-	import { Input } from '$lib/components/ui/input';
-	import * as Avatar from '$lib/components/ui/avatar';
-	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import * as Card from '$components/ui/card';
+	import { Button } from '$components/ui/button';
+	import * as Dialog from '$components/ui/dialog';
+	import { Input } from '$components/ui/input';
+	import * as Avatar from '$components/ui/avatar';
+	import ConfirmDialog from '$components/ConfirmDialog.svelte';
 
 	const notifications = useNotifications();
 

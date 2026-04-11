@@ -11,7 +11,7 @@
 		ShareTypeDesc,
 		type FileShareVO,
 	} from '$api/types';
-	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import ConfirmDialog from '$components/ConfirmDialog.svelte';
 
 	const notifications = useNotifications();
 

@@ -65,8 +65,8 @@ async function fetchBadgeCounts() {
     }
 
     lastFetched = new Date();
-  } catch {
-    // Silently fail - badges are not critical
+  } catch (err) {
+    console.error('fetchBadgeCounts failed:', err);
   } finally {
     isLoading = false;
   }

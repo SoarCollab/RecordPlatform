@@ -21,16 +21,16 @@
     AdminFileStatusLabel,
     AdminShareStatus,
   } from "$api/types";
-  import * as Card from "$lib/components/ui/card";
-  import { Button } from "$lib/components/ui/button";
-  import { Badge } from "$lib/components/ui/badge";
-  import { Input } from "$lib/components/ui/input";
-  import * as Dialog from "$lib/components/ui/dialog";
-  import * as Tabs from "$lib/components/ui/tabs";
-  import * as Table from "$lib/components/ui/table";
-  import { Separator } from "$lib/components/ui/separator";
-  import DateTimePicker from "$lib/components/ui/date-picker/date-time-picker.svelte";
-  import FilePreview from "$lib/components/FilePreview.svelte";
+  import * as Card from "$components/ui/card";
+  import { Button } from "$components/ui/button";
+  import { Badge } from "$components/ui/badge";
+  import { Input } from "$components/ui/input";
+  import * as Dialog from "$components/ui/dialog";
+  import * as Tabs from "$components/ui/tabs";
+  import * as Table from "$components/ui/table";
+  import { Separator } from "$components/ui/separator";
+  import DateTimePicker from "$components/ui/date-picker/date-time-picker.svelte";
+  import FilePreview from "$components/FilePreview.svelte";
 
   const notifications = useNotifications();
 

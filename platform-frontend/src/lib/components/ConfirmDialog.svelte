@@ -1,6 +1,6 @@
 <script lang="ts">
-  import * as Dialog from "$lib/components/ui/dialog";
-  import { Button } from "$lib/components/ui/button";
+  import * as Dialog from "$components/ui/dialog";
+  import { Button } from "$components/ui/button";
 
   let {
     open = $bindable(false),

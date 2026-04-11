@@ -20,10 +20,10 @@
     TicketStatus,
     TicketPriority,
   } from "$api/types";
-  import * as Card from "$lib/components/ui/card";
-  import { Button } from "$lib/components/ui/button";
-  import { Textarea } from "$lib/components/ui/textarea";
-  import * as Dialog from "$lib/components/ui/dialog";
+  import * as Card from "$components/ui/card";
+  import { Button } from "$components/ui/button";
+  import { Textarea } from "$components/ui/textarea";
+  import * as Dialog from "$components/ui/dialog";
 
   let { data } = $props();
 

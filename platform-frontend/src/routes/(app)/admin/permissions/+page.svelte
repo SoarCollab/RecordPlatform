@@ -10,10 +10,10 @@
     revokeRolePermission,
   } from "$api/endpoints/system";
   import type { SysPermission } from "$api/types";
-  import { Button } from "$lib/components/ui/button";
-  import { Input } from "$lib/components/ui/input";
-  import { Badge } from "$lib/components/ui/badge";
-  import { Checkbox } from "$lib/components/ui/checkbox";
+  import { Button } from "$components/ui/button";
+  import { Input } from "$components/ui/input";
+  import { Badge } from "$components/ui/badge";
+  import { Checkbox } from "$components/ui/checkbox";
 
   const notifications = useNotifications();
   const auth = useAuth();
@@ -302,8 +302,8 @@
         monitor: new Set(monitorPerms),
         user: new Set(userPerms),
       };
-    } catch {
-      /* reload silently */
+    } catch (err) {
+      console.error('reload permissions failed:', err);
     }
   }
 </script>

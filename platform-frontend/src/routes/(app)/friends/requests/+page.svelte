@@ -12,11 +12,11 @@
 		cancelFriendRequest
 	} from '$api/endpoints/friends';
 	import { FriendRequestStatus, type FriendRequestDetailVO } from '$api/types';
-	import * as Card from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
-	import * as Tabs from '$lib/components/ui/tabs';
-	import * as Avatar from '$lib/components/ui/avatar';
-	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import * as Card from '$components/ui/card';
+	import { Button } from '$components/ui/button';
+	import * as Tabs from '$components/ui/tabs';
+	import * as Avatar from '$components/ui/avatar';
+	import ConfirmDialog from '$components/ConfirmDialog.svelte';
 
 	const notifications = useNotifications();
 

@@ -16,8 +16,8 @@
     MessageVO,
   } from "$api/types";
   import type { SSEMessage } from "$api/endpoints/sse";
-  import { Button } from "$lib/components/ui/button";
-  import { Textarea } from "$lib/components/ui/textarea";
+  import { Button } from "$components/ui/button";
+  import { Textarea } from "$components/ui/textarea";
 
   let { data } = $props();
 
@@ -103,7 +103,7 @@
 
     tick().then(() => {
       scrollToBottom();
-      markAsRead(data.conversationId).catch(() => {});
+      markAsRead(data.conversationId).catch((err) => console.error('markAsRead failed:', err));
     });
   }
 

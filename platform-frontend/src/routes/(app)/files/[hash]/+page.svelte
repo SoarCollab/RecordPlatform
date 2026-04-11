@@ -24,15 +24,15 @@
     type TransactionVO,
     type FriendVO,
   } from "$api/types";
-  import * as Card from "$lib/components/ui/card";
-  import { Button } from "$lib/components/ui/button";
-  import * as Dialog from "$lib/components/ui/dialog";
-  import { Badge } from "$lib/components/ui/badge";
-  import { Separator } from "$lib/components/ui/separator";
-  import { Input } from "$lib/components/ui/input";
-  import { Textarea } from "$lib/components/ui/textarea";
-  import * as Avatar from "$lib/components/ui/avatar";
-  import FilePreview from "$lib/components/FilePreview.svelte";
+  import * as Card from "$components/ui/card";
+  import { Button } from "$components/ui/button";
+  import * as Dialog from "$components/ui/dialog";
+  import { Badge } from "$components/ui/badge";
+  import { Separator } from "$components/ui/separator";
+  import { Input } from "$components/ui/input";
+  import { Textarea } from "$components/ui/textarea";
+  import * as Avatar from "$components/ui/avatar";
+  import FilePreview from "$components/FilePreview.svelte";
 
   let { data } = $props();
 

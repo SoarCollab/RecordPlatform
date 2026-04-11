@@ -2,8 +2,8 @@
 	import { useUpload, type UploadTask } from '$stores/upload.svelte';
 	import { useNotifications } from '$stores/notifications.svelte';
 	import { formatFileSize, formatSpeed } from '$utils/format';
-	import * as Dialog from '$lib/components/ui/dialog';
-	import { Button } from '$lib/components/ui/button';
+	import * as Dialog from '$components/ui/dialog';
+	import { Button } from '$components/ui/button';
 	import { untrack } from 'svelte';
 
 	const upload = useUpload();

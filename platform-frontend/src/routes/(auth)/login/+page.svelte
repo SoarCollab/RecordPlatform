@@ -4,11 +4,11 @@
   import { useNotifications } from "$stores/notifications.svelte";
   import { wasRememberMeSelected } from "$api/client";
   import { fly } from "svelte/transition";
-  import * as Card from "$lib/components/ui/card";
-  import { Button } from "$lib/components/ui/button";
-  import { Input } from "$lib/components/ui/input";
-  import { Label } from "$lib/components/ui/label";
-  import { Checkbox } from "$lib/components/ui/checkbox";
+  import * as Card from "$components/ui/card";
+  import { Button } from "$components/ui/button";
+  import { Input } from "$components/ui/input";
+  import { Label } from "$components/ui/label";
+  import { Checkbox } from "$components/ui/checkbox";
 
   const auth = useAuth();
   const notifications = useNotifications();

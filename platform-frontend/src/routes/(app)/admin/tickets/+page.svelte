@@ -18,13 +18,13 @@
     TicketPriorityLabel,
     TicketCategory,
   } from "$api/types";
-  import * as Card from "$lib/components/ui/card";
-  import { Button } from "$lib/components/ui/button";
-  import { Badge } from "$lib/components/ui/badge";
-  import { Input } from "$lib/components/ui/input";
-  import * as Dialog from "$lib/components/ui/dialog";
-  import * as Table from "$lib/components/ui/table";
-  import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
+  import * as Card from "$components/ui/card";
+  import { Button } from "$components/ui/button";
+  import { Badge } from "$components/ui/badge";
+  import { Input } from "$components/ui/input";
+  import * as Dialog from "$components/ui/dialog";
+  import * as Table from "$components/ui/table";
+  import * as DropdownMenu from "$components/ui/dropdown-menu";
 
   const auth = useAuth();
   const notifications = useNotifications();
@@ -90,8 +90,8 @@
     try {
       const result = await getAdminPendingCount();
       pendingCount = result.count;
-    } catch {
-      // 忽略
+    } catch (err) {
+      console.error('loadPendingCount failed:', err);
     }
   }
 
