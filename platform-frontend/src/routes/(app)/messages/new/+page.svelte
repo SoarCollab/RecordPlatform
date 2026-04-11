@@ -5,9 +5,9 @@
 	import { getAllFriends } from "$api/endpoints/friends";
 	import { getConversations, sendMessage } from "$api/endpoints/messages";
 	import type { FriendVO } from "$api/types";
-	import { Button } from "$lib/components/ui/button";
-	import { Textarea } from "$lib/components/ui/textarea";
-	import * as Card from "$lib/components/ui/card";
+	import { Button } from "$components/ui/button";
+	import { Textarea } from "$components/ui/textarea";
+	import * as Card from "$components/ui/card";
 
 	let { data } = $props();
 

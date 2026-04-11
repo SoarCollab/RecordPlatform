@@ -12,10 +12,10 @@
     saveSharedFiles,
   } from "$api/endpoints/files";
   import { ResultCode, type SharedFileVO } from "$api/types";
-  import * as Card from "$lib/components/ui/card";
-  import { Button } from "$lib/components/ui/button";
-  import { Badge } from "$lib/components/ui/badge";
-  import { Checkbox } from "$lib/components/ui/checkbox";
+  import * as Card from "$components/ui/card";
+  import { Button } from "$components/ui/button";
+  import { Badge } from "$components/ui/badge";
+  import { Checkbox } from "$components/ui/checkbox";
 
   let { data } = $props();
 

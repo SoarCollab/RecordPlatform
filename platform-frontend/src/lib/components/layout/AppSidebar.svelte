@@ -1,5 +1,5 @@
 <script lang="ts">
-  import AppIcon from "$components/ui/AppIcon.svelte";
+  import { AppIcon } from "$components/ui/app-icon";
   import { adminItems, menuItems, type BadgeKey } from "$lib/config/navigation";
   import logo from "$lib/assets/logo.png";
 

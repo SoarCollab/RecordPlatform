@@ -1,8 +1,10 @@
 <script lang="ts">
+	import type { Snippet } from "svelte";
 	import { goto } from "$app/navigation";
 	import { useAuth } from "$stores/auth.svelte";
 
-	let { children } = $props();
+	interface Props { children: Snippet }
+	let { children }: Props = $props();
 
 	const auth = useAuth();
 

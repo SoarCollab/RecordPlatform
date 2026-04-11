@@ -11,8 +11,8 @@
     backupAuditLogs,
   } from "$api/endpoints/system";
   import type { AuditConfigVO, AuditLogQueryParams } from "$api/types";
-  import { Button } from "$lib/components/ui/button";
-  import * as Tabs from "$lib/components/ui/tabs";
+  import { Button } from "$components/ui/button";
+  import * as Tabs from "$components/ui/tabs";
   import AuditDashboard from "./components/AuditDashboard.svelte";
   import type { DrillDownFilter } from "./components/AuditDashboard.svelte";
   import AuditLogList from "./components/AuditLogList.svelte";

@@ -12,8 +12,8 @@
     ErrorOperationStatsVO,
     UserTimeDistributionVO,
   } from "$api/types";
-  import { Button } from "$lib/components/ui/button";
-  import * as Table from "$lib/components/ui/table";
+  import { Button } from "$components/ui/button";
+  import * as Table from "$components/ui/table";
   import KpiCard from "./cards/KpiCard.svelte";
   import TrendChart from "./charts/TrendChart.svelte";
   import ErrorPieChart from "./charts/ErrorPieChart.svelte";

@@ -1,4 +1,4 @@
-import type { AppIconName } from "$components/ui/appIcon";
+import type { AppIconName } from "$components/ui/app-icon";
 
 export type BadgeKey =
   | "messages"

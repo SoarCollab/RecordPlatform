@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from "svelte";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import { onMount, onDestroy } from "svelte";
@@ -13,7 +14,8 @@
   import AppHeader from "$components/layout/AppHeader.svelte";
   import AppSidebar from "$components/layout/AppSidebar.svelte";
 
-  let { children } = $props();
+  interface Props { children: Snippet }
+  let { children }: Props = $props();
 
   const auth = useAuth();
   const sse = useSSE();

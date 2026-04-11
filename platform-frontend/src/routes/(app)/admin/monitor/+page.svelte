@@ -7,9 +7,9 @@
 	import { getSystemStats, getChainStatus, getSystemHealth } from '$api/endpoints/system';
 	import type { SystemStats, ChainStatus, SystemHealth } from '$api/types';
 	import { ChainType } from '$api/types';
-	import * as Card from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
+	import * as Card from '$components/ui/card';
+	import { Button } from '$components/ui/button';
+	import { Badge } from '$components/ui/badge';
 
 	const notifications = useNotifications();
 	const auth = useAuth();

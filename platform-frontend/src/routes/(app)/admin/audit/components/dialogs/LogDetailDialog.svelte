@@ -1,6 +1,6 @@
 <script lang="ts">
-  import * as Dialog from "$lib/components/ui/dialog";
-  import { Badge } from "$lib/components/ui/badge";
+  import * as Dialog from "$components/ui/dialog";
+  import { Badge } from "$components/ui/badge";
   import type { SysOperationLog, AuditLogVO } from "$api/types";
 
   interface Props {

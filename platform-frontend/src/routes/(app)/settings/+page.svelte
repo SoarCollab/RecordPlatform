@@ -8,12 +8,12 @@
   import { uploadAvatar } from "$api/endpoints/images"; // 保留此导入：后续会用到
 
   // UI 组件
-  import { Button } from "$lib/components/ui/button";
-  import { Input } from "$lib/components/ui/input";
-  import { Label } from "$lib/components/ui/label";
-  import * as Card from "$lib/components/ui/card";
-  import * as Dialog from "$lib/components/ui/dialog";
-  import * as Avatar from "$lib/components/ui/avatar";
+  import { Button } from "$components/ui/button";
+  import { Input } from "$components/ui/input";
+  import { Label } from "$components/ui/label";
+  import * as Card from "$components/ui/card";
+  import * as Dialog from "$components/ui/dialog";
+  import * as Avatar from "$components/ui/avatar";
 
   const auth = useAuth();
   const notifications = useNotifications();

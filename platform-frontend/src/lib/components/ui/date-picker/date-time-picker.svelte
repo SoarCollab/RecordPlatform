@@ -11,10 +11,10 @@
     today,
   } from "@internationalized/date";
   import { cn } from "$lib/utils";
-  import { Button } from "$lib/components/ui/button";
-  import { Calendar } from "$lib/components/ui/calendar";
-  import * as Popover from "$lib/components/ui/popover";
-  import { Input } from "$lib/components/ui/input";
+  import { Button } from "$components/ui/button";
+  import { Calendar } from "$components/ui/calendar";
+  import * as Popover from "$components/ui/popover";
+  import { Input } from "$components/ui/input";
 
   let {
     value = $bindable(),

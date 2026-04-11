@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { Button } from "$lib/components/ui/button";
-  import { Input } from "$lib/components/ui/input";
-  import * as Dialog from "$lib/components/ui/dialog";
-  import * as Table from "$lib/components/ui/table";
+  import { Button } from "$components/ui/button";
+  import { Input } from "$components/ui/input";
+  import * as Dialog from "$components/ui/dialog";
+  import * as Table from "$components/ui/table";
   import type { AuditConfigVO } from "$api/types";
-  import { Checkbox } from "$lib/components/ui/checkbox";
+  import { Checkbox } from "$components/ui/checkbox";
   import { useNotifications } from "$stores/notifications.svelte";
 
   const notifications = useNotifications();

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { appIconMap, type AppIconName } from "./appIcon";
+  import { appIconMap, type AppIconName } from "./app-icon-map";
 
   type Props = {
     name: AppIconName;

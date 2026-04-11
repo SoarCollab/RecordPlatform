@@ -6,9 +6,9 @@
 	import { getAnnouncement, markAnnouncementAsRead } from '$api/endpoints/messages';
 	import type { AnnouncementVO } from '$api/types';
 	import { AnnouncementPriority, AnnouncementPriorityLabel } from '$api/types';
-	import * as Card from '$lib/components/ui/card';
-	import { Button } from '$lib/components/ui/button';
-	import { Separator } from '$lib/components/ui/separator';
+	import * as Card from '$components/ui/card';
+	import { Button } from '$components/ui/button';
+	import { Separator } from '$components/ui/separator';
 
 	let { data } = $props();
 

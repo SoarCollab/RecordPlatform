@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount, untrack } from "svelte";
   import { formatDateTime } from "$utils/format";
   import { getAuditLogs, getAuditLog } from "$api/endpoints/system";
   import type {
@@ -6,12 +7,12 @@
     AuditLogQueryParams,
     SysOperationLog,
   } from "$api/types";
-  import { Button } from "$lib/components/ui/button";
-  import { Input } from "$lib/components/ui/input";
-  import { Badge } from "$lib/components/ui/badge";
-  import * as Table from "$lib/components/ui/table";
-  import * as Card from "$lib/components/ui/card";
-  import DateTimePicker from "$lib/components/ui/date-picker/date-time-picker.svelte";
+  import { Button } from "$components/ui/button";
+  import { Input } from "$components/ui/input";
+  import { Badge } from "$components/ui/badge";
+  import * as Table from "$components/ui/table";
+  import * as Card from "$components/ui/card";
+  import DateTimePicker from "$components/ui/date-picker/date-time-picker.svelte";
   import LogDetailDialog from "./dialogs/LogDetailDialog.svelte";
   import { useNotifications } from "$stores/notifications.svelte";
   import {
@@ -80,22 +81,15 @@
   }
 
   /** 监听外部 filter 变化（通过 _counter 触发） */
-  let lastCounter = -1;
   $effect(() => {
-    const counter = externalFilters?._counter;
-    if (typeof counter === "number" && counter !== lastCounter) {
-      lastCounter = counter;
-      applyExternalFilters();
+    if (typeof externalFilters?._counter === "number") {
+      untrack(() => applyExternalFilters());
     }
   });
 
   /** 初始化：无外部 filter 时加载全部 */
-  let mounted = false;
-  $effect(() => {
-    if (!mounted) {
-      mounted = true;
-      if (!externalFilters?._counter) loadLogs();
-    }
+  onMount(() => {
+    if (!externalFilters?._counter) loadLogs();
   });
 
   async function loadLogs() {
@@ -158,7 +152,8 @@
     loadingLogDetail = true;
     try {
       selectedLogDetail = await getAuditLog(String(log.id));
-    } catch {
+    } catch (err) {
+      console.error('getAuditLog detail failed:', err);
       selectedLogDetail = null;
     } finally {
       loadingLogDetail = false;

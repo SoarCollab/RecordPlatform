@@ -6,11 +6,13 @@
   import { useSSE } from "$stores/sse.svelte";
   import { useDownload } from "$stores/download.svelte";
   import { onMount } from "svelte";
-  import DownloadManager from "$lib/components/DownloadManager.svelte";
-  import LoadingBar from "$lib/components/ui/LoadingBar.svelte";
+  import DownloadManager from "$components/DownloadManager.svelte";
+  import type { Snippet } from "svelte";
+  import { LoadingBar } from "$components/ui/loading-bar";
   import logo from "$lib/assets/logo.png";
 
-  let { children } = $props();
+  interface Props { children: Snippet }
+  let { children }: Props = $props();
 
   const notifications = useNotifications();
   const sse = useSSE();
