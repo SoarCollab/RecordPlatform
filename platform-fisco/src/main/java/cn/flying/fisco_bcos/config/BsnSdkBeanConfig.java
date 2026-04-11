@@ -6,6 +6,7 @@ import org.fisco.bcos.sdk.v3.BcosSDK;
 import org.fisco.bcos.sdk.v3.client.Client;
 import org.fisco.bcos.sdk.v3.config.ConfigOption;
 import org.fisco.bcos.sdk.v3.config.model.ConfigProperty;
+import org.fisco.bcos.sdk.v3.model.CryptoType;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -47,7 +48,7 @@ public class BsnSdkBeanConfig {
         BigInteger blockNumber = client.getBlockNumber().getBlockNumber();
         log.info("[BSN FISCO] Chain connect successful. Current block number {}", blockNumber);
         log.info("[BSN FISCO] Crypto type: {}, address: {}",
-                client.getCryptoSuite().cryptoTypeConfig == 1 ? "GM" : "ECDSA",
+                client.getCryptoSuite().cryptoTypeConfig == CryptoType.SM_TYPE ? "GM" : "ECDSA",
                 client.getCryptoSuite().getCryptoKeyPair().getAddress());
 
         return client;

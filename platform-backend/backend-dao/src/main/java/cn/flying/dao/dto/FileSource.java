@@ -61,6 +61,10 @@ public class FileSource implements Serializable {
     @Schema(description = "链路深度（1=首次分享，2=二次分享...）")
     private Integer depth;
 
+    @TableLogic
+    @Schema(description = "逻辑删除标记 0=正常 1=已删除")
+    private Integer deleted;
+
     @TableField(fill = FieldFill.INSERT)
     @Schema(description = "创建时间")
     private Date createTime;

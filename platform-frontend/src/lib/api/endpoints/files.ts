@@ -81,7 +81,7 @@ export async function getFileByHash(hash: string): Promise<FileVO> {
  * @param fileHashOrId 文件哈希或文件 ID
  */
 export async function deleteFile(fileHashOrId: string): Promise<void> {
-  await api.delete(`${BASE}/delete`, {
+  await api.delete(BASE, {
     params: { identifiers: [fileHashOrId] },
   });
 }

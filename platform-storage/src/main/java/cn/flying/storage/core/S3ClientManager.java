@@ -31,6 +31,9 @@ import java.util.stream.Collectors;
 /**
  * S3 客户端管理器
  * 使用 AtomicReference 实现原子替换，解决配置刷新时的竞态条件问题
+ *
+ * <p>{@code @RefreshScope} 使 Spring Cloud (Nacos) 配置变更时重建此 Bean。
+ * 如果将来脱离 Nacos，移除此注解并改用其他配置刷新机制即可。
  */
 @Component
 @RefreshScope

@@ -720,41 +720,8 @@ export interface paths {
         get: operations["getFiles"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/files/delete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
         /** 批量删除文件（支持通过文件哈希或文件ID） */
         delete: operations["deleteFiles"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/files/deleteById": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** 根据文件id列表批量删除文件（管理员专用） */
-        delete: operations["deleteFileById"];
         options?: never;
         head?: never;
         patch?: never;
@@ -958,7 +925,8 @@ export interface paths {
         get: operations["getFileById"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** 根据文件ID删除文件（管理员专用） */
+        delete: operations["deleteFileById"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1411,7 +1379,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/share/{shareCode}/info": {
+    "/api/v1/shares/{shareCode}/info": {
         parameters: {
             query?: never;
             header?: never;
@@ -6329,12 +6297,12 @@ export interface operations {
     };
     deleteFileById: {
         parameters: {
-            query: {
-                /** @description 待删除文件Id列表 */
-                idList: string;
-            };
+            query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description 待删除文件ID */
+                id: string;
+            };
             cookie?: never;
         };
         requestBody?: never;

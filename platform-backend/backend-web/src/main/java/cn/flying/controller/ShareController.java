@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 @Slf4j
 @RestController
 @Validated
-@RequestMapping("/api/v1/share")
+@RequestMapping("/api/v1/shares")
 @Tag(name = "分享相关接口", description = "用于分享详情查看等操作")
 
 
