@@ -101,7 +101,7 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/v1/shares/*/files").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/public/shares/**").permitAll()
                         .requestMatchers("/api/v1/images/download/images/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/shares/**/info").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/shares/*/info").permitAll()
                         // SSE 短期令牌发行需要用户已认证
                         .requestMatchers("/api/v1/auth/tokens/sse").hasAnyRole(
                                 UserRole.ROLE_DEFAULT.getRole(),
