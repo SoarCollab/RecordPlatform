@@ -172,12 +172,12 @@
             <dependency>
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
-                <version>3.1.1</version>
+                <version>3.1.2</version>
             </dependency>
             <dependency>
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
-                <version>3.1.1</version>
+                <version>3.1.2</version>
             </dependency>
             <!-- Override transitive okhttp/okio from web3j to fix CVE (certificate validation + conversion error) -->
             <dependency>
@@ -188,7 +188,7 @@
             <dependency>
                 <groupId>com.squareup.okio</groupId>
                 <artifactId>okio</artifactId>
-                <version>3.9.1</version>
+                <version>3.17.0</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.commons</groupId>
