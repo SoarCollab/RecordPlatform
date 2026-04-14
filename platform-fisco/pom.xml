@@ -31,7 +31,7 @@
         <netty.version>4.2.12.Final</netty.version>
         <commons-io.version>2.21.0</commons-io.version>
         <commons-lang3.version>3.20.0</commons-lang3.version>
-        <bcprov.version>1.83</bcprov.version>
+        <bcprov.version>1.84</bcprov.version>
     </properties>
     <dependencies>
         <dependency>
@@ -172,12 +172,12 @@
             <dependency>
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
-                <version>3.1.1</version>
+                <version>3.1.2</version>
             </dependency>
             <dependency>
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
-                <version>3.1.1</version>
+                <version>3.1.2</version>
             </dependency>
             <!-- Override transitive okhttp/okio from web3j to fix CVE (certificate validation + conversion error) -->
             <dependency>
@@ -188,7 +188,7 @@
             <dependency>
                 <groupId>com.squareup.okio</groupId>
                 <artifactId>okio</artifactId>
-                <version>3.9.1</version>
+                <version>3.17.0</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.commons</groupId>
