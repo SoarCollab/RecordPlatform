@@ -11,7 +11,7 @@
     </parent>
     <groupId>cn.flying</groupId>
     <artifactId>platform-backend</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>0.0.2-SNAPSHOT</version>
     <name>RecordPlatform-backend</name>
     <description>存证平台后端服务</description>
     <properties>
@@ -68,27 +68,27 @@
             <dependency>
                 <groupId>cn.flying</groupId>
                 <artifactId>backend-dao</artifactId>
-                <version>0.0.1-SNAPSHOT</version>
+                <version>0.0.2-SNAPSHOT</version>
             </dependency>
             <dependency>
                 <groupId>cn.flying</groupId>
                 <artifactId>backend-api</artifactId>
-                <version>0.0.1-SNAPSHOT</version>
+                <version>0.0.2-SNAPSHOT</version>
             </dependency>
             <dependency>
                 <groupId>cn.flying</groupId>
                 <artifactId>backend-common</artifactId>
-                <version>0.0.1-SNAPSHOT</version>
+                <version>0.0.2-SNAPSHOT</version>
             </dependency>
             <dependency>
                 <groupId>cn.flying</groupId>
                 <artifactId>backend-service</artifactId>
-                <version>0.0.1-SNAPSHOT</version>
+                <version>0.0.2-SNAPSHOT</version>
             </dependency>
             <dependency>
                 <groupId>cn.flying</groupId>
                 <artifactId>backend-web</artifactId>
-                <version>0.0.1-SNAPSHOT</version>
+                <version>0.0.2-SNAPSHOT</version>
             </dependency>
             <!-- AWS SDK v2 for S3-compatible storage -->
             <dependency>
