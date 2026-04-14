@@ -27,7 +27,7 @@ WORKDIR /app
 ADD https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.26.1/opentelemetry-javaagent.jar /opt/otel/opentelemetry-javaagent.jar
 RUN chmod 644 /opt/otel/opentelemetry-javaagent.jar
 
-COPY --from=build /workspace/platform-backend/backend-web/target/backend-web-0.0.1-SNAPSHOT.jar app.jar
+COPY --from=build /workspace/platform-backend/backend-web/target/backend-web-0.0.2-SNAPSHOT.jar app.jar
 
 RUN chown -R app:app /app
 USER app

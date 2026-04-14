@@ -5,7 +5,7 @@
     <parent>
         <groupId>cn.flying</groupId>
         <artifactId>platform-backend</artifactId>
-        <version>0.0.1-SNAPSHOT</version>
+        <version>0.0.2-SNAPSHOT</version>
     </parent>
     <artifactId>backend-service</artifactId>
     <name>backend-service</name>
@@ -24,7 +24,7 @@
         <dependency>
             <groupId>cn.flying</groupId>
             <artifactId>platform-api</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
+            <version>0.0.2-SNAPSHOT</version>
         </dependency>
         <dependency>
             <groupId>cn.flying</groupId>

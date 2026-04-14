@@ -24,9 +24,9 @@ else
     JAR_BASE=""
 fi
 
-export STORAGE_JAR="${JAR_BASE:-$PROJECT_ROOT/platform-storage/target}/platform-storage-0.0.1-SNAPSHOT.jar"
-export FISCO_JAR="${JAR_BASE:-$PROJECT_ROOT/platform-fisco/target}/platform-fisco-0.0.1-SNAPSHOT.jar"
-export BACKEND_JAR="${JAR_BASE:-$PROJECT_ROOT/platform-backend/backend-web/target}/backend-web-0.0.1-SNAPSHOT.jar"
+export STORAGE_JAR="${JAR_BASE:-$PROJECT_ROOT/platform-storage/target}/platform-storage-0.0.2-SNAPSHOT.jar"
+export FISCO_JAR="${JAR_BASE:-$PROJECT_ROOT/platform-fisco/target}/platform-fisco-0.0.2-SNAPSHOT.jar"
+export BACKEND_JAR="${JAR_BASE:-$PROJECT_ROOT/platform-backend/backend-web/target}/backend-web-0.0.2-SNAPSHOT.jar"
 
 # ================================
 # 日志配置
