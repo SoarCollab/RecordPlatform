@@ -16,7 +16,7 @@
         <poi.version>5.5.1</poi.version>
         <logstash.encoder.version>8.1</logstash.encoder.version>
         <skywalking.version>9.6.0</skywalking.version>
-        <spring-cloud-alibaba-dependencies.version>2025.0.0.0</spring-cloud-alibaba-dependencies.version>
+        <spring-cloud-alibaba-dependencies.version>2025.1.0.0</spring-cloud-alibaba-dependencies.version>
     </properties>
 
     <dependencies>
