@@ -38,7 +38,7 @@ jobs:
 
       # ── Frontend build ─────────────────────────────────────────────────────
       - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@v6
         with:
           version: 10
 
@@ -57,7 +57,7 @@ jobs:
 
       # ── SBOM ───────────────────────────────────────────────────────────────
       - name: Generate CycloneDX SBOM
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -166,7 +166,7 @@ jobs:
 
       # ── GitHub Release ─────────────────────────────────────────────────────
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           files: sbom.cdx.json
