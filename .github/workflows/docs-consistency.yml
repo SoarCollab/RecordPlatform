@@ -11,6 +11,12 @@ on:
       - 'scripts/*.md'
       - 'tools/k6/README.md'
       - 'tools/docs/**'
+      - 'platform-api/pom.xml'
+      - 'platform-backend/pom.xml'
+      - 'platform-fisco/pom.xml'
+      - 'platform-storage/pom.xml'
+      - 'platform-frontend/package.json'
+      - 'platform-frontend/pnpm-lock.yaml'
       - '.env.example'
       - 'platform-frontend/.env.example'
       - 'scripts/env.sh'
@@ -80,7 +86,7 @@ jobs:
           python-version: '3.11'
 
       - name: Run consistency checks
-        run: python3 tools/docs/check_consistency.py --check-routes --check-env
+        run: python3 tools/docs/check_consistency.py --check-routes --check-env --check-roadmap --check-versions
 
   docs-build:
     name: Build Docs Site

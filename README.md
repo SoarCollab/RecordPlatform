@@ -186,11 +186,11 @@ Verify the installation at:
 
 | Category      | Technology                                              | Version               |
 | ------------- | ------------------------------------------------------- | --------------------- |
-| Backend       | Java + Spring Boot + Virtual Threads                    | 21, 3.5.11            |
+| Backend       | Java + Spring Boot + Virtual Threads                    | 21, 3.5.13            |
 | Microservices | Apache Dubbo (Triple protocol), Nacos                   | 3.3.6                 |
 | Blockchain    | FISCO BCOS, Solidity                                    | 3.8.0, ^0.8.11        |
 | Storage       | S3-compatible (AWS SDK v2), MySQL, Redis (Redisson)     | 2.x, 8.0+, 7.0+       |
-| Frontend      | Svelte 5 (Runes), SvelteKit, Tailwind CSS 4, bits-ui   | 5.53+, 2.53+, 4.2+    |
+| Frontend      | Svelte 5 (Runes), SvelteKit, Vite, Tailwind CSS 4, bits-ui | 5.55+, 2.59+, 7.3+, 4.3+ |
 | Resilience    | Resilience4j (circuit breaker, retry)                   | 2.4.0                 |
 | Monitoring    | Micrometer, Prometheus, OpenTelemetry, Jaeger           | —                     |
 | Testing       | JUnit 5, Mockito, Testcontainers, Vitest                | —                     |

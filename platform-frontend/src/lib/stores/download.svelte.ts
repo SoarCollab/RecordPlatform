@@ -23,6 +23,10 @@ import {
 } from "$utils/downloadStorage";
 import { decryptFile, arrayToBlob, downloadBlob } from "$utils/crypto";
 import {
+  buildBatchMetricsPayload,
+  calculateRetryCount,
+} from "$utils/downloadBatchMetrics";
+import {
   performPreDownloadCheck,
   type DownloadStrategy,
   type DownloadDecision,
@@ -258,56 +262,6 @@ function updateBatchProgress(
     successCount,
     failedCount: failures.length,
     failures: [...failures],
-  };
-}
-
-/**
- * 计算单任务重试次数（不含首次尝试）。
- *
- * @param attempts 实际尝试次数（含首次）。
- * @returns 重试次数。
- */
-function calculateRetryCount(attempts: number): number {
-  return Math.max(0, attempts - 1);
-}
-
-/**
- * 聚合批次失败原因分布。
- *
- * @param failures 批次失败列表。
- * @returns 原因分布映射。
- */
-function buildFailureReasonsDistribution(
-  failures: BatchDownloadFailure[],
-): Record<string, number> {
-  const distribution: Record<string, number> = {};
-  for (const failure of failures) {
-    const reason = (failure.reason ?? "unknown").trim() || "unknown";
-    distribution[reason] = (distribution[reason] ?? 0) + 1;
-  }
-  return distribution;
-}
-
-/**
- * 构建批量下载指标上报载荷。
- *
- * @param snapshot 批次完成快照。
- * @param retryCount 累计重试次数。
- * @returns 上报请求对象。
- */
-function buildBatchMetricsPayload(
-  snapshot: BatchDownloadState,
-  retryCount: number,
-): Parameters<typeof fileApi.reportBatchDownloadMetrics>[0] {
-  const completedAt = snapshot.completedAt ?? Date.now();
-  return {
-    batchId: snapshot.id,
-    total: snapshot.total,
-    successCount: snapshot.successCount,
-    failedCount: snapshot.failedCount,
-    retryCount,
-    durationMs: Math.max(0, completedAt - snapshot.startedAt),
-    failureReasons: buildFailureReasonsDistribution(snapshot.failures),
   };
 }
 
