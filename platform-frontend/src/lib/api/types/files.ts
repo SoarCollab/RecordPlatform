@@ -1,8 +1,13 @@
+import type { components as OpenApiComponents } from "./generated";
+
+type OpenApiSchema<Name extends keyof OpenApiComponents["schemas"]> =
+  OpenApiComponents["schemas"][Name];
+
 /**
  * 文件信息
  * @see FileVO.java
  */
-export interface FileVO {
+export interface FileVO extends OpenApiSchema<"FileVO"> {
   id: string;
   fileName: string;
   fileHash: string;
@@ -23,7 +28,7 @@ export interface FileVO {
  * 用户文件统计信息
  * @see UserFileStatsVO.java
  */
-export interface UserFileStatsVO {
+export interface UserFileStatsVO extends OpenApiSchema<"UserFileStatsVO"> {
   /** 文件总数 */
   totalFiles: number;
   /** 存储用量（字节） */
@@ -38,7 +43,7 @@ export interface UserFileStatsVO {
  * 配额状态信息
  * @see QuotaStatusVO.java
  */
-export interface QuotaStatusVO {
+export interface QuotaStatusVO extends OpenApiSchema<"QuotaStatusVO"> {
   tenantId: number;
   userId: number;
   enforcementMode: "SHADOW" | "ENFORCE";
@@ -56,7 +61,7 @@ export interface QuotaStatusVO {
  * 批量下载指标上报请求。
  * @see BatchDownloadMetricsReportVO.java
  */
-export interface BatchDownloadMetricsReportRequest {
+export interface BatchDownloadMetricsReportRequest extends OpenApiSchema<"BatchDownloadMetricsReportVO"> {
   /** 批次 ID */
   batchId: string;
   /** 批次总文件数 */
@@ -145,7 +150,7 @@ export const UploadProgressStatusLabel: Record<UploadProgressStatus, string> = {
  * 开始上传响应
  * @see StartUploadVO.java
  */
-export interface StartUploadVO {
+export interface StartUploadVO extends OpenApiSchema<"StartUploadVO"> {
   clientId: string;
   chunkSize: number;
   totalChunks: number;
@@ -189,7 +194,7 @@ export interface UploadChunkRequest {
  * 上传进度响应
  * @see ProgressVO.java
  */
-export interface ProgressVO {
+export interface ProgressVO extends OpenApiSchema<"ProgressVO"> {
   clientId: string;
   progress: number; // 总体进度百分比
   uploadProgress: number; // 原始分片上传进度百分比
@@ -204,7 +209,7 @@ export interface ProgressVO {
  * 文件上传状态响应 (checkUploadStatus 接口)
  * @see FileUploadStatusVO.java
  */
-export interface FileUploadStatusVO {
+export interface FileUploadStatusVO extends OpenApiSchema<"FileUploadStatusVO"> {
   /** 文件名 */
   fileName: string;
   /** 文件大小 */
@@ -230,7 +235,7 @@ export interface FileUploadStatusVO {
  * @see FileShareVO.java
  * @note 用于 getMyShares 接口返回
  */
-export interface FileShareVO {
+export interface FileShareVO extends OpenApiSchema<"FileShareVO"> {
   id: string;
   sharingCode: string;
   fileHashes: string[];
@@ -348,7 +353,7 @@ export interface SaveShareFileRequest {
  * 文件解密信息
  * @see FileDecryptInfoVO.java
  */
-export interface FileDecryptInfoVO {
+export interface FileDecryptInfoVO extends OpenApiSchema<"FileDecryptInfoVO"> {
   /** 初始密钥（最后一个分片的解密密钥，Base64编码） */
   initialKey: string;
   /** 文件名 */
@@ -367,7 +372,7 @@ export interface FileDecryptInfoVO {
  * 分享访问日志
  * @see ShareAccessLogVO.java
  */
-export interface ShareAccessLogVO {
+export interface ShareAccessLogVO extends OpenApiSchema<"ShareAccessLogVO"> {
   id: string;
   shareCode: string;
   /** 操作类型：1=查看，2=下载，3=保存 */
@@ -385,7 +390,7 @@ export interface ShareAccessLogVO {
  * 分享访问统计
  * @see ShareAccessStatsVO.java
  */
-export interface ShareAccessStatsVO {
+export interface ShareAccessStatsVO extends OpenApiSchema<"ShareAccessStatsVO"> {
   shareCode: string;
   viewCount: number;
   downloadCount: number;
@@ -398,7 +403,7 @@ export interface ShareAccessStatsVO {
  * 文件溯源信息
  * @see FileProvenanceVO.java
  */
-export interface FileProvenanceVO {
+export interface FileProvenanceVO extends OpenApiSchema<"FileProvenanceVO"> {
   fileId: string;
   fileHash: string;
   fileName: string;
@@ -419,7 +424,7 @@ export interface FileProvenanceVO {
 /**
  * 分享链路节点
  */
-export interface ProvenanceNode {
+export interface ProvenanceNode extends OpenApiSchema<"ProvenanceNode"> {
   userId: string;
   userName: string;
   fileId: string;
