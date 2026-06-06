@@ -37,6 +37,16 @@
 
 ## 2. 自动化基线
 
+### 表 0：仓库规模基线（自动校验）
+
+| 指标 | 当前值 | 证据路径 |
+|------|--------|----------|
+| REST 控制器 | 28 | `platform-backend/backend-web/src/main/java` |
+| 后端服务类 | 74 | `platform-backend/backend-service/src/main/java` |
+| 后端测试文件 | 101 | `platform-backend/**/src/test/java` |
+| 数据库迁移 | 18（V1.0.0 ~ V1.7.0） | `platform-backend/backend-web/src/main/resources/db/migration` |
+| CI 流水线（核心） | 5 | `.github/workflows/test.yml`, `perf-smoke.yml`, `docs.yml`, `security-poc.yml`, `docs-consistency.yml` |
+
 ### 表 1：PR 合并阻断门禁（已就位）
 
 | 门禁 | 证据路径 |
@@ -46,6 +56,7 @@
 | 前端 lint + type check + 测试 | `.github/workflows/test.yml` |
 | 前端覆盖率 (utils ≥ 70%, endpoints/stores/services ≥ 90%) | `platform-frontend/vitest.config.ts` |
 | 契约一致性 (OpenAPI ↔ generated.ts) | `.github/workflows/test.yml` contract-consistency job |
+| 安全扫描 (Trivy PR HIGH/CRITICAL) | `.github/workflows/test.yml` security-scan job (`exit-code: 1`) |
 | 构建验证 | `.github/workflows/test.yml` build-check job |
 | Dependabot 自动依赖更新 | `.github/dependabot.yml` |
 | Codecov patch 覆盖率 ≥ 80% | `.codecov.yml` |
@@ -54,7 +65,7 @@
 
 | 项目 | 现状 | 证据 |
 |------|------|------|
-| 安全扫描 (Trivy PR) | 信息级（`exit-code: 0`），SARIF 上传至 GitHub Security 面板 | `.github/workflows/test.yml` security-scan job |
+| 安全扫描观测 (Trivy SARIF) | PR 阻断扫描前生成 SARIF，上传至 GitHub Security 面板 | `.github/workflows/test.yml` security-scan job |
 | SAST (Semgrep) | 每周定时，信息级；自动观测汇总链路已就位，待首轮数据校准阈值 | `.github/workflows/security-poc.yml`, `tools/security/scripts/render-security-poc-observation.mjs` |
 | SCA (Trivy) 全量扫描 | 每周深度扫描（信息级）；PR 级 HIGH/CRITICAL 已升级为阻断 | `.github/workflows/security-poc.yml`, `.github/workflows/test.yml` |
 | SBOM (CycloneDX) | 每周定时，信息级 | `.github/workflows/security-poc.yml` |
@@ -96,7 +107,7 @@
 **P0-3：安全扫描升级为 PR 阻断** ✅
 
 - **What**：在 `test.yml` 新增 `security-scan` job（PR 触发），Trivy 扫描 HIGH/CRITICAL 漏洞；保留 `security-poc.yml` 作为每周全量深度扫描
-- **当前状态**：已完成（PR #108）。`security-scan` job 已就位于 `test.yml`，信息级（`exit-code: 0`），SARIF 上传至 GitHub Security 面板（category: `trivy-pr`）供生命周期跟踪；`security-poc.yml` 保留每周全量深度扫描（信息级）
+- **当前状态**：已完成（PR #108）。`security-scan` job 已就位于 `test.yml`，PR 级 HIGH/CRITICAL 扫描使用 `exit-code: 1` 阻断；SARIF 仍上传至 GitHub Security 面板（category: `trivy-pr`）供生命周期跟踪；`security-poc.yml` 保留每周全量深度扫描（信息级）
 - **自动化收益**：高危漏洞在 PR 阶段自动拦截，无需人工定期检查
 - **完成标准**：引入已知 CVE 依赖的 PR 被 CI 阻断
 - **涉及文件**：`.github/workflows/test.yml`、`.github/workflows/security-poc.yml`
@@ -400,7 +411,7 @@
 | 策略 | 说明 |
 |------|------|
 | 安全补丁 | Dependabot PR 自动创建，及时合并 |
-| LTS 版本 | 评估并在发布后一个月内采纳；当前已跟踪 Spring Boot 3.5.11、Java 21 |
+| LTS 版本 | 评估并在发布后一个月内采纳；当前已跟踪 Spring Boot 3.5.13、Java 21 |
 | EOL 依赖 | 在 EOL 前规划迁移 |
 | 中间版本 | 不追非 LTS 中间版本 |
 
@@ -435,10 +446,12 @@
 | 组件 | 当前版本 | 下一目标版本 | 备注 |
 |------|----------|-------------|------|
 | Java | 21 (LTS) | 25 (LTS, 2025-09-16 已发布) | 评估 Gatherer/Structured Concurrency 等新 API |
-| Spring Boot | 3.5.11 | 4.0.x (2025-11 已发布) | 跟踪 4.0；Virtual Threads 已启用 |
+| Spring Boot | 3.5.13 | 4.0.x (2025-11 已发布) | 跟踪 4.0；Virtual Threads 已启用 |
 | Dubbo | 3.3.6 (Triple) | 3.3.x | 保持 Triple 协议 |
-| Svelte | 5.53+ | 5.x | Runes API 已稳定 |
-| SvelteKit | 2.53+ | 2.x | — |
+| Svelte | 5.55+ | 5.x | Runes API 已稳定 |
+| SvelteKit | 2.59+ | 2.x | — |
+| Vite | 7.3+ | 7.x | 前端应用构建工具；文档站以 `docs/package.json` 为准 |
+| Tailwind CSS | 4.3+ | 4.x | 通过 `@tailwindcss/vite` 集成 |
 | MySQL | 8.0 | 8.0 / 9.x | 评估 9.x 新特性 |
 | Redis | 7 | 7.x | — |
 | RabbitMQ | 3 | 3.x / 4.x | 跟踪 4.0 发布 |

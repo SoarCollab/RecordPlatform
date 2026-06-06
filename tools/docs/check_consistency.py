@@ -10,10 +10,16 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
+from xml.etree import ElementTree
 
 
 CORE_WORKFLOWS = ("test.yml", "perf-smoke.yml", "docs.yml", "security-poc.yml", "docs-consistency.yml")
-
+SPRING_BOOT_POMS = (
+    "platform-api/pom.xml",
+    "platform-backend/pom.xml",
+    "platform-fisco/pom.xml",
+    "platform-storage/pom.xml",
+)
 ROUTE_DOC_TARGETS = (
     "README.md",
     "README_CN.md",
@@ -106,6 +112,17 @@ class CheckResult:
         return not self.issues
 
 
+@dataclass(frozen=True)
+class RuntimeVersions:
+    """Store canonical runtime versions collected from build manifests."""
+
+    spring_boot: str
+    svelte: str
+    sveltekit: str
+    vite: str
+    tailwind: str
+
+
 
 def get_repo_root() -> Path:
     """Resolve repository root based on the script location."""
@@ -119,6 +136,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--check-routes", action="store_true", help="Validate API routes against OpenAPI")
     parser.add_argument("--check-env", action="store_true", help="Validate documented env vars against code/env sources")
     parser.add_argument("--check-roadmap", action="store_true", help="Validate ROADMAP baseline snapshot")
+    parser.add_argument("--check-versions", action="store_true", help="Validate documented runtime versions")
     parser.add_argument(
         "--openapi",
         type=Path,
@@ -411,6 +429,153 @@ def check_roadmap(root: Path) -> CheckResult:
     return result
 
 
+def direct_child_text(element: ElementTree.Element, name: str) -> str | None:
+    """Return the text value of a direct XML child, ignoring namespace prefixes."""
+    for child in element:
+        if child.tag.rsplit("}", 1)[-1] == name:
+            return child.text.strip() if child.text else None
+    return None
+
+
+def find_direct_child(element: ElementTree.Element, name: str) -> ElementTree.Element | None:
+    """Return a direct XML child element by local tag name."""
+    for child in element:
+        if child.tag.rsplit("}", 1)[-1] == name:
+            return child
+    return None
+
+
+def read_spring_boot_parent_version(pom_path: Path) -> tuple[str | None, str | None]:
+    """Read Spring Boot starter parent version from a Maven POM."""
+    try:
+        project = ElementTree.parse(pom_path).getroot()
+    except ElementTree.ParseError as error:
+        return None, f"{pom_path} is not valid XML: {error}"
+
+    parent = find_direct_child(project, "parent")
+    if parent is None:
+        return None, f"{pom_path} does not declare a parent POM"
+
+    group_id = direct_child_text(parent, "groupId")
+    artifact_id = direct_child_text(parent, "artifactId")
+    version = direct_child_text(parent, "version")
+    if group_id != "org.springframework.boot" or artifact_id != "spring-boot-starter-parent":
+        return None, f"{pom_path} parent is not spring-boot-starter-parent"
+    if version is None:
+        return None, f"{pom_path} does not declare Spring Boot parent version"
+    return version, None
+
+
+def parse_package_version(raw_version: str) -> str | None:
+    """Extract the first semantic version token from a package version string."""
+    match = re.search(r"\d+\.\d+\.\d+", raw_version)
+    return match.group(0) if match else None
+
+
+def minor_floor(version: str) -> str:
+    """Convert an exact semantic version into a documented minor floor token."""
+    major, minor, _patch = version.split(".", 2)
+    return f"{major}.{minor}+"
+
+
+def read_package_json_versions(package_json_path: Path) -> dict[str, str]:
+    """Read selected frontend dependency versions from package.json."""
+    payload = json.loads(package_json_path.read_text(encoding="utf-8"))
+    dependencies = payload.get("dependencies", {})
+    dev_dependencies = payload.get("devDependencies", {})
+    packages = {**dependencies, **dev_dependencies}
+
+    selected_packages = {
+        "svelte": "svelte",
+        "sveltekit": "@sveltejs/kit",
+        "vite": "vite",
+        "tailwind": "tailwindcss",
+    }
+    versions: dict[str, str] = {}
+    for label, package_name in selected_packages.items():
+        raw_version = packages.get(package_name)
+        if not isinstance(raw_version, str):
+            continue
+        parsed = parse_package_version(raw_version)
+        if parsed:
+            versions[label] = parsed
+    return versions
+
+
+def collect_runtime_versions(root: Path, result: CheckResult) -> RuntimeVersions | None:
+    """Collect canonical runtime versions and append collection issues to result."""
+    spring_versions: dict[str, str] = {}
+    for rel_path in SPRING_BOOT_POMS:
+        pom_path = root / rel_path
+        version, issue = read_spring_boot_parent_version(pom_path)
+        if issue:
+            result.issues.append(issue)
+            continue
+        if version:
+            spring_versions[rel_path] = version
+
+    unique_spring_versions = sorted(set(spring_versions.values()))
+    if len(unique_spring_versions) != 1:
+        details = ", ".join(f"{path}={version}" for path, version in sorted(spring_versions.items()))
+        result.issues.append(f"Spring Boot parent version mismatch: {details}")
+        return None
+
+    frontend_versions = read_package_json_versions(root / "platform-frontend/package.json")
+    missing_frontend = [key for key in ("svelte", "sveltekit", "vite", "tailwind") if key not in frontend_versions]
+    for missing in missing_frontend:
+        result.issues.append(f"Missing frontend dependency version in package.json: {missing}")
+
+    if not spring_versions or missing_frontend:
+        return None
+
+    return RuntimeVersions(
+        spring_boot=unique_spring_versions[0],
+        svelte=frontend_versions["svelte"],
+        sveltekit=frontend_versions["sveltekit"],
+        vite=frontend_versions["vite"],
+        tailwind=frontend_versions["tailwind"],
+    )
+
+
+def check_doc_contains(root: Path, rel_path: str, expected_tokens: Iterable[str], result: CheckResult) -> None:
+    """Check that a documentation file contains every expected version token."""
+    file_path = root / rel_path
+    if not file_path.exists():
+        result.issues.append(f"Version doc target not found: {rel_path}")
+        return
+
+    content = file_path.read_text(encoding="utf-8")
+    for token in expected_tokens:
+        if token not in content:
+            result.issues.append(f"{rel_path} does not mention current version token: {token}")
+
+
+def check_versions(root: Path) -> CheckResult:
+    """Validate documented runtime versions against POM and package.json facts."""
+    result = CheckResult("versions")
+    versions = collect_runtime_versions(root, result)
+    if versions is None:
+        return result
+
+    spring = versions.spring_boot
+    svelte = minor_floor(versions.svelte)
+    sveltekit = minor_floor(versions.sveltekit)
+    vite = minor_floor(versions.vite)
+    tailwind = minor_floor(versions.tailwind)
+
+    doc_expectations = {
+        "README.md": (spring, svelte, sveltekit, vite, tailwind),
+        "README_CN.md": (spring, svelte, sveltekit, vite, tailwind),
+        "ROADMAP.md": (spring, svelte, sveltekit, vite, tailwind),
+        "docs/en/getting-started/frontend.md": (svelte, sveltekit, vite, tailwind),
+        "docs/zh/getting-started/frontend.md": (svelte, sveltekit, vite, tailwind),
+    }
+    for rel_path, expected_tokens in doc_expectations.items():
+        check_doc_contains(root, rel_path, expected_tokens, result)
+
+    return result
+
+
 
 def print_result(result: CheckResult) -> None:
     """Print human-readable check result with concise pass/fail details."""
@@ -435,8 +600,10 @@ def main() -> int:
         requested_checks.append("env")
     if args.check_roadmap:
         requested_checks.append("roadmap")
+    if args.check_versions:
+        requested_checks.append("versions")
     if not requested_checks:
-        requested_checks = ["routes", "env", "roadmap"]
+        requested_checks = ["routes", "env", "roadmap", "versions"]
 
     openapi_path = args.openapi
     if not openapi_path.is_absolute():
@@ -449,6 +616,8 @@ def main() -> int:
         results.append(check_env_vars(root))
     if "roadmap" in requested_checks:
         results.append(check_roadmap(root))
+    if "versions" in requested_checks:
+        results.append(check_versions(root))
 
     for result in results:
         print_result(result)
