@@ -411,7 +411,7 @@
 | 策略 | 说明 |
 |------|------|
 | 安全补丁 | Dependabot PR 自动创建，及时合并 |
-| LTS 版本 | 评估并在发布后一个月内采纳；当前已跟踪 Spring Boot 3.5.13、Java 21 |
+| LTS 版本 | 评估并在发布后一个月内采纳；当前已跟踪 Spring Boot 3.5.14、Java 21 |
 | EOL 依赖 | 在 EOL 前规划迁移 |
 | 中间版本 | 不追非 LTS 中间版本 |
 
@@ -446,7 +446,7 @@
 | 组件 | 当前版本 | 下一目标版本 | 备注 |
 |------|----------|-------------|------|
 | Java | 21 (LTS) | 25 (LTS, 2025-09-16 已发布) | 评估 Gatherer/Structured Concurrency 等新 API |
-| Spring Boot | 3.5.13 | 4.0.x (2025-11 已发布) | 跟踪 4.0；Virtual Threads 已启用 |
+| Spring Boot | 3.5.14 | 4.0.x (2025-11 已发布) | 跟踪 4.0；Virtual Threads 已启用 |
 | Dubbo | 3.3.6 (Triple) | 3.3.x | 保持 Triple 协议 |
 | Svelte | 5.55+ | 5.x | Runes API 已稳定 |
 | SvelteKit | 2.59+ | 2.x | — |

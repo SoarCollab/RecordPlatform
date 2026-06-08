@@ -186,7 +186,7 @@ cd platform-frontend && pnpm install && pnpm dev
 
 | 分类     | 技术                                                    | 版本               |
 | -------- | ------------------------------------------------------- | ------------------ |
-| 后端     | Java + Spring Boot + Virtual Threads                    | 21, 3.5.13         |
+| 后端     | Java + Spring Boot + Virtual Threads                    | 21, 3.5.14         |
 | 微服务   | Apache Dubbo (Triple 协议), Nacos                       | 3.3.6              |
 | 区块链   | FISCO BCOS, Solidity                                    | 3.8.0, ^0.8.11     |
 | 存储     | S3 兼容存储 (AWS SDK v2), MySQL, Redis (Redisson)        | 2.x, 8.0+, 7.0+    |

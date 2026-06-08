@@ -186,7 +186,7 @@ Verify the installation at:
 
 | Category      | Technology                                              | Version               |
 | ------------- | ------------------------------------------------------- | --------------------- |
-| Backend       | Java + Spring Boot + Virtual Threads                    | 21, 3.5.13            |
+| Backend       | Java + Spring Boot + Virtual Threads                    | 21, 3.5.14            |
 | Microservices | Apache Dubbo (Triple protocol), Nacos                   | 3.3.6                 |
 | Blockchain    | FISCO BCOS, Solidity                                    | 3.8.0, ^0.8.11        |
 | Storage       | S3-compatible (AWS SDK v2), MySQL, Redis (Redisson)     | 2.x, 8.0+, 7.0+       |
