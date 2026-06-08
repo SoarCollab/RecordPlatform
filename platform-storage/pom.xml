@@ -191,6 +191,14 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!-- Override Bouncy Castle to fix CVE-2026-5598 (Covert Timing Channel)
+                 Note: Project does not use Bouncy Castle directly or FrodoEngine.
+                 Upgrading as a precaution. -->
+            <dependency>
+                <groupId>org.bouncycastle</groupId>
+                <artifactId>bcprov-jdk18on</artifactId>
+                <version>1.84</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 

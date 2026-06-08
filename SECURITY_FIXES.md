@@ -48,6 +48,43 @@
 - platform-storage
 - platform-fisco
 
+## 已修复的 High 告警（第二批）
+
+### 4. fast-uri 路径遍历和主机混淆 (2个 CVE)
+**漏洞详情**:
+- CVE-2026-6321: 通过百分号编码的点段进行路径遍历
+- CVE-2026-6322: 通过百分号编码的权限分隔符进行主机混淆
+
+**修复方案**:
+- 升级 fast-uri 从 3.0.1 → **3.1.2**
+- 通过 pnpm overrides 强制版本
+
+**受影响模块**:
+- platform-frontend (仅开发依赖，通过 openapi-typescript 传递引入)
+
+**实际影响评估**: 
+- ✅ 仅开发依赖，不影响生产运行时
+- ✅ 仅在运行 `pnpm types:gen` 时使用
+- **风险等级: 低**
+
+### 5. Bouncy Castle 时序通道漏洞 (2个 CVE)
+**漏洞详情**:
+- CVE-2026-5598: FrodoEngine 隐蔽时序通道攻击
+
+**修复方案**:
+- 升级 org.bouncycastle:bcprov-jdk18on 从 1.78.1 → **1.84**
+- 通过 dependencyManagement 覆盖版本
+
+**受影响模块**:
+- platform-backend (通过 Spring Cloud 传递引入)
+- platform-storage (通过 Spring Cloud 传递引入)
+
+**实际影响评估**:
+- ✅ 项目未直接使用 Bouncy Castle
+- ✅ 项目未使用受影响的 FrodoEngine
+- ✅ 项目使用标准 Java 加密（AES-GCM/ChaCha20）
+- **实际影响: 零**，升级以保持安全最佳实践
+
 ## 待处理的 Critical 告警
 
 ### Vitest UI Server 任意文件读取 (CVE-2026-47429)
@@ -78,12 +115,20 @@ platform-backend/pom.xml:
   - Spring Boot: 3.5.13 → 3.5.14
   - Tomcat: 10.1.54 → 10.1.55
   - 新增 tools.jackson.core 版本覆盖: 3.1.4
+  - 新增 org.bouncycastle:bcprov-jdk18on 版本覆盖: 1.84
 
 platform-storage/pom.xml:
   - Spring Boot: 3.5.13 → 3.5.14
+  - 新增 org.bouncycastle:bcprov-jdk18on 版本覆盖: 1.84
 
 platform-fisco/pom.xml:
   - Spring Boot: 3.5.13 → 3.5.14
+
+platform-frontend/package.json:
+  - 新增 fast-uri pnpm override: 3.1.2
+
+platform-frontend/pnpm-lock.yaml:
+  - fast-uri: 3.1.0 → 3.1.2
 ```
 
 ## High 级别告警
