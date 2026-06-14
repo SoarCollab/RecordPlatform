@@ -437,8 +437,9 @@ class ControllerCoverageBoostTest {
         assertEquals(ResultEnum.SUCCESS.getCode(), fileController.deleteFiles(userId, List.of("hash-10")).getCode());
         verify(fileService).deleteFiles(userId, List.of("hash-10"));
 
-        assertEquals(ResultEnum.SUCCESS.getCode(), fileController.deleteFileById("10").getCode());
-        verify(fileService).removeByIds(List.of("10"));
+        String externalFileId = IdUtils.toExternalId(10L);
+        assertEquals(ResultEnum.SUCCESS.getCode(), fileController.deleteFileById(externalFileId).getCode());
+        verify(fileService).removeByIds(List.of(10L));
 
         assertEquals(ResultEnum.SUCCESS.getCode(), fileController.cancelShare(userId, "SHARE10").getCode());
         verify(fileService).cancelShare(userId, "SHARE10");
