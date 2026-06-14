@@ -210,6 +210,13 @@ integrity:
     sample-rate: 0.01
     batch-size: 50
     lock-timeout-seconds: 1800
+    distribution:
+      lightweight: 0.99    # 99% fast existence checks
+      medium: 0.009        # 0.9% hash verification
+      heavy: 0.001         # 0.1% full blockchain verification
+    schedule:
+      cron: "0 0 2 * * ?"  # 2 AM daily
+      batch-size: 100
 
 # Outbox publisher configuration
 outbox:
