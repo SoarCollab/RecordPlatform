@@ -1,6 +1,7 @@
 package cn.flying.service.impl;
 
 import cn.flying.api.utils.ResultUtils;
+import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.constant.ShareType;
@@ -744,6 +745,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
+    @OperationLog(module = "FILE_SECURITY", operationType = "KEY_ACCESS", description = "访问文件解密密钥")
+    @io.github.resilience4j.ratelimiter.annotation.RateLimiter(name = "fileKeyAccessRateLimiter", fallbackMethod = "fileKeyAccessRateLimitFallback")
     public FileDecryptInfoVO getFileDecryptInfo(Long userId, String fileHash) {
         // 校验文件所有权：用户只能获取自己的文件解密信息，管理员可获取所有
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
@@ -757,6 +760,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         if (file == null) {
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权限访问");
         }
+
+        // 记录密钥访问审计日志
+        Long tenantId = TenantContext.getTenantId();
+        log.info("访问文件解密密钥: userId={}, fileId={}, fileName={}, fileHash={}, tenantId={}, accessTime={}",
+                userId, file.getId(), file.getFileName(), fileHash, tenantId, new Date());
 
         // 解析 fileParam JSON 获取解密信息
         String fileParam = file.getFileParam();
@@ -795,6 +803,14 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             log.error("解析文件参数失败: fileHash={}, error={}", fileHash, e.getMessage());
             throw new GeneralException(ResultEnum.FAIL, "解析文件元数据失败");
         }
+    }
+
+    /**
+     * Rate limiter fallback for getFileDecryptInfo
+     */
+    private FileDecryptInfoVO fileKeyAccessRateLimitFallback(Long userId, String fileHash, Throwable t) {
+        log.warn("文件解密密钥访问限流触发: userId={}, fileHash={}, error={}", userId, fileHash, t.getMessage());
+        throw new GeneralException(ResultEnum.RATE_LIMIT_EXCEEDED);
     }
 
     @Override

@@ -156,6 +156,12 @@ resilience4j:
         base-config: default
       storageService:
         base-config: default
+  ratelimiter:
+    instances:
+      fileKeyAccessRateLimiter:
+        limit-for-period: 20
+        limit-refresh-period: 60s
+        timeout-duration: 1s
 
 # File cleanup task configuration
 file:
