@@ -66,6 +66,9 @@ import java.util.concurrent.TimeUnit;
  * @description: 文件服务实现类
  * @author flyingcoding
  * @create: 2025-03-12 21:22
+ *
+ * 缓存 key 格式: tenantId:userId
+ * 确保多租户环境下缓存隔离
  */
 @Slf4j
 @Service
@@ -162,7 +165,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      * 注意：此方法不使用类级别事务，Saga 编排器内部管理自己的事务
      */
     @Override
-    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId")
     public File storeFile(Long userId, String OriginFileName, List<java.io.File> fileList, List<String> fileHashList, String fileParam) {
         return storeFile(userId, null, OriginFileName, fileList, fileHashList, fileParam);
     }
@@ -179,7 +182,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      * @return 存储成功后的文件记录
      */
     @Override
-    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId")
     public File storeFile(Long userId, Long targetFileId, String originFileName,
                           List<java.io.File> fileList, List<String> fileHashList, String fileParam) {
         if (CommonUtils.isEmpty(fileList)) {
@@ -265,7 +268,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId")
     public void changeFileStatusByName(Long userId, String fileName, Integer fileStatus) {
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getFileName, fileName)
@@ -277,7 +280,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId")
     public void changeFileStatusByHash(Long userId, String fileHash, Integer fileStatus) {
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getFileHash, fileHash)
@@ -296,7 +299,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId")
     public void changeFileStatusById(Long userId, Long fileId, Integer fileStatus) {
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getId, fileId)
@@ -313,7 +316,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId")
     public void markFileUploadFailed(Long userId, Long fileId) {
         if (fileId == null) {
             return;
@@ -362,7 +365,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId")
     public void deleteFiles(Long userId, List<String> identifiers) {
         if (CommonUtils.isEmpty(identifiers)) {
             return;
@@ -458,7 +461,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
-    @Cacheable(cacheNames = "userFiles", key = "#userId", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId", unless = "#result == null || #result.isEmpty()")
     public List<File> getUserFilesList(Long userId) {
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
         // 所有用户（包括管理员）只能查询自己的文件
@@ -1281,7 +1284,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
-    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId")
     public File createNewVersion(Long userId, Long parentFileId, String fileName, long fileSize, String contentType) {
         File parentFile = validateVersionSourceFile(userId, parentFileId);
 
