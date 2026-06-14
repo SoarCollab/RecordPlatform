@@ -666,7 +666,28 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     }
 
     /**
-     * 尝试从指定节点获取对象并写入临时文件
+     * 从存储节点读取文件对象到内存。
+     *
+     * <p><b>当前实现约束</b>:
+     * 使用 ByteArrayOutputStream 将完整对象加载到堆内存，受 JVM 堆大小限制。
+     * 当前硬编码限制为 100MB（MAX_IN_MEMORY_FILE_SIZE），超过此大小直接拒绝加载。
+     * 高并发下载场景需要注意总内存占用：并发下载数 × 平均文件大小。
+     * </p>
+     *
+     * <p><b>安全机制</b>:
+     * - 下载前检查对象大小（HeadObject）
+     * - 分块读取避免单次读取过大（8KB buffer）
+     * - 读取过程中二次检查防止超限
+     * </p>
+     *
+     * <p><b>v2.0 改进计划</b>（参见 ROADMAP.md P2 任务）:
+     * 返回 S3 预签名 URL 给前端，由前端直接从对象存储流式下载并解密，
+     * 后端完全不参与数据流传输，彻底消除内存聚合问题。
+     * </p>
+     *
+     * @param nodeName 存储节点名称
+     * @param objectName S3 对象键
+     * @return 文件字节数组，如果对象不存在或读取失败则返回 empty
      */
     private Optional<byte[]> tryGetObjectFromNode(String nodeName, String objectName) {
         if (!s3Monitor.isNodeOnline(nodeName)) {
