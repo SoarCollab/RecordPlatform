@@ -56,6 +56,18 @@ public class FileUploadState {
     @Schema(description = "是否已完成 PREPARE 元数据落库（用于 completeUpload 幂等）")
     private volatile boolean prepareStored;
 
+    @Schema(description = "会话唯一标识（用于构建临时文件路径）")
+    private String suid;
+
+    @Schema(description = "上传临时目录路径（用于定时清理）")
+    private String uploadTempPath;
+
+    @Schema(description = "处理后临时目录路径（用于定时清理）")
+    private String processedTempPath;
+
+    @Schema(description = "清理重试次数（用于防止无限重试）")
+    private Integer cleanupRetryCount = 0;
+
     public FileUploadState(Long userId, String fileName, long fileSize, String contentType, String clientId, int chunkSize, int totalChunks) {
         this(userId, fileName, fileSize, contentType, clientId, chunkSize, totalChunks, null);
     }

@@ -74,6 +74,7 @@ public class FileUploadServiceImpl implements FileUploadService {
     private static final int NEXT_KEY_TAIL_SCAN_BYTES = 512;
     private static final String QUOTA_COMPLETE_LOCK_KEY_PREFIX = "distributed:lock:upload:quota:complete:tenant:";
     private static final long QUOTA_COMPLETE_LOCK_LEASE_SECONDS = 60L;
+    private static final int MAX_CLEANUP_RETRIES = 3;
     // --- 允许的文件类型 ---
     private static final Set<String> ALLOWED_FILE_EXTENSIONS = Set.of(
             "jpg", "jpeg", "png", "gif", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "zip", "rar", "7z"
@@ -201,15 +202,28 @@ public class FileUploadServiceImpl implements FileUploadService {
         if (state != null) {
             log.info("--------------------开始清理会话 {} 的相关文件-----------------", clientId);
 
-            // 如果SUID为空，跳过文件系统清理，仅清理Redis状态
-            final String actualSUID = (SUID == null || SUID.isEmpty()) ? "" : SUID;
+            // Check retry count and increment
+            int retryCount = state.getCleanupRetryCount();
+            if (retryCount >= MAX_CLEANUP_RETRIES) {
+                log.error("会话 {} 清理重试次数已达上限 ({}), 强制清理 Redis 状态", clientId, MAX_CLEANUP_RETRIES);
+                redisStateManager.removeSession(state.getClientId(), state.getSuid());
+                return true;
+            }
 
-            if (actualSUID.isEmpty()) {
-                // 对于定时清理任务，我们无法获取准确的SUID，但仍然可以清理Redis状态
-                log.warn("SUID为空，跳过文件系统清理，仅清理Redis状态: 客户端ID={}", clientId);
-            } else {
-                // 同步清理文件，确保文件删除后再删除 Redis 状态
-                // 这样即使清理失败，定时任务仍可通过 Redis 状态重试
+            // Use persisted paths from state
+            final String persistedSuid = state.getSuid();
+            final String uploadPath = state.getUploadTempPath();
+            final String processedPath = state.getProcessedTempPath();
+
+            if (uploadPath == null || processedPath == null) {
+                log.warn("会话 {} 缺少持久化路径信息，回退到 SUID 构建路径", clientId);
+                // Fallback to SUID-based construction
+                final String actualSUID = (SUID == null || SUID.isEmpty()) ? "" : SUID;
+                if (actualSUID.isEmpty()) {
+                    log.warn("SUID 为空且无持久化路径，跳过文件系统清理，仅清理 Redis 状态: 客户端ID={}", clientId);
+                    redisStateManager.removeSession(state.getClientId(), actualSUID);
+                    return true;
+                }
                 try {
                     Path uploadDir = getUploadSessionDir(actualSUID, clientId);
                     cleanupDirectory(uploadDir);
@@ -218,13 +232,28 @@ public class FileUploadServiceImpl implements FileUploadService {
                     log.info("会话 {} 文件清理完成。", clientId);
                 } catch (Exception e) {
                     log.error("会话 {} 文件清理失败，将保留 Redis 状态以便重试: {}", clientId, e.getMessage());
-                    // 文件清理失败时保留 Redis 状态，让定时任务重试
+                    state.setCleanupRetryCount(retryCount + 1);
+                    redisStateManager.updateState(state);
+                    return false;
+                }
+            } else {
+                // Use persisted paths
+                try {
+                    Path uploadDir = Paths.get(uploadPath);
+                    cleanupDirectory(uploadDir);
+                    Path processedDir = Paths.get(processedPath);
+                    cleanupDirectory(processedDir);
+                    log.info("会话 {} 文件清理完成（使用持久化路径）。", clientId);
+                } catch (Exception e) {
+                    log.error("会话 {} 文件清理失败，将保留 Redis 状态以便重试: {}", clientId, e.getMessage());
+                    state.setCleanupRetryCount(retryCount + 1);
+                    redisStateManager.updateState(state);
                     return false;
                 }
             }
 
             // 文件清理成功后，从Redis中移除状态
-            redisStateManager.removeSession(state.getClientId(), actualSUID);
+            redisStateManager.removeSession(state.getClientId(), persistedSuid != null ? persistedSuid : SUID);
 
             return true; // 状态已找到并清理完成
         } else {
@@ -411,11 +440,19 @@ public class FileUploadServiceImpl implements FileUploadService {
                     userId, fileName, fileSize, contentType, clientId, chunkSize, totalChunks, targetFileId
             );
             newState.setTenantId(tenantId);
-            redisStateManager.saveNewState(newState, SUID);
 
             // 确保客户端和会话的目录存在
-            Files.createDirectories(getUploadSessionDir(SUID, clientId));
-            Files.createDirectories(getProcessedSessionDir(SUID, clientId));
+            Path uploadDir = getUploadSessionDir(SUID, clientId);
+            Path processedDir = getProcessedSessionDir(SUID, clientId);
+            Files.createDirectories(uploadDir);
+            Files.createDirectories(processedDir);
+
+            // Persist SUID and paths for cleanup
+            newState.setSuid(SUID);
+            newState.setUploadTempPath(uploadDir.toString());
+            newState.setProcessedTempPath(processedDir.toString());
+
+            redisStateManager.saveNewState(newState, SUID);
 
             log.info("创建新的上传会话: 客户端ID={}, 文件客户端键={}", SUID, fileClientKey);
             // 返回创建成功的 DTO
