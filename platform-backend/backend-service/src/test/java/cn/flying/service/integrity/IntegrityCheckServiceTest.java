@@ -101,7 +101,8 @@ class IntegrityCheckServiceTest {
         when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
         when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
 
-        String hash = "abc123def456";
+        // Hash that matches "test file content"
+        String hash = "60f5237ed4049f0382661ef009d2bc42e48c3ceb3edb6600f7024e7ab3b838f3";
 
         File file = FileTestBuilder.aFile(f -> {
             f.setTenantId(TENANT_ID);
@@ -115,7 +116,8 @@ class IntegrityCheckServiceTest {
                     setRecords(List.of(file));
                 }});
 
-        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of(new byte[]{1, 2, 3}));
+        // Storage returns "test file content" which computes to the hash above
+        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of("test file content".getBytes()));
         when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
 
         FileDetailVO chainDetail = new FileDetailVO(
@@ -137,7 +139,8 @@ class IntegrityCheckServiceTest {
         when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
         when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
 
-        String dbHash = "db_hash_value";
+        // Storage content that hashes to this value
+        String dbHash = "60f5237ed4049f0382661ef009d2bc42e48c3ceb3edb6600f7024e7ab3b838f3";
         String onChainHash = "different_chain_hash";
 
         File file = FileTestBuilder.aFile(f -> {
@@ -152,8 +155,8 @@ class IntegrityCheckServiceTest {
                     setRecords(List.of(file));
                 }});
 
-        // Storage returns non-empty bytes (file exists)
-        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of(new byte[]{1, 2, 3}));
+        // Storage returns "test file content" which matches dbHash
+        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of("test file content".getBytes()));
         when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
 
         // Chain returns a different hash than DB
@@ -183,9 +186,13 @@ class IntegrityCheckServiceTest {
         when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
         when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
 
+        // Hash that matches "test file content"
+        String hash = "60f5237ed4049f0382661ef009d2bc42e48c3ceb3edb6600f7024e7ab3b838f3";
+
         File file = FileTestBuilder.aFile(f -> {
             f.setTenantId(TENANT_ID);
             f.setUid(USER_ID);
+            f.setFileHash(hash);
             f.setStatus(FileUploadStatus.SUCCESS.getCode());
         });
 
@@ -214,9 +221,13 @@ class IntegrityCheckServiceTest {
         when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
         when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
 
+        // Hash that matches "test file content"
+        String hash = "60f5237ed4049f0382661ef009d2bc42e48c3ceb3edb6600f7024e7ab3b838f3";
+
         File file = FileTestBuilder.aFile(f -> {
             f.setTenantId(TENANT_ID);
             f.setUid(USER_ID);
+            f.setFileHash(hash);
             f.setStatus(FileUploadStatus.SUCCESS.getCode());
         });
 
@@ -242,7 +253,8 @@ class IntegrityCheckServiceTest {
         when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
         when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
 
-        String hash = "some_file_hash";
+        // Hash that matches "test file content"
+        String hash = "60f5237ed4049f0382661ef009d2bc42e48c3ceb3edb6600f7024e7ab3b838f3";
 
         File file = FileTestBuilder.aFile(f -> {
             f.setTenantId(TENANT_ID);
@@ -256,8 +268,8 @@ class IntegrityCheckServiceTest {
                     setRecords(List.of(file));
                 }});
 
-        // Storage returns non-empty bytes (file exists)
-        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of(new byte[]{1, 2, 3}));
+        // Storage returns file content that matches hash
+        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of("test file content".getBytes()));
         when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
 
         // Chain returns failure
@@ -280,7 +292,8 @@ class IntegrityCheckServiceTest {
         when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
         when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
 
-        String hash = "chain_service_failure_hash";
+        // Hash that matches "test file content"
+        String hash = "60f5237ed4049f0382661ef009d2bc42e48c3ceb3edb6600f7024e7ab3b838f3";
 
         File file = FileTestBuilder.aFile(f -> {
             f.setTenantId(TENANT_ID);
@@ -294,7 +307,7 @@ class IntegrityCheckServiceTest {
                     setRecords(List.of(file));
                 }});
 
-        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of(new byte[]{1, 2, 3}));
+        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of("test file content".getBytes()));
         when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
 
         Result<FileDetailVO> chainResult = new Result<>(ResultEnum.BLOCKCHAIN_ERROR, null);
@@ -316,7 +329,8 @@ class IntegrityCheckServiceTest {
 
         Long recipientUserId = 200L;
         Long originFileId = 999L;
-        String hash = "shared_file_hash";
+        // Hash that matches "test file content"
+        String hash = "60f5237ed4049f0382661ef009d2bc42e48c3ceb3edb6600f7024e7ab3b838f3";
 
         File sharedFile = FileTestBuilder.aFile(f -> {
             f.setTenantId(TENANT_ID);
@@ -338,7 +352,7 @@ class IntegrityCheckServiceTest {
                 }});
         when(fileMapper.selectByIdIncludeDeleted(originFileId)).thenReturn(originFile);
 
-        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of(new byte[]{1, 2, 3}));
+        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of("test file content".getBytes()));
         when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
 
         FileDetailVO chainDetail = new FileDetailVO(
