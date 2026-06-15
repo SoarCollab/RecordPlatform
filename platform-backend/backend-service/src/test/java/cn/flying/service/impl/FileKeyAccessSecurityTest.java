@@ -90,10 +90,6 @@ class FileKeyAccessSecurityTest {
     @Test
     @DisplayName("Fallback method should throw RATE_LIMIT_EXCEEDED exception")
     void testFileKeyAccessRateLimitFallback_ThrowsCorrectException() throws Exception {
-        // Given: Rate limit exception parameters
-        Long userId = 1L;
-        String fileHash = "test-hash";
-
         // When: Verify fallback method exists and has correct signature
         Method fallbackMethod = FileServiceImpl.class.getDeclaredMethod(
                 "fileKeyAccessRateLimitFallback", Long.class, String.class, Throwable.class);
