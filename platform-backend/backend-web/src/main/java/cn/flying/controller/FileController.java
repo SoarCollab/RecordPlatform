@@ -2,6 +2,8 @@ package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.Result;
+import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.File;
@@ -141,8 +143,12 @@ public class FileController {
     @PreAuthorize("hasPerm('file:admin')")
     @OperationLog(module = "文件操作", operationType = "删除", description = "删除文件")
     public Result<String> deleteFileById(
-            @Schema(description = "待删除文件ID") @PathVariable("id") String id) {
-        fileService.removeByIds(List.of(id));
+            @Schema(description = "待删除文件ID") @PathVariable("id") String externalId) {
+        Long internalId = IdUtils.fromExternalId(externalId);
+        if (internalId == null) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "无效的文件ID");
+        }
+        fileService.removeByIds(List.of(internalId));
         return Result.success("文件删除成功");
     }
 

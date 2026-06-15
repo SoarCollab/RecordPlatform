@@ -126,6 +126,26 @@ public class FileSagaOrchestrator {
         return saga;
     }
 
+    /**
+     * 上传文件分片到分布式存储（S3/MinIO）。
+     *
+     * <p><b>当前实现约束</b>:
+     * 分片数据会完整加载到堆内存后通过 Dubbo 传输到存储服务。
+     * 单分片上限 80MB，受 Dubbo 100MB 消息体限制。
+     * 高并发场景需注意堆内存使用，建议 JVM heap ≥ 4GB。
+     * 堆内存估算公式：并发上传数 × 分片大小 × 2（读取+传输缓冲）。
+     * </p>
+     *
+     * <p><b>v2.0 改进计划</b>（参见 ROADMAP.md P2 任务）:
+     * 迁移到 S3 Multipart Upload 直传模式，前端直接上传到对象存储，
+     * 后端仅管理元数据和区块链存证，完全消除内存聚合瓶颈。
+     * </p>
+     *
+     * @param saga Saga 实例，记录上传状态和进度
+     * @param cmd 文件上传命令，包含分片文件列表和哈希列表
+     * @return 分片哈希到 S3 逻辑路径的映射
+     * @throws GeneralException 文件读取失败或 S3 上传失败时抛出
+     */
     private Map<String, String> executeS3Upload(FileSaga saga, FileUploadCommand cmd) {
         SagaPayloadContext context = loadPayloadContext(saga);
         if (saga.reachedStep(FileSagaStep.S3_UPLOADED) && context.getStoredPaths() != null) {
@@ -145,7 +165,7 @@ public class FileSagaOrchestrator {
 
             byte[] chunkData;
             try (InputStream in = Files.newInputStream(chunkFile.toPath())) {
-                chunkData = in.readAllBytes();
+                chunkData = in.readAllBytes();  // 当前实现：完整加载到内存（权衡 Dubbo 序列化简化 vs 内存占用）
             } catch (IOException e) {
                 log.error("读取文件块失败: index={}, path={}", i, chunkFile.getPath(), e);
                 throw new GeneralException(ResultEnum.FILE_NOT_EXIST);

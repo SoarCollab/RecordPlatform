@@ -30,6 +30,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -67,6 +69,29 @@ public class IntegrityCheckService {
     private long lockTimeoutSeconds;
 
     /**
+     * Integrity check levels with different verification depths.
+     */
+    public enum IntegrityCheckLevel {
+        /**
+         * Lightweight check: verify file exists in S3 storage without downloading.
+         * Fast but only catches missing files.
+         */
+        LIGHTWEIGHT,
+
+        /**
+         * Medium check: download file and verify hash matches database record.
+         * Catches missing files and local corruption, but not blockchain inconsistencies.
+         */
+        MEDIUM,
+
+        /**
+         * Heavy check: download file, verify hash, and compare against blockchain record.
+         * Full verification but slowest and most resource-intensive.
+         */
+        HEAVY
+    }
+
+    /**
      * Run integrity check across all tenants with random sampling.
      * Acquires a distributed lock to prevent concurrent execution.
      *
@@ -75,6 +100,18 @@ public class IntegrityCheckService {
     @TenantScope(ignoreIsolation = true)
     public IntegrityCheckStatsVO checkIntegrity() {
         return executeWithLock(this::doCheckAllTenants);
+    }
+
+    /**
+     * Run integrity check across all tenants with specified check level.
+     * Acquires a distributed lock to prevent concurrent execution.
+     *
+     * @param level the check level to use
+     * @return check statistics
+     */
+    @TenantScope(ignoreIsolation = true)
+    public IntegrityCheckStatsVO checkIntegrityWithLevel(IntegrityCheckLevel level) {
+        return executeWithLock(() -> doCheckAllTenantsWithLevel(level));
     }
 
     /**
@@ -175,6 +212,10 @@ public class IntegrityCheckService {
     }
 
     private IntegrityCheckStatsVO doCheckAllTenants() {
+        return doCheckAllTenantsWithLevel(IntegrityCheckLevel.HEAVY);
+    }
+
+    private IntegrityCheckStatsVO doCheckAllTenantsWithLevel(IntegrityCheckLevel level) {
         List<Long> tenantIds = tenantMapper.selectActiveTenantIds();
         if (tenantIds == null || tenantIds.isEmpty()) {
             log.info("[integrity-check] no active tenants found");
@@ -192,7 +233,7 @@ public class IntegrityCheckService {
                 continue;
             }
 
-            IntegrityCheckStatsVO stats = checkFiles(sampled, tenantId);
+            IntegrityCheckStatsVO stats = checkFilesWithLevel(sampled, tenantId, level);
             totalChecked += stats.totalChecked();
             totalMismatches += stats.mismatchesFound();
             totalErrors += stats.errorsEncountered();
@@ -233,6 +274,10 @@ public class IntegrityCheckService {
     }
 
     private IntegrityCheckStatsVO checkFiles(List<File> files, Long tenantId) {
+        return checkFilesWithLevel(files, tenantId, IntegrityCheckLevel.HEAVY);
+    }
+
+    private IntegrityCheckStatsVO checkFilesWithLevel(List<File> files, Long tenantId, IntegrityCheckLevel level) {
         long checked = 0;
         long mismatches = 0;
         long errors = 0;
@@ -242,7 +287,7 @@ public class IntegrityCheckService {
             for (File file : batch) {
                 checked++;
                 try {
-                    VerifyResult result = verifyFile(file);
+                    VerifyResult result = verifyFile(file, level);
                     if (result != null) {
                         mismatches++;
                         createAlert(file, result.alertType(), tenantId, result.chainHash());
@@ -265,6 +310,140 @@ public class IntegrityCheckService {
      * @return a VerifyResult if a problem is found, or null if the file is consistent
      */
     private VerifyResult verifyFile(File file) {
+        return verifyFile(file, IntegrityCheckLevel.HEAVY);
+    }
+
+    /**
+     * Verify a single file using the specified check level.
+     *
+     * @param file the file to verify
+     * @param level the check level to use
+     * @return a VerifyResult if a problem is found, or null if the file is consistent
+     */
+    private VerifyResult verifyFile(File file, IntegrityCheckLevel level) {
+        return switch (level) {
+            case LIGHTWEIGHT -> checkLightweight(file);
+            case MEDIUM -> checkMedium(file);
+            case HEAVY -> checkHeavy(file);
+        };
+    }
+
+    /**
+     * Lightweight check: verify file exists in S3 storage without downloading.
+     * Only checks for missing files, does not verify content integrity.
+     *
+     * @param file the file to check
+     * @return a VerifyResult if file is missing, null if exists
+     */
+    private VerifyResult checkLightweight(File file) {
+        String filePath = buildFilePath(file);
+
+        // Use empty list request to check existence without downloading content
+        Result<List<String>> urlResult = fileRemoteClient.getFileUrlListByHash(
+                List.of(filePath), List.of(file.getFileHash()));
+
+        if (urlResult == null || !urlResult.isSuccess()) {
+            throw new GeneralException(ResultEnum.FILE_SERVICE_ERROR);
+        }
+
+        // If URL list is empty or null, file doesn't exist
+        if (urlResult.getData() == null || urlResult.getData().isEmpty()
+                || urlResult.getData().get(0) == null || urlResult.getData().get(0).isEmpty()) {
+            log.warn("[integrity-check][lightweight] file not found in S3: fileId={}, hash={}",
+                    file.getId(), file.getFileHash());
+            return new VerifyResult(AlertType.FILE_NOT_FOUND, null);
+        }
+
+        log.debug("[integrity-check][lightweight] file exists: fileId={}", file.getId());
+        return null;
+    }
+
+    /**
+     * Medium check: download file and verify hash matches database record.
+     * Catches missing files and storage corruption, but not blockchain inconsistencies.
+     *
+     * @param file the file to check
+     * @return a VerifyResult if file is missing or hash mismatches, null if consistent
+     */
+    private VerifyResult checkMedium(File file) {
+        String filePath = buildFilePath(file);
+
+        // Download file content
+        Result<List<byte[]>> storageResult = fileRemoteClient.getFileListByHash(
+                List.of(filePath), List.of(file.getFileHash()));
+
+        if (storageResult == null || !storageResult.isSuccess()) {
+            throw new GeneralException(ResultEnum.FILE_SERVICE_ERROR);
+        }
+
+        if (storageResult.getData() == null || storageResult.getData().isEmpty()
+                || storageResult.getData().get(0) == null || storageResult.getData().get(0).length == 0) {
+            log.warn("[integrity-check][medium] file not found in S3: fileId={}, hash={}",
+                    file.getId(), file.getFileHash());
+            return new VerifyResult(AlertType.FILE_NOT_FOUND, null);
+        }
+
+        // Recompute hash and compare with database
+        byte[] fileContent = storageResult.getData().get(0);
+        String computedHash = calculateSHA256(fileContent);
+
+        if (!file.getFileHash().equalsIgnoreCase(computedHash)) {
+            log.warn("[integrity-check][medium] storage hash mismatch: fileId={}, dbHash={}, computedHash={}",
+                    file.getId(), file.getFileHash(), computedHash);
+            return new VerifyResult(AlertType.HASH_MISMATCH, computedHash);
+        }
+
+        log.debug("[integrity-check][medium] file hash verified: fileId={}", file.getId());
+        return null;
+    }
+
+    /**
+     * Heavy check: download file, verify hash, and compare against blockchain record.
+     * Full verification including blockchain consistency check.
+     *
+     * @param file the file to check
+     * @return a VerifyResult if any issue is found, null if fully consistent
+     */
+    private VerifyResult checkHeavy(File file) {
+        // First perform medium check (existence + hash verification)
+        VerifyResult mediumResult = checkMedium(file);
+        if (mediumResult != null) {
+            return mediumResult;
+        }
+
+        // Additional blockchain consistency check
+        String uploader = String.valueOf(resolveBlockchainUploaderId(file));
+        Result<FileDetailVO> chainResult = fileRemoteClient.getFile(uploader, file.getFileHash());
+
+        if (isBlockchainDependencyFailure(chainResult)) {
+            throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR);
+        }
+
+        if (!chainResult.isSuccess() || chainResult.getData() == null) {
+            log.warn("[integrity-check][heavy] chain record not found: fileId={}, hash={}",
+                    file.getId(), file.getFileHash());
+            return new VerifyResult(AlertType.CHAIN_NOT_FOUND, null);
+        }
+
+        String chainHash = chainResult.getData().fileHash();
+        if (!file.getFileHash().equalsIgnoreCase(chainHash)) {
+            log.warn("[integrity-check][heavy] chain hash mismatch: fileId={}, dbHash={}, chainHash={}",
+                    file.getId(), file.getFileHash(), chainHash);
+            return new VerifyResult(AlertType.HASH_MISMATCH, chainHash);
+        }
+
+        log.debug("[integrity-check][heavy] full verification passed: fileId={}", file.getId());
+        return null;
+    }
+
+    /**
+     * Original verify method - kept for backward compatibility.
+     * Uses HEAVY check level by default.
+     *
+     * @deprecated Use {@link #verifyFile(File, IntegrityCheckLevel)} instead
+     */
+    @Deprecated(since = "3.2.0", forRemoval = false)
+    private VerifyResult verifyFileOld(File file) {
         // 1. Verify file exists in S3
         String filePath = buildFilePath(file);
         Result<List<byte[]>> storageResult = fileRemoteClient.getFileListByHash(
@@ -361,6 +540,40 @@ public class IntegrityCheckService {
             }
         }
         return file.getUid();
+    }
+
+    /**
+     * Calculate SHA-256 hash of byte array and return as hex string.
+     *
+     * @param data the data to hash
+     * @return SHA-256 hash as lowercase hex string
+     */
+    private String calculateSHA256(byte[] data) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = digest.digest(data);
+            return bytesToHex(hashBytes);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 algorithm not available", e);
+        }
+    }
+
+    /**
+     * Convert byte array to lowercase hex string.
+     *
+     * @param bytes the bytes to convert
+     * @return hex string
+     */
+    private String bytesToHex(byte[] bytes) {
+        StringBuilder hexString = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            String hex = Integer.toHexString(0xff & b);
+            if (hex.length() == 1) {
+                hexString.append('0');
+            }
+            hexString.append(hex);
+        }
+        return hexString.toString();
     }
 
     private String buildFilePath(File file) {

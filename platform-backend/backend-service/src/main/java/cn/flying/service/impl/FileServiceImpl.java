@@ -1,6 +1,7 @@
 package cn.flying.service.impl;
 
 import cn.flying.api.utils.ResultUtils;
+import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.constant.ShareType;
@@ -66,6 +67,9 @@ import java.util.concurrent.TimeUnit;
  * @description: 文件服务实现类
  * @author flyingcoding
  * @create: 2025-03-12 21:22
+ *
+ * 缓存 key 格式: tenantId:userId
+ * 确保多租户环境下缓存隔离
  */
 @Slf4j
 @Service
@@ -162,7 +166,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      * 注意：此方法不使用类级别事务，Saga 编排器内部管理自己的事务
      */
     @Override
-    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId")
     public File storeFile(Long userId, String OriginFileName, List<java.io.File> fileList, List<String> fileHashList, String fileParam) {
         return storeFile(userId, null, OriginFileName, fileList, fileHashList, fileParam);
     }
@@ -179,7 +183,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      * @return 存储成功后的文件记录
      */
     @Override
-    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId")
     public File storeFile(Long userId, Long targetFileId, String originFileName,
                           List<java.io.File> fileList, List<String> fileHashList, String fileParam) {
         if (CommonUtils.isEmpty(fileList)) {
@@ -265,7 +269,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId")
     public void changeFileStatusByName(Long userId, String fileName, Integer fileStatus) {
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getFileName, fileName)
@@ -277,7 +281,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId")
     public void changeFileStatusByHash(Long userId, String fileHash, Integer fileStatus) {
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getFileHash, fileHash)
@@ -296,7 +300,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId")
     public void changeFileStatusById(Long userId, Long fileId, Integer fileStatus) {
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getId, fileId)
@@ -313,7 +317,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId")
     public void markFileUploadFailed(Long userId, Long fileId) {
         if (fileId == null) {
             return;
@@ -362,7 +366,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId")
     public void deleteFiles(Long userId, List<String> identifiers) {
         if (CommonUtils.isEmpty(identifiers)) {
             return;
@@ -458,7 +462,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
-    @Cacheable(cacheNames = "userFiles", key = "#userId", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId", unless = "#result == null || #result.isEmpty()")
     public List<File> getUserFilesList(Long userId) {
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
         // 所有用户（包括管理员）只能查询自己的文件
@@ -741,6 +745,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
+    @OperationLog(module = "FILE_SECURITY", operationType = "KEY_ACCESS", description = "访问文件解密密钥")
+    @io.github.resilience4j.ratelimiter.annotation.RateLimiter(name = "fileKeyAccessRateLimiter", fallbackMethod = "fileKeyAccessRateLimitFallback")
     public FileDecryptInfoVO getFileDecryptInfo(Long userId, String fileHash) {
         // 校验文件所有权：用户只能获取自己的文件解密信息，管理员可获取所有
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
@@ -754,6 +760,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         if (file == null) {
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权限访问");
         }
+
+        // 记录密钥访问审计日志
+        Long tenantId = TenantContext.getTenantId();
+        log.info("访问文件解密密钥: userId={}, fileId={}, fileName={}, fileHash={}, tenantId={}, accessTime={}",
+                userId, file.getId(), file.getFileName(), fileHash, tenantId, new Date());
 
         // 解析 fileParam JSON 获取解密信息
         String fileParam = file.getFileParam();
@@ -792,6 +803,14 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             log.error("解析文件参数失败: fileHash={}, error={}", fileHash, e.getMessage());
             throw new GeneralException(ResultEnum.FAIL, "解析文件元数据失败");
         }
+    }
+
+    /**
+     * Rate limiter fallback for getFileDecryptInfo
+     */
+    private FileDecryptInfoVO fileKeyAccessRateLimitFallback(Long userId, String fileHash, Throwable t) {
+        log.warn("文件解密密钥访问限流触发: userId={}, fileHash={}, error={}", userId, fileHash, t.getMessage());
+        throw new GeneralException(ResultEnum.RATE_LIMIT_EXCEEDED);
     }
 
     @Override
@@ -1281,7 +1300,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
-    @CacheEvict(cacheNames = "userFiles", key = "#userId")
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId")
     public File createNewVersion(Long userId, Long parentFileId, String fileName, long fileSize, String contentType) {
         File parentFile = validateVersionSourceFile(userId, parentFileId);
 
