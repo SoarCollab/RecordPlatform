@@ -86,6 +86,8 @@ import java.util.concurrent.CompletableFuture;
 @RequiredArgsConstructor
 public class FileQueryServiceImpl implements FileQueryService {
 
+    private static final long MAX_IN_MEMORY_TRANSFER_BYTES = 80L * 1024 * 1024;
+
     private final FileMapper fileMapper;
     private final AccountMapper accountMapper;
     private final FileRemoteClient fileRemoteClient;
@@ -691,6 +693,7 @@ public class FileQueryServiceImpl implements FileQueryService {
             if (file == null) {
                 throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权访问");
             }
+            validateInMemoryTransferLimit(file);
             return resolveBlockchainUserId(file, file.getUid());
         }
 
@@ -701,6 +704,7 @@ public class FileQueryServiceImpl implements FileQueryService {
         File file = fileMapper.selectOne(wrapper);
 
         if (file != null) {
+            validateInMemoryTransferLimit(file);
             return resolveBlockchainUserId(file, userId);
         }
 
@@ -713,11 +717,25 @@ public class FileQueryServiceImpl implements FileQueryService {
                     .eq(File::getUid, sharerId);
             File sharerFile = fileMapper.selectOne(sharerWrapper);
             if (sharerFile != null) {
+                validateInMemoryTransferLimit(sharerFile);
                 return resolveBlockchainUserId(sharerFile, sharerId);
             }
         }
 
         throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权访问");
+    }
+
+    /**
+     * 校验文件是否适合通过当前内存聚合下载接口返回。
+     *
+     * @param file 文件元数据
+     */
+    private void validateInMemoryTransferLimit(File file) {
+        Long fileSize = file.getFileSize();
+        if (fileSize != null && fileSize > MAX_IN_MEMORY_TRANSFER_BYTES) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR,
+                    "文件超过当前下载上限 (" + (MAX_IN_MEMORY_TRANSFER_BYTES / 1024 / 1024) + "MB)");
+        }
     }
 
     /**

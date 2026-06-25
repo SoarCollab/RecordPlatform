@@ -581,13 +581,38 @@ class FileServiceTest {
         void shouldThrowWhenRemoteFileDetailIsNull() {
             try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
                 securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
-                when(fileMapper.selectCount(any())).thenReturn(1L);
+                when(fileMapper.selectOne(any())).thenReturn(new File()
+                        .setUid(USER_ID)
+                        .setFileHash(FILE_HASH)
+                        .setFileSize(1024L));
                 when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH)).thenReturn(Result.success((FileDetailVO) null));
 
                 GeneralException ex = assertThrows(GeneralException.class, () ->
                         fileService.getFile(USER_ID, FILE_HASH));
 
                 assertEquals(ResultEnum.FAIL.getCode(), ex.getResultEnum().getCode());
+            }
+        }
+
+        /**
+         * 验证超出当前内存型下载上限的文件不会继续调用远端 byte[] 聚合接口。
+         */
+        @Test
+        @DisplayName("should reject oversized in-memory download before remote fetch")
+        void shouldRejectOversizedInMemoryDownloadBeforeRemoteFetch() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                when(fileMapper.selectOne(any())).thenReturn(new File()
+                        .setUid(USER_ID)
+                        .setFileHash(FILE_HASH)
+                        .setFileSize(81L * 1024 * 1024));
+
+                GeneralException ex = assertThrows(GeneralException.class, () ->
+                        fileService.getFile(USER_ID, FILE_HASH));
+
+                assertEquals(ResultEnum.PARAM_ERROR.getCode(), ex.getResultEnum().getCode());
+                verify(fileRemoteClient, never()).getFile(anyString(), anyString());
+                verify(fileRemoteClient, never()).getFileListByHash(anyList(), anyList());
             }
         }
     }
@@ -729,6 +754,20 @@ class FileServiceTest {
                 MDC.clear();
                 TenantContext.clear();
             }
+        }
+
+        /**
+         * 验证保存分享文件必须绑定有效分享码，旧式仅传文件 ID 的克隆请求会被拒绝。
+         */
+        @Test
+        @DisplayName("should reject save share file without share code")
+        void shouldRejectSaveShareFileWithoutShareCode() {
+            GeneralException ex = assertThrows(GeneralException.class,
+                    () -> fileService.saveShareFile(List.of("99"), null, "127.0.0.1"));
+
+            assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), ex.getResultEnum().getCode());
+            verify(fileMapper, never()).selectList(any());
+            verify(fileMapper, never()).insert(any(File.class));
         }
     }
 

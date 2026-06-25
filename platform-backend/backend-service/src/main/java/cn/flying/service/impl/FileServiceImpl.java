@@ -80,6 +80,8 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements FileService {
 
+    private static final long MAX_IN_MEMORY_TRANSFER_BYTES = 80L * 1024 * 1024;
+
     private final FileRemoteClient fileRemoteClient;
     private final FileSagaOrchestrator sagaOrchestrator;
     private final FileShareMapper fileShareMapper;
@@ -526,15 +528,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     public List<byte[]> getFile(Long userId, String fileHash) {
-        // 校验文件所有权：用户只能获取自己的文件，管理员可获取所有
-        if (!SecurityUtils.isAdmin()) {
-            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                    .eq(File::getUid, userId)
-                    .eq(File::getFileHash, fileHash);
-            if (this.count(wrapper) == 0) {
-                throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
-            }
-        }
+        validateAccessibleFileForInMemoryTransfer(userId, fileHash);
 
         String userIdStr = String.valueOf(userId);
         Result<FileDetailVO> filePointer = fileRemoteClient.getFile(userIdStr, fileHash);
@@ -553,6 +547,57 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         }
         Result<List<byte[]>> fileListResult = fileRemoteClient.getFileListByHash(fileContentMap.values().stream().toList(), fileContentMap.keySet().stream().toList());
         return ResultUtils.getData(fileListResult);
+    }
+
+    /**
+     * 校验当前用户可访问的文件是否适合通过内存聚合接口下载。
+     *
+     * @param userId 用户ID
+     * @param fileHash 文件哈希
+     */
+    private void validateAccessibleFileForInMemoryTransfer(Long userId, String fileHash) {
+        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                .eq(File::getFileHash, fileHash)
+                .last("LIMIT 1");
+        if (!SecurityUtils.isAdmin()) {
+            wrapper.eq(File::getUid, userId);
+        }
+        File file = baseMapper.selectOne(wrapper);
+        if (file == null) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
+        }
+        validateInMemoryTransferLimit(file);
+    }
+
+    /**
+     * 校验分享所有者文件是否适合通过内存聚合接口下载。
+     *
+     * @param ownerId 分享所有者ID
+     * @param fileHash 文件哈希
+     */
+    private void validateOwnerFileForInMemoryTransfer(Long ownerId, String fileHash) {
+        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                .eq(File::getUid, ownerId)
+                .eq(File::getFileHash, fileHash)
+                .last("LIMIT 1");
+        File file = baseMapper.selectOne(wrapper);
+        if (file == null) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权访问");
+        }
+        validateInMemoryTransferLimit(file);
+    }
+
+    /**
+     * 校验文件是否适合通过当前内存聚合下载接口返回。
+     *
+     * @param file 文件元数据
+     */
+    private void validateInMemoryTransferLimit(File file) {
+        Long fileSize = file.getFileSize();
+        if (fileSize != null && fileSize > MAX_IN_MEMORY_TRANSFER_BYTES) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR,
+                    "文件超过当前下载上限 (" + (MAX_IN_MEMORY_TRANSFER_BYTES / 1024 / 1024) + "MB)");
+        }
     }
 
     @Override
@@ -1161,6 +1206,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     public List<byte[]> getPublicFile(String shareCode, String fileHash) {
         // 验证分享有效性（公开分享）
         ShareAccessContext accessContext = resolveShareAccess(shareCode, fileHash, ShareType.PUBLIC);
+        validateOwnerFileForInMemoryTransfer(accessContext.ownerId(), fileHash);
 
         // 使用 owner 的身份获取文件
         Result<FileDetailVO> filePointer = fileRemoteClient.getFile(String.valueOf(accessContext.ownerId()), fileHash);
@@ -1245,6 +1291,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     public List<byte[]> getSharedFileContent(Long userId, String shareCode, String fileHash) {
         // 验证分享有效性（允许公开/私密）
         ShareAccessContext accessContext = resolveShareAccess(shareCode, fileHash, null);
+        validateOwnerFileForInMemoryTransfer(accessContext.ownerId(), fileHash);
 
         Result<FileDetailVO> filePointer = fileRemoteClient.getFile(String.valueOf(accessContext.ownerId()), fileHash);
         FileDetailVO detailVO = ResultUtils.getData(filePointer);

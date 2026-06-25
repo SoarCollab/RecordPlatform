@@ -65,6 +65,8 @@ public class FileUploadServiceImpl implements FileUploadService {
     private static final int BUFFER_SIZE = 8 * 1024 * 1024; // 8MB I/O 缓冲区大小
     private static final long MAX_FILE_SIZE_BYTES = 4096 * 1024 * 1024L; // 4GB 最大文件大小限制
     private static final int MAX_CHUNK_SIZE_BYTES = 80 * 1024 * 1024; // 80MB 最大分片大小 (Dubbo载荷限制100MB，预留安全边际)
+    private static final int MAX_TOTAL_CHUNKS = 10_000;
+    private static final long MAX_IN_MEMORY_TRANSFER_BYTES = MAX_CHUNK_SIZE_BYTES;
     private static final int PROGRESS_UPDATE_INTERVAL_MS = 1000; // 进度日志更新间隔（毫秒）
     private static final Pattern SAFE_FILENAME_PATTERN = Pattern.compile("^[\\p{IsHan}a-zA-Z0-9\\u4e00-\\u9fa5._\\-\\s,;!@#$%&()+=]+$");
     private static final String HASH_ALGORITHM = "SHA-256"; // 哈希算法
@@ -365,9 +367,13 @@ public class FileUploadServiceImpl implements FileUploadService {
         if (fileSize > MAX_FILE_SIZE_BYTES) {
             throw new GeneralException("文件大小超过限制 (" + (MAX_FILE_SIZE_BYTES / 1024 / 1024 / 1024) + "GB)");
         }
+        if (fileSize > MAX_IN_MEMORY_TRANSFER_BYTES) {
+            throw new GeneralException("文件大小超过当前内存传输上限 (" + (MAX_IN_MEMORY_TRANSFER_BYTES / 1024 / 1024) + "MB)");
+        }
         if (chunkSize <= 0 || chunkSize > MAX_CHUNK_SIZE_BYTES) {
             throw new GeneralException("分片大小必须在 1B 到 " + (MAX_CHUNK_SIZE_BYTES / 1024 / 1024) + "MB 之间");
         }
+        validateUploadPlan(fileSize, chunkSize, totalChunks);
         if (!isFileTypeAllowed(fileName, contentType)) {
             throw new GeneralException("不支持的文件类型");
         }
@@ -499,6 +505,56 @@ public class FileUploadServiceImpl implements FileUploadService {
     }
 
     /**
+     * 校验客户端声明的上传分片计划与文件大小一致。
+     *
+     * @param fileSize 文件总字节数
+     * @param chunkSize 分片字节数
+     * @param totalChunks 分片总数
+     */
+    private void validateUploadPlan(long fileSize, int chunkSize, int totalChunks) {
+        if (totalChunks <= 0 || totalChunks > MAX_TOTAL_CHUNKS) {
+            throw new GeneralException("分片总数必须在 1 到 " + MAX_TOTAL_CHUNKS + " 之间");
+        }
+        int expectedChunks = (int) ((fileSize + chunkSize - 1) / chunkSize);
+        if (totalChunks != expectedChunks) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "分片总数与文件大小不匹配");
+        }
+    }
+
+    /**
+     * 校验上传分片的实际大小必须符合创建会话时确定的分片计划。
+     *
+     * @param state 上传会话状态
+     * @param chunkNumber 分片序号
+     * @param actualSize 当前上传分片字节数
+     */
+    private void validateUploadedChunkSize(FileUploadState state, int chunkNumber, long actualSize) {
+        long expectedSize = expectedChunkSize(state, chunkNumber);
+        if (expectedSize <= 0) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "分片计划无效");
+        }
+        if (actualSize != expectedSize) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR,
+                    "分片大小与上传计划不匹配: 序号=" + chunkNumber
+                            + ", 期望=" + expectedSize + ", 实际=" + actualSize);
+        }
+    }
+
+    /**
+     * 根据上传计划计算指定分片应有的字节数。
+     *
+     * @param state 上传会话状态
+     * @param chunkNumber 分片序号
+     * @return 该分片应有字节数
+     */
+    private long expectedChunkSize(FileUploadState state, int chunkNumber) {
+        if (chunkNumber == state.getTotalChunks() - 1) {
+            return state.getFileSize() - ((long) state.getChunkSize() * chunkNumber);
+        }
+        return state.getChunkSize();
+    }
+
+    /**
      * 判断上传会话绑定的目标文件是否与当前请求一致。
      *
      * @param state 上传会话状态
@@ -556,6 +612,7 @@ public class FileUploadServiceImpl implements FileUploadService {
         if (file.isEmpty()) {
             throw new GeneralException("上传的分片不能为空: 客户端ID=" + clientId + ", 序号=" + chunkNumber);
         }
+        validateUploadedChunkSize(state, chunkNumber, file.getSize());
 
         // --- 优化：边保存边计算哈希 ---
         Path chunkPath = getChunkUploadPath(SUID, clientId, chunkNumber);

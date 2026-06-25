@@ -26,6 +26,7 @@ import org.mockito.quality.Strictness;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.lang.reflect.InvocationTargetException;
@@ -243,6 +244,66 @@ class FileUploadServiceTest {
             int tooLargeChunkSize = 100 * 1024 * 1024; // 100MB
             assertThrows(GeneralException.class, () ->
                     fileUploadService.startUpload(USER_ID, "test.pdf", 1024 * 1024, "application/pdf", null, tooLargeChunkSize, 1));
+        }
+
+        /**
+         * 验证创建会话时服务端会重新计算分片总数，拒绝客户端伪造的 totalChunks。
+         */
+        @Test
+        @DisplayName("should reject mismatched total chunk count")
+        void shouldRejectMismatchedTotalChunkCount() {
+            assertThrows(GeneralException.class, () ->
+                    fileUploadService.startUpload(USER_ID, "test.pdf", 1024 * 1024, "application/pdf", null, 256 * 1024, 999));
+        }
+
+        /**
+         * 验证当前内存型传输链路会拒绝超出安全上限的上传。
+         */
+        @Test
+        @DisplayName("should reject file exceeding in-memory transfer limit")
+        void shouldRejectFileExceedingInMemoryTransferLimit() {
+            long tooLargeForMemoryTransfer = 81L * 1024 * 1024;
+
+            assertThrows(GeneralException.class, () ->
+                    fileUploadService.startUpload(
+                            USER_ID,
+                            "large.pdf",
+                            tooLargeForMemoryTransfer,
+                            "application/pdf",
+                            null,
+                            8 * 1024 * 1024,
+                            11
+                    ));
+        }
+    }
+
+    @Nested
+    @DisplayName("Upload Chunk")
+    class UploadChunk {
+
+        /**
+         * 验证分片上传时实际字节数必须匹配创建会话时确定的分片计划。
+         */
+        @Test
+        @DisplayName("should reject chunk with unexpected byte size")
+        void shouldRejectChunkWithUnexpectedByteSize() {
+            FileUploadState state = FileUploadStateTestBuilder.anUploadState();
+            ReflectionTestUtils.setField(state, "clientId", CLIENT_ID);
+            ReflectionTestUtils.setField(state, "userId", USER_ID);
+            MockMultipartFile smallChunk = new MockMultipartFile(
+                    "file",
+                    "chunk-0.bin",
+                    "application/octet-stream",
+                    "too-small".getBytes(StandardCharsets.UTF_8)
+            );
+
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+            when(redisStateManager.isSessionPaused(CLIENT_ID)).thenReturn(false);
+
+            assertThrows(GeneralException.class, () ->
+                    fileUploadService.uploadChunk(USER_ID, CLIENT_ID, 0, smallChunk));
+
+            verify(redisStateManager, never()).addUploadedChunkWithHash(anyString(), anyInt(), anyString());
         }
     }
 

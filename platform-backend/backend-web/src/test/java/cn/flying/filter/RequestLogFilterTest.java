@@ -283,6 +283,18 @@ class RequestLogFilterTest {
         }
 
         @Test
+        @DisplayName("Should not wrap auth login responses")
+        void shouldNotWrapAuthLoginResponses() throws ServletException, IOException {
+            request.setRequestURI("/api/v1/auth/login");
+            request.setServletPath("/api/v1/auth/login");
+            request.setMethod("POST");
+
+            filter.doFilter(request, response, filterChain);
+
+            assertThat(filterChain.getResponse()).isNotInstanceOf(ContentCachingResponseWrapper.class);
+        }
+
+        @Test
         @DisplayName("Should not wrap file API responses")
         void shouldNotWrapFileApiResponses() throws ServletException, IOException {
             request.setRequestURI("/api/v1/files/hash/test-hash/addresses");

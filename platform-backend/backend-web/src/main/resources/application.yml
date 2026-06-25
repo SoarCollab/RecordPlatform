@@ -93,10 +93,10 @@ springdoc:
 
 # knife4j配置
 knife4j:
-  enable: true
-  production: false
+  enable: ${KNIFE4J_ENABLE:true}
+  production: ${KNIFE4J_PRODUCTION:true}
   basic:
-    enable: true
+    enable: ${KNIFE4J_BASIC_ENABLE:true}
     username: ${KNIFE4J_USERNAME}
     password: ${KNIFE4J_PASSWORD}
   setting:

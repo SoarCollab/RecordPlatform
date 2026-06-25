@@ -111,4 +111,23 @@ class ShareRestControllerTest {
         verify(shareAuditService).logShareView(eq(shareCode), eq(userId), eq("10.0.0.10"), eq("JUnit"));
         verify(shareAuditService).logShareDownload(eq(shareCode), eq(userId), eq(fileHash), eq(null), eq("10.0.0.10"));
     }
+
+    /**
+     * 验证保存分享文件时以路径中的 shareCode 为准，避免请求体伪造分享码。
+     */
+    @Test
+    void shouldUsePathShareCodeWhenSavingSharedFiles() {
+        SaveSharingFile saveVO = new SaveSharingFile();
+        saveVO.setSharingFileIdList(List.of("f-1"));
+        saveVO.setShareCode("body-code");
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRemoteAddr("127.0.0.1");
+
+        Result<String> result = controller.saveSharedFiles("path-code", saveVO, request);
+
+        assertEquals("保存成功", result.getData());
+        assertEquals("path-code", saveVO.getShareCode());
+        verify(fileService).saveShareFile(eq(List.of("f-1")), eq("path-code"), eq("127.0.0.1"));
+    }
 }

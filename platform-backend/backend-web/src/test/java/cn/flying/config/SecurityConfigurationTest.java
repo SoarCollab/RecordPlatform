@@ -67,4 +67,31 @@ class SecurityConfigurationTest {
         assertTrue(securityConfiguration.contains("UserRole.ROLE_ADMINISTER.getRole()"));
         assertTrue(securityConfiguration.contains("UserRole.ROLE_MONITOR.getRole()"));
     }
+
+    /**
+     * 验证 Swagger/Knife4j 文档路由不再匿名公开。
+     */
+    @Test
+    void shouldRestrictApiDocsToOperatorRoles() throws Exception {
+        String securityConfiguration = Files.readString(Path.of("src/main/java/cn/flying/config/SecurityConfiguration.java"));
+
+        assertFalse(securityConfiguration.contains(
+                ".requestMatchers(\"/swagger-ui.html\", \"/swagger-ui/**\", \"/v3/api-docs/**\", \"/doc.html/**\",\"/webjars/**\",\"/favicon.ico\").permitAll()"
+        ));
+        assertTrue(securityConfiguration.contains("\"/doc.html\", \"/doc.html/**\", \"/webjars/**\").hasAnyRole("));
+        assertTrue(securityConfiguration.contains("UserRole.ROLE_ADMINISTER.getRole()"));
+        assertTrue(securityConfiguration.contains("UserRole.ROLE_MONITOR.getRole()"));
+    }
+
+    /**
+     * 验证 Knife4j 默认使用生产模式，避免默认暴露接口文档。
+     */
+    @Test
+    void shouldDefaultKnife4jToProductionMode() throws Exception {
+        String applicationYaml = Files.readString(Path.of("src/main/resources/application.yml"));
+
+        assertTrue(applicationYaml.contains("production: ${KNIFE4J_PRODUCTION:true}"));
+        assertTrue(applicationYaml.contains("enable: ${KNIFE4J_BASIC_ENABLE:true}"));
+        assertFalse(applicationYaml.contains("production: false"));
+    }
 }

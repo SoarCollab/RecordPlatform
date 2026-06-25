@@ -121,6 +121,33 @@ class FileQueryServiceTest {
         }
     }
 
+    @Nested
+    @DisplayName("Get File Content")
+    class GetFileContent {
+
+        /**
+         * 验证超出当前内存型下载上限的文件不会进入远端 byte[] 聚合接口。
+         */
+        @Test
+        @DisplayName("should reject oversized in-memory download before remote fetch")
+        void shouldRejectOversizedInMemoryDownloadBeforeRemoteFetch() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                when(fileMapper.selectOne(any())).thenReturn(new File()
+                        .setUid(USER_ID)
+                        .setFileHash(FILE_HASH)
+                        .setFileSize(81L * 1024 * 1024));
+
+                GeneralException ex = assertThrows(GeneralException.class, () ->
+                        fileQueryService.getFile(USER_ID, FILE_HASH));
+
+                assertEquals(ResultEnum.PARAM_ERROR.getCode(), ex.getResultEnum().getCode());
+                verify(fileRemoteClient, never()).getFile(anyString(), anyString());
+                verify(fileRemoteClient, never()).getFileListByHash(anyList(), anyList());
+            }
+        }
+    }
+
     // ================== Get File By ID Tests ==================
 
     @Nested

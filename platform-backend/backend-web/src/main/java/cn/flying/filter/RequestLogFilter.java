@@ -68,6 +68,8 @@ public class RequestLogFilter extends OncePerRequestFilter {
             "/verification-codes",
             "/sse",
             "/stream",
+            "/api/auth",
+            "/api/v1/auth",
             "/api/file",
             "/api/v1/files",
             "/api/v1/shares",
