@@ -22,6 +22,7 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequ
 
 import java.net.URL;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -208,6 +209,30 @@ class DistributedStorageServiceImplTest {
 
             assertThat(result.getCode()).isEqualTo(ResultEnum.FILE_SERVICE_ERROR.getCode());
             ReflectionTestUtils.setField(storageService, "uploadExecutor", uploadExecutor);
+        }
+
+        /**
+         * 验证达到写入仲裁后会取消剩余未完成上传，避免后台任务继续消耗存储资源。
+         */
+        @Test
+        @DisplayName("Should cancel pending uploads after quorum succeeds")
+        void shouldCancelPendingUploadsAfterQuorumSucceeds() throws Exception {
+            CompletableFuture<String> completed = CompletableFuture.completedFuture("node1");
+            CompletableFuture<String> pending = new CompletableFuture<>();
+            List<CompletableFuture<String>> futures = Arrays.asList(completed, pending);
+            List<String> nodes = Arrays.asList("node1", "node2");
+
+            Object result = ReflectionTestUtils.invokeMethod(
+                    storageService,
+                    "storeWithQuorum",
+                    futures,
+                    nodes,
+                    1,
+                    TEST_FILE_HASH
+            );
+
+            assertThat(result).isNotNull();
+            assertThat(pending).isCancelled();
         }
     }
 

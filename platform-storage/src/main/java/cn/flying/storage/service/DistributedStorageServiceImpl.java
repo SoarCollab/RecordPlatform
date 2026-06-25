@@ -337,13 +337,19 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
 
         try {
-            return resultFuture.get(FILE_OPERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            QuorumResult result = resultFuture.get(FILE_OPERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            if (result.isSuccess()) {
+                cancelPendingFutures(futures, "upload-after-quorum");
+            }
+            return result;
         } catch (TimeoutException e) {
             log.error("存储文件块仲裁超时（>{}s）: hash={}", FILE_OPERATION_TIMEOUT_SECONDS, fileHash);
+            cancelPendingFutures(futures, "upload-timeout");
             return new QuorumResult(false, successCount.get(),
                     new ArrayList<>(successNodes), new ArrayList<>(failedNodes));
         } catch (ExecutionException e) {
             log.error("存储文件块仲裁异常: hash={}", fileHash, e);
+            cancelPendingFutures(futures, "upload-exception");
             return new QuorumResult(false, successCount.get(),
                     new ArrayList<>(successNodes), new ArrayList<>(failedNodes));
         }
@@ -425,6 +431,15 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         if (!future.isDone()) {
             boolean cancelled = future.cancel(true);
             log.debug("取消未完成任务 {}: cancelled={}", name, cancelled);
+        }
+    }
+
+    /**
+     * 批量取消仍未完成的异步任务，避免达到仲裁或超时后后台上传继续占用资源。
+     */
+    private void cancelPendingFutures(List<? extends CompletableFuture<?>> futures, String name) {
+        for (CompletableFuture<?> future : futures) {
+            cancelIfNotDone(future, name);
         }
     }
 

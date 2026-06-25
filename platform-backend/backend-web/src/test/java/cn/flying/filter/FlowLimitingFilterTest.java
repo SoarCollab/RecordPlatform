@@ -168,8 +168,8 @@ class FlowLimitingFilterTest {
     class ClientIpDetectionTests {
 
         @Test
-        @DisplayName("Should use X-Forwarded-For header when present")
-        void shouldUseXForwardedForHeader() throws ServletException, IOException {
+        @DisplayName("Should ignore spoofed X-Forwarded-For header")
+        void shouldIgnoreSpoofedXForwardedForHeader() throws ServletException, IOException {
             request.setMethod("GET");
             request.setRequestURI("/api/v1/files");
             request.addHeader("X-Forwarded-For", "10.0.0.1, 192.168.1.1");
@@ -181,15 +181,15 @@ class FlowLimitingFilterTest {
             filter.doFilter(request, response, filterChain);
 
             verify(rateLimiter).tryAcquireWithBlock(
-                    contains("10.0.0.1"),
-                    contains("10.0.0.1"),
+                    contains("127.0.0.1"),
+                    contains("127.0.0.1"),
                     anyInt(), anyInt(), anyInt()
             );
         }
 
         @Test
-        @DisplayName("Should use X-Real-IP header when X-Forwarded-For is absent")
-        void shouldUseXRealIpHeader() throws ServletException, IOException {
+        @DisplayName("Should ignore spoofed X-Real-IP header")
+        void shouldIgnoreSpoofedXRealIpHeader() throws ServletException, IOException {
             request.setMethod("GET");
             request.setRequestURI("/api/v1/files");
             request.addHeader("X-Real-IP", "10.0.0.2");
@@ -201,8 +201,8 @@ class FlowLimitingFilterTest {
             filter.doFilter(request, response, filterChain);
 
             verify(rateLimiter).tryAcquireWithBlock(
-                    contains("10.0.0.2"),
-                    contains("10.0.0.2"),
+                    contains("127.0.0.1"),
+                    contains("127.0.0.1"),
                     anyInt(), anyInt(), anyInt()
             );
         }

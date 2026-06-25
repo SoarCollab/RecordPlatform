@@ -4,6 +4,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -40,5 +43,16 @@ class SecurityConfigurationTest {
         Boolean result = ReflectionTestUtils.invokeMethod(configuration, "isLoginRequest", request);
 
         assertFalse(Boolean.TRUE.equals(result));
+    }
+
+    /**
+     * 验证 Actuator health 不对外展示组件详情，避免跨租户健康计数泄露。
+     */
+    @Test
+    void shouldDisableActuatorHealthDetails() throws Exception {
+        String applicationYaml = Files.readString(Path.of("src/main/resources/application.yml"));
+
+        assertTrue(applicationYaml.contains("show-details: never"));
+        assertFalse(applicationYaml.contains("show-details: when-authorized"));
     }
 }

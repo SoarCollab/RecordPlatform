@@ -62,6 +62,12 @@ public class SecureIdCodec {
     /** 密文总长度: SIV(16) + AES-CTR(plaintext:16) + MAC(10) = 42 bytes */
     private static final int CIPHERTEXT_LENGTH = SIV_LENGTH + PADDED_PLAINTEXT_LENGTH + MAC_LENGTH;
 
+    /** Base62 编码后的密文最大长度，先做边界检查避免超长输入触发 BigInteger 计算放大。 */
+    private static final int MAX_ENCODED_LENGTH = 64;
+
+    /** 外部 ID 最大长度: 前缀(1) + Base62 密文最大长度。 */
+    private static final int MAX_EXTERNAL_ID_LENGTH = 1 + MAX_ENCODED_LENGTH;
+
     /** HKDF Salt - 固定值用于密钥派生 */
     private static final byte[] HKDF_SALT = "RecordPlatform.IdCodec.v2".getBytes();
 
@@ -128,12 +134,19 @@ public class SecureIdCodec {
      * @return 内部ID, 如果解密失败或格式错误返回null
      */
     public Long fromExternalId(String externalId) {
-        if (externalId == null || externalId.length() < 2) {
+        if (externalId == null || externalId.length() < 2 || externalId.length() > MAX_EXTERNAL_ID_LENGTH) {
             return null;
         }
 
-        String prefix = externalId.substring(0, 1);
-        byte expectedType = "U".equals(prefix) ? TYPE_USER : TYPE_ENTITY;
+        char prefix = externalId.charAt(0);
+        byte expectedType;
+        if (prefix == 'E') {
+            expectedType = TYPE_ENTITY;
+        } else if (prefix == 'U') {
+            expectedType = TYPE_USER;
+        } else {
+            return null;
+        }
 
         return decode(externalId.substring(1), expectedType);
     }
@@ -188,6 +201,10 @@ public class SecureIdCodec {
      */
     private Long decode(String encoded, byte expectedType) {
         try {
+            if (!isValidEncodedPayload(encoded)) {
+                return null;
+            }
+
             // 1. Base62 解码
             byte[] ciphertext = Base62.decode(encoded);
             if (ciphertext.length != CIPHERTEXT_LENGTH) {
@@ -243,6 +260,25 @@ public class SecureIdCodec {
             log.error("ID解密失败", e);
             return null;
         }
+    }
+
+    /**
+     * 校验 Base62 负载的长度和字符集，避免超长或非法输入进入 BigInteger 解码路径。
+     */
+    private boolean isValidEncodedPayload(String encoded) {
+        if (encoded == null || encoded.isEmpty() || encoded.length() > MAX_ENCODED_LENGTH) {
+            return false;
+        }
+        for (int i = 0; i < encoded.length(); i++) {
+            char c = encoded.charAt(i);
+            boolean digit = c >= '0' && c <= '9';
+            boolean upper = c >= 'A' && c <= 'Z';
+            boolean lower = c >= 'a' && c <= 'z';
+            if (!digit && !upper && !lower) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
