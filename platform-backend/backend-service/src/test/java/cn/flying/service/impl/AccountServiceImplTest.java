@@ -29,6 +29,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -82,6 +83,7 @@ class AccountServiceImplTest {
     @AfterEach
     void tearDown() {
         TenantContext.clear();
+        getAddressLocks().clear();
     }
 
     @Nested
@@ -192,6 +194,24 @@ class AccountServiceImplTest {
             assertEquals(EMAIL, data.get("email"));
             assertNotNull(data.get("code"));
         }
+
+        /**
+         * 验证地址锁在请求结束后被清理，避免攻击者用大量源地址撑大静态 map。
+         */
+        @Test
+        @DisplayName("should remove address lock after verification request")
+        void shouldRemoveAddressLockAfterVerificationRequest() {
+            when(flow.limitOnceCheck(anyString(), anyInt())).thenReturn(true);
+
+            accountService.registerEmailVerifyCode("register", EMAIL, IP_ADDRESS);
+
+            assertTrue(getAddressLocks().isEmpty());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private ConcurrentHashMap<String, ?> getAddressLocks() {
+        return (ConcurrentHashMap<String, ?>) ReflectionTestUtils.getField(AccountServiceImpl.class, "ADDRESS_LOCKS");
     }
 
     @Nested

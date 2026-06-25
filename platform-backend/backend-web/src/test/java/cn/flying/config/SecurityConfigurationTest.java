@@ -55,4 +55,16 @@ class SecurityConfigurationTest {
         assertTrue(applicationYaml.contains("show-details: never"));
         assertFalse(applicationYaml.contains("show-details: when-authorized"));
     }
+
+    /**
+     * 验证非 health 的 Actuator 管理端点仍要求管理员或监控员角色。
+     */
+    @Test
+    void shouldRestrictActuatorInternalsToOperatorRoles() throws Exception {
+        String securityConfiguration = Files.readString(Path.of("src/main/java/cn/flying/config/SecurityConfiguration.java"));
+
+        assertTrue(securityConfiguration.contains(".requestMatchers(\"/actuator/**\").hasAnyRole("));
+        assertTrue(securityConfiguration.contains("UserRole.ROLE_ADMINISTER.getRole()"));
+        assertTrue(securityConfiguration.contains("UserRole.ROLE_MONITOR.getRole()"));
+    }
 }

@@ -13,6 +13,8 @@ import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.vo.file.FileVersionVO;
 import cn.flying.service.FriendFileShareService;
 import cn.flying.service.remote.FileRemoteClient;
+import cn.flying.platformapi.response.TransactionVO;
+import cn.flying.platformapi.constant.Result;
 import cn.flying.test.builders.AccountTestBuilder;
 import cn.flying.test.builders.FileTestBuilder;
 import org.junit.jupiter.api.*;
@@ -67,11 +69,56 @@ class FileQueryServiceTest {
     private static final Long OTHER_USER_ID = 200L;
     private static final Long FILE_ID = 1L;
     private static final String FILE_HASH = "sha256_test_hash";
+    private static final String TRANSACTION_HASH = "0xtxhash";
 
     @BeforeEach
     void setUp() {
         FileTestBuilder.resetIdCounter();
         AccountTestBuilder.resetIdCounter();
+    }
+
+    @Nested
+    @DisplayName("Get Transaction By Hash")
+    class GetTransactionByHash {
+
+        /**
+         * 验证普通用户只有在本地存在自己的文件交易记录时才能查询链上交易详情。
+         */
+        @Test
+        @DisplayName("should return transaction for owner")
+        void shouldReturnTransactionForOwner() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                when(fileMapper.selectCount(any())).thenReturn(1L);
+                TransactionVO transactionVO = new TransactionVO(
+                        TRANSACTION_HASH, "chain", "group", "abi", "from", "to", "input", "sig", "1", 1L);
+                when(fileRemoteClient.getTransactionByHash(TRANSACTION_HASH))
+                        .thenReturn(Result.success(transactionVO));
+
+                TransactionVO result = fileQueryService.getTransactionByHash(USER_ID, TRANSACTION_HASH);
+
+                assertEquals(transactionVO, result);
+                verify(fileRemoteClient).getTransactionByHash(TRANSACTION_HASH);
+            }
+        }
+
+        /**
+         * 验证没有本地文件授权时不会调用链服务，避免按任意 hash 探测他人交易。
+         */
+        @Test
+        @DisplayName("should reject transaction without local file authorization")
+        void shouldRejectTransactionWithoutLocalFileAuthorization() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                when(fileMapper.selectCount(any())).thenReturn(0L);
+
+                GeneralException ex = assertThrows(GeneralException.class,
+                        () -> fileQueryService.getTransactionByHash(USER_ID, TRANSACTION_HASH));
+
+                assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), ex.getResultEnum().getCode());
+                verify(fileRemoteClient, never()).getTransactionByHash(anyString());
+            }
+        }
     }
 
     // ================== Get File By ID Tests ==================

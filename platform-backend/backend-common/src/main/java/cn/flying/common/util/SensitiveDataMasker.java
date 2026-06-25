@@ -76,7 +76,23 @@ public final class SensitiveDataMasker {
             "private_key",
             "secretkey",
             "secret_key",
-            "ssetoken"
+            "ssetoken",
+            "sharecode",
+            "share_code",
+            "sharingcode",
+            "sharing_code",
+            "filehash",
+            "file_hash",
+            "transactionhash",
+            "transaction_hash",
+            "contractabi",
+            "contract_abi",
+            "input",
+            "signature",
+            "presignedurl",
+            "presigned_url",
+            "downloadurl",
+            "download_url"
     );
 
     /**

@@ -119,9 +119,9 @@ class AdminAndTransactionControllerTest {
                 "100",
                 1738920000L
         );
-        when(fileQueryService.getTransactionByHash("tx-hash")).thenReturn(transactionVO);
+        when(fileQueryService.getTransactionByHash(100L, "tx-hash")).thenReturn(transactionVO);
 
-        Result<TransactionVO> result = transactionController.getTransaction("tx-hash");
+        Result<TransactionVO> result = transactionController.getTransaction(100L, "tx-hash");
         assertEquals(transactionVO, result.getData());
     }
 }

@@ -281,10 +281,29 @@ public class FileQueryServiceImpl implements FileQueryService {
     }
 
     @Override
-    @Cacheable(cacheNames = "transaction", key = "#transactionHash", unless = "#result == null")
-    public TransactionVO getTransactionByHash(String transactionHash) {
+    @Cacheable(cacheNames = "transaction", key = "#userId + ':' + #transactionHash", unless = "#result == null")
+    public TransactionVO getTransactionByHash(Long userId, String transactionHash) {
+        validateTransactionAccess(userId, transactionHash);
         Result<TransactionVO> result = fileRemoteClient.getTransactionByHash(transactionHash);
         return ResultUtils.getData(result);
+    }
+
+    /**
+     * 校验交易哈希必须绑定到当前用户可访问的本地文件记录。
+     */
+    private void validateTransactionAccess(Long userId, String transactionHash) {
+        if (!StringUtils.hasText(transactionHash)) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "交易哈希不能为空");
+        }
+        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                .eq(File::getTransactionHash, transactionHash);
+        if (!SecurityUtils.isAdmin()) {
+            wrapper.eq(File::getUid, userId);
+        }
+        Long count = fileMapper.selectCount(wrapper);
+        if (count == null || count == 0) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "无权访问此交易");
+        }
     }
 
     @Override

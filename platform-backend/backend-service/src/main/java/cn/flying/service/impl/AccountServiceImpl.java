@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
@@ -38,7 +39,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> implements AccountService {
 
-    private static final ConcurrentHashMap<String, ReentrantLock> ADDRESS_LOCKS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, AddressLock> ADDRESS_LOCKS = new ConcurrentHashMap<>();
 
     //验证邮件发送冷却时间限制，秒为单位
     @Value("${spring.web.verify.mail-limit}")
@@ -79,8 +80,9 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
      * @return 操作结果，null表示正常，否则为错误原因
      */
     public String registerEmailVerifyCode(String type, String email, String address){
-        ReentrantLock lock = ADDRESS_LOCKS.computeIfAbsent(address, k -> new ReentrantLock());
-        lock.lock();
+        String lockKey = normalizeAddressLockKey(address);
+        AddressLock addressLock = acquireAddressLock(lockKey);
+        addressLock.lock().lock();
         try {
             if(!this.verifyLimit(address))
                 return "请求频繁，请稍后再试";
@@ -92,7 +94,63 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
                     .set(Const.VERIFY_EMAIL_DATA + email, String.valueOf(code), 3, TimeUnit.MINUTES);
             return null;
         } finally {
-            lock.unlock();
+            releaseAddressLock(lockKey, addressLock);
+        }
+    }
+
+    /**
+     * 获取地址级短生命周期锁，引用计数用于请求结束后清理 map entry。
+     */
+    private static AddressLock acquireAddressLock(String address) {
+        return ADDRESS_LOCKS.compute(address, (key, existing) -> {
+            AddressLock lock = existing == null ? new AddressLock() : existing;
+            lock.retain();
+            return lock;
+        });
+    }
+
+    /**
+     * 释放地址锁并在没有并发引用时移除 map entry，避免永久保留攻击者控制的地址键。
+     */
+    private static void releaseAddressLock(String address, AddressLock addressLock) {
+        try {
+            addressLock.lock().unlock();
+        } finally {
+            if (addressLock.release() == 0) {
+                ADDRESS_LOCKS.computeIfPresent(address, (key, existing) ->
+                        existing == addressLock && existing.references() == 0 ? null : existing);
+            }
+        }
+    }
+
+    /**
+     * 规范化地址锁 key，避免空地址触发 ConcurrentHashMap 空 key 异常。
+     */
+    private static String normalizeAddressLockKey(String address) {
+        return address == null || address.isBlank() ? "unknown" : address;
+    }
+
+    /**
+     * 地址级锁和引用计数封装。
+     */
+    private static final class AddressLock {
+        private final ReentrantLock lock = new ReentrantLock();
+        private final AtomicInteger references = new AtomicInteger();
+
+        ReentrantLock lock() {
+            return lock;
+        }
+
+        void retain() {
+            references.incrementAndGet();
+        }
+
+        int release() {
+            return references.decrementAndGet();
+        }
+
+        int references() {
+            return references.get();
         }
     }
 

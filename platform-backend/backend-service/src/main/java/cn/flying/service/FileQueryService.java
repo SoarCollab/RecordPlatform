@@ -97,10 +97,11 @@ public interface FileQueryService {
     /**
      * 根据交易哈希获取区块链交易信息
      *
+     * @param userId 当前用户ID（用于权限校验）
      * @param transactionHash 交易哈希
      * @return 交易详情
      */
-    TransactionVO getTransactionByHash(String transactionHash);
+    TransactionVO getTransactionByHash(Long userId, String transactionHash);
 
     /**
      * 获取文件分片内容（字节数组）

@@ -49,7 +49,9 @@ public class RequestLogFilter extends OncePerRequestFilter {
             "token", "secret", "secretKey", "accessKey", "apiKey", "privateKey",
             "creditCard", "cardNumber", "cvv", "ssn",
             "code", "verificationCode", "verifyCode", "otp", "resetCode",
-            "authorization", "initialKey", "decryptKey", "decryptionKey", "fileKey"
+            "authorization", "initialKey", "decryptKey", "decryptionKey", "fileKey",
+            "shareCode", "sharingCode", "fileHash", "transactionHash",
+            "contractABI", "input", "signature", "presignedUrl", "downloadUrl"
     );
 
     private static final String MASK = "***";
@@ -65,7 +67,11 @@ public class RequestLogFilter extends OncePerRequestFilter {
             "/password",
             "/verification-codes",
             "/sse",
-            "/stream"
+            "/stream",
+            "/api/file",
+            "/api/v1/files",
+            "/api/v1/shares",
+            "/api/v1/public/shares"
     );
 
     /**
@@ -284,11 +290,11 @@ public class RequestLogFilter extends OncePerRequestFilter {
         if(id != null) {
             User user = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
             log.info("请求URL: \"{}\" ({}) | 远程IP地址: {} │ 身份: {} (UID: {}) | 角色: {} | 请求参数列表: {}",
-                    request.getServletPath(), request.getMethod(), request.getRemoteAddr(),
+                    sanitizePathForLog(request.getServletPath()), request.getMethod(), request.getRemoteAddr(),
                     user.getUsername(), id, user.getAuthorities(), object);
         } else {
             log.info("请求URL: \"{}\" ({}) | 远程IP地址: {} │ 身份: 未验证 | 请求参数列表: {}",
-                    request.getServletPath(), request.getMethod(), request.getRemoteAddr(), object);
+                    sanitizePathForLog(request.getServletPath()), request.getMethod(), request.getRemoteAddr(), object);
         }
     }
 
@@ -331,5 +337,21 @@ public class RequestLogFilter extends OncePerRequestFilter {
             return value.substring(0, 512) + "...(truncated, len=" + value.length() + ")";
         }
         return value;
+    }
+
+    /**
+     * 对文件/分享/交易路径中的 bearer code、文件哈希、交易哈希做路径级脱敏。
+     */
+    private String sanitizePathForLog(String path) {
+        if (path == null || path.isBlank()) {
+            return path;
+        }
+        return path
+                .replaceAll("(?i)(/public/shares/)[^/]+", "$1***")
+                .replaceAll("(?i)(/shares/)[^/]+", "$1***")
+                .replaceAll("(?i)(/share/)[^/]+", "$1***")
+                .replaceAll("(?i)(/files/)[^/]+", "$1***")
+                .replaceAll("(?i)(/hash/)[^/]+", "$1***")
+                .replaceAll("(?i)(/transactions/)[^/]+", "$1***");
     }
 }

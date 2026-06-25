@@ -15,6 +15,7 @@ import jakarta.servlet.ServletException;
 import java.io.IOException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("RequestLogFilter Unit Tests")
@@ -273,12 +274,24 @@ class RequestLogFilterTest {
         @Test
         @DisplayName("Should wrap response for caching")
         void shouldWrapResponseForCaching() throws ServletException, IOException {
-            request.setServletPath("/api/v1/files");
+            request.setServletPath("/api/v1/conversations");
             request.setMethod("GET");
 
             filter.doFilter(request, response, filterChain);
 
             assertThat(filterChain.getResponse()).isInstanceOf(ContentCachingResponseWrapper.class);
+        }
+
+        @Test
+        @DisplayName("Should not wrap file API responses")
+        void shouldNotWrapFileApiResponses() throws ServletException, IOException {
+            request.setRequestURI("/api/v1/files/hash/test-hash/addresses");
+            request.setServletPath("/api/v1/files/hash/test-hash/addresses");
+            request.setMethod("GET");
+
+            filter.doFilter(request, response, filterChain);
+
+            assertThat(filterChain.getResponse()).isNotInstanceOf(ContentCachingResponseWrapper.class);
         }
 
         @Test
@@ -303,6 +316,21 @@ class RequestLogFilterTest {
             filter.doFilter(request, response, filterChain);
 
             assertThat(filterChain.getResponse()).isNotInstanceOf(ContentCachingResponseWrapper.class);
+        }
+
+        /**
+         * 验证日志路径会脱敏分享码、文件哈希和交易哈希。
+         */
+        @Test
+        @DisplayName("Should mask sensitive identifiers in logged paths")
+        void shouldMaskSensitiveIdentifiersInLoggedPaths() {
+            String sanitized = ReflectionTestUtils.invokeMethod(
+                    filter,
+                    "sanitizePathForLog",
+                    "/api/v1/public/shares/ABC123/files/hash-secret/chunks"
+            );
+
+            assertThat(sanitized).isEqualTo("/api/v1/public/shares/***/files/***/chunks");
         }
     }
 
