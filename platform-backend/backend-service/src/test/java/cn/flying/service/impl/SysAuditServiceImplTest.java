@@ -1,5 +1,8 @@
 package cn.flying.service.impl;
 
+import cn.flying.common.exception.GeneralException;
+import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.dao.dto.SysOperationLog;
 import cn.flying.dao.mapper.SysOperationLogMapper;
 import cn.flying.dao.vo.audit.*;
@@ -12,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
@@ -19,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -336,29 +341,39 @@ class SysAuditServiceImplTest {
     class CheckAnomaliesTests {
 
         @Test
-        @DisplayName("should return anomaly check results")
-        void shouldReturnAnomalyCheckResults() {
-            doAnswer(invocation -> {
-                Map<String, Object> outParams = invocation.getArgument(0);
-                outParams.put("hasAnomalies", true);
-                outParams.put("anomalyDetails", "High login failures detected");
-                return null;
-            }).when(operationLogMapper).checkAnomalies(anyMap());
+        @DisplayName("should return tenant scoped anomaly check results")
+        void shouldReturnTenantScopedAnomalyCheckResults() {
+            when(operationLogMapper.countHighFrequencyUsers(eq(7L), any(LocalDateTime.class), eq(100))).thenReturn(1);
+            when(operationLogMapper.countFailedLoginUsers(eq(7L), any(LocalDateTime.class), eq(5))).thenReturn(0);
+            when(operationLogMapper.selectErrorRatePercent(eq(7L), any(LocalDateTime.class))).thenReturn(12.5D);
 
-            Map<String, Object> result = sysAuditService.checkAnomalies();
+            Map<String, Object> result;
+            try (MockedStatic<TenantContext> tenantContextMock = mockStatic(TenantContext.class)) {
+                tenantContextMock.when(TenantContext::requireTenantId).thenReturn(7L);
+                result = sysAuditService.checkAnomalies();
+            }
 
             assertThat(result).containsKey("hasAnomalies");
             assertThat(result.get("hasAnomalies")).isEqualTo(true);
             assertThat(result).containsKey("success");
             assertThat(result.get("success")).isEqualTo(true);
+            assertThat(result.get("anomalyDetails").toString()).contains("\"tenantId\":7");
+            verify(operationLogMapper).countHighFrequencyUsers(eq(7L), any(LocalDateTime.class), eq(100));
+            verify(operationLogMapper).countFailedLoginUsers(eq(7L), any(LocalDateTime.class), eq(5));
+            verify(operationLogMapper).selectErrorRatePercent(eq(7L), any(LocalDateTime.class));
         }
 
         @Test
         @DisplayName("should handle anomaly check failure")
         void shouldHandleAnomalyCheckFailure() {
-            doThrow(new RuntimeException("Procedure error")).when(operationLogMapper).checkAnomalies(anyMap());
+            when(operationLogMapper.countHighFrequencyUsers(eq(7L), any(LocalDateTime.class), anyInt()))
+                    .thenThrow(new RuntimeException("Query error"));
 
-            Map<String, Object> result = sysAuditService.checkAnomalies();
+            Map<String, Object> result;
+            try (MockedStatic<TenantContext> tenantContextMock = mockStatic(TenantContext.class)) {
+                tenantContextMock.when(TenantContext::requireTenantId).thenReturn(7L);
+                result = sysAuditService.checkAnomalies();
+            }
 
             assertThat(result.get("success")).isEqualTo(false);
             assertThat(result).containsKey("error");
@@ -372,32 +387,61 @@ class SysAuditServiceImplTest {
         @Test
         @DisplayName("should return success message on backup")
         void shouldReturnSuccessMessageOnBackup() {
-            doNothing().when(operationLogMapper).backupLogs(anyInt(), anyBoolean());
+            when(operationLogMapper.insertOperationLogBackup(eq(7L), any(LocalDateTime.class))).thenReturn(3);
 
-            String result = sysAuditService.backupLogs(30, false);
+            String result;
+            try (MockedStatic<TenantContext> tenantContextMock = mockStatic(TenantContext.class)) {
+                tenantContextMock.when(TenantContext::requireTenantId).thenReturn(7L);
+                result = sysAuditService.backupLogs(30, false);
+            }
 
-            assertThat(result).contains("成功备份30天前的日志");
+            assertThat(result).contains("成功备份租户7中30天前的日志");
+            assertThat(result).contains("备份行数=3");
             assertThat(result).doesNotContain("清理");
+            verify(operationLogMapper).insertOperationLogBackup(eq(7L), any(LocalDateTime.class));
+            verify(operationLogMapper, never()).deleteOperationLogsBefore(anyLong(), any(LocalDateTime.class));
         }
 
         @Test
         @DisplayName("should return success message with cleanup")
         void shouldReturnSuccessMessageWithCleanup() {
-            doNothing().when(operationLogMapper).backupLogs(anyInt(), anyBoolean());
+            when(operationLogMapper.insertOperationLogBackup(eq(7L), any(LocalDateTime.class))).thenReturn(3);
+            when(operationLogMapper.deleteOperationLogsBefore(eq(7L), any(LocalDateTime.class))).thenReturn(2);
 
-            String result = sysAuditService.backupLogs(30, true);
+            String result;
+            try (MockedStatic<TenantContext> tenantContextMock = mockStatic(TenantContext.class)) {
+                tenantContextMock.when(TenantContext::requireTenantId).thenReturn(7L);
+                result = sysAuditService.backupLogs(30, true);
+            }
 
-            assertThat(result).contains("清理原表数据");
+            assertThat(result).contains("清理原表行数=2");
+            verify(operationLogMapper).insertOperationLogBackup(eq(7L), any(LocalDateTime.class));
+            verify(operationLogMapper).deleteOperationLogsBefore(eq(7L), any(LocalDateTime.class));
         }
 
         @Test
         @DisplayName("should return error message on backup failure")
         void shouldReturnErrorMessageOnFailure() {
-            doThrow(new RuntimeException("Backup error")).when(operationLogMapper).backupLogs(anyInt(), anyBoolean());
+            when(operationLogMapper.insertOperationLogBackup(eq(7L), any(LocalDateTime.class)))
+                    .thenThrow(new RuntimeException("Backup error"));
 
-            String result = sysAuditService.backupLogs(30, false);
+            String result;
+            try (MockedStatic<TenantContext> tenantContextMock = mockStatic(TenantContext.class)) {
+                tenantContextMock.when(TenantContext::requireTenantId).thenReturn(7L);
+                result = sysAuditService.backupLogs(30, false);
+            }
 
             assertThat(result).contains("备份失败");
+        }
+
+        @Test
+        @DisplayName("should reject non-positive retention days")
+        void shouldRejectNonPositiveRetentionDays() {
+            GeneralException ex = assertThrows(GeneralException.class, () -> sysAuditService.backupLogs(0, true));
+
+            assertThat(ex.getResultEnum()).isEqualTo(ResultEnum.PARAM_IS_INVALID);
+            assertThat(ex.getData()).isEqualTo("days 必须大于等于 1");
+            verifyNoInteractions(operationLogMapper);
         }
     }
 

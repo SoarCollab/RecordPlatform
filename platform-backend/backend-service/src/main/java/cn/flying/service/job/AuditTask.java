@@ -1,7 +1,9 @@
 package cn.flying.service.job;
 
 import cn.flying.common.lock.DistributedLock;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.JsonConverter;
+import cn.flying.dao.mapper.TenantMapper;
 import cn.flying.service.SysAuditService;
 import cn.flying.service.sse.SseEmitterManager;
 import cn.flying.service.sse.SseEvent;
@@ -14,6 +16,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -32,6 +35,9 @@ public class AuditTask {
 
     @Resource
     private SseEmitterManager sseEmitterManager;
+
+    @Resource
+    private TenantMapper tenantMapper;
 
     /**
      * 日志保留天数，默认180天
@@ -60,7 +66,7 @@ public class AuditTask {
     /**
      * 异常检测定时任务
      * 每5分钟执行一次，检测系统中的异常操作
-     * 检测到异常时通过SSE向所有在线管理员发送告警
+     * 检测到异常时通过SSE向对应租户的在线管理员发送告警
      */
     @Scheduled(cron = "${audit.anomaly-check.cron:0 */5 * * * ?}")
     @DistributedLock(key = "audit:anomaly-check", leaseTime = 300)
@@ -73,32 +79,19 @@ public class AuditTask {
         log.info("开始执行审计异常检测任务...");
 
         try {
-            // 调用异常检测服务
-            Map<String, Object> result = sysAuditService.checkAnomalies();
-
-            Boolean hasAnomalies = (Boolean) result.get("hasAnomalies");
-            String anomalyDetails = (String) result.get("anomalyDetails");
-
-            if (Boolean.TRUE.equals(hasAnomalies)) {
-                log.warn("检测到审计异常: {}", anomalyDetails);
-
-                // 构建告警事件
-                Map<String, Object> alertPayload = new HashMap<>();
-                alertPayload.put("type", "anomaly_detected");
-                alertPayload.put("message", "系统检测到异常操作");
-                alertPayload.put("details", parseAnomalyDetails(anomalyDetails));
-                alertPayload.put("checkTime", LocalDateTime.now().toString());
-                alertPayload.put("severity", determineSeverity(anomalyDetails));
-
-                SseEvent alertEvent = SseEvent.of(SseEventType.AUDIT_ALERT, alertPayload);
-
-                // 向所有租户的在线管理员发送告警（跨租户全局广播）
-                sseEmitterManager.broadcastToAllAdmins(alertEvent);
-
-                log.info("审计异常检测完成，已向管理员发送告警");
-            } else {
-                log.debug("审计异常检测完成，未发现异常");
+            List<Long> tenantIds = tenantMapper.selectActiveTenantIds();
+            if (tenantIds == null || tenantIds.isEmpty()) {
+                log.debug("审计异常检测未发现活跃租户，跳过执行");
+                return;
             }
+
+            int alertedTenantCount = 0;
+            for (Long tenantId : tenantIds) {
+                if (checkAndBroadcastTenantAnomalies(tenantId)) {
+                    alertedTenantCount++;
+                }
+            }
+            log.info("审计异常检测完成，触发告警租户数={}/{}", alertedTenantCount, tenantIds.size());
         } catch (Exception e) {
             log.error("审计异常检测任务执行失败", e);
         }
@@ -119,10 +112,62 @@ public class AuditTask {
         log.info("开始执行审计日志备份任务，保留天数={}，备份后删除={}", logRetentionDays, deleteAfterBackup);
 
         try {
-            String result = sysAuditService.backupLogs(logRetentionDays, deleteAfterBackup);
-            log.info("审计日志备份任务完成: {}", result);
+            List<Long> tenantIds = tenantMapper.selectActiveTenantIds();
+            if (tenantIds == null || tenantIds.isEmpty()) {
+                log.debug("审计日志备份未发现活跃租户，跳过执行");
+                return;
+            }
+
+            for (Long tenantId : tenantIds) {
+                try {
+                    TenantContext.callWithTenant(tenantId, () -> {
+                        String result = sysAuditService.backupLogs(logRetentionDays, deleteAfterBackup);
+                        log.info("租户审计日志备份任务完成: tenantId={}, result={}", tenantId, result);
+                        return null;
+                    });
+                } catch (Exception ex) {
+                    log.error("租户审计日志备份任务失败: tenantId={}", tenantId, ex);
+                }
+            }
+            log.info("审计日志备份任务完成，租户数={}", tenantIds.size());
         } catch (Exception e) {
             log.error("审计日志备份任务执行失败", e);
+        }
+    }
+
+    /**
+     * 在指定租户上下文中检查异常并只向该租户管理员/监控员广播。
+     *
+     * @param tenantId 租户ID
+     * @return true 表示该租户触发告警
+     */
+    private boolean checkAndBroadcastTenantAnomalies(Long tenantId) {
+        try {
+            return TenantContext.callWithTenant(tenantId, () -> {
+                Map<String, Object> result = sysAuditService.checkAnomalies();
+                Boolean hasAnomalies = (Boolean) result.get("hasAnomalies");
+                String anomalyDetails = (String) result.get("anomalyDetails");
+
+                if (!Boolean.TRUE.equals(hasAnomalies)) {
+                    log.debug("租户审计异常检测完成，未发现异常: tenantId={}", tenantId);
+                    return false;
+                }
+
+                log.warn("检测到租户审计异常: tenantId={}, details={}", tenantId, anomalyDetails);
+                Map<String, Object> alertPayload = new HashMap<>();
+                alertPayload.put("type", "anomaly_detected");
+                alertPayload.put("message", "系统检测到异常操作");
+                alertPayload.put("details", parseAnomalyDetails(anomalyDetails));
+                alertPayload.put("checkTime", LocalDateTime.now().toString());
+                alertPayload.put("severity", determineSeverity(anomalyDetails));
+
+                SseEvent alertEvent = SseEvent.of(SseEventType.AUDIT_ALERT, alertPayload);
+                sseEmitterManager.broadcastToAdmins(tenantId, alertEvent);
+                return true;
+            });
+        } catch (Exception e) {
+            log.error("租户审计异常检测任务失败: tenantId={}", tenantId, e);
+            return false;
         }
     }
 

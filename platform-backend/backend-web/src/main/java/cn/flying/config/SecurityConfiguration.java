@@ -223,7 +223,16 @@ public class SecurityConfiguration {
      * @return 是否为 /api/v1/auth/login
      */
     private boolean isLoginRequest(HttpServletRequest request) {
+        String servletPath = request.getServletPath();
+        if ("/api/v1/auth/login".equals(servletPath)) {
+            return true;
+        }
+
         String uri = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (contextPath != null && !contextPath.isEmpty() && uri != null && uri.startsWith(contextPath)) {
+            uri = uri.substring(contextPath.length());
+        }
         return "/api/v1/auth/login".equals(uri);
     }
 

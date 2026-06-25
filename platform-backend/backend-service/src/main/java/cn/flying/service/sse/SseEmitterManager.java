@@ -1,7 +1,6 @@
 package cn.flying.service.sse;
 
 import cn.flying.common.constant.UserRole;
-import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.mapper.AccountMapper;
@@ -455,31 +454,4 @@ public class SseEmitterManager {
         log.info("向租户 {} 的 {} 个在线管理员/监控员广播审计告警", tenantId, adminIds.size());
     }
 
-    /**
-     * 向所有租户的在线管理员和监控员广播消息（跨租户全局广播）
-     * 自动处理租户上下文切换，确保数据库查询正确执行
-     *
-     * @param event SSE事件
-     */
-    public void broadcastToAllAdmins(SseEvent event) {
-        List<Long> tenantIds = new ArrayList<>(emittersByTenant.keySet());
-        if (tenantIds.isEmpty()) {
-            log.debug("没有活跃的SSE连接，跳过全局管理员广播");
-            return;
-        }
-
-        int successCount = 0;
-        for (Long tenantId : tenantIds) {
-            try {
-                TenantContext.callWithTenant(tenantId, () -> {
-                    broadcastToAdmins(tenantId, event);
-                    return null;
-                });
-                successCount++;
-            } catch (Exception e) {
-                log.warn("向租户 {} 的管理员广播失败: {}", tenantId, e.getMessage());
-            }
-        }
-        log.info("全局管理员广播完成，成功租户数={}/总租户数={}", successCount, tenantIds.size());
-    }
 }

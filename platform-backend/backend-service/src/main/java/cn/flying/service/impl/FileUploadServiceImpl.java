@@ -75,6 +75,7 @@ public class FileUploadServiceImpl implements FileUploadService {
     private static final String QUOTA_COMPLETE_LOCK_KEY_PREFIX = "distributed:lock:upload:quota:complete:tenant:";
     private static final long QUOTA_COMPLETE_LOCK_LEASE_SECONDS = 60L;
     private static final int MAX_CLEANUP_RETRIES = 3;
+    private static final String UPLOAD_SESSION_STATUS_COMPLETED = "completed";
     // --- 允许的文件类型 ---
     private static final Set<String> ALLOWED_FILE_EXTENSIONS = Set.of(
             "jpg", "jpeg", "png", "gif", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "zip", "rar", "7z"
@@ -652,9 +653,9 @@ public class FileUploadServiceImpl implements FileUploadService {
 
         // 确定状态字符串
         String status;
-        if ("completed".equals(state.getStatus())) {
+        if (UPLOAD_SESSION_STATUS_COMPLETED.equals(state.getStatus())) {
             // 如果状态已标记为 completed，直接返回完成
-            status = "completed";
+            status = UPLOAD_SESSION_STATUS_COMPLETED;
         } else if (paused) {
             status = "paused";
         } else if (progressInfo.totalChunks > 0 && progressInfo.processedCount == progressInfo.totalChunks) {
@@ -710,6 +711,10 @@ public class FileUploadServiceImpl implements FileUploadService {
             throw new GeneralException(ResultEnum.UPLOAD_SESSION_NOT_FOUND);
         }
         validateUploadOwnership(userId, state, clientId);
+        if (isUploadSessionCompleted(state)) {
+            log.info("上传会话已完成，忽略重复完成请求: 客户端ID={}, 文件名={}", clientId, state.getFileName());
+            return;
+        }
 
         log.info("处理完成上传请求: 客户端ID={}, 文件名={}", clientId, state.getFileName());
         redisStateManager.updateLastActivityTime(clientId);
@@ -950,6 +955,16 @@ public class FileUploadServiceImpl implements FileUploadService {
      */
     private boolean shouldCheckQuotaForSession(FileUploadState state) {
         return state != null && state.getTargetFileId() == null;
+    }
+
+    /**
+     * 判断上传会话是否已进入完成终态，用于阻止重复完成请求重放不可逆副作用。
+     *
+     * @param state 上传会话状态
+     * @return true 表示已完成
+     */
+    private boolean isUploadSessionCompleted(FileUploadState state) {
+        return state != null && UPLOAD_SESSION_STATUS_COMPLETED.equalsIgnoreCase(state.getStatus());
     }
 
     /**

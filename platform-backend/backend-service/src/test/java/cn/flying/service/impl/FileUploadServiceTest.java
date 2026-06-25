@@ -549,6 +549,25 @@ class FileUploadServiceTest {
         }
 
         /**
+         * 验证完成态会话重复提交 complete 时直接幂等返回，不重放任何不可逆副作用。
+         */
+        @Test
+        @DisplayName("should ignore complete replay for completed session")
+        void shouldIgnoreCompleteReplayForCompletedSession() {
+            FileUploadState state = FileUploadStateTestBuilder.aCompletedUploadState();
+            ReflectionTestUtils.setField(state, "clientId", CLIENT_ID);
+            ReflectionTestUtils.setField(state, "userId", USER_ID);
+            state.setStatus("completed");
+
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+
+            fileUploadService.completeUpload(USER_ID, CLIENT_ID);
+
+            verify(redisStateManager, never()).updateLastActivityTime(CLIENT_ID);
+            verifyNoInteractions(redissonClient, quotaService, fileService, eventPublisher);
+        }
+
+        /**
          * 验证首次预占位会写入 PREPARE 元数据并回写会话幂等标记。
          */
         @Test
