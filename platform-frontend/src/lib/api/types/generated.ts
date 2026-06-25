@@ -3673,9 +3673,9 @@ export interface components {
             sampledRequestCount: number;
             /**
              * Format: int64
-             * @description 租户ID
+             * @description 兼容字段；服务端以当前租户为准，传入时必须与当前租户一致
              */
-            tenantId: number;
+            tenantId?: number;
         };
         /** @description 配额灰度扩容审计响应 */
         QuotaRolloutAuditVO: {
@@ -5632,8 +5632,6 @@ export interface operations {
             query: {
                 /** @description 灰度批次ID */
                 batchId: string;
-                /** @description 租户ID */
-                tenantId: number;
             };
             header?: never;
             path?: never;

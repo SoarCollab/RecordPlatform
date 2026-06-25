@@ -552,8 +552,8 @@ SSE 连接采用短期一次性令牌：
 | 属性 | 说明 |
 |------|------|
 | `quota.enforcement-mode` | 全局模式：`SHADOW` 或 `ENFORCE` |
-| `quota.rollout.strategy` | `TENANT_WHITELIST` — 仅白名单内租户使用 ENFORCE |
-| `quota.rollout.enforce-tenant-whitelist` | 逗号分隔的 ENFORCE 模式租户 ID 列表 |
+| `quota.rollout.strategy` | `TENANT_WHITELIST` — 非空白名单用于限制 ENFORCE 租户范围 |
+| `quota.rollout.enforce-tenant-whitelist` | 逗号分隔的 ENFORCE 模式租户 ID 列表；全局 `ENFORCE` 下为空表示全部租户生效 |
 | `quota.rollout.force-shadow` | 强制所有租户使用 SHADOW 模式 |
 
 **对账**：定时任务（`quota.reconcile.cron`，默认每 30 分钟）重新计算使用量快照，修正缓存与实际使用量之间的偏差。

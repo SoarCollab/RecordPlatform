@@ -285,9 +285,9 @@ management:
 # Local-only load testing seed data (k6)
 loadtest:
   seed:
-    enabled: true
+    enabled: false
     tenant-id: 1
     tenant-code: loadtest
     tenant-name: LoadTest
     username: loadtest
-    password: ${LOADTEST_PASSWORD:loadtest123}
+    password: ${LOADTEST_PASSWORD:}

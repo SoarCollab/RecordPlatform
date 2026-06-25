@@ -210,11 +210,11 @@ Per-user and per-tenant storage quota enforcement:
 |----------|-------------|---------|
 | `quota.enforcement-mode` | Enforcement mode | `SHADOW` (log only, no rejection) |
 | `quota.rollout.strategy` | Rollout strategy | `TENANT_WHITELIST` |
-| `quota.rollout.enforce-tenant-whitelist` | Tenant IDs to enforce (comma-separated) | _(empty = all SHADOW)_ |
+| `quota.rollout.enforce-tenant-whitelist` | Tenant IDs to enforce (comma-separated) | _(empty = all tenants when global mode is `ENFORCE`)_ |
 | `quota.rollout.force-shadow` | Force SHADOW mode for all tenants | `false` |
 
-> **Tip**: Start with `SHADOW` mode to observe quota usage without rejecting uploads.
-> Switch to `ENFORCE` by adding tenant IDs to `enforce-tenant-whitelist`.
+> **Tip**: Start with global `SHADOW` mode to observe quota usage without rejecting uploads.
+> With global `ENFORCE`, an empty whitelist means all tenants are enforced; use `force-shadow=true` or a non-empty whitelist for a controlled rollout.
 
 ## Scheduled Tasks Configuration
 

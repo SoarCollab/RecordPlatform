@@ -16,6 +16,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.util.Date;
 
@@ -47,13 +48,23 @@ public class LoadTestSeedRunner implements ApplicationRunner {
     @Value("${loadtest.seed.username:loadtest}")
     private String username;
 
-    @Value("${loadtest.seed.password:loadtest123}")
+    @Value("${loadtest.seed.password:}")
     private String password;
 
     @Override
     public void run(ApplicationArguments args) {
+        validateSeedPassword();
         ensureTenant();
         ensureAccount();
+    }
+
+    /**
+     * 校验压测种子账号密码，避免启用 seed 时使用空白或内置默认密码。
+     */
+    private void validateSeedPassword() {
+        if (!StringUtils.hasText(password)) {
+            throw new IllegalStateException("loadtest.seed.password must be configured when loadtest seed is enabled");
+        }
     }
 
     private void ensureTenant() {

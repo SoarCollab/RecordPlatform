@@ -539,8 +539,8 @@ The platform enforces per-user and per-tenant storage quotas with two enforcemen
 | Property | Description |
 |----------|-------------|
 | `quota.enforcement-mode` | Global mode: `SHADOW` or `ENFORCE` |
-| `quota.rollout.strategy` | `TENANT_WHITELIST` — only whitelisted tenants use ENFORCE |
-| `quota.rollout.enforce-tenant-whitelist` | Comma-separated tenant IDs for ENFORCE mode |
+| `quota.rollout.strategy` | `TENANT_WHITELIST` — non-empty whitelist limits ENFORCE to listed tenants |
+| `quota.rollout.enforce-tenant-whitelist` | Comma-separated tenant IDs for ENFORCE mode; empty means all tenants when global mode is `ENFORCE` |
 | `quota.rollout.force-shadow` | Override to force SHADOW for all tenants |
 
 **Reconciliation**: A scheduled job (`quota.reconcile.cron`, default every 30 minutes) recalculates usage snapshots to correct any drift between cached and actual usage.

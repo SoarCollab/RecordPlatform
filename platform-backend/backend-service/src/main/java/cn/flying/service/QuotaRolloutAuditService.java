@@ -12,10 +12,11 @@ public interface QuotaRolloutAuditService {
      * 写入或更新灰度扩容审计记录。
      *
      * @param operatorId 操作人ID
+     * @param tenantId 当前租户ID
      * @param request 审计写入请求
      * @return 最新审计记录
      */
-    QuotaRolloutAuditVO upsertAudit(Long operatorId, QuotaRolloutAuditUpsertVO request);
+    QuotaRolloutAuditVO upsertAudit(Long operatorId, Long tenantId, QuotaRolloutAuditUpsertVO request);
 
     /**
      * 查询指定批次与租户的审计记录。

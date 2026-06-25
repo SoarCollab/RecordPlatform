@@ -22,7 +22,9 @@ import java.util.Date;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -95,7 +97,7 @@ class QuotaRolloutAuditServiceImplTest {
         when(quotaRolloutAuditMapper.upsertAudit(any(QuotaRolloutAudit.class))).thenReturn(1);
         when(quotaRolloutAuditMapper.selectByBatchAndTenant("batch-a", 1L)).thenReturn(audit);
 
-        QuotaRolloutAuditVO result = service.upsertAudit(88L, request);
+        QuotaRolloutAuditVO result = service.upsertAudit(88L, 1L, request);
 
         assertEquals(9L, result.id());
         assertEquals("batch-a", result.batchId());
@@ -103,7 +105,30 @@ class QuotaRolloutAuditServiceImplTest {
         assertEquals("KEEP_ENFORCE", result.rollbackDecision());
         assertEquals(0.05D, result.falsePositiveRate());
         assertEquals("uid:88", result.operatorName());
-        verify(quotaRolloutAuditMapper).upsertAudit(any(QuotaRolloutAudit.class));
+        verify(quotaRolloutAuditMapper).upsertAudit(argThat(savedAudit -> Long.valueOf(1L).equals(savedAudit.getTenantId())));
+    }
+
+    /**
+     * 验证请求体租户与当前租户不一致时拒绝写入。
+     */
+    @Test
+    void shouldRejectWhenRequestTenantDiffersFromCurrentTenant() {
+        QuotaRolloutAuditUpsertVO invalidRequest = new QuotaRolloutAuditUpsertVO(
+                "batch-a",
+                2L,
+                LocalDateTime.of(2026, 2, 1, 0, 0),
+                LocalDateTime.of(2026, 2, 7, 0, 0),
+                1000L,
+                120L,
+                6L,
+                "KEEP_ENFORCE",
+                "持续观察无异常",
+                "https://example.com/evidence/1"
+        );
+
+        assertThrows(GeneralException.class, () -> service.upsertAudit(88L, 1L, invalidRequest));
+
+        verify(quotaRolloutAuditMapper, never()).upsertAudit(any(QuotaRolloutAudit.class));
     }
 
     /**
@@ -124,7 +149,7 @@ class QuotaRolloutAuditServiceImplTest {
                 ""
         );
 
-        assertThrows(GeneralException.class, () -> service.upsertAudit(88L, invalidRequest));
+        assertThrows(GeneralException.class, () -> service.upsertAudit(88L, 1L, invalidRequest));
     }
 
     /**
@@ -145,7 +170,7 @@ class QuotaRolloutAuditServiceImplTest {
                 ""
         );
 
-        assertThrows(GeneralException.class, () -> service.upsertAudit(88L, invalidRequest));
+        assertThrows(GeneralException.class, () -> service.upsertAudit(88L, 1L, invalidRequest));
     }
 
     /**
@@ -166,7 +191,7 @@ class QuotaRolloutAuditServiceImplTest {
                 ""
         );
 
-        assertThrows(GeneralException.class, () -> service.upsertAudit(88L, invalidRequest));
+        assertThrows(GeneralException.class, () -> service.upsertAudit(88L, 1L, invalidRequest));
     }
 
     /**

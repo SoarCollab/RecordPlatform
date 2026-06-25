@@ -210,11 +210,11 @@ storage:
 |------|------|--------|
 | `quota.enforcement-mode` | 执行模式 | `SHADOW`（仅记录日志，不拒绝） |
 | `quota.rollout.strategy` | 灰度策略 | `TENANT_WHITELIST` |
-| `quota.rollout.enforce-tenant-whitelist` | 执行配额的租户 ID（逗号分隔） | _（空 = 全部 SHADOW）_ |
+| `quota.rollout.enforce-tenant-whitelist` | 执行配额的租户 ID（逗号分隔） | _（空 = 全局 `ENFORCE` 时全部租户生效）_ |
 | `quota.rollout.force-shadow` | 强制所有租户使用 SHADOW 模式 | `false` |
 
-> **提示**：建议先使用 `SHADOW` 模式观察配额使用情况，不会拒绝上传。
-> 通过将租户 ID 加入 `enforce-tenant-whitelist` 切换为 `ENFORCE` 模式。
+> **提示**：建议先使用全局 `SHADOW` 模式观察配额使用情况，不会拒绝上传。
+> 全局 `ENFORCE` 下空白名单表示全部租户生效；如需控制灰度范围，使用非空白名单或 `force-shadow=true`。
 
 ## 定时任务配置
 

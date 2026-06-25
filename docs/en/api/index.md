@@ -142,7 +142,7 @@ Based on `SecurityConfiguration`:
 |------|------|------|
 | GET | `/api/v1/files/quota` | Get current user quota status |
 | POST | `/api/v1/admin/quota/rollout/audits` | Upsert quota rollout audit record (admin) |
-| GET | `/api/v1/admin/quota/rollout/audits` | Query quota rollout audit record (admin, params: `batchId`, `tenantId`) |
+| GET | `/api/v1/admin/quota/rollout/audits` | Query quota rollout audit record (admin, param: `batchId`; tenant comes from auth context) |
 
 ### Public Share Page (`/api/v1/shares`)
 

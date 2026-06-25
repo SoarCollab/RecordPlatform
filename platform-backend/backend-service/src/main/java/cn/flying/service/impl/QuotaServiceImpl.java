@@ -108,6 +108,19 @@ public class QuotaServiceImpl implements QuotaService {
      */
     @Override
     public QuotaDecision evaluateUploadQuota(Long tenantId, Long userId, long incomingFileSizeBytes) {
+        return evaluateUploadQuota(tenantId, userId, incomingFileSizeBytes, true);
+    }
+
+    /**
+     * 评估上传请求配额，并按需刷新实时快照。
+     *
+     * @param tenantId 租户ID
+     * @param userId 用户ID
+     * @param incomingFileSizeBytes 待上传文件大小
+     * @param refreshSnapshot 是否写入实时快照
+     * @return 配额判定
+     */
+    private QuotaDecision evaluateUploadQuota(Long tenantId, Long userId, long incomingFileSizeBytes, boolean refreshSnapshot) {
         long resolvedIncomingSize = Math.max(0L, incomingFileSizeBytes);
         long userUsedStorage = nvl(fileMapper.sumQuotaStorageByUserId(userId, tenantId));
         long userUsedFileCount = nvl(fileMapper.countQuotaByUserId(userId, tenantId));
@@ -128,8 +141,10 @@ public class QuotaServiceImpl implements QuotaService {
         boolean tenantFileCountExceeded = tenantUsedFileCount + 1 > tenantMaxFileCount;
         boolean exceeded = userStorageExceeded || userFileCountExceeded || tenantStorageExceeded || tenantFileCountExceeded;
 
-        upsertSnapshot(tenantId, userId, userUsedStorage, userUsedFileCount, "REALTIME");
-        upsertSnapshot(tenantId, 0L, tenantUsedStorage, tenantUsedFileCount, "REALTIME");
+        if (refreshSnapshot) {
+            upsertSnapshot(tenantId, userId, userUsedStorage, userUsedFileCount, "REALTIME");
+            upsertSnapshot(tenantId, 0L, tenantUsedStorage, tenantUsedFileCount, "REALTIME");
+        }
 
         return new QuotaDecision(
                 exceeded,
@@ -194,7 +209,7 @@ public class QuotaServiceImpl implements QuotaService {
      */
     @Override
     public QuotaStatusVO getCurrentQuotaStatus(Long tenantId, Long userId) {
-        QuotaDecision decision = evaluateUploadQuota(tenantId, userId, 0L);
+        QuotaDecision decision = evaluateUploadQuota(tenantId, userId, 0L, false);
         return new QuotaStatusVO(
                 tenantId,
                 userId,
@@ -332,10 +347,14 @@ public class QuotaServiceImpl implements QuotaService {
      * @return true 表示命中灰度范围
      */
     private boolean isTenantEnforceEnabled(Long tenantId) {
+        Set<Long> tenantWhitelist = parseTenantWhitelist();
+        if (tenantWhitelist.isEmpty()) {
+            return true;
+        }
         if (tenantId == null) {
             return false;
         }
-        return parseTenantWhitelist().contains(tenantId);
+        return tenantWhitelist.contains(tenantId);
     }
 
     /**

@@ -4,21 +4,23 @@
 
 ## 1. 启动后端（local profile）
 
-本仓库已提供本地压测 seed（默认 local profile 启用）：
+本仓库已提供可选的本地压测 seed。需要显式开启并设置密码：
 - 租户：`tenantId=1`
-- 用户：`loadtest` / `loadtest123`
+- 用户：`loadtest` / 来自 `LOADTEST_PASSWORD`
 
 设置 JWT 密钥（避免启动报错）：
 
 ```bash
 export JWT_KEY="ci-integration-jwt-key-32chars-xK9mN2pL5qR8vW3y"
+export LOADTEST_PASSWORD="<set-a-local-test-password>"
 ```
 
 启动后端（示例）：
 
 ```bash
 mvn -f platform-backend/pom.xml -pl backend-web -am spring-boot:run \
-  -Dspring-boot.run.profiles=local
+  -Dspring-boot.run.profiles=local \
+  -Dspring-boot.run.arguments=--loadtest.seed.enabled=true
 ```
 
 默认 Base URL：
@@ -33,7 +35,7 @@ http://localhost:8000/record-platform/api/v1
 brew install k6
 ```
 
-若本机未安装 `k6`，可使用 `--engine auto` 自动回退到 Docker（`grafana/k6:0.49.0`）。
+`--engine auto` 只会自动选择本地 `k6`。如需 Docker 执行，必须使用 `--engine docker`，并设置 digest 固定的 `K6_DOCKER_IMAGE`，例如 `grafana/k6@sha256:<digest>`。
 
 ## 3. 快速运行
 
@@ -44,6 +46,8 @@ brew install k6
 ```bash
 bash tools/k6/run-local.sh --profile smoke --scenario all --engine auto
 ```
+
+运行前需要显式设置 `USERNAME` 和 `PASSWORD`；脚本不再提供默认凭证。
 
 `core-mixed` 场景将文件查询和分片上传流程按权重混合执行。默认 70% 迭代执行查询流程，30% 执行上传流程。可通过 `MIX_QUERY_WEIGHT` 环境变量控制查询/上传比例（0-100，默认 70）：
 
