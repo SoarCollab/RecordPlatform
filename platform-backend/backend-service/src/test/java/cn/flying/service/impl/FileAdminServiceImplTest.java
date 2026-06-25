@@ -56,6 +56,7 @@ class FileAdminServiceImplTest {
         TableInfoHelper.initTableInfo(assistant, File.class);
         TableInfoHelper.initTableInfo(assistant, FileShare.class);
         TableInfoHelper.initTableInfo(assistant, FileSource.class);
+        TableInfoHelper.initTableInfo(assistant, Account.class);
     }
 
     @Mock
@@ -413,6 +414,63 @@ class FileAdminServiceImplTest {
             assertEquals(String.valueOf(sharerUserId), vo.getSharedFromUserId());
             assertEquals("direct-sharer", vo.getSharedFromUserName());
         }
+
+        /**
+         * 验证管理员文件列表会把前端传入的所有者和时间条件真正追加到数据库查询。
+         */
+        @Test
+        @DisplayName("should apply owner name and upload time filters")
+        void shouldApplyOwnerNameAndUploadTimeFilters() {
+            Page<File> filePage = new Page<>(1, 10);
+            filePage.setRecords(List.of());
+            filePage.setTotal(0);
+
+            Account owner = createAccount();
+            when(accountMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(owner));
+            when(fileMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(filePage);
+
+            AdminFileQueryParam param = new AdminFileQueryParam();
+            param.setOwnerName("test");
+            param.setStartTime("2026-06-24 00:00:00");
+            param.setEndTime("2026-06-25 23:59:59");
+
+            IPage<AdminFileVO> result = fileAdminService.getAllFiles(param, new Page<>(1, 10));
+
+            assertNotNull(result);
+            assertTrue(result.getRecords().isEmpty());
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<LambdaQueryWrapper<File>> fileWrapperCaptor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+            verify(fileMapper).selectPage(any(Page.class), fileWrapperCaptor.capture());
+            String sqlSegment = fileWrapperCaptor.getValue().getCustomSqlSegment();
+            assertTrue(sqlSegment.contains("uid"));
+            assertTrue(sqlSegment.contains("create_time"));
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<LambdaQueryWrapper<Account>> accountWrapperCaptor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+            verify(accountMapper).selectList(accountWrapperCaptor.capture());
+            String accountSegment = accountWrapperCaptor.getValue().getCustomSqlSegment();
+            assertTrue(accountSegment.contains("tenant_id"));
+            assertTrue(accountSegment.contains("username"));
+            assertTrue(accountSegment.contains("nickname"));
+        }
+
+        /**
+         * 验证管理员文件列表会拒绝不合法的时间范围。
+         */
+        @Test
+        @DisplayName("should reject inverted upload time range")
+        void shouldRejectInvertedUploadTimeRange() {
+            AdminFileQueryParam param = new AdminFileQueryParam();
+            param.setStartTime("2026-06-25 23:59:59");
+            param.setEndTime("2026-06-24 00:00:00");
+
+            GeneralException ex = assertThrows(GeneralException.class,
+                    () -> fileAdminService.getAllFiles(param, new Page<>(1, 10)));
+
+            assertEquals(ResultEnum.PARAM_IS_INVALID, ex.getResultEnum());
+            verify(fileMapper, never()).selectPage(any(Page.class), any(LambdaQueryWrapper.class));
+        }
     }
 
     @Nested
@@ -508,6 +566,46 @@ class FileAdminServiceImplTest {
             assertEquals(2L, vo.getDownloadCount());
             assertEquals(1L, vo.getSaveCount());
             assertEquals(3L, vo.getUniqueActors());
+        }
+
+        /**
+         * 验证管理员分享列表会把分享者和时间条件真正追加到数据库查询。
+         */
+        @Test
+        @DisplayName("should apply sharer name and share time filters")
+        void shouldApplySharerNameAndShareTimeFilters() {
+            Page<FileShare> sharePage = new Page<>(1, 10);
+            sharePage.setRecords(List.of());
+            sharePage.setTotal(0);
+
+            Account sharer = createAccount();
+            when(accountMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(sharer));
+            when(fileShareMapper.selectPage(any(Page.class), any(LambdaQueryWrapper.class))).thenReturn(sharePage);
+
+            AdminShareQueryParam param = new AdminShareQueryParam();
+            param.setSharerName("test");
+            param.setStartTime("2026-06-24 00:00:00");
+            param.setEndTime("2026-06-25 23:59:59");
+
+            IPage<AdminShareVO> result = fileAdminService.getAllShares(param, new Page<>(1, 10));
+
+            assertNotNull(result);
+            assertTrue(result.getRecords().isEmpty());
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<LambdaQueryWrapper<FileShare>> shareWrapperCaptor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+            verify(fileShareMapper).selectPage(any(Page.class), shareWrapperCaptor.capture());
+            String sqlSegment = shareWrapperCaptor.getValue().getCustomSqlSegment();
+            assertTrue(sqlSegment.contains("user_id"));
+            assertTrue(sqlSegment.contains("create_time"));
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<LambdaQueryWrapper<Account>> accountWrapperCaptor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+            verify(accountMapper).selectList(accountWrapperCaptor.capture());
+            String accountSegment = accountWrapperCaptor.getValue().getCustomSqlSegment();
+            assertTrue(accountSegment.contains("tenant_id"));
+            assertTrue(accountSegment.contains("username"));
+            assertTrue(accountSegment.contains("nickname"));
         }
     }
 

@@ -33,6 +33,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 
 /**
@@ -46,6 +50,7 @@ import java.util.*;
 public class FileAdminServiceImpl implements FileAdminService {
 
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(FileAdminServiceImpl.class);
+    private static final DateTimeFormatter ADMIN_QUERY_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final FileMapper fileMapper;
     private final FileShareMapper fileShareMapper;
@@ -77,6 +82,9 @@ public class FileAdminServiceImpl implements FileAdminService {
             wrapper.eq(File::getStatus, param.getStatus());
         }
 
+        // 所有者 ID 与用户名筛选
+        applyOwnerFilter(wrapper, param.getOwnerId(), param.getOwnerName(), tenantId);
+
         // 是否仅原始文件
         if (Boolean.TRUE.equals(param.getOriginalOnly())) {
             wrapper.isNull(File::getOrigin);
@@ -86,6 +94,10 @@ public class FileAdminServiceImpl implements FileAdminService {
         if (Boolean.TRUE.equals(param.getSharedOnly())) {
             wrapper.isNotNull(File::getOrigin);
         }
+
+        Date startTime = parseAdminQueryTime(param.getStartTime(), "startTime");
+        Date endTime = parseAdminQueryTime(param.getEndTime(), "endTime");
+        applyCreateTimeRange(wrapper, startTime, endTime);
 
         // 分页查询
         Page<File> filePage = new Page<>(page.getCurrent(), page.getSize());
@@ -257,6 +269,13 @@ public class FileAdminServiceImpl implements FileAdminService {
             wrapper.eq(FileShare::getShareType, param.getShareType());
         }
 
+        // 分享者 ID 与用户名筛选
+        applySharerFilter(wrapper, param.getSharerId(), param.getSharerName(), tenantId);
+
+        Date startTime = parseAdminQueryTime(param.getStartTime(), "startTime");
+        Date endTime = parseAdminQueryTime(param.getEndTime(), "endTime");
+        applyShareCreateTimeRange(wrapper, startTime, endTime);
+
         // 分页查询
         Page<FileShare> sharePage = new Page<>(page.getCurrent(), page.getSize());
         IPage<FileShare> result = fileShareMapper.selectPage(sharePage, wrapper);
@@ -322,6 +341,142 @@ public class FileAdminServiceImpl implements FileAdminService {
     }
 
     // ==================== 工具方法 ====================
+
+    /**
+     * 为管理员文件列表追加所有者筛选条件。
+     *
+     * @param wrapper   文件查询条件
+     * @param ownerId   所有者用户 ID
+     * @param ownerName 所有者用户名或昵称
+     * @param tenantId  当前租户 ID
+     */
+    private void applyOwnerFilter(LambdaQueryWrapper<File> wrapper, String ownerId, String ownerName, Long tenantId) {
+        if (StringUtils.hasText(ownerId)) {
+            wrapper.eq(File::getUid, parseUserId(ownerId, "ownerId"));
+        }
+        if (StringUtils.hasText(ownerName)) {
+            List<Long> userIds = resolveUserIdsByName(ownerName, tenantId);
+            if (userIds.isEmpty()) {
+                wrapper.eq(File::getUid, -1L);
+            } else {
+                wrapper.in(File::getUid, userIds);
+            }
+        }
+    }
+
+    /**
+     * 为管理员分享列表追加分享者筛选条件。
+     *
+     * @param wrapper    分享查询条件
+     * @param sharerId   分享者用户 ID
+     * @param sharerName 分享者用户名或昵称
+     * @param tenantId   当前租户 ID
+     */
+    private void applySharerFilter(LambdaQueryWrapper<FileShare> wrapper, String sharerId, String sharerName, Long tenantId) {
+        if (StringUtils.hasText(sharerId)) {
+            wrapper.eq(FileShare::getUserId, parseUserId(sharerId, "sharerId"));
+        }
+        if (StringUtils.hasText(sharerName)) {
+            List<Long> userIds = resolveUserIdsByName(sharerName, tenantId);
+            if (userIds.isEmpty()) {
+                wrapper.eq(FileShare::getUserId, -1L);
+            } else {
+                wrapper.in(FileShare::getUserId, userIds);
+            }
+        }
+    }
+
+    /**
+     * 解析管理员查询中的用户 ID 参数。
+     *
+     * @param value     用户 ID 字符串
+     * @param fieldName 参数字段名
+     * @return Long 类型用户 ID
+     */
+    private Long parseUserId(String value, String fieldName) {
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, fieldName + "必须是数字");
+        }
+    }
+
+    /**
+     * 按用户名或昵称模糊查询当前租户内的用户 ID。
+     *
+     * @param userName 用户名或昵称关键词
+     * @param tenantId 当前租户 ID
+     * @return 匹配到的用户 ID 列表
+     */
+    private List<Long> resolveUserIdsByName(String userName, Long tenantId) {
+        LambdaQueryWrapper<Account> userWrapper = new LambdaQueryWrapper<Account>()
+                .eq(Account::getTenantId, tenantId)
+                .and(w -> w.like(Account::getUsername, userName).or().like(Account::getNickname, userName))
+                .select(Account::getId);
+        return accountMapper.selectList(userWrapper).stream()
+                .map(Account::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+    }
+
+    /**
+     * 解析管理员列表的日期时间筛选参数。
+     *
+     * @param value     日期时间字符串
+     * @param fieldName 参数字段名
+     * @return Date 类型时间；空值返回 null
+     */
+    private Date parseAdminQueryTime(String value, String fieldName) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        try {
+            LocalDateTime localDateTime = LocalDateTime.parse(value.trim(), ADMIN_QUERY_TIME_FORMATTER);
+            return Date.from(localDateTime.atZone(ZoneId.systemDefault()).toInstant());
+        } catch (DateTimeParseException e) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID,
+                    fieldName + "格式应为 yyyy-MM-dd HH:mm:ss");
+        }
+    }
+
+    /**
+     * 为文件查询追加创建时间范围条件。
+     *
+     * @param wrapper   文件查询条件
+     * @param startTime 起始时间
+     * @param endTime   结束时间
+     */
+    private void applyCreateTimeRange(LambdaQueryWrapper<File> wrapper, Date startTime, Date endTime) {
+        if (startTime != null && endTime != null && startTime.after(endTime)) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "startTime 不能晚于 endTime");
+        }
+        if (startTime != null) {
+            wrapper.ge(File::getCreateTime, startTime);
+        }
+        if (endTime != null) {
+            wrapper.le(File::getCreateTime, endTime);
+        }
+    }
+
+    /**
+     * 为分享查询追加创建时间范围条件。
+     *
+     * @param wrapper   分享查询条件
+     * @param startTime 起始时间
+     * @param endTime   结束时间
+     */
+    private void applyShareCreateTimeRange(LambdaQueryWrapper<FileShare> wrapper, Date startTime, Date endTime) {
+        if (startTime != null && endTime != null && startTime.after(endTime)) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "startTime 不能晚于 endTime");
+        }
+        if (startTime != null) {
+            wrapper.ge(FileShare::getCreateTime, startTime);
+        }
+        if (endTime != null) {
+            wrapper.le(FileShare::getCreateTime, endTime);
+        }
+    }
 
     private AdminFileVO convertToAdminFileVO(File file, Map<Long, String> userNameCache,
                                              Map<Long, File> originFileMap, Map<Long, FileSource> fileSourceMap) {

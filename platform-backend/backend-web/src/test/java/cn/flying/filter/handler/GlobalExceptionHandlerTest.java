@@ -177,26 +177,26 @@ class GlobalExceptionHandlerTest {
         }
 
         @Test
-        @DisplayName("should return 403 for PERMISSION_UNAUTHORIZED")
-        void shouldReturn403ForPermissionUnauthorized() {
+        @DisplayName("should preserve business code for PERMISSION_UNAUTHORIZED")
+        void shouldPreserveBusinessCodeForPermissionUnauthorized() {
             GeneralException ex = new GeneralException("forbidden");
             ex.setResultEnum(ResultEnum.PERMISSION_UNAUTHORIZED);
 
             ResponseEntity<Result<?>> response = handler.handleBusinessException(ex);
             Result<?> result = response.getBody();
             assertNotNull(result);
-            assertEquals(403, result.getCode());
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), result.getCode());
         }
 
         @Test
-        @DisplayName("should infer 404 when message contains '不存在'")
-        void shouldInfer404WhenMessageContainsNotFound() {
+        @DisplayName("should default to parameter error without message-based status inference")
+        void shouldDefaultToParameterErrorWithoutMessageBasedStatusInference() {
             GeneralException ex = new GeneralException("文件不存在");
 
             ResponseEntity<Result<?>> response = handler.handleBusinessException(ex);
             Result<?> result = response.getBody();
             assertNotNull(result);
-            assertEquals(404, result.getCode());
+            assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), result.getCode());
         }
     }
 

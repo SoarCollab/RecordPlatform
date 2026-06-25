@@ -11,6 +11,7 @@ import cn.flying.platformapi.constant.ResultEnum;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -354,6 +355,40 @@ class DistributedStorageServiceImplTest {
             assertThat(result.getCode()).isEqualTo(ResultEnum.FILE_SERVICE_ERROR.getCode());
             assertThat(result.getData()).containsExactly("http://example.com/success");
         }
+
+        /**
+         * 验证旧版无租户 logical path 会优先使用路径中的逻辑节点和历史对象 key。
+         */
+        @Test
+        @DisplayName("Should generate file url for legacy node path")
+        void shouldGenerateFileUrlForLegacyNodePath() throws Exception {
+            String hash = "hash-url-legacy";
+            String legacyPath = "minio/node/legacy-node/" + hash;
+
+            when(faultDomainManager.getCandidateNodes(hash)).thenReturn(Collections.emptyList());
+            when(faultDomainManager.selectBestNodeForRead(Collections.singletonList("legacy-node")))
+                    .thenReturn("legacy-node");
+            when(s3Monitor.isNodeOnline("legacy-node")).thenReturn(true);
+            when(clientManager.getClient("legacy-node")).thenReturn(s3Client);
+            when(clientManager.getPresigner("legacy-node")).thenReturn(s3Presigner);
+            when(s3Client.headObject(any(HeadObjectRequest.class))).thenReturn(HeadObjectResponse.builder().build());
+
+            PresignedGetObjectRequest presigned = mock(PresignedGetObjectRequest.class);
+            when(presigned.url()).thenReturn(new URL("http://example.com/legacy"));
+            when(s3Presigner.presignGetObject(any(GetObjectPresignRequest.class))).thenReturn(presigned);
+
+            Result<List<String>> result = storageService.getFileUrlListByHash(
+                    Collections.singletonList(legacyPath),
+                    Collections.singletonList(hash)
+            );
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData()).containsExactly("http://example.com/legacy");
+            ArgumentCaptor<HeadObjectRequest> headRequestCaptor = ArgumentCaptor.forClass(HeadObjectRequest.class);
+            verify(s3Client).headObject(headRequestCaptor.capture());
+            assertThat(headRequestCaptor.getValue().bucket()).isEqualTo("legacy-node");
+            assertThat(headRequestCaptor.getValue().key()).isEqualTo(hash);
+        }
     }
 
     @Nested
@@ -465,6 +500,29 @@ class DistributedStorageServiceImplTest {
             verify(clientManager).getClient("node-fallback");
             verify(clientManager).getClient("node2");
             verify(s3Client, times(3)).deleteObject(any(DeleteObjectRequest.class));
+        }
+
+        /**
+         * 验证旧版带租户 logical path 删除时会包含路径中的历史逻辑节点。
+         */
+        @Test
+        @DisplayName("Should delete legacy tenant path from recorded node")
+        void shouldDeleteLegacyTenantPathFromRecordedNode() {
+            String legacyPath = "minio/tenant/42/node/legacy-node/" + TEST_FILE_HASH;
+
+            when(faultDomainManager.getCandidateNodes(TEST_FILE_HASH)).thenReturn(Collections.emptyList());
+            when(faultDomainManager.getActiveDomains()).thenReturn(Collections.emptyList());
+            when(s3Monitor.isNodeOnline("legacy-node")).thenReturn(true);
+            when(clientManager.getClient("legacy-node")).thenReturn(s3Client);
+
+            Result<Boolean> result = storageService.deleteFile(Map.of(TEST_FILE_HASH, legacyPath));
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData()).isTrue();
+            ArgumentCaptor<DeleteObjectRequest> deleteRequestCaptor = ArgumentCaptor.forClass(DeleteObjectRequest.class);
+            verify(s3Client).deleteObject(deleteRequestCaptor.capture());
+            assertThat(deleteRequestCaptor.getValue().bucket()).isEqualTo("legacy-node");
+            assertThat(deleteRequestCaptor.getValue().key()).isEqualTo("tenant/42/" + TEST_FILE_HASH);
         }
     }
 

@@ -504,14 +504,13 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 }
 
                 // 删除覆盖当前候选节点和所有活跃域节点，避免遗漏 fallback/rebalance 残留副本。
-                List<String> targetNodes = getDeleteCandidateNodes(fileHash);
+                List<String> targetNodes = getDeleteCandidateNodes(fileHash, parsedPath);
                 if (targetNodes.isEmpty()) {
                     errors.add(fileHash + ": no candidate nodes found");
                     continue;
                 }
 
-                // 构建对象路径
-                String objectPath = String.format("tenant/%d/%s", parsedPath.tenantId(), parsedPath.objectName());
+                String objectPath = parsedPath.objectPath();
 
                 // 从所有目标节点删除
                 for (String nodeName : targetNodes) {
@@ -541,8 +540,10 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      * @param fileHash 文件分片哈希
      * @return 去重后的候选节点列表
      */
-    private List<String> getDeleteCandidateNodes(String fileHash) {
-        LinkedHashSet<String> nodes = new LinkedHashSet<>(faultDomainManager.getCandidateNodes(fileHash));
+    private List<String> getDeleteCandidateNodes(String fileHash, TenantContextUtil.ParsedChunkPath parsedPath) {
+        LinkedHashSet<String> nodes = new LinkedHashSet<>();
+        addLegacyNodeFirst(nodes, parsedPath);
+        nodes.addAll(faultDomainManager.getCandidateNodes(fileHash));
         List<String> activeDomains = faultDomainManager.getActiveDomains();
         if (!CollectionUtils.isEmpty(activeDomains)) {
             for (String domainName : activeDomains) {
@@ -596,14 +597,13 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
 
         // 获取候选节点
-        List<String> candidateNodes = faultDomainManager.getCandidateNodes(fileHash);
+        List<String> candidateNodes = getReadCandidateNodes(fileHash, parsedPath);
         if (candidateNodes.isEmpty()) {
             log.error("无法找到文件 '{}' 的候选存储节点", fileHash);
             return Optional.empty();
         }
 
-        // 构建对象路径
-        String objectPath = String.format("tenant/%d/%s", parsedPath.tenantId(), parsedPath.objectName());
+        String objectPath = parsedPath.objectPath();
 
         // 选择负载最低的节点作为主节点
         String primaryNode = faultDomainManager.selectBestNodeForRead(candidateNodes);
@@ -658,14 +658,13 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
 
         // 获取候选节点
-        List<String> candidateNodes = faultDomainManager.getCandidateNodes(fileHash);
+        List<String> candidateNodes = getReadCandidateNodes(fileHash, parsedPath);
         if (candidateNodes.isEmpty()) {
             log.error("无法找到文件 '{}' 的候选存储节点", fileHash);
             return Optional.empty();
         }
 
-        // 构建对象路径
-        String objectPath = String.format("tenant/%d/%s", parsedPath.tenantId(), parsedPath.objectName());
+        String objectPath = parsedPath.objectPath();
 
         // 选择负载最低的节点作为主节点
         String primaryNode = faultDomainManager.selectBestNodeForRead(candidateNodes);
@@ -695,6 +694,34 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
 
         log.error("无法从任何候选节点 {} 获取 '{}' 的预签名 URL", candidateNodes, objectPath);
         return Optional.empty();
+    }
+
+    /**
+     * 汇总读取时需要尝试的候选节点，并优先保留旧路径中记录的逻辑节点。
+     *
+     * @param fileHash 文件哈希
+     * @param parsedPath 已解析的分片路径
+     * @return 去重后的读取候选节点
+     */
+    private List<String> getReadCandidateNodes(String fileHash, TenantContextUtil.ParsedChunkPath parsedPath) {
+        LinkedHashSet<String> nodes = new LinkedHashSet<>();
+        addLegacyNodeFirst(nodes, parsedPath);
+        nodes.addAll(faultDomainManager.getCandidateNodes(fileHash));
+        return new ArrayList<>(nodes);
+    }
+
+    /**
+     * 将旧逻辑路径中记录的节点放到候选集合首位。
+     *
+     * @param nodes 候选节点集合
+     * @param parsedPath 已解析的分片路径
+     */
+    private void addLegacyNodeFirst(LinkedHashSet<String> nodes, TenantContextUtil.ParsedChunkPath parsedPath) {
+        if (parsedPath != null
+                && parsedPath.legacyNodeName() != null
+                && !parsedPath.legacyNodeName().isBlank()) {
+            nodes.add(parsedPath.legacyNodeName());
+        }
     }
 
     /**

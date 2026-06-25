@@ -158,10 +158,24 @@ function initMermaidZoom(): () => void {
 
       // Close handlers
       let isClosing = false
+      let closeTimer: ReturnType<typeof window.setTimeout> | null = null
+      const previousBodyOverflow = document.body.style.overflow
       const cleanupModalListeners = () => {
         overlay.removeEventListener('click', handleOverlayClick)
         closeBtn.removeEventListener('click', handleCloseClick)
         document.removeEventListener('keydown', handleEscape)
+      }
+
+      const removeModal = () => {
+        if (closeTimer !== null) {
+          window.clearTimeout(closeTimer)
+          closeTimer = null
+        }
+        cleanupModalListeners()
+        if (overlay.parentNode) {
+          overlay.parentNode.removeChild(overlay)
+        }
+        document.body.style.overflow = previousBodyOverflow
       }
 
       const closeModal = () => {
@@ -170,12 +184,7 @@ function initMermaidZoom(): () => void {
 
         cleanupModalListeners()
         overlay.classList.add('mermaid-zoom-closing')
-        setTimeout(() => {
-          if (overlay.parentNode) {
-            document.body.removeChild(overlay)
-          }
-          document.body.style.overflow = ''
-        }, 300)
+        closeTimer = window.setTimeout(removeModal, 300)
       }
 
       const handleOverlayClick = (e: MouseEvent) => {
@@ -209,7 +218,7 @@ function initMermaidZoom(): () => void {
       })
 
       // Cleanup if component unmounts while modal is open
-      cleanupFunctions.push(cleanupModalListeners)
+      cleanupFunctions.push(removeModal)
     }
 
     element.addEventListener('click', handleClick)

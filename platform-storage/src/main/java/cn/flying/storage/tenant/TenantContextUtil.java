@@ -14,6 +14,7 @@ public final class TenantContextUtil {
     private static final String TENANT_ATTACHMENT_KEY = "tenant.id";
     private static final Long DEFAULT_TENANT_ID = 0L;
     private static final String PATH_PREFIX = "storage";
+    private static final String LEGACY_PATH_PREFIX = "minio";
 
     private TenantContextUtil() {}
 
@@ -67,6 +68,17 @@ public final class TenantContextUtil {
      */
     public static String buildTenantObjectPath(String objectName) {
         Long tenantId = getTenantIdOrDefault();
+        return buildTenantObjectPath(tenantId, objectName);
+    }
+
+    /**
+     * 构建指定租户的物理对象存储路径。
+     *
+     * @param tenantId 租户 ID
+     * @param objectName 原始对象名称
+     * @return 带租户前缀的对象路径
+     */
+    public static String buildTenantObjectPath(Long tenantId, String objectName) {
         return String.format("tenant/%d/%s", tenantId, objectName);
     }
 
@@ -92,12 +104,15 @@ public final class TenantContextUtil {
                     Long tenantId = Long.parseLong(remaining.substring(0, firstSlash));
                     String afterTenant = remaining.substring(firstSlash + 1);
 
-                    // 期望格式: chunk/{objectName}
                     if (afterTenant.startsWith("chunk/")) {
                         String objectName = afterTenant.substring(6);
                         if (!objectName.isEmpty()) {
                             return new ParsedChunkPath(tenantId, objectName);
                         }
+                    }
+
+                    if (afterTenant.startsWith("node/")) {
+                        return parseLegacyNodePath(tenantId, afterTenant.substring(5), true);
                     }
                 } catch (NumberFormatException e) {
                     log.warn("解析分片路径失败，无效的租户 ID: {}", chunkPath);
@@ -105,11 +120,68 @@ public final class TenantContextUtil {
             }
         }
 
+        String legacyTenantPrefix = LEGACY_PATH_PREFIX + "/tenant/";
+        if (chunkPath.startsWith(legacyTenantPrefix)) {
+            String remaining = chunkPath.substring(legacyTenantPrefix.length());
+            int firstSlash = remaining.indexOf('/');
+            if (firstSlash > 0) {
+                try {
+                    Long tenantId = Long.parseLong(remaining.substring(0, firstSlash));
+                    String afterTenant = remaining.substring(firstSlash + 1);
+                    if (afterTenant.startsWith("node/")) {
+                        return parseLegacyNodePath(tenantId, afterTenant.substring(5), true);
+                    }
+                } catch (NumberFormatException e) {
+                    log.warn("解析旧版分片路径失败，无效的租户 ID: {}", chunkPath);
+                }
+            }
+        }
+
+        String legacyNodePrefix = LEGACY_PATH_PREFIX + "/node/";
+        if (chunkPath.startsWith(legacyNodePrefix)) {
+            return parseLegacyNodePath(DEFAULT_TENANT_ID, chunkPath.substring(legacyNodePrefix.length()), false);
+        }
+
         return null;
+    }
+
+    /**
+     * 解析旧版包含逻辑节点名的分片路径。
+     *
+     * @param tenantId 租户 ID
+     * @param remaining 去掉 node/ 前缀后的路径
+     * @param tenantScopedObject 是否使用租户隔离物理对象路径
+     * @return 解析结果；非法路径返回 null
+     */
+    private static ParsedChunkPath parseLegacyNodePath(Long tenantId, String remaining, boolean tenantScopedObject) {
+        int firstSlash = remaining.indexOf('/');
+        if (firstSlash <= 0 || firstSlash == remaining.length() - 1) {
+            return null;
+        }
+
+        String legacyNodeName = remaining.substring(0, firstSlash);
+        String objectName = remaining.substring(firstSlash + 1);
+        if (legacyNodeName.isBlank() || objectName.isBlank()) {
+            return null;
+        }
+
+        String objectPath = tenantScopedObject ? buildTenantObjectPath(tenantId, objectName) : objectName;
+        return new ParsedChunkPath(tenantId, objectName, legacyNodeName, objectPath);
     }
 
     /**
      * 解析后的分片路径信息。
      */
-    public record ParsedChunkPath(Long tenantId, String objectName) {}
+    public record ParsedChunkPath(Long tenantId, String objectName, String legacyNodeName, String objectPath) {
+
+        /**
+         * 构建当前版本分片路径的解析结果。
+         *
+         * @param tenantId 租户 ID
+         * @param objectName 对象名称
+         */
+        public ParsedChunkPath(Long tenantId, String objectName) {
+            this(tenantId, objectName, null, buildTenantObjectPath(tenantId, objectName));
+        }
+    }
 }
