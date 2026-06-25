@@ -128,6 +128,63 @@ public class PermissionServiceImpl implements PermissionService {
     }
 
     /**
+     * 清除所有租户下指定角色的权限缓存。
+     *
+     * @param role 角色标识
+     */
+    private void evictRoleAcrossTenants(String role) {
+        String pattern = "*" + Const.PERMISSION_CACHE_PREFIX + role;
+        cacheUtils.deleteCachePattern(pattern);
+        log.debug("Evicted permission cache for role across tenants: {}", role);
+    }
+
+    /**
+     * 清除所有租户下的权限缓存。
+     */
+    private void evictAllTenantPermissionCaches() {
+        String pattern = "*" + Const.PERMISSION_CACHE_PREFIX + "*";
+        cacheUtils.deleteCachePattern(pattern);
+        log.debug("Evicted all tenant permission caches");
+    }
+
+    /**
+     * 根据变更租户范围清除权限定义缓存。
+     *
+     * @param tenantId 权限定义所属租户
+     */
+    private void evictPermissionDefinitionCaches(Long tenantId) {
+        if (isGlobalTenant(tenantId)) {
+            evictAllTenantPermissionCaches();
+            return;
+        }
+        evictAllCache(tenantId);
+    }
+
+    /**
+     * 根据变更租户范围清除角色权限映射缓存。
+     *
+     * @param role     角色标识
+     * @param tenantId 角色权限映射所属租户
+     */
+    private void evictRolePermissionCaches(String role, Long tenantId) {
+        if (isGlobalTenant(tenantId)) {
+            evictRoleAcrossTenants(role);
+            return;
+        }
+        evictCache(role, tenantId);
+    }
+
+    /**
+     * 判断是否为全局租户权限。
+     *
+     * @param tenantId 租户 ID
+     * @return true 表示全局租户权限
+     */
+    private boolean isGlobalTenant(Long tenantId) {
+        return Long.valueOf(0L).equals(tenantId);
+    }
+
+    /**
      * 构建缓存 key
      */
     private String buildCacheKey(String role, Long tenantId) {
@@ -221,7 +278,7 @@ public class PermissionServiceImpl implements PermissionService {
 
         if (changed) {
             permissionMapper.update(null, updateWrapper);
-            evictAllCache(tenantId);
+            evictPermissionDefinitionCaches(tenantId);
         }
         return permission;
     }
@@ -244,7 +301,7 @@ public class PermissionServiceImpl implements PermissionService {
         rolePermissionMapper.delete(wrapper);
 
         permissionMapper.delete(permissionScope);
-        evictAllCache(tenantId);
+        evictPermissionDefinitionCaches(tenantId);
     }
 
     // ==================== 角色权限映射操作 ====================
@@ -267,7 +324,7 @@ public class PermissionServiceImpl implements PermissionService {
                 .setRole(role)
                 .setPermissionId(permission.getId());
         rolePermissionMapper.insert(mapping);
-        evictCache(role, tenantId);
+        evictRolePermissionCaches(role, tenantId);
     }
 
     @Override
@@ -283,6 +340,6 @@ public class PermissionServiceImpl implements PermissionService {
                 .eq(SysRolePermission::getPermissionId, permission.getId())
                 .eq(SysRolePermission::getTenantId, tenantId);
         rolePermissionMapper.delete(wrapper);
-        evictCache(role, tenantId);
+        evictRolePermissionCaches(role, tenantId);
     }
 }

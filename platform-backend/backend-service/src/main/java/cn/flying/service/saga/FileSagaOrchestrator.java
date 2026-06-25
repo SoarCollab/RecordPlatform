@@ -20,6 +20,7 @@ import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.service.monitor.SagaMetrics;
 import cn.flying.service.outbox.OutboxService;
 import cn.flying.service.remote.FileRemoteClient;
+import com.fasterxml.jackson.core.type.TypeReference;
 import io.micrometer.core.instrument.Timer;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -258,13 +259,33 @@ public class FileSagaOrchestrator {
         if (context == null) {
             context = new SagaPayloadContext();
         }
-        if (context.getStoredPaths() == null) {
-            context.setStoredPaths(new LinkedHashMap<>());
+        if (context.getStoredPaths() == null || context.getStoredPaths().isEmpty()) {
+            context.setStoredPaths(loadLegacyStoredPaths(payloadJson));
         }
         if (context.getCompensatedSteps() == null) {
             context.setCompensatedSteps(new HashSet<>());
         }
         return context;
+    }
+
+    /**
+     * 读取旧版 Saga payload 中直接存放的 hash -> object path 映射。
+     *
+     * @param payloadJson Saga payload JSON
+     * @return 旧版存储路径映射，不符合旧格式时返回空映射
+     */
+    private Map<String, String> loadLegacyStoredPaths(String payloadJson) {
+        if (payloadJson == null || payloadJson.isBlank()) {
+            return new LinkedHashMap<>();
+        }
+        Map<String, String> storedPaths = JsonConverter.parse(payloadJson, new TypeReference<Map<String, String>>() {});
+        if (storedPaths == null || storedPaths.isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+        if (storedPaths.containsKey("storedPaths") || storedPaths.containsKey("compensatedSteps")) {
+            return new LinkedHashMap<>();
+        }
+        return new LinkedHashMap<>(storedPaths);
     }
 
     private void persistPayload(FileSaga saga, SagaPayloadContext context) {

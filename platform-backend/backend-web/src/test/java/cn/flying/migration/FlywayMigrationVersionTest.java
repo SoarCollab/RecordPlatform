@@ -36,6 +36,7 @@ class FlywayMigrationVersionTest {
         }
 
         assertTrue(migrationFiles.contains("V1.5.0__add_account_nickname.sql"));
+        assertTrue(migrationFiles.contains("V1.7.4__rename_file_contract_hash_to_transaction_hash.sql"));
         assertFalse(migrationFiles.contains("V1.0.1__add_account_nickname.sql"));
         assertFalse(migrationFiles.contains("V1.5.0__integrity_alert.sql"));
 
@@ -45,6 +46,21 @@ class FlywayMigrationVersionTest {
             assertTrue(matcher.matches(), "Invalid migration filename: " + fileName);
             assertTrue(versions.add(matcher.group(1)), "Duplicate migration version: " + matcher.group(1));
         }
+    }
+
+    /**
+     * 验证历史列名修复通过新的前向迁移实现，避免继续修改已发布迁移。
+     */
+    @Test
+    @DisplayName("should rename legacy file contract hash column through forward migration")
+    void shouldRenameLegacyFileContractHashColumnThroughForwardMigration() throws IOException {
+        Path migration = resolveMigrationDir().resolve("V1.7.4__rename_file_contract_hash_to_transaction_hash.sql");
+        String sql = Files.readString(migration);
+
+        assertTrue(sql.contains("INFORMATION_SCHEMA.COLUMNS"));
+        assertTrue(sql.contains("COLUMN_NAME = 'contract_hash'"));
+        assertTrue(sql.contains("COLUMN_NAME = 'transaction_hash'"));
+        assertTrue(sql.contains("CHANGE COLUMN `contract_hash` `transaction_hash`"));
     }
 
     /**

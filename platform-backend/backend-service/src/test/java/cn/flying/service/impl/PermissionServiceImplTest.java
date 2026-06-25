@@ -364,6 +364,32 @@ class PermissionServiceImplTest {
         }
 
         /**
+         * 验证全局权限定义更新会清理所有租户的角色权限缓存。
+         */
+        @Test
+        @DisplayName("should evict all tenant caches when global permission changes")
+        void updateGlobalPermission_evictsAllTenantCaches() {
+            Long globalTenantId = 0L;
+            SysPermission permission = createPermission(10L, PERM_FILE_READ, "file");
+            permission.setTenantId(globalTenantId);
+            when(permissionMapper.selectOne(any())).thenReturn(permission);
+
+            try (MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                idUtilsMock.when(() -> IdUtils.fromExternalId("ext_10")).thenReturn(10L);
+                permissionService.updatePermission(
+                        "ext_10",
+                        "File Read",
+                        null,
+                        null,
+                        globalTenantId);
+            }
+
+            verify(permissionMapper).update(isNull(), any());
+            verify(cacheUtils).deleteCachePattern("*" + Const.PERMISSION_CACHE_PREFIX + "*");
+            verify(cacheUtils, never()).deleteCachePattern(TenantKeyUtils.tenantKey(Const.PERMISSION_CACHE_PREFIX, globalTenantId) + "*");
+        }
+
+        /**
          * 验证权限删除先做租户作用域查询，并使用带租户条件的 delete wrapper。
          */
         @Test
@@ -405,6 +431,24 @@ class PermissionServiceImplTest {
         }
 
         /**
+         * 验证全局角色授权只按角色清理所有租户缓存。
+         */
+        @Test
+        @DisplayName("should evict role caches across tenants when assigning global role permission")
+        void assignGlobalPermissionToRole_evictsRoleCachesAcrossTenants() {
+            Long globalTenantId = 0L;
+            SysPermission permission = createPermission(12L, PERM_FILE_WRITE, "file");
+            permission.setTenantId(globalTenantId);
+            when(permissionMapper.selectByCode(PERM_FILE_WRITE, globalTenantId)).thenReturn(permission);
+            when(rolePermissionMapper.countByRoleAndPermission(ROLE_USER, PERM_FILE_WRITE, globalTenantId)).thenReturn(0);
+
+            permissionService.assignPermissionToRole(ROLE_USER, PERM_FILE_WRITE, globalTenantId);
+
+            verify(cacheUtils).deleteCachePattern("*" + Const.PERMISSION_CACHE_PREFIX + ROLE_USER);
+            verify(cacheUtils, never()).deleteCache(buildExpectedCacheKey(ROLE_USER, globalTenantId));
+        }
+
+        /**
          * 验证撤销角色权限时删除条件包含当前租户，避免误删其他租户映射。
          */
         @Test
@@ -422,6 +466,24 @@ class PermissionServiceImplTest {
             assertTrue(sqlSegment.contains("permission_id"));
             assertTrue(sqlSegment.contains("tenant_id"));
             verify(cacheUtils).deleteCache(buildExpectedCacheKey(ROLE_USER, TENANT_ID));
+        }
+
+        /**
+         * 验证全局角色权限撤销会清理所有租户下该角色缓存。
+         */
+        @Test
+        @DisplayName("should evict role caches across tenants when revoking global role permission")
+        void revokeGlobalPermissionFromRole_evictsRoleCachesAcrossTenants() {
+            Long globalTenantId = 0L;
+            SysPermission permission = createPermission(13L, PERM_FILE_WRITE, "file");
+            permission.setTenantId(globalTenantId);
+            when(permissionMapper.selectByCode(PERM_FILE_WRITE, globalTenantId)).thenReturn(permission);
+
+            permissionService.revokePermissionFromRole(ROLE_USER, PERM_FILE_WRITE, globalTenantId);
+
+            verify(rolePermissionMapper).delete(any(Wrapper.class));
+            verify(cacheUtils).deleteCachePattern("*" + Const.PERMISSION_CACHE_PREFIX + ROLE_USER);
+            verify(cacheUtils, never()).deleteCache(buildExpectedCacheKey(ROLE_USER, globalTenantId));
         }
     }
 
