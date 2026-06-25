@@ -13,12 +13,16 @@ import cn.flying.platformapi.request.ShareFilesRequest;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.*;
+import cn.flying.platformapi.security.BlockChainRpcAuth;
 import io.micrometer.core.instrument.Timer;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.apidocs.annotations.ApiDoc;
 import org.apache.dubbo.config.annotation.DubboService;
 import io.github.resilience4j.retry.annotation.Retry;
+import org.apache.dubbo.rpc.RpcContext;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.util.List;
 
@@ -43,10 +47,24 @@ public class BlockChainServiceImpl implements BlockChainService {
     @Resource
     private FiscoMetrics fiscoMetrics;
 
+    @Value("${record-platform.rpc.blockchain-token:}")
+    private String blockchainRpcToken;
+
+    /**
+     * 启动时校验区块链 RPC 共享令牌配置，避免 provider 在未授权状态下对外服务。
+     */
+    @PostConstruct
+    void validateRpcTokenConfiguration() {
+        if (!BlockChainRpcAuth.hasToken(blockchainRpcToken)) {
+            throw new IllegalStateException(BlockChainRpcAuth.TOKEN_PROPERTY_NAME + " must be configured");
+        }
+    }
+
     @Override
     @Retry(name = "blockchain")
     @ApiDoc(value = "分享文件")
     public Result<String> shareFiles(ShareFilesRequest request) {
+        requireTrustedRpcCaller();
         Timer.Sample timerSample = fiscoMetrics.startShareTimer();
         try {
             Integer expireMinutes = request != null ? request.expireMinutes() : null;
@@ -88,6 +106,7 @@ public class BlockChainServiceImpl implements BlockChainService {
     @Retry(name = "blockchain")
     @ApiDoc(value = "获取分享文件")
     public Result<SharingVO> getSharedFiles(String shareCode) {
+        requireTrustedRpcCaller();
         try {
             ChainShareInfo shareInfo = chainAdapter.getSharedFiles(shareCode);
 
@@ -110,6 +129,7 @@ public class BlockChainServiceImpl implements BlockChainService {
     @Retry(name = "blockchain")
     @ApiDoc(value = "保存文件")
     public Result<StoreFileResponse> storeFile(StoreFileRequest request) {
+        requireTrustedRpcCaller();
         Timer.Sample timerSample = fiscoMetrics.startStoreTimer();
         try {
             ChainReceipt receipt = chainAdapter.storeFile(
@@ -136,6 +156,7 @@ public class BlockChainServiceImpl implements BlockChainService {
     @Retry(name = "blockchain")
     @ApiDoc(value = "获取用户所有文件列表")
     public Result<List<FileVO>> getUserFiles(String uploader) {
+        requireTrustedRpcCaller();
         try {
             List<ChainFileInfo> chainFiles = chainAdapter.getUserFiles(uploader);
 
@@ -160,6 +181,7 @@ public class BlockChainServiceImpl implements BlockChainService {
     @Retry(name = "blockchain")
     @ApiDoc(value = "获取单个文件")
     public Result<FileDetailVO> getFile(String uploader, String fileHash) {
+        requireTrustedRpcCaller();
         Timer.Sample timerSample = fiscoMetrics.startQueryTimer();
         try {
             ChainFileDetail detail = chainAdapter.getFile(uploader, fileHash);
@@ -189,6 +211,7 @@ public class BlockChainServiceImpl implements BlockChainService {
     @Retry(name = "blockchain")
     @ApiDoc(value = "批量删除文件")
     public Result<Boolean> deleteFiles(DeleteFilesRequest request) {
+        requireTrustedRpcCaller();
         Timer.Sample timerSample = fiscoMetrics.startDeleteTimer();
         try {
             ChainReceipt receipt = chainAdapter.deleteFiles(
@@ -216,6 +239,7 @@ public class BlockChainServiceImpl implements BlockChainService {
     @Retry(name = "blockchain")
     @ApiDoc(value = "获取当前区块链状态")
     public Result<BlockChainMessage> getCurrentBlockChainMessage() {
+        requireTrustedRpcCaller();
         try {
             ChainStatus status = chainAdapter.getChainStatus();
 
@@ -238,6 +262,7 @@ public class BlockChainServiceImpl implements BlockChainService {
     @Retry(name = "blockchain")
     @ApiDoc(value = "根据交易哈希获取交易详情")
     public Result<TransactionVO> getTransactionByHash(String transactionHash) {
+        requireTrustedRpcCaller();
         try {
             ChainTransaction tx = chainAdapter.getTransaction(transactionHash);
 
@@ -265,6 +290,7 @@ public class BlockChainServiceImpl implements BlockChainService {
     @Retry(name = "blockchain")
     @ApiDoc(value = "取消分享")
     public Result<Boolean> cancelShare(CancelShareRequest request) {
+        requireTrustedRpcCaller();
         try {
             ChainReceipt receipt = chainAdapter.cancelShare(request.shareCode(), request.uploader());
 
@@ -286,6 +312,7 @@ public class BlockChainServiceImpl implements BlockChainService {
     @Retry(name = "blockchain")
     @ApiDoc(value = "获取用户分享码列表")
     public Result<List<String>> getUserShareCodes(String uploader) {
+        requireTrustedRpcCaller();
         try {
             List<String> shareCodes = chainAdapter.getUserShareCodes(uploader);
             return Result.success(shareCodes);
@@ -299,6 +326,7 @@ public class BlockChainServiceImpl implements BlockChainService {
     @Retry(name = "blockchain")
     @ApiDoc(value = "获取分享详情")
     public Result<SharingVO> getShareInfo(String shareCode) {
+        requireTrustedRpcCaller();
         try {
             ChainShareInfo shareInfo = chainAdapter.getShareInfo(shareCode);
 
@@ -314,6 +342,17 @@ public class BlockChainServiceImpl implements BlockChainService {
 
         } catch (Exception e) {
             return BlockChainExceptionHandler.handle(e, "getShareInfo", ResultEnum.BLOCKCHAIN_ERROR);
+        }
+    }
+
+    /**
+     * 校验 Dubbo 调用是否携带后端服务共享令牌。
+     */
+    private void requireTrustedRpcCaller() {
+        String actualToken = RpcContext.getServerAttachment()
+                .getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY);
+        if (!BlockChainRpcAuth.matches(blockchainRpcToken, actualToken)) {
+            throw new SecurityException("Unauthorized blockchain RPC caller");
         }
     }
 }

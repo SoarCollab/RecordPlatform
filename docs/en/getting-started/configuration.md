@@ -31,6 +31,7 @@ vim .env
 |----------|-------------|-------------|
 | `JWT_KEY` | JWT signing key + ID encryption derivation | Min 32 characters, high entropy |
 | `PUBLIC_REGISTRATION_TENANT_ID` | Server-side tenant for public registration | Set explicitly; request headers do not choose registration tenant |
+| `BLOCKCHAIN_RPC_TOKEN` | Shared token for backend-to-FISCO Dubbo calls | Required on both backend and fisco; no default |
 | `RECORD_PLATFORM_UID_SALT` | Salt for UID obfuscation | Recommended 8–16 random chars |
 | `RECORD_PLATFORM_CLIENT_KEY` | Client key for UID obfuscation | Recommended 16–32 random chars |
 

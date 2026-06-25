@@ -48,6 +48,10 @@ contract:
   sharingAddress: ${FISCO_SHARING_CONTRACT:}
   storageAddress: ${FISCO_STORAGE_CONTRACT:}
 
+record-platform:
+  rpc:
+    blockchain-token: ${BLOCKCHAIN_RPC_TOKEN}
+
 ### Springboot configuration
 spring:
   application:

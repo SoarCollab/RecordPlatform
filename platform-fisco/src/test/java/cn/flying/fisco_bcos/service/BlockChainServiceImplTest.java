@@ -6,14 +6,17 @@ import cn.flying.fisco_bcos.monitor.FiscoMetrics;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.request.*;
 import cn.flying.platformapi.response.*;
+import cn.flying.platformapi.security.BlockChainRpcAuth;
 import cn.flying.test.logging.LogbackSilencerExtension;
 import cn.flying.test.logging.SilenceLoggers;
 import io.micrometer.core.instrument.Timer;
+import org.apache.dubbo.rpc.RpcContext;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.*;
 
@@ -25,6 +28,8 @@ import static org.mockito.Mockito.*;
 @ExtendWith(LogbackSilencerExtension.class)
 @DisplayName("BlockChainServiceImpl Tests")
 class BlockChainServiceImplTest {
+
+    private static final String RPC_TOKEN = "backend-to-fisco-rpc-token";
 
     @Mock
     private BlockChainAdapter chainAdapter;
@@ -44,11 +49,52 @@ class BlockChainServiceImplTest {
         lenient().when(fiscoMetrics.startShareTimer()).thenReturn(timerSample);
         lenient().when(fiscoMetrics.startQueryTimer()).thenReturn(timerSample);
         lenient().when(fiscoMetrics.startDeleteTimer()).thenReturn(timerSample);
+        ReflectionTestUtils.setField(blockChainService, "blockchainRpcToken", RPC_TOKEN);
+        RpcContext.getServerAttachment().setAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY, RPC_TOKEN);
+    }
+
+    @AfterEach
+    void tearDown() {
+        RpcContext.removeServerAttachment();
+    }
+
+    /**
+     * 验证 provider 启动时必须配置区块链 RPC 共享令牌。
+     */
+    @Test
+    @DisplayName("Should fail startup when blockchain RPC token is missing")
+    void validateRpcTokenConfiguration_shouldRejectMissingToken() {
+        ReflectionTestUtils.setField(blockChainService, "blockchainRpcToken", " ");
+
+        assertThatThrownBy(blockChainService::validateRpcTokenConfiguration)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(BlockChainRpcAuth.TOKEN_PROPERTY_NAME);
     }
 
     @Nested
     @DisplayName("Store File Operations")
     class StoreFileTests {
+
+        /**
+         * 验证缺失共享令牌的 Dubbo 调用不会触发上链存证。
+         */
+        @Test
+        @DisplayName("Should reject calls without blockchain RPC token")
+        void storeFile_shouldRejectMissingRpcToken() {
+            RpcContext.getServerAttachment().removeAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY);
+            StoreFileRequest request = new StoreFileRequest(
+                    "user123",
+                    "test.pdf",
+                    "{\"size\":1024}",
+                    "file_content_hash"
+            );
+
+            assertThatThrownBy(() -> blockChainService.storeFile(request))
+                    .isInstanceOf(SecurityException.class)
+                    .hasMessageContaining("Unauthorized blockchain RPC caller");
+
+            verifyNoInteractions(chainAdapter);
+        }
         
         @Test
         @DisplayName("Should store file successfully")

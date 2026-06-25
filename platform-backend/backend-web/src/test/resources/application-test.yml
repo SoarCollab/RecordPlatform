@@ -65,6 +65,10 @@ knife4j:
     username: test
     password: test
 
+record-platform:
+  rpc:
+    blockchain-token: test-blockchain-rpc-token
+
 # Disable Dubbo registry for tests (mock external services)
 dubbo:
   registry:

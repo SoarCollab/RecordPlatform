@@ -31,6 +31,7 @@ vim .env
 |------|------|------|
 | `JWT_KEY` | JWT 签名密钥 + ID 加密派生 | 至少 32 字符，高熵值 |
 | `PUBLIC_REGISTRATION_TENANT_ID` | 公开注册使用的服务端租户 | 显式配置；请求头不决定注册租户 |
+| `BLOCKCHAIN_RPC_TOKEN` | 后端调用 FISCO Dubbo 服务的共享令牌 | backend 与 fisco 两端必填且一致，无默认值 |
 | `RECORD_PLATFORM_UID_SALT` | UID 混淆用盐值 | 建议 8–16 字符随机字符串 |
 | `RECORD_PLATFORM_CLIENT_KEY` | UID 混淆用客户端密钥 | 建议 16–32 字符随机字符串 |
 
