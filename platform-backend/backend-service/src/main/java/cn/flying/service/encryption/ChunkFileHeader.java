@@ -98,7 +98,10 @@ public final class ChunkFileHeader {
         if (data == null || data.length < HEADER_SIZE) {
             return false;
         }
-        return data[0] == MAGIC[0] && data[1] == MAGIC[1];
+        return data[0] == MAGIC[0]
+                && data[1] == MAGIC[1]
+                && data[2] == VERSION
+                && isSupportedAlgorithm(data[3]);
     }
 
     /**
@@ -112,7 +115,20 @@ public final class ChunkFileHeader {
         if (data == null || data.length < offset + HEADER_SIZE) {
             return false;
         }
-        return data[offset] == MAGIC[0] && data[offset + 1] == MAGIC[1];
+        return data[offset] == MAGIC[0]
+                && data[offset + 1] == MAGIC[1]
+                && data[offset + 2] == VERSION
+                && isSupportedAlgorithm(data[offset + 3]);
+    }
+
+    /**
+     * 判断算法标识是否属于当前支持的分片加密算法。
+     *
+     * @param algorithmId 算法标识字节
+     * @return true 表示支持该算法
+     */
+    private static boolean isSupportedAlgorithm(byte algorithmId) {
+        return algorithmId == ALGORITHM_AES_GCM || algorithmId == ALGORITHM_CHACHA20;
     }
 
     /**

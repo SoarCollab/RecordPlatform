@@ -64,6 +64,26 @@ class FlywayMigrationVersionTest {
     }
 
     /**
+     * 验证迁移中的存储过程声明使用 MySQL 兼容语法。
+     */
+    @Test
+    @DisplayName("should avoid MariaDB-only CREATE PROCEDURE IF NOT EXISTS syntax")
+    void shouldAvoidMariaDbOnlyCreateProcedureIfNotExistsSyntax() throws IOException {
+        Path migrationDir = resolveMigrationDir();
+        try (var stream = Files.list(migrationDir)) {
+            List<Path> migrationFiles = stream
+                    .filter(path -> path.getFileName().toString().startsWith("V"))
+                    .filter(path -> path.getFileName().toString().endsWith(".sql"))
+                    .toList();
+            for (Path migration : migrationFiles) {
+                String sql = Files.readString(migration);
+                assertFalse(sql.matches("(?is).*CREATE\\s+PROCEDURE\\s+IF\\s+NOT\\s+EXISTS.*"),
+                        "MySQL-incompatible routine declaration in " + migration.getFileName());
+            }
+        }
+    }
+
+    /**
      * 解析不同 Maven 执行目录下的迁移目录路径。
      *
      * @return Flyway 迁移目录

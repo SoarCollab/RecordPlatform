@@ -139,7 +139,15 @@ Start infrastructure with Docker Compose:
 docker compose -f docker-compose.infra.yml up -d
 ```
 
-Copy `.env.example` to `.env` and configure `JWT_KEY`, `S3_*`, and `FISCO_*` before starting services.
+Copy `.env.example` to `.env` and configure `JWT_KEY`, `S3_*`, and `FISCO_*` before starting services:
+
+```bash
+cp .env.example .env
+# Edit .env before continuing.
+set -a
+source .env
+set +a
+```
 
 ### 2. Build
 
