@@ -268,18 +268,7 @@ public class BlockChainServiceImpl implements BlockChainService {
         try {
             ChainTransaction tx = chainAdapter.getTransaction(transactionHash);
 
-            TransactionVO transactionVO = new TransactionVO(
-                    tx.getHash(),
-                    tx.getChainId(),
-                    tx.getGroupId(),
-                    tx.getAbi(),
-                    tx.getFrom(),
-                    tx.getTo(),
-                    tx.getInput(),
-                    tx.getSignature(),
-                    tx.getBlockNumber() != null ? String.valueOf(tx.getBlockNumber()) : null,
-                    tx.getImportTime()
-            );
+            TransactionVO transactionVO = toSafeTransactionVO(tx);
 
             return Result.success(transactionVO);
 
@@ -381,6 +370,24 @@ public class BlockChainServiceImpl implements BlockChainService {
      */
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    /**
+     * 将链上交易映射为外部安全视图，避免暴露 ABI、交易输入和签名原文。
+     */
+    private TransactionVO toSafeTransactionVO(ChainTransaction tx) {
+        return new TransactionVO(
+                tx.getHash(),
+                tx.getChainId(),
+                tx.getGroupId(),
+                null,
+                tx.getFrom(),
+                tx.getTo(),
+                null,
+                null,
+                tx.getBlockNumber() != null ? String.valueOf(tx.getBlockNumber()) : null,
+                tx.getImportTime()
+        );
     }
 
     /**

@@ -40,4 +40,38 @@ class OperationLogAspectTest {
 
         assertThat(result).isTrue();
     }
+
+    /**
+     * 验证系统审计接口本身也会进入操作日志，避免敏感管理动作缺失审计记录。
+     */
+    @Test
+    @DisplayName("Should not ignore system audit API paths")
+    void shouldNotIgnoreSystemAuditApiPaths() {
+        OperationLogAspect aspect = new OperationLogAspect();
+
+        Boolean result = ReflectionTestUtils.invokeMethod(
+                aspect,
+                "isIgnoreUrl",
+                "/api/v1/system/audit/logs/export"
+        );
+
+        assertThat(result).isFalse();
+    }
+
+    /**
+     * 验证非业务文档路由仍然会被操作日志切面忽略。
+     */
+    @Test
+    @DisplayName("Should still ignore API documentation paths")
+    void shouldStillIgnoreApiDocumentationPaths() {
+        OperationLogAspect aspect = new OperationLogAspect();
+
+        Boolean result = ReflectionTestUtils.invokeMethod(
+                aspect,
+                "isIgnoreUrl",
+                "/swagger-ui/index.html"
+        );
+
+        assertThat(result).isTrue();
+    }
 }

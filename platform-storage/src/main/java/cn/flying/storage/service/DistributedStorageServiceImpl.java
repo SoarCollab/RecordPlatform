@@ -503,8 +503,8 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                     continue;
                 }
 
-                // 获取分片存储的所有目标节点（基于一致性哈希）
-                List<String> targetNodes = faultDomainManager.getCandidateNodes(fileHash);
+                // 删除覆盖当前候选节点和所有活跃域节点，避免遗漏 fallback/rebalance 残留副本。
+                List<String> targetNodes = getDeleteCandidateNodes(fileHash);
                 if (targetNodes.isEmpty()) {
                     errors.add(fileHash + ": no candidate nodes found");
                     continue;
@@ -533,6 +533,23 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             return Result.error(ResultEnum.FILE_SERVICE_ERROR, false);
         }
         return Result.success(true);
+    }
+
+    /**
+     * 汇总删除时需要尝试清理的节点。
+     *
+     * @param fileHash 文件分片哈希
+     * @return 去重后的候选节点列表
+     */
+    private List<String> getDeleteCandidateNodes(String fileHash) {
+        LinkedHashSet<String> nodes = new LinkedHashSet<>(faultDomainManager.getCandidateNodes(fileHash));
+        List<String> activeDomains = faultDomainManager.getActiveDomains();
+        if (!CollectionUtils.isEmpty(activeDomains)) {
+            for (String domainName : activeDomains) {
+                nodes.addAll(faultDomainManager.getNodesInDomain(domainName));
+            }
+        }
+        return new ArrayList<>(nodes);
     }
 
     private void deleteFromNode(String nodeName, String objectName) throws Exception {

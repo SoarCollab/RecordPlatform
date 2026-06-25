@@ -29,7 +29,6 @@ import cn.flying.platformapi.request.ShareFilesRequest;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.platformapi.response.SharingVO;
-import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FileService;
 import cn.flying.service.QuotaService;
 import cn.flying.service.ShareAuditService;
@@ -518,12 +517,6 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         }
         Result<List<String>> urlListResult = fileRemoteClient.getFileUrlListByHash(fileContentMap.values().stream().toList(), fileContentMap.keySet().stream().toList());
         return ResultUtils.getData(urlListResult);
-    }
-
-    @Override
-    public TransactionVO getTransactionByHash(String transactionHash) {
-        Result<TransactionVO> result = fileRemoteClient.getTransactionByHash(transactionHash);
-        return ResultUtils.getData(result);
     }
 
     @Override

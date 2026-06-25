@@ -28,34 +28,103 @@ source "$SCRIPT_DIR/env.sh"
 # ================================
 # 服务定义
 # ================================
-declare -A SERVICE_JARS=(
-    ["storage"]="$STORAGE_JAR"
-    ["fisco"]="$FISCO_JAR"
-    ["backend"]="$BACKEND_JAR"
-)
-
-declare -A SERVICE_NAMES=(
-    ["storage"]="存储服务 (Storage)"
-    ["fisco"]="区块链服务 (FISCO)"
-    ["backend"]="后端服务 (Backend)"
-)
-
-declare -A SW_NAMES=(
-    ["storage"]="record-platform-storage"
-    ["fisco"]="record-platform-fisco"
-    ["backend"]="record-platform-web"
-)
-
-declare -A SERVICE_PORTS=(
-    ["storage"]="$STORAGE_PORT"
-    ["fisco"]="$FISCO_PORT"
-    ["backend"]="$BACKEND_PORT"
-)
-
 SERVICE_ORDER=("storage" "fisco" "backend")
 
 HEALTH_CHECK_TIMEOUT=60
 HEALTH_CHECK_INTERVAL=2
+
+# 获取服务对应的 JAR 路径。
+get_service_jar() {
+    case "$1" in
+        storage) echo "$STORAGE_JAR" ;;
+        fisco) echo "$FISCO_JAR" ;;
+        backend) echo "$BACKEND_JAR" ;;
+        *) echo "" ;;
+    esac
+}
+
+# 获取服务展示名称。
+get_service_name() {
+    case "$1" in
+        storage) echo "存储服务 (Storage)" ;;
+        fisco) echo "区块链服务 (FISCO)" ;;
+        backend) echo "后端服务 (Backend)" ;;
+        *) echo "$1" ;;
+    esac
+}
+
+# 获取链路追踪服务名。
+get_sw_name() {
+    case "$1" in
+        storage) echo "record-platform-storage" ;;
+        fisco) echo "record-platform-fisco" ;;
+        backend) echo "record-platform-web" ;;
+        *) echo "$1" ;;
+    esac
+}
+
+# 获取 OpenTelemetry 服务名。
+get_otel_name() {
+    get_sw_name "$1"
+}
+
+# 获取服务健康检查端口。
+get_service_port() {
+    case "$1" in
+        storage) echo "$STORAGE_PORT" ;;
+        fisco) echo "$FISCO_PORT" ;;
+        backend) echo "$BACKEND_PORT" ;;
+        *) echo "" ;;
+    esac
+}
+
+# ================================
+# PID 安全校验函数
+# ================================
+# 判断 PID 是否为正整数。
+is_valid_pid() {
+    local pid=$1
+    [[ "$pid" =~ ^[0-9]+$ ]] && [ "$pid" -gt 0 ]
+}
+
+# 读取指定 PID 的完整命令行。
+get_process_command() {
+    local pid=$1
+    ps -p "$pid" -o command= 2>/dev/null || true
+}
+
+# 校验 PID 指向的进程是否为当前服务对应的 Java JAR。
+is_expected_service_process() {
+    local svc=$1
+    local pid=$2
+    local jar_path
+    jar_path=$(get_service_jar "$svc")
+    local jar_name
+    jar_name=$(basename "$jar_path")
+
+    if ! is_valid_pid "$pid"; then
+        return 1
+    fi
+
+    local command_line
+    command_line=$(get_process_command "$pid")
+    if [ -z "$command_line" ]; then
+        return 1
+    fi
+
+    [[ "$command_line" == *"java"* ]] \
+        && [[ "$command_line" == *" -jar "* ]] \
+        && { [[ "$command_line" == *"$jar_path"* ]] || [[ "$command_line" == *"$jar_name"* ]]; }
+}
+
+if [ "${RECORD_PLATFORM_SCRIPT_SELF_TEST:-}" = "pid-validation" ]; then
+    if is_expected_service_process "backend" "$$"; then
+        echo "PID validation self-test failed: current shell matched backend service" >&2
+        exit 1
+    fi
+    echo "PID validation self-test passed"
+    exit 0
+fi
 
 # ================================
 # 帮助信息函数
@@ -228,11 +297,13 @@ get_pid() {
     local pid_file=$(get_pid_file "$svc")
     
     if [ -f "$pid_file" ]; then
-        local pid=$(cat "$pid_file" 2>/dev/null)
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        local pid
+        pid=$(tr -d '[:space:]' < "$pid_file" 2>/dev/null)
+        if is_valid_pid "$pid" && kill -0 "$pid" 2>/dev/null && is_expected_service_process "$svc" "$pid"; then
             echo "$pid"
             return 0
         fi
+        echo "⚠ 忽略无效或不匹配的 PID 文件: $pid_file (PID: ${pid:-空})" >&2
         rm -f "$pid_file"
     fi
     echo ""
@@ -253,7 +324,8 @@ remove_pid() {
 
 wait_for_health() {
     local svc=$1
-    local port="${SERVICE_PORTS[$svc]}"
+    local port
+    port=$(get_service_port "$svc")
     local elapsed=0
     
     if [ -z "$port" ]; then
@@ -278,9 +350,8 @@ wait_for_health() {
 # ================================
 stop_service() {
     local svc=$1
-    local jar_path="${SERVICE_JARS[$svc]}"
-    local jar_name=$(basename "$jar_path")
-    local name="${SERVICE_NAMES[$svc]}"
+    local name
+    name=$(get_service_name "$svc")
     
     local pid=$(get_pid "$svc")
     
@@ -314,11 +385,14 @@ stop_service() {
 start_service() {
     local svc=$1
     local run_foreground=${2:-false}
-    local jar_path="${SERVICE_JARS[$svc]}"
-    local jar_name=$(basename "$jar_path")
-    local name="${SERVICE_NAMES[$svc]}"
-    local sw_name="${SW_NAMES[$svc]}"
-    local port="${SERVICE_PORTS[$svc]}"
+    local jar_path
+    jar_path=$(get_service_jar "$svc")
+    local name
+    name=$(get_service_name "$svc")
+    local sw_name
+    sw_name=$(get_sw_name "$svc")
+    local port
+    port=$(get_service_port "$svc")
 
     local existing_pid=$(get_pid "$svc")
     if [ -n "$existing_pid" ]; then
@@ -347,7 +421,8 @@ start_service() {
     fi
 
     if [ "$ENABLE_OTEL" = true ]; then
-        local otel_name="${OTEL_NAMES[$svc]:-$sw_name}"
+        local otel_name
+        otel_name=$(get_otel_name "$svc")
         local otel_opts=$(get_otel_opts "$otel_name")
         if [ -n "$otel_opts" ]; then
             java_opts="$java_opts $otel_opts"
@@ -396,10 +471,10 @@ start_service() {
 # ================================
 status_service() {
     local svc=$1
-    local jar_path="${SERVICE_JARS[$svc]}"
-    local jar_name=$(basename "$jar_path")
-    local name="${SERVICE_NAMES[$svc]}"
-    local port="${SERVICE_PORTS[$svc]}"
+    local name
+    name=$(get_service_name "$svc")
+    local port
+    port=$(get_service_port "$svc")
     
     local pid=$(get_pid "$svc")
     

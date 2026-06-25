@@ -47,8 +47,7 @@ public class OperationLogAspect {
             "/doc.html",
             "/swagger-ui",
             "/v3/api-docs",
-            "/api/system/logs",
-            "/api/v1/system/audit"
+            "/api/system/logs"
     );
 
     /**

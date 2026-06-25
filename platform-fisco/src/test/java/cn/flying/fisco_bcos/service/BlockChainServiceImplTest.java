@@ -560,6 +560,9 @@ class BlockChainServiceImplTest {
             tx.setGroupId("1");
             tx.setFrom("0xsender");
             tx.setTo("0xcontract");
+            tx.setAbi("[{\"type\":\"function\"}]");
+            tx.setInput("0xdeadbeef");
+            tx.setSignature("0xsig");
             tx.setBlockNumber(12345L);
             
             when(chainAdapter.getTransaction(txHash)).thenReturn(tx);
@@ -569,6 +572,9 @@ class BlockChainServiceImplTest {
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData().transactionHash()).isEqualTo(txHash);
             assertThat(result.getData().blockNumber()).isEqualTo("12345");
+            assertThat(result.getData().contractABI()).isNull();
+            assertThat(result.getData().input()).isNull();
+            assertThat(result.getData().signature()).isNull();
         }
 
         @Test

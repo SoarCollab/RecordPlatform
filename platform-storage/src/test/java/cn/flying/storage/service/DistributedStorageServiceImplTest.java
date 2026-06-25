@@ -441,6 +441,31 @@ class DistributedStorageServiceImplTest {
             assertThat(result.getCode()).isEqualTo(ResultEnum.FILE_SERVICE_ERROR.getCode());
             assertThat(result.getData()).isFalse();
         }
+
+        /**
+         * 验证删除会覆盖活跃域内的 fallback/rebalance 残留节点，而不仅是当前 hash ring 候选节点。
+         */
+        @Test
+        @DisplayName("Should delete from active domain nodes in addition to current candidates")
+        void shouldDeleteFromActiveDomainNodesInAdditionToCurrentCandidates() {
+            String chunkPath = TenantContextUtil.buildChunkPath(TEST_FILE_HASH);
+
+            when(faultDomainManager.getCandidateNodes(TEST_FILE_HASH)).thenReturn(List.of("node1"));
+            when(faultDomainManager.getActiveDomains()).thenReturn(List.of("domain-a", "domain-b"));
+            when(faultDomainManager.getNodesInDomain("domain-a")).thenReturn(Set.of("node1", "node-fallback"));
+            when(faultDomainManager.getNodesInDomain("domain-b")).thenReturn(Set.of("node2"));
+            when(s3Monitor.isNodeOnline(anyString())).thenReturn(true);
+            when(clientManager.getClient(anyString())).thenReturn(s3Client);
+
+            Result<Boolean> result = storageService.deleteFile(Map.of(TEST_FILE_HASH, chunkPath));
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData()).isTrue();
+            verify(clientManager).getClient("node1");
+            verify(clientManager).getClient("node-fallback");
+            verify(clientManager).getClient("node2");
+            verify(s3Client, times(3)).deleteObject(any(DeleteObjectRequest.class));
+        }
     }
 
     @Nested

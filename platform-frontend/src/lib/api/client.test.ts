@@ -348,6 +348,49 @@ describe("API Client", () => {
       });
     });
 
+    describe("raw response requests", () => {
+      it("should not send API credentials to absolute URLs", async () => {
+        const mockFetch = vi.fn().mockResolvedValue(new Response("ok"));
+        const api = createApiClient({
+          baseUrl: "https://api.test.com",
+          fetch: mockFetch,
+          tenantId: "tenant-123",
+          getToken: () => "my-auth-token",
+        });
+
+        const result = await api.fetchText(
+          "https://storage.example.com/file.txt",
+        );
+
+        const [url, options] = mockFetch.mock.calls[0];
+        expect(url).toBe("https://storage.example.com/file.txt");
+        expect(options.headers.get("Authorization")).toBeNull();
+        expect(options.headers.get("X-Tenant-ID")).toBeNull();
+        expect(result).toBe("ok");
+      });
+
+      it("should keep API credentials for relative raw requests", async () => {
+        const mockFetch = vi.fn().mockResolvedValue(new Response("ok"));
+        const api = createApiClient({
+          baseUrl: "https://api.test.com/api/v1",
+          fetch: mockFetch,
+          tenantId: "tenant-123",
+          getToken: () => "my-auth-token",
+        });
+
+        await api.fetchText("/system/audit/logs/export");
+
+        const [url, options] = mockFetch.mock.calls[0];
+        expect(url).toBe(
+          "https://api.test.com/api/v1/system/audit/logs/export",
+        );
+        expect(options.headers.get("Authorization")).toBe(
+          "Bearer my-auth-token",
+        );
+        expect(options.headers.get("X-Tenant-ID")).toBe("tenant-123");
+      });
+    });
+
     describe("POST requests", () => {
       it("should make POST request with JSON body", async () => {
         const requestBody = { name: "test" };

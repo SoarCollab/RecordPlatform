@@ -8,8 +8,8 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-# 加载 .env 文件
-if [ -f "$PROJECT_ROOT/.env" ]; then
+# 加载 .env 文件；脚本自检或 CI 可通过 RECORD_PLATFORM_SKIP_DOTENV=true 跳过。
+if [ "${RECORD_PLATFORM_SKIP_DOTENV:-false}" != "true" ] && [ -f "$PROJECT_ROOT/.env" ]; then
     set -a
     source "$PROJECT_ROOT/.env"
     set +a
@@ -39,6 +39,7 @@ mkdir -p "$LOG_DIR"
 # ================================
 export PID_DIR="${PID_DIR:-$PROJECT_ROOT/run}"
 mkdir -p "$PID_DIR"
+chmod 700 "$PID_DIR" 2>/dev/null || true
 
 # ================================
 # 服务端口配置 (用于健康检查)
@@ -88,12 +89,6 @@ export OTEL_AGENT_HOME="${OTEL_AGENT_HOME:-$PROJECT_ROOT/agent/otel}"
 export OTEL_EXPORTER_OTLP_ENDPOINT="${OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4317}"
 export OTEL_TRACES_SAMPLER="${OTEL_TRACES_SAMPLER:-parentbased_traceidratio}"
 export OTEL_TRACES_SAMPLER_ARG="${OTEL_TRACES_SAMPLER_ARG:-0.1}"
-
-declare -A OTEL_NAMES=(
-    ["storage"]="record-platform-storage"
-    ["fisco"]="record-platform-fisco"
-    ["backend"]="record-platform-web"
-)
 
 # 检查 OpenTelemetry Agent
 check_otel_agent() {
