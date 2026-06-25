@@ -6,6 +6,8 @@ import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.request.CancelShareRequest;
 import cn.flying.platformapi.request.DeleteFilesRequest;
+import cn.flying.platformapi.request.GetShareInfoRequest;
+import cn.flying.platformapi.request.GetUserShareCodesRequest;
 import cn.flying.platformapi.request.ShareFilesRequest;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
@@ -174,8 +176,9 @@ public class FileRemoteClient {
 
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "getUserShareCodesFallback")
     @Retry(name = "blockChainService")
-    public Result<List<String>> getUserShareCodes(String uploader) {
-        return callBlockChain(() -> blockChainService.getUserShareCodes(uploader));
+    public Result<List<String>> getUserShareCodes(String uploader, String requester) {
+        return callBlockChain(() -> blockChainService.getUserShareCodes(
+                new GetUserShareCodesRequest(uploader, requester)));
     }
 
     private Result<List<String>> getUserShareCodesFallback(String uploader, Throwable t) {
@@ -185,8 +188,9 @@ public class FileRemoteClient {
 
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "getShareInfoFallback")
     @Retry(name = "blockChainService")
-    public Result<SharingVO> getShareInfo(String shareCode) {
-        return callBlockChain(() -> blockChainService.getShareInfo(shareCode));
+    public Result<SharingVO> getShareInfo(String shareCode, String requester) {
+        return callBlockChain(() -> blockChainService.getShareInfo(
+                new GetShareInfoRequest(shareCode, requester)));
     }
 
     private Result<SharingVO> getShareInfoFallback(String shareCode, Throwable t) {

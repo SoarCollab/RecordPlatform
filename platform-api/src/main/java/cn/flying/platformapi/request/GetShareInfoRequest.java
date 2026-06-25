@@ -4,11 +4,10 @@ import java.io.Serial;
 import java.io.Serializable;
 
 /**
- * 取消分享请求 DTO
+ * 获取分享详情请求 DTO。
  */
-public record CancelShareRequest(
+public record GetShareInfoRequest(
         String shareCode,
-        String uploader,
         String requester
 ) implements Serializable {
 

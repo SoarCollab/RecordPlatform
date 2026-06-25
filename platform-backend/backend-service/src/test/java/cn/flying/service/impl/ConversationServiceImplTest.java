@@ -96,7 +96,10 @@ class ConversationServiceImplTest {
                     .getAnnotation(Select.class);
 
             assertNotNull(select);
-            assertTrue(String.join(" ", select.value()).toLowerCase().contains("deleted = 0"));
+            String sql = String.join(" ", select.value()).toLowerCase();
+            assertTrue(sql.contains("deleted = 0"));
+            assertTrue(sql.contains("participant_a_deleted"));
+            assertTrue(sql.contains("participant_b_deleted"));
         }
 
         /**
@@ -110,7 +113,10 @@ class ConversationServiceImplTest {
                     .getAnnotation(Select.class);
 
             assertNotNull(select);
-            assertTrue(String.join(" ", select.value()).toLowerCase().contains("c.deleted = 0"));
+            String sql = String.join(" ", select.value()).toLowerCase();
+            assertTrue(sql.contains("c.deleted = 0"));
+            assertTrue(sql.contains("c.participant_a_deleted = 0"));
+            assertTrue(sql.contains("c.participant_b_deleted = 0"));
         }
 
         @Test
@@ -124,6 +130,24 @@ class ConversationServiceImplTest {
             assertNotNull(result);
             assertEquals(CONVERSATION_ID, result.getId());
             verify(conversationService, never()).save(any());
+        }
+
+        /**
+         * 新消息复用会话时恢复双方可见性，避免历史隐藏状态吞掉新对话。
+         */
+        @Test
+        @DisplayName("should restore hidden conversation when reused")
+        void getOrCreate_existingHidden_shouldRestoreVisibility() {
+            Conversation existing = createConversation(USER_A, USER_B);
+            existing.setParticipantADeleted(1);
+            when(conversationMapper.selectByParticipants(USER_A, USER_B, TENANT_ID)).thenReturn(existing);
+            doReturn(true).when(conversationService).updateById(existing);
+
+            Conversation result = conversationService.getOrCreateConversation(USER_A, USER_B);
+
+            assertEquals(0, result.getParticipantADeleted());
+            assertEquals(0, result.getParticipantBDeleted());
+            verify(conversationService).updateById(existing);
         }
 
         @Test
@@ -292,6 +316,23 @@ class ConversationServiceImplTest {
             assertEquals(ResultEnum.CONVERSATION_NOT_FOUND, ex.getResultEnum());
         }
 
+        /**
+         * 当前用户隐藏会话后，详情接口对该用户表现为不存在。
+         */
+        @Test
+        @DisplayName("should hide conversation detail when deleted by requester")
+        void getConversationDetail_hiddenForRequester() {
+            Conversation conv = createConversation(USER_A, USER_B);
+            conv.setParticipantADeleted(1);
+            when(conversationService.getById(CONVERSATION_ID)).thenReturn(conv);
+
+            GeneralException ex = assertThrows(GeneralException.class,
+                    () -> conversationService.getConversationDetail(USER_A, CONVERSATION_ID, 1, 20));
+
+            assertEquals(ResultEnum.CONVERSATION_NOT_FOUND, ex.getResultEnum());
+            verify(messageService, never()).getMessages(anyLong(), anyLong(), any());
+        }
+
         @Test
         @DisplayName("should calculate hasMore correctly")
         void getConversationDetail_hasMore() {
@@ -369,11 +410,14 @@ class ConversationServiceImplTest {
             Conversation conv = createConversation(USER_A, USER_B);
 
             when(conversationService.getById(CONVERSATION_ID)).thenReturn(conv);
-            doReturn(true).when(conversationService).removeById(CONVERSATION_ID);
+            doReturn(true).when(conversationService).updateById(conv);
 
             assertDoesNotThrow(() -> conversationService.deleteConversation(USER_A, CONVERSATION_ID));
 
-            verify(conversationService).removeById(CONVERSATION_ID);
+            assertEquals(1, conv.getParticipantADeleted());
+            assertEquals(0, conv.getParticipantBDeleted());
+            verify(conversationService).updateById(conv);
+            verify(conversationService, never()).removeById(anyLong());
         }
 
         @Test
@@ -406,11 +450,14 @@ class ConversationServiceImplTest {
             Conversation conv = createConversation(USER_A, USER_B);
 
             when(conversationService.getById(CONVERSATION_ID)).thenReturn(conv);
-            doReturn(true).when(conversationService).removeById(CONVERSATION_ID);
+            doReturn(true).when(conversationService).updateById(conv);
 
             assertDoesNotThrow(() -> conversationService.deleteConversation(USER_B, CONVERSATION_ID));
 
-            verify(conversationService).removeById(CONVERSATION_ID);
+            assertEquals(0, conv.getParticipantADeleted());
+            assertEquals(1, conv.getParticipantBDeleted());
+            verify(conversationService).updateById(conv);
+            verify(conversationService, never()).removeById(anyLong());
         }
     }
 
@@ -452,6 +499,8 @@ class ConversationServiceImplTest {
         conversation.setParticipantA(Math.min(userA, userB));
         conversation.setParticipantB(Math.max(userA, userB));
         conversation.setTenantId(TENANT_ID);
+        conversation.setParticipantADeleted(0);
+        conversation.setParticipantBDeleted(0);
         conversation.setCreateTime(new Date());
         return conversation;
     }

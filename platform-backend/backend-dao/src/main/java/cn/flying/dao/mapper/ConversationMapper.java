@@ -18,7 +18,8 @@ public interface ConversationMapper extends BaseMapper<Conversation> {
      * 根据参与者查询会话（带租户隔离）
      */
     @Select("""
-        SELECT id, tenant_id, participant_a, participant_b, last_message_id, last_message_at, create_time, update_time, deleted
+        SELECT id, tenant_id, participant_a, participant_b, last_message_id, last_message_at,
+               create_time, update_time, deleted, participant_a_deleted, participant_b_deleted
         FROM conversation
         WHERE participant_a = #{participantA}
           AND participant_b = #{participantB}
@@ -39,7 +40,10 @@ public interface ConversationMapper extends BaseMapper<Conversation> {
     @Select("""
         SELECT COUNT(DISTINCT c.id) FROM conversation c
         INNER JOIN message m ON c.id = m.conversation_id
-        WHERE (c.participant_a = #{userId} OR c.participant_b = #{userId})
+        WHERE (
+            (c.participant_a = #{userId} AND c.participant_a_deleted = 0)
+            OR (c.participant_b = #{userId} AND c.participant_b_deleted = 0)
+          )
           AND m.receiver_id = #{userId}
           AND m.is_read = 0
           AND m.deleted = 0

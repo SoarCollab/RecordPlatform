@@ -57,10 +57,60 @@ public class Conversation implements Serializable {
     @Schema(description = "逻辑删除标记 0=正常 1=已删除")
     private Integer deleted;
 
+    @Schema(description = "参与者A是否已隐藏该会话 0=可见 1=隐藏")
+    private Integer participantADeleted;
+
+    @Schema(description = "参与者B是否已隐藏该会话 0=可见 1=隐藏")
+    private Integer participantBDeleted;
+
     /**
      * 获取对方用户ID
      */
     public Long getOtherParticipant(Long userId) {
         return userId.equals(participantA) ? participantB : participantA;
+    }
+
+    /**
+     * 判断当前用户是否已隐藏该会话。
+     */
+    public boolean isHiddenFor(Long userId) {
+        if (userId == null) {
+            return false;
+        }
+        if (userId.equals(participantA)) {
+            return isDeletedFlag(participantADeleted);
+        }
+        if (userId.equals(participantB)) {
+            return isDeletedFlag(participantBDeleted);
+        }
+        return false;
+    }
+
+    /**
+     * 将会话标记为仅对当前用户隐藏。
+     */
+    public Conversation markDeletedFor(Long userId) {
+        if (userId != null && userId.equals(participantA)) {
+            participantADeleted = 1;
+        } else if (userId != null && userId.equals(participantB)) {
+            participantBDeleted = 1;
+        }
+        return this;
+    }
+
+    /**
+     * 新消息复用会话时恢复双方可见性。
+     */
+    public Conversation restoreForAllParticipants() {
+        participantADeleted = 0;
+        participantBDeleted = 0;
+        return this;
+    }
+
+    /**
+     * 判断删除标记是否表示已隐藏。
+     */
+    private boolean isDeletedFlag(Integer flag) {
+        return flag != null && flag == 1;
     }
 }

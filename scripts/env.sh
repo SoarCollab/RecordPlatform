@@ -52,6 +52,7 @@ export BACKEND_PORT="${BACKEND_PORT:-8000}"
 # ================================
 export SW_AGENT_HOME="${SW_AGENT_HOME:-$PROJECT_ROOT/agent}"
 export SW_AGENT_COLLECTOR_BACKEND_SERVICES="${SW_AGENT_COLLECTOR_BACKEND_SERVICES:-127.0.0.1:11800}"
+export SW_JDBC_TRACE_SQL_PARAMETERS="${SW_JDBC_TRACE_SQL_PARAMETERS:-false}"
 
 # 检查 SkyWalking Agent
 check_skywalking_agent() {

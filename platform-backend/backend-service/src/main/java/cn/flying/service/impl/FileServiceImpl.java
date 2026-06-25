@@ -1009,6 +1009,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         Result<Boolean> result = fileRemoteClient.cancelShare(
                 new CancelShareRequest(
                         shareCode,
+                        String.valueOf(userId),
                         String.valueOf(userId)
                 ));
         if (!ResultUtils.isSuccess(result) || !Boolean.TRUE.equals(ResultUtils.getData(result))) {

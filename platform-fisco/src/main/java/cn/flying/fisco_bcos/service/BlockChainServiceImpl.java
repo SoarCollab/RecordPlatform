@@ -9,6 +9,8 @@ import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.request.CancelShareRequest;
 import cn.flying.platformapi.request.DeleteFilesRequest;
+import cn.flying.platformapi.request.GetShareInfoRequest;
+import cn.flying.platformapi.request.GetUserShareCodesRequest;
 import cn.flying.platformapi.request.ShareFilesRequest;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
@@ -292,6 +294,14 @@ public class BlockChainServiceImpl implements BlockChainService {
     public Result<Boolean> cancelShare(CancelShareRequest request) {
         requireTrustedRpcCaller();
         try {
+            if (!hasText(request != null ? request.shareCode() : null)
+                    || !hasText(request != null ? request.uploader() : null)
+                    || !hasText(request != null ? request.requester() : null)) {
+                return new Result<>(ResultEnum.PARAM_IS_INVALID, false);
+            }
+            if (!samePrincipal(request.uploader(), request.requester())) {
+                return new Result<>(ResultEnum.PERMISSION_UNAUTHORIZED, false);
+            }
             ChainReceipt receipt = chainAdapter.cancelShare(request.shareCode(), request.uploader());
 
             if (receipt.isSuccess()) {
@@ -311,10 +321,17 @@ public class BlockChainServiceImpl implements BlockChainService {
     @Override
     @Retry(name = "blockchain")
     @ApiDoc(value = "获取用户分享码列表")
-    public Result<List<String>> getUserShareCodes(String uploader) {
+    public Result<List<String>> getUserShareCodes(GetUserShareCodesRequest request) {
         requireTrustedRpcCaller();
         try {
-            List<String> shareCodes = chainAdapter.getUserShareCodes(uploader);
+            if (!hasText(request != null ? request.uploader() : null)
+                    || !hasText(request != null ? request.requester() : null)) {
+                return new Result<>(ResultEnum.PARAM_IS_INVALID, List.of());
+            }
+            if (!samePrincipal(request.uploader(), request.requester())) {
+                return new Result<>(ResultEnum.PERMISSION_UNAUTHORIZED, List.of());
+            }
+            List<String> shareCodes = chainAdapter.getUserShareCodes(request.uploader());
             return Result.success(shareCodes);
 
         } catch (Exception e) {
@@ -325,15 +342,22 @@ public class BlockChainServiceImpl implements BlockChainService {
     @Override
     @Retry(name = "blockchain")
     @ApiDoc(value = "获取分享详情")
-    public Result<SharingVO> getShareInfo(String shareCode) {
+    public Result<SharingVO> getShareInfo(GetShareInfoRequest request) {
         requireTrustedRpcCaller();
         try {
-            ChainShareInfo shareInfo = chainAdapter.getShareInfo(shareCode);
+            if (!hasText(request != null ? request.shareCode() : null)
+                    || !hasText(request != null ? request.requester() : null)) {
+                return new Result<>(ResultEnum.PARAM_IS_INVALID, null);
+            }
+            ChainShareInfo shareInfo = chainAdapter.getShareInfo(request.shareCode());
+            if (!samePrincipal(shareInfo.getUploader(), request.requester())) {
+                return new Result<>(ResultEnum.PERMISSION_UNAUTHORIZED, null);
+            }
 
             return Result.success(new SharingVO(
                     shareInfo.getUploader(),
                     shareInfo.getFileHashList(),
-                    shareCode,
+                    request.shareCode(),
                     null,
                     null,
                     shareInfo.getExpireTimestamp(),
@@ -343,6 +367,20 @@ public class BlockChainServiceImpl implements BlockChainService {
         } catch (Exception e) {
             return BlockChainExceptionHandler.handle(e, "getShareInfo", ResultEnum.BLOCKCHAIN_ERROR);
         }
+    }
+
+    /**
+     * 判断两个业务主体是否为同一个上传者。
+     */
+    private boolean samePrincipal(String uploader, String requester) {
+        return hasText(uploader) && uploader.equals(requester);
+    }
+
+    /**
+     * 判断文本参数是否有效。
+     */
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     /**

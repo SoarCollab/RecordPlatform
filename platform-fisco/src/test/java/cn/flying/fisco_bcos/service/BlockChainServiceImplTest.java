@@ -4,6 +4,7 @@ import cn.flying.fisco_bcos.adapter.BlockChainAdapter;
 import cn.flying.fisco_bcos.adapter.model.*;
 import cn.flying.fisco_bcos.monitor.FiscoMetrics;
 import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.request.*;
 import cn.flying.platformapi.response.*;
 import cn.flying.platformapi.security.BlockChainRpcAuth;
@@ -465,6 +466,7 @@ class BlockChainServiceImplTest {
         void cancelShare_shouldCancelSuccessfully() {
             CancelShareRequest request = new CancelShareRequest(
                     "SHARE_CODE_123",
+                    "user1",
                     "user1"
             );
 
@@ -486,6 +488,7 @@ class BlockChainServiceImplTest {
         void cancelShare_shouldHandleFailure() {
             CancelShareRequest request = new CancelShareRequest(
                     "INVALID_CODE",
+                    "user1",
                     "user1"
             );
 
@@ -511,6 +514,7 @@ class BlockChainServiceImplTest {
         void cancelShare_shouldHandleException() {
             CancelShareRequest request = new CancelShareRequest(
                     "ERR_CODE",
+                    "user1",
                     "user1"
             );
 
@@ -520,6 +524,24 @@ class BlockChainServiceImplTest {
             Result<Boolean> result = blockChainService.cancelShare(request);
 
             assertThat(result.getCode()).isNotEqualTo(200);
+        }
+
+        /**
+         * 取消分享时 requester 必须与 uploader 一致，避免内部 RPC 误用取消他人分享。
+         */
+        @Test
+        @DisplayName("Should reject cancel share when requester is not uploader")
+        void cancelShare_shouldRejectRequesterMismatch() {
+            CancelShareRequest request = new CancelShareRequest(
+                    "SHARE_CODE_123",
+                    "user1",
+                    "user2"
+            );
+
+            Result<Boolean> result = blockChainService.cancelShare(request);
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED.getCode());
+            verify(chainAdapter, never()).cancelShare(anyString(), anyString());
         }
     }
 
@@ -635,11 +657,26 @@ class BlockChainServiceImplTest {
             
             when(chainAdapter.getUserShareCodes(uploader)).thenReturn(shareCodes);
             
-            Result<List<String>> result = blockChainService.getUserShareCodes(uploader);
+            Result<List<String>> result = blockChainService.getUserShareCodes(
+                    new GetUserShareCodesRequest(uploader, uploader));
             
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData()).hasSize(3);
             assertThat(result.getData()).contains("CODE1", "CODE2");
+        }
+
+        /**
+         * 分享码列表只能由同一 uploader 查询。
+         */
+        @Test
+        @DisplayName("Should reject share code query when requester is not uploader")
+        void getUserShareCodes_shouldRejectRequesterMismatch() {
+            Result<List<String>> result = blockChainService.getUserShareCodes(
+                    new GetUserShareCodesRequest("user123", "user456"));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED.getCode());
+            assertThat(result.getData()).isEmpty();
+            verify(chainAdapter, never()).getUserShareCodes(anyString());
         }
 
         /**
@@ -652,7 +689,8 @@ class BlockChainServiceImplTest {
             when(chainAdapter.getUserShareCodes(anyString()))
                     .thenThrow(new RuntimeException("Share code query failed"));
 
-            Result<List<String>> result = blockChainService.getUserShareCodes("user123");
+            Result<List<String>> result = blockChainService.getUserShareCodes(
+                    new GetUserShareCodesRequest("user123", "user123"));
 
             assertThat(result.getCode()).isNotEqualTo(200);
         }
@@ -675,11 +713,33 @@ class BlockChainServiceImplTest {
             
             when(chainAdapter.getShareInfo(shareCode)).thenReturn(shareInfo);
             
-            Result<SharingVO> result = blockChainService.getShareInfo(shareCode);
+            Result<SharingVO> result = blockChainService.getShareInfo(
+                    new GetShareInfoRequest(shareCode, "user123"));
             
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData().shareCode()).isEqualTo(shareCode);
             assertThat(result.getData().isValid()).isTrue();
+        }
+
+        /**
+         * 分享详情查询必须验证 requester 与链上 uploader 一致。
+         */
+        @Test
+        @DisplayName("Should reject share info when requester is not uploader")
+        void getShareInfo_shouldRejectRequesterMismatch() {
+            String shareCode = "SHARE_CODE_123";
+            ChainShareInfo shareInfo = new ChainShareInfo();
+            shareInfo.setUploader("user123");
+            shareInfo.setFileHashList(List.of("hash1"));
+            shareInfo.setExpireTimestamp(System.currentTimeMillis() + 3600000);
+            shareInfo.setIsValid(true);
+            when(chainAdapter.getShareInfo(shareCode)).thenReturn(shareInfo);
+
+            Result<SharingVO> result = blockChainService.getShareInfo(
+                    new GetShareInfoRequest(shareCode, "user456"));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED.getCode());
+            assertThat(result.getData()).isNull();
         }
 
         /**
@@ -692,7 +752,8 @@ class BlockChainServiceImplTest {
             when(chainAdapter.getShareInfo(anyString()))
                     .thenThrow(new RuntimeException("Share info failed"));
 
-            Result<SharingVO> result = blockChainService.getShareInfo("INVALID");
+            Result<SharingVO> result = blockChainService.getShareInfo(
+                    new GetShareInfoRequest("INVALID", "user123"));
 
             assertThat(result.getCode()).isNotEqualTo(200);
         }

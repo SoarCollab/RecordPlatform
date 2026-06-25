@@ -28,9 +28,17 @@ class PlatformApiJacksonRecordTest {
         DeleteFilesRequest deleteFilesRequest2 = objectMapper.readValue(objectMapper.writeValueAsBytes(deleteFilesRequest), DeleteFilesRequest.class);
         assertThat(deleteFilesRequest2).isEqualTo(deleteFilesRequest);
 
-        CancelShareRequest cancelShareRequest = new CancelShareRequest("SC123", "u1");
+        CancelShareRequest cancelShareRequest = new CancelShareRequest("SC123", "u1", "u1");
         CancelShareRequest cancelShareRequest2 = objectMapper.readValue(objectMapper.writeValueAsBytes(cancelShareRequest), CancelShareRequest.class);
         assertThat(cancelShareRequest2).isEqualTo(cancelShareRequest);
+
+        GetUserShareCodesRequest shareCodesRequest = new GetUserShareCodesRequest("u1", "u1");
+        GetUserShareCodesRequest shareCodesRequest2 = objectMapper.readValue(objectMapper.writeValueAsBytes(shareCodesRequest), GetUserShareCodesRequest.class);
+        assertThat(shareCodesRequest2).isEqualTo(shareCodesRequest);
+
+        GetShareInfoRequest shareInfoRequest = new GetShareInfoRequest("SC123", "u1");
+        GetShareInfoRequest shareInfoRequest2 = objectMapper.readValue(objectMapper.writeValueAsBytes(shareInfoRequest), GetShareInfoRequest.class);
+        assertThat(shareInfoRequest2).isEqualTo(shareInfoRequest);
     }
 
     @Test

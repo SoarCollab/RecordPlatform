@@ -3,6 +3,8 @@ package cn.flying.platformapi.external;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.request.CancelShareRequest;
 import cn.flying.platformapi.request.DeleteFilesRequest;
+import cn.flying.platformapi.request.GetShareInfoRequest;
+import cn.flying.platformapi.request.GetUserShareCodesRequest;
 import cn.flying.platformapi.request.ShareFilesRequest;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
@@ -79,18 +81,18 @@ public interface BlockChainService {
     /**
      * 获取用户的所有分享码列表
      *
-     * @param uploader 上传者标识
+     * @param request 分享码查询请求
      * @return 分享码列表
      */
-    Result<List<String>> getUserShareCodes(String uploader);
+    Result<List<String>> getUserShareCodes(GetUserShareCodesRequest request);
 
     /**
      * 获取分享详情（不校验有效性，包含已取消的分享）
      *
-     * @param shareCode 分享码
+     * @param request 分享详情查询请求
      * @return 分享详情
      */
-    Result<SharingVO> getShareInfo(String shareCode);
+    Result<SharingVO> getShareInfo(GetShareInfoRequest request);
 
     /**
      * 获取当前区块链状态
