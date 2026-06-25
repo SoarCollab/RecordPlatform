@@ -453,6 +453,25 @@ class FileUploadServiceTest {
             assertTrue(result);
             verify(redisStateManager).removeSession(CLIENT_ID, SUID);
         }
+
+        /**
+         * 验证取消上传前必须校验会话所有者，避免仅凭 clientId 清理他人会话。
+         */
+        @Test
+        @DisplayName("should reject cancel for unauthorized user")
+        void shouldRejectCancelForUnauthorizedUser() {
+            FileUploadState state = FileUploadStateTestBuilder.anUploadState();
+            ReflectionTestUtils.setField(state, "clientId", CLIENT_ID);
+            ReflectionTestUtils.setField(state, "userId", 999L);
+
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+
+            GeneralException ex = assertThrows(GeneralException.class, () ->
+                    fileUploadService.cancelUpload(USER_ID, CLIENT_ID));
+
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, ex.getResultEnum());
+            verify(redisStateManager, never()).removeSession(anyString(), anyString());
+        }
     }
 
     @Nested
@@ -506,6 +525,27 @@ class FileUploadServiceTest {
             verify(quotaService).checkUploadQuota(77L, USER_ID, 1024L);
             verify(fileService, never()).prepareStoreFile(anyLong(), any(), anyString(), anyLong());
             verify(quotaLock).unlock();
+        }
+
+        /**
+         * 验证完成上传前必须校验会话所有者，避免非所有者推进存证和配额流程。
+         */
+        @Test
+        @DisplayName("should reject complete for unauthorized user")
+        void shouldRejectCompleteForUnauthorizedUser() {
+            FileUploadState state = FileUploadStateTestBuilder.aCompletedUploadState();
+            ReflectionTestUtils.setField(state, "clientId", CLIENT_ID);
+            ReflectionTestUtils.setField(state, "userId", 999L);
+
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+
+            GeneralException ex = assertThrows(GeneralException.class, () ->
+                    fileUploadService.completeUpload(USER_ID, CLIENT_ID));
+
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, ex.getResultEnum());
+            verify(redisStateManager, never()).updateLastActivityTime(CLIENT_ID);
+            verify(fileService, never()).prepareStoreFile(anyLong(), any(), anyString(), anyLong());
+            verifyNoInteractions(redissonClient);
         }
 
         /**

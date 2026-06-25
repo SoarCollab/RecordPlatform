@@ -685,6 +685,11 @@ public class FileUploadServiceImpl implements FileUploadService {
     public boolean cancelUpload(Long userId, String clientId) {
         String SUID = UidEncoder.encodeUid(String.valueOf(userId));
         log.info("收到取消上传请求: 客户端ID={}", clientId);
+        FileUploadState state = redisStateManager.getState(clientId);
+        if (state == null) {
+            return cleanupUploadSessionInternal(SUID, clientId);
+        }
+        validateUploadOwnership(userId, state, clientId);
         return cleanupUploadSessionInternal(SUID, clientId); // 内部方法处理查找和清理
     }
 
@@ -704,6 +709,7 @@ public class FileUploadServiceImpl implements FileUploadService {
         if (state == null) {
             throw new GeneralException(ResultEnum.UPLOAD_SESSION_NOT_FOUND);
         }
+        validateUploadOwnership(userId, state, clientId);
 
         log.info("处理完成上传请求: 客户端ID={}, 文件名={}", clientId, state.getFileName());
         redisStateManager.updateLastActivityTime(clientId);

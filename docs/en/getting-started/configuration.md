@@ -21,8 +21,8 @@ vim .env
 |----------|----------|-------------|---------|
 | **Nacos** | `NACOS_HOST` | Nacos server | localhost |
 | | `NACOS_PORT` | Nacos port | 8848 |
-| | `NACOS_USERNAME` | Nacos username | nacos |
-| | `NACOS_PASSWORD` | Nacos password | nacos |
+| | `NACOS_USERNAME` | Nacos username | required, no default |
+| | `NACOS_PASSWORD` | Nacos password | required, no default |
 | **Profile** | `SPRING_PROFILES_ACTIVE` | Spring profile | local |
 
 ### Security Configuration
@@ -30,6 +30,7 @@ vim .env
 | Variable | Description | Requirement |
 |----------|-------------|-------------|
 | `JWT_KEY` | JWT signing key + ID encryption derivation | Min 32 characters, high entropy |
+| `PUBLIC_REGISTRATION_TENANT_ID` | Server-side tenant for public registration | Set explicitly; request headers do not choose registration tenant |
 | `RECORD_PLATFORM_UID_SALT` | Salt for UID obfuscation | Recommended 8–16 random chars |
 | `RECORD_PLATFORM_CLIENT_KEY` | Client key for UID obfuscation | Recommended 16–32 random chars |
 
@@ -95,8 +96,8 @@ Fault domain configuration is managed through Nacos and supports runtime refresh
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `KNIFE4J_USERNAME` | Knife4j/Swagger UI username | admin |
-| `KNIFE4J_PASSWORD` | Knife4j/Swagger UI password | 123456 (if not set) |
+| `KNIFE4J_USERNAME` | Knife4j/Swagger UI username | required, no default |
+| `KNIFE4J_PASSWORD` | Knife4j/Swagger UI password | required, no default |
 
 ### APM Configuration (Optional)
 

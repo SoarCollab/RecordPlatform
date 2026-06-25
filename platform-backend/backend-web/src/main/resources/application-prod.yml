@@ -64,7 +64,8 @@ dubbo:
     name: RecordPlatform_Main
     logger: slf4j
     qos-port: ${QOS_BACKEND_PORT:22330}
-    check-serializable: false
+    check-serializable: true
+    serialize-check-status: STRICT
     protocol: tri
   protocol: # Dubbo 协议配置
     name: tri # 使用 Triple 协议

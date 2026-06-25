@@ -54,6 +54,8 @@ spring:
   web:
     verify:
       mail-limit: 60
+    registration:
+      tenant-id: ${PUBLIC_REGISTRATION_TENANT_ID:0}
     flow:
       period: 3
       limit: 50
@@ -91,8 +93,8 @@ knife4j:
   production: false
   basic:
     enable: true
-    username: ${KNIFE4J_USERNAME:admin}
-    password: ${KNIFE4J_PASSWORD:123456}
+    username: ${KNIFE4J_USERNAME}
+    password: ${KNIFE4J_PASSWORD}
   setting:
     language: zh_cn
     enable-group: true

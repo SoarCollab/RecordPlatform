@@ -21,8 +21,8 @@ vim .env
 |------|------|------|--------|
 | **Nacos** | `NACOS_HOST` | Nacos 服务器 | localhost |
 | | `NACOS_PORT` | Nacos 端口 | 8848 |
-| | `NACOS_USERNAME` | Nacos 用户名 | nacos |
-| | `NACOS_PASSWORD` | Nacos 密码 | nacos |
+| | `NACOS_USERNAME` | Nacos 用户名 | 必填，无默认值 |
+| | `NACOS_PASSWORD` | Nacos 密码 | 必填，无默认值 |
 | **Profile** | `SPRING_PROFILES_ACTIVE` | Spring Profile | local |
 
 ### 安全配置
@@ -30,6 +30,7 @@ vim .env
 | 变量 | 说明 | 要求 |
 |------|------|------|
 | `JWT_KEY` | JWT 签名密钥 + ID 加密派生 | 至少 32 字符，高熵值 |
+| `PUBLIC_REGISTRATION_TENANT_ID` | 公开注册使用的服务端租户 | 显式配置；请求头不决定注册租户 |
 | `RECORD_PLATFORM_UID_SALT` | UID 混淆用盐值 | 建议 8–16 字符随机字符串 |
 | `RECORD_PLATFORM_CLIENT_KEY` | UID 混淆用客户端密钥 | 建议 16–32 字符随机字符串 |
 
@@ -95,8 +96,8 @@ S3 兼容存储通过 Nacos 配置。基本环境变量：
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `KNIFE4J_USERNAME` | Knife4j/Swagger UI 用户名 | admin |
-| `KNIFE4J_PASSWORD` | Knife4j/Swagger UI 密码 | 123456（未设置时） |
+| `KNIFE4J_USERNAME` | Knife4j/Swagger UI 用户名 | 必填，无默认值 |
+| `KNIFE4J_PASSWORD` | Knife4j/Swagger UI 密码 | 必填，无默认值 |
 
 ### APM 配置（可选）
 

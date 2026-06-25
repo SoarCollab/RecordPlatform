@@ -70,8 +70,8 @@ dubbo:
     qos-port: ${QOS_FISCO_PORT:22331} # 使用 23333 端口
     qos-enable: on # 启用 QoS 功能
     qos-accept-foreign-ip: false # 只允许本机访问
-    check-serializable: false
-    serialize-check-status: DISABLE
+    check-serializable: true
+    serialize-check-status: STRICT
   provider:
     timeout: 60000 # 全局提供者超时设置为 60000ms (60秒)
   protocol:
@@ -80,7 +80,7 @@ dubbo:
     host: ${DUBBO_HOST:192.168.5.100}
   registry:
     register-mode: instance
-    address: nacos://${NACOS_HOST:localhost}:${NACOS_PORT:8848}?username=${NACOS_USERNAME:}&password=${NACOS_PASSWORD:}
+    address: nacos://${NACOS_HOST:localhost}:${NACOS_PORT:8848}?username=${NACOS_USERNAME}&password=${NACOS_PASSWORD}
 
 logging:
   level:

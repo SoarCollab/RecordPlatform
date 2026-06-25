@@ -56,6 +56,15 @@ spring:
       key: ci-integration-jwt-key-32chars-xK9mN2pL5qR8vW3y
       expire: 1
 
+  web:
+    registration:
+      tenant-id: 1
+
+knife4j:
+  basic:
+    username: test
+    password: test
+
 # Disable Dubbo registry for tests (mock external services)
 dubbo:
   registry:

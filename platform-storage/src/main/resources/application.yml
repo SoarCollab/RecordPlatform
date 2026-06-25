@@ -18,8 +18,8 @@ dubbo:
     qos-port: ${QOS_STORAGE_PORT:22332}
     qos-enable: true # 启用 QoS 功能
     qos-accept-foreign-ip: false # 只允许本机访问
-    check-serializable: false # 关闭序列化检查
-    serialize-check-status: DISABLE
+    check-serializable: true # 启用 Dubbo 序列化检查
+    serialize-check-status: STRICT
   protocol:
     name: tri # 使用 Triple 协议
     port: ${DUBBO_STORAGE_PORT:8092}
@@ -27,7 +27,7 @@ dubbo:
     payload: 104857600 # 将最大载荷大小设置为 100MB (100 * 1024 * 1024 bytes)
   registry:
     register-mode: instance
-    address: nacos://${NACOS_HOST:localhost}:${NACOS_PORT:8848}?username=${NACOS_USERNAME:}&password=${NACOS_PASSWORD:}
+    address: nacos://${NACOS_HOST:localhost}:${NACOS_PORT:8848}?username=${NACOS_USERNAME}&password=${NACOS_PASSWORD}
 
 # Storage 配置
 storage:

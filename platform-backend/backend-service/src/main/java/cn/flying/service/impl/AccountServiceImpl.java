@@ -1,6 +1,7 @@
 package cn.flying.service.impl;
 
 import cn.flying.common.constant.UserRole;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.FlowUtils;
 import cn.flying.common.util.IdUtils;
@@ -42,6 +43,9 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
     //验证邮件发送冷却时间限制，秒为单位
     @Value("${spring.web.verify.mail-limit}")
     int VERIFY_LIMIT;
+
+    @Value("${spring.web.registration.tenant-id:0}")
+    Long registrationTenantId;
 
     private final AmqpTemplate rabbitTemplate;
     private final StringRedisTemplate stringRedisTemplate;
@@ -98,6 +102,18 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
      * @return 操作结果，null表示正常，否则为错误原因
      */
     public String registerEmailAccount(EmailRegisterVO info){
+        Long tenantId = resolveRegistrationTenantId();
+        return TenantContext.callWithTenant(tenantId, () -> registerEmailAccountInTenant(info, tenantId));
+    }
+
+    /**
+     * 在服务端配置的公开注册租户内完成账号注册，避免信任未认证请求携带的租户头。
+     *
+     * @param info 注册基本信息
+     * @param tenantId 服务端配置的公开注册租户ID
+     * @return 操作结果，null表示正常，否则为错误原因
+     */
+    private String registerEmailAccountInTenant(EmailRegisterVO info, Long tenantId) {
         String email = info.getEmail();
         String code = this.getEmailVerifyCode(email);
         if(code == null) return "请先获取验证码";
@@ -108,12 +124,25 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
         String password = passwordEncoder.encode(info.getPassword());
         Account account = new Account(IdUtils.nextUserId(), info.getUsername(),
                 password, email, UserRole.ROLE_DEFAULT.getRole(), null, info.getNickname());
+        account.setTenantId(tenantId);
         if(!this.save(account)) {
             return "内部错误，注册失败";
         } else {
             this.deleteEmailVerifyCode(email);
             return null;
         }
+    }
+
+    /**
+     * 解析公开注册租户配置，缺失或非法时快速失败，避免账号落入调用方伪造的租户上下文。
+     *
+     * @return 公开注册租户ID
+     */
+    private Long resolveRegistrationTenantId() {
+        if (registrationTenantId == null || registrationTenantId < 0) {
+            throw new IllegalStateException("spring.web.registration.tenant-id must be configured to a non-negative tenant ID");
+        }
+        return registrationTenantId;
     }
 
     /**
