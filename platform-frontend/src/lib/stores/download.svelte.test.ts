@@ -372,10 +372,7 @@ describe("download store", () => {
         fileSize: 200,
         contentType: "application/octet-stream",
         totalChunks: 2,
-        initialKey: "k",
         source: { type: "owned" },
-        presignedUrls: ["u1", "u2"],
-        urlsFetchedAt: Date.now(),
         createdAt: Date.now(),
       },
     ]);
@@ -389,6 +386,8 @@ describe("download store", () => {
     expect(download.tasks).toHaveLength(1);
     expect(download.tasks[0].status).toBe("paused");
     expect(download.tasks[0].downloadedChunks).toBe(1);
+    expect(download.tasks[0].presignedUrls).toEqual([]);
+    expect(download.tasks[0].initialKey).toBeNull();
   });
 
   it("setConcurrency 应限制在 [1,10] 区间", async () => {
@@ -725,10 +724,7 @@ it("restoreTasks 在 totalChunks=0 时进度应回退为 0", async () => {
       fileSize: 0,
       contentType: "application/octet-stream",
       totalChunks: 0,
-      initialKey: null,
       source: { type: "owned" },
-      presignedUrls: [],
-      urlsFetchedAt: null,
       createdAt: Date.now(),
     },
   ]);

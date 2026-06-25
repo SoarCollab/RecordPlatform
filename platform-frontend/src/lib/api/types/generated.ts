@@ -7415,7 +7415,6 @@ export interface operations {
     connect: {
         parameters: {
             query: {
-                connectionId?: string;
                 token: string;
             };
             header?: never;

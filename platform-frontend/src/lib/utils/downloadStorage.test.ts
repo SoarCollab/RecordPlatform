@@ -30,13 +30,7 @@ describe("downloadStorage", () => {
       fileSize: 1024,
       contentType: "text/plain",
       totalChunks: 2,
-      initialKey: null,
       source: { type: "owned" as const },
-      presignedUrls: [
-        "https://example.com/chunk1",
-        "https://example.com/chunk2",
-      ],
-      urlsFetchedAt: Date.now(),
       createdAt: Date.now(),
       ...overrides,
     };
@@ -91,6 +85,26 @@ describe("downloadStorage", () => {
         const retrieved = await getTask("task-overwrite");
 
         expect(retrieved?.fileName).toBe("updated.txt");
+      });
+
+      it("should strip download secrets before persisting task metadata", async () => {
+        const taskWithSecrets = {
+          ...createTestTask("task-secret-strip"),
+          initialKey: "secret-key",
+          presignedUrls: ["https://example.com/private"],
+          urlsFetchedAt: Date.now(),
+        } as PersistedDownloadTask & {
+          initialKey: string;
+          presignedUrls: string[];
+          urlsFetchedAt: number;
+        };
+
+        await saveTask(taskWithSecrets);
+        const retrieved = await getTask("task-secret-strip");
+
+        expect(retrieved).not.toHaveProperty("initialKey");
+        expect(retrieved).not.toHaveProperty("presignedUrls");
+        expect(retrieved).not.toHaveProperty("urlsFetchedAt");
       });
     });
 
@@ -275,7 +289,6 @@ describe("downloadStorage", () => {
       expect(task.contentType).toBeDefined();
       expect(task.totalChunks).toBeDefined();
       expect(task.source).toBeDefined();
-      expect(task.presignedUrls).toBeDefined();
       expect(task.createdAt).toBeDefined();
     });
   });

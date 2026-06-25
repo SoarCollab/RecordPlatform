@@ -86,7 +86,6 @@ describe("sse endpoints", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const eventSource = await createSSEConnection({
-      connectionId: "conn-1",
       onOpen,
       onMessage,
       onError,
@@ -97,7 +96,7 @@ describe("sse endpoints", () => {
     const es = getLatestEventSource();
     expect(es.url).toContain("/sse/connect?");
     expect(es.url).toContain("token=short-token");
-    expect(es.url).toContain("connectionId=conn-1");
+    expect(es.url).not.toContain("connectionId=");
 
     es.emitOpen();
     expect(onOpen).toHaveBeenCalledTimes(1);

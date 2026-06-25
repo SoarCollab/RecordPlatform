@@ -87,6 +87,7 @@ class ShareRestControllerTest {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("X-Forwarded-For", "1.1.1.1, 2.2.2.2");
         request.addHeader("User-Agent", "JUnit");
+        request.setRemoteAddr("10.0.0.10");
 
         Result<String> createResult = controller.createShare(userId, createVO);
         Result<String> updateResult = controller.updateShare(userId, shareCode, updateVO);
@@ -107,7 +108,7 @@ class ShareRestControllerTest {
         assertEquals(fileHash, publicDecryptResult.getData().fileHash());
 
         verify(fileService).updateShare(eq(userId), any(UpdateShareVO.class));
-        verify(shareAuditService).logShareView(eq(shareCode), eq(userId), eq("1.1.1.1"), eq("JUnit"));
-        verify(shareAuditService).logShareDownload(eq(shareCode), eq(userId), eq(fileHash), eq(null), eq("1.1.1.1"));
+        verify(shareAuditService).logShareView(eq(shareCode), eq(userId), eq("10.0.0.10"), eq("JUnit"));
+        verify(shareAuditService).logShareDownload(eq(shareCode), eq(userId), eq(fileHash), eq(null), eq("10.0.0.10"));
     }
 }

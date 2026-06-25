@@ -411,10 +411,7 @@ async function executeDownload(task: DownloadTask): Promise<void> {
         fileSize,
         contentType,
         totalChunks,
-        initialKey,
         source: task.source,
-        presignedUrls: urls,
-        urlsFetchedAt: Date.now(),
         createdAt: task.createdAt,
       };
       await saveTask(persistedTask);
@@ -1132,14 +1129,14 @@ async function restoreTasks(): Promise<void> {
           pt.totalChunks > 0
             ? Math.round((chunks.size / pt.totalChunks) * 100)
             : 0,
-        presignedUrls: pt.presignedUrls,
-        urlsFetchedAt: pt.urlsFetchedAt,
+        presignedUrls: [],
+        urlsFetchedAt: null,
         chunks: Array.from({ length: pt.totalChunks }, (_, i) => ({
           index: i,
           status: chunks.has(i) ? ("completed" as const) : ("pending" as const),
           retryCount: 0,
         })),
-        initialKey: pt.initialKey,
+        initialKey: null,
         source: pt.source,
         createdAt: pt.createdAt,
         startedAt: null,

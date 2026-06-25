@@ -14,10 +14,7 @@ export interface PersistedDownloadTask {
   fileSize: number;
   contentType: string;
   totalChunks: number;
-  initialKey: string | null;
   source: DownloadSource;
-  presignedUrls: string[];
-  urlsFetchedAt: number | null;
   createdAt: number;
 }
 
@@ -36,14 +33,56 @@ export interface PersistedChunk {
 // ===== Constants =====
 
 const DB_NAME = "rp_downloads";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const TASKS_STORE = "tasks";
 const CHUNKS_STORE = "chunks";
 const EXPIRY_DAYS = 7; // Auto-cleanup after 7 days
 
+type StoredDownloadTask = PersistedDownloadTask & {
+  initialKey?: unknown;
+  presignedUrls?: unknown;
+  urlsFetchedAt?: unknown;
+};
+
 // ===== Database Management =====
 
 let dbPromise: Promise<IDBDatabase> | null = null;
+
+/**
+ * Remove sensitive download authorization fields before task metadata is persisted or returned.
+ */
+function sanitizeTaskForPersistence(
+  task: StoredDownloadTask,
+): PersistedDownloadTask {
+  const {
+    initialKey: _initialKey,
+    presignedUrls: _presignedUrls,
+    urlsFetchedAt: _urlsFetchedAt,
+    ...safeTask
+  } = task;
+  return safeTask;
+}
+
+/**
+ * Strip sensitive fields from legacy task records during IndexedDB upgrades.
+ */
+function sanitizeExistingTaskRecords(taskStore: IDBObjectStore): void {
+  const request = taskStore.openCursor();
+  request.onsuccess = (event) => {
+    const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+    if (!cursor) return;
+
+    const task = cursor.value as StoredDownloadTask;
+    if (
+      "initialKey" in task ||
+      "presignedUrls" in task ||
+      "urlsFetchedAt" in task
+    ) {
+      cursor.update(sanitizeTaskForPersistence(task));
+    }
+    cursor.continue();
+  };
+}
 
 /**
  * Initialize and open IndexedDB connection
@@ -71,12 +110,20 @@ function openDB(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
+      const tx = (event.target as IDBOpenDBRequest).transaction;
+      let taskStore: IDBObjectStore | null;
 
       // Tasks store
       if (!db.objectStoreNames.contains(TASKS_STORE)) {
-        const taskStore = db.createObjectStore(TASKS_STORE, { keyPath: "id" });
+        taskStore = db.createObjectStore(TASKS_STORE, { keyPath: "id" });
         taskStore.createIndex("fileHash", "fileHash", { unique: false });
         taskStore.createIndex("createdAt", "createdAt", { unique: false });
+      } else {
+        taskStore = tx?.objectStore(TASKS_STORE) ?? null;
+      }
+
+      if (taskStore && event.oldVersion < 2) {
+        sanitizeExistingTaskRecords(taskStore);
       }
 
       // Chunks store with composite key
@@ -98,14 +145,14 @@ function openDB(): Promise<IDBDatabase> {
 // ===== Task Operations =====
 
 /**
- * Save download task metadata
+ * Save non-sensitive download task metadata.
  */
 export async function saveTask(task: PersistedDownloadTask): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(TASKS_STORE, "readwrite");
     const store = tx.objectStore(TASKS_STORE);
-    const request = store.put(task);
+    const request = store.put(sanitizeTaskForPersistence(task));
 
     request.onsuccess = () => resolve();
     request.onerror = () =>
@@ -125,7 +172,12 @@ export async function getTask(
     const store = tx.objectStore(TASKS_STORE);
     const request = store.get(taskId);
 
-    request.onsuccess = () => resolve(request.result || null);
+    request.onsuccess = () =>
+      resolve(
+        request.result
+          ? sanitizeTaskForPersistence(request.result as StoredDownloadTask)
+          : null,
+      );
     request.onerror = () =>
       reject(new Error(`Failed to get task: ${request.error?.message}`));
   });
@@ -141,7 +193,12 @@ export async function getPendingTasks(): Promise<PersistedDownloadTask[]> {
     const store = tx.objectStore(TASKS_STORE);
     const request = store.getAll();
 
-    request.onsuccess = () => resolve(request.result || []);
+    request.onsuccess = () =>
+      resolve(
+        (request.result as StoredDownloadTask[] | undefined)?.map(
+          sanitizeTaskForPersistence,
+        ) || [],
+      );
     request.onerror = () =>
       reject(
         new Error(`Failed to get pending tasks: ${request.error?.message}`),

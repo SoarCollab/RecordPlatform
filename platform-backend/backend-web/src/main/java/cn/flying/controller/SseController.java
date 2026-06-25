@@ -34,14 +34,12 @@ public class SseController {
     /**
      * 建立 SSE 连接（使用短期令牌）
      * 该端点使用一次性短期令牌进行认证，不使用常规 JWT
-     * 支持同一用户多个连接（多设备/多标签页），通过 connectionId 区分
+     * 支持同一用户多个连接（多设备/多标签页），连接 ID 由服务端生成
      */
     @OperationLog(module = "实时推送", operationType = "新增", description = "建立SSE连接")
     @GetMapping(value = "/connect", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(summary = "建立SSE连接", description = "使用短期SSE令牌建立长连接，接收实时消息推送。支持多设备/多标签页连接。")
-    public ResponseEntity<SseEmitter> connect(
-            @RequestParam("token") String sseToken,
-            @RequestParam(value = "connectionId", required = false) String connectionId) {
+    public ResponseEntity<SseEmitter> connect(@RequestParam("token") String sseToken) {
         // 验证并消费 SSE 短期令牌
         String[] userInfo = jwtUtils.validateAndConsumeSseToken(sseToken);
         if (userInfo == null || userInfo.length < 2) {
@@ -60,10 +58,7 @@ public class SseController {
             return ResponseEntity.status(401).build();
         }
 
-        // 如果未提供 connectionId，则自动生成
-        if (connectionId == null || connectionId.isBlank()) {
-            connectionId = UUID.randomUUID().toString().replace("-", "");
-        }
+        String connectionId = UUID.randomUUID().toString().replace("-", "");
 
         log.info("SSE 连接请求: tenantId={}, userId={}, connectionId={}", tenantId, userId, connectionId);
         SseEmitter emitter = sseEmitterManager.createConnection(tenantId, userId, connectionId);

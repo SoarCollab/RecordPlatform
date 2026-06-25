@@ -22,7 +22,6 @@ export interface SSEMessage<T = unknown> {
 }
 
 export interface SSEConnectionOptions {
-  connectionId?: string;
   onMessage?: (event: SSEMessage) => void;
   onError?: (error: Event) => void;
   onOpen?: () => void;
@@ -56,11 +55,6 @@ export async function createSSEConnection(
       token: sseToken,
       "x-tenant-id": env.PUBLIC_TENANT_ID || "",
     });
-
-    // 如果提供了 connectionId，添加到参数中
-    if (options.connectionId) {
-      params.set("connectionId", options.connectionId);
-    }
 
     const apiBase = import.meta.env.DEV
       ? "/record-platform/api/v1"

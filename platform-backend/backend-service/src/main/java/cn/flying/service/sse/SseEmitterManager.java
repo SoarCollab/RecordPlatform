@@ -62,6 +62,11 @@ public class SseEmitterManager {
         List<SseEmitter> emittersToComplete = new ArrayList<>();
         uc.lock().lock();
         try {
+            SseEmitter replacedEmitter = uc.map().remove(connectionId);
+            if (replacedEmitter != null) {
+                emittersToComplete.add(replacedEmitter);
+            }
+
             // 限制每个用户的最大连接数，防止滥用
             while (uc.map().size() >= MAX_CONNECTIONS_PER_USER) {
                 SseEmitter oldEmitter = removeOldestConnectionLocked(tenantId, userId, uc.map());
@@ -85,18 +90,18 @@ public class SseEmitterManager {
 
         emitter.onCompletion(() -> {
             log.info("SSE 连接完成: tenantId={}, userId={}, connectionId={}", tenantId, userId, connectionId);
-            removeConnection(tenantId, userId, connectionId);
+            removeConnection(tenantId, userId, connectionId, emitter, false);
         });
 
         emitter.onTimeout(() -> {
             log.info("SSE 连接超时: tenantId={}, userId={}, connectionId={}", tenantId, userId, connectionId);
-            removeConnection(tenantId, userId, connectionId);
+            removeConnection(tenantId, userId, connectionId, emitter, false);
         });
 
         emitter.onError(e -> {
             log.warn("SSE 连接错误: tenantId={}, userId={}, connectionId={}, error={}",
                     tenantId, userId, connectionId, e.getMessage());
-            removeConnection(tenantId, userId, connectionId);
+            removeConnection(tenantId, userId, connectionId, emitter, false);
         });
 
         getTenantOnlineUsers(tenantId).add(userId);
@@ -151,6 +156,18 @@ public class SseEmitterManager {
      * 移除指定连接
      */
     public void removeConnection(Long tenantId, Long userId, String connectionId) {
+        removeConnection(tenantId, userId, connectionId, null, true);
+    }
+
+    /**
+     * 移除指定连接，可限制只移除指定 emitter，避免旧连接回调误删同 ID 新连接。
+     */
+    private void removeConnection(
+            Long tenantId,
+            Long userId,
+            String connectionId,
+            SseEmitter expectedEmitter,
+            boolean completeRemoved) {
         Map<Long, UserConnections> tenantEmitters = emittersByTenant.get(tenantId);
         if (tenantEmitters == null) return;
 
@@ -161,13 +178,17 @@ public class SseEmitterManager {
         boolean isEmpty;
         uc.lock().lock();
         try {
+            emitter = uc.map().get(connectionId);
+            if (expectedEmitter != null && emitter != expectedEmitter) {
+                return;
+            }
             emitter = uc.map().remove(connectionId);
             isEmpty = uc.map().isEmpty();
         } finally {
             uc.lock().unlock();
         }
 
-        if (emitter != null) {
+        if (completeRemoved && emitter != null) {
             try {
                 emitter.complete();
             } catch (Exception e) {

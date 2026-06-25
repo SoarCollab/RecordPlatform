@@ -198,22 +198,12 @@ public class ShareRestController {
     }
 
     /**
-     * 获取客户端 IP。
+     * 获取审计用客户端 IP。
      *
      * @param request 当前请求
-     * @return 客户端 IP
+     * @return servlet 容器确认的客户端 IP
      */
     private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("X-Real-IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getRemoteAddr();
-        }
-        if (ip != null && ip.contains(",")) {
-            ip = ip.split(",")[0].trim();
-        }
-        return ip;
+        return request.getRemoteAddr();
     }
 }
