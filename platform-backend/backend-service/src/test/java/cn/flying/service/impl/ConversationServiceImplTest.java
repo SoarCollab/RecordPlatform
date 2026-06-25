@@ -17,6 +17,7 @@ import cn.flying.service.MessageService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.apache.ibatis.annotations.Select;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.*;
@@ -83,6 +84,34 @@ class ConversationServiceImplTest {
     @Nested
     @DisplayName("getOrCreateConversation")
     class GetOrCreateConversation {
+
+        /**
+         * 验证自定义会话查询不会复用已逻辑删除的会话。
+         */
+        @Test
+        @DisplayName("mapper selectByParticipants should exclude soft-deleted rows")
+        void mapperSelectByParticipants_shouldExcludeSoftDeletedRows() throws NoSuchMethodException {
+            Select select = ConversationMapper.class
+                    .getMethod("selectByParticipants", Long.class, Long.class, Long.class)
+                    .getAnnotation(Select.class);
+
+            assertNotNull(select);
+            assertTrue(String.join(" ", select.value()).toLowerCase().contains("deleted = 0"));
+        }
+
+        /**
+         * 验证未读会话统计不会计入已逻辑删除的会话。
+         */
+        @Test
+        @DisplayName("mapper unread count should exclude soft-deleted conversations")
+        void mapperUnreadCount_shouldExcludeSoftDeletedConversations() throws NoSuchMethodException {
+            Select select = ConversationMapper.class
+                    .getMethod("countUnreadConversations", Long.class, Long.class)
+                    .getAnnotation(Select.class);
+
+            assertNotNull(select);
+            assertTrue(String.join(" ", select.value()).toLowerCase().contains("c.deleted = 0"));
+        }
 
         @Test
         @DisplayName("should return existing conversation")

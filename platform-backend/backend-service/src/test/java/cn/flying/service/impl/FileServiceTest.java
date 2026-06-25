@@ -18,6 +18,7 @@ import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.request.CancelShareRequest;
 import cn.flying.platformapi.response.FileDetailVO;
+import cn.flying.service.QuotaService;
 import cn.flying.service.ShareAuditService;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.service.saga.FileSagaOrchestrator;
@@ -33,10 +34,15 @@ import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.slf4j.MDC;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.Date;
 import java.util.List;
@@ -84,6 +90,18 @@ class FileServiceTest {
 
     @Mock
     private Cache cache;
+
+    @Mock
+    private RedissonClient redissonClient;
+
+    @Mock
+    private RLock versionLock;
+
+    @Mock
+    private TransactionTemplate transactionTemplate;
+
+    @Mock
+    private QuotaService quotaService;
 
     @InjectMocks
     private FileServiceImpl fileService;
@@ -711,6 +729,78 @@ class FileServiceTest {
                 MDC.clear();
                 TenantContext.clear();
             }
+        }
+    }
+
+    @Nested
+    @DisplayName("Create New Version Quota")
+    class CreateNewVersionQuota {
+
+        /**
+         * 验证创建新版本 PREPARE 记录前会执行用户/租户配额检查。
+         */
+        @Test
+        @DisplayName("should check quota before creating prepare version")
+        void shouldCheckQuotaBeforeCreatingPrepareVersion() throws Exception {
+            File parent = createLatestParentFile();
+            when(fileMapper.selectById(parent.getId())).thenReturn(parent, parent);
+            when(redissonClient.getLock("file:version:" + parent.getVersionGroupId())).thenReturn(versionLock);
+            when(versionLock.tryLock(5, 30, java.util.concurrent.TimeUnit.SECONDS)).thenReturn(true);
+            when(versionLock.isHeldByCurrentThread()).thenReturn(true);
+            when(transactionTemplate.execute(any())).thenAnswer(inv -> {
+                @SuppressWarnings("unchecked")
+                TransactionCallback<File> callback = inv.getArgument(0);
+                return callback.doInTransaction(mock(TransactionStatus.class));
+            });
+            when(fileMapper.insert(any(File.class))).thenReturn(1);
+
+            try (MockedStatic<IdUtils> idUtils = mockStatic(IdUtils.class)) {
+                idUtils.when(IdUtils::nextEntityId).thenReturn(9002L);
+
+                File result = fileService.createNewVersion(USER_ID, parent.getId(), "v2.txt", 4096L, "text/plain");
+
+                assertNotNull(result);
+                assertEquals(9002L, result.getId());
+                verify(quotaService).checkUploadQuota(parent.getTenantId(), USER_ID, 4096L);
+                verify(fileMapper).clearLatestInChain(parent.getVersionGroupId(), parent.getTenantId());
+                verify(fileMapper).insert(any(File.class));
+            }
+        }
+
+        /**
+         * 验证配额拒绝时不会写入新版本 PREPARE 记录。
+         */
+        @Test
+        @DisplayName("should not create prepare version when quota is exceeded")
+        void shouldNotCreatePrepareVersionWhenQuotaExceeded() throws Exception {
+            File parent = createLatestParentFile();
+            when(fileMapper.selectById(parent.getId())).thenReturn(parent, parent);
+            when(redissonClient.getLock("file:version:" + parent.getVersionGroupId())).thenReturn(versionLock);
+            when(versionLock.tryLock(5, 30, java.util.concurrent.TimeUnit.SECONDS)).thenReturn(true);
+            when(versionLock.isHeldByCurrentThread()).thenReturn(true);
+            doThrow(new GeneralException(ResultEnum.QUOTA_EXCEEDED))
+                    .when(quotaService).checkUploadQuota(parent.getTenantId(), USER_ID, 4096L);
+
+            GeneralException ex = assertThrows(GeneralException.class,
+                    () -> fileService.createNewVersion(USER_ID, parent.getId(), "v2.txt", 4096L, "text/plain"));
+
+            assertEquals(ResultEnum.QUOTA_EXCEEDED.getCode(), ex.getResultEnum().getCode());
+            verify(transactionTemplate, never()).execute(any());
+            verify(fileMapper, never()).insert(any(File.class));
+            verify(versionLock).unlock();
+        }
+
+        private File createLatestParentFile() {
+            return new File()
+                    .setId(9001L)
+                    .setTenantId(2L)
+                    .setUid(USER_ID)
+                    .setFileName("v1.txt")
+                    .setFileHash(FILE_HASH)
+                    .setStatus(cn.flying.common.constant.FileUploadStatus.SUCCESS.getCode())
+                    .setVersion(1)
+                    .setIsLatest(1)
+                    .setVersionGroupId(9001L);
         }
     }
 

@@ -273,6 +273,8 @@ management:
       probes:
         enabled: true
   health:
+    remote-rpc:
+      enabled: false
     livenessState:
       enabled: true
     readinessState:

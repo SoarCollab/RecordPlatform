@@ -18,11 +18,12 @@ public interface ConversationMapper extends BaseMapper<Conversation> {
      * 根据参与者查询会话（带租户隔离）
      */
     @Select("""
-        SELECT id, tenant_id, participant_a, participant_b, last_message_id, last_message_at, create_time, update_time
+        SELECT id, tenant_id, participant_a, participant_b, last_message_id, last_message_at, create_time, update_time, deleted
         FROM conversation
         WHERE participant_a = #{participantA}
           AND participant_b = #{participantB}
           AND tenant_id = #{tenantId}
+          AND deleted = 0
         """)
     Conversation selectByParticipants(
             @Param("participantA") Long participantA,
@@ -42,6 +43,7 @@ public interface ConversationMapper extends BaseMapper<Conversation> {
           AND m.receiver_id = #{userId}
           AND m.is_read = 0
           AND m.deleted = 0
+          AND c.deleted = 0
           AND c.tenant_id = #{tenantId}
           AND m.tenant_id = #{tenantId}
         """)

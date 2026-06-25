@@ -173,15 +173,8 @@ public class FileAdminServiceImpl implements FileAdminService {
             detail.setProvenanceChain(List.of());
         }
 
-        // 获取引用计数（跨租户查询）
-        Long refCount;
-        boolean originalIgnoreIsolation = TenantContext.isIgnoreIsolation();
-        try {
-            TenantContext.setIgnoreIsolation(true);
-            refCount = fileMapper.countActiveFilesByHash(file.getFileHash(), id);
-        } finally {
-            TenantContext.setIgnoreIsolation(originalIgnoreIsolation);
-        }
+        // 获取当前租户内引用计数，避免管理员详情成为跨租户文件存在性探针。
+        Long refCount = fileMapper.countActiveFilesByHashInTenant(file.getFileHash(), id, tenantId);
         detail.setRefCount(refCount != null ? refCount.intValue() : 0);
 
         // 获取相关分享列表

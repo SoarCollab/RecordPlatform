@@ -7,6 +7,7 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.math.BigInteger;
@@ -18,8 +19,16 @@ public class FiscoHealthIndicator implements HealthIndicator {
     @Resource
     private FileRemoteClient fileRemoteClient;
 
+    @Value("${management.health.remote-rpc.enabled:false}")
+    private boolean remoteRpcHealthEnabled;
+
     @Override
     public Health health() {
+        if (!remoteRpcHealthEnabled) {
+            return Health.up()
+                    .withDetail("remoteCheck", "disabled")
+                    .build();
+        }
         try {
             Result<BlockChainMessage> result = fileRemoteClient.getCurrentBlockChainMessage();
             if (result == null || result.getData() == null) {

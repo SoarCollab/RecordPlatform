@@ -31,6 +31,7 @@ import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.platformapi.response.SharingVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FileService;
+import cn.flying.service.QuotaService;
 import cn.flying.service.ShareAuditService;
 import cn.flying.service.saga.FileSagaOrchestrator;
 import cn.flying.service.saga.FileUploadCommand;
@@ -87,6 +88,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     private final CacheManager cacheManager;
     private final RedissonClient redissonClient;
     private final TransactionTemplate transactionTemplate;
+    private final QuotaService quotaService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -1441,6 +1443,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             try {
                 // 加锁后再次校验，防止并发下基于过期父版本创建新版本。
                 File latestParentFile = validateVersionSourceFile(userId, parentFileId);
+                quotaService.checkUploadQuota(latestParentFile.getTenantId(), userId, fileSize);
                 File createdVersion = transactionTemplate.execute(
                         status -> doCreateNewVersion(userId, latestParentFile, versionGroupId, fileName, fileSize, contentType)
                 );

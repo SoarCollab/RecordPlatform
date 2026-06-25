@@ -143,7 +143,7 @@ class FileAdminServiceImplTest {
 
             when(fileMapper.selectById(FILE_ID)).thenReturn(file);
             when(accountMapper.selectById(USER_ID)).thenReturn(createAccount());
-            when(fileMapper.countActiveFilesByHash(FILE_HASH, FILE_ID)).thenReturn(0L);
+            when(fileMapper.countActiveFilesByHashInTenant(FILE_HASH, FILE_ID, TENANT_ID)).thenReturn(0L);
             when(fileShareMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
 
             Page<ShareAccessLog> emptyLogPage = new Page<>(1, 10);
@@ -168,7 +168,7 @@ class FileAdminServiceImplTest {
 
             when(fileMapper.selectById(FILE_ID)).thenReturn(file);
             when(accountMapper.selectById(USER_ID)).thenReturn(createAccount());
-            when(fileMapper.countActiveFilesByHash(FILE_HASH, FILE_ID)).thenReturn(0L);
+            when(fileMapper.countActiveFilesByHashInTenant(FILE_HASH, FILE_ID, TENANT_ID)).thenReturn(0L);
             when(fileShareMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(share));
 
             Page<ShareAccessLog> emptyLogPage = new Page<>(1, 10);
@@ -193,7 +193,7 @@ class FileAdminServiceImplTest {
 
             when(fileMapper.selectById(FILE_ID)).thenReturn(file);
             when(accountMapper.selectById(USER_ID)).thenReturn(createAccount());
-            when(fileMapper.countActiveFilesByHash(FILE_HASH, FILE_ID)).thenReturn(0L);
+            when(fileMapper.countActiveFilesByHashInTenant(FILE_HASH, FILE_ID, TENANT_ID)).thenReturn(0L);
             when(fileShareMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
 
             Page<ShareAccessLog> logPage = new Page<>(1, 10);
@@ -215,7 +215,7 @@ class FileAdminServiceImplTest {
 
             when(fileMapper.selectById(FILE_ID)).thenReturn(file);
             when(accountMapper.selectById(USER_ID)).thenReturn(createAccount());
-            when(fileMapper.countActiveFilesByHash(FILE_HASH, FILE_ID)).thenReturn(5L);
+            when(fileMapper.countActiveFilesByHashInTenant(FILE_HASH, FILE_ID, TENANT_ID)).thenReturn(5L);
             when(fileShareMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
 
             Page<ShareAccessLog> emptyLogPage = new Page<>(1, 10);
@@ -226,6 +226,10 @@ class FileAdminServiceImplTest {
 
             assertNotNull(result);
             assertEquals(5, result.getRefCount());
+            verify(fileMapper).countActiveFilesByHashInTenant(FILE_HASH, FILE_ID, TENANT_ID);
+            verify(fileMapper, never()).countActiveFilesByHash(anyString(), anyLong());
+            tenantContextMock.verify(() -> TenantContext.setIgnoreIsolation(true), never());
+            tenantContextMock.verify(() -> TenantContext.setIgnoreIsolation(false), never());
         }
     }
 
@@ -258,7 +262,7 @@ class FileAdminServiceImplTest {
             when(accountMapper.selectById(USER_ID)).thenReturn(createAccount());
             when(fileSourceMapper.selectByFileId(FILE_ID, TENANT_ID)).thenReturn(source);
             when(fileSourceMapper.selectProvenanceChain(FILE_ID, TENANT_ID)).thenReturn(List.of());
-            when(fileMapper.countActiveFilesByHash(FILE_HASH, FILE_ID)).thenReturn(1L);
+            when(fileMapper.countActiveFilesByHashInTenant(FILE_HASH, FILE_ID, TENANT_ID)).thenReturn(1L);
             when(fileShareMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
 
             Page<ShareAccessLog> emptyLogPage = new Page<>(1, 10);
@@ -300,7 +304,7 @@ class FileAdminServiceImplTest {
             when(accountMapper.selectById(sharedFromUserId)).thenReturn(sharedFromAccount);
             when(fileSourceMapper.selectByFileId(FILE_ID, TENANT_ID)).thenReturn(source);
             when(fileSourceMapper.selectProvenanceChain(FILE_ID, TENANT_ID)).thenReturn(List.of());
-            when(fileMapper.countActiveFilesByHash(FILE_HASH, FILE_ID)).thenReturn(0L);
+            when(fileMapper.countActiveFilesByHashInTenant(FILE_HASH, FILE_ID, TENANT_ID)).thenReturn(0L);
             when(fileShareMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
 
             Page<ShareAccessLog> emptyLogPage = new Page<>(1, 10);

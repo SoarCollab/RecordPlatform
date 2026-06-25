@@ -78,9 +78,27 @@ load_env_file() {
                 value="${value%%[[:space:]]#*}"
                 value="${value%"${value##*[![:space:]]}"}"
             fi
-            export "${key}=${value}"
+            if is_contract_env_key_allowed "$key"; then
+                export "${key}=${value}"
+            fi
         fi
     done < "$env_file"
+}
+
+is_contract_env_key_allowed() {
+    case "$1" in
+        FISCO_*|BSN_*|BLOCKCHAIN_*|CONTRACT_*)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+run_console() {
+    local timeout_seconds="$1"
+    env -u BASH_ENV -u ENV -u SHELLOPTS -u CDPATH timeout "$timeout_seconds" ./console.sh
 }
 
 # TCP connectivity probe (bash /dev/tcp → nc fallback, same as env-check.sh)
@@ -233,7 +251,7 @@ if [ "$DRY_RUN" = true ]; then
     dry "mkdir -p $CONSOLE_CONTRACT_DIR"
     dry "cp $CONTRACT_SRC_DIR/Storage.sol $CONSOLE_CONTRACT_DIR/"
     dry "cp $CONTRACT_SRC_DIR/Sharing.sol  $CONSOLE_CONTRACT_DIR/"
-    dry "cd $CONSOLE_DIR && echo 'compileByContractLoader' | ./console.sh"
+    dry "cd $CONSOLE_DIR && echo 'compileByContractLoader' | env -u BASH_ENV -u ENV -u SHELLOPTS -u CDPATH timeout 60 ./console.sh"
     ok "Dry-run: compile step would copy contracts and invoke FISCO console"
 else
     # Copy .sol files into the console's expected location
@@ -245,7 +263,7 @@ else
     # FISCO BCOS console compiles .sol files automatically on deploy.
     # For explicit compilation (generates Java wrappers + ABI), run:
     COMPILE_OUTPUT=""
-    COMPILE_OUTPUT=$(cd "$CONSOLE_DIR" && printf 'compileByContractLoader org.fisco.bcos.sdk.v3.contract.loadcontract.ContractLoader\nexit\n' | timeout 60 ./console.sh 2>&1) || true
+    COMPILE_OUTPUT=$(cd "$CONSOLE_DIR" && printf 'compileByContractLoader org.fisco.bcos.sdk.v3.contract.loadcontract.ContractLoader\nexit\n' | run_console 60 2>&1) || true
 
     # Check that compilation produced ABI/BIN artefacts
     if [ -f "$CONSOLE_SDK_DIR/Storage.abi" ] && [ -f "$CONSOLE_SDK_DIR/Sharing.abi" ]; then
@@ -267,7 +285,7 @@ deploy_contract() {
     local result_var="$2" # name of the variable to set with the address
 
     if [ "$DRY_RUN" = true ]; then
-        dry "cd $CONSOLE_DIR && printf 'deploy $name\\nexit\\n' | timeout 120 ./console.sh"
+        dry "cd $CONSOLE_DIR && printf 'deploy $name\\nexit\\n' | env -u BASH_ENV -u ENV -u SHELLOPTS -u CDPATH timeout 120 ./console.sh"
         eval "$result_var=0xDRYRUN0000000000000000000000000000000001"
         ok "Dry-run: $name would be deployed"
         return
@@ -278,7 +296,7 @@ deploy_contract() {
     local output
     output=$(
         cd "$CONSOLE_DIR"
-        printf 'deploy %s\nexit\n' "$name" | timeout 120 ./console.sh 2>&1
+        printf 'deploy %s\nexit\n' "$name" | run_console 120 2>&1
     ) || true
 
     # Extract contract address from console output.
@@ -424,7 +442,7 @@ else
         local args="${4:-}"
 
         if [ "$DRY_RUN" = true ]; then
-            dry "cd $CONSOLE_DIR && printf 'call $name $addr $method $args\\nexit\\n' | timeout 30 ./console.sh"
+            dry "cd $CONSOLE_DIR && printf 'call $name $addr $method $args\\nexit\\n' | env -u BASH_ENV -u ENV -u SHELLOPTS -u CDPATH timeout 30 ./console.sh"
             ok "Dry-run: $name.$method() would be called for verification"
             return
         fi
@@ -441,7 +459,7 @@ else
         local output
         output=$(
             cd "$CONSOLE_DIR"
-            printf '%s\nexit\n' "$cmd_input" | timeout 30 ./console.sh 2>&1
+            printf '%s\nexit\n' "$cmd_input" | run_console 30 2>&1
         ) || true
 
         # A successful call returns "Return value" or "[]" (empty result)
