@@ -2,17 +2,25 @@ package cn.flying.service.impl;
 
 import cn.flying.common.util.CacheUtils;
 import cn.flying.common.util.Const;
+import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.TenantKeyUtils;
 import cn.flying.dao.entity.SysPermission;
+import cn.flying.dao.entity.SysRolePermission;
 import cn.flying.dao.mapper.SysPermissionMapper;
 import cn.flying.dao.mapper.SysRolePermissionMapper;
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.*;
@@ -44,6 +52,17 @@ class PermissionServiceImplTest {
     private static final String PERM_FILE_WRITE = "file:write";
     private static final String PERM_FILE_DELETE = "file:delete";
     private static final String PERM_ADMIN_ALL = "admin:all";
+
+    /**
+     * 初始化 MyBatis-Plus Lambda 缓存，支持纯 Mockito 单测构造 LambdaWrapper。
+     */
+    @org.junit.jupiter.api.BeforeAll
+    static void initTableInfo() {
+        MybatisConfiguration configuration = new MybatisConfiguration();
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(configuration, "");
+        TableInfoHelper.initTableInfo(assistant, SysPermission.class);
+        TableInfoHelper.initTableInfo(assistant, SysRolePermission.class);
+    }
 
     private String buildExpectedCacheKey(String role, Long tenantId) {
         return TenantKeyUtils.tenantKey(Const.PERMISSION_CACHE_PREFIX, tenantId) + role;
@@ -307,6 +326,102 @@ class PermissionServiceImplTest {
             permissionService.evictAllCache(TENANT_ID);
 
             verify(cacheUtils).deleteCachePattern(expectedPattern);
+        }
+    }
+
+    @Nested
+    @DisplayName("tenant-scoped permission CRUD")
+    class TenantScopedPermissionCrud {
+
+        /**
+         * 验证权限更新通过租户作用域 wrapper 执行，避免继承 CRUD 绕过租户隔离。
+         */
+        @Test
+        @DisplayName("should update permission through tenant-scoped wrappers")
+        void updatePermission_usesTenantScopedWrappers() {
+            SysPermission permission = createPermission(10L, PERM_FILE_READ, "file");
+            when(permissionMapper.selectOne(any())).thenReturn(permission);
+
+            SysPermission result;
+            try (MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                idUtilsMock.when(() -> IdUtils.fromExternalId("ext_10")).thenReturn(10L);
+                result = permissionService.updatePermission(
+                        "ext_10",
+                        "File Read",
+                        "Read files",
+                        1,
+                        TENANT_ID);
+            }
+
+            assertNotNull(result);
+            assertEquals("File Read", result.getName());
+            assertEquals("Read files", result.getDescription());
+            verify(permissionMapper).selectOne(any());
+            verify(permissionMapper, never()).selectById(anyLong());
+            verify(permissionMapper).update(isNull(), any());
+            verify(permissionMapper, never()).updateById(any(SysPermission.class));
+            verify(cacheUtils).deleteCachePattern(TenantKeyUtils.tenantKey(Const.PERMISSION_CACHE_PREFIX, TENANT_ID) + "*");
+        }
+
+        /**
+         * 验证权限删除先做租户作用域查询，并使用带租户条件的 delete wrapper。
+         */
+        @Test
+        @DisplayName("should delete permission through tenant-scoped wrappers")
+        void deletePermission_usesTenantScopedWrappers() {
+            SysPermission permission = createPermission(11L, PERM_FILE_DELETE, "file");
+            when(permissionMapper.selectOne(any())).thenReturn(permission);
+
+            try (MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                idUtilsMock.when(() -> IdUtils.fromExternalId("ext_11")).thenReturn(11L);
+                permissionService.deletePermission("ext_11", TENANT_ID);
+            }
+
+            verify(permissionMapper).selectOne(any());
+            verify(rolePermissionMapper).delete(any(Wrapper.class));
+            verify(permissionMapper).delete(any(Wrapper.class));
+            verify(permissionMapper, never()).deleteById(anyLong());
+            verify(cacheUtils).deleteCachePattern(TenantKeyUtils.tenantKey(Const.PERMISSION_CACHE_PREFIX, TENANT_ID) + "*");
+        }
+
+        /**
+         * 验证角色授权显式写入当前租户 ID。
+         */
+        @Test
+        @DisplayName("should assign permission mapping with current tenant")
+        void assignPermissionToRole_setsTenantId() {
+            SysPermission permission = createPermission(12L, PERM_FILE_WRITE, "file");
+            when(permissionMapper.selectByCode(PERM_FILE_WRITE, TENANT_ID)).thenReturn(permission);
+            when(rolePermissionMapper.countByRoleAndPermission(ROLE_USER, PERM_FILE_WRITE, TENANT_ID)).thenReturn(0);
+
+            permissionService.assignPermissionToRole(ROLE_USER, PERM_FILE_WRITE, TENANT_ID);
+
+            ArgumentCaptor<SysRolePermission> captor = ArgumentCaptor.forClass(SysRolePermission.class);
+            verify(rolePermissionMapper).insert(captor.capture());
+            SysRolePermission rolePermission = captor.getValue();
+            assertEquals(TENANT_ID, rolePermission.getTenantId());
+            assertEquals(ROLE_USER, rolePermission.getRole());
+            assertEquals(permission.getId(), rolePermission.getPermissionId());
+        }
+
+        /**
+         * 验证撤销角色权限时删除条件包含当前租户，避免误删其他租户映射。
+         */
+        @Test
+        @DisplayName("should revoke permission mapping through tenant-scoped wrapper")
+        void revokePermissionFromRole_usesTenantScopedWrapper() {
+            SysPermission permission = createPermission(13L, PERM_FILE_WRITE, "file");
+            when(permissionMapper.selectByCode(PERM_FILE_WRITE, TENANT_ID)).thenReturn(permission);
+
+            permissionService.revokePermissionFromRole(ROLE_USER, PERM_FILE_WRITE, TENANT_ID);
+
+            ArgumentCaptor<Wrapper<SysRolePermission>> captor = ArgumentCaptor.captor();
+            verify(rolePermissionMapper).delete(captor.capture());
+            String sqlSegment = captor.getValue().getSqlSegment();
+            assertTrue(sqlSegment.contains("role"));
+            assertTrue(sqlSegment.contains("permission_id"));
+            assertTrue(sqlSegment.contains("tenant_id"));
+            verify(cacheUtils).deleteCache(buildExpectedCacheKey(ROLE_USER, TENANT_ID));
         }
     }
 

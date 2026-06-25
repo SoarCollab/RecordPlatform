@@ -1,10 +1,10 @@
 package cn.flying.controller;
 
 import cn.flying.common.constant.Result;
-import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileSharingVO;
 import cn.flying.dao.vo.file.SaveSharingFile;
+import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
@@ -74,7 +74,9 @@ class ShareRestControllerTest {
         saveVO.setShareCode(shareCode);
 
         when(fileService.generateSharingCode(userId, createVO.getFileHash(), 60, 0)).thenReturn(shareCode);
-        when(fileQueryService.getShareFile(shareCode)).thenReturn(List.of(new File()));
+        when(fileQueryService.getShareFile(shareCode)).thenReturn(List.of(
+                new ShareFileVO("f-1", "n", "document", fileHash, 1L, "text/plain", null, null, null, null)
+        ));
         when(fileService.getSharedFileContent(userId, shareCode, fileHash)).thenReturn(List.of("abc".getBytes()));
         when(fileService.getSharedFileDecryptInfo(userId, shareCode, fileHash))
                 .thenReturn(new FileDecryptInfoVO("k1", "n", 1L, "text/plain", 1, fileHash));
@@ -88,7 +90,7 @@ class ShareRestControllerTest {
 
         Result<String> createResult = controller.createShare(userId, createVO);
         Result<String> updateResult = controller.updateShare(userId, shareCode, updateVO);
-        Result<List<File>> listResult = controller.getSharedFiles(shareCode, userId, request);
+        Result<List<ShareFileVO>> listResult = controller.getSharedFiles(shareCode, userId, request);
         Result<String> saveResult = controller.saveSharedFiles(shareCode, saveVO, request);
         Result<List<byte[]>> downloadResult = controller.downloadSharedFile(userId, shareCode, fileHash, request);
         Result<FileDecryptInfoVO> decryptResult = controller.getSharedDecryptInfo(userId, shareCode, fileHash);

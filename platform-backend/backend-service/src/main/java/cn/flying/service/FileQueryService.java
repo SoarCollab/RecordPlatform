@@ -2,6 +2,7 @@ package cn.flying.service;
 
 import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.dao.vo.file.FileVersionVO;
 import cn.flying.dao.vo.file.UserFileStatsVO;
 import cn.flying.platformapi.response.TransactionVO;
@@ -116,7 +117,7 @@ public interface FileQueryService {
      * @param sharingCode 分享码
      * @return 分享的文件列表
      */
-    List<File> getShareFile(String sharingCode);
+    List<ShareFileVO> getShareFile(String sharingCode);
 
     /**
      * 获取文件解密信息（客户端解密用）

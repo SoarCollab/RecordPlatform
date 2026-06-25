@@ -13,6 +13,7 @@ import cn.flying.dao.mapper.SysPermissionMapper;
 import cn.flying.dao.mapper.SysRolePermissionMapper;
 import cn.flying.service.PermissionService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
@@ -190,23 +191,38 @@ public class PermissionServiceImpl implements PermissionService {
     @Transactional
     public SysPermission updatePermission(String externalId, String name, String description, Integer status, Long tenantId) {
         Long permissionId = IdUtils.fromExternalId(externalId);
-        SysPermission permission = permissionMapper.selectById(permissionId);
+        LambdaQueryWrapper<SysPermission> queryWrapper = new LambdaQueryWrapper<SysPermission>()
+                .eq(SysPermission::getId, permissionId)
+                .eq(SysPermission::getTenantId, tenantId);
+        SysPermission permission = permissionMapper.selectOne(queryWrapper);
         if (permission == null) {
             return null;
         }
 
+        LambdaUpdateWrapper<SysPermission> updateWrapper = new LambdaUpdateWrapper<SysPermission>()
+                .eq(SysPermission::getId, permissionId)
+                .eq(SysPermission::getTenantId, tenantId);
+        boolean changed = false;
         if (name != null) {
             permission.setName(name);
+            updateWrapper.set(SysPermission::getName, name);
+            changed = true;
         }
         if (description != null) {
             permission.setDescription(description);
+            updateWrapper.set(SysPermission::getDescription, description);
+            changed = true;
         }
         if (status != null) {
             permission.setStatus(status);
+            updateWrapper.set(SysPermission::getStatus, status);
+            changed = true;
         }
 
-        permissionMapper.updateById(permission);
-        evictAllCache(tenantId);
+        if (changed) {
+            permissionMapper.update(null, updateWrapper);
+            evictAllCache(tenantId);
+        }
         return permission;
     }
 
@@ -214,12 +230,20 @@ public class PermissionServiceImpl implements PermissionService {
     @Transactional
     public void deletePermission(String externalId, Long tenantId) {
         Long permissionId = IdUtils.fromExternalId(externalId);
+        LambdaQueryWrapper<SysPermission> permissionScope = new LambdaQueryWrapper<SysPermission>()
+                .eq(SysPermission::getId, permissionId)
+                .eq(SysPermission::getTenantId, tenantId);
+        SysPermission permission = permissionMapper.selectOne(permissionScope);
+        if (permission == null) {
+            return;
+        }
 
         LambdaQueryWrapper<SysRolePermission> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(SysRolePermission::getPermissionId, permissionId);
+        wrapper.eq(SysRolePermission::getPermissionId, permissionId)
+                .eq(SysRolePermission::getTenantId, tenantId);
         rolePermissionMapper.delete(wrapper);
 
-        permissionMapper.deleteById(permissionId);
+        permissionMapper.delete(permissionScope);
         evictAllCache(tenantId);
     }
 
@@ -239,6 +263,7 @@ public class PermissionServiceImpl implements PermissionService {
         }
 
         SysRolePermission mapping = new SysRolePermission()
+                .setTenantId(tenantId)
                 .setRole(role)
                 .setPermissionId(permission.getId());
         rolePermissionMapper.insert(mapping);

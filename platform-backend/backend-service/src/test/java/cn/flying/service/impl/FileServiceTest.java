@@ -3,17 +3,21 @@ package cn.flying.service.impl;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.constant.ShareType;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.tenant.TenantContext;
+import cn.flying.common.util.Const;
+import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
+import cn.flying.dao.dto.FileSource;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.mapper.FileSourceMapper;
+import cn.flying.dao.vo.file.ShareInfoVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.request.CancelShareRequest;
 import cn.flying.platformapi.response.FileDetailVO;
-import cn.flying.platformapi.response.SharingVO;
 import cn.flying.service.ShareAuditService;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.service.saga.FileSagaOrchestrator;
@@ -29,6 +33,7 @@ import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.slf4j.MDC;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -115,6 +120,7 @@ class FileServiceTest {
     private FileShare aFileShare() {
         return new FileShare()
                 .setId(1L)
+                .setTenantId(1L)
                 .setUserId(USER_ID)
                 .setShareCode(SHARE_CODE)
                 .setShareType(ShareType.PUBLIC.getCode())
@@ -578,8 +584,8 @@ class FileServiceTest {
         @Test
         @DisplayName("should throw cancelled when expiration is negative")
         void shouldThrowCancelledWhenExpirationIsNegative() {
-            SharingVO sharingVO = new SharingVO("100", List.of(FILE_HASH), SHARE_CODE, null, null, -1L, true);
-            when(fileRemoteClient.getSharedFiles(SHARE_CODE)).thenReturn(Result.success(sharingVO));
+            when(fileShareMapper.selectByShareCode(SHARE_CODE))
+                    .thenReturn(aFileShare(s -> s.setStatus(FileShare.STATUS_CANCELLED)));
 
             GeneralException ex = assertThrows(GeneralException.class, () -> fileService.getShareFile(SHARE_CODE));
 
@@ -592,16 +598,8 @@ class FileServiceTest {
         @Test
         @DisplayName("should throw expired when share is timeout")
         void shouldThrowExpiredWhenShareIsTimeout() {
-            SharingVO sharingVO = new SharingVO(
-                    "100",
-                    List.of(FILE_HASH),
-                    SHARE_CODE,
-                    null,
-                    null,
-                    System.currentTimeMillis() - 1000,
-                    true
-            );
-            when(fileRemoteClient.getSharedFiles(SHARE_CODE)).thenReturn(Result.success(sharingVO));
+            when(fileShareMapper.selectByShareCode(SHARE_CODE))
+                    .thenReturn(aFileShare(s -> s.setExpireTime(new Date(System.currentTimeMillis() - 1000))));
 
             GeneralException ex = assertThrows(GeneralException.class, () -> fileService.getShareFile(SHARE_CODE));
 
@@ -614,12 +612,105 @@ class FileServiceTest {
         @Test
         @DisplayName("should throw cancelled when share is invalid")
         void shouldThrowCancelledWhenShareIsInvalid() {
-            SharingVO sharingVO = new SharingVO("100", List.of(FILE_HASH), SHARE_CODE, null, null, null, false);
-            when(fileRemoteClient.getSharedFiles(SHARE_CODE)).thenReturn(Result.success(sharingVO));
+            when(fileShareMapper.selectByShareCode(SHARE_CODE))
+                    .thenReturn(aFileShare(s -> s.setStatus(FileShare.STATUS_CANCELLED)));
 
             GeneralException ex = assertThrows(GeneralException.class, () -> fileService.getShareFile(SHARE_CODE));
 
             assertEquals(ResultEnum.SHARE_CANCELLED.getCode(), ex.getResultEnum().getCode());
+        }
+    }
+
+    @Nested
+    @DisplayName("Share Info Security")
+    class ShareInfoSecurity {
+
+        /**
+         * 验证公开分享详情只返回安全文件视图，不暴露 fileParam 中的解密密钥。
+         */
+        @Test
+        @DisplayName("should return safe file view for public share info")
+        void shouldReturnSafeFileViewForPublicShareInfo() {
+            File sourceFile = new File()
+                    .setId(1L)
+                    .setTenantId(1L)
+                    .setUid(USER_ID)
+                    .setFileName("public.txt")
+                    .setFileHash(FILE_HASH)
+                    .setFileParam("{\"initialKey\":\"secret\"}")
+                    .setDeleted(0);
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(aFileShare());
+            when(fileMapper.selectList(any())).thenReturn(List.of(sourceFile));
+
+            ShareInfoVO info;
+            try (MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                idUtilsMock.when(() -> IdUtils.toExternalId(1L)).thenReturn("ext_1");
+                info = fileService.getShareInfo(SHARE_CODE);
+            }
+
+            assertNotNull(info);
+            assertEquals(SHARE_CODE, info.getShareCode());
+            assertEquals(1, info.getFiles().size());
+            assertEquals("ext_1", info.getFiles().get(0).id());
+            assertEquals("public.txt", info.getFiles().get(0).fileName());
+        }
+
+        /**
+         * 验证匿名分享详情入口不能返回私密分享元数据。
+         */
+        @Test
+        @DisplayName("should reject private share info")
+        void shouldRejectPrivateShareInfo() {
+            when(fileShareMapper.selectByShareCode(SHARE_CODE))
+                    .thenReturn(aFileShare(s -> s.setShareType(ShareType.PRIVATE.getCode())));
+
+            GeneralException ex = assertThrows(GeneralException.class, () -> fileService.getShareInfo(SHARE_CODE));
+
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), ex.getResultEnum().getCode());
+            verify(fileMapper, never()).selectList(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Save Share File Authorization")
+    class SaveShareFileAuthorization {
+
+        /**
+         * 验证保存分享文件时必须校验文件 ID 属于该分享码授权的文件集合。
+         */
+        @Test
+        @DisplayName("should reject file id not authorized by share code before copying")
+        void shouldRejectFileIdNotAuthorizedByShareCodeBeforeCopying() {
+            FileShare share = aFileShare(s -> {
+                s.setUserId(OTHER_USER_ID);
+                s.setFileHashes("[\"allowed-hash\"]");
+            });
+            File sourceFile = new File()
+                    .setId(99L)
+                    .setTenantId(1L)
+                    .setUid(OTHER_USER_ID)
+                    .setFileHash("other-hash")
+                    .setFileName("secret.txt")
+                    .setFileParam("{\"initialKey\":\"secret\"}")
+                    .setDeleted(0);
+
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
+            when(fileMapper.selectList(any())).thenReturn(List.of(sourceFile));
+
+            MDC.put(Const.ATTR_USER_ID, String.valueOf(USER_ID));
+            TenantContext.setTenantId(2L);
+            try {
+                GeneralException ex = assertThrows(GeneralException.class,
+                        () -> fileService.saveShareFile(List.of("99"), SHARE_CODE, "127.0.0.1"));
+
+                assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), ex.getResultEnum().getCode());
+                verify(fileMapper, never()).insert(any(File.class));
+                verify(fileSourceMapper, never()).insert(any(FileSource.class));
+                verify(shareAuditService, never()).logShareSave(anyString(), anyLong(), anyString(), anyString(), anyString());
+            } finally {
+                MDC.clear();
+                TenantContext.clear();
+            }
         }
     }
 

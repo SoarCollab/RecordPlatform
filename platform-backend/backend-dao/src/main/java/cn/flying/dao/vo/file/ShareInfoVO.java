@@ -1,6 +1,5 @@
 package cn.flying.dao.vo.file;
 
-import cn.flying.dao.dto.File;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 import lombok.Setter;
@@ -31,9 +30,8 @@ public class ShareInfoVO {
     private Date expireTime;
 
     @Schema(description = "分享文件列表")
-    private List<File> files;
+    private List<ShareFileVO> files;
 
     @Schema(description = "分享状态（服务层内部使用，用于标识异常状态）", hidden = true)
     private Integer status;
 }
-

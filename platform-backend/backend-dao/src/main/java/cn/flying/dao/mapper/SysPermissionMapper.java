@@ -12,15 +12,15 @@ import java.util.Set;
 
 /**
  * 权限定义 Mapper 接口
- * 注意：所有方法均手动处理租户条件 (tenant_id = 0 OR tenant_id = ?) 以支持全局权限
+ * 注意：仅自定义查询方法手动处理全局权限租户条件，继承 CRUD 依赖租户插件隔离
  */
 @Mapper
-@InterceptorIgnore(tenantLine = "true")
 public interface SysPermissionMapper extends BaseMapper<SysPermission> {
 
     /**
      * 根据角色获取权限码列表
      */
+    @InterceptorIgnore(tenantLine = "true")
     @Select("""
         SELECT DISTINCT p.code FROM sys_permission p
         INNER JOIN sys_role_permission rp ON p.id = rp.permission_id
@@ -34,6 +34,7 @@ public interface SysPermissionMapper extends BaseMapper<SysPermission> {
     /**
      * 根据多个角色获取权限码列表
      */
+    @InterceptorIgnore(tenantLine = "true")
     @Select("""
         <script>
         SELECT DISTINCT p.code FROM sys_permission p
@@ -52,6 +53,7 @@ public interface SysPermissionMapper extends BaseMapper<SysPermission> {
     /**
      * 根据模块获取权限列表
      */
+    @InterceptorIgnore(tenantLine = "true")
     @Select("""
         SELECT id, tenant_id, code, name, module, action, description, status, create_time, update_time
         FROM sys_permission
@@ -65,6 +67,7 @@ public interface SysPermissionMapper extends BaseMapper<SysPermission> {
     /**
      * 根据权限码获取权限
      */
+    @InterceptorIgnore(tenantLine = "true")
     @Select("""
         SELECT id, tenant_id, code, name, module, action, description, status, create_time, update_time
         FROM sys_permission

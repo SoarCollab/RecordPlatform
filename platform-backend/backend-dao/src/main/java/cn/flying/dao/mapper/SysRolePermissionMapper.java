@@ -12,15 +12,15 @@ import java.util.List;
 
 /**
  * 角色权限映射 Mapper 接口
- * 注意：所有方法均手动处理租户条件 (tenant_id = 0 OR tenant_id = ?) 以支持全局权限
+ * 注意：仅自定义查询方法手动处理全局权限租户条件，继承 CRUD 依赖租户插件隔离
  */
 @Mapper
-@InterceptorIgnore(tenantLine = "true")
 public interface SysRolePermissionMapper extends BaseMapper<SysRolePermission> {
 
     /**
      * 根据角色获取权限ID列表
      */
+    @InterceptorIgnore(tenantLine = "true")
     @Select("""
         SELECT permission_id FROM sys_role_permission
         WHERE role = #{role}
@@ -41,6 +41,7 @@ public interface SysRolePermissionMapper extends BaseMapper<SysRolePermission> {
     /**
      * 检查角色是否拥有指定权限
      */
+    @InterceptorIgnore(tenantLine = "true")
     @Select("""
         SELECT COUNT(*) FROM sys_role_permission rp
         INNER JOIN sys_permission p ON rp.permission_id = p.id
