@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => {
       downloadFile: vi.fn(),
       reportBatchDownloadMetrics: vi.fn(),
     },
+    apiClient: {
+      getToken: vi.fn(),
+    },
     chunkDownloader: {
       downloadAllChunks: vi.fn(),
     },
@@ -19,6 +22,7 @@ const mocks = vi.hoisted(() => {
       getChunks: vi.fn(),
       getPendingTasks: vi.fn(),
       clearTaskData: vi.fn(),
+      clearAllDownloadData: vi.fn(),
       cleanupExpiredData: vi.fn(),
     },
     crypto: {
@@ -38,11 +42,20 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("$api/endpoints/files", () => mocks.fileApi);
+vi.mock("$api/client", () => ({
+  getToken: mocks.apiClient.getToken,
+}));
+vi.mock("$env/dynamic/public", () => ({
+  env: { PUBLIC_TENANT_ID: "0" },
+}));
 vi.mock("$utils/chunkDownloader", () => mocks.chunkDownloader);
 vi.mock("$utils/downloadStorage", () => mocks.downloadStorage);
 vi.mock("$utils/crypto", () => mocks.crypto);
 vi.mock("$utils/fileSize", () => mocks.fileSize);
 vi.mock("$utils/streamingDownloader", () => mocks.streaming);
+
+const AUTH_CONTEXT_HASH =
+  "ef7b394c6766be8db576d762d728771fb2bc198bb24831d7a2b5cc628c4210e1";
 
 /**
  * 重新导入 download store，隔离模块状态。
@@ -132,6 +145,7 @@ describe("download store", () => {
     mocks.fileApi.downloadFile.mockResolvedValue(createBlob());
     mocks.fileApi.reportBatchDownloadMetrics.mockResolvedValue("ok");
     mocks.fileApi.reportBatchDownloadMetrics.mockResolvedValue("ok");
+    mocks.apiClient.getToken.mockReturnValue("test-token");
 
     mocks.chunkDownloader.downloadAllChunks.mockImplementation(
       async (
@@ -156,6 +170,7 @@ describe("download store", () => {
     mocks.downloadStorage.getChunks.mockResolvedValue(new Map());
     mocks.downloadStorage.getPendingTasks.mockResolvedValue([]);
     mocks.downloadStorage.clearTaskData.mockResolvedValue(undefined);
+    mocks.downloadStorage.clearAllDownloadData.mockResolvedValue(undefined);
     mocks.downloadStorage.cleanupExpiredData.mockResolvedValue(undefined);
 
     mocks.crypto.decryptFile.mockResolvedValue(new Uint8Array([2]));
@@ -212,7 +227,36 @@ describe("download store", () => {
     expect(mocks.chunkDownloader.downloadAllChunks).toHaveBeenCalled();
     expect(mocks.crypto.decryptFile).toHaveBeenCalled();
     expect(mocks.crypto.downloadBlob).toHaveBeenCalled();
+    expect(mocks.downloadStorage.saveTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authContextHash: AUTH_CONTEXT_HASH,
+        source: { type: "owned" },
+      }),
+    );
     expect(mocks.downloadStorage.clearTaskData).toHaveBeenCalledWith(id);
+  });
+
+  it("缺少登录上下文绑定时应继续下载但不持久化断点缓存", async () => {
+    mocks.apiClient.getToken.mockReturnValue(null);
+
+    const download = await loadDownloadStore();
+    const id = await download.startDownload(
+      "hash-no-context",
+      "no-context.pdf",
+      { type: "owned" },
+      1024,
+      "inmemory",
+    );
+
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "completed",
+    );
+
+    expect(mocks.downloadStorage.saveTask).not.toHaveBeenCalled();
+    expect(mocks.downloadStorage.saveChunk).not.toHaveBeenCalled();
+    expect(mocks.downloadStorage.getChunks).not.toHaveBeenCalled();
+    expect(mocks.crypto.downloadBlob).toHaveBeenCalled();
   });
 
   it("public/private share 应走 backend proxy 下载分支", async () => {
@@ -373,6 +417,7 @@ describe("download store", () => {
         contentType: "application/octet-stream",
         totalChunks: 2,
         source: { type: "owned" },
+        authContextHash: AUTH_CONTEXT_HASH,
         createdAt: Date.now(),
       },
     ]);
@@ -388,6 +433,83 @@ describe("download store", () => {
     expect(download.tasks[0].downloadedChunks).toBe(1);
     expect(download.tasks[0].presignedUrls).toEqual([]);
     expect(download.tasks[0].initialKey).toBeNull();
+  });
+
+  it("clearAllDownloads 应清空内存任务和 IndexedDB 缓存", async () => {
+    mocks.downloadStorage.getPendingTasks.mockResolvedValue([
+      {
+        id: "restored-clear-all",
+        fileHash: "h-clear",
+        fileName: "clear.bin",
+        fileSize: 200,
+        contentType: "application/octet-stream",
+        totalChunks: 1,
+        source: { type: "owned" },
+        authContextHash: AUTH_CONTEXT_HASH,
+        createdAt: Date.now(),
+      },
+    ]);
+    mocks.downloadStorage.getChunks.mockResolvedValue(
+      new Map([[0, new Uint8Array([1])]]),
+    );
+
+    const download = await loadDownloadStore();
+    await download.restoreTasks();
+    expect(download.tasks).toHaveLength(1);
+
+    await download.clearAllDownloads();
+
+    expect(download.tasks).toHaveLength(0);
+    expect(download.batchState).toBeNull();
+    expect(download.initialized).toBe(false);
+    expect(mocks.downloadStorage.clearAllDownloadData).toHaveBeenCalled();
+  });
+
+  it("restoreTasks 应删除不属于当前登录上下文的旧任务", async () => {
+    mocks.downloadStorage.getPendingTasks.mockResolvedValue([
+      {
+        id: "restored-other-user",
+        fileHash: "h-other",
+        fileName: "other.bin",
+        fileSize: 200,
+        contentType: "application/octet-stream",
+        totalChunks: 1,
+        source: { type: "owned" },
+        authContextHash: "other-context",
+        createdAt: Date.now(),
+      },
+    ]);
+
+    const download = await loadDownloadStore();
+    await download.restoreTasks();
+
+    expect(download.tasks).toHaveLength(0);
+    expect(mocks.downloadStorage.clearTaskData).toHaveBeenCalledWith(
+      "restored-other-user",
+    );
+  });
+
+  it("restoreTasks 应删除缺失登录上下文绑定的历史任务", async () => {
+    mocks.downloadStorage.getPendingTasks.mockResolvedValue([
+      {
+        id: "restored-legacy",
+        fileHash: "h-legacy",
+        fileName: "legacy.bin",
+        fileSize: 200,
+        contentType: "application/octet-stream",
+        totalChunks: 1,
+        source: { type: "owned" },
+        createdAt: Date.now(),
+      },
+    ]);
+
+    const download = await loadDownloadStore();
+    await download.restoreTasks();
+
+    expect(download.tasks).toHaveLength(0);
+    expect(mocks.downloadStorage.clearTaskData).toHaveBeenCalledWith(
+      "restored-legacy",
+    );
   });
 
   it("setConcurrency 应限制在 [1,10] 区间", async () => {
@@ -538,6 +660,7 @@ describe("download store extra branches", () => {
     mocks.fileApi.publicDownloadFile.mockResolvedValue(createBlob());
     mocks.fileApi.shareDownloadFile.mockResolvedValue(createBlob());
     mocks.fileApi.downloadFile.mockResolvedValue(createBlob());
+    mocks.apiClient.getToken.mockReturnValue("test-token");
 
     mocks.chunkDownloader.downloadAllChunks.mockResolvedValue([
       new Uint8Array([1]),
@@ -547,6 +670,7 @@ describe("download store extra branches", () => {
     mocks.downloadStorage.getChunks.mockResolvedValue(new Map());
     mocks.downloadStorage.getPendingTasks.mockResolvedValue([]);
     mocks.downloadStorage.clearTaskData.mockResolvedValue(undefined);
+    mocks.downloadStorage.clearAllDownloadData.mockResolvedValue(undefined);
     mocks.downloadStorage.cleanupExpiredData.mockResolvedValue(undefined);
     mocks.crypto.decryptFile.mockResolvedValue(new Uint8Array([2]));
     mocks.crypto.arrayToBlob.mockReturnValue(createBlob());
@@ -725,6 +849,7 @@ it("restoreTasks 在 totalChunks=0 时进度应回退为 0", async () => {
       contentType: "application/octet-stream",
       totalChunks: 0,
       source: { type: "owned" },
+      authContextHash: AUTH_CONTEXT_HASH,
       createdAt: Date.now(),
     },
   ]);

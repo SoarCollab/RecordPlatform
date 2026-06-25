@@ -5,6 +5,8 @@
  */
 
 import { browser } from "$app/environment";
+import { env } from "$env/dynamic/public";
+import { getToken } from "$api/client";
 import * as fileApi from "$api/endpoints/files";
 import {
   downloadAllChunks,
@@ -17,6 +19,7 @@ import {
   getChunks,
   getPendingTasks,
   clearTaskData,
+  clearAllDownloadData,
   cleanupExpiredData,
   type PersistedDownloadTask,
   type DownloadSource,
@@ -184,6 +187,27 @@ function areUrlsExpired(urlsFetchedAt: number | null): boolean {
   if (!urlsFetchedAt) return true;
   const age = Date.now() - urlsFetchedAt;
   return age > PRESIGNED_URL_TTL_MS - URL_EXPIRY_BUFFER_MS;
+}
+
+/**
+ * 计算当前登录上下文的不可逆摘要，用于隔离同源浏览器中的下载恢复记录。
+ *
+ * @returns 当前 token 与租户绑定的 SHA-256 摘要；不可用时返回 null。
+ */
+async function getAuthContextHash(): Promise<string | null> {
+  if (!browser || !globalThis.crypto?.subtle) return null;
+
+  const token = getToken();
+  if (!token) return null;
+
+  const tenantId = env.PUBLIC_TENANT_ID || "0";
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${tenantId}:${token}`),
+  );
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 /**
@@ -376,6 +400,7 @@ async function executeDownload(task: DownloadTask): Promise<void> {
     let contentType = task.contentType;
     let fileName = task.fileName;
     let fileSize = task.fileSize;
+    const authContextHash = await getAuthContextHash();
 
     if (urls.length === 0 || areUrlsExpired(task.urlsFetchedAt)) {
       updateTask(taskId, { status: "fetching_urls" });
@@ -404,23 +429,26 @@ async function executeDownload(task: DownloadTask): Promise<void> {
       });
 
       // Persist task metadata
-      const persistedTask: PersistedDownloadTask = {
-        id: taskId,
-        fileHash: task.fileHash,
-        fileName,
-        fileSize,
-        contentType,
-        totalChunks,
-        source: task.source,
-        createdAt: task.createdAt,
-      };
-      await saveTask(persistedTask);
+      if (authContextHash) {
+        const persistedTask: PersistedDownloadTask = {
+          id: taskId,
+          fileHash: task.fileHash,
+          fileName,
+          fileSize,
+          contentType,
+          totalChunks,
+          source: task.source,
+          authContextHash,
+          createdAt: task.createdAt,
+        };
+        await saveTask(persistedTask);
+      }
     }
 
     // Step 2: Load existing chunks from IndexedDB (for resume)
     let existingChunks = downloadedChunksMap.get(taskId);
     if (!existingChunks) {
-      existingChunks = await getChunks(taskId);
+      existingChunks = authContextHash ? await getChunks(taskId) : new Map();
       downloadedChunksMap.set(taskId, existingChunks);
     }
 
@@ -442,7 +470,9 @@ async function executeDownload(task: DownloadTask): Promise<void> {
         existingChunks!.set(result.index, result.data);
 
         // Persist to IndexedDB
-        await saveChunk(taskId, result.index, result.data);
+        if (authContextHash) {
+          await saveChunk(taskId, result.index, result.data);
+        }
 
         // Update chunk state
         const currentTask = getTask(taskId);
@@ -1096,6 +1126,28 @@ function clearCompleted(): void {
 }
 
 /**
+ * Clear all in-memory and persisted download state for the current browser profile.
+ */
+async function clearAllDownloads(): Promise<void> {
+  for (const task of tasks) {
+    if (
+      task.status === "downloading" ||
+      task.status === "fetching_urls" ||
+      task.status === "streaming" ||
+      task.status === "writing"
+    ) {
+      task.abortController?.abort();
+    }
+  }
+
+  tasks = [];
+  batchState = null;
+  downloadedChunksMap.clear();
+  initialized = false;
+  await clearAllDownloadData();
+}
+
+/**
  * Restore pending tasks from IndexedDB (call on app init)
  */
 async function restoreTasks(): Promise<void> {
@@ -1107,8 +1159,14 @@ async function restoreTasks(): Promise<void> {
 
     // Load pending tasks
     const persistedTasks = await getPendingTasks();
+    const authContextHash = await getAuthContextHash();
 
     for (const pt of persistedTasks) {
+      if (!authContextHash || pt.authContextHash !== authContextHash) {
+        await clearTaskData(pt.id);
+        continue;
+      }
+
       // Check if already in memory
       if (tasks.find((t) => t.id === pt.id)) continue;
 
@@ -1231,6 +1289,7 @@ export function useDownload() {
     retryDownload,
     removeTask,
     clearCompleted,
+    clearAllDownloads,
     restoreTasks,
     setConcurrency,
 

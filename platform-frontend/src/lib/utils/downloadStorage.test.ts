@@ -10,6 +10,7 @@ import {
   getChunkCount,
   deleteChunks,
   clearTaskData,
+  clearAllDownloadData,
   cleanupExpiredData,
   getStorageUsage,
   type PersistedDownloadTask,
@@ -90,10 +91,12 @@ describe("downloadStorage", () => {
       it("should strip download secrets before persisting task metadata", async () => {
         const taskWithSecrets = {
           ...createTestTask("task-secret-strip"),
+          source: { type: "public_share", shareCode: "share-secret" },
           initialKey: "secret-key",
           presignedUrls: ["https://example.com/private"],
           urlsFetchedAt: Date.now(),
         } as PersistedDownloadTask & {
+          source: { type: "public_share"; shareCode: string };
           initialKey: string;
           presignedUrls: string[];
           urlsFetchedAt: number;
@@ -105,6 +108,8 @@ describe("downloadStorage", () => {
         expect(retrieved).not.toHaveProperty("initialKey");
         expect(retrieved).not.toHaveProperty("presignedUrls");
         expect(retrieved).not.toHaveProperty("urlsFetchedAt");
+        expect(retrieved?.source).toEqual({ type: "public_share" });
+        expect(retrieved?.source).not.toHaveProperty("shareCode");
       });
     });
 
@@ -222,6 +227,22 @@ describe("downloadStorage", () => {
 
         expect(await getTask("task-clear")).toBeNull();
         expect(await getChunkCount("task-clear")).toBe(0);
+      });
+    });
+
+    describe("clearAllDownloadData", () => {
+      it("should clear all persisted tasks and encrypted chunks", async () => {
+        await saveTask(createTestTask("task-clear-all-1"));
+        await saveTask(createTestTask("task-clear-all-2"));
+        await saveChunk("task-clear-all-1", 0, new Uint8Array([1]));
+        await saveChunk("task-clear-all-2", 0, new Uint8Array([2]));
+
+        await clearAllDownloadData();
+
+        expect(await getTask("task-clear-all-1")).toBeNull();
+        expect(await getTask("task-clear-all-2")).toBeNull();
+        expect(await getChunkCount("task-clear-all-1")).toBe(0);
+        expect(await getChunkCount("task-clear-all-2")).toBe(0);
       });
     });
 

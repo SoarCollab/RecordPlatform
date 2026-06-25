@@ -14,13 +14,20 @@ export interface PersistedDownloadTask {
   fileSize: number;
   contentType: string;
   totalChunks: number;
-  source: DownloadSource;
+  source: PersistedDownloadSource;
+  authContextHash?: string;
   createdAt: number;
 }
 
+export type DownloadSourceType = "owned" | "public_share" | "private_share";
+
 export interface DownloadSource {
-  type: "owned" | "public_share" | "private_share";
+  type: DownloadSourceType;
   shareCode?: string;
+}
+
+export interface PersistedDownloadSource {
+  type: DownloadSourceType;
 }
 
 export interface PersistedChunk {
@@ -33,12 +40,16 @@ export interface PersistedChunk {
 // ===== Constants =====
 
 const DB_NAME = "rp_downloads";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const TASKS_STORE = "tasks";
 const CHUNKS_STORE = "chunks";
 const EXPIRY_DAYS = 7; // Auto-cleanup after 7 days
 
-type StoredDownloadTask = PersistedDownloadTask & {
+type PersistableDownloadTask = Omit<PersistedDownloadTask, "source"> & {
+  source: DownloadSource | PersistedDownloadSource;
+};
+
+type StoredDownloadTask = PersistableDownloadTask & {
   initialKey?: unknown;
   presignedUrls?: unknown;
   urlsFetchedAt?: unknown;
@@ -47,6 +58,15 @@ type StoredDownloadTask = PersistedDownloadTask & {
 // ===== Database Management =====
 
 let dbPromise: Promise<IDBDatabase> | null = null;
+
+/**
+ * Keep only non-sensitive source metadata in durable browser storage.
+ */
+function sanitizeDownloadSource(
+  source: DownloadSource | PersistedDownloadSource | undefined,
+): PersistedDownloadSource {
+  return { type: source?.type ?? "owned" };
+}
 
 /**
  * Remove sensitive download authorization fields before task metadata is persisted or returned.
@@ -60,7 +80,10 @@ function sanitizeTaskForPersistence(
     urlsFetchedAt: _urlsFetchedAt,
     ...safeTask
   } = task;
-  return safeTask;
+  return {
+    ...safeTask,
+    source: sanitizeDownloadSource(task.source),
+  };
 }
 
 /**
@@ -73,10 +96,13 @@ function sanitizeExistingTaskRecords(taskStore: IDBObjectStore): void {
     if (!cursor) return;
 
     const task = cursor.value as StoredDownloadTask;
+    const sourceHasShareCode =
+      task.source && "shareCode" in task.source && task.source.shareCode;
     if (
       "initialKey" in task ||
       "presignedUrls" in task ||
-      "urlsFetchedAt" in task
+      "urlsFetchedAt" in task ||
+      sourceHasShareCode
     ) {
       cursor.update(sanitizeTaskForPersistence(task));
     }
@@ -122,7 +148,7 @@ function openDB(): Promise<IDBDatabase> {
         taskStore = tx?.objectStore(TASKS_STORE) ?? null;
       }
 
-      if (taskStore && event.oldVersion < 2) {
+      if (taskStore && event.oldVersion < 3) {
         sanitizeExistingTaskRecords(taskStore);
       }
 
@@ -147,7 +173,7 @@ function openDB(): Promise<IDBDatabase> {
 /**
  * Save non-sensitive download task metadata.
  */
-export async function saveTask(task: PersistedDownloadTask): Promise<void> {
+export async function saveTask(task: PersistableDownloadTask): Promise<void> {
   const db = await openDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(TASKS_STORE, "readwrite");
@@ -333,6 +359,22 @@ export async function deleteChunks(taskId: string): Promise<void> {
 export async function clearTaskData(taskId: string): Promise<void> {
   await deleteChunks(taskId);
   await deleteTask(taskId);
+}
+
+/**
+ * Clear every persisted download task and cached encrypted chunk for the current browser profile.
+ */
+export async function clearAllDownloadData(): Promise<void> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([TASKS_STORE, CHUNKS_STORE], "readwrite");
+    tx.objectStore(TASKS_STORE).clear();
+    tx.objectStore(CHUNKS_STORE).clear();
+
+    tx.oncomplete = () => resolve();
+    tx.onerror = () =>
+      reject(new Error(`Failed to clear download data: ${tx.error?.message}`));
+  });
 }
 
 /**
