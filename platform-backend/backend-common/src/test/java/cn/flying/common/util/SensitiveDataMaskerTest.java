@@ -49,6 +49,29 @@ class SensitiveDataMaskerTest {
     }
 
     @Test
+    @DisplayName("验证码和文件解密密钥字段应被脱敏")
+    void maskSensitiveFields_shouldMaskVerificationAndDecryptFields() {
+        String json = """
+                {"email":"user@test.com","code":"123456","verificationCode":"654321","new_password":"newPass123","initialKey":"file-key","decryptKey":"decrypt-key","nonce":"public-nonce"}
+                """;
+
+        String masked = SensitiveDataMasker.maskSensitiveFields(json);
+
+        assertTrue(masked.contains("\"email\":\"user@test.com\""));
+        assertTrue(masked.contains("\"code\":\"******\""));
+        assertTrue(masked.contains("\"verificationCode\":\"******\""));
+        assertTrue(masked.contains("\"new_password\":\"******\""));
+        assertTrue(masked.contains("\"initialKey\":\"******\""));
+        assertTrue(masked.contains("\"decryptKey\":\"******\""));
+        assertTrue(masked.contains("\"nonce\":\"public-nonce\""));
+        assertFalse(masked.contains("123456"));
+        assertFalse(masked.contains("654321"));
+        assertFalse(masked.contains("newPass123"));
+        assertFalse(masked.contains("file-key"));
+        assertFalse(masked.contains("decrypt-key"));
+    }
+
+    @Test
     @DisplayName("嵌套JSON中的敏感字段应被脱敏")
     void maskSensitiveFields_shouldMaskNestedFields() {
         String json = "{\"user\":{\"name\":\"test\",\"credential\":\"cred123\"},\"token\":\"tok123\"}";
@@ -134,6 +157,10 @@ class SensitiveDataMaskerTest {
         assertTrue(SensitiveDataMasker.isSensitiveField("secret"));
         assertTrue(SensitiveDataMasker.isSensitiveField("apiKey"));
         assertTrue(SensitiveDataMasker.isSensitiveField("credential"));
+        assertTrue(SensitiveDataMasker.isSensitiveField("code"));
+        assertTrue(SensitiveDataMasker.isSensitiveField("verificationCode"));
+        assertTrue(SensitiveDataMasker.isSensitiveField("new_password"));
+        assertTrue(SensitiveDataMasker.isSensitiveField("initialKey"));
 
         assertFalse(SensitiveDataMasker.isSensitiveField("username"));
         assertFalse(SensitiveDataMasker.isSensitiveField("email"));

@@ -82,7 +82,7 @@ public class AuthorizeController {
      * @param vo 重置确认参数
      * @return 操作结果
      */
-    @OperationLog(module = "登录校验模块", operationType = "新增", description = "confirmPasswordReset")
+    @OperationLog(module = "登录校验模块", operationType = "新增", description = "confirmPasswordReset", saveRequestData = false)
     @PostMapping("/password-resets/confirm")
     @Operation(summary = "密码重置确认（REST）")
     public Result<String> confirmPasswordReset(@RequestBody @Valid ConfirmResetVO vo) {
@@ -95,7 +95,7 @@ public class AuthorizeController {
      * @param vo 密码重置信息
      * @return 操作结果
      */
-    @OperationLog(module = "登录校验模块", operationType = "修改", description = "updatePasswordByReset")
+    @OperationLog(module = "登录校验模块", operationType = "修改", description = "updatePasswordByReset", saveRequestData = false)
     @PutMapping("/password-resets")
     @Operation(summary = "密码重置操作（REST）")
     public Result<String> updatePasswordByReset(@RequestBody @Valid EmailResetVO vo) {

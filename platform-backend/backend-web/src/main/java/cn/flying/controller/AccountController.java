@@ -92,7 +92,7 @@ public class AccountController {
      */
     @PutMapping("/password")
     @Operation(summary = "修改密码（REST）")
-    @OperationLog(module = "用户模块", operationType = "修改", description = "修改密码（REST）")
+    @OperationLog(module = "用户模块", operationType = "修改", description = "修改密码（REST）", saveRequestData = false)
     public Result<String> updatePassword(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
                                          @RequestBody @Valid ChangePasswordVO changePasswordVO) {
         return utils.messageHandle(() -> accountService.changePassword(userId, changePasswordVO));

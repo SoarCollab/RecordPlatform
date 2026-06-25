@@ -2,6 +2,7 @@ package cn.flying.filter;
 
 import cn.flying.common.util.Const;
 import cn.flying.common.util.IdUtils;
+import cn.flying.common.util.SensitiveDataMasker;
 import cn.hutool.json.JSONObject;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -46,10 +47,26 @@ public class RequestLogFilter extends OncePerRequestFilter {
     private static final Set<String> SENSITIVE_PARAMS = Set.of(
             "password", "pwd", "oldPassword", "newPassword", "new_password", "old_password",
             "token", "secret", "secretKey", "accessKey", "apiKey", "privateKey",
-            "creditCard", "cardNumber", "cvv", "ssn"
+            "creditCard", "cardNumber", "cvv", "ssn",
+            "code", "verificationCode", "verifyCode", "otp", "resetCode",
+            "authorization", "initialKey", "decryptKey", "decryptionKey", "fileKey"
     );
 
     private static final String MASK = "***";
+
+    /**
+     * 响应体不应被缓存或打印的路径片段。
+     */
+    private static final Set<String> SENSITIVE_RESPONSE_PATH_MARKERS = Set.of(
+            "/download",
+            "/chunks",
+            "/decrypt-info",
+            "/tokens",
+            "/password",
+            "/verification-codes",
+            "/sse",
+            "/stream"
+    );
 
     /**
      * 响应体日志截断阈值（字节）。
@@ -131,8 +148,11 @@ public class RequestLogFilter extends OncePerRequestFilter {
         if (requestUri == null || requestUri.isBlank()) {
             requestUri = request.getServletPath();
         }
-        // 统一按路径关键字跳过：download 类接口可能返回二进制或大块 base64 JSON
-        return requestUri != null && requestUri.contains("/download");
+        if (requestUri == null) {
+            return false;
+        }
+        String normalizedPath = requestUri.toLowerCase();
+        return SENSITIVE_RESPONSE_PATH_MARKERS.stream().anyMatch(normalizedPath::contains);
     }
 
     /**
@@ -206,7 +226,7 @@ public class RequestLogFilter extends OncePerRequestFilter {
         }
 
         int limit = Math.min(bodySize, MAX_RESPONSE_LOG_BYTES);
-        String preview = new String(body, 0, limit, StandardCharsets.UTF_8);
+        String preview = SensitiveDataMasker.maskSensitiveFields(new String(body, 0, limit, StandardCharsets.UTF_8));
         if (bodySize > MAX_RESPONSE_LOG_BYTES) {
             return preview + "...(truncated, bytes=" + bodySize + ")";
         }

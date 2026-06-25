@@ -280,6 +280,30 @@ class RequestLogFilterTest {
 
             assertThat(filterChain.getResponse()).isInstanceOf(ContentCachingResponseWrapper.class);
         }
+
+        @Test
+        @DisplayName("Should not wrap chunk responses")
+        void shouldNotWrapChunkResponses() throws ServletException, IOException {
+            request.setRequestURI("/api/v1/files/hash/test-hash/chunks");
+            request.setServletPath("/api/v1/files/hash/test-hash/chunks");
+            request.setMethod("GET");
+
+            filter.doFilter(request, response, filterChain);
+
+            assertThat(filterChain.getResponse()).isNotInstanceOf(ContentCachingResponseWrapper.class);
+        }
+
+        @Test
+        @DisplayName("Should not wrap decrypt info responses")
+        void shouldNotWrapDecryptInfoResponses() throws ServletException, IOException {
+            request.setRequestURI("/api/v1/public/shares/share-code/files/test-hash/decrypt-info");
+            request.setServletPath("/api/v1/public/shares/share-code/files/test-hash/decrypt-info");
+            request.setMethod("GET");
+
+            filter.doFilter(request, response, filterChain);
+
+            assertThat(filterChain.getResponse()).isNotInstanceOf(ContentCachingResponseWrapper.class);
+        }
     }
 
     @Nested
