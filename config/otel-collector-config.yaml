@@ -3,7 +3,9 @@
 # ==============================================================================
 # Used by docker-compose.infra.yml for local development.
 # Receives OTLP data from Java services, exports traces to Jaeger
-# and metrics to Prometheus scrape endpoint.
+# and metrics to Prometheus scrape endpoint. Do not enable the debug
+# exporter in default environments because trace payloads can contain
+# sensitive request metadata.
 
 receivers:
   otlp:
@@ -28,16 +30,13 @@ exporters:
     endpoint: 0.0.0.0:8889
     namespace: otel
 
-  debug:
-    verbosity: basic
-
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [otlp/jaeger, debug]
+      exporters: [otlp/jaeger]
     metrics:
       receivers: [otlp]
       processors: [batch]
-      exporters: [prometheus, debug]
+      exporters: [prometheus]
