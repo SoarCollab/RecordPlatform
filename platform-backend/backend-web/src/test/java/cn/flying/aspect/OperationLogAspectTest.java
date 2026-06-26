@@ -42,6 +42,24 @@ class OperationLogAspectTest {
     }
 
     /**
+     * 验证生产 context-path 下的文件接口仍会被标记为敏感操作。
+     */
+    @Test
+    @DisplayName("Should classify sensitive operations behind context path")
+    void shouldClassifySensitiveOperationsBehindContextPath() {
+        OperationLogAspect aspect = new OperationLogAspect();
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "GET",
+                "/record-platform/api/v1/public/shares/ABC123/files/hash-secret/chunks"
+        );
+        request.setContextPath("/record-platform");
+
+        Boolean result = ReflectionTestUtils.invokeMethod(aspect, "isSensitiveFileOperation", request);
+
+        assertThat(result).isTrue();
+    }
+
+    /**
      * 验证系统审计接口本身也会进入操作日志，避免敏感管理动作缺失审计记录。
      */
     @Test

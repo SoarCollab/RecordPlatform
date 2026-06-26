@@ -1,11 +1,13 @@
 package cn.flying.service.remote;
 
 import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.FileDetailVO;
+import cn.flying.platformapi.response.SharingVO;
 import cn.flying.platformapi.security.BlockChainRpcAuth;
 import org.apache.dubbo.rpc.RpcContext;
 import org.junit.jupiter.api.AfterEach;
@@ -16,6 +18,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+
+import java.lang.reflect.Method;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -121,5 +126,57 @@ class FileRemoteClientTest {
         assertThat(actual).isSameAs(expected);
         assertThat(RpcContext.getClientAttachment().getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY))
                 .isEqualTo("previous-token");
+    }
+
+    /**
+     * 验证分享码列表降级方法签名与 Resilience4j 原方法参数保持一致。
+     */
+    @Test
+    void getUserShareCodesFallback_shouldMatchCircuitBreakerSignature() throws Exception {
+        Method fallback = FileRemoteClient.class.getDeclaredMethod(
+                "getUserShareCodesFallback",
+                String.class,
+                String.class,
+                Throwable.class
+        );
+
+        assertThat(fallback.getReturnType()).isEqualTo(Result.class);
+        @SuppressWarnings("unchecked")
+        Result<List<String>> result = (Result<List<String>>) ReflectionTestUtils.invokeMethod(
+                fileRemoteClient,
+                "getUserShareCodesFallback",
+                "owner",
+                "viewer",
+                new RuntimeException("boom")
+        );
+
+        assertThat(result.getCode()).isEqualTo(ResultEnum.BLOCKCHAIN_ERROR.getCode());
+        assertThat(result.getData()).isEmpty();
+    }
+
+    /**
+     * 验证分享详情降级方法签名与 Resilience4j 原方法参数保持一致。
+     */
+    @Test
+    void getShareInfoFallback_shouldMatchCircuitBreakerSignature() throws Exception {
+        Method fallback = FileRemoteClient.class.getDeclaredMethod(
+                "getShareInfoFallback",
+                String.class,
+                String.class,
+                Throwable.class
+        );
+
+        assertThat(fallback.getReturnType()).isEqualTo(Result.class);
+        @SuppressWarnings("unchecked")
+        Result<SharingVO> result = (Result<SharingVO>) ReflectionTestUtils.invokeMethod(
+                fileRemoteClient,
+                "getShareInfoFallback",
+                "share-code",
+                "viewer",
+                new RuntimeException("boom")
+        );
+
+        assertThat(result.getCode()).isEqualTo(ResultEnum.GET_USER_SHARE_FILE_ERROR.getCode());
+        assertThat(result.getData()).isNull();
     }
 }

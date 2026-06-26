@@ -20,11 +20,11 @@ class FlywayMigrationVersionTest {
     private static final Pattern VERSION_PATTERN = Pattern.compile("^V([^_]+)__.+\\.sql$");
 
     /**
-     * 验证 Flyway 迁移版本不会复用历史版本号。
+     * 验证 Flyway 历史迁移文件名保持稳定且不会复用版本号。
      */
     @Test
-    @DisplayName("should keep nickname migration on original version and avoid version reuse")
-    void shouldKeepNicknameMigrationOnOriginalVersionAndAvoidVersionReuse() throws IOException {
+    @DisplayName("should keep released migration versions and avoid version reuse")
+    void shouldKeepReleasedMigrationVersionsAndAvoidVersionReuse() throws IOException {
         Path migrationDir = resolveMigrationDir();
         List<String> migrationFiles;
         try (var stream = Files.list(migrationDir)) {
@@ -35,10 +35,12 @@ class FlywayMigrationVersionTest {
                     .toList();
         }
 
-        assertTrue(migrationFiles.contains("V1.5.0__add_account_nickname.sql"));
+        assertTrue(migrationFiles.contains("V1.0.1__add_account_nickname.sql"));
+        assertTrue(migrationFiles.contains("V1.5.0__integrity_alert.sql"));
         assertTrue(migrationFiles.contains("V1.7.4__rename_file_contract_hash_to_transaction_hash.sql"));
-        assertFalse(migrationFiles.contains("V1.0.1__add_account_nickname.sql"));
-        assertFalse(migrationFiles.contains("V1.5.0__integrity_alert.sql"));
+        assertTrue(migrationFiles.contains("V1.7.5__replace_clean_log_procedures.sql"));
+        assertFalse(migrationFiles.contains("V1.5.0__add_account_nickname.sql"));
+        assertFalse(migrationFiles.contains("V1.7.3__integrity_alert.sql"));
 
         Set<String> versions = new HashSet<>();
         for (String fileName : migrationFiles) {
@@ -64,23 +66,19 @@ class FlywayMigrationVersionTest {
     }
 
     /**
-     * 验证迁移中的存储过程声明使用 MySQL 兼容语法。
+     * 验证清理类存储过程通过新的前向迁移替换，避免改写历史初始化迁移。
      */
     @Test
-    @DisplayName("should avoid MariaDB-only CREATE PROCEDURE IF NOT EXISTS syntax")
-    void shouldAvoidMariaDbOnlyCreateProcedureIfNotExistsSyntax() throws IOException {
-        Path migrationDir = resolveMigrationDir();
-        try (var stream = Files.list(migrationDir)) {
-            List<Path> migrationFiles = stream
-                    .filter(path -> path.getFileName().toString().startsWith("V"))
-                    .filter(path -> path.getFileName().toString().endsWith(".sql"))
-                    .toList();
-            for (Path migration : migrationFiles) {
-                String sql = Files.readString(migration);
-                assertFalse(sql.matches("(?is).*CREATE\\s+PROCEDURE\\s+IF\\s+NOT\\s+EXISTS.*"),
-                        "MySQL-incompatible routine declaration in " + migration.getFileName());
-            }
-        }
+    @DisplayName("should replace clean log procedures through forward migration")
+    void shouldReplaceCleanLogProceduresThroughForwardMigration() throws IOException {
+        Path migration = resolveMigrationDir().resolve("V1.7.5__replace_clean_log_procedures.sql");
+        String sql = Files.readString(migration);
+
+        assertTrue(sql.contains("DROP PROCEDURE IF EXISTS `proc_clean_processed_messages`"));
+        assertTrue(sql.contains("DROP PROCEDURE IF EXISTS `proc_clean_old_operation_logs`"));
+        assertTrue(sql.contains("CREATE PROCEDURE `proc_clean_processed_messages`"));
+        assertTrue(sql.contains("CREATE PROCEDURE `proc_clean_old_operation_logs`"));
+        assertFalse(sql.matches("(?is).*CREATE\\s+PROCEDURE\\s+IF\\s+NOT\\s+EXISTS.*"));
     }
 
     /**

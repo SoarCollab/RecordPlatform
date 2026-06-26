@@ -567,20 +567,17 @@ SELECT 0, 'monitor', id FROM `sys_permission` WHERE `tenant_id` = 0 AND `code` I
 -- 8. Stored Procedures
 -- =============================================
 
-DROP PROCEDURE IF EXISTS `proc_clean_processed_messages`;
-DROP PROCEDURE IF EXISTS `proc_clean_old_operation_logs`;
-
 DELIMITER //
 
 -- Clean processed messages
-CREATE PROCEDURE `proc_clean_processed_messages`(IN retention_days INT)
+CREATE PROCEDURE IF NOT EXISTS `proc_clean_processed_messages`(IN retention_days INT)
 BEGIN
     DELETE FROM processed_message
     WHERE processed_at < DATE_SUB(NOW(), INTERVAL retention_days DAY);
 END //
 
 -- Clean old operation logs
-CREATE PROCEDURE `proc_clean_old_operation_logs`(IN days INT)
+CREATE PROCEDURE IF NOT EXISTS `proc_clean_old_operation_logs`(IN days INT)
 BEGIN
     DELETE FROM sys_operation_log
     WHERE operation_time < DATE_SUB(NOW(), INTERVAL days DAY);

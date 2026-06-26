@@ -307,6 +307,10 @@ public class OperationLogAspect {
         if (path == null) {
             return false;
         }
+        String contextPath = request.getContextPath();
+        if (contextPath != null && !contextPath.isBlank() && path.startsWith(contextPath)) {
+            path = path.substring(contextPath.length());
+        }
         String normalized = path.toLowerCase();
         return normalized.startsWith("/api/file")
                 || normalized.startsWith("/api/v1/files")
