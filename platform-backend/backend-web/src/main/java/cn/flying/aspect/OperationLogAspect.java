@@ -297,7 +297,7 @@ public class OperationLogAspect {
     }
 
     /**
-     * 判断是否为文件、分享或交易类敏感操作，避免 bearer code、文件哈希和链上输入落库。
+     * 判断是否为文件、分享、上传会话或交易类敏感操作，避免 bearer code、文件哈希、clientId 和链上输入落库。
      */
     private boolean isSensitiveFileOperation(HttpServletRequest request) {
         String path = request.getRequestURI();
@@ -316,23 +316,15 @@ public class OperationLogAspect {
                 || normalized.startsWith("/api/v1/files")
                 || normalized.startsWith("/api/v1/shares")
                 || normalized.startsWith("/api/v1/public/shares")
+                || normalized.startsWith("/api/v1/upload-sessions")
                 || normalized.startsWith("/api/v1/transactions");
     }
 
     /**
-     * 对路径变量中的分享码、文件哈希和交易哈希做脱敏。
+     * 对路径变量中的分享码、文件哈希、clientId 和交易哈希做脱敏。
      */
     private String sanitizePathForLog(String path) {
-        if (path == null || path.isBlank()) {
-            return path;
-        }
-        return path
-                .replaceAll("(?i)(/public/shares/)[^/]+", "$1***")
-                .replaceAll("(?i)(/shares/)[^/]+", "$1***")
-                .replaceAll("(?i)(/share/)[^/]+", "$1***")
-                .replaceAll("(?i)(/files/)[^/]+", "$1***")
-                .replaceAll("(?i)(/hash/)[^/]+", "$1***")
-                .replaceAll("(?i)(/transactions/)[^/]+", "$1***");
+        return SensitiveDataMasker.maskSensitivePathSegments(path);
     }
 
     /**

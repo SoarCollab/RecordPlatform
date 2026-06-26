@@ -51,7 +51,8 @@ public class RequestLogFilter extends OncePerRequestFilter {
             "code", "verificationCode", "verifyCode", "otp", "resetCode",
             "authorization", "initialKey", "decryptKey", "decryptionKey", "fileKey",
             "shareCode", "sharingCode", "fileHash", "transactionHash",
-            "contractABI", "input", "signature", "presignedUrl", "downloadUrl"
+            "contractABI", "input", "signature", "presignedUrl", "downloadUrl",
+            "clientId"
     );
 
     private static final String MASK = "***";
@@ -342,18 +343,9 @@ public class RequestLogFilter extends OncePerRequestFilter {
     }
 
     /**
-     * 对文件/分享/交易路径中的 bearer code、文件哈希、交易哈希做路径级脱敏。
+     * 对文件/分享/交易/上传会话路径中的 bearer code、文件哈希、交易哈希和 clientId 做路径级脱敏。
      */
     private String sanitizePathForLog(String path) {
-        if (path == null || path.isBlank()) {
-            return path;
-        }
-        return path
-                .replaceAll("(?i)(/public/shares/)[^/]+", "$1***")
-                .replaceAll("(?i)(/shares/)[^/]+", "$1***")
-                .replaceAll("(?i)(/share/)[^/]+", "$1***")
-                .replaceAll("(?i)(/files/)[^/]+", "$1***")
-                .replaceAll("(?i)(/hash/)[^/]+", "$1***")
-                .replaceAll("(?i)(/transactions/)[^/]+", "$1***");
+        return SensitiveDataMasker.maskSensitivePathSegments(path);
     }
 }

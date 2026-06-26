@@ -25,6 +25,27 @@ class OperationLogAspectTest {
         );
 
         assertThat(sanitized).isEqualTo("/api/v1/public/shares/***/files/***/chunks");
+
+        String fileHashRoute = ReflectionTestUtils.invokeMethod(
+                aspect,
+                "sanitizePathForLog",
+                "/api/v1/files/hash/hash-secret/chunks"
+        );
+        assertThat(fileHashRoute).isEqualTo("/api/v1/files/hash/***/chunks");
+
+        String saveRoute = ReflectionTestUtils.invokeMethod(
+                aspect,
+                "sanitizePathForLog",
+                "/api/v1/shares/ABC123/files/save"
+        );
+        assertThat(saveRoute).isEqualTo("/api/v1/shares/***/files/save");
+
+        String uploadSessionRoute = ReflectionTestUtils.invokeMethod(
+                aspect,
+                "sanitizePathForLog",
+                "/api/v1/upload-sessions/client-secret/progress"
+        );
+        assertThat(uploadSessionRoute).isEqualTo("/api/v1/upload-sessions/***/progress");
     }
 
     /**
@@ -35,6 +56,23 @@ class OperationLogAspectTest {
     void shouldClassifyFileOperationsAsSensitive() {
         OperationLogAspect aspect = new OperationLogAspect();
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/transactions/0xtxhash");
+
+        Boolean result = ReflectionTestUtils.invokeMethod(aspect, "isSensitiveFileOperation", request);
+
+        assertThat(result).isTrue();
+    }
+
+    /**
+     * 验证上传会话接口也会被标记为敏感操作，避免 clientId 作为方法参数落库。
+     */
+    @Test
+    @DisplayName("Should classify upload session operations as sensitive")
+    void shouldClassifyUploadSessionOperationsAsSensitive() {
+        OperationLogAspect aspect = new OperationLogAspect();
+        MockHttpServletRequest request = new MockHttpServletRequest(
+                "POST",
+                "/api/v1/upload-sessions/client-secret/complete"
+        );
 
         Boolean result = ReflectionTestUtils.invokeMethod(aspect, "isSensitiveFileOperation", request);
 

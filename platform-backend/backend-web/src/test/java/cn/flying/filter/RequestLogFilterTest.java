@@ -203,6 +203,17 @@ class RequestLogFilterTest {
             assertThat(filterChain.getRequest()).isNotNull();
         }
 
+        /**
+         * 验证上传会话 clientId 参数会被敏感参数规则识别。
+         */
+        @Test
+        @DisplayName("Should treat upload clientId parameter as sensitive")
+        void shouldTreatUploadClientIdParameterAsSensitive() {
+            Boolean result = ReflectionTestUtils.invokeMethod(filter, "isSensitiveParam", "clientId");
+
+            assertThat(result).isTrue();
+        }
+
         @Test
         @DisplayName("Should mask new_password parameter")
         void shouldMaskNewPasswordParameter() throws ServletException, IOException {
@@ -343,6 +354,20 @@ class RequestLogFilterTest {
             );
 
             assertThat(sanitized).isEqualTo("/api/v1/public/shares/***/files/***/chunks");
+
+            String fileHashRoute = ReflectionTestUtils.invokeMethod(
+                    filter,
+                    "sanitizePathForLog",
+                    "/api/v1/files/hash/hash-secret/chunks"
+            );
+            assertThat(fileHashRoute).isEqualTo("/api/v1/files/hash/***/chunks");
+
+            String uploadSessionRoute = ReflectionTestUtils.invokeMethod(
+                    filter,
+                    "sanitizePathForLog",
+                    "/api/v1/upload-sessions/client-secret/complete"
+            );
+            assertThat(uploadSessionRoute).isEqualTo("/api/v1/upload-sessions/***/complete");
         }
     }
 

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -92,7 +93,28 @@ public final class SensitiveDataMasker {
             "presignedurl",
             "presigned_url",
             "downloadurl",
-            "download_url"
+            "download_url",
+            "clientid",
+            "client_id"
+    );
+
+    /**
+     * 日志路径中用于替换敏感路径变量的值。
+     */
+    private static final String PATH_MASKED_VALUE = "***";
+
+    /**
+     * /files 后面这些路径段是路由字面量，不应被当作文件 ID 或文件哈希脱敏。
+     */
+    private static final Set<String> FILE_ROUTE_LITERALS = Set.of(
+            "download-batches",
+            "hash",
+            "quota",
+            "share",
+            "shares",
+            "stats",
+            "upload-sessions",
+            "save"
     );
 
     /**
@@ -135,6 +157,82 @@ public final class SensitiveDataMasker {
             });
         }
         return result;
+    }
+
+    /**
+     * 对日志路径中的分享码、文件 ID、文件哈希、交易哈希和上传会话 ID 做路径段级脱敏。
+     *
+     * @param path 原始请求路径
+     * @return 脱敏后的请求路径
+     */
+    public static String maskSensitivePathSegments(String path) {
+        if (path == null || path.isBlank()) {
+            return path;
+        }
+
+        PathParts pathParts = splitPath(path);
+        String[] segments = pathParts.path().split("/", -1);
+        for (int i = 0; i < segments.length; i++) {
+            String segment = segments[i].toLowerCase(Locale.ROOT);
+            if (("shares".equals(segment) || "share".equals(segment) || "transactions".equals(segment))
+                    && hasMaskableNextSegment(segments, i)) {
+                segments[++i] = PATH_MASKED_VALUE;
+                continue;
+            }
+
+            if ("upload-sessions".equals(segment) && hasMaskableNextSegment(segments, i)) {
+                segments[++i] = PATH_MASKED_VALUE;
+                continue;
+            }
+
+            if ("hash".equals(segment) && hasMaskableNextSegment(segments, i)) {
+                segments[++i] = PATH_MASKED_VALUE;
+                continue;
+            }
+
+            if ("files".equals(segment)
+                    && hasMaskableNextSegment(segments, i)
+                    && isSensitiveFilePathVariable(segments[i + 1])) {
+                segments[++i] = PATH_MASKED_VALUE;
+            }
+        }
+        return String.join("/", segments) + pathParts.suffix();
+    }
+
+    /**
+     * 判断指定位置后是否存在可脱敏路径段。
+     */
+    private static boolean hasMaskableNextSegment(String[] segments, int currentIndex) {
+        return currentIndex + 1 < segments.length
+                && segments[currentIndex + 1] != null
+                && !segments[currentIndex + 1].isBlank()
+                && !PATH_MASKED_VALUE.equals(segments[currentIndex + 1]);
+    }
+
+    /**
+     * 判断 /files 后的路径段是否为敏感变量，而非静态路由字面量。
+     */
+    private static boolean isSensitiveFilePathVariable(String segment) {
+        if (segment == null || segment.isBlank()) {
+            return false;
+        }
+        return !FILE_ROUTE_LITERALS.contains(segment.toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * 分离路径主体和查询/锚点后缀，只对路径段本身做脱敏。
+     */
+    private static PathParts splitPath(String path) {
+        int suffixIndex = path.length();
+        int queryIndex = path.indexOf('?');
+        if (queryIndex >= 0) {
+            suffixIndex = Math.min(suffixIndex, queryIndex);
+        }
+        int fragmentIndex = path.indexOf('#');
+        if (fragmentIndex >= 0) {
+            suffixIndex = Math.min(suffixIndex, fragmentIndex);
+        }
+        return new PathParts(path.substring(0, suffixIndex), path.substring(suffixIndex));
     }
 
     /**
@@ -236,5 +334,8 @@ public final class SensitiveDataMasker {
         }
         String lowerFieldName = fieldName.toLowerCase();
         return SENSITIVE_FIELD_NAMES.contains(lowerFieldName);
+    }
+
+    private record PathParts(String path, String suffix) {
     }
 }
