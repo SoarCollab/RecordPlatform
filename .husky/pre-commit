@@ -1,3 +1,13 @@
 #!/usr/bin/env sh
 
-cd platform-frontend && pnpm exec lint-staged
+set -eu
+
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$repo_root/platform-frontend"
+
+if ! command -v corepack >/dev/null 2>&1; then
+  echo "corepack is required to run frontend pre-commit checks with pinned pnpm." >&2
+  exit 1
+fi
+
+corepack pnpm exec lint-staged
