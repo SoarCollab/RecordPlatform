@@ -150,6 +150,52 @@ class SensitiveDataMaskerTest {
         );
     }
 
+    /**
+     * 验证空路径输入会保持原值返回，避免日志过滤器处理异常请求路径时报错。
+     */
+    @Test
+    @DisplayName("空路径应保持原样")
+    void maskSensitivePathSegments_shouldKeepBlankPathInputs() {
+        assertNull(SensitiveDataMasker.maskSensitivePathSegments(null));
+        assertEquals("   ", SensitiveDataMasker.maskSensitivePathSegments("   "));
+    }
+
+    /**
+     * 验证路径脱敏只处理路径段本身，并保留查询参数或 fragment 后缀。
+     */
+    @Test
+    @DisplayName("路径脱敏应保留查询参数和fragment后缀")
+    void maskSensitivePathSegments_shouldPreserveSuffixes() {
+        assertEquals(
+                "/api/v1/shares/***#details",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/shares/share-secret#details")
+        );
+        assertEquals(
+                "/api/v1/files/hash/***?download=true#section",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/files/hash/file-hash?download=true#section")
+        );
+    }
+
+    /**
+     * 验证已经脱敏或缺少变量值的路径不会被重复替换。
+     */
+    @Test
+    @DisplayName("已脱敏或缺少变量值的路径应保持稳定")
+    void maskSensitivePathSegments_shouldKeepAlreadyMaskedOrTerminalRoutes() {
+        assertEquals(
+                "/api/v1/shares/***",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/shares/***")
+        );
+        assertEquals(
+                "/api/v1/share",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/share")
+        );
+        assertEquals(
+                "/api/v1/files/hash/***",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/files/hash/***")
+        );
+    }
+
     @Test
     @DisplayName("不区分大小写匹配敏感字段")
     void maskSensitiveFields_shouldBeCaseInsensitive() {

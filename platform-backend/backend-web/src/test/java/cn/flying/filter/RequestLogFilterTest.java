@@ -12,7 +12,9 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -368,6 +370,29 @@ class RequestLogFilterTest {
                     "/api/v1/upload-sessions/client-secret/complete"
             );
             assertThat(uploadSessionRoute).isEqualTo("/api/v1/upload-sessions/***/complete");
+        }
+
+        /**
+         * 验证响应体日志预览会复用敏感字段脱敏规则，避免令牌进入日志。
+         */
+        @Test
+        @DisplayName("Should mask sensitive JSON fields in response log content")
+        void shouldMaskSensitiveJsonFieldsInResponseLogContent() {
+            request.setRequestURI("/api/v1/conversations");
+            byte[] body = "{\"token\":\"secret-token\",\"message\":\"ok\"}".getBytes(StandardCharsets.UTF_8);
+
+            String content = ReflectionTestUtils.invokeMethod(
+                    filter,
+                    "buildResponseLogContent",
+                    request,
+                    "application/json",
+                    HttpServletResponse.SC_OK,
+                    body
+            );
+
+            assertThat(content).contains("\"token\":\"******\"");
+            assertThat(content).contains("\"message\":\"ok\"");
+            assertThat(content).doesNotContain("secret-token");
         }
     }
 

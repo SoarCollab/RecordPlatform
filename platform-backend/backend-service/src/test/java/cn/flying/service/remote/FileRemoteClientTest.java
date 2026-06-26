@@ -4,8 +4,11 @@ import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.external.DistributedStorageService;
+import cn.flying.platformapi.request.GetShareInfoRequest;
+import cn.flying.platformapi.request.GetUserShareCodesRequest;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
+import cn.flying.platformapi.response.BlockChainMessage;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.SharingVO;
 import cn.flying.platformapi.security.BlockChainRpcAuth;
@@ -24,6 +27,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -126,6 +130,69 @@ class FileRemoteClientTest {
         assertThat(actual).isSameAs(expected);
         assertThat(RpcContext.getClientAttachment().getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY))
                 .isEqualTo("previous-token");
+    }
+
+    /**
+     * 验证获取分享码时会把查看者身份封装进区块链请求。
+     */
+    @Test
+    void getUserShareCodes_shouldWrapUploaderAndRequesterInRpcRequest() {
+        Result<List<String>> expected = Result.success(List.of("share-1"));
+        when(blockChainService.getUserShareCodes(any(GetUserShareCodesRequest.class))).thenAnswer(invocation -> {
+            GetUserShareCodesRequest request = invocation.getArgument(0);
+            assertThat(request.uploader()).isEqualTo("owner");
+            assertThat(request.requester()).isEqualTo("viewer");
+            assertThat(RpcContext.getClientAttachment().getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY))
+                    .isEqualTo(RPC_TOKEN);
+            return expected;
+        });
+
+        Result<List<String>> actual = fileRemoteClient.getUserShareCodes("owner", "viewer");
+
+        assertThat(actual).isSameAs(expected);
+        assertThat(RpcContext.getClientAttachment().getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY))
+                .isNull();
+    }
+
+    /**
+     * 验证获取分享详情时会把分享码和查看者身份封装进区块链请求。
+     */
+    @Test
+    void getShareInfo_shouldWrapShareCodeAndRequesterInRpcRequest() {
+        Result<SharingVO> expected = Result.success(null);
+        when(blockChainService.getShareInfo(any(GetShareInfoRequest.class))).thenAnswer(invocation -> {
+            GetShareInfoRequest request = invocation.getArgument(0);
+            assertThat(request.shareCode()).isEqualTo("share-code");
+            assertThat(request.requester()).isEqualTo("viewer");
+            assertThat(RpcContext.getClientAttachment().getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY))
+                    .isEqualTo(RPC_TOKEN);
+            return expected;
+        });
+
+        Result<SharingVO> actual = fileRemoteClient.getShareInfo("share-code", "viewer");
+
+        assertThat(actual).isSameAs(expected);
+        assertThat(RpcContext.getClientAttachment().getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY))
+                .isNull();
+    }
+
+    /**
+     * 验证区块链健康信息调用同样会携带共享令牌。
+     */
+    @Test
+    void getCurrentBlockChainMessage_shouldAttachRpcToken() {
+        Result<BlockChainMessage> expected = Result.success(null);
+        when(blockChainService.getCurrentBlockChainMessage()).thenAnswer(invocation -> {
+            assertThat(RpcContext.getClientAttachment().getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY))
+                    .isEqualTo(RPC_TOKEN);
+            return expected;
+        });
+
+        Result<BlockChainMessage> actual = fileRemoteClient.getCurrentBlockChainMessage();
+
+        assertThat(actual).isSameAs(expected);
+        assertThat(RpcContext.getClientAttachment().getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY))
+                .isNull();
     }
 
     /**
