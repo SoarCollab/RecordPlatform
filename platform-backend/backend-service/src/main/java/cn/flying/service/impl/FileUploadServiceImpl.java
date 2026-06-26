@@ -66,7 +66,6 @@ public class FileUploadServiceImpl implements FileUploadService {
     private static final long MAX_FILE_SIZE_BYTES = 4096 * 1024 * 1024L; // 4GB 最大文件大小限制
     private static final int MAX_CHUNK_SIZE_BYTES = 80 * 1024 * 1024; // 80MB 最大分片大小 (Dubbo载荷限制100MB，预留安全边际)
     private static final int MAX_TOTAL_CHUNKS = 10_000;
-    private static final long MAX_IN_MEMORY_TRANSFER_BYTES = MAX_CHUNK_SIZE_BYTES;
     private static final int PROGRESS_UPDATE_INTERVAL_MS = 1000; // 进度日志更新间隔（毫秒）
     private static final Pattern SAFE_FILENAME_PATTERN = Pattern.compile("^[\\p{IsHan}a-zA-Z0-9\\u4e00-\\u9fa5._\\-\\s,;!@#$%&()+=]+$");
     private static final String HASH_ALGORITHM = "SHA-256"; // 哈希算法
@@ -366,9 +365,6 @@ public class FileUploadServiceImpl implements FileUploadService {
         }
         if (fileSize > MAX_FILE_SIZE_BYTES) {
             throw new GeneralException("文件大小超过限制 (" + (MAX_FILE_SIZE_BYTES / 1024 / 1024 / 1024) + "GB)");
-        }
-        if (fileSize > MAX_IN_MEMORY_TRANSFER_BYTES) {
-            throw new GeneralException("文件大小超过当前内存传输上限 (" + (MAX_IN_MEMORY_TRANSFER_BYTES / 1024 / 1024) + "MB)");
         }
         if (chunkSize <= 0 || chunkSize > MAX_CHUNK_SIZE_BYTES) {
             throw new GeneralException("分片大小必须在 1B 到 " + (MAX_CHUNK_SIZE_BYTES / 1024 / 1024) + "MB 之间");

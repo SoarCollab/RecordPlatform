@@ -257,23 +257,30 @@ class FileUploadServiceTest {
         }
 
         /**
-         * 验证当前内存型传输链路会拒绝超出安全上限的上传。
+         * 验证总文件大小可以超过单分片内存传输上限，只要客户端按安全分片大小上传。
          */
         @Test
-        @DisplayName("should reject file exceeding in-memory transfer limit")
-        void shouldRejectFileExceedingInMemoryTransferLimit() {
-            long tooLargeForMemoryTransfer = 81L * 1024 * 1024;
+        @DisplayName("should allow file larger than single chunk limit when chunked safely")
+        void shouldAllowFileLargerThanSingleChunkLimitWhenChunkedSafely() {
+            long fileSize = 81L * 1024 * 1024;
+            int chunkSize = 8 * 1024 * 1024;
+            int totalChunks = 11;
+            when(redisStateManager.getSessionIdByFileClientKey(anyString(), anyString())).thenReturn(null);
 
-            assertThrows(GeneralException.class, () ->
-                    fileUploadService.startUpload(
-                            USER_ID,
-                            "large.pdf",
-                            tooLargeForMemoryTransfer,
-                            "application/pdf",
-                            null,
-                            8 * 1024 * 1024,
-                            11
-                    ));
+            StartUploadVO result = fileUploadService.startUpload(
+                    USER_ID,
+                    "large.pdf",
+                    fileSize,
+                    "application/pdf",
+                    null,
+                    chunkSize,
+                    totalChunks
+            );
+
+            assertNotNull(result);
+            assertEquals(chunkSize, result.getChunkSize());
+            assertEquals(totalChunks, result.getTotalChunks());
+            verify(redisStateManager).saveNewState(any(FileUploadState.class), eq(SUID));
         }
     }
 
