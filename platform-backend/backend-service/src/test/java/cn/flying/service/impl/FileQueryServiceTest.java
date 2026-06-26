@@ -7,14 +7,17 @@ import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.dto.File;
+import cn.flying.dao.dto.FileShare;
 import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.vo.file.FileVersionVO;
+import cn.flying.dao.vo.file.ShareFileVO;
+import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.response.FileDetailVO;
+import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FriendFileShareService;
 import cn.flying.service.remote.FileRemoteClient;
-import cn.flying.platformapi.response.TransactionVO;
-import cn.flying.platformapi.constant.Result;
 import cn.flying.test.builders.AccountTestBuilder;
 import cn.flying.test.builders.FileTestBuilder;
 import org.junit.jupiter.api.*;
@@ -126,6 +129,43 @@ class FileQueryServiceTest {
     class GetFileContent {
 
         /**
+         * 验证本地所有权校验通过后，查询服务会按链上内容映射读取文件分片。
+         */
+        @Test
+        @DisplayName("should return file content for owned file")
+        void shouldReturnFileContentForOwnedFile() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                File ownedFile = new File()
+                        .setUid(USER_ID)
+                        .setFileHash(FILE_HASH)
+                        .setFileSize(1024L);
+                FileDetailVO detail = new FileDetailVO(
+                        String.valueOf(USER_ID),
+                        "owned.txt",
+                        "{}",
+                        "{\"node-a\":\"hash-a\"}",
+                        FILE_HASH,
+                        "2026-06-27T00:00:00Z",
+                        1L,
+                        1024L,
+                        "text/plain");
+                byte[] payload = "payload".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+                when(fileMapper.selectOne(any())).thenReturn(ownedFile);
+                when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH)).thenReturn(Result.success(detail));
+                when(fileRemoteClient.getFileListByHash(List.of("hash-a"), List.of("node-a")))
+                        .thenReturn(Result.success(List.of(payload)));
+
+                List<byte[]> result = fileQueryService.getFile(USER_ID, FILE_HASH);
+
+                assertEquals(1, result.size());
+                assertArrayEquals(payload, result.get(0));
+                verify(fileRemoteClient).getFileListByHash(List.of("hash-a"), List.of("node-a"));
+            }
+        }
+
+        /**
          * 验证超出当前内存型下载上限的文件不会进入远端 byte[] 聚合接口。
          */
         @Test
@@ -145,6 +185,68 @@ class FileQueryServiceTest {
                 verify(fileRemoteClient, never()).getFile(anyString(), anyString());
                 verify(fileRemoteClient, never()).getFileListByHash(anyList(), anyList());
             }
+        }
+    }
+
+    @Nested
+    @DisplayName("Public Share File Lookup")
+    class PublicShareFileLookup {
+
+        /**
+         * 验证公开分享文件列表只读取分享租户内的源文件，并填充展示所有者。
+         */
+        @Test
+        @DisplayName("should return public shared files in share tenant")
+        void shouldReturnPublicSharedFilesInShareTenant() {
+            FileShare share = new FileShare()
+                    .setTenantId(1L)
+                    .setUserId(OTHER_USER_ID)
+                    .setShareCode("PUBLIC1")
+                    .setShareType(cn.flying.common.constant.ShareType.PUBLIC.getCode())
+                    .setFileHashes("[\"" + FILE_HASH + "\"]")
+                    .setExpireTime(new java.util.Date(System.currentTimeMillis() + 60_000))
+                    .setStatus(FileShare.STATUS_ACTIVE);
+            File sourceFile = new File()
+                    .setId(7L)
+                    .setTenantId(1L)
+                    .setUid(OTHER_USER_ID)
+                    .setFileName("public.txt")
+                    .setFileHash(FILE_HASH)
+                    .setFileSize(1024L)
+                    .setContentType("text/plain");
+            Account owner = AccountTestBuilder.anAccount(a -> {
+                a.setId(OTHER_USER_ID);
+                a.setUsername("owner");
+            });
+
+            when(fileShareMapper.markAsExpiredIfNecessary("PUBLIC1")).thenReturn(0);
+            when(fileShareMapper.selectByShareCode("PUBLIC1")).thenReturn(share);
+            when(fileMapper.selectList(any())).thenReturn(List.of(sourceFile));
+            when(accountMapper.selectById(OTHER_USER_ID)).thenReturn(owner);
+
+            List<ShareFileVO> result;
+            try (MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                idUtilsMock.when(() -> IdUtils.toExternalId(7L)).thenReturn("ext_7");
+                result = fileQueryService.getShareFile("PUBLIC1");
+            }
+
+            assertEquals(1, result.size());
+            assertEquals("ext_7", result.get(0).id());
+            assertEquals("public.txt", result.get(0).fileName());
+            assertEquals("owner", result.get(0).ownerName());
+        }
+
+        /**
+         * 验证公开分享文件列表入口拒绝空分享码。
+         */
+        @Test
+        @DisplayName("should reject blank public sharing code")
+        void shouldRejectBlankPublicSharingCode() {
+            GeneralException ex = assertThrows(GeneralException.class,
+                    () -> fileQueryService.getShareFile(" "));
+
+            assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), ex.getResultEnum().getCode());
+            verify(fileShareMapper, never()).selectByShareCode(anyString());
         }
     }
 

@@ -13,6 +13,7 @@ import cn.flying.dao.dto.FileSource;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.mapper.FileSourceMapper;
+import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.dao.vo.file.ShareInfoVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.platformapi.constant.Result;
@@ -595,6 +596,43 @@ class FileServiceTest {
         }
 
         /**
+         * 验证普通用户通过本地所有权校验后，可以按区块链文件内容映射读取分片字节。
+         */
+        @Test
+        @DisplayName("should return file bytes for owned file")
+        void shouldReturnFileBytesForOwnedFile() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                File ownedFile = new File()
+                        .setUid(USER_ID)
+                        .setFileHash(FILE_HASH)
+                        .setFileSize(1024L);
+                FileDetailVO detail = new FileDetailVO(
+                        String.valueOf(USER_ID),
+                        "owned.txt",
+                        "{}",
+                        "{\"node-a\":\"hash-a\"}",
+                        FILE_HASH,
+                        "2026-06-27T00:00:00Z",
+                        1L,
+                        1024L,
+                        "text/plain");
+                byte[] payload = "payload".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+                when(fileMapper.selectOne(any())).thenReturn(ownedFile);
+                when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH)).thenReturn(Result.success(detail));
+                when(fileRemoteClient.getFileListByHash(List.of("hash-a"), List.of("node-a")))
+                        .thenReturn(Result.success(List.of(payload)));
+
+                List<byte[]> result = fileService.getFile(USER_ID, FILE_HASH);
+
+                assertEquals(1, result.size());
+                assertArrayEquals(payload, result.get(0));
+                verify(fileRemoteClient).getFileListByHash(List.of("hash-a"), List.of("node-a"));
+            }
+        }
+
+        /**
          * 验证超出当前内存型下载上限的文件不会继续调用远端 byte[] 聚合接口。
          */
         @Test
@@ -662,6 +700,36 @@ class FileServiceTest {
 
             assertEquals(ResultEnum.SHARE_CANCELLED.getCode(), ex.getResultEnum().getCode());
         }
+
+        /**
+         * 验证公开分享文件列表只在分享所属租户内读取，并转换为安全展示 VO。
+         */
+        @Test
+        @DisplayName("should return safe shared files for public share")
+        void shouldReturnSafeSharedFilesForPublicShare() {
+            File sourceFile = new File()
+                    .setId(7L)
+                    .setTenantId(1L)
+                    .setUid(USER_ID)
+                    .setFileName("public.txt")
+                    .setFileHash(FILE_HASH)
+                    .setFileSize(1024L)
+                    .setContentType("text/plain")
+                    .setDeleted(0);
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(aFileShare());
+            when(fileMapper.selectList(any())).thenReturn(List.of(sourceFile));
+
+            List<ShareFileVO> result;
+            try (MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                idUtilsMock.when(() -> IdUtils.toExternalId(7L)).thenReturn("ext_7");
+                result = fileService.getShareFile(SHARE_CODE);
+            }
+
+            assertEquals(1, result.size());
+            assertEquals("ext_7", result.get(0).id());
+            assertEquals("public.txt", result.get(0).fileName());
+            assertEquals(FILE_HASH, result.get(0).fileHash());
+        }
     }
 
     @Nested
@@ -710,6 +778,23 @@ class FileServiceTest {
             GeneralException ex = assertThrows(GeneralException.class, () -> fileService.getShareInfo(SHARE_CODE));
 
             assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), ex.getResultEnum().getCode());
+            verify(fileMapper, never()).selectList(any());
+        }
+
+        /**
+         * 验证公开分享缺少文件哈希时返回空文件状态，不继续读取文件表。
+         */
+        @Test
+        @DisplayName("should return empty status when share has no file hashes")
+        void shouldReturnEmptyStatusWhenShareHasNoFileHashes() {
+            when(fileShareMapper.selectByShareCode(SHARE_CODE))
+                    .thenReturn(aFileShare(s -> s.setFileHashes("[]")));
+
+            ShareInfoVO info = fileService.getShareInfo(SHARE_CODE);
+
+            assertNotNull(info);
+            assertEquals(SHARE_CODE, info.getShareCode());
+            assertEquals(ShareInfoVO.STATUS_EMPTY_FILES, info.getStatus());
             verify(fileMapper, never()).selectList(any());
         }
     }
@@ -768,6 +853,66 @@ class FileServiceTest {
             assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), ex.getResultEnum().getCode());
             verify(fileMapper, never()).selectList(any());
             verify(fileMapper, never()).insert(any(File.class));
+        }
+
+        /**
+         * 验证保存分享文件成功时复制源文件、写入来源链路，并记录分享保存审计。
+         */
+        @Test
+        @DisplayName("should copy authorized shared file and record provenance")
+        void shouldCopyAuthorizedSharedFileAndRecordProvenance() {
+            FileShare share = aFileShare(s -> {
+                s.setTenantId(1L);
+                s.setUserId(OTHER_USER_ID);
+                s.setFileHashes("[\"allowed-hash\"]");
+            });
+            File sourceFile = new File()
+                    .setId(99L)
+                    .setTenantId(1L)
+                    .setUid(OTHER_USER_ID)
+                    .setFileHash("allowed-hash")
+                    .setFileName("shared.txt")
+                    .setFileParam("{\"fileSize\":1024,\"contentType\":\"text/plain\"}")
+                    .setStatus(1)
+                    .setDeleted(0)
+                    .setVersion(1)
+                    .setIsLatest(1)
+                    .setVersionGroupId(99L);
+
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
+            when(fileMapper.selectList(any())).thenReturn(List.of(sourceFile));
+            when(fileSourceMapper.selectByFileId(99L, 1L)).thenReturn(null);
+            when(fileMapper.insert(any(File.class))).thenAnswer(invocation -> {
+                File copied = invocation.getArgument(0);
+                copied.setId(300L);
+                return 1;
+            });
+
+            MDC.put(Const.ATTR_USER_ID, String.valueOf(USER_ID));
+            TenantContext.setTenantId(2L);
+            try {
+                fileService.saveShareFile(List.of("99"), SHARE_CODE, "127.0.0.1");
+            } finally {
+                MDC.clear();
+                TenantContext.clear();
+            }
+
+            ArgumentCaptor<File> copiedCaptor = ArgumentCaptor.forClass(File.class);
+            verify(fileMapper).insert(copiedCaptor.capture());
+            File copied = copiedCaptor.getValue();
+            assertEquals(USER_ID, copied.getUid());
+            assertEquals(99L, copied.getOrigin());
+            assertEquals(OTHER_USER_ID, copied.getSharedFromUserId());
+            assertEquals("allowed-hash", copied.getFileHash());
+
+            ArgumentCaptor<FileSource> sourceCaptor = ArgumentCaptor.forClass(FileSource.class);
+            verify(fileSourceMapper).insert(sourceCaptor.capture());
+            FileSource provenance = sourceCaptor.getValue();
+            assertEquals(300L, provenance.getFileId());
+            assertEquals(99L, provenance.getSourceFileId());
+            assertEquals(OTHER_USER_ID, provenance.getSourceUserId());
+            assertEquals(SHARE_CODE, provenance.getShareCode());
+            verify(shareAuditService).logShareSave(SHARE_CODE, USER_ID, "allowed-hash", "shared.txt", "127.0.0.1");
         }
     }
 

@@ -10,7 +10,9 @@ import cn.flying.dao.mapper.SysPermissionMapper;
 import cn.flying.dao.mapper.SysRolePermissionMapper;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -330,6 +332,74 @@ class PermissionServiceImplTest {
     }
 
     @Nested
+    @DisplayName("tenant-scoped permission queries")
+    class TenantScopedPermissionQueries {
+
+        /**
+         * 验证权限树查询委托 mapper，并返回当前租户可见的权限集合。
+         */
+        @Test
+        @DisplayName("should return tenant visible permission tree")
+        void getPermissionTree_returnsTenantVisiblePermissions() {
+            SysPermission global = createPermission(1L, PERM_FILE_READ, "file");
+            global.setTenantId(0L);
+            SysPermission tenant = createPermission(2L, PERM_FILE_WRITE, "file");
+            when(permissionMapper.selectList(any())).thenReturn(List.of(global, tenant));
+
+            List<SysPermission> result = permissionService.getPermissionTree(TENANT_ID);
+
+            assertEquals(List.of(global, tenant), result);
+            verify(permissionMapper).selectList(any());
+        }
+
+        /**
+         * 验证权限分页查询保留模块过滤和租户可见范围。
+         */
+        @Test
+        @DisplayName("should list permissions with optional module filter")
+        void listPermissions_returnsPagedPermissions() {
+            Page<SysPermission> page = new Page<>(1, 10);
+            Page<SysPermission> expected = new Page<>(1, 10);
+            expected.setRecords(List.of(createPermission(1L, PERM_FILE_READ, "file")));
+            when(permissionMapper.selectPage(eq(page), any())).thenReturn(expected);
+
+            IPage<SysPermission> result = permissionService.listPermissions(TENANT_ID, "file", page);
+
+            assertSame(expected, result);
+            verify(permissionMapper).selectPage(eq(page), any());
+        }
+
+        /**
+         * 验证权限模块列表从 mapper 结果提取模块名。
+         */
+        @Test
+        @DisplayName("should list distinct permission modules")
+        void listModules_mapsPermissionModules() {
+            SysPermission file = createPermission(1L, PERM_FILE_READ, "file");
+            SysPermission admin = createPermission(2L, PERM_ADMIN_ALL, "admin");
+            when(permissionMapper.selectList(any())).thenReturn(List.of(file, admin));
+
+            List<String> result = permissionService.listModules(TENANT_ID);
+
+            assertEquals(List.of("file", "admin"), result);
+        }
+
+        /**
+         * 验证权限创建返回已插入的实体。
+         */
+        @Test
+        @DisplayName("should insert and return permission")
+        void createPermission_insertsAndReturnsPermission() {
+            SysPermission permission = createPermission(20L, "audit:read", "audit");
+
+            SysPermission result = permissionService.createPermission(permission);
+
+            assertSame(permission, result);
+            verify(permissionMapper).insert(permission);
+        }
+    }
+
+    @Nested
     @DisplayName("tenant-scoped permission CRUD")
     class TenantScopedPermissionCrud {
 
@@ -390,6 +460,46 @@ class PermissionServiceImplTest {
         }
 
         /**
+         * 验证未修改任何字段时不会执行 update，也不会清缓存。
+         */
+        @Test
+        @DisplayName("should skip update and cache eviction when no fields change")
+        void updatePermissionWithoutChanges_skipsUpdateAndCacheEviction() {
+            SysPermission permission = createPermission(10L, PERM_FILE_READ, "file");
+            when(permissionMapper.selectOne(any())).thenReturn(permission);
+
+            SysPermission result;
+            try (MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                idUtilsMock.when(() -> IdUtils.fromExternalId("ext_10")).thenReturn(10L);
+                result = permissionService.updatePermission("ext_10", null, null, null, TENANT_ID);
+            }
+
+            assertSame(permission, result);
+            verify(permissionMapper, never()).update(isNull(), any());
+            verify(cacheUtils, never()).deleteCachePattern(anyString());
+            verify(cacheUtils, never()).deleteCache(anyString());
+        }
+
+        /**
+         * 验证更新找不到当前租户权限时返回 null，避免跨租户写入。
+         */
+        @Test
+        @DisplayName("should return null when tenant scoped update misses")
+        void updatePermissionTenantMiss_returnsNull() {
+            when(permissionMapper.selectOne(any())).thenReturn(null);
+
+            SysPermission result;
+            try (MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                idUtilsMock.when(() -> IdUtils.fromExternalId("ext_404")).thenReturn(404L);
+                result = permissionService.updatePermission("ext_404", "name", "desc", 1, TENANT_ID);
+            }
+
+            assertNull(result);
+            verify(permissionMapper, never()).update(isNull(), any());
+            verify(cacheUtils, never()).deleteCachePattern(anyString());
+        }
+
+        /**
          * 验证权限删除先做租户作用域查询，并使用带租户条件的 delete wrapper。
          */
         @Test
@@ -411,6 +521,24 @@ class PermissionServiceImplTest {
         }
 
         /**
+         * 验证删除找不到当前租户权限时不会删除映射或清缓存。
+         */
+        @Test
+        @DisplayName("should skip deletes when tenant scoped delete misses")
+        void deletePermissionTenantMiss_skipsDeletes() {
+            when(permissionMapper.selectOne(any())).thenReturn(null);
+
+            try (MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                idUtilsMock.when(() -> IdUtils.fromExternalId("ext_404")).thenReturn(404L);
+                permissionService.deletePermission("ext_404", TENANT_ID);
+            }
+
+            verify(rolePermissionMapper, never()).delete(any(Wrapper.class));
+            verify(permissionMapper, never()).delete(any(Wrapper.class));
+            verify(cacheUtils, never()).deleteCachePattern(anyString());
+        }
+
+        /**
          * 验证角色授权显式写入当前租户 ID。
          */
         @Test
@@ -428,6 +556,36 @@ class PermissionServiceImplTest {
             assertEquals(TENANT_ID, rolePermission.getTenantId());
             assertEquals(ROLE_USER, rolePermission.getRole());
             assertEquals(permission.getId(), rolePermission.getPermissionId());
+        }
+
+        /**
+         * 验证授权时权限码不存在会抛出业务异常。
+         */
+        @Test
+        @DisplayName("should reject assigning unknown permission code")
+        void assignPermissionToRoleUnknownPermission_throws() {
+            when(permissionMapper.selectByCode(PERM_FILE_WRITE, TENANT_ID)).thenReturn(null);
+
+            assertThrows(
+                    cn.flying.common.exception.GeneralException.class,
+                    () -> permissionService.assignPermissionToRole(ROLE_USER, PERM_FILE_WRITE, TENANT_ID));
+            verify(rolePermissionMapper, never()).insert(any(SysRolePermission.class));
+        }
+
+        /**
+         * 验证重复授权会被拒绝，避免重复角色权限映射。
+         */
+        @Test
+        @DisplayName("should reject duplicate role permission assignment")
+        void assignPermissionToRoleDuplicate_throws() {
+            SysPermission permission = createPermission(12L, PERM_FILE_WRITE, "file");
+            when(permissionMapper.selectByCode(PERM_FILE_WRITE, TENANT_ID)).thenReturn(permission);
+            when(rolePermissionMapper.countByRoleAndPermission(ROLE_USER, PERM_FILE_WRITE, TENANT_ID)).thenReturn(1);
+
+            assertThrows(
+                    cn.flying.common.exception.GeneralException.class,
+                    () -> permissionService.assignPermissionToRole(ROLE_USER, PERM_FILE_WRITE, TENANT_ID));
+            verify(rolePermissionMapper, never()).insert(any(SysRolePermission.class));
         }
 
         /**
@@ -466,6 +624,20 @@ class PermissionServiceImplTest {
             assertTrue(sqlSegment.contains("permission_id"));
             assertTrue(sqlSegment.contains("tenant_id"));
             verify(cacheUtils).deleteCache(buildExpectedCacheKey(ROLE_USER, TENANT_ID));
+        }
+
+        /**
+         * 验证撤销不存在的权限码会抛出业务异常。
+         */
+        @Test
+        @DisplayName("should reject revoking unknown permission code")
+        void revokePermissionFromRoleUnknownPermission_throws() {
+            when(permissionMapper.selectByCode(PERM_FILE_WRITE, TENANT_ID)).thenReturn(null);
+
+            assertThrows(
+                    cn.flying.common.exception.GeneralException.class,
+                    () -> permissionService.revokePermissionFromRole(ROLE_USER, PERM_FILE_WRITE, TENANT_ID));
+            verify(rolePermissionMapper, never()).delete(any(Wrapper.class));
         }
 
         /**
