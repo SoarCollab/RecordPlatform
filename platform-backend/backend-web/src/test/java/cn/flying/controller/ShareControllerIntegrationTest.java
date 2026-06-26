@@ -418,7 +418,7 @@ class ShareControllerIntegrationTest extends BaseControllerIntegrationTest {
             mockMvc.perform(get(BASE_URL + "/" + shareCode + "/info")
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.code").value(403))
+                    .andExpect(jsonPath("$.code").value(ResultEnum.PERMISSION_UNAUTHORIZED.getCode()))
                     .andExpect(jsonPath("$.message").value("此分享需要登录后才能访问"));
         }
     }
