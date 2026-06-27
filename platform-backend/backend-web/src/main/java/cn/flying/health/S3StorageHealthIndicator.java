@@ -6,6 +6,7 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -20,8 +21,16 @@ public class S3StorageHealthIndicator implements HealthIndicator {
     @Resource
     private FileRemoteClient fileRemoteClient;
 
+    @Value("${management.health.remote-rpc.enabled:false}")
+    private boolean remoteRpcHealthEnabled;
+
     @Override
     public Health health() {
+        if (!remoteRpcHealthEnabled) {
+            return Health.up()
+                    .withDetail("remoteCheck", "disabled")
+                    .build();
+        }
         try {
             Result<Map<String, Boolean>> result = fileRemoteClient.getClusterHealth();
             if (result == null || result.getData() == null) {

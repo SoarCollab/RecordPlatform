@@ -1,7 +1,6 @@
 package cn.flying.service.sse;
 
 import cn.flying.common.constant.UserRole;
-import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.mapper.AccountMapper;
@@ -63,6 +62,11 @@ public class SseEmitterManager {
         List<SseEmitter> emittersToComplete = new ArrayList<>();
         uc.lock().lock();
         try {
+            SseEmitter replacedEmitter = uc.map().remove(connectionId);
+            if (replacedEmitter != null) {
+                emittersToComplete.add(replacedEmitter);
+            }
+
             // 限制每个用户的最大连接数，防止滥用
             while (uc.map().size() >= MAX_CONNECTIONS_PER_USER) {
                 SseEmitter oldEmitter = removeOldestConnectionLocked(tenantId, userId, uc.map());
@@ -86,18 +90,18 @@ public class SseEmitterManager {
 
         emitter.onCompletion(() -> {
             log.info("SSE 连接完成: tenantId={}, userId={}, connectionId={}", tenantId, userId, connectionId);
-            removeConnection(tenantId, userId, connectionId);
+            removeConnection(tenantId, userId, connectionId, emitter, false);
         });
 
         emitter.onTimeout(() -> {
             log.info("SSE 连接超时: tenantId={}, userId={}, connectionId={}", tenantId, userId, connectionId);
-            removeConnection(tenantId, userId, connectionId);
+            removeConnection(tenantId, userId, connectionId, emitter, false);
         });
 
         emitter.onError(e -> {
             log.warn("SSE 连接错误: tenantId={}, userId={}, connectionId={}, error={}",
                     tenantId, userId, connectionId, e.getMessage());
-            removeConnection(tenantId, userId, connectionId);
+            removeConnection(tenantId, userId, connectionId, emitter, false);
         });
 
         getTenantOnlineUsers(tenantId).add(userId);
@@ -152,6 +156,18 @@ public class SseEmitterManager {
      * 移除指定连接
      */
     public void removeConnection(Long tenantId, Long userId, String connectionId) {
+        removeConnection(tenantId, userId, connectionId, null, true);
+    }
+
+    /**
+     * 移除指定连接，可限制只移除指定 emitter，避免旧连接回调误删同 ID 新连接。
+     */
+    private void removeConnection(
+            Long tenantId,
+            Long userId,
+            String connectionId,
+            SseEmitter expectedEmitter,
+            boolean completeRemoved) {
         Map<Long, UserConnections> tenantEmitters = emittersByTenant.get(tenantId);
         if (tenantEmitters == null) return;
 
@@ -162,13 +178,17 @@ public class SseEmitterManager {
         boolean isEmpty;
         uc.lock().lock();
         try {
+            emitter = uc.map().get(connectionId);
+            if (expectedEmitter != null && emitter != expectedEmitter) {
+                return;
+            }
             emitter = uc.map().remove(connectionId);
             isEmpty = uc.map().isEmpty();
         } finally {
             uc.lock().unlock();
         }
 
-        if (emitter != null) {
+        if (completeRemoved && emitter != null) {
             try {
                 emitter.complete();
             } catch (Exception e) {
@@ -455,31 +475,4 @@ public class SseEmitterManager {
         log.info("向租户 {} 的 {} 个在线管理员/监控员广播审计告警", tenantId, adminIds.size());
     }
 
-    /**
-     * 向所有租户的在线管理员和监控员广播消息（跨租户全局广播）
-     * 自动处理租户上下文切换，确保数据库查询正确执行
-     *
-     * @param event SSE事件
-     */
-    public void broadcastToAllAdmins(SseEvent event) {
-        List<Long> tenantIds = new ArrayList<>(emittersByTenant.keySet());
-        if (tenantIds.isEmpty()) {
-            log.debug("没有活跃的SSE连接，跳过全局管理员广播");
-            return;
-        }
-
-        int successCount = 0;
-        for (Long tenantId : tenantIds) {
-            try {
-                TenantContext.callWithTenant(tenantId, () -> {
-                    broadcastToAdmins(tenantId, event);
-                    return null;
-                });
-                successCount++;
-            } catch (Exception e) {
-                log.warn("向租户 {} 的管理员广播失败: {}", tenantId, e.getMessage());
-            }
-        }
-        log.info("全局管理员广播完成，成功租户数={}/总租户数={}", successCount, tenantIds.size());
-    }
 }

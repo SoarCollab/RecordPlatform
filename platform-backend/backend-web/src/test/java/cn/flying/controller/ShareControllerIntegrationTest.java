@@ -75,7 +75,7 @@ class ShareControllerIntegrationTest extends BaseControllerIntegrationTest {
         file.setUid(userId);
         file.setFileName("test_file_" + fileHash + ".txt");
         file.setFileHash(fileHash);
-        file.setFileParam("{\"fileSize\":1024,\"contentType\":\"text/plain\"}");
+        file.setFileParam("{\"fileSize\":1024,\"contentType\":\"text/plain\",\"initialKey\":\"secret-key-" + fileHash + "\"}");
         file.setClassification("document");
         file.setStatus(1);
         file.setTenantId(tenantId);
@@ -128,7 +128,9 @@ class ShareControllerIntegrationTest extends BaseControllerIntegrationTest {
                     .andExpect(jsonPath("$.data.shareCode").value(shareCode))
                     .andExpect(jsonPath("$.data.shareType").value(0))
                     .andExpect(jsonPath("$.data.files").isArray())
-                    .andExpect(jsonPath("$.data.files[0].fileHash").value(fileHash));
+                    .andExpect(jsonPath("$.data.files[0].fileHash").value(fileHash))
+                    .andExpect(jsonPath("$.data.files[0].fileParam").doesNotExist())
+                    .andExpect(jsonPath("$.data.files[0].initialKey").doesNotExist());
         }
 
         @Test
@@ -402,8 +404,8 @@ class ShareControllerIntegrationTest extends BaseControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("should return correct share type for private share")
-        void shouldReturnCorrectShareTypeForPrivate() throws Exception {
+        @DisplayName("should reject private share info on anonymous endpoint")
+        void shouldRejectPrivateShareInfoOnAnonymousEndpoint() throws Exception {
             String shareCode = generateShareCode();
             String fileHash = "sha256_private_type_" + System.currentTimeMillis();
 
@@ -416,8 +418,8 @@ class ShareControllerIntegrationTest extends BaseControllerIntegrationTest {
             mockMvc.perform(get(BASE_URL + "/" + shareCode + "/info")
                             .header(HEADER_TENANT_ID, testTenantId))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.code").value(200))
-                    .andExpect(jsonPath("$.data.shareType").value(1));
+                    .andExpect(jsonPath("$.code").value(ResultEnum.PERMISSION_UNAUTHORIZED.getCode()))
+                    .andExpect(jsonPath("$.message").value("此分享需要登录后才能访问"));
         }
     }
 

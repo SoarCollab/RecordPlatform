@@ -54,6 +54,8 @@ spring:
   web:
     verify:
       mail-limit: 60
+    registration:
+      tenant-id: ${PUBLIC_REGISTRATION_TENANT_ID:0}
     flow:
       period: 3
       limit: 50
@@ -62,6 +64,10 @@ spring:
       origin: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
       credentials: true
       methods: GET,POST,PUT,DELETE,OPTIONS
+
+record-platform:
+  rpc:
+    blockchain-token: ${BLOCKCHAIN_RPC_TOKEN}
 
 # springdoc-openapi项目配置
 springdoc:
@@ -87,12 +93,12 @@ springdoc:
 
 # knife4j配置
 knife4j:
-  enable: true
-  production: false
+  enable: ${KNIFE4J_ENABLE:true}
+  production: ${KNIFE4J_PRODUCTION:true}
   basic:
-    enable: true
-    username: ${KNIFE4J_USERNAME:admin}
-    password: ${KNIFE4J_PASSWORD:123456}
+    enable: ${KNIFE4J_BASIC_ENABLE:true}
+    username: ${KNIFE4J_USERNAME}
+    password: ${KNIFE4J_PASSWORD}
   setting:
     language: zh_cn
     enable-group: true
@@ -263,10 +269,12 @@ management:
       base-path: /actuator
   endpoint:
     health:
-      show-details: when-authorized
+      show-details: never
       probes:
         enabled: true
   health:
+    remote-rpc:
+      enabled: false
     livenessState:
       enabled: true
     readinessState:
@@ -277,9 +285,9 @@ management:
 # Local-only load testing seed data (k6)
 loadtest:
   seed:
-    enabled: true
+    enabled: false
     tenant-id: 1
     tenant-code: loadtest
     tenant-name: LoadTest
     username: loadtest
-    password: ${LOADTEST_PASSWORD:loadtest123}
+    password: ${LOADTEST_PASSWORD:}

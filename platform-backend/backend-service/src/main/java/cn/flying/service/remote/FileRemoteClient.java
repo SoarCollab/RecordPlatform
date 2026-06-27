@@ -6,6 +6,8 @@ import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.request.CancelShareRequest;
 import cn.flying.platformapi.request.DeleteFilesRequest;
+import cn.flying.platformapi.request.GetShareInfoRequest;
+import cn.flying.platformapi.request.GetUserShareCodesRequest;
 import cn.flying.platformapi.request.ShareFilesRequest;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
@@ -14,14 +16,19 @@ import cn.flying.platformapi.response.SharingVO;
 import cn.flying.platformapi.response.BlockChainMessage;
 import cn.flying.platformapi.response.StorageCapacityVO;
 import cn.flying.platformapi.response.TransactionVO;
+import cn.flying.platformapi.security.BlockChainRpcAuth;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
+import org.apache.dubbo.rpc.RpcContext;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 @Slf4j
 @Component
@@ -32,6 +39,19 @@ public class FileRemoteClient {
 
     @DubboReference(id = "storageServiceFileRemoteClient", version = DistributedStorageService.VERSION, providedBy = "RecordPlatform_storage")
     private DistributedStorageService storageService;
+
+    @Value("${record-platform.rpc.blockchain-token:}")
+    private String blockchainRpcToken;
+
+    /**
+     * 启动时校验后端到 FISCO 的 RPC 共享令牌配置。
+     */
+    @PostConstruct
+    void validateRpcTokenConfiguration() {
+        if (!BlockChainRpcAuth.hasToken(blockchainRpcToken)) {
+            throw new IllegalStateException(BlockChainRpcAuth.TOKEN_PROPERTY_NAME + " must be configured");
+        }
+    }
 
     @CircuitBreaker(name = "storageService", fallbackMethod = "storeFileChunkFallback")
     @Retry(name = "storageService")
@@ -47,7 +67,7 @@ public class FileRemoteClient {
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "storeFileOnChainFallback")
     @Retry(name = "blockChainService")
     public Result<StoreFileResponse> storeFileOnChain(StoreFileRequest request) {
-        return blockChainService.storeFile(request);
+        return callBlockChain(() -> blockChainService.storeFile(request));
     }
 
     private Result<StoreFileResponse> storeFileOnChainFallback(StoreFileRequest request, Throwable t) {
@@ -58,7 +78,7 @@ public class FileRemoteClient {
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "getFileFallback")
     @Retry(name = "blockChainService")
     public Result<FileDetailVO> getFile(String userId, String fileHash) {
-        return blockChainService.getFile(userId, fileHash);
+        return callBlockChain(() -> blockChainService.getFile(userId, fileHash));
     }
 
     private Result<FileDetailVO> getFileFallback(String userId, String fileHash, Throwable t) {
@@ -91,7 +111,7 @@ public class FileRemoteClient {
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "getTransactionFallback")
     @Retry(name = "blockChainService")
     public Result<TransactionVO> getTransactionByHash(String transactionHash) {
-        return blockChainService.getTransactionByHash(transactionHash);
+        return callBlockChain(() -> blockChainService.getTransactionByHash(transactionHash));
     }
 
     private Result<TransactionVO> getTransactionFallback(String transactionHash, Throwable t) {
@@ -102,7 +122,7 @@ public class FileRemoteClient {
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "shareFilesFallback")
     @Retry(name = "blockChainService")
     public Result<String> shareFiles(ShareFilesRequest request) {
-        return blockChainService.shareFiles(request);
+        return callBlockChain(() -> blockChainService.shareFiles(request));
     }
 
     private Result<String> shareFilesFallback(ShareFilesRequest request, Throwable t) {
@@ -113,7 +133,7 @@ public class FileRemoteClient {
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "getSharedFilesFallback")
     @Retry(name = "blockChainService")
     public Result<SharingVO> getSharedFiles(String sharingCode) {
-        return blockChainService.getSharedFiles(sharingCode);
+        return callBlockChain(() -> blockChainService.getSharedFiles(sharingCode));
     }
 
     private Result<SharingVO> getSharedFilesFallback(String sharingCode, Throwable t) {
@@ -124,7 +144,7 @@ public class FileRemoteClient {
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "deleteFilesFallback")
     @Retry(name = "blockChainService")
     public Result<Boolean> deleteFiles(DeleteFilesRequest request) {
-        return blockChainService.deleteFiles(request);
+        return callBlockChain(() -> blockChainService.deleteFiles(request));
     }
 
     private Result<Boolean> deleteFilesFallback(DeleteFilesRequest request, Throwable t) {
@@ -146,7 +166,7 @@ public class FileRemoteClient {
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "cancelShareFallback")
     @Retry(name = "blockChainService")
     public Result<Boolean> cancelShare(CancelShareRequest request) {
-        return blockChainService.cancelShare(request);
+        return callBlockChain(() -> blockChainService.cancelShare(request));
     }
 
     private Result<Boolean> cancelShareFallback(CancelShareRequest request, Throwable t) {
@@ -156,23 +176,25 @@ public class FileRemoteClient {
 
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "getUserShareCodesFallback")
     @Retry(name = "blockChainService")
-    public Result<List<String>> getUserShareCodes(String uploader) {
-        return blockChainService.getUserShareCodes(uploader);
+    public Result<List<String>> getUserShareCodes(String uploader, String requester) {
+        return callBlockChain(() -> blockChainService.getUserShareCodes(
+                new GetUserShareCodesRequest(uploader, requester)));
     }
 
-    private Result<List<String>> getUserShareCodesFallback(String uploader, Throwable t) {
-        log.error("BlockChain service getUserShareCodes failed, uploader={}", uploader, t);
+    private Result<List<String>> getUserShareCodesFallback(String uploader, String requester, Throwable t) {
+        log.error("BlockChain service getUserShareCodes failed, uploader={}, requester={}", uploader, requester, t);
         return new Result<>(ResultEnum.BLOCKCHAIN_ERROR, List.of());
     }
 
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "getShareInfoFallback")
     @Retry(name = "blockChainService")
-    public Result<SharingVO> getShareInfo(String shareCode) {
-        return blockChainService.getShareInfo(shareCode);
+    public Result<SharingVO> getShareInfo(String shareCode, String requester) {
+        return callBlockChain(() -> blockChainService.getShareInfo(
+                new GetShareInfoRequest(shareCode, requester)));
     }
 
-    private Result<SharingVO> getShareInfoFallback(String shareCode, Throwable t) {
-        log.error("BlockChain service getShareInfo failed, shareCode={}", shareCode, t);
+    private Result<SharingVO> getShareInfoFallback(String shareCode, String requester, Throwable t) {
+        log.error("BlockChain service getShareInfo failed, shareCode={}, requester={}", shareCode, requester, t);
         return new Result<>(ResultEnum.GET_USER_SHARE_FILE_ERROR, null);
     }
 
@@ -200,11 +222,40 @@ public class FileRemoteClient {
 
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "getCurrentBlockChainMessageFallback")
     public Result<BlockChainMessage> getCurrentBlockChainMessage() {
-        return blockChainService.getCurrentBlockChainMessage();
+        return callBlockChain(() -> blockChainService.getCurrentBlockChainMessage());
     }
 
     private Result<BlockChainMessage> getCurrentBlockChainMessageFallback(Throwable t) {
         log.error("BlockChain service getCurrentBlockChainMessage failed", t);
         return new Result<>(ResultEnum.SERVICE_CIRCUIT_OPEN, null);
+    }
+
+    /**
+     * 为区块链 Dubbo 调用附加服务端共享令牌并在调用结束后恢复上下文。
+     */
+    private <T> T callBlockChain(Supplier<T> supplier) {
+        if (!BlockChainRpcAuth.hasToken(blockchainRpcToken)) {
+            throw new IllegalStateException("Blockchain RPC token is not configured");
+        }
+
+        RpcContext clientContext = RpcContext.getClientAttachment();
+        String previousToken = clientContext.getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY);
+        clientContext.setAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY, blockchainRpcToken);
+        try {
+            return supplier.get();
+        } finally {
+            restoreBlockChainRpcToken(clientContext, previousToken);
+        }
+    }
+
+    /**
+     * 恢复调用前的 Dubbo attachment，避免令牌泄露到其他 RPC 调用。
+     */
+    private void restoreBlockChainRpcToken(RpcContext clientContext, String previousToken) {
+        if (previousToken == null) {
+            clientContext.removeAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY);
+        } else {
+            clientContext.setAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY, previousToken);
+        }
     }
 }

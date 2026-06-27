@@ -3673,9 +3673,9 @@ export interface components {
             sampledRequestCount: number;
             /**
              * Format: int64
-             * @description 租户ID
+             * @description 兼容字段；服务端以当前租户为准，传入时必须与当前租户一致
              */
-            tenantId: number;
+            tenantId?: number;
         };
         /** @description 配额灰度扩容审计响应 */
         QuotaRolloutAuditVO: {
@@ -4187,18 +4187,6 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
-        ResultListFile: {
-            /**
-             * Format: int32
-             * @description 操作代码
-             */
-            code?: number;
-            /** @description 结果数据 */
-            data?: components["schemas"]["file"][];
-            /** @description 提示信息 */
-            message?: string;
-        };
-        /** @description 返回结果封装 */
         ResultListFileVersionVO: {
             /**
              * Format: int32
@@ -4231,6 +4219,18 @@ export interface components {
             code?: number;
             /** @description 结果数据 */
             data?: components["schemas"]["HighFrequencyOperationVO"][];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultListShareFileVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            /** @description 结果数据 */
+            data?: components["schemas"]["ShareFileVO"][];
             /** @description 提示信息 */
             message?: string;
         };
@@ -4649,6 +4649,35 @@ export interface components {
              */
             viewCount?: number;
         };
+        /** @description 分享文件展示响应 */
+        ShareFileVO: {
+            /** @description 文件分类 */
+            classification?: string;
+            /** @description 文件MIME类型 */
+            contentType?: string;
+            /**
+             * Format: date-time
+             * @description 创建时间
+             */
+            createTime?: string;
+            /** @description 文件哈希 */
+            fileHash?: string;
+            /** @description 文件名称 */
+            fileName?: string;
+            /**
+             * Format: int64
+             * @description 文件大小
+             */
+            fileSize?: number;
+            /** @description 文件外部ID */
+            id?: string;
+            /** @description 原上传者用户名 */
+            originOwnerName?: string;
+            /** @description 文件所有者用户名 */
+            ownerName?: string;
+            /** @description 直接分享者用户名 */
+            sharedFromUserName?: string;
+        };
         /** @description 分享详情 */
         ShareInfoVO: {
             /**
@@ -4657,7 +4686,7 @@ export interface components {
              */
             expireTime?: string;
             /** @description 分享文件列表 */
-            files?: components["schemas"]["file"][];
+            files?: components["schemas"]["ShareFileVO"][];
             /** @description 分享码 */
             shareCode?: string;
             /**
@@ -5203,92 +5232,6 @@ export interface components {
              */
             operationCount?: number;
         };
-        /** @description 文件信息实体类 */
-        file: {
-            /** @description 文件分类 */
-            classification?: string;
-            /** @description 文件类型 */
-            contentType?: string;
-            /**
-             * Format: date-time
-             * @description 创建时间
-             */
-            createTime?: string;
-            /**
-             * Format: int32
-             * @description 逻辑删除字段：0—>未删除 , 1->已删除
-             */
-            deleted?: number;
-            /** @description 文件哈希 */
-            fileHash?: string;
-            /** @description 文件名称 */
-            fileName?: string;
-            /** @description 文件参数(JSON):文件类型、文件描述、文件大小等其它参数 */
-            fileParam?: string;
-            /**
-             * Format: int64
-             * @description 文件大小
-             */
-            fileSize?: number;
-            /**
-             * Format: int64
-             * @description 主键ID
-             */
-            id?: number;
-            /**
-             * Format: int32
-             * @description 是否最新版本：1=是，0=否
-             */
-            isLatest?: number;
-            /**
-             * Format: int64
-             * @description 来源Id(标识分享文件原始来源用户Id)
-             */
-            origin?: number;
-            /** @description 原上传者用户名（来自分享保存场景） */
-            originOwnerName?: string;
-            /** @description 文件所有者用户名（分享场景） */
-            ownerName?: string;
-            /**
-             * Format: int64
-             * @description 上一版本文件ID
-             */
-            parentVersionId?: number;
-            /**
-             * Format: int64
-             * @description 直接分享者用户ID
-             */
-            sharedFromUserId?: number;
-            /** @description 直接分享者用户名 */
-            sharedFromUserName?: string;
-            /**
-             * Format: int32
-             * @description 文件上传状态(是否成功上传至区块链与分布式存储): 见枚举类——>FileUploadStatus
-             */
-            status?: number;
-            /**
-             * Format: int64
-             * @description 租户ID
-             */
-            tenantId?: number;
-            /** @description 交易哈希 */
-            transactionHash?: string;
-            /**
-             * Format: int64
-             * @description 用户ID
-             */
-            uid?: number;
-            /**
-             * Format: int32
-             * @description 版本号，从 1 开始
-             */
-            version?: number;
-            /**
-             * Format: int64
-             * @description 版本链分组ID
-             */
-            versionGroupId?: number;
-        };
     };
     responses: never;
     parameters: never;
@@ -5632,8 +5575,6 @@ export interface operations {
             query: {
                 /** @description 灰度批次ID */
                 batchId: string;
-                /** @description 租户ID */
-                tenantId: number;
             };
             header?: never;
             path?: never;
@@ -7314,7 +7255,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ResultListFile"];
+                    "*/*": components["schemas"]["ResultListShareFileVO"];
                 };
             };
         };
@@ -7417,7 +7358,6 @@ export interface operations {
     connect: {
         parameters: {
             query: {
-                connectionId?: string;
                 token: string;
             };
             header?: never;

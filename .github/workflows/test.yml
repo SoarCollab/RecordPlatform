@@ -12,6 +12,7 @@ concurrency:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   changes:
@@ -19,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: read
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
@@ -117,7 +119,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.26.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -127,7 +129,9 @@ jobs:
           cache-dependency-path: platform-frontend/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          pnpm --version
+          pnpm install --frozen-lockfile
 
       - name: Check Formatting
         run: pnpm format:check
@@ -170,7 +174,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.26.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -181,7 +185,9 @@ jobs:
 
       - name: Install dependencies
         working-directory: platform-frontend
-        run: pnpm install --frozen-lockfile
+        run: |
+          pnpm --version
+          pnpm install --frozen-lockfile
 
       - name: Generate And Verify Frontend API Types
         working-directory: platform-frontend
@@ -267,7 +273,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.26.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -279,5 +285,6 @@ jobs:
       - name: Build Frontend
         working-directory: platform-frontend
         run: |
+          pnpm --version
           pnpm install --frozen-lockfile
           pnpm build

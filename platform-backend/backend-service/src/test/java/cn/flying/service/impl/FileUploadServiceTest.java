@@ -26,6 +26,7 @@ import org.mockito.quality.Strictness;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.lang.reflect.InvocationTargetException;
@@ -244,6 +245,73 @@ class FileUploadServiceTest {
             assertThrows(GeneralException.class, () ->
                     fileUploadService.startUpload(USER_ID, "test.pdf", 1024 * 1024, "application/pdf", null, tooLargeChunkSize, 1));
         }
+
+        /**
+         * 验证创建会话时服务端会重新计算分片总数，拒绝客户端伪造的 totalChunks。
+         */
+        @Test
+        @DisplayName("should reject mismatched total chunk count")
+        void shouldRejectMismatchedTotalChunkCount() {
+            assertThrows(GeneralException.class, () ->
+                    fileUploadService.startUpload(USER_ID, "test.pdf", 1024 * 1024, "application/pdf", null, 256 * 1024, 999));
+        }
+
+        /**
+         * 验证总文件大小可以超过单分片内存传输上限，只要客户端按安全分片大小上传。
+         */
+        @Test
+        @DisplayName("should allow file larger than single chunk limit when chunked safely")
+        void shouldAllowFileLargerThanSingleChunkLimitWhenChunkedSafely() {
+            long fileSize = 81L * 1024 * 1024;
+            int chunkSize = 8 * 1024 * 1024;
+            int totalChunks = 11;
+            when(redisStateManager.getSessionIdByFileClientKey(anyString(), anyString())).thenReturn(null);
+
+            StartUploadVO result = fileUploadService.startUpload(
+                    USER_ID,
+                    "large.pdf",
+                    fileSize,
+                    "application/pdf",
+                    null,
+                    chunkSize,
+                    totalChunks
+            );
+
+            assertNotNull(result);
+            assertEquals(chunkSize, result.getChunkSize());
+            assertEquals(totalChunks, result.getTotalChunks());
+            verify(redisStateManager).saveNewState(any(FileUploadState.class), eq(SUID));
+        }
+    }
+
+    @Nested
+    @DisplayName("Upload Chunk")
+    class UploadChunk {
+
+        /**
+         * 验证分片上传时实际字节数必须匹配创建会话时确定的分片计划。
+         */
+        @Test
+        @DisplayName("should reject chunk with unexpected byte size")
+        void shouldRejectChunkWithUnexpectedByteSize() {
+            FileUploadState state = FileUploadStateTestBuilder.anUploadState();
+            ReflectionTestUtils.setField(state, "clientId", CLIENT_ID);
+            ReflectionTestUtils.setField(state, "userId", USER_ID);
+            MockMultipartFile smallChunk = new MockMultipartFile(
+                    "file",
+                    "chunk-0.bin",
+                    "application/octet-stream",
+                    "too-small".getBytes(StandardCharsets.UTF_8)
+            );
+
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+            when(redisStateManager.isSessionPaused(CLIENT_ID)).thenReturn(false);
+
+            assertThrows(GeneralException.class, () ->
+                    fileUploadService.uploadChunk(USER_ID, CLIENT_ID, 0, smallChunk));
+
+            verify(redisStateManager, never()).addUploadedChunkWithHash(anyString(), anyInt(), anyString());
+        }
     }
 
     @Nested
@@ -453,6 +521,25 @@ class FileUploadServiceTest {
             assertTrue(result);
             verify(redisStateManager).removeSession(CLIENT_ID, SUID);
         }
+
+        /**
+         * 验证取消上传前必须校验会话所有者，避免仅凭 clientId 清理他人会话。
+         */
+        @Test
+        @DisplayName("should reject cancel for unauthorized user")
+        void shouldRejectCancelForUnauthorizedUser() {
+            FileUploadState state = FileUploadStateTestBuilder.anUploadState();
+            ReflectionTestUtils.setField(state, "clientId", CLIENT_ID);
+            ReflectionTestUtils.setField(state, "userId", 999L);
+
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+
+            GeneralException ex = assertThrows(GeneralException.class, () ->
+                    fileUploadService.cancelUpload(USER_ID, CLIENT_ID));
+
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, ex.getResultEnum());
+            verify(redisStateManager, never()).removeSession(anyString(), anyString());
+        }
     }
 
     @Nested
@@ -506,6 +593,46 @@ class FileUploadServiceTest {
             verify(quotaService).checkUploadQuota(77L, USER_ID, 1024L);
             verify(fileService, never()).prepareStoreFile(anyLong(), any(), anyString(), anyLong());
             verify(quotaLock).unlock();
+        }
+
+        /**
+         * 验证完成上传前必须校验会话所有者，避免非所有者推进存证和配额流程。
+         */
+        @Test
+        @DisplayName("should reject complete for unauthorized user")
+        void shouldRejectCompleteForUnauthorizedUser() {
+            FileUploadState state = FileUploadStateTestBuilder.aCompletedUploadState();
+            ReflectionTestUtils.setField(state, "clientId", CLIENT_ID);
+            ReflectionTestUtils.setField(state, "userId", 999L);
+
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+
+            GeneralException ex = assertThrows(GeneralException.class, () ->
+                    fileUploadService.completeUpload(USER_ID, CLIENT_ID));
+
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, ex.getResultEnum());
+            verify(redisStateManager, never()).updateLastActivityTime(CLIENT_ID);
+            verify(fileService, never()).prepareStoreFile(anyLong(), any(), anyString(), anyLong());
+            verifyNoInteractions(redissonClient);
+        }
+
+        /**
+         * 验证完成态会话重复提交 complete 时直接幂等返回，不重放任何不可逆副作用。
+         */
+        @Test
+        @DisplayName("should ignore complete replay for completed session")
+        void shouldIgnoreCompleteReplayForCompletedSession() {
+            FileUploadState state = FileUploadStateTestBuilder.aCompletedUploadState();
+            ReflectionTestUtils.setField(state, "clientId", CLIENT_ID);
+            ReflectionTestUtils.setField(state, "userId", USER_ID);
+            state.setStatus("completed");
+
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+
+            fileUploadService.completeUpload(USER_ID, CLIENT_ID);
+
+            verify(redisStateManager, never()).updateLastActivityTime(CLIENT_ID);
+            verifyNoInteractions(redissonClient, quotaService, fileService, eventPublisher);
         }
 
         /**

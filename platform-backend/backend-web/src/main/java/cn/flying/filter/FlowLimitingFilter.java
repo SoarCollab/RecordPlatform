@@ -122,22 +122,9 @@ public class FlowLimitingFilter extends HttpFilter {
     }
 
     /**
-     * 获取客户端真实 IP。
-     * 支持反向代理场景（X-Forwarded-For、X-Real-IP）。
+     * 获取连接层客户端 IP，避免未受信任的代理头绕过全局限流。
      */
     private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip != null && !ip.isEmpty() && !"unknown".equalsIgnoreCase(ip)) {
-            // 多次代理时取第一个 IP
-            int commaIndex = ip.indexOf(',');
-            return commaIndex > 0 ? ip.substring(0, commaIndex).trim() : ip.trim();
-        }
-
-        ip = request.getHeader("X-Real-IP");
-        if (ip != null && !ip.isEmpty() && !"unknown".equalsIgnoreCase(ip)) {
-            return ip.trim();
-        }
-
         return request.getRemoteAddr();
     }
 

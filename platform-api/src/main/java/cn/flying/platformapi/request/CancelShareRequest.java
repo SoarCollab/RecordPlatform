@@ -8,7 +8,8 @@ import java.io.Serializable;
  */
 public record CancelShareRequest(
         String shareCode,
-        String uploader
+        String uploader,
+        String requester
 ) implements Serializable {
 
     @Serial

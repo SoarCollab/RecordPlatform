@@ -4,16 +4,20 @@ import cn.flying.fisco_bcos.adapter.BlockChainAdapter;
 import cn.flying.fisco_bcos.adapter.model.*;
 import cn.flying.fisco_bcos.monitor.FiscoMetrics;
 import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.request.*;
 import cn.flying.platformapi.response.*;
+import cn.flying.platformapi.security.BlockChainRpcAuth;
 import cn.flying.test.logging.LogbackSilencerExtension;
 import cn.flying.test.logging.SilenceLoggers;
 import io.micrometer.core.instrument.Timer;
+import org.apache.dubbo.rpc.RpcContext;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.*;
 
@@ -25,6 +29,8 @@ import static org.mockito.Mockito.*;
 @ExtendWith(LogbackSilencerExtension.class)
 @DisplayName("BlockChainServiceImpl Tests")
 class BlockChainServiceImplTest {
+
+    private static final String RPC_TOKEN = "backend-to-fisco-rpc-token";
 
     @Mock
     private BlockChainAdapter chainAdapter;
@@ -44,11 +50,52 @@ class BlockChainServiceImplTest {
         lenient().when(fiscoMetrics.startShareTimer()).thenReturn(timerSample);
         lenient().when(fiscoMetrics.startQueryTimer()).thenReturn(timerSample);
         lenient().when(fiscoMetrics.startDeleteTimer()).thenReturn(timerSample);
+        ReflectionTestUtils.setField(blockChainService, "blockchainRpcToken", RPC_TOKEN);
+        RpcContext.getServerAttachment().setAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY, RPC_TOKEN);
+    }
+
+    @AfterEach
+    void tearDown() {
+        RpcContext.removeServerAttachment();
+    }
+
+    /**
+     * 验证 provider 启动时必须配置区块链 RPC 共享令牌。
+     */
+    @Test
+    @DisplayName("Should fail startup when blockchain RPC token is missing")
+    void validateRpcTokenConfiguration_shouldRejectMissingToken() {
+        ReflectionTestUtils.setField(blockChainService, "blockchainRpcToken", " ");
+
+        assertThatThrownBy(blockChainService::validateRpcTokenConfiguration)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(BlockChainRpcAuth.TOKEN_PROPERTY_NAME);
     }
 
     @Nested
     @DisplayName("Store File Operations")
     class StoreFileTests {
+
+        /**
+         * 验证缺失共享令牌的 Dubbo 调用不会触发上链存证。
+         */
+        @Test
+        @DisplayName("Should reject calls without blockchain RPC token")
+        void storeFile_shouldRejectMissingRpcToken() {
+            RpcContext.getServerAttachment().removeAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY);
+            StoreFileRequest request = new StoreFileRequest(
+                    "user123",
+                    "test.pdf",
+                    "{\"size\":1024}",
+                    "file_content_hash"
+            );
+
+            assertThatThrownBy(() -> blockChainService.storeFile(request))
+                    .isInstanceOf(SecurityException.class)
+                    .hasMessageContaining("Unauthorized blockchain RPC caller");
+
+            verifyNoInteractions(chainAdapter);
+        }
         
         @Test
         @DisplayName("Should store file successfully")
@@ -419,6 +466,7 @@ class BlockChainServiceImplTest {
         void cancelShare_shouldCancelSuccessfully() {
             CancelShareRequest request = new CancelShareRequest(
                     "SHARE_CODE_123",
+                    "user1",
                     "user1"
             );
 
@@ -440,6 +488,7 @@ class BlockChainServiceImplTest {
         void cancelShare_shouldHandleFailure() {
             CancelShareRequest request = new CancelShareRequest(
                     "INVALID_CODE",
+                    "user1",
                     "user1"
             );
 
@@ -465,6 +514,7 @@ class BlockChainServiceImplTest {
         void cancelShare_shouldHandleException() {
             CancelShareRequest request = new CancelShareRequest(
                     "ERR_CODE",
+                    "user1",
                     "user1"
             );
 
@@ -474,6 +524,24 @@ class BlockChainServiceImplTest {
             Result<Boolean> result = blockChainService.cancelShare(request);
 
             assertThat(result.getCode()).isNotEqualTo(200);
+        }
+
+        /**
+         * 取消分享时 requester 必须与 uploader 一致，避免内部 RPC 误用取消他人分享。
+         */
+        @Test
+        @DisplayName("Should reject cancel share when requester is not uploader")
+        void cancelShare_shouldRejectRequesterMismatch() {
+            CancelShareRequest request = new CancelShareRequest(
+                    "SHARE_CODE_123",
+                    "user1",
+                    "user2"
+            );
+
+            Result<Boolean> result = blockChainService.cancelShare(request);
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED.getCode());
+            verify(chainAdapter, never()).cancelShare(anyString(), anyString());
         }
     }
 
@@ -492,6 +560,9 @@ class BlockChainServiceImplTest {
             tx.setGroupId("1");
             tx.setFrom("0xsender");
             tx.setTo("0xcontract");
+            tx.setAbi("[{\"type\":\"function\"}]");
+            tx.setInput("0xdeadbeef");
+            tx.setSignature("0xsig");
             tx.setBlockNumber(12345L);
             
             when(chainAdapter.getTransaction(txHash)).thenReturn(tx);
@@ -501,6 +572,9 @@ class BlockChainServiceImplTest {
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData().transactionHash()).isEqualTo(txHash);
             assertThat(result.getData().blockNumber()).isEqualTo("12345");
+            assertThat(result.getData().contractABI()).isNull();
+            assertThat(result.getData().input()).isNull();
+            assertThat(result.getData().signature()).isNull();
         }
 
         @Test
@@ -589,11 +663,26 @@ class BlockChainServiceImplTest {
             
             when(chainAdapter.getUserShareCodes(uploader)).thenReturn(shareCodes);
             
-            Result<List<String>> result = blockChainService.getUserShareCodes(uploader);
+            Result<List<String>> result = blockChainService.getUserShareCodes(
+                    new GetUserShareCodesRequest(uploader, uploader));
             
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData()).hasSize(3);
             assertThat(result.getData()).contains("CODE1", "CODE2");
+        }
+
+        /**
+         * 分享码列表只能由同一 uploader 查询。
+         */
+        @Test
+        @DisplayName("Should reject share code query when requester is not uploader")
+        void getUserShareCodes_shouldRejectRequesterMismatch() {
+            Result<List<String>> result = blockChainService.getUserShareCodes(
+                    new GetUserShareCodesRequest("user123", "user456"));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED.getCode());
+            assertThat(result.getData()).isEmpty();
+            verify(chainAdapter, never()).getUserShareCodes(anyString());
         }
 
         /**
@@ -606,7 +695,8 @@ class BlockChainServiceImplTest {
             when(chainAdapter.getUserShareCodes(anyString()))
                     .thenThrow(new RuntimeException("Share code query failed"));
 
-            Result<List<String>> result = blockChainService.getUserShareCodes("user123");
+            Result<List<String>> result = blockChainService.getUserShareCodes(
+                    new GetUserShareCodesRequest("user123", "user123"));
 
             assertThat(result.getCode()).isNotEqualTo(200);
         }
@@ -629,11 +719,33 @@ class BlockChainServiceImplTest {
             
             when(chainAdapter.getShareInfo(shareCode)).thenReturn(shareInfo);
             
-            Result<SharingVO> result = blockChainService.getShareInfo(shareCode);
+            Result<SharingVO> result = blockChainService.getShareInfo(
+                    new GetShareInfoRequest(shareCode, "user123"));
             
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData().shareCode()).isEqualTo(shareCode);
             assertThat(result.getData().isValid()).isTrue();
+        }
+
+        /**
+         * 分享详情查询必须验证 requester 与链上 uploader 一致。
+         */
+        @Test
+        @DisplayName("Should reject share info when requester is not uploader")
+        void getShareInfo_shouldRejectRequesterMismatch() {
+            String shareCode = "SHARE_CODE_123";
+            ChainShareInfo shareInfo = new ChainShareInfo();
+            shareInfo.setUploader("user123");
+            shareInfo.setFileHashList(List.of("hash1"));
+            shareInfo.setExpireTimestamp(System.currentTimeMillis() + 3600000);
+            shareInfo.setIsValid(true);
+            when(chainAdapter.getShareInfo(shareCode)).thenReturn(shareInfo);
+
+            Result<SharingVO> result = blockChainService.getShareInfo(
+                    new GetShareInfoRequest(shareCode, "user456"));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED.getCode());
+            assertThat(result.getData()).isNull();
         }
 
         /**
@@ -646,7 +758,8 @@ class BlockChainServiceImplTest {
             when(chainAdapter.getShareInfo(anyString()))
                     .thenThrow(new RuntimeException("Share info failed"));
 
-            Result<SharingVO> result = blockChainService.getShareInfo("INVALID");
+            Result<SharingVO> result = blockChainService.getShareInfo(
+                    new GetShareInfoRequest("INVALID", "user123"));
 
             assertThat(result.getCode()).isNotEqualTo(200);
         }

@@ -39,10 +39,17 @@ cp .env.example .env
 Edit `.env` and update key settings:
 
 ```bash
-# Must change
+# Must change before starting infrastructure
 JWT_KEY=<random-string-at-least-32-chars>
 DB_PASSWORD=<database-password>
 REDIS_PASSWORD=<redis-password>
+RABBITMQ_USERNAME=<rabbitmq-username>
+RABBITMQ_PASSWORD=<rabbitmq-password>
+NACOS_USERNAME=<nacos-username>
+NACOS_PASSWORD=<nacos-password>
+NACOS_AUTH_TOKEN=<base64-random-token-at-least-32-bytes>
+NACOS_AUTH_IDENTITY_KEY=<nacos-identity-key-name>
+NACOS_AUTH_IDENTITY_VALUE=<nacos-identity-secret>
 S3_ACCESS_KEY=<minio-access-key>
 S3_SECRET_KEY=<minio-secret-key>
 
@@ -50,9 +57,11 @@ S3_SECRET_KEY=<minio-secret-key>
 SPRING_PROFILES_ACTIVE=local   # local / dev / prod
 ```
 
-::: tip
-For development, the default values in `.env.example` work out of the box.
+::: warning
+Do not use `.env.example` placeholder values on any shared or server host. The infrastructure compose file fails fast when required secrets are missing, and all passwords/tokens above must be replaced with strong environment-specific values.
 :::
+
+`docker-compose.infra.yml` binds published service ports to `127.0.0.1` by default through `INFRA_BIND_ADDRESS` and `OBSERVABILITY_BIND_ADDRESS`. Keep this default on servers and expose only the application-facing endpoints through a firewall, VPN, SSH tunnel, or authenticated reverse proxy. Do not set these bind addresses to `0.0.0.0` unless the host firewall restricts every infrastructure port.
 
 ## Step 2: Start Infrastructure
 
@@ -70,14 +79,14 @@ Included services:
 
 | Service | Port | Management UI |
 |---------|------|---------------|
-| Nacos | 8848 | http://localhost:8848/nacos |
-| MySQL | 3306 | — |
-| Redis | 6379 | — |
-| RabbitMQ | 5672 | http://localhost:15672 |
-| MinIO-A | 9000 | http://localhost:9001 |
-| MinIO-B | 9010 | http://localhost:9011 |
-| OTel Collector | 4317/4318/8889 | — |
-| Jaeger | 16686 | http://localhost:16686 |
+| Nacos | 127.0.0.1:8848 | http://localhost:8848/nacos |
+| MySQL | 127.0.0.1:3306 | — |
+| Redis | 127.0.0.1:6379 | — |
+| RabbitMQ | 127.0.0.1:5672 | http://localhost:15672 |
+| MinIO-A | 127.0.0.1:9000 | http://localhost:9001 |
+| MinIO-B | 127.0.0.1:9010 | http://localhost:9011 |
+| OTel Collector | 127.0.0.1:4317/4318/8889 | — |
+| Jaeger | 127.0.0.1:16686 | http://localhost:16686 |
 
 Verify status:
 
@@ -89,7 +98,7 @@ docker compose -f docker-compose.infra.yml ps
 
 Nacos serves as the configuration center. Application configs must be imported.
 
-1. Open Nacos console: http://localhost:8848/nacos (default: nacos/nacos)
+1. Open Nacos console: http://localhost:8848/nacos and sign in with the credentials configured for this environment. If the Nacos image initializes a built-in default account, rotate it before exposing the host beyond your workstation.
 2. Create configurations:
 
 | Data ID | Group | Description |

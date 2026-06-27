@@ -13,6 +13,7 @@ import cn.flying.dao.mapper.SysPermissionMapper;
 import cn.flying.dao.mapper.SysRolePermissionMapper;
 import cn.flying.service.PermissionService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
@@ -127,6 +128,63 @@ public class PermissionServiceImpl implements PermissionService {
     }
 
     /**
+     * 清除所有租户下指定角色的权限缓存。
+     *
+     * @param role 角色标识
+     */
+    private void evictRoleAcrossTenants(String role) {
+        String pattern = "*" + Const.PERMISSION_CACHE_PREFIX + role;
+        cacheUtils.deleteCachePattern(pattern);
+        log.debug("Evicted permission cache for role across tenants: {}", role);
+    }
+
+    /**
+     * 清除所有租户下的权限缓存。
+     */
+    private void evictAllTenantPermissionCaches() {
+        String pattern = "*" + Const.PERMISSION_CACHE_PREFIX + "*";
+        cacheUtils.deleteCachePattern(pattern);
+        log.debug("Evicted all tenant permission caches");
+    }
+
+    /**
+     * 根据变更租户范围清除权限定义缓存。
+     *
+     * @param tenantId 权限定义所属租户
+     */
+    private void evictPermissionDefinitionCaches(Long tenantId) {
+        if (isGlobalTenant(tenantId)) {
+            evictAllTenantPermissionCaches();
+            return;
+        }
+        evictAllCache(tenantId);
+    }
+
+    /**
+     * 根据变更租户范围清除角色权限映射缓存。
+     *
+     * @param role     角色标识
+     * @param tenantId 角色权限映射所属租户
+     */
+    private void evictRolePermissionCaches(String role, Long tenantId) {
+        if (isGlobalTenant(tenantId)) {
+            evictRoleAcrossTenants(role);
+            return;
+        }
+        evictCache(role, tenantId);
+    }
+
+    /**
+     * 判断是否为全局租户权限。
+     *
+     * @param tenantId 租户 ID
+     * @return true 表示全局租户权限
+     */
+    private boolean isGlobalTenant(Long tenantId) {
+        return Long.valueOf(0L).equals(tenantId);
+    }
+
+    /**
      * 构建缓存 key
      */
     private String buildCacheKey(String role, Long tenantId) {
@@ -190,23 +248,38 @@ public class PermissionServiceImpl implements PermissionService {
     @Transactional
     public SysPermission updatePermission(String externalId, String name, String description, Integer status, Long tenantId) {
         Long permissionId = IdUtils.fromExternalId(externalId);
-        SysPermission permission = permissionMapper.selectById(permissionId);
+        LambdaQueryWrapper<SysPermission> queryWrapper = new LambdaQueryWrapper<SysPermission>()
+                .eq(SysPermission::getId, permissionId)
+                .eq(SysPermission::getTenantId, tenantId);
+        SysPermission permission = permissionMapper.selectOne(queryWrapper);
         if (permission == null) {
             return null;
         }
 
+        LambdaUpdateWrapper<SysPermission> updateWrapper = new LambdaUpdateWrapper<SysPermission>()
+                .eq(SysPermission::getId, permissionId)
+                .eq(SysPermission::getTenantId, tenantId);
+        boolean changed = false;
         if (name != null) {
             permission.setName(name);
+            updateWrapper.set(SysPermission::getName, name);
+            changed = true;
         }
         if (description != null) {
             permission.setDescription(description);
+            updateWrapper.set(SysPermission::getDescription, description);
+            changed = true;
         }
         if (status != null) {
             permission.setStatus(status);
+            updateWrapper.set(SysPermission::getStatus, status);
+            changed = true;
         }
 
-        permissionMapper.updateById(permission);
-        evictAllCache(tenantId);
+        if (changed) {
+            permissionMapper.update(null, updateWrapper);
+            evictPermissionDefinitionCaches(tenantId);
+        }
         return permission;
     }
 
@@ -214,13 +287,21 @@ public class PermissionServiceImpl implements PermissionService {
     @Transactional
     public void deletePermission(String externalId, Long tenantId) {
         Long permissionId = IdUtils.fromExternalId(externalId);
+        LambdaQueryWrapper<SysPermission> permissionScope = new LambdaQueryWrapper<SysPermission>()
+                .eq(SysPermission::getId, permissionId)
+                .eq(SysPermission::getTenantId, tenantId);
+        SysPermission permission = permissionMapper.selectOne(permissionScope);
+        if (permission == null) {
+            return;
+        }
 
         LambdaQueryWrapper<SysRolePermission> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(SysRolePermission::getPermissionId, permissionId);
+        wrapper.eq(SysRolePermission::getPermissionId, permissionId)
+                .eq(SysRolePermission::getTenantId, tenantId);
         rolePermissionMapper.delete(wrapper);
 
-        permissionMapper.deleteById(permissionId);
-        evictAllCache(tenantId);
+        permissionMapper.delete(permissionScope);
+        evictPermissionDefinitionCaches(tenantId);
     }
 
     // ==================== 角色权限映射操作 ====================
@@ -239,10 +320,11 @@ public class PermissionServiceImpl implements PermissionService {
         }
 
         SysRolePermission mapping = new SysRolePermission()
+                .setTenantId(tenantId)
                 .setRole(role)
                 .setPermissionId(permission.getId());
         rolePermissionMapper.insert(mapping);
-        evictCache(role, tenantId);
+        evictRolePermissionCaches(role, tenantId);
     }
 
     @Override
@@ -258,6 +340,6 @@ public class PermissionServiceImpl implements PermissionService {
                 .eq(SysRolePermission::getPermissionId, permission.getId())
                 .eq(SysRolePermission::getTenantId, tenantId);
         rolePermissionMapper.delete(wrapper);
-        evictCache(role, tenantId);
+        evictRolePermissionCaches(role, tenantId);
     }
 }

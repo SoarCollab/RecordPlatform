@@ -172,6 +172,33 @@ class FileSagaOrchestratorTest {
             verify(sagaMetrics).recordSagaCompensated();
         }
 
+        /**
+         * 验证旧版 payload 中直接保存的 hash -> path 映射仍会参与 S3 补偿。
+         */
+        @Test
+        @DisplayName("should compensate legacy raw stored path payload")
+        void shouldCompensateLegacyRawStoredPathPayload() {
+            FileSaga saga = new FileSaga()
+                    .setId(1L)
+                    .setFileId(100L)
+                    .setRequestId("req-legacy")
+                    .setUserId(1L)
+                    .setCurrentStep(FileSagaStep.S3_UPLOADED.name())
+                    .setStatus(FileSagaStatus.PENDING_COMPENSATION.name())
+                    .setRetryCount(1)
+                    .setPayload("{\"hash1\":\"minio/node/node-a/hash1\"}");
+
+            when(fileRemoteClient.deleteStorageFile(anyMap())).thenReturn(Result.success(true));
+            when(fileMapper.updateById(any(File.class))).thenReturn(1);
+
+            orchestrator.retryCompensation(saga);
+
+            ArgumentCaptor<Map<String, String>> storedPathsCaptor = ArgumentCaptor.captor();
+            verify(fileRemoteClient).deleteStorageFile(storedPathsCaptor.capture());
+            assertEquals(Map.of("hash1", "minio/node/node-a/hash1"), storedPathsCaptor.getValue());
+            verify(sagaMetrics).recordSagaCompensated();
+        }
+
         @Test
         @DisplayName("should schedule retry on compensation failure")
         void shouldScheduleRetryOnFailure() {

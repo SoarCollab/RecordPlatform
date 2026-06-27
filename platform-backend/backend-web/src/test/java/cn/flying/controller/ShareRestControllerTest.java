@@ -1,10 +1,10 @@
 package cn.flying.controller;
 
 import cn.flying.common.constant.Result;
-import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileSharingVO;
 import cn.flying.dao.vo.file.SaveSharingFile;
+import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
@@ -74,7 +74,9 @@ class ShareRestControllerTest {
         saveVO.setShareCode(shareCode);
 
         when(fileService.generateSharingCode(userId, createVO.getFileHash(), 60, 0)).thenReturn(shareCode);
-        when(fileQueryService.getShareFile(shareCode)).thenReturn(List.of(new File()));
+        when(fileQueryService.getShareFile(shareCode)).thenReturn(List.of(
+                new ShareFileVO("f-1", "n", "document", fileHash, 1L, "text/plain", null, null, null, null)
+        ));
         when(fileService.getSharedFileContent(userId, shareCode, fileHash)).thenReturn(List.of("abc".getBytes()));
         when(fileService.getSharedFileDecryptInfo(userId, shareCode, fileHash))
                 .thenReturn(new FileDecryptInfoVO("k1", "n", 1L, "text/plain", 1, fileHash));
@@ -85,10 +87,11 @@ class ShareRestControllerTest {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("X-Forwarded-For", "1.1.1.1, 2.2.2.2");
         request.addHeader("User-Agent", "JUnit");
+        request.setRemoteAddr("10.0.0.10");
 
         Result<String> createResult = controller.createShare(userId, createVO);
         Result<String> updateResult = controller.updateShare(userId, shareCode, updateVO);
-        Result<List<File>> listResult = controller.getSharedFiles(shareCode, userId, request);
+        Result<List<ShareFileVO>> listResult = controller.getSharedFiles(shareCode, userId, request);
         Result<String> saveResult = controller.saveSharedFiles(shareCode, saveVO, request);
         Result<List<byte[]>> downloadResult = controller.downloadSharedFile(userId, shareCode, fileHash, request);
         Result<FileDecryptInfoVO> decryptResult = controller.getSharedDecryptInfo(userId, shareCode, fileHash);
@@ -105,7 +108,26 @@ class ShareRestControllerTest {
         assertEquals(fileHash, publicDecryptResult.getData().fileHash());
 
         verify(fileService).updateShare(eq(userId), any(UpdateShareVO.class));
-        verify(shareAuditService).logShareView(eq(shareCode), eq(userId), eq("1.1.1.1"), eq("JUnit"));
-        verify(shareAuditService).logShareDownload(eq(shareCode), eq(userId), eq(fileHash), eq(null), eq("1.1.1.1"));
+        verify(shareAuditService).logShareView(eq(shareCode), eq(userId), eq("10.0.0.10"), eq("JUnit"));
+        verify(shareAuditService).logShareDownload(eq(shareCode), eq(userId), eq(fileHash), eq(null), eq("10.0.0.10"));
+    }
+
+    /**
+     * 验证保存分享文件时以路径中的 shareCode 为准，避免请求体伪造分享码。
+     */
+    @Test
+    void shouldUsePathShareCodeWhenSavingSharedFiles() {
+        SaveSharingFile saveVO = new SaveSharingFile();
+        saveVO.setSharingFileIdList(List.of("f-1"));
+        saveVO.setShareCode("body-code");
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRemoteAddr("127.0.0.1");
+
+        Result<String> result = controller.saveSharedFiles("path-code", saveVO, request);
+
+        assertEquals("保存成功", result.getData());
+        assertEquals("path-code", saveVO.getShareCode());
+        verify(fileService).saveShareFile(eq(List.of("f-1")), eq("path-code"), eq("127.0.0.1"));
     }
 }

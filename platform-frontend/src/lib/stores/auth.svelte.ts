@@ -3,6 +3,7 @@ import { goto } from "$app/navigation";
 import { getToken } from "$api/client";
 import * as authApi from "$api/endpoints/auth";
 import { useBadges } from "$stores/badges.svelte";
+import { useDownload } from "$stores/download.svelte";
 import type {
   AccountVO,
   LoginRequest,
@@ -87,6 +88,11 @@ async function logout(): Promise<void> {
   } catch (err) {
     console.error("logout failed:", err);
   } finally {
+    try {
+      await useDownload().clearAllDownloads();
+    } catch (err) {
+      console.error("clear download cache failed:", err);
+    }
     user = null;
     isLoading = false;
     useBadges().reset();

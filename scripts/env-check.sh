@@ -134,6 +134,16 @@ tcp_check() {
 # Check if a CLI tool is available
 has_cmd() { command -v "$1" &>/dev/null; }
 
+# Check a required secret without falling back to public defaults.
+required_secret() {
+    local name="$1"
+    if [ -z "${!name:-}" ]; then
+        fail "$name is required"
+        info "Set $name in .env before running infrastructure checks"
+        return 1
+    fi
+}
+
 # ==============================================================================
 # 1. Nacos
 # ==============================================================================
@@ -155,8 +165,10 @@ check_nacos() {
     fi
 
     # Deep check: login API
-    local user="${NACOS_USERNAME:-nacos}"
-    local pass="${NACOS_PASSWORD:-nacos}"
+    if ! required_secret NACOS_USERNAME; then return; fi
+    if ! required_secret NACOS_PASSWORD; then return; fi
+    local user="$NACOS_USERNAME"
+    local pass="$NACOS_PASSWORD"
     local token
     token=$(curl -sf --max-time 5 -X POST \
         "http://$host:$port/nacos/v1/auth/login" \
@@ -189,8 +201,9 @@ check_nacos() {
 # ==============================================================================
 check_mysql() {
     local host="${MYSQL_HOST:-127.0.0.1}"
-    local port="${MYSQL_PORT:-3306}"
-    local password="${DB_PASSWORD:-recordplatform}"
+    local port="${MYSQL_PORT:-${DB_PORT:-3306}}"
+    if ! required_secret DB_PASSWORD; then return; fi
+    local password="$DB_PASSWORD"
 
     section 2 "MySQL ($host:$port)"
 
@@ -237,7 +250,8 @@ check_mysql() {
 check_redis() {
     local host="${REDIS_HOST:-localhost}"
     local port="${REDIS_PORT:-6379}"
-    local password="${REDIS_PASSWORD:-redis123}"
+    if ! required_secret REDIS_PASSWORD; then return; fi
+    local password="$REDIS_PASSWORD"
 
     section 3 "Redis ($host:$port)"
 
@@ -268,8 +282,10 @@ check_rabbitmq() {
     local host="${RABBITMQ_HOST:-localhost}"
     local port="${RABBITMQ_PORT:-5672}"
     local mgmt_port="${RABBITMQ_MANAGEMENT_PORT:-15672}"
-    local user="${RABBITMQ_USERNAME:-rabbitmq}"
-    local pass="${RABBITMQ_PASSWORD:-rabbitmq}"
+    if ! required_secret RABBITMQ_USERNAME; then return; fi
+    if ! required_secret RABBITMQ_PASSWORD; then return; fi
+    local user="$RABBITMQ_USERNAME"
+    local pass="$RABBITMQ_PASSWORD"
 
     section 4 "RabbitMQ ($host:$port)"
 
@@ -321,8 +337,10 @@ check_fisco() {
 # ==============================================================================
 check_s3() {
     local endpoint="${S3_ENDPOINT:-http://localhost:9000}"
-    local access_key="${S3_ACCESS_KEY:-minioadmin}"
-    local secret_key="${S3_SECRET_KEY:-minioadmin}"
+    if ! required_secret S3_ACCESS_KEY; then return; fi
+    if ! required_secret S3_SECRET_KEY; then return; fi
+    local access_key="$S3_ACCESS_KEY"
+    local secret_key="$S3_SECRET_KEY"
     local bucket="${S3_BUCKET_NAME:-forum}"
 
     section 6 "S3/MinIO ($endpoint)"

@@ -27,7 +27,6 @@ let canManualReconnect = $state(false);
 let reconnectAttempts = 0;
 let eventSource: EventSource | null = null;
 let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
-let connectionId = "";
 let userId = "";
 let isPageVisible = true;
 let isInitialized = false;
@@ -152,7 +151,6 @@ function connect(): void {
   updateStatus("connecting");
 
   createSSEConnection({
-    connectionId,
     onOpen: () => {
       updateStatus("connected");
       reconnectAttempts = 0;
@@ -205,11 +203,6 @@ function init(currentUserId: string): void {
   if (!browser || isInitialized) return;
 
   userId = currentUserId;
-  connectionId =
-    crypto.randomUUID?.() ??
-    crypto
-      .getRandomValues(new Uint32Array(4))
-      .reduce((s, v) => s + v.toString(16).padStart(8, "0"), "");
   isInitialized = true;
 
   setupVisibilityListener();

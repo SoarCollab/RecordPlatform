@@ -1,6 +1,7 @@
 package cn.flying.service.impl;
 
 import cn.flying.common.constant.UserRole;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.FlowUtils;
 import cn.flying.common.util.IdUtils;
@@ -26,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
@@ -37,11 +39,14 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> implements AccountService {
 
-    private static final ConcurrentHashMap<String, ReentrantLock> ADDRESS_LOCKS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, AddressLock> ADDRESS_LOCKS = new ConcurrentHashMap<>();
 
     //验证邮件发送冷却时间限制，秒为单位
     @Value("${spring.web.verify.mail-limit}")
     int VERIFY_LIMIT;
+
+    @Value("${spring.web.registration.tenant-id:0}")
+    Long registrationTenantId;
 
     private final AmqpTemplate rabbitTemplate;
     private final StringRedisTemplate stringRedisTemplate;
@@ -75,8 +80,9 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
      * @return 操作结果，null表示正常，否则为错误原因
      */
     public String registerEmailVerifyCode(String type, String email, String address){
-        ReentrantLock lock = ADDRESS_LOCKS.computeIfAbsent(address, k -> new ReentrantLock());
-        lock.lock();
+        String lockKey = normalizeAddressLockKey(address);
+        AddressLock addressLock = acquireAddressLock(lockKey);
+        addressLock.lock().lock();
         try {
             if(!this.verifyLimit(address))
                 return "请求频繁，请稍后再试";
@@ -88,7 +94,63 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
                     .set(Const.VERIFY_EMAIL_DATA + email, String.valueOf(code), 3, TimeUnit.MINUTES);
             return null;
         } finally {
-            lock.unlock();
+            releaseAddressLock(lockKey, addressLock);
+        }
+    }
+
+    /**
+     * 获取地址级短生命周期锁，引用计数用于请求结束后清理 map entry。
+     */
+    private static AddressLock acquireAddressLock(String address) {
+        return ADDRESS_LOCKS.compute(address, (key, existing) -> {
+            AddressLock lock = existing == null ? new AddressLock() : existing;
+            lock.retain();
+            return lock;
+        });
+    }
+
+    /**
+     * 释放地址锁并在没有并发引用时移除 map entry，避免永久保留攻击者控制的地址键。
+     */
+    private static void releaseAddressLock(String address, AddressLock addressLock) {
+        try {
+            addressLock.lock().unlock();
+        } finally {
+            if (addressLock.release() == 0) {
+                ADDRESS_LOCKS.computeIfPresent(address, (key, existing) ->
+                        existing == addressLock && existing.references() == 0 ? null : existing);
+            }
+        }
+    }
+
+    /**
+     * 规范化地址锁 key，避免空地址触发 ConcurrentHashMap 空 key 异常。
+     */
+    private static String normalizeAddressLockKey(String address) {
+        return address == null || address.isBlank() ? "unknown" : address;
+    }
+
+    /**
+     * 地址级锁和引用计数封装。
+     */
+    private static final class AddressLock {
+        private final ReentrantLock lock = new ReentrantLock();
+        private final AtomicInteger references = new AtomicInteger();
+
+        ReentrantLock lock() {
+            return lock;
+        }
+
+        void retain() {
+            references.incrementAndGet();
+        }
+
+        int release() {
+            return references.decrementAndGet();
+        }
+
+        int references() {
+            return references.get();
         }
     }
 
@@ -98,6 +160,18 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
      * @return 操作结果，null表示正常，否则为错误原因
      */
     public String registerEmailAccount(EmailRegisterVO info){
+        Long tenantId = resolveRegistrationTenantId();
+        return TenantContext.callWithTenant(tenantId, () -> registerEmailAccountInTenant(info, tenantId));
+    }
+
+    /**
+     * 在服务端配置的公开注册租户内完成账号注册，避免信任未认证请求携带的租户头。
+     *
+     * @param info 注册基本信息
+     * @param tenantId 服务端配置的公开注册租户ID
+     * @return 操作结果，null表示正常，否则为错误原因
+     */
+    private String registerEmailAccountInTenant(EmailRegisterVO info, Long tenantId) {
         String email = info.getEmail();
         String code = this.getEmailVerifyCode(email);
         if(code == null) return "请先获取验证码";
@@ -108,12 +182,25 @@ public class AccountServiceImpl extends ServiceImpl<AccountMapper, Account> impl
         String password = passwordEncoder.encode(info.getPassword());
         Account account = new Account(IdUtils.nextUserId(), info.getUsername(),
                 password, email, UserRole.ROLE_DEFAULT.getRole(), null, info.getNickname());
+        account.setTenantId(tenantId);
         if(!this.save(account)) {
             return "内部错误，注册失败";
         } else {
             this.deleteEmailVerifyCode(email);
             return null;
         }
+    }
+
+    /**
+     * 解析公开注册租户配置，缺失或非法时快速失败，避免账号落入调用方伪造的租户上下文。
+     *
+     * @return 公开注册租户ID
+     */
+    private Long resolveRegistrationTenantId() {
+        if (registrationTenantId == null || registrationTenantId < 0) {
+            throw new IllegalStateException("spring.web.registration.tenant-id must be configured to a non-negative tenant ID");
+        }
+        return registrationTenantId;
     }
 
     /**

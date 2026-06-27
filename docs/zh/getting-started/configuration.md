@@ -21,8 +21,8 @@ vim .env
 |------|------|------|--------|
 | **Nacos** | `NACOS_HOST` | Nacos 服务器 | localhost |
 | | `NACOS_PORT` | Nacos 端口 | 8848 |
-| | `NACOS_USERNAME` | Nacos 用户名 | nacos |
-| | `NACOS_PASSWORD` | Nacos 密码 | nacos |
+| | `NACOS_USERNAME` | Nacos 用户名 | 必填，无默认值 |
+| | `NACOS_PASSWORD` | Nacos 密码 | 必填，无默认值 |
 | **Profile** | `SPRING_PROFILES_ACTIVE` | Spring Profile | local |
 
 ### 安全配置
@@ -30,6 +30,8 @@ vim .env
 | 变量 | 说明 | 要求 |
 |------|------|------|
 | `JWT_KEY` | JWT 签名密钥 + ID 加密派生 | 至少 32 字符，高熵值 |
+| `PUBLIC_REGISTRATION_TENANT_ID` | 公开注册使用的服务端租户 | 显式配置；请求头不决定注册租户 |
+| `BLOCKCHAIN_RPC_TOKEN` | 后端调用 FISCO Dubbo 服务的共享令牌 | backend 与 fisco 两端必填且一致，无默认值 |
 | `RECORD_PLATFORM_UID_SALT` | UID 混淆用盐值 | 建议 8–16 字符随机字符串 |
 | `RECORD_PLATFORM_CLIENT_KEY` | UID 混淆用客户端密钥 | 建议 16–32 字符随机字符串 |
 
@@ -71,12 +73,12 @@ S3 兼容存储通过 Nacos 配置。基本环境变量：
 | `SERVER_PORT` | 后端 REST API 端口 | 8000（本地/开发推荐；prod profile 未设置时默认 8080） |
 | `DUBBO_FISCO_PORT` | FISCO Dubbo 服务端口 | 8091 |
 | `DUBBO_STORAGE_PORT` | Storage Dubbo 服务端口 | 8092 |
-| `DUBBO_HOST` | 服务注册 IP（用于 Docker 环境） | `192.168.5.100` (YAML 默认值；请根据环境修改) |
+| `DUBBO_HOST` | 服务注册 IP（用于 Docker 环境） | Provider 服务必填；运行时无默认值 |
 | `QOS_BACKEND_PORT` | Backend QoS 管理端口 | 22330 |
 | `QOS_FISCO_PORT` | FISCO QoS 管理端口 | 22331 |
 | `QOS_STORAGE_PORT` | Storage QoS 管理端口 | 22332 |
 
-> **注意**: `DUBBO_HOST` 在 Docker 环境中非常重要，确保服务注册使用可访问的 IP 而非 Docker 网桥 IP。
+> **注意**: `DUBBO_HOST` 在 Docker 环境中非常重要，确保服务注册使用可访问的 IP 而非 Docker 网桥 IP。请在 `.env` 或部署密钥中显式设置。
 
 ### 日志配置
 
@@ -95,8 +97,8 @@ S3 兼容存储通过 Nacos 配置。基本环境变量：
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `KNIFE4J_USERNAME` | Knife4j/Swagger UI 用户名 | admin |
-| `KNIFE4J_PASSWORD` | Knife4j/Swagger UI 密码 | 123456（未设置时） |
+| `KNIFE4J_USERNAME` | Knife4j/Swagger UI 用户名 | 必填，无默认值 |
+| `KNIFE4J_PASSWORD` | Knife4j/Swagger UI 密码 | 必填，无默认值 |
 
 ### APM 配置（可选）
 
@@ -208,11 +210,11 @@ storage:
 |------|------|--------|
 | `quota.enforcement-mode` | 执行模式 | `SHADOW`（仅记录日志，不拒绝） |
 | `quota.rollout.strategy` | 灰度策略 | `TENANT_WHITELIST` |
-| `quota.rollout.enforce-tenant-whitelist` | 执行配额的租户 ID（逗号分隔） | _（空 = 全部 SHADOW）_ |
+| `quota.rollout.enforce-tenant-whitelist` | 执行配额的租户 ID（逗号分隔） | _（空 = 全局 `ENFORCE` 时全部租户生效）_ |
 | `quota.rollout.force-shadow` | 强制所有租户使用 SHADOW 模式 | `false` |
 
-> **提示**：建议先使用 `SHADOW` 模式观察配额使用情况，不会拒绝上传。
-> 通过将租户 ID 加入 `enforce-tenant-whitelist` 切换为 `ENFORCE` 模式。
+> **提示**：建议先使用全局 `SHADOW` 模式观察配额使用情况，不会拒绝上传。
+> 全局 `ENFORCE` 下空白名单表示全部租户生效；如需控制灰度范围，使用非空白名单或 `force-shadow=true`。
 
 ## 定时任务配置
 

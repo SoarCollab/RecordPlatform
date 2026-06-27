@@ -109,7 +109,11 @@ public class SecurityConfiguration {
                                 UserRole.ROLE_MONITOR.getRole())
                         // SSE 连接端点使用短期令牌认证，不使用常规 JWT
                         .requestMatchers("/api/v1/sse/connect").permitAll()
-                        .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**", "/doc.html/**","/webjars/**","/favicon.ico").permitAll()
+                        .requestMatchers("/favicon.ico").permitAll()
+                        .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**",
+                                "/doc.html", "/doc.html/**", "/webjars/**").hasAnyRole(
+                                UserRole.ROLE_ADMINISTER.getRole(),
+                                UserRole.ROLE_MONITOR.getRole())
                         // 健康检查端点公开
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         // 监控端点需要管理员或监控员角色
@@ -223,7 +227,16 @@ public class SecurityConfiguration {
      * @return 是否为 /api/v1/auth/login
      */
     private boolean isLoginRequest(HttpServletRequest request) {
+        String servletPath = request.getServletPath();
+        if ("/api/v1/auth/login".equals(servletPath)) {
+            return true;
+        }
+
         String uri = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (contextPath != null && !contextPath.isEmpty() && uri != null && uri.startsWith(contextPath)) {
+            uri = uri.substring(contextPath.length());
+        }
         return "/api/v1/auth/login".equals(uri);
     }
 

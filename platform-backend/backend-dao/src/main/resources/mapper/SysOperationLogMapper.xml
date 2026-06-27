@@ -16,6 +16,45 @@
         LIMIT 100 -- Limit results for performance
     </select>
 
+    <select id="countHighFrequencyUsers" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM (
+            SELECT user_id
+            FROM sys_operation_log
+            WHERE tenant_id = #{tenantId}
+              AND operation_time >= #{startTime}
+              AND user_id IS NOT NULL AND user_id != '' AND user_id != 'system'
+            GROUP BY user_id
+            HAVING COUNT(*) > #{threshold}
+        ) AS high_freq_users
+    </select>
+
+    <select id="countFailedLoginUsers" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM (
+            SELECT user_id
+            FROM sys_operation_log
+            WHERE tenant_id = #{tenantId}
+              AND operation_time >= #{startTime}
+              AND operation_type = 'LOGIN'
+              AND status = 1
+              AND user_id IS NOT NULL AND user_id != ''
+            GROUP BY user_id
+            HAVING COUNT(*) >= #{threshold}
+        ) AS failed_login_users
+    </select>
+
+    <select id="selectErrorRatePercent" resultType="java.lang.Double">
+        SELECT
+            CASE
+                WHEN COUNT(*) = 0 THEN 0
+                ELSE ROUND(SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2)
+            END
+        FROM sys_operation_log
+        WHERE tenant_id = #{tenantId}
+          AND operation_time >= #{startTime}
+    </select>
+
     <!-- 查询敏感操作记录 (分页) -->
     <select id="selectSensitiveOperations" resultType="cn.flying.dao.dto.SysOperationLog">
         SELECT
@@ -175,19 +214,52 @@
         ORDER BY operation_date ASC
     </select>
 
-    <!-- == Stored Procedure Calls == -->
+    <insert id="insertOperationLogBackup">
+        INSERT IGNORE INTO `sys_operation_log_backup` (
+            `id`,
+            `tenant_id`,
+            `module`,
+            `operation_type`,
+            `description`,
+            `method`,
+            `request_url`,
+            `request_method`,
+            `request_ip`,
+            `request_param`,
+            `response_result`,
+            `status`,
+            `error_msg`,
+            `user_id`,
+            `username`,
+            `operation_time`,
+            `execution_time`
+        )
+        SELECT
+            `id`,
+            `tenant_id`,
+            `module`,
+            `operation_type`,
+            `description`,
+            `method`,
+            `request_url`,
+            `request_method`,
+            `request_ip`,
+            `request_param`,
+            `response_result`,
+            `status`,
+            `error_msg`,
+            `user_id`,
+            `username`,
+            `operation_time`,
+            `execution_time`
+        FROM `sys_operation_log`
+        WHERE `tenant_id` = #{tenantId}
+          AND `operation_time` &lt; #{cutoffTime}
+    </insert>
 
-    <update id="checkAnomalies" statementType="CALLABLE" parameterType="java.util.Map">
-        {CALL proc_check_operation_anomalies(
-                #{hasAnomalies, mode=OUT, jdbcType=BOOLEAN},
-                #{anomalyDetails, mode=OUT, jdbcType=VARCHAR}
-              )}
-    </update>
-
-    <update id="backupLogs" statementType="CALLABLE">
-        {CALL proc_backup_operation_logs(
-                #{days, mode=IN, jdbcType=INTEGER},
-                #{deleteAfterBackup, mode=IN, jdbcType=BOOLEAN}
-              )}
-    </update>
+    <delete id="deleteOperationLogsBefore">
+        DELETE FROM `sys_operation_log`
+        WHERE `tenant_id` = #{tenantId}
+          AND `operation_time` &lt; #{cutoffTime}
+    </delete>
 </mapper>

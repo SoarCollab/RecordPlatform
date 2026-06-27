@@ -51,6 +51,9 @@ public class JsonUsernamePasswordAuthenticationFilter extends UsernamePasswordAu
         }
 
         LoginRequest loginRequest = readLoginRequest(request);
+        if (loginRequest == null) {
+            throw new AuthenticationServiceException("Invalid login request body");
+        }
         String username = loginRequest.getUsername();
         String password = loginRequest.getPassword();
 

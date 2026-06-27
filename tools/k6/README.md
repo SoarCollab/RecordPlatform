@@ -34,14 +34,13 @@ tools/k6/
 ## 前置条件
 
 - 后端服务可访问（默认：`http://localhost:8000/record-platform/api/v1`）
-- 至少具备一种执行引擎：
-  - 本地 `k6`（macOS）：
+- 本地 `k6`（macOS）：
 
 ```bash
 brew install k6
 ```
 
-- 或 Docker Desktop（脚本会使用 `grafana/k6:0.49.0` 自动回退执行）。
+- 如需 Docker 执行，必须显式使用 `--engine docker`，并通过 `K6_DOCKER_IMAGE` 提供 digest 固定镜像，例如 `grafana/k6@sha256:<digest>`。
 
 > 注意：`X-Tenant-ID` 对 `/api/v1/auth/login` 也必填。
 
@@ -50,13 +49,14 @@ brew install k6
 基础变量：
 - `BASE_URL`（默认：`http://localhost:8000/record-platform/api/v1`）
 - `TENANT_ID`（默认：`1`）
-- `USERNAME`（默认：`loadtest`）
-- `PASSWORD`（默认：`loadtest123`）
+- `USERNAME`（必填）
+- `PASSWORD`（必填）
 
 框架变量：
 - `K6_PROFILE=smoke|load`
 - `K6_SCENARIO=all|file-query|chunk-upload|core-mixed`
-- `K6_ENGINE=auto|local|docker`（默认 `auto`）
+- `K6_ENGINE=auto|local|docker`（默认 `auto`；`auto` 仅自动使用本地 k6）
+- `K6_DOCKER_IMAGE`（Docker 引擎必填，必须是 digest 固定镜像）
 - `RUN_ID`（默认当前时间戳）
 - `RESULT_DIR`（默认 `tools/k6/results/<RUN_ID>`）
 

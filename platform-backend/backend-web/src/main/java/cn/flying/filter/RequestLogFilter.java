@@ -2,6 +2,7 @@ package cn.flying.filter;
 
 import cn.flying.common.util.Const;
 import cn.flying.common.util.IdUtils;
+import cn.flying.common.util.SensitiveDataMasker;
 import cn.hutool.json.JSONObject;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -46,10 +47,35 @@ public class RequestLogFilter extends OncePerRequestFilter {
     private static final Set<String> SENSITIVE_PARAMS = Set.of(
             "password", "pwd", "oldPassword", "newPassword", "new_password", "old_password",
             "token", "secret", "secretKey", "accessKey", "apiKey", "privateKey",
-            "creditCard", "cardNumber", "cvv", "ssn"
+            "creditCard", "cardNumber", "cvv", "ssn",
+            "code", "verificationCode", "verifyCode", "otp", "resetCode",
+            "authorization", "initialKey", "decryptKey", "decryptionKey", "fileKey",
+            "shareCode", "sharingCode", "fileHash", "transactionHash",
+            "contractABI", "input", "signature", "presignedUrl", "downloadUrl",
+            "clientId"
     );
 
     private static final String MASK = "***";
+
+    /**
+     * 响应体不应被缓存或打印的路径片段。
+     */
+    private static final Set<String> SENSITIVE_RESPONSE_PATH_MARKERS = Set.of(
+            "/download",
+            "/chunks",
+            "/decrypt-info",
+            "/tokens",
+            "/password",
+            "/verification-codes",
+            "/sse",
+            "/stream",
+            "/api/auth",
+            "/api/v1/auth",
+            "/api/file",
+            "/api/v1/files",
+            "/api/v1/shares",
+            "/api/v1/public/shares"
+    );
 
     /**
      * 响应体日志截断阈值（字节）。
@@ -131,8 +157,11 @@ public class RequestLogFilter extends OncePerRequestFilter {
         if (requestUri == null || requestUri.isBlank()) {
             requestUri = request.getServletPath();
         }
-        // 统一按路径关键字跳过：download 类接口可能返回二进制或大块 base64 JSON
-        return requestUri != null && requestUri.contains("/download");
+        if (requestUri == null) {
+            return false;
+        }
+        String normalizedPath = requestUri.toLowerCase();
+        return SENSITIVE_RESPONSE_PATH_MARKERS.stream().anyMatch(normalizedPath::contains);
     }
 
     /**
@@ -206,7 +235,7 @@ public class RequestLogFilter extends OncePerRequestFilter {
         }
 
         int limit = Math.min(bodySize, MAX_RESPONSE_LOG_BYTES);
-        String preview = new String(body, 0, limit, StandardCharsets.UTF_8);
+        String preview = SensitiveDataMasker.maskSensitiveFields(new String(body, 0, limit, StandardCharsets.UTF_8));
         if (bodySize > MAX_RESPONSE_LOG_BYTES) {
             return preview + "...(truncated, bytes=" + bodySize + ")";
         }
@@ -264,11 +293,11 @@ public class RequestLogFilter extends OncePerRequestFilter {
         if(id != null) {
             User user = (User) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
             log.info("请求URL: \"{}\" ({}) | 远程IP地址: {} │ 身份: {} (UID: {}) | 角色: {} | 请求参数列表: {}",
-                    request.getServletPath(), request.getMethod(), request.getRemoteAddr(),
+                    sanitizePathForLog(request.getServletPath()), request.getMethod(), request.getRemoteAddr(),
                     user.getUsername(), id, user.getAuthorities(), object);
         } else {
             log.info("请求URL: \"{}\" ({}) | 远程IP地址: {} │ 身份: 未验证 | 请求参数列表: {}",
-                    request.getServletPath(), request.getMethod(), request.getRemoteAddr(), object);
+                    sanitizePathForLog(request.getServletPath()), request.getMethod(), request.getRemoteAddr(), object);
         }
     }
 
@@ -311,5 +340,12 @@ public class RequestLogFilter extends OncePerRequestFilter {
             return value.substring(0, 512) + "...(truncated, len=" + value.length() + ")";
         }
         return value;
+    }
+
+    /**
+     * 对文件/分享/交易/上传会话路径中的 bearer code、文件哈希、交易哈希和 clientId 做路径级脱敏。
+     */
+    private String sanitizePathForLog(String path) {
+        return SensitiveDataMasker.maskSensitivePathSegments(path);
     }
 }

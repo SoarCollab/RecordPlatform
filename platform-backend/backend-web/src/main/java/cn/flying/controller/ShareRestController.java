@@ -4,10 +4,10 @@ import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.annotation.RateLimit;
 import cn.flying.common.constant.Result;
 import cn.flying.common.util.Const;
-import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileSharingVO;
 import cn.flying.dao.vo.file.SaveSharingFile;
+import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
@@ -96,10 +96,10 @@ public class ShareRestController {
     @GetMapping("/api/v1/shares/{shareCode}/files")
     @Operation(summary = "获取分享文件列表（REST）")
     @OperationLog(module = "文件操作", operationType = "查询", description = "获取分享文件列表（REST）")
-    public Result<List<File>> getSharedFiles(@PathVariable String shareCode,
-                                             @RequestAttribute(value = Const.ATTR_USER_ID, required = false) Long userId,
-                                             HttpServletRequest request) {
-        List<File> files = fileQueryService.getShareFile(shareCode);
+    public Result<List<ShareFileVO>> getSharedFiles(@PathVariable String shareCode,
+                                                    @RequestAttribute(value = Const.ATTR_USER_ID, required = false) Long userId,
+                                                    HttpServletRequest request) {
+        List<ShareFileVO> files = fileQueryService.getShareFile(shareCode);
         shareAuditService.logShareView(shareCode, userId, getClientIp(request), request.getHeader("User-Agent"));
         return Result.success(files);
     }
@@ -198,23 +198,12 @@ public class ShareRestController {
     }
 
     /**
-     * 获取客户端 IP。
+     * 获取审计用客户端 IP。
      *
      * @param request 当前请求
-     * @return 客户端 IP
+     * @return servlet 容器确认的客户端 IP
      */
     private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("X-Real-IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getRemoteAddr();
-        }
-        if (ip != null && ip.contains(",")) {
-            ip = ip.split(",")[0].trim();
-        }
-        return ip;
+        return request.getRemoteAddr();
     }
 }
-

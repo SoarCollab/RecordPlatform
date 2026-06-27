@@ -12,7 +12,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -81,16 +80,16 @@ class QuotaAdminControllerTest {
                 LocalDateTime.of(2026, 2, 7, 1, 30)
         );
 
-        when(quotaRolloutAuditService.upsertAudit(88L, request)).thenReturn(response);
+        when(quotaRolloutAuditService.upsertAudit(88L, 1L, request)).thenReturn(response);
 
-        Result<QuotaRolloutAuditVO> result = controller.upsertQuotaRolloutAudit(88L, request);
+        Result<QuotaRolloutAuditVO> result = controller.upsertQuotaRolloutAudit(88L, 1L, request);
 
         assertEquals(9L, result.getData().id());
-        verify(quotaRolloutAuditService).upsertAudit(88L, request);
+        verify(quotaRolloutAuditService).upsertAudit(88L, 1L, request);
     }
 
     /**
-     * 验证审计查询接口会按批次和租户查询。
+     * 验证审计查询接口会按当前租户和批次查询。
      */
     @Test
     void shouldDelegateGetAuditToService() {
@@ -114,7 +113,7 @@ class QuotaAdminControllerTest {
 
         when(quotaRolloutAuditService.getLatestAudit("batch-a", 1L)).thenReturn(response);
 
-        Result<QuotaRolloutAuditVO> result = controller.getQuotaRolloutAudit("batch-a", 1L);
+        Result<QuotaRolloutAuditVO> result = controller.getQuotaRolloutAudit(1L, "batch-a");
 
         assertEquals("batch-a", result.getData().batchId());
         verify(quotaRolloutAuditService).getLatestAudit("batch-a", 1L);
@@ -140,20 +139,24 @@ class QuotaAdminControllerTest {
         Method method = QuotaAdminController.class.getDeclaredMethod(
                 "upsertQuotaRolloutAudit",
                 Long.class,
+                Long.class,
                 QuotaRolloutAuditUpsertVO.class
         );
         Parameter[] parameters = method.getParameters();
 
-        assertEquals(2, parameters.length);
+        assertEquals(3, parameters.length);
         RequestAttribute requestAttribute = parameters[0].getAnnotation(RequestAttribute.class);
         assertNotNull(requestAttribute);
         assertEquals(Const.ATTR_USER_ID, requestAttribute.value());
-        assertTrue(parameters[1].isAnnotationPresent(RequestBody.class));
-        assertTrue(parameters[1].isAnnotationPresent(Valid.class));
+        RequestAttribute tenantAttribute = parameters[1].getAnnotation(RequestAttribute.class);
+        assertNotNull(tenantAttribute);
+        assertEquals(Const.ATTR_TENANT_ID, tenantAttribute.value());
+        assertTrue(parameters[2].isAnnotationPresent(RequestBody.class));
+        assertTrue(parameters[2].isAnnotationPresent(Valid.class));
     }
 
     /**
-     * 验证 GET 接口声明了 batchId 与 tenantId 查询参数注解。
+     * 验证 GET 接口声明了租户上下文与 batchId 查询参数注解。
      *
      * @throws Exception 方法反射失败时抛出
      */
@@ -161,13 +164,15 @@ class QuotaAdminControllerTest {
     void shouldDeclareQueryParameterAnnotations() throws Exception {
         Method method = QuotaAdminController.class.getDeclaredMethod(
                 "getQuotaRolloutAudit",
-                String.class,
-                Long.class
+                Long.class,
+                String.class
         );
         Parameter[] parameters = method.getParameters();
 
         assertEquals(2, parameters.length);
-        assertTrue(parameters[0].isAnnotationPresent(RequestParam.class));
+        RequestAttribute tenantAttribute = parameters[0].getAnnotation(RequestAttribute.class);
+        assertNotNull(tenantAttribute);
+        assertEquals(Const.ATTR_TENANT_ID, tenantAttribute.value());
         assertTrue(parameters[1].isAnnotationPresent(RequestParam.class));
     }
 }

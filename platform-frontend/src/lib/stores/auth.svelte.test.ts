@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
     logout: vi.fn(),
     getCurrentUser: vi.fn(),
     updateUser: vi.fn(),
+    clearAllDownloads: vi.fn(),
   };
 });
 
@@ -26,6 +27,12 @@ vi.mock("$api/endpoints/auth", () => ({
   logout: mocks.logout,
   getCurrentUser: mocks.getCurrentUser,
   updateUser: mocks.updateUser,
+}));
+
+vi.mock("$stores/download.svelte", () => ({
+  useDownload: () => ({
+    clearAllDownloads: mocks.clearAllDownloads,
+  }),
 }));
 
 /**
@@ -93,6 +100,7 @@ describe("auth store", () => {
     mocks.logout.mockResolvedValue(undefined);
     mocks.getCurrentUser.mockResolvedValue(createUser("user"));
     mocks.updateUser.mockResolvedValue(createUser("user"));
+    mocks.clearAllDownloads.mockResolvedValue(undefined);
   });
 
   it("无 token 初始化时应标记 initialized 且保持未登录", async () => {
@@ -271,6 +279,7 @@ describe("auth store", () => {
     await auth.logout();
 
     expect(auth.user).toBeNull();
+    expect(mocks.clearAllDownloads).toHaveBeenCalledTimes(1);
     expect(mocks.goto).toHaveBeenCalledWith("/login");
   });
 

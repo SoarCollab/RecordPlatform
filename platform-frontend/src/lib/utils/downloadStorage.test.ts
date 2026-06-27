@@ -10,6 +10,7 @@ import {
   getChunkCount,
   deleteChunks,
   clearTaskData,
+  clearAllDownloadData,
   cleanupExpiredData,
   getStorageUsage,
   type PersistedDownloadTask,
@@ -30,13 +31,7 @@ describe("downloadStorage", () => {
       fileSize: 1024,
       contentType: "text/plain",
       totalChunks: 2,
-      initialKey: null,
       source: { type: "owned" as const },
-      presignedUrls: [
-        "https://example.com/chunk1",
-        "https://example.com/chunk2",
-      ],
-      urlsFetchedAt: Date.now(),
       createdAt: Date.now(),
       ...overrides,
     };
@@ -91,6 +86,30 @@ describe("downloadStorage", () => {
         const retrieved = await getTask("task-overwrite");
 
         expect(retrieved?.fileName).toBe("updated.txt");
+      });
+
+      it("should strip download secrets before persisting task metadata", async () => {
+        const taskWithSecrets = {
+          ...createTestTask("task-secret-strip"),
+          source: { type: "public_share", shareCode: "share-secret" },
+          initialKey: "secret-key",
+          presignedUrls: ["https://example.com/private"],
+          urlsFetchedAt: Date.now(),
+        } as PersistedDownloadTask & {
+          source: { type: "public_share"; shareCode: string };
+          initialKey: string;
+          presignedUrls: string[];
+          urlsFetchedAt: number;
+        };
+
+        await saveTask(taskWithSecrets);
+        const retrieved = await getTask("task-secret-strip");
+
+        expect(retrieved).not.toHaveProperty("initialKey");
+        expect(retrieved).not.toHaveProperty("presignedUrls");
+        expect(retrieved).not.toHaveProperty("urlsFetchedAt");
+        expect(retrieved?.source).toEqual({ type: "public_share" });
+        expect(retrieved?.source).not.toHaveProperty("shareCode");
       });
     });
 
@@ -211,6 +230,22 @@ describe("downloadStorage", () => {
       });
     });
 
+    describe("clearAllDownloadData", () => {
+      it("should clear all persisted tasks and encrypted chunks", async () => {
+        await saveTask(createTestTask("task-clear-all-1"));
+        await saveTask(createTestTask("task-clear-all-2"));
+        await saveChunk("task-clear-all-1", 0, new Uint8Array([1]));
+        await saveChunk("task-clear-all-2", 0, new Uint8Array([2]));
+
+        await clearAllDownloadData();
+
+        expect(await getTask("task-clear-all-1")).toBeNull();
+        expect(await getTask("task-clear-all-2")).toBeNull();
+        expect(await getChunkCount("task-clear-all-1")).toBe(0);
+        expect(await getChunkCount("task-clear-all-2")).toBe(0);
+      });
+    });
+
     describe("cleanupExpiredData", () => {
       it("should delete tasks older than expiry period", async () => {
         const oldTask = createTestTask("old-task-cleanup", {
@@ -275,7 +310,6 @@ describe("downloadStorage", () => {
       expect(task.contentType).toBeDefined();
       expect(task.totalChunks).toBeDefined();
       expect(task.source).toBeDefined();
-      expect(task.presignedUrls).toBeDefined();
       expect(task.createdAt).toBeDefined();
     });
   });

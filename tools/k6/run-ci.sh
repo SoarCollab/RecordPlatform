@@ -8,7 +8,7 @@ Usage: tools/k6/run-ci.sh [options]
 
 Options:
   --include-chunk               在 CI smoke 中追加 chunk-upload 场景
-  --engine <auto|local|docker>  执行引擎（默认：auto）
+  --engine <auto|local|docker>  执行引擎（默认：auto；auto 仅自动使用本地 k6）
   --run-id <id>                 自定义运行 ID（默认：ci-当前时间）
   --result-dir <dir>            自定义结果目录（默认：tools/k6/results/<run-id>）
   --help                         显示帮助
@@ -18,6 +18,7 @@ Environment (required):
   TENANT_ID
   USERNAME
   PASSWORD
+  K6_DOCKER_IMAGE               Docker 引擎必填，且必须使用 digest 固定镜像
 USAGE
 }
 
@@ -49,6 +50,10 @@ resolve_engine() {
         echo "[ERROR] 已指定 --engine docker，但未检测到 Docker。请先安装并启动 Docker Desktop。" >&2
         exit 1
       fi
+      if [[ "${K6_DOCKER_IMAGE:-}" != *@sha256:* ]]; then
+        echo "[ERROR] Docker 引擎要求设置 K6_DOCKER_IMAGE，且必须使用 digest 固定镜像，例如 grafana/k6@sha256:<digest>。" >&2
+        exit 1
+      fi
       echo "docker"
       ;;
     auto)
@@ -56,13 +61,9 @@ resolve_engine() {
         echo "local"
         return
       fi
-      if has_command docker; then
-        echo "docker"
-        return
-      fi
-      echo "[ERROR] 未检测到 k6 或 Docker。请安装其一：" >&2
+      echo "[ERROR] 未检测到本地 k6。auto 模式不会自动回退到 Docker。" >&2
       echo "        - macOS 安装 k6: brew install k6" >&2
-      echo "        - 或安装并启动 Docker Desktop（用于 grafana/k6 镜像执行）" >&2
+      echo "        - 或显式使用 --engine docker，并设置 digest 固定的 K6_DOCKER_IMAGE。" >&2
       exit 1
       ;;
     *)
@@ -217,11 +218,12 @@ run_with_docker_k6() {
   local suite_script="$1"
   local result_dir="${RESULT_DIR:-}"
   local result_dir_abs=""
+  local docker_image="${K6_DOCKER_IMAGE:?K6_DOCKER_IMAGE is required for docker engine}"
   local -a docker_args
   docker_args=(
     run
     --rm
-    -v "$PWD:/workspace"
+    -v "$PWD:/workspace:ro"
     -w /workspace
   )
 
@@ -231,23 +233,23 @@ run_with_docker_k6() {
 
   if [[ -n "$result_dir" ]]; then
     result_dir_abs="$(resolve_existing_dir_absolute_path "$result_dir")"
-    docker_args+=(-v "$result_dir_abs:$result_dir_abs")
+    docker_args+=(-v "$result_dir_abs:$result_dir_abs:rw")
   fi
 
   docker "${docker_args[@]}" \
-    -e BASE_URL="${BASE_URL:-}" \
-    -e TENANT_ID="${TENANT_ID:-}" \
-    -e USERNAME="${USERNAME:-}" \
-    -e PASSWORD="${PASSWORD:-}" \
-    -e K6_PROFILE="${K6_PROFILE:-}" \
-    -e K6_SCENARIO="${K6_SCENARIO:-}" \
-    -e RUN_ID="${RUN_ID:-}" \
-    -e RESULT_DIR="${result_dir_abs:-${RESULT_DIR:-}}" \
-    -e CLEANUP="${CLEANUP:-}" \
-    -e CI_INCLUDE_CHUNK="${CI_INCLUDE_CHUNK:-}" \
-    -e TOTAL_CHUNKS="${TOTAL_CHUNKS:-}" \
-    -e CHUNK_SIZE="${CHUNK_SIZE:-}" \
-    grafana/k6:0.49.0 \
+    -e BASE_URL \
+    -e TENANT_ID \
+    -e USERNAME \
+    -e PASSWORD \
+    -e K6_PROFILE \
+    -e K6_SCENARIO \
+    -e RUN_ID \
+    -e RESULT_DIR \
+    -e CLEANUP \
+    -e CI_INCLUDE_CHUNK \
+    -e TOTAL_CHUNKS \
+    -e CHUNK_SIZE \
+    "$docker_image" \
     run "$suite_script"
 }
 
@@ -349,7 +351,7 @@ main() {
 
   write_run_meta "$result_dir" "$run_id" "$K6_PROFILE" "$K6_SCENARIO" "$resolved_engine"
 
-  echo "[INFO] BASE_URL=$BASE_URL"
+  echo "[INFO] BASE_URL=$(mask_base_url "$BASE_URL")"
   echo "[INFO] TENANT_ID=$TENANT_ID"
   echo "[INFO] USERNAME=$USERNAME"
   echo "[INFO] run_id=$RUN_ID result_dir=$RESULT_DIR include_chunk=$CI_INCLUDE_CHUNK engine=$K6_ENGINE"

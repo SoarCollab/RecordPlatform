@@ -5,7 +5,6 @@ import cn.flying.dao.vo.audit.AuditConfigVO;
 import cn.flying.dao.vo.audit.ErrorOperationStatsVO;
 import cn.flying.dao.vo.audit.HighFrequencyOperationVO;
 import cn.flying.dao.vo.audit.UserTimeDistributionVO;
-import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -21,23 +20,64 @@ import java.util.Map;
 public interface SysOperationLogMapper extends BaseMapper<SysOperationLog> {
 
     /**
-     * 执行异常检查存储过程（OUT 参数会写回到入参 Map 中）。
-     *
-     * @param params OUT 参数容器，执行后包含：hasAnomalies、anomalyDetails
-     */
-    @InterceptorIgnore(tenantLine = "true")
-    void checkAnomalies(Map<String, Object> params);
-
-    /**
-     * 执行日志备份
-     */
-    @InterceptorIgnore(tenantLine = "true")
-    void backupLogs(@Param("days") Integer days, @Param("deleteAfterBackup") Boolean deleteAfterBackup);
-
-    /**
      * 查询高频操作记录 (v_high_frequency_operations)
      */
     List<HighFrequencyOperationVO> selectHighFrequencyOperations();
+
+    /**
+     * 查询指定租户在时间窗口内超过阈值的高频用户数。
+     *
+     * @param tenantId 租户ID
+     * @param startTime 起始时间
+     * @param threshold 高频阈值
+     * @return 高频用户数
+     */
+    Integer countHighFrequencyUsers(
+            @Param("tenantId") Long tenantId,
+            @Param("startTime") LocalDateTime startTime,
+            @Param("threshold") int threshold
+    );
+
+    /**
+     * 查询指定租户在时间窗口内达到失败登录阈值的用户数。
+     *
+     * @param tenantId 租户ID
+     * @param startTime 起始时间
+     * @param threshold 失败登录阈值
+     * @return 失败登录用户数
+     */
+    Integer countFailedLoginUsers(
+            @Param("tenantId") Long tenantId,
+            @Param("startTime") LocalDateTime startTime,
+            @Param("threshold") int threshold
+    );
+
+    /**
+     * 查询指定租户在时间窗口内的错误率百分比。
+     *
+     * @param tenantId 租户ID
+     * @param startTime 起始时间
+     * @return 错误率百分比
+     */
+    Double selectErrorRatePercent(@Param("tenantId") Long tenantId, @Param("startTime") LocalDateTime startTime);
+
+    /**
+     * 备份指定租户截止时间之前的操作日志。
+     *
+     * @param tenantId 租户ID
+     * @param cutoffTime 截止时间
+     * @return 插入备份表的行数
+     */
+    int insertOperationLogBackup(@Param("tenantId") Long tenantId, @Param("cutoffTime") LocalDateTime cutoffTime);
+
+    /**
+     * 删除指定租户截止时间之前的原始操作日志。
+     *
+     * @param tenantId 租户ID
+     * @param cutoffTime 截止时间
+     * @return 删除行数
+     */
+    int deleteOperationLogsBefore(@Param("tenantId") Long tenantId, @Param("cutoffTime") LocalDateTime cutoffTime);
 
     /**
      * 查询敏感操作记录 (v_sensitive_operations) - 分页

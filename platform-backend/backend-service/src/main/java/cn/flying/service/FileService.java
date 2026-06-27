@@ -4,8 +4,8 @@ import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.ShareInfoVO;
+import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
-import cn.flying.platformapi.response.TransactionVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 
@@ -126,13 +126,6 @@ public interface FileService extends IService<File> {
     List<String> getFileAddress(Long userId, String fileHash);
 
     /**
-     * 根据交易哈希获取文件交易信息
-     * @param transactionHash 交易哈希
-     * @return 交易信息
-     */
-    TransactionVO getTransactionByHash(String transactionHash);
-
-    /**
      * 获取文件分片
      * @param userId 用户ID
      * @param fileHash 文件哈希
@@ -155,7 +148,7 @@ public interface FileService extends IService<File> {
      * @param sharingCode 分享码
      * @return
      */
-    List<File> getShareFile(String sharingCode);
+    List<ShareFileVO> getShareFile(String sharingCode);
 
     /**
      * 保存他人分享的文件

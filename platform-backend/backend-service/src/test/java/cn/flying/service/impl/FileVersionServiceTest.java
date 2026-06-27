@@ -6,6 +6,7 @@ import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.mapper.FileMapper;
+import cn.flying.service.QuotaService;
 import cn.flying.test.builders.FileTestBuilder;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
@@ -52,6 +53,9 @@ class FileVersionServiceTest {
 
     @Mock
     private TransactionTemplate transactionTemplate;
+
+    @Mock
+    private QuotaService quotaService;
 
     @InjectMocks
     private FileServiceImpl fileService;
@@ -118,6 +122,7 @@ class FileVersionServiceTest {
 
                 // Verify clearLatestInChain was called
                 verify(fileMapper).clearLatestInChain(1L, TENANT_ID);
+                verify(quotaService).checkUploadQuota(TENANT_ID, USER_ID, 2048L);
                 // Verify lock was acquired and released
                 verify(rLock).tryLock(5, 30, TimeUnit.SECONDS);
                 verify(rLock).unlock();

@@ -7,6 +7,8 @@ import "./Storage.sol";
 // share expiry is an explicit time-based business rule and not a randomness source.
 // slither-disable-start timestamp
 contract Sharing is Storage {
+    address private operator;
+
     // 分享信息结构体
     struct ShareInfo {
         string uploader;        // 分享者
@@ -32,6 +34,28 @@ contract Sharing is Storage {
 
     // 取消分享事件
     event ShareCancelled(string shareCode, string uploader);
+
+    // 平台操作员变更事件
+    event OperatorTransferred(address previousOperator, address newOperator);
+
+    // 初始化平台操作员为合约部署账户
+    constructor() {
+        operator = msg.sender;
+        emit OperatorTransferred(address(0), operator);
+    }
+
+    // 限制分享管理操作只能由平台操作员账户发起
+    modifier onlyOperator() {
+        require(msg.sender == operator, "Only platform operator");
+        _;
+    }
+
+    // 转移平台操作员权限
+    function transferOperator(address newOperator) public onlyOperator {
+        require(newOperator != address(0), "Operator cannot be zero address");
+        emit OperatorTransferred(operator, newOperator);
+        operator = newOperator;
+    }
     
     // 生成分享码（基于合约上下文和递增 nonce，避免外部自调用依赖）
     function generateShareCode(
@@ -65,7 +89,7 @@ contract Sharing is Storage {
         string memory uploader,
         bytes32[] memory fileHashes,
         uint256 expireMinutes
-    ) public returns (string memory) {
+    ) public onlyOperator returns (string memory) {
         require(bytes(uploader).length > 0, "Uploader name cannot be empty");
         require(fileHashes.length > 0, "File hashes array cannot be empty");
         require(expireMinutes > 0, "Expire minutes must be greater than 0");
@@ -146,7 +170,7 @@ contract Sharing is Storage {
     }
 
     // 取消分享（需验证调用者身份）
-    function cancelShare(string memory shareCode, string memory uploader) public {
+    function cancelShare(string memory shareCode, string memory uploader) public onlyOperator {
         require(bytes(shareCode).length == 6, "Invalid share code length");
         require(bytes(uploader).length > 0, "Uploader cannot be empty");
 
@@ -165,6 +189,7 @@ contract Sharing is Storage {
     function getUserShareCodes(string memory uploader)
         public
         view
+        onlyOperator
         returns (string[] memory)
     {
         return userShareCodes[uploader];

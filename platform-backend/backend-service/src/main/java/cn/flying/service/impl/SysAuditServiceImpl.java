@@ -1,5 +1,9 @@
 package cn.flying.service.impl;
 
+import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
+import cn.flying.common.tenant.TenantContext;
+import cn.flying.common.util.JsonConverter;
 import cn.flying.common.util.SqlUtils;
 import cn.flying.dao.dto.SysOperationLog;
 import cn.flying.dao.mapper.SysOperationLogMapper;
@@ -12,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -29,6 +34,10 @@ import java.util.Map;
 public class SysAuditServiceImpl implements SysAuditService {
 
     private static final DateTimeFormatter DATETIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final int DEFAULT_HIGH_FREQ_THRESHOLD = 100;
+    private static final int DEFAULT_FAILED_LOGIN_THRESHOLD = 5;
+    private static final int DEFAULT_ERROR_RATE_THRESHOLD = 10;
+    private static final int MIN_BACKUP_RETENTION_DAYS = 1;
 
     private final SysOperationLogMapper operationLogMapper;
     
@@ -276,75 +285,140 @@ public class SysAuditServiceImpl implements SysAuditService {
      */
     @Override
     public Map<String, Object> checkAnomalies() {
+        Long tenantId = requireTenantIdForAudit();
         Map<String, Object> result = new HashMap<>();
         
         try {
-            Map<String, Object> outParams = new HashMap<>();
-            operationLogMapper.checkAnomalies(outParams);
+            int highFreqThreshold = getPositiveAuditConfig("HIGH_FREQ_THRESHOLD", DEFAULT_HIGH_FREQ_THRESHOLD);
+            int failedLoginThreshold = getPositiveAuditConfig("FAILED_LOGIN_THRESHOLD", DEFAULT_FAILED_LOGIN_THRESHOLD);
+            int errorRateThreshold = getPositiveAuditConfig("ERROR_RATE_THRESHOLD", DEFAULT_ERROR_RATE_THRESHOLD);
+            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime highFrequencyStartTime = now.minusMinutes(5);
+            LocalDateTime failedLoginStartTime = now.minusHours(1);
 
-            Boolean hasAnomalies = toBooleanOrNull(outParams.get("hasAnomalies"));
-            String anomalyDetails = toStringOrNull(outParams.get("anomalyDetails"));
+            int highFreqCount = nvl(operationLogMapper.countHighFrequencyUsers(
+                    tenantId,
+                    highFrequencyStartTime,
+                    highFreqThreshold
+            ));
+            int failedLoginCount = nvl(operationLogMapper.countFailedLoginUsers(
+                    tenantId,
+                    failedLoginStartTime,
+                    failedLoginThreshold
+            ));
+            double errorRate = nvl(operationLogMapper.selectErrorRatePercent(tenantId, failedLoginStartTime));
+
+            Boolean hasAnomalies = highFreqCount > 0 || failedLoginCount > 0 || errorRate > errorRateThreshold;
+            Map<String, Object> thresholds = new HashMap<>();
+            thresholds.put("highFrequency", highFreqThreshold);
+            thresholds.put("failedLogin", failedLoginThreshold);
+            thresholds.put("errorRate", errorRateThreshold);
+
+            Map<String, Object> details = new HashMap<>();
+            details.put("tenantId", tenantId);
+            details.put("highFrequencyUsers", highFreqCount);
+            details.put("failedLoginUsers", failedLoginCount);
+            details.put("errorRatePercent", errorRate);
+            details.put("thresholds", thresholds);
+
+            String anomalyDetails = JsonConverter.toJson(details);
             
             result.put("hasAnomalies", hasAnomalies);
-            result.put("anomalyDetails", anomalyDetails);
+            result.put("anomalyDetails", anomalyDetails == null ? "{}" : anomalyDetails);
             result.put("checkTime", LocalDateTime.now().toString());
             result.put("success", true);
         } catch (Exception e) {
-            log.error("调用异常检测存储过程失败", e);
+            log.error("执行租户审计异常检测失败: tenantId={}", tenantId, e);
             result.put("success", false);
             result.put("error", e.getMessage());
         }
-        
+
         return result;
     }
 
-    /**
-     * 将存储过程 OUT 参数返回值转换为布尔值。
-     *
-     * @param value OUT 参数值（可能为 Boolean/Number/String）
-     * @return 转换后的布尔值，无法识别时返回 null
-     */
-    private Boolean toBooleanOrNull(Object value) {
-        if (value == null) {
-            return null;
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public String backupLogs(Integer days, Boolean deleteAfterBackup) {
+        int retentionDays = validateBackupRetentionDays(days);
+        Long tenantId = requireTenantIdForAudit();
+        LocalDateTime cutoffTime = LocalDateTime.now().minusDays(retentionDays);
+        try {
+            int backupRows = operationLogMapper.insertOperationLogBackup(tenantId, cutoffTime);
+            int deletedRows = 0;
+            if (Boolean.TRUE.equals(deleteAfterBackup)) {
+                deletedRows = operationLogMapper.deleteOperationLogsBefore(tenantId, cutoffTime);
+            }
+            return "成功备份租户" + tenantId + "中" + retentionDays + "天前的日志"
+                    + "，备份行数=" + backupRows
+                    + (Boolean.TRUE.equals(deleteAfterBackup) ? "，清理原表行数=" + deletedRows : "");
+        } catch (Exception e) {
+            log.error("执行租户审计日志备份失败: tenantId={}, retentionDays={}, deleteAfterBackup={}",
+                    tenantId, retentionDays, deleteAfterBackup, e);
+            return "备份失败：" + e.getMessage();
         }
-        if (value instanceof Boolean booleanValue) {
-            return booleanValue;
-        }
-        if (value instanceof Number numberValue) {
-            return numberValue.intValue() != 0;
-        }
-        String text = value.toString().trim();
-        if (text.isEmpty()) {
-            return null;
-        }
-        if ("1".equals(text) || "true".equalsIgnoreCase(text) || "yes".equalsIgnoreCase(text)) {
-            return true;
-        }
-        if ("0".equals(text) || "false".equalsIgnoreCase(text) || "no".equalsIgnoreCase(text)) {
-            return false;
-        }
-        return null;
     }
 
     /**
-     * 将任意对象安全转换为字符串。
+     * 获取当前租户上下文，审计异常检测和备份均禁止无租户全局执行。
      *
-     * @param value 可能为 null 的对象
-     * @return 字符串值，value 为 null 时返回 null
+     * @return 当前租户ID
      */
-    private String toStringOrNull(Object value) {
-        return value == null ? null : value.toString();
-    }
-    
-    @Override
-    public String backupLogs(Integer days, Boolean deleteAfterBackup) {
+    private Long requireTenantIdForAudit() {
         try {
-            operationLogMapper.backupLogs(days, deleteAfterBackup);
-            return "成功备份" + days + "天前的日志" + (deleteAfterBackup ? "并清理原表数据" : "");
-        } catch (Exception e) {
-            log.error("调用日志备份存储过程失败", e);
-            return "备份失败：" + e.getMessage();
+            return TenantContext.requireTenantId();
+        } catch (IllegalStateException ex) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "当前租户不能为空");
         }
+    }
+
+    /**
+     * 读取正整数审计配置，非法或缺失时回退默认值。
+     *
+     * @param key 配置键
+     * @param fallback 默认值
+     * @return 正整数配置值
+     */
+    private int getPositiveAuditConfig(String key, int fallback) {
+        String value = getAuditConfigValue(key, String.valueOf(fallback));
+        try {
+            int parsed = Integer.parseInt(value.trim());
+            return parsed > 0 ? parsed : fallback;
+        } catch (NumberFormatException ex) {
+            log.warn("审计配置不是有效正整数: key={}, value={}", key, value);
+            return fallback;
+        }
+    }
+
+    /**
+     * 校验备份保留天数，禁止 0 或负数导致整表备份/删除。
+     *
+     * @param days 保留天数
+     * @return 规范化后的保留天数
+     */
+    private int validateBackupRetentionDays(Integer days) {
+        if (days == null || days < MIN_BACKUP_RETENTION_DAYS) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "days 必须大于等于 1");
+        }
+        return days;
+    }
+
+    /**
+     * Integer 空值转 0。
+     *
+     * @param value 输入值
+     * @return 非空 int
+     */
+    private int nvl(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    /**
+     * Double 空值转 0。
+     *
+     * @param value 输入值
+     * @return 非空 double
+     */
+    private double nvl(Double value) {
+        return value == null ? 0D : value;
     }
 } 

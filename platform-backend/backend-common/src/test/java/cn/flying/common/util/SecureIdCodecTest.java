@@ -193,6 +193,30 @@ class SecureIdCodecTest {
             assertThat(result).isNull();
         }
 
+        /**
+         * 验证超长外部 ID 会在 Base62 解码前被拒绝，避免 BigInteger 解析被放大为 CPU 消耗。
+         */
+        @Test
+        @DisplayName("should reject oversized external ID before Base62 decoding")
+        void fromExternalId_returnsNullForOversizedInput() {
+            Long result = codec.fromExternalId("E" + "A".repeat(10_000));
+
+            assertThat(result).isNull();
+        }
+
+        /**
+         * 验证未知前缀不会被默认当作实体 ID 解码。
+         */
+        @Test
+        @DisplayName("should reject unknown type prefix")
+        void fromExternalId_returnsNullForUnknownPrefix() {
+            String validExternalId = codec.toExternalId(12345L);
+
+            Long result = codec.fromExternalId("X" + validExternalId.substring(1));
+
+            assertThat(result).isNull();
+        }
+
         @Test
         @DisplayName("should return null for invalid Base62")
         void fromExternalId_returnsNullForInvalidBase62() {

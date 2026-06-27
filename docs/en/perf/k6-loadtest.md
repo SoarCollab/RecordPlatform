@@ -4,21 +4,23 @@ Goal: provide a repeatable, gated, and archivable performance baseline and regre
 
 ## 1. Start Backend (local profile)
 
-This repository ships with a local load-test seed (enabled by default in the local profile):
+This repository ships with an optional local load-test seed. Enable it explicitly and set a password:
 - Tenant: `tenantId=1`
-- User: `loadtest` / `loadtest123`
+- User: `loadtest` / value from `LOADTEST_PASSWORD`
 
 Set the JWT key (to avoid startup errors):
 
 ```bash
 export JWT_KEY="ci-integration-jwt-key-32chars-xK9mN2pL5qR8vW3y"
+export LOADTEST_PASSWORD="<set-a-local-test-password>"
 ```
 
 Start the backend (example):
 
 ```bash
 mvn -f platform-backend/pom.xml -pl backend-web -am spring-boot:run \
-  -Dspring-boot.run.profiles=local
+  -Dspring-boot.run.profiles=local \
+  -Dspring-boot.run.arguments=--loadtest.seed.enabled=true
 ```
 
 Default Base URL:
@@ -33,7 +35,7 @@ http://localhost:8000/record-platform/api/v1
 brew install k6
 ```
 
-If local `k6` is unavailable, use `--engine auto` to fall back to Docker (`grafana/k6:0.49.0`).
+`--engine auto` only auto-selects a local `k6` binary. To run in Docker, use `--engine docker` and set a digest-pinned `K6_DOCKER_IMAGE`, for example `grafana/k6@sha256:<digest>`.
 
 ## 3. Quick Run
 
@@ -44,6 +46,8 @@ When `K6_SCENARIO=all` (default), runs `file-query + core-mixed`.
 ```bash
 bash tools/k6/run-local.sh --profile smoke --scenario all --engine auto
 ```
+
+Set `USERNAME` and `PASSWORD` before running; the scripts no longer provide default credentials.
 
 The `core-mixed` scenario combines file query and chunk upload flows in a weighted mix. By default, 70% of iterations run query flows and 30% run upload flows. Control the query/upload ratio with the `MIX_QUERY_WEIGHT` environment variable (0-100, default 70):
 

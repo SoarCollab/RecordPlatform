@@ -18,14 +18,14 @@ services:
     image: nacos/nacos-server:v2.3.0
     container_name: nacos
     ports:
-      - "8848:8848"
-      - "9848:9848"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${NACOS_PORT:-8848}:8848"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${NACOS_GRPC_PORT:-9848}:9848"
     environment:
       - MODE=standalone
       - NACOS_AUTH_ENABLE=true
-      - NACOS_AUTH_TOKEN=${NACOS_AUTH_TOKEN:-c2VjcmV0VG9rZW5Gb3JSZWNvcmRQbGF0Zm9ybQ==}
-      - NACOS_AUTH_IDENTITY_KEY=serverIdentity
-      - NACOS_AUTH_IDENTITY_VALUE=security
+      - NACOS_AUTH_TOKEN=${NACOS_AUTH_TOKEN:?Set NACOS_AUTH_TOKEN in .env}
+      - NACOS_AUTH_IDENTITY_KEY=${NACOS_AUTH_IDENTITY_KEY:?Set NACOS_AUTH_IDENTITY_KEY in .env}
+      - NACOS_AUTH_IDENTITY_VALUE=${NACOS_AUTH_IDENTITY_VALUE:?Set NACOS_AUTH_IDENTITY_VALUE in .env}
     volumes:
       - nacos_data:/home/nacos/data
     healthcheck:
@@ -40,15 +40,15 @@ services:
     image: mysql:8.0
     container_name: mysql
     ports:
-      - "3306:3306"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${DB_PORT:-3306}:3306"
     environment:
-      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD:-recordplatform}
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD:?Set DB_PASSWORD in .env}
       - MYSQL_DATABASE=RecordPlatform
     volumes:
       - mysql_data:/var/lib/mysql
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${DB_PASSWORD:-recordplatform}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${DB_PASSWORD:?Set DB_PASSWORD in .env}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -59,12 +59,12 @@ services:
     image: redis:7-alpine
     container_name: redis
     ports:
-      - "${REDIS_PORT:-6379}:6379"
-    command: redis-server --requirepass ${REDIS_PASSWORD:-redis123}
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
+    command: redis-server --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis123}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -75,11 +75,11 @@ services:
     image: rabbitmq:3-management
     container_name: rabbitmq
     ports:
-      - "${RABBITMQ_PORT:-5672}:5672"
-      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${RABBITMQ_PORT:-5672}:5672"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
     environment:
-      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USERNAME:-rabbitmq}
-      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-rabbitmq}
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USERNAME:?Set RABBITMQ_USERNAME in .env}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
@@ -94,11 +94,11 @@ services:
     image: minio/minio:RELEASE.2024-11-07T00-52-20Z
     container_name: minio-a
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${MINIO_A_API_PORT:-9000}:9000"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${MINIO_A_CONSOLE_PORT:-9001}:9001"
     environment:
-      - MINIO_ROOT_USER=${S3_ACCESS_KEY:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:-minioadmin}
+      - MINIO_ROOT_USER=${S3_ACCESS_KEY:?Set S3_ACCESS_KEY in .env}
+      - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:?Set S3_SECRET_KEY in .env}
     command: server /data --console-address ":9001"
     volumes:
       - minio_a_data:/data
@@ -114,11 +114,11 @@ services:
     image: minio/minio:RELEASE.2024-11-07T00-52-20Z
     container_name: minio-b
     ports:
-      - "9010:9000"
-      - "9011:9001"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${MINIO_B_API_PORT:-9010}:9000"
+      - "${INFRA_BIND_ADDRESS:-127.0.0.1}:${MINIO_B_CONSOLE_PORT:-9011}:9001"
     environment:
-      - MINIO_ROOT_USER=${S3_ACCESS_KEY:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:-minioadmin}
+      - MINIO_ROOT_USER=${S3_ACCESS_KEY:?Set S3_ACCESS_KEY in .env}
+      - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:?Set S3_SECRET_KEY in .env}
     command: server /data --console-address ":9001"
     volumes:
       - minio_b_data:/data
@@ -136,7 +136,8 @@ services:
     image: jaegertracing/all-in-one:1.68
     container_name: jaeger
     ports:
-      - "16686:16686"   # Jaeger UI
+      - "${OBSERVABILITY_BIND_ADDRESS:-127.0.0.1}:${JAEGER_UI_PORT:-16686}:16686"   # Jaeger UI
+    expose:
       - "4317"          # OTLP gRPC (internal, used by otel-collector)
       - "4318"          # OTLP HTTP
       - "14269"         # Admin / health
@@ -154,9 +155,9 @@ services:
     image: otel/opentelemetry-collector-contrib:0.123.0
     container_name: otel-collector
     ports:
-      - "4317:4317"     # OTLP gRPC
-      - "4318:4318"     # OTLP HTTP
-      - "8889:8889"     # Prometheus metrics
+      - "${OBSERVABILITY_BIND_ADDRESS:-127.0.0.1}:${OTEL_GRPC_PORT:-4317}:4317"     # OTLP gRPC
+      - "${OBSERVABILITY_BIND_ADDRESS:-127.0.0.1}:${OTEL_HTTP_PORT:-4318}:4318"     # OTLP HTTP
+      - "${OBSERVABILITY_BIND_ADDRESS:-127.0.0.1}:${OTEL_PROMETHEUS_PORT:-8889}:8889"     # Prometheus metrics
     volumes:
       - ./config/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
     depends_on:
@@ -336,4 +337,3 @@ DUBBO_HOST=host.docker.internal  # Docker Desktop 用户
 # 或
 DUBBO_HOST=192.168.1.100         # Linux 用户，使用实际宿主机 IP
 ```
-

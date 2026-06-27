@@ -6,20 +6,20 @@ on:
       - 'v*.*.*'
 
 permissions:
-  contents: write   # create GitHub Release
-  packages: write   # push to ghcr.io
+  contents: read
 
 jobs:
-  release:
-    name: Build & Publish Release
+  build:
+    name: Build Release Artifacts
     runs-on: ubuntu-latest
-    # Single job: avoids rebuilding platform-api across multiple matrix jobs
-    # and shares the Maven local repository cache across all modules.
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # full history for accurate release notes
+          fetch-depth: 0
+          persist-credentials: false
 
       # ── Java build ────────────────────────────────────────────────────────
       - name: Setup Java 21
@@ -40,7 +40,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 10.26.1
 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
@@ -52,6 +52,7 @@ jobs:
       - name: Build frontend
         working-directory: platform-frontend
         run: |
+          pnpm --version
           pnpm install --frozen-lockfile
           pnpm build
 
@@ -65,16 +66,9 @@ jobs:
           output: sbom.cdx.json
           exit-code: '0'
 
-      # ── Docker ─────────────────────────────────────────────────────────────
+      # ── Docker image build, no registry token in this job ─────────────────
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       # backend
       - name: Docker metadata -- backend
@@ -87,16 +81,25 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=sha-,format=short
 
-      - name: Build and push -- backend
+      - name: Build image -- backend
         uses: docker/build-push-action@v7
         with:
           context: .
           file: platform-backend/Dockerfile
-          push: true
+          push: false
+          load: true
           tags: ${{ steps.meta-backend.outputs.tags }}
           labels: ${{ steps.meta-backend.outputs.labels }}
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
+
+      - name: Save image -- backend
+        env:
+          IMAGE_TAGS: ${{ steps.meta-backend.outputs.tags }}
+        run: |
+          mkdir -p release-images
+          printf '%s\n' "$IMAGE_TAGS" > release-images/backend.tags
+          docker save $(printf '%s\n' "$IMAGE_TAGS") -o release-images/backend.tar
 
       # fisco
       - name: Docker metadata -- fisco
@@ -109,16 +112,25 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=sha-,format=short
 
-      - name: Build and push -- fisco
+      - name: Build image -- fisco
         uses: docker/build-push-action@v7
         with:
           context: .
           file: platform-fisco/Dockerfile
-          push: true
+          push: false
+          load: true
           tags: ${{ steps.meta-fisco.outputs.tags }}
           labels: ${{ steps.meta-fisco.outputs.labels }}
           cache-from: type=gha,scope=fisco
           cache-to: type=gha,mode=max,scope=fisco
+
+      - name: Save image -- fisco
+        env:
+          IMAGE_TAGS: ${{ steps.meta-fisco.outputs.tags }}
+        run: |
+          mkdir -p release-images
+          printf '%s\n' "$IMAGE_TAGS" > release-images/fisco.tags
+          docker save $(printf '%s\n' "$IMAGE_TAGS") -o release-images/fisco.tar
 
       # storage
       - name: Docker metadata -- storage
@@ -131,16 +143,25 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=sha-,format=short
 
-      - name: Build and push -- storage
+      - name: Build image -- storage
         uses: docker/build-push-action@v7
         with:
           context: .
           file: platform-storage/Dockerfile
-          push: true
+          push: false
+          load: true
           tags: ${{ steps.meta-storage.outputs.tags }}
           labels: ${{ steps.meta-storage.outputs.labels }}
           cache-from: type=gha,scope=storage
           cache-to: type=gha,mode=max,scope=storage
+
+      - name: Save image -- storage
+        env:
+          IMAGE_TAGS: ${{ steps.meta-storage.outputs.tags }}
+        run: |
+          mkdir -p release-images
+          printf '%s\n' "$IMAGE_TAGS" > release-images/storage.tags
+          docker save $(printf '%s\n' "$IMAGE_TAGS") -o release-images/storage.tar
 
       # frontend
       - name: Docker metadata -- frontend
@@ -153,20 +174,73 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix=sha-,format=short
 
-      - name: Build and push -- frontend
+      - name: Build image -- frontend
         uses: docker/build-push-action@v7
         with:
           context: platform-frontend
           file: platform-frontend/Dockerfile
-          push: true
+          push: false
+          load: true
           tags: ${{ steps.meta-frontend.outputs.tags }}
           labels: ${{ steps.meta-frontend.outputs.labels }}
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
-      # ── GitHub Release ─────────────────────────────────────────────────────
+      - name: Save image -- frontend
+        env:
+          IMAGE_TAGS: ${{ steps.meta-frontend.outputs.tags }}
+        run: |
+          mkdir -p release-images
+          printf '%s\n' "$IMAGE_TAGS" > release-images/frontend.tags
+          docker save $(printf '%s\n' "$IMAGE_TAGS") -o release-images/frontend.tar
+
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle
+          path: |
+            sbom.cdx.json
+            release-images/*.tar
+            release-images/*.tags
+          retention-days: 1
+
+  publish:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Download release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: release-bundle
+          path: release-bundle
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Load Docker images
+        run: |
+          for image in release-bundle/release-images/*.tar; do
+            docker load -i "$image"
+          done
+
+      - name: Push Docker images
+        run: |
+          for tag_file in release-bundle/release-images/*.tags; do
+            while IFS= read -r tag; do
+              [ -n "$tag" ] && docker push "$tag"
+            done < "$tag_file"
+          done
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
-          files: sbom.cdx.json
+          files: release-bundle/sbom.cdx.json

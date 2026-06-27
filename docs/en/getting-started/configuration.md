@@ -21,8 +21,8 @@ vim .env
 |----------|----------|-------------|---------|
 | **Nacos** | `NACOS_HOST` | Nacos server | localhost |
 | | `NACOS_PORT` | Nacos port | 8848 |
-| | `NACOS_USERNAME` | Nacos username | nacos |
-| | `NACOS_PASSWORD` | Nacos password | nacos |
+| | `NACOS_USERNAME` | Nacos username | required, no default |
+| | `NACOS_PASSWORD` | Nacos password | required, no default |
 | **Profile** | `SPRING_PROFILES_ACTIVE` | Spring profile | local |
 
 ### Security Configuration
@@ -30,6 +30,8 @@ vim .env
 | Variable | Description | Requirement |
 |----------|-------------|-------------|
 | `JWT_KEY` | JWT signing key + ID encryption derivation | Min 32 characters, high entropy |
+| `PUBLIC_REGISTRATION_TENANT_ID` | Server-side tenant for public registration | Set explicitly; request headers do not choose registration tenant |
+| `BLOCKCHAIN_RPC_TOKEN` | Shared token for backend-to-FISCO Dubbo calls | Required on both backend and fisco; no default |
 | `RECORD_PLATFORM_UID_SALT` | Salt for UID obfuscation | Recommended 8–16 random chars |
 | `RECORD_PLATFORM_CLIENT_KEY` | Client key for UID obfuscation | Recommended 16–32 random chars |
 
@@ -71,12 +73,12 @@ Fault domain configuration is managed through Nacos and supports runtime refresh
 | `SERVER_PORT` | Backend REST API port | 8000 (recommended for local/dev; prod profile defaults to 8080 if unset) |
 | `DUBBO_FISCO_PORT` | FISCO Dubbo service port | 8091 |
 | `DUBBO_STORAGE_PORT` | Storage Dubbo service port | 8092 |
-| `DUBBO_HOST` | Service registration IP (for Docker) | `192.168.5.100` (in YAML; override for your environment) |
+| `DUBBO_HOST` | Service registration IP (for Docker) | Required for provider services; no runtime default |
 | `QOS_BACKEND_PORT` | Backend QoS management port | 22330 |
 | `QOS_FISCO_PORT` | FISCO QoS management port | 22331 |
 | `QOS_STORAGE_PORT` | Storage QoS management port | 22332 |
 
-> **Note**: `DUBBO_HOST` is critical in Docker environments to ensure services register with accessible IPs rather than Docker bridge network IPs.
+> **Note**: `DUBBO_HOST` is critical in Docker environments to ensure services register with accessible IPs rather than Docker bridge network IPs. Set it explicitly in `.env` or deployment secrets.
 
 ### Logging Configuration
 
@@ -95,8 +97,8 @@ Fault domain configuration is managed through Nacos and supports runtime refresh
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `KNIFE4J_USERNAME` | Knife4j/Swagger UI username | admin |
-| `KNIFE4J_PASSWORD` | Knife4j/Swagger UI password | 123456 (if not set) |
+| `KNIFE4J_USERNAME` | Knife4j/Swagger UI username | required, no default |
+| `KNIFE4J_PASSWORD` | Knife4j/Swagger UI password | required, no default |
 
 ### APM Configuration (Optional)
 
@@ -208,11 +210,11 @@ Per-user and per-tenant storage quota enforcement:
 |----------|-------------|---------|
 | `quota.enforcement-mode` | Enforcement mode | `SHADOW` (log only, no rejection) |
 | `quota.rollout.strategy` | Rollout strategy | `TENANT_WHITELIST` |
-| `quota.rollout.enforce-tenant-whitelist` | Tenant IDs to enforce (comma-separated) | _(empty = all SHADOW)_ |
+| `quota.rollout.enforce-tenant-whitelist` | Tenant IDs to enforce (comma-separated) | _(empty = all tenants when global mode is `ENFORCE`)_ |
 | `quota.rollout.force-shadow` | Force SHADOW mode for all tenants | `false` |
 
-> **Tip**: Start with `SHADOW` mode to observe quota usage without rejecting uploads.
-> Switch to `ENFORCE` by adding tenant IDs to `enforce-tenant-whitelist`.
+> **Tip**: Start with global `SHADOW` mode to observe quota usage without rejecting uploads.
+> With global `ENFORCE`, an empty whitelist means all tenants are enforced; use `force-shadow=true` or a non-empty whitelist for a controlled rollout.
 
 ## Scheduled Tasks Configuration
 

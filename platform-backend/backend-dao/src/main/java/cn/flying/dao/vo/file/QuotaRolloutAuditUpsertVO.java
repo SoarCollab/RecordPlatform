@@ -3,7 +3,6 @@ package cn.flying.dao.vo.file;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
 
@@ -18,9 +17,7 @@ public record QuotaRolloutAuditUpsertVO(
         @Size(max = 64, message = "batchId 长度不能超过 64")
         @Schema(description = "灰度批次ID", requiredMode = Schema.RequiredMode.REQUIRED)
         String batchId,
-        @NotNull(message = "tenantId 不能为空")
-        @Positive(message = "tenantId 必须大于 0")
-        @Schema(description = "租户ID", requiredMode = Schema.RequiredMode.REQUIRED)
+        @Schema(description = "兼容字段；服务端以当前租户为准，传入时必须与当前租户一致")
         Long tenantId,
         @NotNull(message = "observationStartTime 不能为空")
         @Schema(description = "观察窗口开始时间", requiredMode = Schema.RequiredMode.REQUIRED)

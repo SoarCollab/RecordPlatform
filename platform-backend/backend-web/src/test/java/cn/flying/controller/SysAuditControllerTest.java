@@ -1,5 +1,6 @@
 package cn.flying.controller;
 
+import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.SecureIdCodec;
 import cn.flying.common.util.SnowflakeIdGenerator;
@@ -18,11 +19,22 @@ import org.springframework.context.annotation.Import;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
 
+import java.lang.reflect.Method;
 import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -88,5 +100,41 @@ public class SysAuditControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.operationTime").value("2023-10-01 12:00:00"));
+    }
+
+    /**
+     * 验证系统审计控制器的所有对外接口都显式记录操作日志。
+     */
+    @Test
+    @DisplayName("should annotate every audit endpoint with OperationLog")
+    void shouldAnnotateEveryAuditEndpointWithOperationLog() {
+        Set<Class<?>> mappingAnnotations = Set.of(
+                RequestMapping.class,
+                GetMapping.class,
+                PostMapping.class,
+                PutMapping.class,
+                DeleteMapping.class,
+                PatchMapping.class
+        );
+
+        List<String> missingOperationLogs = Arrays.stream(SysAuditController.class.getDeclaredMethods())
+                .filter(method -> hasAnyMappingAnnotation(method, mappingAnnotations))
+                .filter(method -> !method.isAnnotationPresent(OperationLog.class))
+                .map(Method::getName)
+                .toList();
+
+        assertTrue(missingOperationLogs.isEmpty(), "Missing @OperationLog: " + missingOperationLogs);
+    }
+
+    /**
+     * 判断方法是否声明了 Spring MVC 路由注解。
+     *
+     * @param method             待检查方法
+     * @param mappingAnnotations Spring MVC 路由注解集合
+     * @return 存在任一路由注解时返回 true
+     */
+    private boolean hasAnyMappingAnnotation(Method method, Set<Class<?>> mappingAnnotations) {
+        return Arrays.stream(method.getAnnotations())
+                .anyMatch(annotation -> mappingAnnotations.contains(annotation.annotationType()));
     }
 }

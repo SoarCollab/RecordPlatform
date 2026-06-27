@@ -67,8 +67,8 @@ class SseControllerIntegrationTest extends BaseControllerIntegrationTest {
         }
 
         @Test
-        @DisplayName("GET /connect - Should establish connection with custom connectionId")
-        void connect_shouldEstablishConnectionWithCustomConnectionId() throws Exception {
+        @DisplayName("GET /connect - Should ignore client supplied connectionId")
+        void connect_shouldIgnoreClientSuppliedConnectionId() throws Exception {
             String validSseToken = "valid_sse_token";
             String connectionId = "custom_connection_123";
             doReturn(new String[]{"100", "1"})
@@ -81,7 +81,9 @@ class SseControllerIntegrationTest extends BaseControllerIntegrationTest {
                             .accept(MediaType.TEXT_EVENT_STREAM_VALUE))
                     .andExpect(status().isOk());
 
-            verify(sseEmitterManager).createConnection(1L, 100L, connectionId);
+            verify(sseEmitterManager).createConnection(eq(1L), eq(100L), argThat(id ->
+                    id != null && !id.isBlank() && id.length() == 32 && !id.equals(connectionId)
+            ));
         }
 
         @Test
@@ -231,9 +233,6 @@ class SseControllerIntegrationTest extends BaseControllerIntegrationTest {
         void shouldSupportMultipleConnectionsForSameUser() throws Exception {
             String validSseToken1 = "valid_sse_token_1";
             String validSseToken2 = "valid_sse_token_2";
-            String connectionId1 = "device_1";
-            String connectionId2 = "device_2";
-
             doReturn(new String[]{"100", "1"})
                     .when(jwtUtils).validateAndConsumeSseToken(validSseToken1);
             doReturn(new String[]{"100", "1"})
@@ -242,19 +241,20 @@ class SseControllerIntegrationTest extends BaseControllerIntegrationTest {
             mockMvc.perform(get(BASE_URL + "/connect")
                             .param("token", validSseToken1)
                             .param("tenantId", String.valueOf(testTenantId))
-                            .param("connectionId", connectionId1)
+                            .param("connectionId", "device_1")
                             .accept(MediaType.TEXT_EVENT_STREAM_VALUE))
                     .andExpect(status().isOk());
 
             mockMvc.perform(get(BASE_URL + "/connect")
                             .param("token", validSseToken2)
                             .param("tenantId", String.valueOf(testTenantId))
-                            .param("connectionId", connectionId2)
+                            .param("connectionId", "device_2")
                             .accept(MediaType.TEXT_EVENT_STREAM_VALUE))
                     .andExpect(status().isOk());
 
-            verify(sseEmitterManager).createConnection(1L, 100L, connectionId1);
-            verify(sseEmitterManager).createConnection(1L, 100L, connectionId2);
+            verify(sseEmitterManager, times(2)).createConnection(eq(1L), eq(100L), argThat(id ->
+                    id != null && !id.isBlank() && id.length() == 32
+            ));
         }
     }
 

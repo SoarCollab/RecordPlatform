@@ -49,6 +49,31 @@ class SensitiveDataMaskerTest {
     }
 
     @Test
+    @DisplayName("验证码和文件解密密钥字段应被脱敏")
+    void maskSensitiveFields_shouldMaskVerificationAndDecryptFields() {
+        String json = """
+                {"email":"user@test.com","code":"123456","verificationCode":"654321","new_password":"newPass123","initialKey":"file-key","decryptKey":"decrypt-key","clientId":"upload-session-secret","nonce":"public-nonce"}
+                """;
+
+        String masked = SensitiveDataMasker.maskSensitiveFields(json);
+
+        assertTrue(masked.contains("\"email\":\"user@test.com\""));
+        assertTrue(masked.contains("\"code\":\"******\""));
+        assertTrue(masked.contains("\"verificationCode\":\"******\""));
+        assertTrue(masked.contains("\"new_password\":\"******\""));
+        assertTrue(masked.contains("\"initialKey\":\"******\""));
+        assertTrue(masked.contains("\"decryptKey\":\"******\""));
+        assertTrue(masked.contains("\"clientId\":\"******\""));
+        assertTrue(masked.contains("\"nonce\":\"public-nonce\""));
+        assertFalse(masked.contains("123456"));
+        assertFalse(masked.contains("654321"));
+        assertFalse(masked.contains("newPass123"));
+        assertFalse(masked.contains("file-key"));
+        assertFalse(masked.contains("decrypt-key"));
+        assertFalse(masked.contains("upload-session-secret"));
+    }
+
+    @Test
     @DisplayName("嵌套JSON中的敏感字段应被脱敏")
     void maskSensitiveFields_shouldMaskNestedFields() {
         String json = "{\"user\":{\"name\":\"test\",\"credential\":\"cred123\"},\"token\":\"tok123\"}";
@@ -69,6 +94,106 @@ class SensitiveDataMaskerTest {
     @DisplayName("null应返回null")
     void maskSensitiveFields_shouldHandleNull() {
         assertNull(SensitiveDataMasker.maskSensitiveFields((String) null));
+    }
+
+    @Test
+    @DisplayName("日志路径中的分享码、文件哈希和交易哈希应被脱敏")
+    void maskSensitivePathSegments_shouldMaskSensitiveRouteVariables() {
+        assertEquals(
+                "/api/v1/public/shares/***/files/***/chunks",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/public/shares/ABC123/files/hash-secret/chunks")
+        );
+        assertEquals(
+                "/api/v1/shares/***/files/***/decrypt-info",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/shares/share-private/files/file-hash/decrypt-info")
+        );
+        assertEquals(
+                "/api/v1/files/hash/***/chunks",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/files/hash/hash-secret/chunks")
+        );
+        assertEquals(
+                "/api/v1/files/share/***/stats",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/files/share/SHARE123/stats")
+        );
+        assertEquals(
+                "/api/v1/transactions/***",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/transactions/0xdeadbeef")
+        );
+        assertEquals(
+                "/api/v1/upload-sessions/***/chunks/3",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/upload-sessions/client-1/chunks/3")
+        );
+        assertEquals(
+                "/api/v1/upload-sessions/***/complete",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/upload-sessions/resume-client/complete")
+        );
+        assertEquals(
+                "/api/v1/upload-sessions/***/progress?verbose=true",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/upload-sessions/client-secret/progress?verbose=true")
+        );
+    }
+
+    @Test
+    @DisplayName("日志路径脱敏不应误替换静态文件路由段")
+    void maskSensitivePathSegments_shouldKeepStaticFileRouteSegments() {
+        assertEquals(
+                "/api/v1/files/stats",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/files/stats")
+        );
+        assertEquals(
+                "/api/v1/files/download-batches/report",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/files/download-batches/report")
+        );
+        assertEquals(
+                "/api/v1/shares/***/files/save",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/shares/ABC123/files/save")
+        );
+    }
+
+    /**
+     * 验证空路径输入会保持原值返回，避免日志过滤器处理异常请求路径时报错。
+     */
+    @Test
+    @DisplayName("空路径应保持原样")
+    void maskSensitivePathSegments_shouldKeepBlankPathInputs() {
+        assertNull(SensitiveDataMasker.maskSensitivePathSegments(null));
+        assertEquals("   ", SensitiveDataMasker.maskSensitivePathSegments("   "));
+    }
+
+    /**
+     * 验证路径脱敏只处理路径段本身，并保留查询参数或 fragment 后缀。
+     */
+    @Test
+    @DisplayName("路径脱敏应保留查询参数和fragment后缀")
+    void maskSensitivePathSegments_shouldPreserveSuffixes() {
+        assertEquals(
+                "/api/v1/shares/***#details",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/shares/share-secret#details")
+        );
+        assertEquals(
+                "/api/v1/files/hash/***?download=true#section",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/files/hash/file-hash?download=true#section")
+        );
+    }
+
+    /**
+     * 验证已经脱敏或缺少变量值的路径不会被重复替换。
+     */
+    @Test
+    @DisplayName("已脱敏或缺少变量值的路径应保持稳定")
+    void maskSensitivePathSegments_shouldKeepAlreadyMaskedOrTerminalRoutes() {
+        assertEquals(
+                "/api/v1/shares/***",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/shares/***")
+        );
+        assertEquals(
+                "/api/v1/share",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/share")
+        );
+        assertEquals(
+                "/api/v1/files/hash/***",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/files/hash/***")
+        );
     }
 
     @Test
@@ -134,6 +259,12 @@ class SensitiveDataMaskerTest {
         assertTrue(SensitiveDataMasker.isSensitiveField("secret"));
         assertTrue(SensitiveDataMasker.isSensitiveField("apiKey"));
         assertTrue(SensitiveDataMasker.isSensitiveField("credential"));
+        assertTrue(SensitiveDataMasker.isSensitiveField("code"));
+        assertTrue(SensitiveDataMasker.isSensitiveField("verificationCode"));
+        assertTrue(SensitiveDataMasker.isSensitiveField("new_password"));
+        assertTrue(SensitiveDataMasker.isSensitiveField("initialKey"));
+        assertTrue(SensitiveDataMasker.isSensitiveField("clientId"));
+        assertTrue(SensitiveDataMasker.isSensitiveField("client_id"));
 
         assertFalse(SensitiveDataMasker.isSensitiveField("username"));
         assertFalse(SensitiveDataMasker.isSensitiveField("email"));

@@ -252,6 +252,22 @@ class ChunkDecryptionServiceTest {
         }
 
         @Test
+        @DisplayName("should return false for legacy nonce that only matches magic bytes")
+        void isValidFormat_legacyMagicCollision_false() {
+            byte[] legacyChunk = {
+                    ChunkFileHeader.MAGIC[0],
+                    ChunkFileHeader.MAGIC[1],
+                    0x7F,
+                    0x55,
+                    0x01,
+                    0x02
+            };
+
+            assertFalse(decryptionService.isValidFormat(legacyChunk));
+            assertThrows(IllegalArgumentException.class, () -> decryptionService.detectAlgorithm(legacyChunk));
+        }
+
+        @Test
         @DisplayName("should return false for data shorter than header")
         void isValidFormat_tooShort_false() {
             byte[] data = {0x52, 0x50};

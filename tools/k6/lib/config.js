@@ -56,8 +56,8 @@ export function getBaseConfig() {
   return {
     baseUrl: __ENV.BASE_URL || 'http://localhost:8000/record-platform/api/v1',
     tenantId: __ENV.TENANT_ID || '1',
-    username: __ENV.USERNAME || 'loadtest',
-    password: __ENV.PASSWORD || 'loadtest123',
+    username: __ENV.USERNAME || '',
+    password: __ENV.PASSWORD || '',
     runId,
     resultDir: __ENV.RESULT_DIR || 'tools/k6/results',
     profile: __ENV.K6_PROFILE || 'smoke',

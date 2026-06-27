@@ -1,5 +1,6 @@
 package cn.flying.controller;
 
+import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.File;
@@ -339,8 +340,7 @@ class FileUploadE2ETest extends BaseControllerIntegrationTest {
 
             int code = objectMapper.readTree(result.getResponse().getContentAsString())
                     .get("code").asInt();
-            // Should return 404 (not found) or specific error code when accessing another tenant's upload
-            assertThat(code).isIn(404, 40004, 1001, 403);
+            assertThat(code).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED.getCode());
         }
     }
 

@@ -39,10 +39,17 @@ cp .env.example .env
 编辑 `.env`，修改关键配置：
 
 ```bash
-# 必须修改的配置
+# 启动基础设施前必须修改的配置
 JWT_KEY=<生成32字符以上随机字符串>
 DB_PASSWORD=<数据库密码>
 REDIS_PASSWORD=<Redis密码>
+RABBITMQ_USERNAME=<RabbitMQ用户名>
+RABBITMQ_PASSWORD=<RabbitMQ密码>
+NACOS_USERNAME=<Nacos用户名>
+NACOS_PASSWORD=<Nacos密码>
+NACOS_AUTH_TOKEN=<至少32字节随机值的Base64令牌>
+NACOS_AUTH_IDENTITY_KEY=<Nacos身份键名>
+NACOS_AUTH_IDENTITY_VALUE=<Nacos身份密钥>
 S3_ACCESS_KEY=<MinIO访问密钥>
 S3_SECRET_KEY=<MinIO密钥>
 
@@ -50,9 +57,11 @@ S3_SECRET_KEY=<MinIO密钥>
 SPRING_PROFILES_ACTIVE=local   # local / dev / prod
 ```
 
-::: tip
-开发环境可直接使用 `.env.example` 中的默认值快速启动。
+::: warning
+不要在共享主机或服务器上使用 `.env.example` 的占位值。基础设施 Compose 会在缺少必填密钥时快速失败，上述密码和令牌都必须替换为当前环境专用的强随机值。
 :::
+
+`docker-compose.infra.yml` 默认通过 `INFRA_BIND_ADDRESS` 和 `OBSERVABILITY_BIND_ADDRESS` 将发布端口绑定到 `127.0.0.1`。服务器上应保留该默认值，只通过防火墙、VPN、SSH 隧道或带认证的反向代理暴露应用入口。除非主机防火墙已限制所有基础设施端口，否则不要把这些绑定地址改成 `0.0.0.0`。
 
 ## 步骤 2：启动基础设施
 
@@ -70,14 +79,14 @@ docker compose -f docker-compose.infra.yml up -d --wait
 
 | 服务 | 端口 | 管理界面 |
 |------|------|----------|
-| Nacos | 8848 | http://localhost:8848/nacos |
-| MySQL | 3306 | — |
-| Redis | 6379 | — |
-| RabbitMQ | 5672 | http://localhost:15672 |
-| MinIO-A | 9000 | http://localhost:9001 |
-| MinIO-B | 9010 | http://localhost:9011 |
-| OTel Collector | 4317/4318/8889 | — |
-| Jaeger | 16686 | http://localhost:16686 |
+| Nacos | 127.0.0.1:8848 | http://localhost:8848/nacos |
+| MySQL | 127.0.0.1:3306 | — |
+| Redis | 127.0.0.1:6379 | — |
+| RabbitMQ | 127.0.0.1:5672 | http://localhost:15672 |
+| MinIO-A | 127.0.0.1:9000 | http://localhost:9001 |
+| MinIO-B | 127.0.0.1:9010 | http://localhost:9011 |
+| OTel Collector | 127.0.0.1:4317/4318/8889 | — |
+| Jaeger | 127.0.0.1:16686 | http://localhost:16686 |
 
 验证启动状态：
 
@@ -89,7 +98,7 @@ docker compose -f docker-compose.infra.yml ps
 
 Nacos 作为配置中心，需要导入应用配置。
 
-1. 登录 Nacos 控制台：http://localhost:8848/nacos（默认 nacos/nacos）
+1. 登录 Nacos 控制台：http://localhost:8848/nacos，使用当前环境配置的凭据。如果 Nacos 镜像初始化了内置默认账号，请在主机暴露到工作站之外前完成轮换。
 2. 创建配置：
 
 | Data ID | Group | 说明 |

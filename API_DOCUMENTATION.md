@@ -3353,6 +3353,7 @@ GET /api/v1/files/quota
 ### 17.2 Upsert Quota Rollout Audit Record (Admin)
 
 Write or update a quota rollout audit record for governance tracking during gradual quota enforcement rollout.
+The target tenant is always resolved from the authenticated tenant context. Request-body `tenantId` is accepted only as a compatibility field and must match the current tenant when present.
 
 ```
 POST /api/v1/admin/quota/rollout/audits
@@ -3380,7 +3381,7 @@ POST /api/v1/admin/quota/rollout/audits
 | Field                 | Type     | Required | Validation                  | Description                                         |
 | --------------------- | -------- | -------- | --------------------------- | --------------------------------------------------- |
 | batchId               | string   | Yes      | max 64 chars                | Rollout batch identifier                            |
-| tenantId              | long     | Yes      | positive                    | Target tenant ID                                    |
+| tenantId              | long     | No       | positive; must match current tenant when present | Compatibility field; current tenant is authoritative |
 | observationStartTime  | datetime | Yes      |                             | Observation window start                            |
 | observationEndTime    | datetime | Yes      |                             | Observation window end                              |
 | sampledRequestCount   | long     | Yes      | ≥0                          | Total sampled requests during observation           |
@@ -3420,7 +3421,7 @@ POST /api/v1/admin/quota/rollout/audits
 
 ### 17.3 Query Quota Rollout Audit Records (Admin)
 
-Query audit records for a specific tenant and rollout batch.
+Query audit records for the current tenant and rollout batch.
 
 ```
 GET /api/v1/admin/quota/rollout/audits
@@ -3433,7 +3434,6 @@ GET /api/v1/admin/quota/rollout/audits
 | Parameter | Type   | Required | Description       |
 | --------- | ------ | -------- | ----------------- |
 | batchId   | string | Yes      | Rollout batch ID  |
-| tenantId  | long   | Yes      | Target tenant ID  |
 
 **Response (QuotaRolloutAuditVO)**: Same structure as 17.2 response.
 

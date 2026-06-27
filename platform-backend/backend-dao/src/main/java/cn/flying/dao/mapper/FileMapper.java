@@ -80,6 +80,21 @@ public interface FileMapper extends BaseMapper<File> {
     Long countActiveFilesByHash(@Param("fileHash") String fileHash, @Param("excludeId") Long excludeId);
 
     /**
+     * 统计当前租户内使用相同 fileHash 的未删除文件数量。
+     *
+     * @param fileHash 文件哈希
+     * @param excludeId 排除的文件ID
+     * @param tenantId 租户ID
+     * @return 当前租户内引用该 fileHash 的未删除文件数量
+     */
+    @Select("SELECT COUNT(*) FROM file WHERE file_hash = #{fileHash} AND id != #{excludeId} AND tenant_id = #{tenantId} AND deleted = 0")
+    Long countActiveFilesByHashInTenant(
+            @Param("fileHash") String fileHash,
+            @Param("excludeId") Long excludeId,
+            @Param("tenantId") Long tenantId
+    );
+
+    /**
      * 根据ID查询文件（包括已删除的记录，绕过@TableLogic）
      * 用于分享文件下载时追溯原始上传者信息
      * <p>

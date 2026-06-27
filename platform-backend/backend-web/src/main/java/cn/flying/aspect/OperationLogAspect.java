@@ -47,8 +47,7 @@ public class OperationLogAspect {
             "/doc.html",
             "/swagger-ui",
             "/v3/api-docs",
-            "/api/system/logs",
-            "/api/v1/system/audit"
+            "/api/system/logs"
     );
 
     /**
@@ -134,7 +133,7 @@ public class OperationLogAspect {
             }
             
             // 获取请求参数
-            String requestParams = getRequestParams(joinPoint);
+            String requestParams = getRequestParams(request, joinPoint);
             
             // 获取操作注解信息
             OperationLog operationLogAnnotation = getOperationLogAnnotation(joinPoint);
@@ -144,7 +143,7 @@ public class OperationLogAspect {
             
             // 记录请求开始的日志
             log.info("操作日志 - 开始 | 模块: {} | 类型: {} | 描述: {} | URL: \"{}\" ({}) | IP: {} | 用户: {} | 角色: {} | 参数: {}",
-                    module, operationType, description, request.getServletPath(), request.getMethod(),
+                    module, operationType, description, sanitizePathForLog(request.getServletPath()), request.getMethod(),
                     getClientIp(request), username, authorities, requestParams);
             
         } catch (Exception e) {
@@ -201,7 +200,7 @@ public class OperationLogAspect {
             
             // 设置请求信息
             operationLog.setRequestIp(getClientIp(request));
-            operationLog.setRequestUrl(request.getRequestURI());
+            operationLog.setRequestUrl(sanitizePathForLog(request.getRequestURI()));
             operationLog.setRequestMethod(request.getMethod());
             operationLog.setMethod(joinPoint.getSignature().getDeclaringTypeName() + "." + joinPoint.getSignature().getName());
             
@@ -224,12 +223,14 @@ public class OperationLogAspect {
             
             // 设置请求参数
             if (operationLogAnnotation.saveRequestData()) {
-                operationLog.setRequestParam(getRequestParams(joinPoint));
+                operationLog.setRequestParam(getRequestParams(request, joinPoint));
             }
             
             // 设置响应数据（已脱敏）
             if (operationLogAnnotation.saveResponseData() && result != null) {
-                operationLog.setResponseResult(SensitiveDataMasker.maskAndSerialize(result));
+                operationLog.setResponseResult(isSensitiveFileOperation(request)
+                        ? "<sensitive-file-operation>"
+                        : SensitiveDataMasker.maskAndSerialize(result));
             }
             
             // 设置操作状态和时间
@@ -274,7 +275,10 @@ public class OperationLogAspect {
      * @param joinPoint 切入点
      * @return 请求参数字符串
      */
-    private String getRequestParams(JoinPoint joinPoint) {
+    private String getRequestParams(HttpServletRequest request, JoinPoint joinPoint) {
+        if (isSensitiveFileOperation(request)) {
+            return "<sensitive-file-operation>";
+        }
         Object[] args = joinPoint.getArgs();
         List<Object> logArgs = new ArrayList<>();
         for (Object arg : args) {
@@ -290,6 +294,37 @@ public class OperationLogAspect {
         }
         // 使用脱敏工具对敏感字段进行脱敏
         return SensitiveDataMasker.maskAndSerialize(logArgs);
+    }
+
+    /**
+     * 判断是否为文件、分享、上传会话或交易类敏感操作，避免 bearer code、文件哈希、clientId 和链上输入落库。
+     */
+    private boolean isSensitiveFileOperation(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        if (path == null || path.isBlank()) {
+            path = request.getServletPath();
+        }
+        if (path == null) {
+            return false;
+        }
+        String contextPath = request.getContextPath();
+        if (contextPath != null && !contextPath.isBlank() && path.startsWith(contextPath)) {
+            path = path.substring(contextPath.length());
+        }
+        String normalized = path.toLowerCase();
+        return normalized.startsWith("/api/file")
+                || normalized.startsWith("/api/v1/files")
+                || normalized.startsWith("/api/v1/shares")
+                || normalized.startsWith("/api/v1/public/shares")
+                || normalized.startsWith("/api/v1/upload-sessions")
+                || normalized.startsWith("/api/v1/transactions");
+    }
+
+    /**
+     * 对路径变量中的分享码、文件哈希、clientId 和交易哈希做脱敏。
+     */
+    private String sanitizePathForLog(String path) {
+        return SensitiveDataMasker.maskSensitivePathSegments(path);
     }
 
     /**

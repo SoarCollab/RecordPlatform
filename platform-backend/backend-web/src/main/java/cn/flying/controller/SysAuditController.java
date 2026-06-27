@@ -331,6 +331,7 @@ public class SysAuditController {
     @PostMapping("/logs/backups")
     @Operation(summary = "执行日志备份（REST）")
     @OperationLog(module = "系统审计", operationType = "备份", description = "执行日志备份（REST）")
+    @PreAuthorize("isAdmin()")
     public Result<String> backupLogsRest(
             @RequestParam(defaultValue = "180") Integer days,
             @RequestParam(defaultValue = "false") Boolean deleteAfterBackup) {

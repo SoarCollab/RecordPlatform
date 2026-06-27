@@ -2,6 +2,7 @@ package cn.flying.service;
 
 import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.dao.vo.file.FileVersionVO;
 import cn.flying.dao.vo.file.UserFileStatsVO;
 import cn.flying.platformapi.response.TransactionVO;
@@ -96,10 +97,11 @@ public interface FileQueryService {
     /**
      * 根据交易哈希获取区块链交易信息
      *
+     * @param userId 当前用户ID（用于权限校验）
      * @param transactionHash 交易哈希
      * @return 交易详情
      */
-    TransactionVO getTransactionByHash(String transactionHash);
+    TransactionVO getTransactionByHash(Long userId, String transactionHash);
 
     /**
      * 获取文件分片内容（字节数组）
@@ -116,7 +118,7 @@ public interface FileQueryService {
      * @param sharingCode 分享码
      * @return 分享的文件列表
      */
-    List<File> getShareFile(String sharingCode);
+    List<ShareFileVO> getShareFile(String sharingCode);
 
     /**
      * 获取文件解密信息（客户端解密用）

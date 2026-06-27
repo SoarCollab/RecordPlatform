@@ -19,10 +19,10 @@ import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileShareVO;
 import cn.flying.dao.vo.file.FileVersionVO;
+import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.dao.vo.file.UserFileStatsVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.FileDetailVO;
-import cn.flying.platformapi.response.SharingVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FriendFileShareService;
@@ -85,6 +85,8 @@ import java.util.concurrent.CompletableFuture;
 @Service
 @RequiredArgsConstructor
 public class FileQueryServiceImpl implements FileQueryService {
+
+    private static final long MAX_IN_MEMORY_TRANSFER_BYTES = 80L * 1024 * 1024;
 
     private final FileMapper fileMapper;
     private final AccountMapper accountMapper;
@@ -281,10 +283,29 @@ public class FileQueryServiceImpl implements FileQueryService {
     }
 
     @Override
-    @Cacheable(cacheNames = "transaction", key = "#transactionHash", unless = "#result == null")
-    public TransactionVO getTransactionByHash(String transactionHash) {
+    @Cacheable(cacheNames = "transaction", key = "#userId + ':' + #transactionHash", unless = "#result == null")
+    public TransactionVO getTransactionByHash(Long userId, String transactionHash) {
+        validateTransactionAccess(userId, transactionHash);
         Result<TransactionVO> result = fileRemoteClient.getTransactionByHash(transactionHash);
         return ResultUtils.getData(result);
+    }
+
+    /**
+     * 校验交易哈希必须绑定到当前用户可访问的本地文件记录。
+     */
+    private void validateTransactionAccess(Long userId, String transactionHash) {
+        if (!StringUtils.hasText(transactionHash)) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "交易哈希不能为空");
+        }
+        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                .eq(File::getTransactionHash, transactionHash);
+        if (!SecurityUtils.isAdmin()) {
+            wrapper.eq(File::getUid, userId);
+        }
+        Long count = fileMapper.selectCount(wrapper);
+        if (count == null || count == 0) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "无权访问此交易");
+        }
     }
 
     @Override
@@ -318,48 +339,75 @@ public class FileQueryServiceImpl implements FileQueryService {
      */
     @Override
     @Cacheable(cacheNames = "sharedFiles", key = "#sharingCode", unless = "#result == null || #result.isEmpty()")
-    public List<File> getShareFile(String sharingCode) {
-        Result<SharingVO> result = fileRemoteClient.getSharedFiles(sharingCode);
-        if (ResultUtils.isSuccess(result)) {
-            SharingVO sharingFiles = ResultUtils.getData(result);
-            Long expirationTime = sharingFiles.expirationTime();
-            if (expirationTime != null) {
-                if (expirationTime < 0) {
-                    throw new GeneralException(ResultEnum.SHARE_CANCELLED);
-                }
-                if (expirationTime > 0 && expirationTime < System.currentTimeMillis()) {
-                    throw new GeneralException(ResultEnum.SHARE_EXPIRED);
-                }
-            }
-            if (Boolean.FALSE.equals(sharingFiles.isValid())) {
-                throw new GeneralException(ResultEnum.SHARE_CANCELLED);
-            }
-            String uploader = sharingFiles.uploader();
-            List<String> fileHashList = sharingFiles.fileHashList();
-            if (CommonUtils.isNotEmpty(fileHashList)) {
-                try {
-                    Long uploaderId = Long.valueOf(uploader);
-                    // 公开分享需要跨租户访问，使用 runWithoutIsolation 绕过租户隔离
-                    return TenantContext.runWithoutIsolation(() -> {
-                        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                                .eq(File::getUid, uploaderId)
-                                .in(File::getFileHash, fileHashList);
-                        List<File> files = fileMapper.selectList(wrapper);
-
-                        // 查询分享者用户名并填充到文件对象
-                        if (CommonUtils.isNotEmpty(files)) {
-                            Account owner = accountMapper.selectById(uploaderId);
-                            String ownerName = (owner != null) ? owner.getUsername() : null;
-                            files.forEach(file -> file.setOwnerName(ownerName));
-                        }
-                        return files;
-                    });
-                } catch (NumberFormatException e) {
-                    log.warn("分享文件的上传者ID格式不正确: {}", uploader);
-                }
-            }
+    public List<ShareFileVO> getShareFile(String sharingCode) {
+        FileShare share = requirePublicActiveShare(sharingCode);
+        List<String> fileHashList = parseFileHashes(share.getFileHashes());
+        if (CommonUtils.isEmpty(fileHashList)) {
+            return List.of();
         }
-        return List.of();
+
+        List<File> files = listShareFilesInShareTenant(share, fileHashList);
+        return files.stream().map(ShareFileVO::fromFile).toList();
+    }
+
+    /**
+     * 校验公开分享元数据访问，并返回处于有效状态的本地分享记录。
+     *
+     * @param sharingCode 分享码
+     * @return 公开且有效的分享记录
+     */
+    private FileShare requirePublicActiveShare(String sharingCode) {
+        if (!StringUtils.hasText(sharingCode)) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "分享码不能为空");
+        }
+
+        FileShare share = TenantContext.runWithoutIsolation(() -> {
+            int expiredCount = fileShareMapper.markAsExpiredIfNecessary(sharingCode);
+            FileShare current = fileShareMapper.selectByShareCode(sharingCode);
+            if (current != null && expiredCount > 0) {
+                current.setStatus(FileShare.STATUS_EXPIRED);
+            }
+            return current;
+        });
+
+        if (share == null) {
+            throw new GeneralException(ResultEnum.SHARE_NOT_FOUND);
+        }
+        if (share.getStatus() == FileShare.STATUS_CANCELLED) {
+            throw new GeneralException(ResultEnum.SHARE_CANCELLED);
+        }
+        if (share.getStatus() == FileShare.STATUS_EXPIRED
+                || (share.getExpireTime() != null && share.getExpireTime().before(new Date()))) {
+            throw new GeneralException(ResultEnum.SHARE_EXPIRED);
+        }
+        if (ShareType.fromCode(share.getShareType()).isPrivate()) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "此分享需要登录后才能访问");
+        }
+        return share;
+    }
+
+    /**
+     * 在分享所属租户内读取文件和所有者展示名，避免公开分享列表绕过所有租户过滤。
+     *
+     * @param share 分享记录
+     * @param fileHashList 分享授权的文件哈希
+     * @return 分享文件实体列表
+     */
+    private List<File> listShareFilesInShareTenant(FileShare share, List<String> fileHashList) {
+        Long shareTenantId = share.getTenantId() != null ? share.getTenantId() : 0L;
+        return TenantContext.callWithTenant(shareTenantId, () -> {
+            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                    .eq(File::getUid, share.getUserId())
+                    .in(File::getFileHash, fileHashList);
+            List<File> files = fileMapper.selectList(wrapper);
+
+            if (CommonUtils.isNotEmpty(files)) {
+                Account owner = accountMapper.selectById(share.getUserId());
+                String ownerName = (owner != null) ? owner.getUsername() : null;
+                files.forEach(file -> file.setOwnerName(ownerName));
+            }
+            return files;
+        });
     }
 
     @Override
@@ -645,6 +693,7 @@ public class FileQueryServiceImpl implements FileQueryService {
             if (file == null) {
                 throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权访问");
             }
+            validateInMemoryTransferLimit(file);
             return resolveBlockchainUserId(file, file.getUid());
         }
 
@@ -655,6 +704,7 @@ public class FileQueryServiceImpl implements FileQueryService {
         File file = fileMapper.selectOne(wrapper);
 
         if (file != null) {
+            validateInMemoryTransferLimit(file);
             return resolveBlockchainUserId(file, userId);
         }
 
@@ -667,11 +717,25 @@ public class FileQueryServiceImpl implements FileQueryService {
                     .eq(File::getUid, sharerId);
             File sharerFile = fileMapper.selectOne(sharerWrapper);
             if (sharerFile != null) {
+                validateInMemoryTransferLimit(sharerFile);
                 return resolveBlockchainUserId(sharerFile, sharerId);
             }
         }
 
         throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权访问");
+    }
+
+    /**
+     * 校验文件是否适合通过当前内存聚合下载接口返回。
+     *
+     * @param file 文件元数据
+     */
+    private void validateInMemoryTransferLimit(File file) {
+        Long fileSize = file.getFileSize();
+        if (fileSize != null && fileSize > MAX_IN_MEMORY_TRANSFER_BYTES) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR,
+                    "文件超过当前下载上限 (" + (MAX_IN_MEMORY_TRANSFER_BYTES / 1024 / 1024) + "MB)");
+        }
     }
 
     /**

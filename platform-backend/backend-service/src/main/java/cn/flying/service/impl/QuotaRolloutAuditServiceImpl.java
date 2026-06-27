@@ -10,6 +10,7 @@ import cn.flying.dao.vo.file.QuotaRolloutAuditVO;
 import cn.flying.service.QuotaRolloutAuditService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -35,17 +36,20 @@ public class QuotaRolloutAuditServiceImpl implements QuotaRolloutAuditService {
      * 写入或更新灰度扩容审计记录。
      *
      * @param operatorId 操作人ID
+     * @param tenantId 当前租户ID
      * @param request 审计写入请求
      * @return 最新审计记录
      */
     @Override
-    public QuotaRolloutAuditVO upsertAudit(Long operatorId, QuotaRolloutAuditUpsertVO request) {
-        validateRequest(request);
+    @Transactional(rollbackFor = Exception.class)
+    public QuotaRolloutAuditVO upsertAudit(Long operatorId, Long tenantId, QuotaRolloutAuditUpsertVO request) {
+        validateTenantId(tenantId);
+        validateRequest(request, tenantId);
 
         QuotaRolloutAudit audit = new QuotaRolloutAudit()
                 .setId(IdUtils.nextEntityId())
                 .setBatchId(request.batchId().trim())
-                .setTenantId(request.tenantId())
+                .setTenantId(tenantId)
                 .setObservationStartTime(toDate(request.observationStartTime()))
                 .setObservationEndTime(toDate(request.observationEndTime()))
                 .setSampledRequestCount(request.sampledRequestCount())
@@ -91,16 +95,20 @@ public class QuotaRolloutAuditServiceImpl implements QuotaRolloutAuditService {
      * 校验审计写入请求，保证计数和观察窗口口径一致。
      *
      * @param request 审计写入请求
+     * @param tenantId 当前租户ID
      */
-    private void validateRequest(QuotaRolloutAuditUpsertVO request) {
+    private void validateRequest(QuotaRolloutAuditUpsertVO request, Long tenantId) {
         if (request == null) {
             throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "审计请求不能为空");
         }
         if (!StringUtils.hasText(request.batchId())) {
             throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "batchId 不能为空");
         }
-        if (request.tenantId() == null || request.tenantId() <= 0) {
+        if (request.tenantId() != null && request.tenantId() <= 0) {
             throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "tenantId 必须大于 0");
+        }
+        if (request.tenantId() != null && !request.tenantId().equals(tenantId)) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "tenantId 与当前租户不一致");
         }
         if (request.observationStartTime() == null || request.observationEndTime() == null) {
             throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "观察窗口不能为空");
@@ -126,6 +134,17 @@ public class QuotaRolloutAuditServiceImpl implements QuotaRolloutAuditService {
         String rollbackDecision = normalizeRollbackDecision(request.rollbackDecision());
         if (DECISION_FORCE_SHADOW.equals(rollbackDecision) && !StringUtils.hasText(request.rollbackReason())) {
             throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "FORCE_SHADOW 必须提供 rollbackReason");
+        }
+    }
+
+    /**
+     * 校验当前租户上下文，禁止使用请求体租户作为授权来源。
+     *
+     * @param tenantId 当前租户ID
+     */
+    private void validateTenantId(Long tenantId) {
+        if (tenantId == null || tenantId <= 0) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "当前租户不能为空");
         }
     }
 

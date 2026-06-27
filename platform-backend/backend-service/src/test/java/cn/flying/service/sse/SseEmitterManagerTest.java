@@ -100,6 +100,18 @@ class SseEmitterManagerTest {
             // Should only have 5 connections (oldest removed)
             assertEquals(5, manager.getUserConnectionCount(TENANT_1, USER_1));
         }
+
+        @Test
+        @DisplayName("should keep replacement connection when duplicate id closes old emitter")
+        void shouldKeepReplacementConnectionForDuplicateId() {
+            manager.createConnection(TENANT_1, USER_1, "same-conn");
+
+            SseEmitter replacement = manager.createConnection(TENANT_1, USER_1, "same-conn");
+
+            assertNotNull(replacement);
+            assertTrue(manager.isOnline(TENANT_1, USER_1));
+            assertEquals(1, manager.getUserConnectionCount(TENANT_1, USER_1));
+        }
     }
 
     @Nested

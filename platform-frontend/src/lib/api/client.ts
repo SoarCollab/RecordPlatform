@@ -183,6 +183,10 @@ function buildHeaders(
   return headers;
 }
 
+function isAbsoluteHttpUrl(url: string): boolean {
+  return url.startsWith("http://") || url.startsWith("https://");
+}
+
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -369,7 +373,10 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
     const timeout = config?.timeout ?? 30000;
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-    const headers = buildHeaders(config, tenantId, tokenGetter);
+    const isAbsoluteUrl = isAbsoluteHttpUrl(url);
+    const headers = isAbsoluteUrl
+      ? new Headers(config?.headers || {})
+      : buildHeaders(config, tenantId, tokenGetter);
 
     if (body instanceof FormData) {
       headers.delete("Content-Type");
@@ -377,11 +384,9 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
       headers.set("Content-Type", "application/x-www-form-urlencoded");
     }
 
-    // Determine if url is an absolute URL or a path relative to baseUrl
-    const resolvedUrl =
-      url.startsWith("http://") || url.startsWith("https://")
-        ? url
-        : buildUrl(baseUrl, url, config?.params);
+    const resolvedUrl = isAbsoluteUrl
+      ? url
+      : buildUrl(baseUrl, url, config?.params);
 
     try {
       const response = await fetchFn(resolvedUrl, {
@@ -444,7 +449,7 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
 
     /**
      * Fetch a URL and return the response as text.
-     * Handles auth/tenant headers. Supports both absolute URLs and API paths.
+     * API paths include auth/tenant headers; absolute URLs only use explicit headers from config.
      */
     async fetchText(url: string, config?: RequestConfig): Promise<string> {
       const response = await rawRequest("GET", url, undefined, config);
@@ -453,7 +458,7 @@ export function createApiClient(clientConfig: ApiClientConfig = {}) {
 
     /**
      * Fetch a URL and return the response as a Blob.
-     * Handles auth/tenant headers. Supports both absolute URLs and API paths.
+     * API paths include auth/tenant headers; absolute URLs only use explicit headers from config.
      */
     async fetchBlob(
       method: string,

@@ -12,9 +12,12 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("RequestLogFilter Unit Tests")
@@ -202,6 +205,17 @@ class RequestLogFilterTest {
             assertThat(filterChain.getRequest()).isNotNull();
         }
 
+        /**
+         * 验证上传会话 clientId 参数会被敏感参数规则识别。
+         */
+        @Test
+        @DisplayName("Should treat upload clientId parameter as sensitive")
+        void shouldTreatUploadClientIdParameterAsSensitive() {
+            Boolean result = ReflectionTestUtils.invokeMethod(filter, "isSensitiveParam", "clientId");
+
+            assertThat(result).isTrue();
+        }
+
         @Test
         @DisplayName("Should mask new_password parameter")
         void shouldMaskNewPasswordParameter() throws ServletException, IOException {
@@ -273,12 +287,112 @@ class RequestLogFilterTest {
         @Test
         @DisplayName("Should wrap response for caching")
         void shouldWrapResponseForCaching() throws ServletException, IOException {
-            request.setServletPath("/api/v1/files");
+            request.setServletPath("/api/v1/conversations");
             request.setMethod("GET");
 
             filter.doFilter(request, response, filterChain);
 
             assertThat(filterChain.getResponse()).isInstanceOf(ContentCachingResponseWrapper.class);
+        }
+
+        @Test
+        @DisplayName("Should not wrap auth login responses")
+        void shouldNotWrapAuthLoginResponses() throws ServletException, IOException {
+            request.setRequestURI("/api/v1/auth/login");
+            request.setServletPath("/api/v1/auth/login");
+            request.setMethod("POST");
+
+            filter.doFilter(request, response, filterChain);
+
+            assertThat(filterChain.getResponse()).isNotInstanceOf(ContentCachingResponseWrapper.class);
+        }
+
+        @Test
+        @DisplayName("Should not wrap file API responses")
+        void shouldNotWrapFileApiResponses() throws ServletException, IOException {
+            request.setRequestURI("/api/v1/files/hash/test-hash/addresses");
+            request.setServletPath("/api/v1/files/hash/test-hash/addresses");
+            request.setMethod("GET");
+
+            filter.doFilter(request, response, filterChain);
+
+            assertThat(filterChain.getResponse()).isNotInstanceOf(ContentCachingResponseWrapper.class);
+        }
+
+        @Test
+        @DisplayName("Should not wrap chunk responses")
+        void shouldNotWrapChunkResponses() throws ServletException, IOException {
+            request.setRequestURI("/api/v1/files/hash/test-hash/chunks");
+            request.setServletPath("/api/v1/files/hash/test-hash/chunks");
+            request.setMethod("GET");
+
+            filter.doFilter(request, response, filterChain);
+
+            assertThat(filterChain.getResponse()).isNotInstanceOf(ContentCachingResponseWrapper.class);
+        }
+
+        @Test
+        @DisplayName("Should not wrap decrypt info responses")
+        void shouldNotWrapDecryptInfoResponses() throws ServletException, IOException {
+            request.setRequestURI("/api/v1/public/shares/share-code/files/test-hash/decrypt-info");
+            request.setServletPath("/api/v1/public/shares/share-code/files/test-hash/decrypt-info");
+            request.setMethod("GET");
+
+            filter.doFilter(request, response, filterChain);
+
+            assertThat(filterChain.getResponse()).isNotInstanceOf(ContentCachingResponseWrapper.class);
+        }
+
+        /**
+         * 验证日志路径会脱敏分享码、文件哈希和交易哈希。
+         */
+        @Test
+        @DisplayName("Should mask sensitive identifiers in logged paths")
+        void shouldMaskSensitiveIdentifiersInLoggedPaths() {
+            String sanitized = ReflectionTestUtils.invokeMethod(
+                    filter,
+                    "sanitizePathForLog",
+                    "/api/v1/public/shares/ABC123/files/hash-secret/chunks"
+            );
+
+            assertThat(sanitized).isEqualTo("/api/v1/public/shares/***/files/***/chunks");
+
+            String fileHashRoute = ReflectionTestUtils.invokeMethod(
+                    filter,
+                    "sanitizePathForLog",
+                    "/api/v1/files/hash/hash-secret/chunks"
+            );
+            assertThat(fileHashRoute).isEqualTo("/api/v1/files/hash/***/chunks");
+
+            String uploadSessionRoute = ReflectionTestUtils.invokeMethod(
+                    filter,
+                    "sanitizePathForLog",
+                    "/api/v1/upload-sessions/client-secret/complete"
+            );
+            assertThat(uploadSessionRoute).isEqualTo("/api/v1/upload-sessions/***/complete");
+        }
+
+        /**
+         * 验证响应体日志预览会复用敏感字段脱敏规则，避免令牌进入日志。
+         */
+        @Test
+        @DisplayName("Should mask sensitive JSON fields in response log content")
+        void shouldMaskSensitiveJsonFieldsInResponseLogContent() {
+            request.setRequestURI("/api/v1/conversations");
+            byte[] body = "{\"token\":\"secret-token\",\"message\":\"ok\"}".getBytes(StandardCharsets.UTF_8);
+
+            String content = ReflectionTestUtils.invokeMethod(
+                    filter,
+                    "buildResponseLogContent",
+                    request,
+                    "application/json",
+                    HttpServletResponse.SC_OK,
+                    body
+            );
+
+            assertThat(content).contains("\"token\":\"******\"");
+            assertThat(content).contains("\"message\":\"ok\"");
+            assertThat(content).doesNotContain("secret-token");
         }
     }
 

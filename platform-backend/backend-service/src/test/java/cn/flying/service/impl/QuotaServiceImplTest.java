@@ -150,6 +150,24 @@ class QuotaServiceImplTest {
     }
 
     /**
+     * 验证全局 ENFORCE 且白名单为空时不会静默回退 SHADOW。
+     */
+    @Test
+    void shouldKeepEnforceWhenGlobalEnforceAndWhitelistEmpty() {
+        ReflectionTestUtils.setField(quotaService, "enforcementMode", "ENFORCE");
+        ReflectionTestUtils.setField(quotaService, "rolloutStrategy", "TENANT_WHITELIST");
+        ReflectionTestUtils.setField(quotaService, "enforceTenantWhitelist", "");
+        when(fileMapper.sumQuotaStorageByUserId(3L, 1L)).thenReturn(980L);
+
+        GeneralException ex = assertThrows(GeneralException.class, () ->
+                quotaService.checkUploadQuota(1L, 3L, 200L));
+
+        assertEquals(50013, ex.getResultEnum().getCode());
+        verify(quotaMetrics).recordQuotaDecision("ENFORCE", true);
+        verify(quotaMetrics).recordRolloutDecision("batch-w2-gray", "ENFORCE", "BLOCK", "user_storage_exceeded");
+    }
+
+    /**
      * 验证租户不在白名单时强制回退 SHADOW。
      */
     @Test
@@ -210,6 +228,8 @@ class QuotaServiceImplTest {
         assertEquals(2L, status.userId());
         assertEquals("ENFORCE", status.enforcementMode());
         assertEquals(200L, status.userUsedStorageBytes());
+        verify(quotaUsageSnapshotMapper, never()).upsertSnapshot(
+                anyLong(), anyLong(), anyLong(), anyLong(), anyLong(), anyString());
     }
 
     /**

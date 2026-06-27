@@ -65,6 +65,7 @@ public class FileUploadServiceImpl implements FileUploadService {
     private static final int BUFFER_SIZE = 8 * 1024 * 1024; // 8MB I/O 缓冲区大小
     private static final long MAX_FILE_SIZE_BYTES = 4096 * 1024 * 1024L; // 4GB 最大文件大小限制
     private static final int MAX_CHUNK_SIZE_BYTES = 80 * 1024 * 1024; // 80MB 最大分片大小 (Dubbo载荷限制100MB，预留安全边际)
+    private static final int MAX_TOTAL_CHUNKS = 10_000;
     private static final int PROGRESS_UPDATE_INTERVAL_MS = 1000; // 进度日志更新间隔（毫秒）
     private static final Pattern SAFE_FILENAME_PATTERN = Pattern.compile("^[\\p{IsHan}a-zA-Z0-9\\u4e00-\\u9fa5._\\-\\s,;!@#$%&()+=]+$");
     private static final String HASH_ALGORITHM = "SHA-256"; // 哈希算法
@@ -75,6 +76,7 @@ public class FileUploadServiceImpl implements FileUploadService {
     private static final String QUOTA_COMPLETE_LOCK_KEY_PREFIX = "distributed:lock:upload:quota:complete:tenant:";
     private static final long QUOTA_COMPLETE_LOCK_LEASE_SECONDS = 60L;
     private static final int MAX_CLEANUP_RETRIES = 3;
+    private static final String UPLOAD_SESSION_STATUS_COMPLETED = "completed";
     // --- 允许的文件类型 ---
     private static final Set<String> ALLOWED_FILE_EXTENSIONS = Set.of(
             "jpg", "jpeg", "png", "gif", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "zip", "rar", "7z"
@@ -367,6 +369,7 @@ public class FileUploadServiceImpl implements FileUploadService {
         if (chunkSize <= 0 || chunkSize > MAX_CHUNK_SIZE_BYTES) {
             throw new GeneralException("分片大小必须在 1B 到 " + (MAX_CHUNK_SIZE_BYTES / 1024 / 1024) + "MB 之间");
         }
+        validateUploadPlan(fileSize, chunkSize, totalChunks);
         if (!isFileTypeAllowed(fileName, contentType)) {
             throw new GeneralException("不支持的文件类型");
         }
@@ -498,6 +501,56 @@ public class FileUploadServiceImpl implements FileUploadService {
     }
 
     /**
+     * 校验客户端声明的上传分片计划与文件大小一致。
+     *
+     * @param fileSize 文件总字节数
+     * @param chunkSize 分片字节数
+     * @param totalChunks 分片总数
+     */
+    private void validateUploadPlan(long fileSize, int chunkSize, int totalChunks) {
+        if (totalChunks <= 0 || totalChunks > MAX_TOTAL_CHUNKS) {
+            throw new GeneralException("分片总数必须在 1 到 " + MAX_TOTAL_CHUNKS + " 之间");
+        }
+        int expectedChunks = (int) ((fileSize + chunkSize - 1) / chunkSize);
+        if (totalChunks != expectedChunks) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "分片总数与文件大小不匹配");
+        }
+    }
+
+    /**
+     * 校验上传分片的实际大小必须符合创建会话时确定的分片计划。
+     *
+     * @param state 上传会话状态
+     * @param chunkNumber 分片序号
+     * @param actualSize 当前上传分片字节数
+     */
+    private void validateUploadedChunkSize(FileUploadState state, int chunkNumber, long actualSize) {
+        long expectedSize = expectedChunkSize(state, chunkNumber);
+        if (expectedSize <= 0) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "分片计划无效");
+        }
+        if (actualSize != expectedSize) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR,
+                    "分片大小与上传计划不匹配: 序号=" + chunkNumber
+                            + ", 期望=" + expectedSize + ", 实际=" + actualSize);
+        }
+    }
+
+    /**
+     * 根据上传计划计算指定分片应有的字节数。
+     *
+     * @param state 上传会话状态
+     * @param chunkNumber 分片序号
+     * @return 该分片应有字节数
+     */
+    private long expectedChunkSize(FileUploadState state, int chunkNumber) {
+        if (chunkNumber == state.getTotalChunks() - 1) {
+            return state.getFileSize() - ((long) state.getChunkSize() * chunkNumber);
+        }
+        return state.getChunkSize();
+    }
+
+    /**
      * 判断上传会话绑定的目标文件是否与当前请求一致。
      *
      * @param state 上传会话状态
@@ -555,6 +608,7 @@ public class FileUploadServiceImpl implements FileUploadService {
         if (file.isEmpty()) {
             throw new GeneralException("上传的分片不能为空: 客户端ID=" + clientId + ", 序号=" + chunkNumber);
         }
+        validateUploadedChunkSize(state, chunkNumber, file.getSize());
 
         // --- 优化：边保存边计算哈希 ---
         Path chunkPath = getChunkUploadPath(SUID, clientId, chunkNumber);
@@ -652,9 +706,9 @@ public class FileUploadServiceImpl implements FileUploadService {
 
         // 确定状态字符串
         String status;
-        if ("completed".equals(state.getStatus())) {
+        if (UPLOAD_SESSION_STATUS_COMPLETED.equals(state.getStatus())) {
             // 如果状态已标记为 completed，直接返回完成
-            status = "completed";
+            status = UPLOAD_SESSION_STATUS_COMPLETED;
         } else if (paused) {
             status = "paused";
         } else if (progressInfo.totalChunks > 0 && progressInfo.processedCount == progressInfo.totalChunks) {
@@ -685,6 +739,11 @@ public class FileUploadServiceImpl implements FileUploadService {
     public boolean cancelUpload(Long userId, String clientId) {
         String SUID = UidEncoder.encodeUid(String.valueOf(userId));
         log.info("收到取消上传请求: 客户端ID={}", clientId);
+        FileUploadState state = redisStateManager.getState(clientId);
+        if (state == null) {
+            return cleanupUploadSessionInternal(SUID, clientId);
+        }
+        validateUploadOwnership(userId, state, clientId);
         return cleanupUploadSessionInternal(SUID, clientId); // 内部方法处理查找和清理
     }
 
@@ -703,6 +762,11 @@ public class FileUploadServiceImpl implements FileUploadService {
         FileUploadState state = redisStateManager.getState(clientId);
         if (state == null) {
             throw new GeneralException(ResultEnum.UPLOAD_SESSION_NOT_FOUND);
+        }
+        validateUploadOwnership(userId, state, clientId);
+        if (isUploadSessionCompleted(state)) {
+            log.info("上传会话已完成，忽略重复完成请求: 客户端ID={}, 文件名={}", clientId, state.getFileName());
+            return;
         }
 
         log.info("处理完成上传请求: 客户端ID={}, 文件名={}", clientId, state.getFileName());
@@ -944,6 +1008,16 @@ public class FileUploadServiceImpl implements FileUploadService {
      */
     private boolean shouldCheckQuotaForSession(FileUploadState state) {
         return state != null && state.getTargetFileId() == null;
+    }
+
+    /**
+     * 判断上传会话是否已进入完成终态，用于阻止重复完成请求重放不可逆副作用。
+     *
+     * @param state 上传会话状态
+     * @return true 表示已完成
+     */
+    private boolean isUploadSessionCompleted(FileUploadState state) {
+        return state != null && UPLOAD_SESSION_STATUS_COMPLETED.equalsIgnoreCase(state.getStatus());
     }
 
     /**

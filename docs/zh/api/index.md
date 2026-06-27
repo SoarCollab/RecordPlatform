@@ -142,7 +142,7 @@ Authorization: Bearer <token>
 |------|------|------|
 | GET | `/api/v1/files/quota` | 查询当前用户配额状态 |
 | POST | `/api/v1/admin/quota/rollout/audits` | 写入或更新配额灰度审计记录（管理员） |
-| GET | `/api/v1/admin/quota/rollout/audits` | 查询配额灰度审计记录（管理员，参数：`batchId`、`tenantId`） |
+| GET | `/api/v1/admin/quota/rollout/audits` | 查询配额灰度审计记录（管理员，参数：`batchId`；租户来自认证上下文） |
 
 ### 公开分享页（`/api/v1/shares`）
 

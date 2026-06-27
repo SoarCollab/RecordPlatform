@@ -46,12 +46,18 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
 
         Conversation existing = baseMapper.selectByParticipants(participantA, participantB, TenantContext.getTenantId());
         if (existing != null) {
+            if (existing.isHiddenFor(userA) || existing.isHiddenFor(userB)) {
+                existing.restoreForAllParticipants();
+                this.updateById(existing);
+            }
             return existing;
         }
 
         Conversation conversation = new Conversation()
                 .setParticipantA(participantA)
-                .setParticipantB(participantB);
+                .setParticipantB(participantB)
+                .setParticipantADeleted(0)
+                .setParticipantBDeleted(0);
 
         this.save(conversation);
         log.info("创建新会话: id={}, participantA={}, participantB={}", conversation.getId(), participantA, participantB);
@@ -61,9 +67,13 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
     @Override
     public IPage<ConversationVO> getConversationList(Long userId, Page<Conversation> page) {
         LambdaQueryWrapper<Conversation> wrapper = new LambdaQueryWrapper<Conversation>()
-                .and(query -> query.eq(Conversation::getParticipantA, userId)
+                .and(query -> query.and(participantAQuery -> participantAQuery
+                                .eq(Conversation::getParticipantA, userId)
+                                .eq(Conversation::getParticipantADeleted, 0))
                         .or()
-                        .eq(Conversation::getParticipantB, userId))
+                        .and(participantBQuery -> participantBQuery
+                                .eq(Conversation::getParticipantB, userId)
+                                .eq(Conversation::getParticipantBDeleted, 0)))
                 .orderByDesc(Conversation::getLastMessageAt);
 
         IPage<Conversation> conversationPage = this.page(page, wrapper);
@@ -79,6 +89,9 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
 
         if (!conversation.getParticipantA().equals(userId) && !conversation.getParticipantB().equals(userId)) {
             // 安全策略：隐藏会话是否存在
+            throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
+        }
+        if (conversation.isHiddenFor(userId)) {
             throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
         }
 
@@ -112,8 +125,8 @@ public class ConversationServiceImpl extends ServiceImpl<ConversationMapper, Con
             throw new GeneralException(ResultEnum.CONVERSATION_NOT_FOUND);
         }
 
-        // 执行软删除（MyBatis-Plus 的 @TableLogic 会自动处理）
-        this.removeById(conversationId);
+        conversation.markDeletedFor(userId);
+        this.updateById(conversation);
         log.info("用户 {} 删除会话 {}", userId, conversationId);
     }
 

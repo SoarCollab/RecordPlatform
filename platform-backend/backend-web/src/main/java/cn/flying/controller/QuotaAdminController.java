@@ -39,6 +39,7 @@ public class QuotaAdminController {
      * 写入或更新配额灰度扩容审计记录。
      *
      * @param userId 当前用户ID
+     * @param tenantId 当前租户ID
      * @param request 审计写入请求
      * @return 审计记录
      */
@@ -47,23 +48,24 @@ public class QuotaAdminController {
     @OperationLog(module = "管理员-配额灰度审计", operationType = "写入", description = "写入或更新配额灰度审计记录")
     public Result<QuotaRolloutAuditVO> upsertQuotaRolloutAudit(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @RequestAttribute(Const.ATTR_TENANT_ID) Long tenantId,
             @RequestBody @Valid QuotaRolloutAuditUpsertVO request) {
-        return Result.success(quotaRolloutAuditService.upsertAudit(userId, request));
+        return Result.success(quotaRolloutAuditService.upsertAudit(userId, tenantId, request));
     }
 
     /**
-     * 查询指定租户在某一灰度批次下的审计记录。
+     * 查询当前租户在某一灰度批次下的审计记录。
      *
+     * @param tenantId 当前租户ID
      * @param batchId 灰度批次ID
-     * @param tenantId 租户ID
      * @return 审计记录
      */
     @GetMapping("")
     @Operation(summary = "查询配额灰度审计记录")
     @OperationLog(module = "管理员-配额灰度审计", operationType = "查询", description = "查询配额灰度审计记录")
     public Result<QuotaRolloutAuditVO> getQuotaRolloutAudit(
-            @Parameter(description = "灰度批次ID") @RequestParam String batchId,
-            @Parameter(description = "租户ID") @RequestParam Long tenantId) {
+            @RequestAttribute(Const.ATTR_TENANT_ID) Long tenantId,
+            @Parameter(description = "灰度批次ID") @RequestParam String batchId) {
         return Result.success(quotaRolloutAuditService.getLatestAudit(batchId, tenantId));
     }
 }

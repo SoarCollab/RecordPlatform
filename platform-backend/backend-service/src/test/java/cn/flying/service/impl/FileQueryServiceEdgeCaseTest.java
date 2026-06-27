@@ -1,14 +1,17 @@
 package cn.flying.service.impl;
 
+import cn.flying.common.constant.ShareType;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.dto.File;
+import cn.flying.dao.dto.FileShare;
 import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.mapper.FileMapper;
-import cn.flying.platformapi.constant.Result;
-import cn.flying.platformapi.response.SharingVO;
+import cn.flying.dao.mapper.FileShareMapper;
+import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.service.FriendFileShareService;
 import cn.flying.service.remote.FileRemoteClient;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -42,6 +45,9 @@ class FileQueryServiceEdgeCaseTest {
     private FileMapper fileMapper;
 
     @Mock
+    private FileShareMapper fileShareMapper;
+
+    @Mock
     private AccountMapper accountMapper;
 
     @Mock
@@ -58,6 +64,22 @@ class FileQueryServiceEdgeCaseTest {
     private static final Long FILE_ID = 1L;
     private static final String FILE_HASH = "sha256_edge_hash";
     private static final String SHARE_CODE = "EDGE01";
+
+    /**
+     * 构造本地分享记录，供公开分享元数据路径测试使用。
+     */
+    private FileShare createShare(Integer status, Date expireTime, Integer shareType) {
+        return new FileShare()
+                .setId(1L)
+                .setTenantId(1L)
+                .setUserId(100L)
+                .setShareCode(SHARE_CODE)
+                .setShareType(shareType)
+                .setFileHashes("[\"" + FILE_HASH + "\"]")
+                .setStatus(status)
+                .setExpireTime(expireTime)
+                .setAccessCount(0);
+    }
 
     @Nested
     @DisplayName("getFileById Edge Cases")
@@ -240,8 +262,8 @@ class FileQueryServiceEdgeCaseTest {
         @Test
         @DisplayName("should throw cancelled when share expiration is negative")
         void shouldThrowCancelledWhenShareExpirationIsNegative() {
-            SharingVO sharingVO = new SharingVO("100", List.of(FILE_HASH), SHARE_CODE, null, null, -1L, true);
-            when(fileRemoteClient.getSharedFiles(SHARE_CODE)).thenReturn(Result.success(sharingVO));
+            when(fileShareMapper.selectByShareCode(SHARE_CODE))
+                    .thenReturn(createShare(FileShare.STATUS_CANCELLED, null, ShareType.PUBLIC.getCode()));
 
             GeneralException ex = assertThrows(GeneralException.class, () -> fileQueryService.getShareFile(SHARE_CODE));
 
@@ -254,16 +276,11 @@ class FileQueryServiceEdgeCaseTest {
         @Test
         @DisplayName("should throw expired when share expiration has passed")
         void shouldThrowExpiredWhenShareExpirationHasPassed() {
-            SharingVO sharingVO = new SharingVO(
-                    "100",
-                    List.of(FILE_HASH),
-                    SHARE_CODE,
-                    null,
-                    null,
-                    System.currentTimeMillis() - 2000,
-                    true
-            );
-            when(fileRemoteClient.getSharedFiles(SHARE_CODE)).thenReturn(Result.success(sharingVO));
+            when(fileShareMapper.selectByShareCode(SHARE_CODE))
+                    .thenReturn(createShare(
+                            FileShare.STATUS_ACTIVE,
+                            new Date(System.currentTimeMillis() - 2000),
+                            ShareType.PUBLIC.getCode()));
 
             GeneralException ex = assertThrows(GeneralException.class, () -> fileQueryService.getShareFile(SHARE_CODE));
 
@@ -276,12 +293,26 @@ class FileQueryServiceEdgeCaseTest {
         @Test
         @DisplayName("should throw cancelled when share valid flag is false")
         void shouldThrowCancelledWhenShareValidFlagIsFalse() {
-            SharingVO sharingVO = new SharingVO("100", List.of(FILE_HASH), SHARE_CODE, null, null, null, false);
-            when(fileRemoteClient.getSharedFiles(SHARE_CODE)).thenReturn(Result.success(sharingVO));
+            when(fileShareMapper.selectByShareCode(SHARE_CODE))
+                    .thenReturn(createShare(FileShare.STATUS_CANCELLED, null, ShareType.PUBLIC.getCode()));
 
             GeneralException ex = assertThrows(GeneralException.class, () -> fileQueryService.getShareFile(SHARE_CODE));
 
             assertThat(ex.getResultEnum()).isEqualTo(ResultEnum.SHARE_CANCELLED);
+        }
+
+        /**
+         * 验证公开分享文件列表不会返回私密分享数据。
+         */
+        @Test
+        @DisplayName("should reject private share on public metadata lookup")
+        void shouldRejectPrivateShareOnPublicMetadataLookup() {
+            when(fileShareMapper.selectByShareCode(SHARE_CODE))
+                    .thenReturn(createShare(FileShare.STATUS_ACTIVE, null, ShareType.PRIVATE.getCode()));
+
+            GeneralException ex = assertThrows(GeneralException.class, () -> fileQueryService.getShareFile(SHARE_CODE));
+
+            assertThat(ex.getResultEnum()).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED);
         }
     }
 
@@ -371,24 +402,32 @@ class FileQueryServiceEdgeCaseTest {
         @Test
         @DisplayName("should fill ownerName when shared files are found")
         void shouldFillOwnerNameWhenSharedFilesAreFound() {
-            SharingVO sharingVO = new SharingVO("100", List.of(FILE_HASH), SHARE_CODE, null, null, null, true);
             File file = new File();
             file.setId(FILE_ID);
             file.setUid(100L);
             file.setFileHash(FILE_HASH);
+            file.setFileName("shared.txt");
+            file.setFileParam("{\"initialKey\":\"secret\"}");
 
             Account owner = new Account();
             owner.setId(100L);
             owner.setUsername("owner-name");
 
-            when(fileRemoteClient.getSharedFiles(SHARE_CODE)).thenReturn(Result.success(sharingVO));
+            when(fileShareMapper.selectByShareCode(SHARE_CODE))
+                    .thenReturn(createShare(FileShare.STATUS_ACTIVE, null, ShareType.PUBLIC.getCode()));
             when(fileMapper.selectList(any())).thenReturn(List.of(file));
             when(accountMapper.selectById(100L)).thenReturn(owner);
 
-            List<File> result = fileQueryService.getShareFile(SHARE_CODE);
+            List<ShareFileVO> result;
+            try (MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                idUtilsMock.when(() -> IdUtils.toExternalId(FILE_ID)).thenReturn("ext_1");
+                result = fileQueryService.getShareFile(SHARE_CODE);
+            }
 
             assertThat(result).hasSize(1);
-            assertThat(result.get(0).getOwnerName()).isEqualTo("owner-name");
+            assertThat(result.get(0).id()).isEqualTo("ext_1");
+            assertThat(result.get(0).ownerName()).isEqualTo("owner-name");
+            assertThat(result.get(0).fileName()).isEqualTo("shared.txt");
         }
     }
 }

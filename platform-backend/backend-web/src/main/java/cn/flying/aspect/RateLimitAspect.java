@@ -95,8 +95,8 @@ public class RateLimitAspect {
                 String.valueOf(period)
         );
 
-        if (result == 0) {
-            log.warn("Rate limit exceeded: key={}, limit={}, period={}s", key, limit, period);
+        if (!Long.valueOf(1L).equals(result)) {
+            log.warn("Rate limit denied: key={}, limit={}, period={}s, result={}", key, limit, period, result);
             throw new GeneralException(ResultEnum.PERMISSION_LIMIT);
         }
 

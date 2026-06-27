@@ -1,11 +1,14 @@
 package cn.flying.service.impl;
 
 import cn.flying.common.constant.UserRole;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.FlowUtils;
+import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.vo.auth.*;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -13,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
+import org.mockito.MockedStatic;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -25,6 +29,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -65,12 +70,20 @@ class AccountServiceImplTest {
     private static final String VERIFY_CODE = "123456";
     private static final String IP_ADDRESS = "192.168.1.1";
     private static final int VERIFY_LIMIT = 60;
+    private static final Long REGISTRATION_TENANT_ID = 1L;
 
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(accountService, "VERIFY_LIMIT", VERIFY_LIMIT);
+        ReflectionTestUtils.setField(accountService, "registrationTenantId", REGISTRATION_TENANT_ID);
         ReflectionTestUtils.setField(accountService, "baseMapper", accountMapper);
         lenient().when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
+    }
+
+    @AfterEach
+    void tearDown() {
+        TenantContext.clear();
+        getAddressLocks().clear();
     }
 
     @Nested
@@ -181,6 +194,24 @@ class AccountServiceImplTest {
             assertEquals(EMAIL, data.get("email"));
             assertNotNull(data.get("code"));
         }
+
+        /**
+         * 验证地址锁在请求结束后被清理，避免攻击者用大量源地址撑大静态 map。
+         */
+        @Test
+        @DisplayName("should remove address lock after verification request")
+        void shouldRemoveAddressLockAfterVerificationRequest() {
+            when(flow.limitOnceCheck(anyString(), anyInt())).thenReturn(true);
+
+            accountService.registerEmailVerifyCode("register", EMAIL, IP_ADDRESS);
+
+            assertTrue(getAddressLocks().isEmpty());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private ConcurrentHashMap<String, ?> getAddressLocks() {
+        return (ConcurrentHashMap<String, ?>) ReflectionTestUtils.getField(AccountServiceImpl.class, "ADDRESS_LOCKS");
     }
 
     @Nested
@@ -231,6 +262,40 @@ class AccountServiceImplTest {
             String result = accountService.registerEmailAccount(vo);
 
             assertEquals("该用户名已被他人使用，请重新更换", result);
+        }
+
+        /**
+         * 验证公开注册只写入服务端配置的租户，不信任未认证请求预先写入的 TenantContext。
+         */
+        @Test
+        @DisplayName("should register account under configured tenant")
+        void validRegistration_usesConfiguredTenant() {
+            TenantContext.setTenantId(99L);
+            EmailRegisterVO vo = createRegisterVO();
+            when(valueOperations.get(Const.VERIFY_EMAIL_DATA + EMAIL)).thenReturn(VERIFY_CODE);
+            when(accountMapper.exists(any())).thenAnswer(invocation -> {
+                assertEquals(REGISTRATION_TENANT_ID, TenantContext.getTenantId());
+                return false;
+            });
+            when(passwordEncoder.encode(PASSWORD)).thenReturn(ENCODED_PASSWORD);
+            when(accountMapper.insert(any(Account.class))).thenAnswer(invocation -> {
+                assertEquals(REGISTRATION_TENANT_ID, TenantContext.getTenantId());
+                return 1;
+            });
+            ArgumentCaptor<Account> accountCaptor = ArgumentCaptor.forClass(Account.class);
+
+            String result;
+            try (MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                idUtilsMock.when(IdUtils::nextUserId).thenReturn(USER_ID);
+                result = accountService.registerEmailAccount(vo);
+            }
+
+            assertNull(result);
+            verify(accountMapper).insert(accountCaptor.capture());
+            Account saved = accountCaptor.getValue();
+            assertEquals(REGISTRATION_TENANT_ID, saved.getTenantId());
+            assertEquals(99L, TenantContext.getTenantId());
+            verify(stringRedisTemplate).delete(Const.VERIFY_EMAIL_DATA + EMAIL);
         }
     }
 

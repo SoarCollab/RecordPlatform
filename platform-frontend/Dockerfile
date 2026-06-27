@@ -4,18 +4,18 @@
 # ── Stage 1: Build ──────────────────────────────────────────────────────────
 FROM node:20-alpine AS build
 
-# Enable pnpm via corepack (matches CI toolchain)
-RUN corepack enable && corepack prepare pnpm@10 --activate
+# Enable Corepack so pnpm is resolved from package.json packageManager.
+RUN corepack enable
 
 WORKDIR /app
 
 # Install dependencies first (layer caching: only re-runs on lockfile change)
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN corepack pnpm install --frozen-lockfile
 
 # Copy source and build SPA
 COPY . .
-RUN pnpm build
+RUN corepack pnpm build
 # Output: dist/ with precompressed .gz/.br assets (precompress: true in svelte.config.js)
 
 # ── Stage 2: Runtime ────────────────────────────────────────────────────────
