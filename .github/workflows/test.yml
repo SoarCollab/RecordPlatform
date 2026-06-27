@@ -26,7 +26,7 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       automation: ${{ steps.filter.outputs.automation }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -60,7 +60,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Java 21
         uses: actions/setup-java@v4
@@ -114,7 +114,7 @@ jobs:
         working-directory: platform-frontend
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -163,7 +163,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download Backend OpenAPI Artifact
         uses: actions/download-artifact@v8
@@ -216,7 +216,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run Trivy SARIF output
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -254,7 +254,7 @@ jobs:
     if: always() && !failure() && !cancelled() && (needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.automation == 'true')
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Java 21
         uses: actions/setup-java@v4
