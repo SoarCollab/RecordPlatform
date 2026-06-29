@@ -28,6 +28,7 @@ import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FriendFileShareService;
+import cn.flying.service.key.FileKeyEnvelopeService;
 import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.ChunkManifestView;
@@ -52,6 +53,7 @@ import java.time.ZoneId;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.concurrent.CompletableFuture;
 
@@ -100,6 +102,7 @@ public class FileQueryServiceImpl implements FileQueryService {
     private final FileShareMapper fileShareMapper;
     private final FriendFileShareService friendFileShareService;
     private final ChunkManifestService chunkManifestService;
+    private final FileKeyEnvelopeService fileKeyEnvelopeService;
     @Qualifier("virtualThreadExecutor")
     private final TaskExecutor virtualThreadExecutor;
 
@@ -542,7 +545,14 @@ public class FileQueryServiceImpl implements FileQueryService {
             @SuppressWarnings("unchecked")
             Map<String, Object> params = JsonConverter.parse(fileParam, Map.class);
 
-            String initialKey = (String) params.get("initialKey");
+            Optional<String> envelopeInitialKey = fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
+                    file,
+                    fileHash,
+                    file.getUid()
+            );
+            String initialKey = (envelopeInitialKey != null ? envelopeInitialKey : Optional.<String>empty())
+                    .or(() -> legacyInitialKey(params))
+                    .orElse(null);
             if (CommonUtils.isEmpty(initialKey)) {
                 throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
             }
@@ -569,6 +579,17 @@ public class FileQueryServiceImpl implements FileQueryService {
             log.error("解析文件参数失败: fileHash={}, error={}", fileHash, e.getMessage());
             throw new GeneralException(ResultEnum.FAIL, "解析文件元数据失败");
         }
+    }
+
+    /**
+     * Extracts the legacy initialKey from file_param for pre-envelope records.
+     */
+    private Optional<String> legacyInitialKey(Map<String, Object> fileParam) {
+        Object value = fileParam.get("initialKey");
+        if (value instanceof String key && CommonUtils.isNotEmpty(key)) {
+            return Optional.of(key);
+        }
+        return Optional.empty();
     }
 
     @Override

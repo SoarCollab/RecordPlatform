@@ -185,6 +185,14 @@ file:
     benchmark-data-size: 1048576
     # Benchmark iterations
     benchmark-iterations: 3
+  key-envelope:
+    provider: local
+    kms-key-id: local-file-key-v1
+    local-master-key: ${FILE_KEY_ENVELOPE_MASTER_KEY:${JWT_KEY:}}
+    key-version: 1
+    algorithm-suite: RP-AES256-GCM-CHUNK-CHAIN-V1
+    encryption-algorithm: CHUNK_KEY_CHAIN
+    wrapping-algorithm: AES-256-GCM
 
 # Quota governance configuration
 quota:

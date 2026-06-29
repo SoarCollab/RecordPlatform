@@ -8,9 +8,10 @@
 
 ### 1.1 密钥存储
 
-- **初始密钥（initialKey）**：以加密分片形式存储在数据库中
-- **存储位置**：`encryption_keys` 表，每个文件对应一条记录
-- **分片机制**：密钥被拆分为多个加密块（chunks），分别存储
+- **文件数据密钥令牌（initialKey）**：新上传文件不再持久化到 `file.file_param`
+- **存储位置**：`file_key_envelope` 表保存包封后的 `encrypted_data_key`、`wrapping_iv`、`algorithm_suite`、`key_version` 和 recipient 元数据
+- **包封机制**：当前实现使用本地 AES-GCM 包封 serialized initialKey，AAD 绑定 tenant、file、fileHash、recipient、keyVersion 和 algorithmSuite
+- **兼容机制**：历史文件若没有 active envelope，仍会回退读取旧 `fileParam.initialKey`
 
 ### 1.2 密钥派生
 
@@ -29,15 +30,16 @@ per-chunk key = KDF(initialKey, chunkIndex, salt)
 ### 1.3 密钥生命周期
 
 1. **生成**：文件上传时为每个文件生成唯一的 initialKey
-2. **存储**：加密后写入数据库 `encryption_keys` 表
-3. **使用**：文件下载时从数据库读取，派生分片密钥进行解密
-4. **删除**：文件删除时级联删除对应的密钥记录（软删除）
+2. **包封**：上传完成写入文件记录前，将 initialKey 从 `fileParam` 移除并写入 owner envelope
+3. **使用**：下载/解密 metadata 通过授权检查后解封 owner envelope；旧文件回退读取 legacy `initialKey`
+4. **删除**：当前随文件软删除隔离；recipient envelope 回收和显式 revocation 属于 P3-2
 
 ### 1.4 架构限制
 
-- **无 KMS**：密钥直接存储在数据库，未集成外部密钥管理服务
+- **未接入外部 KMS**：当前 KEK 来自 `FILE_KEY_ENVELOPE_MASTER_KEY`/`JWT_KEY` 派生的本地主密钥
 - **无硬件安全模块**：未使用 HSM 进行密钥保护
-- **无密钥版本控制**：不支持密钥轮换和版本管理
+- **密钥轮换未完成**：envelope 已记录 `key_version`，但自动 rewrap、rotation API 和 revocation 仍在 P3-2
+- **API 兼容输出**：P3-1 仍在授权响应中返回既有 `initialKey` 字段，前端合同移除属于后续任务
 
 ## 2. 安全假设
 
@@ -125,9 +127,10 @@ public FileVO downloadFile(String fileId) {
 
 ### 3.4 密钥隔离
 
-- **租户隔离**：`encryption_keys.tenant_id` 字段 + MyBatis 拦截器
+- **租户隔离**：`file_key_envelope.tenant_id` 字段 + MyBatis 拦截器
 - **用户隔离**：仅文件所有者可访问对应密钥
 - **S3 路径隔离**：`/{tenantId}/{userId}/` 前缀防止路径遍历
+- **AAD 绑定**：owner envelope 与 tenant、file、fileHash、recipient、keyVersion、algorithmSuite 绑定，篡改上下文会导致 AES-GCM 解封失败
 
 ## 4. 已知限制
 
@@ -135,16 +138,16 @@ public FileVO downloadFile(String fileId) {
 
 **当前状态**：❌ 不支持
 
-- **问题**：密钥一旦生成无法更换，即使怀疑泄露也无法轮换
+- **问题**：envelope 已记录 keyVersion，但尚未提供 rewrap/rotation API
 - **影响**：长期密钥暴露风险累积
-- **workaround**：手动重新上传文件（生成新密钥）
+- **workaround**：手动重新上传文件（生成新 file envelope）
 
 ### 4.2 硬件安全模块（HSM）
 
 **当前状态**：❌ 未集成
 
-- **问题**：密钥以软件形式存储在数据库，无法抵御高级持续性威胁（APT）
-- **影响**：数据库 root 用户或磁盘物理访问可直接读取密钥
+- **问题**：当前使用本地主密钥包封，无法抵御应用主机完全失陷
+- **影响**：攻击者同时获得数据库和本地主密钥后可解封文件数据密钥
 - **workaround**：依赖数据库静态加密 + 严格访问控制
 
 ### 4.3 单点故障
@@ -163,7 +166,7 @@ public FileVO downloadFile(String fileId) {
 
 - **问题**：无中心化密钥管理，无法统一审计和权限控制
 - **影响**：密钥策略分散在应用代码中，难以统一修改
-- **workaround**：依赖应用层权限检查 + 审计日志
+- **workaround**：依赖应用层权限检查 + 审计日志 + 本地 envelope 主密钥
 
 ### 4.5 密钥导出
 
@@ -181,7 +184,7 @@ public FileVO downloadFile(String fileId) {
 
 **架构变更**：
 ```
-当前: initialKey → Database (encrypted)
+当前: initialKey → file_key_envelope.encrypted_data_key (local AES-GCM wrapped)
     ↓
 未来: Data Encryption Key (DEK) → Database
       Key Encryption Key (KEK) → KMS
@@ -203,18 +206,17 @@ public FileVO downloadFile(String fileId) {
 
 **实现方案**：
 ```sql
--- 新增字段
-ALTER TABLE encryption_keys 
-  ADD COLUMN key_version INT NOT NULL DEFAULT 1,
-  ADD COLUMN rotated_at DATETIME,
-  ADD COLUMN previous_key_id BIGINT;
+-- existing envelope fields used by rotation
+SELECT key_version, encrypted_data_key, kms_key_id, status
+FROM file_key_envelope
+WHERE tenant_id = ? AND file_id = ? AND status = 'ACTIVE';
 
 -- 轮换流程
-1. 生成新 initialKey (version = N+1)
-2. 读取旧密钥 (version = N) 解密文件
-3. 用新密钥重新加密所有分片
-4. 更新 encryption_keys 表
-5. 保留旧密钥 90 天（用于回滚）
+1. 读取 active envelope 并解封 DEK
+2. 使用新 KEK/keyVersion 重新包封同一个 DEK
+3. 写入新 active envelope
+4. 将旧 envelope 标记为 SUPERSEDED/REVOKED
+5. 审计 rotation 结果
 ```
 
 **触发条件**：
