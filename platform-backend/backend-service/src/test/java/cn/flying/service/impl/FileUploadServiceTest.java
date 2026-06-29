@@ -299,6 +299,44 @@ class FileUploadServiceTest {
         }
 
         @Test
+        @DisplayName("should resume existing direct upload only when metadata matches")
+        void shouldResumeExistingDirectUploadOnlyWhenMetadataMatches() {
+            DirectUploadSessionRequest request = directSessionRequest();
+            request.setClientId(CLIENT_ID);
+            FileUploadState state = directUploadState();
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+
+            DirectUploadSessionVO result = fileUploadService.startDirectUpload(USER_ID, request);
+
+            assertTrue(result.isResumed());
+            assertEquals(CLIENT_ID, result.getClientId());
+            assertEquals(2, result.getParts().size());
+            verify(redisStateManager).updateLastActivityTime(CLIENT_ID);
+            verify(fileRemoteClient, never()).createDirectMultipartUpload(any());
+        }
+
+        @Test
+        @DisplayName("should reject direct upload resume when part metadata differs")
+        void shouldRejectDirectUploadResumeWhenPartMetadataDiffers() {
+            DirectUploadSessionRequest request = directSessionRequest();
+            request.setClientId(CLIENT_ID);
+            request.setParts(List.of(
+                    directUploadPart(0, 512L, "sha256:different", "sha256:different"),
+                    directUploadPart(1, 512L, "sha256:chunk-1", "sha256:chunk-1")
+            ));
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(directUploadState());
+
+            GeneralException exception = assertThrows(
+                    GeneralException.class,
+                    () -> fileUploadService.startDirectUpload(USER_ID, request)
+            );
+
+            assertEquals(ResultEnum.PARAM_ERROR, exception.getResultEnum());
+            verify(redisStateManager, never()).updateLastActivityTime(CLIENT_ID);
+            verify(fileRemoteClient, never()).createDirectMultipartUpload(any());
+        }
+
+        @Test
         @DisplayName("should complete direct upload, register file, and persist manifest")
         void shouldCompleteDirectUploadAndPersistManifest() {
             FileUploadState state = directUploadState();
