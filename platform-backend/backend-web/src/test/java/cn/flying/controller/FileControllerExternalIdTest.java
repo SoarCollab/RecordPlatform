@@ -4,9 +4,11 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.SecureIdCodec;
+import cn.flying.dao.vo.file.ProofBundleVO;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
 import cn.flying.service.ShareAuditService;
+import cn.flying.service.proof.ProofBundleService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -41,6 +43,9 @@ class FileControllerExternalIdTest {
     private ShareAuditService shareAuditService;
 
     @Mock
+    private ProofBundleService proofBundleService;
+
+    @Mock
     private SecureIdCodec secureIdCodec;
 
     private FileController controller;
@@ -50,7 +55,7 @@ class FileControllerExternalIdTest {
      */
     @BeforeEach
     void setUp() {
-        controller = new FileController(fileQueryService, fileService, shareAuditService);
+        controller = new FileController(fileQueryService, fileService, shareAuditService, proofBundleService);
     }
 
     /**
@@ -127,5 +132,63 @@ class FileControllerExternalIdTest {
 
         assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), ex.getResultEnum().getCode());
         verify(fileService, never()).removeByIds(anyList());
+    }
+
+    /**
+     * 验证文件证明包导出会把外部文件 ID 转换后委托到服务层。
+     */
+    @Test
+    void testExportProofBundleByFile_ValidExternalId() {
+        String externalId = "encrypted_file_123";
+        Long internalId = 100L;
+        ProofBundleVO bundle = new ProofBundleVO(
+                ProofBundleVO.CONTRACT_VERSION,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of()
+        );
+
+        ReflectionTestUtils.setField(IdUtils.class, "secureIdCodec", secureIdCodec);
+        when(secureIdCodec.fromExternalId(externalId)).thenReturn(internalId);
+        when(proofBundleService.exportByFileId(88L, internalId)).thenReturn(bundle);
+
+        var result = controller.exportProofBundleByFile(88L, externalId);
+
+        assertEquals(bundle, result.getData());
+        verify(proofBundleService).exportByFileId(88L, internalId);
+    }
+
+    /**
+     * 验证叶子证明包导出会把外部叶子 ID 转换后委托到服务层。
+     */
+    @Test
+    void testExportProofBundleByLeaf_ValidExternalId() {
+        String externalId = "encrypted_leaf_123";
+        Long internalId = 300L;
+        ProofBundleVO bundle = new ProofBundleVO(
+                ProofBundleVO.CONTRACT_VERSION,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of()
+        );
+
+        ReflectionTestUtils.setField(IdUtils.class, "secureIdCodec", secureIdCodec);
+        when(secureIdCodec.fromExternalId(externalId)).thenReturn(internalId);
+        when(proofBundleService.exportByLeafId(88L, internalId)).thenReturn(bundle);
+
+        var result = controller.exportProofBundleByLeaf(88L, externalId);
+
+        assertEquals(bundle, result.getData());
+        verify(proofBundleService).exportByLeafId(88L, internalId);
     }
 }
