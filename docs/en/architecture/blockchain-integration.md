@@ -188,6 +188,55 @@ sequenceDiagram
     Fisco-->>Backend: txHash
 ```
 
+### Merkle Batch Foundation
+
+P1 introduces a backend-side Merkle batch foundation for exportable proof metadata:
+
+1. `AttestationBatchService` loads successful file records for the current tenant.
+2. `MerkleTreeService` canonicalizes file hashes, calculates one Merkle root, and stores each leaf proof path.
+3. `attestation_batch` and `attestation_leaf` persist the batch root, proof algorithm, leaf hash, leaf index, and proof path JSON.
+4. `FileRemoteClient.storeAttestationBatchRoot` writes the batch root through the existing authenticated `storeFile` RPC contract.
+
+The current chain write is a compatibility boundary. A future dedicated FISCO batch contract can replace the `storeFile` payload shape inside `FileRemoteClient` without changing the batch orchestration or stored proof format.
+
+### Proof Bundle Export
+
+P1-2 exports verifier-ready JSON proof bundles from the persisted Merkle batch data:
+
+- `GET /api/v1/files/{id}/proof-bundle` exports by external file ID.
+- `GET /api/v1/files/attestation-leaves/{leafId}/proof-bundle` exports by external attestation leaf ID.
+- `ProofBundleService` performs tenant and owner checks before reading file, batch, leaf, storage HEAD, and chain receipt metadata.
+- `ProofBundleVO` is the stable v1 contract for P1-3 verifier input.
+
+The bundle intentionally includes public proof inputs only:
+
+- file name, file hash, file size, content type, version, and file transaction hash
+- storage object path and HEAD metadata
+- Merkle root, leaf hash, leaf index, proof algorithm, and proof path
+- batch transaction hash and batch chain file hash
+- issuer and verification policy metadata
+
+The bundle does not include raw file bytes, decrypt keys, RPC tokens, raw database-only IDs, or full `file_param`. The v1 bundle is unsigned; `issuer.signatureAlgorithm` and `issuer.signature` are reserved for a later signing phase.
+
+### Independent Proof Verifier
+
+P1-3 adds an offline verifier boundary for the `proof-bundle.v1` contract:
+
+- `ProofBundleVerifier.verify(byte[] originalFile, ProofBundleVO bundle)` validates a parsed bundle without backend session state.
+- `ProofBundleVerifier.verify(byte[] originalFile, String bundleJson)` parses exported JSON and returns the same structured result.
+- `ProofVerificationResult` reports `valid`, machine-readable issue codes, computed file hash, computed leaf hash, computed Merkle root, chain receipt fields, and issuer status.
+
+The verifier checks:
+
+- SHA-256 of the original file against `file.fileHash`
+- `merkle.proofAlgorithm` against `SHA-256-MERKLE-V1`
+- `merkle.leafHash` from the public `leaf\n{fileHash}` rule
+- `merkle.proofPath` from leaf to `merkle.merkleRoot`
+- `chain.batchChainFileHash` against the Merkle root when present
+- issuer batch status and storage metadata mismatch flags
+
+The verifier does not call platform APIs, query the database, read tenant context, or authenticate to FISCO. Direct transaction receipt validation remains a separate online verification step until a public chain gateway or signed receipt contract is introduced.
+
 ### Transaction Verification
 
 Query blockchain for attestation proof:
