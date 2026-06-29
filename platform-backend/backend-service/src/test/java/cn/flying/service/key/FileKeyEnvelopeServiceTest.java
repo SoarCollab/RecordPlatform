@@ -151,6 +151,80 @@ class FileKeyEnvelopeServiceTest {
     }
 
     /**
+     * Verifies that encrypted files cannot be persisted without envelope input.
+     */
+    @Test
+    @DisplayName("should reject encrypted file param without initial key")
+    void shouldRejectEncryptedFileParamWithoutInitialKey() {
+        assertThatThrownBy(() -> envelopeService.prepareFileParam("""
+                {"fileName":"a.txt","encryptionAlgorithm":"AES-GCM"}
+                """))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> {
+                    GeneralException generalException = (GeneralException) ex;
+                    assertThat(generalException.getResultEnum()).isEqualTo(ResultEnum.PARAM_ERROR);
+                    assertThat(generalException.getData()).asString().contains("文件数据密钥不能为空");
+                });
+    }
+
+    /**
+     * Verifies that file metadata must be present under the current upload contract.
+     */
+    @Test
+    @DisplayName("should reject blank file param")
+    void shouldRejectBlankFileParam() {
+        assertThatThrownBy(() -> envelopeService.prepareFileParam(" "))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> {
+                    GeneralException generalException = (GeneralException) ex;
+                    assertThat(generalException.getResultEnum()).isEqualTo(ResultEnum.PARAM_ERROR);
+                    assertThat(generalException.getData()).asString().contains("文件元数据不能为空");
+                });
+    }
+
+    /**
+     * Verifies that direct multipart uploads must explicitly declare NONE encryption.
+     */
+    @Test
+    @DisplayName("should not infer none encryption from direct multipart upload mode")
+    void shouldNotInferNoneEncryptionFromDirectMultipartUploadMode() {
+        assertThatThrownBy(() -> envelopeService.prepareFileParam("""
+                {"uploadMode":"DIRECT_MULTIPART","fileName":"a.txt"}
+                """))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> {
+                    GeneralException generalException = (GeneralException) ex;
+                    assertThat(generalException.getResultEnum()).isEqualTo(ResultEnum.PARAM_ERROR);
+                    assertThat(generalException.getData()).asString().contains("文件数据密钥不能为空");
+                });
+    }
+
+    /**
+     * Verifies that unencrypted files do not create share recipient envelopes.
+     */
+    @Test
+    @DisplayName("should skip share envelope for unencrypted file")
+    void shouldSkipShareEnvelopeForUnencryptedFile() {
+        File file = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1")
+                .setFileParam("""
+                        {"uploadMode":"DIRECT_MULTIPART","encryptionAlgorithm":"NONE","fileName":"a.txt"}
+                        """);
+        FileShare share = new FileShare()
+                .setId(200L)
+                .setTenantId(1L)
+                .setUserId(100L)
+                .setShareCode("ABC123");
+
+        envelopeService.saveShareEnvelopes(share, java.util.List.of(file), 100L, "SHARE_CREATE");
+
+        verify(fileKeyEnvelopeMapper, org.mockito.Mockito.never()).insert(any(FileKeyEnvelope.class));
+    }
+
+    /**
      * Verifies that an owner envelope can be saved and unwrapped later.
      */
     @Test
@@ -355,13 +429,13 @@ class FileKeyEnvelopeServiceTest {
     }
 
     /**
-     * Verifies that rotation rewraps old active envelopes and skips target-version envelopes.
+     * Verifies that rotation rewraps previous active envelopes and skips target-version envelopes.
      */
     @Test
     @DisplayName("should rotate envelopes idempotently")
     void shouldRotateEnvelopesIdempotently() {
         properties.setLocalMasterKeys(Map.of(
-                1, "old-local-master-key",
+                1, "previous-local-master-key",
                 2, "new-local-master-key"
         ));
         properties.setKeyVersion(1);
@@ -378,11 +452,11 @@ class FileKeyEnvelopeServiceTest {
 
         envelopeService.saveOwnerEnvelope(file, "hash-1", 100L, result);
         verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
-        FileKeyEnvelope oldEnvelope = envelopeCaptor.getValue().setId(501L);
+        FileKeyEnvelope previousEnvelope = envelopeCaptor.getValue().setId(501L);
 
         clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
         properties.setKeyVersion(2);
-        when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(oldEnvelope));
+        when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(previousEnvelope));
         when(fileKeyEnvelopeMapper.selectCount(any())).thenReturn(0L);
         when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
 

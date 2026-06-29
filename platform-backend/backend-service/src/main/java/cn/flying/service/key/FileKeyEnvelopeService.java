@@ -3,7 +3,6 @@ package cn.flying.service.key;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.tenant.TenantContext;
-import cn.flying.common.util.CommonUtils;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
@@ -29,7 +28,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Coordinates file data-key envelope metadata, storage, and legacy fallback.
+ * Coordinates file data-key envelope metadata, storage, and unwrap auditing.
  */
 @Service
 @RequiredArgsConstructor
@@ -62,7 +61,6 @@ public class FileKeyEnvelopeService {
     private static final String FIELD_KEY_VERSION = "keyVersion";
     private static final String FIELD_DEPRECATED_AFTER = "deprecatedAfter";
     private static final String FIELD_ENCRYPTION_ALGORITHM = "encryptionAlgorithm";
-    private static final String FIELD_UPLOAD_MODE = "uploadMode";
     private static final String ENVELOPE_STATUS_ENVELOPED = "ENVELOPED";
     private static final String ENCRYPTION_NONE = "NONE";
 
@@ -76,8 +74,8 @@ public class FileKeyEnvelopeService {
      * Removes plaintext key material from file_param and returns envelope input metadata.
      */
     public FileParamEnvelopeResult prepareFileParam(String fileParam) {
-        if (CommonUtils.isEmpty(fileParam)) {
-            return FileParamEnvelopeResult.withoutEnvelope(fileParam);
+        if (!StringUtils.hasText(fileParam)) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "文件元数据不能为空");
         }
 
         Map<String, Object> params = JsonConverter.parse(fileParam, FILE_PARAM_TYPE);
@@ -87,17 +85,23 @@ public class FileKeyEnvelopeService {
 
         Map<String, Object> sanitized = new LinkedHashMap<>(params);
         Object rawInitialKey = sanitized.remove(FIELD_INITIAL_KEY);
+        String encryptionAlgorithm = resolveEncryptionAlgorithm(sanitized);
         if (rawInitialKey == null) {
-            return FileParamEnvelopeResult.withoutEnvelope(JsonConverter.toJson(sanitized));
+            if (ENCRYPTION_NONE.equalsIgnoreCase(encryptionAlgorithm)) {
+                return FileParamEnvelopeResult.withoutEnvelope(JsonConverter.toJson(sanitized));
+            }
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "文件数据密钥不能为空");
         }
         if (!(rawInitialKey instanceof String initialKey)) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "文件数据密钥格式无效");
         }
         if (!StringUtils.hasText(initialKey)) {
-            return FileParamEnvelopeResult.withoutEnvelope(JsonConverter.toJson(sanitized));
+            if (ENCRYPTION_NONE.equalsIgnoreCase(encryptionAlgorithm)) {
+                return FileParamEnvelopeResult.withoutEnvelope(JsonConverter.toJson(sanitized));
+            }
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "文件数据密钥不能为空");
         }
 
-        String encryptionAlgorithm = resolveEncryptionAlgorithm(sanitized);
         if (ENCRYPTION_NONE.equalsIgnoreCase(encryptionAlgorithm)) {
             return FileParamEnvelopeResult.withoutEnvelope(JsonConverter.toJson(sanitized));
         }
@@ -235,7 +239,10 @@ public class FileKeyEnvelopeService {
             if (file == null || file.getId() == null || !StringUtils.hasText(file.getFileHash())) {
                 continue;
             }
-            String initialKey = resolveOwnerOrLegacyInitialKey(file, file.getFileHash(), share.getUserId(), actorId,
+            if (!requiresInitialKey(file)) {
+                continue;
+            }
+            String initialKey = requireOwnerInitialKey(file, file.getFileHash(), share.getUserId(), actorId,
                     "SHARE_ENVELOPE_CREATE");
             saveRecipientEnvelope(
                     tenantId,
@@ -265,7 +272,10 @@ public class FileKeyEnvelopeService {
             if (file == null || file.getId() == null || !StringUtils.hasText(file.getFileHash())) {
                 continue;
             }
-            String initialKey = resolveOwnerOrLegacyInitialKey(file, file.getFileHash(), share.getSharerId(), actorId,
+            if (!requiresInitialKey(file)) {
+                continue;
+            }
+            String initialKey = requireOwnerInitialKey(file, file.getFileHash(), share.getSharerId(), actorId,
                     "FRIEND_SHARE_ENVELOPE_CREATE");
             saveRecipientEnvelope(
                     tenantId,
@@ -433,10 +443,6 @@ public class FileKeyEnvelopeService {
 
             try {
                 String plaintextKey = unwrapEnvelopeForRotation(envelope);
-                String targetAlgorithmSuite = suitePolicy.defaultIfMissing(
-                        envelope.getAlgorithmSuite(),
-                        targetMetadata.algorithmSuite()
-                );
                 byte[] targetAad = buildEnvelopeAad(
                         envelope.getTenantId(),
                         envelope.getFileId(),
@@ -444,11 +450,11 @@ public class FileKeyEnvelopeService {
                         envelope.getRecipientType(),
                         envelope.getRecipientId(),
                         targetKeyVersion,
-                        targetAlgorithmSuite
+                        envelope.getAlgorithmSuite()
                 );
                 WrappedDataKey wrapped = wrappingService.wrap(plaintextKey, targetAad, targetKeyVersion);
                 markEnvelopeSuperseded(envelope);
-                FileKeyEnvelope rotatedEnvelope = copyForRotation(envelope, wrapped, targetAad, targetMetadata, targetAlgorithmSuite);
+                FileKeyEnvelope rotatedEnvelope = copyForRotation(envelope, wrapped, targetAad);
                 fileKeyEnvelopeMapper.insert(rotatedEnvelope);
                 rotated++;
                 audit(rotatedEnvelope, OPERATION_ROTATE, actorId, RESULT_SUCCESS, reason, null);
@@ -459,20 +465,6 @@ public class FileKeyEnvelopeService {
         }
 
         return new KeyEnvelopeRotationResult(file.getFileHash(), targetKeyVersion, rotated, skipped);
-    }
-
-    /**
-     * Returns the legacy plaintext initial key from file_param when no envelope exists.
-     */
-    public Optional<String> legacyInitialKey(Map<String, Object> fileParam) {
-        if (fileParam == null) {
-            return Optional.empty();
-        }
-        Object value = fileParam.get(FIELD_INITIAL_KEY);
-        if (value instanceof String key && StringUtils.hasText(key)) {
-            return Optional.of(key);
-        }
-        return Optional.empty();
     }
 
     /**
@@ -520,7 +512,7 @@ public class FileKeyEnvelopeService {
     }
 
     /**
-     * Marks old owner envelopes inactive before writing the current active envelope.
+     * Marks existing owner envelopes inactive before writing the current active envelope.
      */
     private void markActiveOwnerEnvelopesSuperseded(Long tenantId, Long fileId, String fileHash, Long ownerId) {
         markActiveRecipientEnvelopesSuperseded(tenantId, fileId, fileHash, RECIPIENT_TYPE_OWNER, ownerId);
@@ -585,33 +577,30 @@ public class FileKeyEnvelopeService {
     }
 
     /**
-     * Resolves a data key from owner envelope first and legacy file_param second.
+     * Requires an active owner envelope for encrypted files before creating recipient envelopes.
      */
-    private String resolveOwnerOrLegacyInitialKey(File file,
-                                                  String fileHash,
-                                                  Long ownerId,
-                                                  Long actorId,
-                                                  String reason) {
+    private String requireOwnerInitialKey(File file,
+                                          String fileHash,
+                                          Long ownerId,
+                                          Long actorId,
+                                          String reason) {
         Optional<String> ownerEnvelope = unwrapActiveOwnerInitialKey(file, fileHash, ownerId, actorId, reason);
         if (ownerEnvelope.isPresent()) {
             return ownerEnvelope.get();
-        }
-        Optional<String> legacyKey = parseLegacyInitialKey(file);
-        if (legacyKey.isPresent()) {
-            return legacyKey.get();
         }
         throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
     }
 
     /**
-     * Extracts legacy key metadata from a file row.
+     * Returns whether the file metadata describes encrypted content that needs recipient envelopes.
      */
-    private Optional<String> parseLegacyInitialKey(File file) {
+    private boolean requiresInitialKey(File file) {
         if (file == null || !StringUtils.hasText(file.getFileParam())) {
-            return Optional.empty();
+            return true;
         }
         Map<String, Object> params = JsonConverter.parse(file.getFileParam(), FILE_PARAM_TYPE);
-        return legacyInitialKey(params);
+        String encryptionAlgorithm = resolveEncryptionAlgorithm(params);
+        return !ENCRYPTION_NONE.equalsIgnoreCase(encryptionAlgorithm);
     }
 
     /**
@@ -632,6 +621,7 @@ public class FileKeyEnvelopeService {
      * Unwraps an envelope without writing an unwrap audit event for internal rotation use.
      */
     private String unwrapEnvelopeForRotation(FileKeyEnvelope envelope) {
+        validatePersistedEnvelopeSuites(envelope);
         byte[] aad = buildEnvelopeAad(
                 envelope.getTenantId(),
                 envelope.getFileId(),
@@ -673,9 +663,7 @@ public class FileKeyEnvelopeService {
      */
     private FileKeyEnvelope copyForRotation(FileKeyEnvelope source,
                                             WrappedDataKey wrapped,
-                                            byte[] aad,
-                                            CryptoSuiteMetadata targetMetadata,
-                                            String targetAlgorithmSuite) {
+                                            byte[] aad) {
         return new FileKeyEnvelope()
                 .setTenantId(source.getTenantId())
                 .setFileId(source.getFileId())
@@ -683,10 +671,10 @@ public class FileKeyEnvelopeService {
                 .setRecipientType(source.getRecipientType())
                 .setRecipientId(source.getRecipientId())
                 .setKeyVersion(wrapped.keyVersion())
-                .setAlgorithmSuite(targetAlgorithmSuite)
-                .setSignatureSuite(suitePolicy.defaultIfMissing(source.getSignatureSuite(), targetMetadata.signatureSuite()))
-                .setKemSuite(suitePolicy.defaultIfMissing(source.getKemSuite(), targetMetadata.kemSuite()))
-                .setProofSuite(suitePolicy.defaultIfMissing(source.getProofSuite(), targetMetadata.proofSuite()))
+                .setAlgorithmSuite(source.getAlgorithmSuite())
+                .setSignatureSuite(source.getSignatureSuite())
+                .setKemSuite(source.getKemSuite())
+                .setProofSuite(source.getProofSuite())
                 .setEncryptionAlgorithm(source.getEncryptionAlgorithm())
                 .setWrappingAlgorithm(wrapped.wrappingAlgorithm())
                 .setKmsProvider(wrapped.kmsProvider())
@@ -695,7 +683,7 @@ public class FileKeyEnvelopeService {
                 .setWrappingIv(wrapped.wrappingIv())
                 .setAadHash(hashAad(aad))
                 .setStatus(STATUS_ACTIVE)
-                .setDeprecatedAfter(cloneDate(source.getDeprecatedAfter(), targetMetadata.deprecatedAfterDate()))
+                .setDeprecatedAfter(cloneDate(source.getDeprecatedAfter()))
                 .setDeleted(0);
     }
 
@@ -714,11 +702,28 @@ public class FileKeyEnvelopeService {
     }
 
     /**
-     * Returns the source date when present, otherwise a defensive fallback copy.
+     * Returns a defensive copy of the source date.
      */
-    private Date cloneDate(Date source, Date fallback) {
-        Date value = source != null ? source : fallback;
-        return value == null ? null : new Date(value.getTime());
+    private Date cloneDate(Date source) {
+        return source == null ? null : new Date(source.getTime());
+    }
+
+    /**
+     * Requires persisted envelope crypto-suite metadata to be complete before unwrap.
+     */
+    private void validatePersistedEnvelopeSuites(FileKeyEnvelope envelope) {
+        if (!StringUtils.hasText(envelope.getAlgorithmSuite())) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件密钥信封缺少 algorithmSuite");
+        }
+        if (!StringUtils.hasText(envelope.getSignatureSuite())) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件密钥信封缺少 signatureSuite");
+        }
+        if (!StringUtils.hasText(envelope.getKemSuite())) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件密钥信封缺少 kemSuite");
+        }
+        if (!StringUtils.hasText(envelope.getProofSuite())) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件密钥信封缺少 proofSuite");
+        }
     }
 
     /**
@@ -792,10 +797,6 @@ public class FileKeyEnvelopeService {
         Object value = params.get(FIELD_ENCRYPTION_ALGORITHM);
         if (value instanceof String algorithm && StringUtils.hasText(algorithm)) {
             return algorithm;
-        }
-        Object uploadMode = params.get(FIELD_UPLOAD_MODE);
-        if (uploadMode instanceof String mode && "DIRECT_MULTIPART".equalsIgnoreCase(mode)) {
-            return ENCRYPTION_NONE;
         }
         return properties.getEncryptionAlgorithm();
     }

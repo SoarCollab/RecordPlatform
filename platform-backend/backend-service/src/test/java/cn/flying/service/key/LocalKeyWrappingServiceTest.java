@@ -66,7 +66,7 @@ class LocalKeyWrappingServiceTest {
     void shouldUnwrapWithPersistedLocalMasterKeyVersion() {
         properties.setKeyVersion(2);
         properties.setLocalMasterKeys(Map.of(
-                1, "old-local-master-key",
+                1, "previous-local-master-key",
                 2, "new-local-master-key"
         ));
         byte[] aad = "tenant|file|hash|OWNER|100|1|suite".getBytes();
@@ -82,13 +82,13 @@ class LocalKeyWrappingServiceTest {
     }
 
     /**
-     * Verifies that old envelope versions fail when their local master key is no longer configured.
+     * Verifies that previous envelope versions fail when their local master key is no longer configured.
      */
     @Test
     @DisplayName("should reject unwrap when persisted local master key version is missing")
     void shouldRejectUnwrapWhenPersistedLocalMasterKeyVersionIsMissing() {
         properties.setKeyVersion(1);
-        properties.setLocalMasterKeys(Map.of(1, "old-local-master-key"));
+        properties.setLocalMasterKeys(Map.of(1, "previous-local-master-key"));
         byte[] aad = "tenant|file|hash|OWNER|100|1|suite".getBytes();
         WrappedDataKey wrapped = wrappingService.wrap("serialized-key", aad, 1);
 

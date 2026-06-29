@@ -191,6 +191,56 @@ class ProofBundleVerifierImplTest {
     }
 
     /**
+     * 验证明包缺少验证策略时会被离线 verifier 拒绝。
+     */
+    @Test
+    void verify_shouldRejectMissingVerificationPolicy() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO missingPolicy = withPolicy(bundle, null);
+
+        ProofVerificationResult result = verifier.verify(originalFile, missingPolicy);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.issues())
+                .extracting(ProofVerificationIssue::code)
+                .contains(ProofVerificationCode.UNSUPPORTED_ALGORITHM);
+    }
+
+    /**
+     * 验证明包缺少 suite 字段时会被离线 verifier 拒绝。
+     */
+    @Test
+    void verify_shouldRejectMissingSuitePolicy() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO missingSuite = withPolicy(
+                bundle,
+                new ProofBundleVO.VerificationPolicy(
+                        null,
+                        "UNSIGNED-V1",
+                        "NONE-V1",
+                        "RP-MERKLE-SHA256-V1",
+                        1,
+                        null,
+                        bundle.verificationPolicy().hashAlgorithm(),
+                        bundle.verificationPolicy().leafHashRule(),
+                        bundle.verificationPolicy().parentHashRule(),
+                        bundle.verificationPolicy().leafOrdering(),
+                        bundle.verificationPolicy().oddLeafRule(),
+                        bundle.verificationPolicy().proofPathRule()
+                )
+        );
+
+        ProofVerificationResult result = verifier.verify(originalFile, missingSuite);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.issues())
+                .extracting(ProofVerificationIssue::code)
+                .contains(ProofVerificationCode.UNSUPPORTED_ALGORITHM);
+    }
+
+    /**
      * 验证链上根字段与 Merkle 根不一致时会显式失败。
      */
     @Test

@@ -51,13 +51,6 @@ public class CryptoSuitePolicyService {
     }
 
     /**
-     * Resolves nullable persisted suite metadata to current defaults for old envelope rows.
-     */
-    public String defaultIfMissing(String value, String defaultValue) {
-        return StringUtils.hasText(value) ? value : defaultValue;
-    }
-
-    /**
      * Rejects blank, unsupported, or explicitly deprecated suite identifiers.
      */
     private void validateSuite(String field, String value, Set<String> supportedValues) {
