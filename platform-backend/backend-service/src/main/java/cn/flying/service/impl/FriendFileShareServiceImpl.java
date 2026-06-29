@@ -14,6 +14,7 @@ import cn.flying.dao.vo.friend.FriendShareVO;
 import cn.flying.service.AccountService;
 import cn.flying.service.FriendFileShareService;
 import cn.flying.service.FriendService;
+import cn.flying.service.key.FileKeyEnvelopeService;
 import cn.flying.service.sse.SseEmitterManager;
 import cn.flying.service.sse.SseEvent;
 import cn.flying.service.sse.SseEventType;
@@ -45,6 +46,7 @@ public class FriendFileShareServiceImpl extends ServiceImpl<FriendFileShareMappe
     private final FileMapper fileMapper;
     private final SseEmitterManager sseEmitterManager;
     private final ObjectMapper objectMapper;
+    private final FileKeyEnvelopeService fileKeyEnvelopeService;
 
     @Override
     @Transactional
@@ -67,11 +69,16 @@ public class FriendFileShareServiceImpl extends ServiceImpl<FriendFileShareMappe
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
                 .eq(File::getUid, sharerId)
                 .in(File::getFileHash, fileHashes);
-        long ownedCount = fileMapper.selectCount(wrapper);
-        if (ownedCount != fileHashes.size()) {
+        List<File> ownedFiles = fileMapper.selectList(wrapper);
+        Map<String, File> hashToFile = ownedFiles.stream()
+                .collect(Collectors.toMap(File::getFileHash, file -> file, (left, right) -> left, LinkedHashMap::new));
+        if (hashToFile.size() != fileHashes.size()) {
             // 安全策略：不泄露文件存在性/归属，统一视为文件不存在
             throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
         }
+        List<File> filesForShare = fileHashes.stream()
+                .map(hashToFile::get)
+                .toList();
 
         // 序列化文件哈希列表
         String fileHashesJson;
@@ -91,6 +98,7 @@ public class FriendFileShareServiceImpl extends ServiceImpl<FriendFileShareMappe
                 .setStatus(FriendFileShare.STATUS_ACTIVE);
 
         this.save(share);
+        fileKeyEnvelopeService.saveFriendShareEnvelopes(share, filesForShare, sharerId, "FRIEND_SHARE_CREATE");
         log.info("好友文件分享: id={}, sharer={}, friend={}, files={}", share.getId(), sharerId, friendId, fileHashes.size());
 
         // SSE 通知好友
@@ -173,6 +181,7 @@ public class FriendFileShareServiceImpl extends ServiceImpl<FriendFileShareMappe
 
         share.setStatus(FriendFileShare.STATUS_CANCELLED);
         this.updateById(share);
+        fileKeyEnvelopeService.revokeFriendShareEnvelopes(share, userId, "USER_CANCEL_FRIEND_SHARE");
         log.info("取消好友分享: shareId={}", sId);
     }
 
@@ -205,7 +214,13 @@ public class FriendFileShareServiceImpl extends ServiceImpl<FriendFileShareMappe
 
     @Override
     public Long getSharerIdForFile(Long userId, String fileHash) {
-        return baseMapper.findSharerIdForFile(userId, fileHash, TenantContext.getTenantId());
+        FriendFileShare share = getActiveShareForFile(userId, fileHash);
+        return share != null ? share.getSharerId() : null;
+    }
+
+    @Override
+    public FriendFileShare getActiveShareForFile(Long userId, String fileHash) {
+        return baseMapper.findActiveShareForFile(userId, fileHash, TenantContext.getTenantId());
     }
 
     private FriendFileShareDetailVO convertToVO(FriendFileShare share, boolean isReceiver) {

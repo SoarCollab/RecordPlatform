@@ -12,6 +12,7 @@ import cn.flying.dao.mapper.FriendFileShareMapper;
 import cn.flying.dao.vo.friend.FriendShareVO;
 import cn.flying.service.AccountService;
 import cn.flying.service.FriendService;
+import cn.flying.service.key.FileKeyEnvelopeService;
 import cn.flying.service.sse.SseEmitterManager;
 import cn.flying.service.sse.SseEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -46,6 +47,9 @@ class FriendFileShareServiceImplTest {
 
     @Mock
     private SseEmitterManager sseEmitterManager;
+
+    @Mock
+    private FileKeyEnvelopeService fileKeyEnvelopeService;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -103,7 +107,7 @@ class FriendFileShareServiceImplTest {
             when(friendService.areFriends(SHARER_ID, FRIEND_ID)).thenReturn(true);
             when(accountService.findAccountById(FRIEND_ID)).thenReturn(friend);
             when(accountService.findAccountById(SHARER_ID)).thenReturn(sharer);
-            when(fileMapper.selectCount(any())).thenReturn(2L);
+            when(fileMapper.selectList(any())).thenReturn(createOwnedFiles());
 
             ArgumentCaptor<FriendFileShare> shareCaptor = ArgumentCaptor.forClass(FriendFileShare.class);
             doAnswer(inv -> {
@@ -120,6 +124,12 @@ class FriendFileShareServiceImplTest {
             assertEquals(FriendFileShare.STATUS_ACTIVE, captured.getStatus());
             assertEquals(0, captured.getIsRead());
             verify(sseEmitterManager).sendToUser(eq(TENANT_ID), eq(FRIEND_ID), any(SseEvent.class));
+            verify(fileKeyEnvelopeService).saveFriendShareEnvelopes(
+                    eq(captured),
+                    argThat(files -> files != null && files.size() == 2),
+                    eq(SHARER_ID),
+                    eq("FRIEND_SHARE_CREATE")
+            );
         }
 
         @Test
@@ -155,7 +165,7 @@ class FriendFileShareServiceImplTest {
             
             when(friendService.areFriends(SHARER_ID, FRIEND_ID)).thenReturn(true);
             when(accountService.findAccountById(FRIEND_ID)).thenReturn(friend);
-            when(fileMapper.selectCount(any())).thenReturn(1L);
+            when(fileMapper.selectList(any())).thenReturn(List.of(createFile(FILE_HASH_1)));
 
             GeneralException ex = assertThrows(GeneralException.class,
                     () -> friendFileShareService.shareToFriend(SHARER_ID, vo));
@@ -176,7 +186,7 @@ class FriendFileShareServiceImplTest {
             when(friendService.areFriends(SHARER_ID, FRIEND_ID)).thenReturn(true);
             when(accountService.findAccountById(FRIEND_ID)).thenReturn(friend);
             when(accountService.findAccountById(SHARER_ID)).thenReturn(sharer);
-            when(fileMapper.selectCount(any())).thenReturn(2L);
+            when(fileMapper.selectList(any())).thenReturn(createOwnedFiles());
 
             ArgumentCaptor<FriendFileShare> shareCaptor = ArgumentCaptor.forClass(FriendFileShare.class);
             doAnswer(inv -> {
@@ -211,6 +221,11 @@ class FriendFileShareServiceImplTest {
             assertDoesNotThrow(() -> friendFileShareService.cancelShare(SHARER_ID, "ext_" + SHARE_ID));
 
             assertEquals(FriendFileShare.STATUS_CANCELLED, share.getStatus());
+            verify(fileKeyEnvelopeService).revokeFriendShareEnvelopes(
+                    share,
+                    SHARER_ID,
+                    "USER_CANCEL_FRIEND_SHARE"
+            );
         }
 
         @Test
@@ -341,8 +356,9 @@ class FriendFileShareServiceImplTest {
         @Test
         @DisplayName("should return sharer id when file is shared")
         void getSharerIdForFile_success() {
-            when(friendFileShareMapper.findSharerIdForFile(FRIEND_ID, FILE_HASH_1, TENANT_ID))
-                    .thenReturn(SHARER_ID);
+            FriendFileShare share = createActiveShare();
+            when(friendFileShareMapper.findActiveShareForFile(FRIEND_ID, FILE_HASH_1, TENANT_ID))
+                    .thenReturn(share);
 
             Long sharerId = friendFileShareService.getSharerIdForFile(FRIEND_ID, FILE_HASH_1);
 
@@ -352,12 +368,24 @@ class FriendFileShareServiceImplTest {
         @Test
         @DisplayName("should return null when file not shared")
         void getSharerIdForFile_notShared() {
-            when(friendFileShareMapper.findSharerIdForFile(FRIEND_ID, FILE_HASH_1, TENANT_ID))
+            when(friendFileShareMapper.findActiveShareForFile(FRIEND_ID, FILE_HASH_1, TENANT_ID))
                     .thenReturn(null);
 
             Long sharerId = friendFileShareService.getSharerIdForFile(FRIEND_ID, FILE_HASH_1);
 
             assertNull(sharerId);
+        }
+
+        @Test
+        @DisplayName("should return active share when file is shared")
+        void getActiveShareForFile_success() {
+            FriendFileShare share = createActiveShare();
+            when(friendFileShareMapper.findActiveShareForFile(FRIEND_ID, FILE_HASH_1, TENANT_ID))
+                    .thenReturn(share);
+
+            FriendFileShare result = friendFileShareService.getActiveShareForFile(FRIEND_ID, FILE_HASH_1);
+
+            assertSame(share, result);
         }
     }
 
@@ -381,10 +409,25 @@ class FriendFileShareServiceImplTest {
     private FriendFileShare createActiveShare() {
         return new FriendFileShare()
                 .setId(SHARE_ID)
+                .setTenantId(TENANT_ID)
                 .setSharerId(SHARER_ID)
                 .setFriendId(FRIEND_ID)
                 .setFileHashes("[\"" + FILE_HASH_1 + "\"]")
                 .setStatus(FriendFileShare.STATUS_ACTIVE)
                 .setIsRead(0);
+    }
+
+    private List<File> createOwnedFiles() {
+        return List.of(createFile(FILE_HASH_1), createFile(FILE_HASH_2));
+    }
+
+    private File createFile(String fileHash) {
+        return new File()
+                .setId(Math.abs(fileHash.hashCode()) + 1L)
+                .setTenantId(TENANT_ID)
+                .setUid(SHARER_ID)
+                .setFileHash(fileHash)
+                .setFileName(fileHash + ".txt")
+                .setFileParam("{\"initialKey\":\"serialized-key\"}");
     }
 }

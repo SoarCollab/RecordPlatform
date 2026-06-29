@@ -13,6 +13,7 @@ import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
+import cn.flying.dao.entity.FriendFileShare;
 import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
@@ -79,7 +80,6 @@ import java.util.concurrent.CompletableFuture;
  * 使用 Caffeine 本地缓存，缓存名称定义在 CacheConfiguration 中：
  * <ul>
  *   <li>userFiles - 用户文件列表（高命中率，key 格式: tenantId:userId）</li>
- *   <li>fileDecryptInfo - 文件解密信息（key 格式: userId:fileHash）</li>
  *   <li>transaction - 区块链交易信息（key 格式: transactionHash）</li>
  *   <li>sharedFiles - 分享文件列表（key 格式: sharingCode）</li>
  * </ul>
@@ -166,37 +166,8 @@ public class FileQueryServiceImpl implements FileQueryService {
             throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "文件哈希不能为空");
         }
 
-        File file = null;
-
-        // 管理员可以访问所有文件
-        if (SecurityUtils.isAdmin()) {
-            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                    .eq(File::getFileHash, fileHash)
-                    .last("LIMIT 1");
-            file = fileMapper.selectOne(wrapper);
-        } else {
-            // 首先检查用户自己的文件
-            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                    .eq(File::getFileHash, fileHash)
-                    .eq(File::getUid, userId);
-            file = fileMapper.selectOne(wrapper);
-
-            // 检查好友分享权限：如果存在有效分享记录，则允许访问分享者的文件
-            if (file == null) {
-                Long sharerId = friendFileShareService.getSharerIdForFile(userId, fileHash);
-                if (sharerId != null) {
-                    LambdaQueryWrapper<File> sharerWrapper = new LambdaQueryWrapper<File>()
-                            .eq(File::getFileHash, fileHash)
-                            .eq(File::getUid, sharerId);
-                    file = fileMapper.selectOne(sharerWrapper);
-                    if (file != null) {
-                        Account sharer = accountMapper.selectById(sharerId);
-                        file.setSharedFromUserId(sharerId);
-                        file.setSharedFromUserName(sharer != null ? sharer.getUsername() : null);
-                    }
-                }
-            }
-        }
+        FileAccessContext accessContext = findAccessibleFile(userId, fileHash, true);
+        File file = accessContext != null ? accessContext.file() : null;
 
         if (file == null) {
             // 安全策略：不泄露文件存在性/归属
@@ -297,8 +268,12 @@ public class FileQueryServiceImpl implements FileQueryService {
      */
     @Override
     public FileDownloadMetadataVO getDownloadMetadata(Long userId, String fileHash) {
-        File file = getFileByHash(userId, fileHash);
-        FileDecryptInfoVO decryptInfo = buildFileDecryptInfo(file, fileHash);
+        FileAccessContext accessContext = findAccessibleFile(userId, fileHash, true);
+        if (accessContext == null) {
+            throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
+        }
+        File file = accessContext.file();
+        FileDecryptInfoVO decryptInfo = buildFileDecryptInfo(accessContext, fileHash, userId);
         ChunkManifestView manifest = chunkManifestService.findActiveManifest(file.getUid(), file.getId())
                 .orElseThrow(() -> new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件缺少分片 manifest"));
         if (CommonUtils.isEmpty(manifest.chunks())) {
@@ -496,46 +471,22 @@ public class FileQueryServiceImpl implements FileQueryService {
     }
 
     @Override
-    @Cacheable(cacheNames = "fileDecryptInfo", key = "#userId + ':' + #fileHash", unless = "#result == null")
     public FileDecryptInfoVO getFileDecryptInfo(Long userId, String fileHash) {
-        File file = null;
-
-        // 管理员可以访问所有文件
-        if (SecurityUtils.isAdmin()) {
-            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                    .eq(File::getFileHash, fileHash)
-                    .last("LIMIT 1");
-            file = fileMapper.selectOne(wrapper);
-        } else {
-            // 首先检查用户自己的文件
-            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                    .eq(File::getFileHash, fileHash)
-                    .eq(File::getUid, userId);
-            file = fileMapper.selectOne(wrapper);
-
-            // 检查好友分享权限
-            if (file == null) {
-                Long sharerId = friendFileShareService.getSharerIdForFile(userId, fileHash);
-                if (sharerId != null) {
-                    LambdaQueryWrapper<File> sharerWrapper = new LambdaQueryWrapper<File>()
-                            .eq(File::getFileHash, fileHash)
-                            .eq(File::getUid, sharerId);
-                    file = fileMapper.selectOne(sharerWrapper);
-                }
-            }
-        }
+        FileAccessContext accessContext = findAccessibleFile(userId, fileHash, false);
+        File file = accessContext != null ? accessContext.file() : null;
 
         if (file == null) {
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权限访问");
         }
 
-        return buildFileDecryptInfo(file, fileHash);
+        return buildFileDecryptInfo(accessContext, fileHash, userId);
     }
 
     /**
      * Builds decrypt metadata from the stored file parameter JSON.
      */
-    private FileDecryptInfoVO buildFileDecryptInfo(File file, String fileHash) {
+    private FileDecryptInfoVO buildFileDecryptInfo(FileAccessContext accessContext, String fileHash, Long actorId) {
+        File file = accessContext.file();
         String fileParam = file.getFileParam();
         if (CommonUtils.isEmpty(fileParam)) {
             throw new GeneralException(ResultEnum.FAIL, "文件元数据不完整，缺少解密信息");
@@ -545,13 +496,8 @@ public class FileQueryServiceImpl implements FileQueryService {
             @SuppressWarnings("unchecked")
             Map<String, Object> params = JsonConverter.parse(fileParam, Map.class);
 
-            Optional<String> envelopeInitialKey = fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
-                    file,
-                    fileHash,
-                    file.getUid()
-            );
+            Optional<String> envelopeInitialKey = resolveInitialKey(accessContext, fileHash, actorId, params);
             String initialKey = (envelopeInitialKey != null ? envelopeInitialKey : Optional.<String>empty())
-                    .or(() -> legacyInitialKey(params))
                     .orElse(null);
             if (CommonUtils.isEmpty(initialKey)) {
                 throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
@@ -579,6 +525,37 @@ public class FileQueryServiceImpl implements FileQueryService {
             log.error("解析文件参数失败: fileHash={}, error={}", fileHash, e.getMessage());
             throw new GeneralException(ResultEnum.FAIL, "解析文件元数据失败");
         }
+    }
+
+    /**
+     * Resolves the decrypt key according to owner/admin or friend-share access mode.
+     */
+    private Optional<String> resolveInitialKey(FileAccessContext accessContext,
+                                               String fileHash,
+                                               Long actorId,
+                                               Map<String, Object> params) {
+        File file = accessContext.file();
+        FriendFileShare friendShare = accessContext.friendShare();
+        if (friendShare != null) {
+            Optional<String> friendShareKey = fileKeyEnvelopeService.unwrapActiveFriendShareInitialKey(
+                    file,
+                    fileHash,
+                    friendShare,
+                    actorId,
+                    "FRIEND_SHARE_DECRYPT"
+            );
+            return friendShareKey != null ? friendShareKey : Optional.empty();
+        }
+
+        Optional<String> ownerEnvelope = fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
+                file,
+                fileHash,
+                file.getUid(),
+                actorId,
+                "OWNER_DECRYPT"
+        );
+        return (ownerEnvelope != null ? ownerEnvelope : Optional.<String>empty())
+                .or(() -> legacyInitialKey(params));
     }
 
     /**
@@ -819,9 +796,10 @@ public class FileQueryServiceImpl implements FileQueryService {
         }
 
         // 检查好友分享权限
-        Long sharerId = friendFileShareService.getSharerIdForFile(userId, fileHash);
-        if (sharerId != null) {
+        FriendFileShare friendShare = friendFileShareService.getActiveShareForFile(userId, fileHash);
+        if (friendShare != null) {
             // 用户通过好友分享有权访问，使用分享者的文件
+            Long sharerId = friendShare.getSharerId();
             LambdaQueryWrapper<File> sharerWrapper = new LambdaQueryWrapper<File>()
                     .eq(File::getFileHash, fileHash)
                     .eq(File::getUid, sharerId);
@@ -833,6 +811,63 @@ public class FileQueryServiceImpl implements FileQueryService {
         }
 
         throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权访问");
+    }
+
+    /**
+     * Resolves an accessible file and carries friend-share recipient context when applicable.
+     */
+    private FileAccessContext findAccessibleFile(Long userId, String fileHash, boolean fillSharedFromUser) {
+        if (!StringUtils.hasText(fileHash)) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "文件哈希不能为空");
+        }
+
+        if (SecurityUtils.isAdmin()) {
+            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                    .eq(File::getFileHash, fileHash)
+                    .last("LIMIT 1");
+            File file = fileMapper.selectOne(wrapper);
+            return file != null ? new FileAccessContext(file, null) : null;
+        }
+
+        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                .eq(File::getFileHash, fileHash)
+                .eq(File::getUid, userId);
+        File file = fileMapper.selectOne(wrapper);
+        if (file != null) {
+            return new FileAccessContext(file, null);
+        }
+
+        FriendFileShare friendShare = friendFileShareService.getActiveShareForFile(userId, fileHash);
+        if (friendShare == null) {
+            return null;
+        }
+
+        LambdaQueryWrapper<File> sharerWrapper = new LambdaQueryWrapper<File>()
+                .eq(File::getFileHash, fileHash)
+                .eq(File::getUid, friendShare.getSharerId());
+        File sharerFile = fileMapper.selectOne(sharerWrapper);
+        if (sharerFile == null) {
+            return null;
+        }
+        if (fillSharedFromUser) {
+            fillFriendShareSource(sharerFile, friendShare.getSharerId());
+        }
+        return new FileAccessContext(sharerFile, friendShare);
+    }
+
+    /**
+     * Adds sharer display metadata to a file resolved through friend-share access.
+     */
+    private void fillFriendShareSource(File file, Long sharerId) {
+        Account sharer = accountMapper.selectById(sharerId);
+        file.setSharedFromUserId(sharerId);
+        file.setSharedFromUserName(sharer != null ? sharer.getUsername() : null);
+    }
+
+    /**
+     * Carries both the resolved file row and its friend-share recipient context.
+     */
+    private record FileAccessContext(File file, FriendFileShare friendShare) {
     }
 
     /**

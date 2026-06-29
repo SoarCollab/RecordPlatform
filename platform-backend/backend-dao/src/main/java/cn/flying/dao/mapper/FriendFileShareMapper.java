@@ -62,4 +62,35 @@ public interface FriendFileShareMapper extends BaseMapper<FriendFileShare> {
             @Param("fileHash") String fileHash,
             @Param("tenantId") Long tenantId
     );
+
+    /**
+     * 查询用户通过好友分享可访问指定文件的有效分享记录
+     * 使用 JSON_CONTAINS 检查 file_hashes 数组中是否包含指定的文件哈希
+     */
+    @Select("""
+        SELECT id,
+               tenant_id,
+               sharer_id,
+               friend_id,
+               file_hashes,
+               message,
+               is_read,
+               status,
+               deleted,
+               create_time,
+               read_time
+        FROM friend_file_share
+        WHERE friend_id = #{userId}
+          AND status = 1
+          AND deleted = 0
+          AND JSON_CONTAINS(file_hashes, JSON_QUOTE(#{fileHash}))
+          AND tenant_id = #{tenantId}
+        ORDER BY create_time DESC
+        LIMIT 1
+        """)
+    FriendFileShare findActiveShareForFile(
+            @Param("userId") Long userId,
+            @Param("fileHash") String fileHash,
+            @Param("tenantId") Long tenantId
+    );
 }

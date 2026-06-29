@@ -8,6 +8,7 @@ import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
+import cn.flying.dao.entity.FriendFileShare;
 import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
@@ -87,6 +88,19 @@ class FileQueryServiceEdgeCaseTest {
                 .setStatus(status)
                 .setExpireTime(expireTime)
                 .setAccessCount(0);
+    }
+
+    /**
+     * 构造有效好友分享记录，供好友分享访问边界测试使用。
+     */
+    private FriendFileShare createFriendShare() {
+        return new FriendFileShare()
+                .setId(2L)
+                .setTenantId(1L)
+                .setSharerId(OTHER_USER_ID)
+                .setFriendId(USER_ID)
+                .setFileHashes("[\"" + FILE_HASH + "\"]")
+                .setStatus(FriendFileShare.STATUS_ACTIVE);
     }
 
     @Nested
@@ -338,7 +352,7 @@ class FileQueryServiceEdgeCaseTest {
                 securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
 
                 when(fileMapper.selectOne(any())).thenReturn(null);
-                when(friendFileShareService.getSharerIdForFile(USER_ID, FILE_HASH)).thenReturn(OTHER_USER_ID);
+                when(friendFileShareService.getActiveShareForFile(USER_ID, FILE_HASH)).thenReturn(createFriendShare());
 
                 GeneralException ex = assertThrows(GeneralException.class, () ->
                         fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH));
