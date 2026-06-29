@@ -39,6 +39,8 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequ
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import java.io.ByteArrayOutputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
@@ -99,6 +101,11 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
 
     private static final String METADATA_FILE_HASH = "file-hash";
     private static final String METADATA_TENANT_ID = "tenant-id";
+    private static final String METADATA_CHECKSUM_ALGORITHM = "checksum-algorithm";
+    private static final String METADATA_PLAIN_HASH = "plain-hash";
+    private static final String METADATA_CIPHER_HASH = "cipher-hash";
+    private static final String CHECKSUM_ALGORITHM_SHA256 = "SHA-256";
+    private static final String HASH_PREFIX_SHA256 = "sha256:";
     private static final String STAGING_PREFIX = "staging/direct-upload";
 
     // 修复检查并发限制信号量
@@ -359,7 +366,6 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 .key(stagingObjectName)
                 .contentLength(part.size())
                 .contentType(resolveContentType(part.contentType(), request.contentType()))
-                .metadata(buildObjectMetadata(part.objectName(), tenantId))
                 .build();
         PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()
                 .signatureDuration(Duration.ofHours(EXPIRY_HOURS))
@@ -381,7 +387,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     }
 
     /**
-     * Verifies a staging object and promotes it to the final chunk object key.
+     * Verifies a staging object and promotes it to enough final replicas to satisfy write quorum.
      */
     private DirectMultipartCompletedPartVO promoteDirectUploadPart(DirectMultipartCompletedPart part) {
         S3Client client = clientManager.getClient(part.nodeName());
@@ -403,17 +409,41 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             throw new IllegalArgumentException("staging object eTag mismatch");
         }
 
-        CopyObjectRequest copyRequest = CopyObjectRequest.builder()
-                .sourceBucket(part.nodeName())
-                .sourceKey(part.stagingObjectName())
-                .destinationBucket(part.nodeName())
-                .destinationKey(part.finalObjectName())
-                .metadata(buildObjectMetadata(part.cipherHash(), TenantContextUtil.getTenantIdOrDefault()))
-                .metadataDirective(MetadataDirective.REPLACE)
-                .build();
-        client.copyObject(copyRequest);
-        HeadObjectResponse finalHead = client.headObject(HeadObjectRequest.builder()
-                .bucket(part.nodeName())
+        byte[] stagingBytes = readAndVerifyDirectUploadStagingObject(client, part, stagingHead);
+        Long tenantId = TenantContextUtil.getTenantIdOrDefault();
+        List<String> targetNodes = resolveDirectUploadTargetNodes(part.cipherHash());
+        List<CompletableFuture<String>> uploadFutures = new ArrayList<>(targetNodes.size());
+        for (String node : targetNodes) {
+            uploadFutures.add(uploadDirectFinalObjectAsync(node, part.finalObjectName(), stagingBytes, part, tenantId));
+        }
+
+        QuorumResult quorumResult;
+        try {
+            quorumResult = storeWithQuorum(uploadFutures, targetNodes, resolveDirectUploadQuorum(targetNodes), part.cipherHash());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            cancelPendingFutures(uploadFutures, "direct-upload-interrupted");
+            throw new IllegalStateException("direct-upload final replica write interrupted", e);
+        }
+        if (!quorumResult.isSuccess()) {
+            cancelPendingFutures(uploadFutures, "direct-upload-quorum-failure");
+            throw new IllegalStateException("direct-upload final replica quorum not reached");
+        }
+        scheduleRepairIfNeededForDomains(uploadFutures, targetNodes, part.finalObjectName());
+
+        boolean isDegraded = targetNodes.size() < storageProperties.getEffectiveReplicationFactor();
+        StorageProperties.DegradedWriteConfig degradedWriteConfig = storageProperties.getDegradedWrite();
+        if (isDegraded && degradedWriteConfig != null && degradedWriteConfig.isTrackForSync()) {
+            degradedWriteTracker.recordDegradedWrite(part.cipherHash(), quorumResult.getSuccessNodes(), tenantId);
+        }
+
+        String headNode = quorumResult.getSuccessNodes().getFirst();
+        S3Client headClient = clientManager.getClient(headNode);
+        if (headClient == null) {
+            throw new IllegalStateException("S3 client is unavailable for completed node " + headNode);
+        }
+        HeadObjectResponse finalHead = headClient.headObject(HeadObjectRequest.builder()
+                .bucket(headNode)
                 .key(part.finalObjectName())
                 .build());
         try {
@@ -432,6 +462,120 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 part.cipherHash(),
                 part.checksumAlgorithm()
         );
+    }
+
+    /**
+     * Reads the uploaded staging object once and verifies its checksum against backend-trusted metadata.
+     */
+    private byte[] readAndVerifyDirectUploadStagingObject(S3Client client,
+                                                          DirectMultipartCompletedPart part,
+                                                          HeadObjectResponse stagingHead) {
+        if (!CHECKSUM_ALGORITHM_SHA256.equalsIgnoreCase(normalizeChecksumAlgorithm(part.checksumAlgorithm()))) {
+            throw new IllegalArgumentException("unsupported direct-upload checksum algorithm");
+        }
+        long stagingSize = stagingHead.contentLength() != null ? stagingHead.contentLength() : -1L;
+        if (stagingSize < 0) {
+            throw new IllegalArgumentException("staging object size is missing");
+        }
+        if (stagingSize > MAX_IN_MEMORY_FILE_SIZE) {
+            throw new IllegalArgumentException("direct-upload chunk exceeds in-memory verification limit");
+        }
+
+        MessageDigest digest = sha256Digest();
+        ByteArrayOutputStream output = new ByteArrayOutputStream((int) stagingSize);
+        GetObjectRequest getRequest = GetObjectRequest.builder()
+                .bucket(part.nodeName())
+                .key(part.stagingObjectName())
+                .build();
+        try (ResponseInputStream<GetObjectResponse> input = client.getObject(getRequest)) {
+            byte[] buffer = new byte[BUFFER_SIZE];
+            long totalRead = 0L;
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                digest.update(buffer, 0, read);
+                output.write(buffer, 0, read);
+                totalRead += read;
+                if (totalRead > MAX_IN_MEMORY_FILE_SIZE) {
+                    throw new IllegalArgumentException("direct-upload chunk exceeds in-memory verification limit");
+                }
+            }
+            if (totalRead != part.size()) {
+                throw new IllegalArgumentException("staging object read size mismatch");
+            }
+        } catch (Exception e) {
+            if (e instanceof IllegalArgumentException illegalArgumentException) {
+                throw illegalArgumentException;
+            }
+            throw new IllegalStateException("failed to read direct-upload staging object", e);
+        }
+
+        String actualCipherHash = HASH_PREFIX_SHA256 + HexFormat.of().formatHex(digest.digest());
+        if (!normalizeHash(actualCipherHash).equals(normalizeHash(part.cipherHash()))) {
+            throw new IllegalArgumentException("staging object checksum mismatch");
+        }
+        return output.toByteArray();
+    }
+
+    /**
+     * Resolves target replica nodes and enforces the same degraded-write policy used by normal chunk uploads.
+     */
+    private List<String> resolveDirectUploadTargetNodes(String cipherHash) {
+        List<String> targetNodes = faultDomainManager.getTargetNodes(cipherHash);
+        int requiredReplicas = storageProperties.getEffectiveReplicationFactor();
+        StorageProperties.DegradedWriteConfig degradedWriteConfig = storageProperties.getDegradedWrite();
+        if (targetNodes.size() < requiredReplicas) {
+            if (degradedWriteConfig != null && degradedWriteConfig.isEnabled()
+                    && targetNodes.size() >= degradedWriteConfig.getMinReplicas()) {
+                log.warn("直传降级写入模式: hash={}, 目标副本={}, 实际可用={}",
+                        cipherHash, requiredReplicas, targetNodes.size());
+            } else {
+                throw new IllegalStateException("direct-upload target replicas are insufficient");
+            }
+        }
+        if (targetNodes.isEmpty()) {
+            throw new IllegalStateException("No online storage node available for " + cipherHash);
+        }
+        return targetNodes;
+    }
+
+    /**
+     * Calculates the write quorum for direct-upload final replica promotion.
+     */
+    private int resolveDirectUploadQuorum(List<String> targetNodes) {
+        int requiredReplicas = storageProperties.getEffectiveReplicationFactor();
+        if (targetNodes.size() < requiredReplicas) {
+            return targetNodes.size();
+        }
+        return storageProperties.getEffectiveQuorum();
+    }
+
+    /**
+     * Writes a verified direct-upload chunk to one final replica node.
+     */
+    private CompletableFuture<String> uploadDirectFinalObjectAsync(String nodeName,
+                                                                   String finalObjectName,
+                                                                   byte[] data,
+                                                                   DirectMultipartCompletedPart part,
+                                                                   Long tenantId) {
+        return CompletableFuture.supplyAsync(() -> {
+            if (!s3Monitor.isNodeOnline(nodeName)) {
+                throw new RuntimeException("Node '" + nodeName + "' is offline, cannot promote direct upload.");
+            }
+            S3Client targetClient = clientManager.getClient(nodeName);
+            if (targetClient == null) {
+                throw new RuntimeException("Cannot get S3Client for online node: " + nodeName);
+            }
+            ensureBucketExists(targetClient, nodeName, nodeName);
+            PutObjectRequest request = PutObjectRequest.builder()
+                    .bucket(nodeName)
+                    .key(finalObjectName)
+                    .contentLength((long) data.length)
+                    .metadata(buildDirectUploadObjectMetadata(part, tenantId))
+                    .build();
+            targetClient.putObject(request, RequestBody.fromBytes(data));
+            log.debug("已成功将直传分片 '{}' 提升到节点 '{}'", finalObjectName, nodeName);
+            return nodeName;
+        }, uploadExecutor);
     }
 
     /**
@@ -466,7 +610,8 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 && part.plainHash() != null
                 && !part.plainHash().isBlank()
                 && part.cipherHash() != null
-                && !part.cipherHash().isBlank();
+                && !part.cipherHash().isBlank()
+                && normalizeHash(part.plainHash()).equals(normalizeHash(part.cipherHash()));
     }
 
     /**
@@ -495,6 +640,31 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      */
     private String normalizeEtag(String value) {
         return value == null ? "" : value.replace("\"", "").trim();
+    }
+
+    /**
+     * Normalizes checksum algorithm text for direct-upload validation.
+     */
+    private String normalizeChecksumAlgorithm(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    /**
+     * Normalizes prefixed hash values for deterministic comparison.
+     */
+    private String normalizeHash(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Creates a SHA-256 digest instance for direct-upload content verification.
+     */
+    private MessageDigest sha256Digest() {
+        try {
+            return MessageDigest.getInstance(CHECKSUM_ALGORITHM_SHA256);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 digest is unavailable", e);
+        }
     }
 
     /**
@@ -818,6 +988,17 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         Map<String, String> metadata = new HashMap<>();
         metadata.put(METADATA_FILE_HASH, fileHash);
         metadata.put(METADATA_TENANT_ID, String.valueOf(tenantId));
+        return metadata;
+    }
+
+    /**
+     * Builds final-object metadata for verified direct-upload chunks.
+     */
+    private Map<String, String> buildDirectUploadObjectMetadata(DirectMultipartCompletedPart part, Long tenantId) {
+        Map<String, String> metadata = buildObjectMetadata(part.cipherHash(), tenantId);
+        metadata.put(METADATA_CHECKSUM_ALGORITHM, normalizeChecksumAlgorithm(part.checksumAlgorithm()));
+        metadata.put(METADATA_PLAIN_HASH, part.plainHash());
+        metadata.put(METADATA_CIPHER_HASH, part.cipherHash());
         return metadata;
     }
 

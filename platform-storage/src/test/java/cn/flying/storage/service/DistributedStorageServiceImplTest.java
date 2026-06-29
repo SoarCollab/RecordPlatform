@@ -23,6 +23,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.http.AbortableInputStream;
 import software.amazon.awssdk.http.SdkHttpFullRequest;
 import software.amazon.awssdk.http.SdkHttpMethod;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -33,8 +35,11 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequ
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
+import java.io.ByteArrayInputStream;
 import java.net.URI;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -100,6 +105,18 @@ class DistributedStorageServiceImplTest {
     void tearDown() {
         if (uploadExecutor != null) {
             uploadExecutor.shutdownNow();
+        }
+    }
+
+    /**
+     * Calculates the direct-upload hash format used by the browser and storage verifier.
+     */
+    private String sha256Prefixed(byte[] data) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return "sha256:" + HexFormat.of().formatHex(digest.digest(data));
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
         }
     }
 
@@ -1052,7 +1069,7 @@ class DistributedStorageServiceImplTest {
                             "chunk-hash-0",
                             512L,
                             "application/pdf",
-                            "plain-0",
+                            "chunk-hash-0",
                             "chunk-hash-0",
                             "SHA-256"
                     ))
@@ -1079,15 +1096,29 @@ class DistributedStorageServiceImplTest {
         @Test
         @DisplayName("Should validate and promote direct uploaded parts")
         void shouldValidateAndPromoteDirectUploadedParts() {
+            byte[] chunkBytes = "direct-upload-chunk".getBytes(StandardCharsets.UTF_8);
+            String chunkHash = sha256Prefixed(chunkBytes);
+            when(faultDomainManager.getTargetNodes(chunkHash)).thenReturn(List.of("node1", "node2"));
+            when(storageProperties.getEffectiveReplicationFactor()).thenReturn(2);
+            when(storageProperties.getEffectiveQuorum()).thenReturn(2);
+            when(storageProperties.getDegradedWrite()).thenReturn(new StorageProperties.DegradedWriteConfig());
             when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
+            when(s3Monitor.isNodeOnline("node2")).thenReturn(true);
             when(clientManager.getClient("node1")).thenReturn(s3Client);
+            when(clientManager.getClient("node2")).thenReturn(s3Client);
             when(s3Client.headBucket(any(HeadBucketRequest.class))).thenReturn(HeadBucketResponse.builder().build());
             when(s3Client.headObject(any(HeadObjectRequest.class)))
                     .thenReturn(
-                            HeadObjectResponse.builder().contentLength(512L).eTag("\"etag-0\"").build(),
-                            HeadObjectResponse.builder().contentLength(512L).eTag("\"etag-final\"").build()
+                            HeadObjectResponse.builder().contentLength((long) chunkBytes.length).eTag("\"etag-0\"").build(),
+                            HeadObjectResponse.builder().contentLength((long) chunkBytes.length).eTag("\"etag-final\"").build()
                     );
-            when(s3Client.copyObject(any(CopyObjectRequest.class))).thenReturn(CopyObjectResponse.builder().build());
+            when(s3Client.getObject(any(GetObjectRequest.class)))
+                    .thenReturn(new ResponseInputStream<>(
+                            GetObjectResponse.builder().build(),
+                            AbortableInputStream.create(new ByteArrayInputStream(chunkBytes))
+                    ));
+            when(s3Client.putObject(any(PutObjectRequest.class), any(software.amazon.awssdk.core.sync.RequestBody.class)))
+                    .thenReturn(PutObjectResponse.builder().eTag("\"etag-final\"").build());
             when(s3Client.deleteObject(any(DeleteObjectRequest.class))).thenReturn(DeleteObjectResponse.builder().build());
 
             CompleteDirectMultipartUploadRequest request = new CompleteDirectMultipartUploadRequest(
@@ -1098,10 +1129,10 @@ class DistributedStorageServiceImplTest {
                             "chunks/direct-session/chunk-0",
                             "node1",
                             "s3://node1/chunks/direct-session/chunk-0",
-                            512L,
+                            chunkBytes.length,
                             "\"etag-0\"",
-                            "plain-0",
-                            "cipher-0",
+                            chunkHash,
+                            chunkHash,
                             "SHA-256"
                     ))
             );
@@ -1114,14 +1145,18 @@ class DistributedStorageServiceImplTest {
             assertThat(result.getData().parts().getFirst().storagePath())
                     .isEqualTo("s3://node1/chunks/direct-session/chunk-0");
             assertThat(result.getData().parts().getFirst().eTag()).isEqualTo("\"etag-final\"");
+            assertThat(result.getData().parts().getFirst().cipherHash()).isEqualTo(chunkHash);
 
-            ArgumentCaptor<CopyObjectRequest> copyCaptor = ArgumentCaptor.forClass(CopyObjectRequest.class);
-            verify(s3Client).copyObject(copyCaptor.capture());
-            assertThat(copyCaptor.getValue().sourceBucket()).isEqualTo("node1");
-            assertThat(copyCaptor.getValue().sourceKey()).isEqualTo("staging/direct-upload/direct-session/chunk-0");
-            assertThat(copyCaptor.getValue().destinationBucket()).isEqualTo("node1");
-            assertThat(copyCaptor.getValue().destinationKey()).isEqualTo("chunks/direct-session/chunk-0");
-            assertThat(copyCaptor.getValue().metadata()).containsEntry("file-hash", "cipher-0");
+            ArgumentCaptor<PutObjectRequest> putCaptor = ArgumentCaptor.forClass(PutObjectRequest.class);
+            verify(s3Client, times(2)).putObject(putCaptor.capture(), any(software.amazon.awssdk.core.sync.RequestBody.class));
+            assertThat(putCaptor.getAllValues())
+                    .extracting(PutObjectRequest::bucket)
+                    .containsExactlyInAnyOrder("node1", "node2");
+            assertThat(putCaptor.getAllValues().getFirst().key()).isEqualTo("chunks/direct-session/chunk-0");
+            assertThat(putCaptor.getAllValues().getFirst().metadata())
+                    .containsEntry("file-hash", chunkHash)
+                    .containsEntry("cipher-hash", chunkHash)
+                    .containsEntry("checksum-algorithm", "SHA-256");
 
             ArgumentCaptor<DeleteObjectRequest> deleteCaptor = ArgumentCaptor.forClass(DeleteObjectRequest.class);
             verify(s3Client).deleteObject(deleteCaptor.capture());
@@ -1146,8 +1181,8 @@ class DistributedStorageServiceImplTest {
                             "s3://node1/chunks/direct-session/chunk-0",
                             512L,
                             null,
-                            "plain-0",
-                            "cipher-0",
+                            "sha256:chunk-0",
+                            "sha256:chunk-0",
                             "SHA-256"
                     ))
             );

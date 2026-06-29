@@ -708,11 +708,21 @@ public class FileUploadServiceImpl implements FileUploadService {
             if (CommonUtils.isEmpty(part.getPlainHash()) || CommonUtils.isEmpty(part.getCipherHash())) {
                 throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片哈希不能为空");
             }
+            if (!normalizeDirectUploadHash(part.getPlainHash()).equals(normalizeDirectUploadHash(part.getCipherHash()))) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "未加密直传分片的明文哈希与密文哈希必须一致");
+            }
             sizeSum = Math.addExact(sizeSum, part.getSize());
         }
         if (sizeSum != request.getFileSize()) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片总大小与文件大小不匹配");
         }
+    }
+
+    /**
+     * Normalizes direct-upload hash declarations before comparing equivalent clear/cipher hashes.
+     */
+    private String normalizeDirectUploadHash(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
     /**

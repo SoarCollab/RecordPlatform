@@ -153,8 +153,8 @@ class FileUploadServiceTest {
         request.setChunkSize(512);
         request.setTotalChunks(2);
         request.setParts(List.of(
-                directUploadPart(0, 512L, "plain-0", "cipher-0"),
-                directUploadPart(1, 512L, "plain-1", "cipher-1")
+                directUploadPart(0, 512L, "sha256:chunk-0", "sha256:chunk-0"),
+                directUploadPart(1, 512L, "sha256:chunk-1", "sha256:chunk-1")
         ));
         return request;
     }
@@ -220,8 +220,8 @@ class FileUploadServiceTest {
                 new FileUploadState.DirectUploadPartState(
                         0,
                         512L,
-                        "plain-0",
-                        "cipher-0",
+                        "sha256:chunk-0",
+                        "sha256:chunk-0",
                         "SHA-256",
                         "https://storage.example/upload/0",
                         4_102_444_800L,
@@ -233,8 +233,8 @@ class FileUploadServiceTest {
                 new FileUploadState.DirectUploadPartState(
                         1,
                         512L,
-                        "plain-1",
-                        "cipher-1",
+                        "sha256:chunk-1",
+                        "sha256:chunk-1",
                         "SHA-256",
                         "https://storage.example/upload/1",
                         4_102_444_800L,
@@ -287,7 +287,7 @@ class FileUploadServiceTest {
                     ArgumentCaptor.forClass(CreateDirectMultipartUploadRequest.class);
             verify(fileRemoteClient).createDirectMultipartUpload(storageRequestCaptor.capture());
             assertEquals(CLIENT_ID, storageRequestCaptor.getValue().sessionId());
-            assertEquals("cipher-0", storageRequestCaptor.getValue().parts().getFirst().objectName());
+            assertEquals("sha256:chunk-0", storageRequestCaptor.getValue().parts().getFirst().objectName());
 
             verify(redisStateManager).saveNewState(
                     argThat(state -> state.isDirectUpload()
@@ -311,8 +311,8 @@ class FileUploadServiceTest {
                     .setTransactionHash("tx-1")
                     .setStatus(FileUploadStatus.SUCCESS.getCode());
             List<DirectMultipartCompletedPartVO> completedParts = List.of(
-                    new DirectMultipartCompletedPartVO(0, "s3://node-a/final-0", 512L, "\"etag-0\"", "plain-0", "cipher-0", "SHA-256"),
-                    new DirectMultipartCompletedPartVO(1, "s3://node-a/final-1", 512L, "\"etag-1\"", "plain-1", "cipher-1", "SHA-256")
+                    new DirectMultipartCompletedPartVO(0, "s3://node-a/final-0", 512L, "\"etag-0\"", "sha256:chunk-0", "sha256:chunk-0", "SHA-256"),
+                    new DirectMultipartCompletedPartVO(1, "s3://node-a/final-1", 512L, "\"etag-1\"", "sha256:chunk-1", "sha256:chunk-1", "SHA-256")
             );
             ChunkManifestView manifest = new ChunkManifestView(
                     900L,
@@ -370,8 +370,8 @@ class FileUploadServiceTest {
                     storedPathCaptor.capture(),
                     contains("DIRECT_MULTIPART")
             );
-            assertEquals("s3://node-a/final-0", storedPathCaptor.getValue().get("cipher-0"));
-            assertEquals("s3://node-a/final-1", storedPathCaptor.getValue().get("cipher-1"));
+            assertEquals("s3://node-a/final-0", storedPathCaptor.getValue().get("sha256:chunk-0"));
+            assertEquals("s3://node-a/final-1", storedPathCaptor.getValue().get("sha256:chunk-1"));
 
             ArgumentCaptor<ChunkManifestDraft> manifestCaptor = ArgumentCaptor.forClass(ChunkManifestDraft.class);
             verify(chunkManifestService).saveManifest(eq(USER_ID), eq(42L), manifestCaptor.capture());
