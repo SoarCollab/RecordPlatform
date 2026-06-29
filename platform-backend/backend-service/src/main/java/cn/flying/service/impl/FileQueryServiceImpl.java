@@ -34,6 +34,8 @@ import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.ChunkManifestView;
 import cn.flying.service.remote.FileRemoteClient;
+import cn.flying.service.support.StoredObjectReference;
+import cn.flying.service.support.StoredObjectReferenceCodec;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -251,14 +253,10 @@ public class FileQueryServiceImpl implements FileQueryService {
         if (CommonUtils.isEmpty(fileContent)) {
             throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
         }
-        @SuppressWarnings("unchecked")
-        Map<String, String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
-        if (fileContentMap == null || fileContentMap.isEmpty()) {
-            throw new GeneralException(ResultEnum.FAIL, "文件内容格式解析失败");
-        }
+        List<StoredObjectReference> references = StoredObjectReferenceCodec.parseChainContent(fileContent);
         Result<List<String>> urlListResult = fileRemoteClient.getFileUrlListByHash(
-                fileContentMap.values().stream().toList(),
-                fileContentMap.keySet().stream().toList()
+                references.stream().map(StoredObjectReference::storagePath).toList(),
+                references.stream().map(StoredObjectReference::cipherHash).toList()
         );
         return ResultUtils.getData(urlListResult);
     }
@@ -382,14 +380,10 @@ public class FileQueryServiceImpl implements FileQueryService {
         if (CommonUtils.isEmpty(fileContent)) {
             throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
         }
-        @SuppressWarnings("unchecked")
-        Map<String, String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
-        if (fileContentMap == null || fileContentMap.isEmpty()) {
-            throw new GeneralException(ResultEnum.FAIL, "文件内容格式解析失败");
-        }
+        List<StoredObjectReference> references = StoredObjectReferenceCodec.parseChainContent(fileContent);
         Result<List<byte[]>> fileListResult = fileRemoteClient.getFileListByHash(
-                fileContentMap.values().stream().toList(),
-                fileContentMap.keySet().stream().toList()
+                references.stream().map(StoredObjectReference::storagePath).toList(),
+                references.stream().map(StoredObjectReference::cipherHash).toList()
         );
         return ResultUtils.getData(fileListResult);
     }

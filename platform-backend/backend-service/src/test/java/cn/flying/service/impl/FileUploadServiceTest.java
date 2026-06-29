@@ -57,7 +57,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
@@ -335,7 +334,7 @@ class FileUploadServiceTest {
             when(quotaLock.isHeldByCurrentThread()).thenReturn(true);
             when(fileRemoteClient.completeDirectMultipartUpload(any()))
                     .thenReturn(Result.success(new CompleteDirectMultipartUploadResponse(CLIENT_ID, completedParts)));
-            when(fileService.storeDirectUploadedFile(anyLong(), any(), anyString(), anyLong(), anyMap(), anyString()))
+            when(fileService.storeDirectUploadedFile(anyLong(), any(), anyString(), anyLong(), anyList(), anyString()))
                     .thenReturn(storedFile);
             when(chunkManifestService.saveManifest(eq(USER_ID), eq(42L), any()))
                     .thenReturn(manifest);
@@ -361,17 +360,20 @@ class FileUploadServiceTest {
             assertEquals("staging/direct/0", completeRequestCaptor.getValue().parts().getFirst().stagingObjectName());
 
             @SuppressWarnings("unchecked")
-            ArgumentCaptor<Map<String, String>> storedPathCaptor = ArgumentCaptor.forClass(Map.class);
+            ArgumentCaptor<List<DirectMultipartCompletedPartVO>> storedPartsCaptor = ArgumentCaptor.forClass(List.class);
             verify(fileService).storeDirectUploadedFile(
                     eq(USER_ID),
                     isNull(),
                     eq("direct.pdf"),
                     eq(1024L),
-                    storedPathCaptor.capture(),
+                    storedPartsCaptor.capture(),
                     contains("DIRECT_MULTIPART")
             );
-            assertEquals("s3://node-a/final-0", storedPathCaptor.getValue().get("sha256:chunk-0"));
-            assertEquals("s3://node-a/final-1", storedPathCaptor.getValue().get("sha256:chunk-1"));
+            assertEquals(2, storedPartsCaptor.getValue().size());
+            assertEquals("sha256:chunk-0", storedPartsCaptor.getValue().get(0).cipherHash());
+            assertEquals("s3://node-a/final-0", storedPartsCaptor.getValue().get(0).storagePath());
+            assertEquals("sha256:chunk-1", storedPartsCaptor.getValue().get(1).cipherHash());
+            assertEquals("s3://node-a/final-1", storedPartsCaptor.getValue().get(1).storagePath());
 
             ArgumentCaptor<ChunkManifestDraft> manifestCaptor = ArgumentCaptor.forClass(ChunkManifestDraft.class);
             verify(chunkManifestService).saveManifest(eq(USER_ID), eq(42L), manifestCaptor.capture());
