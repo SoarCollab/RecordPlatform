@@ -18,6 +18,8 @@ import cn.flying.platformapi.response.StorageCapacityVO;
 import cn.flying.platformapi.response.StorageObjectHeadVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.platformapi.security.BlockChainRpcAuth;
+import cn.flying.common.util.JsonConverter;
+import cn.flying.service.attestation.AttestationBatchRootPayload;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
 import jakarta.annotation.PostConstruct;
@@ -69,6 +71,25 @@ public class FileRemoteClient {
     @Retry(name = "blockChainService")
     public Result<StoreFileResponse> storeFileOnChain(StoreFileRequest request) {
         return callBlockChain(() -> blockChainService.storeFile(request));
+    }
+
+    /**
+     * Stores a Merkle batch root through the current blockchain file-attestation contract.
+     *
+     * <p>This is an explicit compatibility boundary: a future FISCO batch contract can replace
+     * the StoreFileRequest shape here without changing attestation batch orchestration.</p>
+     *
+     * @param payload Merkle batch root payload
+     * @return blockchain transaction response
+     */
+    public Result<StoreFileResponse> storeAttestationBatchRoot(AttestationBatchRootPayload payload) {
+        StoreFileRequest request = new StoreFileRequest(
+                "tenant:" + payload.tenantId(),
+                payload.type() + ":" + payload.batchNo(),
+                JsonConverter.toJson(payload),
+                payload.merkleRoot()
+        );
+        return storeFileOnChain(request);
     }
 
     private Result<StoreFileResponse> storeFileOnChainFallback(StoreFileRequest request, Throwable t) {
