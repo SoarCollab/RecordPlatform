@@ -1165,8 +1165,60 @@ class DistributedStorageServiceImplTest {
         }
 
         @Test
+        @DisplayName("Should complete retry when direct upload part was already promoted")
+        void shouldCompleteRetryWhenDirectUploadPartWasAlreadyPromoted() {
+            byte[] chunkBytes = "direct-upload-chunk".getBytes(StandardCharsets.UTF_8);
+            String chunkHash = sha256Prefixed(chunkBytes);
+            when(faultDomainManager.getTargetNodes(chunkHash)).thenReturn(List.of("node1", "node2"));
+            when(clientManager.getClient("node1")).thenReturn(s3Client);
+            when(s3Client.headBucket(any(HeadBucketRequest.class))).thenReturn(HeadBucketResponse.builder().build());
+            when(s3Client.headObject(any(HeadObjectRequest.class)))
+                    .thenThrow(NoSuchKeyException.builder().message("staging missing").build())
+                    .thenReturn(HeadObjectResponse.builder()
+                            .contentLength((long) chunkBytes.length)
+                            .eTag("\"etag-final\"")
+                            .metadata(Map.of(
+                                    "file-hash", chunkHash,
+                                    "tenant-id", "0",
+                                    "checksum-algorithm", "SHA-256",
+                                    "plain-hash", chunkHash,
+                                    "cipher-hash", chunkHash
+                            ))
+                            .build());
+
+            CompleteDirectMultipartUploadRequest request = new CompleteDirectMultipartUploadRequest(
+                    "direct-session",
+                    List.of(new DirectMultipartCompletedPart(
+                            0,
+                            "staging/direct-upload/direct-session/chunk-0",
+                            "chunks/direct-session/chunk-0",
+                            "node1",
+                            "s3://node1/chunks/direct-session/chunk-0",
+                            chunkBytes.length,
+                            "\"etag-0\"",
+                            chunkHash,
+                            chunkHash,
+                            "SHA-256"
+                    ))
+            );
+
+            Result<CompleteDirectMultipartUploadResponse> result = storageService.completeDirectMultipartUpload(request);
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData().parts()).hasSize(1);
+            assertThat(result.getData().parts().getFirst().storagePath())
+                    .isEqualTo("s3://node1/chunks/direct-session/chunk-0");
+            assertThat(result.getData().parts().getFirst().eTag()).isEqualTo("\"etag-final\"");
+
+            verify(s3Client, never()).getObject(any(GetObjectRequest.class));
+            verify(s3Client, never()).putObject(any(PutObjectRequest.class), any(software.amazon.awssdk.core.sync.RequestBody.class));
+            verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
+        }
+
+        @Test
         @DisplayName("Should abort direct multipart upload by deleting staging parts")
         void shouldAbortDirectMultipartUpload() {
+            when(faultDomainManager.getTargetNodes("sha256:chunk-0")).thenReturn(List.of("node1"));
             when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
             when(clientManager.getClient("node1")).thenReturn(s3Client);
             when(s3Client.deleteObject(any(DeleteObjectRequest.class))).thenReturn(DeleteObjectResponse.builder().build());
@@ -1193,9 +1245,16 @@ class DistributedStorageServiceImplTest {
             assertThat(result.getData()).isTrue();
 
             ArgumentCaptor<DeleteObjectRequest> deleteCaptor = ArgumentCaptor.forClass(DeleteObjectRequest.class);
-            verify(s3Client).deleteObject(deleteCaptor.capture());
-            assertThat(deleteCaptor.getValue().bucket()).isEqualTo("node1");
-            assertThat(deleteCaptor.getValue().key()).isEqualTo("staging/direct-upload/direct-session/chunk-0");
+            verify(s3Client, times(2)).deleteObject(deleteCaptor.capture());
+            assertThat(deleteCaptor.getAllValues())
+                    .extracting(DeleteObjectRequest::bucket)
+                    .containsExactly("node1", "node1");
+            assertThat(deleteCaptor.getAllValues())
+                    .extracting(DeleteObjectRequest::key)
+                    .containsExactly(
+                            "staging/direct-upload/direct-session/chunk-0",
+                            "chunks/direct-session/chunk-0"
+                    );
         }
     }
 
