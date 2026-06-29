@@ -1,5 +1,6 @@
 package cn.flying.service.impl;
 
+import cn.flying.api.utils.ResultUtils;
 import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.event.FileStorageEvent;
@@ -8,6 +9,7 @@ import cn.flying.common.exception.RetryableException;
 import cn.flying.common.lock.DistributedLock;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.CommonUtils;
+import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.common.util.UidEncoder;
 import cn.flying.dao.vo.file.*;
@@ -16,6 +18,21 @@ import cn.flying.service.FileUploadService;
 import cn.flying.service.QuotaService;
 import cn.flying.service.assistant.FileUploadRedisStateManager;
 import cn.flying.service.encryption.*;
+import cn.flying.service.manifest.ChunkManifestCanonicalizer;
+import cn.flying.service.manifest.ChunkManifestChunk;
+import cn.flying.service.manifest.ChunkManifestDraft;
+import cn.flying.service.manifest.ChunkManifestService;
+import cn.flying.service.manifest.ChunkManifestView;
+import cn.flying.service.remote.FileRemoteClient;
+import cn.flying.platformapi.request.AbortDirectMultipartUploadRequest;
+import cn.flying.platformapi.request.CompleteDirectMultipartUploadRequest;
+import cn.flying.platformapi.request.CreateDirectMultipartUploadRequest;
+import cn.flying.platformapi.request.DirectMultipartCompletedPart;
+import cn.flying.platformapi.request.DirectMultipartUploadPartRequest;
+import cn.flying.platformapi.response.CompleteDirectMultipartUploadResponse;
+import cn.flying.platformapi.response.CreateDirectMultipartUploadResponse;
+import cn.flying.platformapi.response.DirectMultipartCompletedPartVO;
+import cn.flying.platformapi.response.DirectMultipartUploadPartUrl;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -105,6 +122,8 @@ public class FileUploadServiceImpl implements FileUploadService {
     private final FileService fileService;
     private final QuotaService quotaService;
     private final RedissonClient redissonClient;
+    private final FileRemoteClient fileRemoteClient;
+    private final ChunkManifestService chunkManifestService;
 
     @PostConstruct
     public void initialize() {
@@ -466,6 +485,462 @@ public class FileUploadServiceImpl implements FileUploadService {
             // 包装成自定义异常，方便 Controller 统一处理
             throw new GeneralException("创建上传会话失败: " + e.getMessage());
         }
+    }
+
+    /**
+     * Creates a direct-upload session whose chunk bytes are sent to object storage by the frontend.
+     *
+     * @param userId current user ID
+     * @param request direct-upload request
+     * @return direct-upload session metadata with presigned URLs
+     */
+    @Override
+    public DirectUploadSessionVO startDirectUpload(Long userId, DirectUploadSessionRequest request) {
+        if (request == null) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID);
+        }
+
+        Long targetFileId = decodeOptionalFileId(request.getFileId());
+        validateDirectUploadRequest(userId, request, targetFileId);
+
+        String suid = UidEncoder.encodeUid(String.valueOf(userId));
+        String clientId = CommonUtils.isBlank(request.getClientId())
+                ? UidEncoder.encodeCid(suid)
+                : request.getClientId();
+        FileUploadState existingState = redisStateManager.getState(clientId);
+        if (existingState != null) {
+            validateUploadOwnership(userId, existingState, clientId);
+            if (!existingState.isDirectUpload()) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "客户端ID已被普通上传会话占用");
+            }
+            redisStateManager.updateLastActivityTime(clientId);
+            return toDirectUploadSessionVO(existingState, true);
+        }
+
+        Long tenantId = TenantContext.getTenantId();
+        checkQuotaForNewUploadSession(tenantId, userId, request.getFileSize(), targetFileId);
+
+        CreateDirectMultipartUploadResponse storageResponse = ResultUtils.getData(
+                fileRemoteClient.createDirectMultipartUpload(toStorageCreateRequest(clientId, request))
+        );
+        if (storageResponse == null || CommonUtils.isEmpty(storageResponse.parts())) {
+            throw new GeneralException(ResultEnum.FILE_SERVICE_ERROR, "对象存储未返回直传 URL");
+        }
+
+        FileUploadState state = new FileUploadState(
+                userId,
+                request.getFileName(),
+                request.getFileSize(),
+                request.getContentType(),
+                clientId,
+                request.getChunkSize(),
+                request.getTotalChunks(),
+                targetFileId
+        );
+        state.setTenantId(tenantId);
+        state.setSuid(suid);
+        state.setDirectUpload(true);
+        state.setDirectUploadParts(buildDirectUploadPartStates(request, storageResponse.parts()));
+
+        redisStateManager.saveNewState(state, suid);
+        redisStateManager.updateState(state);
+        return toDirectUploadSessionVO(state, false);
+    }
+
+    /**
+     * Completes a direct-upload session by validating storage metadata, registering the file, and saving the manifest.
+     *
+     * @param userId current user ID
+     * @param clientId upload session ID
+     * @param request completion metadata from the frontend
+     * @return completion result
+     */
+    @Override
+    public DirectUploadCompleteVO completeDirectUpload(Long userId, String clientId, DirectUploadCompleteRequest request) {
+        FileUploadState state = redisStateManager.getState(clientId);
+        if (state == null) {
+            throw new GeneralException(ResultEnum.UPLOAD_SESSION_NOT_FOUND);
+        }
+        validateUploadOwnership(userId, state, clientId);
+        if (!state.isDirectUpload()) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "该会话不是直传上传会话");
+        }
+        if (isUploadSessionCompleted(state)) {
+            return new DirectUploadCompleteVO(
+                    clientId,
+                    IdUtils.toExternalId(state.getDirectFileId()),
+                    state.getDirectFileHash(),
+                    state.getDirectTransactionHash(),
+                    state.getDirectManifestHash(),
+                    UPLOAD_SESSION_STATUS_COMPLETED
+            );
+        }
+        if (request == null || CommonUtils.isEmpty(request.getParts())) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "分片完成元数据不能为空");
+        }
+
+        Map<Integer, DirectUploadCompletePartRequest> completedPartMap = indexCompletedParts(request);
+        List<DirectMultipartCompletedPart> storageParts = buildStorageCompleteParts(state, completedPartMap);
+
+        recheckQuotaBeforeFinalProcessing(userId, state);
+        CompleteDirectMultipartUploadResponse storageResponse = ResultUtils.getData(
+                fileRemoteClient.completeDirectMultipartUpload(
+                        new CompleteDirectMultipartUploadRequest(clientId, storageParts)
+                )
+        );
+        if (storageResponse == null || CommonUtils.isEmpty(storageResponse.parts())) {
+            throw new GeneralException(ResultEnum.FILE_SERVICE_ERROR, "对象存储未返回直传完成结果");
+        }
+
+        reserveQuotaAndPrepareStoreFile(userId, state);
+        cn.flying.dao.dto.File storedFile = fileService.storeDirectUploadedFile(
+                userId,
+                state.getTargetFileId(),
+                state.getFileName(),
+                state.getFileSize(),
+                buildStoredPathMap(storageResponse.parts()),
+                generateDirectUploadFileParam(state)
+        );
+
+        ChunkManifestView manifest = chunkManifestService.saveManifest(
+                userId,
+                storedFile.getId(),
+                buildChunkManifestDraft(storedFile, state, storageResponse.parts())
+        );
+
+        state.setDirectFileId(storedFile.getId());
+        state.setDirectFileHash(storedFile.getFileHash());
+        state.setDirectTransactionHash(storedFile.getTransactionHash());
+        state.setDirectManifestHash(manifest.manifestHash());
+        redisStateManager.updateState(state);
+        redisStateManager.markCompleted(clientId, state.getSuid(), 300);
+
+        return new DirectUploadCompleteVO(
+                clientId,
+                IdUtils.toExternalId(storedFile.getId()),
+                storedFile.getFileHash(),
+                storedFile.getTransactionHash(),
+                manifest.manifestHash(),
+                UPLOAD_SESSION_STATUS_COMPLETED
+        );
+    }
+
+    /**
+     * Aborts a direct-upload session and removes storage staging objects best-effort.
+     *
+     * @param userId current user ID
+     * @param clientId upload session ID
+     * @return true when local session cleanup completed
+     */
+    @Override
+    public boolean abortDirectUpload(Long userId, String clientId) {
+        FileUploadState state = redisStateManager.getState(clientId);
+        if (state == null) {
+            return false;
+        }
+        validateUploadOwnership(userId, state, clientId);
+        if (!state.isDirectUpload()) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "该会话不是直传上传会话");
+        }
+        fileRemoteClient.abortDirectMultipartUpload(
+                new AbortDirectMultipartUploadRequest(clientId, buildStorageAbortParts(state))
+        );
+        redisStateManager.removeSession(clientId, state.getSuid());
+        return true;
+    }
+
+    /**
+     * Decodes an optional externally exposed file ID from the direct-upload request.
+     */
+    private Long decodeOptionalFileId(String fileId) {
+        if (CommonUtils.isEmpty(fileId)) {
+            return null;
+        }
+        Long targetFileId = IdUtils.fromExternalId(fileId);
+        if (targetFileId == null) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "fileId 无效");
+        }
+        return targetFileId;
+    }
+
+    /**
+     * Validates direct-upload metadata before asking object storage for presigned URLs.
+     */
+    private void validateDirectUploadRequest(Long userId, DirectUploadSessionRequest request, Long targetFileId) {
+        if (!isValidFileName(request.getFileName())) {
+            throw new GeneralException("文件名包含非法字符");
+        }
+        if (request.getFileSize() <= 0 || request.getFileSize() > MAX_FILE_SIZE_BYTES) {
+            throw new GeneralException(ResultEnum.FILE_MAX_SIZE_OVERFLOW);
+        }
+        if (request.getChunkSize() <= 0 || request.getChunkSize() > MAX_CHUNK_SIZE_BYTES) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "分片大小超出允许范围");
+        }
+        validateUploadPlan(request.getFileSize(), request.getChunkSize(), request.getTotalChunks());
+        if (!isFileTypeAllowed(request.getFileName(), request.getContentType())) {
+            throw new GeneralException(ResultEnum.FILE_ACCEPT_NOT_SUPPORT);
+        }
+        if (CommonUtils.isEmpty(request.getParts()) || request.getParts().size() != request.getTotalChunks()) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片元数据数量与上传计划不匹配");
+        }
+        validateDirectUploadParts(request);
+        validateUploadTargetFile(userId, request.getFileName(), request.getFileSize(), targetFileId);
+    }
+
+    /**
+     * Validates chunk indexes, sizes, and hash metadata for direct upload.
+     */
+    private void validateDirectUploadParts(DirectUploadSessionRequest request) {
+        boolean[] seen = new boolean[request.getTotalChunks()];
+        long sizeSum = 0L;
+        for (DirectUploadPartRequest part : request.getParts()) {
+            if (part == null || part.getIndex() < 0 || part.getIndex() >= request.getTotalChunks()) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片索引无效");
+            }
+            if (seen[part.getIndex()]) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片索引重复");
+            }
+            seen[part.getIndex()] = true;
+            long expectedSize = expectedDirectChunkSize(request.getFileSize(), request.getChunkSize(), part.getIndex(), request.getTotalChunks());
+            if (part.getSize() != expectedSize) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片大小与上传计划不匹配");
+            }
+            if (CommonUtils.isEmpty(part.getPlainHash()) || CommonUtils.isEmpty(part.getCipherHash())) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片哈希不能为空");
+            }
+            sizeSum = Math.addExact(sizeSum, part.getSize());
+        }
+        if (sizeSum != request.getFileSize()) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片总大小与文件大小不匹配");
+        }
+    }
+
+    /**
+     * Calculates the expected direct-upload chunk size for a zero-based chunk index.
+     */
+    private long expectedDirectChunkSize(long fileSize, int chunkSize, int index, int totalChunks) {
+        if (index == totalChunks - 1) {
+            return fileSize - ((long) chunkSize * index);
+        }
+        return chunkSize;
+    }
+
+    /**
+     * Converts the REST request into the storage RPC request.
+     */
+    private CreateDirectMultipartUploadRequest toStorageCreateRequest(String clientId, DirectUploadSessionRequest request) {
+        List<DirectMultipartUploadPartRequest> parts = request.getParts().stream()
+                .sorted(Comparator.comparingInt(DirectUploadPartRequest::getIndex))
+                .map(part -> new DirectMultipartUploadPartRequest(
+                        part.getIndex(),
+                        part.getCipherHash(),
+                        part.getSize(),
+                        request.getContentType(),
+                        part.getPlainHash(),
+                        part.getCipherHash(),
+                        normalizeChecksumAlgorithm(part.getChecksumAlgorithm())
+                ))
+                .toList();
+        return new CreateDirectMultipartUploadRequest(
+                clientId,
+                request.getFileName(),
+                request.getFileSize(),
+                request.getChunkSize(),
+                request.getContentType(),
+                parts
+        );
+    }
+
+    /**
+     * Builds the Redis-persisted direct-upload part states from storage RPC output.
+     */
+    private List<FileUploadState.DirectUploadPartState> buildDirectUploadPartStates(
+            DirectUploadSessionRequest request,
+            List<DirectMultipartUploadPartUrl> storageParts) {
+        Map<Integer, DirectUploadPartRequest> declaredParts = new HashMap<>();
+        for (DirectUploadPartRequest part : request.getParts()) {
+            declaredParts.put(part.getIndex(), part);
+        }
+
+        List<FileUploadState.DirectUploadPartState> states = new ArrayList<>(storageParts.size());
+        for (DirectMultipartUploadPartUrl storagePart : storageParts) {
+            DirectUploadPartRequest declaredPart = declaredParts.get(storagePart.partIndex());
+            if (declaredPart == null) {
+                throw new GeneralException(ResultEnum.FILE_SERVICE_ERROR, "对象存储返回了未知分片");
+            }
+            states.add(new FileUploadState.DirectUploadPartState(
+                    storagePart.partIndex(),
+                    storagePart.size(),
+                    declaredPart.getPlainHash(),
+                    declaredPart.getCipherHash(),
+                    normalizeChecksumAlgorithm(declaredPart.getChecksumAlgorithm()),
+                    storagePart.uploadUrl(),
+                    storagePart.expiresAtEpochSeconds(),
+                    storagePart.storagePath(),
+                    storagePart.stagingObjectName(),
+                    storagePart.finalObjectName(),
+                    storagePart.nodeName()
+            ));
+        }
+        states.sort(Comparator.comparingInt(FileUploadState.DirectUploadPartState::getIndex));
+        return states;
+    }
+
+    /**
+     * Converts Redis-persisted state into the public direct-upload session response.
+     */
+    private DirectUploadSessionVO toDirectUploadSessionVO(FileUploadState state, boolean resumed) {
+        List<DirectUploadPartUrlVO> parts = state.getDirectUploadParts().stream()
+                .sorted(Comparator.comparingInt(FileUploadState.DirectUploadPartState::getIndex))
+                .map(part -> new DirectUploadPartUrlVO(
+                        part.getIndex(),
+                        part.getSize(),
+                        part.getUploadUrl(),
+                        part.getExpiresAtEpochSeconds(),
+                        part.getStoragePath(),
+                        part.getPlainHash(),
+                        part.getCipherHash()
+                ))
+                .toList();
+        return new DirectUploadSessionVO(
+                state.getClientId(),
+                state.getChunkSize(),
+                state.getTotalChunks(),
+                resumed,
+                ChunkManifestCanonicalizer.SCHEMA_ID,
+                parts
+        );
+    }
+
+    /**
+     * Indexes completion parts and rejects duplicates.
+     */
+    private Map<Integer, DirectUploadCompletePartRequest> indexCompletedParts(DirectUploadCompleteRequest request) {
+        Map<Integer, DirectUploadCompletePartRequest> result = new HashMap<>();
+        for (DirectUploadCompletePartRequest part : request.getParts()) {
+            if (part == null || result.put(part.getIndex(), part) != null) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "直传完成分片索引重复或为空");
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Builds storage completion metadata from trusted Redis state plus frontend ETags.
+     */
+    private List<DirectMultipartCompletedPart> buildStorageCompleteParts(
+            FileUploadState state,
+            Map<Integer, DirectUploadCompletePartRequest> completedPartMap) {
+        if (state.getDirectUploadParts().size() != state.getTotalChunks()
+                || completedPartMap.size() != state.getTotalChunks()) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "直传完成分片数量与上传计划不匹配");
+        }
+
+        List<DirectMultipartCompletedPart> parts = new ArrayList<>(state.getDirectUploadParts().size());
+        for (FileUploadState.DirectUploadPartState part : state.getDirectUploadParts()) {
+            DirectUploadCompletePartRequest completedPart = completedPartMap.get(part.getIndex());
+            if (completedPart == null) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "直传完成缺少分片: " + part.getIndex());
+            }
+            parts.add(toStorageCompletedPart(part, completedPart.getETag()));
+        }
+        parts.sort(Comparator.comparingInt(DirectMultipartCompletedPart::partIndex));
+        return parts;
+    }
+
+    /**
+     * Builds storage abort metadata from trusted Redis state.
+     */
+    private List<DirectMultipartCompletedPart> buildStorageAbortParts(FileUploadState state) {
+        return state.getDirectUploadParts().stream()
+                .map(part -> toStorageCompletedPart(part, null))
+                .toList();
+    }
+
+    /**
+     * Converts one direct-upload part state into storage completion/abort metadata.
+     */
+    private DirectMultipartCompletedPart toStorageCompletedPart(FileUploadState.DirectUploadPartState part, String eTag) {
+        return new DirectMultipartCompletedPart(
+                part.getIndex(),
+                part.getStagingObjectName(),
+                part.getFinalObjectName(),
+                part.getNodeName(),
+                part.getStoragePath(),
+                part.getSize(),
+                eTag,
+                part.getPlainHash(),
+                part.getCipherHash(),
+                normalizeChecksumAlgorithm(part.getChecksumAlgorithm())
+        );
+    }
+
+    /**
+     * Builds the chain content map from completed storage parts.
+     */
+    private Map<String, String> buildStoredPathMap(List<DirectMultipartCompletedPartVO> parts) {
+        Map<String, String> storedPaths = new LinkedHashMap<>();
+        parts.stream()
+                .sorted(Comparator.comparingInt(DirectMultipartCompletedPartVO::partIndex))
+                .forEach(part -> storedPaths.put(part.cipherHash(), part.storagePath()));
+        return storedPaths;
+    }
+
+    /**
+     * Builds a manifest draft from completed storage metadata and final file record.
+     */
+    private ChunkManifestDraft buildChunkManifestDraft(
+            cn.flying.dao.dto.File storedFile,
+            FileUploadState state,
+            List<DirectMultipartCompletedPartVO> completedParts) {
+        List<ChunkManifestChunk> chunks = completedParts.stream()
+                .sorted(Comparator.comparingInt(DirectMultipartCompletedPartVO::partIndex))
+                .map(part -> new ChunkManifestChunk(
+                        part.partIndex(),
+                        part.plainHash(),
+                        part.cipherHash(),
+                        part.size(),
+                        part.storagePath(),
+                        "S3",
+                        part.eTag(),
+                        normalizeChecksumAlgorithm(part.checksumAlgorithm())
+                ))
+                .toList();
+        return new ChunkManifestDraft(
+                ChunkManifestCanonicalizer.SCHEMA_ID,
+                storedFile.getFileHash(),
+                ChunkManifestCanonicalizer.HASH_ALGORITHM,
+                state.getChunkSize(),
+                state.getFileSize(),
+                null,
+                "NONE",
+                "S3",
+                chunks
+        );
+    }
+
+    /**
+     * Generates direct-upload file parameters for download/decrypt metadata.
+     */
+    private String generateDirectUploadFileParam(FileUploadState state) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("fileName", state.getFileName());
+        params.put("fileSize", state.getFileSize());
+        params.put("contentType", state.getContentType());
+        params.put("uploadTime", System.currentTimeMillis());
+        params.put("chunkCount", state.getTotalChunks());
+        params.put("uploadMode", "DIRECT_MULTIPART");
+        params.put("encryptionAlgorithm", "NONE");
+        return JsonConverter.toJson(params);
+    }
+
+    /**
+     * Applies the default checksum algorithm used by the P2-3 manifest contract.
+     */
+    private String normalizeChecksumAlgorithm(String checksumAlgorithm) {
+        return CommonUtils.isEmpty(checksumAlgorithm)
+                ? ChunkManifestCanonicalizer.HASH_ALGORITHM
+                : checksumAlgorithm.trim();
     }
 
     /**

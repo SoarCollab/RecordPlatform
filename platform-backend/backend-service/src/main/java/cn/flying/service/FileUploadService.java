@@ -1,6 +1,10 @@
 package cn.flying.service;
 
 import cn.flying.dao.vo.file.FileUploadStatusVO;
+import cn.flying.dao.vo.file.DirectUploadCompleteRequest;
+import cn.flying.dao.vo.file.DirectUploadCompleteVO;
+import cn.flying.dao.vo.file.DirectUploadSessionRequest;
+import cn.flying.dao.vo.file.DirectUploadSessionVO;
 import cn.flying.dao.vo.file.ProgressVO;
 import cn.flying.dao.vo.file.ResumeUploadVO;
 import cn.flying.dao.vo.file.StartUploadVO;
@@ -41,6 +45,33 @@ public interface FileUploadService {
      * @return 上传会话信息
      */
     StartUploadVO startUpload(Long userId, String fileName, long fileSize, String contentType, String clientId, int chunkSize, int totalChunks, Long targetFileId);
+    /**
+     * 创建对象存储直传上传会话。
+     *
+     * @param userId 用户ID
+     * @param request 直传上传会话请求
+     * @return 直传上传会话信息
+     */
+    DirectUploadSessionVO startDirectUpload(Long userId, DirectUploadSessionRequest request);
+
+    /**
+     * 完成对象存储直传上传。
+     *
+     * @param userId 用户ID
+     * @param clientId 客户端会话ID
+     * @param request 分片完成元数据
+     * @return 完成结果
+     */
+    DirectUploadCompleteVO completeDirectUpload(Long userId, String clientId, DirectUploadCompleteRequest request);
+
+    /**
+     * 中止对象存储直传上传并清理 staging 对象。
+     *
+     * @param userId 用户ID
+     * @param clientId 客户端会话ID
+     * @return 是否清理成功
+     */
+    boolean abortDirectUpload(Long userId, String clientId);
     /**
      * 上传分片
      * @param uid 用户ID

@@ -8,6 +8,13 @@ import cn.flying.storage.core.S3Monitor;
 import cn.flying.storage.tenant.TenantContextUtil;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
+import cn.flying.platformapi.request.AbortDirectMultipartUploadRequest;
+import cn.flying.platformapi.request.CompleteDirectMultipartUploadRequest;
+import cn.flying.platformapi.request.CreateDirectMultipartUploadRequest;
+import cn.flying.platformapi.request.DirectMultipartCompletedPart;
+import cn.flying.platformapi.request.DirectMultipartUploadPartRequest;
+import cn.flying.platformapi.response.CompleteDirectMultipartUploadResponse;
+import cn.flying.platformapi.response.CreateDirectMultipartUploadResponse;
 import cn.flying.platformapi.response.StorageObjectHeadVO;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -16,13 +23,19 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import software.amazon.awssdk.http.SdkHttpFullRequest;
+import software.amazon.awssdk.http.SdkHttpMethod;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
+import java.net.URI;
 import java.net.URL;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -1002,6 +1015,152 @@ class DistributedStorageServiceImplTest {
             assertThat(result.getData().get("type")).isNull();
             assertThat(result.getData().get("startTime")).isNull();
             assertThat(result.getData().get("endTime")).isNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("Direct Multipart Upload Tests")
+    class DirectMultipartUploadTests {
+
+        @Test
+        @DisplayName("Should create presigned PUT URLs for direct upload parts")
+        void shouldCreatePresignedPutUrlsForDirectUploadParts() {
+            when(faultDomainManager.getTargetNodes("chunk-hash-0")).thenReturn(List.of("node1"));
+            when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
+            when(clientManager.getClient("node1")).thenReturn(s3Client);
+            when(clientManager.getPresigner("node1")).thenReturn(s3Presigner);
+            when(s3Client.headBucket(any(HeadBucketRequest.class))).thenReturn(HeadBucketResponse.builder().build());
+            when(s3Presigner.presignPutObject(any(PutObjectPresignRequest.class)))
+                    .thenReturn(PresignedPutObjectRequest.builder()
+                            .expiration(Instant.now().plusSeconds(900))
+                            .isBrowserExecutable(true)
+                            .signedHeaders(Map.of("host", List.of("storage.example")))
+                            .httpRequest(SdkHttpFullRequest.builder()
+                                    .method(SdkHttpMethod.PUT)
+                                    .uri(URI.create("https://storage.example/upload/part-0"))
+                                    .build())
+                            .build());
+
+            CreateDirectMultipartUploadRequest request = new CreateDirectMultipartUploadRequest(
+                    "direct-session",
+                    "direct.pdf",
+                    512L,
+                    512,
+                    "application/pdf",
+                    List.of(new DirectMultipartUploadPartRequest(
+                            0,
+                            "chunk-hash-0",
+                            512L,
+                            "application/pdf",
+                            "plain-0",
+                            "chunk-hash-0",
+                            "SHA-256"
+                    ))
+            );
+
+            Result<CreateDirectMultipartUploadResponse> result = storageService.createDirectMultipartUpload(request);
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData().sessionId()).isEqualTo("direct-session");
+            assertThat(result.getData().parts()).hasSize(1);
+            assertThat(result.getData().parts().getFirst().uploadUrl())
+                    .isEqualTo("https://storage.example/upload/part-0");
+            assertThat(result.getData().parts().getFirst().nodeName()).isEqualTo("node1");
+            assertThat(result.getData().parts().getFirst().finalObjectName()).contains("chunk-hash-0");
+
+            ArgumentCaptor<PutObjectPresignRequest> presignCaptor =
+                    ArgumentCaptor.forClass(PutObjectPresignRequest.class);
+            verify(s3Presigner).presignPutObject(presignCaptor.capture());
+            assertThat(presignCaptor.getValue().signatureDuration().toSeconds()).isEqualTo(86_400);
+            assertThat(presignCaptor.getValue().putObjectRequest().bucket()).isEqualTo("node1");
+            assertThat(presignCaptor.getValue().putObjectRequest().key()).contains("staging/direct-upload");
+        }
+
+        @Test
+        @DisplayName("Should validate and promote direct uploaded parts")
+        void shouldValidateAndPromoteDirectUploadedParts() {
+            when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
+            when(clientManager.getClient("node1")).thenReturn(s3Client);
+            when(s3Client.headBucket(any(HeadBucketRequest.class))).thenReturn(HeadBucketResponse.builder().build());
+            when(s3Client.headObject(any(HeadObjectRequest.class)))
+                    .thenReturn(
+                            HeadObjectResponse.builder().contentLength(512L).eTag("\"etag-0\"").build(),
+                            HeadObjectResponse.builder().contentLength(512L).eTag("\"etag-final\"").build()
+                    );
+            when(s3Client.copyObject(any(CopyObjectRequest.class))).thenReturn(CopyObjectResponse.builder().build());
+            when(s3Client.deleteObject(any(DeleteObjectRequest.class))).thenReturn(DeleteObjectResponse.builder().build());
+
+            CompleteDirectMultipartUploadRequest request = new CompleteDirectMultipartUploadRequest(
+                    "direct-session",
+                    List.of(new DirectMultipartCompletedPart(
+                            0,
+                            "staging/direct-upload/direct-session/chunk-0",
+                            "chunks/direct-session/chunk-0",
+                            "node1",
+                            "s3://node1/chunks/direct-session/chunk-0",
+                            512L,
+                            "\"etag-0\"",
+                            "plain-0",
+                            "cipher-0",
+                            "SHA-256"
+                    ))
+            );
+
+            Result<CompleteDirectMultipartUploadResponse> result = storageService.completeDirectMultipartUpload(request);
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData().sessionId()).isEqualTo("direct-session");
+            assertThat(result.getData().parts()).hasSize(1);
+            assertThat(result.getData().parts().getFirst().storagePath())
+                    .isEqualTo("s3://node1/chunks/direct-session/chunk-0");
+            assertThat(result.getData().parts().getFirst().eTag()).isEqualTo("\"etag-final\"");
+
+            ArgumentCaptor<CopyObjectRequest> copyCaptor = ArgumentCaptor.forClass(CopyObjectRequest.class);
+            verify(s3Client).copyObject(copyCaptor.capture());
+            assertThat(copyCaptor.getValue().sourceBucket()).isEqualTo("node1");
+            assertThat(copyCaptor.getValue().sourceKey()).isEqualTo("staging/direct-upload/direct-session/chunk-0");
+            assertThat(copyCaptor.getValue().destinationBucket()).isEqualTo("node1");
+            assertThat(copyCaptor.getValue().destinationKey()).isEqualTo("chunks/direct-session/chunk-0");
+            assertThat(copyCaptor.getValue().metadata()).containsEntry("file-hash", "cipher-0");
+
+            ArgumentCaptor<DeleteObjectRequest> deleteCaptor = ArgumentCaptor.forClass(DeleteObjectRequest.class);
+            verify(s3Client).deleteObject(deleteCaptor.capture());
+            assertThat(deleteCaptor.getValue().bucket()).isEqualTo("node1");
+            assertThat(deleteCaptor.getValue().key()).isEqualTo("staging/direct-upload/direct-session/chunk-0");
+        }
+
+        @Test
+        @DisplayName("Should abort direct multipart upload by deleting staging parts")
+        void shouldAbortDirectMultipartUpload() {
+            when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
+            when(clientManager.getClient("node1")).thenReturn(s3Client);
+            when(s3Client.deleteObject(any(DeleteObjectRequest.class))).thenReturn(DeleteObjectResponse.builder().build());
+
+            AbortDirectMultipartUploadRequest request = new AbortDirectMultipartUploadRequest(
+                    "direct-session",
+                    List.of(new DirectMultipartCompletedPart(
+                            0,
+                            "staging/direct-upload/direct-session/chunk-0",
+                            "chunks/direct-session/chunk-0",
+                            "node1",
+                            "s3://node1/chunks/direct-session/chunk-0",
+                            512L,
+                            null,
+                            "plain-0",
+                            "cipher-0",
+                            "SHA-256"
+                    ))
+            );
+
+            Result<Boolean> result = storageService.abortDirectMultipartUpload(request);
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData()).isTrue();
+
+            ArgumentCaptor<DeleteObjectRequest> deleteCaptor = ArgumentCaptor.forClass(DeleteObjectRequest.class);
+            verify(s3Client).deleteObject(deleteCaptor.capture());
+            assertThat(deleteCaptor.getValue().bucket()).isEqualTo("node1");
+            assertThat(deleteCaptor.getValue().key()).isEqualTo("staging/direct-upload/direct-session/chunk-0");
         }
     }
 

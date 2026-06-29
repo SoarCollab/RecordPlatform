@@ -2,6 +2,11 @@ import { browser } from "$app/environment";
 import { useSSE } from "$stores/sse.svelte";
 import * as uploadApi from "$api/endpoints/upload";
 import { ApiError } from "$api/client";
+import type {
+  DirectUploadCompletePartRequest,
+  DirectUploadPartRequest,
+  DirectUploadPartUrlVO,
+} from "$api/types";
 
 // ===== Types =====
 
@@ -24,6 +29,9 @@ export interface UploadTask {
   processProgress: number;
   serverProgress: number;
   uploadedChunks: number[];
+  directUpload: boolean;
+  directParts: DirectUploadPartUrlVO[];
+  directCompletedParts: DirectUploadCompletePartRequest[];
   totalChunks: number;
   chunkSize: number; // 该任务使用的分片大小
   speed: number; // bytes/sec
@@ -58,6 +66,9 @@ const CHUNK_CONFIG = {
 
 const MAX_CONCURRENT_UPLOADS = 3;
 const MAX_CONCURRENT_CHUNKS = 3;
+const DIRECT_UPLOAD_CHECKSUM_ALGORITHM = "SHA-256";
+const DIRECT_UPLOAD_HASH_PREFIX = "sha256:";
+const DIRECT_URL_EXPIRY_BUFFER_MS = 60 * 1000;
 
 /**
  * 根据文件大小计算最优分片大小
@@ -115,6 +126,79 @@ function calculateChunks(
   chunkSize: number = CHUNK_CONFIG.RULES[1].chunkSize, // 默认 5MB
 ): number {
   return Math.ceil(fileSize / chunkSize);
+}
+
+/**
+ * 将字节数组转换为十六进制字符串。
+ *
+ * @param bytes 摘要字节数组。
+ * @returns 小写十六进制字符串。
+ */
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/**
+ * 计算分片 SHA-256 摘要。
+ *
+ * @param chunk 文件分片。
+ * @returns 带算法前缀的摘要。
+ */
+async function calculateChunkHash(chunk: Blob): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error("当前浏览器不支持 SHA-256 分片校验");
+  }
+
+  const digest = await globalThis.crypto.subtle.digest(
+    DIRECT_UPLOAD_CHECKSUM_ALGORITHM,
+    await chunk.arrayBuffer(),
+  );
+  return `${DIRECT_UPLOAD_HASH_PREFIX}${bytesToHex(new Uint8Array(digest))}`;
+}
+
+/**
+ * 构建直传会话创建所需的全部分片元数据。
+ *
+ * @param file 待上传文件。
+ * @param chunkSize 分片大小。
+ * @param totalChunks 分片总数。
+ * @returns 直传分片元数据列表。
+ */
+async function buildDirectUploadParts(
+  file: File,
+  chunkSize: number,
+  totalChunks: number,
+): Promise<DirectUploadPartRequest[]> {
+  const parts: DirectUploadPartRequest[] = [];
+  for (let index = 0; index < totalChunks; index++) {
+    const start = index * chunkSize;
+    const end = Math.min(start + chunkSize, file.size);
+    const chunk = file.slice(start, end);
+    const hash = await calculateChunkHash(chunk);
+    parts.push({
+      index,
+      size: end - start,
+      plainHash: hash,
+      cipherHash: hash,
+      checksumAlgorithm: DIRECT_UPLOAD_CHECKSUM_ALGORITHM,
+    });
+  }
+  return parts;
+}
+
+/**
+ * 判断直传分片 URL 是否已经接近过期。
+ *
+ * @param part 直传分片 URL 元数据。
+ * @returns URL 是否不可继续安全使用。
+ */
+function isDirectPartUrlExpired(part: DirectUploadPartUrlVO): boolean {
+  return (
+    part.expiresAtEpochSeconds * 1000 - Date.now() <=
+    DIRECT_URL_EXPIRY_BUFFER_MS
+  );
 }
 
 const sse = useSSE();
@@ -344,6 +428,111 @@ async function uploadChunks(task: UploadTask): Promise<void> {
   await Promise.all(workers);
 }
 
+/**
+ * 使用预签名 URL 并发直传剩余分片。
+ *
+ * @param task 当前上传任务快照。
+ */
+async function uploadDirectParts(task: UploadTask): Promise<void> {
+  if (!task.clientId) return;
+
+  const chunkSize = task.chunkSize;
+  const file = task.file;
+  const partsByIndex = new Map(
+    task.directParts.map((part) => [part.index, part]),
+  );
+  const completedParts = new Map<number, DirectUploadCompletePartRequest>(
+    task.directCompletedParts.map((part) => [part.index, part]),
+  );
+
+  if (!uploadedChunkSets.has(task.id)) {
+    uploadedChunkSets.set(
+      task.id,
+      new Set([
+        ...task.uploadedChunks,
+        ...task.directCompletedParts.map((part) => part.index),
+      ]),
+    );
+  }
+  const chunkSet = uploadedChunkSets.get(task.id)!;
+
+  const chunksToUpload: number[] = [];
+  for (let index = 0; index < task.totalChunks; index++) {
+    if (!chunkSet.has(index)) {
+      chunksToUpload.push(index);
+    }
+  }
+
+  let lastTime = Date.now();
+
+  const uploadPart = async (index: number): Promise<void> => {
+    const currentTask = tasks.find((t) => t.id === task.id);
+    if (!currentTask || currentTask.status !== "uploading") {
+      return;
+    }
+
+    const part = partsByIndex.get(index);
+    if (!part) {
+      throw new Error(`缺少直传分片 URL: ${index}`);
+    }
+    if (isDirectPartUrlExpired(part)) {
+      throw new Error("直传 URL 已过期，请重试上传");
+    }
+
+    const start = index * chunkSize;
+    const end = Math.min(start + chunkSize, file.size);
+    const chunk = file.slice(start, end);
+    const chunkBytes = end - start;
+    const eTag = await uploadApi.uploadDirectPart(part.uploadUrl, chunk);
+
+    chunkSet.add(index);
+    completedParts.set(index, { index, eTag });
+
+    const now = Date.now();
+    const timeDiff = (now - lastTime) / 1000;
+    const speed = timeDiff > 0 ? chunkBytes / timeDiff : 0;
+    lastTime = now;
+
+    const nextProgress = Math.round((chunkSet.size / task.totalChunks) * 100);
+    const current = tasks.find((t) => t.id === task.id);
+    const nextServerProgress = Math.max(
+      current?.serverProgress ?? 0,
+      nextProgress,
+    );
+
+    updateTask(task.id, {
+      uploadedChunks: Array.from(chunkSet).sort((a, b) => a - b),
+      directCompletedParts: Array.from(completedParts.values()).sort(
+        (a, b) => a.index - b.index,
+      ),
+      progress: nextProgress,
+      serverProgress: nextServerProgress,
+      speed,
+    });
+  };
+
+  const queue = [...chunksToUpload];
+  const workers: Promise<void>[] = [];
+
+  const processQueue = async () => {
+    while (queue.length > 0) {
+      const currentTask = tasks.find((t) => t.id === task.id);
+      if (!currentTask || currentTask.status !== "uploading") {
+        break;
+      }
+
+      const index = queue.shift()!;
+      await uploadPart(index);
+    }
+  };
+
+  for (let i = 0; i < MAX_CONCURRENT_CHUNKS; i++) {
+    workers.push(processQueue());
+  }
+
+  await Promise.all(workers);
+}
+
 // ===== Actions =====
 
 /**
@@ -372,6 +561,9 @@ async function addFile(
     processProgress: 0,
     serverProgress: 0,
     uploadedChunks: [],
+    directUpload: false,
+    directParts: [],
+    directCompletedParts: [],
     totalChunks,
     chunkSize,
     speed: 0,
@@ -417,40 +609,43 @@ async function startUpload(id: string): Promise<void> {
   });
 
   try {
-    // Initialize upload
-    const result = await uploadApi.startUpload({
+    const parts = await buildDirectUploadParts(
+      task.file,
+      task.chunkSize,
+      task.totalChunks,
+    );
+    const result = await uploadApi.startDirectUpload({
       fileName: task.file.name,
       fileSize: task.file.size,
       contentType: task.file.type || "application/octet-stream",
       chunkSize: task.chunkSize,
       totalChunks: task.totalChunks,
       fileId: task.targetFileId ?? undefined,
+      parts,
     });
-
-    const initialProgress = Math.round(
-      (result.processedChunks.length / task.totalChunks) * 100,
-    );
 
     updateTask(id, {
       clientId: result.clientId,
-      uploadedChunks: result.processedChunks,
-      progress: initialProgress,
+      directUpload: true,
+      directParts: result.parts,
+      directCompletedParts: [],
+      uploadedChunks: [],
+      progress: 0,
       processProgress: 0,
-      serverProgress: initialProgress,
+      serverProgress: 0,
     });
 
     startProgressPolling(id, true);
 
-    // Initialize chunk set with server-reported processed chunks
-    uploadedChunkSets.set(id, new Set(result.processedChunks));
+    uploadedChunkSets.set(id, new Set());
 
-    // Upload chunks
-    await uploadChunks(tasks.find((t) => t.id === id)!);
+    await uploadDirectParts(tasks.find((t) => t.id === id)!);
 
-    // Check final status
     const finalTask = tasks.find((t) => t.id === id);
     if (finalTask?.status === "uploading") {
-      await uploadApi.completeUpload(finalTask.clientId!);
+      await uploadApi.completeDirectUpload(finalTask.clientId!, {
+        parts: finalTask.directCompletedParts,
+      });
       updateTask(id, {
         status: "processing",
         progress: 100,
@@ -486,7 +681,7 @@ async function pauseUpload(id: string): Promise<void> {
   updateTask(id, { status: "paused" });
   stopProgressPolling(id);
 
-  if (task.clientId) {
+  if (task.clientId && !task.directUpload) {
     await uploadApi.pauseUpload(task.clientId);
   }
 }
@@ -495,7 +690,7 @@ async function resumeUpload(id: string): Promise<void> {
   const task = tasks.find((t) => t.id === id);
   if (!task || task.status !== "paused") return;
 
-  if (task.clientId) {
+  if (task.clientId && !task.directUpload) {
     try {
       const result = await uploadApi.resumeUpload(task.clientId);
       // Sync chunk set with server state
@@ -516,11 +711,21 @@ async function resumeUpload(id: string): Promise<void> {
 
   updateTask(id, { status: "uploading" });
   startProgressPolling(id, true);
-  await uploadChunks(tasks.find((t) => t.id === id)!);
+  if (task.directUpload) {
+    await uploadDirectParts(tasks.find((t) => t.id === id)!);
+  } else {
+    await uploadChunks(tasks.find((t) => t.id === id)!);
+  }
 
   const finalTask = tasks.find((t) => t.id === id);
   if (finalTask?.status === "uploading") {
-    await uploadApi.completeUpload(finalTask.clientId!);
+    if (finalTask.directUpload) {
+      await uploadApi.completeDirectUpload(finalTask.clientId!, {
+        parts: finalTask.directCompletedParts,
+      });
+    } else {
+      await uploadApi.completeUpload(finalTask.clientId!);
+    }
     updateTask(id, {
       status: "processing",
       progress: 100,
@@ -539,7 +744,11 @@ async function cancelUpload(id: string): Promise<void> {
   stopProgressPolling(id);
 
   if (task.clientId) {
-    await uploadApi.cancelUpload(task.clientId);
+    if (task.directUpload) {
+      await uploadApi.abortDirectUpload(task.clientId);
+    } else {
+      await uploadApi.cancelUpload(task.clientId);
+    }
   }
 }
 
@@ -556,6 +765,9 @@ async function retryUpload(id: string): Promise<void> {
     processProgress: 0,
     serverProgress: 0,
     uploadedChunks: [],
+    directUpload: false,
+    directParts: [],
+    directCompletedParts: [],
     clientId: null,
     speed: 0,
     startTime: null,

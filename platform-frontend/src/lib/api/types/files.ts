@@ -182,6 +182,97 @@ export interface StartUploadRequest {
 }
 
 /**
+ * 直传分片创建请求。
+ * @see DirectUploadPartRequest.java
+ */
+export interface DirectUploadPartRequest {
+  /** 分片索引，从 0 开始 */
+  index: number;
+  /** 分片字节数 */
+  size: number;
+  /** 明文分片 SHA-256 */
+  plainHash: string;
+  /** 密文分片 SHA-256；未启用前端加密时与 plainHash 相同 */
+  cipherHash: string;
+  /** 校验算法 */
+  checksumAlgorithm?: string;
+}
+
+/**
+ * 直传上传会话创建请求。
+ * @see DirectUploadSessionRequest.java
+ */
+export interface DirectUploadSessionRequest {
+  fileName: string;
+  fileSize: number;
+  contentType: string;
+  chunkSize: number;
+  totalChunks: number;
+  clientId?: string;
+  fileId?: string;
+  parts: DirectUploadPartRequest[];
+}
+
+/**
+ * 直传分片预签名 URL。
+ * @see DirectUploadPartUrlVO.java
+ */
+export interface DirectUploadPartUrlVO {
+  index: number;
+  size: number;
+  uploadUrl: string;
+  expiresAtEpochSeconds: number;
+  storagePath: string;
+  plainHash: string;
+  cipherHash: string;
+}
+
+/**
+ * 直传上传会话响应。
+ * @see DirectUploadSessionVO.java
+ */
+export interface DirectUploadSessionVO {
+  clientId: string;
+  chunkSize: number;
+  totalChunks: number;
+  resumed: boolean;
+  manifestSchemaId?: string;
+  parts: DirectUploadPartUrlVO[];
+}
+
+/**
+ * 直传分片完成请求。
+ * @see DirectUploadCompletePartRequest.java
+ */
+export interface DirectUploadCompletePartRequest {
+  /** 分片索引，从 0 开始 */
+  index: number;
+  /** 对象存储返回的 ETag */
+  eTag?: string | null;
+}
+
+/**
+ * 直传上传完成请求。
+ * @see DirectUploadCompleteRequest.java
+ */
+export interface DirectUploadCompleteRequest {
+  parts: DirectUploadCompletePartRequest[];
+}
+
+/**
+ * 直传上传完成响应。
+ * @see DirectUploadCompleteVO.java
+ */
+export interface DirectUploadCompleteVO {
+  clientId: string;
+  fileId: string;
+  fileHash: string;
+  transactionHash: string;
+  manifestHash?: string;
+  status: string;
+}
+
+/**
  * 上传分片请求
  */
 export interface UploadChunkRequest {

@@ -1,10 +1,13 @@
 package cn.flying.dao.vo.file;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -55,6 +58,18 @@ public class FileUploadState {
     private volatile String status = "uploading";
     @Schema(description = "是否已完成 PREPARE 元数据落库（用于 completeUpload 幂等）")
     private volatile boolean prepareStored;
+    @Schema(description = "是否为对象存储直传会话")
+    private boolean directUpload;
+    @Schema(description = "直传会话分片内部存储元数据")
+    private List<DirectUploadPartState> directUploadParts = new ArrayList<>();
+    @Schema(description = "直传完成后的文件ID")
+    private Long directFileId;
+    @Schema(description = "直传完成后的文件哈希")
+    private String directFileHash;
+    @Schema(description = "直传完成后的交易哈希")
+    private String directTransactionHash;
+    @Schema(description = "直传完成后的 manifest hash")
+    private String directManifestHash;
 
     @Schema(description = "会话唯一标识（用于构建临时文件路径）")
     private String suid;
@@ -106,5 +121,27 @@ public class FileUploadState {
 
     public void updateLastActivity() {
         this.lastActivityTime = System.currentTimeMillis();
+    }
+
+    /**
+     * Internal storage metadata for one direct-upload chunk.
+     */
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Schema(description = "直传分片内部状态")
+    public static class DirectUploadPartState {
+        private int index;
+        private long size;
+        private String plainHash;
+        private String cipherHash;
+        private String checksumAlgorithm;
+        private String uploadUrl;
+        private long expiresAtEpochSeconds;
+        private String storagePath;
+        private String stagingObjectName;
+        private String finalObjectName;
+        private String nodeName;
     }
 }

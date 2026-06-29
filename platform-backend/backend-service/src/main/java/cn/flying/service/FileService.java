@@ -10,6 +10,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 文件服务接口（经过多层封装后对外暴露的统一接口）
@@ -60,6 +61,20 @@ public interface FileService extends IService<File> {
      * @return 已落库文件信息
      */
     File storeFile(Long userId, Long targetFileId, String originFileName, List<java.io.File> fileList, List<String> fileHashList, String fileParam);
+
+    /**
+     * Registers a direct-uploaded file whose chunks already exist in object storage.
+     *
+     * @param userId 用户ID
+     * @param targetFileId 目标文件ID（为空时按 fileName 回溯 PREPARE）
+     * @param originFileName 原始文件名
+     * @param fileSize 文件大小（字节）
+     * @param storedPaths 分片哈希到 storagePath 的映射
+     * @param fileParam 文件参数(JSON)
+     * @return 已落库文件信息
+     */
+    File storeDirectUploadedFile(Long userId, Long targetFileId, String originFileName, long fileSize,
+                                 Map<String, String> storedPaths, String fileParam);
 
     /**
      * 修改文件状态

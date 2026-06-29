@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const clientMocks = vi.hoisted(() => {
   return {
@@ -32,6 +32,10 @@ function paramsToObject(params: URLSearchParams): Record<string, string> {
 describe("upload endpoints", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("startUpload 应使用 URLSearchParams 适配后端 @RequestParam", async () => {
@@ -83,6 +87,37 @@ describe("upload endpoints", () => {
     expect(payload.fileId).toBe("ext_file_id");
   });
 
+  it("startDirectUpload 应使用 JSON body 创建直传会话", async () => {
+    clientMocks.api.post.mockResolvedValue({
+      clientId: "direct-1",
+      parts: [],
+    });
+
+    const payload = {
+      fileName: "large.bin",
+      fileSize: 4096,
+      contentType: "application/octet-stream",
+      totalChunks: 2,
+      chunkSize: 2048,
+      parts: [
+        {
+          index: 0,
+          size: 2048,
+          plainHash: "sha256:a",
+          cipherHash: "sha256:a",
+          checksumAlgorithm: "SHA-256",
+        },
+      ],
+    };
+
+    await uploadApi.startDirectUpload(payload);
+
+    expect(clientMocks.api.post).toHaveBeenCalledWith(
+      "/upload-sessions/direct",
+      payload,
+    );
+  });
+
   it("uploadChunk 应构建 FormData 并调用 PUT 新路径", async () => {
     clientMocks.api.put.mockResolvedValue(undefined);
     const blob = new Blob(["abc"], { type: "text/plain" });
@@ -95,6 +130,29 @@ describe("upload endpoints", () => {
       expect.any(FormData),
     );
     expect((formData as FormData).get("file")).toBeInstanceOf(Blob);
+  });
+
+  it("uploadDirectPart 应直接 PUT 到预签名 URL 并返回 ETag", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, {
+        status: 200,
+        headers: { ETag: '"etag-1"' },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const blob = new Blob(["abc"], { type: "text/plain" });
+
+    const eTag = await uploadApi.uploadDirectPart(
+      "https://storage.example/upload",
+      blob,
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith("https://storage.example/upload", {
+      method: "PUT",
+      body: blob,
+    });
+    expect(clientMocks.api.put).not.toHaveBeenCalled();
+    expect(eTag).toBe('"etag-1"');
   });
 
   it("complete/pause/resume/cancel 应携带 clientId 参数", async () => {
@@ -124,6 +182,27 @@ describe("upload endpoints", () => {
     expect(clientMocks.api.delete).toHaveBeenNthCalledWith(
       1,
       "/upload-sessions/client-1",
+    );
+  });
+
+  it("completeDirectUpload/abortDirectUpload 应使用 direct 路径", async () => {
+    clientMocks.api.post.mockResolvedValueOnce({
+      clientId: "direct-1",
+      status: "completed",
+    });
+    clientMocks.api.delete.mockResolvedValueOnce(undefined);
+
+    await uploadApi.completeDirectUpload("direct-1", {
+      parts: [{ index: 0, eTag: '"etag-1"' }],
+    });
+    await uploadApi.abortDirectUpload("direct-1");
+
+    expect(clientMocks.api.post).toHaveBeenCalledWith(
+      "/upload-sessions/direct-1/direct/complete",
+      { parts: [{ index: 0, eTag: '"etag-1"' }] },
+    );
+    expect(clientMocks.api.delete).toHaveBeenCalledWith(
+      "/upload-sessions/direct-1/direct",
     );
   });
 

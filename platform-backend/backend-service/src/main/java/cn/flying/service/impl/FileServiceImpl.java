@@ -26,6 +26,8 @@ import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.request.CancelShareRequest;
 import cn.flying.platformapi.request.ShareFilesRequest;
+import cn.flying.platformapi.request.StoreFileRequest;
+import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.platformapi.response.SharingVO;
@@ -239,6 +241,57 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         }
 
         return file;
+    }
+
+    /**
+     * Registers chunks that were uploaded directly to object storage without proxying bytes through backend.
+     */
+    @Override
+    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.util.TenantKeyUtils).currentTenantUserKey(#userId)")
+    public File storeDirectUploadedFile(Long userId, Long targetFileId, String originFileName, long fileSize,
+                                        Map<String, String> storedPaths, String fileParam) {
+        if (CommonUtils.isEmpty(storedPaths)) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "Stored paths cannot be empty");
+        }
+
+        File existingFile = resolvePrepareFileForStore(userId, targetFileId, originFileName);
+        String fileContent = JsonConverter.toJsonWithPretty(storedPaths);
+        Result<StoreFileResponse> result = fileRemoteClient.storeFileOnChain(new StoreFileRequest(
+                String.valueOf(userId),
+                existingFile.getFileName(),
+                fileParam,
+                fileContent
+        ));
+        StoreFileResponse chainResult = ResultUtils.getData(result);
+        if (chainResult == null || CommonUtils.isEmpty(chainResult.fileHash())
+                || CommonUtils.isEmpty(chainResult.transactionHash())) {
+            throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "区块链存储返回无效结果");
+        }
+
+        LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
+                .eq(File::getId, existingFile.getId())
+                .eq(File::getUid, userId)
+                .eq(File::getStatus, FileUploadStatus.PREPARE.getCode());
+
+        File update = new File()
+                .setUid(userId)
+                .setFileName(existingFile.getFileName())
+                .setFileHash(chainResult.fileHash())
+                .setTransactionHash(chainResult.transactionHash())
+                .setFileParam(fileParam)
+                .setStatus(FileUploadStatus.SUCCESS.getCode());
+
+        boolean updated = this.update(update, wrapper);
+        if (!updated) {
+            throw new GeneralException(ResultEnum.FAIL, "文件状态更新失败，请重试");
+        }
+
+        return existingFile
+                .setFileSize(fileSize)
+                .setFileHash(chainResult.fileHash())
+                .setTransactionHash(chainResult.transactionHash())
+                .setFileParam(fileParam)
+                .setStatus(FileUploadStatus.SUCCESS.getCode());
     }
 
     /**

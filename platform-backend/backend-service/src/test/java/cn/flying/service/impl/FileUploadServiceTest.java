@@ -4,19 +4,40 @@ import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.lock.DistributedLock;
+import cn.flying.common.tenant.TenantContext;
+import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.UidEncoder;
 import cn.flying.dao.dto.File;
+import cn.flying.dao.vo.file.DirectUploadCompletePartRequest;
+import cn.flying.dao.vo.file.DirectUploadCompleteRequest;
+import cn.flying.dao.vo.file.DirectUploadCompleteVO;
+import cn.flying.dao.vo.file.DirectUploadPartRequest;
+import cn.flying.dao.vo.file.DirectUploadSessionRequest;
+import cn.flying.dao.vo.file.DirectUploadSessionVO;
 import cn.flying.dao.vo.file.FileUploadState;
 import cn.flying.dao.vo.file.ProgressVO;
 import cn.flying.dao.vo.file.ResumeUploadVO;
 import cn.flying.dao.vo.file.StartUploadVO;
+import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.request.AbortDirectMultipartUploadRequest;
+import cn.flying.platformapi.request.CompleteDirectMultipartUploadRequest;
+import cn.flying.platformapi.request.CreateDirectMultipartUploadRequest;
+import cn.flying.platformapi.response.CompleteDirectMultipartUploadResponse;
+import cn.flying.platformapi.response.CreateDirectMultipartUploadResponse;
+import cn.flying.platformapi.response.DirectMultipartCompletedPartVO;
+import cn.flying.platformapi.response.DirectMultipartUploadPartUrl;
 import cn.flying.service.FileService;
 import cn.flying.service.QuotaService;
 import cn.flying.service.assistant.FileUploadRedisStateManager;
 import cn.flying.service.encryption.EncryptionStrategyFactory;
+import cn.flying.service.manifest.ChunkManifestDraft;
+import cn.flying.service.manifest.ChunkManifestService;
+import cn.flying.service.manifest.ChunkManifestView;
+import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.test.builders.FileUploadStateTestBuilder;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
@@ -35,6 +56,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
@@ -72,10 +95,17 @@ class FileUploadServiceTest {
     @Mock
     private RLock quotaLock;
 
+    @Mock
+    private FileRemoteClient fileRemoteClient;
+
+    @Mock
+    private ChunkManifestService chunkManifestService;
+
     @InjectMocks
     private FileUploadServiceImpl fileUploadService;
 
     private static MockedStatic<UidEncoder> uidEncoderMock;
+    private static MockedStatic<IdUtils> idUtilsMock;
 
     private static final Long USER_ID = 100L;
     private static final String SUID = "encoded_uid_100";
@@ -86,11 +116,16 @@ class FileUploadServiceTest {
         uidEncoderMock = mockStatic(UidEncoder.class);
         uidEncoderMock.when(() -> UidEncoder.encodeUid(anyString())).thenReturn(SUID);
         uidEncoderMock.when(() -> UidEncoder.encodeCid(anyString())).thenReturn(CLIENT_ID);
+        idUtilsMock = mockStatic(IdUtils.class);
+        idUtilsMock.when(() -> IdUtils.toExternalId(any(Long.class)))
+                .thenAnswer(invocation -> "E" + invocation.getArgument(0));
+        idUtilsMock.when(() -> IdUtils.fromExternalId(anyString())).thenReturn(9527L);
     }
 
     @AfterAll
     static void tearDownClass() {
         uidEncoderMock.close();
+        idUtilsMock.close();
     }
 
     @BeforeEach
@@ -100,6 +135,277 @@ class FileUploadServiceTest {
         ReflectionTestUtils.setField(fileUploadService, "eventPublisher", eventPublisher);
         // 让异步分片处理在测试中同步执行，避免线程池/时序不稳定
         ReflectionTestUtils.setField(fileUploadService, "fileProcessingExecutor", (java.util.concurrent.Executor) Runnable::run);
+    }
+
+    @AfterEach
+    void tearDown() {
+        TenantContext.clear();
+    }
+
+    /**
+     * 构造两分片 direct upload 创建请求。
+     */
+    private DirectUploadSessionRequest directSessionRequest() {
+        DirectUploadSessionRequest request = new DirectUploadSessionRequest();
+        request.setFileName("direct.pdf");
+        request.setFileSize(1024L);
+        request.setContentType("application/pdf");
+        request.setChunkSize(512);
+        request.setTotalChunks(2);
+        request.setParts(List.of(
+                directUploadPart(0, 512L, "plain-0", "cipher-0"),
+                directUploadPart(1, 512L, "plain-1", "cipher-1")
+        ));
+        return request;
+    }
+
+    /**
+     * 构造 direct upload 分片声明。
+     */
+    private DirectUploadPartRequest directUploadPart(int index, long size, String plainHash, String cipherHash) {
+        DirectUploadPartRequest part = new DirectUploadPartRequest();
+        part.setIndex(index);
+        part.setSize(size);
+        part.setPlainHash(plainHash);
+        part.setCipherHash(cipherHash);
+        part.setChecksumAlgorithm("SHA-256");
+        return part;
+    }
+
+    /**
+     * 构造对象存储返回的 direct upload 预签名 URL 元数据。
+     */
+    private List<DirectMultipartUploadPartUrl> storageUploadPartUrls() {
+        return List.of(
+                new DirectMultipartUploadPartUrl(
+                        0,
+                        "https://storage.example/upload/0",
+                        4_102_444_800L,
+                        "s3://node-a/final-0",
+                        "staging/direct/0",
+                        "chunks/direct/final-0",
+                        "node-a",
+                        512L
+                ),
+                new DirectMultipartUploadPartUrl(
+                        1,
+                        "https://storage.example/upload/1",
+                        4_102_444_800L,
+                        "s3://node-a/final-1",
+                        "staging/direct/1",
+                        "chunks/direct/final-1",
+                        "node-a",
+                        512L
+                )
+        );
+    }
+
+    /**
+     * 构造已持久化在 Redis 中的 direct upload 会话状态。
+     */
+    private FileUploadState directUploadState() {
+        FileUploadState state = new FileUploadState(
+                USER_ID,
+                "direct.pdf",
+                1024L,
+                "application/pdf",
+                CLIENT_ID,
+                512,
+                2
+        );
+        state.setTenantId(77L);
+        state.setSuid(SUID);
+        state.setDirectUpload(true);
+        state.setDirectUploadParts(List.of(
+                new FileUploadState.DirectUploadPartState(
+                        0,
+                        512L,
+                        "plain-0",
+                        "cipher-0",
+                        "SHA-256",
+                        "https://storage.example/upload/0",
+                        4_102_444_800L,
+                        "s3://node-a/final-0",
+                        "staging/direct/0",
+                        "chunks/direct/final-0",
+                        "node-a"
+                ),
+                new FileUploadState.DirectUploadPartState(
+                        1,
+                        512L,
+                        "plain-1",
+                        "cipher-1",
+                        "SHA-256",
+                        "https://storage.example/upload/1",
+                        4_102_444_800L,
+                        "s3://node-a/final-1",
+                        "staging/direct/1",
+                        "chunks/direct/final-1",
+                        "node-a"
+                )
+        ));
+        return state;
+    }
+
+    /**
+     * 构造前端 direct upload 完成请求。
+     */
+    private DirectUploadCompleteRequest directCompleteRequest() {
+        DirectUploadCompletePartRequest first = new DirectUploadCompletePartRequest();
+        first.setIndex(0);
+        first.setETag("\"etag-0\"");
+        DirectUploadCompletePartRequest second = new DirectUploadCompletePartRequest();
+        second.setIndex(1);
+        second.setETag("\"etag-1\"");
+        DirectUploadCompleteRequest request = new DirectUploadCompleteRequest();
+        request.setParts(List.of(first, second));
+        return request;
+    }
+
+    @Nested
+    @DisplayName("Direct Upload")
+    class DirectUpload {
+
+        @Test
+        @DisplayName("should create direct upload session and persist presigned part state")
+        void shouldCreateDirectUploadSession() {
+            TenantContext.setTenantId(77L);
+            DirectUploadSessionRequest request = directSessionRequest();
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(null);
+            when(fileRemoteClient.createDirectMultipartUpload(any()))
+                    .thenReturn(Result.success(new CreateDirectMultipartUploadResponse(CLIENT_ID, storageUploadPartUrls())));
+
+            DirectUploadSessionVO result = fileUploadService.startDirectUpload(USER_ID, request);
+
+            assertNotNull(result);
+            assertEquals(CLIENT_ID, result.getClientId());
+            assertEquals(2, result.getParts().size());
+            assertFalse(result.isResumed());
+            assertEquals("https://storage.example/upload/0", result.getParts().getFirst().getUploadUrl());
+
+            ArgumentCaptor<CreateDirectMultipartUploadRequest> storageRequestCaptor =
+                    ArgumentCaptor.forClass(CreateDirectMultipartUploadRequest.class);
+            verify(fileRemoteClient).createDirectMultipartUpload(storageRequestCaptor.capture());
+            assertEquals(CLIENT_ID, storageRequestCaptor.getValue().sessionId());
+            assertEquals("cipher-0", storageRequestCaptor.getValue().parts().getFirst().objectName());
+
+            verify(redisStateManager).saveNewState(
+                    argThat(state -> state.isDirectUpload()
+                            && state.getDirectUploadParts().size() == 2
+                            && Objects.equals(state.getDirectUploadParts().getFirst().getStagingObjectName(), "staging/direct/0")),
+                    eq(SUID)
+            );
+            verify(redisStateManager).updateState(argThat(FileUploadState::isDirectUpload));
+            verify(quotaService).checkUploadQuota(77L, USER_ID, 1024L);
+        }
+
+        @Test
+        @DisplayName("should complete direct upload, register file, and persist manifest")
+        void shouldCompleteDirectUploadAndPersistManifest() {
+            FileUploadState state = directUploadState();
+            File storedFile = new File()
+                    .setId(42L)
+                    .setUid(USER_ID)
+                    .setFileName("direct.pdf")
+                    .setFileHash("file-hash")
+                    .setTransactionHash("tx-1")
+                    .setStatus(FileUploadStatus.SUCCESS.getCode());
+            List<DirectMultipartCompletedPartVO> completedParts = List.of(
+                    new DirectMultipartCompletedPartVO(0, "s3://node-a/final-0", 512L, "\"etag-0\"", "plain-0", "cipher-0", "SHA-256"),
+                    new DirectMultipartCompletedPartVO(1, "s3://node-a/final-1", 512L, "\"etag-1\"", "plain-1", "cipher-1", "SHA-256")
+            );
+            ChunkManifestView manifest = new ChunkManifestView(
+                    900L,
+                    42L,
+                    1,
+                    "cn.flying.chunk-manifest.v1",
+                    "file-hash",
+                    "manifest-hash",
+                    "SHA-256",
+                    512L,
+                    1024L,
+                    null,
+                    "NONE",
+                    "S3",
+                    List.of()
+            );
+
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+            when(redissonClient.getLock("distributed:lock:upload:quota:complete:tenant:77")).thenReturn(quotaLock);
+            when(quotaLock.isHeldByCurrentThread()).thenReturn(true);
+            when(fileRemoteClient.completeDirectMultipartUpload(any()))
+                    .thenReturn(Result.success(new CompleteDirectMultipartUploadResponse(CLIENT_ID, completedParts)));
+            when(fileService.storeDirectUploadedFile(anyLong(), any(), anyString(), anyLong(), anyMap(), anyString()))
+                    .thenReturn(storedFile);
+            when(chunkManifestService.saveManifest(eq(USER_ID), eq(42L), any()))
+                    .thenReturn(manifest);
+
+            DirectUploadCompleteVO result = fileUploadService.completeDirectUpload(
+                    USER_ID,
+                    CLIENT_ID,
+                    directCompleteRequest()
+            );
+
+            assertEquals(CLIENT_ID, result.getClientId());
+            assertEquals("E42", result.getFileId());
+            assertEquals("file-hash", result.getFileHash());
+            assertEquals("tx-1", result.getTransactionHash());
+            assertEquals("manifest-hash", result.getManifestHash());
+            assertEquals("completed", result.getStatus());
+
+            ArgumentCaptor<CompleteDirectMultipartUploadRequest> completeRequestCaptor =
+                    ArgumentCaptor.forClass(CompleteDirectMultipartUploadRequest.class);
+            verify(fileRemoteClient).completeDirectMultipartUpload(completeRequestCaptor.capture());
+            assertEquals(CLIENT_ID, completeRequestCaptor.getValue().sessionId());
+            assertEquals("\"etag-0\"", completeRequestCaptor.getValue().parts().getFirst().eTag());
+            assertEquals("staging/direct/0", completeRequestCaptor.getValue().parts().getFirst().stagingObjectName());
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Map<String, String>> storedPathCaptor = ArgumentCaptor.forClass(Map.class);
+            verify(fileService).storeDirectUploadedFile(
+                    eq(USER_ID),
+                    isNull(),
+                    eq("direct.pdf"),
+                    eq(1024L),
+                    storedPathCaptor.capture(),
+                    contains("DIRECT_MULTIPART")
+            );
+            assertEquals("s3://node-a/final-0", storedPathCaptor.getValue().get("cipher-0"));
+            assertEquals("s3://node-a/final-1", storedPathCaptor.getValue().get("cipher-1"));
+
+            ArgumentCaptor<ChunkManifestDraft> manifestCaptor = ArgumentCaptor.forClass(ChunkManifestDraft.class);
+            verify(chunkManifestService).saveManifest(eq(USER_ID), eq(42L), manifestCaptor.capture());
+            assertEquals("file-hash", manifestCaptor.getValue().fileHash());
+            assertEquals(2, manifestCaptor.getValue().chunks().size());
+            assertEquals("S3", manifestCaptor.getValue().storageBackend());
+
+            assertEquals(42L, state.getDirectFileId());
+            assertEquals("file-hash", state.getDirectFileHash());
+            assertEquals("tx-1", state.getDirectTransactionHash());
+            assertEquals("manifest-hash", state.getDirectManifestHash());
+            verify(redisStateManager, atLeastOnce()).updateState(state);
+            verify(redisStateManager).markCompleted(CLIENT_ID, SUID, 300);
+            verify(quotaService, times(2)).checkUploadQuota(77L, USER_ID, 1024L);
+        }
+
+        @Test
+        @DisplayName("should abort direct upload and remove local session")
+        void shouldAbortDirectUpload() {
+            FileUploadState state = directUploadState();
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+            when(fileRemoteClient.abortDirectMultipartUpload(any())).thenReturn(Result.success(true));
+
+            boolean result = fileUploadService.abortDirectUpload(USER_ID, CLIENT_ID);
+
+            assertTrue(result);
+            ArgumentCaptor<AbortDirectMultipartUploadRequest> abortRequestCaptor =
+                    ArgumentCaptor.forClass(AbortDirectMultipartUploadRequest.class);
+            verify(fileRemoteClient).abortDirectMultipartUpload(abortRequestCaptor.capture());
+            assertEquals(CLIENT_ID, abortRequestCaptor.getValue().sessionId());
+            assertEquals(2, abortRequestCaptor.getValue().parts().size());
+            assertNull(abortRequestCaptor.getValue().parts().getFirst().eTag());
+            verify(redisStateManager).removeSession(CLIENT_ID, SUID);
+        }
     }
 
     @Nested
