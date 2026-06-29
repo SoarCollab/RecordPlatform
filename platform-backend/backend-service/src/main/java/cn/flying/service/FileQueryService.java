@@ -1,6 +1,7 @@
 package cn.flying.service;
 
 import cn.flying.dao.dto.File;
+import cn.flying.dao.vo.file.FileDownloadMetadataVO;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.dao.vo.file.FileVersionVO;
@@ -93,6 +94,15 @@ public interface FileQueryService {
      * @return 分片地址列表
      */
     List<String> getFileAddress(Long userId, String fileHash);
+
+    /**
+     * 获取文件预签名分片下载元数据。
+     *
+     * @param userId 用户ID
+     * @param fileHash 文件哈希
+     * @return 分片下载 URL、manifest、解密和算法元数据
+     */
+    FileDownloadMetadataVO getDownloadMetadata(Long userId, String fileHash);
 
     /**
      * 根据交易哈希获取区块链交易信息

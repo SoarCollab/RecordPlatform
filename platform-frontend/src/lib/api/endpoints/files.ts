@@ -17,11 +17,12 @@ import type {
   ShareAccessLogVO,
   ShareAccessStatsVO,
   FileProvenanceVO,
+  FileDownloadMetadataVO,
 } from "../types";
 import { ShareType } from "../types";
 
 // Re-export types for use in other modules
-export type { FileDecryptInfoVO } from "../types";
+export type { FileDecryptInfoVO, FileDownloadMetadataVO } from "../types";
 
 const BASE = "/files";
 
@@ -177,6 +178,20 @@ export async function getMyShares(
  */
 export async function getDownloadAddress(fileHash: string): Promise<string[]> {
   return api.get<string[]>(`${BASE}/hash/${fileHash}/addresses`);
+}
+
+/**
+ * 获取文件预签名分片下载元数据。
+ *
+ * @param fileHash 文件哈希
+ * @returns manifest、解密信息和有序分片下载 URL
+ */
+export async function getDownloadMetadata(
+  fileHash: string,
+): Promise<FileDownloadMetadataVO> {
+  return api.get<FileDownloadMetadataVO>(
+    `${BASE}/hash/${fileHash}/download-metadata`,
+  );
 }
 
 /**

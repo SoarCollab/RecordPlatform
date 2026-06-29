@@ -17,6 +17,8 @@ import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.FileDownloadMetadataVO;
+import cn.flying.dao.vo.file.FileDownloadPartVO;
 import cn.flying.dao.vo.file.FileShareVO;
 import cn.flying.dao.vo.file.FileVersionVO;
 import cn.flying.dao.vo.file.ShareFileVO;
@@ -26,6 +28,9 @@ import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FriendFileShareService;
+import cn.flying.service.manifest.ChunkManifestChunk;
+import cn.flying.service.manifest.ChunkManifestService;
+import cn.flying.service.manifest.ChunkManifestView;
 import cn.flying.service.remote.FileRemoteClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -87,12 +92,14 @@ import java.util.concurrent.CompletableFuture;
 public class FileQueryServiceImpl implements FileQueryService {
 
     private static final long MAX_IN_MEMORY_TRANSFER_BYTES = 80L * 1024 * 1024;
+    private static final long DOWNLOAD_URL_TTL_SECONDS = 24L * 60L * 60L;
 
     private final FileMapper fileMapper;
     private final AccountMapper accountMapper;
     private final FileRemoteClient fileRemoteClient;
     private final FileShareMapper fileShareMapper;
     private final FriendFileShareService friendFileShareService;
+    private final ChunkManifestService chunkManifestService;
     @Qualifier("virtualThreadExecutor")
     private final TaskExecutor virtualThreadExecutor;
 
@@ -282,6 +289,81 @@ public class FileQueryServiceImpl implements FileQueryService {
         return ResultUtils.getData(urlListResult);
     }
 
+    /**
+     * Builds authorized presigned chunk-download metadata from the active chunk manifest.
+     */
+    @Override
+    public FileDownloadMetadataVO getDownloadMetadata(Long userId, String fileHash) {
+        File file = getFileByHash(userId, fileHash);
+        FileDecryptInfoVO decryptInfo = buildFileDecryptInfo(file, fileHash);
+        ChunkManifestView manifest = chunkManifestService.findActiveManifest(file.getUid(), file.getId())
+                .orElseThrow(() -> new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件缺少分片 manifest"));
+        if (CommonUtils.isEmpty(manifest.chunks())) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件分片 manifest 为空");
+        }
+
+        List<String> storagePaths = manifest.chunks().stream()
+                .map(ChunkManifestChunk::storagePath)
+                .toList();
+        List<String> cipherHashes = manifest.chunks().stream()
+                .map(ChunkManifestChunk::cipherHash)
+                .toList();
+        List<String> downloadUrls = ResultUtils.getData(
+                fileRemoteClient.getFileUrlListByHash(storagePaths, cipherHashes)
+        );
+        if (downloadUrls == null || downloadUrls.size() != manifest.chunks().size()) {
+            throw new GeneralException(ResultEnum.FILE_SERVICE_ERROR, "对象存储返回的下载 URL 数量不一致");
+        }
+
+        long expiresAtEpochSeconds = System.currentTimeMillis() / 1000L + DOWNLOAD_URL_TTL_SECONDS;
+        List<FileDownloadPartVO> parts = buildDownloadParts(manifest, downloadUrls, expiresAtEpochSeconds);
+        Long fileSizeValue = decryptInfo.fileSize() != null ? decryptInfo.fileSize() : file.getFileSize();
+        if (fileSizeValue == null) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件大小缺失");
+        }
+
+        return new FileDownloadMetadataVO(
+                IdUtils.toExternalId(file.getId()),
+                fileHash,
+                decryptInfo.fileName(),
+                fileSizeValue,
+                decryptInfo.contentType(),
+                decryptInfo.initialKey(),
+                manifest.schemaId(),
+                manifest.manifestHash(),
+                manifest.hashAlgorithm(),
+                manifest.encryptionAlgorithm(),
+                manifest.storageBackend(),
+                manifest.chunkSize(),
+                parts.size(),
+                parts
+        );
+    }
+
+    /**
+     * Combines ordered manifest chunks with storage presigned URLs.
+     */
+    private List<FileDownloadPartVO> buildDownloadParts(ChunkManifestView manifest,
+                                                        List<String> downloadUrls,
+                                                        long expiresAtEpochSeconds) {
+        List<ChunkManifestChunk> chunks = manifest.chunks();
+        List<FileDownloadPartVO> parts = new ArrayList<>(chunks.size());
+        for (int i = 0; i < chunks.size(); i++) {
+            ChunkManifestChunk chunk = chunks.get(i);
+            parts.add(new FileDownloadPartVO(
+                    chunk.index(),
+                    chunk.size(),
+                    downloadUrls.get(i),
+                    expiresAtEpochSeconds,
+                    chunk.storagePath(),
+                    chunk.plainHash(),
+                    chunk.cipherHash(),
+                    chunk.checksumAlgorithm()
+            ));
+        }
+        return parts;
+    }
+
     @Override
     @Cacheable(cacheNames = "transaction", key = "#userId + ':' + #transactionHash", unless = "#result == null")
     public TransactionVO getTransactionByHash(Long userId, String transactionHash) {
@@ -444,6 +526,13 @@ public class FileQueryServiceImpl implements FileQueryService {
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权限访问");
         }
 
+        return buildFileDecryptInfo(file, fileHash);
+    }
+
+    /**
+     * Builds decrypt metadata from the stored file parameter JSON.
+     */
+    private FileDecryptInfoVO buildFileDecryptInfo(File file, String fileHash) {
         String fileParam = file.getFileParam();
         if (CommonUtils.isEmpty(fileParam)) {
             throw new GeneralException(ResultEnum.FAIL, "文件元数据不完整，缺少解密信息");

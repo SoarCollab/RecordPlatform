@@ -72,6 +72,7 @@ describe("files endpoints", () => {
       .mockResolvedValueOnce({ initialKey: "k", chunkCount: 1 })
       .mockResolvedValueOnce({ records: [], total: 0 })
       .mockResolvedValueOnce(["u1", "u2"])
+      .mockResolvedValueOnce({ fileHash: "h1", parts: [] })
       .mockResolvedValueOnce({ tx: "t1" })
       .mockResolvedValueOnce({ records: [], total: 0 })
       .mockResolvedValueOnce({ count: 1 })
@@ -92,6 +93,7 @@ describe("files endpoints", () => {
     await filesApi.getDecryptInfo("h1");
     await filesApi.getMyShares({ pageNum: 1, pageSize: 5 });
     await filesApi.getDownloadAddress("h1");
+    await filesApi.getDownloadMetadata("h1");
     await filesApi.getTransaction("tx-hash");
     await filesApi.getShareAccessLogs("code1", { pageNum: 2 });
     await filesApi.getShareAccessStats("code1");
@@ -127,19 +129,23 @@ describe("files endpoints", () => {
     );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       10,
-      "/transactions/tx-hash",
+      "/files/hash/h1/download-metadata",
     );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       11,
+      "/transactions/tx-hash",
+    );
+    expect(clientMocks.api.get).toHaveBeenNthCalledWith(
+      12,
       "/files/share/code1/access-logs",
       { params: { pageNum: 2 } },
     );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
-      12,
+      13,
       "/files/share/code1/stats",
     );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
-      13,
+      14,
       "/files/file-id/provenance",
     );
   });

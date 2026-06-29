@@ -6,6 +6,8 @@ import cn.flying.common.util.SecureIdCodec;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.BatchDownloadMetricsReportVO;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.FileDownloadMetadataVO;
+import cn.flying.dao.vo.file.FileDownloadPartVO;
 import cn.flying.dao.vo.file.FileVO;
 import cn.flying.service.DownloadBatchMetricsService;
 import cn.flying.service.FileQueryService;
@@ -70,20 +72,49 @@ class FileRestControllerTest {
         when(fileQueryService.getFile(userId, fileHash)).thenReturn(List.of("a".getBytes()));
         when(fileQueryService.getFileDecryptInfo(userId, fileHash))
                 .thenReturn(new FileDecryptInfoVO("k", "n", 1L, "text/plain", 1, fileHash));
+        when(fileQueryService.getDownloadMetadata(userId, fileHash))
+                .thenReturn(new FileDownloadMetadataVO(
+                        "file-1",
+                        fileHash,
+                        "n",
+                        1L,
+                        "text/plain",
+                        "k",
+                        "cn.flying.chunk-manifest.v1",
+                        "sha256:manifest",
+                        "SHA-256",
+                        "AES-GCM",
+                        "S3",
+                        1L,
+                        1,
+                        List.of(new FileDownloadPartVO(
+                                0,
+                                1L,
+                                "url-1",
+                                1000L,
+                                "chunks/0",
+                                "plain-0",
+                                "cipher-0",
+                                "SHA-256"
+                        ))
+                ));
 
         Result<Page<FileVO>> pageResult = controller.getFiles(userId, 1, 10, null, null, null, null, null);
         Result<FileVO> byHashResult = controller.getFileByHash(userId, fileHash);
         Result<List<String>> addressResult = controller.getFileAddresses(userId, fileHash);
+        Result<FileDownloadMetadataVO> metadataResult = controller.getDownloadMetadata(userId, fileHash);
         Result<List<byte[]>> chunksResult = controller.getFileChunks(userId, fileHash);
         Result<FileDecryptInfoVO> decryptInfoResult = controller.getFileDecryptInfo(userId, fileHash);
 
         assertNotNull(pageResult.getData());
         assertNotNull(byHashResult.getData());
         assertEquals(1, addressResult.getData().size());
+        assertEquals("sha256:manifest", metadataResult.getData().manifestHash());
         assertEquals(1, chunksResult.getData().size());
         assertEquals(fileHash, decryptInfoResult.getData().fileHash());
         verify(fileQueryService).getFileByHash(userId, fileHash);
         verify(fileQueryService).getFileAddress(userId, fileHash);
+        verify(fileQueryService).getDownloadMetadata(userId, fileHash);
         verify(fileQueryService).getFile(userId, fileHash);
         verify(fileQueryService).getFileDecryptInfo(userId, fileHash);
     }

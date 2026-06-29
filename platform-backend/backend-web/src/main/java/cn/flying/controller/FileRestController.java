@@ -9,6 +9,7 @@ import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.BatchDownloadMetricsReportVO;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.FileDownloadMetadataVO;
 import cn.flying.dao.vo.file.FileVO;
 import cn.flying.service.DownloadBatchMetricsService;
 import cn.flying.service.FileQueryService;
@@ -181,6 +182,21 @@ public class FileRestController {
     public Result<List<String>> getFileAddresses(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
                                                  @PathVariable String fileHash) {
         return Result.success(fileQueryService.getFileAddress(userId, fileHash));
+    }
+
+    /**
+     * 获取文件预签名分片下载元数据（REST 新路径）。
+     *
+     * @param userId   用户 ID
+     * @param fileHash 文件哈希
+     * @return 下载 URL、manifest、解密和算法元数据
+     */
+    @GetMapping("/hash/{fileHash}/download-metadata")
+    @Operation(summary = "获取文件预签名分片下载元数据（REST）")
+    @OperationLog(module = "文件操作", operationType = "下载", description = "获取文件预签名分片下载元数据（REST）")
+    public Result<FileDownloadMetadataVO> getDownloadMetadata(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
+                                                              @PathVariable String fileHash) {
+        return Result.success(fileQueryService.getDownloadMetadata(userId, fileHash));
     }
 
     /**

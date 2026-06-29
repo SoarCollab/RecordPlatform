@@ -13,6 +13,7 @@ import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.service.FriendFileShareService;
+import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.remote.FileRemoteClient;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.junit.jupiter.api.DisplayName;
@@ -55,6 +56,9 @@ class FileQueryServiceEdgeCaseTest {
 
     @Mock
     private FriendFileShareService friendFileShareService;
+
+    @Mock
+    private ChunkManifestService chunkManifestService;
 
     @InjectMocks
     private FileQueryServiceImpl fileQueryService;

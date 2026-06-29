@@ -91,9 +91,10 @@ Based on `SecurityConfiguration`:
 | GET | `/api/v1/files/hash/{fileHash}` | File detail by hash |
 | GET | `/api/v1/files` | User file page (supports `keyword`, `keywordMode=FUZZY/PREFIX/EXACT_HASH/AUTO`, `status`, `startTime`, `endTime`) |
 | GET | `/api/v1/files/stats` | User file stats |
-| GET | `/api/v1/files/hash/{fileHash}/addresses` | Fetch download URLs |
+| GET | `/api/v1/files/hash/{fileHash}/download-metadata` | Fetch manifest-backed presigned chunk download metadata |
+| GET | `/api/v1/files/hash/{fileHash}/addresses` | Fetch download URLs (legacy compatibility) |
 | GET | `/api/v1/transactions/{transactionHash}` | Query blockchain transaction |
-| GET | `/api/v1/files/hash/{fileHash}/chunks` | Download file (authenticated) |
+| GET | `/api/v1/files/hash/{fileHash}/chunks` | Download file via backend byte payload (legacy compatibility) |
 | GET | `/api/v1/files/hash/{fileHash}/decrypt-info` | Decrypt info (authenticated) |
 | GET | `/api/v1/shares/{shareCode}/files` | Public share file list (public) |
 | GET | `/api/v1/files/shares` | My share list |

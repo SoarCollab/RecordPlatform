@@ -273,6 +273,50 @@ export interface DirectUploadCompleteVO {
 }
 
 /**
+ * 文件分片预签名下载元数据。
+ * @see FileDownloadPartVO.java
+ */
+export interface FileDownloadPartVO {
+  /** 分片索引，从 0 开始 */
+  index: number;
+  /** 分片字节数 */
+  size: number;
+  /** 预签名下载 URL */
+  downloadUrl: string;
+  /** URL 过期时间（Unix 秒） */
+  expiresAtEpochSeconds: number;
+  /** 分片 storagePath */
+  storagePath: string;
+  /** 明文分片哈希 */
+  plainHash: string;
+  /** 密文分片哈希 */
+  cipherHash: string;
+  /** 校验算法 */
+  checksumAlgorithm?: string | null;
+}
+
+/**
+ * 文件预签名分片下载元数据。
+ * @see FileDownloadMetadataVO.java
+ */
+export interface FileDownloadMetadataVO {
+  fileId: string;
+  fileHash: string;
+  fileName: string;
+  fileSize: number;
+  contentType: string;
+  initialKey: string;
+  manifestSchemaId: string;
+  manifestHash: string;
+  hashAlgorithm: string;
+  encryptionAlgorithm?: string | null;
+  storageBackend: string;
+  chunkSize: number;
+  totalChunks: number;
+  parts: FileDownloadPartVO[];
+}
+
+/**
  * 上传分片请求
  */
 export interface UploadChunkRequest {

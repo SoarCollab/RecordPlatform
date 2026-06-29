@@ -152,18 +152,14 @@ sequenceDiagram
     participant Storage as platform-storage
     participant S3 as S3 Cluster
 
-    Note over Client, Backend: 阶段 1: 获取下载信息
-    Client->>Backend: GET /api/v1/files/hash/{fileHash}/addresses
-    Backend->>Backend: 校验权限 & 获取文件元数据
-    Backend->>Storage: RPC: generatePresignedUrls()
+    Note over Client, Backend: 阶段 1: 获取基于 manifest 的下载元数据
+    Client->>Backend: GET /api/v1/files/hash/{fileHash}/download-metadata
+    Backend->>Backend: 校验权限 & 读取 active chunk manifest
+    Backend->>Storage: RPC: getFileUrlListByHash(storagePath[], cipherHash[])
     Storage->>S3: 生成预签名 URL
     S3-->>Storage: 预签名 URL 列表
-    Storage-->>Backend: URL + 解密密钥链
-    Backend-->>Client: 200 OK (URLs, ChunkInfo)
-
-    Note over Client, Backend: 阶段 1.5: 获取解密信息
-    Client->>Backend: GET /api/v1/files/hash/{fileHash}/decrypt-info
-    Backend-->>Client: 200 OK (DecryptKeys)
+    Storage-->>Backend: 有序 URL 列表
+    Backend-->>Client: 200 OK (URLs, manifest, hashes, decrypt metadata)
 
     Note over Client, S3: 阶段 2: 并发下载分片
     par 并发下载
