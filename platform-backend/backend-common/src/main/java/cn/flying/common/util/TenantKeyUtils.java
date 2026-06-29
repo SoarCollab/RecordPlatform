@@ -38,6 +38,28 @@ public final class TenantKeyUtils {
     }
 
     /**
+     * 构建当前租户下的用户级缓存 Key。
+     *
+     * @param userId 用户 ID
+     * @return 格式为 tenantId:userId 的缓存 Key
+     */
+    public static String currentTenantUserKey(Long userId) {
+        return tenantUserKey(TenantContext.getTenantIdOrDefault(), userId);
+    }
+
+    /**
+     * 构建指定租户下的用户级缓存 Key。
+     *
+     * @param tenantId 租户 ID
+     * @param userId 用户 ID
+     * @return 格式为 tenantId:userId 的缓存 Key
+     */
+    public static String tenantUserKey(Long tenantId, Long userId) {
+        long tid = tenantId != null ? tenantId : DEFAULT_TENANT_ID;
+        return tid + ":" + userId;
+    }
+
+    /**
      * 检查 Key 是否应该进行租户隔离。
      * 某些全局 Key（如限流计数器、登录安全计数器）不应隔离。
      *

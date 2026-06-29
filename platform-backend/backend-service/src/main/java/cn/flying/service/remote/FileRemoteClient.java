@@ -15,6 +15,7 @@ import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.SharingVO;
 import cn.flying.platformapi.response.BlockChainMessage;
 import cn.flying.platformapi.response.StorageCapacityVO;
+import cn.flying.platformapi.response.StorageObjectHeadVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.platformapi.security.BlockChainRpcAuth;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
@@ -95,6 +96,17 @@ public class FileRemoteClient {
     private Result<List<String>> getFileUrlListFallback(List<String> urls, List<String> keys, Throwable t) {
         log.error("Storage service getFileUrlListByHash failed", t);
         return new Result<>(ResultEnum.FILE_SERVICE_ERROR, List.of());
+    }
+
+    @CircuitBreaker(name = "storageService", fallbackMethod = "headObjectFallback")
+    @Retry(name = "storageService")
+    public Result<StorageObjectHeadVO> headObject(String filePath, String fileHash) {
+        return storageService.headObject(filePath, fileHash);
+    }
+
+    private Result<StorageObjectHeadVO> headObjectFallback(String filePath, String fileHash, Throwable t) {
+        log.error("Storage service headObject failed, path={}, hash={}", filePath, fileHash, t);
+        return new Result<>(ResultEnum.FILE_SERVICE_ERROR, null);
     }
 
     @CircuitBreaker(name = "storageService", fallbackMethod = "getFileListFallback")

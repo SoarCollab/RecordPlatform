@@ -2,6 +2,7 @@ package cn.flying.platformapi.external;
 
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.StorageCapacityVO;
+import cn.flying.platformapi.response.StorageObjectHeadVO;
 
 import java.util.List;
 import java.util.Map;
@@ -40,6 +41,15 @@ public interface DistributedStorageService {
      * @return 预签名 URL 列表
      */
     Result<List<String>> getFileUrlListByHash(List<String> filePathList, List<String> fileHashList);
+
+    /**
+     * 获取单个对象的 HEAD 元数据，不下载对象内容。
+     *
+     * @param filePath 文件逻辑路径
+     * @param fileHash 文件哈希
+     * @return 对象 HEAD 元数据；对象不存在时返回 exists=false
+     */
+    Result<StorageObjectHeadVO> headObject(String filePath, String fileHash);
 
     /**
      * 存储单个文件块

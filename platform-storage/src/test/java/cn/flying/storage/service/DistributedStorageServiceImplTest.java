@@ -8,6 +8,7 @@ import cn.flying.storage.core.S3Monitor;
 import cn.flying.storage.tenant.TenantContextUtil;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
+import cn.flying.platformapi.response.StorageObjectHeadVO;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -166,6 +167,12 @@ class DistributedStorageServiceImplTest {
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData()).contains(TEST_FILE_HASH);
             verify(degradedWriteTracker).recordDegradedWrite(eq(TEST_FILE_HASH), anyList(), anyLong());
+
+            ArgumentCaptor<PutObjectRequest> putRequestCaptor = ArgumentCaptor.forClass(PutObjectRequest.class);
+            verify(s3Client).putObject(putRequestCaptor.capture(), any(software.amazon.awssdk.core.sync.RequestBody.class));
+            assertThat(putRequestCaptor.getValue().metadata())
+                    .containsEntry("file-hash", TEST_FILE_HASH)
+                    .containsEntry("tenant-id", "0");
         }
 
         /**
@@ -388,6 +395,100 @@ class DistributedStorageServiceImplTest {
             verify(s3Client).headObject(headRequestCaptor.capture());
             assertThat(headRequestCaptor.getValue().bucket()).isEqualTo("legacy-node");
             assertThat(headRequestCaptor.getValue().key()).isEqualTo(hash);
+        }
+    }
+
+    @Nested
+    @DisplayName("Head Object Tests")
+    class HeadObjectTests {
+
+        @Test
+        @DisplayName("Should return object metadata without downloading content")
+        void shouldReturnObjectMetadataWithoutDownloadingContent() {
+            String hash = "hash-head-success";
+            String chunkPath = TenantContextUtil.buildChunkPath(hash);
+
+            when(faultDomainManager.getCandidateNodes(hash)).thenReturn(Collections.singletonList("node1"));
+            when(faultDomainManager.selectBestNodeForRead(anyList())).thenReturn("node1");
+            when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
+            when(clientManager.getClient("node1")).thenReturn(s3Client);
+            when(s3Client.headObject(any(HeadObjectRequest.class))).thenReturn(
+                    HeadObjectResponse.builder()
+                            .contentLength(2048L)
+                            .eTag("\"etag-1\"")
+                            .metadata(Map.of("file-hash", hash, "tenant-id", "0"))
+                            .build()
+            );
+
+            Result<StorageObjectHeadVO> result = storageService.headObject(chunkPath, hash);
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData().exists()).isTrue();
+            assertThat(result.getData().fileHash()).isEqualTo(hash);
+            assertThat(result.getData().tenantId()).isEqualTo(0L);
+            assertThat(result.getData().metadataTenantId()).isEqualTo(0L);
+            assertThat(result.getData().nodeName()).isEqualTo("node1");
+            assertThat(result.getData().contentLength()).isEqualTo(2048L);
+            assertThat(result.getData().eTag()).isEqualTo("\"etag-1\"");
+            assertThat(result.getData().metadataHash()).isEqualTo(hash);
+
+            ArgumentCaptor<HeadObjectRequest> headRequestCaptor = ArgumentCaptor.forClass(HeadObjectRequest.class);
+            verify(s3Client).headObject(headRequestCaptor.capture());
+            assertThat(headRequestCaptor.getValue().bucket()).isEqualTo("node1");
+            assertThat(headRequestCaptor.getValue().key()).isEqualTo("tenant/0/" + hash);
+            verify(s3Client, never()).getObject(any(GetObjectRequest.class));
+        }
+
+        @Test
+        @DisplayName("Should return missing result when object is absent")
+        void shouldReturnMissingResultWhenObjectIsAbsent() {
+            String hash = "hash-head-missing";
+            String chunkPath = TenantContextUtil.buildChunkPath(hash);
+
+            when(faultDomainManager.getCandidateNodes(hash)).thenReturn(Collections.singletonList("node1"));
+            when(faultDomainManager.selectBestNodeForRead(anyList())).thenReturn("node1");
+            when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
+            when(clientManager.getClient("node1")).thenReturn(s3Client);
+            when(s3Client.headObject(any(HeadObjectRequest.class))).thenThrow(
+                    NoSuchKeyException.builder().message("missing").build()
+            );
+
+            Result<StorageObjectHeadVO> result = storageService.headObject(chunkPath, hash);
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData().exists()).isFalse();
+            assertThat(result.getData().filePath()).isEqualTo(chunkPath);
+            assertThat(result.getData().fileHash()).isEqualTo(hash);
+            assertThat(result.getData().tenantId()).isEqualTo(0L);
+        }
+
+        @Test
+        @DisplayName("Should return service error when object head cannot be confirmed")
+        void shouldReturnServiceErrorWhenObjectHeadCannotBeConfirmed() {
+            String hash = "hash-head-unavailable";
+            String chunkPath = TenantContextUtil.buildChunkPath(hash);
+
+            when(faultDomainManager.getCandidateNodes(hash)).thenReturn(Collections.singletonList("node1"));
+            when(faultDomainManager.selectBestNodeForRead(anyList())).thenReturn("node1");
+            when(s3Monitor.isNodeOnline("node1")).thenReturn(false);
+
+            Result<StorageObjectHeadVO> result = storageService.headObject(chunkPath, hash);
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.FILE_SERVICE_ERROR.getCode());
+            assertThat(result.getData().exists()).isFalse();
+            assertThat(result.getData().fileHash()).isEqualTo(hash);
+            verify(clientManager, never()).getClient("node1");
+        }
+
+        @Test
+        @DisplayName("Should reject hash mismatch between logical path and request hash")
+        void shouldRejectHashMismatchBetweenLogicalPathAndRequestHash() {
+            String chunkPath = TenantContextUtil.buildChunkPath("actual-hash");
+
+            Result<StorageObjectHeadVO> result = storageService.headObject(chunkPath, "request-hash");
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+            verifyNoInteractions(s3Client);
         }
     }
 
