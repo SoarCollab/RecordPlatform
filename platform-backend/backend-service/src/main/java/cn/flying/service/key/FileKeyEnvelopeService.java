@@ -7,6 +7,7 @@ import cn.flying.common.util.CommonUtils;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
+import cn.flying.dao.entity.FriendFileShare;
 import cn.flying.dao.entity.FileKeyAuditLog;
 import cn.flying.dao.entity.FileKeyEnvelope;
 import cn.flying.dao.mapper.FileKeyAuditLogMapper;
@@ -36,6 +37,7 @@ public class FileKeyEnvelopeService {
 
     public static final String RECIPIENT_TYPE_OWNER = "OWNER";
     public static final String RECIPIENT_TYPE_SHARE = "SHARE";
+    public static final String RECIPIENT_TYPE_FRIEND_SHARE = "FRIEND_SHARE";
     public static final String STATUS_ACTIVE = "ACTIVE";
     public static final String STATUS_SUPERSEDED = "SUPERSEDED";
     public static final String STATUS_REVOKED = "REVOKED";
@@ -205,23 +207,15 @@ public class FileKeyEnvelopeService {
             return Optional.empty();
         }
 
-        FileKeyEnvelope envelope = fileKeyEnvelopeMapper.selectOne(new LambdaQueryWrapper<FileKeyEnvelope>()
-                .eq(FileKeyEnvelope::getTenantId, tenantId)
-                .eq(FileKeyEnvelope::getFileId, file.getId())
-                .eq(FileKeyEnvelope::getFileHash, resolvedFileHash)
-                .eq(FileKeyEnvelope::getRecipientType, RECIPIENT_TYPE_OWNER)
-                .eq(FileKeyEnvelope::getRecipientId, ownerId)
-                .eq(FileKeyEnvelope::getStatus, STATUS_ACTIVE)
-                .orderByDesc(FileKeyEnvelope::getKeyVersion)
-                .orderByDesc(FileKeyEnvelope::getCreateTime)
-                .last("LIMIT 1"));
-        if (envelope == null) {
-            audit(tenantId, file.getId(), resolvedFileHash, RECIPIENT_TYPE_OWNER, ownerId, null,
-                    OPERATION_UNWRAP, actorId, RESULT_MISSING, reason, null);
-            return Optional.empty();
-        }
-
-        return unwrapEnvelope(envelope, actorId, reason);
+        return unwrapActiveRecipientInitialKey(
+                file,
+                resolvedFileHash,
+                tenantId,
+                RECIPIENT_TYPE_OWNER,
+                ownerId,
+                actorId,
+                reason
+        );
     }
 
     /**
@@ -255,6 +249,36 @@ public class FileKeyEnvelopeService {
     }
 
     /**
+     * Saves friend-share recipient envelopes for every file included in a friend share.
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void saveFriendShareEnvelopes(FriendFileShare share, List<File> files, Long actorId, String reason) {
+        if (share == null || share.getId() == null || files == null || files.isEmpty()) {
+            return;
+        }
+        Long tenantId = resolveTenantId(share);
+        if (tenantId == null) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "好友分享密钥信封租户上下文不完整");
+        }
+
+        for (File file : files) {
+            if (file == null || file.getId() == null || !StringUtils.hasText(file.getFileHash())) {
+                continue;
+            }
+            String initialKey = resolveOwnerOrLegacyInitialKey(file, file.getFileHash(), share.getSharerId(), actorId,
+                    "FRIEND_SHARE_ENVELOPE_CREATE");
+            saveRecipientEnvelope(
+                    tenantId,
+                    file,
+                    file.getFileHash(),
+                    RECIPIENT_TYPE_FRIEND_SHARE,
+                    share.getId(),
+                    initialKey
+            );
+        }
+    }
+
+    /**
      * Resolves an active share-code recipient envelope and audits the unwrap attempt.
      */
     public Optional<String> unwrapActiveShareInitialKey(File file,
@@ -271,23 +295,43 @@ public class FileKeyEnvelopeService {
             return Optional.empty();
         }
 
-        FileKeyEnvelope envelope = fileKeyEnvelopeMapper.selectOne(new LambdaQueryWrapper<FileKeyEnvelope>()
-                .eq(FileKeyEnvelope::getTenantId, tenantId)
-                .eq(FileKeyEnvelope::getFileId, file.getId())
-                .eq(FileKeyEnvelope::getFileHash, resolvedFileHash)
-                .eq(FileKeyEnvelope::getRecipientType, RECIPIENT_TYPE_SHARE)
-                .eq(FileKeyEnvelope::getRecipientId, share.getId())
-                .eq(FileKeyEnvelope::getStatus, STATUS_ACTIVE)
-                .orderByDesc(FileKeyEnvelope::getKeyVersion)
-                .orderByDesc(FileKeyEnvelope::getCreateTime)
-                .last("LIMIT 1"));
-        if (envelope == null) {
-            audit(tenantId, file.getId(), resolvedFileHash, RECIPIENT_TYPE_SHARE, share.getId(), null,
-                    OPERATION_UNWRAP, actorId, RESULT_MISSING, reason, null);
+        return unwrapActiveRecipientInitialKey(
+                file,
+                resolvedFileHash,
+                tenantId,
+                RECIPIENT_TYPE_SHARE,
+                share.getId(),
+                actorId,
+                reason
+        );
+    }
+
+    /**
+     * Resolves an active friend-share recipient envelope and audits the unwrap attempt.
+     */
+    public Optional<String> unwrapActiveFriendShareInitialKey(File file,
+                                                              String fileHash,
+                                                              FriendFileShare share,
+                                                              Long actorId,
+                                                              String reason) {
+        if (file == null || file.getId() == null || share == null || share.getId() == null) {
+            return Optional.empty();
+        }
+        Long tenantId = resolveTenantId(file);
+        String resolvedFileHash = StringUtils.hasText(fileHash) ? fileHash : file.getFileHash();
+        if (tenantId == null || !StringUtils.hasText(resolvedFileHash)) {
             return Optional.empty();
         }
 
-        return unwrapEnvelope(envelope, actorId, reason);
+        return unwrapActiveRecipientInitialKey(
+                file,
+                resolvedFileHash,
+                tenantId,
+                RECIPIENT_TYPE_FRIEND_SHARE,
+                share.getId(),
+                actorId,
+                reason
+        );
     }
 
     /**
@@ -299,14 +343,37 @@ public class FileKeyEnvelopeService {
             return;
         }
         Long tenantId = resolveTenantId(share);
+        revokeActiveRecipientEnvelopes(tenantId, RECIPIENT_TYPE_SHARE, share.getId(), actorId, reason);
+    }
+
+    /**
+     * Revokes all active friend-share recipient envelopes for a friend share.
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void revokeFriendShareEnvelopes(FriendFileShare share, Long actorId, String reason) {
+        if (share == null || share.getId() == null) {
+            return;
+        }
+        Long tenantId = resolveTenantId(share);
+        revokeActiveRecipientEnvelopes(tenantId, RECIPIENT_TYPE_FRIEND_SHARE, share.getId(), actorId, reason);
+    }
+
+    /**
+     * Revokes all active recipient envelopes matching a share-like recipient.
+     */
+    private void revokeActiveRecipientEnvelopes(Long tenantId,
+                                                String recipientType,
+                                                Long recipientId,
+                                                Long actorId,
+                                                String reason) {
         List<FileKeyEnvelope> envelopes = fileKeyEnvelopeMapper.selectList(new LambdaQueryWrapper<FileKeyEnvelope>()
                 .eq(tenantId != null, FileKeyEnvelope::getTenantId, tenantId)
-                .eq(FileKeyEnvelope::getRecipientType, RECIPIENT_TYPE_SHARE)
-                .eq(FileKeyEnvelope::getRecipientId, share.getId())
+                .eq(FileKeyEnvelope::getRecipientType, recipientType)
+                .eq(FileKeyEnvelope::getRecipientId, recipientId)
                 .eq(FileKeyEnvelope::getStatus, STATUS_ACTIVE));
 
         if (envelopes == null || envelopes.isEmpty()) {
-            audit(tenantId, null, null, RECIPIENT_TYPE_SHARE, share.getId(), null,
+            audit(tenantId, null, null, recipientType, recipientId, null,
                     OPERATION_REVOKE, actorId, RESULT_MISSING, reason, null);
             return;
         }
@@ -406,6 +473,35 @@ public class FileKeyEnvelopeService {
             return Optional.of(key);
         }
         return Optional.empty();
+    }
+
+    /**
+     * Resolves and unwraps the latest active envelope for a specific recipient.
+     */
+    private Optional<String> unwrapActiveRecipientInitialKey(File file,
+                                                            String fileHash,
+                                                            Long tenantId,
+                                                            String recipientType,
+                                                            Long recipientId,
+                                                            Long actorId,
+                                                            String reason) {
+        FileKeyEnvelope envelope = fileKeyEnvelopeMapper.selectOne(new LambdaQueryWrapper<FileKeyEnvelope>()
+                .eq(FileKeyEnvelope::getTenantId, tenantId)
+                .eq(FileKeyEnvelope::getFileId, file.getId())
+                .eq(FileKeyEnvelope::getFileHash, fileHash)
+                .eq(FileKeyEnvelope::getRecipientType, recipientType)
+                .eq(FileKeyEnvelope::getRecipientId, recipientId)
+                .eq(FileKeyEnvelope::getStatus, STATUS_ACTIVE)
+                .orderByDesc(FileKeyEnvelope::getKeyVersion)
+                .orderByDesc(FileKeyEnvelope::getCreateTime)
+                .last("LIMIT 1"));
+        if (envelope == null) {
+            audit(tenantId, file.getId(), fileHash, recipientType, recipientId, null,
+                    OPERATION_UNWRAP, actorId, RESULT_MISSING, reason, null);
+            return Optional.empty();
+        }
+
+        return unwrapEnvelope(envelope, actorId, reason);
     }
 
     /**
@@ -715,6 +811,13 @@ public class FileKeyEnvelopeService {
      * Resolves tenant from the share row and falls back to current tenant context.
      */
     private Long resolveTenantId(FileShare share) {
+        return share.getTenantId() != null ? share.getTenantId() : TenantContext.getTenantId();
+    }
+
+    /**
+     * Resolves tenant from the friend-share row and falls back to current tenant context.
+     */
+    private Long resolveTenantId(FriendFileShare share) {
         return share.getTenantId() != null ? share.getTenantId() : TenantContext.getTenantId();
     }
 

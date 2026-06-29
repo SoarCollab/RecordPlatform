@@ -8,6 +8,7 @@ import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
+import cn.flying.dao.entity.FriendFileShare;
 import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
@@ -195,7 +196,7 @@ class FileQueryServiceTest {
             try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
                 securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
                 when(fileMapper.selectOne(any())).thenReturn(null);
-                when(friendFileShareService.getSharerIdForFile(USER_ID, FILE_HASH)).thenReturn(null);
+                when(friendFileShareService.getActiveShareForFile(USER_ID, FILE_HASH)).thenReturn(null);
 
                 GeneralException ex = assertThrows(GeneralException.class,
                         () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH));
@@ -595,8 +596,9 @@ class FileQueryServiceTest {
                 File sharerFile = FileTestBuilder.aFile(f -> {
                     f.setUid(OTHER_USER_ID);
                     f.setFileHash(FILE_HASH);
-                    f.setFileParam("{\"initialKey\":\"dGVzdGtleQ==\",\"fileSize\":1024}");
+                    f.setFileParam("{\"fileSize\":1024}");
                 });
+                FriendFileShare friendShare = createFriendShare();
 
                 // Use doAnswer to handle different query scenarios based on the wrapper content
                 doAnswer((InvocationOnMock invocation) -> {
@@ -607,19 +609,40 @@ class FileQueryServiceTest {
                 }).doAnswer((InvocationOnMock invocation) -> sharerFile)
                         .when(fileMapper).selectOne(any());
 
-                when(friendFileShareService.getSharerIdForFile(USER_ID, FILE_HASH)).thenReturn(OTHER_USER_ID);
+                when(friendFileShareService.getActiveShareForFile(USER_ID, FILE_HASH)).thenReturn(friendShare);
+                when(fileKeyEnvelopeService.unwrapActiveFriendShareInitialKey(
+                        sharerFile,
+                        FILE_HASH,
+                        friendShare,
+                        USER_ID,
+                        "FRIEND_SHARE_DECRYPT"
+                )).thenReturn(Optional.of("friend-envelope-key"));
 
                 // When
                 var result = fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH);
 
                 // Then
                 assertNotNull(result);
-                assertEquals("dGVzdGtleQ==", result.initialKey());
+                assertEquals("friend-envelope-key", result.initialKey());
                 assertEquals(1024L, result.fileSize());
                 assertEquals(FILE_HASH, result.fileHash());
 
                 // Verify friend share service was called
-                verify(friendFileShareService).getSharerIdForFile(USER_ID, FILE_HASH);
+                verify(friendFileShareService).getActiveShareForFile(USER_ID, FILE_HASH);
+                verify(fileKeyEnvelopeService).unwrapActiveFriendShareInitialKey(
+                        sharerFile,
+                        FILE_HASH,
+                        friendShare,
+                        USER_ID,
+                        "FRIEND_SHARE_DECRYPT"
+                );
+                verify(fileKeyEnvelopeService, never()).unwrapActiveOwnerInitialKey(
+                        any(File.class),
+                        anyString(),
+                        anyLong(),
+                        anyLong(),
+                        anyString()
+                );
             }
         }
 
@@ -632,7 +655,7 @@ class FileQueryServiceTest {
 
                 // User doesn't own the file and has no friend share
                 when(fileMapper.selectOne(any())).thenReturn(null);
-                when(friendFileShareService.getSharerIdForFile(USER_ID, FILE_HASH)).thenReturn(null);
+                when(friendFileShareService.getActiveShareForFile(USER_ID, FILE_HASH)).thenReturn(null);
 
                 // When & Then
                 GeneralException ex = assertThrows(GeneralException.class, () ->
@@ -652,7 +675,7 @@ class FileQueryServiceTest {
                 // User doesn't own the file
                 // Friend share exists, but sharer's file is not found
                 when(fileMapper.selectOne(any())).thenReturn(null);
-                when(friendFileShareService.getSharerIdForFile(USER_ID, FILE_HASH)).thenReturn(OTHER_USER_ID);
+                when(friendFileShareService.getActiveShareForFile(USER_ID, FILE_HASH)).thenReturn(createFriendShare());
 
                 // When & Then - Sharer's file lookup also returns null
                 GeneralException ex = assertThrows(GeneralException.class, () ->
@@ -691,7 +714,7 @@ class FileQueryServiceTest {
                 assertNotNull(result);
                 assertEquals("YWRtaW5rZXk=", result.initialKey());
                 // Should not call friendFileShareService for admin
-                verify(friendFileShareService, never()).getSharerIdForFile(any(), any());
+                verify(friendFileShareService, never()).getActiveShareForFile(any(), any());
             }
         }
 
@@ -1012,5 +1035,19 @@ class FileQueryServiceTest {
 
             assertEquals(ResultEnum.FILE_NOT_EXIST.getCode(), ex.getResultEnum().getCode());
         }
+    }
+
+    /**
+     * Creates an active friend-share fixture for decrypt-boundary tests.
+     */
+    private FriendFileShare createFriendShare() {
+        return new FriendFileShare()
+                .setId(900L)
+                .setTenantId(1L)
+                .setSharerId(OTHER_USER_ID)
+                .setFriendId(USER_ID)
+                .setFileHashes("[\"" + FILE_HASH + "\"]")
+                .setStatus(FriendFileShare.STATUS_ACTIVE)
+                .setIsRead(0);
     }
 }

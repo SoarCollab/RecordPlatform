@@ -73,6 +73,15 @@ public interface FriendFileShareService extends IService<FriendFileShare> {
     FriendFileShareDetailVO getShareDetail(Long userId, String shareId);
 
     /**
+     * 检查用户是否通过好友分享有权访问指定文件，并返回有效分享记录
+     *
+     * @param userId   当前用户ID
+     * @param fileHash 文件哈希
+     * @return 如果有权访问则返回有效分享记录，否则返回null
+     */
+    FriendFileShare getActiveShareForFile(Long userId, String fileHash);
+
+    /**
      * 检查用户是否通过好友分享有权访问指定文件
      *
      * @param userId   当前用户ID

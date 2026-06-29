@@ -5,6 +5,7 @@ import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
+import cn.flying.dao.entity.FriendFileShare;
 import cn.flying.dao.entity.FileKeyAuditLog;
 import cn.flying.dao.entity.FileKeyEnvelope;
 import cn.flying.dao.mapper.FileKeyAuditLogMapper;
@@ -234,6 +235,64 @@ class FileKeyEnvelopeServiceTest {
     }
 
     /**
+     * Verifies that friend-share recipient envelopes are created and unwrapped by friend-share id.
+     */
+    @Test
+    @DisplayName("should save and unwrap friend share recipient envelope")
+    void shouldSaveAndUnwrapFriendShareRecipientEnvelope() {
+        File file = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1")
+                .setFileParam("""
+                        {"fileName":"a.txt"}
+                        """);
+        FriendFileShare share = new FriendFileShare()
+                .setId(300L)
+                .setTenantId(1L)
+                .setSharerId(100L)
+                .setFriendId(200L)
+                .setFileHashes("[\"hash-1\"]")
+                .setStatus(FriendFileShare.STATUS_ACTIVE);
+        FileParamEnvelopeResult result = envelopeService.prepareFileParam("""
+                {"fileName":"a.txt","initialKey":"serialized-key"}
+                """);
+        ArgumentCaptor<FileKeyEnvelope> envelopeCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+
+        envelopeService.saveOwnerEnvelope(file, "hash-1", 100L, result);
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope ownerEnvelope = envelopeCaptor.getValue();
+
+        clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(ownerEnvelope);
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+
+        envelopeService.saveFriendShareEnvelopes(share, java.util.List.of(file), 100L, "FRIEND_SHARE_CREATE");
+
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope friendShareEnvelope = envelopeCaptor.getValue();
+        assertEquals(FileKeyEnvelopeService.RECIPIENT_TYPE_FRIEND_SHARE, friendShareEnvelope.getRecipientType());
+        assertEquals(300L, friendShareEnvelope.getRecipientId());
+        assertEquals(FileKeyEnvelopeService.STATUS_ACTIVE, friendShareEnvelope.getStatus());
+
+        clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(friendShareEnvelope);
+        Optional<String> unwrapped = envelopeService.unwrapActiveFriendShareInitialKey(
+                file,
+                "hash-1",
+                share,
+                200L,
+                "FRIEND_SHARE_DECRYPT"
+        );
+
+        assertTrue(unwrapped.isPresent());
+        assertEquals("serialized-key", unwrapped.get());
+        verify(fileKeyAuditLogMapper).insert(any(FileKeyAuditLog.class));
+    }
+
+    /**
      * Verifies that revoking a share marks its recipient envelopes unusable.
      */
     @Test
@@ -257,6 +316,38 @@ class FileKeyEnvelopeServiceTest {
         ArgumentCaptor<FileKeyEnvelope> updateCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
 
         envelopeService.revokeShareEnvelopes(share, 100L, "USER_CANCEL_SHARE");
+
+        verify(fileKeyEnvelopeMapper).updateById(updateCaptor.capture());
+        assertEquals(FileKeyEnvelopeService.STATUS_REVOKED, updateCaptor.getValue().getStatus());
+        verify(fileKeyAuditLogMapper).insert(any(FileKeyAuditLog.class));
+    }
+
+    /**
+     * Verifies that revoking a friend share marks its recipient envelopes unusable.
+     */
+    @Test
+    @DisplayName("should revoke active friend share recipient envelopes")
+    void shouldRevokeActiveFriendShareRecipientEnvelopes() {
+        FriendFileShare share = new FriendFileShare()
+                .setId(300L)
+                .setTenantId(1L)
+                .setSharerId(100L)
+                .setFriendId(200L)
+                .setFileHashes("[\"hash-1\"]")
+                .setStatus(FriendFileShare.STATUS_ACTIVE);
+        FileKeyEnvelope friendShareEnvelope = new FileKeyEnvelope()
+                .setId(600L)
+                .setTenantId(1L)
+                .setFileId(10L)
+                .setFileHash("hash-1")
+                .setRecipientType(FileKeyEnvelopeService.RECIPIENT_TYPE_FRIEND_SHARE)
+                .setRecipientId(300L)
+                .setKeyVersion(1)
+                .setStatus(FileKeyEnvelopeService.STATUS_ACTIVE);
+        when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(friendShareEnvelope));
+        ArgumentCaptor<FileKeyEnvelope> updateCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+
+        envelopeService.revokeFriendShareEnvelopes(share, 100L, "USER_CANCEL_FRIEND_SHARE");
 
         verify(fileKeyEnvelopeMapper).updateById(updateCaptor.capture());
         assertEquals(FileKeyEnvelopeService.STATUS_REVOKED, updateCaptor.getValue().getStatus());
