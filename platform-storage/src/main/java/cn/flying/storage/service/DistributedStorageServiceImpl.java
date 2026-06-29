@@ -339,8 +339,36 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 log.warn("清理直传 staging 分片失败: sessionId={}, partIndex={}, node={}",
                         request.sessionId(), part.partIndex(), part.nodeName(), e);
             }
+            deleteDirectFinalObjectCandidates(request.sessionId(), part);
         }
         return Result.success(true);
+    }
+
+    /**
+     * Removes any final replicas that may have been promoted before a direct-upload session was aborted.
+     */
+    private void deleteDirectFinalObjectCandidates(String sessionId, DirectMultipartCompletedPart part) {
+        if (part.finalObjectName() == null || part.finalObjectName().isBlank()
+                || part.cipherHash() == null || part.cipherHash().isBlank()) {
+            return;
+        }
+        Set<String> candidateNodes = new LinkedHashSet<>();
+        try {
+            candidateNodes.addAll(faultDomainManager.getTargetNodes(part.cipherHash()));
+        } catch (Exception e) {
+            log.warn("获取直传 final 分片候选节点失败: sessionId={}, partIndex={}", sessionId, part.partIndex(), e);
+        }
+        if (candidateNodes.isEmpty() && part.nodeName() != null && !part.nodeName().isBlank()) {
+            candidateNodes.add(part.nodeName());
+        }
+        for (String nodeName : candidateNodes) {
+            try {
+                deleteFromNode(nodeName, part.finalObjectName());
+            } catch (Exception e) {
+                log.warn("清理直传 final 分片失败: sessionId={}, partIndex={}, node={}",
+                        sessionId, part.partIndex(), nodeName, e);
+            }
+        }
     }
 
     /**
@@ -395,10 +423,24 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
         ensureBucketExists(client, part.nodeName(), part.nodeName());
 
-        HeadObjectResponse stagingHead = client.headObject(HeadObjectRequest.builder()
-                .bucket(part.nodeName())
-                .key(part.stagingObjectName())
-                .build());
+        HeadObjectResponse stagingHead;
+        try {
+            stagingHead = client.headObject(HeadObjectRequest.builder()
+                    .bucket(part.nodeName())
+                    .key(part.stagingObjectName())
+                    .build());
+        } catch (NoSuchKeyException e) {
+            log.info("直传 staging 分片已不存在，尝试按已晋级 final object 完成: partIndex={}, node={}",
+                    part.partIndex(), part.nodeName());
+            return completeAlreadyPromotedDirectUploadPart(part);
+        } catch (S3Exception e) {
+            if (isMissingObject(e)) {
+                log.info("直传 staging 分片已不存在，尝试按已晋级 final object 完成: partIndex={}, node={}",
+                        part.partIndex(), part.nodeName());
+                return completeAlreadyPromotedDirectUploadPart(part);
+            }
+            throw e;
+        }
         if (stagingHead.contentLength() != part.size()) {
             throw new IllegalArgumentException("staging object size mismatch");
         }
@@ -452,6 +494,64 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                     part.partIndex(), part.nodeName(), e);
         }
 
+        return toDirectMultipartCompletedPartVO(part, finalHead);
+    }
+
+    /**
+     * Completes a retry after the original request already promoted the staging object to final replicas.
+     */
+    private DirectMultipartCompletedPartVO completeAlreadyPromotedDirectUploadPart(DirectMultipartCompletedPart part) {
+        Long tenantId = TenantContextUtil.getTenantIdOrDefault();
+        for (String nodeName : resolveDirectUploadTargetNodes(part.cipherHash())) {
+            S3Client finalClient = clientManager.getClient(nodeName);
+            if (finalClient == null) {
+                continue;
+            }
+            try {
+                HeadObjectResponse finalHead = finalClient.headObject(HeadObjectRequest.builder()
+                        .bucket(nodeName)
+                        .key(part.finalObjectName())
+                        .build());
+                validateDirectUploadFinalObject(part, finalHead, tenantId);
+                return toDirectMultipartCompletedPartVO(part, finalHead);
+            } catch (NoSuchKeyException e) {
+                log.debug("直传 final 分片不存在: partIndex={}, node={}", part.partIndex(), nodeName);
+            } catch (S3Exception e) {
+                if (isMissingObject(e)) {
+                    log.debug("直传 final 分片不存在: partIndex={}, node={}", part.partIndex(), nodeName);
+                    continue;
+                }
+                throw e;
+            }
+        }
+        throw new IllegalStateException("direct-upload staging object is missing and final object is unavailable");
+    }
+
+    /**
+     * Validates the already-promoted final object against backend-trusted direct-upload metadata.
+     */
+    private void validateDirectUploadFinalObject(DirectMultipartCompletedPart part,
+                                                 HeadObjectResponse finalHead,
+                                                 Long tenantId) {
+        if (finalHead.contentLength() == null || finalHead.contentLength() != part.size()) {
+            throw new IllegalArgumentException("direct-upload final object size mismatch");
+        }
+        Map<String, String> metadata = finalHead.metadata() != null ? finalHead.metadata() : Map.of();
+        if (!normalizeHash(part.cipherHash()).equals(normalizeHash(metadata.get(METADATA_FILE_HASH)))
+                || !normalizeHash(part.cipherHash()).equals(normalizeHash(metadata.get(METADATA_CIPHER_HASH)))
+                || !normalizeHash(part.plainHash()).equals(normalizeHash(metadata.get(METADATA_PLAIN_HASH)))
+                || !normalizeChecksumAlgorithm(part.checksumAlgorithm())
+                        .equalsIgnoreCase(normalizeChecksumAlgorithm(metadata.get(METADATA_CHECKSUM_ALGORITHM)))
+                || !Objects.equals(String.valueOf(tenantId), metadata.get(METADATA_TENANT_ID))) {
+            throw new IllegalArgumentException("direct-upload final object metadata mismatch");
+        }
+    }
+
+    /**
+     * Converts verified final-object metadata into the direct-upload completion response part.
+     */
+    private DirectMultipartCompletedPartVO toDirectMultipartCompletedPartVO(DirectMultipartCompletedPart part,
+                                                                            HeadObjectResponse finalHead) {
         return new DirectMultipartCompletedPartVO(
                 part.partIndex(),
                 part.storagePath(),
@@ -653,6 +753,14 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      */
     private String normalizeHash(String value) {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Detects S3-compatible missing-object responses across providers.
+     */
+    private boolean isMissingObject(S3Exception e) {
+        String errorCode = e.awsErrorDetails() != null ? e.awsErrorDetails().errorCode() : "";
+        return e.statusCode() == 404 || "NoSuchKey".equalsIgnoreCase(errorCode);
     }
 
     /**
