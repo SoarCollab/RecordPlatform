@@ -147,6 +147,106 @@ class BlockChainServiceImplTest {
     }
 
     @Nested
+    @DisplayName("Store Attestation Batch Operations")
+    class StoreAttestationBatchTests {
+
+        private static final String MERKLE_ROOT =
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+        /**
+         * 验证批量存证根不会通过普通文件 storeFile 路径上链。
+         */
+        @Test
+        @DisplayName("Should store attestation batch through dedicated adapter method")
+        void storeAttestationBatch_shouldUseDedicatedAdapterMethod() {
+            StoreAttestationBatchRequest request = new StoreAttestationBatchRequest(
+                    7L,
+                    900L,
+                    "MB-900",
+                    "SHA-256-MERKLE-V1",
+                    MERKLE_ROOT,
+                    2
+            );
+            ChainReceipt receipt = ChainReceipt.builder()
+                    .transactionHash("0xabc123")
+                    .fileHash(MERKLE_ROOT)
+                    .success(true)
+                    .build();
+
+            when(chainAdapter.storeAttestationBatch(
+                    request.tenantId(),
+                    request.batchId(),
+                    request.batchNo(),
+                    request.proofAlgorithm(),
+                    request.merkleRoot(),
+                    request.leafCount()
+            )).thenReturn(receipt);
+
+            Result<StoreAttestationBatchResponse> result = blockChainService.storeAttestationBatch(request);
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData().transactionHash()).isEqualTo("0xabc123");
+            assertThat(result.getData().batchRootHash()).isEqualTo(MERKLE_ROOT);
+            verify(chainAdapter).storeAttestationBatch(
+                    7L,
+                    900L,
+                    "MB-900",
+                    "SHA-256-MERKLE-V1",
+                    MERKLE_ROOT,
+                    2
+            );
+            verify(chainAdapter, never()).storeFile(anyString(), anyString(), anyString(), anyString());
+            verify(fiscoMetrics).recordSuccess();
+            verify(fiscoMetrics).stopStoreTimer(timerSample);
+        }
+
+        /**
+         * 验证缺失共享令牌的批量存证调用不会触发上链。
+         */
+        @Test
+        @DisplayName("Should reject attestation batch calls without blockchain RPC token")
+        void storeAttestationBatch_shouldRejectMissingRpcToken() {
+            RpcContext.getServerAttachment().removeAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY);
+            StoreAttestationBatchRequest request = new StoreAttestationBatchRequest(
+                    7L,
+                    900L,
+                    "MB-900",
+                    "SHA-256-MERKLE-V1",
+                    MERKLE_ROOT,
+                    2
+            );
+
+            assertThatThrownBy(() -> blockChainService.storeAttestationBatch(request))
+                    .isInstanceOf(SecurityException.class)
+                    .hasMessageContaining("Unauthorized blockchain RPC caller");
+
+            verifyNoInteractions(chainAdapter);
+        }
+
+        /**
+         * 验证非 bytes32 的 Merkle 根会在 provider 入口被拒绝。
+         */
+        @Test
+        @DisplayName("Should reject invalid attestation batch root")
+        void storeAttestationBatch_shouldRejectInvalidRoot() {
+            StoreAttestationBatchRequest request = new StoreAttestationBatchRequest(
+                    7L,
+                    900L,
+                    "MB-900",
+                    "SHA-256-MERKLE-V1",
+                    "root-hash",
+                    2
+            );
+
+            Result<StoreAttestationBatchResponse> result = blockChainService.storeAttestationBatch(request);
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+            verifyNoInteractions(chainAdapter);
+            verify(fiscoMetrics).stopStoreTimer(timerSample);
+        }
+    }
+
+    @Nested
     @DisplayName("Share Files Operations")
     class ShareFilesTests {
         

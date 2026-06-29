@@ -14,7 +14,8 @@ import cn.flying.dao.mapper.AttestationBatchMapper;
 import cn.flying.dao.mapper.AttestationLeafMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.platformapi.constant.Result;
-import cn.flying.platformapi.request.StoreFileResponse;
+import cn.flying.platformapi.request.StoreAttestationBatchRequest;
+import cn.flying.platformapi.request.StoreAttestationBatchResponse;
 import cn.flying.service.remote.FileRemoteClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -61,11 +62,11 @@ public class AttestationBatchServiceImpl implements AttestationBatchService {
 
         AttestationBatch batch = insertBatch(tenantId, tree);
         insertLeaves(tenantId, batch.getId(), tree);
-        StoreFileResponse chainResponse = storeBatchRootOnChain(tenantId, batch, tree);
+        StoreAttestationBatchResponse chainResponse = storeBatchRootOnChain(tenantId, batch, tree);
 
         batch.setStatus(STATUS_COMPLETED)
                 .setChainTransactionHash(chainResponse.transactionHash())
-                .setChainFileHash(chainResponse.fileHash())
+                .setChainFileHash(chainResponse.batchRootHash())
                 .setChainError(null);
         batchMapper.updateById(batch);
 
@@ -161,19 +162,20 @@ public class AttestationBatchServiceImpl implements AttestationBatchService {
         }
     }
 
-    private StoreFileResponse storeBatchRootOnChain(Long tenantId, AttestationBatch batch, MerkleTreeResult tree) {
-        Result<StoreFileResponse> result = fileRemoteClient.storeAttestationBatchRoot(
-                AttestationBatchRootPayload.of(
+    private StoreAttestationBatchResponse storeBatchRootOnChain(Long tenantId, AttestationBatch batch, MerkleTreeResult tree) {
+        Result<StoreAttestationBatchResponse> result = fileRemoteClient.storeAttestationBatch(
+                new StoreAttestationBatchRequest(
                         tenantId,
                         batch.getId(),
                         batch.getBatchNo(),
                         tree.proofAlgorithm(),
                         tree.merkleRoot(),
                         tree.leaves().size()
-                )
-        );
-        StoreFileResponse response = ResultUtils.getData(result);
-        if (response == null || !StringUtils.hasText(response.transactionHash()) || !StringUtils.hasText(response.fileHash())) {
+                ));
+        StoreAttestationBatchResponse response = ResultUtils.getData(result);
+        if (response == null
+                || !StringUtils.hasText(response.transactionHash())
+                || !StringUtils.hasText(response.batchRootHash())) {
             throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "批量存证根上链失败");
         }
         return response;

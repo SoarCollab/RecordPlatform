@@ -195,9 +195,9 @@ P1 introduces a backend-side Merkle batch foundation for exportable proof metada
 1. `AttestationBatchService` loads successful file records for the current tenant.
 2. `MerkleTreeService` canonicalizes file hashes, calculates one Merkle root, and stores each leaf proof path.
 3. `attestation_batch` and `attestation_leaf` persist the batch root, proof algorithm, leaf hash, leaf index, and proof path JSON.
-4. `FileRemoteClient.storeAttestationBatchRoot` writes the batch root through the existing authenticated `storeFile` RPC contract.
+4. `FileRemoteClient.storeAttestationBatch` writes the batch root through the dedicated authenticated `storeAttestationBatch` RPC and Sharing contract method.
 
-The current chain write is a compatibility boundary. A future dedicated FISCO batch contract can replace the `storeFile` payload shape inside `FileRemoteClient` without changing the batch orchestration or stored proof format.
+The batch root chain write is intentionally separate from ordinary file attestation. It does not create `Storage.storeFile` records, so Merkle batch roots are not returned as user file entries by file-listing contract reads.
 
 ### Proof Bundle Export
 

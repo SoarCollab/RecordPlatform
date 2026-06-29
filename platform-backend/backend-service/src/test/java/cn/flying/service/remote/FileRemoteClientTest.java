@@ -6,13 +6,14 @@ import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.request.GetShareInfoRequest;
 import cn.flying.platformapi.request.GetUserShareCodesRequest;
+import cn.flying.platformapi.request.StoreAttestationBatchRequest;
+import cn.flying.platformapi.request.StoreAttestationBatchResponse;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.BlockChainMessage;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.SharingVO;
 import cn.flying.platformapi.security.BlockChainRpcAuth;
-import cn.flying.service.attestation.AttestationBatchRootPayload;
 import org.apache.dubbo.rpc.RpcContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,6 +31,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -100,11 +103,11 @@ class FileRemoteClientTest {
     }
 
     /**
-     * 验证批量 Merkle 根上链兼容方法复用 storeFile RPC 边界并携带共享令牌。
+     * 验证批量 Merkle 根使用专用区块链 RPC 边界，不再复用 storeFile。
      */
     @Test
-    void storeAttestationBatchRoot_shouldWrapPayloadAndAttachRpcToken() {
-        AttestationBatchRootPayload payload = AttestationBatchRootPayload.of(
+    void storeAttestationBatch_shouldUseDedicatedRpcAndAttachRpcToken() {
+        StoreAttestationBatchRequest request = new StoreAttestationBatchRequest(
                 7L,
                 900L,
                 "MB-900",
@@ -112,23 +115,23 @@ class FileRemoteClientTest {
                 "root-hash",
                 2
         );
-        Result<StoreFileResponse> expected = Result.success(new StoreFileResponse("tx-root", "chain-root"));
+        Result<StoreAttestationBatchResponse> expected =
+                Result.success(new StoreAttestationBatchResponse("tx-root", "root-hash"));
 
-        when(blockChainService.storeFile(any(StoreFileRequest.class))).thenAnswer(invocation -> {
+        when(blockChainService.storeAttestationBatch(request)).thenAnswer(invocation -> {
             assertThat(RpcContext.getClientAttachment().getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY))
                     .isEqualTo(RPC_TOKEN);
             return expected;
         });
 
-        Result<StoreFileResponse> actual = fileRemoteClient.storeAttestationBatchRoot(payload);
+        Result<StoreAttestationBatchResponse> actual = fileRemoteClient.storeAttestationBatch(request);
 
         assertThat(actual).isSameAs(expected);
-        ArgumentCaptor<StoreFileRequest> requestCaptor = ArgumentCaptor.forClass(StoreFileRequest.class);
-        org.mockito.Mockito.verify(blockChainService).storeFile(requestCaptor.capture());
-        assertThat(requestCaptor.getValue().uploader()).isEqualTo("tenant:7");
-        assertThat(requestCaptor.getValue().fileName()).isEqualTo("MERKLE_ATTESTATION_BATCH_ROOT:MB-900");
-        assertThat(requestCaptor.getValue().param()).contains("\"merkleRoot\":\"root-hash\"");
-        assertThat(requestCaptor.getValue().content()).isEqualTo("root-hash");
+        ArgumentCaptor<StoreAttestationBatchRequest> requestCaptor =
+                ArgumentCaptor.forClass(StoreAttestationBatchRequest.class);
+        verify(blockChainService).storeAttestationBatch(requestCaptor.capture());
+        verify(blockChainService, never()).storeFile(any(StoreFileRequest.class));
+        assertThat(requestCaptor.getValue()).isEqualTo(request);
         assertThat(RpcContext.getClientAttachment().getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY))
                 .isNull();
     }

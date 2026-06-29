@@ -12,6 +12,8 @@ import cn.flying.platformapi.request.DeleteFilesRequest;
 import cn.flying.platformapi.request.GetShareInfoRequest;
 import cn.flying.platformapi.request.GetUserShareCodesRequest;
 import cn.flying.platformapi.request.ShareFilesRequest;
+import cn.flying.platformapi.request.StoreAttestationBatchRequest;
+import cn.flying.platformapi.request.StoreAttestationBatchResponse;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.*;
@@ -149,6 +151,51 @@ public class BlockChainServiceImpl implements BlockChainService {
 
         } catch (Exception e) {
             return BlockChainExceptionHandler.handle(e, "storeFile", ResultEnum.CONTRACT_ERROR, fiscoMetrics);
+        } finally {
+            fiscoMetrics.stopStoreTimer(timerSample);
+        }
+    }
+
+    /**
+     * 存储 Merkle 批量存证根，不复用普通文件 storeFile 合约记录。
+     */
+    @Override
+    @Retry(name = "blockchain")
+    @ApiDoc(value = "保存 Merkle 批量存证根")
+    public Result<StoreAttestationBatchResponse> storeAttestationBatch(StoreAttestationBatchRequest request) {
+        requireTrustedRpcCaller();
+        Timer.Sample timerSample = fiscoMetrics.startStoreTimer();
+        try {
+            if (!isValidAttestationBatchRequest(request)) {
+                return new Result<>(
+                        ResultEnum.PARAM_IS_INVALID.getCode(),
+                        "参数错误：tenantId、batchId、batchNo、proofAlgorithm、merkleRoot、leafCount 均不能为空，merkleRoot 必须为 bytes32 十六进制",
+                        null
+                );
+            }
+
+            ChainReceipt receipt = chainAdapter.storeAttestationBatch(
+                    request.tenantId(),
+                    request.batchId(),
+                    request.batchNo(),
+                    request.proofAlgorithm(),
+                    request.merkleRoot(),
+                    request.leafCount()
+            );
+
+            if (receipt == null || !receipt.isSuccess() || !hasText(receipt.getFileHash())) {
+                fiscoMetrics.recordFailure();
+                return Result.error(ResultEnum.CONTRACT_ERROR, null);
+            }
+
+            fiscoMetrics.recordSuccess();
+            return Result.success(new StoreAttestationBatchResponse(
+                    receipt.getTransactionHash(),
+                    receipt.getFileHash()
+            ));
+
+        } catch (Exception e) {
+            return BlockChainExceptionHandler.handle(e, "storeAttestationBatch", ResultEnum.CONTRACT_ERROR, fiscoMetrics);
         } finally {
             fiscoMetrics.stopStoreTimer(timerSample);
         }
@@ -370,6 +417,33 @@ public class BlockChainServiceImpl implements BlockChainService {
      */
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    /**
+     * 校验批量存证根上链请求的必填字段和 bytes32 根格式。
+     */
+    private boolean isValidAttestationBatchRequest(StoreAttestationBatchRequest request) {
+        return request != null
+                && request.tenantId() != null
+                && request.batchId() != null
+                && hasText(request.batchNo())
+                && hasText(request.proofAlgorithm())
+                && isBytes32Hex(request.merkleRoot())
+                && request.leafCount() != null
+                && request.leafCount() > 0;
+    }
+
+    /**
+     * 判断文本是否为 Solidity bytes32 十六进制哈希。
+     */
+    private boolean isBytes32Hex(String value) {
+        if (!hasText(value)) {
+            return false;
+        }
+        String normalized = value.startsWith("0x") || value.startsWith("0X")
+                ? value.substring(2)
+                : value;
+        return normalized.length() == 64 && normalized.matches("[0-9a-fA-F]+");
     }
 
     /**

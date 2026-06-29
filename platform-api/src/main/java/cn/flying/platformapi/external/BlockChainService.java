@@ -6,6 +6,8 @@ import cn.flying.platformapi.request.DeleteFilesRequest;
 import cn.flying.platformapi.request.GetShareInfoRequest;
 import cn.flying.platformapi.request.GetUserShareCodesRequest;
 import cn.flying.platformapi.request.ShareFilesRequest;
+import cn.flying.platformapi.request.StoreAttestationBatchRequest;
+import cn.flying.platformapi.request.StoreAttestationBatchResponse;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.*;
@@ -28,6 +30,14 @@ public interface BlockChainService {
      * @return 存储结果（包含交易哈希和文件哈希）
      */
     Result<StoreFileResponse> storeFile(StoreFileRequest request);
+
+    /**
+     * 存储 Merkle 批量存证根到区块链。
+     *
+     * @param request 批量存证请求
+     * @return 存储结果（包含交易哈希和链上确认的 Merkle 根）
+     */
+    Result<StoreAttestationBatchResponse> storeAttestationBatch(StoreAttestationBatchRequest request);
 
     /**
      * 获取用户所有文件列表

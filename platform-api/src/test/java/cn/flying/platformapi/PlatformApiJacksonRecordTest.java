@@ -20,6 +20,18 @@ class PlatformApiJacksonRecordTest {
         StoreFileRequest storeFileRequest2 = objectMapper.readValue(objectMapper.writeValueAsBytes(storeFileRequest), StoreFileRequest.class);
         assertThat(storeFileRequest2).isEqualTo(storeFileRequest);
 
+        StoreAttestationBatchRequest batchRequest = new StoreAttestationBatchRequest(
+                7L,
+                900L,
+                "MB-900",
+                "SHA-256-MERKLE-V1",
+                "root-hash",
+                2
+        );
+        StoreAttestationBatchRequest batchRequest2 =
+                objectMapper.readValue(objectMapper.writeValueAsBytes(batchRequest), StoreAttestationBatchRequest.class);
+        assertThat(batchRequest2).isEqualTo(batchRequest);
+
         ShareFilesRequest shareFilesRequest = new ShareFilesRequest("u1", List.of("h1", "h2"), 60);
         ShareFilesRequest shareFilesRequest2 = objectMapper.readValue(objectMapper.writeValueAsBytes(shareFilesRequest), ShareFilesRequest.class);
         assertThat(shareFilesRequest2).isEqualTo(shareFilesRequest);
@@ -99,5 +111,12 @@ class PlatformApiJacksonRecordTest {
         );
         StorageObjectHeadVO headVO2 = objectMapper.readValue(objectMapper.writeValueAsBytes(headVO), StorageObjectHeadVO.class);
         assertThat(headVO2).isEqualTo(headVO);
+
+        StoreAttestationBatchResponse batchResponse = new StoreAttestationBatchResponse("tx-root", "root-hash");
+        StoreAttestationBatchResponse batchResponse2 = objectMapper.readValue(
+                objectMapper.writeValueAsBytes(batchResponse),
+                StoreAttestationBatchResponse.class
+        );
+        assertThat(batchResponse2).isEqualTo(batchResponse);
     }
 }

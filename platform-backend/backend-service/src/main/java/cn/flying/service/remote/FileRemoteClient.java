@@ -9,6 +9,8 @@ import cn.flying.platformapi.request.DeleteFilesRequest;
 import cn.flying.platformapi.request.GetShareInfoRequest;
 import cn.flying.platformapi.request.GetUserShareCodesRequest;
 import cn.flying.platformapi.request.ShareFilesRequest;
+import cn.flying.platformapi.request.StoreAttestationBatchRequest;
+import cn.flying.platformapi.request.StoreAttestationBatchResponse;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.FileDetailVO;
@@ -18,8 +20,6 @@ import cn.flying.platformapi.response.StorageCapacityVO;
 import cn.flying.platformapi.response.StorageObjectHeadVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.platformapi.security.BlockChainRpcAuth;
-import cn.flying.common.util.JsonConverter;
-import cn.flying.service.attestation.AttestationBatchRootPayload;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
 import jakarta.annotation.PostConstruct;
@@ -74,22 +74,24 @@ public class FileRemoteClient {
     }
 
     /**
-     * Stores a Merkle batch root through the current blockchain file-attestation contract.
-     *
-     * <p>This is an explicit compatibility boundary: a future FISCO batch contract can replace
-     * the StoreFileRequest shape here without changing attestation batch orchestration.</p>
-     *
-     * @param payload Merkle batch root payload
-     * @return blockchain transaction response
+     * Stores a Merkle batch root through the dedicated blockchain batch-attestation RPC.
      */
-    public Result<StoreFileResponse> storeAttestationBatchRoot(AttestationBatchRootPayload payload) {
-        StoreFileRequest request = new StoreFileRequest(
-                "tenant:" + payload.tenantId(),
-                payload.type() + ":" + payload.batchNo(),
-                JsonConverter.toJson(payload),
-                payload.merkleRoot()
-        );
-        return storeFileOnChain(request);
+    @CircuitBreaker(name = "blockChainService", fallbackMethod = "storeAttestationBatchFallback")
+    @Retry(name = "blockChainService")
+    public Result<StoreAttestationBatchResponse> storeAttestationBatch(StoreAttestationBatchRequest request) {
+        return callBlockChain(() -> blockChainService.storeAttestationBatch(request));
+    }
+
+    /**
+     * Converts batch-attestation RPC failures into the shared blockchain error result.
+     */
+    private Result<StoreAttestationBatchResponse> storeAttestationBatchFallback(
+            StoreAttestationBatchRequest request,
+            Throwable t
+    ) {
+        log.error("BlockChain service storeAttestationBatch failed, batchNo={}",
+                request != null ? request.batchNo() : null, t);
+        return new Result<>(ResultEnum.BLOCKCHAIN_ERROR, null);
     }
 
     private Result<StoreFileResponse> storeFileOnChainFallback(StoreFileRequest request, Throwable t) {

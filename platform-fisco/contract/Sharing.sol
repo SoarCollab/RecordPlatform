@@ -17,6 +17,17 @@ contract Sharing is Storage {
         bool isValid;           // 是否有效
     }
 
+    // 批量存证根信息结构体
+    struct AttestationBatch {
+        string tenantId;         // 租户 ID
+        uint256 batchId;         // 批量存证 ID
+        string batchNo;          // 批量存证编号
+        string proofAlgorithm;   // Merkle 证明算法
+        bytes32 merkleRoot;      // Merkle 根
+        uint256 leafCount;       // 叶子数量
+        uint256 recordedTime;    // 上链时间（时间戳，毫秒）
+    }
+
     // 字符集，用于生成分享码
     string private constant CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
@@ -26,6 +37,9 @@ contract Sharing is Storage {
     // 用户分享码列表索引：uploader → shareCode[]
     mapping(string => string[]) private userShareCodes;
 
+    // 租户批量存证索引：tenantId → batchId → AttestationBatch
+    mapping(string => mapping(uint256 => AttestationBatch)) private attestationBatches;
+
     // 用于生成随机数的nonce
     uint256 private nonce = 0;
 
@@ -34,6 +48,16 @@ contract Sharing is Storage {
 
     // 取消分享事件
     event ShareCancelled(string shareCode, string uploader);
+
+    // 批量存证根存储事件
+    event AttestationBatchStored(
+        string tenantId,
+        uint256 batchId,
+        string batchNo,
+        bytes32 merkleRoot,
+        uint256 leafCount,
+        uint256 recordedTime
+    );
 
     // 平台操作员变更事件
     event OperatorTransferred(address previousOperator, address newOperator);
@@ -55,6 +79,38 @@ contract Sharing is Storage {
         require(newOperator != address(0), "Operator cannot be zero address");
         emit OperatorTransferred(operator, newOperator);
         operator = newOperator;
+    }
+
+    // 存储 Merkle 批量存证根（不写入普通文件映射）
+    function storeAttestationBatch(
+        string memory tenantId,
+        uint256 batchId,
+        string memory batchNo,
+        string memory proofAlgorithm,
+        bytes32 merkleRoot,
+        uint256 leafCount
+    ) public onlyOperator returns (bytes32) {
+        require(bytes(tenantId).length > 0, "Tenant cannot be empty");
+        require(batchId > 0, "Batch ID must be greater than 0");
+        require(bytes(batchNo).length > 0, "Batch number cannot be empty");
+        require(bytes(proofAlgorithm).length > 0, "Proof algorithm cannot be empty");
+        require(merkleRoot != bytes32(0), "Merkle root cannot be empty");
+        require(leafCount > 0, "Leaf count must be greater than 0");
+        require(attestationBatches[tenantId][batchId].recordedTime == 0, "Attestation batch already exists");
+
+        uint256 recordedTime = block.timestamp * 1000;
+        attestationBatches[tenantId][batchId] = AttestationBatch({
+            tenantId: tenantId,
+            batchId: batchId,
+            batchNo: batchNo,
+            proofAlgorithm: proofAlgorithm,
+            merkleRoot: merkleRoot,
+            leafCount: leafCount,
+            recordedTime: recordedTime
+        });
+
+        emit AttestationBatchStored(tenantId, batchId, batchNo, merkleRoot, leafCount, recordedTime);
+        return merkleRoot;
     }
     
     // 生成分享码（基于合约上下文和递增 nonce，避免外部自调用依赖）

@@ -182,6 +182,62 @@ public class BsnBesuAdapter implements BlockChainAdapter {
         }
     }
 
+    /**
+     * Stores a Merkle batch attestation through the dedicated Sharing contract method.
+     */
+    @Override
+    public ChainReceipt storeAttestationBatch(
+            Long tenantId,
+            Long batchId,
+            String batchNo,
+            String proofAlgorithm,
+            String merkleRoot,
+            Integer leafCount
+    ) {
+        try {
+            byte[] merkleRootBytes = toBytes32Hash(merkleRoot, "storeAttestationBatch");
+            org.web3j.abi.datatypes.Function abiFunction = new org.web3j.abi.datatypes.Function(
+                    "storeAttestationBatch",
+                    Arrays.asList(
+                            new Utf8String(String.valueOf(tenantId)),
+                            new Uint256(BigInteger.valueOf(batchId)),
+                            new Utf8String(batchNo),
+                            new Utf8String(proofAlgorithm),
+                            new Bytes32(merkleRootBytes),
+                            new Uint256(BigInteger.valueOf(leafCount))
+                    ),
+                    Collections.singletonList(new TypeReference<Bytes32>() {
+                    })
+            );
+
+            EthSendTransaction txResponse = sendTransaction(abiFunction);
+
+            if (txResponse.hasError()) {
+                throw new ChainException(ChainType.BSN_BESU, "storeAttestationBatch", txResponse.getError().getMessage());
+            }
+
+            String txHash = txResponse.getTransactionHash();
+            TransactionReceipt receipt = waitForReceipt(txHash);
+            if (!receipt.isStatusOK()) {
+                throw new ChainException(ChainType.BSN_BESU, "storeAttestationBatch", "Transaction execution failed");
+            }
+
+            return ChainReceipt.builder()
+                    .transactionHash(normalizeHash(txHash))
+                    .fileHash(normalizeHash(merkleRoot))
+                    .blockNumber(receipt.getBlockNumber().longValue())
+                    .gasUsed(receipt.getGasUsed().longValue())
+                    .success(true)
+                    .build();
+
+        } catch (ChainException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[BSN Besu storeAttestationBatch] 异常", e);
+            throw new ChainException(ChainType.BSN_BESU, "storeAttestationBatch", e.getMessage(), e);
+        }
+    }
+
     @Override
     public List<ChainFileInfo> getUserFiles(String uploader) {
         try {
@@ -682,5 +738,16 @@ public class BsnBesuAdapter implements BlockChainAdapter {
     private String normalizeHash(String hash) {
         if (hash == null) return "";
         return hash.startsWith("0x") || hash.startsWith("0X") ? hash.substring(2) : hash;
+    }
+
+    /**
+     * Converts a hexadecimal hash into a Solidity bytes32 value.
+     */
+    private byte[] toBytes32Hash(String hash, String operation) {
+        byte[] bytes = Numeric.hexStringToByteArray(hash);
+        if (bytes.length != 32) {
+            throw new ChainException(ChainType.BSN_BESU, operation, "Hash must be 32 bytes");
+        }
+        return bytes;
     }
 }
