@@ -365,7 +365,6 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 .bucket(nodeName)
                 .key(stagingObjectName)
                 .contentLength(part.size())
-                .contentType(resolveContentType(part.contentType(), request.contentType()))
                 .build();
         PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()
                 .signatureDuration(Duration.ofHours(EXPIRY_HOURS))
@@ -665,19 +664,6 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 digest is unavailable", e);
         }
-    }
-
-    /**
-     * Resolves the content type used for a presigned chunk PUT request.
-     */
-    private String resolveContentType(String partContentType, String requestContentType) {
-        if (partContentType != null && !partContentType.isBlank()) {
-            return partContentType;
-        }
-        if (requestContentType != null && !requestContentType.isBlank()) {
-            return requestContentType;
-        }
-        return "application/octet-stream";
     }
 
     @Override
