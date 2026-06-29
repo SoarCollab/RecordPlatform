@@ -513,6 +513,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             if (!existingState.isDirectUpload()) {
                 throw new GeneralException(ResultEnum.PARAM_ERROR, "客户端ID已被普通上传会话占用");
             }
+            validateDirectUploadResumeRequest(existingState, request, targetFileId);
             redisStateManager.updateLastActivityTime(clientId);
             return toDirectUploadSessionVO(existingState, true);
         }
@@ -716,6 +717,52 @@ public class FileUploadServiceImpl implements FileUploadService {
         if (sizeSum != request.getFileSize()) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片总大小与文件大小不匹配");
         }
+    }
+
+    /**
+     * Validates that an existing direct-upload session is being resumed with the original upload plan.
+     */
+    private void validateDirectUploadResumeRequest(FileUploadState state,
+                                                   DirectUploadSessionRequest request,
+                                                   Long targetFileId) {
+        if (!Objects.equals(state.getFileName(), request.getFileName())
+                || state.getFileSize() != request.getFileSize()
+                || !Objects.equals(state.getContentType(), request.getContentType())
+                || state.getChunkSize() != request.getChunkSize()
+                || state.getTotalChunks() != request.getTotalChunks()
+                || !Objects.equals(state.getTargetFileId(), targetFileId)
+                || state.getDirectUploadParts() == null
+                || state.getDirectUploadParts().size() != request.getTotalChunks()) {
+            throw directUploadResumeMismatch();
+        }
+
+        Map<Integer, DirectUploadPartRequest> declaredParts = new HashMap<>();
+        for (DirectUploadPartRequest part : request.getParts()) {
+            declaredParts.put(part.getIndex(), part);
+        }
+        for (FileUploadState.DirectUploadPartState persistedPart : state.getDirectUploadParts()) {
+            DirectUploadPartRequest declaredPart = declaredParts.get(persistedPart.getIndex());
+            if (declaredPart == null
+                    || persistedPart.getSize() != declaredPart.getSize()
+                    || !Objects.equals(
+                            normalizeDirectUploadHash(persistedPart.getPlainHash()),
+                            normalizeDirectUploadHash(declaredPart.getPlainHash()))
+                    || !Objects.equals(
+                            normalizeDirectUploadHash(persistedPart.getCipherHash()),
+                            normalizeDirectUploadHash(declaredPart.getCipherHash()))
+                    || !Objects.equals(
+                            normalizeChecksumAlgorithm(persistedPart.getChecksumAlgorithm()),
+                            normalizeChecksumAlgorithm(declaredPart.getChecksumAlgorithm()))) {
+                throw directUploadResumeMismatch();
+            }
+        }
+    }
+
+    /**
+     * Builds the strict resume mismatch error used by all direct-upload resume metadata checks.
+     */
+    private GeneralException directUploadResumeMismatch() {
+        return new GeneralException(ResultEnum.PARAM_ERROR, "客户端ID与直传上传会话不匹配");
     }
 
     /**
