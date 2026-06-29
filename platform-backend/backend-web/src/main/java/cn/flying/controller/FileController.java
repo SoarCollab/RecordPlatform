@@ -12,12 +12,14 @@ import cn.flying.dao.vo.file.FileProvenanceVO;
 import cn.flying.dao.vo.file.FileShareVO;
 import cn.flying.dao.vo.file.FileVO;
 import cn.flying.dao.vo.file.FileVersionVO;
+import cn.flying.dao.vo.file.ProofBundleVO;
 import cn.flying.dao.vo.file.ShareAccessLogVO;
 import cn.flying.dao.vo.file.ShareAccessStatsVO;
 import cn.flying.dao.vo.file.UserFileStatsVO;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
 import cn.flying.service.ShareAuditService;
+import cn.flying.service.proof.ProofBundleService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
@@ -63,6 +65,8 @@ public class FileController {
 
     private final ShareAuditService shareAuditService;
 
+    private final ProofBundleService proofBundleService;
+
     /**
      * 根据文件 ID 获取文件详情。
      *
@@ -79,6 +83,46 @@ public class FileController {
         Long fileId = IdUtils.fromExternalId(id);
         File file = fileQueryService.getFileById(userId, fileId);
         return Result.success(toFileVO(file));
+    }
+
+    /**
+     * 根据文件 ID 导出第三方可检查的证明包。
+     *
+     * @param userId 用户 ID
+     * @param id     文件外部 ID
+     * @return 证明包
+     */
+    @GetMapping("/{id}/proof-bundle")
+    @Operation(summary = "导出文件证明包")
+    @OperationLog(module = "文件操作", operationType = "查询", description = "导出文件证明包")
+    public Result<ProofBundleVO> exportProofBundleByFile(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Schema(description = "文件ID") @PathVariable String id) {
+        Long fileId = IdUtils.fromExternalId(id);
+        if (fileId == null) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "无效的文件ID");
+        }
+        return Result.success(proofBundleService.exportByFileId(userId, fileId));
+    }
+
+    /**
+     * 根据存证叶子 ID 导出第三方可检查的证明包。
+     *
+     * @param userId 用户 ID
+     * @param leafId 存证叶子外部 ID
+     * @return 证明包
+     */
+    @GetMapping("/attestation-leaves/{leafId}/proof-bundle")
+    @Operation(summary = "按存证叶子导出文件证明包")
+    @OperationLog(module = "文件操作", operationType = "查询", description = "按存证叶子导出文件证明包")
+    public Result<ProofBundleVO> exportProofBundleByLeaf(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Schema(description = "存证叶子ID") @PathVariable String leafId) {
+        Long internalLeafId = IdUtils.fromExternalId(leafId);
+        if (internalLeafId == null) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "无效的存证叶子ID");
+        }
+        return Result.success(proofBundleService.exportByLeafId(userId, internalLeafId));
     }
 
     /**

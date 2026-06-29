@@ -53,6 +53,7 @@ import cn.flying.service.ShareAuditService;
 import cn.flying.service.SysAuditService;
 import cn.flying.service.SystemMonitorService;
 import cn.flying.service.TicketService;
+import cn.flying.service.proof.ProofBundleService;
 import cn.flying.service.sse.SseEmitterManager;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -148,6 +149,9 @@ class OpenApiContractExportTest {
 
     @MockitoBean
     private FileService fileService;
+
+    @MockitoBean
+    private ProofBundleService proofBundleService;
 
     @MockitoBean
     private DownloadBatchMetricsService downloadBatchMetricsService;

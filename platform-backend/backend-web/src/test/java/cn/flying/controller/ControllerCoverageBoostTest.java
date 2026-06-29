@@ -124,6 +124,8 @@ class ControllerCoverageBoostTest {
     @Mock
     private ShareAuditService shareAuditService;
     @Mock
+    private cn.flying.service.proof.ProofBundleService proofBundleService;
+    @Mock
     private FriendFileShareService friendFileShareService;
     @Mock
     private PermissionService permissionService;
@@ -163,7 +165,7 @@ class ControllerCoverageBoostTest {
         friendController = new FriendController(friendService);
         ticketController = new TicketController(ticketService);
         uploadSessionController = new UploadSessionController(fileUploadService);
-        fileController = new FileController(fileQueryService, fileService, shareAuditService);
+        fileController = new FileController(fileQueryService, fileService, shareAuditService, proofBundleService);
         friendFileShareController = new FriendFileShareController(friendFileShareService);
         permissionController = new PermissionController(permissionService);
     }
