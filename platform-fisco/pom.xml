@@ -25,10 +25,10 @@
         <jakarta.servlet-api.version>6.1.0</jakarta.servlet-api.version>
         <resilience4j.version>2.4.0</resilience4j.version>
         <dubbo.version>3.3.6</dubbo.version>
-        <protobuf.version>4.34.1</protobuf.version>
+        <protobuf.version>4.35.1</protobuf.version>
         <logstash.logback.version>9.0</logstash.logback.version>
         <skywalking.toolkit.version>9.6.0</skywalking.toolkit.version>
-        <netty.version>4.2.13.Final</netty.version>
+        <netty.version>4.2.15.Final</netty.version>
         <commons-io.version>2.22.0</commons-io.version>
         <commons-lang3.version>3.20.0</commons-lang3.version>
         <bcprov.version>1.84</bcprov.version>
@@ -172,12 +172,12 @@
             <dependency>
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
-                <version>3.1.3</version>
+                <version>3.2.0</version>
             </dependency>
             <dependency>
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
-                <version>3.1.3</version>
+                <version>3.2.0</version>
             </dependency>
             <!-- Override transitive okhttp/okio from web3j to fix CVE (certificate validation + conversion error) -->
             <dependency>
@@ -221,7 +221,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
-                <version>3.6.2</version>
+                <version>3.6.3</version>
                 <executions>
                     <execution>
                         <id>enforce-java-21</id>
