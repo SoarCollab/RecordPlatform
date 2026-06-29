@@ -2,6 +2,7 @@ package cn.flying.service.saga;
 
 import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.entity.FileSaga;
 import cn.flying.dao.entity.FileSagaStatus;
@@ -10,10 +11,13 @@ import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileSagaMapper;
 import cn.flying.dao.mapper.TenantMapper;
 import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.service.monitor.SagaMetrics;
 import cn.flying.service.outbox.OutboxService;
 import cn.flying.service.remote.FileRemoteClient;
+import cn.flying.service.support.StoredObjectReference;
+import cn.flying.service.support.StoredObjectReferenceCodec;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -27,6 +31,9 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -131,6 +138,60 @@ class FileSagaOrchestratorTest {
 
             saga.markStatus(FileSagaStatus.COMPENSATED);
             assertEquals(FileSagaStatus.COMPENSATED.name(), saga.getStatus());
+        }
+    }
+
+    @Nested
+    @DisplayName("Execute Upload")
+    class ExecuteUpload {
+
+        /**
+         * 验证普通上传链上内容使用有序数组，重复分片哈希不会被 Map 覆盖。
+         */
+        @Test
+        @DisplayName("should persist ordered chain content when chunk hashes repeat")
+        void shouldPersistOrderedChainContentWhenChunkHashesRepeat() throws Exception {
+            Path firstChunk = Files.createTempFile("saga-dup-0", ".bin");
+            Path secondChunk = Files.createTempFile("saga-dup-1", ".bin");
+            try {
+                TenantContext.setTenantId(77L);
+                Files.writeString(firstChunk, "same", StandardCharsets.UTF_8);
+                Files.writeString(secondChunk, "same", StandardCharsets.UTF_8);
+                FileUploadCommand command = FileUploadCommand.builder()
+                        .requestId("req-ordered")
+                        .fileId(100L)
+                        .userId(1L)
+                        .fileName("dup.txt")
+                        .fileParam("{}")
+                        .fileList(List.of(firstChunk.toFile(), secondChunk.toFile()))
+                        .fileHashList(List.of("hash-same", "hash-same"))
+                        .tenantId(77L)
+                        .build();
+
+                when(sagaMapper.selectByRequestId("req-ordered", 77L)).thenReturn(null);
+                when(fileRemoteClient.storeFileChunk(any(byte[].class), eq("hash-same")))
+                        .thenReturn(Result.success("storage/tenant/77/chunk/hash-same"));
+                when(fileRemoteClient.storeFileOnChain(any()))
+                        .thenReturn(Result.success(new StoreFileResponse("tx-1", "chain-hash")));
+
+                FileUploadResult result = orchestrator.executeUpload(command);
+
+                assertTrue(result.isSuccess());
+                ArgumentCaptor<StoreFileRequest> requestCaptor = ArgumentCaptor.forClass(StoreFileRequest.class);
+                verify(fileRemoteClient).storeFileOnChain(requestCaptor.capture());
+                List<StoredObjectReference> references =
+                        StoredObjectReferenceCodec.parseChainContent(requestCaptor.getValue().content());
+                assertEquals(2, references.size());
+                assertEquals(0, references.get(0).index());
+                assertEquals("hash-same", references.get(0).cipherHash());
+                assertEquals(1, references.get(1).index());
+                assertEquals("hash-same", references.get(1).cipherHash());
+                assertEquals("storage/tenant/77/chunk/hash-same", references.get(1).storagePath());
+            } finally {
+                TenantContext.clear();
+                Files.deleteIfExists(firstChunk);
+                Files.deleteIfExists(secondChunk);
+            }
         }
     }
 

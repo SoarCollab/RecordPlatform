@@ -28,6 +28,7 @@ import cn.flying.platformapi.request.CancelShareRequest;
 import cn.flying.platformapi.request.ShareFilesRequest;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
+import cn.flying.platformapi.response.DirectMultipartCompletedPartVO;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.platformapi.response.SharingVO;
@@ -39,6 +40,8 @@ import cn.flying.service.key.FileParamEnvelopeResult;
 import cn.flying.service.saga.FileSagaOrchestrator;
 import cn.flying.service.saga.FileUploadCommand;
 import cn.flying.service.saga.FileUploadResult;
+import cn.flying.service.support.StoredObjectReference;
+import cn.flying.service.support.StoredObjectReferenceCodec;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -262,15 +265,15 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     @Override
     @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.util.TenantKeyUtils).currentTenantUserKey(#userId)")
     public File storeDirectUploadedFile(Long userId, Long targetFileId, String originFileName, long fileSize,
-                                        Map<String, String> storedPaths, String fileParam) {
-        if (CommonUtils.isEmpty(storedPaths)) {
-            throw new GeneralException(ResultEnum.PARAM_ERROR, "Stored paths cannot be empty");
+                                        List<DirectMultipartCompletedPartVO> completedParts, String fileParam) {
+        if (CommonUtils.isEmpty(completedParts)) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "Stored parts cannot be empty");
         }
 
         File existingFile = resolvePrepareFileForStore(userId, targetFileId, originFileName);
         FileParamEnvelopeResult envelopeResult = prepareFileParamEnvelope(fileParam);
         String sanitizedFileParam = envelopeResult.sanitizedFileParam();
-        String fileContent = JsonConverter.toJsonWithPretty(storedPaths);
+        String fileContent = StoredObjectReferenceCodec.toChainContent(completedParts);
         Result<StoreFileResponse> result = fileRemoteClient.storeFileOnChain(new StoreFileRequest(
                 String.valueOf(userId),
                 existingFile.getFileName(),
@@ -588,12 +591,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         if (CommonUtils.isEmpty(fileContent)) {
             throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
         }
-        @SuppressWarnings("unchecked")
-        Map<String,String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
-        if (fileContentMap == null || fileContentMap.isEmpty()) {
-            throw new GeneralException(ResultEnum.FAIL, "文件内容格式解析失败");
-        }
-        Result<List<String>> urlListResult = fileRemoteClient.getFileUrlListByHash(fileContentMap.values().stream().toList(), fileContentMap.keySet().stream().toList());
+        List<StoredObjectReference> references = StoredObjectReferenceCodec.parseChainContent(fileContent);
+        Result<List<String>> urlListResult = fileRemoteClient.getFileUrlListByHash(
+                references.stream().map(StoredObjectReference::storagePath).toList(),
+                references.stream().map(StoredObjectReference::cipherHash).toList()
+        );
         return ResultUtils.getData(urlListResult);
     }
 
@@ -611,12 +613,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         if (CommonUtils.isEmpty(fileContent)) {
             throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
         }
-        @SuppressWarnings("unchecked")
-        Map<String,String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
-        if (fileContentMap == null || fileContentMap.isEmpty()) {
-            throw new GeneralException(ResultEnum.FAIL, "文件内容格式解析失败");
-        }
-        Result<List<byte[]>> fileListResult = fileRemoteClient.getFileListByHash(fileContentMap.values().stream().toList(), fileContentMap.keySet().stream().toList());
+        List<StoredObjectReference> references = StoredObjectReferenceCodec.parseChainContent(fileContent);
+        Result<List<byte[]>> fileListResult = fileRemoteClient.getFileListByHash(
+                references.stream().map(StoredObjectReference::storagePath).toList(),
+                references.stream().map(StoredObjectReference::cipherHash).toList()
+        );
         return ResultUtils.getData(fileListResult);
     }
 
@@ -1257,14 +1258,10 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         if (CommonUtils.isEmpty(fileContent)) {
             throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
         }
-        @SuppressWarnings("unchecked")
-        Map<String, String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
-        if (fileContentMap == null || fileContentMap.isEmpty()) {
-            throw new GeneralException(ResultEnum.FAIL, "文件内容格式解析失败");
-        }
+        List<StoredObjectReference> references = StoredObjectReferenceCodec.parseChainContent(fileContent);
         Result<List<byte[]>> fileListResult = fileRemoteClient.getFileListByHash(
-                fileContentMap.values().stream().toList(),
-                fileContentMap.keySet().stream().toList());
+                references.stream().map(StoredObjectReference::storagePath).toList(),
+                references.stream().map(StoredObjectReference::cipherHash).toList());
         List<byte[]> files = ResultUtils.getData(fileListResult);
         incrementShareAccessCount(accessContext);
         return files;
@@ -1305,14 +1302,10 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         if (CommonUtils.isEmpty(fileContent)) {
             throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
         }
-        @SuppressWarnings("unchecked")
-        Map<String, String> fileContentMap = JsonConverter.parse(fileContent, Map.class);
-        if (fileContentMap == null || fileContentMap.isEmpty()) {
-            throw new GeneralException(ResultEnum.FAIL, "文件内容格式解析失败");
-        }
+        List<StoredObjectReference> references = StoredObjectReferenceCodec.parseChainContent(fileContent);
         Result<List<byte[]>> fileListResult = fileRemoteClient.getFileListByHash(
-                fileContentMap.values().stream().toList(),
-                fileContentMap.keySet().stream().toList());
+                references.stream().map(StoredObjectReference::storagePath).toList(),
+                references.stream().map(StoredObjectReference::cipherHash).toList());
         List<byte[]> files = ResultUtils.getData(fileListResult);
         incrementShareAccessCount(accessContext);
         return files;

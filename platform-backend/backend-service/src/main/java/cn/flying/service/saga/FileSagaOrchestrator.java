@@ -20,6 +20,8 @@ import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.service.monitor.SagaMetrics;
 import cn.flying.service.outbox.OutboxService;
 import cn.flying.service.remote.FileRemoteClient;
+import cn.flying.service.support.StoredObjectReference;
+import cn.flying.service.support.StoredObjectReferenceCodec;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.micrometer.core.instrument.Timer;
 import lombok.Getter;
@@ -80,8 +82,8 @@ public class FileSagaOrchestrator {
         FileSaga saga = startOrResumeSaga(cmd);
 
         try {
-            Map<String, String> storedPaths = executeS3Upload(saga, cmd);
-            StoreFileResponse chainResult = executeBlockchainStore(saga, cmd, storedPaths);
+            List<StoredObjectReference> storedObjects = executeS3Upload(saga, cmd);
+            StoreFileResponse chainResult = executeBlockchainStore(saga, cmd, storedObjects);
 
             publishSuccessEvent(saga, cmd, chainResult);
             completeSaga(saga);
@@ -144,18 +146,21 @@ public class FileSagaOrchestrator {
      *
      * @param saga Saga 实例，记录上传状态和进度
      * @param cmd 文件上传命令，包含分片文件列表和哈希列表
-     * @return 分片哈希到 S3 逻辑路径的映射
+     * @return 有序分片存储引用
      * @throws GeneralException 文件读取失败或 S3 上传失败时抛出
      */
-    private Map<String, String> executeS3Upload(FileSaga saga, FileUploadCommand cmd) {
+    private List<StoredObjectReference> executeS3Upload(FileSaga saga, FileUploadCommand cmd) {
         SagaPayloadContext context = loadPayloadContext(saga);
-        if (saga.reachedStep(FileSagaStep.S3_UPLOADED) && context.getStoredPaths() != null) {
-            return new LinkedHashMap<>(context.getStoredPaths());
+        if (saga.reachedStep(FileSagaStep.S3_UPLOADED)
+                && context.getStoredObjects() != null
+                && !context.getStoredObjects().isEmpty()) {
+            return List.copyOf(context.getStoredObjects());
         }
 
         saga.advanceTo(FileSagaStep.S3_UPLOADING);
         compensationHelper.updateSagaStepInNewTransaction(saga);
 
+        List<StoredObjectReference> storedObjects = new ArrayList<>();
         Map<String, String> storedPaths = new LinkedHashMap<>();
         List<java.io.File> fileList = cmd.getFileList();
         List<String> fileHashList = cmd.getFileHashList();
@@ -178,24 +183,26 @@ public class FileSagaOrchestrator {
                 log.error("S3 存储上传失败: index={}, hash={}", i, chunkHash);
                 throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR);
             }
+            storedObjects.add(new StoredObjectReference(i, chunkHash, logicalPath));
             storedPaths.put(chunkHash, logicalPath);
         }
 
+        context.setStoredObjects(storedObjects);
         context.setStoredPaths(storedPaths);
         context.resetCompensatedSteps();
 
         saga.advanceTo(FileSagaStep.S3_UPLOADED);
         persistPayload(saga, context);
 
-        return new LinkedHashMap<>(storedPaths);
+        return List.copyOf(storedObjects);
     }
 
     private StoreFileResponse executeBlockchainStore(FileSaga saga, FileUploadCommand cmd,
-                                                     Map<String, String> storedPaths) {
+                                                     List<StoredObjectReference> storedObjects) {
         saga.advanceTo(FileSagaStep.CHAIN_STORING);
         compensationHelper.updateSagaStepInNewTransaction(saga);
 
-        String fileContent = JsonConverter.toJsonWithPretty(storedPaths);
+        String fileContent = StoredObjectReferenceCodec.toReferenceChainContent(storedObjects);
         String userIdStr = String.valueOf(cmd.getUserId());
 
         Result<StoreFileResponse> result = fileRemoteClient.storeFileOnChain(new StoreFileRequest(
@@ -262,6 +269,14 @@ public class FileSagaOrchestrator {
         if (context.getStoredPaths() == null || context.getStoredPaths().isEmpty()) {
             context.setStoredPaths(loadLegacyStoredPaths(payloadJson));
         }
+        if ((context.getStoredObjects() == null || context.getStoredObjects().isEmpty())
+                && context.getStoredPaths() != null && !context.getStoredPaths().isEmpty()) {
+            context.setStoredObjects(toStoredObjectReferences(context.getStoredPaths()));
+        }
+        if ((context.getStoredPaths() == null || context.getStoredPaths().isEmpty())
+                && context.getStoredObjects() != null && !context.getStoredObjects().isEmpty()) {
+            context.setStoredPaths(toStoredPathMap(context.getStoredObjects()));
+        }
         if (context.getCompensatedSteps() == null) {
             context.setCompensatedSteps(new HashSet<>());
         }
@@ -278,11 +293,13 @@ public class FileSagaOrchestrator {
         if (payloadJson == null || payloadJson.isBlank()) {
             return new LinkedHashMap<>();
         }
-        Map<String, String> storedPaths = JsonConverter.parse(payloadJson, new TypeReference<Map<String, String>>() {});
-        if (storedPaths == null || storedPaths.isEmpty()) {
+        if (payloadJson.contains("\"storedObjects\"")
+                || payloadJson.contains("\"storedPaths\"")
+                || payloadJson.contains("\"compensatedSteps\"")) {
             return new LinkedHashMap<>();
         }
-        if (storedPaths.containsKey("storedPaths") || storedPaths.containsKey("compensatedSteps")) {
+        Map<String, String> storedPaths = JsonConverter.parse(payloadJson, new TypeReference<Map<String, String>>() {});
+        if (storedPaths == null || storedPaths.isEmpty()) {
             return new LinkedHashMap<>();
         }
         return new LinkedHashMap<>(storedPaths);
@@ -329,7 +346,10 @@ public class FileSagaOrchestrator {
             return true;
         }
 
-        Map<String, String> storedPaths = context.getStoredPaths();
+        Map<String, String> storedPaths = toStoredPathMap(context.getStoredObjects());
+        if (storedPaths.isEmpty() && context.getStoredPaths() != null) {
+            storedPaths = context.getStoredPaths();
+        }
         if (storedPaths == null || storedPaths.isEmpty()) {
             log.info("存储路径为空，跳过 S3 存储补偿: sagaId={}", saga.getId());
             return true;
@@ -527,6 +547,7 @@ public class FileSagaOrchestrator {
     @Setter
     @Getter
     private static class SagaPayloadContext {
+        private List<StoredObjectReference> storedObjects;
         private Map<String, String> storedPaths;
         private Set<String> compensatedSteps;
 
@@ -546,5 +567,34 @@ public class FileSagaOrchestrator {
                 compensatedSteps.clear();
             }
         }
+    }
+
+    /**
+     * Converts stored path maps into ordered references for resumed or historical Saga payloads.
+     */
+    private List<StoredObjectReference> toStoredObjectReferences(Map<String, String> storedPaths) {
+        if (storedPaths == null || storedPaths.isEmpty()) {
+            return List.of();
+        }
+        List<StoredObjectReference> references = new ArrayList<>(storedPaths.size());
+        int index = 0;
+        for (Map.Entry<String, String> entry : storedPaths.entrySet()) {
+            references.add(new StoredObjectReference(index++, entry.getKey(), entry.getValue()));
+        }
+        return List.copyOf(references);
+    }
+
+    /**
+     * Builds the hash-to-path map required by the storage deletion RPC.
+     */
+    private Map<String, String> toStoredPathMap(List<StoredObjectReference> storedObjects) {
+        if (storedObjects == null || storedObjects.isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+        Map<String, String> storedPaths = new LinkedHashMap<>();
+        storedObjects.stream()
+                .sorted(Comparator.comparingInt(StoredObjectReference::index))
+                .forEach(reference -> storedPaths.put(reference.cipherHash(), reference.storagePath()));
+        return storedPaths;
     }
 }

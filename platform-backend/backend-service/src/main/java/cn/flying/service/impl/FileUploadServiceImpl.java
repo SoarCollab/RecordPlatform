@@ -598,7 +598,7 @@ public class FileUploadServiceImpl implements FileUploadService {
                 state.getTargetFileId(),
                 state.getFileName(),
                 state.getFileSize(),
-                buildStoredPathMap(storageResponse.parts()),
+                storageResponse.parts(),
                 generateDirectUploadFileParam(state)
         );
 
@@ -883,17 +883,6 @@ public class FileUploadServiceImpl implements FileUploadService {
                 part.getCipherHash(),
                 normalizeChecksumAlgorithm(part.getChecksumAlgorithm())
         );
-    }
-
-    /**
-     * Builds the chain content map from completed storage parts.
-     */
-    private Map<String, String> buildStoredPathMap(List<DirectMultipartCompletedPartVO> parts) {
-        Map<String, String> storedPaths = new LinkedHashMap<>();
-        parts.stream()
-                .sorted(Comparator.comparingInt(DirectMultipartCompletedPartVO::partIndex))
-                .forEach(part -> storedPaths.put(part.cipherHash(), part.storagePath()));
-        return storedPaths;
     }
 
     /**

@@ -3,7 +3,6 @@ package cn.flying.service.job;
 import cn.flying.api.utils.ResultUtils;
 import cn.flying.common.lock.DistributedLock;
 import cn.flying.common.tenant.TenantContext;
-import cn.flying.common.util.JsonConverter;
 import cn.flying.common.util.TenantKeyUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.mapper.FileMapper;
@@ -11,6 +10,8 @@ import cn.flying.dao.mapper.TenantMapper;
 import cn.flying.platformapi.request.DeleteFilesRequest;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.service.remote.FileRemoteClient;
+import cn.flying.service.support.StoredObjectReference;
+import cn.flying.service.support.StoredObjectReferenceCodec;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,6 +24,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -141,6 +143,16 @@ public class FileCleanupTask {
         }
     }
 
+    /**
+     * Converts chain content references into the storage deletion RPC map shape.
+     */
+    private Map<String, String> toDeleteContentMap(String fileContent) {
+        List<StoredObjectReference> references = StoredObjectReferenceCodec.parseChainContent(fileContent);
+        Map<String, String> contentMap = new LinkedHashMap<>();
+        references.forEach(reference -> contentMap.put(reference.cipherHash(), reference.storagePath()));
+        return contentMap;
+    }
+
     private void cleanupSingleFile(File file, Long tenantId) {
         String userId = String.valueOf(file.getUid());
         String fileHash = file.getFileHash();
@@ -170,8 +182,7 @@ public class FileCleanupTask {
 
                 if (detail != null && detail.content() != null) {
                     // 2. 解析存储位置并从 S3 存储删除
-                    @SuppressWarnings("unchecked")
-                    Map<String, String> contentMap = JsonConverter.parse(detail.content(), Map.class);
+                    Map<String, String> contentMap = toDeleteContentMap(detail.content());
                     if (contentMap != null && !contentMap.isEmpty()) {
                         try {
                             fileRemoteClient.deleteStorageFile(contentMap);

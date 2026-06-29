@@ -365,6 +365,54 @@ class FileQueryServiceTest {
         }
 
         /**
+         * 验证有序链上内容可以保留重复分片哈希，并按 storagePath 顺序读取。
+         */
+        @Test
+        @DisplayName("should keep duplicate chunk hashes from ordered chain content")
+        void shouldKeepDuplicateChunkHashesFromOrderedChainContent() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                File ownedFile = new File()
+                        .setUid(USER_ID)
+                        .setFileHash(FILE_HASH)
+                        .setFileSize(1024L);
+                FileDetailVO detail = new FileDetailVO(
+                        String.valueOf(USER_ID),
+                        "owned.txt",
+                        "{}",
+                        """
+                                [
+                                  {"index":0,"cipherHash":"sha256:same","storagePath":"s3://node-a/final-0"},
+                                  {"index":1,"cipherHash":"sha256:same","storagePath":"s3://node-a/final-1"}
+                                ]
+                                """,
+                        FILE_HASH,
+                        "2026-06-27T00:00:00Z",
+                        1L,
+                        1024L,
+                        "text/plain");
+                byte[] first = "first".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                byte[] second = "second".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+                when(fileMapper.selectOne(any())).thenReturn(ownedFile);
+                when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH)).thenReturn(Result.success(detail));
+                when(fileRemoteClient.getFileListByHash(
+                        List.of("s3://node-a/final-0", "s3://node-a/final-1"),
+                        List.of("sha256:same", "sha256:same")))
+                        .thenReturn(Result.success(List.of(first, second)));
+
+                List<byte[]> result = fileQueryService.getFile(USER_ID, FILE_HASH);
+
+                assertEquals(2, result.size());
+                assertArrayEquals(first, result.get(0));
+                assertArrayEquals(second, result.get(1));
+                verify(fileRemoteClient).getFileListByHash(
+                        List.of("s3://node-a/final-0", "s3://node-a/final-1"),
+                        List.of("sha256:same", "sha256:same"));
+            }
+        }
+
+        /**
          * 验证超出当前内存型下载上限的文件不会进入远端 byte[] 聚合接口。
          */
         @Test
