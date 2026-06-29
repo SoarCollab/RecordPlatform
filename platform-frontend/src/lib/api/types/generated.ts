@@ -124,6 +124,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/files/{id}/key-envelopes/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 轮换文件密钥信封 */
+        post: operations["rotateKeyEnvelopes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/files/{id}/status": {
         parameters: {
             query?: never;
@@ -727,6 +744,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/files/attestation-leaves/{leafId}/proof-bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 按存证叶子导出文件证明包 */
+        get: operations["exportProofBundleByLeaf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/files/download-batches/report": {
         parameters: {
             query?: never;
@@ -804,6 +838,23 @@ export interface paths {
         };
         /** 获取文件解密信息（REST） */
         get: operations["getFileDecryptInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/files/hash/{fileHash}/download-metadata": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 获取文件预签名分片下载元数据（REST） */
+        get: operations["getDownloadMetadata"];
         put?: never;
         post?: never;
         delete?: never;
@@ -927,6 +978,23 @@ export interface paths {
         post?: never;
         /** 根据文件ID删除文件（管理员专用） */
         delete: operations["deleteFileById"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/files/{id}/proof-bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 导出文件证明包 */
+        get: operations["exportProofBundleByFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2136,6 +2204,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/upload-sessions/direct": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 创建直传上传会话 */
+        post: operations["createDirectUploadSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/upload-sessions/{clientId}": {
         parameters: {
             query?: never;
@@ -2182,6 +2267,40 @@ export interface paths {
         put?: never;
         /** 完成上传 */
         post: operations["completeUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/upload-sessions/{clientId}/direct": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 中止直传上传 */
+        delete: operations["abortDirectUpload"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/upload-sessions/{clientId}/direct/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 完成直传上传 */
+        post: operations["completeDirectUpload"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2786,6 +2905,15 @@ export interface components {
              */
             total: number;
         };
+        /** @description 链上回执摘要 */
+        ChainEvidence: {
+            /** @description 批量根上链文件哈希 */
+            batchChainFileHash?: string;
+            /** @description 批量根上链交易哈希 */
+            batchTransactionHash?: string;
+            /** @description 文件上链交易哈希 */
+            fileTransactionHash?: string;
+        };
         /** @description 区块链状态信息 */
         ChainStatusVO: {
             /**
@@ -2896,6 +3024,129 @@ export interface components {
              */
             fileSize: number;
         };
+        /** @description 直传分片完成请求 */
+        DirectUploadCompletePartRequest: {
+            etag?: string;
+            /**
+             * Format: int32
+             * @description 分片索引，从 0 开始
+             */
+            index?: number;
+        };
+        /** @description 直传上传完成请求 */
+        DirectUploadCompleteRequest: {
+            /** @description 分片完成元数据 */
+            parts: components["schemas"]["DirectUploadCompletePartRequest"][];
+        };
+        /** @description 直传上传完成响应 */
+        DirectUploadCompleteVO: {
+            /** @description 客户端会话 ID */
+            clientId?: string;
+            /** @description 链上文件哈希 */
+            fileHash?: string;
+            /** @description 文件外部 ID */
+            fileId?: string;
+            /** @description chunk manifest hash */
+            manifestHash?: string;
+            /** @description 完成状态 */
+            status?: string;
+            /** @description 交易哈希 */
+            transactionHash?: string;
+        };
+        /** @description 直传分片请求 */
+        DirectUploadPartRequest: {
+            /** @description 分片校验算法 */
+            checksumAlgorithm?: string;
+            /** @description 密文分片哈希；未启用前端加密时与 plainHash 相同 */
+            cipherHash: string;
+            /**
+             * Format: int32
+             * @description 分片索引，从 0 开始
+             */
+            index?: number;
+            /** @description 明文分片哈希 */
+            plainHash: string;
+            /**
+             * Format: int64
+             * @description 分片字节数
+             */
+            size?: number;
+        };
+        /** @description 直传分片预签名 URL */
+        DirectUploadPartUrlVO: {
+            /** @description 密文分片哈希 */
+            cipherHash?: string;
+            /**
+             * Format: int64
+             * @description URL 过期时间（Unix 秒）
+             */
+            expiresAtEpochSeconds?: number;
+            /**
+             * Format: int32
+             * @description 分片索引，从 0 开始
+             */
+            index?: number;
+            /** @description 明文分片哈希 */
+            plainHash?: string;
+            /**
+             * Format: int64
+             * @description 分片字节数
+             */
+            size?: number;
+            /** @description 完成后持久化的 chunk storagePath */
+            storagePath?: string;
+            /** @description 预签名上传 URL */
+            uploadUrl?: string;
+        };
+        /** @description 直传上传会话创建请求 */
+        DirectUploadSessionRequest: {
+            /**
+             * Format: int32
+             * @description 分片大小
+             */
+            chunkSize?: number;
+            /** @description 客户端会话 ID */
+            clientId?: string;
+            /** @description 文件类型 */
+            contentType: string;
+            /** @description 目标文件ID（可选） */
+            fileId?: string;
+            /** @description 文件名 */
+            fileName: string;
+            /**
+             * Format: int64
+             * @description 文件大小
+             */
+            fileSize?: number;
+            /** @description 分片元数据 */
+            parts: components["schemas"]["DirectUploadPartRequest"][];
+            /**
+             * Format: int32
+             * @description 分片总数
+             */
+            totalChunks?: number;
+        };
+        /** @description 直传上传会话响应 */
+        DirectUploadSessionVO: {
+            /**
+             * Format: int32
+             * @description 分片大小
+             */
+            chunkSize?: number;
+            /** @description 客户端会话 ID */
+            clientId?: string;
+            /** @description manifest schema id */
+            manifestSchemaId?: string;
+            /** @description 分片预签名 URL 列表 */
+            parts?: components["schemas"]["DirectUploadPartUrlVO"][];
+            /** @description 是否恢复既有会话 */
+            resumed?: boolean;
+            /**
+             * Format: int32
+             * @description 分片总数
+             */
+            totalChunks?: number;
+        };
         /** @description 用户注册表单信息 */
         EmailRegisterVO: {
             /** @description 验证码 */
@@ -2962,6 +3213,112 @@ export interface components {
             fileSize?: number;
             /** @description 初始密钥（最后一个分片的解密密钥，Base64编码） */
             initialKey?: string;
+        };
+        /** @description 文件预签名分片下载元数据 */
+        FileDownloadMetadataVO: {
+            /**
+             * Format: int64
+             * @description 分片大小
+             */
+            chunkSize?: number;
+            /** @description 文件 MIME 类型 */
+            contentType?: string;
+            /** @description 加密算法 */
+            encryptionAlgorithm?: string;
+            /** @description 文件哈希 */
+            fileHash?: string;
+            /** @description 外部文件 ID */
+            fileId?: string;
+            /** @description 文件名 */
+            fileName?: string;
+            /**
+             * Format: int64
+             * @description 文件大小（字节）
+             */
+            fileSize?: number;
+            /** @description 哈希算法 */
+            hashAlgorithm?: string;
+            /** @description 初始密钥（最后一个分片的解密密钥，Base64 编码） */
+            initialKey?: string;
+            /** @description manifest hash */
+            manifestHash?: string;
+            /** @description manifest schema id */
+            manifestSchemaId?: string;
+            /** @description 有序分片下载 URL 列表 */
+            parts?: components["schemas"]["FileDownloadPartVO"][];
+            /** @description 存储后端 */
+            storageBackend?: string;
+            /**
+             * Format: int32
+             * @description 分片总数
+             */
+            totalChunks?: number;
+        };
+        /** @description 文件分片预签名下载元数据 */
+        FileDownloadPartVO: {
+            /** @description 校验算法 */
+            checksumAlgorithm?: string;
+            /** @description 密文分片哈希 */
+            cipherHash?: string;
+            /** @description 预签名下载 URL */
+            downloadUrl?: string;
+            /**
+             * Format: int64
+             * @description URL 过期时间（Unix 秒）
+             */
+            expiresAtEpochSeconds?: number;
+            /**
+             * Format: int32
+             * @description 分片索引，从 0 开始
+             */
+            index?: number;
+            /** @description 明文分片哈希 */
+            plainHash?: string;
+            /**
+             * Format: int64
+             * @description 分片字节数
+             */
+            size?: number;
+            /** @description 分片 storagePath */
+            storagePath?: string;
+        };
+        /** @description 文件公开元数据 */
+        FileEvidence: {
+            /**
+             * Format: int32
+             * @description 分片数量
+             */
+            chunkCount?: number;
+            /** @description 内容类型 */
+            contentType?: string;
+            /**
+             * Format: date-time
+             * @description 创建时间
+             */
+            createTime?: string;
+            /** @description 文件哈希 */
+            fileHash?: string;
+            /** @description 外部文件 ID */
+            fileId?: string;
+            /** @description 文件名称 */
+            fileName?: string;
+            /**
+             * Format: int64
+             * @description 文件大小
+             */
+            fileSize?: number;
+            /**
+             * Format: int32
+             * @description 是否最新版本
+             */
+            isLatest?: number;
+            /** @description 文件链上交易哈希 */
+            transactionHash?: string;
+            /**
+             * Format: int32
+             * @description 版本号
+             */
+            version?: number;
         };
         /** @description 文件溯源信息 */
         FileProvenanceVO: {
@@ -3507,6 +3864,70 @@ export interface components {
             /** Format: int64 */
             totalChecked?: number;
         };
+        /** @description 签发方元数据 */
+        IssuerEvidence: {
+            /** @description 批次状态 */
+            batchStatus?: string;
+            /** @description 签发合同 */
+            contract?: string;
+            /** @description 签发平台 */
+            platform?: string;
+            /** @description 签名；为空表示当前版本未签名 */
+            signature?: string;
+            /** @description 签名算法；为空表示当前版本未签名 */
+            signatureAlgorithm?: string;
+        };
+        /** @description 文件密钥信封轮换结果 */
+        KeyEnvelopeRotationResultVO: {
+            /** @description 文件哈希 */
+            fileHash?: string;
+            /** @description 文件ID */
+            fileId?: string;
+            /**
+             * Format: int32
+             * @description 已轮换信封数
+             */
+            rotatedCount?: number;
+            /**
+             * Format: int32
+             * @description 跳过信封数
+             */
+            skippedCount?: number;
+            /**
+             * Format: int32
+             * @description 目标密钥版本
+             */
+            targetKeyVersion?: number;
+        };
+        /** @description 证明包清单 */
+        Manifest: {
+            /** @description 批量存证号 */
+            batchNo?: string;
+            /** @description 外部文件 ID */
+            fileId?: string;
+            /** @description 外部叶子 ID */
+            leafId?: string;
+            /** @description 证明包类型 */
+            type?: string;
+            /** @description 证明包版本 */
+            version?: string;
+        };
+        /** @description Merkle 证明 */
+        MerkleEvidence: {
+            /** @description 叶子哈希 */
+            leafHash?: string;
+            /**
+             * Format: int32
+             * @description 叶子索引
+             */
+            leafIndex?: number;
+            /** @description Merkle 根 */
+            merkleRoot?: string;
+            /** @description 证明算法 */
+            proofAlgorithm?: string;
+            /** @description 证明路径 */
+            proofPath?: components["schemas"]["ProofNode"][];
+        };
         /** @description 消息信息 */
         MessageVO: {
             /** @description 消息内容 */
@@ -3614,6 +4035,27 @@ export interface components {
              * @description 已上传原始分片数量
              */
             uploadedChunkCount?: number;
+        };
+        /** @description 文件证明包 */
+        ProofBundleVO: {
+            chain?: components["schemas"]["ChainEvidence"];
+            /** @description 证明包合同版本 */
+            contractVersion?: string;
+            file?: components["schemas"]["FileEvidence"];
+            issuer?: components["schemas"]["IssuerEvidence"];
+            manifest?: components["schemas"]["Manifest"];
+            merkle?: components["schemas"]["MerkleEvidence"];
+            storage?: components["schemas"]["StorageEvidence"];
+            /** @description 人工验证说明 */
+            verificationGuide?: string[];
+            verificationPolicy?: components["schemas"]["VerificationPolicy"];
+        };
+        /** @description 证明路径 */
+        ProofNode: {
+            /** @description 兄弟节点哈希 */
+            hash?: string;
+            /** @description 兄弟节点位置：LEFT/RIGHT */
+            position?: string;
         };
         /** @description 分享链路节点 */
         ProvenanceNode: {
@@ -3908,6 +4350,28 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
+        ResultDirectUploadCompleteVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["DirectUploadCompleteVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultDirectUploadSessionVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["DirectUploadSessionVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
         ResultFileDecryptInfoVO: {
             /**
              * Format: int32
@@ -3915,6 +4379,17 @@ export interface components {
              */
             code?: number;
             data?: components["schemas"]["FileDecryptInfoVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultFileDownloadMetadataVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["FileDownloadMetadataVO"];
             /** @description 提示信息 */
             message?: string;
         };
@@ -4139,6 +4614,17 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
+        ResultKeyEnvelopeRotationResultVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["KeyEnvelopeRotationResultVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
         ResultListAnnouncementVO: {
             /**
              * Format: int32
@@ -4355,6 +4841,17 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
+        ResultProofBundleVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["ProofBundleVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
         ResultQuotaRolloutAuditVO: {
             /**
              * Format: int32
@@ -4564,6 +5061,11 @@ export interface components {
              */
             totalChunks?: number;
         };
+        /** @description 文件密钥信封轮换请求 */
+        RotateKeyEnvelopeVO: {
+            /** @description 轮换原因/备注 */
+            reason?: string;
+        };
         /** @description 保存分享文件VO */
         SaveSharingFile: {
             /** @description 分享码（用于链路追踪） */
@@ -4758,6 +5260,11 @@ export interface components {
             /** Format: int64 */
             usedCapacityBytes?: number;
         };
+        /** @description 存储公开元数据 */
+        StorageEvidence: {
+            /** @description 存储对象列表 */
+            objects?: components["schemas"]["StorageObjectEvidence"][];
+        };
         StorageNodeCapacityVO: {
             faultDomain?: string;
             nodeName?: string;
@@ -4768,6 +5275,44 @@ export interface components {
             usagePercent?: number;
             /** Format: int64 */
             usedCapacityBytes?: number;
+        };
+        /** @description 存储对象列表 */
+        StorageObjectEvidence: {
+            /** @description 校验算法 */
+            checksumAlgorithm?: string;
+            /** @description 密文分片哈希 */
+            cipherHash?: string;
+            /**
+             * Format: int64
+             * @description 对象长度
+             */
+            contentLength?: number;
+            /** @description ETag */
+            eTag?: string;
+            /** @description 对象是否存在 */
+            exists?: boolean;
+            /**
+             * Format: int32
+             * @description 分片序号
+             */
+            index?: number;
+            /** @description 对象元数据文件哈希 */
+            metadataHash?: string;
+            /** @description 对象元数据哈希是否匹配 */
+            metadataHashMatches?: boolean;
+            /** @description 存储节点名 */
+            nodeName?: string;
+            /** @description 逻辑对象路径 */
+            objectPath?: string;
+            /** @description 明文分片 SHA-256 */
+            plainHash?: string;
+            /**
+             * Format: int64
+             * @description 分片长度
+             */
+            size?: number;
+            /** @description 对象路径租户是否匹配 */
+            tenantMatches?: boolean;
         };
         /** @description 系统操作日志视图对象 */
         SysOperationLogVO: {
@@ -5232,6 +5777,39 @@ export interface components {
              */
             operationCount?: number;
         };
+        /** @description 验证策略 */
+        VerificationPolicy: {
+            /** @description 内容加密算法套件 */
+            algorithmSuite?: string;
+            /**
+             * Format: date-time
+             * @description 套件废弃时间；为空表示尚未计划废弃
+             */
+            deprecatedAfter?: string;
+            /** @description 哈希算法 */
+            hashAlgorithm?: string;
+            /** @description KEM/接收方密钥协商套件；NONE-V1 表示当前版本未使用 KEM */
+            kemSuite?: string;
+            /**
+             * Format: int32
+             * @description 密钥版本
+             */
+            keyVersion?: number;
+            /** @description 叶子哈希规则 */
+            leafHashRule?: string;
+            /** @description 叶子排序规则 */
+            leafOrdering?: string;
+            /** @description 奇数叶子规则 */
+            oddLeafRule?: string;
+            /** @description 父节点哈希规则 */
+            parentHashRule?: string;
+            /** @description 证明路径规则 */
+            proofPathRule?: string;
+            /** @description 证明构造套件 */
+            proofSuite?: string;
+            /** @description 签名算法套件；UNSIGNED-V1 表示当前证明包未签名 */
+            signatureSuite?: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -5440,6 +6018,33 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultString"];
+                };
+            };
+        };
+    };
+    rotateKeyEnvelopes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文件ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RotateKeyEnvelopeVO"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultKeyEnvelopeRotationResultVO"];
                 };
             };
         };
@@ -6236,6 +6841,29 @@ export interface operations {
             };
         };
     };
+    exportProofBundleByLeaf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 存证叶子ID */
+                leafId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultProofBundleVO"];
+                };
+            };
+        };
+    };
     reportDownloadBatchMetrics: {
         parameters: {
             query?: never;
@@ -6344,6 +6972,28 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultFileDecryptInfoVO"];
+                };
+            };
+        };
+    };
+    getDownloadMetadata: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fileHash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultFileDownloadMetadataVO"];
                 };
             };
         };
@@ -6529,6 +7179,29 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultString"];
+                };
+            };
+        };
+    };
+    exportProofBundleByFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文件ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultProofBundleVO"];
                 };
             };
         };
@@ -8284,6 +8957,30 @@ export interface operations {
             };
         };
     };
+    createDirectUploadSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DirectUploadSessionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultDirectUploadSessionVO"];
+                };
+            };
+        };
+    };
     getUploadSession: {
         parameters: {
             query?: never;
@@ -8376,6 +9073,54 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultString"];
+                };
+            };
+        };
+    };
+    abortDirectUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clientId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultString"];
+                };
+            };
+        };
+    };
+    completeDirectUpload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clientId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DirectUploadCompleteRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultDirectUploadCompleteVO"];
                 };
             };
         };
