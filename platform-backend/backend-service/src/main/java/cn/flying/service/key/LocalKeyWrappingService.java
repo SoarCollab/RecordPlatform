@@ -34,6 +34,13 @@ public class LocalKeyWrappingService {
      * Encrypts a serialized file data-key token and binds it to the supplied AAD.
      */
     public WrappedDataKey wrap(String plaintextKey, byte[] aad) {
+        return wrap(plaintextKey, aad, properties.getKeyVersion());
+    }
+
+    /**
+     * Encrypts a serialized file data-key token with an explicit wrapping key version.
+     */
+    public WrappedDataKey wrap(String plaintextKey, byte[] aad, Integer keyVersion) {
         if (!StringUtils.hasText(plaintextKey)) {
             throw new GeneralException(ResultEnum.ENCRYPTION_ERROR, "文件数据密钥不能为空");
         }
@@ -42,7 +49,8 @@ public class LocalKeyWrappingService {
             secureRandom.nextBytes(iv);
 
             Cipher cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION);
-            cipher.init(Cipher.ENCRYPT_MODE, resolveMasterKey(), new GCMParameterSpec(GCM_TAG_BITS, iv));
+            Integer resolvedKeyVersion = resolveKeyVersion(keyVersion);
+            cipher.init(Cipher.ENCRYPT_MODE, resolveMasterKey(resolvedKeyVersion), new GCMParameterSpec(GCM_TAG_BITS, iv));
             if (aad != null && aad.length > 0) {
                 cipher.updateAAD(aad);
             }
@@ -52,7 +60,7 @@ public class LocalKeyWrappingService {
                     Base64.getEncoder().encodeToString(iv),
                     properties.getProvider(),
                     properties.getKmsKeyId(),
-                    properties.getKeyVersion(),
+                    resolvedKeyVersion,
                     properties.getWrappingAlgorithm()
             );
         } catch (GeneralException e) {
@@ -75,7 +83,7 @@ public class LocalKeyWrappingService {
             byte[] encrypted = Base64.getDecoder().decode(envelope.getEncryptedDataKey());
 
             Cipher cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION);
-            cipher.init(Cipher.DECRYPT_MODE, resolveMasterKey(), new GCMParameterSpec(GCM_TAG_BITS, iv));
+            cipher.init(Cipher.DECRYPT_MODE, resolveMasterKey(envelope.getKeyVersion()), new GCMParameterSpec(GCM_TAG_BITS, iv));
             if (aad != null && aad.length > 0) {
                 cipher.updateAAD(aad);
             }
@@ -88,12 +96,19 @@ public class LocalKeyWrappingService {
     }
 
     /**
-     * Derives a stable AES-256 key from the deployment local master key.
+     * Derives a stable AES-256 key from the deployment local master key version.
      */
-    private SecretKeySpec resolveMasterKey() {
-        String masterKey = properties.getLocalMasterKey();
+    private SecretKeySpec resolveMasterKey(Integer keyVersion) {
+        Integer resolvedKeyVersion = resolveKeyVersion(keyVersion);
+        String masterKey = properties.getLocalMasterKeys().get(resolvedKeyVersion);
+        if (!StringUtils.hasText(masterKey) && resolvedKeyVersion.equals(properties.getKeyVersion())) {
+            masterKey = properties.getLocalMasterKey();
+        }
+        if (!StringUtils.hasText(masterKey) && properties.getLocalMasterKeys().isEmpty()) {
+            masterKey = properties.getLocalMasterKey();
+        }
         if (!StringUtils.hasText(masterKey)) {
-            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR, "文件密钥信封主密钥未配置");
+            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR, "文件密钥信封主密钥版本未配置");
         }
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -102,5 +117,16 @@ public class LocalKeyWrappingService {
         } catch (Exception e) {
             throw new GeneralException(ResultEnum.ENCRYPTION_ERROR, "文件密钥信封主密钥派生失败");
         }
+    }
+
+    /**
+     * Resolves the configured current key version when callers omit a target version.
+     */
+    private Integer resolveKeyVersion(Integer keyVersion) {
+        Integer resolved = keyVersion != null ? keyVersion : properties.getKeyVersion();
+        if (resolved == null || resolved <= 0) {
+            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR, "文件密钥信封版本无效");
+        }
+        return resolved;
     }
 }

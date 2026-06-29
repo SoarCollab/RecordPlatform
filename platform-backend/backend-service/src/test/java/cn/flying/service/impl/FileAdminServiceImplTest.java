@@ -19,6 +19,7 @@ import cn.flying.dao.vo.admin.AdminFileQueryParam;
 import cn.flying.dao.vo.admin.AdminFileVO;
 import cn.flying.dao.vo.admin.AdminShareQueryParam;
 import cn.flying.dao.vo.admin.AdminShareVO;
+import cn.flying.service.key.FileKeyEnvelopeService;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -73,6 +74,9 @@ class FileAdminServiceImplTest {
 
     @Mock
     private AccountMapper accountMapper;
+
+    @Mock
+    private FileKeyEnvelopeService fileKeyEnvelopeService;
 
     @InjectMocks
     private FileAdminServiceImpl fileAdminService;

@@ -189,6 +189,10 @@ file:
     provider: local
     kms-key-id: local-file-key-v1
     local-master-key: ${FILE_KEY_ENVELOPE_MASTER_KEY:${JWT_KEY:}}
+    # Optional versioned local wrapping keys. Keep old versions configured until rewrap completes.
+    # local-master-keys:
+    #   1: ${FILE_KEY_ENVELOPE_MASTER_KEY_V1:${FILE_KEY_ENVELOPE_MASTER_KEY:${JWT_KEY:}}}
+    #   2: ${FILE_KEY_ENVELOPE_MASTER_KEY_V2:}
     key-version: 1
     algorithm-suite: RP-AES256-GCM-CHUNK-CHAIN-V1
     encryption-algorithm: CHUNK_KEY_CHAIN
