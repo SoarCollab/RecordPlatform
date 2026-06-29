@@ -75,11 +75,14 @@ Authorization: Bearer <token>
 | 方法 | 端点 | 说明 |
 |------|------|------|
 | POST | `/api/v1/upload-sessions` | 开始分片上传 |
+| POST | `/api/v1/upload-sessions/direct` | 开始对象存储直传并返回预签名 URL |
 | PUT | `/api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}` | 上传分片 |
 | POST | `/api/v1/upload-sessions/{clientId}/complete` | 完成上传 |
+| POST | `/api/v1/upload-sessions/{clientId}/direct/complete` | 完成对象存储直传 |
 | POST | `/api/v1/upload-sessions/{clientId}/pause` | 暂停上传 |
 | POST | `/api/v1/upload-sessions/{clientId}/resume` | 恢复上传 |
 | DELETE | `/api/v1/upload-sessions/{clientId}` | 取消上传 |
+| DELETE | `/api/v1/upload-sessions/{clientId}/direct` | 中止对象存储直传 |
 | GET | `/api/v1/upload-sessions/{clientId}` | 检查上传状态 |
 | GET | `/api/v1/upload-sessions/{clientId}/progress` | 查询上传进度 |
 
@@ -88,13 +91,15 @@ Authorization: Bearer <token>
 | 方法 | 端点 | 说明 |
 |------|------|------|
 | GET | `/api/v1/files/{id}` | 按文件 ID 查询详情 |
+| GET | `/api/v1/files/{id}/proof-bundle` | 按文件 ID 导出可验证证明包 |
+| GET | `/api/v1/files/attestation-leaves/{leafId}/proof-bundle` | 按存证叶子 ID 导出可验证证明包 |
 | GET | `/api/v1/files/hash/{fileHash}` | 按文件哈希查询详情 |
 | GET | `/api/v1/files` | 用户文件分页（支持 `keyword`、`keywordMode=FUZZY/PREFIX/EXACT_HASH/AUTO`、`status`、`startTime`、`endTime`） |
 | GET | `/api/v1/files/stats` | 用户文件统计 |
 | GET | `/api/v1/files/hash/{fileHash}/download-metadata` | 获取基于 manifest 的预签名分片下载元数据 |
-| GET | `/api/v1/files/hash/{fileHash}/addresses` | 获取下载地址（遗留兼容） |
+| GET | `/api/v1/files/hash/{fileHash}/addresses` | 获取仅 URL 下载地址 |
 | GET | `/api/v1/transactions/{transactionHash}` | 查询链上交易信息 |
-| GET | `/api/v1/files/hash/{fileHash}/chunks` | 后端 byte payload 下载（遗留兼容） |
+| GET | `/api/v1/files/hash/{fileHash}/chunks` | 后端 byte payload 下载 |
 | GET | `/api/v1/files/hash/{fileHash}/decrypt-info` | 获取解密信息（登录态） |
 | GET | `/api/v1/shares/{shareCode}/files` | 公开分享文件列表（公开） |
 | GET | `/api/v1/files/shares` | 获取我的分享列表 |

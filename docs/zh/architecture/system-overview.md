@@ -115,30 +115,36 @@ sequenceDiagram
     participant S3 as S3 Cluster
     participant Chain as FISCO BCOS
 
-    Note over Client, Backend: 阶段 1: 初始化上传
-    Client->>Backend: POST /api/v1/upload-sessions
-    Backend->>Backend: 校验配额 & 文件是否存在
-    Backend-->>Client: 200 OK (ClientId, ChunkSize)
-
-    Note over Client, S3: 阶段 2: 分片上传
-    loop 每个分片
-        Client->>Backend: PUT /api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}
-        Backend->>Storage: RPC: storeChunk()
-        Storage->>S3: PutObject (加密)
-        S3-->>Storage: 成功
-        Storage-->>Backend: 分片哈希
-        Backend-->>Client: 200 OK
+    alt 对象存储直传
+        Client->>Backend: POST /api/v1/upload-sessions/direct
+        Backend->>Backend: 校验配额、分片元数据、plainHash == cipherHash
+        Backend->>Storage: RPC: createDirectMultipartUpload
+        Storage->>S3: 创建 staging PUT 预签名 URL
+        Backend-->>Client: clientId、manifest schema、预签名 URL
+        loop 每个分片
+            Client->>S3: PUT 预签名 URL
+            S3-->>Client: ETag
+        end
+        Client->>Backend: POST /api/v1/upload-sessions/{clientId}/direct/complete
+        Backend->>Storage: RPC: completeDirectMultipartUpload
+        Storage->>S3: 校验 staging 字节并写入最终副本
+        Backend->>Backend: 持久化文件记录和 active chunk manifest
+    else 后端代理分片上传
+        Client->>Backend: POST /api/v1/upload-sessions
+        Backend-->>Client: clientId、chunkSize、totalChunks
+        loop 每个分片
+            Client->>Backend: PUT /api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}
+            Backend->>Storage: RPC: storeChunk()
+            Storage->>S3: PutObject
+            Backend-->>Client: 分片 ACK
+        end
+        Client->>Backend: POST /api/v1/upload-sessions/{clientId}/complete
     end
 
-    Note over Client, Chain: 阶段 3: 存证 & 确认
-    Client->>Backend: POST /api/v1/upload-sessions/{clientId}/complete
-    Backend->>Backend: 合并分片元数据
-    Backend->>Chain: 异步 Transaction (Saga)
+    Backend->>Chain: 写入文件存证
     Chain-->>Backend: TxHash
-    Backend-->>Client: 200 OK (FileID)
-
-    Note right of Backend: 通过 SSE 推送最终链上状态
-    Backend--)Client: SSE: UPLOAD_COMPLETED
+    Backend-->>Client: 文件记录
+    Backend--)Client: SSE 状态更新
 ```
 
 ### 文件下载流程
@@ -154,7 +160,7 @@ sequenceDiagram
 
     Note over Client, Backend: 阶段 1: 获取基于 manifest 的下载元数据
     Client->>Backend: GET /api/v1/files/hash/{fileHash}/download-metadata
-    Backend->>Backend: 校验权限 & 读取 active chunk manifest
+    Backend->>Backend: 校验权限 & 要求 active chunk manifest
     Backend->>Storage: RPC: getFileUrlListByHash(storagePath[], cipherHash[])
     Storage->>S3: 生成预签名 URL
     S3-->>Storage: 预签名 URL 列表
@@ -251,9 +257,9 @@ sequenceDiagram
     Backend-->>Friend: 200 OK (SharedFiles)
 
     Note over Friend, Backend: 阶段 3: 下载分享文件
-    Friend->>Backend: GET /api/v1/files/hash/{fileHash}/addresses (使用分享文件哈希)
-    Backend->>Backend: 使用原上传者 ID 查询文件
-    Backend-->>Friend: 200 OK (DownloadInfo)
+    Friend->>Backend: GET /api/v1/files/hash/{fileHash}/download-metadata
+    Backend->>Backend: 校验分享访问权限和 active manifest
+    Backend-->>Friend: 200 OK (URLs, manifest, decrypt metadata)
 ```
 
 **分享类型对比**：

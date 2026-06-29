@@ -595,7 +595,10 @@ PUT /api/v1/users/password
 
 Base Path: `/api/v1/upload-sessions`
 
-This module implements chunked file upload with pause/resume support.
+This module exposes two upload paths:
+
+- Backend-proxied chunk upload with pause/resume support.
+- Direct multipart upload where the frontend uploads chunk bytes to object storage through presigned URLs and the backend only validates metadata, registers the file, persists the chunk manifest, and records attestation.
 
 ### Upload Flow
 
@@ -604,6 +607,15 @@ This module implements chunked file upload with pause/resume support.
 3. Monitor progress via `GET /api/v1/upload-sessions/{clientId}/progress`
 4. Call `POST /api/v1/upload-sessions/{clientId}/complete` when all chunks uploaded
 5. Optionally use `pause` and `resume` endpoints for interruption control
+
+Direct multipart flow:
+
+1. Call `POST /api/v1/upload-sessions/direct` with declared chunk metadata.
+2. Upload every chunk to the returned `uploadUrl`.
+3. Call `POST /api/v1/upload-sessions/{clientId}/direct/complete` with each object-storage ETag.
+4. Abort an unfinished direct session with `DELETE /api/v1/upload-sessions/{clientId}/direct`.
+
+Direct uploads currently represent unencrypted object-storage bytes: every part must declare the same `plainHash` and `cipherHash`, and the persisted `fileParam.encryptionAlgorithm` is `NONE`.
 
 ---
 
@@ -823,6 +835,126 @@ GET /api/v1/upload-sessions/{clientId}/progress
 
 ---
 
+### 3.9 Create Direct Multipart Upload
+
+Create a direct multipart upload session and return presigned object-storage upload URLs.
+
+```
+POST /api/v1/upload-sessions/direct
+```
+
+**Authentication**: Bearer Token
+
+**Request Body (DirectUploadSessionRequest)**:
+
+```json
+{
+  "fileName": "report.pdf",
+  "fileSize": 2048,
+  "contentType": "application/pdf",
+  "clientId": "optional-client-id",
+  "chunkSize": 1024,
+  "totalChunks": 2,
+  "fileId": null,
+  "parts": [
+    {
+      "index": 0,
+      "size": 1024,
+      "plainHash": "sha256:plain-0",
+      "cipherHash": "sha256:plain-0",
+      "checksumAlgorithm": "SHA-256"
+    }
+  ]
+}
+```
+
+`parts` must be contiguous from index `0`, sizes must match the declared `fileSize` and `chunkSize`, and `cipherHash` must equal `plainHash` for the current `encryptionAlgorithm=NONE` direct-upload contract.
+
+**Response (DirectUploadSessionVO)**:
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "clientId": "abc123",
+    "chunkSize": 1024,
+    "totalChunks": 2,
+    "resumed": false,
+    "manifestSchemaId": "cn.flying.chunk-manifest.v1",
+    "parts": [
+      {
+        "index": 0,
+        "size": 1024,
+        "uploadUrl": "https://storage.example.com/staging/abc123/0?signature=...",
+        "expiresAtEpochSeconds": 1782806400,
+        "storagePath": "storage/tenant/1/chunk/sha256:plain-0",
+        "plainHash": "sha256:plain-0",
+        "cipherHash": "sha256:plain-0"
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 3.10 Complete Direct Multipart Upload
+
+Validate uploaded staging objects, write final replicated chunks, register the file, persist the active chunk manifest, and write the file attestation.
+
+```
+POST /api/v1/upload-sessions/{clientId}/direct/complete
+```
+
+**Authentication**: Bearer Token
+
+**Request Body (DirectUploadCompleteRequest)**:
+
+```json
+{
+  "parts": [
+    {
+      "index": 0,
+      "eTag": "\"object-etag\""
+    }
+  ]
+}
+```
+
+The backend re-reads staging objects, verifies the object SHA-256 against the declared `cipherHash`, and rejects completion when any part is missing or mismatched.
+
+**Response (DirectUploadCompleteVO)**:
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "clientId": "abc123",
+    "fileId": "9P6q...",
+    "fileHash": "sha256:file",
+    "transactionHash": "0xabc...",
+    "manifestHash": "sha256:manifest",
+    "status": "SUCCESS"
+  }
+}
+```
+
+---
+
+### 3.11 Abort Direct Multipart Upload
+
+Abort an unfinished direct multipart upload and delete staging objects on a best-effort basis.
+
+```
+DELETE /api/v1/upload-sessions/{clientId}/direct
+```
+
+**Authentication**: Bearer Token
+
+---
+
 ## 4. File Operations Module
 
 Base Path: `/api/v1/files`
@@ -931,7 +1063,9 @@ DELETE /api/v1/files/{id}
 
 ### 4.5 Get File Download Metadata
 
-Get authorized pre-signed chunk download metadata for the normal owned-file download path. The response is built from the active chunk manifest and includes ordered chunk URLs, hash metadata, algorithm metadata, and the existing decrypt key envelope fields.
+Get authorized pre-signed chunk download metadata for the normal owned-file download path. The response is built from the active chunk manifest and includes ordered chunk URLs, hash metadata, algorithm metadata, and decrypt metadata resolved from the active key envelope when the file is encrypted.
+
+`download-metadata` requires an active `cn.flying.chunk-manifest.v1` record. Files without an active manifest return `FILE_RECORD_ERROR` instead of falling back to URL-only download metadata.
 
 ```
 GET /api/v1/files/hash/{fileHash}/download-metadata
@@ -957,11 +1091,11 @@ GET /api/v1/files/hash/{fileHash}/download-metadata
     "fileName": "report.pdf",
     "fileSize": 2048,
     "contentType": "application/pdf",
-    "initialKey": "base64-key",
+    "initialKey": null,
     "manifestSchemaId": "cn.flying.chunk-manifest.v1",
     "manifestHash": "sha256:manifest",
     "hashAlgorithm": "SHA-256",
-    "encryptionAlgorithm": "AES-GCM",
+    "encryptionAlgorithm": "NONE",
     "storageBackend": "S3",
     "chunkSize": 1024,
     "totalChunks": 2,
@@ -981,7 +1115,9 @@ GET /api/v1/files/hash/{fileHash}/download-metadata
 }
 ```
 
-`GET /api/v1/files/hash/{fileHash}/addresses` remains available as a legacy URL-only compatibility endpoint. New owned-file downloads should use `download-metadata` instead of calling `addresses` and `decrypt-info` separately.
+For encrypted files, `initialKey` contains the authorized envelope-unwrapped key. For unencrypted direct multipart uploads, `initialKey` is `null` and `encryptionAlgorithm` is `NONE`.
+
+`GET /api/v1/files/hash/{fileHash}/addresses` remains available as a URL-only endpoint for clients that intentionally manage decrypt metadata separately. New owned-file downloads should use `download-metadata` as the primary contract.
 
 ---
 
@@ -1017,7 +1153,7 @@ GET /api/v1/transactions/{transactionHash}
 
 ### 4.7 Download File
 
-Legacy backend-proxied encrypted shard download. This endpoint returns backend-assembled `List<byte[]>` content and is kept for compatibility. Normal large-file owned downloads should use `GET /api/v1/files/hash/{fileHash}/download-metadata`.
+Backend-proxied encrypted shard download. This endpoint returns backend-assembled `List<byte[]>` content and is intended for small-file or controlled operational paths. Normal large-file owned downloads should use `GET /api/v1/files/hash/{fileHash}/download-metadata`.
 
 ```
 GET /api/v1/files/hash/{fileHash}/chunks
@@ -1109,6 +1245,8 @@ The following REST endpoints are also active in current controllers/OpenAPI and 
 | Method | Endpoint | Description |
 | ------ | -------- | ----------- |
 | GET | `/api/v1/files/{id}` | Get file detail by ID |
+| GET | `/api/v1/files/{id}/proof-bundle` | Export verifier-ready proof bundle by file ID |
+| GET | `/api/v1/files/attestation-leaves/{leafId}/proof-bundle` | Export verifier-ready proof bundle by attestation leaf ID |
 | GET | `/api/v1/files/stats` | Get user file statistics |
 | GET | `/api/v1/files/shares` | Get current user's share list |
 | DELETE | `/api/v1/files/share/{shareCode}` | Cancel share by code |
@@ -1172,6 +1310,23 @@ POST /api/v1/files/download-batches/report
 ```
 
 > **Note**: This endpoint is fire-and-forget from the client perspective. Reporting failures should be silently ignored by the client to avoid blocking the download flow.
+
+---
+
+### 4.13 Export Proof Bundle
+
+Export verifier-ready `proof-bundle.v1` JSON. The bundle contains public proof inputs only: file metadata, storage HEAD evidence, Merkle proof data, chain receipt fields, issuer metadata, and required `verificationPolicy` suite metadata.
+
+```
+GET /api/v1/files/{id}/proof-bundle
+GET /api/v1/files/attestation-leaves/{leafId}/proof-bundle
+```
+
+**Authentication**: Bearer Token
+
+The export requires the current tenant and user to be authorized for the file. The bundle does not include raw file bytes, decrypt keys, RPC tokens, internal database IDs, or full `file_param`.
+
+`verificationPolicy.algorithmSuite`, `signatureSuite`, `kemSuite`, and `proofSuite` are required fields. Offline verification rejects missing or unsupported suite metadata with `UNSUPPORTED_ALGORITHM`.
 
 ---
 
@@ -2552,7 +2707,51 @@ DELETE /api/v1/admin/files/{id}
 
 ---
 
-### 13.5 Get All Shares (Paginated)
+### 13.5 Rotate File Key Envelopes
+
+Rewrap all active key envelopes for a file to the currently configured key version.
+
+```
+POST /api/v1/admin/files/{id}/key-envelopes/rotate
+```
+
+**Authentication**: Bearer Token + Admin role
+
+**Path Parameters**:
+
+| Parameter | Type   | Description      |
+| --------- | ------ | ---------------- |
+| id        | string | File external ID |
+
+**Request Body (RotateKeyEnvelopeVO)**:
+
+```json
+{
+  "reason": "scheduled key rotation"
+}
+```
+
+The active envelope rows must include complete crypto-suite metadata. Missing `algorithmSuite`, `signatureSuite`, `kemSuite`, or `proofSuite` is treated as corrupt key-envelope state and the rotation fails.
+
+**Response (KeyEnvelopeRotationResultVO)**:
+
+```json
+{
+  "code": 200,
+  "message": "操作成功",
+  "data": {
+    "fileId": "9P6q...",
+    "fileHash": "sha256:file",
+    "targetKeyVersion": 2,
+    "rotatedCount": 3,
+    "skippedCount": 0
+  }
+}
+```
+
+---
+
+### 13.6 Get All Shares (Paginated)
 
 Get all shares across all users with filtering and statistics.
 
@@ -2615,7 +2814,7 @@ GET /api/v1/admin/files/shares
 
 ---
 
-### 13.6 Force Cancel Share
+### 13.7 Force Cancel Share
 
 Cancel a share regardless of ownership.
 
@@ -2647,7 +2846,7 @@ DELETE /api/v1/admin/files/shares/{shareCode}
 
 ---
 
-### 13.7 Get Share Access Logs
+### 13.8 Get Share Access Logs
 
 Get detailed access logs for a specific share.
 
@@ -2721,7 +2920,7 @@ GET /api/v1/admin/files/shares/{shareCode}/logs
 
 ---
 
-### 13.8 Get Share Access Statistics
+### 13.9 Get Share Access Statistics
 
 Get aggregated access statistics for a share.
 
@@ -3378,7 +3577,7 @@ GET /api/v1/files/quota
 ### 17.2 Upsert Quota Rollout Audit Record (Admin)
 
 Write or update a quota rollout audit record for governance tracking during gradual quota enforcement rollout.
-The target tenant is always resolved from the authenticated tenant context. Request-body `tenantId` is accepted only as a compatibility field and must match the current tenant when present.
+The target tenant is always resolved from the authenticated tenant context. Request-body `tenantId` is optional; when present it must match the current tenant and is used only as a request consistency guard.
 
 ```
 POST /api/v1/admin/quota/rollout/audits
@@ -3406,7 +3605,7 @@ POST /api/v1/admin/quota/rollout/audits
 | Field                 | Type     | Required | Validation                  | Description                                         |
 | --------------------- | -------- | -------- | --------------------------- | --------------------------------------------------- |
 | batchId               | string   | Yes      | max 64 chars                | Rollout batch identifier                            |
-| tenantId              | long     | No       | positive; must match current tenant when present | Compatibility field; current tenant is authoritative |
+| tenantId              | long     | No       | positive; must match current tenant when present | Optional consistency guard; current tenant is authoritative |
 | observationStartTime  | datetime | Yes      |                             | Observation window start                            |
 | observationEndTime    | datetime | Yes      |                             | Observation window end                              |
 | sampledRequestCount   | long     | Yes      | ≥0                          | Total sampled requests during observation           |
@@ -3547,6 +3746,8 @@ PUT /api/v1/admin/integrity-alerts/{id}/resolve
 - `GET /api/v1/files`
 - `GET /api/v1/files/hash/{fileHash}`
 - `GET /api/v1/files/{id}`
+- `GET /api/v1/files/{id}/proof-bundle`
+- `GET /api/v1/files/attestation-leaves/{leafId}/proof-bundle`
 - `GET /api/v1/files/hash/{fileHash}/download-metadata`
 - `GET /api/v1/files/hash/{fileHash}/addresses`
 - `GET /api/v1/files/hash/{fileHash}/chunks`
@@ -3556,11 +3757,14 @@ PUT /api/v1/admin/integrity-alerts/{id}/resolve
 - `GET /api/v1/files/{id}/provenance`
 - `GET /api/v1/transactions/{transactionHash}`
 - `POST /api/v1/upload-sessions`
+- `POST /api/v1/upload-sessions/direct`
 - `PUT /api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}`
 - `POST /api/v1/upload-sessions/{clientId}/complete`
+- `POST /api/v1/upload-sessions/{clientId}/direct/complete`
 - `POST /api/v1/upload-sessions/{clientId}/pause`
 - `POST /api/v1/upload-sessions/{clientId}/resume`
 - `DELETE /api/v1/upload-sessions/{clientId}`
+- `DELETE /api/v1/upload-sessions/{clientId}/direct`
 - `GET /api/v1/upload-sessions/{clientId}`
 - `GET /api/v1/upload-sessions/{clientId}/progress`
 - `POST /api/v1/shares`
@@ -3586,6 +3790,7 @@ PUT /api/v1/admin/integrity-alerts/{id}/resolve
 - `PUT /api/v1/admin/tickets/{ticketId}/assignee`
 - `PUT /api/v1/admin/tickets/{ticketId}/status`
 - `GET /api/v1/admin/tickets/pending-count`
+- `POST /api/v1/admin/files/{id}/key-envelopes/rotate`
 - `PUT /api/v1/friends/requests/{requestId}/status`
 - `PUT /api/v1/friend-shares/{shareId}/read-status`
 - `GET /api/v1/system/permissions`
@@ -3746,7 +3951,8 @@ Behavior:
 - Upload/envelope creation and proof-bundle export validate configured suite identifiers before persisting or returning metadata.
 - Unsupported suite identifiers return `PARAM_ERROR`.
 - If `deprecatedAfter` is reached, new envelope/proof metadata creation returns `PARAM_ERROR`.
-- Existing records created before these fields existed remain readable; missing suite fields are treated as legacy metadata and resolved with current defaults where needed.
+- Persisted key envelopes must contain `algorithmSuite`, `signatureSuite`, `kemSuite`, and `proofSuite`. Missing persisted suite metadata is treated as corrupt file-key state and causes unwrap/rotation to fail with `FILE_RECORD_ERROR`.
+- Proof bundle `verificationPolicy` must contain all four suite fields. Missing or unsupported suite metadata makes offline verification return `UNSUPPORTED_ALGORITHM`.
 
 ---
 

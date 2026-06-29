@@ -107,24 +107,43 @@ Distributed storage service (Dubbo Provider):
 
 ```mermaid
 sequenceDiagram
+    autonumber
+
     participant Client
-    participant Backend
-    participant S3 as S3 Storage
-    participant Chain as Blockchain
+    participant Backend as platform-backend
+    participant Storage as platform-storage
+    participant S3 as S3 Cluster
+    participant Chain as FISCO BCOS
 
-    Client->>Backend: 1. Start upload
-    Backend-->>Client: Upload session
+    alt Direct multipart upload
+        Client->>Backend: POST /api/v1/upload-sessions/direct
+        Backend->>Backend: Validate quota, chunk metadata, plainHash == cipherHash
+        Backend->>Storage: RPC: createDirectMultipartUpload
+        Storage->>S3: Create presigned staging PUT URLs
+        Backend-->>Client: clientId, manifest schema, presigned URLs
+        loop Each part
+            Client->>S3: PUT presigned URL
+            S3-->>Client: ETag
+        end
+        Client->>Backend: POST /api/v1/upload-sessions/{clientId}/direct/complete
+        Backend->>Storage: RPC: completeDirectMultipartUpload
+        Storage->>S3: Verify staging bytes and write final replicas
+        Backend->>Backend: Persist file + active chunk manifest
+    else Backend-proxied chunk upload
+        Client->>Backend: POST /api/v1/upload-sessions
+        Backend-->>Client: clientId, chunkSize, totalChunks
+        loop Each chunk
+            Client->>Backend: PUT /api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}
+            Backend->>Storage: RPC: storeChunk()
+            Storage->>S3: PutObject
+            Backend-->>Client: Chunk ACK
+        end
+        Client->>Backend: POST /api/v1/upload-sessions/{clientId}/complete
+    end
 
-    Client->>Backend: 2. Upload chunk
-    Backend->>S3: Encrypt & Write A+B
-    Backend-->>Client: Chunk ACK
-
-    Client->>Backend: 3. Complete
-    Backend->>Chain: Saga Transaction
-    Chain->>Chain: Store metadata
+    Backend->>Chain: Store file attestation
     Chain-->>Backend: TX hash
     Backend-->>Client: File record
-
     Backend-->>Client: SSE: status update
 ```
 
@@ -141,7 +160,7 @@ sequenceDiagram
 
     Note over Client, Backend: Phase 1: Get Manifest-Backed Download Metadata
     Client->>Backend: GET /api/v1/files/hash/{fileHash}/download-metadata
-    Backend->>Backend: Verify permissions & load active chunk manifest
+    Backend->>Backend: Verify permissions & require active chunk manifest
     Backend->>Storage: RPC: getFileUrlListByHash(storagePath[], cipherHash[])
     Storage->>S3: Generate presigned URLs
     S3-->>Storage: Presigned URL list
@@ -238,9 +257,9 @@ sequenceDiagram
     Backend-->>Friend: 200 OK (SharedFiles)
 
     Note over Friend, Backend: Phase 3: Download Shared File
-    Friend->>Backend: GET /api/v1/files/hash/{fileHash}/addresses (with shared file hash)
-    Backend->>Backend: Query file using original uploader ID
-    Backend-->>Friend: 200 OK (DownloadInfo)
+    Friend->>Backend: GET /api/v1/files/hash/{fileHash}/download-metadata
+    Backend->>Backend: Verify share access and active manifest
+    Backend-->>Friend: 200 OK (URLs, manifest, decrypt metadata)
 ```
 
 **Share Type Comparison**:
