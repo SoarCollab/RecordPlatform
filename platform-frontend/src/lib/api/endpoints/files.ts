@@ -27,6 +27,16 @@ export type { FileDecryptInfoVO, FileDownloadMetadataVO } from "../types";
 const BASE = "/files";
 
 /**
+ * 读取加密分片下载必需的 initialKey。
+ */
+function requireInitialKey(initialKey: string | null): string {
+  if (!initialKey) {
+    throw new Error("缺少加密文件初始密钥");
+  }
+  return initialKey;
+}
+
+/**
  * 获取文件列表（分页）。
  *
  * @param params 查询参数
@@ -247,7 +257,10 @@ export async function downloadFile(fileHash: string): Promise<Blob> {
     Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
   );
 
-  const decryptedData = await decryptFile(chunks, decryptInfo.initialKey);
+  const decryptedData = await decryptFile(
+    chunks,
+    requireInitialKey(decryptInfo.initialKey),
+  );
   return arrayToBlob(decryptedData, decryptInfo.contentType);
 }
 
@@ -313,7 +326,10 @@ export async function publicDownloadFile(
     Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
   );
 
-  const decryptedData = await decryptFile(chunks, decryptInfo.initialKey);
+  const decryptedData = await decryptFile(
+    chunks,
+    requireInitialKey(decryptInfo.initialKey),
+  );
   return arrayToBlob(decryptedData, decryptInfo.contentType);
 }
 
@@ -369,7 +385,10 @@ export async function shareDownloadFile(
     Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
   );
 
-  const decryptedData = await decryptFile(chunks, decryptInfo.initialKey);
+  const decryptedData = await decryptFile(
+    chunks,
+    requireInitialKey(decryptInfo.initialKey),
+  );
   return arrayToBlob(decryptedData, decryptInfo.contentType);
 }
 

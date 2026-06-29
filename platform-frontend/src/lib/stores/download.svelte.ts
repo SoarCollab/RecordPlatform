@@ -86,6 +86,7 @@ export interface DownloadTask {
   urlsFetchedAt: number | null;
   chunks: ChunkState[];
   initialKey: string | null;
+  encryptionAlgorithm: string | null;
   source: DownloadSource;
   createdAt: number;
   startedAt: number | null;
@@ -121,6 +122,22 @@ export interface BatchDownloadState {
   startedAt: number;
   completedAt: number | null;
 }
+
+type WritableFileStreamLike = {
+  write(data: Blob | BufferSource | string): Promise<void>;
+  close(): Promise<void>;
+  abort?: () => Promise<void>;
+};
+
+type WritableFileHandleLike = {
+  createWritable(): Promise<WritableFileStreamLike>;
+};
+
+type PresignedUrlMetadata = {
+  urls: string[];
+  decryptInfo: fileApi.FileDecryptInfoVO;
+  encryptionAlgorithm: string | null;
+};
 
 // ===== Pre-download Check Result =====
 
@@ -187,6 +204,39 @@ function areUrlsExpired(urlsFetchedAt: number | null): boolean {
   if (!urlsFetchedAt) return true;
   const age = Date.now() - urlsFetchedAt;
   return age > PRESIGNED_URL_TTL_MS - URL_EXPIRY_BUFFER_MS;
+}
+
+/**
+ * 判断下载元数据是否声明对象分片未经过前端加密。
+ */
+function isPlainDownload(
+  encryptionAlgorithm: string | null | undefined,
+): boolean {
+  return encryptionAlgorithm?.trim().toUpperCase() === "NONE";
+}
+
+/**
+ * 读取加密下载必需的 initialKey；缺失时立即失败，避免把 null 传给解密器。
+ */
+function requireInitialKey(initialKey: string | null): string {
+  if (!initialKey) {
+    throw new Error("缺少加密文件初始密钥");
+  }
+  return initialKey;
+}
+
+/**
+ * 将未加密分片按顺序拼接成单个字节数组。
+ */
+function concatenatePlainChunks(chunks: Uint8Array[]): Uint8Array {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
 }
 
 /**
@@ -371,7 +421,7 @@ async function executeBatchItem(
 
 async function fetchPresignedUrls(
   task: DownloadTask,
-): Promise<{ urls: string[]; decryptInfo: fileApi.FileDecryptInfoVO }> {
+): Promise<PresignedUrlMetadata> {
   if (task.source.type === "owned") {
     const metadata = await fileApi.getDownloadMetadata(task.fileHash);
     const orderedParts = [...metadata.parts].sort((a, b) => a.index - b.index);
@@ -384,7 +434,11 @@ async function fetchPresignedUrls(
       chunkCount: metadata.totalChunks,
       fileHash: metadata.fileHash,
     };
-    return { urls, decryptInfo };
+    return {
+      urls,
+      decryptInfo,
+      encryptionAlgorithm: metadata.encryptionAlgorithm ?? null,
+    };
   }
 
   // For shared files, we don't have presigned URL endpoint yet
@@ -407,23 +461,30 @@ async function executeDownload(task: DownloadTask): Promise<void> {
     let contentType = task.contentType;
     let fileName = task.fileName;
     let fileSize = task.fileSize;
+    let encryptionAlgorithm = task.encryptionAlgorithm;
     const authContextHash = await getAuthContextHash();
 
     if (urls.length === 0 || areUrlsExpired(task.urlsFetchedAt)) {
       updateTask(taskId, { status: "fetching_urls" });
 
-      const { urls: newUrls, decryptInfo } = await fetchPresignedUrls(task);
+      const {
+        urls: newUrls,
+        decryptInfo,
+        encryptionAlgorithm: metadataEncryptionAlgorithm,
+      } = await fetchPresignedUrls(task);
       urls = newUrls;
       initialKey = decryptInfo.initialKey;
       totalChunks = decryptInfo.chunkCount;
       contentType = decryptInfo.contentType;
       fileName = decryptInfo.fileName;
       fileSize = decryptInfo.fileSize;
+      encryptionAlgorithm = metadataEncryptionAlgorithm;
 
       updateTask(taskId, {
         presignedUrls: urls,
         urlsFetchedAt: Date.now(),
         initialKey,
+        encryptionAlgorithm,
         totalChunks,
         contentType,
         fileName,
@@ -510,11 +571,14 @@ async function executeDownload(task: DownloadTask): Promise<void> {
       return;
     }
 
-    // Step 4: Decrypt
-    updateTask(taskId, { status: "decrypting" });
+    // Step 4: Build the output bytes
+    const plainDownload = isPlainDownload(encryptionAlgorithm);
+    updateTask(taskId, { status: plainDownload ? "writing" : "decrypting" });
 
-    const decryptedData = await decryptFile(allChunks, initialKey!);
-    const blob = arrayToBlob(decryptedData, contentType);
+    const outputData = plainDownload
+      ? concatenatePlainChunks(allChunks)
+      : await decryptFile(allChunks, requireInitialKey(initialKey));
+    const blob = arrayToBlob(outputData, contentType);
 
     // Step 5: Trigger browser download
     downloadBlob(blob, fileName);
@@ -556,6 +620,61 @@ async function executeDownload(task: DownloadTask): Promise<void> {
 }
 
 // ===== Streaming Download (File System Access API) =====
+
+/**
+ * 流式下载未加密分片并直接写入用户选择的文件。
+ */
+async function executePlainStreamingDownload(params: {
+  contentType: string;
+  totalChunks: number;
+  presignedUrls: string[];
+  fileHandle: unknown;
+  signal: AbortSignal;
+  onProgress: (phase: StreamingPhase, current: number, total: number) => void;
+}): Promise<{ success: boolean; bytesWritten?: number; error?: string }> {
+  const fileHandle = params.fileHandle as Partial<WritableFileHandleLike>;
+  if (typeof fileHandle?.createWritable !== "function") {
+    return {
+      success: false,
+      error: "Streaming download file handle is invalid",
+    };
+  }
+
+  let writable: WritableFileStreamLike | null = null;
+  try {
+    writable = await fileHandle.createWritable();
+    let bytesWritten = 0;
+    for (let index = 0; index < params.presignedUrls.length; index++) {
+      if (params.signal.aborted) {
+        throw new Error("Download cancelled");
+      }
+      const response = await fetch(params.presignedUrls[index], {
+        signal: params.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`分片 ${index + 1} 下载失败: ${response.status}`);
+      }
+      const chunk = new Uint8Array(await response.arrayBuffer());
+      if (params.signal.aborted) {
+        throw new Error("Download cancelled");
+      }
+      await writable.write(new Blob([chunk], { type: params.contentType }));
+      bytesWritten += chunk.byteLength;
+      params.onProgress("downloading", index + 1, params.totalChunks);
+    }
+    await writable.close();
+    params.onProgress("completed", params.totalChunks, params.totalChunks);
+    return { success: true, bytesWritten };
+  } catch (error) {
+    if (writable?.abort) {
+      await writable.abort();
+    }
+    if (params.signal.aborted) {
+      return { success: false, error: "Download cancelled" };
+    }
+    return { success: false, error: (error as Error).message };
+  }
+}
 
 /**
  * Execute streaming download for large files
@@ -605,22 +724,29 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
     let contentType = task.contentType;
     let fileName = task.fileName;
     let fileSize = task.fileSize;
+    let encryptionAlgorithm = task.encryptionAlgorithm;
 
     if (urls.length === 0 || areUrlsExpired(task.urlsFetchedAt)) {
       updateTask(taskId, { status: "fetching_urls" });
 
-      const { urls: newUrls, decryptInfo } = await fetchPresignedUrls(task);
+      const {
+        urls: newUrls,
+        decryptInfo,
+        encryptionAlgorithm: metadataEncryptionAlgorithm,
+      } = await fetchPresignedUrls(task);
       urls = newUrls;
       initialKey = decryptInfo.initialKey;
       totalChunks = decryptInfo.chunkCount;
       contentType = decryptInfo.contentType;
       fileName = decryptInfo.fileName;
       fileSize = decryptInfo.fileSize;
+      encryptionAlgorithm = metadataEncryptionAlgorithm;
 
       updateTask(taskId, {
         presignedUrls: urls,
         urlsFetchedAt: Date.now(),
         initialKey,
+        encryptionAlgorithm,
         totalChunks,
         contentType,
         fileName,
@@ -639,51 +765,66 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
       startedAt: task.startedAt ?? Date.now(),
     });
 
-    const result = await executeBufferedStreamingDownload({
-      fileName,
-      contentType,
-      totalChunks,
-      initialKey: initialKey!,
-      presignedUrls: urls,
-      fileHandle,
-      signal: abortController.signal,
-      onProgress: (phase: StreamingPhase, current: number, total: number) => {
-        const currentTask = getTask(taskId);
-        if (
-          !currentTask ||
-          currentTask.status === "cancelled" ||
-          currentTask.status === "paused"
-        ) {
-          return;
-        }
+    const onStreamingProgress = (
+      phase: StreamingPhase,
+      current: number,
+      total: number,
+    ) => {
+      const currentTask = getTask(taskId);
+      if (
+        !currentTask ||
+        currentTask.status === "cancelled" ||
+        currentTask.status === "paused"
+      ) {
+        return;
+      }
 
-        const progress = Math.round((current / total) * 100);
+      const progress = Math.round((current / total) * 100);
 
-        switch (phase) {
-          case "downloading":
-            updateTask(taskId, {
-              status: "streaming",
-              downloadedChunks: current,
-              progress,
-            });
-            break;
-          case "decrypting":
-            updateTask(taskId, {
-              status: "decrypting",
-              progress,
-            });
-            break;
-          case "writing":
-            updateTask(taskId, {
-              status: "writing",
-              progress,
-            });
-            break;
-          case "completed":
-            break;
-        }
-      },
-    });
+      switch (phase) {
+        case "downloading":
+          updateTask(taskId, {
+            status: "streaming",
+            downloadedChunks: current,
+            progress,
+          });
+          break;
+        case "decrypting":
+          updateTask(taskId, {
+            status: "decrypting",
+            progress,
+          });
+          break;
+        case "writing":
+          updateTask(taskId, {
+            status: "writing",
+            progress,
+          });
+          break;
+        case "completed":
+          break;
+      }
+    };
+
+    const result = isPlainDownload(encryptionAlgorithm)
+      ? await executePlainStreamingDownload({
+          contentType,
+          totalChunks,
+          presignedUrls: urls,
+          fileHandle,
+          signal: abortController.signal,
+          onProgress: onStreamingProgress,
+        })
+      : await executeBufferedStreamingDownload({
+          fileName,
+          contentType,
+          totalChunks,
+          initialKey: requireInitialKey(initialKey),
+          presignedUrls: urls,
+          fileHandle,
+          signal: abortController.signal,
+          onProgress: onStreamingProgress,
+        });
 
     // Check result
     if (!result.success) {
@@ -850,6 +991,7 @@ async function startDownload(
     urlsFetchedAt: null,
     chunks: [],
     initialKey: null,
+    encryptionAlgorithm: null,
     source,
     createdAt: Date.now(),
     startedAt: null,
@@ -1202,6 +1344,7 @@ async function restoreTasks(): Promise<void> {
           retryCount: 0,
         })),
         initialKey: null,
+        encryptionAlgorithm: null,
         source: pt.source,
         createdAt: pt.createdAt,
         startedAt: null,

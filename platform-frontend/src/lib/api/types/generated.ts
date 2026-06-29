@@ -3212,7 +3212,7 @@ export interface components {
              */
             fileSize?: number;
             /** @description 初始密钥（最后一个分片的解密密钥，Base64编码） */
-            initialKey?: string;
+            initialKey?: string | null;
         };
         /** @description 文件预签名分片下载元数据 */
         FileDownloadMetadataVO: {
@@ -3224,7 +3224,7 @@ export interface components {
             /** @description 文件 MIME 类型 */
             contentType?: string;
             /** @description 加密算法 */
-            encryptionAlgorithm?: string;
+            encryptionAlgorithm?: string | null;
             /** @description 文件哈希 */
             fileHash?: string;
             /** @description 外部文件 ID */
@@ -3239,7 +3239,7 @@ export interface components {
             /** @description 哈希算法 */
             hashAlgorithm?: string;
             /** @description 初始密钥（最后一个分片的解密密钥，Base64 编码） */
-            initialKey?: string;
+            initialKey?: string | null;
             /** @description manifest hash */
             manifestHash?: string;
             /** @description manifest schema id */
