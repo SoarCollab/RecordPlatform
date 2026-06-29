@@ -42,9 +42,9 @@
 | 指标 | 当前值 | 证据路径 |
 |------|--------|----------|
 | REST 控制器 | 28 | `platform-backend/backend-web/src/main/java` |
-| 后端服务类 | 74 | `platform-backend/backend-service/src/main/java` |
-| 后端测试文件 | 118 | `platform-backend/**/src/test/java` |
-| 数据库迁移 | 22（V1.0.0 ~ V1.7.5） | `platform-backend/backend-web/src/main/resources/db/migration` |
+| 后端服务类 | 90 | `platform-backend/backend-service/src/main/java` |
+| 后端测试文件 | 124 | `platform-backend/**/src/test/java` |
+| 数据库迁移 | 23（V1.0.0 ~ V1.8.0） | `platform-backend/backend-web/src/main/resources/db/migration` |
 | CI 流水线（核心） | 5 | `.github/workflows/test.yml`, `perf-smoke.yml`, `docs.yml`, `security-poc.yml`, `docs-consistency.yml` |
 
 ### 表 1：PR 合并阻断门禁（已就位）
