@@ -91,9 +91,10 @@ Authorization: Bearer <token>
 | GET | `/api/v1/files/hash/{fileHash}` | 按文件哈希查询详情 |
 | GET | `/api/v1/files` | 用户文件分页（支持 `keyword`、`keywordMode=FUZZY/PREFIX/EXACT_HASH/AUTO`、`status`、`startTime`、`endTime`） |
 | GET | `/api/v1/files/stats` | 用户文件统计 |
-| GET | `/api/v1/files/hash/{fileHash}/addresses` | 获取下载地址 |
+| GET | `/api/v1/files/hash/{fileHash}/download-metadata` | 获取基于 manifest 的预签名分片下载元数据 |
+| GET | `/api/v1/files/hash/{fileHash}/addresses` | 获取下载地址（遗留兼容） |
 | GET | `/api/v1/transactions/{transactionHash}` | 查询链上交易信息 |
-| GET | `/api/v1/files/hash/{fileHash}/chunks` | 下载文件（登录态） |
+| GET | `/api/v1/files/hash/{fileHash}/chunks` | 后端 byte payload 下载（遗留兼容） |
 | GET | `/api/v1/files/hash/{fileHash}/decrypt-info` | 获取解密信息（登录态） |
 | GET | `/api/v1/shares/{shareCode}/files` | 公开分享文件列表（公开） |
 | GET | `/api/v1/files/shares` | 获取我的分享列表 |

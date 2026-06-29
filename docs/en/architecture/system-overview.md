@@ -139,18 +139,14 @@ sequenceDiagram
     participant Storage as platform-storage
     participant S3 as S3 Cluster
 
-    Note over Client, Backend: Phase 1: Get Download Info
-    Client->>Backend: GET /api/v1/files/hash/{fileHash}/addresses
-    Backend->>Backend: Verify permissions & get file metadata
-    Backend->>Storage: RPC: generatePresignedUrls()
+    Note over Client, Backend: Phase 1: Get Manifest-Backed Download Metadata
+    Client->>Backend: GET /api/v1/files/hash/{fileHash}/download-metadata
+    Backend->>Backend: Verify permissions & load active chunk manifest
+    Backend->>Storage: RPC: getFileUrlListByHash(storagePath[], cipherHash[])
     Storage->>S3: Generate presigned URLs
     S3-->>Storage: Presigned URL list
-    Storage-->>Backend: URLs + Decrypt key chain
-    Backend-->>Client: 200 OK (URLs, ChunkInfo)
-
-    Note over Client, Backend: Phase 1.5: Get Decrypt Info
-    Client->>Backend: GET /api/v1/files/hash/{fileHash}/decrypt-info
-    Backend-->>Client: 200 OK (DecryptKeys)
+    Storage-->>Backend: Ordered URL list
+    Backend-->>Client: 200 OK (URLs, manifest, hashes, decrypt metadata)
 
     Note over Client, S3: Phase 2: Concurrent Chunk Download
     par Concurrent downloads

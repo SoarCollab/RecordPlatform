@@ -17,6 +17,9 @@ import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FriendFileShareService;
+import cn.flying.service.manifest.ChunkManifestChunk;
+import cn.flying.service.manifest.ChunkManifestService;
+import cn.flying.service.manifest.ChunkManifestView;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.test.builders.AccountTestBuilder;
 import cn.flying.test.builders.FileTestBuilder;
@@ -30,6 +33,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -65,6 +69,9 @@ class FileQueryServiceTest {
     @Mock
     private FriendFileShareService friendFileShareService;
 
+    @Mock
+    private ChunkManifestService chunkManifestService;
+
     @InjectMocks
     private FileQueryServiceImpl fileQueryService;
 
@@ -78,6 +85,122 @@ class FileQueryServiceTest {
     void setUp() {
         FileTestBuilder.resetIdCounter();
         AccountTestBuilder.resetIdCounter();
+    }
+
+    @Nested
+    @DisplayName("Download Metadata")
+    class DownloadMetadata {
+
+        /**
+         * 验证下载 metadata 从已授权文件的 active manifest 生成，并按 manifest 顺序签发 URL。
+         */
+        @Test
+        @DisplayName("should build presigned download metadata from manifest")
+        void shouldBuildPresignedDownloadMetadataFromManifest() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class);
+                 MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                idUtilsMock.when(() -> IdUtils.toExternalId(FILE_ID)).thenReturn("ext-file-1");
+                File ownedFile = new File()
+                        .setId(FILE_ID)
+                        .setUid(USER_ID)
+                        .setFileName("report.pdf")
+                        .setFileHash(FILE_HASH)
+                        .setFileSize(2048L)
+                        .setContentType("application/pdf")
+                        .setFileParam("""
+                                {"initialKey":"k1","fileName":"report.pdf","fileSize":2048,"contentType":"application/pdf","chunkCount":2}
+                                """);
+                ChunkManifestView manifest = new ChunkManifestView(
+                        10L,
+                        FILE_ID,
+                        1,
+                        "cn.flying.chunk-manifest.v1",
+                        FILE_HASH,
+                        "sha256:manifest",
+                        "SHA-256",
+                        1024L,
+                        2048L,
+                        null,
+                        "AES-GCM",
+                        "S3",
+                        List.of(
+                                new ChunkManifestChunk(0, "plain-0", "cipher-0", 1024L,
+                                        "chunks/0", "S3", "etag-0", "SHA-256"),
+                                new ChunkManifestChunk(1, "plain-1", "cipher-1", 1024L,
+                                        "chunks/1", "S3", "etag-1", "SHA-256")
+                        )
+                );
+
+                when(fileMapper.selectOne(any())).thenReturn(ownedFile);
+                when(chunkManifestService.findActiveManifest(USER_ID, FILE_ID)).thenReturn(Optional.of(manifest));
+                when(fileRemoteClient.getFileUrlListByHash(List.of("chunks/0", "chunks/1"),
+                        List.of("cipher-0", "cipher-1"))).thenReturn(Result.success(List.of("url-0", "url-1")));
+
+                var metadata = fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH);
+
+                assertEquals("ext-file-1", metadata.fileId());
+                assertEquals(FILE_HASH, metadata.fileHash());
+                assertEquals("sha256:manifest", metadata.manifestHash());
+                assertEquals(2, metadata.totalChunks());
+                assertEquals("url-0", metadata.parts().get(0).downloadUrl());
+                assertEquals("chunks/1", metadata.parts().get(1).storagePath());
+                verify(fileRemoteClient).getFileUrlListByHash(
+                        List.of("chunks/0", "chunks/1"),
+                        List.of("cipher-0", "cipher-1")
+                );
+                verify(fileRemoteClient, never()).getFileListByHash(anyList(), anyList());
+            }
+        }
+
+        /**
+         * 验证缺少 active manifest 时不会继续向对象存储签发 URL。
+         */
+        @Test
+        @DisplayName("should fail when active manifest is missing")
+        void shouldFailWhenActiveManifestIsMissing() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                File ownedFile = new File()
+                        .setId(FILE_ID)
+                        .setUid(USER_ID)
+                        .setFileName("report.pdf")
+                        .setFileHash(FILE_HASH)
+                        .setFileSize(1024L)
+                        .setFileParam("""
+                                {"initialKey":"k1","fileName":"report.pdf","fileSize":1024,"contentType":"application/pdf","chunkCount":1}
+                                """);
+
+                when(fileMapper.selectOne(any())).thenReturn(ownedFile);
+                when(chunkManifestService.findActiveManifest(USER_ID, FILE_ID)).thenReturn(Optional.empty());
+
+                GeneralException ex = assertThrows(GeneralException.class,
+                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH));
+
+                assertEquals(ResultEnum.FILE_RECORD_ERROR.getCode(), ex.getResultEnum().getCode());
+                verify(fileRemoteClient, never()).getFileUrlListByHash(anyList(), anyList());
+            }
+        }
+
+        /**
+         * 验证授权失败时不会读取 manifest 或签发对象存储 URL。
+         */
+        @Test
+        @DisplayName("should not generate urls before authorization")
+        void shouldNotGenerateUrlsBeforeAuthorization() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                when(fileMapper.selectOne(any())).thenReturn(null);
+                when(friendFileShareService.getSharerIdForFile(USER_ID, FILE_HASH)).thenReturn(null);
+
+                GeneralException ex = assertThrows(GeneralException.class,
+                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH));
+
+                assertEquals(ResultEnum.FILE_NOT_EXIST.getCode(), ex.getResultEnum().getCode());
+                verify(chunkManifestService, never()).findActiveManifest(any(), any());
+                verify(fileRemoteClient, never()).getFileUrlListByHash(anyList(), anyList());
+            }
+        }
     }
 
     @Nested

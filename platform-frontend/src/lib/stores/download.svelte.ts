@@ -373,10 +373,17 @@ async function fetchPresignedUrls(
   task: DownloadTask,
 ): Promise<{ urls: string[]; decryptInfo: fileApi.FileDecryptInfoVO }> {
   if (task.source.type === "owned") {
-    const [urls, decryptInfo] = await Promise.all([
-      fileApi.getDownloadAddress(task.fileHash),
-      fileApi.getDecryptInfo(task.fileHash),
-    ]);
+    const metadata = await fileApi.getDownloadMetadata(task.fileHash);
+    const orderedParts = [...metadata.parts].sort((a, b) => a.index - b.index);
+    const urls = orderedParts.map((part) => part.downloadUrl);
+    const decryptInfo: fileApi.FileDecryptInfoVO = {
+      initialKey: metadata.initialKey,
+      fileName: metadata.fileName,
+      fileSize: metadata.fileSize,
+      contentType: metadata.contentType,
+      chunkCount: metadata.totalChunks,
+      fileHash: metadata.fileHash,
+    };
     return { urls, decryptInfo };
   }
 

@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => {
   return {
     fileApi: {
       getDownloadAddress: vi.fn(),
+      getDownloadMetadata: vi.fn(),
       getDecryptInfo: vi.fn(),
       publicDownloadFile: vi.fn(),
       shareDownloadFile: vi.fn(),
@@ -116,6 +117,43 @@ function createBlob(): Blob {
 }
 
 /**
+ * 构造下载 metadata 测试响应。
+ *
+ * @param fileHash 文件哈希。
+ * @param downloadUrl 分片下载 URL。
+ * @returns metadata 响应。
+ */
+function createDownloadMetadata(fileHash = "hash-1", downloadUrl = "u1") {
+  return {
+    fileId: "file-1",
+    fileHash,
+    fileName: "report.pdf",
+    fileSize: 1024,
+    contentType: "application/pdf",
+    initialKey: "k1",
+    manifestSchemaId: "cn.flying.chunk-manifest.v1",
+    manifestHash: "sha256:manifest",
+    hashAlgorithm: "SHA-256",
+    encryptionAlgorithm: "AES-GCM",
+    storageBackend: "S3",
+    chunkSize: 1024,
+    totalChunks: 1,
+    parts: [
+      {
+        index: 0,
+        size: 1024,
+        downloadUrl,
+        expiresAtEpochSeconds: Math.floor(Date.now() / 1000) + 86_400,
+        storagePath: "chunks/0",
+        plainHash: "plain-0",
+        cipherHash: "cipher-0",
+        checksumAlgorithm: "SHA-256",
+      },
+    ],
+  };
+}
+
+/**
  * 构造可手动控制完成时机的 Promise。
  *
  *  deferred 结构体。
@@ -132,7 +170,10 @@ describe("download store", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mocks.fileApi.getDownloadAddress.mockResolvedValue(["u1"]);
+    mocks.fileApi.getDownloadAddress.mockResolvedValue(["legacy-u1"]);
+    mocks.fileApi.getDownloadMetadata.mockResolvedValue(
+      createDownloadMetadata(),
+    );
     mocks.fileApi.getDecryptInfo.mockResolvedValue({
       initialKey: "k1",
       chunkCount: 1,
@@ -222,8 +263,9 @@ describe("download store", () => {
       "completed",
     );
 
-    expect(mocks.fileApi.getDownloadAddress).toHaveBeenCalledWith("hash-1");
-    expect(mocks.fileApi.getDecryptInfo).toHaveBeenCalledWith("hash-1");
+    expect(mocks.fileApi.getDownloadMetadata).toHaveBeenCalledWith("hash-1");
+    expect(mocks.fileApi.getDownloadAddress).not.toHaveBeenCalled();
+    expect(mocks.fileApi.getDecryptInfo).not.toHaveBeenCalled();
     expect(mocks.chunkDownloader.downloadAllChunks).toHaveBeenCalled();
     expect(mocks.crypto.decryptFile).toHaveBeenCalled();
     expect(mocks.crypto.downloadBlob).toHaveBeenCalled();
@@ -309,7 +351,7 @@ describe("download store", () => {
     );
 
     expect(mocks.streaming.executeBufferedStreamingDownload).toHaveBeenCalled();
-    expect(mocks.fileApi.getDownloadAddress).toHaveBeenCalledWith(
+    expect(mocks.fileApi.getDownloadMetadata).toHaveBeenCalledWith(
       "hash-stream",
     );
   });
@@ -599,13 +641,13 @@ describe("download store", () => {
 
   it("批量下载失败项应自动重试 2 次并支持 retryBatchFailed", async () => {
     let failCalls = 0;
-    mocks.fileApi.getDownloadAddress.mockImplementation(
+    mocks.fileApi.getDownloadMetadata.mockImplementation(
       async (fileHash: string) => {
         if (fileHash === "hash-fail") {
           failCalls++;
           throw new Error("network_error");
         }
-        return ["u1"];
+        return createDownloadMetadata(fileHash);
       },
     );
 
@@ -635,7 +677,9 @@ describe("download store", () => {
       }),
     );
 
-    mocks.fileApi.getDownloadAddress.mockResolvedValue(["u1"]);
+    mocks.fileApi.getDownloadMetadata.mockResolvedValue(
+      createDownloadMetadata(),
+    );
     const retryBatch = await download.retryBatchFailed();
 
     expect(retryBatch).not.toBeNull();
@@ -649,7 +693,10 @@ describe("download store extra branches", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mocks.fileApi.getDownloadAddress.mockResolvedValue(["u1"]);
+    mocks.fileApi.getDownloadAddress.mockResolvedValue(["legacy-u1"]);
+    mocks.fileApi.getDownloadMetadata.mockResolvedValue(
+      createDownloadMetadata(),
+    );
     mocks.fileApi.getDecryptInfo.mockResolvedValue({
       initialKey: "k1",
       chunkCount: 1,

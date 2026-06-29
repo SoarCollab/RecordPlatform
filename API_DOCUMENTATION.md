@@ -929,12 +929,12 @@ DELETE /api/v1/files/{id}
 
 ---
 
-### 4.5 Get File Download Address
+### 4.5 Get File Download Metadata
 
-Get pre-signed download URLs for file shards.
+Get authorized pre-signed chunk download metadata for the normal owned-file download path. The response is built from the active chunk manifest and includes ordered chunk URLs, hash metadata, algorithm metadata, and the existing decrypt key envelope fields.
 
 ```
-GET /api/v1/files/hash/{fileHash}/addresses
+GET /api/v1/files/hash/{fileHash}/download-metadata
 ```
 
 **Authentication**: Bearer Token
@@ -951,12 +951,37 @@ GET /api/v1/files/hash/{fileHash}/addresses
 {
   "code": 200,
   "message": "操作成功",
-  "data": [
-    "https://storage.example.com/shard1?signature=...",
-    "https://storage.example.com/shard2?signature=..."
-  ]
+  "data": {
+    "fileId": "9P6q...",
+    "fileHash": "sha256:...",
+    "fileName": "report.pdf",
+    "fileSize": 2048,
+    "contentType": "application/pdf",
+    "initialKey": "base64-key",
+    "manifestSchemaId": "cn.flying.chunk-manifest.v1",
+    "manifestHash": "sha256:manifest",
+    "hashAlgorithm": "SHA-256",
+    "encryptionAlgorithm": "AES-GCM",
+    "storageBackend": "S3",
+    "chunkSize": 1024,
+    "totalChunks": 2,
+    "parts": [
+      {
+        "index": 0,
+        "size": 1024,
+        "downloadUrl": "https://storage.example.com/chunk-0?signature=...",
+        "expiresAtEpochSeconds": 1782806400,
+        "storagePath": "chunks/0",
+        "plainHash": "plain-0",
+        "cipherHash": "cipher-0",
+        "checksumAlgorithm": "SHA-256"
+      }
+    ]
+  }
 }
 ```
+
+`GET /api/v1/files/hash/{fileHash}/addresses` remains available as a legacy URL-only compatibility endpoint. New owned-file downloads should use `download-metadata` instead of calling `addresses` and `decrypt-info` separately.
 
 ---
 
@@ -992,7 +1017,7 @@ GET /api/v1/transactions/{transactionHash}
 
 ### 4.7 Download File
 
-Download file content (encrypted shards).
+Legacy backend-proxied encrypted shard download. This endpoint returns backend-assembled `List<byte[]>` content and is kept for compatibility. Normal large-file owned downloads should use `GET /api/v1/files/hash/{fileHash}/download-metadata`.
 
 ```
 GET /api/v1/files/hash/{fileHash}/chunks
@@ -3522,6 +3547,7 @@ PUT /api/v1/admin/integrity-alerts/{id}/resolve
 - `GET /api/v1/files`
 - `GET /api/v1/files/hash/{fileHash}`
 - `GET /api/v1/files/{id}`
+- `GET /api/v1/files/hash/{fileHash}/download-metadata`
 - `GET /api/v1/files/hash/{fileHash}/addresses`
 - `GET /api/v1/files/hash/{fileHash}/chunks`
 - `GET /api/v1/files/hash/{fileHash}/decrypt-info`
