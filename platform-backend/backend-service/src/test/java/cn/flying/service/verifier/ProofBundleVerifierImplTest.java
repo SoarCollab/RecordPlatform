@@ -125,6 +125,72 @@ class ProofBundleVerifierImplTest {
     }
 
     /**
+     * 验证明包显式声明未知 suite 时会被离线 verifier 拒绝。
+     */
+    @Test
+    void verify_shouldRejectUnsupportedSuitePolicy() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO unsupported = withPolicy(
+                bundle,
+                new ProofBundleVO.VerificationPolicy(
+                        "UNKNOWN-CONTENT-SUITE",
+                        "UNSIGNED-V1",
+                        "NONE-V1",
+                        "RP-MERKLE-SHA256-V1",
+                        1,
+                        null,
+                        bundle.verificationPolicy().hashAlgorithm(),
+                        bundle.verificationPolicy().leafHashRule(),
+                        bundle.verificationPolicy().parentHashRule(),
+                        bundle.verificationPolicy().leafOrdering(),
+                        bundle.verificationPolicy().oddLeafRule(),
+                        bundle.verificationPolicy().proofPathRule()
+                )
+        );
+
+        ProofVerificationResult result = verifier.verify(originalFile, unsupported);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.issues())
+                .extracting(ProofVerificationIssue::code)
+                .contains(ProofVerificationCode.UNSUPPORTED_ALGORITHM);
+    }
+
+    /**
+     * 验证明包声明已过废弃时间的 suite 时会被离线 verifier 拒绝。
+     */
+    @Test
+    void verify_shouldRejectDeprecatedSuitePolicy() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO deprecated = withPolicy(
+                bundle,
+                new ProofBundleVO.VerificationPolicy(
+                        "RP-AES256-GCM-CHUNK-CHAIN-V1",
+                        "UNSIGNED-V1",
+                        "NONE-V1",
+                        "RP-MERKLE-SHA256-V1",
+                        1,
+                        new Date(0),
+                        bundle.verificationPolicy().hashAlgorithm(),
+                        bundle.verificationPolicy().leafHashRule(),
+                        bundle.verificationPolicy().parentHashRule(),
+                        bundle.verificationPolicy().leafOrdering(),
+                        bundle.verificationPolicy().oddLeafRule(),
+                        bundle.verificationPolicy().proofPathRule()
+                )
+        );
+
+        ProofVerificationResult result = verifier.verify(originalFile, deprecated);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.issues())
+                .extracting(ProofVerificationIssue::code)
+                .contains(ProofVerificationCode.UNSUPPORTED_ALGORITHM);
+    }
+
+    /**
      * 验证链上根字段与 Merkle 根不一致时会显式失败。
      */
     @Test
@@ -215,6 +281,12 @@ class ProofBundleVerifierImplTest {
                 new ProofBundleVO.ChainEvidence("tx-batch", tree.merkleRoot(), "tx-file"),
                 new ProofBundleVO.IssuerEvidence("RecordPlatform", "P1.2-proof-bundle", "COMPLETED", null, null),
                 new ProofBundleVO.VerificationPolicy(
+                        "RP-AES256-GCM-CHUNK-CHAIN-V1",
+                        "UNSIGNED-V1",
+                        "NONE-V1",
+                        "RP-MERKLE-SHA256-V1",
+                        1,
+                        null,
                         "SHA-256",
                         "hex(sha256('leaf\\n' + fileHash.trim()))",
                         "hex(sha256('node\\n' + leftHash.trim() + '\\n' + rightHash.trim()))",
@@ -256,6 +328,23 @@ class ProofBundleVerifierImplTest {
                 chain,
                 bundle.issuer(),
                 bundle.verificationPolicy(),
+                bundle.verificationGuide()
+        );
+    }
+
+    /**
+     * 替换证明包里的验证策略段。
+     */
+    private ProofBundleVO withPolicy(ProofBundleVO bundle, ProofBundleVO.VerificationPolicy policy) {
+        return new ProofBundleVO(
+                bundle.contractVersion(),
+                bundle.manifest(),
+                bundle.file(),
+                bundle.storage(),
+                bundle.merkle(),
+                bundle.chain(),
+                bundle.issuer(),
+                policy,
                 bundle.verificationGuide()
         );
     }

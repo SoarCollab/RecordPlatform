@@ -195,8 +195,22 @@ file:
     #   2: ${FILE_KEY_ENVELOPE_MASTER_KEY_V2:}
     key-version: 1
     algorithm-suite: RP-AES256-GCM-CHUNK-CHAIN-V1
+    signature-suite: UNSIGNED-V1
+    kem-suite: NONE-V1
+    proof-suite: RP-MERKLE-SHA256-V1
     encryption-algorithm: CHUNK_KEY_CHAIN
     wrapping-algorithm: AES-256-GCM
+    # Optional ISO-8601 instant. Once reached, new envelope/proof metadata using this suite is rejected.
+    # deprecated-after: 2030-01-01T00:00:00Z
+    supported-algorithm-suites:
+      - RP-AES256-GCM-CHUNK-CHAIN-V1
+    supported-signature-suites:
+      - UNSIGNED-V1
+    supported-kem-suites:
+      - NONE-V1
+    supported-proof-suites:
+      - RP-MERKLE-SHA256-V1
+    deprecated-suites: []
 
 # Quota governance configuration
 quota:

@@ -1,5 +1,7 @@
 package cn.flying.service.key;
 
+import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
@@ -19,10 +21,13 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -43,6 +48,7 @@ class FileKeyEnvelopeServiceTest {
 
     private FileKeyEnvelopeProperties properties;
     private LocalKeyWrappingService wrappingService;
+    private CryptoSuitePolicyService suitePolicy;
     private FileKeyEnvelopeService envelopeService;
 
     @BeforeAll
@@ -57,7 +63,8 @@ class FileKeyEnvelopeServiceTest {
         properties = new FileKeyEnvelopeProperties();
         properties.setLocalMasterKey("test-master-key-with-enough-entropy");
         wrappingService = new LocalKeyWrappingService(properties);
-        envelopeService = new FileKeyEnvelopeService(fileKeyEnvelopeMapper, fileKeyAuditLogMapper, wrappingService, properties);
+        suitePolicy = new CryptoSuitePolicyService(properties);
+        envelopeService = new FileKeyEnvelopeService(fileKeyEnvelopeMapper, fileKeyAuditLogMapper, wrappingService, properties, suitePolicy);
     }
 
     /**
@@ -79,7 +86,48 @@ class FileKeyEnvelopeServiceTest {
         assertFalse(sanitized.containsKey("initialKey"));
         assertEquals("ENVELOPED", sanitized.get("keyEnvelopeStatus"));
         assertEquals("RP-AES256-GCM-CHUNK-CHAIN-V1", sanitized.get("algorithmSuite"));
+        assertEquals("UNSIGNED-V1", sanitized.get("signatureSuite"));
+        assertEquals("NONE-V1", sanitized.get("kemSuite"));
+        assertEquals("RP-MERKLE-SHA256-V1", sanitized.get("proofSuite"));
         assertEquals(1, ((Number) sanitized.get("keyVersion")).intValue());
+    }
+
+    /**
+     * Verifies that unsupported configured suite identifiers are rejected before persistence.
+     */
+    @Test
+    @DisplayName("should reject unsupported crypto suite")
+    void shouldRejectUnsupportedCryptoSuite() {
+        properties.setSupportedAlgorithmSuites(Set.of("OTHER-SUITE"));
+
+        assertThatThrownBy(() -> envelopeService.prepareFileParam("""
+                {"fileName":"a.txt","initialKey":"serialized-key"}
+                """))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> {
+                    GeneralException generalException = (GeneralException) ex;
+                    assertThat(generalException.getResultEnum()).isEqualTo(ResultEnum.PARAM_ERROR);
+                    assertThat(generalException.getData()).asString().contains("不支持的密码套件");
+                });
+    }
+
+    /**
+     * Verifies that deprecated active suites are rejected deterministically.
+     */
+    @Test
+    @DisplayName("should reject deprecated crypto suite")
+    void shouldRejectDeprecatedCryptoSuite() {
+        properties.setDeprecatedAfter(Instant.now().minusSeconds(1));
+
+        assertThatThrownBy(() -> envelopeService.prepareFileParam("""
+                {"fileName":"a.txt","initialKey":"serialized-key"}
+                """))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> {
+                    GeneralException generalException = (GeneralException) ex;
+                    assertThat(generalException.getResultEnum()).isEqualTo(ResultEnum.PARAM_ERROR);
+                    assertThat(generalException.getData()).asString().contains("当前密码套件已废弃");
+                });
     }
 
     /**
@@ -123,6 +171,9 @@ class FileKeyEnvelopeServiceTest {
         verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
         FileKeyEnvelope envelope = envelopeCaptor.getValue();
         assertThat(envelope.getEncryptedDataKey()).isNotBlank();
+        assertEquals("UNSIGNED-V1", envelope.getSignatureSuite());
+        assertEquals("NONE-V1", envelope.getKemSuite());
+        assertEquals("RP-MERKLE-SHA256-V1", envelope.getProofSuite());
         assertEquals(FileKeyEnvelopeService.STATUS_ACTIVE, envelope.getStatus());
 
         when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(envelope);

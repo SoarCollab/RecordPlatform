@@ -18,6 +18,8 @@ import cn.flying.dao.vo.file.ProofBundleVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.StorageObjectHeadVO;
 import cn.flying.service.attestation.MerkleTreeService;
+import cn.flying.service.key.CryptoSuitePolicyService;
+import cn.flying.service.key.FileKeyEnvelopeProperties;
 import cn.flying.service.remote.FileRemoteClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,6 +32,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Date;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -61,6 +64,7 @@ class ProofBundleServiceImplTest {
     @Mock
     private FileRemoteClient fileRemoteClient;
 
+    private FileKeyEnvelopeProperties suiteProperties;
     private ProofBundleServiceImpl service;
 
     /**
@@ -68,7 +72,14 @@ class ProofBundleServiceImplTest {
      */
     @BeforeEach
     void setUp() {
-        service = new ProofBundleServiceImpl(fileMapper, leafMapper, batchMapper, fileRemoteClient);
+        suiteProperties = new FileKeyEnvelopeProperties();
+        service = new ProofBundleServiceImpl(
+                fileMapper,
+                leafMapper,
+                batchMapper,
+                fileRemoteClient,
+                new CryptoSuitePolicyService(suiteProperties)
+        );
         TenantContext.setTenantId(TENANT_ID);
         ReflectionTestUtils.setField(
                 IdUtils.class,
@@ -103,6 +114,11 @@ class ProofBundleServiceImplTest {
             assertThat(bundle.file().transactionHash()).isEqualTo("tx-file");
             assertThat(bundle.merkle().proofAlgorithm()).isEqualTo(MerkleTreeService.PROOF_ALGORITHM);
             assertThat(bundle.merkle().proofPath()).hasSize(1);
+            assertThat(bundle.verificationPolicy().algorithmSuite()).isEqualTo("RP-AES256-GCM-CHUNK-CHAIN-V1");
+            assertThat(bundle.verificationPolicy().signatureSuite()).isEqualTo("UNSIGNED-V1");
+            assertThat(bundle.verificationPolicy().kemSuite()).isEqualTo("NONE-V1");
+            assertThat(bundle.verificationPolicy().proofSuite()).isEqualTo("RP-MERKLE-SHA256-V1");
+            assertThat(bundle.verificationPolicy().keyVersion()).isEqualTo(1);
             assertThat(bundle.chain().batchTransactionHash()).isEqualTo("tx-batch");
             assertThat(bundle.storage().objects()).hasSize(1);
             assertThat(bundle.storage().objects().getFirst().metadataHashMatches()).isTrue();
@@ -159,6 +175,25 @@ class ProofBundleServiceImplTest {
 
             verify(batchMapper, never()).selectById(any());
             verify(fileRemoteClient, never()).headObject(any(), any());
+        }
+    }
+
+    /**
+     * 验证证明包导出会拒绝不受支持的 suite 配置。
+     */
+    @Test
+    void exportByFileId_shouldRejectUnsupportedSuitePolicy() {
+        suiteProperties.setSupportedProofSuites(Set.of("OTHER-PROOF"));
+        try (MockedStatic<SecurityUtils> ignored = mockStaticUser()) {
+            mockSuccessfulBundleDependencies(file());
+
+            assertThatThrownBy(() -> service.exportByFileId(USER_ID, FILE_ID))
+                    .isInstanceOf(GeneralException.class)
+                    .satisfies(ex -> {
+                        GeneralException generalException = (GeneralException) ex;
+                        assertThat(generalException.getResultEnum()).isEqualTo(ResultEnum.PARAM_ERROR);
+                        assertThat(generalException.getData()).asString().contains("不支持的密码套件");
+                    });
         }
     }
 

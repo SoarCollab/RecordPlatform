@@ -9,15 +9,19 @@ public record FileParamEnvelopeResult(
         String sanitizedFileParam,
         String initialKey,
         String algorithmSuite,
+        String signatureSuite,
+        String kemSuite,
+        String proofSuite,
         String encryptionAlgorithm,
-        Integer keyVersion
+        Integer keyVersion,
+        String deprecatedAfter
 ) {
 
     /**
      * Creates a result for metadata that does not require envelope persistence.
      */
     public static FileParamEnvelopeResult withoutEnvelope(String fileParam) {
-        return new FileParamEnvelopeResult(fileParam, null, null, null, null);
+        return new FileParamEnvelopeResult(fileParam, null, null, null, null, null, null, null, null);
     }
 
     /**
