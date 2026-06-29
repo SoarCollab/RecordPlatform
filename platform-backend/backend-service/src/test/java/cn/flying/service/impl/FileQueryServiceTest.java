@@ -114,7 +114,7 @@ class FileQueryServiceTest {
                         .setFileSize(2048L)
                         .setContentType("application/pdf")
                         .setFileParam("""
-                                {"initialKey":"k1","fileName":"report.pdf","fileSize":2048,"contentType":"application/pdf","chunkCount":2}
+                                {"keyEnvelopeStatus":"ENVELOPED","encryptionAlgorithm":"AES-GCM","fileName":"report.pdf","fileSize":2048,"contentType":"application/pdf","chunkCount":2}
                                 """);
                 ChunkManifestView manifest = new ChunkManifestView(
                         10L,
@@ -138,6 +138,13 @@ class FileQueryServiceTest {
                 );
 
                 when(fileMapper.selectOne(any())).thenReturn(ownedFile);
+                when(fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
+                        ownedFile,
+                        FILE_HASH,
+                        USER_ID,
+                        USER_ID,
+                        "OWNER_DECRYPT"
+                )).thenReturn(Optional.of("k1"));
                 when(chunkManifestService.findActiveManifest(USER_ID, FILE_ID)).thenReturn(Optional.of(manifest));
                 when(fileRemoteClient.getFileUrlListByHash(List.of("chunks/0", "chunks/1"),
                         List.of("cipher-0", "cipher-1"))).thenReturn(Result.success(List.of("url-0", "url-1")));
@@ -159,6 +166,63 @@ class FileQueryServiceTest {
         }
 
         /**
+         * 验证未加密直传文件的下载 metadata 不要求 initialKey。
+         */
+        @Test
+        @DisplayName("should build download metadata for unencrypted direct upload without key envelope")
+        void shouldBuildDownloadMetadataForUnencryptedDirectUploadWithoutKeyEnvelope() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class);
+                 MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                idUtilsMock.when(() -> IdUtils.toExternalId(FILE_ID)).thenReturn("ext-file-1");
+                File ownedFile = new File()
+                        .setId(FILE_ID)
+                        .setUid(USER_ID)
+                        .setFileName("direct.pdf")
+                        .setFileHash(FILE_HASH)
+                        .setFileSize(512L)
+                        .setContentType("application/pdf")
+                        .setFileParam("""
+                                {"uploadMode":"DIRECT_MULTIPART","encryptionAlgorithm":"NONE","fileName":"direct.pdf","fileSize":512,"contentType":"application/pdf","chunkCount":1}
+                                """);
+                ChunkManifestView manifest = new ChunkManifestView(
+                        10L,
+                        FILE_ID,
+                        1,
+                        "cn.flying.chunk-manifest.v1",
+                        FILE_HASH,
+                        "sha256:manifest",
+                        "SHA-256",
+                        512L,
+                        512L,
+                        null,
+                        "NONE",
+                        "S3",
+                        List.of(new ChunkManifestChunk(0, "sha256:chunk", "sha256:chunk", 512L,
+                                "chunks/0", "S3", "etag-0", "SHA-256"))
+                );
+
+                when(fileMapper.selectOne(any())).thenReturn(ownedFile);
+                when(chunkManifestService.findActiveManifest(USER_ID, FILE_ID)).thenReturn(Optional.of(manifest));
+                when(fileRemoteClient.getFileUrlListByHash(List.of("chunks/0"), List.of("sha256:chunk")))
+                        .thenReturn(Result.success(List.of("url-0")));
+
+                var metadata = fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH);
+
+                assertNull(metadata.initialKey());
+                assertEquals("NONE", metadata.encryptionAlgorithm());
+                assertEquals("url-0", metadata.parts().getFirst().downloadUrl());
+                verify(fileKeyEnvelopeService, never()).unwrapActiveOwnerInitialKey(
+                        any(File.class),
+                        anyString(),
+                        anyLong(),
+                        anyLong(),
+                        anyString()
+                );
+            }
+        }
+
+        /**
          * 验证缺少 active manifest 时不会继续向对象存储签发 URL。
          */
         @Test
@@ -173,10 +237,17 @@ class FileQueryServiceTest {
                         .setFileHash(FILE_HASH)
                         .setFileSize(1024L)
                         .setFileParam("""
-                                {"initialKey":"k1","fileName":"report.pdf","fileSize":1024,"contentType":"application/pdf","chunkCount":1}
+                                {"keyEnvelopeStatus":"ENVELOPED","encryptionAlgorithm":"AES-GCM","fileName":"report.pdf","fileSize":1024,"contentType":"application/pdf","chunkCount":1}
                                 """);
 
                 when(fileMapper.selectOne(any())).thenReturn(ownedFile);
+                when(fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
+                        ownedFile,
+                        FILE_HASH,
+                        USER_ID,
+                        USER_ID,
+                        "OWNER_DECRYPT"
+                )).thenReturn(Optional.of("k1"));
                 when(chunkManifestService.findActiveManifest(USER_ID, FILE_ID)).thenReturn(Optional.empty());
 
                 GeneralException ex = assertThrows(GeneralException.class,
@@ -702,10 +773,17 @@ class FileQueryServiceTest {
                 File file = FileTestBuilder.aFile(f -> {
                     f.setUid(OTHER_USER_ID); // Different user
                     f.setFileHash(FILE_HASH);
-                    f.setFileParam("{\"initialKey\":\"YWRtaW5rZXk=\",\"fileSize\":2048}");
+                    f.setFileParam("{\"keyEnvelopeStatus\":\"ENVELOPED\",\"encryptionAlgorithm\":\"AES-GCM\",\"fileSize\":2048}");
                 });
 
                 when(fileMapper.selectOne(any())).thenReturn(file);
+                when(fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
+                        file,
+                        FILE_HASH,
+                        OTHER_USER_ID,
+                        USER_ID,
+                        "OWNER_DECRYPT"
+                )).thenReturn(Optional.of("YWRtaW5rZXk="));
 
                 // When
                 var result = fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH);
@@ -752,10 +830,17 @@ class FileQueryServiceTest {
                     f.setUid(USER_ID);
                     f.setFileHash(FILE_HASH);
                     f.setFileName("document.pdf");
-                    f.setFileParam("{\"initialKey\":\"c2VjcmV0a2V5\",\"fileSize\":4096,\"contentType\":\"application/pdf\",\"chunkCount\":2}");
+                    f.setFileParam("{\"keyEnvelopeStatus\":\"ENVELOPED\",\"encryptionAlgorithm\":\"AES-GCM\",\"fileSize\":4096,\"contentType\":\"application/pdf\",\"chunkCount\":2}");
                 });
 
                 when(fileMapper.selectOne(any())).thenReturn(file);
+                when(fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
+                        file,
+                        FILE_HASH,
+                        USER_ID,
+                        USER_ID,
+                        "OWNER_DECRYPT"
+                )).thenReturn(Optional.of("c2VjcmV0a2V5"));
 
                 // When
                 var result = fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH);
@@ -781,10 +866,17 @@ class FileQueryServiceTest {
                     f.setUid(USER_ID);
                     f.setFileHash(FILE_HASH);
                     f.setFileName("entity_name.txt");
-                    f.setFileParam("{\"initialKey\":\"a2V5\",\"fileSize\":100}"); // No fileName in params
+                    f.setFileParam("{\"keyEnvelopeStatus\":\"ENVELOPED\",\"encryptionAlgorithm\":\"AES-GCM\",\"fileSize\":100}"); // No fileName in params
                 });
 
                 when(fileMapper.selectOne(any())).thenReturn(file);
+                when(fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
+                        file,
+                        FILE_HASH,
+                        USER_ID,
+                        USER_ID,
+                        "OWNER_DECRYPT"
+                )).thenReturn(Optional.of("a2V5"));
 
                 // When
                 var result = fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH);

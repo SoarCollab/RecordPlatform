@@ -496,11 +496,14 @@ public class FileQueryServiceImpl implements FileQueryService {
             @SuppressWarnings("unchecked")
             Map<String, Object> params = JsonConverter.parse(fileParam, Map.class);
 
-            Optional<String> envelopeInitialKey = resolveInitialKey(accessContext, fileHash, actorId, params);
-            String initialKey = (envelopeInitialKey != null ? envelopeInitialKey : Optional.<String>empty())
-                    .orElse(null);
-            if (CommonUtils.isEmpty(initialKey)) {
-                throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
+            String initialKey = null;
+            if (requiresInitialKey(params)) {
+                Optional<String> envelopeInitialKey = resolveInitialKey(accessContext, fileHash, actorId);
+                initialKey = (envelopeInitialKey != null ? envelopeInitialKey : Optional.<String>empty())
+                        .orElse(null);
+                if (CommonUtils.isEmpty(initialKey)) {
+                    throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
+                }
             }
 
             String fileName = (String) params.get("fileName");
@@ -532,8 +535,7 @@ public class FileQueryServiceImpl implements FileQueryService {
      */
     private Optional<String> resolveInitialKey(FileAccessContext accessContext,
                                                String fileHash,
-                                               Long actorId,
-                                               Map<String, Object> params) {
+                                               Long actorId) {
         File file = accessContext.file();
         FriendFileShare friendShare = accessContext.friendShare();
         if (friendShare != null) {
@@ -554,19 +556,15 @@ public class FileQueryServiceImpl implements FileQueryService {
                 actorId,
                 "OWNER_DECRYPT"
         );
-        return (ownerEnvelope != null ? ownerEnvelope : Optional.<String>empty())
-                .or(() -> legacyInitialKey(params));
+        return ownerEnvelope != null ? ownerEnvelope : Optional.empty();
     }
 
     /**
-     * Extracts the legacy initialKey from file_param for pre-envelope records.
+     * Returns whether the file metadata describes encrypted content that needs a data key.
      */
-    private Optional<String> legacyInitialKey(Map<String, Object> fileParam) {
-        Object value = fileParam.get("initialKey");
-        if (value instanceof String key && CommonUtils.isNotEmpty(key)) {
-            return Optional.of(key);
-        }
-        return Optional.empty();
+    private boolean requiresInitialKey(Map<String, Object> fileParam) {
+        Object encryptionAlgorithm = fileParam.get("encryptionAlgorithm");
+        return !(encryptionAlgorithm instanceof String algorithm && "NONE".equalsIgnoreCase(algorithm.trim()));
     }
 
     @Override

@@ -316,8 +316,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      * Sanitizes file metadata and protects raw initial keys before persistence.
      */
     private FileParamEnvelopeResult prepareFileParamEnvelope(String fileParam) {
-        FileParamEnvelopeResult result = fileKeyEnvelopeService.prepareFileParam(fileParam);
-        return result != null ? result : FileParamEnvelopeResult.withoutEnvelope(fileParam);
+        return fileKeyEnvelopeService.prepareFileParam(fileParam);
     }
 
     /**
@@ -1340,7 +1339,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     /**
-     * Builds decrypt metadata by resolving key envelopes first and legacy file_param keys second.
+     * Builds decrypt metadata by resolving key envelopes for encrypted files.
      */
     private FileDecryptInfoVO buildFileDecryptInfo(File file, String fileHash, Long envelopeOwnerId) {
         return buildFileDecryptInfo(file, fileHash, envelopeOwnerId, envelopeOwnerId);
@@ -1359,18 +1358,20 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             @SuppressWarnings("unchecked")
             Map<String, Object> params = JsonConverter.parse(fileParam, Map.class);
 
-            Optional<String> envelopeInitialKey = fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
-                    file,
-                    fileHash,
-                    envelopeOwnerId,
-                    actorId,
-                    "OWNER_DECRYPT"
-            );
-            String initialKey = (envelopeInitialKey != null ? envelopeInitialKey : Optional.<String>empty())
-                    .or(() -> legacyInitialKey(params))
-                    .orElse(null);
-            if (CommonUtils.isEmpty(initialKey)) {
-                throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
+            String initialKey = null;
+            if (requiresInitialKey(params)) {
+                Optional<String> envelopeInitialKey = fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
+                        file,
+                        fileHash,
+                        envelopeOwnerId,
+                        actorId,
+                        "OWNER_DECRYPT"
+                );
+                initialKey = (envelopeInitialKey != null ? envelopeInitialKey : Optional.<String>empty())
+                        .orElse(null);
+                if (CommonUtils.isEmpty(initialKey)) {
+                    throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
+                }
             }
 
             String fileName = (String) params.get("fileName");
@@ -1398,7 +1399,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     /**
-     * Builds decrypt metadata for share-code access using recipient envelopes before legacy fallback.
+     * Builds decrypt metadata for share-code access using recipient envelopes for encrypted files.
      */
     private FileDecryptInfoVO buildShareFileDecryptInfo(File file,
                                                         String fileHash,
@@ -1413,25 +1414,20 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             @SuppressWarnings("unchecked")
             Map<String, Object> params = JsonConverter.parse(fileParam, Map.class);
 
-            Optional<String> shareEnvelopeInitialKey = fileKeyEnvelopeService.unwrapActiveShareInitialKey(
-                    file,
-                    fileHash,
-                    accessContext.fileShare(),
-                    actorId,
-                    "SHARE_DECRYPT"
-            );
-            String initialKey = (shareEnvelopeInitialKey != null ? shareEnvelopeInitialKey : Optional.<String>empty())
-                    .or(() -> fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
-                            file,
-                            fileHash,
-                            accessContext.ownerId(),
-                            actorId,
-                            "SHARE_LEGACY_FALLBACK"
-                    ))
-                    .or(() -> legacyInitialKey(params))
-                    .orElse(null);
-            if (CommonUtils.isEmpty(initialKey)) {
-                throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
+            String initialKey = null;
+            if (requiresInitialKey(params)) {
+                Optional<String> shareEnvelopeInitialKey = fileKeyEnvelopeService.unwrapActiveShareInitialKey(
+                        file,
+                        fileHash,
+                        accessContext.fileShare(),
+                        actorId,
+                        "SHARE_DECRYPT"
+                );
+                initialKey = (shareEnvelopeInitialKey != null ? shareEnvelopeInitialKey : Optional.<String>empty())
+                        .orElse(null);
+                if (CommonUtils.isEmpty(initialKey)) {
+                    throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
+                }
             }
 
             String fileName = (String) params.get("fileName");
@@ -1460,14 +1456,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     /**
-     * Extracts the legacy initialKey from file_param for pre-envelope records.
+     * Returns whether the file metadata describes encrypted content that needs a data key.
      */
-    private Optional<String> legacyInitialKey(Map<String, Object> fileParam) {
-        Object value = fileParam.get("initialKey");
-        if (value instanceof String key && CommonUtils.isNotEmpty(key)) {
-            return Optional.of(key);
-        }
-        return Optional.empty();
+    private boolean requiresInitialKey(Map<String, Object> fileParam) {
+        Object encryptionAlgorithm = fileParam.get("encryptionAlgorithm");
+        return !(encryptionAlgorithm instanceof String algorithm && "NONE".equalsIgnoreCase(algorithm.trim()));
     }
 
     /**

@@ -355,20 +355,26 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
     }
 
     /**
-     * Validates optional crypto agility suite fields while preserving old proof-bundle compatibility.
+     * Validates required crypto agility suite fields declared by the proof bundle.
      */
     private void validateVerificationPolicy(ProofBundleVO.VerificationPolicy policy,
                                             List<ProofVerificationIssue> issues) {
         if (policy == null) {
+            issues.add(issue(
+                    ProofVerificationCode.UNSUPPORTED_ALGORITHM,
+                    ProofVerificationSeverity.ERROR,
+                    "verificationPolicy",
+                    "证明包缺少验证策略"
+            ));
             return;
         }
-        validateOptionalSuite("verificationPolicy.algorithmSuite", policy.algorithmSuite(),
+        validateRequiredSuite("verificationPolicy.algorithmSuite", policy.algorithmSuite(),
                 SUPPORTED_ALGORITHM_SUITE, issues);
-        validateOptionalSuite("verificationPolicy.signatureSuite", policy.signatureSuite(),
+        validateRequiredSuite("verificationPolicy.signatureSuite", policy.signatureSuite(),
                 SUPPORTED_SIGNATURE_SUITE, issues);
-        validateOptionalSuite("verificationPolicy.kemSuite", policy.kemSuite(),
+        validateRequiredSuite("verificationPolicy.kemSuite", policy.kemSuite(),
                 SUPPORTED_KEM_SUITE, issues);
-        validateOptionalSuite("verificationPolicy.proofSuite", policy.proofSuite(),
+        validateRequiredSuite("verificationPolicy.proofSuite", policy.proofSuite(),
                 SUPPORTED_PROOF_SUITE, issues);
         if (policy.deprecatedAfter() != null && !policy.deprecatedAfter().after(new Date())) {
             issues.add(issue(
@@ -381,13 +387,22 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
     }
 
     /**
-     * Rejects explicit unsupported suite identifiers and ignores absent legacy metadata.
+     * Rejects absent or unsupported suite identifiers.
      */
-    private void validateOptionalSuite(String field,
+    private void validateRequiredSuite(String field,
                                        String actual,
                                        String supported,
                                        List<ProofVerificationIssue> issues) {
-        if (StringUtils.hasText(actual) && !supported.equals(actual)) {
+        if (!StringUtils.hasText(actual)) {
+            issues.add(issue(
+                    ProofVerificationCode.UNSUPPORTED_ALGORITHM,
+                    ProofVerificationSeverity.ERROR,
+                    field,
+                    "证明包缺少密码套件"
+            ));
+            return;
+        }
+        if (!supported.equals(actual)) {
             issues.add(issue(
                     ProofVerificationCode.UNSUPPORTED_ALGORITHM,
                     ProofVerificationSeverity.ERROR,
