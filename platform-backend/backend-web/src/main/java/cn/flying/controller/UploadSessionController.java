@@ -7,6 +7,10 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.IdUtils;
+import cn.flying.dao.vo.file.DirectUploadCompleteRequest;
+import cn.flying.dao.vo.file.DirectUploadCompleteVO;
+import cn.flying.dao.vo.file.DirectUploadSessionRequest;
+import cn.flying.dao.vo.file.DirectUploadSessionVO;
 import cn.flying.dao.vo.file.FileUploadStatusVO;
 import cn.flying.dao.vo.file.ProgressVO;
 import cn.flying.dao.vo.file.ResumeUploadVO;
@@ -16,6 +20,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -27,6 +32,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -86,6 +92,60 @@ public class UploadSessionController {
                 userId, fileName, fileSize, contentType, providedClientId, chunkSize, totalChunks, targetFileId
         );
         return Result.success(uploadVO);
+    }
+
+    /**
+     * 创建对象存储直传上传会话。
+     *
+     * @param userId 用户 ID
+     * @param request 直传上传会话请求
+     * @return 直传上传会话信息
+     */
+    @PostMapping("/direct")
+    @Operation(summary = "创建直传上传会话")
+    @OperationLog(module = "文件直传上传模块", operationType = "上传", description = "创建直传上传会话")
+    public Result<DirectUploadSessionVO> createDirectUploadSession(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @RequestBody @Valid DirectUploadSessionRequest request) {
+        return Result.success(fileUploadService.startDirectUpload(userId, request));
+    }
+
+    /**
+     * 完成对象存储直传上传。
+     *
+     * @param userId 用户 ID
+     * @param clientId 客户端会话 ID
+     * @param request 分片完成元数据
+     * @return 完成结果
+     */
+    @PostMapping("/{clientId}/direct/complete")
+    @Operation(summary = "完成直传上传")
+    @OperationLog(module = "文件直传上传模块", operationType = "上传", description = "完成直传上传")
+    public Result<DirectUploadCompleteVO> completeDirectUpload(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @PathVariable @Pattern(regexp = "^[A-Za-z0-9-]{1,64}$", message = "clientId 格式无效") String clientId,
+            @RequestBody @Valid DirectUploadCompleteRequest request) {
+        return Result.success(fileUploadService.completeDirectUpload(userId, clientId, request));
+    }
+
+    /**
+     * 中止对象存储直传上传。
+     *
+     * @param userId 用户 ID
+     * @param clientId 客户端会话 ID
+     * @return 处理结果
+     */
+    @DeleteMapping("/{clientId}/direct")
+    @Operation(summary = "中止直传上传")
+    @OperationLog(module = "文件直传上传模块", operationType = "上传", description = "中止直传上传")
+    public Result<String> abortDirectUpload(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @PathVariable @Pattern(regexp = "^[A-Za-z0-9-]{1,64}$", message = "clientId 格式无效") String clientId) {
+        boolean aborted = fileUploadService.abortDirectUpload(userId, clientId);
+        if (!aborted) {
+            return Result.error(ResultEnum.RESULT_DATA_NONE);
+        }
+        return Result.success("直传上传已中止");
     }
 
     /**

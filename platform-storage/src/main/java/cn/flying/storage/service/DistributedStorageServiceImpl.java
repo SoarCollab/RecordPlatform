@@ -9,6 +9,15 @@ import cn.flying.storage.tenant.TenantContextUtil;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.DistributedStorageService;
+import cn.flying.platformapi.request.AbortDirectMultipartUploadRequest;
+import cn.flying.platformapi.request.CompleteDirectMultipartUploadRequest;
+import cn.flying.platformapi.request.CreateDirectMultipartUploadRequest;
+import cn.flying.platformapi.request.DirectMultipartCompletedPart;
+import cn.flying.platformapi.request.DirectMultipartUploadPartRequest;
+import cn.flying.platformapi.response.CompleteDirectMultipartUploadResponse;
+import cn.flying.platformapi.response.CreateDirectMultipartUploadResponse;
+import cn.flying.platformapi.response.DirectMultipartCompletedPartVO;
+import cn.flying.platformapi.response.DirectMultipartUploadPartUrl;
 import cn.flying.platformapi.response.StorageCapacityVO;
 import cn.flying.platformapi.response.StorageDomainCapacityVO;
 import cn.flying.platformapi.response.StorageNodeCapacityVO;
@@ -26,6 +35,8 @@ import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import java.io.ByteArrayOutputStream;
 import java.time.Duration;
@@ -88,6 +99,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
 
     private static final String METADATA_FILE_HASH = "file-hash";
     private static final String METADATA_TENANT_ID = "tenant-id";
+    private static final String STAGING_PREFIX = "staging/direct-upload";
 
     // 修复检查并发限制信号量
     private static final Semaphore REPAIR_CHECK_SEMAPHORE = new Semaphore(10);
@@ -251,6 +263,251 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
 
         log.warn("无法从任何候选节点 {} 获取 '{}' 的对象元数据", candidateNodes, objectPath);
         return Result.success(StorageObjectHeadVO.missing(filePath, fileHash, parsedPath.tenantId()));
+    }
+
+    @Override
+    public Result<CreateDirectMultipartUploadResponse> createDirectMultipartUpload(
+            CreateDirectMultipartUploadRequest request) {
+        if (request == null || request.sessionId() == null || request.sessionId().isBlank()
+                || CollectionUtils.isEmpty(request.parts())) {
+            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+        }
+
+        Long tenantId = TenantContextUtil.getTenantIdOrDefault();
+        List<DirectMultipartUploadPartUrl> urls = new ArrayList<>(request.parts().size());
+        for (DirectMultipartUploadPartRequest part : request.parts()) {
+            if (!isValidDirectUploadPart(part)) {
+                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+            }
+            try {
+                urls.add(createPresignedPartUrl(request, part, tenantId));
+            } catch (Exception e) {
+                log.error("创建直传分片预签名 URL 失败: sessionId={}, partIndex={}",
+                        request.sessionId(), part != null ? part.partIndex() : null, e);
+                return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
+            }
+        }
+        return Result.success(new CreateDirectMultipartUploadResponse(request.sessionId(), urls));
+    }
+
+    @Override
+    public Result<CompleteDirectMultipartUploadResponse> completeDirectMultipartUpload(
+            CompleteDirectMultipartUploadRequest request) {
+        if (request == null || request.sessionId() == null || request.sessionId().isBlank()
+                || CollectionUtils.isEmpty(request.parts())) {
+            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+        }
+
+        List<DirectMultipartCompletedPartVO> completedParts = new ArrayList<>(request.parts().size());
+        for (DirectMultipartCompletedPart part : request.parts()) {
+            if (!isValidCompletedDirectPart(part)) {
+                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+            }
+            try {
+                completedParts.add(promoteDirectUploadPart(part));
+            } catch (Exception e) {
+                log.error("直传分片校验或晋级失败: sessionId={}, partIndex={}",
+                        request.sessionId(), part != null ? part.partIndex() : null, e);
+                return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
+            }
+        }
+
+        return Result.success(new CompleteDirectMultipartUploadResponse(request.sessionId(), completedParts));
+    }
+
+    @Override
+    public Result<Boolean> abortDirectMultipartUpload(AbortDirectMultipartUploadRequest request) {
+        if (request == null || CollectionUtils.isEmpty(request.parts())) {
+            return Result.success(true);
+        }
+
+        for (DirectMultipartCompletedPart part : request.parts()) {
+            if (part == null || part.nodeName() == null || part.nodeName().isBlank()
+                    || part.stagingObjectName() == null || part.stagingObjectName().isBlank()) {
+                continue;
+            }
+            try {
+                deleteFromNode(part.nodeName(), part.stagingObjectName());
+            } catch (Exception e) {
+                log.warn("清理直传 staging 分片失败: sessionId={}, partIndex={}, node={}",
+                        request.sessionId(), part.partIndex(), part.nodeName(), e);
+            }
+        }
+        return Result.success(true);
+    }
+
+    /**
+     * Generates a presigned PUT URL for a direct-upload staging object.
+     */
+    private DirectMultipartUploadPartUrl createPresignedPartUrl(
+            CreateDirectMultipartUploadRequest request,
+            DirectMultipartUploadPartRequest part,
+            Long tenantId) {
+        String nodeName = selectWritableNode(part.objectName());
+        S3Client client = clientManager.getClient(nodeName);
+        S3Presigner presigner = clientManager.getPresigner(nodeName);
+        if (client == null || presigner == null) {
+            throw new IllegalStateException("S3 client or presigner is unavailable for node " + nodeName);
+        }
+
+        ensureBucketExists(client, nodeName, nodeName);
+
+        String stagingObjectName = buildDirectUploadStagingObjectName(tenantId, request.sessionId(), part.partIndex());
+        String finalObjectName = TenantContextUtil.buildTenantObjectPath(tenantId, part.objectName());
+        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                .bucket(nodeName)
+                .key(stagingObjectName)
+                .contentLength(part.size())
+                .contentType(resolveContentType(part.contentType(), request.contentType()))
+                .metadata(buildObjectMetadata(part.objectName(), tenantId))
+                .build();
+        PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofHours(EXPIRY_HOURS))
+                .putObjectRequest(putObjectRequest)
+                .build();
+        PresignedPutObjectRequest presignedRequest = presigner.presignPutObject(presignRequest);
+
+        long expiresAt = System.currentTimeMillis() / 1000L + TimeUnit.HOURS.toSeconds(EXPIRY_HOURS);
+        return new DirectMultipartUploadPartUrl(
+                part.partIndex(),
+                presignedRequest.url().toString(),
+                expiresAt,
+                TenantContextUtil.buildChunkPath(part.objectName()),
+                stagingObjectName,
+                finalObjectName,
+                nodeName,
+                part.size()
+        );
+    }
+
+    /**
+     * Verifies a staging object and promotes it to the final chunk object key.
+     */
+    private DirectMultipartCompletedPartVO promoteDirectUploadPart(DirectMultipartCompletedPart part) {
+        S3Client client = clientManager.getClient(part.nodeName());
+        if (client == null) {
+            throw new IllegalStateException("S3 client is unavailable for node " + part.nodeName());
+        }
+        ensureBucketExists(client, part.nodeName(), part.nodeName());
+
+        HeadObjectResponse stagingHead = client.headObject(HeadObjectRequest.builder()
+                .bucket(part.nodeName())
+                .key(part.stagingObjectName())
+                .build());
+        if (stagingHead.contentLength() != part.size()) {
+            throw new IllegalArgumentException("staging object size mismatch");
+        }
+        if (part.eTag() != null && !part.eTag().isBlank()
+                && stagingHead.eTag() != null
+                && !normalizeEtag(stagingHead.eTag()).equals(normalizeEtag(part.eTag()))) {
+            throw new IllegalArgumentException("staging object eTag mismatch");
+        }
+
+        CopyObjectRequest copyRequest = CopyObjectRequest.builder()
+                .sourceBucket(part.nodeName())
+                .sourceKey(part.stagingObjectName())
+                .destinationBucket(part.nodeName())
+                .destinationKey(part.finalObjectName())
+                .metadata(buildObjectMetadata(part.cipherHash(), TenantContextUtil.getTenantIdOrDefault()))
+                .metadataDirective(MetadataDirective.REPLACE)
+                .build();
+        client.copyObject(copyRequest);
+        HeadObjectResponse finalHead = client.headObject(HeadObjectRequest.builder()
+                .bucket(part.nodeName())
+                .key(part.finalObjectName())
+                .build());
+        try {
+            deleteFromNode(part.nodeName(), part.stagingObjectName());
+        } catch (Exception e) {
+            log.warn("清理已提升的直传 staging 分片失败: partIndex={}, node={}",
+                    part.partIndex(), part.nodeName(), e);
+        }
+
+        return new DirectMultipartCompletedPartVO(
+                part.partIndex(),
+                part.storagePath(),
+                finalHead.contentLength(),
+                finalHead.eTag(),
+                part.plainHash(),
+                part.cipherHash(),
+                part.checksumAlgorithm()
+        );
+    }
+
+    /**
+     * Selects one online target node for the direct-upload chunk object.
+     */
+    private String selectWritableNode(String objectName) {
+        List<String> targetNodes = faultDomainManager.getTargetNodes(objectName);
+        for (String node : targetNodes) {
+            if (s3Monitor.isNodeOnline(node)) {
+                return node;
+            }
+        }
+        throw new IllegalStateException("No online storage node available for " + objectName);
+    }
+
+    /**
+     * Builds the physical staging object key for a direct-upload chunk.
+     */
+    private String buildDirectUploadStagingObjectName(Long tenantId, String sessionId, int partIndex) {
+        return "tenant/" + tenantId + "/" + STAGING_PREFIX + "/" + sessionId + "/part-" + partIndex;
+    }
+
+    /**
+     * Validates one requested direct-upload part.
+     */
+    private boolean isValidDirectUploadPart(DirectMultipartUploadPartRequest part) {
+        return part != null
+                && part.partIndex() >= 0
+                && part.size() > 0
+                && part.objectName() != null
+                && !part.objectName().isBlank()
+                && part.plainHash() != null
+                && !part.plainHash().isBlank()
+                && part.cipherHash() != null
+                && !part.cipherHash().isBlank();
+    }
+
+    /**
+     * Validates one completed direct-upload part request.
+     */
+    private boolean isValidCompletedDirectPart(DirectMultipartCompletedPart part) {
+        return part != null
+                && part.partIndex() >= 0
+                && part.size() > 0
+                && part.nodeName() != null
+                && !part.nodeName().isBlank()
+                && part.stagingObjectName() != null
+                && !part.stagingObjectName().isBlank()
+                && part.finalObjectName() != null
+                && !part.finalObjectName().isBlank()
+                && part.storagePath() != null
+                && !part.storagePath().isBlank()
+                && part.plainHash() != null
+                && !part.plainHash().isBlank()
+                && part.cipherHash() != null
+                && !part.cipherHash().isBlank();
+    }
+
+    /**
+     * Normalizes ETag quoting differences between clients and S3-compatible providers.
+     */
+    private String normalizeEtag(String value) {
+        return value == null ? "" : value.replace("\"", "").trim();
+    }
+
+    /**
+     * Resolves the content type used for a presigned chunk PUT request.
+     */
+    private String resolveContentType(String partContentType, String requestContentType) {
+        if (partContentType != null && !partContentType.isBlank()) {
+            return partContentType;
+        }
+        if (requestContentType != null && !requestContentType.isBlank()) {
+            return requestContentType;
+        }
+        return "application/octet-stream";
     }
 
     @Override

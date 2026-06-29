@@ -5,6 +5,9 @@ import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.request.CancelShareRequest;
+import cn.flying.platformapi.request.AbortDirectMultipartUploadRequest;
+import cn.flying.platformapi.request.CompleteDirectMultipartUploadRequest;
+import cn.flying.platformapi.request.CreateDirectMultipartUploadRequest;
 import cn.flying.platformapi.request.DeleteFilesRequest;
 import cn.flying.platformapi.request.GetShareInfoRequest;
 import cn.flying.platformapi.request.GetUserShareCodesRequest;
@@ -16,6 +19,8 @@ import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.SharingVO;
 import cn.flying.platformapi.response.BlockChainMessage;
+import cn.flying.platformapi.response.CompleteDirectMultipartUploadResponse;
+import cn.flying.platformapi.response.CreateDirectMultipartUploadResponse;
 import cn.flying.platformapi.response.StorageCapacityVO;
 import cn.flying.platformapi.response.StorageObjectHeadVO;
 import cn.flying.platformapi.response.TransactionVO;
@@ -130,6 +135,57 @@ public class FileRemoteClient {
     private Result<StorageObjectHeadVO> headObjectFallback(String filePath, String fileHash, Throwable t) {
         log.error("Storage service headObject failed, path={}, hash={}", filePath, fileHash, t);
         return new Result<>(ResultEnum.FILE_SERVICE_ERROR, null);
+    }
+
+    /**
+     * Creates object-storage presigned URLs for direct multipart upload chunks.
+     */
+    @CircuitBreaker(name = "storageService", fallbackMethod = "createDirectMultipartUploadFallback")
+    @Retry(name = "storageService")
+    public Result<CreateDirectMultipartUploadResponse> createDirectMultipartUpload(
+            CreateDirectMultipartUploadRequest request) {
+        return storageService.createDirectMultipartUpload(request);
+    }
+
+    private Result<CreateDirectMultipartUploadResponse> createDirectMultipartUploadFallback(
+            CreateDirectMultipartUploadRequest request,
+            Throwable t) {
+        log.error("Storage service createDirectMultipartUpload failed, sessionId={}",
+                request != null ? request.sessionId() : null, t);
+        return new Result<>(ResultEnum.FILE_SERVICE_ERROR, null);
+    }
+
+    /**
+     * Completes direct multipart upload by validating and promoting staging chunks.
+     */
+    @CircuitBreaker(name = "storageService", fallbackMethod = "completeDirectMultipartUploadFallback")
+    @Retry(name = "storageService")
+    public Result<CompleteDirectMultipartUploadResponse> completeDirectMultipartUpload(
+            CompleteDirectMultipartUploadRequest request) {
+        return storageService.completeDirectMultipartUpload(request);
+    }
+
+    private Result<CompleteDirectMultipartUploadResponse> completeDirectMultipartUploadFallback(
+            CompleteDirectMultipartUploadRequest request,
+            Throwable t) {
+        log.error("Storage service completeDirectMultipartUpload failed, sessionId={}",
+                request != null ? request.sessionId() : null, t);
+        return new Result<>(ResultEnum.FILE_SERVICE_ERROR, null);
+    }
+
+    /**
+     * Aborts direct multipart upload staging objects.
+     */
+    @CircuitBreaker(name = "storageService", fallbackMethod = "abortDirectMultipartUploadFallback")
+    @Retry(name = "storageService")
+    public Result<Boolean> abortDirectMultipartUpload(AbortDirectMultipartUploadRequest request) {
+        return storageService.abortDirectMultipartUpload(request);
+    }
+
+    private Result<Boolean> abortDirectMultipartUploadFallback(AbortDirectMultipartUploadRequest request, Throwable t) {
+        log.error("Storage service abortDirectMultipartUpload failed, sessionId={}",
+                request != null ? request.sessionId() : null, t);
+        return new Result<>(ResultEnum.FILE_SERVICE_ERROR, false);
     }
 
     @CircuitBreaker(name = "storageService", fallbackMethod = "getFileListFallback")

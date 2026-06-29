@@ -5,6 +5,10 @@ import type {
   ProgressVO,
   FileUploadStatusVO,
   ResumeUploadVO,
+  DirectUploadSessionRequest,
+  DirectUploadSessionVO,
+  DirectUploadCompleteRequest,
+  DirectUploadCompleteVO,
 } from "../types";
 
 const BASE = "/upload-sessions";
@@ -32,6 +36,18 @@ export async function startUpload(
 }
 
 /**
+ * 开始直传上传会话。
+ *
+ * @param data 直传上传初始化参数
+ * @returns 预签名分片上传 URL 列表
+ */
+export async function startDirectUpload(
+  data: DirectUploadSessionRequest,
+): Promise<DirectUploadSessionVO> {
+  return api.post<DirectUploadSessionVO>(`${BASE}/direct`, data);
+}
+
+/**
  * 上传分片。
  *
  * @param clientId 客户端会话 ID
@@ -50,12 +66,52 @@ export async function uploadChunk(
 }
 
 /**
+ * 使用对象存储预签名 URL 直传分片。
+ *
+ * @param uploadUrl 对象存储预签名 PUT URL
+ * @param chunk 分片数据
+ * @returns 对象存储返回的 ETag
+ */
+export async function uploadDirectPart(
+  uploadUrl: string,
+  chunk: Blob,
+): Promise<string | null> {
+  const response = await fetch(uploadUrl, {
+    method: "PUT",
+    body: chunk,
+  });
+
+  if (!response.ok) {
+    throw new Error(`直传分片失败 (${response.status})`);
+  }
+
+  return response.headers.get("ETag");
+}
+
+/**
  * 完成上传。
  *
  * @param clientId 客户端会话 ID
  */
 export async function completeUpload(clientId: string): Promise<void> {
   await api.post(`${BASE}/${clientId}/complete`);
+}
+
+/**
+ * 完成直传上传。
+ *
+ * @param clientId 客户端会话 ID
+ * @param data 已直传分片的完成元数据
+ * @returns 文件入库和 manifest 持久化结果
+ */
+export async function completeDirectUpload(
+  clientId: string,
+  data: DirectUploadCompleteRequest,
+): Promise<DirectUploadCompleteVO> {
+  return api.post<DirectUploadCompleteVO>(
+    `${BASE}/${clientId}/direct/complete`,
+    data,
+  );
 }
 
 /**
@@ -84,6 +140,15 @@ export async function resumeUpload(clientId: string): Promise<ResumeUploadVO> {
  */
 export async function cancelUpload(clientId: string): Promise<void> {
   await api.delete(`${BASE}/${clientId}`);
+}
+
+/**
+ * 取消直传上传并清理对象存储 staging 分片。
+ *
+ * @param clientId 客户端会话 ID
+ */
+export async function abortDirectUpload(clientId: string): Promise<void> {
+  await api.delete(`${BASE}/${clientId}/direct`);
 }
 
 /**

@@ -1,6 +1,11 @@
 package cn.flying.platformapi.external;
 
 import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.request.AbortDirectMultipartUploadRequest;
+import cn.flying.platformapi.request.CompleteDirectMultipartUploadRequest;
+import cn.flying.platformapi.request.CreateDirectMultipartUploadRequest;
+import cn.flying.platformapi.response.CompleteDirectMultipartUploadResponse;
+import cn.flying.platformapi.response.CreateDirectMultipartUploadResponse;
 import cn.flying.platformapi.response.StorageCapacityVO;
 import cn.flying.platformapi.response.StorageObjectHeadVO;
 
@@ -50,6 +55,30 @@ public interface DistributedStorageService {
      * @return 对象 HEAD 元数据；对象不存在时返回 exists=false
      */
     Result<StorageObjectHeadVO> headObject(String filePath, String fileHash);
+
+    /**
+     * Creates presigned URLs for direct multipart chunk upload.
+     *
+     * @param request direct upload request
+     * @return presigned upload URLs and internal storage metadata
+     */
+    Result<CreateDirectMultipartUploadResponse> createDirectMultipartUpload(CreateDirectMultipartUploadRequest request);
+
+    /**
+     * Verifies direct-uploaded staging chunks and promotes them to final chunk paths.
+     *
+     * @param request completion metadata
+     * @return promoted chunk metadata
+     */
+    Result<CompleteDirectMultipartUploadResponse> completeDirectMultipartUpload(CompleteDirectMultipartUploadRequest request);
+
+    /**
+     * Aborts a direct multipart upload by deleting any staging chunks.
+     *
+     * @param request abort metadata
+     * @return true when cleanup completed best-effort
+     */
+    Result<Boolean> abortDirectMultipartUpload(AbortDirectMultipartUploadRequest request);
 
     /**
      * 存储单个文件块
