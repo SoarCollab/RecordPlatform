@@ -21,6 +21,7 @@ import cn.flying.platformapi.request.CancelShareRequest;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.service.QuotaService;
 import cn.flying.service.ShareAuditService;
+import cn.flying.service.key.FileKeyEnvelopeService;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.service.saga.FileSagaOrchestrator;
 import cn.flying.test.builders.FileTestBuilder;
@@ -103,6 +104,9 @@ class FileServiceTest {
 
     @Mock
     private QuotaService quotaService;
+
+    @Mock
+    private FileKeyEnvelopeService fileKeyEnvelopeService;
 
     @InjectMocks
     private FileServiceImpl fileService;

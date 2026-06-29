@@ -17,6 +17,7 @@ import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FriendFileShareService;
+import cn.flying.service.key.FileKeyEnvelopeService;
 import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.ChunkManifestView;
@@ -71,6 +72,9 @@ class FileQueryServiceTest {
 
     @Mock
     private ChunkManifestService chunkManifestService;
+
+    @Mock
+    private FileKeyEnvelopeService fileKeyEnvelopeService;
 
     @InjectMocks
     private FileQueryServiceImpl fileQueryService;

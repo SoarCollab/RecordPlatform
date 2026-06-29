@@ -52,7 +52,7 @@ class SensitiveDataMaskerTest {
     @DisplayName("验证码和文件解密密钥字段应被脱敏")
     void maskSensitiveFields_shouldMaskVerificationAndDecryptFields() {
         String json = """
-                {"email":"user@test.com","code":"123456","verificationCode":"654321","new_password":"newPass123","initialKey":"file-key","decryptKey":"decrypt-key","clientId":"upload-session-secret","nonce":"public-nonce"}
+                {"email":"user@test.com","code":"123456","verificationCode":"654321","new_password":"newPass123","initialKey":"file-key","decryptKey":"decrypt-key","encryptedDataKey":"wrapped-key","wrappingIv":"nonce-value","kmsKeyId":"kms-key","clientId":"upload-session-secret","nonce":"public-nonce"}
                 """;
 
         String masked = SensitiveDataMasker.maskSensitiveFields(json);
@@ -63,6 +63,9 @@ class SensitiveDataMaskerTest {
         assertTrue(masked.contains("\"new_password\":\"******\""));
         assertTrue(masked.contains("\"initialKey\":\"******\""));
         assertTrue(masked.contains("\"decryptKey\":\"******\""));
+        assertTrue(masked.contains("\"encryptedDataKey\":\"******\""));
+        assertTrue(masked.contains("\"wrappingIv\":\"******\""));
+        assertTrue(masked.contains("\"kmsKeyId\":\"******\""));
         assertTrue(masked.contains("\"clientId\":\"******\""));
         assertTrue(masked.contains("\"nonce\":\"public-nonce\""));
         assertFalse(masked.contains("123456"));
@@ -70,6 +73,9 @@ class SensitiveDataMaskerTest {
         assertFalse(masked.contains("newPass123"));
         assertFalse(masked.contains("file-key"));
         assertFalse(masked.contains("decrypt-key"));
+        assertFalse(masked.contains("wrapped-key"));
+        assertFalse(masked.contains("nonce-value"));
+        assertFalse(masked.contains("kms-key"));
         assertFalse(masked.contains("upload-session-secret"));
     }
 
@@ -263,6 +269,9 @@ class SensitiveDataMaskerTest {
         assertTrue(SensitiveDataMasker.isSensitiveField("verificationCode"));
         assertTrue(SensitiveDataMasker.isSensitiveField("new_password"));
         assertTrue(SensitiveDataMasker.isSensitiveField("initialKey"));
+        assertTrue(SensitiveDataMasker.isSensitiveField("encryptedDataKey"));
+        assertTrue(SensitiveDataMasker.isSensitiveField("wrapped_data_key"));
+        assertTrue(SensitiveDataMasker.isSensitiveField("kmsKeyId"));
         assertTrue(SensitiveDataMasker.isSensitiveField("clientId"));
         assertTrue(SensitiveDataMasker.isSensitiveField("client_id"));
 

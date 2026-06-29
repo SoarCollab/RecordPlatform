@@ -34,6 +34,8 @@ import cn.flying.platformapi.response.SharingVO;
 import cn.flying.service.FileService;
 import cn.flying.service.QuotaService;
 import cn.flying.service.ShareAuditService;
+import cn.flying.service.key.FileKeyEnvelopeService;
+import cn.flying.service.key.FileParamEnvelopeResult;
 import cn.flying.service.saga.FileSagaOrchestrator;
 import cn.flying.service.saga.FileUploadCommand;
 import cn.flying.service.saga.FileUploadResult;
@@ -63,6 +65,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -92,6 +95,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     private final RedissonClient redissonClient;
     private final TransactionTemplate transactionTemplate;
     private final QuotaService quotaService;
+    private final FileKeyEnvelopeService fileKeyEnvelopeService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -199,6 +203,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         }
 
         File existingFile = resolvePrepareFileForStore(userId, targetFileId, originFileName);
+        FileParamEnvelopeResult envelopeResult = prepareFileParamEnvelope(fileParam);
+        String sanitizedFileParam = envelopeResult.sanitizedFileParam();
 
         String requestId = UUID.randomUUID().toString();
         FileUploadCommand cmd = FileUploadCommand.builder()
@@ -207,7 +213,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 .userId(userId)
                 .tenantId(existingFile.getTenantId())
                 .fileName(existingFile.getFileName())
-                .fileParam(fileParam)
+                .fileParam(sanitizedFileParam)
                 .fileList(fileList)
                 .fileHashList(fileHashList)
                 .build();
@@ -230,17 +236,24 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 .setFileName(existingFile.getFileName())
                 .setFileHash(result.getFileHash())
                 .setTransactionHash(result.getTransactionHash())
-                .setFileParam(fileParam)
+                .setFileParam(sanitizedFileParam)
                 .setStatus(FileUploadStatus.SUCCESS.getCode());
 
-        boolean updated = this.update(file, wrapper);
-        if (!updated) {
-            log.warn("文件状态更新失败，可能已被其他操作修改: fileId={}, userId={}, fileName={}",
-                    existingFile.getId(), userId, existingFile.getFileName());
-            throw new GeneralException(ResultEnum.FAIL, "文件状态更新失败，请重试");
-        }
+        transactionTemplate.executeWithoutResult(status -> {
+            boolean updated = this.update(file, wrapper);
+            if (!updated) {
+                log.warn("文件状态更新失败，可能已被其他操作修改: fileId={}, userId={}, fileName={}",
+                        existingFile.getId(), userId, existingFile.getFileName());
+                throw new GeneralException(ResultEnum.FAIL, "文件状态更新失败，请重试");
+            }
+            fileKeyEnvelopeService.saveOwnerEnvelope(existingFile, result.getFileHash(), userId, envelopeResult);
+        });
 
-        return file;
+        return existingFile
+                .setFileHash(result.getFileHash())
+                .setTransactionHash(result.getTransactionHash())
+                .setFileParam(sanitizedFileParam)
+                .setStatus(FileUploadStatus.SUCCESS.getCode());
     }
 
     /**
@@ -255,11 +268,13 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         }
 
         File existingFile = resolvePrepareFileForStore(userId, targetFileId, originFileName);
+        FileParamEnvelopeResult envelopeResult = prepareFileParamEnvelope(fileParam);
+        String sanitizedFileParam = envelopeResult.sanitizedFileParam();
         String fileContent = JsonConverter.toJsonWithPretty(storedPaths);
         Result<StoreFileResponse> result = fileRemoteClient.storeFileOnChain(new StoreFileRequest(
                 String.valueOf(userId),
                 existingFile.getFileName(),
-                fileParam,
+                sanitizedFileParam,
                 fileContent
         ));
         StoreFileResponse chainResult = ResultUtils.getData(result);
@@ -278,20 +293,31 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 .setFileName(existingFile.getFileName())
                 .setFileHash(chainResult.fileHash())
                 .setTransactionHash(chainResult.transactionHash())
-                .setFileParam(fileParam)
+                .setFileParam(sanitizedFileParam)
                 .setStatus(FileUploadStatus.SUCCESS.getCode());
 
-        boolean updated = this.update(update, wrapper);
-        if (!updated) {
-            throw new GeneralException(ResultEnum.FAIL, "文件状态更新失败，请重试");
-        }
+        transactionTemplate.executeWithoutResult(status -> {
+            boolean updated = this.update(update, wrapper);
+            if (!updated) {
+                throw new GeneralException(ResultEnum.FAIL, "文件状态更新失败，请重试");
+            }
+            fileKeyEnvelopeService.saveOwnerEnvelope(existingFile, chainResult.fileHash(), userId, envelopeResult);
+        });
 
         return existingFile
                 .setFileSize(fileSize)
                 .setFileHash(chainResult.fileHash())
                 .setTransactionHash(chainResult.transactionHash())
-                .setFileParam(fileParam)
+                .setFileParam(sanitizedFileParam)
                 .setStatus(FileUploadStatus.SUCCESS.getCode());
+    }
+
+    /**
+     * Sanitizes file metadata and protects raw initial keys before persistence.
+     */
+    private FileParamEnvelopeResult prepareFileParamEnvelope(String fileParam) {
+        FileParamEnvelopeResult result = fileKeyEnvelopeService.prepareFileParam(fileParam);
+        return result != null ? result : FileParamEnvelopeResult.withoutEnvelope(fileParam);
     }
 
     /**
@@ -992,43 +1018,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         log.info("访问文件解密密钥: userId={}, fileId={}, fileName={}, fileHash={}, tenantId={}, accessTime={}",
                 userId, file.getId(), file.getFileName(), fileHash, tenantId, new Date());
 
-        // 解析 fileParam JSON 获取解密信息
-        String fileParam = file.getFileParam();
-        if (CommonUtils.isEmpty(fileParam)) {
-            throw new GeneralException(ResultEnum.FAIL, "文件元数据不完整，缺少解密信息");
-        }
-
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> params = JsonConverter.parse(fileParam, Map.class);
-
-            String initialKey = (String) params.get("initialKey");
-            if (CommonUtils.isEmpty(initialKey)) {
-                throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
-            }
-
-            String fileName = (String) params.get("fileName");
-            Long fileSize = params.get("fileSize") instanceof Number
-                    ? ((Number) params.get("fileSize")).longValue() : null;
-            String contentType = (String) params.get("contentType");
-            Integer chunkCount = params.get("chunkCount") instanceof Number
-                    ? ((Number) params.get("chunkCount")).intValue() : null;
-
-            return new FileDecryptInfoVO(
-                    initialKey,
-                    fileName != null ? fileName : file.getFileName(),
-                    fileSize,
-                    contentType,
-                    chunkCount,
-                    fileHash
-            );
-
-        } catch (GeneralException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("解析文件参数失败: fileHash={}, error={}", fileHash, e.getMessage());
-            throw new GeneralException(ResultEnum.FAIL, "解析文件元数据失败");
-        }
+        return buildFileDecryptInfo(file, fileHash, file.getUid());
     }
 
     /**
@@ -1291,43 +1281,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             throw new GeneralException(ResultEnum.FAIL, "文件不存在");
         }
 
-        // 解析 fileParam JSON 获取解密信息
-        String fileParam = file.getFileParam();
-        if (CommonUtils.isEmpty(fileParam)) {
-            throw new GeneralException(ResultEnum.FAIL, "文件元数据不完整，缺少解密信息");
-        }
-
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> params = JsonConverter.parse(fileParam, Map.class);
-
-            String initialKey = (String) params.get("initialKey");
-            if (CommonUtils.isEmpty(initialKey)) {
-                throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
-            }
-
-            String fileName = (String) params.get("fileName");
-            Long fileSize = params.get("fileSize") instanceof Number
-                    ? ((Number) params.get("fileSize")).longValue() : null;
-            String contentType = (String) params.get("contentType");
-            Integer chunkCount = params.get("chunkCount") instanceof Number
-                    ? ((Number) params.get("chunkCount")).intValue() : null;
-
-            return new FileDecryptInfoVO(
-                    initialKey,
-                    fileName != null ? fileName : file.getFileName(),
-                    fileSize,
-                    contentType,
-                    chunkCount,
-                    fileHash
-            );
-
-        } catch (GeneralException e) {
-            throw e;
-        } catch (Exception e) {
-            log.error("解析文件参数失败: fileHash={}, error={}", fileHash, e.getMessage());
-            throw new GeneralException(ResultEnum.FAIL, "解析文件元数据失败");
-        }
+        return buildFileDecryptInfo(file, fileHash, accessContext.ownerId());
     }
 
     /**
@@ -1378,7 +1332,13 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             throw new GeneralException(ResultEnum.FAIL, "文件不存在");
         }
 
-        // 解析 fileParam JSON 获取解密信息
+        return buildFileDecryptInfo(file, fileHash, accessContext.ownerId());
+    }
+
+    /**
+     * Builds decrypt metadata by resolving key envelopes first and legacy file_param keys second.
+     */
+    private FileDecryptInfoVO buildFileDecryptInfo(File file, String fileHash, Long envelopeOwnerId) {
         String fileParam = file.getFileParam();
         if (CommonUtils.isEmpty(fileParam)) {
             throw new GeneralException(ResultEnum.FAIL, "文件元数据不完整，缺少解密信息");
@@ -1388,7 +1348,14 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             @SuppressWarnings("unchecked")
             Map<String, Object> params = JsonConverter.parse(fileParam, Map.class);
 
-            String initialKey = (String) params.get("initialKey");
+            Optional<String> envelopeInitialKey = fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
+                    file,
+                    fileHash,
+                    envelopeOwnerId
+            );
+            String initialKey = (envelopeInitialKey != null ? envelopeInitialKey : Optional.<String>empty())
+                    .or(() -> legacyInitialKey(params))
+                    .orElse(null);
             if (CommonUtils.isEmpty(initialKey)) {
                 throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
             }
@@ -1415,6 +1382,17 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             log.error("解析文件参数失败: fileHash={}, error={}", fileHash, e.getMessage());
             throw new GeneralException(ResultEnum.FAIL, "解析文件元数据失败");
         }
+    }
+
+    /**
+     * Extracts the legacy initialKey from file_param for pre-envelope records.
+     */
+    private Optional<String> legacyInitialKey(Map<String, Object> fileParam) {
+        Object value = fileParam.get("initialKey");
+        if (value instanceof String key && CommonUtils.isNotEmpty(key)) {
+            return Optional.of(key);
+        }
+        return Optional.empty();
     }
 
     /**

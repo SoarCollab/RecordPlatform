@@ -50,6 +50,7 @@ public class RequestLogFilter extends OncePerRequestFilter {
             "creditCard", "cardNumber", "cvv", "ssn",
             "code", "verificationCode", "verifyCode", "otp", "resetCode",
             "authorization", "initialKey", "decryptKey", "decryptionKey", "fileKey",
+            "encryptedDataKey", "wrappedDataKey", "wrappingIv", "kmsKeyId", "fileDataKey",
             "shareCode", "sharingCode", "fileHash", "transactionHash",
             "contractABI", "input", "signature", "presignedUrl", "downloadUrl",
             "clientId"
