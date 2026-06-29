@@ -196,6 +196,56 @@ sequenceDiagram
     deactivate FiscoService
 ```
 
+### Merkle 批量存证基础
+
+当前后端已具备 Merkle 批量存证基础，用于导出可独立验证的证明元数据：
+
+1. `AttestationBatchService` 按当前租户加载成功文件记录。
+2. `MerkleTreeService` 规范化文件哈希，计算 Merkle root，并为每个叶子保存 proof path。
+3. `attestation_batch` 和 `attestation_leaf` 持久化批次根、证明算法、叶子哈希、叶子索引和 proof path JSON。
+4. `FileRemoteClient.storeAttestationBatch` 通过独立的 `storeAttestationBatch` RPC 和 Sharing 合约方法写入批次根。
+
+批次根上链与普通单文件存证分离，不创建 `Storage.storeFile` 文件记录，因此不会被用户文件列表的合约读取当作普通文件返回。
+
+### 证明包导出
+
+当前提供两个 verifier-ready JSON 证明包导出入口：
+
+- `GET /api/v1/files/{id}/proof-bundle`：按文件外部 ID 导出。
+- `GET /api/v1/files/attestation-leaves/{leafId}/proof-bundle`：按存证叶子外部 ID 导出。
+
+`ProofBundleService` 会先校验租户和文件所有权，再读取文件、批次、叶子、存储 HEAD 和链上回执元数据。`ProofBundleVO` 是当前 `proof-bundle.v1` 的稳定输入合同。
+
+证明包只包含公开证明输入：
+
+- 文件名、文件哈希、文件大小、内容类型、版本和文件交易哈希；
+- 存储对象路径和 HEAD 元数据；
+- Merkle root、leaf hash、leaf index、proof algorithm 和 proof path；
+- batch transaction hash 和 batch chain file hash；
+- issuer 与 verification policy 元数据。
+
+证明包不包含原始文件字节、解密密钥、RPC token、数据库内部 ID 或完整 `file_param`。v1 证明包未签名，`issuer.signatureAlgorithm` 和 `issuer.signature` 预留给后续签名阶段。
+
+### 离线证明校验器
+
+`ProofBundleVerifier` 提供不依赖平台会话和数据库的离线校验边界：
+
+- `verify(byte[] originalFile, ProofBundleVO bundle)` 校验已解析证明包；
+- `verify(byte[] originalFile, String bundleJson)` 解析 JSON 后复用同一套校验逻辑；
+- `ProofVerificationResult` 返回 `valid`、机器可读 issue code、计算出的 file hash、leaf hash、Merkle root、链上回执字段和 issuer 状态。
+
+校验器会检查：
+
+- `verificationPolicy` 必须包含 `algorithmSuite`、`signatureSuite`、`kemSuite`、`proofSuite`；
+- 原始文件 SHA-256 是否匹配 `file.fileHash`；
+- `merkle.proofAlgorithm` 是否为 `SHA-256-MERKLE-V1`；
+- `merkle.leafHash` 是否符合公开的 `leaf\n{fileHash}` 规则；
+- `merkle.proofPath` 是否能从叶子推导到 `merkle.merkleRoot`；
+- `chain.batchChainFileHash` 存在时是否等于 Merkle root；
+- issuer batch 状态和 storage metadata mismatch 标记。
+
+缺失或不支持的 suite 元数据会返回 `UNSUPPORTED_ALGORITHM`；校验器不会用运行时默认值补齐缺失字段。
+
 ### 交易验证
 
 查询区块链获取存证证明：

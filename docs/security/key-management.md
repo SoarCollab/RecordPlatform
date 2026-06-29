@@ -11,7 +11,7 @@
 - **文件数据密钥令牌（initialKey）**：新上传文件不再持久化到 `file.file_param`
 - **存储位置**：`file_key_envelope` 表保存包封后的 `encrypted_data_key`、`wrapping_iv`、`algorithm_suite`、`key_version` 和 recipient 元数据
 - **包封机制**：当前实现使用本地 AES-GCM 包封 serialized initialKey，AAD 绑定 tenant、file、fileHash、recipient、keyVersion 和 algorithmSuite
-- **兼容机制**：历史文件若没有 active envelope，仍会回退读取旧 `fileParam.initialKey`
+- **严格解封合同**：加密文件必须存在 active key envelope，且 envelope 必须包含完整的 `algorithmSuite`、`signatureSuite`、`kemSuite`、`proofSuite` 元数据；不再从 `fileParam.initialKey` 回退读取旧密钥
 
 ### 1.2 密钥派生
 
@@ -33,13 +33,14 @@ per-chunk key = KDF(initialKey, chunkIndex, salt)
 2. **包封**：上传完成写入文件记录前，将 initialKey 从 `fileParam` 移除并写入 owner envelope
 3. **使用**：下载/解密 metadata 通过授权检查后解封对应 recipient envelope；owner/admin 访问使用 `OWNER`，分享码访问使用 `SHARE`，好友分享访问使用 `FRIEND_SHARE`
 4. **撤销/删除**：分享码和好友分享取消时会将对应 recipient envelope 标记为 `REVOKED`；文件删除仍通过文件软删除隔离
+5. **轮换**：管理员可通过 `POST /api/v1/admin/files/{id}/key-envelopes/rotate` 将文件的 active envelopes 重新包封到当前配置的 `keyVersion`
 
 ### 1.4 架构限制
 
 - **未接入外部 KMS**：当前 KEK 来自 `FILE_KEY_ENVELOPE_MASTER_KEY`/`JWT_KEY` 派生的本地主密钥
 - **无硬件安全模块**：未使用 HSM 进行密钥保护
 - **自动密钥轮换未完成**：envelope 已记录 `key_version`，当前支持显式 rotation/revocation，但尚未接入自动轮换调度
-- **API 兼容输出**：P3-1 仍在授权响应中返回既有 `initialKey` 字段，前端合同移除属于后续任务
+- **API 解密输出**：授权下载/解密 metadata 对加密文件仍返回 `initialKey` 供前端解密；未加密直传文件返回 `initialKey=null` 且 `encryptionAlgorithm=NONE`
 
 ## 2. 安全假设
 
@@ -129,18 +130,18 @@ public FileVO downloadFile(String fileId) {
 
 - **租户隔离**：`file_key_envelope.tenant_id` 字段 + MyBatis 拦截器
 - **用户隔离**：仅文件所有者、管理员或拥有 active recipient envelope 的分享接收方可访问对应密钥
-- **S3 路径隔离**：`/{tenantId}/{userId}/` 前缀防止路径遍历
+- **S3 路径隔离**：`storage/tenant/{tenantId}/chunk/{hash}` 命名与 tenant metadata 校验共同防止跨租户对象混用
 - **AAD 绑定**：`OWNER`、`SHARE`、`FRIEND_SHARE` envelope 均与 tenant、file、fileHash、recipient、keyVersion、algorithmSuite 绑定，篡改上下文会导致 AES-GCM 解封失败
 
 ## 4. 已知限制
 
 ### 4.1 密钥轮换
 
-**当前状态**：❌ 不支持
+**当前状态**：⚠️ 支持显式轮换，未接入自动调度
 
-- **问题**：envelope 已记录 keyVersion，但尚未提供 rewrap/rotation API
-- **影响**：长期密钥暴露风险累积
-- **workaround**：手动重新上传文件（生成新 file envelope）
+- **已实现**：管理员接口可对指定文件 active envelopes 执行 rewrap/rotation，并写入审计日志
+- **限制**：缺少定期轮换调度、批量轮换任务和外部 KMS key policy 联动
+- **要求**：参与轮换的 active envelope 必须具备完整 crypto-suite 元数据；缺失字段会被视为数据错误而不是自动补齐
 
 ### 4.2 硬件安全模块（HSM）
 

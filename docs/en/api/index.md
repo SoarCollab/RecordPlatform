@@ -75,11 +75,14 @@ Based on `SecurityConfiguration`:
 | Method | Endpoint | Description |
 |------|------|------|
 | POST | `/api/v1/upload-sessions` | Start chunked upload |
+| POST | `/api/v1/upload-sessions/direct` | Start direct multipart upload and return presigned URLs |
 | PUT | `/api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}` | Upload chunk |
 | POST | `/api/v1/upload-sessions/{clientId}/complete` | Complete upload |
+| POST | `/api/v1/upload-sessions/{clientId}/direct/complete` | Complete direct multipart upload |
 | POST | `/api/v1/upload-sessions/{clientId}/pause` | Pause upload |
 | POST | `/api/v1/upload-sessions/{clientId}/resume` | Resume upload |
 | DELETE | `/api/v1/upload-sessions/{clientId}` | Cancel upload |
+| DELETE | `/api/v1/upload-sessions/{clientId}/direct` | Abort direct multipart upload |
 | GET | `/api/v1/upload-sessions/{clientId}` | Check upload status |
 | GET | `/api/v1/upload-sessions/{clientId}/progress` | Query upload progress |
 
@@ -88,13 +91,15 @@ Based on `SecurityConfiguration`:
 | Method | Endpoint | Description |
 |------|------|------|
 | GET | `/api/v1/files/{id}` | File detail by ID |
+| GET | `/api/v1/files/{id}/proof-bundle` | Export verifier-ready proof bundle by file ID |
+| GET | `/api/v1/files/attestation-leaves/{leafId}/proof-bundle` | Export verifier-ready proof bundle by attestation leaf ID |
 | GET | `/api/v1/files/hash/{fileHash}` | File detail by hash |
 | GET | `/api/v1/files` | User file page (supports `keyword`, `keywordMode=FUZZY/PREFIX/EXACT_HASH/AUTO`, `status`, `startTime`, `endTime`) |
 | GET | `/api/v1/files/stats` | User file stats |
 | GET | `/api/v1/files/hash/{fileHash}/download-metadata` | Fetch manifest-backed presigned chunk download metadata |
-| GET | `/api/v1/files/hash/{fileHash}/addresses` | Fetch download URLs (legacy compatibility) |
+| GET | `/api/v1/files/hash/{fileHash}/addresses` | Fetch URL-only download addresses |
 | GET | `/api/v1/transactions/{transactionHash}` | Query blockchain transaction |
-| GET | `/api/v1/files/hash/{fileHash}/chunks` | Download file via backend byte payload (legacy compatibility) |
+| GET | `/api/v1/files/hash/{fileHash}/chunks` | Download file via backend byte payload |
 | GET | `/api/v1/files/hash/{fileHash}/decrypt-info` | Decrypt info (authenticated) |
 | GET | `/api/v1/shares/{shareCode}/files` | Public share file list (public) |
 | GET | `/api/v1/files/shares` | My share list |

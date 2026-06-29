@@ -48,4 +48,6 @@ The persisted manifest hash is calculated over canonical JSON without the `manif
 - `plain_hash`, `cipher_hash`, `size`
 - `storage_path`, optional `storage_backend`, `etag`, `checksum_algorithm`
 
-Existing files can have no manifest. `ChunkManifestService.findActiveManifest(...)` returns an empty result in that case so legacy upload/download paths keep working until P2-1 and P2-2 wire the model into transfer flows.
+Manifest-backed download metadata requires an active manifest. `GET /api/v1/files/hash/{fileHash}/download-metadata` returns `FILE_RECORD_ERROR` when the file has no active `cn.flying.chunk-manifest.v1` record instead of falling back to URL-only metadata.
+
+Direct multipart upload completion persists the active manifest after validating every staging object against its declared `cipherHash`. The current direct-upload contract stores unencrypted object bytes, so `plainHash` and `cipherHash` must match and the manifest `encryption_algorithm` is `NONE`.

@@ -228,12 +228,15 @@ P1-3 adds an offline verifier boundary for the `proof-bundle.v1` contract:
 
 The verifier checks:
 
+- required `verificationPolicy` suite metadata: `algorithmSuite`, `signatureSuite`, `kemSuite`, and `proofSuite`
 - SHA-256 of the original file against `file.fileHash`
 - `merkle.proofAlgorithm` against `SHA-256-MERKLE-V1`
 - `merkle.leafHash` from the public `leaf\n{fileHash}` rule
 - `merkle.proofPath` from leaf to `merkle.merkleRoot`
 - `chain.batchChainFileHash` against the Merkle root when present
 - issuer batch status and storage metadata mismatch flags
+
+Missing or unsupported suite metadata is reported as `UNSUPPORTED_ALGORITHM`; the verifier does not resolve absent fields with runtime defaults.
 
 The verifier does not call platform APIs, query the database, read tenant context, or authenticate to FISCO. Direct transaction receipt validation remains a separate online verification step until a public chain gateway or signed receipt contract is introduced.
 
