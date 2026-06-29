@@ -278,6 +278,63 @@ describe("download store", () => {
     expect(mocks.downloadStorage.clearTaskData).toHaveBeenCalledWith(id);
   });
 
+  it("NONE 加密直传文件应按明文分片下载且不调用 decryptFile", async () => {
+    mocks.fileApi.getDownloadMetadata.mockResolvedValueOnce({
+      ...createDownloadMetadata("hash-direct", "u-direct-0"),
+      initialKey: null,
+      encryptionAlgorithm: "NONE",
+      contentType: "application/octet-stream",
+      totalChunks: 2,
+      parts: [
+        {
+          index: 0,
+          size: 2,
+          downloadUrl: "u-direct-0",
+          expiresAtEpochSeconds: Math.floor(Date.now() / 1000) + 86_400,
+          storagePath: "chunks/0",
+          plainHash: "plain-0",
+          cipherHash: "plain-0",
+          checksumAlgorithm: "SHA-256",
+        },
+        {
+          index: 1,
+          size: 1,
+          downloadUrl: "u-direct-1",
+          expiresAtEpochSeconds: Math.floor(Date.now() / 1000) + 86_400,
+          storagePath: "chunks/1",
+          plainHash: "plain-1",
+          cipherHash: "plain-1",
+          checksumAlgorithm: "SHA-256",
+        },
+      ],
+    });
+    mocks.chunkDownloader.downloadAllChunks.mockResolvedValueOnce([
+      new Uint8Array([1, 2]),
+      new Uint8Array([3]),
+    ]);
+
+    const download = await loadDownloadStore();
+    const id = await download.startDownload(
+      "hash-direct",
+      "direct.bin",
+      { type: "owned" },
+      3,
+      "inmemory",
+    );
+
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "completed",
+    );
+
+    expect(mocks.crypto.decryptFile).not.toHaveBeenCalled();
+    expect(mocks.crypto.arrayToBlob).toHaveBeenCalledWith(
+      new Uint8Array([1, 2, 3]),
+      "application/octet-stream",
+    );
+    expect(mocks.crypto.downloadBlob).toHaveBeenCalled();
+  });
+
   it("缺少登录上下文绑定时应继续下载但不持久化断点缓存", async () => {
     mocks.apiClient.getToken.mockReturnValue(null);
 
