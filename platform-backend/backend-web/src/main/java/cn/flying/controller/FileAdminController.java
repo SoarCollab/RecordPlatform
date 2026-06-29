@@ -7,6 +7,8 @@ import cn.flying.dao.vo.admin.AdminFileQueryParam;
 import cn.flying.dao.vo.admin.AdminFileVO;
 import cn.flying.dao.vo.admin.AdminShareQueryParam;
 import cn.flying.dao.vo.admin.AdminShareVO;
+import cn.flying.dao.vo.admin.KeyEnvelopeRotationResultVO;
+import cn.flying.dao.vo.admin.RotateKeyEnvelopeVO;
 import cn.flying.dao.vo.admin.UpdateFileStatusVO;
 import cn.flying.dao.vo.file.ShareAccessLogVO;
 import cn.flying.dao.vo.file.ShareAccessStatsVO;
@@ -105,6 +107,20 @@ public class FileAdminController {
             @Parameter(description = "删除原因") @RequestParam(required = false) String reason) {
         fileAdminService.forceDeleteFile(id, reason);
         return Result.success("文件已删除");
+    }
+
+    /**
+     * 轮换文件密钥信封。
+     */
+    @PostMapping("/{id}/key-envelopes/rotate")
+    @Operation(summary = "轮换文件密钥信封")
+    @OperationLog(module = "管理员-文件审计", operationType = "更新", description = "轮换文件密钥信封")
+    public Result<KeyEnvelopeRotationResultVO> rotateKeyEnvelopes(
+            @Parameter(description = "文件ID") @PathVariable String id,
+            @RequestBody(required = false) RotateKeyEnvelopeVO rotateVO) {
+        String reason = rotateVO != null ? rotateVO.reason() : null;
+        KeyEnvelopeRotationResultVO result = fileAdminService.rotateKeyEnvelopes(id, reason);
+        return Result.success(result);
     }
 
     // ==================== 分享管理 ====================

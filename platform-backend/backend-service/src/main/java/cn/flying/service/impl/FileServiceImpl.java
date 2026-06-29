@@ -726,6 +726,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 .setCreateTime(new Date());
 
         fileShareMapper.insert(fileShare);
+        List<File> ownedFiles = this.list(ownershipWrapper);
+        fileKeyEnvelopeService.saveShareEnvelopes(fileShare, ownedFiles, userId, "SHARE_CREATE");
         log.info("分享码已生成: userId={}, shareCode={}, shareType={}, fileCount={}",
                 userId, sharingCode, ShareType.fromCode(fileShare.getShareType()).getName(), fileHash.size());
 
@@ -1018,7 +1020,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         log.info("访问文件解密密钥: userId={}, fileId={}, fileName={}, fileHash={}, tenantId={}, accessTime={}",
                 userId, file.getId(), file.getFileName(), fileHash, tenantId, new Date());
 
-        return buildFileDecryptInfo(file, fileHash, file.getUid());
+        return buildFileDecryptInfo(file, fileHash, file.getUid(), userId);
     }
 
     /**
@@ -1100,8 +1102,10 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         // 同步更新数据库状态
         LambdaUpdateWrapper<FileShare> wrapper = new LambdaUpdateWrapper<FileShare>()
                 .eq(FileShare::getShareCode, shareCode)
-                .set(FileShare::getStatus, FileShare.STATUS_CANCELLED);
+                .set(FileShare::getStatus, FileShare.STATUS_CANCELLED)
+                .set(FileShare::getUpdateTime, new Date());
         fileShareMapper.update(null, wrapper);
+        fileKeyEnvelopeService.revokeShareEnvelopes(fileShare, userId, "USER_CANCEL_SHARE");
 
         log.info("分享已取消: userId={}, shareCode={}", userId, shareCode);
     }
@@ -1281,7 +1285,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             throw new GeneralException(ResultEnum.FAIL, "文件不存在");
         }
 
-        return buildFileDecryptInfo(file, fileHash, accessContext.ownerId());
+        return buildShareFileDecryptInfo(file, fileHash, accessContext, null);
     }
 
     /**
@@ -1332,13 +1336,20 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             throw new GeneralException(ResultEnum.FAIL, "文件不存在");
         }
 
-        return buildFileDecryptInfo(file, fileHash, accessContext.ownerId());
+        return buildShareFileDecryptInfo(file, fileHash, accessContext, userId);
     }
 
     /**
      * Builds decrypt metadata by resolving key envelopes first and legacy file_param keys second.
      */
     private FileDecryptInfoVO buildFileDecryptInfo(File file, String fileHash, Long envelopeOwnerId) {
+        return buildFileDecryptInfo(file, fileHash, envelopeOwnerId, envelopeOwnerId);
+    }
+
+    /**
+     * Builds decrypt metadata for owner/admin access by auditing the requesting actor.
+     */
+    private FileDecryptInfoVO buildFileDecryptInfo(File file, String fileHash, Long envelopeOwnerId, Long actorId) {
         String fileParam = file.getFileParam();
         if (CommonUtils.isEmpty(fileParam)) {
             throw new GeneralException(ResultEnum.FAIL, "文件元数据不完整，缺少解密信息");
@@ -1351,7 +1362,9 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             Optional<String> envelopeInitialKey = fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
                     file,
                     fileHash,
-                    envelopeOwnerId
+                    envelopeOwnerId,
+                    actorId,
+                    "OWNER_DECRYPT"
             );
             String initialKey = (envelopeInitialKey != null ? envelopeInitialKey : Optional.<String>empty())
                     .or(() -> legacyInitialKey(params))
@@ -1380,6 +1393,68 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             throw e;
         } catch (Exception e) {
             log.error("解析文件参数失败: fileHash={}, error={}", fileHash, e.getMessage());
+            throw new GeneralException(ResultEnum.FAIL, "解析文件元数据失败");
+        }
+    }
+
+    /**
+     * Builds decrypt metadata for share-code access using recipient envelopes before legacy fallback.
+     */
+    private FileDecryptInfoVO buildShareFileDecryptInfo(File file,
+                                                        String fileHash,
+                                                        ShareAccessContext accessContext,
+                                                        Long actorId) {
+        String fileParam = file.getFileParam();
+        if (CommonUtils.isEmpty(fileParam)) {
+            throw new GeneralException(ResultEnum.FAIL, "文件元数据不完整，缺少解密信息");
+        }
+
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> params = JsonConverter.parse(fileParam, Map.class);
+
+            Optional<String> shareEnvelopeInitialKey = fileKeyEnvelopeService.unwrapActiveShareInitialKey(
+                    file,
+                    fileHash,
+                    accessContext.fileShare(),
+                    actorId,
+                    "SHARE_DECRYPT"
+            );
+            String initialKey = (shareEnvelopeInitialKey != null ? shareEnvelopeInitialKey : Optional.<String>empty())
+                    .or(() -> fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
+                            file,
+                            fileHash,
+                            accessContext.ownerId(),
+                            actorId,
+                            "SHARE_LEGACY_FALLBACK"
+                    ))
+                    .or(() -> legacyInitialKey(params))
+                    .orElse(null);
+            if (CommonUtils.isEmpty(initialKey)) {
+                throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
+            }
+
+            String fileName = (String) params.get("fileName");
+            Long fileSize = params.get("fileSize") instanceof Number
+                    ? ((Number) params.get("fileSize")).longValue() : null;
+            String contentType = (String) params.get("contentType");
+            Integer chunkCount = params.get("chunkCount") instanceof Number
+                    ? ((Number) params.get("chunkCount")).intValue() : null;
+
+            return new FileDecryptInfoVO(
+                    initialKey,
+                    fileName != null ? fileName : file.getFileName(),
+                    fileSize,
+                    contentType,
+                    chunkCount,
+                    fileHash
+            );
+
+        } catch (GeneralException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("解析分享文件参数失败: fileHash={}, shareCode={}, error={}",
+                    fileHash, accessContext.fileShare().getShareCode(), e.getMessage());
             throw new GeneralException(ResultEnum.FAIL, "解析文件元数据失败");
         }
     }

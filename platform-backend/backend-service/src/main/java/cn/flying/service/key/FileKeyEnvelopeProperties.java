@@ -5,6 +5,9 @@ import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * Configuration for file data-key envelope storage and wrapping.
  */
@@ -19,6 +22,8 @@ public class FileKeyEnvelopeProperties {
     private String kmsKeyId = "local-file-key-v1";
 
     private String localMasterKey;
+
+    private Map<Integer, String> localMasterKeys = new LinkedHashMap<>();
 
     private Integer keyVersion = 1;
 

@@ -5,6 +5,7 @@ import cn.flying.dao.vo.admin.AdminFileQueryParam;
 import cn.flying.dao.vo.admin.AdminFileVO;
 import cn.flying.dao.vo.admin.AdminShareQueryParam;
 import cn.flying.dao.vo.admin.AdminShareVO;
+import cn.flying.dao.vo.admin.KeyEnvelopeRotationResultVO;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 
@@ -59,6 +60,15 @@ public interface FileAdminService {
      * @param reason 删除原因
      */
     void forceDeleteFile(String fileId, String reason);
+
+    /**
+     * 轮换文件密钥信封。
+     *
+     * @param fileId 文件ID（外部ID）
+     * @param reason 轮换原因
+     * @return 轮换结果
+     */
+    KeyEnvelopeRotationResultVO rotateKeyEnvelopes(String fileId, String reason);
 
     // ==================== 分享管理 ====================
 

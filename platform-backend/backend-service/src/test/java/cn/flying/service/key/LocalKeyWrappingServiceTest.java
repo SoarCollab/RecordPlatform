@@ -6,6 +6,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -34,7 +36,8 @@ class LocalKeyWrappingServiceTest {
         WrappedDataKey wrapped = wrappingService.wrap("base64-initial-key", aad);
         FileKeyEnvelope envelope = new FileKeyEnvelope()
                 .setEncryptedDataKey(wrapped.encryptedDataKey())
-                .setWrappingIv(wrapped.wrappingIv());
+                .setWrappingIv(wrapped.wrappingIv())
+                .setKeyVersion(wrapped.keyVersion());
 
         assertNotEquals("base64-initial-key", wrapped.encryptedDataKey());
         assertEquals("base64-initial-key", wrappingService.unwrap(envelope, aad));
@@ -49,8 +52,55 @@ class LocalKeyWrappingServiceTest {
         WrappedDataKey wrapped = wrappingService.wrap("base64-initial-key", "aad-1".getBytes());
         FileKeyEnvelope envelope = new FileKeyEnvelope()
                 .setEncryptedDataKey(wrapped.encryptedDataKey())
-                .setWrappingIv(wrapped.wrappingIv());
+                .setWrappingIv(wrapped.wrappingIv())
+                .setKeyVersion(wrapped.keyVersion());
 
         assertThrows(GeneralException.class, () -> wrappingService.unwrap(envelope, "aad-2".getBytes()));
+    }
+
+    /**
+     * Verifies that persisted key versions select the matching local master key.
+     */
+    @Test
+    @DisplayName("should unwrap with persisted local master key version")
+    void shouldUnwrapWithPersistedLocalMasterKeyVersion() {
+        properties.setKeyVersion(2);
+        properties.setLocalMasterKeys(Map.of(
+                1, "old-local-master-key",
+                2, "new-local-master-key"
+        ));
+        byte[] aad = "tenant|file|hash|OWNER|100|1|suite".getBytes();
+
+        WrappedDataKey wrapped = wrappingService.wrap("serialized-key", aad, 1);
+        FileKeyEnvelope envelope = new FileKeyEnvelope()
+                .setEncryptedDataKey(wrapped.encryptedDataKey())
+                .setWrappingIv(wrapped.wrappingIv())
+                .setKeyVersion(1);
+
+        assertEquals(1, wrapped.keyVersion());
+        assertEquals("serialized-key", wrappingService.unwrap(envelope, aad));
+    }
+
+    /**
+     * Verifies that old envelope versions fail when their local master key is no longer configured.
+     */
+    @Test
+    @DisplayName("should reject unwrap when persisted local master key version is missing")
+    void shouldRejectUnwrapWhenPersistedLocalMasterKeyVersionIsMissing() {
+        properties.setKeyVersion(1);
+        properties.setLocalMasterKeys(Map.of(1, "old-local-master-key"));
+        byte[] aad = "tenant|file|hash|OWNER|100|1|suite".getBytes();
+        WrappedDataKey wrapped = wrappingService.wrap("serialized-key", aad, 1);
+
+        FileKeyEnvelopeProperties missingOldKeyProperties = new FileKeyEnvelopeProperties();
+        missingOldKeyProperties.setKeyVersion(2);
+        missingOldKeyProperties.setLocalMasterKeys(Map.of(2, "new-local-master-key"));
+        LocalKeyWrappingService missingOldKeyService = new LocalKeyWrappingService(missingOldKeyProperties);
+        FileKeyEnvelope envelope = new FileKeyEnvelope()
+                .setEncryptedDataKey(wrapped.encryptedDataKey())
+                .setWrappingIv(wrapped.wrappingIv())
+                .setKeyVersion(1);
+
+        assertThrows(GeneralException.class, () -> missingOldKeyService.unwrap(envelope, aad));
     }
 }

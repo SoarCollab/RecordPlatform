@@ -5,6 +5,7 @@ import cn.flying.common.exception.GeneralException;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.JsonConverter;
+import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.Account;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
@@ -20,9 +21,12 @@ import cn.flying.dao.vo.admin.AdminFileQueryParam;
 import cn.flying.dao.vo.admin.AdminFileVO;
 import cn.flying.dao.vo.admin.AdminShareQueryParam;
 import cn.flying.dao.vo.admin.AdminShareVO;
+import cn.flying.dao.vo.admin.KeyEnvelopeRotationResultVO;
 import cn.flying.dao.vo.file.FileProvenanceVO.ProvenanceNode;
 import cn.flying.dao.vo.file.ShareAccessLogVO;
 import cn.flying.service.FileAdminService;
+import cn.flying.service.key.FileKeyEnvelopeService;
+import cn.flying.service.key.KeyEnvelopeRotationResult;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -57,6 +61,7 @@ public class FileAdminServiceImpl implements FileAdminService {
     private final FileSourceMapper fileSourceMapper;
     private final ShareAccessLogMapper shareAccessLogMapper;
     private final AccountMapper accountMapper;
+    private final FileKeyEnvelopeService fileKeyEnvelopeService;
 
     // ==================== 文件管理 ====================
 
@@ -241,6 +246,38 @@ public class FileAdminServiceImpl implements FileAdminService {
         }
     }
 
+    /**
+     * 轮换指定文件的活跃密钥信封。
+     *
+     * @param fileId 文件外部 ID
+     * @param reason 轮换原因
+     * @return 轮换结果
+     */
+    @Override
+    @Transactional
+    public KeyEnvelopeRotationResultVO rotateKeyEnvelopes(String fileId, String reason) {
+        Long id = IdUtils.fromExternalId(fileId);
+        File file = fileMapper.selectById(id);
+        if (file == null) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "文件不存在");
+        }
+
+        KeyEnvelopeRotationResult result = fileKeyEnvelopeService.rotateActiveFileEnvelopes(
+                file,
+                SecurityUtils.getUserId(),
+                reason
+        );
+        LOGGER.info("管理员轮换文件密钥信封: fileId={}, fileHash={}, targetKeyVersion={}, rotated={}, skipped={}, reason={}",
+                id, result.fileHash(), result.targetKeyVersion(), result.rotatedCount(), result.skippedCount(), reason);
+        return new KeyEnvelopeRotationResultVO(
+                IdUtils.toExternalId(id),
+                result.fileHash(),
+                result.targetKeyVersion(),
+                result.rotatedCount(),
+                result.skippedCount()
+        );
+    }
+
     // ==================== 分享管理 ====================
 
     @Override
@@ -337,6 +374,7 @@ public class FileAdminServiceImpl implements FileAdminService {
                 .set(FileShare::getUpdateTime, new Date());
 
         fileShareMapper.update(null, wrapper);
+        fileKeyEnvelopeService.revokeShareEnvelopes(share, SecurityUtils.getUserId(), reason);
         LOGGER.info("管理员强制取消分享: shareCode={}, reason={}", shareCode, reason);
     }
 
