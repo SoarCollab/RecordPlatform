@@ -1,0 +1,21 @@
+package cn.flying.service.verifier;
+
+/**
+ * Stable result codes emitted by the offline proof verifier.
+ */
+public enum ProofVerificationCode {
+    MALFORMED_BUNDLE,
+    MISSING_ORIGINAL_FILE,
+    MISSING_REQUIRED_FIELD,
+    UNSUPPORTED_CONTRACT_VERSION,
+    UNSUPPORTED_ALGORITHM,
+    FILE_HASH_MISMATCH,
+    LEAF_HASH_MISMATCH,
+    PROOF_PATH_MISMATCH,
+    CHAIN_RECEIPT_MISSING,
+    CHAIN_ROOT_MISMATCH,
+    BATCH_STATUS_NOT_COMPLETED,
+    STORAGE_OBJECT_MISSING,
+    STORAGE_HASH_MISMATCH,
+    STORAGE_TENANT_MISMATCH
+}
