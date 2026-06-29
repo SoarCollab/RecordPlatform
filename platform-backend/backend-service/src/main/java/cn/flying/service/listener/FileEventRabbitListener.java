@@ -3,6 +3,7 @@ package cn.flying.service.listener;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.JsonConverter;
+import cn.flying.common.util.TenantKeyUtils;
 import cn.flying.dao.entity.ProcessedMessage;
 import cn.flying.dao.mapper.ProcessedMessageMapper;
 import cn.flying.service.outbox.OutboxPublisher;
@@ -170,8 +171,9 @@ public class FileEventRabbitListener {
     private void evictUserFilesCache(Long userId) {
         var cache = cacheManager.getCache("userFiles");
         if (cache != null) {
-            cache.evict(userId);
-            log.debug("Evicted userFiles cache for userId={}", userId);
+            String cacheKey = TenantKeyUtils.currentTenantUserKey(userId);
+            cache.evict(cacheKey);
+            log.debug("Evicted userFiles cache for key={}", cacheKey);
         }
     }
 

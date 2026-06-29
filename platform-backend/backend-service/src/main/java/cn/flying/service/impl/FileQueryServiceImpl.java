@@ -197,7 +197,7 @@ public class FileQueryServiceImpl implements FileQueryService {
     }
 
     @Override
-    @Cacheable(cacheNames = "userFiles", key = "T(cn.flying.common.tenant.TenantContext).getTenantIdOrDefault() + ':' + #userId", unless = "#result == null || #result.isEmpty()")
+    @Cacheable(cacheNames = "userFiles", key = "T(cn.flying.common.util.TenantKeyUtils).currentTenantUserKey(#userId)", unless = "#result == null || #result.isEmpty()")
     public List<File> getUserFilesList(Long userId) {
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
         // 所有用户（包括管理员）只能查询自己的文件

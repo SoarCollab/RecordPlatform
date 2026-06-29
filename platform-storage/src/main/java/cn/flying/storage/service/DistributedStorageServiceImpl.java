@@ -12,6 +12,7 @@ import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.response.StorageCapacityVO;
 import cn.flying.platformapi.response.StorageDomainCapacityVO;
 import cn.flying.platformapi.response.StorageNodeCapacityVO;
+import cn.flying.platformapi.response.StorageObjectHeadVO;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.annotation.Resource;
@@ -85,6 +86,9 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     // 分块读取缓冲区大小（8KB）
     private static final int BUFFER_SIZE = 8192;
 
+    private static final String METADATA_FILE_HASH = "file-hash";
+    private static final String METADATA_TENANT_ID = "tenant-id";
+
     // 修复检查并发限制信号量
     private static final Semaphore REPAIR_CHECK_SEMAPHORE = new Semaphore(10);
 
@@ -97,6 +101,14 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         .expireAfterWrite(30, TimeUnit.MINUTES)
         .maximumSize(256)
         .build();
+
+    private enum HeadLookupStatus {
+        FOUND,
+        MISSING,
+        UNAVAILABLE
+    }
+
+    private record HeadLookupResult(HeadLookupStatus status, StorageObjectHeadVO head) {}
 
 
     @Override
@@ -179,6 +191,69 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     }
 
     @Override
+    public Result<StorageObjectHeadVO> headObject(String filePath, String fileHash) {
+        if (filePath == null || filePath.isBlank() || fileHash == null || fileHash.isBlank()) {
+            log.warn("headObject参数无效: filePath={}, fileHash={}", filePath, fileHash);
+            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+        }
+
+        TenantContextUtil.ParsedChunkPath parsedPath = TenantContextUtil.parseChunkPath(filePath);
+        if (parsedPath == null) {
+            log.error("无效的分片路径格式: {}", filePath);
+            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+        }
+
+        if (!fileHash.equals(parsedPath.objectName())) {
+            log.error("路径[{}]中的 fileHash '{}' 和 objectName '{}' 不匹配",
+                    filePath, fileHash, parsedPath.objectName());
+            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+        }
+
+        List<String> candidateNodes = getReadCandidateNodes(fileHash, parsedPath);
+        if (candidateNodes.isEmpty()) {
+            log.error("无法找到文件 '{}' 的候选存储节点", fileHash);
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR,
+                    StorageObjectHeadVO.missing(filePath, fileHash, parsedPath.tenantId()));
+        }
+
+        String objectPath = parsedPath.objectPath();
+        boolean unavailableObserved = false;
+        String primaryNode = faultDomainManager.selectBestNodeForRead(candidateNodes);
+        if (primaryNode != null) {
+            HeadLookupResult lookup = tryHeadObjectFromNode(
+                    primaryNode, objectPath, filePath, fileHash, parsedPath.tenantId());
+            if (lookup.status() == HeadLookupStatus.FOUND) {
+                return Result.success(lookup.head());
+            }
+            unavailableObserved = lookup.status() == HeadLookupStatus.UNAVAILABLE;
+            log.warn("无法从主节点 '{}' 获取 '{}' 的对象元数据", primaryNode, objectPath);
+        }
+
+        for (String node : candidateNodes) {
+            if (node.equals(primaryNode)) {
+                continue;
+            }
+            HeadLookupResult lookup = tryHeadObjectFromNode(
+                    node, objectPath, filePath, fileHash, parsedPath.tenantId());
+            if (lookup.status() == HeadLookupStatus.FOUND) {
+                return Result.success(lookup.head());
+            }
+            if (lookup.status() == HeadLookupStatus.UNAVAILABLE) {
+                unavailableObserved = true;
+            }
+        }
+
+        if (unavailableObserved) {
+            log.warn("候选节点 {} 无法完整确认 '{}' 的对象元数据", candidateNodes, objectPath);
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR,
+                    StorageObjectHeadVO.missing(filePath, fileHash, parsedPath.tenantId()));
+        }
+
+        log.warn("无法从任何候选节点 {} 获取 '{}' 的对象元数据", candidateNodes, objectPath);
+        return Result.success(StorageObjectHeadVO.missing(filePath, fileHash, parsedPath.tenantId()));
+    }
+
+    @Override
     public Result<String> storeFileChunk(byte[] fileData, String fileHash) {
         if (fileData == null || fileData.length == 0 || fileHash == null || fileHash.isEmpty()) {
             log.warn("storeFileChunk参数无效: fileData={}, fileHash={}",
@@ -210,12 +285,13 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
 
         try {
-            String tenantObjectPath = TenantContextUtil.buildTenantObjectPath(fileHash);
+            Long tenantId = TenantContextUtil.getTenantIdOrDefault();
+            String tenantObjectPath = TenantContextUtil.buildTenantObjectPath(tenantId, fileHash);
 
             // 创建所有节点的上传任务
             List<CompletableFuture<String>> uploadFutures = new ArrayList<>();
             for (String node : targetNodes) {
-                uploadFutures.add(uploadToNodeAsyncWithResult(node, tenantObjectPath, fileData));
+                uploadFutures.add(uploadToNodeAsyncWithResult(node, tenantObjectPath, fileData, fileHash, tenantId));
             }
 
             // 使用仲裁模式等待写入结果
@@ -240,7 +316,6 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             // 如果是降级写入，记录以便后续同步
             boolean isDegraded = targetNodes.size() < requiredReplicas;
             if (isDegraded && degradedWriteConfig != null && degradedWriteConfig.isTrackForSync()) {
-                Long tenantId = TenantContextUtil.getTenantIdOrDefault();
                 degradedWriteTracker.recordDegradedWrite(fileHash, quorumResult.getSuccessNodes(), tenantId);
                 return Result.success(logicalPath); // 降级成功仍返回 SUCCESS
             }
@@ -446,7 +521,8 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     /**
      * 异步上传并返回成功的节点名称
      */
-    private CompletableFuture<String> uploadToNodeAsyncWithResult(String nodeName, String objectName, byte[] file) {
+    private CompletableFuture<String> uploadToNodeAsyncWithResult(String nodeName, String objectName,
+                                                                  byte[] file, String fileHash, Long tenantId) {
         return CompletableFuture.supplyAsync(() -> {
             if (!s3Monitor.isNodeOnline(nodeName)) {
                 throw new RuntimeException("Node '" + nodeName + "' is offline, cannot upload file '" + objectName + "'.");
@@ -465,6 +541,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                     .bucket(nodeName)
                     .key(objectName)
                     .contentLength((long) file.length)
+                    .metadata(buildObjectMetadata(fileHash, tenantId))
                     .build();
                 client.putObject(request, RequestBody.fromBytes(file));
                 log.debug("已成功将'{}'上传到节点'{}'", objectName, nodeName);
@@ -475,6 +552,16 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 throw new RuntimeException("Upload of '" + objectName + "' to node '" + nodeName + "' failed: " + e.getMessage(), e);
             }
         }, uploadExecutor);
+    }
+
+    /**
+     * 构造对象写入时用于后续轻量完整性校验的 S3 用户元数据。
+     */
+    private Map<String, String> buildObjectMetadata(String fileHash, Long tenantId) {
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put(METADATA_FILE_HASH, fileHash);
+        metadata.put(METADATA_TENANT_ID, String.valueOf(tenantId));
+        return metadata;
     }
 
     @Override
@@ -867,6 +954,82 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         } catch (Exception e) {
             log.error("无法从节点 '{}' 为对象 '{}' 生成预签名 URL：{}", nodeName, objectName, e.getMessage(), e);
             return Optional.empty();
+        }
+    }
+
+    /**
+     * 从指定存储节点读取对象 HEAD 元数据，不下载对象内容。
+     */
+    private HeadLookupResult tryHeadObjectFromNode(String nodeName, String objectName,
+                                                  String filePath, String fileHash, Long tenantId) {
+        if (!s3Monitor.isNodeOnline(nodeName)) {
+            log.warn("节点 '{}' 处于离线状态，无法获取 '{}' 的对象元数据", nodeName, objectName);
+            return new HeadLookupResult(HeadLookupStatus.UNAVAILABLE, null);
+        }
+        S3Client client = clientManager.getClient(nodeName);
+        if (client == null) {
+            log.error("无法获取在线节点 '{}' 的S3Client", nodeName);
+            return new HeadLookupResult(HeadLookupStatus.UNAVAILABLE, null);
+        }
+
+        try {
+            HeadObjectRequest headRequest = HeadObjectRequest.builder()
+                    .bucket(nodeName)
+                    .key(objectName)
+                    .build();
+            HeadObjectResponse headResponse = client.headObject(headRequest);
+            Map<String, String> metadata = headResponse.metadata() != null ? headResponse.metadata() : Map.of();
+            StorageObjectHeadVO head = new StorageObjectHeadVO(
+                    true,
+                    filePath,
+                    fileHash,
+                    tenantId,
+                    parseLongMetadata(metadata.get(METADATA_TENANT_ID)),
+                    nodeName,
+                    headResponse.contentLength(),
+                    headResponse.eTag(),
+                    firstPresentMetadata(metadata, METADATA_FILE_HASH, "fileHash", "filehash", "sha256", "hash")
+            );
+            return new HeadLookupResult(HeadLookupStatus.FOUND, head);
+        } catch (NoSuchKeyException e) {
+            log.warn("在节点 '{}' 上找不到对象 '{}'，无法读取对象元数据", nodeName, objectName);
+            return new HeadLookupResult(HeadLookupStatus.MISSING, null);
+        } catch (S3Exception e) {
+            log.error("从节点 '{}' 获取对象 '{}' 元数据时出现S3错误：{} (errorCode: {})",
+                    nodeName, objectName, e.awsErrorDetails().errorMessage(),
+                    e.awsErrorDetails().errorCode(), e);
+            return new HeadLookupResult(HeadLookupStatus.UNAVAILABLE, null);
+        } catch (Exception e) {
+            log.error("从节点 '{}' 获取对象 '{}' 元数据时出现意外错误：{}", nodeName, objectName, e.getMessage(), e);
+            return new HeadLookupResult(HeadLookupStatus.UNAVAILABLE, null);
+        }
+    }
+
+    /**
+     * 从对象用户元数据中按候选 key 取第一个非空值。
+     */
+    private String firstPresentMetadata(Map<String, String> metadata, String... keys) {
+        for (String key : keys) {
+            String value = metadata.get(key);
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 将对象用户元数据中的长整数字段解析为 Long。
+     */
+    private Long parseLongMetadata(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            log.warn("对象元数据中的租户 ID 无法解析: {}", value);
+            return null;
         }
     }
 

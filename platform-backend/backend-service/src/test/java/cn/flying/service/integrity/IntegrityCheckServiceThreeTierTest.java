@@ -10,6 +10,7 @@ import cn.flying.dao.vo.file.IntegrityCheckStatsVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.response.FileDetailVO;
+import cn.flying.platformapi.response.StorageObjectHeadVO;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.service.sse.SseEmitterManager;
 import cn.flying.test.builders.BuilderResetExtension;
@@ -120,10 +121,8 @@ class IntegrityCheckServiceThreeTierTest {
         when(fileMapper.selectPage(any(), any())).thenReturn(
                 new Page<File>() {{ setRecords(List.of(file)); }});
 
-        // Lightweight check uses getFileUrlListByHash - returns non-empty URL list
-        Result<List<String>> urlResult = new Result<>(ResultEnum.SUCCESS,
-                List.of("http://minio:9000/bucket/file"));
-        when(fileRemoteClient.getFileUrlListByHash(anyList(), anyList())).thenReturn(urlResult);
+        Result<StorageObjectHeadVO> headResult = new Result<>(ResultEnum.SUCCESS, existingHead(hash, 1024L));
+        when(fileRemoteClient.headObject(anyString(), anyString())).thenReturn(headResult);
 
         IntegrityCheckStatsVO stats = integrityCheckService.checkIntegrityWithLevel(
                 IntegrityCheckService.IntegrityCheckLevel.LIGHTWEIGHT);
@@ -134,6 +133,7 @@ class IntegrityCheckServiceThreeTierTest {
 
         // Verify NO download occurred (getFileListByHash not called)
         verify(fileRemoteClient, never()).getFileListByHash(anyList(), anyList());
+        verify(fileRemoteClient, never()).getFileUrlListByHash(anyList(), anyList());
         // Verify NO blockchain check occurred
         verify(fileRemoteClient, never()).getFile(anyString(), anyString());
         // No alert created
@@ -157,9 +157,11 @@ class IntegrityCheckServiceThreeTierTest {
         when(fileMapper.selectPage(any(), any())).thenReturn(
                 new Page<File>() {{ setRecords(List.of(file)); }});
 
-        // Return empty URL list (file not found)
-        Result<List<String>> urlResult = new Result<>(ResultEnum.SUCCESS, List.of());
-        when(fileRemoteClient.getFileUrlListByHash(anyList(), anyList())).thenReturn(urlResult);
+        Result<StorageObjectHeadVO> headResult = new Result<>(
+                ResultEnum.SUCCESS,
+                StorageObjectHeadVO.missing(buildFilePath(hash), hash, TENANT_ID)
+        );
+        when(fileRemoteClient.headObject(anyString(), anyString())).thenReturn(headResult);
 
         IntegrityCheckStatsVO stats = integrityCheckService.checkIntegrityWithLevel(
                 IntegrityCheckService.IntegrityCheckLevel.LIGHTWEIGHT);
@@ -174,6 +176,7 @@ class IntegrityCheckServiceThreeTierTest {
 
         // No download or blockchain check
         verify(fileRemoteClient, never()).getFileListByHash(anyList(), anyList());
+        verify(fileRemoteClient, never()).getFileUrlListByHash(anyList(), anyList());
         verify(fileRemoteClient, never()).getFile(anyString(), anyString());
     }
 
@@ -194,11 +197,8 @@ class IntegrityCheckServiceThreeTierTest {
         when(fileMapper.selectPage(any(), any())).thenReturn(
                 new Page<File>() {{ setRecords(List.of(file)); }});
 
-        // File exists but returns list with null URL (edge case)
-        List<String> urlList = new java.util.ArrayList<>();
-        urlList.add(null);
-        Result<List<String>> urlResult = new Result<>(ResultEnum.SUCCESS, urlList);
-        when(fileRemoteClient.getFileUrlListByHash(anyList(), anyList())).thenReturn(urlResult);
+        Result<StorageObjectHeadVO> headResult = new Result<>(ResultEnum.SUCCESS, existingHead(hash, 2048L));
+        when(fileRemoteClient.headObject(anyString(), anyString())).thenReturn(headResult);
 
         IntegrityCheckStatsVO stats = integrityCheckService.checkIntegrityWithLevel(
                 IntegrityCheckService.IntegrityCheckLevel.LIGHTWEIGHT);
@@ -206,7 +206,54 @@ class IntegrityCheckServiceThreeTierTest {
         assertEquals(1, stats.totalChecked());
         assertEquals(1, stats.mismatchesFound());
 
-        verify(integrityAlertMapper).insert(any(IntegrityAlert.class));
+        verify(integrityAlertMapper).insert(argThat((IntegrityAlert alert) ->
+                alert.getAlertType().equals(IntegrityAlert.AlertType.HASH_MISMATCH.name())
+                        && "storage-size:2048".equals(alert.getChainHash())));
+    }
+
+    @Test
+    @DisplayName("Lightweight: Metadata hash mismatch detected - alert created")
+    void testLightweightCheck_MetadataHashMismatch() throws Exception {
+        when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
+        when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
+
+        String hash = "metadata_mismatch_hash";
+        File file = FileTestBuilder.aFile(f -> {
+            f.setTenantId(TENANT_ID);
+            f.setUid(USER_ID);
+            f.setFileHash(hash);
+            f.setStatus(FileUploadStatus.SUCCESS.getCode());
+        });
+
+        when(fileMapper.selectPage(any(), any())).thenReturn(
+                new Page<File>() {{ setRecords(List.of(file)); }});
+
+        StorageObjectHeadVO head = new StorageObjectHeadVO(
+                true,
+                buildFilePath(hash),
+                hash,
+                TENANT_ID,
+                TENANT_ID,
+                "node1",
+                1024L,
+                "\"etag\"",
+                "different_hash"
+        );
+        when(fileRemoteClient.headObject(anyString(), anyString()))
+                .thenReturn(new Result<>(ResultEnum.SUCCESS, head));
+
+        IntegrityCheckStatsVO stats = integrityCheckService.checkIntegrityWithLevel(
+                IntegrityCheckService.IntegrityCheckLevel.LIGHTWEIGHT);
+
+        assertEquals(1, stats.totalChecked());
+        assertEquals(1, stats.mismatchesFound());
+        assertEquals(0, stats.errorsEncountered());
+
+        verify(integrityAlertMapper).insert(argThat((IntegrityAlert alert) ->
+                alert.getAlertType().equals(IntegrityAlert.AlertType.HASH_MISMATCH.name())
+                        && "different_hash".equals(alert.getChainHash())));
+        verify(fileRemoteClient, never()).getFileListByHash(anyList(), anyList());
+        verify(fileRemoteClient, never()).getFile(anyString(), anyString());
     }
 
     // ========== MEDIUM TESTS ==========
@@ -515,9 +562,8 @@ class IntegrityCheckServiceThreeTierTest {
                 new Page<File>() {{ setRecords(List.of(file)); }});
 
         // Setup mocks for all levels
-        Result<List<String>> urlResult = new Result<>(ResultEnum.SUCCESS,
-                List.of("http://minio:9000/file"));
-        when(fileRemoteClient.getFileUrlListByHash(anyList(), anyList())).thenReturn(urlResult);
+        Result<StorageObjectHeadVO> headResult = new Result<>(ResultEnum.SUCCESS, existingHead(hash, 1024L));
+        when(fileRemoteClient.headObject(anyString(), anyString())).thenReturn(headResult);
 
         Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of(contentBytes));
         when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
@@ -530,10 +576,11 @@ class IntegrityCheckServiceThreeTierTest {
 
         // Test LIGHTWEIGHT
         reset(fileRemoteClient);
-        when(fileRemoteClient.getFileUrlListByHash(anyList(), anyList())).thenReturn(urlResult);
+        when(fileRemoteClient.headObject(anyString(), anyString())).thenReturn(headResult);
         integrityCheckService.checkIntegrityWithLevel(
                 IntegrityCheckService.IntegrityCheckLevel.LIGHTWEIGHT);
         verify(fileRemoteClient, never()).getFileListByHash(anyList(), anyList());
+        verify(fileRemoteClient, never()).getFileUrlListByHash(anyList(), anyList());
         verify(fileRemoteClient, never()).getFile(anyString(), anyString());
 
         // Test MEDIUM
@@ -590,6 +637,30 @@ class IntegrityCheckServiceThreeTierTest {
     }
 
     // ========== Helper Methods ==========
+
+    /**
+     * Build a successful storage HEAD response for lightweight integrity checks.
+     */
+    private StorageObjectHeadVO existingHead(String hash, long contentLength) {
+        return new StorageObjectHeadVO(
+                true,
+                buildFilePath(hash),
+                hash,
+                TENANT_ID,
+                TENANT_ID,
+                "node1",
+                contentLength,
+                "\"etag\"",
+                hash
+        );
+    }
+
+    /**
+     * Build the tenant-scoped logical file path used by IntegrityCheckService.
+     */
+    private String buildFilePath(String hash) {
+        return String.format("storage/tenant/%d/chunk/%s", TENANT_ID, hash);
+    }
 
     /**
      * Calculate SHA-256 hash matching the implementation in IntegrityCheckService.

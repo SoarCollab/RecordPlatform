@@ -15,6 +15,7 @@ import cn.flying.dao.mapper.TenantMapper;
 import cn.flying.dao.vo.file.IntegrityCheckStatsVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.FileDetailVO;
+import cn.flying.platformapi.response.StorageObjectHeadVO;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.service.sse.SseEmitterManager;
 import cn.flying.service.sse.SseEvent;
@@ -73,8 +74,8 @@ public class IntegrityCheckService {
      */
     public enum IntegrityCheckLevel {
         /**
-         * Lightweight check: verify file exists in S3 storage without downloading.
-         * Fast but only catches missing files.
+         * Lightweight check: verify S3 object HEAD metadata without downloading.
+         * Fast path catches missing files and metadata-level mismatches.
          */
         LIGHTWEIGHT,
 
@@ -329,8 +330,8 @@ public class IntegrityCheckService {
     }
 
     /**
-     * Lightweight check: verify file exists in S3 storage without downloading.
-     * Only checks for missing files, does not verify content integrity.
+     * Lightweight check: verify object HEAD metadata without downloading content.
+     * Checks object existence, tenant path, optional object metadata hash, and expected size when available.
      *
      * @param file the file to check
      * @return a VerifyResult if file is missing, null if exists
@@ -338,20 +339,48 @@ public class IntegrityCheckService {
     private VerifyResult checkLightweight(File file) {
         String filePath = buildFilePath(file);
 
-        // Use empty list request to check existence without downloading content
-        Result<List<String>> urlResult = fileRemoteClient.getFileUrlListByHash(
-                List.of(filePath), List.of(file.getFileHash()));
+        Result<StorageObjectHeadVO> headResult = fileRemoteClient.headObject(filePath, file.getFileHash());
 
-        if (urlResult == null || !urlResult.isSuccess()) {
+        if (headResult == null || !headResult.isSuccess()) {
             throw new GeneralException(ResultEnum.FILE_SERVICE_ERROR);
         }
 
-        // If URL list is empty or null, file doesn't exist
-        if (urlResult.getData() == null || urlResult.getData().isEmpty()
-                || urlResult.getData().get(0) == null || urlResult.getData().get(0).isEmpty()) {
+        StorageObjectHeadVO head = headResult.getData();
+        if (head == null || !head.exists()) {
             log.warn("[integrity-check][lightweight] file not found in S3: fileId={}, hash={}",
                     file.getId(), file.getFileHash());
             return new VerifyResult(AlertType.FILE_NOT_FOUND, null);
+        }
+
+        if (head.tenantId() != null && !Objects.equals(head.tenantId(), file.getTenantId())) {
+            log.warn("[integrity-check][lightweight] tenant path mismatch: fileId={}, expectedTenant={}, actualTenant={}",
+                    file.getId(), file.getTenantId(), head.tenantId());
+            return new VerifyResult(AlertType.HASH_MISMATCH, "tenant:" + head.tenantId());
+        }
+
+        if (head.metadataTenantId() != null && !Objects.equals(head.metadataTenantId(), file.getTenantId())) {
+            log.warn("[integrity-check][lightweight] tenant metadata mismatch: fileId={}, expectedTenant={}, actualTenant={}",
+                    file.getId(), file.getTenantId(), head.metadataTenantId());
+            return new VerifyResult(AlertType.HASH_MISMATCH, "metadata-tenant:" + head.metadataTenantId());
+        }
+
+        Long expectedSize = file.getFileSize();
+        if (expectedSize != null && expectedSize >= 0
+                && head.contentLength() != null && !Objects.equals(expectedSize, head.contentLength())) {
+            log.warn("[integrity-check][lightweight] object size mismatch: fileId={}, expectedSize={}, actualSize={}",
+                    file.getId(), expectedSize, head.contentLength());
+            return new VerifyResult(AlertType.HASH_MISMATCH, "storage-size:" + head.contentLength());
+        }
+
+        if (StringUtils.hasText(head.metadataHash())) {
+            if (!file.getFileHash().equalsIgnoreCase(head.metadataHash())) {
+                log.warn("[integrity-check][lightweight] metadata hash mismatch: fileId={}, dbHash={}, metadataHash={}",
+                        file.getId(), file.getFileHash(), head.metadataHash());
+                return new VerifyResult(AlertType.HASH_MISMATCH, head.metadataHash());
+            }
+        } else {
+            log.debug("[integrity-check][lightweight] storage object has no metadata hash: fileId={}, hash={}",
+                    file.getId(), file.getFileHash());
         }
 
         log.debug("[integrity-check][lightweight] file exists: fileId={}", file.getId());

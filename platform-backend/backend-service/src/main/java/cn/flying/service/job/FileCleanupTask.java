@@ -4,6 +4,7 @@ import cn.flying.api.utils.ResultUtils;
 import cn.flying.common.lock.DistributedLock;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.JsonConverter;
+import cn.flying.common.util.TenantKeyUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.TenantMapper;
@@ -125,18 +126,18 @@ public class FileCleanupTask {
             }
         }
 
-        evictCachesForUsers(affectedUserIds);
+        evictCachesForUsers(tenantId, affectedUserIds);
         log.info("租户 {} 文件清理完成: 成功={}, 失败={}", tenantId, successCount, failCount);
         return new int[]{successCount, failCount};
     }
 
-    private void evictCachesForUsers(Set<Long> userIds) {
+    private void evictCachesForUsers(Long tenantId, Set<Long> userIds) {
         Cache userFilesCache = cacheManager.getCache("userFiles");
         if (userFilesCache != null && !userIds.isEmpty()) {
             for (Long userId : userIds) {
-                userFilesCache.evict(userId);
+                userFilesCache.evict(TenantKeyUtils.tenantUserKey(tenantId, userId));
             }
-            log.debug("清除 {} 个用户的缓存", userIds.size());
+            log.debug("清除租户 {} 下 {} 个用户的缓存", tenantId, userIds.size());
         }
     }
 

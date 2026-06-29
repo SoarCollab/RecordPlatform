@@ -85,5 +85,19 @@ class PlatformApiJacksonRecordTest {
         FileDetailVO detailVO = new FileDetailVO("u1", "a.txt", "p", "c", "h1", "t", 2L, 1L, "text/plain");
         FileDetailVO detailVO2 = objectMapper.readValue(objectMapper.writeValueAsBytes(detailVO), FileDetailVO.class);
         assertThat(detailVO2).isEqualTo(detailVO);
+
+        StorageObjectHeadVO headVO = new StorageObjectHeadVO(
+                true,
+                "storage/tenant/1/chunk/h1",
+                "h1",
+                1L,
+                1L,
+                "node-a",
+                1024L,
+                "\"etag\"",
+                "h1"
+        );
+        StorageObjectHeadVO headVO2 = objectMapper.readValue(objectMapper.writeValueAsBytes(headVO), StorageObjectHeadVO.class);
+        assertThat(headVO2).isEqualTo(headVO);
     }
 }
