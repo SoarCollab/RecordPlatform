@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HexFormat;
 import java.util.List;
 
@@ -25,6 +26,10 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
 
     private static final String DIGEST_ALGORITHM = "SHA-256";
     private static final String COMPLETED_STATUS = "COMPLETED";
+    private static final String SUPPORTED_ALGORITHM_SUITE = "RP-AES256-GCM-CHUNK-CHAIN-V1";
+    private static final String SUPPORTED_SIGNATURE_SUITE = "UNSIGNED-V1";
+    private static final String SUPPORTED_KEM_SUITE = "NONE-V1";
+    private static final String SUPPORTED_PROOF_SUITE = "RP-MERKLE-SHA256-V1";
 
     private final MerkleTreeService merkleTreeService;
 
@@ -67,6 +72,7 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
         validateChainEvidence(chain, merkle, issues);
         validateIssuerEvidence(issuer, issues);
         validateStorageEvidence(bundle.storage(), issues);
+        validateVerificationPolicy(bundle.verificationPolicy(), issues);
 
         return buildResult(
                 issues,
@@ -345,6 +351,49 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
                         "存储对象租户元数据不匹配"
                 ));
             }
+        }
+    }
+
+    /**
+     * Validates optional crypto agility suite fields while preserving old proof-bundle compatibility.
+     */
+    private void validateVerificationPolicy(ProofBundleVO.VerificationPolicy policy,
+                                            List<ProofVerificationIssue> issues) {
+        if (policy == null) {
+            return;
+        }
+        validateOptionalSuite("verificationPolicy.algorithmSuite", policy.algorithmSuite(),
+                SUPPORTED_ALGORITHM_SUITE, issues);
+        validateOptionalSuite("verificationPolicy.signatureSuite", policy.signatureSuite(),
+                SUPPORTED_SIGNATURE_SUITE, issues);
+        validateOptionalSuite("verificationPolicy.kemSuite", policy.kemSuite(),
+                SUPPORTED_KEM_SUITE, issues);
+        validateOptionalSuite("verificationPolicy.proofSuite", policy.proofSuite(),
+                SUPPORTED_PROOF_SUITE, issues);
+        if (policy.deprecatedAfter() != null && !policy.deprecatedAfter().after(new Date())) {
+            issues.add(issue(
+                    ProofVerificationCode.UNSUPPORTED_ALGORITHM,
+                    ProofVerificationSeverity.ERROR,
+                    "verificationPolicy.deprecatedAfter",
+                    "证明包声明的密码套件已废弃"
+            ));
+        }
+    }
+
+    /**
+     * Rejects explicit unsupported suite identifiers and ignores absent legacy metadata.
+     */
+    private void validateOptionalSuite(String field,
+                                       String actual,
+                                       String supported,
+                                       List<ProofVerificationIssue> issues) {
+        if (StringUtils.hasText(actual) && !supported.equals(actual)) {
+            issues.add(issue(
+                    ProofVerificationCode.UNSUPPORTED_ALGORITHM,
+                    ProofVerificationSeverity.ERROR,
+                    field,
+                    "不支持的密码套件"
+            ));
         }
     }
 

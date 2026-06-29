@@ -3728,10 +3728,31 @@ File provenance tracking enables tracing the complete sharing chain of a file:
 
 The `provenanceChain` array in file details shows the complete path from original uploader to current owner.
 
+### L. Crypto Suite Policy
+
+File key envelopes and proof bundles expose explicit crypto-agility metadata so verifiers and future migration jobs can reject unsupported algorithms deterministically.
+
+| Field | Current Supported Value | Description |
+| ----- | ----------------------- | ----------- |
+| `algorithmSuite` | `RP-AES256-GCM-CHUNK-CHAIN-V1` | RecordPlatform content encryption suite using the current chunk key chain metadata model |
+| `signatureSuite` | `UNSIGNED-V1` | Proof bundle issuer signature suite; current v1 bundles are unsigned |
+| `kemSuite` | `NONE-V1` | Recipient KEM/key-establishment suite; current share-code envelopes use local wrapping, not public-key KEM |
+| `proofSuite` | `RP-MERKLE-SHA256-V1` | Merkle proof construction suite based on SHA-256 leaf/node rules |
+| `keyVersion` | Deployment configured integer | Wrapping key version used by envelope encryption |
+| `deprecatedAfter` | `null` by default | Optional cutoff after which new metadata using the configured suite set is rejected |
+
+Behavior:
+
+- Upload/envelope creation and proof-bundle export validate configured suite identifiers before persisting or returning metadata.
+- Unsupported suite identifiers return `PARAM_ERROR`.
+- If `deprecatedAfter` is reached, new envelope/proof metadata creation returns `PARAM_ERROR`.
+- Existing records created before these fields existed remain readable; missing suite fields are treated as legacy metadata and resolved with current defaults where needed.
+
 ---
 
 ## Changelog
 
+- **v1.4** - Added crypto suite policy metadata for key envelopes and proof bundles
 - **v1.3** - Added Quota Module (user quota query, admin rollout audit), batch download metrics reporting endpoint, Friend System error codes (60010-60019), storage/system/data/permission error code additions (28 new codes total)
 - **v1.2** - Added Friend Module, Friend File Share Module, public share info endpoint, auth token endpoints
 - **v1.1** - Added File Admin Module for share audit and file provenance tracking

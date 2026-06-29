@@ -16,6 +16,8 @@ import cn.flying.dao.vo.file.ProofBundleVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.StorageObjectHeadVO;
 import cn.flying.service.remote.FileRemoteClient;
+import cn.flying.service.key.CryptoSuiteMetadata;
+import cn.flying.service.key.CryptoSuitePolicyService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +47,7 @@ public class ProofBundleServiceImpl implements ProofBundleService {
     private final AttestationLeafMapper leafMapper;
     private final AttestationBatchMapper batchMapper;
     private final FileRemoteClient fileRemoteClient;
+    private final CryptoSuitePolicyService suitePolicy;
 
     /**
      * Export a proof bundle for a file version selected by internal file ID.
@@ -257,7 +260,14 @@ public class ProofBundleServiceImpl implements ProofBundleService {
      * Build deterministic verifier policy text matching MerkleTreeService.
      */
     private ProofBundleVO.VerificationPolicy buildVerificationPolicy() {
+        CryptoSuiteMetadata suiteMetadata = suitePolicy.currentMetadata(null);
         return new ProofBundleVO.VerificationPolicy(
+                suiteMetadata.algorithmSuite(),
+                suiteMetadata.signatureSuite(),
+                suiteMetadata.kemSuite(),
+                suiteMetadata.proofSuite(),
+                suiteMetadata.keyVersion(),
+                suiteMetadata.deprecatedAfterDate(),
                 "SHA-256",
                 "hex(sha256('leaf\\n' + fileHash.trim()))",
                 "hex(sha256('node\\n' + leftHash.trim() + '\\n' + rightHash.trim()))",

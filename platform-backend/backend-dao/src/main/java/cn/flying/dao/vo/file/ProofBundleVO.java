@@ -170,6 +170,18 @@ public record ProofBundleVO(
      * Deterministic verification policy for the proof bundle.
      */
     public record VerificationPolicy(
+            @Schema(description = "内容加密算法套件")
+            String algorithmSuite,
+            @Schema(description = "签名算法套件；UNSIGNED-V1 表示当前证明包未签名")
+            String signatureSuite,
+            @Schema(description = "KEM/接收方密钥协商套件；NONE-V1 表示当前版本未使用 KEM")
+            String kemSuite,
+            @Schema(description = "证明构造套件")
+            String proofSuite,
+            @Schema(description = "密钥版本")
+            Integer keyVersion,
+            @Schema(description = "套件废弃时间；为空表示尚未计划废弃")
+            Date deprecatedAfter,
             @Schema(description = "哈希算法")
             String hashAlgorithm,
             @Schema(description = "叶子哈希规则")

@@ -21,6 +21,7 @@ import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.Date;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -53,7 +54,11 @@ public class FileKeyEnvelopeService {
     private static final String FIELD_INITIAL_KEY = "initialKey";
     private static final String FIELD_KEY_ENVELOPE_STATUS = "keyEnvelopeStatus";
     private static final String FIELD_ALGORITHM_SUITE = "algorithmSuite";
+    private static final String FIELD_SIGNATURE_SUITE = "signatureSuite";
+    private static final String FIELD_KEM_SUITE = "kemSuite";
+    private static final String FIELD_PROOF_SUITE = "proofSuite";
     private static final String FIELD_KEY_VERSION = "keyVersion";
+    private static final String FIELD_DEPRECATED_AFTER = "deprecatedAfter";
     private static final String FIELD_ENCRYPTION_ALGORITHM = "encryptionAlgorithm";
     private static final String FIELD_UPLOAD_MODE = "uploadMode";
     private static final String ENVELOPE_STATUS_ENVELOPED = "ENVELOPED";
@@ -63,6 +68,7 @@ public class FileKeyEnvelopeService {
     private final FileKeyAuditLogMapper fileKeyAuditLogMapper;
     private final LocalKeyWrappingService wrappingService;
     private final FileKeyEnvelopeProperties properties;
+    private final CryptoSuitePolicyService suitePolicy;
 
     /**
      * Removes plaintext key material from file_param and returns envelope input metadata.
@@ -94,11 +100,18 @@ public class FileKeyEnvelopeService {
             return FileParamEnvelopeResult.withoutEnvelope(JsonConverter.toJson(sanitized));
         }
 
-        String algorithmSuite = properties.getAlgorithmSuite();
         Integer keyVersion = properties.getKeyVersion();
+        CryptoSuiteMetadata suiteMetadata = suitePolicy.currentMetadata(keyVersion);
+        String algorithmSuite = suiteMetadata.algorithmSuite();
         sanitized.put(FIELD_KEY_ENVELOPE_STATUS, ENVELOPE_STATUS_ENVELOPED);
         sanitized.put(FIELD_ALGORITHM_SUITE, algorithmSuite);
+        sanitized.put(FIELD_SIGNATURE_SUITE, suiteMetadata.signatureSuite());
+        sanitized.put(FIELD_KEM_SUITE, suiteMetadata.kemSuite());
+        sanitized.put(FIELD_PROOF_SUITE, suiteMetadata.proofSuite());
         sanitized.put(FIELD_KEY_VERSION, keyVersion);
+        if (suiteMetadata.deprecatedAfterIso() != null) {
+            sanitized.put(FIELD_DEPRECATED_AFTER, suiteMetadata.deprecatedAfterIso());
+        }
         sanitized.putIfAbsent(FIELD_ENCRYPTION_ALGORITHM, encryptionAlgorithm);
 
         String sanitizedJson = JsonConverter.toJson(sanitized);
@@ -109,8 +122,12 @@ public class FileKeyEnvelopeService {
                 sanitizedJson,
                 initialKey,
                 algorithmSuite,
+                suiteMetadata.signatureSuite(),
+                suiteMetadata.kemSuite(),
+                suiteMetadata.proofSuite(),
                 encryptionAlgorithm,
-                keyVersion
+                keyVersion,
+                suiteMetadata.deprecatedAfterIso()
         );
     }
 
@@ -148,6 +165,9 @@ public class FileKeyEnvelopeService {
                 .setRecipientId(ownerId)
                 .setKeyVersion(wrapped.keyVersion())
                 .setAlgorithmSuite(envelopeResult.algorithmSuite())
+                .setSignatureSuite(envelopeResult.signatureSuite())
+                .setKemSuite(envelopeResult.kemSuite())
+                .setProofSuite(envelopeResult.proofSuite())
                 .setEncryptionAlgorithm(envelopeResult.encryptionAlgorithm())
                 .setWrappingAlgorithm(wrapped.wrappingAlgorithm())
                 .setKmsProvider(wrapped.kmsProvider())
@@ -156,6 +176,7 @@ public class FileKeyEnvelopeService {
                 .setWrappingIv(wrapped.wrappingIv())
                 .setAadHash(hashAad(aad))
                 .setStatus(STATUS_ACTIVE)
+                .setDeprecatedAfter(parseDeprecatedAfter(envelopeResult.deprecatedAfter()))
                 .setDeleted(0);
         fileKeyEnvelopeMapper.insert(envelope);
     }
@@ -312,7 +333,8 @@ public class FileKeyEnvelopeService {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件密钥信封上下文不完整");
         }
 
-        Integer targetKeyVersion = properties.getKeyVersion();
+        CryptoSuiteMetadata targetMetadata = suitePolicy.currentMetadata(properties.getKeyVersion());
+        Integer targetKeyVersion = targetMetadata.keyVersion();
         List<FileKeyEnvelope> envelopes = fileKeyEnvelopeMapper.selectList(new LambdaQueryWrapper<FileKeyEnvelope>()
                 .eq(FileKeyEnvelope::getTenantId, tenantId)
                 .eq(FileKeyEnvelope::getFileId, file.getId())
@@ -344,6 +366,10 @@ public class FileKeyEnvelopeService {
 
             try {
                 String plaintextKey = unwrapEnvelopeForRotation(envelope);
+                String targetAlgorithmSuite = suitePolicy.defaultIfMissing(
+                        envelope.getAlgorithmSuite(),
+                        targetMetadata.algorithmSuite()
+                );
                 byte[] targetAad = buildEnvelopeAad(
                         envelope.getTenantId(),
                         envelope.getFileId(),
@@ -351,11 +377,11 @@ public class FileKeyEnvelopeService {
                         envelope.getRecipientType(),
                         envelope.getRecipientId(),
                         targetKeyVersion,
-                        envelope.getAlgorithmSuite()
+                        targetAlgorithmSuite
                 );
                 WrappedDataKey wrapped = wrappingService.wrap(plaintextKey, targetAad, targetKeyVersion);
                 markEnvelopeSuperseded(envelope);
-                FileKeyEnvelope rotatedEnvelope = copyForRotation(envelope, wrapped, targetAad);
+                FileKeyEnvelope rotatedEnvelope = copyForRotation(envelope, wrapped, targetAad, targetMetadata, targetAlgorithmSuite);
                 fileKeyEnvelopeMapper.insert(rotatedEnvelope);
                 rotated++;
                 audit(rotatedEnvelope, OPERATION_ROTATE, actorId, RESULT_SUCCESS, reason, null);
@@ -431,8 +457,9 @@ public class FileKeyEnvelopeService {
                                        String recipientType,
                                        Long recipientId,
                                        String initialKey) {
-        Integer keyVersion = properties.getKeyVersion();
-        String algorithmSuite = properties.getAlgorithmSuite();
+        CryptoSuiteMetadata suiteMetadata = suitePolicy.currentMetadata(properties.getKeyVersion());
+        Integer keyVersion = suiteMetadata.keyVersion();
+        String algorithmSuite = suiteMetadata.algorithmSuite();
         markActiveRecipientEnvelopesSuperseded(tenantId, file.getId(), fileHash, recipientType, recipientId);
         byte[] aad = buildEnvelopeAad(tenantId, file.getId(), fileHash, recipientType, recipientId, keyVersion, algorithmSuite);
         WrappedDataKey wrapped = wrappingService.wrap(initialKey, aad, keyVersion);
@@ -445,6 +472,9 @@ public class FileKeyEnvelopeService {
                 .setRecipientId(recipientId)
                 .setKeyVersion(wrapped.keyVersion())
                 .setAlgorithmSuite(algorithmSuite)
+                .setSignatureSuite(suiteMetadata.signatureSuite())
+                .setKemSuite(suiteMetadata.kemSuite())
+                .setProofSuite(suiteMetadata.proofSuite())
                 .setEncryptionAlgorithm(properties.getEncryptionAlgorithm())
                 .setWrappingAlgorithm(wrapped.wrappingAlgorithm())
                 .setKmsProvider(wrapped.kmsProvider())
@@ -453,6 +483,7 @@ public class FileKeyEnvelopeService {
                 .setWrappingIv(wrapped.wrappingIv())
                 .setAadHash(hashAad(aad))
                 .setStatus(STATUS_ACTIVE)
+                .setDeprecatedAfter(suiteMetadata.deprecatedAfterDate())
                 .setDeleted(0);
         fileKeyEnvelopeMapper.insert(envelope);
     }
@@ -544,7 +575,11 @@ public class FileKeyEnvelopeService {
     /**
      * Creates a replacement envelope for rotation while preserving recipient metadata.
      */
-    private FileKeyEnvelope copyForRotation(FileKeyEnvelope source, WrappedDataKey wrapped, byte[] aad) {
+    private FileKeyEnvelope copyForRotation(FileKeyEnvelope source,
+                                            WrappedDataKey wrapped,
+                                            byte[] aad,
+                                            CryptoSuiteMetadata targetMetadata,
+                                            String targetAlgorithmSuite) {
         return new FileKeyEnvelope()
                 .setTenantId(source.getTenantId())
                 .setFileId(source.getFileId())
@@ -552,7 +587,10 @@ public class FileKeyEnvelopeService {
                 .setRecipientType(source.getRecipientType())
                 .setRecipientId(source.getRecipientId())
                 .setKeyVersion(wrapped.keyVersion())
-                .setAlgorithmSuite(source.getAlgorithmSuite())
+                .setAlgorithmSuite(targetAlgorithmSuite)
+                .setSignatureSuite(suitePolicy.defaultIfMissing(source.getSignatureSuite(), targetMetadata.signatureSuite()))
+                .setKemSuite(suitePolicy.defaultIfMissing(source.getKemSuite(), targetMetadata.kemSuite()))
+                .setProofSuite(suitePolicy.defaultIfMissing(source.getProofSuite(), targetMetadata.proofSuite()))
                 .setEncryptionAlgorithm(source.getEncryptionAlgorithm())
                 .setWrappingAlgorithm(wrapped.wrappingAlgorithm())
                 .setKmsProvider(wrapped.kmsProvider())
@@ -561,7 +599,30 @@ public class FileKeyEnvelopeService {
                 .setWrappingIv(wrapped.wrappingIv())
                 .setAadHash(hashAad(aad))
                 .setStatus(STATUS_ACTIVE)
+                .setDeprecatedAfter(cloneDate(source.getDeprecatedAfter(), targetMetadata.deprecatedAfterDate()))
                 .setDeleted(0);
+    }
+
+    /**
+     * Parses ISO deprecation metadata from file_param into a persistence date.
+     */
+    private Date parseDeprecatedAfter(String deprecatedAfter) {
+        if (!StringUtils.hasText(deprecatedAfter)) {
+            return null;
+        }
+        try {
+            return Date.from(java.time.Instant.parse(deprecatedAfter));
+        } catch (RuntimeException e) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "密码套件废弃时间格式无效");
+        }
+    }
+
+    /**
+     * Returns the source date when present, otherwise a defensive fallback copy.
+     */
+    private Date cloneDate(Date source, Date fallback) {
+        Date value = source != null ? source : fallback;
+        return value == null ? null : new Date(value.getTime());
     }
 
     /**

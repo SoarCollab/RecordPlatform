@@ -44,6 +44,12 @@ public class FileKeyEnvelope implements Serializable {
 
     private String algorithmSuite;
 
+    private String signatureSuite;
+
+    private String kemSuite;
+
+    private String proofSuite;
+
     private String encryptionAlgorithm;
 
     private String wrappingAlgorithm;
@@ -59,6 +65,8 @@ public class FileKeyEnvelope implements Serializable {
     private String aadHash;
 
     private String status;
+
+    private Date deprecatedAfter;
 
     @TableField(fill = FieldFill.INSERT)
     private Date createTime;
