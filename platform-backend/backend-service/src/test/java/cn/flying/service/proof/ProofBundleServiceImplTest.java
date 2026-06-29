@@ -20,6 +20,9 @@ import cn.flying.platformapi.response.StorageObjectHeadVO;
 import cn.flying.service.attestation.MerkleTreeService;
 import cn.flying.service.key.CryptoSuitePolicyService;
 import cn.flying.service.key.FileKeyEnvelopeProperties;
+import cn.flying.service.manifest.ChunkManifestChunk;
+import cn.flying.service.manifest.ChunkManifestService;
+import cn.flying.service.manifest.ChunkManifestView;
 import cn.flying.service.remote.FileRemoteClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,6 +35,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Date;
+import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,7 +54,10 @@ class ProofBundleServiceImplTest {
     private static final Long FILE_ID = 11L;
     private static final Long LEAF_ID = 901L;
     private static final Long BATCH_ID = 900L;
-    private static final String FILE_HASH = "hash-a";
+    private static final String FILE_HASH = "chain-hash-a";
+    private static final String PLAIN_HASH = "sha256:plain-a";
+    private static final String CIPHER_HASH = "sha256:cipher-a";
+    private static final String STORAGE_PATH = "storage/tenant/7/chunk/cipher-a";
 
     @Mock
     private FileMapper fileMapper;
@@ -63,6 +70,9 @@ class ProofBundleServiceImplTest {
 
     @Mock
     private FileRemoteClient fileRemoteClient;
+
+    @Mock
+    private ChunkManifestService chunkManifestService;
 
     private FileKeyEnvelopeProperties suiteProperties;
     private ProofBundleServiceImpl service;
@@ -78,6 +88,7 @@ class ProofBundleServiceImplTest {
                 leafMapper,
                 batchMapper,
                 fileRemoteClient,
+                chunkManifestService,
                 new CryptoSuitePolicyService(suiteProperties)
         );
         TenantContext.setTenantId(TENANT_ID);
@@ -121,7 +132,12 @@ class ProofBundleServiceImplTest {
             assertThat(bundle.verificationPolicy().keyVersion()).isEqualTo(1);
             assertThat(bundle.chain().batchTransactionHash()).isEqualTo("tx-batch");
             assertThat(bundle.storage().objects()).hasSize(1);
-            assertThat(bundle.storage().objects().getFirst().metadataHashMatches()).isTrue();
+            ProofBundleVO.StorageObjectEvidence storageObject = bundle.storage().objects().getFirst();
+            assertThat(storageObject.index()).isZero();
+            assertThat(storageObject.objectPath()).isEqualTo(STORAGE_PATH);
+            assertThat(storageObject.plainHash()).isEqualTo(PLAIN_HASH);
+            assertThat(storageObject.cipherHash()).isEqualTo(CIPHER_HASH);
+            assertThat(storageObject.metadataHashMatches()).isTrue();
             assertThat(JsonConverter.toJson(bundle)).doesNotContain("initialKey", "secret-key");
             security.verify(SecurityUtils::isAdmin);
         }
@@ -232,18 +248,49 @@ class ProofBundleServiceImplTest {
         when(fileMapper.selectById(FILE_ID)).thenReturn(file);
         when(leafMapper.selectOne(any())).thenReturn(leaf());
         when(batchMapper.selectById(BATCH_ID)).thenReturn(batch());
-        when(fileRemoteClient.headObject("storage/tenant/7/chunk/hash-a", FILE_HASH))
+        when(chunkManifestService.findActiveManifest(null, FILE_ID)).thenReturn(java.util.Optional.of(manifest()));
+        when(fileRemoteClient.headObject(STORAGE_PATH, CIPHER_HASH))
                 .thenReturn(Result.success(new StorageObjectHeadVO(
                         true,
-                        "storage/tenant/7/chunk/hash-a",
-                        FILE_HASH,
+                        STORAGE_PATH,
+                        CIPHER_HASH,
                         TENANT_ID,
                         TENANT_ID,
                         "node-a",
                         1024L,
                         "etag-a",
-                        FILE_HASH
+                        CIPHER_HASH
                 )));
+    }
+
+    /**
+     * 构造文件的 active 分片 manifest。
+     */
+    private ChunkManifestView manifest() {
+        return new ChunkManifestView(
+                1000L,
+                FILE_ID,
+                2,
+                "cn.flying.chunk-manifest.v1",
+                FILE_HASH,
+                "manifest-hash",
+                "SHA-256",
+                1024L,
+                1024L,
+                null,
+                "NONE",
+                "S3",
+                List.of(new ChunkManifestChunk(
+                        0,
+                        PLAIN_HASH,
+                        CIPHER_HASH,
+                        1024L,
+                        STORAGE_PATH,
+                        "S3",
+                        "etag-a",
+                        "SHA-256"
+                ))
+        );
     }
 
     /**

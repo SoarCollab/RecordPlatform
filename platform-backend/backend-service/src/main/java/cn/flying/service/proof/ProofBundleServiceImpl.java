@@ -15,9 +15,12 @@ import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.vo.file.ProofBundleVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.StorageObjectHeadVO;
-import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.service.key.CryptoSuiteMetadata;
 import cn.flying.service.key.CryptoSuitePolicyService;
+import cn.flying.service.manifest.ChunkManifestChunk;
+import cn.flying.service.manifest.ChunkManifestService;
+import cn.flying.service.manifest.ChunkManifestView;
+import cn.flying.service.remote.FileRemoteClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.RequiredArgsConstructor;
@@ -41,12 +44,12 @@ public class ProofBundleServiceImpl implements ProofBundleService {
     private static final String PLATFORM = "RecordPlatform";
     private static final String ISSUER_CONTRACT = "P1.2-proof-bundle";
     private static final String COMPLETED_STATUS = "COMPLETED";
-    private static final String S3_PATH_FORMAT = "storage/tenant/%d/chunk/%s";
 
     private final FileMapper fileMapper;
     private final AttestationLeafMapper leafMapper;
     private final AttestationBatchMapper batchMapper;
     private final FileRemoteClient fileRemoteClient;
+    private final ChunkManifestService chunkManifestService;
     private final CryptoSuitePolicyService suitePolicy;
 
     /**
@@ -185,30 +188,54 @@ public class ProofBundleServiceImpl implements ProofBundleService {
     }
 
     /**
-     * Build the storage metadata section from a HEAD lookup.
+     * Build the storage metadata section from the active chunk manifest.
      */
     private ProofBundleVO.StorageEvidence buildStorageEvidence(File file) {
-        String objectPath = buildStoragePath(file);
-        Result<StorageObjectHeadVO> result = fileRemoteClient.headObject(objectPath, file.getFileHash());
+        ChunkManifestView manifest = chunkManifestService.findActiveManifest(null, file.getId())
+                .orElseThrow(() -> new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件缺少分片 manifest"));
+        if (manifest.chunks() == null || manifest.chunks().isEmpty()) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件分片 manifest 为空");
+        }
+        List<ProofBundleVO.StorageObjectEvidence> objects = manifest.chunks().stream()
+                .map(chunk -> buildStorageObjectEvidence(file, chunk))
+                .toList();
+        return new ProofBundleVO.StorageEvidence(objects);
+    }
+
+    /**
+     * Resolve storage object HEAD metadata for one manifest chunk.
+     */
+    private ProofBundleVO.StorageObjectEvidence buildStorageObjectEvidence(File file, ChunkManifestChunk chunk) {
+        Result<StorageObjectHeadVO> result = fileRemoteClient.headObject(chunk.storagePath(), chunk.cipherHash());
         if (result == null || !result.isSuccess()) {
             throw new GeneralException(ResultEnum.FILE_SERVICE_ERROR, "存储元数据查询失败");
         }
         StorageObjectHeadVO head = result.getData();
         if (head == null) {
-            head = StorageObjectHeadVO.missing(objectPath, file.getFileHash(), file.getTenantId());
+            head = StorageObjectHeadVO.missing(chunk.storagePath(), chunk.cipherHash(), file.getTenantId());
         }
-        return new ProofBundleVO.StorageEvidence(List.of(toStorageObjectEvidence(file, objectPath, head)));
+        return toStorageObjectEvidence(file, chunk, head);
     }
 
     /**
      * Convert a storage HEAD response into public proof evidence.
      */
-    private ProofBundleVO.StorageObjectEvidence toStorageObjectEvidence(File file, String objectPath, StorageObjectHeadVO head) {
-        Boolean tenantMatches = head.tenantId() == null || Objects.equals(file.getTenantId(), head.tenantId());
-        Boolean metadataHashMatches = !StringUtils.hasText(head.metadataHash())
-                || file.getFileHash().equalsIgnoreCase(head.metadataHash());
+    private ProofBundleVO.StorageObjectEvidence toStorageObjectEvidence(
+            File file,
+            ChunkManifestChunk chunk,
+            StorageObjectHeadVO head) {
+        Boolean pathTenantMatches = Objects.equals(file.getTenantId(), head.tenantId());
+        Boolean metadataTenantMatches = Objects.equals(file.getTenantId(), head.metadataTenantId());
+        Boolean tenantMatches = pathTenantMatches && metadataTenantMatches;
+        Boolean metadataHashMatches = StringUtils.hasText(head.metadataHash())
+                && chunk.cipherHash().equalsIgnoreCase(head.metadataHash());
         return new ProofBundleVO.StorageObjectEvidence(
-                objectPath,
+                chunk.index(),
+                chunk.storagePath(),
+                chunk.plainHash(),
+                chunk.cipherHash(),
+                chunk.size(),
+                chunk.checksumAlgorithm(),
                 head.exists(),
                 head.nodeName(),
                 head.contentLength(),
@@ -282,8 +309,8 @@ public class ProofBundleServiceImpl implements ProofBundleService {
      */
     private List<String> verificationGuide() {
         return List.of(
-                "Hash the original file content with SHA-256 and compare it to file.fileHash.",
-                "Recompute merkle.leafHash from file.fileHash using verificationPolicy.leafHashRule.",
+                "Split the original file by storage.objects order and compare every chunk SHA-256 with storage.objects[].plainHash.",
+                "Treat file.fileHash as the chain record hash and recompute merkle.leafHash from it using verificationPolicy.leafHashRule.",
                 "Apply merkle.proofPath with verificationPolicy.parentHashRule until the computed value equals merkle.merkleRoot.",
                 "Compare merkle.merkleRoot with the batch root recorded by chain.batchTransactionHash or chain.batchChainFileHash.",
                 "Inspect storage.objects metadata for object existence and hash or tenant mismatches."
@@ -321,13 +348,6 @@ public class ProofBundleServiceImpl implements ProofBundleService {
         }
         Object chunkCount = params == null ? null : params.get("chunkCount");
         return chunkCount instanceof Number number ? number.intValue() : null;
-    }
-
-    /**
-     * Build the logical storage path used by integrity and storage HEAD checks.
-     */
-    private String buildStoragePath(File file) {
-        return String.format(S3_PATH_FORMAT, file.getTenantId(), file.getFileHash());
     }
 
     /**

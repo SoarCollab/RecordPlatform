@@ -36,7 +36,8 @@ class ProofBundleVerifierImplTest {
 
         assertThat(result.valid()).isTrue();
         assertThat(result.issues()).isEmpty();
-        assertThat(result.computedFileHash()).isEqualTo(bundle.file().fileHash());
+        assertThat(result.fileHash()).isEqualTo(bundle.file().fileHash());
+        assertThat(result.computedFileHash()).isEqualTo(sha256Hex(originalFile));
         assertThat(result.computedLeafHash()).isEqualTo(bundle.merkle().leafHash());
         assertThat(result.computedMerkleRoot()).isEqualTo(bundle.merkle().merkleRoot());
         assertThat(result.batchTransactionHash()).isEqualTo("tx-batch");
@@ -277,7 +278,9 @@ class ProofBundleVerifierImplTest {
      * 构造与原始文件内容匹配的证明包。
      */
     private ProofBundleVO validBundle(byte[] originalFile) {
-        String fileHash = sha256Hex(originalFile);
+        String fileHash = "chain-record-hash";
+        String plainHash = "sha256:" + sha256Hex(originalFile);
+        String cipherHash = "sha256:" + sha256Hex(bytes("cipher"));
         String siblingHash = sha256Hex(bytes("sibling"));
         MerkleTreeResult tree = merkleTreeService.buildTree(List.of(
                 new MerkleLeafInput(1L, fileHash),
@@ -310,12 +313,17 @@ class ProofBundleVerifierImplTest {
                         new Date(1710000000000L)
                 ),
                 new ProofBundleVO.StorageEvidence(List.of(new ProofBundleVO.StorageObjectEvidence(
-                        "storage/tenant/7/chunk/" + fileHash,
+                        0,
+                        "storage/tenant/7/chunk/" + cipherHash,
+                        plainHash,
+                        cipherHash,
+                        (long) originalFile.length,
+                        "SHA-256",
                         true,
                         "node-a",
                         (long) originalFile.length,
                         "etag-a",
-                        fileHash,
+                        cipherHash,
                         true,
                         true
                 ))),

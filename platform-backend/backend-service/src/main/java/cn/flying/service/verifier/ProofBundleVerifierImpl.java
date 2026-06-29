@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Default offline verifier for proof-bundle.v1 Merkle proof bundles.
@@ -66,7 +67,8 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
         ProofBundleVO.IssuerEvidence issuer = bundle.issuer();
 
         validateContract(bundle, issues);
-        validateFileHash(file, computedFileHash, issues);
+        validateFileEvidence(file, issues);
+        validateOriginalContent(originalFile, bundle.storage(), issues);
         String computedLeafHash = validateMerkleLeaf(file, merkle, issues);
         String computedMerkleRoot = validateMerklePath(merkle, computedLeafHash, issues);
         validateChainEvidence(chain, merkle, issues);
@@ -138,10 +140,9 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
     }
 
     /**
-     * Validates the local file hash against bundle file evidence.
+     * Validates required file evidence fields used by chain and Merkle checks.
      */
-    private void validateFileHash(ProofBundleVO.FileEvidence file, String computedFileHash,
-                                  List<ProofVerificationIssue> issues) {
+    private void validateFileEvidence(ProofBundleVO.FileEvidence file, List<ProofVerificationIssue> issues) {
         if (file == null) {
             issues.add(missing("file", "缺少文件证明信息"));
             return;
@@ -150,14 +151,117 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
             issues.add(missing("file.fileHash", "缺少文件哈希"));
             return;
         }
-        if (StringUtils.hasText(computedFileHash) && !file.fileHash().equalsIgnoreCase(computedFileHash)) {
+    }
+
+    /**
+     * Validates original bytes against ordered chunk hashes exported in storage evidence.
+     */
+    private void validateOriginalContent(byte[] originalFile,
+                                         ProofBundleVO.StorageEvidence storage,
+                                         List<ProofVerificationIssue> issues) {
+        if (originalFile == null) {
+            return;
+        }
+        if (storage == null || CollectionUtils.isEmpty(storage.objects())) {
+            issues.add(missing("storage.objects", "缺少存储分片证明信息"));
+            return;
+        }
+
+        long offset = 0;
+        List<ProofBundleVO.StorageObjectEvidence> objects = storage.objects();
+        for (int i = 0; i < objects.size(); i++) {
+            ProofBundleVO.StorageObjectEvidence object = objects.get(i);
+            String fieldPrefix = "storage.objects[" + i + "]";
+            if (object == null) {
+                issues.add(missing(fieldPrefix, "缺少存储分片证明"));
+                return;
+            }
+            if (!validateChunkIndex(object, i, fieldPrefix, issues)
+                    || !validateChunkHashFields(object, fieldPrefix, issues)) {
+                return;
+            }
+
+            long chunkSize = object.size();
+            if (offset + chunkSize > originalFile.length) {
+                issues.add(issue(
+                        ProofVerificationCode.FILE_HASH_MISMATCH,
+                        ProofVerificationSeverity.ERROR,
+                        fieldPrefix + ".size",
+                        "证明包分片长度超过原始文件长度"
+                ));
+                return;
+            }
+
+            String computedChunkHash = sha256Hex(originalFile, Math.toIntExact(offset), Math.toIntExact(chunkSize));
+            if (!computedChunkHash.equalsIgnoreCase(normalizeSha256(object.plainHash()))) {
+                issues.add(issue(
+                        ProofVerificationCode.FILE_HASH_MISMATCH,
+                        ProofVerificationSeverity.ERROR,
+                        fieldPrefix + ".plainHash",
+                        "原始文件分片 SHA-256 与证明包不一致"
+                ));
+                return;
+            }
+            offset += chunkSize;
+        }
+
+        if (offset != originalFile.length) {
             issues.add(issue(
                     ProofVerificationCode.FILE_HASH_MISMATCH,
                     ProofVerificationSeverity.ERROR,
-                    "file.fileHash",
-                    "原始文件 SHA-256 与证明包文件哈希不一致"
+                    "storage.objects",
+                    "证明包分片总长度与原始文件长度不一致"
             ));
         }
+    }
+
+    /**
+     * Validates that the chunk order is explicit and contiguous.
+     */
+    private boolean validateChunkIndex(ProofBundleVO.StorageObjectEvidence object,
+                                       int expectedIndex,
+                                       String fieldPrefix,
+                                       List<ProofVerificationIssue> issues) {
+        if (object.index() == null) {
+            issues.add(missing(fieldPrefix + ".index", "缺少分片序号"));
+            return false;
+        }
+        if (object.index() != expectedIndex) {
+            issues.add(issue(
+                    ProofVerificationCode.FILE_HASH_MISMATCH,
+                    ProofVerificationSeverity.ERROR,
+                    fieldPrefix + ".index",
+                    "证明包分片序号必须从 0 连续递增"
+            ));
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Validates chunk fields required for local original-file verification.
+     */
+    private boolean validateChunkHashFields(ProofBundleVO.StorageObjectEvidence object,
+                                            String fieldPrefix,
+                                            List<ProofVerificationIssue> issues) {
+        if (object.size() == null || object.size() < 0) {
+            issues.add(missing(fieldPrefix + ".size", "缺少有效分片长度"));
+            return false;
+        }
+        if (!StringUtils.hasText(object.plainHash())) {
+            issues.add(missing(fieldPrefix + ".plainHash", "缺少明文分片哈希"));
+            return false;
+        }
+        if (object.size() > Integer.MAX_VALUE) {
+            issues.add(issue(
+                    ProofVerificationCode.FILE_HASH_MISMATCH,
+                    ProofVerificationSeverity.ERROR,
+                    fieldPrefix + ".size",
+                    "单个证明分片超过本地验证器支持的字节数组长度"
+            ));
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -340,7 +444,7 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
                         ProofVerificationCode.STORAGE_HASH_MISMATCH,
                         ProofVerificationSeverity.ERROR,
                         fieldPrefix + ".metadataHashMatches",
-                        "存储对象元数据哈希与文件哈希不一致"
+                        "存储对象元数据哈希与密文分片哈希不一致"
                 ));
             }
             if (Boolean.FALSE.equals(object.tenantMatches())) {
@@ -349,6 +453,16 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
                         ProofVerificationSeverity.ERROR,
                         fieldPrefix + ".tenantMatches",
                         "存储对象租户元数据不匹配"
+                ));
+            }
+            if (object.size() != null
+                    && object.contentLength() != null
+                    && !Objects.equals(object.size(), object.contentLength())) {
+                issues.add(issue(
+                        ProofVerificationCode.STORAGE_HASH_MISMATCH,
+                        ProofVerificationSeverity.ERROR,
+                        fieldPrefix + ".contentLength",
+                        "存储对象长度与 manifest 分片长度不一致"
                 ));
             }
         }
@@ -465,11 +579,30 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
      * Calculates lowercase SHA-256 hex for file bytes.
      */
     private String sha256Hex(byte[] value) {
+        return sha256Hex(value, 0, value.length);
+    }
+
+    /**
+     * Calculates lowercase SHA-256 hex for a byte-array slice.
+     */
+    private String sha256Hex(byte[] value, int offset, int length) {
         try {
             MessageDigest digest = MessageDigest.getInstance(DIGEST_ALGORITHM);
-            return HexFormat.of().formatHex(digest.digest(value));
+            digest.update(value, offset, length);
+            return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 digest is not available", e);
         }
+    }
+
+    /**
+     * Normalizes optional algorithm-prefixed SHA-256 strings from upload metadata.
+     */
+    private String normalizeSha256(String value) {
+        String trimmed = value == null ? "" : value.trim();
+        if (trimmed.regionMatches(true, 0, "sha256:", 0, "sha256:".length())) {
+            return trimmed.substring("sha256:".length());
+        }
+        return trimmed;
     }
 }

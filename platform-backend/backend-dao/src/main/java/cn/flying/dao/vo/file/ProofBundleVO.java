@@ -89,8 +89,18 @@ public record ProofBundleVO(
      * One storage object metadata entry.
      */
     public record StorageObjectEvidence(
+            @Schema(description = "分片序号")
+            Integer index,
             @Schema(description = "逻辑对象路径")
             String objectPath,
+            @Schema(description = "明文分片 SHA-256")
+            String plainHash,
+            @Schema(description = "密文分片哈希")
+            String cipherHash,
+            @Schema(description = "分片长度")
+            Long size,
+            @Schema(description = "校验算法")
+            String checksumAlgorithm,
             @Schema(description = "对象是否存在")
             boolean exists,
             @Schema(description = "存储节点名")
