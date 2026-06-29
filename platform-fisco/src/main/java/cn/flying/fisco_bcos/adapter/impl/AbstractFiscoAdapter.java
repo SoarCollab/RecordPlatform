@@ -13,6 +13,7 @@ import org.fisco.bcos.sdk.v3.model.TransactionReceipt;
 import org.fisco.bcos.sdk.v3.transaction.model.dto.CallResponse;
 import org.fisco.bcos.sdk.v3.transaction.model.dto.TransactionResponse;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -93,6 +94,72 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
         } catch (Exception e) {
             log.error("{} [storeFile] 异常", getLogPrefix(), e);
             throw new ChainException(getChainType(), "storeFile", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Stores a Merkle batch attestation through the dedicated Sharing contract method.
+     */
+    @Override
+    public ChainReceipt storeAttestationBatch(
+            Long tenantId,
+            Long batchId,
+            String batchNo,
+            String proofAlgorithm,
+            String merkleRoot,
+            Integer leafCount
+    ) {
+        try {
+            byte[] merkleRootBytes = toBytes32Hash(merkleRoot, "storeAttestationBatch");
+            TransactionResponse response = getSharingService().storeAttestationBatch(
+                    new SharingStoreAttestationBatchInputBO(
+                            String.valueOf(tenantId),
+                            BigInteger.valueOf(batchId),
+                            batchNo,
+                            proofAlgorithm,
+                            merkleRootBytes,
+                            BigInteger.valueOf(leafCount)));
+
+            if (response == null) {
+                throw new ChainException(getChainType(), "storeAttestationBatch", "Response is null");
+            }
+
+            TransactionReceipt receipt = response.getTransactionReceipt();
+            if (receipt == null || receipt.getTransactionHash() == null) {
+                throw new ChainException(getChainType(), "storeAttestationBatch", "Transaction receipt is null");
+            }
+
+            String transactionHash = normalizeHash(receipt.getTransactionHash());
+
+            if (response.getReturnCode() != 0) {
+                log.warn("{} [storeAttestationBatch] 合约返回错误: {}", getLogPrefix(), response.getReturnMessage());
+                throw new ChainException(getChainType(), "storeAttestationBatch", response.getReturnMessage());
+            }
+
+            if (!(response.getReturnObject() instanceof List<?> returnList) || returnList.isEmpty()) {
+                throw new ChainException(getChainType(), "storeAttestationBatch", "Invalid return value");
+            }
+
+            Optional<String> batchRootHashOpt = safeGet(returnList, 0, byte[].class)
+                    .map(Convert::bytesToHex)
+                    .map(this::normalizeHash);
+
+            if (batchRootHashOpt.isEmpty()) {
+                throw new ChainException(getChainType(), "storeAttestationBatch", "Failed to extract batchRootHash");
+            }
+
+            return ChainReceipt.builder()
+                    .transactionHash(transactionHash)
+                    .fileHash(batchRootHashOpt.get())
+                    .blockNumber(receipt.getBlockNumber().longValue())
+                    .success(true)
+                    .build();
+
+        } catch (ChainException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("{} [storeAttestationBatch] 异常", getLogPrefix(), e);
+            throw new ChainException(getChainType(), "storeAttestationBatch", e.getMessage(), e);
         }
     }
 
@@ -539,5 +606,16 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
     protected String normalizeHash(String hash) {
         if (hash == null) return "";
         return hash.startsWith("0x") || hash.startsWith("0X") ? hash.substring(2) : hash;
+    }
+
+    /**
+     * Converts a hexadecimal hash into a Solidity bytes32 value.
+     */
+    protected byte[] toBytes32Hash(String hash, String operation) {
+        byte[] bytes = Convert.hexTobyte(hash);
+        if (bytes.length != 32) {
+            throw new ChainException(getChainType(), operation, "Hash must be 32 bytes");
+        }
+        return bytes;
     }
 }

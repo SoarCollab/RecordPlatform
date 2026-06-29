@@ -21,6 +21,7 @@ import cn.flying.fisco_bcos.model.bo.SharingGetSharedFilesInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingGetUserFilesInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingGetUserShareCodesInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingShareFilesInputBO;
+import cn.flying.fisco_bcos.model.bo.SharingStoreAttestationBatchInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingStoreFileInputBO;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -86,6 +87,17 @@ public class SharingService {
 
   public TransactionResponse storeFile(SharingStoreFileInputBO input) throws Exception {
     return this.txProcessor.sendTransactionAndGetResponse(this.address, ContractConstants.SharingAbi, "storeFile", input.toArgs());
+  }
+
+  /**
+   * Stores a Merkle batch attestation through the dedicated Sharing contract method.
+   */
+  public TransactionResponse storeAttestationBatch(SharingStoreAttestationBatchInputBO input) throws Exception {
+    return this.txProcessor.sendTransactionAndGetResponse(
+        this.address,
+        ContractConstants.SharingAbi,
+        "storeAttestationBatch",
+        input.toArgs());
   }
 
   public TotalTransactionCount getCurrentBlockChainMessage() {

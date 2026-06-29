@@ -41,6 +41,27 @@ public interface BlockChainAdapter {
     ChainReceipt storeFile(String uploader, String fileName, String content, String param);
 
     /**
+     * 存储 Merkle 批量存证根到区块链。
+     *
+     * @param tenantId       租户 ID
+     * @param batchId        批量存证 ID
+     * @param batchNo        批量存证编号
+     * @param proofAlgorithm Merkle 证明算法
+     * @param merkleRoot     Merkle 根哈希
+     * @param leafCount      批次叶子数量
+     * @return 交易回执，包含 transactionHash 和 batchRootHash
+     * @throws ChainException 链操作异常
+     */
+    ChainReceipt storeAttestationBatch(
+            Long tenantId,
+            Long batchId,
+            String batchNo,
+            String proofAlgorithm,
+            String merkleRoot,
+            Integer leafCount
+    );
+
+    /**
      * 获取用户的所有文件列表
      *
      * @param uploader 上传者标识

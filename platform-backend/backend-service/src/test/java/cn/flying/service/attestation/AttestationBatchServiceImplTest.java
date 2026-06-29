@@ -12,7 +12,8 @@ import cn.flying.dao.mapper.AttestationBatchMapper;
 import cn.flying.dao.mapper.AttestationLeafMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.platformapi.constant.Result;
-import cn.flying.platformapi.request.StoreFileResponse;
+import cn.flying.platformapi.request.StoreAttestationBatchRequest;
+import cn.flying.platformapi.request.StoreAttestationBatchResponse;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.test.builders.BuilderResetExtension;
 import cn.flying.test.builders.FileTestBuilder;
@@ -88,8 +89,8 @@ class AttestationBatchServiceImplTest {
         File second = successfulFile(12L, "hash-a");
         when(fileMapper.selectBatchIds(List.of(11L, 12L))).thenReturn(List.of(first, second));
         when(snowflakeIdGenerator.nextId()).thenReturn(900L, 901L, 902L);
-        when(fileRemoteClient.storeAttestationBatchRoot(any(AttestationBatchRootPayload.class)))
-                .thenReturn(Result.success(new StoreFileResponse("tx-root", "chain-root")));
+        when(fileRemoteClient.storeAttestationBatch(any(StoreAttestationBatchRequest.class)))
+                .thenReturn(Result.success(new StoreAttestationBatchResponse("tx-root", "root-hash")));
         doAnswer(invocation -> {
             AttestationBatch batch = invocation.getArgument(0);
             assertThat(batch.getStatus()).isEqualTo("CHAIN_PENDING");
@@ -101,7 +102,7 @@ class AttestationBatchServiceImplTest {
         assertThat(batch.getId()).isEqualTo(900L);
         assertThat(batch.getStatus()).isEqualTo("COMPLETED");
         assertThat(batch.getChainTransactionHash()).isEqualTo("tx-root");
-        assertThat(batch.getChainFileHash()).isEqualTo("chain-root");
+        assertThat(batch.getChainFileHash()).isEqualTo("root-hash");
 
         ArgumentCaptor<AttestationLeaf> leafCaptor = ArgumentCaptor.forClass(AttestationLeaf.class);
         verify(leafMapper, times(2)).insert(leafCaptor.capture());
@@ -118,13 +119,14 @@ class AttestationBatchServiceImplTest {
                     assertThat(leaf.getProofAlgorithm()).isEqualTo(MerkleTreeService.PROOF_ALGORITHM);
                 });
 
-        ArgumentCaptor<AttestationBatchRootPayload> payloadCaptor =
-                ArgumentCaptor.forClass(AttestationBatchRootPayload.class);
-        verify(fileRemoteClient).storeAttestationBatchRoot(payloadCaptor.capture());
-        assertThat(payloadCaptor.getValue().tenantId()).isEqualTo(TENANT_ID);
-        assertThat(payloadCaptor.getValue().batchId()).isEqualTo(900L);
-        assertThat(payloadCaptor.getValue().leafCount()).isEqualTo(2);
-        assertThat(payloadCaptor.getValue().merkleRoot()).isEqualTo(batch.getMerkleRoot());
+        ArgumentCaptor<StoreAttestationBatchRequest> requestCaptor =
+                ArgumentCaptor.forClass(StoreAttestationBatchRequest.class);
+        verify(fileRemoteClient).storeAttestationBatch(requestCaptor.capture());
+        assertThat(requestCaptor.getValue().tenantId()).isEqualTo(TENANT_ID);
+        assertThat(requestCaptor.getValue().batchId()).isEqualTo(900L);
+        assertThat(requestCaptor.getValue().batchNo()).isEqualTo("MB-900");
+        assertThat(requestCaptor.getValue().leafCount()).isEqualTo(2);
+        assertThat(requestCaptor.getValue().merkleRoot()).isEqualTo(batch.getMerkleRoot());
         verify(batchMapper).updateById(batch);
     }
 
@@ -136,7 +138,7 @@ class AttestationBatchServiceImplTest {
         File file = successfulFile(11L, "hash-a");
         when(fileMapper.selectBatchIds(List.of(11L))).thenReturn(List.of(file));
         when(snowflakeIdGenerator.nextId()).thenReturn(900L, 901L);
-        when(fileRemoteClient.storeAttestationBatchRoot(any(AttestationBatchRootPayload.class)))
+        when(fileRemoteClient.storeAttestationBatch(any(StoreAttestationBatchRequest.class)))
                 .thenReturn(Result.success(null));
 
         assertThatThrownBy(() -> service.createBatch(USER_ID, List.of(11L)))
@@ -161,7 +163,7 @@ class AttestationBatchServiceImplTest {
                         .isEqualTo(ResultEnum.FILE_RECORD_ERROR));
 
         verify(batchMapper, never()).insert(any(AttestationBatch.class));
-        verify(fileRemoteClient, never()).storeAttestationBatchRoot(any());
+        verify(fileRemoteClient, never()).storeAttestationBatch(any());
     }
 
     private File successfulFile(Long id, String hash) {
