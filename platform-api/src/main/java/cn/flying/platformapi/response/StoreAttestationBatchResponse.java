@@ -1,4 +1,4 @@
-package cn.flying.platformapi.request;
+package cn.flying.platformapi.response;
 
 /**
  * Dedicated blockchain response for a Merkle attestation batch write.

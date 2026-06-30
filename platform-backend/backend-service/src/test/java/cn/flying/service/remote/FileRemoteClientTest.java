@@ -7,7 +7,7 @@ import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.request.GetShareInfoRequest;
 import cn.flying.platformapi.request.GetUserShareCodesRequest;
 import cn.flying.platformapi.request.StoreAttestationBatchRequest;
-import cn.flying.platformapi.request.StoreAttestationBatchResponse;
+import cn.flying.platformapi.response.StoreAttestationBatchResponse;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.BlockChainMessage;
