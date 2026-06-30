@@ -306,12 +306,18 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
 
         List<DirectMultipartCompletedPartVO> completedParts = new ArrayList<>(request.parts().size());
+        Long tenantId = TenantContextUtil.getTenantIdOrDefault();
         for (DirectMultipartCompletedPart part : request.parts()) {
-            if (!isValidCompletedDirectPart(part)) {
+            TrustedDirectUploadPart trustedPart;
+            try {
+                trustedPart = toTrustedDirectUploadPart(request.sessionId(), part, tenantId);
+            } catch (IllegalArgumentException e) {
+                log.warn("直传分片完成请求参数无效: sessionId={}, partIndex={}, reason={}",
+                        request.sessionId(), part != null ? part.partIndex() : null, e.getMessage());
                 return Result.error(ResultEnum.PARAM_IS_INVALID, null);
             }
             try {
-                completedParts.add(promoteDirectUploadPart(part));
+                completedParts.add(promoteDirectUploadPart(trustedPart));
             } catch (Exception e) {
                 log.error("直传分片校验或晋级失败: sessionId={}, partIndex={}",
                         request.sessionId(), part != null ? part.partIndex() : null, e);
@@ -328,18 +334,23 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             return Result.success(true);
         }
 
+        Long tenantId = TenantContextUtil.getTenantIdOrDefault();
         for (DirectMultipartCompletedPart part : request.parts()) {
-            if (part == null || part.nodeName() == null || part.nodeName().isBlank()
-                    || part.stagingObjectName() == null || part.stagingObjectName().isBlank()) {
-                continue;
+            TrustedDirectUploadPart trustedPart;
+            try {
+                trustedPart = toTrustedDirectUploadPart(request.sessionId(), part, tenantId);
+            } catch (IllegalArgumentException e) {
+                log.warn("直传分片终止请求参数无效: sessionId={}, partIndex={}, reason={}",
+                        request.sessionId(), part != null ? part.partIndex() : null, e.getMessage());
+                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
             }
             try {
-                deleteFromNode(part.nodeName(), part.stagingObjectName());
+                deleteFromNode(trustedPart.nodeName(), trustedPart.stagingObjectName());
             } catch (Exception e) {
                 log.warn("清理直传 staging 分片失败: sessionId={}, partIndex={}, node={}",
-                        request.sessionId(), part.partIndex(), part.nodeName(), e);
+                        request.sessionId(), part.partIndex(), trustedPart.nodeName(), e);
             }
-            deleteDirectFinalObjectCandidates(request.sessionId(), part);
+            deleteDirectFinalObjectCandidates(request.sessionId(), trustedPart);
         }
         return Result.success(true);
     }
@@ -347,21 +358,8 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     /**
      * Removes any final replicas that may have been promoted before a direct-upload session was aborted.
      */
-    private void deleteDirectFinalObjectCandidates(String sessionId, DirectMultipartCompletedPart part) {
-        if (part.finalObjectName() == null || part.finalObjectName().isBlank()
-                || part.cipherHash() == null || part.cipherHash().isBlank()) {
-            return;
-        }
-        Set<String> candidateNodes = new LinkedHashSet<>();
-        try {
-            candidateNodes.addAll(faultDomainManager.getTargetNodes(part.cipherHash()));
-        } catch (Exception e) {
-            log.warn("获取直传 final 分片候选节点失败: sessionId={}, partIndex={}", sessionId, part.partIndex(), e);
-        }
-        if (candidateNodes.isEmpty() && part.nodeName() != null && !part.nodeName().isBlank()) {
-            candidateNodes.add(part.nodeName());
-        }
-        for (String nodeName : candidateNodes) {
+    private void deleteDirectFinalObjectCandidates(String sessionId, TrustedDirectUploadPart part) {
+        for (String nodeName : part.targetNodes()) {
             try {
                 deleteFromNode(nodeName, part.finalObjectName());
             } catch (Exception e) {
@@ -387,8 +385,9 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
 
         ensureBucketExists(client, nodeName, nodeName);
 
+        String directObjectName = normalizeHash(part.cipherHash());
         String stagingObjectName = buildDirectUploadStagingObjectName(tenantId, request.sessionId(), part.partIndex());
-        String finalObjectName = TenantContextUtil.buildTenantObjectPath(tenantId, part.objectName());
+        String finalObjectName = buildDirectUploadFinalObjectName(tenantId, directObjectName);
         PutObjectRequest putObjectRequest = PutObjectRequest.builder()
                 .bucket(nodeName)
                 .key(stagingObjectName)
@@ -405,7 +404,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 part.partIndex(),
                 presignedRequest.url().toString(),
                 expiresAt,
-                TenantContextUtil.buildChunkPath(part.objectName()),
+                buildDirectUploadStoragePath(tenantId, directObjectName),
                 stagingObjectName,
                 finalObjectName,
                 nodeName,
@@ -416,7 +415,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     /**
      * Verifies a staging object and promotes it to enough final replicas to satisfy write quorum.
      */
-    private DirectMultipartCompletedPartVO promoteDirectUploadPart(DirectMultipartCompletedPart part) {
+    private DirectMultipartCompletedPartVO promoteDirectUploadPart(TrustedDirectUploadPart part) {
         S3Client client = clientManager.getClient(part.nodeName());
         if (client == null) {
             throw new IllegalStateException("S3 client is unavailable for node " + part.nodeName());
@@ -451,8 +450,8 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
 
         byte[] stagingBytes = readAndVerifyDirectUploadStagingObject(client, part, stagingHead);
-        Long tenantId = TenantContextUtil.getTenantIdOrDefault();
-        List<String> targetNodes = resolveDirectUploadTargetNodes(part.cipherHash());
+        Long tenantId = part.tenantId();
+        List<String> targetNodes = part.targetNodes();
         List<CompletableFuture<String>> uploadFutures = new ArrayList<>(targetNodes.size());
         for (String node : targetNodes) {
             uploadFutures.add(uploadDirectFinalObjectAsync(node, part.finalObjectName(), stagingBytes, part, tenantId));
@@ -500,9 +499,8 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     /**
      * Completes a retry after the original request already promoted the staging object to final replicas.
      */
-    private DirectMultipartCompletedPartVO completeAlreadyPromotedDirectUploadPart(DirectMultipartCompletedPart part) {
-        Long tenantId = TenantContextUtil.getTenantIdOrDefault();
-        for (String nodeName : resolveDirectUploadTargetNodes(part.cipherHash())) {
+    private DirectMultipartCompletedPartVO completeAlreadyPromotedDirectUploadPart(TrustedDirectUploadPart part) {
+        for (String nodeName : part.targetNodes()) {
             S3Client finalClient = clientManager.getClient(nodeName);
             if (finalClient == null) {
                 continue;
@@ -512,7 +510,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                         .bucket(nodeName)
                         .key(part.finalObjectName())
                         .build());
-                validateDirectUploadFinalObject(part, finalHead, tenantId);
+                validateDirectUploadFinalObject(part, finalHead, part.tenantId());
                 return toDirectMultipartCompletedPartVO(part, finalHead);
             } catch (NoSuchKeyException e) {
                 log.debug("直传 final 分片不存在: partIndex={}, node={}", part.partIndex(), nodeName);
@@ -530,7 +528,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     /**
      * Validates the already-promoted final object against backend-trusted direct-upload metadata.
      */
-    private void validateDirectUploadFinalObject(DirectMultipartCompletedPart part,
+    private void validateDirectUploadFinalObject(TrustedDirectUploadPart part,
                                                  HeadObjectResponse finalHead,
                                                  Long tenantId) {
         if (finalHead.contentLength() == null || finalHead.contentLength() != part.size()) {
@@ -550,7 +548,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     /**
      * Converts verified final-object metadata into the direct-upload completion response part.
      */
-    private DirectMultipartCompletedPartVO toDirectMultipartCompletedPartVO(DirectMultipartCompletedPart part,
+    private DirectMultipartCompletedPartVO toDirectMultipartCompletedPartVO(TrustedDirectUploadPart part,
                                                                             HeadObjectResponse finalHead) {
         return new DirectMultipartCompletedPartVO(
                 part.partIndex(),
@@ -567,7 +565,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      * Reads the uploaded staging object once and verifies its checksum against backend-trusted metadata.
      */
     private byte[] readAndVerifyDirectUploadStagingObject(S3Client client,
-                                                          DirectMultipartCompletedPart part,
+                                                          TrustedDirectUploadPart part,
                                                           HeadObjectResponse stagingHead) {
         if (!CHECKSUM_ALGORITHM_SHA256.equalsIgnoreCase(normalizeChecksumAlgorithm(part.checksumAlgorithm()))) {
             throw new IllegalArgumentException("unsupported direct-upload checksum algorithm");
@@ -654,7 +652,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     private CompletableFuture<String> uploadDirectFinalObjectAsync(String nodeName,
                                                                    String finalObjectName,
                                                                    byte[] data,
-                                                                   DirectMultipartCompletedPart part,
+                                                                   TrustedDirectUploadPart part,
                                                                    Long tenantId) {
         return CompletableFuture.supplyAsync(() -> {
             if (!s3Monitor.isNodeOnline(nodeName)) {
@@ -698,18 +696,34 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     }
 
     /**
+     * Builds the tenant-scoped final object key for a verified direct-upload chunk.
+     */
+    private String buildDirectUploadFinalObjectName(Long tenantId, String cipherHash) {
+        return TenantContextUtil.buildTenantObjectPath(tenantId, normalizeHash(cipherHash));
+    }
+
+    /**
+     * Builds the logical chunk path returned to backend manifests for a direct-upload chunk.
+     */
+    private String buildDirectUploadStoragePath(Long tenantId, String cipherHash) {
+        return "storage/tenant/" + tenantId + "/chunk/" + normalizeHash(cipherHash);
+    }
+
+    /**
      * Validates one requested direct-upload part.
      */
     private boolean isValidDirectUploadPart(DirectMultipartUploadPartRequest part) {
         return part != null
                 && part.partIndex() >= 0
                 && part.size() > 0
+                && part.size() <= MAX_IN_MEMORY_FILE_SIZE
                 && part.objectName() != null
                 && !part.objectName().isBlank()
-                && part.plainHash() != null
-                && !part.plainHash().isBlank()
-                && part.cipherHash() != null
-                && !part.cipherHash().isBlank()
+                && isSha256Hash(part.objectName())
+                && isSha256Hash(part.plainHash())
+                && isSha256Hash(part.cipherHash())
+                && CHECKSUM_ALGORITHM_SHA256.equalsIgnoreCase(normalizeChecksumAlgorithm(part.checksumAlgorithm()))
+                && normalizeHash(part.objectName()).equals(normalizeHash(part.cipherHash()))
                 && normalizeHash(part.plainHash()).equals(normalizeHash(part.cipherHash()));
     }
 
@@ -728,10 +742,111 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 && !part.finalObjectName().isBlank()
                 && part.storagePath() != null
                 && !part.storagePath().isBlank()
-                && part.plainHash() != null
-                && !part.plainHash().isBlank()
-                && part.cipherHash() != null
-                && !part.cipherHash().isBlank();
+                && isSha256Hash(part.plainHash())
+                && isSha256Hash(part.cipherHash())
+                && CHECKSUM_ALGORITHM_SHA256.equalsIgnoreCase(normalizeChecksumAlgorithm(part.checksumAlgorithm()))
+                && normalizeHash(part.plainHash()).equals(normalizeHash(part.cipherHash()))
+                && part.size() <= MAX_IN_MEMORY_FILE_SIZE;
+    }
+
+    /**
+     * Rebuilds tenant/session-owned storage metadata and rejects client-supplied object keys that do not match it.
+     */
+    private TrustedDirectUploadPart toTrustedDirectUploadPart(
+            String sessionId,
+            DirectMultipartCompletedPart part,
+            Long tenantId
+    ) {
+        if (sessionId == null || sessionId.isBlank() || !isValidCompletedDirectPart(part)) {
+            throw new IllegalArgumentException("invalid direct-upload part metadata");
+        }
+        String cipherHash = normalizeHash(part.cipherHash());
+        String expectedStagingObjectName = buildDirectUploadStagingObjectName(tenantId, sessionId, part.partIndex());
+        String expectedFinalObjectName = buildDirectUploadFinalObjectName(tenantId, cipherHash);
+        String expectedStoragePath = buildDirectUploadStoragePath(tenantId, cipherHash);
+        if (!expectedStagingObjectName.equals(part.stagingObjectName())
+                || !expectedFinalObjectName.equals(part.finalObjectName())
+                || !expectedStoragePath.equals(part.storagePath())) {
+            throw new IllegalArgumentException("direct-upload object paths do not match the session");
+        }
+
+        List<String> targetNodes = resolveDirectUploadTargetNodes(cipherHash);
+        if (!targetNodes.contains(part.nodeName())) {
+            throw new IllegalArgumentException("direct-upload node is not assigned to the chunk hash");
+        }
+        return new TrustedDirectUploadPart(
+                part,
+                tenantId,
+                expectedStagingObjectName,
+                expectedFinalObjectName,
+                expectedStoragePath,
+                targetNodes
+        );
+    }
+
+    /**
+     * Validates the canonical sha256-prefixed hash format used by direct-upload completion.
+     */
+    private boolean isSha256Hash(String value) {
+        String normalized = normalizeHash(value);
+        if (!normalized.startsWith(HASH_PREFIX_SHA256)) {
+            return false;
+        }
+        String hex = normalized.substring(HASH_PREFIX_SHA256.length());
+        if (hex.length() != 64) {
+            return false;
+        }
+        for (int i = 0; i < hex.length(); i++) {
+            char c = hex.charAt(i);
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Carries direct-upload metadata after it has been rebound to the current tenant/session.
+     */
+    private record TrustedDirectUploadPart(
+            DirectMultipartCompletedPart source,
+            Long tenantId,
+            String stagingObjectName,
+            String finalObjectName,
+            String storagePath,
+            List<String> targetNodes
+    ) {
+        private TrustedDirectUploadPart {
+            targetNodes = List.copyOf(targetNodes);
+        }
+
+        private int partIndex() {
+            return source.partIndex();
+        }
+
+        private String nodeName() {
+            return source.nodeName();
+        }
+
+        private long size() {
+            return source.size();
+        }
+
+        private String eTag() {
+            return source.eTag();
+        }
+
+        private String plainHash() {
+            return source.plainHash();
+        }
+
+        private String cipherHash() {
+            return source.cipherHash();
+        }
+
+        private String checksumAlgorithm() {
+            return source.checksumAlgorithm();
+        }
     }
 
     /**
@@ -1088,7 +1203,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     /**
      * Builds final-object metadata for verified direct-upload chunks.
      */
-    private Map<String, String> buildDirectUploadObjectMetadata(DirectMultipartCompletedPart part, Long tenantId) {
+    private Map<String, String> buildDirectUploadObjectMetadata(TrustedDirectUploadPart part, Long tenantId) {
         Map<String, String> metadata = buildObjectMetadata(part.cipherHash(), tenantId);
         metadata.put(METADATA_CHECKSUM_ALGORITHM, normalizeChecksumAlgorithm(part.checksumAlgorithm()));
         metadata.put(METADATA_PLAIN_HASH, part.plainHash());
@@ -1527,9 +1642,15 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             log.warn("在节点 '{}' 上找不到对象 '{}'，无法读取对象元数据", nodeName, objectName);
             return new HeadLookupResult(HeadLookupStatus.MISSING, null);
         } catch (S3Exception e) {
+            if (isMissingObject(e)) {
+                log.warn("在节点 '{}' 上找不到对象 '{}'，无法读取对象元数据", nodeName, objectName);
+                return new HeadLookupResult(HeadLookupStatus.MISSING, null);
+            }
+            var details = e.awsErrorDetails();
             log.error("从节点 '{}' 获取对象 '{}' 元数据时出现S3错误：{} (errorCode: {})",
-                    nodeName, objectName, e.awsErrorDetails().errorMessage(),
-                    e.awsErrorDetails().errorCode(), e);
+                    nodeName, objectName,
+                    details != null ? details.errorMessage() : e.getMessage(),
+                    details != null ? details.errorCode() : e.statusCode(), e);
             return new HeadLookupResult(HeadLookupStatus.UNAVAILABLE, null);
         } catch (Exception e) {
             log.error("从节点 '{}' 获取对象 '{}' 元数据时出现意外错误：{}", nodeName, objectName, e.getMessage(), e);

@@ -120,6 +120,27 @@ class DistributedStorageServiceImplTest {
         }
     }
 
+    /**
+     * Builds the tenant-scoped direct-upload staging key expected by the storage service.
+     */
+    private String directStagingObjectName(String sessionId, int partIndex) {
+        return "tenant/0/staging/direct-upload/" + sessionId + "/part-" + partIndex;
+    }
+
+    /**
+     * Builds the tenant-scoped direct-upload final key expected by the storage service.
+     */
+    private String directFinalObjectName(String chunkHash) {
+        return "tenant/0/" + chunkHash;
+    }
+
+    /**
+     * Builds the logical storage path returned for a completed direct-upload part.
+     */
+    private String directStoragePath(String chunkHash) {
+        return "storage/tenant/0/chunk/" + chunkHash;
+    }
+
     @Nested
     @DisplayName("Store File Chunk Tests")
     class StoreFileChunkTests {
@@ -488,6 +509,28 @@ class DistributedStorageServiceImplTest {
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData().exists()).isFalse();
             assertThat(result.getData().filePath()).isEqualTo(chunkPath);
+            assertThat(result.getData().fileHash()).isEqualTo(hash);
+            assertThat(result.getData().tenantId()).isEqualTo(0L);
+        }
+
+        @Test
+        @DisplayName("Should return missing result for generic S3 404 responses")
+        void shouldReturnMissingResultForGenericS3NotFoundResponses() {
+            String hash = "hash-head-s3-missing";
+            String chunkPath = TenantContextUtil.buildChunkPath(hash);
+
+            when(faultDomainManager.getCandidateNodes(hash)).thenReturn(Collections.singletonList("node1"));
+            when(faultDomainManager.selectBestNodeForRead(anyList())).thenReturn("node1");
+            when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
+            when(clientManager.getClient("node1")).thenReturn(s3Client);
+            when(s3Client.headObject(any(HeadObjectRequest.class))).thenThrow(
+                    S3Exception.builder().statusCode(404).message("missing").build()
+            );
+
+            Result<StorageObjectHeadVO> result = storageService.headObject(chunkPath, hash);
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData().exists()).isFalse();
             assertThat(result.getData().fileHash()).isEqualTo(hash);
             assertThat(result.getData().tenantId()).isEqualTo(0L);
         }
@@ -1042,7 +1085,9 @@ class DistributedStorageServiceImplTest {
         @Test
         @DisplayName("Should create presigned PUT URLs for direct upload parts")
         void shouldCreatePresignedPutUrlsForDirectUploadParts() {
-            when(faultDomainManager.getTargetNodes("chunk-hash-0")).thenReturn(List.of("node1"));
+            byte[] chunkBytes = "direct-upload-create".getBytes(StandardCharsets.UTF_8);
+            String chunkHash = sha256Prefixed(chunkBytes);
+            when(faultDomainManager.getTargetNodes(chunkHash)).thenReturn(List.of("node1"));
             when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
             when(clientManager.getClient("node1")).thenReturn(s3Client);
             when(clientManager.getPresigner("node1")).thenReturn(s3Presigner);
@@ -1066,11 +1111,11 @@ class DistributedStorageServiceImplTest {
                     "application/pdf",
                     List.of(new DirectMultipartUploadPartRequest(
                             0,
-                            "chunk-hash-0",
+                            chunkHash,
                             512L,
                             "application/pdf",
-                            "chunk-hash-0",
-                            "chunk-hash-0",
+                            chunkHash,
+                            chunkHash,
                             "SHA-256"
                     ))
             );
@@ -1083,14 +1128,81 @@ class DistributedStorageServiceImplTest {
             assertThat(result.getData().parts().getFirst().uploadUrl())
                     .isEqualTo("https://storage.example/upload/part-0");
             assertThat(result.getData().parts().getFirst().nodeName()).isEqualTo("node1");
-            assertThat(result.getData().parts().getFirst().finalObjectName()).contains("chunk-hash-0");
+            assertThat(result.getData().parts().getFirst().storagePath()).isEqualTo(directStoragePath(chunkHash));
+            assertThat(result.getData().parts().getFirst().finalObjectName()).isEqualTo(directFinalObjectName(chunkHash));
+            assertThat(result.getData().parts().getFirst().stagingObjectName())
+                    .isEqualTo(directStagingObjectName("direct-session", 0));
 
             ArgumentCaptor<PutObjectPresignRequest> presignCaptor =
                     ArgumentCaptor.forClass(PutObjectPresignRequest.class);
             verify(s3Presigner).presignPutObject(presignCaptor.capture());
             assertThat(presignCaptor.getValue().signatureDuration().toSeconds()).isEqualTo(86_400);
             assertThat(presignCaptor.getValue().putObjectRequest().bucket()).isEqualTo("node1");
-            assertThat(presignCaptor.getValue().putObjectRequest().key()).contains("staging/direct-upload");
+            assertThat(presignCaptor.getValue().putObjectRequest().key())
+                    .isEqualTo(directStagingObjectName("direct-session", 0));
+        }
+
+        @Test
+        @DisplayName("Should reject direct upload parts that completion cannot verify")
+        void shouldRejectDirectUploadPartsThatCompletionCannotVerify() {
+            String chunkHash = sha256Prefixed("direct-upload-create".getBytes(StandardCharsets.UTF_8));
+
+            CreateDirectMultipartUploadRequest invalidHashRequest = new CreateDirectMultipartUploadRequest(
+                    "direct-session",
+                    "direct.pdf",
+                    512L,
+                    512,
+                    "application/pdf",
+                    List.of(new DirectMultipartUploadPartRequest(
+                            0,
+                            "chunk-hash-0",
+                            512L,
+                            "application/pdf",
+                            "chunk-hash-0",
+                            "chunk-hash-0",
+                            "SHA-256"
+                    ))
+            );
+            CreateDirectMultipartUploadRequest invalidAlgorithmRequest = new CreateDirectMultipartUploadRequest(
+                    "direct-session",
+                    "direct.pdf",
+                    512L,
+                    512,
+                    "application/pdf",
+                    List.of(new DirectMultipartUploadPartRequest(
+                            0,
+                            chunkHash,
+                            512L,
+                            "application/pdf",
+                            chunkHash,
+                            chunkHash,
+                            "MD5"
+                    ))
+            );
+            CreateDirectMultipartUploadRequest oversizedRequest = new CreateDirectMultipartUploadRequest(
+                    "direct-session",
+                    "direct.pdf",
+                    100 * 1024 * 1024L + 1,
+                    512,
+                    "application/pdf",
+                    List.of(new DirectMultipartUploadPartRequest(
+                            0,
+                            chunkHash,
+                            100 * 1024 * 1024L + 1,
+                            "application/pdf",
+                            chunkHash,
+                            chunkHash,
+                            "SHA-256"
+                    ))
+            );
+
+            assertThat(storageService.createDirectMultipartUpload(invalidHashRequest).getCode())
+                    .isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+            assertThat(storageService.createDirectMultipartUpload(invalidAlgorithmRequest).getCode())
+                    .isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+            assertThat(storageService.createDirectMultipartUpload(oversizedRequest).getCode())
+                    .isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+            verifyNoInteractions(s3Client, s3Presigner);
         }
 
         @Test
@@ -1125,10 +1237,10 @@ class DistributedStorageServiceImplTest {
                     "direct-session",
                     List.of(new DirectMultipartCompletedPart(
                             0,
-                            "staging/direct-upload/direct-session/chunk-0",
-                            "chunks/direct-session/chunk-0",
+                            directStagingObjectName("direct-session", 0),
+                            directFinalObjectName(chunkHash),
                             "node1",
-                            "s3://node1/chunks/direct-session/chunk-0",
+                            directStoragePath(chunkHash),
                             chunkBytes.length,
                             "\"etag-0\"",
                             chunkHash,
@@ -1143,7 +1255,7 @@ class DistributedStorageServiceImplTest {
             assertThat(result.getData().sessionId()).isEqualTo("direct-session");
             assertThat(result.getData().parts()).hasSize(1);
             assertThat(result.getData().parts().getFirst().storagePath())
-                    .isEqualTo("s3://node1/chunks/direct-session/chunk-0");
+                    .isEqualTo(directStoragePath(chunkHash));
             assertThat(result.getData().parts().getFirst().eTag()).isEqualTo("\"etag-final\"");
             assertThat(result.getData().parts().getFirst().cipherHash()).isEqualTo(chunkHash);
 
@@ -1152,7 +1264,9 @@ class DistributedStorageServiceImplTest {
             assertThat(putCaptor.getAllValues())
                     .extracting(PutObjectRequest::bucket)
                     .containsExactlyInAnyOrder("node1", "node2");
-            assertThat(putCaptor.getAllValues().getFirst().key()).isEqualTo("chunks/direct-session/chunk-0");
+            assertThat(putCaptor.getAllValues())
+                    .extracting(PutObjectRequest::key)
+                    .containsOnly(directFinalObjectName(chunkHash));
             assertThat(putCaptor.getAllValues().getFirst().metadata())
                     .containsEntry("file-hash", chunkHash)
                     .containsEntry("cipher-hash", chunkHash)
@@ -1161,7 +1275,7 @@ class DistributedStorageServiceImplTest {
             ArgumentCaptor<DeleteObjectRequest> deleteCaptor = ArgumentCaptor.forClass(DeleteObjectRequest.class);
             verify(s3Client).deleteObject(deleteCaptor.capture());
             assertThat(deleteCaptor.getValue().bucket()).isEqualTo("node1");
-            assertThat(deleteCaptor.getValue().key()).isEqualTo("staging/direct-upload/direct-session/chunk-0");
+            assertThat(deleteCaptor.getValue().key()).isEqualTo(directStagingObjectName("direct-session", 0));
         }
 
         @Test
@@ -1190,10 +1304,10 @@ class DistributedStorageServiceImplTest {
                     "direct-session",
                     List.of(new DirectMultipartCompletedPart(
                             0,
-                            "staging/direct-upload/direct-session/chunk-0",
-                            "chunks/direct-session/chunk-0",
+                            directStagingObjectName("direct-session", 0),
+                            directFinalObjectName(chunkHash),
                             "node1",
-                            "s3://node1/chunks/direct-session/chunk-0",
+                            directStoragePath(chunkHash),
                             chunkBytes.length,
                             "\"etag-0\"",
                             chunkHash,
@@ -1207,7 +1321,7 @@ class DistributedStorageServiceImplTest {
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData().parts()).hasSize(1);
             assertThat(result.getData().parts().getFirst().storagePath())
-                    .isEqualTo("s3://node1/chunks/direct-session/chunk-0");
+                    .isEqualTo(directStoragePath(chunkHash));
             assertThat(result.getData().parts().getFirst().eTag()).isEqualTo("\"etag-final\"");
 
             verify(s3Client, never()).getObject(any(GetObjectRequest.class));
@@ -1216,9 +1330,39 @@ class DistributedStorageServiceImplTest {
         }
 
         @Test
+        @DisplayName("Should reject completed parts whose object keys do not match the session")
+        void shouldRejectCompletedPartsWhoseObjectKeysDoNotMatchTheSession() {
+            byte[] chunkBytes = "direct-upload-chunk".getBytes(StandardCharsets.UTF_8);
+            String chunkHash = sha256Prefixed(chunkBytes);
+
+            CompleteDirectMultipartUploadRequest request = new CompleteDirectMultipartUploadRequest(
+                    "direct-session",
+                    List.of(new DirectMultipartCompletedPart(
+                            0,
+                            directStagingObjectName("other-session", 0),
+                            directFinalObjectName(chunkHash),
+                            "node1",
+                            directStoragePath(chunkHash),
+                            chunkBytes.length,
+                            "\"etag-0\"",
+                            chunkHash,
+                            chunkHash,
+                            "SHA-256"
+                    ))
+            );
+
+            Result<CompleteDirectMultipartUploadResponse> result = storageService.completeDirectMultipartUpload(request);
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+            verifyNoInteractions(s3Client);
+        }
+
+        @Test
         @DisplayName("Should abort direct multipart upload by deleting staging parts")
         void shouldAbortDirectMultipartUpload() {
-            when(faultDomainManager.getTargetNodes("sha256:chunk-0")).thenReturn(List.of("node1"));
+            byte[] chunkBytes = "direct-upload-chunk".getBytes(StandardCharsets.UTF_8);
+            String chunkHash = sha256Prefixed(chunkBytes);
+            when(faultDomainManager.getTargetNodes(chunkHash)).thenReturn(List.of("node1"));
             when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
             when(clientManager.getClient("node1")).thenReturn(s3Client);
             when(s3Client.deleteObject(any(DeleteObjectRequest.class))).thenReturn(DeleteObjectResponse.builder().build());
@@ -1227,14 +1371,14 @@ class DistributedStorageServiceImplTest {
                     "direct-session",
                     List.of(new DirectMultipartCompletedPart(
                             0,
-                            "staging/direct-upload/direct-session/chunk-0",
-                            "chunks/direct-session/chunk-0",
+                            directStagingObjectName("direct-session", 0),
+                            directFinalObjectName(chunkHash),
                             "node1",
-                            "s3://node1/chunks/direct-session/chunk-0",
+                            directStoragePath(chunkHash),
                             512L,
                             null,
-                            "sha256:chunk-0",
-                            "sha256:chunk-0",
+                            chunkHash,
+                            chunkHash,
                             "SHA-256"
                     ))
             );
@@ -1252,8 +1396,8 @@ class DistributedStorageServiceImplTest {
             assertThat(deleteCaptor.getAllValues())
                     .extracting(DeleteObjectRequest::key)
                     .containsExactly(
-                            "staging/direct-upload/direct-session/chunk-0",
-                            "chunks/direct-session/chunk-0"
+                            directStagingObjectName("direct-session", 0),
+                            directFinalObjectName(chunkHash)
                     );
         }
     }
