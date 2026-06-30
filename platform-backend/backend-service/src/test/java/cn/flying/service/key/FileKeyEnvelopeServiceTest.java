@@ -225,6 +225,31 @@ class FileKeyEnvelopeServiceTest {
     }
 
     /**
+     * Verifies that legacy/plain persisted metadata without an explicit encryption algorithm does not block sharing.
+     */
+    @Test
+    @DisplayName("should skip share envelope for legacy metadata without encryption algorithm")
+    void shouldSkipShareEnvelopeForLegacyMetadataWithoutEncryptionAlgorithm() {
+        File file = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1")
+                .setFileParam("""
+                        {"fileName":"a.txt","fileSize":10,"contentType":"text/plain"}
+                        """);
+        FileShare share = new FileShare()
+                .setId(200L)
+                .setTenantId(1L)
+                .setUserId(100L)
+                .setShareCode("ABC123");
+
+        envelopeService.saveShareEnvelopes(share, java.util.List.of(file), 100L, "SHARE_CREATE");
+
+        verify(fileKeyEnvelopeMapper, org.mockito.Mockito.never()).insert(any(FileKeyEnvelope.class));
+    }
+
+    /**
      * Verifies that an owner envelope can be saved and unwrapped later.
      */
     @Test
@@ -238,6 +263,7 @@ class FileKeyEnvelopeServiceTest {
         FileParamEnvelopeResult result = envelopeService.prepareFileParam("""
                 {"fileName":"a.txt","initialKey":"serialized-key"}
                 """);
+        file.setFileParam(result.sanitizedFileParam());
         ArgumentCaptor<FileKeyEnvelope> envelopeCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
         when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
 
@@ -280,6 +306,7 @@ class FileKeyEnvelopeServiceTest {
         FileParamEnvelopeResult result = envelopeService.prepareFileParam("""
                 {"fileName":"a.txt","initialKey":"serialized-key"}
                 """);
+        file.setFileParam(result.sanitizedFileParam());
         ArgumentCaptor<FileKeyEnvelope> envelopeCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
         when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
 
@@ -332,6 +359,7 @@ class FileKeyEnvelopeServiceTest {
         FileParamEnvelopeResult result = envelopeService.prepareFileParam("""
                 {"fileName":"a.txt","initialKey":"serialized-key"}
                 """);
+        file.setFileParam(result.sanitizedFileParam());
         ArgumentCaptor<FileKeyEnvelope> envelopeCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
         when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
 
