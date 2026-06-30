@@ -533,6 +533,26 @@ async function uploadDirectParts(task: UploadTask): Promise<void> {
   await Promise.all(workers);
 }
 
+/**
+ * 将上传任务标记为失败并停止对应进度轮询。
+ *
+ * @param id 任务 ID。
+ * @param err 失败原因。
+ * @param fallbackMessage 无法读取错误信息时使用的默认文案。
+ */
+function markTaskFailed(
+  id: string,
+  err: unknown,
+  fallbackMessage: string,
+): void {
+  stopProgressPolling(id);
+  updateTask(id, {
+    status: "failed",
+    error: err instanceof Error ? err.message : fallbackMessage,
+    endTime: Date.now(),
+  });
+}
+
 // ===== Actions =====
 
 /**
@@ -655,12 +675,7 @@ async function startUpload(id: string): Promise<void> {
       startProgressPolling(id, true);
     }
   } catch (err) {
-    stopProgressPolling(id);
-    updateTask(id, {
-      status: "failed",
-      error: err instanceof Error ? err.message : "上传失败",
-      endTime: Date.now(),
-    });
+    markTaskFailed(id, err, "上传失败");
   }
 
   // Start next pending upload
@@ -690,8 +705,8 @@ async function resumeUpload(id: string): Promise<void> {
   const task = tasks.find((t) => t.id === id);
   if (!task || task.status !== "paused") return;
 
-  if (task.clientId && !task.directUpload) {
-    try {
+  try {
+    if (task.clientId && !task.directUpload) {
       const result = await uploadApi.resumeUpload(task.clientId);
       // Sync chunk set with server state
       uploadedChunkSets.set(id, new Set(result.processedChunks));
@@ -701,38 +716,36 @@ async function resumeUpload(id: string): Promise<void> {
           (result.processedChunks.length / task.totalChunks) * 100,
         ),
       });
-    } catch (err) {
-      updateTask(id, {
-        error: err instanceof Error ? err.message : "恢复失败",
-      });
-      throw err;
     }
-  }
 
-  updateTask(id, { status: "uploading" });
-  startProgressPolling(id, true);
-  if (task.directUpload) {
-    await uploadDirectParts(tasks.find((t) => t.id === id)!);
-  } else {
-    await uploadChunks(tasks.find((t) => t.id === id)!);
-  }
-
-  const finalTask = tasks.find((t) => t.id === id);
-  if (finalTask?.status === "uploading") {
-    if (finalTask.directUpload) {
-      await uploadApi.completeDirectUpload(finalTask.clientId!, {
-        parts: finalTask.directCompletedParts,
-      });
-    } else {
-      await uploadApi.completeUpload(finalTask.clientId!);
-    }
-    updateTask(id, {
-      status: "processing",
-      progress: 100,
-      processProgress: Math.max(finalTask.processProgress, 0),
-      serverProgress: Math.max(finalTask.serverProgress, 0),
-    });
+    updateTask(id, { status: "uploading", error: null });
     startProgressPolling(id, true);
+    if (task.directUpload) {
+      await uploadDirectParts(tasks.find((t) => t.id === id)!);
+    } else {
+      await uploadChunks(tasks.find((t) => t.id === id)!);
+    }
+
+    const finalTask = tasks.find((t) => t.id === id);
+    if (finalTask?.status === "uploading") {
+      if (finalTask.directUpload) {
+        await uploadApi.completeDirectUpload(finalTask.clientId!, {
+          parts: finalTask.directCompletedParts,
+        });
+      } else {
+        await uploadApi.completeUpload(finalTask.clientId!);
+      }
+      updateTask(id, {
+        status: "processing",
+        progress: 100,
+        processProgress: Math.max(finalTask.processProgress, 0),
+        serverProgress: Math.max(finalTask.serverProgress, 0),
+      });
+      startProgressPolling(id, true);
+    }
+  } catch (err) {
+    markTaskFailed(id, err, "恢复失败");
+    throw err;
   }
 }
 
