@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+  DirectUploadCompletePartRequest,
+  DirectUploadPartUrlVO,
+} from "$api/types";
 
 class MockApiError extends Error {
   code: number;
@@ -256,6 +260,46 @@ describe("upload store", () => {
     ).toBe(true);
   });
 
+  it("resumeUpload 遇到过期直传 URL 时应标记 failed 并允许重试", async () => {
+    mocks.getUploadProgress.mockImplementation(() => new Promise(() => {}));
+
+    const upload = await loadUploadStore();
+    const id = await upload.addFile(createFile(1024), { autoStart: false });
+    const task = findMutableTask(upload, id);
+
+    expect(task).toBeDefined();
+    Object.assign(task!, {
+      status: "paused",
+      clientId: "direct-client",
+      directUpload: true,
+      uploadedChunks: [],
+      directCompletedParts: [],
+      directParts: [
+        {
+          index: 0,
+          size: 1024,
+          uploadUrl: "https://storage.example/upload/expired",
+          expiresAtEpochSeconds: Math.floor(Date.now() / 1000) - 1,
+          storagePath: "s3://node/chunk-0",
+          plainHash: "sha256:chunk-0",
+          cipherHash: "sha256:chunk-0",
+        },
+      ],
+    });
+
+    await expect(upload.resumeUpload(id)).rejects.toThrow("直传 URL 已过期");
+
+    expect(findTask(upload, id)?.status).toBe("failed");
+    expect(findTask(upload, id)?.error).toBe("直传 URL 已过期，请重试上传");
+
+    mocks.startDirectUpload.mockClear();
+    await upload.retryUpload(id);
+
+    await vi.waitFor(() =>
+      expect(mocks.startDirectUpload).toHaveBeenCalledTimes(1),
+    );
+  });
+
   it("retryUpload/批量重试/批量取消/清理接口应可工作", async () => {
     mocks.startDirectUpload
       .mockRejectedValueOnce(new Error("first fail"))
@@ -324,6 +368,33 @@ function findTask(
       }>;
     }
   ).tasks.find((task) => task.id === id);
+}
+
+interface MutableUploadTask {
+  id: string;
+  status: string;
+  clientId: string | null;
+  directUpload: boolean;
+  directParts: DirectUploadPartUrlVO[];
+  directCompletedParts: DirectUploadCompletePartRequest[];
+  uploadedChunks: number[];
+  error?: string | null;
+}
+
+/**
+ * 根据任务 ID 读取可变任务快照，用于构造 store 内部状态分支。
+ *
+ * @param upload store 实例。
+ * @param id 任务 ID。
+ * @returns 匹配的可变任务。
+ */
+function findMutableTask(
+  upload: ReturnType<typeof Object>,
+  id: string,
+): MutableUploadTask | undefined {
+  return (upload as { tasks: MutableUploadTask[] }).tasks.find(
+    (task) => task.id === id,
+  );
 }
 
 describe("upload store extra branches", () => {
