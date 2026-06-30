@@ -15,7 +15,7 @@ import cn.flying.dao.mapper.AttestationLeafMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.request.StoreAttestationBatchRequest;
-import cn.flying.platformapi.request.StoreAttestationBatchResponse;
+import cn.flying.platformapi.response.StoreAttestationBatchResponse;
 import cn.flying.service.remote.FileRemoteClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
