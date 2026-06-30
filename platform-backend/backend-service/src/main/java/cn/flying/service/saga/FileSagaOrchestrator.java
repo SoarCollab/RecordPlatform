@@ -33,9 +33,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.util.*;
+import java.util.concurrent.Semaphore;
 
 /**
  * 文件上传 Saga 编排器。
@@ -51,6 +51,7 @@ public class FileSagaOrchestrator {
 
     private static final String COMP_STEP_S3 = "S3_DELETED";
     private static final String COMP_STEP_DB = "DB_ROLLBACK";
+    private static final String DEFAULT_MAX_IN_MEMORY_CHUNK_BYTES = "83886080";
     private final FileSagaMapper sagaMapper;
     private final FileRemoteClient fileRemoteClient;
     private final OutboxService outboxService;
@@ -58,12 +59,15 @@ public class FileSagaOrchestrator {
     private final SagaMetrics sagaMetrics;
     private final TenantMapper tenantMapper;
     private final SagaCompensationHelper compensationHelper;
+    private final Semaphore uploadMemoryPermit = new Semaphore(1);
     @Value("${saga.compensation.max-retries:5}")
     private int maxCompensationRetries;
     @Value("${saga.compensation.batch-size:50}")
     private int compensationBatchSize;
     @Value("${saga.dead-letter.enabled:true}")
     private boolean deadLetterEnabled;
+    @Value("${saga.upload.max-in-memory-chunk-bytes:" + DEFAULT_MAX_IN_MEMORY_CHUNK_BYTES + "}")
+    private long maxInMemoryChunkBytes;
 
     /**
      * 执行文件上传 Saga。
@@ -164,25 +168,12 @@ public class FileSagaOrchestrator {
         Map<String, String> storedPaths = new LinkedHashMap<>();
         List<java.io.File> fileList = cmd.getFileList();
         List<String> fileHashList = cmd.getFileHashList();
+        validateChunkInputs(fileList, fileHashList);
 
         for (int i = 0; i < fileList.size(); i++) {
             java.io.File chunkFile = fileList.get(i);
             String chunkHash = fileHashList.get(i);
-
-            byte[] chunkData;
-            try (InputStream in = Files.newInputStream(chunkFile.toPath())) {
-                chunkData = in.readAllBytes();  // 当前实现：完整加载到内存（权衡 Dubbo 序列化简化 vs 内存占用）
-            } catch (IOException e) {
-                log.error("读取文件块失败: index={}, path={}", i, chunkFile.getPath(), e);
-                throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
-            }
-
-            Result<String> result = fileRemoteClient.storeFileChunk(chunkData, chunkHash);
-            String logicalPath = ResultUtils.getData(result);
-            if (logicalPath == null) {
-                log.error("S3 存储上传失败: index={}, hash={}", i, chunkHash);
-                throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR);
-            }
+            String logicalPath = storeChunkWithMemoryPermit(i, chunkFile, chunkHash);
             storedObjects.add(new StoredObjectReference(i, chunkHash, logicalPath));
             storedPaths.put(chunkHash, logicalPath);
         }
@@ -195,6 +186,77 @@ public class FileSagaOrchestrator {
         persistPayload(saga, context);
 
         return List.copyOf(storedObjects);
+    }
+
+    /**
+     * 校验 Saga 上传分片输入，避免空列表或哈希数量不一致进入远程存储调用。
+     */
+    private void validateChunkInputs(List<java.io.File> fileList, List<String> fileHashList) {
+        if (fileList == null || fileHashList == null || fileList.size() != fileHashList.size()) {
+            throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR, "文件分片与哈希数量不一致");
+        }
+    }
+
+    /**
+     * 在单实例内存许可保护下读取并上传分片，确保 byte[] 载荷不会并发放大堆内存占用。
+     */
+    private String storeChunkWithMemoryPermit(int index, java.io.File chunkFile, String chunkHash) {
+        validateChunkReference(index, chunkFile, chunkHash);
+        validateChunkSize(index, chunkFile);
+
+        boolean acquired = false;
+        try {
+            uploadMemoryPermit.acquire();
+            acquired = true;
+            byte[] chunkData = Files.readAllBytes(chunkFile.toPath());
+            Result<String> result = fileRemoteClient.storeFileChunk(chunkData, chunkHash);
+            String logicalPath = ResultUtils.getData(result);
+            if (logicalPath == null) {
+                log.error("S3 存储上传失败: index={}, hash={}", index, chunkHash);
+                throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR);
+            }
+            return logicalPath;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR, "上传任务被中断");
+        } catch (IOException e) {
+            log.error("读取文件块失败: index={}, path={}", index, chunkFile.getPath(), e);
+            throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
+        } finally {
+            if (acquired) {
+                uploadMemoryPermit.release();
+            }
+        }
+    }
+
+    /**
+     * 校验单个分片文件和哈希引用，避免空值进入文件系统或远程调用。
+     */
+    private void validateChunkReference(int index, java.io.File chunkFile, String chunkHash) {
+        if (chunkFile == null || chunkHash == null || chunkHash.isBlank()) {
+            log.error("文件分片参数无效: index={}, chunkFile={}, chunkHash={}", index, chunkFile, chunkHash);
+            throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR, "文件分片与哈希数量不一致");
+        }
+    }
+
+    /**
+     * 在读取分片前检查文件大小，阻断超过 Dubbo byte[] 代理上传上限的请求。
+     */
+    private void validateChunkSize(int index, java.io.File chunkFile) {
+        try {
+            long chunkSize = Files.size(chunkFile.toPath());
+            if (chunkSize > maxInMemoryChunkBytes) {
+                log.warn("文件分片超过后端代理上传上限: index={}, path={}, size={}, limit={}",
+                        index, chunkFile.getPath(), chunkSize, maxInMemoryChunkBytes);
+                throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR,
+                        "分片大小超过后端代理上传上限，请使用 Multipart 直传链路");
+            }
+        } catch (GeneralException e) {
+            throw e;
+        } catch (IOException e) {
+            log.error("读取文件块大小失败: index={}, path={}", index, chunkFile.getPath(), e);
+            throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
+        }
     }
 
     private StoreFileResponse executeBlockchainStore(FileSaga saga, FileUploadCommand cmd,

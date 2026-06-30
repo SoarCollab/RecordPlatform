@@ -35,12 +35,12 @@ class FlywayMigrationVersionTest {
                     .toList();
         }
 
-        assertTrue(migrationFiles.contains("V1.0.1__add_account_nickname.sql"));
-        assertTrue(migrationFiles.contains("V1.5.0__integrity_alert.sql"));
+        assertTrue(migrationFiles.contains("V1.5.0__add_account_nickname.sql"));
+        assertTrue(migrationFiles.contains("V1.7.3__integrity_alert.sql"));
         assertTrue(migrationFiles.contains("V1.7.4__rename_file_contract_hash_to_transaction_hash.sql"));
         assertTrue(migrationFiles.contains("V1.7.5__replace_clean_log_procedures.sql"));
-        assertFalse(migrationFiles.contains("V1.5.0__add_account_nickname.sql"));
-        assertFalse(migrationFiles.contains("V1.7.3__integrity_alert.sql"));
+        assertFalse(migrationFiles.contains("V1.0.1__add_account_nickname.sql"));
+        assertFalse(migrationFiles.contains("V1.5.0__integrity_alert.sql"));
 
         Set<String> versions = new HashSet<>();
         for (String fileName : migrationFiles) {
@@ -48,6 +48,19 @@ class FlywayMigrationVersionTest {
             assertTrue(matcher.matches(), "Invalid migration filename: " + fileName);
             assertTrue(versions.add(matcher.group(1)), "Duplicate migration version: " + matcher.group(1));
         }
+    }
+
+    /**
+     * 验证初始化迁移保持历史列名，由后续前向迁移负责改名。
+     */
+    @Test
+    @DisplayName("should keep initial file migration compatible with forward transaction hash rename")
+    void shouldKeepInitialFileMigrationCompatibleWithForwardTransactionHashRename() throws IOException {
+        Path migration = resolveMigrationDir().resolve("V1.0.0__init_schema.sql");
+        String sql = Files.readString(migration);
+
+        assertTrue(sql.contains("`contract_hash`"));
+        assertFalse(sql.contains("`transaction_hash`     VARCHAR"));
     }
 
     /**
@@ -63,6 +76,27 @@ class FlywayMigrationVersionTest {
         assertTrue(sql.contains("COLUMN_NAME = 'contract_hash'"));
         assertTrue(sql.contains("COLUMN_NAME = 'transaction_hash'"));
         assertTrue(sql.contains("CHANGE COLUMN `contract_hash` `transaction_hash`"));
+    }
+
+    /**
+     * 验证所有迁移脚本避免使用 MySQL 8.0 早期版本不支持的存储过程 IF NOT EXISTS 语法。
+     */
+    @Test
+    @DisplayName("should not use unsupported create procedure if not exists syntax")
+    void shouldNotUseUnsupportedCreateProcedureIfNotExistsSyntax() throws IOException {
+        Path migrationDir = resolveMigrationDir();
+        try (var stream = Files.list(migrationDir)) {
+            List<Path> migrationFiles = stream
+                    .filter(path -> path.getFileName().toString().endsWith(".sql"))
+                    .toList();
+
+            for (Path migration : migrationFiles) {
+                String sql = Files.readString(migration);
+                assertFalse(
+                        sql.matches("(?is).*CREATE\\s+PROCEDURE\\s+IF\\s+NOT\\s+EXISTS.*"),
+                        "Unsupported procedure syntax in " + migration.getFileName());
+            }
+        }
     }
 
     /**

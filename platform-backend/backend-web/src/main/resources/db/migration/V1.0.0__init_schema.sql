@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS `file` (
     `file_param`           VARCHAR(255) DEFAULT NULL COMMENT 'File params JSON',
     `file_hash`            VARCHAR(255) DEFAULT NULL COMMENT 'File hash',
     `status`               INT          NOT NULL COMMENT 'Upload status',
-    `transaction_hash`     VARCHAR(255) DEFAULT NULL COMMENT 'Blockchain tx hash',
+    `contract_hash`        VARCHAR(255) DEFAULT NULL COMMENT 'Blockchain tx hash',
     `deleted`              INT          DEFAULT 0 NOT NULL COMMENT 'Soft delete flag',
     `create_time`          DATETIME     NOT NULL COMMENT 'Create time',
     PRIMARY KEY (`id`),
@@ -570,14 +570,16 @@ SELECT 0, 'monitor', id FROM `sys_permission` WHERE `tenant_id` = 0 AND `code` I
 DELIMITER //
 
 -- Clean processed messages
-CREATE PROCEDURE IF NOT EXISTS `proc_clean_processed_messages`(IN retention_days INT)
+DROP PROCEDURE IF EXISTS `proc_clean_processed_messages` //
+CREATE PROCEDURE `proc_clean_processed_messages`(IN retention_days INT)
 BEGIN
     DELETE FROM processed_message
     WHERE processed_at < DATE_SUB(NOW(), INTERVAL retention_days DAY);
 END //
 
 -- Clean old operation logs
-CREATE PROCEDURE IF NOT EXISTS `proc_clean_old_operation_logs`(IN days INT)
+DROP PROCEDURE IF EXISTS `proc_clean_old_operation_logs` //
+CREATE PROCEDURE `proc_clean_old_operation_logs`(IN days INT)
 BEGIN
     DELETE FROM sys_operation_log
     WHERE operation_time < DATE_SUB(NOW(), INTERVAL days DAY);
