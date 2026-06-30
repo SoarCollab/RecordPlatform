@@ -592,15 +592,22 @@ public class FileKeyEnvelopeService {
     }
 
     /**
-     * Returns whether the file metadata describes encrypted content that needs recipient envelopes.
+     * Returns whether persisted metadata explicitly describes encrypted content that needs recipient envelopes.
+     *
+     * <p>Upload-time validation remains strict in {@link #prepareFileParam(String)}. This method is used only for
+     * existing file records during share creation, so legacy/plain records without an encryptionAlgorithm are treated
+     * as not requiring recipient envelopes instead of breaking share creation.</p>
      */
     private boolean requiresInitialKey(File file) {
         if (file == null || !StringUtils.hasText(file.getFileParam())) {
-            return true;
+            return false;
         }
         Map<String, Object> params = JsonConverter.parse(file.getFileParam(), FILE_PARAM_TYPE);
-        String encryptionAlgorithm = resolveEncryptionAlgorithm(params);
-        return !ENCRYPTION_NONE.equalsIgnoreCase(encryptionAlgorithm);
+        Object encryptionAlgorithm = params.get(FIELD_ENCRYPTION_ALGORITHM);
+        if (!(encryptionAlgorithm instanceof String algorithm) || !StringUtils.hasText(algorithm)) {
+            return false;
+        }
+        return !ENCRYPTION_NONE.equalsIgnoreCase(algorithm.trim());
     }
 
     /**
