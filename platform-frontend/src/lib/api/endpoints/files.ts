@@ -29,7 +29,7 @@ const BASE = "/files";
 /**
  * 读取加密分片下载必需的 initialKey。
  */
-function requireInitialKey(initialKey: string | null): string {
+function requireInitialKey(initialKey: string | null | undefined): string {
   if (!initialKey) {
     throw new Error("缺少加密文件初始密钥");
   }

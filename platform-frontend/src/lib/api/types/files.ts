@@ -305,11 +305,11 @@ export interface FileDownloadMetadataVO {
   fileName: string;
   fileSize: number;
   contentType: string;
-  initialKey: string | null;
+  initialKey?: string;
   manifestSchemaId: string;
   manifestHash: string;
   hashAlgorithm: string;
-  encryptionAlgorithm?: string | null;
+  encryptionAlgorithm?: string;
   storageBackend: string;
   chunkSize: number;
   totalChunks: number;
@@ -490,7 +490,7 @@ export interface SaveShareFileRequest {
  */
 export interface FileDecryptInfoVO extends OpenApiSchema<"FileDecryptInfoVO"> {
   /** 初始密钥（最后一个分片的解密密钥，Base64编码） */
-  initialKey: string | null;
+  initialKey?: string;
   /** 文件名 */
   fileName: string;
   /** 文件大小（字节） */
