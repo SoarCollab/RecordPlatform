@@ -14,11 +14,6 @@ ALTER TABLE `friend_file_share`
 ALTER TABLE `conversation`
     ADD COLUMN `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除标记 0=正常 1=已删除' AFTER `update_time`;
 
--- integrity_alert: add deleted + update_time
-ALTER TABLE `integrity_alert`
-    ADD COLUMN `deleted`     TINYINT  NOT NULL DEFAULT 0 COMMENT '逻辑删除标记 0=正常 1=已删除' AFTER `note`,
-    ADD COLUMN `update_time` DATETIME NULL DEFAULT NULL COMMENT '更新时间' AFTER `create_time`;
-
 -- file_source: add deleted
 ALTER TABLE `file_source`
     ADD COLUMN `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除标记 0=正常 1=已删除' AFTER `depth`;

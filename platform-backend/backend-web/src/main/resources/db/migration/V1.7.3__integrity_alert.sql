@@ -12,6 +12,8 @@ CREATE TABLE `integrity_alert` (
     `resolved_at` DATETIME COMMENT 'Resolution time',
     `note` VARCHAR(512) COMMENT 'Resolution note',
     `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME NULL DEFAULT NULL COMMENT 'Update time',
+    `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT 'Soft delete flag',
     PRIMARY KEY (`id`),
     INDEX `idx_integrity_alert_tenant` (`tenant_id`, `status`, `create_time` DESC),
     INDEX `idx_integrity_alert_file` (`file_id`)
