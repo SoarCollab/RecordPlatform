@@ -272,6 +272,9 @@ processed-message:
 
 # Saga compensation configuration
 saga:
+  upload:
+    # Legacy backend-proxied chunk uploads use Dubbo byte[] payloads; keep below 100MB Dubbo payload.
+    max-in-memory-chunk-bytes: 83886080
   compensation:
     max-retries: 5
     batch-size: 50

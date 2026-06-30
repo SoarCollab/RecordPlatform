@@ -1,6 +1,7 @@
 package cn.flying.service.saga;
 
 import cn.flying.common.constant.FileUploadStatus;
+import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.dao.dto.File;
@@ -18,12 +19,15 @@ import cn.flying.service.outbox.OutboxService;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.service.support.StoredObjectReference;
 import cn.flying.service.support.StoredObjectReferenceCodec;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -34,6 +38,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -76,10 +81,19 @@ class FileSagaOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "maxCompensationRetries", 5);
         ReflectionTestUtils.setField(orchestrator, "compensationBatchSize", 50);
         ReflectionTestUtils.setField(orchestrator, "deadLetterEnabled", true);
+        ReflectionTestUtils.setField(orchestrator, "maxInMemoryChunkBytes", 80L * 1024L * 1024L);
 
         // Default timer behavior
         when(sagaMetrics.startSagaTimer()).thenReturn(null);
         when(sagaMetrics.startCompensationTimer()).thenReturn(null);
+    }
+
+    /**
+     * 清理测试线程中的租户上下文，避免影响后续用例。
+     */
+    @AfterEach
+    void tearDown() {
+        TenantContext.clear();
     }
 
     @Nested
@@ -192,6 +206,90 @@ class FileSagaOrchestratorTest {
                 Files.deleteIfExists(firstChunk);
                 Files.deleteIfExists(secondChunk);
             }
+        }
+    }
+
+    @Nested
+    @DisplayName("Upload Memory Guard")
+    class UploadMemoryGuard {
+
+        @TempDir
+        private Path tempDir;
+
+        /**
+         * 验证合法小分片仍可经过 Saga 上传和链上存证路径。
+         */
+        @Test
+        @DisplayName("should upload valid chunk through storage and blockchain")
+        void shouldUploadValidChunkThroughStorageAndBlockchain() throws Exception {
+            java.io.File chunk = writeChunk("small.bin", new byte[] {1, 2, 3, 4});
+            prepareNewSaga("req-small");
+            when(fileRemoteClient.storeFileChunk(any(byte[].class), eq("hash-small")))
+                    .thenReturn(Result.success("minio/tenant/77/hash-small"));
+            when(fileRemoteClient.storeFileOnChain(any(StoreFileRequest.class)))
+                    .thenReturn(Result.success(new StoreFileResponse("tx-small", "file-hash")));
+
+            FileUploadResult result = orchestrator.executeUpload(FileUploadCommand.builder()
+                    .requestId("req-small")
+                    .userId(100L)
+                    .fileName("small.bin")
+                    .fileList(List.of(chunk))
+                    .fileHashList(List.of("hash-small"))
+                    .build());
+
+            assertTrue(result.isSuccess());
+            assertEquals("tx-small", result.getTransactionHash());
+            verify(fileRemoteClient).storeFileChunk(
+                    ArgumentMatchers.<byte[]>argThat(bytes -> Arrays.equals(bytes, new byte[] {1, 2, 3, 4})),
+                    eq("hash-small"));
+            verify(fileRemoteClient).storeFileOnChain(any(StoreFileRequest.class));
+        }
+
+        /**
+         * 验证超限分片在读取为 byte[] 和远程存储调用前被拒绝。
+         */
+        @Test
+        @DisplayName("should reject oversized chunk before storage RPC")
+        void shouldRejectOversizedChunkBeforeStorageRpc() throws Exception {
+            ReflectionTestUtils.setField(orchestrator, "maxInMemoryChunkBytes", 4L);
+            java.io.File chunk = writeChunk("large.bin", new byte[] {1, 2, 3, 4, 5});
+            prepareNewSaga("req-large");
+
+            GeneralException exception = assertThrows(GeneralException.class, () ->
+                    orchestrator.executeUpload(FileUploadCommand.builder()
+                            .requestId("req-large")
+                            .userId(100L)
+                            .fileName("large.bin")
+                            .fileList(List.of(chunk))
+                            .fileHashList(List.of("hash-large"))
+                            .build()));
+
+            assertEquals(ResultEnum.FILE_UPLOAD_ERROR, exception.getResultEnum());
+            assertEquals("分片大小超过后端代理上传上限，请使用 Multipart 直传链路", exception.getData());
+            verify(fileRemoteClient, never()).storeFileChunk(any(), any());
+            verify(fileRemoteClient, never()).storeFileOnChain(any());
+        }
+
+        /**
+         * 创建临时分片文件并写入指定内容。
+         */
+        private java.io.File writeChunk(String fileName, byte[] bytes) throws Exception {
+            Path path = tempDir.resolve(fileName);
+            Files.write(path, bytes);
+            return path.toFile();
+        }
+
+        /**
+         * 准备一个新 Saga 启动场景所需的租户上下文和持久化 mock。
+         */
+        private void prepareNewSaga(String requestId) {
+            TenantContext.setTenantId(77L);
+            when(sagaMapper.selectByRequestId(eq(requestId), eq(77L))).thenReturn(null);
+            doAnswer(invocation -> {
+                FileSaga saga = invocation.getArgument(0);
+                saga.setId(999L).setTenantId(77L);
+                return null;
+            }).when(compensationHelper).insertSagaInNewTransaction(any(FileSaga.class));
         }
     }
 
