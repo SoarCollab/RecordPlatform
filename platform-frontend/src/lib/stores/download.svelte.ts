@@ -218,7 +218,7 @@ function isPlainDownload(
 /**
  * 读取加密下载必需的 initialKey；缺失时立即失败，避免把 null 传给解密器。
  */
-function requireInitialKey(initialKey: string | null): string {
+function requireInitialKey(initialKey: string | null | undefined): string {
   if (!initialKey) {
     throw new Error("缺少加密文件初始密钥");
   }
@@ -473,7 +473,7 @@ async function executeDownload(task: DownloadTask): Promise<void> {
         encryptionAlgorithm: metadataEncryptionAlgorithm,
       } = await fetchPresignedUrls(task);
       urls = newUrls;
-      initialKey = decryptInfo.initialKey;
+      initialKey = decryptInfo.initialKey ?? null;
       totalChunks = decryptInfo.chunkCount;
       contentType = decryptInfo.contentType;
       fileName = decryptInfo.fileName;
@@ -735,7 +735,7 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
         encryptionAlgorithm: metadataEncryptionAlgorithm,
       } = await fetchPresignedUrls(task);
       urls = newUrls;
-      initialKey = decryptInfo.initialKey;
+      initialKey = decryptInfo.initialKey ?? null;
       totalChunks = decryptInfo.chunkCount;
       contentType = decryptInfo.contentType;
       fileName = decryptInfo.fileName;
