@@ -231,6 +231,10 @@ public class FileUploadServiceImpl implements FileUploadService {
                 return true;
             }
 
+            if (state.isDirectUpload()) {
+                return cleanupDirectUploadSessionInternal(clientId, state, retryCount);
+            }
+
             // Use persisted paths from state
             final String persistedSuid = state.getSuid();
             final String uploadPath = state.getUploadTempPath();
@@ -286,6 +290,23 @@ public class FileUploadServiceImpl implements FileUploadService {
                 log.debug("尝试清理会话 {}，但状态已不存在。", clientId);
             }
             return false; // 会话状态未找到
+        }
+    }
+
+    /**
+     * Cleans an expired direct-upload session by aborting object-storage staging objects before dropping Redis state.
+     */
+    private boolean cleanupDirectUploadSessionInternal(String clientId, FileUploadState state, int retryCount) {
+        try {
+            abortDirectUploadStorage(clientId, state);
+            redisStateManager.removeSession(clientId, state.getSuid());
+            log.info("直传会话 {} staging 清理完成。", clientId);
+            return true;
+        } catch (Exception e) {
+            log.error("直传会话 {} staging 清理失败，将保留 Redis 状态以便重试: {}", clientId, e.getMessage());
+            state.setCleanupRetryCount(retryCount + 1);
+            redisStateManager.updateState(state);
+            return false;
         }
     }
 
@@ -643,11 +664,21 @@ public class FileUploadServiceImpl implements FileUploadService {
         if (!state.isDirectUpload()) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "该会话不是直传上传会话");
         }
-        fileRemoteClient.abortDirectMultipartUpload(
-                new AbortDirectMultipartUploadRequest(clientId, buildStorageAbortParts(state))
-        );
+        abortDirectUploadStorage(clientId, state);
         redisStateManager.removeSession(clientId, state.getSuid());
         return true;
+    }
+
+    /**
+     * Aborts direct-upload staging/final object candidates through the storage service and verifies the remote result.
+     */
+    private void abortDirectUploadStorage(String clientId, FileUploadState state) {
+        Boolean aborted = ResultUtils.getData(fileRemoteClient.abortDirectMultipartUpload(
+                new AbortDirectMultipartUploadRequest(clientId, buildStorageAbortParts(state))
+        ));
+        if (!Boolean.TRUE.equals(aborted)) {
+            throw new GeneralException(ResultEnum.FILE_SERVICE_ERROR, "直传 staging 清理失败");
+        }
     }
 
     /**

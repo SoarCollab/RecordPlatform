@@ -446,6 +446,23 @@ class FileUploadServiceTest {
             assertNull(abortRequestCaptor.getValue().parts().getFirst().eTag());
             verify(redisStateManager).removeSession(CLIENT_ID, SUID);
         }
+
+        @Test
+        @DisplayName("should keep direct upload session when storage abort fails")
+        void shouldKeepDirectUploadSessionWhenStorageAbortFails() {
+            FileUploadState state = directUploadState();
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+            when(fileRemoteClient.abortDirectMultipartUpload(any()))
+                    .thenReturn(new Result<>(cn.flying.platformapi.constant.ResultEnum.FILE_SERVICE_ERROR, false));
+
+            GeneralException exception = assertThrows(
+                    GeneralException.class,
+                    () -> fileUploadService.abortDirectUpload(USER_ID, CLIENT_ID)
+            );
+
+            assertEquals(ResultEnum.FILE_SERVICE_ERROR, exception.getResultEnum());
+            verify(redisStateManager, never()).removeSession(eq(CLIENT_ID), anyString());
+        }
     }
 
     @Nested
@@ -1251,6 +1268,48 @@ class FileUploadServiceTest {
             fileUploadService.cleanupExpiredUploadSessions();
 
             verify(redisStateManager).removeSession(clientId, "");
+        }
+
+        @Test
+        @DisplayName("should abort expired direct upload session before removing Redis state")
+        void shouldAbortExpiredDirectUploadSessionBeforeRemovingState() {
+            FileUploadState state = directUploadState();
+            state.setLastActivityTime(System.currentTimeMillis() - java.util.concurrent.TimeUnit.HOURS.toMillis(13));
+
+            when(redisStateManager.getAllActiveSessionIds()).thenReturn(java.util.Set.of(CLIENT_ID));
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+            when(redisStateManager.isSessionPaused(CLIENT_ID)).thenReturn(false);
+            when(fileRemoteClient.abortDirectMultipartUpload(any())).thenReturn(Result.success(true));
+
+            fileUploadService.cleanupExpiredUploadSessions();
+
+            ArgumentCaptor<AbortDirectMultipartUploadRequest> abortRequestCaptor =
+                    ArgumentCaptor.forClass(AbortDirectMultipartUploadRequest.class);
+            verify(fileRemoteClient).abortDirectMultipartUpload(abortRequestCaptor.capture());
+            assertEquals(CLIENT_ID, abortRequestCaptor.getValue().sessionId());
+            assertEquals(2, abortRequestCaptor.getValue().parts().size());
+            assertEquals("staging/direct/0", abortRequestCaptor.getValue().parts().getFirst().stagingObjectName());
+            verify(redisStateManager).removeSession(CLIENT_ID, SUID);
+            verify(redisStateManager, never()).removeSession(CLIENT_ID, "");
+        }
+
+        @Test
+        @DisplayName("should retain expired direct upload session when storage abort fails")
+        void shouldRetainExpiredDirectUploadSessionWhenStorageAbortFails() {
+            FileUploadState state = directUploadState();
+            state.setLastActivityTime(System.currentTimeMillis() - java.util.concurrent.TimeUnit.HOURS.toMillis(13));
+
+            when(redisStateManager.getAllActiveSessionIds()).thenReturn(java.util.Set.of(CLIENT_ID));
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+            when(redisStateManager.isSessionPaused(CLIENT_ID)).thenReturn(false);
+            when(fileRemoteClient.abortDirectMultipartUpload(any()))
+                    .thenReturn(new Result<>(cn.flying.platformapi.constant.ResultEnum.FILE_SERVICE_ERROR, false));
+
+            fileUploadService.cleanupExpiredUploadSessions();
+
+            verify(redisStateManager, never()).removeSession(eq(CLIENT_ID), anyString());
+            verify(redisStateManager).updateState(argThat(updated ->
+                    updated.isDirectUpload() && updated.getCleanupRetryCount() == 1));
         }
 
         @Test
