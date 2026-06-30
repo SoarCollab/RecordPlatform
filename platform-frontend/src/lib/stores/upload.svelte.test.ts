@@ -444,6 +444,59 @@ describe("upload store extra branches", () => {
     expect(typeof upload.isUploading).toBe("boolean");
   });
 
+  it("非直传任务应调用后端控制接口并清理任务状态", async () => {
+    const upload = await loadUploadStore();
+    const activeId = await upload.addFile(createFile(1024), {
+      autoStart: false,
+    });
+    const processingId = await upload.addFile(createFile(2048), {
+      autoStart: false,
+    });
+    const removableId = await upload.addFile(createFile(4096), {
+      autoStart: false,
+    });
+
+    Object.assign(findMutableTask(upload, activeId)!, {
+      status: "uploading",
+      clientId: "legacy-client",
+      directUpload: false,
+      progress: 40,
+    });
+    Object.assign(findMutableTask(upload, processingId)!, {
+      status: "processing",
+      clientId: "processing-client",
+      directUpload: false,
+      progress: 10,
+      processProgress: 80,
+    });
+
+    await upload.pauseUpload(activeId);
+    expect(mocks.pauseUpload).toHaveBeenCalledWith("legacy-client");
+
+    Object.assign(findMutableTask(upload, activeId)!, {
+      status: "uploading",
+      clientId: "legacy-client",
+      directUpload: false,
+    });
+    await upload.cancelUpload(activeId);
+    expect(mocks.cancelUpload).toHaveBeenCalledWith("legacy-client");
+
+    Object.assign(findMutableTask(upload, removableId)!, {
+      status: "uploading",
+      clientId: "remove-client",
+      directUpload: false,
+    });
+    upload.removeTask(removableId);
+    expect(mocks.cancelUpload).toHaveBeenCalledWith("remove-client");
+    expect(upload.tasks.some((task) => task.id === removableId)).toBe(false);
+
+    Object.assign(findMutableTask(upload, processingId)!, {
+      status: "completed",
+    });
+    upload.clearCompleted();
+    expect(upload.tasks.some((task) => task.id === processingId)).toBe(false);
+  });
+
   it("direct PUT 与 abort 的异常分支应被覆盖", async () => {
     mocks.getUploadProgress.mockImplementation(() => new Promise(() => {}));
     mocks.uploadDirectPart.mockRejectedValueOnce(new Error("put failed"));
@@ -633,6 +686,50 @@ describe("upload store extra branches", () => {
       deferred.resolve();
       removeListenerSpy.mockRestore();
       clearTimeoutSpy.mockRestore();
+    }
+  });
+
+  it("缺少直传分片 URL 时恢复上传应失败", async () => {
+    const upload = await loadUploadStore();
+    const id = await upload.addFile(createFile(1024), { autoStart: false });
+
+    Object.assign(findMutableTask(upload, id)!, {
+      status: "paused",
+      clientId: "direct-client",
+      directUpload: true,
+      uploadedChunks: [],
+      directCompletedParts: [],
+      directParts: [],
+    });
+
+    await expect(upload.resumeUpload(id)).rejects.toThrow(
+      "缺少直传分片 URL: 0",
+    );
+    expect(findTask(upload, id)?.status).toBe("failed");
+  });
+
+  it("缺少 WebCrypto 支持时应标记上传失败", async () => {
+    const originalCrypto = globalThis.crypto;
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: {},
+    });
+
+    try {
+      const upload = await loadUploadStore();
+      const id = await upload.addFile(createFile(1024));
+
+      await vi.waitFor(() => {
+        expect(findTask(upload, id)?.status).toBe("failed");
+        expect(findTask(upload, id)?.error).toBe(
+          "当前浏览器不支持 SHA-256 分片校验",
+        );
+      });
+    } finally {
+      Object.defineProperty(globalThis, "crypto", {
+        configurable: true,
+        value: originalCrypto,
+      });
     }
   });
 });

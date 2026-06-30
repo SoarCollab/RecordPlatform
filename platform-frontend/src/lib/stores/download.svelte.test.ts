@@ -857,6 +857,32 @@ describe("download store extra branches", () => {
     );
   });
 
+  it("未加密 streaming 下载拿到无效 file handle 时应进入 failed", async () => {
+    mocks.fileApi.getDownloadMetadata.mockResolvedValueOnce({
+      ...createDownloadMetadata("hash-plain-stream", "u-plain-stream"),
+      initialKey: null,
+      encryptionAlgorithm: "NONE",
+      contentType: "application/octet-stream",
+    });
+
+    const download = await loadDownloadStore();
+    const id = await download.startDownload(
+      "hash-plain-stream",
+      "plain-stream.bin",
+      { type: "owned" },
+      undefined,
+      "streaming",
+    );
+
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "failed",
+    );
+    expect(download.tasks.find((task) => task.id === id)?.error).toBe(
+      "Streaming download file handle is invalid",
+    );
+  });
+
   it("下载中 cancel 后应命中取消分支，resume/retry 非法状态应提前返回", async () => {
     const deferred = createDeferred<Uint8Array[]>();
     mocks.chunkDownloader.downloadAllChunks.mockImplementationOnce(

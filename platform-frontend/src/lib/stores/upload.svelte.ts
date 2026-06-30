@@ -151,9 +151,10 @@ async function calculateChunkHash(chunk: Blob): Promise<string> {
     throw new Error("当前浏览器不支持 SHA-256 分片校验");
   }
 
+  const buffer = await chunk.arrayBuffer();
   const digest = await globalThis.crypto.subtle.digest(
     DIRECT_UPLOAD_CHECKSUM_ALGORITHM,
-    await chunk.arrayBuffer(),
+    new Uint8Array(buffer),
   );
   return `${DIRECT_UPLOAD_HASH_PREFIX}${bytesToHex(new Uint8Array(digest))}`;
 }
