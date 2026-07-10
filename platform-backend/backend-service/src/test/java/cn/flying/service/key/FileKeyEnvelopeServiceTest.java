@@ -282,6 +282,39 @@ class FileKeyEnvelopeServiceTest {
     }
 
     /**
+     * Verifies that explicitly encrypted files fail share creation when no owner or legacy key exists.
+     */
+    @Test
+    @DisplayName("should reject encrypted share envelope when key is missing")
+    void shouldRejectEncryptedShareEnvelopeWhenKeyIsMissing() {
+        File file = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1")
+                .setFileParam("""
+                        {"fileName":"a.txt","encryptionAlgorithm":"AES-GCM"}
+                        """);
+        FileShare share = new FileShare()
+                .setId(200L)
+                .setTenantId(1L)
+                .setUserId(100L)
+                .setShareCode("ABC123");
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(null);
+
+        assertThatThrownBy(() -> envelopeService.saveShareEnvelopes(
+                share,
+                java.util.List.of(file),
+                100L,
+                "SHARE_CREATE"
+        ))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getData())
+                        .asString()
+                        .contains("文件解密密钥不存在"));
+    }
+
+    /**
      * Verifies that owner decrypt remains compatible with pre-envelope file_param key material.
      */
     @Test
@@ -319,6 +352,45 @@ class FileKeyEnvelopeServiceTest {
         when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(null);
 
         Optional<String> initialKey = envelopeService.unwrapActiveOwnerInitialKey(file, "hash-1", 200L);
+
+        assertThat(initialKey).isEmpty();
+    }
+
+    /**
+     * Verifies that stale legacy key material is ignored when metadata explicitly declares no encryption.
+     */
+    @Test
+    @DisplayName("should ignore stale legacy key for explicitly unencrypted file")
+    void shouldIgnoreStaleLegacyKeyForExplicitlyUnencryptedFile() {
+        File file = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1")
+                .setFileParam("""
+                        {"fileName":"a.txt","encryptionAlgorithm":"NONE","initialKey":"stale-key"}
+                        """);
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(null);
+
+        Optional<String> initialKey = envelopeService.unwrapActiveOwnerInitialKey(file, "hash-1", 100L);
+
+        assertThat(initialKey).isEmpty();
+    }
+
+    /**
+     * Verifies that missing persisted metadata returns no legacy owner key.
+     */
+    @Test
+    @DisplayName("should return empty legacy key for blank file param")
+    void shouldReturnEmptyLegacyKeyForBlankFileParam() {
+        File file = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1");
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(null);
+
+        Optional<String> initialKey = envelopeService.unwrapActiveOwnerInitialKey(file, "hash-1", 100L);
 
         assertThat(initialKey).isEmpty();
     }
@@ -455,8 +527,7 @@ class FileKeyEnvelopeServiceTest {
         File copiedFile = new File()
                 .setId(20L)
                 .setTenantId(2L)
-                .setUid(200L)
-                .setFileHash("hash-1");
+                .setUid(200L);
         FileShare share = new FileShare()
                 .setId(300L)
                 .setTenantId(1L)
@@ -528,6 +599,235 @@ class FileKeyEnvelopeServiceTest {
             TenantContext.clear();
         }
         assertThat(copiedInitialKey).contains("serialized-key");
+    }
+
+    /**
+     * Verifies that copied-envelope creation rejects missing call and persistence identities.
+     */
+    @Test
+    @DisplayName("should reject incomplete copied owner envelope context")
+    void shouldRejectIncompleteCopiedOwnerEnvelopeContext() {
+        FileShare share = new FileShare()
+                .setId(300L)
+                .setTenantId(1L)
+                .setUserId(100L)
+                .setShareCode("ABC123");
+
+        assertThatThrownBy(() -> envelopeService.saveCopiedOwnerEnvelope(
+                null,
+                new File(),
+                share,
+                200L,
+                200L,
+                "SHARE_SAVE_OWNER_ENVELOPE"
+        ))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getData())
+                        .asString()
+                        .contains("上下文不完整"));
+
+        File sourceFile = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1");
+        File copiedFileWithoutId = new File()
+                .setTenantId(2L)
+                .setUid(200L)
+                .setFileHash("hash-1");
+
+        assertThatThrownBy(() -> envelopeService.saveCopiedOwnerEnvelope(
+                sourceFile,
+                copiedFileWithoutId,
+                share,
+                200L,
+                200L,
+                "SHARE_SAVE_OWNER_ENVELOPE"
+        ))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getData())
+                        .asString()
+                        .contains("上下文不完整"));
+    }
+
+    /**
+     * Verifies that copied-envelope creation remains a no-op for explicitly unencrypted source files.
+     */
+    @Test
+    @DisplayName("should skip copied owner envelope for unencrypted source")
+    void shouldSkipCopiedOwnerEnvelopeForUnencryptedSource() {
+        File sourceFile = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1")
+                .setFileParam("""
+                        {"fileName":"a.txt","encryptionAlgorithm":"NONE"}
+                        """);
+        File copiedFile = new File()
+                .setId(20L)
+                .setTenantId(2L)
+                .setUid(200L)
+                .setFileHash("hash-1");
+        FileShare share = new FileShare()
+                .setId(300L)
+                .setTenantId(1L)
+                .setUserId(100L)
+                .setShareCode("ABC123");
+
+        envelopeService.saveCopiedOwnerEnvelope(
+                sourceFile,
+                copiedFile,
+                share,
+                200L,
+                200L,
+                "SHARE_SAVE_OWNER_ENVELOPE"
+        );
+
+        verify(fileKeyEnvelopeMapper, org.mockito.Mockito.never()).selectOne(any());
+        verify(fileKeyEnvelopeMapper, org.mockito.Mockito.never()).insert(any(FileKeyEnvelope.class));
+    }
+
+    /**
+     * Verifies that copied-envelope creation falls back to the authorized source owner envelope.
+     */
+    @Test
+    @DisplayName("should rewrap source owner key when share envelope is missing")
+    void shouldRewrapSourceOwnerKeyWhenShareEnvelopeIsMissing() {
+        File sourceFile = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1");
+        File copiedFile = new File()
+                .setId(20L)
+                .setTenantId(2L)
+                .setUid(200L)
+                .setFileHash("hash-1");
+        FileShare share = new FileShare()
+                .setId(300L)
+                .setTenantId(1L)
+                .setUserId(100L)
+                .setShareCode("ABC123");
+        FileParamEnvelopeResult result = envelopeService.prepareFileParam("""
+                {"fileName":"a.txt","initialKey":"serialized-key"}
+                """);
+        sourceFile.setFileParam(result.sanitizedFileParam());
+        copiedFile.setFileParam(result.sanitizedFileParam());
+        ArgumentCaptor<FileKeyEnvelope> envelopeCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+        envelopeService.saveOwnerEnvelope(sourceFile, "hash-1", 100L, result);
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope sourceOwnerEnvelope = envelopeCaptor.getValue();
+
+        clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(null, sourceOwnerEnvelope);
+        TenantContext.setTenantId(2L);
+        try {
+            envelopeService.saveCopiedOwnerEnvelope(
+                    sourceFile,
+                    copiedFile,
+                    share,
+                    200L,
+                    200L,
+                    "SHARE_SAVE_OWNER_ENVELOPE"
+            );
+        } finally {
+            TenantContext.clear();
+        }
+
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope copiedOwnerEnvelope = envelopeCaptor.getValue();
+        assertEquals(FileKeyEnvelopeService.RECIPIENT_TYPE_OWNER, copiedOwnerEnvelope.getRecipientType());
+        assertEquals(200L, copiedOwnerEnvelope.getRecipientId());
+    }
+
+    /**
+     * Verifies that an encrypted copied file is rejected when neither share nor owner key material exists.
+     */
+    @Test
+    @DisplayName("should reject copied encrypted file when key is missing")
+    void shouldRejectCopiedEncryptedFileWhenKeyIsMissing() {
+        File sourceFile = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1")
+                .setFileParam("""
+                        {"fileName":"a.txt","encryptionAlgorithm":"AES-GCM"}
+                        """);
+        File copiedFile = new File()
+                .setId(20L)
+                .setTenantId(2L)
+                .setUid(200L)
+                .setFileHash("hash-1");
+        FileShare share = new FileShare()
+                .setId(300L)
+                .setTenantId(1L)
+                .setUserId(100L)
+                .setShareCode("ABC123");
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(null);
+
+        TenantContext.setTenantId(2L);
+        try {
+            assertThatThrownBy(() -> envelopeService.saveCopiedOwnerEnvelope(
+                    sourceFile,
+                    copiedFile,
+                    share,
+                    200L,
+                    200L,
+                    "SHARE_SAVE_OWNER_ENVELOPE"
+            ))
+                    .isInstanceOf(GeneralException.class)
+                    .satisfies(ex -> assertThat(((GeneralException) ex).getData())
+                            .asString()
+                            .contains("文件解密密钥不存在"));
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
+    /**
+     * Verifies that a legacy/plain copied file remains saveable when no key material exists.
+     */
+    @Test
+    @DisplayName("should skip copied legacy plain file when key is missing")
+    void shouldSkipCopiedLegacyPlainFileWhenKeyIsMissing() {
+        File sourceFile = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1")
+                .setFileParam("""
+                        {"fileName":"a.txt","fileSize":10}
+                        """);
+        File copiedFile = new File()
+                .setId(20L)
+                .setTenantId(2L)
+                .setUid(200L)
+                .setFileHash("hash-1");
+        FileShare share = new FileShare()
+                .setId(300L)
+                .setTenantId(1L)
+                .setUserId(100L)
+                .setShareCode("ABC123");
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(null);
+
+        TenantContext.setTenantId(2L);
+        try {
+            envelopeService.saveCopiedOwnerEnvelope(
+                    sourceFile,
+                    copiedFile,
+                    share,
+                    200L,
+                    200L,
+                    "SHARE_SAVE_OWNER_ENVELOPE"
+            );
+        } finally {
+            TenantContext.clear();
+        }
+
+        verify(fileKeyEnvelopeMapper, org.mockito.Mockito.never()).insert(any(FileKeyEnvelope.class));
     }
 
     /**

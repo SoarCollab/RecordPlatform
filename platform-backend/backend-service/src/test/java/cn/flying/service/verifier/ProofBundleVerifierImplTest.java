@@ -130,6 +130,23 @@ class ProofBundleVerifierImplTest {
     }
 
     /**
+     * 验证缺少文件证据时哈希绑定校验会安全返回并保留缺字段错误。
+     */
+    @Test
+    void verify_shouldRejectMissingFileEvidence() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO missingFile = withFile(bundle, null);
+
+        ProofVerificationResult result = verifier.verify(originalFile, missingFile);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.issues())
+                .extracting(ProofVerificationIssue::code)
+                .contains(ProofVerificationCode.MISSING_REQUIRED_FIELD);
+    }
+
+    /**
      * 验证证明路径被篡改时会拒绝证明包。
      */
     @Test
@@ -455,6 +472,23 @@ class ProofBundleVerifierImplTest {
                 bundle.manifest(),
                 bundle.file(),
                 storage,
+                bundle.merkle(),
+                bundle.chain(),
+                bundle.issuer(),
+                bundle.verificationPolicy(),
+                bundle.verificationGuide()
+        );
+    }
+
+    /**
+     * 替换证明包里的文件证据段。
+     */
+    private ProofBundleVO withFile(ProofBundleVO bundle, ProofBundleVO.FileEvidence file) {
+        return new ProofBundleVO(
+                bundle.contractVersion(),
+                bundle.manifest(),
+                file,
+                bundle.storage(),
                 bundle.merkle(),
                 bundle.chain(),
                 bundle.issuer(),
