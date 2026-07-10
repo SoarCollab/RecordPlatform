@@ -224,7 +224,7 @@ P1-3 adds an offline verifier boundary for the `proof-bundle.v1` contract:
 
 - `ProofBundleVerifier.verify(byte[] originalFile, ProofBundleVO bundle)` validates a parsed bundle without backend session state.
 - `ProofBundleVerifier.verify(byte[] originalFile, String bundleJson)` parses exported JSON and returns the same structured result.
-- `ProofVerificationResult` reports `valid`, machine-readable issue codes, computed file hash, computed leaf hash, computed Merkle root, chain receipt fields, and issuer status.
+- `ProofVerificationResult` reports `valid`, machine-readable issue codes, computed file hash, computed leaf hash, computed Merkle root, chain receipt fields, and issuer status. `valid=true` is reserved for proof formats that establish both structural consistency and authenticity.
 
 The verifier checks:
 
@@ -239,6 +239,8 @@ The verifier checks:
 Missing or unsupported suite metadata is reported as `UNSUPPORTED_ALGORITHM`; the verifier does not resolve absent fields with runtime defaults.
 
 The verifier does not call platform APIs, query the database, read tenant context, or authenticate to FISCO. Direct transaction receipt validation remains a separate online verification step until a public chain gateway or signed receipt contract is introduced.
+
+Because `proof-bundle.v1` currently declares `UNSIGNED-V1`, the offline verifier returns `AUTHENTICITY_NOT_VERIFIED` as an error even when every structural check passes. Callers may inspect the computed evidence, but they must not treat the unsigned bundle as an authentic attestation. A future signed bundle or online chain-verification flow must replace this fail-closed result with a real trust-anchor check.
 
 ### Transaction Verification
 

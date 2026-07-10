@@ -211,7 +211,7 @@ public class FileKeyEnvelopeService {
             return Optional.empty();
         }
 
-        return unwrapActiveRecipientInitialKey(
+        Optional<String> envelopeInitialKey = unwrapActiveRecipientInitialKey(
                 file,
                 resolvedFileHash,
                 tenantId,
@@ -220,6 +220,9 @@ public class FileKeyEnvelopeService {
                 actorId,
                 reason
         );
+        return envelopeInitialKey.isPresent()
+                ? envelopeInitialKey
+                : resolveLegacyInitialKey(file, ownerId);
     }
 
     /**
@@ -239,18 +242,23 @@ public class FileKeyEnvelopeService {
             if (file == null || file.getId() == null || !StringUtils.hasText(file.getFileHash())) {
                 continue;
             }
-            if (!requiresInitialKey(file)) {
+            Optional<String> initialKey = resolveExistingOwnerInitialKey(
+                    file,
+                    file.getFileHash(),
+                    share.getUserId(),
+                    actorId,
+                    "SHARE_ENVELOPE_CREATE"
+            );
+            if (initialKey.isEmpty()) {
                 continue;
             }
-            String initialKey = requireOwnerInitialKey(file, file.getFileHash(), share.getUserId(), actorId,
-                    "SHARE_ENVELOPE_CREATE");
             saveRecipientEnvelope(
                     tenantId,
                     file,
                     file.getFileHash(),
                     RECIPIENT_TYPE_SHARE,
                     share.getId(),
-                    initialKey
+                    initialKey.get()
             );
         }
     }
@@ -272,20 +280,91 @@ public class FileKeyEnvelopeService {
             if (file == null || file.getId() == null || !StringUtils.hasText(file.getFileHash())) {
                 continue;
             }
-            if (!requiresInitialKey(file)) {
+            Optional<String> initialKey = resolveExistingOwnerInitialKey(
+                    file,
+                    file.getFileHash(),
+                    share.getSharerId(),
+                    actorId,
+                    "FRIEND_SHARE_ENVELOPE_CREATE"
+            );
+            if (initialKey.isEmpty()) {
                 continue;
             }
-            String initialKey = requireOwnerInitialKey(file, file.getFileHash(), share.getSharerId(), actorId,
-                    "FRIEND_SHARE_ENVELOPE_CREATE");
             saveRecipientEnvelope(
                     tenantId,
                     file,
                     file.getFileHash(),
                     RECIPIENT_TYPE_FRIEND_SHARE,
                     share.getId(),
-                    initialKey
+                    initialKey.get()
             );
         }
+    }
+
+    /**
+     * Rewraps a shared file's data key as an owner envelope for the recipient's newly copied file record.
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void saveCopiedOwnerEnvelope(File sourceFile,
+                                        File copiedFile,
+                                        FileShare share,
+                                        Long recipientUserId,
+                                        Long actorId,
+                                        String reason) {
+        if (sourceFile == null || copiedFile == null || share == null || recipientUserId == null) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "保存分享文件的密钥信封上下文不完整");
+        }
+        String fileHash = StringUtils.hasText(copiedFile.getFileHash())
+                ? copiedFile.getFileHash()
+                : sourceFile.getFileHash();
+        Long sourceTenantId = resolveTenantId(sourceFile);
+        Long copiedTenantId = resolveTenantId(copiedFile);
+        if (copiedFile.getId() == null || sourceTenantId == null || copiedTenantId == null
+                || !StringUtils.hasText(fileHash)) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "保存分享文件的密钥信封上下文不完整");
+        }
+        if (isExplicitlyUnencrypted(sourceFile)) {
+            return;
+        }
+
+        Optional<String> initialKey = TenantContext.callWithTenant(sourceTenantId, () -> {
+            Optional<String> shareInitialKey = unwrapActiveShareInitialKey(
+                    sourceFile,
+                    sourceFile.getFileHash(),
+                    share,
+                    actorId,
+                    reason
+            );
+            if (shareInitialKey.isPresent()) {
+                return shareInitialKey;
+            }
+            return unwrapActiveOwnerInitialKey(
+                    sourceFile,
+                    sourceFile.getFileHash(),
+                    share.getUserId(),
+                    actorId,
+                    reason
+            );
+        });
+        if (initialKey.isEmpty()) {
+            if (hasExplicitEncryptionAlgorithm(sourceFile)) {
+                throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
+            }
+            return;
+        }
+
+        String copiedInitialKey = initialKey.get();
+        TenantContext.callWithTenant(copiedTenantId, () -> {
+            saveRecipientEnvelope(
+                    copiedTenantId,
+                    copiedFile,
+                    fileHash,
+                    RECIPIENT_TYPE_OWNER,
+                    recipientUserId,
+                    copiedInitialKey
+            );
+            return null;
+        });
     }
 
     /**
@@ -577,37 +656,81 @@ public class FileKeyEnvelopeService {
     }
 
     /**
-     * Requires an active owner envelope for encrypted files before creating recipient envelopes.
+     * Resolves an existing owner's key while preserving compatibility for legacy/plain metadata.
      */
-    private String requireOwnerInitialKey(File file,
-                                          String fileHash,
-                                          Long ownerId,
-                                          Long actorId,
-                                          String reason) {
-        Optional<String> ownerEnvelope = unwrapActiveOwnerInitialKey(file, fileHash, ownerId, actorId, reason);
-        if (ownerEnvelope.isPresent()) {
-            return ownerEnvelope.get();
+    private Optional<String> resolveExistingOwnerInitialKey(File file,
+                                                            String fileHash,
+                                                            Long ownerId,
+                                                            Long actorId,
+                                                            String reason) {
+        if (isExplicitlyUnencrypted(file)) {
+            return Optional.empty();
         }
-        throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
+        Optional<String> initialKey = unwrapActiveOwnerInitialKey(file, fileHash, ownerId, actorId, reason);
+        if (initialKey.isPresent()) {
+            return initialKey;
+        }
+        if (hasExplicitEncryptionAlgorithm(file)) {
+            throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
+        }
+        return Optional.empty();
     }
 
     /**
-     * Returns whether persisted metadata explicitly describes encrypted content that needs recipient envelopes.
-     *
-     * <p>Upload-time validation remains strict in {@link #prepareFileParam(String)}. This method is used only for
-     * existing file records during share creation, so legacy/plain records without an encryptionAlgorithm are treated
-     * as not requiring recipient envelopes instead of breaking share creation.</p>
+     * Reads legacy plaintext key material only when metadata does not explicitly mark the file unencrypted.
      */
-    private boolean requiresInitialKey(File file) {
+    private Optional<String> resolveLegacyInitialKey(File file, Long ownerId) {
+        if (file == null || file.getUid() == null || !file.getUid().equals(ownerId)) {
+            return Optional.empty();
+        }
+        Map<String, Object> params = parsePersistedFileParam(file);
+        String encryptionAlgorithm = resolvePersistedEncryptionAlgorithm(params);
+        if (ENCRYPTION_NONE.equalsIgnoreCase(encryptionAlgorithm)) {
+            return Optional.empty();
+        }
+        Object rawInitialKey = params.get(FIELD_INITIAL_KEY);
+        if (rawInitialKey instanceof String initialKey && StringUtils.hasText(initialKey)) {
+            return Optional.of(initialKey);
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Returns whether existing metadata explicitly marks the stored bytes as unencrypted.
+     */
+    private boolean isExplicitlyUnencrypted(File file) {
+        return ENCRYPTION_NONE.equalsIgnoreCase(
+                resolvePersistedEncryptionAlgorithm(parsePersistedFileParam(file))
+        );
+    }
+
+    /**
+     * Returns whether existing metadata explicitly declares any encryption algorithm.
+     */
+    private boolean hasExplicitEncryptionAlgorithm(File file) {
+        return StringUtils.hasText(resolvePersistedEncryptionAlgorithm(parsePersistedFileParam(file)));
+    }
+
+    /**
+     * Parses persisted file metadata for compatibility decisions.
+     */
+    private Map<String, Object> parsePersistedFileParam(File file) {
         if (file == null || !StringUtils.hasText(file.getFileParam())) {
-            return false;
+            return Map.of();
         }
         Map<String, Object> params = JsonConverter.parse(file.getFileParam(), FILE_PARAM_TYPE);
-        Object encryptionAlgorithm = params.get(FIELD_ENCRYPTION_ALGORITHM);
-        if (!(encryptionAlgorithm instanceof String algorithm) || !StringUtils.hasText(algorithm)) {
-            return false;
+        return params == null ? Map.of() : params;
+    }
+
+    /**
+     * Reads a normalized encryption algorithm from persisted metadata.
+     */
+    private String resolvePersistedEncryptionAlgorithm(Map<String, Object> params) {
+        Object rawAlgorithm = params.get(FIELD_ENCRYPTION_ALGORITHM);
+        if (rawAlgorithm instanceof String algorithm && StringUtils.hasText(algorithm)) {
+            return algorithm.trim();
         }
-        return !ENCRYPTION_NONE.equalsIgnoreCase(algorithm.trim());
+        return null;
     }
 
     /**
@@ -628,7 +751,7 @@ public class FileKeyEnvelopeService {
      * Unwraps an envelope without writing an unwrap audit event for internal rotation use.
      */
     private String unwrapEnvelopeForRotation(FileKeyEnvelope envelope) {
-        validatePersistedEnvelopeSuites(envelope);
+        validatePersistedEnvelopeAadMetadata(envelope);
         byte[] aad = buildEnvelopeAad(
                 envelope.getTenantId(),
                 envelope.getFileId(),
@@ -716,20 +839,11 @@ public class FileKeyEnvelopeService {
     }
 
     /**
-     * Requires persisted envelope crypto-suite metadata to be complete before unwrap.
+     * Requires the persisted suite field that participates in envelope AAD before unwrap.
      */
-    private void validatePersistedEnvelopeSuites(FileKeyEnvelope envelope) {
+    private void validatePersistedEnvelopeAadMetadata(FileKeyEnvelope envelope) {
         if (!StringUtils.hasText(envelope.getAlgorithmSuite())) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件密钥信封缺少 algorithmSuite");
-        }
-        if (!StringUtils.hasText(envelope.getSignatureSuite())) {
-            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件密钥信封缺少 signatureSuite");
-        }
-        if (!StringUtils.hasText(envelope.getKemSuite())) {
-            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件密钥信封缺少 kemSuite");
-        }
-        if (!StringUtils.hasText(envelope.getProofSuite())) {
-            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件密钥信封缺少 proofSuite");
         }
     }
 

@@ -2,6 +2,7 @@ package cn.flying.service.key;
 
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
@@ -250,6 +251,79 @@ class FileKeyEnvelopeServiceTest {
     }
 
     /**
+     * Verifies that legacy encrypted metadata still creates a share envelope when plaintext key material exists.
+     */
+    @Test
+    @DisplayName("should create share envelope for legacy metadata with initial key")
+    void shouldCreateShareEnvelopeForLegacyMetadataWithInitialKey() {
+        File file = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1")
+                .setFileParam("""
+                        {"fileName":"a.txt","fileSize":10,"initialKey":"legacy-key"}
+                        """);
+        FileShare share = new FileShare()
+                .setId(200L)
+                .setTenantId(1L)
+                .setUserId(100L)
+                .setShareCode("ABC123");
+        ArgumentCaptor<FileKeyEnvelope> envelopeCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(null);
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+
+        envelopeService.saveShareEnvelopes(share, java.util.List.of(file), 100L, "SHARE_CREATE");
+
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope shareEnvelope = envelopeCaptor.getValue();
+        assertEquals(FileKeyEnvelopeService.RECIPIENT_TYPE_SHARE, shareEnvelope.getRecipientType());
+        assertEquals(200L, shareEnvelope.getRecipientId());
+    }
+
+    /**
+     * Verifies that owner decrypt remains compatible with pre-envelope file_param key material.
+     */
+    @Test
+    @DisplayName("should resolve legacy initial key when owner envelope is missing")
+    void shouldResolveLegacyInitialKeyWhenOwnerEnvelopeIsMissing() {
+        File file = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1")
+                .setFileParam("""
+                        {"fileName":"a.txt","initialKey":"legacy-key"}
+                        """);
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(null);
+
+        Optional<String> initialKey = envelopeService.unwrapActiveOwnerInitialKey(file, "hash-1", 100L);
+
+        assertThat(initialKey).contains("legacy-key");
+    }
+
+    /**
+     * Verifies that legacy plaintext key fallback remains bound to the persisted file owner.
+     */
+    @Test
+    @DisplayName("should not resolve legacy initial key for another owner")
+    void shouldNotResolveLegacyInitialKeyForAnotherOwner() {
+        File file = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1")
+                .setFileParam("""
+                        {"fileName":"a.txt","initialKey":"legacy-key"}
+                        """);
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(null);
+
+        Optional<String> initialKey = envelopeService.unwrapActiveOwnerInitialKey(file, "hash-1", 200L);
+
+        assertThat(initialKey).isEmpty();
+    }
+
+    /**
      * Verifies that an owner envelope can be saved and unwrapped later.
      */
     @Test
@@ -282,6 +356,38 @@ class FileKeyEnvelopeServiceTest {
 
         assertTrue(unwrapped.isPresent());
         assertEquals("serialized-key", unwrapped.get());
+    }
+
+    /**
+     * Verifies that historical envelopes remain readable when non-AAD suite metadata is absent.
+     */
+    @Test
+    @DisplayName("should unwrap historical envelope without non aad suite metadata")
+    void shouldUnwrapHistoricalEnvelopeWithoutNonAadSuiteMetadata() {
+        File file = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1");
+        FileParamEnvelopeResult result = envelopeService.prepareFileParam("""
+                {"fileName":"a.txt","initialKey":"serialized-key"}
+                """);
+        file.setFileParam(result.sanitizedFileParam());
+        ArgumentCaptor<FileKeyEnvelope> envelopeCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+        envelopeService.saveOwnerEnvelope(file, "hash-1", 100L, result);
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope historicalEnvelope = envelopeCaptor.getValue()
+                .setSignatureSuite(null)
+                .setKemSuite(null)
+                .setProofSuite(null);
+
+        clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(historicalEnvelope);
+
+        Optional<String> initialKey = envelopeService.unwrapActiveOwnerInitialKey(file, "hash-1", 100L);
+
+        assertThat(initialKey).contains("serialized-key");
     }
 
     /**
@@ -333,6 +439,95 @@ class FileKeyEnvelopeServiceTest {
         assertTrue(unwrapped.isPresent());
         assertEquals("serialized-key", unwrapped.get());
         verify(fileKeyAuditLogMapper).insert(any(FileKeyAuditLog.class));
+    }
+
+    /**
+     * Verifies that saving a shared encrypted file creates a new owner envelope bound to the copied file identity.
+     */
+    @Test
+    @DisplayName("should rewrap shared key for copied file owner")
+    void shouldRewrapSharedKeyForCopiedFileOwner() {
+        File sourceFile = new File()
+                .setId(10L)
+                .setTenantId(1L)
+                .setUid(100L)
+                .setFileHash("hash-1");
+        File copiedFile = new File()
+                .setId(20L)
+                .setTenantId(2L)
+                .setUid(200L)
+                .setFileHash("hash-1");
+        FileShare share = new FileShare()
+                .setId(300L)
+                .setTenantId(1L)
+                .setUserId(100L)
+                .setShareCode("ABC123");
+        FileParamEnvelopeResult result = envelopeService.prepareFileParam("""
+                {"fileName":"a.txt","initialKey":"serialized-key"}
+                """);
+        sourceFile.setFileParam(result.sanitizedFileParam());
+        copiedFile.setFileParam(result.sanitizedFileParam());
+        ArgumentCaptor<FileKeyEnvelope> envelopeCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+
+        envelopeService.saveOwnerEnvelope(sourceFile, "hash-1", 100L, result);
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope ownerEnvelope = envelopeCaptor.getValue();
+
+        clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(ownerEnvelope);
+        envelopeService.saveShareEnvelopes(share, java.util.List.of(sourceFile), 100L, "SHARE_CREATE");
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope shareEnvelope = envelopeCaptor.getValue();
+
+        clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenAnswer(invocation -> {
+            assertEquals(1L, TenantContext.getTenantIdOrDefault());
+            return shareEnvelope;
+        });
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenAnswer(invocation -> {
+            assertEquals(2L, TenantContext.getTenantIdOrDefault());
+            return 1;
+        });
+        TenantContext.setTenantId(2L);
+        try {
+            envelopeService.saveCopiedOwnerEnvelope(
+                    sourceFile,
+                    copiedFile,
+                    share,
+                    200L,
+                    200L,
+                    "SHARE_SAVE_OWNER_ENVELOPE"
+            );
+        } finally {
+            TenantContext.clear();
+        }
+
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope copiedOwnerEnvelope = envelopeCaptor.getValue();
+        assertEquals(2L, copiedOwnerEnvelope.getTenantId());
+        assertEquals(20L, copiedOwnerEnvelope.getFileId());
+        assertEquals(FileKeyEnvelopeService.RECIPIENT_TYPE_OWNER, copiedOwnerEnvelope.getRecipientType());
+        assertEquals(200L, copiedOwnerEnvelope.getRecipientId());
+
+        clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
+        org.mockito.Mockito.doAnswer(invocation -> {
+                    assertEquals(2L, TenantContext.getTenantIdOrDefault());
+                    return copiedOwnerEnvelope;
+                })
+                .when(fileKeyEnvelopeMapper).selectOne(any());
+        TenantContext.setTenantId(2L);
+        Optional<String> copiedInitialKey;
+        try {
+            copiedInitialKey = envelopeService.unwrapActiveOwnerInitialKey(
+                    copiedFile,
+                    "hash-1",
+                    200L
+            );
+        } finally {
+            TenantContext.clear();
+        }
+        assertThat(copiedInitialKey).contains("serialized-key");
     }
 
     /**

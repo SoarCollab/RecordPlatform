@@ -1358,8 +1358,8 @@ class DistributedStorageServiceImplTest {
         }
 
         @Test
-        @DisplayName("Should abort direct multipart upload by deleting staging parts")
-        void shouldAbortDirectMultipartUpload() {
+        @DisplayName("Should abort direct multipart upload without deleting shared final chunks")
+        void shouldAbortDirectMultipartUploadWithoutDeletingSharedFinalChunks() {
             byte[] chunkBytes = "direct-upload-chunk".getBytes(StandardCharsets.UTF_8);
             String chunkHash = sha256Prefixed(chunkBytes);
             when(faultDomainManager.getTargetNodes(chunkHash)).thenReturn(List.of("node1"));
@@ -1389,16 +1389,11 @@ class DistributedStorageServiceImplTest {
             assertThat(result.getData()).isTrue();
 
             ArgumentCaptor<DeleteObjectRequest> deleteCaptor = ArgumentCaptor.forClass(DeleteObjectRequest.class);
-            verify(s3Client, times(2)).deleteObject(deleteCaptor.capture());
-            assertThat(deleteCaptor.getAllValues())
-                    .extracting(DeleteObjectRequest::bucket)
-                    .containsExactly("node1", "node1");
-            assertThat(deleteCaptor.getAllValues())
-                    .extracting(DeleteObjectRequest::key)
-                    .containsExactly(
-                            directStagingObjectName("direct-session", 0),
-                            directFinalObjectName(chunkHash)
-                    );
+            verify(s3Client).deleteObject(deleteCaptor.capture());
+            assertThat(deleteCaptor.getValue().bucket()).isEqualTo("node1");
+            assertThat(deleteCaptor.getValue().key())
+                    .isEqualTo(directStagingObjectName("direct-session", 0));
+            assertThat(deleteCaptor.getValue().key()).isNotEqualTo(directFinalObjectName(chunkHash));
         }
     }
 

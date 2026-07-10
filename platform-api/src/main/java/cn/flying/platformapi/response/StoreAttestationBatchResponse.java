@@ -1,5 +1,8 @@
 package cn.flying.platformapi.response;
 
+import java.io.Serial;
+import java.io.Serializable;
+
 /**
  * Dedicated blockchain response for a Merkle attestation batch write.
  *
@@ -9,5 +12,8 @@ package cn.flying.platformapi.response;
 public record StoreAttestationBatchResponse(
         String transactionHash,
         String batchRootHash
-) {
+) implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 }

@@ -25,17 +25,19 @@ class ProofBundleVerifierImplTest {
     private final ProofBundleVerifierImpl verifier = new ProofBundleVerifierImpl(merkleTreeService);
 
     /**
-     * 验证有效证明包可以在无平台会话和无数据库访问的情况下通过校验。
+     * 验证结构自洽但未签名的证明包会保留计算证据并以真实性未验证失败。
      */
     @Test
-    void verify_shouldAcceptValidProofBundle() {
+    void verify_shouldReturnComputedEvidenceForStructurallyValidUnsignedBundle() {
         byte[] originalFile = bytes("hello proof");
         ProofBundleVO bundle = validBundle(originalFile);
 
         ProofVerificationResult result = verifier.verify(originalFile, bundle);
 
-        assertThat(result.valid()).isTrue();
-        assertThat(result.issues()).isEmpty();
+        assertThat(result.valid()).isFalse();
+        assertThat(result.issues())
+                .extracting(ProofVerificationIssue::code)
+                .containsExactly(ProofVerificationCode.AUTHENTICITY_NOT_VERIFIED);
         assertThat(result.fileHash()).isEqualTo(bundle.file().fileHash());
         assertThat(result.computedFileHash()).isEqualTo(sha256Hex(originalFile));
         assertThat(result.computedLeafHash()).isEqualTo(bundle.merkle().leafHash());
@@ -45,16 +47,19 @@ class ProofBundleVerifierImplTest {
     }
 
     /**
-     * 验证 JSON 字符串入口会解析证明包并复用同一套离线校验逻辑。
+     * 验证 JSON 字符串入口会解析证明包并保留 unsigned fail-closed 语义。
      */
     @Test
-    void verify_shouldAcceptValidProofBundleJson() {
+    void verify_shouldReturnComputedEvidenceForStructurallyValidUnsignedBundleJson() {
         byte[] originalFile = bytes("hello proof");
         ProofBundleVO bundle = validBundle(originalFile);
 
         ProofVerificationResult result = verifier.verify(originalFile, JsonConverter.toJson(bundle));
 
-        assertThat(result.valid()).isTrue();
+        assertThat(result.valid()).isFalse();
+        assertThat(result.issues())
+                .extracting(ProofVerificationIssue::code)
+                .containsExactly(ProofVerificationCode.AUTHENTICITY_NOT_VERIFIED);
         assertThat(result.contractVersion()).isEqualTo(ProofBundleVO.CONTRACT_VERSION);
     }
 
@@ -71,6 +76,57 @@ class ProofBundleVerifierImplTest {
         assertThat(result.issues())
                 .extracting(ProofVerificationIssue::code)
                 .contains(ProofVerificationCode.FILE_HASH_MISMATCH);
+    }
+
+    /**
+     * 验证即使存储分片声明被改写为匹配另一份文件，原始文件也必须绑定到链上 fileHash。
+     */
+    @Test
+    void verify_shouldRejectFileEvidenceHashMismatchWhenStorageEvidenceMatches() {
+        byte[] attestedFile = bytes("hello proof");
+        byte[] substitutedFile = bytes("substituted proof");
+        ProofBundleVO bundle = validBundle(attestedFile);
+        ProofBundleVO.StorageObjectEvidence originalObject = bundle.storage().objects().getFirst();
+        ProofBundleVO substituted = withStorage(
+                bundle,
+                new ProofBundleVO.StorageEvidence(List.of(new ProofBundleVO.StorageObjectEvidence(
+                        originalObject.index(),
+                        originalObject.objectPath(),
+                        "sha256:" + sha256Hex(substitutedFile),
+                        originalObject.cipherHash(),
+                        (long) substitutedFile.length,
+                        originalObject.checksumAlgorithm(),
+                        originalObject.exists(),
+                        originalObject.nodeName(),
+                        (long) substitutedFile.length,
+                        originalObject.eTag(),
+                        originalObject.metadataHash(),
+                        originalObject.metadataHashMatches(),
+                        originalObject.tenantMatches()
+                )))
+        );
+
+        ProofVerificationResult result = verifier.verify(substitutedFile, substituted);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.issues())
+                .extracting(ProofVerificationIssue::code)
+                .contains(ProofVerificationCode.FILE_HASH_MISMATCH);
+    }
+
+    /**
+     * 验证 unsigned v1 证明包只能证明内部结构自洽，不能被标记为真实存证有效。
+     */
+    @Test
+    void verify_shouldRejectUnsignedSelfConsistentBundleAsUnauthenticated() {
+        byte[] originalFile = bytes("hello proof");
+
+        ProofVerificationResult result = verifier.verify(originalFile, validBundle(originalFile));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.issues())
+                .extracting(ProofVerificationIssue::code)
+                .contains(ProofVerificationCode.AUTHENTICITY_NOT_VERIFIED);
     }
 
     /**
@@ -278,7 +334,7 @@ class ProofBundleVerifierImplTest {
      * 构造与原始文件内容匹配的证明包。
      */
     private ProofBundleVO validBundle(byte[] originalFile) {
-        String fileHash = "chain-record-hash";
+        String fileHash = sha256Hex(originalFile);
         String plainHash = "sha256:" + sha256Hex(originalFile);
         String cipherHash = "sha256:" + sha256Hex(bytes("cipher"));
         String siblingHash = sha256Hex(bytes("sibling"));
@@ -384,6 +440,23 @@ class ProofBundleVerifierImplTest {
                 bundle.storage(),
                 bundle.merkle(),
                 chain,
+                bundle.issuer(),
+                bundle.verificationPolicy(),
+                bundle.verificationGuide()
+        );
+    }
+
+    /**
+     * 替换证明包里的存储证明段。
+     */
+    private ProofBundleVO withStorage(ProofBundleVO bundle, ProofBundleVO.StorageEvidence storage) {
+        return new ProofBundleVO(
+                bundle.contractVersion(),
+                bundle.manifest(),
+                bundle.file(),
+                storage,
+                bundle.merkle(),
+                bundle.chain(),
                 bundle.issuer(),
                 bundle.verificationPolicy(),
                 bundle.verificationGuide()

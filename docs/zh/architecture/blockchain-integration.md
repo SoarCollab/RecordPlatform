@@ -232,7 +232,7 @@ sequenceDiagram
 
 - `verify(byte[] originalFile, ProofBundleVO bundle)` 校验已解析证明包；
 - `verify(byte[] originalFile, String bundleJson)` 解析 JSON 后复用同一套校验逻辑；
-- `ProofVerificationResult` 返回 `valid`、机器可读 issue code、计算出的 file hash、leaf hash、Merkle root、链上回执字段和 issuer 状态。
+- `ProofVerificationResult` 返回 `valid`、机器可读 issue code、计算出的 file hash、leaf hash、Merkle root、链上回执字段和 issuer 状态；只有同时建立结构一致性和真实性的证明格式才允许返回 `valid=true`。
 
 校验器会检查：
 
@@ -245,6 +245,8 @@ sequenceDiagram
 - issuer batch 状态和 storage metadata mismatch 标记。
 
 缺失或不支持的 suite 元数据会返回 `UNSUPPORTED_ALGORITHM`；校验器不会用运行时默认值补齐缺失字段。
+
+当前 `proof-bundle.v1` 使用 `UNSIGNED-V1`，因此即使所有结构检查通过，离线校验器仍会返回 `AUTHENTICITY_NOT_VERIFIED` 错误。调用方可以读取计算后的证据，但不能把未签名证明包当作真实存证。后续必须由签名证明包或在线链上校验建立可信锚点后，才能得到 `valid=true`。
 
 ### 交易验证
 
