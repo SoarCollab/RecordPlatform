@@ -964,6 +964,14 @@ class FileServiceTest {
             assertEquals(99L, provenance.getSourceFileId());
             assertEquals(OTHER_USER_ID, provenance.getSourceUserId());
             assertEquals(SHARE_CODE, provenance.getShareCode());
+            verify(fileKeyEnvelopeService).saveCopiedOwnerEnvelope(
+                    sourceFile,
+                    copied,
+                    share,
+                    USER_ID,
+                    USER_ID,
+                    "SHARE_SAVE_OWNER_ENVELOPE"
+            );
             verify(shareAuditService).logShareSave(SHARE_CODE, USER_ID, "allowed-hash", "shared.txt", "127.0.0.1");
         }
     }

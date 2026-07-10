@@ -866,6 +866,14 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
             // 先保存文件以获取新ID
             this.save(copiedFile);
+            fileKeyEnvelopeService.saveCopiedOwnerEnvelope(
+                    file,
+                    copiedFile,
+                    fileShare,
+                    userId,
+                    userId,
+                    "SHARE_SAVE_OWNER_ENVELOPE"
+            );
 
             // 创建 FileSource 记录
             FileSource fileSource = new FileSource()

@@ -6,6 +6,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serializable;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -118,5 +123,38 @@ class PlatformApiJacksonRecordTest {
                 StoreAttestationBatchResponse.class
         );
         assertThat(batchResponse2).isEqualTo(batchResponse);
+    }
+
+    /**
+     * Verifies that dedicated batch attestation DTOs cross strict Java-serialization RPC boundaries.
+     */
+    @Test
+    void shouldJavaSerializeBatchAttestationRecords() throws Exception {
+        StoreAttestationBatchRequest request = new StoreAttestationBatchRequest(
+                7L,
+                900L,
+                "MB-900",
+                "SHA-256-MERKLE-V1",
+                "root-hash",
+                2
+        );
+        StoreAttestationBatchResponse response = new StoreAttestationBatchResponse("tx-root", "root-hash");
+
+        assertThat(javaSerializationRoundTrip(request)).isEqualTo(request);
+        assertThat(javaSerializationRoundTrip(response)).isEqualTo(response);
+    }
+
+    /**
+     * Serializes and deserializes one RPC value through the JDK object stream contract.
+     */
+    private Object javaSerializationRoundTrip(Object value) throws Exception {
+        assertThat(value).isInstanceOf(Serializable.class);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ObjectOutputStream output = new ObjectOutputStream(bytes)) {
+            output.writeObject(value);
+        }
+        try (ObjectInputStream input = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+            return input.readObject();
+        }
     }
 }

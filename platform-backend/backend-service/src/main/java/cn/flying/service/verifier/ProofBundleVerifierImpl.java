@@ -68,6 +68,7 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
 
         validateContract(bundle, issues);
         validateFileEvidence(file, issues);
+        validateOriginalFileHash(file, computedFileHash, issues);
         validateOriginalContent(originalFile, bundle.storage(), issues);
         String computedLeafHash = validateMerkleLeaf(file, merkle, issues);
         String computedMerkleRoot = validateMerklePath(merkle, computedLeafHash, issues);
@@ -75,6 +76,7 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
         validateIssuerEvidence(issuer, issues);
         validateStorageEvidence(bundle.storage(), issues);
         validateVerificationPolicy(bundle.verificationPolicy(), issues);
+        validateAuthenticityEvidence(bundle.verificationPolicy(), issues);
 
         return buildResult(
                 issues,
@@ -150,6 +152,25 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
         if (!StringUtils.hasText(file.fileHash())) {
             issues.add(missing("file.fileHash", "缺少文件哈希"));
             return;
+        }
+    }
+
+    /**
+     * Binds the supplied original bytes to the file hash used by the Merkle and chain evidence.
+     */
+    private void validateOriginalFileHash(ProofBundleVO.FileEvidence file,
+                                          String computedFileHash,
+                                          List<ProofVerificationIssue> issues) {
+        if (file == null || !StringUtils.hasText(file.fileHash()) || !StringUtils.hasText(computedFileHash)) {
+            return;
+        }
+        if (!computedFileHash.equalsIgnoreCase(normalizeSha256(file.fileHash()))) {
+            issues.add(issue(
+                    ProofVerificationCode.FILE_HASH_MISMATCH,
+                    ProofVerificationSeverity.ERROR,
+                    "file.fileHash",
+                    "原始文件 SHA-256 与存证文件哈希不一致"
+            ));
         }
     }
 
@@ -498,6 +519,22 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
                     "证明包声明的密码套件已废弃"
             ));
         }
+    }
+
+    /**
+     * Rejects unsigned proof bundles as authentic attestations while preserving structural evidence.
+     */
+    private void validateAuthenticityEvidence(ProofBundleVO.VerificationPolicy policy,
+                                              List<ProofVerificationIssue> issues) {
+        if (policy == null || !SUPPORTED_SIGNATURE_SUITE.equals(policy.signatureSuite())) {
+            return;
+        }
+        issues.add(issue(
+                ProofVerificationCode.AUTHENTICITY_NOT_VERIFIED,
+                ProofVerificationSeverity.ERROR,
+                "verificationPolicy.signatureSuite",
+                "unsigned 证明包只能验证结构一致性，无法证明签发方或链上真实性"
+        ));
     }
 
     /**

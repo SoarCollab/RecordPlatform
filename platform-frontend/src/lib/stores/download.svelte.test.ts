@@ -278,6 +278,94 @@ describe("download store", () => {
     expect(mocks.downloadStorage.clearTaskData).toHaveBeenCalledWith(id);
   });
 
+  it("owned legacy 文件缺少 manifest 时应回退旧下载元数据接口", async () => {
+    mocks.fileApi.getDownloadMetadata.mockRejectedValueOnce(
+      new Error("文件缺少分片 manifest"),
+    );
+    const download = await loadDownloadStore();
+
+    const id = await download.startDownload(
+      "hash-legacy",
+      "legacy.pdf",
+      { type: "owned" },
+      1024,
+      "inmemory",
+    );
+
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "completed",
+    );
+
+    expect(mocks.fileApi.getDownloadMetadata).toHaveBeenCalledWith(
+      "hash-legacy",
+    );
+    expect(mocks.fileApi.getDownloadAddress).toHaveBeenCalledWith(
+      "hash-legacy",
+    );
+    expect(mocks.fileApi.getDecryptInfo).toHaveBeenCalledWith("hash-legacy");
+    expect(mocks.chunkDownloader.downloadAllChunks).toHaveBeenCalledWith(
+      ["legacy-u1"],
+      expect.any(Object),
+    );
+  });
+
+  it("owned legacy 回退接口失败时应保留回退错误", async () => {
+    mocks.fileApi.getDownloadMetadata.mockRejectedValueOnce(
+      new Error("文件缺少分片 manifest"),
+    );
+    mocks.fileApi.getDownloadAddress.mockRejectedValueOnce(
+      new Error("legacy address failed"),
+    );
+    const download = await loadDownloadStore();
+
+    const id = await download.startDownload(
+      "hash-legacy-failed",
+      "legacy-failed.pdf",
+      { type: "owned" },
+      1024,
+      "inmemory",
+    );
+
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "failed",
+    );
+
+    expect(mocks.fileApi.getDownloadAddress).toHaveBeenCalledWith(
+      "hash-legacy-failed",
+    );
+    expect(download.tasks.find((task) => task.id === id)?.error).toBe(
+      "legacy address failed",
+    );
+  });
+
+  it("owned metadata 的其他 manifest 错误不应触发旧接口回退", async () => {
+    mocks.fileApi.getDownloadMetadata.mockRejectedValueOnce(
+      new Error("文件分片 manifest 为空"),
+    );
+    const download = await loadDownloadStore();
+
+    const id = await download.startDownload(
+      "hash-empty-manifest",
+      "empty-manifest.pdf",
+      { type: "owned" },
+      1024,
+      "inmemory",
+    );
+
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "failed",
+    );
+
+    expect(mocks.fileApi.getDownloadAddress).not.toHaveBeenCalled();
+    expect(mocks.fileApi.getDecryptInfo).not.toHaveBeenCalled();
+    expect(download.tasks.find((task) => task.id === id)?.error).toBe(
+      "文件分片 manifest 为空",
+    );
+  });
+
   it("NONE 加密直传文件应按明文分片下载且不调用 decryptFile", async () => {
     mocks.fileApi.getDownloadMetadata.mockResolvedValueOnce({
       ...createDownloadMetadata("hash-direct", "u-direct-0"),

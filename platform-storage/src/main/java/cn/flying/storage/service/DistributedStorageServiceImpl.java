@@ -350,23 +350,8 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 log.warn("清理直传 staging 分片失败: sessionId={}, partIndex={}, node={}",
                         request.sessionId(), part.partIndex(), trustedPart.nodeName(), e);
             }
-            deleteDirectFinalObjectCandidates(request.sessionId(), trustedPart);
         }
         return Result.success(true);
-    }
-
-    /**
-     * Removes any final replicas that may have been promoted before a direct-upload session was aborted.
-     */
-    private void deleteDirectFinalObjectCandidates(String sessionId, TrustedDirectUploadPart part) {
-        for (String nodeName : part.targetNodes()) {
-            try {
-                deleteFromNode(nodeName, part.finalObjectName());
-            } catch (Exception e) {
-                log.warn("清理直传 final 分片失败: sessionId={}, partIndex={}, node={}",
-                        sessionId, part.partIndex(), nodeName, e);
-            }
-        }
     }
 
     /**

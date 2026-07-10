@@ -1,5 +1,8 @@
 package cn.flying.platformapi.request;
 
+import java.io.Serial;
+import java.io.Serializable;
+
 /**
  * Dedicated blockchain request for recording a Merkle attestation batch root.
  *
@@ -17,5 +20,8 @@ public record StoreAttestationBatchRequest(
         String proofAlgorithm,
         String merkleRoot,
         Integer leafCount
-) {
+) implements Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
 }

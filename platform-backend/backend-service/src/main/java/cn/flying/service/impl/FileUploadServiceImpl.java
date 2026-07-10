@@ -670,7 +670,7 @@ public class FileUploadServiceImpl implements FileUploadService {
     }
 
     /**
-     * Aborts direct-upload staging/final object candidates through the storage service and verifies the remote result.
+     * Aborts session-scoped direct-upload staging objects and verifies the remote result.
      */
     private void abortDirectUploadStorage(String clientId, FileUploadState state) {
         Boolean aborted = ResultUtils.getData(fileRemoteClient.abortDirectMultipartUpload(

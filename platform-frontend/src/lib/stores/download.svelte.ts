@@ -423,28 +423,67 @@ async function fetchPresignedUrls(
   task: DownloadTask,
 ): Promise<PresignedUrlMetadata> {
   if (task.source.type === "owned") {
-    const metadata = await fileApi.getDownloadMetadata(task.fileHash);
-    const orderedParts = [...metadata.parts].sort((a, b) => a.index - b.index);
-    const urls = orderedParts.map((part) => part.downloadUrl);
-    const decryptInfo: fileApi.FileDecryptInfoVO = {
-      initialKey: metadata.initialKey,
-      fileName: metadata.fileName,
-      fileSize: metadata.fileSize,
-      contentType: metadata.contentType,
-      chunkCount: metadata.totalChunks,
-      fileHash: metadata.fileHash,
-    };
-    return {
-      urls,
-      decryptInfo,
-      encryptionAlgorithm: metadata.encryptionAlgorithm ?? null,
-    };
+    try {
+      const metadata = await fileApi.getDownloadMetadata(task.fileHash);
+      const orderedParts = [...metadata.parts].sort(
+        (a, b) => a.index - b.index,
+      );
+      const urls = orderedParts.map((part) => part.downloadUrl);
+      const decryptInfo: fileApi.FileDecryptInfoVO = {
+        initialKey: metadata.initialKey,
+        fileName: metadata.fileName,
+        fileSize: metadata.fileSize,
+        contentType: metadata.contentType,
+        chunkCount: metadata.totalChunks,
+        fileHash: metadata.fileHash,
+      };
+      return {
+        urls,
+        decryptInfo,
+        encryptionAlgorithm: metadata.encryptionAlgorithm ?? null,
+      };
+    } catch (metadataError) {
+      if (!isMissingManifestError(metadataError)) {
+        throw metadataError;
+      }
+      console.warn(
+        "[download] manifest metadata unavailable, using legacy endpoints",
+        metadataError,
+      );
+      return fetchLegacyPresignedUrls(task.fileHash);
+    }
   }
 
   // For shared files, we don't have presigned URL endpoint yet
   // This will throw if not implemented
   throw new Error(
     "Presigned URLs not available for shared files. Use fallback download.",
+  );
+}
+
+/**
+ * 通过旧地址与解密信息接口恢复无 manifest 自有文件的下载元数据。
+ */
+async function fetchLegacyPresignedUrls(
+  fileHash: string,
+): Promise<PresignedUrlMetadata> {
+  const [urls, decryptInfo] = await Promise.all([
+    fileApi.getDownloadAddress(fileHash),
+    fileApi.getDecryptInfo(fileHash),
+  ]);
+  return {
+    urls,
+    decryptInfo,
+    encryptionAlgorithm: decryptInfo.initialKey ? null : "NONE",
+  };
+}
+
+/**
+ * 判断 metadata 失败是否由历史文件缺少分片 manifest 引起。
+ */
+function isMissingManifestError(error: unknown): boolean {
+  return (
+    error instanceof Error && error.message.includes("文件缺少分片 manifest")
   );
 }
 
