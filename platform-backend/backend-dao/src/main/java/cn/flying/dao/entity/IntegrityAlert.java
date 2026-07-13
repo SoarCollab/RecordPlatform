@@ -43,6 +43,10 @@ public class IntegrityAlert implements Serializable {
 
     private String alertType;
 
+    private String severity;
+
+    private String evidence;
+
     private Integer status;
 
     private Long resolvedBy;
@@ -63,10 +67,32 @@ public class IntegrityAlert implements Serializable {
     /**
      * Alert type constants.
      */
+    @Getter
     public enum AlertType {
-        HASH_MISMATCH,
-        FILE_NOT_FOUND,
-        CHAIN_NOT_FOUND;
+        HASH_MISMATCH(AlertSeverity.CRITICAL),
+        FILE_NOT_FOUND(AlertSeverity.CRITICAL),
+        CHAIN_NOT_FOUND(AlertSeverity.ERROR),
+        MANIFEST_MISSING(AlertSeverity.WARNING),
+        MANIFEST_INVALID(AlertSeverity.CRITICAL),
+        OBJECT_NOT_FOUND(AlertSeverity.CRITICAL),
+        METADATA_MISMATCH(AlertSeverity.CRITICAL),
+        CONTENT_HASH_MISMATCH(AlertSeverity.CRITICAL),
+        CHAIN_MISMATCH(AlertSeverity.CRITICAL);
+
+        private final AlertSeverity defaultSeverity;
+
+        AlertType(AlertSeverity defaultSeverity) {
+            this.defaultSeverity = defaultSeverity;
+        }
+    }
+
+    /**
+     * Stable operational severity values persisted with integrity alerts.
+     */
+    public enum AlertSeverity {
+        WARNING,
+        ERROR,
+        CRITICAL
     }
 
     /**

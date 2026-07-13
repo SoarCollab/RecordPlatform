@@ -1,10 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type Mock,
+} from "vitest";
 
 interface LeaderCallbacks {
-  onBecomeLeader: ReturnType<typeof vi.fn>;
-  onBecomeFollower: ReturnType<typeof vi.fn>;
-  onMessage: ReturnType<typeof vi.fn>;
-  onStatusChange: ReturnType<typeof vi.fn>;
+  onBecomeLeader: Mock<() => void>;
+  onBecomeFollower: Mock<() => void>;
+  onMessage: Mock<(message: unknown) => void>;
+  onStatusChange: Mock<(status: string) => void>;
 }
 
 /**
@@ -14,10 +22,10 @@ interface LeaderCallbacks {
  */
 function createCallbacks(): LeaderCallbacks {
   return {
-    onBecomeLeader: vi.fn(),
-    onBecomeFollower: vi.fn(),
-    onMessage: vi.fn(),
-    onStatusChange: vi.fn(),
+    onBecomeLeader: vi.fn<() => void>(),
+    onBecomeFollower: vi.fn<() => void>(),
+    onMessage: vi.fn<(message: unknown) => void>(),
+    onStatusChange: vi.fn<(status: string) => void>(),
   };
 }
 

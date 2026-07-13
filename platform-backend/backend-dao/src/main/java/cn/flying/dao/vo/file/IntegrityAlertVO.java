@@ -22,6 +22,10 @@ public record IntegrityAlertVO(
         String chainHash,
         @Schema(description = "告警类型")
         String alertType,
+        @Schema(description = "告警严重级别：WARNING、ERROR、CRITICAL")
+        String severity,
+        @Schema(description = "有界巡检证据")
+        String evidence,
         @Schema(description = "告警状态")
         Integer status,
         @Schema(description = "处理人ID（外部ID）")

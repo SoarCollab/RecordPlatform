@@ -360,6 +360,7 @@ class FileUploadServiceTest {
                     "manifest-hash",
                     "SHA-256",
                     512L,
+                    2,
                     1024L,
                     null,
                     "NONE",

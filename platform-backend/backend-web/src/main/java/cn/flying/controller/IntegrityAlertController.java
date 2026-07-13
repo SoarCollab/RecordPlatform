@@ -123,6 +123,8 @@ public class IntegrityAlertController {
                 alert.getActualHash(),
                 alert.getChainHash(),
                 alert.getAlertType(),
+                alert.getSeverity(),
+                alert.getEvidence(),
                 alert.getStatus(),
                 IdUtils.toExternalId(alert.getResolvedBy()),
                 alert.getResolvedAt(),

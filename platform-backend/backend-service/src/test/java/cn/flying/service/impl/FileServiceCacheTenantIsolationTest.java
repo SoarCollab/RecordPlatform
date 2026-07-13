@@ -1,387 +1,503 @@
 package cn.flying.service.impl;
 
 import cn.flying.common.tenant.TenantContext;
-import cn.flying.common.util.IdUtils;
+import cn.flying.common.util.TenantKeyUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.mapper.FileMapper;
-import cn.flying.service.remote.FileRemoteClient;
-import cn.flying.test.builders.BuilderResetExtension;
-import cn.flying.test.builders.FileTestBuilder;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import org.junit.jupiter.api.*;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.*;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
-import org.springframework.cache.Cache;
-import org.springframework.cache.CacheManager;
-import org.springframework.test.util.ReflectionTestUtils;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import jakarta.annotation.Resource;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.aop.support.AopUtils;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.AnnotationCacheOperationSource;
+import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
+import org.springframework.cache.interceptor.CacheEvictOperation;
+import org.springframework.cache.interceptor.CacheOperation;
+import org.springframework.cache.interceptor.CacheOperationSource;
+import org.springframework.cache.interceptor.CacheableOperation;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
-import static org.assertj.core.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 文件服务缓存租户隔离测试
- * <p>
- * 验证多租户场景下缓存的隔离性，确保不同租户的缓存数据不会相互污染。
- * 缓存 key 格式: tenantId:userId
- * </p>
- *
- * @see FileServiceImpl#getUserFilesList(Long)
+ * 通过真实 Spring Cache AOP 代理验证用户文件缓存的租户隔离合同。
  */
-@ExtendWith({MockitoExtension.class, BuilderResetExtension.class})
-@MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("FileService Cache Tenant Isolation Tests")
+@SpringJUnitConfig(FileServiceCacheTenantIsolationTest.CacheTestConfiguration.class)
+@DisplayName("FileService Spring Cache Tenant Isolation Tests")
 class FileServiceCacheTenantIsolationTest {
 
-    @Mock
-    private FileMapper fileMapper;
-
-    @Mock
-    private FileRemoteClient fileRemoteClient;
-
-    @Mock
-    private CacheManager cacheManager;
-
-    @Mock
-    private Cache userFilesCache;
-
-    @Spy
-    @InjectMocks
-    private FileServiceImpl fileService;
-
-    private MockedStatic<TenantContext> tenantContextMock;
-    private MockedStatic<IdUtils> idUtilsMock;
-
-    private static final Long USER_ID_1 = 100L;
+    private static final String USER_FILES_CACHE = "userFiles";
+    private static final String CANONICAL_TENANT_USER_KEY =
+            "T(cn.flying.common.util.TenantKeyUtils).currentTenantUserKey(#userId)";
+    private static final Long USER_ID = 100L;
     private static final Long TENANT_ID_1 = 1L;
     private static final Long TENANT_ID_2 = 2L;
 
-    @BeforeEach
-    void setUp() {
-        // Initialize MyBatis Plus lambda cache for File entity
-        if (!TableInfoHelper.getTableInfos().stream()
-                .anyMatch(info -> info.getEntityType().equals(File.class))) {
-            MapperBuilderAssistant assistant = new MapperBuilderAssistant(
-                    new MybatisConfiguration(), "");
+    private static final Set<String> EXPECTED_USER_FILES_CACHE_METHODS = Set.of(
+            "FileQueryServiceImpl#getUserFilesList(Long)",
+            "FileServiceImpl#storeFile(Long,String,List,List,String)",
+            "FileServiceImpl#storeFile(Long,Long,String,List,List,String)",
+            "FileServiceImpl#storeDirectUploadedFile(Long,Long,String,long,List,String)",
+            "FileServiceImpl#changeFileStatusByName(Long,String,Integer)",
+            "FileServiceImpl#changeFileStatusByHash(Long,String,Integer)",
+            "FileServiceImpl#changeFileStatusById(Long,Long,Integer)",
+            "FileServiceImpl#markFileUploadFailed(Long,Long)",
+            "FileServiceImpl#deleteFiles(Long,List)",
+            "FileServiceImpl#getUserFilesList(Long)",
+            "FileServiceImpl#createNewVersion(Long,Long,String,long,String)"
+    );
+
+    @Resource
+    private FileQueryServiceImpl fileQueryService;
+
+    @Resource
+    private FileServiceImpl fileService;
+
+    @Resource
+    private CacheManager cacheManager;
+
+    @Resource
+    private TenantAwareFileStore fileStore;
+
+    /**
+     * 初始化 MyBatis Plus 的实体元数据，使 Lambda wrapper 在纯单元环境中可用。
+     */
+    @BeforeAll
+    static void initializeMyBatisMetadata() {
+        boolean initialized = TableInfoHelper.getTableInfos().stream()
+                .anyMatch(info -> info.getEntityType().equals(File.class));
+        if (!initialized) {
+            MapperBuilderAssistant assistant = new MapperBuilderAssistant(new MybatisConfiguration(), "");
             TableInfoHelper.initTableInfo(assistant, File.class);
         }
-
-        ReflectionTestUtils.setField(fileService, "baseMapper", fileMapper);
-
-        // Mock TenantContext
-        tenantContextMock = mockStatic(TenantContext.class);
-
-        // Mock IdUtils
-        idUtilsMock = mockStatic(IdUtils.class);
-        idUtilsMock.when(() -> IdUtils.toExternalId(anyLong()))
-                .thenAnswer(inv -> "ext_" + inv.getArgument(0));
-        idUtilsMock.when(() -> IdUtils.fromExternalId(anyString()))
-                .thenAnswer(inv -> {
-                    String externalId = inv.getArgument(0);
-                    return Long.parseLong(externalId.replace("ext_", ""));
-                });
-
-        // Mock CacheManager to return userFilesCache
-        when(cacheManager.getCache("userFiles")).thenReturn(userFilesCache);
     }
 
+    /**
+     * 在每个用例前重置内存数据、缓存和真实租户上下文。
+     */
+    @BeforeEach
+    void setUp() {
+        assertThat(TenantContext.isSet()).as("前一用例不得泄漏租户上下文").isFalse();
+        fileStore.reset();
+        requireUserFilesCache().clear();
+    }
+
+    /**
+     * 在每个用例后清理 ThreadLocal 和缓存，保证测试顺序无关。
+     */
     @AfterEach
     void tearDown() {
-        if (tenantContextMock != null) tenantContextMock.close();
-        if (idUtilsMock != null) idUtilsMock.close();
+        TenantContext.clear();
+        requireUserFilesCache().clear();
+        assertThat(TenantContext.isSet()).isFalse();
     }
 
-    @Nested
-    @DisplayName("Cache Key Tenant Isolation")
-    class CacheKeyTenantIsolation {
-
-        @Test
-        @DisplayName("should use different cache keys for same userId in different tenants")
-        void shouldUseDifferentCacheKeysForSameUserIdInDifferentTenants() {
-            // Given: tenant1/userId=100 has files
-            List<File> tenant1Files = List.of(
-                    FileTestBuilder.aFile(f -> {
-                        f.setId(1001L);
-                        f.setUid(USER_ID_1);
-                        f.setTenantId(TENANT_ID_1);
-                        f.setFileName("tenant1-file.pdf");
-                        f.setFileHash("hash_tenant1_file");
-                    })
-            );
-
-            // Given: tenant2/userId=100 has different files
-            List<File> tenant2Files = List.of(
-                    FileTestBuilder.aFile(f -> {
-                        f.setId(2001L);
-                        f.setUid(USER_ID_1);
-                        f.setTenantId(TENANT_ID_2);
-                        f.setFileName("tenant2-file.pdf");
-                        f.setFileHash("hash_tenant2_file");
-                    })
-            );
-
-            // When: tenant1 queries files
-            tenantContextMock.when(TenantContext::getTenantIdOrDefault).thenReturn(TENANT_ID_1);
-            when(fileMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(tenant1Files);
-
-            List<File> result1 = fileService.getUserFilesList(USER_ID_1);
-
-            // When: tenant2 queries files (should use different cache key)
-            tenantContextMock.when(TenantContext::getTenantIdOrDefault).thenReturn(TENANT_ID_2);
-            when(fileMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(tenant2Files);
-
-            List<File> result2 = fileService.getUserFilesList(USER_ID_1);
-
-            // Then: both queries should return their own tenant data
-            assertThat(result1).hasSize(1);
-            assertThat(result1.get(0).getTenantId()).isEqualTo(TENANT_ID_1);
-            assertThat(result1.get(0).getFileHash()).isEqualTo("hash_tenant1_file");
-
-            assertThat(result2).hasSize(1);
-            assertThat(result2.get(0).getTenantId()).isEqualTo(TENANT_ID_2);
-            assertThat(result2.get(0).getFileHash()).isEqualTo("hash_tenant2_file");
-
-            // Then: fileMapper should be called twice (no cache hit across tenants)
-            verify(fileMapper, times(2)).selectList(any(LambdaQueryWrapper.class));
-        }
-
-        @Test
-        @DisplayName("should not share cache between different tenants with same userId")
-        void shouldNotShareCacheBetweenDifferentTenantsWithSameUserId() {
-            // Given: mock cache behavior
-            ArgumentCaptor<String> cacheKeyCaptor = ArgumentCaptor.forClass(String.class);
-
-            // When: tenant1 queries and caches
-            tenantContextMock.when(TenantContext::getTenantIdOrDefault).thenReturn(TENANT_ID_1);
-            when(fileMapper.selectList(any(LambdaQueryWrapper.class)))
-                    .thenReturn(List.of(FileTestBuilder.aFile(f -> f.setTenantId(TENANT_ID_1))));
-
-            fileService.getUserFilesList(USER_ID_1);
-
-            // When: tenant2 queries (should not hit tenant1's cache)
-            tenantContextMock.when(TenantContext::getTenantIdOrDefault).thenReturn(TENANT_ID_2);
-            when(fileMapper.selectList(any(LambdaQueryWrapper.class)))
-                    .thenReturn(List.of(FileTestBuilder.aFile(f -> f.setTenantId(TENANT_ID_2))));
-
-            fileService.getUserFilesList(USER_ID_1);
-
-            // Then: should query database twice (cache isolated by tenant)
-            verify(fileMapper, times(2)).selectList(any(LambdaQueryWrapper.class));
-        }
+    /**
+     * 证明读取和写入服务均由 Spring 缓存切面代理，而不是直接实例调用。
+     */
+    @Test
+    @DisplayName("should invoke production services through Spring AOP proxies")
+    void shouldInvokeProductionServicesThroughSpringAopProxies() {
+        assertThat(AopUtils.isAopProxy(fileQueryService)).isTrue();
+        assertThat(AopUtils.isCglibProxy(fileQueryService)).isTrue();
+        assertThat(AopUtils.isAopProxy(fileService)).isTrue();
+        assertThat(AopUtils.isCglibProxy(fileService)).isTrue();
     }
 
-    @Nested
-    @DisplayName("Cache Eviction Tenant Isolation")
-    class CacheEvictionTenantIsolation {
+    /**
+     * 证明相同用户在两个租户下各自首次回源，后续及交错切换均命中自己的缓存。
+     */
+    @Test
+    @DisplayName("should isolate cache hits for the same user across tenants")
+    void shouldIsolateCacheHitsForSameUserAcrossTenants() {
+        fileStore.setFiles(TENANT_ID_1, List.of(file(1001L, TENANT_ID_1, "tenant-one.pdf")));
+        fileStore.setFiles(TENANT_ID_2, List.of(file(2001L, TENANT_ID_2, "tenant-two.pdf")));
 
-        @Test
-        @DisplayName("should only evict cache for current tenant when storing file")
-        void shouldOnlyEvictCacheForCurrentTenantWhenStoringFile() {
-            // Given: tenant1 has cached files
-            tenantContextMock.when(TenantContext::getTenantIdOrDefault).thenReturn(TENANT_ID_1);
-            tenantContextMock.when(TenantContext::requireTenantId).thenReturn(TENANT_ID_1);
+        List<File> tenantOneFirst = callAsTenant(TENANT_ID_1, () -> fileQueryService.getUserFilesList(USER_ID));
+        List<File> tenantOneCached = callAsTenant(TENANT_ID_1, () -> fileQueryService.getUserFilesList(USER_ID));
+        List<File> tenantTwoFirst = callAsTenant(TENANT_ID_2, () -> fileQueryService.getUserFilesList(USER_ID));
+        List<File> tenantOneAfterSwitch = callAsTenant(TENANT_ID_1,
+                () -> fileQueryService.getUserFilesList(USER_ID));
+        List<File> tenantTwoCached = callAsTenant(TENANT_ID_2, () -> fileQueryService.getUserFilesList(USER_ID));
 
-            when(fileMapper.selectList(any(LambdaQueryWrapper.class)))
-                    .thenReturn(List.of(FileTestBuilder.aFile(f -> f.setTenantId(TENANT_ID_1))));
-
-            fileService.getUserFilesList(USER_ID_1);
-
-            // When: tenant1 stores a file (triggers cache eviction)
-            // Simulate cache eviction by verifying the evict() call
-            String expectedCacheKey = TENANT_ID_1 + ":" + USER_ID_1;
-
-            // Verify cache eviction happens for tenant1's key
-            // Note: @CacheEvict is processed by Spring AOP, so we verify the key format
-            assertThat(expectedCacheKey).isEqualTo("1:100");
-
-            // Then: tenant2's cache (if exists) should not be affected
-            tenantContextMock.when(TenantContext::getTenantIdOrDefault).thenReturn(TENANT_ID_2);
-
-            String tenant2CacheKey = TENANT_ID_2 + ":" + USER_ID_1;
-            assertThat(tenant2CacheKey).isEqualTo("2:100");
-            assertThat(tenant2CacheKey).isNotEqualTo(expectedCacheKey);
-        }
-
-        @Test
-        @DisplayName("should evict correct tenant cache when deleting file")
-        void shouldEvictCorrectTenantCacheWhenDeletingFile() {
-            // Given: both tenants have cached data for same userId
-            List<File> tenant1Files = List.of(
-                    FileTestBuilder.aFile(f -> {
-                        f.setId(1001L);
-                        f.setUid(USER_ID_1);
-                        f.setTenantId(TENANT_ID_1);
-                        f.setFileHash("hash_to_delete");
-                    })
-            );
-
-            List<File> tenant2Files = List.of(
-                    FileTestBuilder.aFile(f -> {
-                        f.setId(2001L);
-                        f.setUid(USER_ID_1);
-                        f.setTenantId(TENANT_ID_2);
-                        f.setFileHash("hash_different");
-                    })
-            );
-
-            // Cache for tenant1
-            tenantContextMock.when(TenantContext::getTenantIdOrDefault).thenReturn(TENANT_ID_1);
-            tenantContextMock.when(TenantContext::requireTenantId).thenReturn(TENANT_ID_1);
-            when(fileMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(tenant1Files);
-            fileService.getUserFilesList(USER_ID_1);
-
-            // Cache for tenant2
-            tenantContextMock.when(TenantContext::getTenantIdOrDefault).thenReturn(TENANT_ID_2);
-            tenantContextMock.when(TenantContext::requireTenantId).thenReturn(TENANT_ID_2);
-            when(fileMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(tenant2Files);
-            fileService.getUserFilesList(USER_ID_1);
-
-            // When: tenant1 deletes a file
-            tenantContextMock.when(TenantContext::getTenantIdOrDefault).thenReturn(TENANT_ID_1);
-            tenantContextMock.when(TenantContext::requireTenantId).thenReturn(TENANT_ID_1);
-
-            when(fileMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(tenant1Files);
-            when(fileMapper.update(any(), any(LambdaQueryWrapper.class))).thenReturn(1);
-
-            // Simulate delete operation (which would trigger @CacheEvict)
-            fileService.deleteFiles(USER_ID_1, List.of("hash_to_delete"));
-
-            // Then: tenant1 should query DB again after cache eviction
-            reset(fileMapper);
-            when(fileMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of());
-            fileService.getUserFilesList(USER_ID_1);
-            verify(fileMapper, times(1)).selectList(any(LambdaQueryWrapper.class));
-
-            // Then: tenant2 cache should remain valid (can still hit cache)
-            tenantContextMock.when(TenantContext::getTenantIdOrDefault).thenReturn(TENANT_ID_2);
-            tenantContextMock.when(TenantContext::requireTenantId).thenReturn(TENANT_ID_2);
-
-            // If tenant2 queries now, it should not trigger DB query (cache still valid)
-            // In real scenario with Spring cache, this would hit cache
-            // Here we verify the cache keys are isolated
-            String tenant1Key = "1:100";
-            String tenant2Key = "2:100";
-            assertThat(tenant1Key).isNotEqualTo(tenant2Key);
-        }
-
-        @Test
-        @DisplayName("should evict correct tenant cache when creating new version")
-        void shouldEvictCorrectTenantCacheWhenCreatingNewVersion() {
-            // Given: parent file exists in tenant1
-            File parentFile = FileTestBuilder.aFile(f -> {
-                f.setId(1001L);
-                f.setUid(USER_ID_1);
-                f.setTenantId(TENANT_ID_1);
-                f.setStatus(1); // SUCCESS
-                f.setIsLatest(1);
-                f.setVersion(1);
-            });
-
-            // Setup tenant1 context
-            tenantContextMock.when(TenantContext::getTenantIdOrDefault).thenReturn(TENANT_ID_1);
-            tenantContextMock.when(TenantContext::requireTenantId).thenReturn(TENANT_ID_1);
-
-            // Cache tenant1 files
-            when(fileMapper.selectList(any(LambdaQueryWrapper.class)))
-                    .thenReturn(List.of(parentFile));
-            fileService.getUserFilesList(USER_ID_1);
-
-            // Cache tenant2 files
-            tenantContextMock.when(TenantContext::getTenantIdOrDefault).thenReturn(TENANT_ID_2);
-            tenantContextMock.when(TenantContext::requireTenantId).thenReturn(TENANT_ID_2);
-            when(fileMapper.selectList(any(LambdaQueryWrapper.class)))
-                    .thenReturn(List.of(FileTestBuilder.aFile(f -> f.setTenantId(TENANT_ID_2))));
-            fileService.getUserFilesList(USER_ID_1);
-
-            // When: tenant1 creates new version (triggers @CacheEvict for tenant1)
-            tenantContextMock.when(TenantContext::getTenantIdOrDefault).thenReturn(TENANT_ID_1);
-            tenantContextMock.when(TenantContext::requireTenantId).thenReturn(TENANT_ID_1);
-
-            // Verify cache key format ensures isolation
-            String tenant1CacheKey = TENANT_ID_1 + ":" + USER_ID_1;
-            String tenant2CacheKey = TENANT_ID_2 + ":" + USER_ID_1;
-
-            // Then: cache keys must be different to ensure isolation
-            assertThat(tenant1CacheKey).isEqualTo("1:100");
-            assertThat(tenant2CacheKey).isEqualTo("2:100");
-            assertThat(tenant1CacheKey).isNotEqualTo(tenant2CacheKey);
-        }
+        assertThat(tenantOneFirst).extracting(File::getFileName).containsExactly("tenant-one.pdf");
+        assertThat(tenantOneCached).isSameAs(tenantOneFirst);
+        assertThat(tenantOneAfterSwitch).isSameAs(tenantOneFirst);
+        assertThat(tenantTwoFirst).extracting(File::getFileName).containsExactly("tenant-two.pdf");
+        assertThat(tenantTwoCached).isSameAs(tenantTwoFirst);
+        assertThat(fileStore.selectCount(TENANT_ID_1)).isEqualTo(1);
+        assertThat(fileStore.selectCount(TENANT_ID_2)).isEqualTo(1);
+        assertThat(requireUserFilesCache().get("1:100")).isNotNull();
+        assertThat(requireUserFilesCache().get("2:100")).isNotNull();
     }
 
-    @Nested
-    @DisplayName("Cache Behavior Verification")
-    class CacheBehaviorVerification {
+    /**
+     * 证明缓存条目只写入 canonical tenantId:userId key，不回退到裸用户 ID。
+     */
+    @Test
+    @DisplayName("should store entries only under the canonical tenant user key")
+    void shouldStoreEntriesOnlyUnderCanonicalTenantUserKey() {
+        fileStore.setFiles(TENANT_ID_1, List.of(file(1001L, TENANT_ID_1, "tenant-one.pdf")));
 
-        @Test
-        @DisplayName("should build correct cache key with tenant prefix")
-        void shouldBuildCorrectCacheKeyWithTenantPrefix() {
-            // Given: different tenants and users
-            Long[][] testCases = {
-                    {1L, 100L},  // tenant1, user100
-                    {1L, 200L},  // tenant1, user200
-                    {2L, 100L},  // tenant2, user100
-                    {2L, 200L},  // tenant2, user200
+        callAsTenant(TENANT_ID_1, () -> fileQueryService.getUserFilesList(USER_ID));
+
+        String canonicalKey = TenantKeyUtils.tenantUserKey(TENANT_ID_1, USER_ID);
+        assertThat(canonicalKey).isEqualTo("1:100");
+        assertThat(requireUserFilesCache().get(canonicalKey)).isNotNull();
+        assertThat(requireUserFilesCache().get(USER_ID)).isNull();
+        assertThat(requireUserFilesCache().get(USER_ID.toString())).isNull();
+    }
+
+    /**
+     * 证明真实 CacheEvict 代理只清除当前租户条目，另一租户继续命中缓存。
+     */
+    @Test
+    @DisplayName("should evict only the current tenant through a production CacheEvict method")
+    void shouldEvictOnlyCurrentTenantThroughProductionCacheEvictMethod() {
+        fileStore.setFiles(TENANT_ID_1, List.of(file(1001L, TENANT_ID_1, "tenant-one-v1.pdf")));
+        fileStore.setFiles(TENANT_ID_2, List.of(file(2001L, TENANT_ID_2, "tenant-two-v1.pdf")));
+        callAsTenant(TENANT_ID_1, () -> fileQueryService.getUserFilesList(USER_ID));
+        List<File> tenantTwoCached = callAsTenant(TENANT_ID_2,
+                () -> fileQueryService.getUserFilesList(USER_ID));
+
+        fileStore.setFiles(TENANT_ID_1, List.of(file(1002L, TENANT_ID_1, "tenant-one-v2.pdf")));
+        runAsTenant(TENANT_ID_1, () -> fileService.changeFileStatusById(USER_ID, 1001L, 2));
+
+        assertThat(requireUserFilesCache().get("1:100")).isNull();
+        assertThat(requireUserFilesCache().get("2:100")).isNotNull();
+
+        List<File> tenantTwoAfterEviction = callAsTenant(TENANT_ID_2,
+                () -> fileQueryService.getUserFilesList(USER_ID));
+        List<File> tenantOneAfterEviction = callAsTenant(TENANT_ID_1,
+                () -> fileQueryService.getUserFilesList(USER_ID));
+
+        assertThat(tenantTwoAfterEviction).isSameAs(tenantTwoCached);
+        assertThat(tenantOneAfterEviction).extracting(File::getFileName)
+                .containsExactly("tenant-one-v2.pdf");
+        assertThat(fileStore.selectCount(TENANT_ID_1)).isEqualTo(2);
+        assertThat(fileStore.selectCount(TENANT_ID_2)).isEqualTo(1);
+    }
+
+    /**
+     * 证明 unless 条件不会缓存空结果，后续查询仍会回源。
+     */
+    @Test
+    @DisplayName("should not cache empty query results")
+    void shouldNotCacheEmptyQueryResults() {
+        fileStore.setFiles(TENANT_ID_1, List.of());
+
+        assertThat(callAsTenant(TENANT_ID_1, () -> fileQueryService.getUserFilesList(USER_ID))).isEmpty();
+        assertThat(callAsTenant(TENANT_ID_1, () -> fileQueryService.getUserFilesList(USER_ID))).isEmpty();
+
+        assertThat(fileStore.selectCount(TENANT_ID_1)).isEqualTo(2);
+        assertThat(requireUserFilesCache().get("1:100")).isNull();
+    }
+
+    /**
+     * 证明异常查询不会写入缓存，恢复后可正常回源并缓存成功结果。
+     */
+    @Test
+    @DisplayName("should not cache exceptions or leak tenant context")
+    void shouldNotCacheExceptionsOrLeakTenantContext() {
+        fileStore.failSelectFor(TENANT_ID_1, true);
+
+        assertThatThrownBy(() -> callAsTenant(TENANT_ID_1,
+                () -> fileQueryService.getUserFilesList(USER_ID)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("simulated mapper failure");
+        assertThat(TenantContext.isSet()).isFalse();
+        assertThat(requireUserFilesCache().get("1:100")).isNull();
+
+        fileStore.failSelectFor(TENANT_ID_1, false);
+        fileStore.setFiles(TENANT_ID_1, List.of(file(1001L, TENANT_ID_1, "recovered.pdf")));
+        List<File> recovered = callAsTenant(TENANT_ID_1, () -> fileQueryService.getUserFilesList(USER_ID));
+        List<File> cached = callAsTenant(TENANT_ID_1, () -> fileQueryService.getUserFilesList(USER_ID));
+
+        assertThat(recovered).extracting(File::getFileName).containsExactly("recovered.pdf");
+        assertThat(cached).isSameAs(recovered);
+        assertThat(fileStore.selectCount(TENANT_ID_1)).isEqualTo(2);
+    }
+
+    /**
+     * 枚举全部 userFiles 缓存操作，防止新增写路径遗漏租户 key 或误用用户 ID。
+     */
+    @Test
+    @DisplayName("should keep every userFiles annotation on the canonical tenant key")
+    void shouldKeepEveryUserFilesAnnotationOnCanonicalTenantKey() {
+        List<DiscoveredCacheOperation> operations = discoverUserFilesOperations();
+
+        assertThat(operations).extracting(DiscoveredCacheOperation::methodId)
+                .containsExactlyInAnyOrderElementsOf(EXPECTED_USER_FILES_CACHE_METHODS);
+        assertThat(operations).allSatisfy(discovered -> {
+            assertThat(discovered.operation().getCacheNames()).containsExactly(USER_FILES_CACHE);
+            assertThat(discovered.operation().getKey()).isEqualTo(CANONICAL_TENANT_USER_KEY);
+        });
+
+        Set<String> cacheableMethods = operations.stream()
+                .filter(discovered -> discovered.operation() instanceof CacheableOperation)
+                .map(DiscoveredCacheOperation::methodId)
+                .collect(Collectors.toSet());
+        assertThat(cacheableMethods).containsExactlyInAnyOrder(
+                "FileQueryServiceImpl#getUserFilesList(Long)",
+                "FileServiceImpl#getUserFilesList(Long)"
+        );
+        assertThat(operations.stream()
+                .filter(discovered -> !cacheableMethods.contains(discovered.methodId()))
+                .map(DiscoveredCacheOperation::operation))
+                .allMatch(CacheEvictOperation.class::isInstance);
+    }
+
+    /**
+     * 从生产类元数据中提取全部 userFiles 缓存操作。
+     */
+    private List<DiscoveredCacheOperation> discoverUserFilesOperations() {
+        CacheOperationSource source = new AnnotationCacheOperationSource();
+        List<DiscoveredCacheOperation> discovered = new ArrayList<>();
+        for (Class<?> targetClass : List.of(FileQueryServiceImpl.class, FileServiceImpl.class)) {
+            for (Method method : targetClass.getDeclaredMethods()) {
+                Collection<CacheOperation> methodOperations = source.getCacheOperations(method, targetClass);
+                if (methodOperations == null) {
+                    continue;
+                }
+                methodOperations.stream()
+                        .filter(operation -> operation.getCacheNames().contains(USER_FILES_CACHE))
+                        .map(operation -> new DiscoveredCacheOperation(operationId(targetClass, method), operation))
+                        .forEach(discovered::add);
+            }
+        }
+        return discovered;
+    }
+
+    /**
+     * 构造稳定的方法签名，供缓存注解合同断言使用。
+     */
+    private String operationId(Class<?> targetClass, Method method) {
+        String parameters = Arrays.stream(method.getParameterTypes())
+                .map(Class::getSimpleName)
+                .collect(Collectors.joining(","));
+        return targetClass.getSimpleName() + "#" + method.getName() + "(" + parameters + ")";
+    }
+
+    /**
+     * 在指定真实租户上下文中执行带返回值操作，并验证上下文已恢复。
+     */
+    private <T> T callAsTenant(Long tenantId, Supplier<T> action) {
+        assertThat(TenantContext.isSet()).isFalse();
+        T result = TenantContext.callWithTenant(tenantId, action);
+        assertThat(TenantContext.isSet()).isFalse();
+        return result;
+    }
+
+    /**
+     * 在指定真实租户上下文中执行无返回值操作，并验证上下文已恢复。
+     */
+    private void runAsTenant(Long tenantId, Runnable action) {
+        assertThat(TenantContext.isSet()).isFalse();
+        TenantContext.runWithTenant(tenantId, action);
+        assertThat(TenantContext.isSet()).isFalse();
+    }
+
+    /**
+     * 获取测试使用的用户文件缓存并在缺失时立即失败。
+     */
+    private Cache requireUserFilesCache() {
+        Cache cache = cacheManager.getCache(USER_FILES_CACHE);
+        assertThat(cache).isNotNull();
+        return cache;
+    }
+
+    /**
+     * 构造租户文件记录。
+     */
+    private File file(Long id, Long tenantId, String fileName) {
+        return new File()
+                .setId(id)
+                .setUid(USER_ID)
+                .setTenantId(tenantId)
+                .setFileName(fileName)
+                .setFileHash("hash-" + id)
+                .setIsLatest(1);
+    }
+
+    /**
+     * 缓存操作及其声明方法的组合。
+     */
+    private record DiscoveredCacheOperation(String methodId, CacheOperation operation) {
+    }
+
+    /**
+     * 首个子任务使用的最小 Spring 缓存测试上下文。
+     */
+    @Configuration(proxyBeanMethods = false)
+    @EnableCaching(proxyTargetClass = true)
+    static class CacheTestConfiguration {
+
+        /**
+         * 提供与生产同名、但不依赖 Redis 的确定性内存缓存。
+         */
+        @Bean
+        CacheManager cacheManager() {
+            return new ConcurrentMapCacheManager(USER_FILES_CACHE);
+        }
+
+        /**
+         * 提供按租户保存查询结果与调用次数的内存数据源。
+         */
+        @Bean
+        TenantAwareFileStore fileStore() {
+            return new TenantAwareFileStore();
+        }
+
+        /**
+         * 提供只实现本测试所需方法的 mapper test double。
+         */
+        @Bean
+        FileMapper fileMapper(TenantAwareFileStore fileStore) {
+            return (FileMapper) Proxy.newProxyInstance(
+                    FileMapper.class.getClassLoader(),
+                    new Class<?>[]{FileMapper.class},
+                    (proxy, method, args) -> invokeMapper(fileStore, proxy, method, args)
+            );
+        }
+
+        /**
+         * 创建真实查询服务，由 Spring 缓存后处理器负责代理。
+         */
+        @Bean
+        FileQueryServiceImpl fileQueryService(FileMapper fileMapper) {
+            return new FileQueryServiceImpl(
+                    fileMapper,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    Runnable::run
+            );
+        }
+
+        /**
+         * 创建真实写服务并注入 mapper，使实际 CacheEvict 方法可执行。
+         */
+        @Bean
+        FileServiceImpl fileService(FileMapper fileMapper, CacheManager cacheManager) {
+            FileServiceImpl service = new FileServiceImpl(
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    cacheManager,
+                    null,
+                    null,
+                    null,
+                    null
+            );
+            ReflectionTestUtils.setField(service, "baseMapper", fileMapper);
+            return service;
+        }
+
+        /**
+         * 分派 mapper test double 调用，并拒绝任何超出测试范围的数据库访问。
+         */
+        private static Object invokeMapper(TenantAwareFileStore fileStore, Object proxy,
+                                           Method method, Object[] args) {
+            if (method.getDeclaringClass() == Object.class) {
+                return switch (method.getName()) {
+                    case "toString" -> "TenantAwareFileMapper";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> throw new UnsupportedOperationException(method.getName());
+                };
+            }
+            return switch (method.getName()) {
+                case "selectList" -> fileStore.selectFiles();
+                case "update" -> 1;
+                default -> throw new UnsupportedOperationException(
+                        "Unexpected FileMapper call: " + method.toGenericString());
             };
+        }
+    }
 
-            for (Long[] testCase : testCases) {
-                Long tenantId = testCase[0];
-                Long userId = testCase[1];
+    /**
+     * 不依赖数据库的租户感知数据源，用于观测真实缓存命中和回源次数。
+     */
+    static final class TenantAwareFileStore {
 
-                // When: construct cache key using the same format as @Cacheable
-                String cacheKey = tenantId + ":" + userId;
+        private final Map<Long, List<File>> filesByTenant = new HashMap<>();
+        private final Map<Long, Integer> selectCounts = new HashMap<>();
+        private final Set<Long> failingTenants = new HashSet<>();
 
-                // Then: verify key format is correct
-                assertThat(cacheKey).matches("\\d+:\\d+");
-                assertThat(cacheKey).startsWith(tenantId.toString());
-                assertThat(cacheKey).contains(":");
-                assertThat(cacheKey).endsWith(userId.toString());
+        /**
+         * 清空所有数据和计数。
+         */
+        void reset() {
+            filesByTenant.clear();
+            selectCounts.clear();
+            failingTenants.clear();
+        }
+
+        /**
+         * 设置指定租户下一次回源应返回的文件列表。
+         */
+        void setFiles(Long tenantId, List<File> files) {
+            filesByTenant.put(tenantId, List.copyOf(files));
+        }
+
+        /**
+         * 控制指定租户的回源查询是否抛出异常。
+         */
+        void failSelectFor(Long tenantId, boolean fail) {
+            if (fail) {
+                failingTenants.add(tenantId);
+            } else {
+                failingTenants.remove(tenantId);
             }
         }
 
-        @Test
-        @DisplayName("should maintain cache isolation when switching tenant context")
-        void shouldMaintainCacheIsolationWhenSwitchingTenantContext() {
-            // Given: prepare different files for different tenants
-            List<File> tenant1Files = List.of(FileTestBuilder.aFile(f -> {
-                f.setTenantId(TENANT_ID_1);
-                f.setFileName("tenant1.pdf");
-            }));
+        /**
+         * 返回当前租户的文件并记录一次真实回源。
+         */
+        List<File> selectFiles() {
+            Long tenantId = TenantContext.requireTenantId();
+            selectCounts.merge(tenantId, 1, Integer::sum);
+            if (failingTenants.contains(tenantId)) {
+                throw new IllegalStateException("simulated mapper failure for tenant " + tenantId);
+            }
+            return filesByTenant.getOrDefault(tenantId, List.of());
+        }
 
-            List<File> tenant2Files = List.of(FileTestBuilder.aFile(f -> {
-                f.setTenantId(TENANT_ID_2);
-                f.setFileName("tenant2.pdf");
-            }));
-
-            // When: query from tenant1
-            tenantContextMock.when(TenantContext::getTenantIdOrDefault).thenReturn(TENANT_ID_1);
-            when(fileMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(tenant1Files);
-            List<File> result1 = fileService.getUserFilesList(USER_ID_1);
-
-            // When: switch to tenant2 and query
-            tenantContextMock.when(TenantContext::getTenantIdOrDefault).thenReturn(TENANT_ID_2);
-            when(fileMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(tenant2Files);
-            List<File> result2 = fileService.getUserFilesList(USER_ID_1);
-
-            // When: switch back to tenant1 and query again
-            tenantContextMock.when(TenantContext::getTenantIdOrDefault).thenReturn(TENANT_ID_1);
-            when(fileMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(tenant1Files);
-            List<File> result3 = fileService.getUserFilesList(USER_ID_1);
-
-            // Then: each tenant should get their own data
-            assertThat(result1.get(0).getFileName()).isEqualTo("tenant1.pdf");
-            assertThat(result2.get(0).getFileName()).isEqualTo("tenant2.pdf");
-            assertThat(result3.get(0).getFileName()).isEqualTo("tenant1.pdf");
-
-            // Then: should query DB for each tenant (no cross-tenant cache hit)
-            verify(fileMapper, atLeast(3)).selectList(any(LambdaQueryWrapper.class));
+        /**
+         * 返回指定租户累计回源次数。
+         */
+        int selectCount(Long tenantId) {
+            return selectCounts.getOrDefault(tenantId, 0);
         }
     }
 }

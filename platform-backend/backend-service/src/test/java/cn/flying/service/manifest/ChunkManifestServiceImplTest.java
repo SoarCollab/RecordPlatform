@@ -27,11 +27,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.LongStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -152,6 +154,7 @@ class ChunkManifestServiceImplTest {
                 .setManifestHash("sha256:abc")
                 .setHashAlgorithm(ChunkManifestCanonicalizer.HASH_ALGORITHM)
                 .setChunkSize(10L)
+                .setChunkCount(2)
                 .setTotalSize(10L)
                 .setStorageBackend("S3"));
         when(manifestItemMapper.selectList(any())).thenReturn(List.of(
@@ -181,6 +184,64 @@ class ChunkManifestServiceImplTest {
         assertThat(view.get().chunks())
                 .extracting(ChunkManifestChunk::storagePath)
                 .containsExactly("storage/tenant/7/chunk/0", "storage/tenant/7/chunk/1");
+    }
+
+    /**
+     * Verifies system callers load a whole tenant batch in two queries and see duplicate active rows.
+     */
+    @Test
+    void findActiveManifests_shouldBatchLoadChunksAndReportDuplicateActiveRows() {
+        long secondFileId = 100L;
+        FileChunkManifest selected = manifest(1000L, FILE_ID, 2);
+        FileChunkManifest duplicate = manifest(999L, FILE_ID, 1);
+        FileChunkManifest second = manifest(2000L, secondFileId, 1);
+        when(manifestMapper.selectList(any())).thenReturn(List.of(selected, duplicate, second));
+        when(manifestItemMapper.selectList(any())).thenReturn(List.of(
+                item(1001L, 1000L, FILE_ID, 0),
+                item(1002L, 1000L, FILE_ID, 1),
+                item(2001L, 2000L, secondFileId, 0)
+        ));
+
+        ChunkManifestBatchView batch = service.findActiveManifests(List.of(FILE_ID, secondFileId, FILE_ID));
+
+        assertThat(batch.manifests()).containsOnlyKeys(FILE_ID, secondFileId);
+        assertThat(batch.duplicateFileIds()).containsExactly(FILE_ID);
+        assertThat(batch.manifests().get(FILE_ID).manifestId()).isEqualTo(1000L);
+        assertThat(batch.manifests().get(FILE_ID).chunks())
+                .extracting(ChunkManifestChunk::index)
+                .containsExactly(0, 1);
+        verify(manifestMapper, times(1)).selectList(any());
+        verify(manifestItemMapper, times(1)).selectList(any());
+        verify(fileMapper, never()).selectById(any());
+    }
+
+    /**
+     * Verifies empty batch input avoids emitting an invalid empty IN clause.
+     */
+    @Test
+    void findActiveManifests_shouldReturnEmptyWithoutQueriesForEmptyInput() {
+        ChunkManifestBatchView batch = service.findActiveManifests(List.of());
+
+        assertThat(batch.manifests()).isEmpty();
+        assertThat(batch.duplicateFileIds()).isEmpty();
+        verify(manifestMapper, never()).selectList(any());
+        verify(manifestItemMapper, never()).selectList(any());
+    }
+
+    /**
+     * Verifies oversized IN batches fail before persistence access.
+     */
+    @Test
+    void findActiveManifests_shouldRejectMoreThanOneThousandDistinctIds() {
+        List<Long> fileIds = LongStream.rangeClosed(1, 1001).boxed().toList();
+
+        assertThatThrownBy(() -> service.findActiveManifests(fileIds))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getResultEnum())
+                        .isEqualTo(ResultEnum.PARAM_IS_INVALID));
+
+        verify(manifestMapper, never()).selectList(any());
+        verify(manifestItemMapper, never()).selectList(any());
     }
 
     /**
@@ -217,6 +278,49 @@ class ChunkManifestServiceImplTest {
                 .setUid(USER_ID)
                 .setFileHash("file-hash")
                 .setVersion(3));
+    }
+
+    /**
+     * Builds an active manifest header for batch-loading tests.
+     */
+    private FileChunkManifest manifest(Long manifestId, Long fileId, int chunkCount) {
+        return new FileChunkManifest()
+                .setId(manifestId)
+                .setTenantId(TENANT_ID)
+                .setFileId(fileId)
+                .setFileVersion(1)
+                .setSchemaId(ChunkManifestCanonicalizer.SCHEMA_ID)
+                .setFileHash("file-hash")
+                .setManifestHash("sha256:" + "a".repeat(64))
+                .setHashAlgorithm(ChunkManifestCanonicalizer.HASH_ALGORITHM)
+                .setChunkSize(5L)
+                .setChunkCount(chunkCount)
+                .setTotalSize(chunkCount * 5L)
+                .setEncryptionAlgorithm("NONE")
+                .setStorageBackend("S3")
+                .setStatus("ACTIVE")
+                .setDeleted(0);
+    }
+
+    /**
+     * Builds a persisted chunk item for batch-loading tests.
+     */
+    private FileChunkManifestItem item(Long id, Long manifestId, Long fileId, int index) {
+        String hash = "sha256:" + Integer.toHexString(index + 1).repeat(64).substring(0, 64);
+        return new FileChunkManifestItem()
+                .setId(id)
+                .setTenantId(TENANT_ID)
+                .setManifestId(manifestId)
+                .setFileId(fileId)
+                .setChunkIndex(index)
+                .setPlainHash(hash)
+                .setCipherHash(hash)
+                .setSize(5L)
+                .setStoragePath("storage/tenant/" + TENANT_ID + "/chunk/" + hash)
+                .setStorageBackend("S3")
+                .setEtag("etag-" + index)
+                .setChecksumAlgorithm("SHA-256")
+                .setDeleted(0);
     }
 
     private ChunkManifestDraft draft() {

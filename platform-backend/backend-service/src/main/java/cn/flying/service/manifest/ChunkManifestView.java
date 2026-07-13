@@ -14,6 +14,7 @@ public record ChunkManifestView(
         String manifestHash,
         String hashAlgorithm,
         long chunkSize,
+        Integer chunkCount,
         long totalSize,
         String merkleRoot,
         String encryptionAlgorithm,

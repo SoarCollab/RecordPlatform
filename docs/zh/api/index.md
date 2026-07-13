@@ -142,6 +142,8 @@ Authorization: Bearer <token>
 | PUT | `/api/v1/admin/integrity-alerts/{id}/acknowledge` | 确认完整性告警 |
 | PUT | `/api/v1/admin/integrity-alerts/{id}/resolve` | 解决完整性告警（附备注） |
 
+告警响应新增 `severity` 和有界 `evidence`，现有字段保持不变。Manifest 驱动的 `alertType` 包括 `MANIFEST_MISSING`、`MANIFEST_INVALID`、`OBJECT_NOT_FOUND`、`METADATA_MISMATCH`、`CONTENT_HASH_MISMATCH`、`CHAIN_NOT_FOUND`、`CHAIN_MISMATCH`；历史类型仍可读取。
+
 ### 配额（`/api/v1/files/quota`、`/api/v1/admin/quota`）
 
 | 方法 | 端点 | 说明 |

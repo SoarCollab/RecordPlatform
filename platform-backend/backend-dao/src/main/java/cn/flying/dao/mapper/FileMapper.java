@@ -2,6 +2,7 @@ package cn.flying.dao.mapper;
 
 import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.QuotaUserUsageVO;
+import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
@@ -108,6 +109,7 @@ public interface FileMapper extends BaseMapper<File> {
      * @param id 文件ID（来自当前用户文件的 origin 字段，非外部输入）
      * @return 文件记录（可能已删除），仅用于获取 uid
      */
+    @InterceptorIgnore(tenantLine = "true")
     @Select("SELECT id, uid, tenant_id FROM file WHERE id = #{id}")
     File selectByIdIncludeDeleted(@Param("id") Long id);
 

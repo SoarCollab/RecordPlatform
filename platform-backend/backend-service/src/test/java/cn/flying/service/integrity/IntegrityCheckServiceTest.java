@@ -2,28 +2,38 @@ package cn.flying.service.integrity;
 
 import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.entity.IntegrityAlert;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.IntegrityAlertMapper;
 import cn.flying.dao.mapper.TenantMapper;
+import cn.flying.dao.vo.file.IntegrityCheckStatsVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.response.FileDetailVO;
+import cn.flying.platformapi.response.StorageObjectHeadVO;
+import cn.flying.service.manifest.ChunkManifestBatchView;
+import cn.flying.service.manifest.ChunkManifestCanonicalizer;
+import cn.flying.service.manifest.ChunkManifestChunk;
+import cn.flying.service.manifest.ChunkManifestDraft;
+import cn.flying.service.manifest.ChunkManifestService;
+import cn.flying.service.manifest.ChunkManifestView;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.service.sse.SseEmitterManager;
 import cn.flying.service.sse.SseEvent;
-import cn.flying.test.builders.FileTestBuilder;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
@@ -32,20 +42,37 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.Mockito.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for IntegrityCheckService.
+ * Operational, dependency-failure, alert-lifecycle, and tenant-context tests.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-@DisplayName("IntegrityCheckService Tests")
+@DisplayName("IntegrityCheckService operational behavior")
 class IntegrityCheckServiceTest {
+
+    private static final Long TENANT_ID = 7L;
+    private static final Long USER_ID = 42L;
+    private static final Long FILE_ID = 99L;
+    private static final String CHAIN_RECORD_ID = "chain-record-99";
+    private static final byte[] CONTENT = "content!".getBytes(StandardCharsets.UTF_8);
 
     @Mock
     private FileMapper fileMapper;
@@ -68,14 +95,14 @@ class IntegrityCheckServiceTest {
     @Mock
     private RLock rLock;
 
-    @InjectMocks
-    private IntegrityCheckService integrityCheckService;
+    @Mock
+    private ChunkManifestService chunkManifestService;
 
-    private static final Long TENANT_ID = 1L;
-    private static final Long USER_ID = 100L;
+    private final ChunkManifestCanonicalizer canonicalizer = new ChunkManifestCanonicalizer();
+    private IntegrityCheckService service;
 
     /**
-     * Initialize MyBatis-Plus lambda cache to avoid LambdaQueryWrapper failures in pure Mockito tests.
+     * Initializes MyBatis-Plus lambda metadata used by service query wrappers.
      */
     @BeforeAll
     static void initTableInfo() {
@@ -85,381 +112,451 @@ class IntegrityCheckServiceTest {
         TableInfoHelper.initTableInfo(assistant, IntegrityAlert.class);
     }
 
+    /**
+     * Creates a deterministic service and successful infrastructure defaults.
+     */
     @BeforeEach
-    void setUp() {
-        FileTestBuilder.resetIdCounter();
-        ReflectionTestUtils.setField(integrityCheckService, "sampleRate", 1.0); // 100% for tests
-        ReflectionTestUtils.setField(integrityCheckService, "batchSize", 50);
-        ReflectionTestUtils.setField(integrityCheckService, "lockTimeoutSeconds", 1800L);
+    void setUp() throws Exception {
+        service = new IntegrityCheckService(
+                fileMapper,
+                integrityAlertMapper,
+                tenantMapper,
+                fileRemoteClient,
+                sseEmitterManager,
+                redissonClient,
+                chunkManifestService
+        );
+        ReflectionTestUtils.setField(service, "sampleRate", 1.0);
+        ReflectionTestUtils.setField(service, "batchSize", 50);
+        ReflectionTestUtils.setField(service, "lockTimeoutSeconds", 1800L);
+        ReflectionTestUtils.setField(service, "heavySampleChunks", 1);
+        ReflectionTestUtils.setField(service, "heavyMaxDownloadBytes", 80L * 1024 * 1024);
 
         when(redissonClient.getLock("integrity-check-lock")).thenReturn(rLock);
+        when(rLock.tryLock(0, 1800L, TimeUnit.SECONDS)).thenReturn(true);
+        when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
+        when(integrityAlertMapper.selectCount(any())).thenReturn(0L);
+        when(integrityAlertMapper.insert(any(IntegrityAlert.class))).thenAnswer(invocation -> {
+            IntegrityAlert alert = invocation.getArgument(0);
+            alert.setId(1000L);
+            return 1;
+        });
+        when(chunkManifestService.calculateManifestHash(any()))
+                .thenAnswer(invocation -> canonicalizer.manifestHash(invocation.getArgument(0)));
     }
 
+    /**
+     * Clears thread-local tenant state between tests.
+     */
+    @AfterEach
+    void tearDown() {
+        TenantContext.clear();
+    }
+
+    /**
+     * Verifies a successful dependency response with no record becomes CHAIN_NOT_FOUND.
+     */
     @Test
-    @DisplayName("Happy path: all files match - no alerts created")
-    void checkIntegrity_allFilesMatch_noAlerts() throws Exception {
-        when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
-        when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
+    void heavy_shouldClassifyMissingChainRecord() {
+        File file = file();
+        prepareValidHeavyInputs(file);
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), CHAIN_RECORD_ID))
+                .thenReturn(new Result<>(ResultEnum.GET_USER_FILE_ERROR, null));
 
-        // Hash that matches "test file content"
-        String hash = "60f5237ed4049f0382661ef009d2bc42e48c3ceb3edb6600f7024e7ab3b838f3";
+        IntegrityCheckStatsVO stats = service.checkIntegrity();
 
-        File file = FileTestBuilder.aFile(f -> {
-            f.setTenantId(TENANT_ID);
-            f.setUid(USER_ID);
-            f.setFileHash(hash);
-            f.setStatus(FileUploadStatus.SUCCESS.getCode());
-        });
+        assertThat(stats).isEqualTo(new IntegrityCheckStatsVO(1, 1, 0));
+        IntegrityAlert alert = insertedAlert();
+        assertThat(alert.getAlertType()).isEqualTo(IntegrityAlert.AlertType.CHAIN_NOT_FOUND.name());
+        assertThat(alert.getSeverity()).isEqualTo(IntegrityAlert.AlertSeverity.ERROR.name());
+        assertThat(alert.getChainHash()).isNull();
+    }
 
-        when(fileMapper.selectPage(any(), any())).thenReturn(
-                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<File>() {{
-                    setRecords(List.of(file));
-                }});
+    /**
+     * Verifies storage availability failures count as execution errors, not corruption.
+     */
+    @Test
+    void lightweight_shouldCountStorageDependencyFailureAsError() {
+        File file = file();
+        ChunkManifestView manifest = manifest(file);
+        prepareFileAndManifest(file, manifest);
+        ChunkManifestChunk chunk = manifest.chunks().getFirst();
+        when(fileRemoteClient.headObject(chunk.storagePath(), chunk.cipherHash()))
+                .thenReturn(new Result<>(ResultEnum.FILE_SERVICE_ERROR, null));
 
-        // Storage returns "test file content" which computes to the hash above
-        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of("test file content".getBytes()));
-        when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
+        IntegrityCheckStatsVO stats = service.checkIntegrityWithLevel(
+                IntegrityCheckService.IntegrityCheckLevel.LIGHTWEIGHT);
 
-        FileDetailVO chainDetail = new FileDetailVO(
-                String.valueOf(USER_ID), "test.txt", "{}", "", hash, "2025-01-01", 0L, 1024L, "text/plain");
-        Result<FileDetailVO> chainResult = new Result<>(ResultEnum.SUCCESS, chainDetail);
-        when(fileRemoteClient.getFile(anyString(), eq(hash))).thenReturn(chainResult);
-
-        var stats = integrityCheckService.checkIntegrity();
-
-        assertEquals(1, stats.totalChecked());
-        assertEquals(0, stats.mismatchesFound());
-        assertEquals(0, stats.errorsEncountered());
+        assertThat(stats).isEqualTo(new IntegrityCheckStatsVO(1, 0, 1));
         verify(integrityAlertMapper, never()).insert(any(IntegrityAlert.class));
     }
 
+    /**
+     * Verifies blockchain availability failures do not create false mismatch alerts.
+     */
     @Test
-    @DisplayName("Hash mismatch detected - alert created with chainHash and SSE sent")
-    void checkIntegrity_hashMismatch_alertCreated() throws Exception {
-        when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
-        when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
+    void heavy_shouldCountBlockchainDependencyFailureAsError() {
+        File file = file();
+        prepareValidHeavyInputs(file);
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), CHAIN_RECORD_ID))
+                .thenReturn(new Result<>(ResultEnum.BLOCKCHAIN_ERROR, null));
 
-        // Storage content that hashes to this value
-        String dbHash = "60f5237ed4049f0382661ef009d2bc42e48c3ceb3edb6600f7024e7ab3b838f3";
-        String onChainHash = "different_chain_hash";
+        IntegrityCheckStatsVO stats = service.checkIntegrity();
 
-        File file = FileTestBuilder.aFile(f -> {
-            f.setTenantId(TENANT_ID);
-            f.setUid(USER_ID);
-            f.setFileHash(dbHash);
-            f.setStatus(FileUploadStatus.SUCCESS.getCode());
-        });
-
-        when(fileMapper.selectPage(any(), any())).thenReturn(
-                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<File>() {{
-                    setRecords(List.of(file));
-                }});
-
-        // Storage returns "test file content" which matches dbHash
-        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of("test file content".getBytes()));
-        when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
-
-        // Chain returns a different hash than DB
-        FileDetailVO chainDetail = new FileDetailVO(
-                String.valueOf(USER_ID), "test.txt", "{}", "", onChainHash, "2025-01-01", 0L, 1024L, "text/plain");
-        Result<FileDetailVO> chainResult = new Result<>(ResultEnum.SUCCESS, chainDetail);
-        when(fileRemoteClient.getFile(anyString(), eq(dbHash))).thenReturn(chainResult);
-
-        var stats = integrityCheckService.checkIntegrity();
-
-        assertEquals(1, stats.totalChecked());
-        assertEquals(1, stats.mismatchesFound());
-
-        ArgumentCaptor<IntegrityAlert> alertCaptor = ArgumentCaptor.forClass(IntegrityAlert.class);
-        verify(integrityAlertMapper).insert(alertCaptor.capture());
-        IntegrityAlert alert = alertCaptor.getValue();
-        assertEquals(IntegrityAlert.AlertType.HASH_MISMATCH.name(), alert.getAlertType());
-        assertEquals(dbHash, alert.getFileHash());
-        assertEquals(onChainHash, alert.getChainHash());
-
-        verify(sseEmitterManager).broadcastToAdmins(eq(TENANT_ID), any(SseEvent.class));
-    }
-
-    @Test
-    @DisplayName("File not found in S3 - FILE_NOT_FOUND alert")
-    void checkIntegrity_fileNotFound_alert() throws Exception {
-        when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
-        when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
-
-        // Hash that matches "test file content"
-        String hash = "60f5237ed4049f0382661ef009d2bc42e48c3ceb3edb6600f7024e7ab3b838f3";
-
-        File file = FileTestBuilder.aFile(f -> {
-            f.setTenantId(TENANT_ID);
-            f.setUid(USER_ID);
-            f.setFileHash(hash);
-            f.setStatus(FileUploadStatus.SUCCESS.getCode());
-        });
-
-        when(fileMapper.selectPage(any(), any())).thenReturn(
-                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<File>() {{
-                    setRecords(List.of(file));
-                }});
-
-        // Return empty result from storage
-        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of());
-        when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
-
-        var stats = integrityCheckService.checkIntegrity();
-
-        assertEquals(1, stats.totalChecked());
-        assertEquals(1, stats.mismatchesFound());
-
-        ArgumentCaptor<IntegrityAlert> alertCaptor = ArgumentCaptor.forClass(IntegrityAlert.class);
-        verify(integrityAlertMapper).insert(alertCaptor.capture());
-        assertEquals(IntegrityAlert.AlertType.FILE_NOT_FOUND.name(), alertCaptor.getValue().getAlertType());
-    }
-
-    @Test
-    @DisplayName("Storage service failure counts as execution error instead of alert")
-    void checkIntegrity_storageServiceFailure_countsAsError() throws Exception {
-        when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
-        when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
-
-        // Hash that matches "test file content"
-        String hash = "60f5237ed4049f0382661ef009d2bc42e48c3ceb3edb6600f7024e7ab3b838f3";
-
-        File file = FileTestBuilder.aFile(f -> {
-            f.setTenantId(TENANT_ID);
-            f.setUid(USER_ID);
-            f.setFileHash(hash);
-            f.setStatus(FileUploadStatus.SUCCESS.getCode());
-        });
-
-        when(fileMapper.selectPage(any(), any())).thenReturn(
-                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<File>() {{
-                    setRecords(List.of(file));
-                }});
-
-        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.FILE_SERVICE_ERROR, List.of());
-        when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
-
-        var stats = integrityCheckService.checkIntegrity();
-
-        assertEquals(1, stats.totalChecked());
-        assertEquals(0, stats.mismatchesFound());
-        assertEquals(1, stats.errorsEncountered());
+        assertThat(stats).isEqualTo(new IntegrityCheckStatsVO(1, 0, 1));
         verify(integrityAlertMapper, never()).insert(any(IntegrityAlert.class));
     }
 
+    /**
+     * Verifies share-saved records query the blockchain with the original uploader.
+     */
     @Test
-    @DisplayName("Chain record not found - CHAIN_NOT_FOUND alert")
-    void checkIntegrity_chainNotFound_alert() throws Exception {
-        when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
-        when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
+    void heavy_shouldResolveOriginalUploaderForShareSavedFile() {
+        Long originFileId = 1234L;
+        Long recipientId = 88L;
+        File file = file().setUid(recipientId).setOrigin(originFileId);
+        File origin = new File().setId(originFileId).setUid(USER_ID).setTenantId(TENANT_ID);
+        when(fileMapper.selectByIdIncludeDeleted(originFileId)).thenReturn(origin);
+        prepareValidHeavyInputs(file);
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), CHAIN_RECORD_ID))
+                .thenReturn(successChain(CHAIN_RECORD_ID));
 
-        // Hash that matches "test file content"
-        String hash = "60f5237ed4049f0382661ef009d2bc42e48c3ceb3edb6600f7024e7ab3b838f3";
+        IntegrityCheckStatsVO stats = service.checkIntegrity();
 
-        File file = FileTestBuilder.aFile(f -> {
-            f.setTenantId(TENANT_ID);
-            f.setUid(USER_ID);
-            f.setFileHash(hash);
-            f.setStatus(FileUploadStatus.SUCCESS.getCode());
-        });
-
-        when(fileMapper.selectPage(any(), any())).thenReturn(
-                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<File>() {{
-                    setRecords(List.of(file));
-                }});
-
-        // Storage returns file content that matches hash
-        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of("test file content".getBytes()));
-        when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
-
-        // Chain returns failure
-        Result<FileDetailVO> chainResult = new Result<>(ResultEnum.GET_USER_FILE_ERROR, null);
-        when(fileRemoteClient.getFile(anyString(), eq(hash))).thenReturn(chainResult);
-
-        var stats = integrityCheckService.checkIntegrity();
-
-        assertEquals(1, stats.totalChecked());
-        assertEquals(1, stats.mismatchesFound());
-
-        ArgumentCaptor<IntegrityAlert> alertCaptor = ArgumentCaptor.forClass(IntegrityAlert.class);
-        verify(integrityAlertMapper).insert(alertCaptor.capture());
-        assertEquals(IntegrityAlert.AlertType.CHAIN_NOT_FOUND.name(), alertCaptor.getValue().getAlertType());
+        assertThat(stats).isEqualTo(new IntegrityCheckStatsVO(1, 0, 0));
+        verify(fileRemoteClient).getFile(String.valueOf(USER_ID), CHAIN_RECORD_ID);
+        verify(fileRemoteClient, never()).getFile(String.valueOf(recipientId), CHAIN_RECORD_ID);
     }
 
+    /**
+     * Verifies missing uploader metadata becomes an explicit finding without an invalid remote lookup.
+     */
     @Test
-    @DisplayName("Blockchain service failure counts as execution error instead of alert")
-    void checkIntegrity_blockchainServiceFailure_countsAsError() throws Exception {
-        when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
-        when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
+    void heavy_shouldClassifyMissingBlockchainUploaderWithoutRemoteLookup() {
+        File file = file().setUid(null);
+        prepareValidHeavyInputs(file);
 
-        // Hash that matches "test file content"
-        String hash = "60f5237ed4049f0382661ef009d2bc42e48c3ceb3edb6600f7024e7ab3b838f3";
+        IntegrityCheckStatsVO stats = service.checkIntegrity();
 
-        File file = FileTestBuilder.aFile(f -> {
-            f.setTenantId(TENANT_ID);
-            f.setUid(USER_ID);
-            f.setFileHash(hash);
-            f.setStatus(FileUploadStatus.SUCCESS.getCode());
-        });
+        assertThat(stats).isEqualTo(new IntegrityCheckStatsVO(1, 1, 0));
+        IntegrityAlert alert = insertedAlert();
+        assertThat(alert.getAlertType()).isEqualTo(IntegrityAlert.AlertType.CHAIN_NOT_FOUND.name());
+        assertThat(alert.getEvidence()).contains("reason=chain_uploader_missing");
+        verify(fileRemoteClient, never()).getFile(anyString(), eq(CHAIN_RECORD_ID));
+    }
 
-        when(fileMapper.selectPage(any(), any())).thenReturn(
-                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<File>() {{
-                    setRecords(List.of(file));
-                }});
+    /**
+     * Verifies an open alert suppresses duplicate insertion and duplicate SSE delivery.
+     */
+    @Test
+    void alertCreation_shouldDeduplicatePendingAndAcknowledgedFindings() {
+        File file = file();
+        prepareFileAndBatch(file, ChunkManifestBatchView.empty());
+        when(integrityAlertMapper.selectCount(any())).thenReturn(1L);
 
-        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of("test file content".getBytes()));
-        when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
+        IntegrityCheckStatsVO stats = service.checkIntegrityWithLevel(
+                IntegrityCheckService.IntegrityCheckLevel.LIGHTWEIGHT);
 
-        Result<FileDetailVO> chainResult = new Result<>(ResultEnum.BLOCKCHAIN_ERROR, null);
-        when(fileRemoteClient.getFile(anyString(), eq(hash))).thenReturn(chainResult);
-
-        var stats = integrityCheckService.checkIntegrity();
-
-        assertEquals(1, stats.totalChecked());
-        assertEquals(0, stats.mismatchesFound());
-        assertEquals(1, stats.errorsEncountered());
+        assertThat(stats).isEqualTo(new IntegrityCheckStatsVO(1, 1, 0));
         verify(integrityAlertMapper, never()).insert(any(IntegrityAlert.class));
+        verify(sseEmitterManager, never()).broadcastToAdmins(any(), any());
     }
 
+    /**
+     * Verifies new alerts expose stable severity and evidence in the SSE payload.
+     */
     @Test
-    @DisplayName("Share-saved file resolves origin uploader for chain lookup")
-    void checkIntegrity_shareSavedFile_usesOriginUploader() throws Exception {
-        when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
-        when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
+    void alertCreation_shouldBroadcastSeverityAndEvidence() {
+        File file = file();
+        prepareFileAndBatch(file, ChunkManifestBatchView.empty());
 
-        Long recipientUserId = 200L;
-        Long originFileId = 999L;
-        // Hash that matches "test file content"
-        String hash = "60f5237ed4049f0382661ef009d2bc42e48c3ceb3edb6600f7024e7ab3b838f3";
+        service.checkIntegrityWithLevel(IntegrityCheckService.IntegrityCheckLevel.LIGHTWEIGHT);
 
-        File sharedFile = FileTestBuilder.aFile(f -> {
-            f.setTenantId(TENANT_ID);
-            f.setUid(recipientUserId);
-            f.setOrigin(originFileId);
-            f.setFileHash(hash);
-            f.setStatus(FileUploadStatus.SUCCESS.getCode());
-        });
-        File originFile = FileTestBuilder.aFile(f -> {
-            f.setId(originFileId);
-            f.setUid(USER_ID);
-            f.setTenantId(TENANT_ID);
-            f.setFileHash(hash);
-        });
+        ArgumentCaptor<SseEvent> eventCaptor = ArgumentCaptor.forClass(SseEvent.class);
+        verify(sseEmitterManager).broadcastToAdmins(eq(TENANT_ID), eventCaptor.capture());
+        assertThat(eventCaptor.getValue().getPayload()).isInstanceOf(Map.class);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> payload = (Map<String, Object>) eventCaptor.getValue().getPayload();
+        assertThat(payload)
+                .containsEntry("alertType", IntegrityAlert.AlertType.MANIFEST_MISSING.name())
+                .containsEntry("severity", IntegrityAlert.AlertSeverity.WARNING.name());
+        assertThat(payload.get("evidence")).asString().contains("active_manifest_missing");
+    }
 
-        when(fileMapper.selectPage(any(), any())).thenReturn(
-                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<File>() {{
-                    setRecords(List.of(sharedFile));
-                }});
-        when(fileMapper.selectByIdIncludeDeleted(originFileId)).thenReturn(originFile);
+    /**
+     * Verifies a failed batch manifest query accounts for each file and does not create alerts.
+     */
+    @Test
+    void checkIntegrity_shouldCountManifestBatchFailureForEveryFile() {
+        File first = file();
+        File second = file().setId(100L).setFileHash("chain-record-100");
+        prepareFiles(List.of(first, second));
+        when(chunkManifestService.findActiveManifests(anyList()))
+                .thenThrow(new IllegalStateException("database unavailable"));
 
-        Result<List<byte[]>> storageResult = new Result<>(ResultEnum.SUCCESS, List.of("test file content".getBytes()));
-        when(fileRemoteClient.getFileListByHash(anyList(), anyList())).thenReturn(storageResult);
+        IntegrityCheckStatsVO stats = service.checkIntegrityWithLevel(
+                IntegrityCheckService.IntegrityCheckLevel.LIGHTWEIGHT);
 
-        FileDetailVO chainDetail = new FileDetailVO(
-                String.valueOf(USER_ID), "test.txt", "{}", "", hash, "2025-01-01", 0L, 1024L, "text/plain");
-        Result<FileDetailVO> chainResult = new Result<>(ResultEnum.SUCCESS, chainDetail);
-        when(fileRemoteClient.getFile(String.valueOf(USER_ID), hash)).thenReturn(chainResult);
-
-        var stats = integrityCheckService.checkIntegrity();
-
-        assertEquals(1, stats.totalChecked());
-        assertEquals(0, stats.mismatchesFound());
-        assertEquals(0, stats.errorsEncountered());
-        verify(fileRemoteClient).getFile(String.valueOf(USER_ID), hash);
-        verify(fileRemoteClient, never()).getFile(String.valueOf(recipientUserId), hash);
+        assertThat(stats).isEqualTo(new IntegrityCheckStatsVO(2, 0, 2));
         verify(integrityAlertMapper, never()).insert(any(IntegrityAlert.class));
+        verify(fileRemoteClient, never()).headObject(anyString(), anyString());
     }
 
+    /**
+     * Verifies manual checks restore a caller's prior tenant context after HEAVY execution.
+     */
     @Test
-    @DisplayName("Lock acquisition failure - skip check gracefully")
-    void checkIntegrity_lockFailed_skips() throws Exception {
-        when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(false);
+    void triggerManualCheck_shouldRestorePreviousTenantContext() {
+        File file = file();
+        prepareValidHeavyInputs(file);
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), CHAIN_RECORD_ID))
+                .thenReturn(successChain(CHAIN_RECORD_ID));
+        TenantContext.setTenantId(999L);
 
-        var stats = integrityCheckService.checkIntegrity();
+        IntegrityCheckStatsVO stats = service.triggerManualCheck(TENANT_ID);
 
-        assertEquals(0, stats.totalChecked());
-        assertEquals(0, stats.mismatchesFound());
-        assertEquals(0, stats.errorsEncountered());
+        assertThat(stats).isEqualTo(new IntegrityCheckStatsVO(1, 0, 0));
+        assertThat(TenantContext.getTenantId()).isEqualTo(999L);
+        verify(tenantMapper, never()).selectActiveTenantIds();
+    }
+
+    /**
+     * Verifies invalid manual tenant input is rejected before lock acquisition.
+     */
+    @Test
+    void triggerManualCheck_shouldRejectNullTenant() {
+        assertThatThrownBy(() -> service.triggerManualCheck(null))
+                .isInstanceOf(GeneralException.class);
+
+        verify(redissonClient, never()).getLock(anyString());
+    }
+
+    /**
+     * Verifies lock contention safely skips the run without touching persistence.
+     */
+    @Test
+    void checkIntegrity_shouldSkipWhenDistributedLockIsHeld() throws Exception {
+        when(rLock.tryLock(0, 1800L, TimeUnit.SECONDS)).thenReturn(false);
+
+        IntegrityCheckStatsVO stats = service.checkIntegrity();
+
+        assertThat(stats).isEqualTo(new IntegrityCheckStatsVO(0, 0, 0));
+        verify(tenantMapper, never()).selectActiveTenantIds();
         verify(fileMapper, never()).selectPage(any(), any());
     }
 
+    /**
+     * Verifies a scheduler run with no active tenants is a clean no-op.
+     */
     @Test
-    @DisplayName("Empty file list - no-op")
-    void checkIntegrity_emptyFileList_noop() throws Exception {
-        when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
-        when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of(TENANT_ID));
-        when(fileMapper.selectPage(any(), any())).thenReturn(
-                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<File>() {{
-                    setRecords(List.of());
-                }});
-
-        var stats = integrityCheckService.checkIntegrity();
-
-        assertEquals(0, stats.totalChecked());
-        assertEquals(0, stats.mismatchesFound());
-        assertEquals(0, stats.errorsEncountered());
-        verify(integrityAlertMapper, never()).insert(any(IntegrityAlert.class));
-    }
-
-    @Test
-    @DisplayName("Acknowledge alert updates status")
-    void acknowledgeAlert_updatesStatus() {
-        IntegrityAlert alert = new IntegrityAlert()
-                .setStatus(IntegrityAlert.AlertStatus.PENDING.getCode());
-        when(integrityAlertMapper.selectById(1L)).thenReturn(alert);
-        when(integrityAlertMapper.updateById(any(IntegrityAlert.class))).thenReturn(1);
-
-        integrityCheckService.acknowledgeAlert(1L, 99L);
-
-        assertEquals(IntegrityAlert.AlertStatus.ACKNOWLEDGED.getCode(), alert.getStatus());
-        verify(integrityAlertMapper).updateById(alert);
-    }
-
-    @Test
-    @DisplayName("Acknowledge non-existent alert throws exception")
-    void acknowledgeAlert_notFound_throws() {
-        when(integrityAlertMapper.selectById(999L)).thenReturn(null);
-
-        assertThrows(GeneralException.class, () ->
-                integrityCheckService.acknowledgeAlert(999L, 99L));
-    }
-
-    @Test
-    @DisplayName("Resolve alert updates status, resolvedBy, resolvedAt, and note")
-    void resolveAlert_updatesFields() {
-        IntegrityAlert alert = new IntegrityAlert()
-                .setStatus(IntegrityAlert.AlertStatus.ACKNOWLEDGED.getCode());
-        when(integrityAlertMapper.selectById(1L)).thenReturn(alert);
-        when(integrityAlertMapper.updateById(any(IntegrityAlert.class))).thenReturn(1);
-
-        integrityCheckService.resolveAlert(1L, 99L, "Fixed by re-upload");
-
-        assertEquals(IntegrityAlert.AlertStatus.RESOLVED.getCode(), alert.getStatus());
-        assertEquals(99L, alert.getResolvedBy());
-        assertNotNull(alert.getResolvedAt());
-        assertEquals("Fixed by re-upload", alert.getNote());
-        verify(integrityAlertMapper).updateById(alert);
-    }
-
-    @Test
-    @DisplayName("Resolve non-existent alert throws exception")
-    void resolveAlert_notFound_throws() {
-        when(integrityAlertMapper.selectById(999L)).thenReturn(null);
-
-        assertThrows(GeneralException.class, () ->
-                integrityCheckService.resolveAlert(999L, 99L, "note"));
-    }
-
-    @Test
-    @DisplayName("No active tenants - returns zero stats")
-    void checkIntegrity_noTenants_returnsZero() throws Exception {
-        when(rLock.tryLock(0, 1800, TimeUnit.SECONDS)).thenReturn(true);
+    void checkIntegrity_shouldReturnZeroWhenNoTenantsExist() {
         when(tenantMapper.selectActiveTenantIds()).thenReturn(List.of());
 
-        var stats = integrityCheckService.checkIntegrity();
+        IntegrityCheckStatsVO stats = service.checkIntegrity();
 
-        assertEquals(0, stats.totalChecked());
-        assertEquals(0, stats.mismatchesFound());
-        assertEquals(0, stats.errorsEncountered());
+        assertThat(stats).isEqualTo(new IntegrityCheckStatsVO(0, 0, 0));
+        verify(fileMapper, never()).selectPage(any(), any());
+    }
+
+    /**
+     * Verifies the scan loads fileParam so the transient file size can be derived during validation.
+     */
+    @Test
+    void lightweight_shouldSelectFileParamForDerivedFileSizeValidation() {
+        File file = file()
+                .setFileSize(null)
+                .setFileParam("{\"fileSize\":" + CONTENT.length + "}");
+        ChunkManifestView manifest = manifest(file);
+        prepareFileAndManifest(file, manifest);
+        ChunkManifestChunk chunk = manifest.chunks().getFirst();
+        when(fileRemoteClient.headObject(chunk.storagePath(), chunk.cipherHash()))
+                .thenReturn(successHead(chunk));
+
+        IntegrityCheckStatsVO stats = service.checkIntegrityWithLevel(
+                IntegrityCheckService.IntegrityCheckLevel.LIGHTWEIGHT);
+
+        assertThat(stats).isEqualTo(new IntegrityCheckStatsVO(1, 0, 0));
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaQueryWrapper<File>> wrapperCaptor =
+                ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(fileMapper).selectPage(any(), wrapperCaptor.capture());
+        assertThat(wrapperCaptor.getValue().getSqlSelect()).contains("file_param");
+        assertThat(file.getFileSize()).isEqualTo((long) CONTENT.length);
+    }
+
+    /**
+     * Verifies acknowledgement preserves the alert lifecycle contract.
+     */
+    @Test
+    void acknowledgeAlert_shouldUpdateStatus() {
+        IntegrityAlert alert = new IntegrityAlert().setStatus(IntegrityAlert.AlertStatus.PENDING.getCode());
+        when(integrityAlertMapper.selectById(1L)).thenReturn(alert);
+
+        service.acknowledgeAlert(1L, USER_ID);
+
+        assertThat(alert.getStatus()).isEqualTo(IntegrityAlert.AlertStatus.ACKNOWLEDGED.getCode());
+        verify(integrityAlertMapper).updateById(alert);
+    }
+
+    /**
+     * Verifies resolution records the operator, timestamp, and note.
+     */
+    @Test
+    void resolveAlert_shouldUpdateResolutionFields() {
+        IntegrityAlert alert = new IntegrityAlert().setStatus(IntegrityAlert.AlertStatus.ACKNOWLEDGED.getCode());
+        when(integrityAlertMapper.selectById(1L)).thenReturn(alert);
+
+        service.resolveAlert(1L, USER_ID, "re-uploaded");
+
+        assertThat(alert.getStatus()).isEqualTo(IntegrityAlert.AlertStatus.RESOLVED.getCode());
+        assertThat(alert.getResolvedBy()).isEqualTo(USER_ID);
+        assertThat(alert.getResolvedAt()).isNotNull();
+        assertThat(alert.getNote()).isEqualTo("re-uploaded");
+        verify(integrityAlertMapper).updateById(alert);
+    }
+
+    /**
+     * Registers a valid manifest, HEAD, sampled bytes, and file page for heavy tests.
+     */
+    private void prepareValidHeavyInputs(File file) {
+        ChunkManifestView manifest = manifest(file);
+        prepareFileAndManifest(file, manifest);
+        ChunkManifestChunk chunk = manifest.chunks().getFirst();
+        when(fileRemoteClient.headObject(chunk.storagePath(), chunk.cipherHash()))
+                .thenReturn(successHead(chunk));
+        when(fileRemoteClient.getFileListByHash(List.of(chunk.storagePath()), List.of(chunk.cipherHash())))
+                .thenReturn(new Result<>(ResultEnum.SUCCESS, List.of(CONTENT)));
+    }
+
+    /**
+     * Registers one file and its active manifest batch.
+     */
+    private void prepareFileAndManifest(File file, ChunkManifestView manifest) {
+        prepareFileAndBatch(file, new ChunkManifestBatchView(Map.of(file.getId(), manifest), Set.of()));
+    }
+
+    /**
+     * Registers one file and an explicit manifest batch response.
+     */
+    private void prepareFileAndBatch(File file, ChunkManifestBatchView batch) {
+        prepareFiles(List.of(file));
+        when(chunkManifestService.findActiveManifests(anyList())).thenReturn(batch);
+    }
+
+    /**
+     * Registers one short file page for scheduler/manual query paths.
+     */
+    private void prepareFiles(List<File> files) {
+        Page<File> page = new Page<>();
+        page.setRecords(files);
+        when(fileMapper.selectPage(any(), any())).thenReturn(page);
+    }
+
+    /**
+     * Builds a successful file whose fileHash is an explicit chain record identifier.
+     */
+    private File file() {
+        return new File()
+                .setId(FILE_ID)
+                .setTenantId(TENANT_ID)
+                .setUid(USER_ID)
+                .setFileName("manifest.bin")
+                .setFileHash(CHAIN_RECORD_ID)
+                .setFileSize((long) CONTENT.length)
+                .setVersion(1)
+                .setStatus(FileUploadStatus.SUCCESS.getCode())
+                .setDeleted(0);
+    }
+
+    /**
+     * Builds a valid canonical single-chunk NONE manifest.
+     */
+    private ChunkManifestView manifest(File file) {
+        String hash = sha256(CONTENT);
+        ChunkManifestChunk chunk = new ChunkManifestChunk(
+                0,
+                hash,
+                hash,
+                CONTENT.length,
+                "storage/tenant/" + TENANT_ID + "/chunk/" + hash,
+                "S3",
+                "etag-0",
+                "SHA-256"
+        );
+        ChunkManifestDraft draft = new ChunkManifestDraft(
+                ChunkManifestCanonicalizer.SCHEMA_ID,
+                file.getFileHash(),
+                ChunkManifestCanonicalizer.HASH_ALGORITHM,
+                CONTENT.length,
+                CONTENT.length,
+                null,
+                "NONE",
+                "S3",
+                List.of(chunk)
+        );
+        return new ChunkManifestView(
+                1000L,
+                file.getId(),
+                file.getVersion(),
+                draft.schemaId(),
+                draft.fileHash(),
+                canonicalizer.manifestHash(draft),
+                draft.hashAlgorithm(),
+                draft.chunkSize(),
+                1,
+                draft.totalSize(),
+                null,
+                draft.encryptionAlgorithm(),
+                draft.storageBackend(),
+                List.of(chunk)
+        );
+    }
+
+    /**
+     * Creates a complete successful storage HEAD response for one chunk.
+     */
+    private Result<StorageObjectHeadVO> successHead(ChunkManifestChunk chunk) {
+        return new Result<>(ResultEnum.SUCCESS, new StorageObjectHeadVO(
+                true,
+                chunk.storagePath(),
+                chunk.cipherHash(),
+                TENANT_ID,
+                TENANT_ID,
+                "node-a",
+                chunk.size(),
+                "\"" + chunk.etag() + "\"",
+                chunk.cipherHash()
+        ));
+    }
+
+    /**
+     * Creates a successful chain lookup response.
+     */
+    private Result<FileDetailVO> successChain(String returnedRecordId) {
+        FileDetailVO detail = new FileDetailVO(
+                String.valueOf(USER_ID), "manifest.bin", "{}", "", returnedRecordId,
+                "2026-07-13", 0L, (long) CONTENT.length, "application/octet-stream");
+        return new Result<>(ResultEnum.SUCCESS, detail);
+    }
+
+    /**
+     * Captures the alert inserted by the current test.
+     */
+    private IntegrityAlert insertedAlert() {
+        ArgumentCaptor<IntegrityAlert> captor = ArgumentCaptor.forClass(IntegrityAlert.class);
+        verify(integrityAlertMapper).insert(captor.capture());
+        return captor.getValue();
+    }
+
+    /**
+     * Calculates the canonical direct-upload cipher hash.
+     */
+    private String sha256(byte[] content) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return "sha256:" + HexFormat.of().formatHex(digest.digest(content));
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 }

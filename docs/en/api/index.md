@@ -142,6 +142,8 @@ Based on `SecurityConfiguration`:
 | PUT | `/api/v1/admin/integrity-alerts/{id}/acknowledge` | Acknowledge an integrity alert |
 | PUT | `/api/v1/admin/integrity-alerts/{id}/resolve` | Resolve an integrity alert (with note) |
 
+Alert responses add `severity` and bounded `evidence` while retaining existing fields. Manifest-driven `alertType` values are `MANIFEST_MISSING`, `MANIFEST_INVALID`, `OBJECT_NOT_FOUND`, `METADATA_MISMATCH`, `CONTENT_HASH_MISMATCH`, `CHAIN_NOT_FOUND`, and `CHAIN_MISMATCH`; legacy values remain readable.
+
 ### Quota (`/api/v1/files/quota`, `/api/v1/admin/quota`)
 
 | Method | Endpoint | Description |

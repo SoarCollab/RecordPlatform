@@ -212,25 +212,33 @@ Visit http://localhost:16686 to view trace data.
 
 ## Storage Integrity Check
 
-The system periodically verifies the consistency of S3-stored files against blockchain records.
+The system periodically verifies active chunk manifests, S3-compatible object metadata, sampled chunk bytes, and blockchain records. Files without an active manifest are reported as a migration condition; the checker never falls back to treating `file.fileHash` as an object content hash.
 
 ### How It Works
 
-1. Runs daily at 2:00 AM, sampling 1% of files
-2. Verifies file existence in S3
-3. Compares database hash against on-chain hash
-4. Creates alerts and notifies admins via SSE when anomalies are found
+1. Runs daily at 2:00 AM and samples 1% of successful files.
+2. Batch-loads each tenant's active manifests and ordered chunk rows.
+3. Applies one randomly selected check level to the sampled run:
 
-> Due to storage-layer encryption, the check does not re-hash file contents. Instead it verifies S3 file existence + DB-to-chain hash consistency.
+| Level | Verification | Object download |
+|-------|--------------|-----------------|
+| `LIGHTWEIGHT` | Manifest identity/safety contract plus every chunk's path, tenant, size, metadata hash, and declared ETag via `HeadObject` | No |
+| `MEDIUM` | Lightweight checks plus chunk order/count/aggregate size and canonical `manifestHash` | No |
+| `HEAVY` | Medium checks plus bounded sampled chunk SHA-256 and blockchain record comparison | Selected chunks only |
+
+`file.fileHash` and the v1 manifest `fileHash` compatibility field are chain record identifiers. Object content evidence comes from chunk `plainHash`/`cipherHash`; the ordered manifest proof is `manifestHash`.
 
 ### Configuration
 
 | Property | Default | Description |
 |----------|---------|-------------|
 | `integrity.check.enabled` | `true` | Enable/disable check |
-| `integrity.check.cron` | `0 0 2 * * ?` | Execution schedule |
+| `integrity.check.schedule.cron` | `0 0 2 * * ?` | Execution schedule |
 | `integrity.check.sample-rate` | `0.01` | Sampling rate |
-| `integrity.check.batch-size` | `50` | Batch size |
+| `integrity.check.batch-size` | `50` | Files per manifest batch; runtime bounds this to `1..1000` |
+| `integrity.check.lock-timeout-seconds` | `1800` | Distributed lock lease time |
+| `integrity.check.heavy.sample-chunks` | `1` | Unique chunk objects sampled per heavy file check |
+| `integrity.check.heavy.max-download-bytes` | `83886080` | Maximum sampled bytes downloaded for one file in one run |
 
 ### Admin Endpoints
 
@@ -243,7 +251,9 @@ The system periodically verifies the consistency of S3-stored files against bloc
 
 ### Alert Notifications
 
-When integrity anomalies are detected, the system pushes `INTEGRITY_ALERT` events to admins via SSE. Alert records are stored in the `integrity_alert` table. A distributed lock (Redisson) ensures no concurrent check executions.
+When integrity anomalies are detected, the system pushes `INTEGRITY_ALERT` events to admins via SSE. Records and events include `alertType`, `severity`, bounded `evidence`, `actualHash`, and `chainHash` where applicable.
+
+New manifest-driven types are `MANIFEST_MISSING`, `MANIFEST_INVALID`, `OBJECT_NOT_FOUND`, `METADATA_MISMATCH`, `CONTENT_HASH_MISMATCH`, and `CHAIN_MISMATCH`; `CHAIN_NOT_FOUND` remains supported. Legacy `HASH_MISMATCH` and `FILE_NOT_FOUND` records remain readable for API compatibility. An unresolved alert with the same tenant, file, and type is not inserted or broadcast again. A distributed lock (Redisson) serializes scheduled and manual checks.
 
 ## SkyWalking Integration
 

@@ -14,13 +14,13 @@ import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Scheduled trigger for periodic storage integrity checks with tiered strategy.
- * Runs daily at 2am by default; controlled via {@code integrity.check.cron}.
+ * Runs daily at 2am by default; controlled via {@code integrity.check.schedule.cron}.
  *
  * <p>Uses probabilistic distribution to select check levels:
  * <ul>
- *   <li>LIGHTWEIGHT (99%): Fast existence checks</li>
- *   <li>MEDIUM (0.9%): Hash verification</li>
- *   <li>HEAVY (0.1%): Full blockchain verification</li>
+ *   <li>LIGHTWEIGHT (99%): Manifest-backed HEAD metadata checks</li>
+ *   <li>MEDIUM (0.9%): Canonical manifest and ordered chunk checks</li>
+ *   <li>HEAVY (0.1%): Bounded chunk download sampling plus blockchain verification</li>
  * </ul>
  */
 @Slf4j
@@ -105,11 +105,11 @@ public class IntegrityCheckScheduler {
      * @return the selected check level
      */
     private IntegrityCheckLevel selectCheckLevel() {
-        // Validate distribution sums to ~1.0 (allow small floating point tolerance)
         double total = lightweightProbability + mediumProbability + heavyProbability;
-        if (Math.abs(total - 1.0) > 0.01) {
-            log.warn("[integrity-check] distribution probabilities sum to {}, expected 1.0. Using defaults.",
-                    total);
+        if (!hasValidDistribution(total)) {
+            log.warn("[integrity-check] invalid distribution probabilities: lightweight={}, medium={}, "
+                            + "heavy={}, total={}. Using defaults.",
+                    lightweightProbability, mediumProbability, heavyProbability, total);
             return selectCheckLevelWithDefaults();
         }
 
@@ -123,6 +123,24 @@ public class IntegrityCheckScheduler {
         } else {
             return IntegrityCheckLevel.HEAVY;
         }
+    }
+
+    /**
+     * Rejects non-finite, negative, out-of-range, or materially incomplete distributions.
+     */
+    private boolean hasValidDistribution(double total) {
+        return isProbability(lightweightProbability)
+                && isProbability(mediumProbability)
+                && isProbability(heavyProbability)
+                && Double.isFinite(total)
+                && Math.abs(total - 1.0) <= 0.01;
+    }
+
+    /**
+     * Validates one configured probability before it participates in tier selection.
+     */
+    private boolean isProbability(double probability) {
+        return Double.isFinite(probability) && probability >= 0.0 && probability <= 1.0;
     }
 
     /**

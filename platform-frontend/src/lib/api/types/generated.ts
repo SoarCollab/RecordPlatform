@@ -3834,6 +3834,8 @@ export interface components {
              * @description 创建时间
              */
             createTime?: string;
+            /** @description 有界巡检证据 */
+            evidence?: string;
             /** @description 文件哈希 */
             fileHash?: string;
             /** @description 文件ID（外部ID） */
@@ -3849,6 +3851,8 @@ export interface components {
             resolvedAt?: string;
             /** @description 处理人ID（外部ID） */
             resolvedBy?: string;
+            /** @description 告警严重级别：WARNING、ERROR、CRITICAL */
+            severity?: string;
             /**
              * Format: int32
              * @description 告警状态
