@@ -249,6 +249,9 @@ class OpenApiContractExportTest {
         assertThat(rootNode.path("paths").has("/api/v1/files")).isTrue();
         assertThat(rootNode.path("paths").has("/api/v1/admin/quota/rollout/audits")).isTrue();
         assertThat(rootNode.path("paths").has("/api/v1/admin/integrity-alerts")).isTrue();
+        JsonNode integrityAlertSchema = rootNode.path("components").path("schemas").path("IntegrityAlertVO");
+        assertThat(integrityAlertSchema.path("properties").has("severity")).isTrue();
+        assertThat(integrityAlertSchema.path("properties").has("evidence")).isTrue();
 
         return normalizeOpenApiDocument(rootNode);
     }

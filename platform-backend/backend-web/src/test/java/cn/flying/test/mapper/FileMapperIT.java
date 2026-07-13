@@ -213,5 +213,21 @@ class FileMapperIT extends BaseMapperIT {
             assertThat(files).hasSize(1);
             assertThat(files.get(0).getTenantId()).isEqualTo(TEST_TENANT_ID);
         }
+
+        @Test
+        @DisplayName("selectByIdIncludeDeleted should resolve an explicit cross-tenant origin")
+        void selectByIdIncludeDeletedShouldResolveCrossTenantOrigin() {
+            File originFile = withTenant(999L, () -> {
+                File file = createTestFile(999L, 999L);
+                fileMapper.insert(file);
+                return file;
+            });
+
+            File found = fileMapper.selectByIdIncludeDeleted(originFile.getId());
+
+            assertThat(found).isNotNull();
+            assertThat(found.getUid()).isEqualTo(999L);
+            assertThat(found.getTenantId()).isEqualTo(999L);
+        }
     }
 }

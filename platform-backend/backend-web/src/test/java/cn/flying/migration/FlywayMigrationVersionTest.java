@@ -39,6 +39,7 @@ class FlywayMigrationVersionTest {
         assertTrue(migrationFiles.contains("V1.7.3__integrity_alert.sql"));
         assertTrue(migrationFiles.contains("V1.7.4__rename_file_contract_hash_to_transaction_hash.sql"));
         assertTrue(migrationFiles.contains("V1.7.5__replace_clean_log_procedures.sql"));
+        assertTrue(migrationFiles.contains("V1.10.3__integrity_alert_evidence.sql"));
         assertFalse(migrationFiles.contains("V1.0.1__add_account_nickname.sql"));
         assertFalse(migrationFiles.contains("V1.5.0__integrity_alert.sql"));
 
@@ -113,6 +114,21 @@ class FlywayMigrationVersionTest {
         assertTrue(sql.contains("CREATE PROCEDURE `proc_clean_processed_messages`"));
         assertTrue(sql.contains("CREATE PROCEDURE `proc_clean_old_operation_logs`"));
         assertFalse(sql.matches("(?is).*CREATE\\s+PROCEDURE\\s+IF\\s+NOT\\s+EXISTS.*"));
+    }
+
+    /**
+     * 验证完整性告警证据通过前向迁移新增，并包含开放告警去重索引。
+     */
+    @Test
+    @DisplayName("should add integrity severity evidence and open-alert dedup index")
+    void shouldAddIntegritySeverityEvidenceAndOpenAlertDedupIndex() throws IOException {
+        Path migration = resolveMigrationDir().resolve("V1.10.3__integrity_alert_evidence.sql");
+        String sql = Files.readString(migration);
+
+        assertTrue(sql.contains("ADD COLUMN `severity` VARCHAR(16) NOT NULL"));
+        assertTrue(sql.contains("ADD COLUMN `evidence` VARCHAR(1024)"));
+        assertTrue(sql.contains("ADD INDEX `idx_integrity_alert_open_dedup`"));
+        assertTrue(sql.contains("WHEN `alert_type` = 'CHAIN_NOT_FOUND' THEN 'ERROR'"));
     }
 
     /**

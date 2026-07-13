@@ -15,6 +15,8 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
@@ -100,6 +102,36 @@ class IntegrityAlertControllerIT extends BaseControllerIntegrationTest {
             performGet(BASE_URL + "?alertType=HASH_MISMATCH&pageNum=1&pageSize=20")
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200));
+        }
+
+        /**
+         * Verifies manifest-driven severity and bounded evidence are exposed additively.
+         */
+        @Test
+        @DisplayName("should expose severity and evidence fields")
+        void shouldExposeSeverityAndEvidence() throws Exception {
+            IntegrityAlert alert = new IntegrityAlert()
+                    .setId(10L)
+                    .setFileId(20L)
+                    .setFileHash("chain-record-20")
+                    .setAlertType(IntegrityAlert.AlertType.MANIFEST_MISSING.name())
+                    .setSeverity(IntegrityAlert.AlertSeverity.WARNING.name())
+                    .setEvidence("reason=active_manifest_missing")
+                    .setStatus(IntegrityAlert.AlertStatus.PENDING.getCode());
+            Page<IntegrityAlert> page = new Page<>(1, 20);
+            page.setRecords(List.of(alert));
+            page.setTotal(1);
+            when(integrityCheckService.listAlerts(eq(1L), any(), any(), any()))
+                    .thenReturn(page);
+
+            performGet(BASE_URL + "?pageNum=1&pageSize=20")
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.records[0].alertType")
+                            .value(IntegrityAlert.AlertType.MANIFEST_MISSING.name()))
+                    .andExpect(jsonPath("$.data.records[0].severity")
+                            .value(IntegrityAlert.AlertSeverity.WARNING.name()))
+                    .andExpect(jsonPath("$.data.records[0].evidence")
+                            .value("reason=active_manifest_missing"));
         }
     }
 

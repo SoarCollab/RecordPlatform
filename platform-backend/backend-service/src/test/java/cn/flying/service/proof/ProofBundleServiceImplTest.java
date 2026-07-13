@@ -276,6 +276,7 @@ class ProofBundleServiceImplTest {
                 "manifest-hash",
                 "SHA-256",
                 1024L,
+                1,
                 1024L,
                 null,
                 "NONE",

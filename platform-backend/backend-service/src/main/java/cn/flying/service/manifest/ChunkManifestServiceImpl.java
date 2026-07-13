@@ -18,9 +18,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Persists and loads chunk manifests through the backend database boundary.
@@ -32,6 +37,7 @@ public class ChunkManifestServiceImpl implements ChunkManifestService {
 
     private static final String STATUS_ACTIVE = "ACTIVE";
     private static final String STATUS_SUPERSEDED = "SUPERSEDED";
+    private static final int MAX_BATCH_FILE_IDS = 1000;
 
     private final FileMapper fileMapper;
     private final FileChunkManifestMapper manifestMapper;
@@ -84,11 +90,95 @@ public class ChunkManifestServiceImpl implements ChunkManifestService {
     }
 
     /**
+     * Loads active manifest headers and chunk rows with two bounded tenant-scoped queries.
+     */
+    @Override
+    public ChunkManifestBatchView findActiveManifests(List<Long> fileIds) {
+        Long tenantId = TenantContext.requireTenantId();
+        List<Long> normalizedFileIds = normalizeBatchFileIds(fileIds);
+        if (normalizedFileIds.isEmpty()) {
+            return ChunkManifestBatchView.empty();
+        }
+
+        List<FileChunkManifest> activeManifests = manifestMapper.selectList(
+                new LambdaQueryWrapper<FileChunkManifest>()
+                        .eq(FileChunkManifest::getTenantId, tenantId)
+                        .in(FileChunkManifest::getFileId, normalizedFileIds)
+                        .eq(FileChunkManifest::getStatus, STATUS_ACTIVE)
+                        .eq(FileChunkManifest::getDeleted, 0)
+                        .orderByDesc(FileChunkManifest::getCreateTime)
+                        .orderByDesc(FileChunkManifest::getId));
+        if (activeManifests == null || activeManifests.isEmpty()) {
+            return ChunkManifestBatchView.empty();
+        }
+
+        Map<Long, FileChunkManifest> selectedByFile = new LinkedHashMap<>();
+        Set<Long> duplicateFileIds = new LinkedHashSet<>();
+        for (FileChunkManifest manifest : activeManifests) {
+            if (manifest == null || manifest.getFileId() == null || manifest.getId() == null) {
+                continue;
+            }
+            if (selectedByFile.putIfAbsent(manifest.getFileId(), manifest) != null) {
+                duplicateFileIds.add(manifest.getFileId());
+            }
+        }
+        if (selectedByFile.isEmpty()) {
+            return new ChunkManifestBatchView(Map.of(), duplicateFileIds);
+        }
+
+        List<Long> manifestIds = selectedByFile.values().stream()
+                .map(FileChunkManifest::getId)
+                .toList();
+        List<FileChunkManifestItem> items = manifestItemMapper.selectList(
+                new LambdaQueryWrapper<FileChunkManifestItem>()
+                        .eq(FileChunkManifestItem::getTenantId, tenantId)
+                        .in(FileChunkManifestItem::getManifestId, manifestIds)
+                        .eq(FileChunkManifestItem::getDeleted, 0)
+                        .orderByAsc(FileChunkManifestItem::getManifestId)
+                        .orderByAsc(FileChunkManifestItem::getChunkIndex));
+
+        Map<Long, List<ChunkManifestChunk>> chunksByManifest = new LinkedHashMap<>();
+        if (items != null) {
+            for (FileChunkManifestItem item : items) {
+                if (item == null || item.getManifestId() == null) {
+                    continue;
+                }
+                chunksByManifest.computeIfAbsent(item.getManifestId(), ignored -> new ArrayList<>())
+                        .add(toChunk(item));
+            }
+        }
+
+        Map<Long, ChunkManifestView> views = new LinkedHashMap<>();
+        selectedByFile.forEach((fileId, manifest) -> views.put(
+                fileId,
+                toView(manifest, chunksByManifest.getOrDefault(manifest.getId(), List.of()))));
+        return new ChunkManifestBatchView(views, duplicateFileIds);
+    }
+
+    /**
      * Calculates a deterministic manifest hash without touching persistence.
      */
     @Override
     public String calculateManifestHash(ChunkManifestDraft draft) {
         return canonicalizer.manifestHash(draft);
+    }
+
+    /**
+     * Removes nulls and duplicates and enforces the database IN-clause safety limit.
+     */
+    private List<Long> normalizeBatchFileIds(List<Long> fileIds) {
+        if (fileIds == null || fileIds.isEmpty()) {
+            return List.of();
+        }
+        List<Long> normalized = fileIds.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (normalized.size() > MAX_BATCH_FILE_IDS) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID,
+                    "chunk manifest batch cannot exceed " + MAX_BATCH_FILE_IDS + " file IDs");
+        }
+        return normalized;
     }
 
     /**
@@ -214,6 +304,7 @@ public class ChunkManifestServiceImpl implements ChunkManifestService {
                 manifest.getManifestHash(),
                 manifest.getHashAlgorithm(),
                 manifest.getChunkSize(),
+                manifest.getChunkCount(),
                 manifest.getTotalSize(),
                 manifest.getMerkleRoot(),
                 manifest.getEncryptionAlgorithm(),

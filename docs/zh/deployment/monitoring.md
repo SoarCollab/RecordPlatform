@@ -211,25 +211,33 @@ W3C Trace Context 标准传播，支持跨服务链路追踪。
 
 ## 存储完整性校验
 
-系统定期验证 S3 存储文件与区块链记录的一致性。
+系统定期验证 active chunk manifest、S3 兼容对象 metadata、抽样分片内容和区块链记录。缺少 active manifest 的文件会被标记为迁移状态；巡检不会回退到把 `file.fileHash` 当作对象内容哈希。
 
 ### 工作原理
 
-1. 每天凌晨 2 点自动执行，采样 1% 的文件
-2. 验证文件在 S3 中的存在性
-3. 比对数据库哈希与链上哈希的一致性
-4. 发现异常时创建告警并通过 SSE 通知管理员
+1. 每天凌晨 2 点自动执行，采样 1% 的成功文件。
+2. 按租户批量加载 active manifest 及其有序分片。
+3. 对本轮样本应用随机选择的巡检级别：
 
-> 由于文件存储层采用加密，校验不会重新计算文件内容哈希，而是验证 S3 文件存在性 + DB 与链上哈希的一致性。
+| 级别 | 校验内容 | 对象下载 |
+|------|----------|----------|
+| `LIGHTWEIGHT` | manifest 身份/安全合同，以及所有分片的路径、tenant、大小、metadata hash 和已声明 ETag | 不下载 |
+| `MEDIUM` | 轻量校验，加分片顺序/数量/聚合大小和 canonical `manifestHash` | 不下载 |
+| `HEAVY` | 中量校验，加受字节上限约束的分片抽样 SHA-256 和链记录比对 | 仅选中的分片 |
+
+`file.fileHash` 和 manifest v1 的兼容字段 `fileHash` 是链记录 ID。对象内容证据来自分片 `plainHash`/`cipherHash`，有序 manifest 的证明是 `manifestHash`。
 
 ### 配置
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
 | `integrity.check.enabled` | `true` | 是否启用 |
-| `integrity.check.cron` | `0 0 2 * * ?` | 执行时间 |
+| `integrity.check.schedule.cron` | `0 0 2 * * ?` | 执行时间 |
 | `integrity.check.sample-rate` | `0.01` | 采样率 |
-| `integrity.check.batch-size` | `50` | 批次大小 |
+| `integrity.check.batch-size` | `50` | 每批文件数；运行时限制在 `1..1000` |
+| `integrity.check.lock-timeout-seconds` | `1800` | 分布式锁租期 |
+| `integrity.check.heavy.sample-chunks` | `1` | 每个文件在重型巡检中抽样的唯一分片数 |
+| `integrity.check.heavy.max-download-bytes` | `83886080` | 单文件单轮允许下载的最大抽样字节数 |
 
 ### 管理接口
 
@@ -242,7 +250,9 @@ W3C Trace Context 标准传播，支持跨服务链路追踪。
 
 ### 告警通知
 
-发现完整性异常时，系统通过 SSE 推送 `INTEGRITY_ALERT` 事件通知管理员，告警记录存储在 `integrity_alert` 表中。分布式锁（Redisson）确保不会并发执行多个校验任务。
+发现完整性异常时，系统通过 SSE 推送 `INTEGRITY_ALERT` 事件通知管理员。记录和事件包含 `alertType`、`severity`、有界 `evidence`，以及适用时的 `actualHash`、`chainHash`。
+
+Manifest 驱动的新类型包括 `MANIFEST_MISSING`、`MANIFEST_INVALID`、`OBJECT_NOT_FOUND`、`METADATA_MISMATCH`、`CONTENT_HASH_MISMATCH`、`CHAIN_MISMATCH`，并继续支持 `CHAIN_NOT_FOUND`。历史 `HASH_MISMATCH`、`FILE_NOT_FOUND` 记录仍可读取以保持 API 兼容。同一 tenant、文件和类型存在未解决告警时，不重复写入或推送。分布式锁（Redisson）串行化定时和手工巡检。
 
 ## SkyWalking 集成
 
