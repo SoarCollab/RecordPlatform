@@ -6,6 +6,12 @@ on:
     paths:
       - '.github/workflows/contract-security.yml'
       - 'platform-fisco/contract/**/*.sol'
+      - 'platform-fisco/src/main/contracts/**/*.sol'
+      - 'platform-fisco/src/main/resources/abi/**'
+      - 'platform-fisco/src/main/resources/bin/**'
+      - 'platform-fisco/src/main/resources/contract-registry/**'
+      - 'tools/contracts/**'
+      - 'scripts/contract-deploy.sh'
   workflow_dispatch:
 
 permissions:
@@ -13,16 +19,58 @@ permissions:
   security-events: write
 
 jobs:
+  artifact-integrity:
+    name: Contract Artifact Integrity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate deployment script syntax
+        run: bash -n scripts/contract-deploy.sh
+
+      - name: Run contract fingerprint and deployment fixtures
+        run: python3 -m unittest discover -s tools/contracts/tests -v
+
+      - name: Verify signed artifact catalog
+        run: >-
+          python3 tools/contracts/contract_fingerprint.py verify
+          --project-root .
+          --catalog platform-fisco/src/main/resources/contract-registry/artifacts.json
+
+      - name: Generate contract fingerprint evidence
+        run: |
+          mkdir -p contract-fingerprint
+          python3 tools/contracts/contract_fingerprint.py refresh \
+            --project-root . \
+            --catalog platform-fisco/src/main/resources/contract-registry/artifacts.json \
+            --output contract-fingerprint/verified-artifacts.json
+          shasum -a 256 \
+            platform-fisco/src/main/resources/contract-registry/artifacts.json \
+            > contract-fingerprint/catalog.sha256
+
+      - name: Upload contract fingerprint evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: contract-artifact-integrity
+          path: contract-fingerprint
+          if-no-files-found: error
+
   slither:
     name: Slither Analysis (Informational)
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
 
@@ -183,7 +231,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Security
         if: always() && hashFiles('slither-results/merged.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
         with:
           sarif_file: slither-results/merged.sarif
           category: slither
@@ -279,7 +327,7 @@ jobs:
 
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: slither-results
           path: slither-results

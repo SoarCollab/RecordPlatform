@@ -3,6 +3,7 @@ package cn.flying.fisco_bcos.service;
 import cn.flying.fisco_bcos.adapter.BlockChainAdapter;
 import cn.flying.fisco_bcos.adapter.model.*;
 import cn.flying.fisco_bcos.monitor.FiscoMetrics;
+import cn.flying.fisco_bcos.registry.ContractRegistryService;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.request.*;
@@ -31,12 +32,34 @@ import static org.mockito.Mockito.*;
 class BlockChainServiceImplTest {
 
     private static final String RPC_TOKEN = "backend-to-fisco-rpc-token";
+    private static final ContractRegistryEntryResponse CONTRACT_REGISTRY =
+            new ContractRegistryEntryResponse(
+                    ContractRegistryService.ENTRY_SCHEMA,
+                    "sha256:" + "1".repeat(64),
+                    "Sharing",
+                    "2.0.0",
+                    "LOCAL_FISCO",
+                    "chain0",
+                    "group0",
+                    "0x1111111111111111111111111111111111111111",
+                    "ABI-CANONICAL-JSON-SHA256-V1",
+                    "sha256:" + "2".repeat(64),
+                    "sha256:" + "3".repeat(64),
+                    "sha256:" + "4".repeat(64),
+                    null,
+                    null,
+                    "ACTIVE",
+                    "2026-07-13T00:00:00Z",
+                    "REDEPLOY_ADDRESS");
 
     @Mock
     private BlockChainAdapter chainAdapter;
     
     @Mock
     private FiscoMetrics fiscoMetrics;
+
+    @Mock
+    private ContractRegistryService contractRegistryService;
     
     @Mock
     private Timer.Sample timerSample;
@@ -70,6 +93,35 @@ class BlockChainServiceImplTest {
         assertThatThrownBy(blockChainService::validateRpcTokenConfiguration)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(BlockChainRpcAuth.TOKEN_PROPERTY_NAME);
+    }
+
+    /**
+     * 验证可信 backend 调用只能读取 registry service 已完成 runtime 核验的条目。
+     */
+    @Test
+    void getContractRegistry_shouldReturnVerifiedEntriesForTrustedCaller() {
+        when(contractRegistryService.getActiveEntries()).thenReturn(List.of(CONTRACT_REGISTRY));
+
+        Result<List<ContractRegistryEntryResponse>> result =
+                blockChainService.getContractRegistry();
+
+        assertThat(result.getCode()).isEqualTo(200);
+        assertThat(result.getData()).containsExactly(CONTRACT_REGISTRY);
+        verify(contractRegistryService).getActiveEntries();
+    }
+
+    /**
+     * 验证缺少共享令牌的 registry 查询在读取任何合约身份之前被拒绝。
+     */
+    @Test
+    void getContractRegistry_shouldRejectUntrustedCaller() {
+        RpcContext.getServerAttachment().removeAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY);
+
+        assertThatThrownBy(blockChainService::getContractRegistry)
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("Unauthorized blockchain RPC caller");
+
+        verifyNoInteractions(contractRegistryService);
     }
 
     @Nested
@@ -165,7 +217,8 @@ class BlockChainServiceImplTest {
                     "MB-900",
                     "SHA-256-MERKLE-V1",
                     MERKLE_ROOT,
-                    2
+                    2,
+                    CONTRACT_REGISTRY
             );
             ChainReceipt receipt = ChainReceipt.builder()
                     .transactionHash("0xabc123")
@@ -195,6 +248,8 @@ class BlockChainServiceImplTest {
                     MERKLE_ROOT,
                     2
             );
+            verify(contractRegistryService).requireActiveReference(
+                    CONTRACT_REGISTRY, "Sharing");
             verify(chainAdapter, never()).storeFile(anyString(), anyString(), anyString(), anyString());
             verify(fiscoMetrics).recordSuccess();
             verify(fiscoMetrics).stopStoreTimer(timerSample);
@@ -213,7 +268,8 @@ class BlockChainServiceImplTest {
                     "MB-900",
                     "SHA-256-MERKLE-V1",
                     MERKLE_ROOT,
-                    2
+                    2,
+                    CONTRACT_REGISTRY
             );
 
             assertThatThrownBy(() -> blockChainService.storeAttestationBatch(request))
@@ -235,7 +291,8 @@ class BlockChainServiceImplTest {
                     "MB-900",
                     "SHA-256-MERKLE-V1",
                     "root-hash",
-                    2
+                    2,
+                    CONTRACT_REGISTRY
             );
 
             Result<StoreAttestationBatchResponse> result = blockChainService.storeAttestationBatch(request);
@@ -243,6 +300,95 @@ class BlockChainServiceImplTest {
             assertThat(result.getCode()).isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
             verifyNoInteractions(chainAdapter);
             verify(fiscoMetrics).stopStoreTimer(timerSample);
+        }
+
+        /**
+         * 验证 provider 写入口不再配置透明重试，避免结果未知时重复链写。
+         */
+        @Test
+        @DisplayName("Should not transparently retry attestation batch writes")
+        void storeAttestationBatch_shouldNotDeclareRetryAnnotation() throws Exception {
+            assertThat(BlockChainServiceImpl.class.getMethod(
+                    "storeAttestationBatch", StoreAttestationBatchRequest.class)
+                    .getAnnotation(io.github.resilience4j.retry.annotation.Retry.class))
+                    .isNull();
+        }
+    }
+
+    @Nested
+    @DisplayName("Get Attestation Batch Operations")
+    class GetAttestationBatchTests {
+
+        /**
+         * 验证链适配器查询结果完整映射到共享 API 合同。
+         */
+        @Test
+        @DisplayName("Should query attestation batch through adapter")
+        void getAttestationBatch_shouldMapExistingRecord() {
+            ChainAttestationBatch chainBatch = ChainAttestationBatch.builder()
+                    .exists(true)
+                    .tenantId(7L)
+                    .batchId(900L)
+                    .batchNo("MB-900")
+                    .proofAlgorithm("SHA-256-MERKLE-V1")
+                    .merkleRoot("a".repeat(64))
+                    .leafCount(2)
+                    .recordedTime(1_700_000_000_000L)
+                    .build();
+            when(chainAdapter.getAttestationBatch(7L, 900L)).thenReturn(chainBatch);
+
+            Result<GetAttestationBatchResponse> result = blockChainService.getAttestationBatch(
+                    new GetAttestationBatchRequest(7L, 900L, CONTRACT_REGISTRY));
+
+            assertThat(result.isSuccess()).isTrue();
+            assertThat(result.getData().exists()).isTrue();
+            assertThat(result.getData().merkleRoot()).isEqualTo("a".repeat(64));
+            assertThat(result.getData().recordedTime()).isEqualTo(1_700_000_000_000L);
+        }
+
+        /**
+         * 验证链上不存在属于成功查询结果，而不是外部服务故障。
+         */
+        @Test
+        @DisplayName("Should return explicit not found response")
+        void getAttestationBatch_shouldReturnNotFoundResponse() {
+            when(chainAdapter.getAttestationBatch(7L, 900L))
+                    .thenReturn(ChainAttestationBatch.notFound(7L, 900L));
+
+            Result<GetAttestationBatchResponse> result = blockChainService.getAttestationBatch(
+                    new GetAttestationBatchRequest(7L, 900L, CONTRACT_REGISTRY));
+
+            assertThat(result.isSuccess()).isTrue();
+            assertThat(result.getData())
+                    .isEqualTo(GetAttestationBatchResponse.notFound(7L, 900L));
+        }
+
+        /**
+         * 验证无效业务键在 provider 入口被拒绝且不调用链适配器。
+         */
+        @Test
+        @DisplayName("Should reject invalid attestation batch query")
+        void getAttestationBatch_shouldRejectInvalidBusinessKey() {
+            Result<GetAttestationBatchResponse> result = blockChainService.getAttestationBatch(
+                    new GetAttestationBatchRequest(7L, 0L, CONTRACT_REGISTRY));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+            verifyNoInteractions(chainAdapter);
+        }
+
+        /**
+         * 验证批量存证查询同样受 RPC 共享令牌保护。
+         */
+        @Test
+        @DisplayName("Should reject attestation batch query without RPC token")
+        void getAttestationBatch_shouldRejectMissingRpcToken() {
+            RpcContext.getServerAttachment().removeAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY);
+
+            assertThatThrownBy(() -> blockChainService.getAttestationBatch(
+                    new GetAttestationBatchRequest(7L, 900L, CONTRACT_REGISTRY)))
+                    .isInstanceOf(SecurityException.class);
+
+            verifyNoInteractions(chainAdapter);
         }
     }
 

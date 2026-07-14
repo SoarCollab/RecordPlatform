@@ -76,7 +76,8 @@ public class CorsFilter extends HttpFilter {
         if (resolvedOrigin != null) {
             response.addHeader("Access-Control-Allow-Origin", resolvedOrigin);
             response.addHeader("Access-Control-Allow-Methods", methods);
-            response.addHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+            response.addHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Tenant-ID");
+            response.addHeader("Access-Control-Expose-Headers", "Content-Disposition, X-Proof-Manifest-Hash");
             if (credentials) {
                 response.addHeader("Access-Control-Allow-Credentials", "true");
             }

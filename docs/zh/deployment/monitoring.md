@@ -79,6 +79,19 @@ RecordPlatform 的监控、指标和健康检查。
 | `s3_node_online_status` | Gauge | 节点在线状态 (0/1)，由 backend actuator 基于存储容量快照桥接暴露 |
 | `s3_node_usage_percent` | Gauge | 节点磁盘使用率 (0-100)，由 backend actuator 基于存储容量快照桥接暴露 |
 
+### 生产存证批次指标
+
+所有标签都是固定枚举；指标刻意不包含 tenant、file、candidate 或 batch ID，以限制时序基数。
+
+| 指标 | 类型 | 标签 / 说明 |
+|------|------|-------------|
+| `app_attestation_candidate_total` | Counter | `result=admitted\|batched\|dead_letter` |
+| `app_attestation_candidate_backlog` | Gauge | 最近一次定时任务观察到的全局值，`status=ready\|dead_letter` |
+| `app_attestation_batch_total` | Counter | `status=completed\|retry\|manual_review` |
+| `app_attestation_batch_size` | Distribution summary | 每个已创建 batch 的 manifest 证据叶子数 |
+| `app_attestation_batch_latency_seconds` | Timer | candidate 准入到本地 batch 创建的耗时 |
+| `app_attestation_production_run_total` | Counter | `result=completed\|disabled\|failed` |
+
 ## 健康阈值
 
 配置告警阈值：
@@ -253,6 +266,32 @@ W3C Trace Context 标准传播，支持跨服务链路追踪。
 发现完整性异常时，系统通过 SSE 推送 `INTEGRITY_ALERT` 事件通知管理员。记录和事件包含 `alertType`、`severity`、有界 `evidence`，以及适用时的 `actualHash`、`chainHash`。
 
 Manifest 驱动的新类型包括 `MANIFEST_MISSING`、`MANIFEST_INVALID`、`OBJECT_NOT_FOUND`、`METADATA_MISMATCH`、`CONTENT_HASH_MISMATCH`、`CHAIN_MISMATCH`，并继续支持 `CHAIN_NOT_FOUND`。历史 `HASH_MISMATCH`、`FILE_NOT_FOUND` 记录仍可读取以保持 API 兼容。同一 tenant、文件和类型存在未解决告警时，不重复写入或推送。分布式锁（Redisson）串行化定时和手工巡检。
+
+## 生产 Merkle Batch 触发器
+
+生产准入默认关闭，必须由运维显式启用。关闭时不会创建定时任务；人工触发返回 disabled 结果，且不读取或写入 candidate、batch、leaf。
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `attestation.production.enabled` | `false` | 启用 candidate 准入和 flush |
+| `attestation.production.poll-interval-ms` | `30000` | 调度间隔 |
+| `attestation.production.initial-delay-ms` | `30000` | 调度首次延迟 |
+| `attestation.production.min-batch-size` | `50` | 自动 flush 数量阈值 |
+| `attestation.production.max-batch-size` | `100` | 单个 batch 最多领取的 candidate 数 |
+| `attestation.production.max-wait-seconds` | `600` | 最老 READY candidate 的最大等待时间 |
+| `attestation.production.seed-limit` | `200` | 每租户每轮最多发现的新 candidate 数 |
+| `attestation.production.max-batches-per-run` | `2` | 每租户每轮恢复与新建 batch 的共享预算 |
+| `attestation.production.claim-lease-seconds` | `120` | candidate worker 租约 |
+| `attestation.production.candidate-max-attempts` | `3` | 进入 dead letter 前的最大失败次数 |
+
+两个接口都要求管理员角色，并从认证请求上下文取得租户；调用方不能提交跨租户 ID。
+
+| 端点 | 说明 |
+|------|------|
+| `POST /api/v1/admin/attestation-batches/production/trigger` | 为当前租户强制执行一轮有界处理 |
+| `GET /api/v1/admin/attestation-batches/production/status` | 查询 feature 状态、有效上限、candidate backlog 和 due batch |
+
+灰度顺序：先应用 Flyway migration，以 `enabled=false` 部署，检查状态和指标，再逐环境启用。回滚应用行为时设置 `enabled=false`；必须保留 candidate 表和 leaf 证据列，删除它们会丢失审计状态或破坏已创建 batch。
 
 ## SkyWalking 集成
 

@@ -6,6 +6,7 @@ blockchain:
   # BSN FISCO BCOS 配置 (blockchain.active=bsn-fisco 时生效)
   bsn-fisco:
     node-id: ${BSN_NODE_ID:city-node-shanghai}
+    chain-id: ${BSN_FISCO_CHAIN_ID:}
     group-id: group0
     cert-path: ${BSN_CERT_PATH:bsn-certs}
     peers:
@@ -40,6 +41,7 @@ bcos:
 
 ### System configuration
 system:
+  chainId: ${FISCO_CHAIN_ID:chain0}
   groupId: ${FISCO_GROUP_ID:group0}
   hexPrivateKey: ${FISCO_PRIVATE_KEY:}
 
@@ -47,6 +49,19 @@ system:
 contract:
   sharingAddress: ${FISCO_SHARING_CONTRACT:}
   storageAddress: ${FISCO_STORAGE_CONTRACT:}
+
+### Versioned contract artifact and runtime registry
+contract-registry:
+  catalog-location: classpath:contract-registry/artifacts.json
+  deployment:
+    sharing:
+      transaction-hash: ${FISCO_SHARING_DEPLOYMENT_TX:}
+      block-number: ${FISCO_SHARING_DEPLOYMENT_BLOCK:}
+      effective-at: ${FISCO_SHARING_DEPLOYMENT_EFFECTIVE_AT:}
+    storage:
+      transaction-hash: ${FISCO_STORAGE_DEPLOYMENT_TX:}
+      block-number: ${FISCO_STORAGE_DEPLOYMENT_BLOCK:}
+      effective-at: ${FISCO_STORAGE_DEPLOYMENT_EFFECTIVE_AT:}
 
 record-platform:
   rpc:

@@ -15,7 +15,7 @@ jobs:
     continue-on-error: true
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Mark scan start
         run: |
@@ -30,12 +30,12 @@ jobs:
             -v "$PWD:/src" \
             -w /src \
             semgrep/semgrep:1.112.0 \
-            semgrep --config auto --metrics=off --sarif --output security-artifacts/semgrep/semgrep.sarif
+            semgrep --config p/default --metrics=off --sarif --output security-artifacts/semgrep/semgrep.sarif
           docker run --rm \
             -v "$PWD:/src" \
             -w /src \
             semgrep/semgrep:1.112.0 \
-            semgrep --config auto --metrics=off --json --output security-artifacts/semgrep/semgrep.json
+            semgrep --config p/default --metrics=off --json --output security-artifacts/semgrep/semgrep.json
           set -e
 
       - name: Write Semgrep run meta
@@ -60,7 +60,7 @@ jobs:
           EOF
 
       - name: Upload Semgrep Artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: security-poc-semgrep
@@ -73,7 +73,7 @@ jobs:
     continue-on-error: true
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Mark scan start
         run: |
@@ -85,7 +85,7 @@ jobs:
 
       - name: Run Trivy SCA (SARIF)
         continue-on-error: true
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -98,7 +98,7 @@ jobs:
 
       - name: Run Trivy SCA (JSON)
         continue-on-error: true
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -131,7 +131,7 @@ jobs:
           EOF
 
       - name: Upload Trivy Artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: security-poc-trivy
@@ -144,7 +144,7 @@ jobs:
     continue-on-error: true
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Mark scan start
         run: |
@@ -156,7 +156,7 @@ jobs:
 
       - name: Generate CycloneDX SBOM
         continue-on-error: true
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -186,7 +186,7 @@ jobs:
           EOF
 
       - name: Upload SBOM Artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: security-poc-sbom
@@ -204,24 +204,24 @@ jobs:
     if: always()
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Download Semgrep artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         continue-on-error: true
         with:
           name: security-poc-semgrep
           path: security-artifacts/semgrep
 
       - name: Download Trivy artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         continue-on-error: true
         with:
           name: security-poc-trivy
           path: security-artifacts/trivy
 
       - name: Download SBOM artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         continue-on-error: true
         with:
           name: security-poc-sbom
@@ -249,7 +249,7 @@ jobs:
           fi
 
       - name: Upload observation summary artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: security-poc-summary

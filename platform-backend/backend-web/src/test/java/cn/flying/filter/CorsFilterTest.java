@@ -298,7 +298,10 @@ class CorsFilterTest {
 
             assertThat(response.getHeader("Access-Control-Allow-Origin")).isEqualTo("https://example.com");
             assertThat(response.getHeader("Access-Control-Allow-Methods")).isEqualTo("GET,POST,PUT,DELETE,OPTIONS");
-            assertThat(response.getHeader("Access-Control-Allow-Headers")).isEqualTo("Authorization, Content-Type");
+            assertThat(response.getHeader("Access-Control-Allow-Headers"))
+                    .isEqualTo("Authorization, Content-Type, X-Tenant-ID");
+            assertThat(response.getHeader("Access-Control-Expose-Headers"))
+                    .isEqualTo("Content-Disposition, X-Proof-Manifest-Hash");
             assertThat(response.getHeader("Access-Control-Allow-Credentials")).isEqualTo("true");
         }
 

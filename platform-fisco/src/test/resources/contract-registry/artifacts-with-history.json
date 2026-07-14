@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "record-platform-contract-artifacts.v1",
+  "abiFingerprintAlgorithm": "ABI-CANONICAL-JSON-SHA256-V1",
+  "bytecodeFingerprintAlgorithm": "EVM-BYTECODE-SHA256-V1",
+  "sourceFingerprintAlgorithm": "SOURCE-UTF8-LF-SHA256-V1",
+  "contracts": [
+    {
+      "contractName": "Sharing",
+      "semanticVersion": "1.0.0",
+      "status": "DEPRECATED",
+      "effectiveAt": "2025-01-01T00:00:00Z",
+      "upgradeStrategy": "REDEPLOY_ADDRESS",
+      "sourcePaths": ["history/Sharing.sol", "history/runtime/Sharing.sol"],
+      "sourceSha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "abiPath": "history/Sharing.abi",
+      "abiSha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "bytecodePaths": {"ecc": "history/ecc/Sharing.bin", "sm": "history/sm/Sharing.bin"},
+      "bytecodeSha256": {
+        "ecc": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "sm": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+      }
+    },
+    {
+      "contractName": "Sharing",
+      "semanticVersion": "2.0.0",
+      "status": "ACTIVE",
+      "effectiveAt": "2026-07-13T00:00:00Z",
+      "upgradeStrategy": "REDEPLOY_ADDRESS",
+      "sourcePaths": ["platform-fisco/contract/Sharing.sol", "platform-fisco/src/main/contracts/Sharing.sol"],
+      "sourceSha256": "sha256:902bb69845b56fa846191ea71c6159fa6b3b02c37d111b908ff33aa3501bcbbd",
+      "abiPath": "platform-fisco/src/main/resources/abi/Sharing.abi",
+      "abiSha256": "sha256:ceab3800ebf3303970fccbdf885adf51e5bdfe2b320ea1c08328744891502f20",
+      "bytecodePaths": {
+        "ecc": "platform-fisco/src/main/resources/bin/ecc/Sharing.bin",
+        "sm": "platform-fisco/src/main/resources/bin/sm/Sharing.bin"
+      },
+      "bytecodeSha256": {
+        "ecc": "sha256:84a9388521295d8999985b4231e15bb8b78ea702259b1c331825471bdb7bf436",
+        "sm": "sha256:84a9388521295d8999985b4231e15bb8b78ea702259b1c331825471bdb7bf436"
+      }
+    },
+    {
+      "contractName": "Storage",
+      "semanticVersion": "1.0.0",
+      "status": "ACTIVE",
+      "effectiveAt": "2026-07-13T00:00:00Z",
+      "upgradeStrategy": "REDEPLOY_ADDRESS",
+      "sourcePaths": ["platform-fisco/contract/Storage.sol", "platform-fisco/src/main/contracts/Storage.sol"],
+      "sourceSha256": "sha256:e38c55a39ce33d9ae9a39745ada76b8acae9ae3d23d57a1f21eb5d40e3733246",
+      "abiPath": "platform-fisco/src/main/resources/abi/Storage.abi",
+      "abiSha256": "sha256:f62e5ade6b39d589ddcf2e53b15f0afb1cfb6550257ec468e9dff9cbe23cedf4",
+      "bytecodePaths": {
+        "ecc": "platform-fisco/src/main/resources/bin/ecc/Storage.bin",
+        "sm": "platform-fisco/src/main/resources/bin/sm/Storage.bin"
+      },
+      "bytecodeSha256": {
+        "ecc": "sha256:0b4118f24b33d68fc6bfa4b5ed6e581cc6df5705dc2dc7ba9c56170442f6822c",
+        "sm": "sha256:0b4118f24b33d68fc6bfa4b5ed6e581cc6df5705dc2dc7ba9c56170442f6822c"
+      }
+    }
+  ]
+}

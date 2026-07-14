@@ -54,8 +54,17 @@ Fault domain configuration is managed through Nacos and supports runtime refresh
 |----------|-------------|---------|
 | `BLOCKCHAIN_ACTIVE` | Active chain type | `local-fisco`, `bsn-fisco`, `bsn-besu` |
 | `FISCO_PEER_ADDRESS` | FISCO node address | `127.0.0.1:20200` |
+| `FISCO_CHAIN_ID` | Expected local FISCO chain ID | `chain0` |
+| `FISCO_GROUP_ID` | Expected local FISCO group ID | `group0` |
+| `BSN_FISCO_CHAIN_ID` | Expected BSN FISCO chain ID; required with no default when `BLOCKCHAIN_ACTIVE=bsn-fisco` | Provider-assigned value |
 | `FISCO_STORAGE_CONTRACT` | Storage contract address | `0x...` |
 | `FISCO_SHARING_CONTRACT` | Sharing contract address | `0x...` |
+| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_TX` | Deployment transaction hash; set as part of the complete evidence triplet | `0x` + 64 hex |
+| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_BLOCK` | Deployment block number; set with transaction/effective time | Non-negative decimal |
+| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_EFFECTIVE_AT` | Actual activation time; set with transaction/block | UTC `YYYY-MM-DDTHH:MM:SSZ` |
+| `CONTRACT_DEPLOYMENT_RECEIPT_DIR` | Durable restricted directory for public deployment audit receipts | `log/contract-deployments` for local development |
+
+`scripts/contract-deploy.sh` requires explicit local chain/group values and compares them with Console `getGroupInfo` before compilation or deployment. The deployment evidence fields for each contract must be all absent for legacy compatibility or all present as one transaction/block/effective-time triplet. The guarded script writes the two triplets with one shared effective time and first publishes a credential-free structured receipt; production should place that receipt directory outside ephemeral application storage.
 
 ### SSL Configuration (Production)
 
@@ -215,6 +224,21 @@ Per-user and per-tenant storage quota enforcement:
 
 > **Tip**: Start with global `SHADOW` mode to observe quota usage without rejecting uploads.
 > With global `ENFORCE`, an empty whitelist means all tenants are enforced; use `force-shadow=true` or a non-empty whitelist for a controlled rollout.
+
+### Signed-Proof Issuer
+
+Signed proof ZIPs use a dedicated Ed25519 key. Issuance is disabled and fail-closed by default, with no fallback to `JWT_KEY`, the file-envelope master key, or a blockchain RPC token.
+
+| Environment variable | Description | Default |
+|----------|-------------|---------|
+| `PROOF_SIGNING_ENABLED` | Allow new issuance and historical rebuild | `false` |
+| `PROOF_SIGNING_KEY_ID` | Stable key identifier using letters, digits, dot, underscore, or hyphen; max 64 characters | empty |
+| `PROOF_SIGNING_KEY_VERSION` | Positive key version; increment on rotation | `1` |
+| `PROOF_SIGNING_KEY_STATUS` | Must be `ACTIVE` for new issuance | `DISABLED` |
+| `PROOF_SIGNING_PRIVATE_KEY_PKCS8` | Base64 or PEM-wrapped Ed25519 PKCS#8 private key | empty |
+| `PROOF_SIGNING_PUBLIC_KEY_SPKI` | Matching Base64 or PEM X.509 SPKI public key | empty |
+
+Before enabling issuance, configure a matching PKCS#8/SPKI pair, non-empty key ID, positive version, and `ACTIVE` status. Configuration errors do not print key material. First issuance atomically registers `(keyId, keyVersion)` in the global key table. For rotation, retain old public material and provision the new key under a higher version; never reuse the same ID/version for another SPKI. Inject the private key through deployment secret management, never Git, logs, or exception messages.
 
 ## Scheduled Tasks Configuration
 

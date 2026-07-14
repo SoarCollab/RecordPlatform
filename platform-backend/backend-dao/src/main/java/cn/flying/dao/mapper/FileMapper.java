@@ -273,6 +273,27 @@ public interface FileMapper extends BaseMapper<File> {
     List<QuotaUserUsageVO> aggregateQuotaUserUsageByTenant(@Param("tenantId") Long tenantId);
 
     /**
+     * 锁定版本链最早的稳定锚点，串行化新版本成功与旧 proof 首次签发。
+     *
+     * @param tenantId 租户ID
+     * @param versionGroupId 版本链分组ID
+     * @return 被锁定的锚点文件ID
+     */
+    @Select("""
+            SELECT id
+            FROM file
+            WHERE tenant_id = #{tenantId}
+              AND version_group_id = #{versionGroupId}
+              AND deleted = 0
+            ORDER BY version ASC, id ASC
+            LIMIT 1
+            FOR UPDATE
+            """)
+    Long lockVersionGroupForProofLifecycle(
+            @Param("tenantId") Long tenantId,
+            @Param("versionGroupId") Long versionGroupId);
+
+    /**
      * 将版本链中所有文件的 is_latest 置为 0
      *
      * @param versionGroupId 版本链分组ID

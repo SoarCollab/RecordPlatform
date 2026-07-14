@@ -1,6 +1,7 @@
 package cn.flying.controller;
 
 import cn.flying.common.annotation.OperationLog;
+import cn.flying.common.annotation.RateLimit;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
@@ -13,6 +14,8 @@ import cn.flying.dao.vo.file.FileShareVO;
 import cn.flying.dao.vo.file.FileVO;
 import cn.flying.dao.vo.file.FileVersionVO;
 import cn.flying.dao.vo.file.ProofBundleVO;
+import cn.flying.dao.vo.file.ProofStatusVO;
+import cn.flying.dao.vo.file.RevokeProofRequest;
 import cn.flying.dao.vo.file.ShareAccessLogVO;
 import cn.flying.dao.vo.file.ShareAccessStatsVO;
 import cn.flying.dao.vo.file.UserFileStatsVO;
@@ -20,16 +23,27 @@ import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
 import cn.flying.service.ShareAuditService;
 import cn.flying.service.proof.ProofBundleService;
+import cn.flying.service.proof.signed.ProofArchive;
+import cn.flying.service.proof.signed.SignedProofArchiveService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.headers.Header;
+import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -39,7 +53,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -67,6 +83,8 @@ public class FileController {
 
     private final ProofBundleService proofBundleService;
 
+    private final SignedProofArchiveService signedProofArchiveService;
+
     /**
      * 根据文件 ID 获取文件详情。
      *
@@ -93,7 +111,8 @@ public class FileController {
      * @return 证明包
      */
     @GetMapping("/{id}/proof-bundle")
-    @Operation(summary = "导出文件证明包")
+    @Operation(summary = "导出旧版 JSON 文件证明包", deprecated = true,
+            description = "兼容 proof-bundle.v1.1；新集成请使用同路径的 .zip 端点")
     @OperationLog(module = "文件操作", operationType = "查询", description = "导出文件证明包")
     public Result<ProofBundleVO> exportProofBundleByFile(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
@@ -113,7 +132,8 @@ public class FileController {
      * @return 证明包
      */
     @GetMapping("/attestation-leaves/{leafId}/proof-bundle")
-    @Operation(summary = "按存证叶子导出文件证明包")
+    @Operation(summary = "按存证叶子导出旧版 JSON 文件证明包", deprecated = true,
+            description = "兼容 proof-bundle.v1.1；新集成请使用同路径的 .zip 端点")
     @OperationLog(module = "文件操作", operationType = "查询", description = "按存证叶子导出文件证明包")
     public Result<ProofBundleVO> exportProofBundleByLeaf(
             @RequestAttribute(Const.ATTR_USER_ID) Long userId,
@@ -123,6 +143,152 @@ public class FileController {
             throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "无效的存证叶子ID");
         }
         return Result.success(proofBundleService.exportByLeafId(userId, internalLeafId));
+    }
+
+    /**
+     * 根据文件 ID 流式导出固定八条目的签名 proof ZIP。
+     *
+     * @param userId 用户 ID
+     * @param id 文件外部 ID
+     * @return application/zip 流式响应
+     */
+    @GetMapping(value = "/{id}/proof-bundle.zip", produces = "application/zip")
+    @Operation(summary = "导出签名文件证明 ZIP")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "签名证明 ZIP",
+                    headers = {
+                            @Header(name = HttpHeaders.CONTENT_DISPOSITION,
+                                    description = "RFC 5987 编码的安全附件文件名",
+                                    schema = @Schema(type = "string")),
+                            @Header(name = HttpHeaders.CACHE_CONTROL,
+                                    description = "证明包禁止缓存并要求重新验证",
+                                    schema = @Schema(type = "string")),
+                            @Header(name = "X-Proof-Manifest-Hash",
+                                    description = "ZIP 顶层 manifest 的 SHA-256 摘要",
+                                    schema = @Schema(type = "string"))
+                    },
+                    content = @Content(mediaType = "application/zip",
+                            schema = @Schema(type = "string", format = "binary"))),
+            @ApiResponse(responseCode = "503", description = "证明生成容量已满或依赖暂时不可用",
+                    headers = @Header(name = HttpHeaders.RETRY_AFTER,
+                            description = "客户端再次尝试前需等待的秒数",
+                            schema = @Schema(type = "integer", format = "int32", example = "5")),
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = Result.class)))
+    })
+    @RateLimit(
+            limit = 10,
+            period = 60,
+            adminLimit = 30,
+            monitorLimit = 30,
+            type = RateLimit.LimitType.USER,
+            key = "proof:archive")
+    @OperationLog(module = "文件操作", operationType = "查询", description = "导出签名文件证明 ZIP")
+    public ResponseEntity<StreamingResponseBody> exportSignedProofArchiveByFile(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Schema(description = "文件ID") @PathVariable String id) {
+        Long fileId = requireExternalId(id, "无效的文件ID");
+        return proofArchiveResponse(signedProofArchiveService.exportByFileId(userId, fileId));
+    }
+
+    /**
+     * 根据存证叶子 ID 流式导出固定八条目的签名 proof ZIP。
+     *
+     * @param userId 用户 ID
+     * @param leafId 存证叶子外部 ID
+     * @return application/zip 流式响应
+     */
+    @GetMapping(value = "/attestation-leaves/{leafId}/proof-bundle.zip", produces = "application/zip")
+    @Operation(summary = "按存证叶子导出签名文件证明 ZIP")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "签名证明 ZIP",
+                    headers = {
+                            @Header(name = HttpHeaders.CONTENT_DISPOSITION,
+                                    description = "RFC 5987 编码的安全附件文件名",
+                                    schema = @Schema(type = "string")),
+                            @Header(name = HttpHeaders.CACHE_CONTROL,
+                                    description = "证明包禁止缓存并要求重新验证",
+                                    schema = @Schema(type = "string")),
+                            @Header(name = "X-Proof-Manifest-Hash",
+                                    description = "ZIP 顶层 manifest 的 SHA-256 摘要",
+                                    schema = @Schema(type = "string"))
+                    },
+                    content = @Content(mediaType = "application/zip",
+                            schema = @Schema(type = "string", format = "binary"))),
+            @ApiResponse(responseCode = "503", description = "证明生成容量已满或依赖暂时不可用",
+                    headers = @Header(name = HttpHeaders.RETRY_AFTER,
+                            description = "客户端再次尝试前需等待的秒数",
+                            schema = @Schema(type = "integer", format = "int32", example = "5")),
+                    content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                            schema = @Schema(implementation = Result.class)))
+    })
+    @RateLimit(
+            limit = 10,
+            period = 60,
+            adminLimit = 30,
+            monitorLimit = 30,
+            type = RateLimit.LimitType.USER,
+            key = "proof:archive")
+    @OperationLog(module = "文件操作", operationType = "查询", description = "按存证叶子导出签名文件证明 ZIP")
+    public ResponseEntity<StreamingResponseBody> exportSignedProofArchiveByLeaf(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Schema(description = "存证叶子ID") @PathVariable String leafId) {
+        Long internalLeafId = requireExternalId(leafId, "无效的存证叶子ID");
+        return proofArchiveResponse(signedProofArchiveService.exportByLeafId(userId, internalLeafId));
+    }
+
+    /**
+     * 撤销当前用户有权管理的叶子证明，重复撤销保持幂等。
+     *
+     * @param userId 用户 ID
+     * @param leafId 存证叶子外部 ID
+     * @param request 可选撤销原因
+     * @return 当前公开状态
+     */
+    @PostMapping("/attestation-leaves/{leafId}/proof-status/revoke")
+    @Operation(summary = "撤销签名文件证明")
+    @RateLimit(
+            limit = 10,
+            period = 60,
+            adminLimit = 30,
+            monitorLimit = 30,
+            type = RateLimit.LimitType.USER,
+            key = "proof:revoke")
+    @OperationLog(module = "文件操作", operationType = "更新", description = "撤销签名文件证明")
+    public Result<ProofStatusVO> revokeSignedProof(
+            @RequestAttribute(Const.ATTR_USER_ID) Long userId,
+            @Schema(description = "存证叶子ID") @PathVariable String leafId,
+            @Valid @RequestBody(required = false) RevokeProofRequest request) {
+        Long internalLeafId = requireExternalId(leafId, "无效的存证叶子ID");
+        String reason = request == null ? null : request.reason();
+        return Result.success(signedProofArchiveService.revokeByLeafId(userId, internalLeafId, reason));
+    }
+
+    /**
+     * 构建不缓存的安全附件响应，ZIP 内容由受限 archive 直接写入 HTTP 输出流。
+     */
+    private ResponseEntity<StreamingResponseBody> proofArchiveResponse(ProofArchive archive) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType("application/zip"));
+        headers.setContentDisposition(ContentDisposition.attachment()
+                .filename(archive.fileName(), StandardCharsets.UTF_8)
+                .build());
+        headers.setCacheControl(CacheControl.noStore().mustRevalidate());
+        headers.set("X-Proof-Manifest-Hash", archive.manifestHash());
+        return ResponseEntity.ok()
+                .headers(headers)
+                .body(archive::writeTo);
+    }
+
+    /**
+     * 把外部 ID 转换为内部 ID，并统一拒绝非法输入。
+     */
+    private Long requireExternalId(String externalId, String errorMessage) {
+        Long internalId = IdUtils.fromExternalId(externalId);
+        if (internalId == null) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, errorMessage);
+        }
+        return internalId;
     }
 
     /**

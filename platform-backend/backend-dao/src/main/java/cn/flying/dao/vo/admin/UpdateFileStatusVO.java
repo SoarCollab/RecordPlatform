@@ -15,7 +15,7 @@ import lombok.Data;
 public class UpdateFileStatusVO {
 
     @NotNull(message = "文件状态不能为空")
-    @Schema(description = "文件状态：0-处理中，1-已完成，2-已删除，-1-失败")
+    @Schema(description = "文件状态：0-处理中，1-已完成（仅已完成记录幂等设置），2-已删除，-1-失败；禁止通过管理接口将未完成文件提升为已完成")
     private Integer status;
 
     @Schema(description = "操作原因/备注")

@@ -13,9 +13,11 @@ import org.fisco.bcos.sdk.v3.transaction.manager.TransactionProcessorFactory;
 import org.fisco.bcos.sdk.v3.transaction.model.dto.CallResponse;
 import org.fisco.bcos.sdk.v3.transaction.model.dto.TransactionResponse;
 import cn.flying.fisco_bcos.constants.ContractConstants;
+import cn.flying.fisco_bcos.registry.ContractRegistryService;
 import cn.flying.fisco_bcos.model.bo.SharingCancelShareInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingDeleteFilesInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingGetFileInputBO;
+import cn.flying.fisco_bcos.model.bo.SharingGetAttestationBatchInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingGetShareInfoInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingGetSharedFilesInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingGetUserFilesInputBO;
@@ -23,7 +25,6 @@ import cn.flying.fisco_bcos.model.bo.SharingGetUserShareCodesInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingShareFilesInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingStoreAttestationBatchInputBO;
 import cn.flying.fisco_bcos.model.bo.SharingStoreFileInputBO;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 
@@ -39,16 +40,19 @@ import org.springframework.stereotype.Service;
 @NoArgsConstructor
 @Getter
 public class SharingService {
-  @Value("${contract.sharingAddress}")
   private String address;
 
   @Resource
   private Client client;
 
+  @Resource
+  private ContractRegistryService contractRegistryService;
+
   AssembleTransactionProcessor txProcessor;
 
   @PostConstruct
   public void init() {
+    this.address = contractRegistryService.getActiveEntry("Sharing").contractAddress();
     this.txProcessor = TransactionProcessorFactory.createAssembleTransactionProcessor(this.client, this.client.getCryptoSuite().getCryptoKeyPair());
   }
 
@@ -97,6 +101,18 @@ public class SharingService {
         this.address,
         ContractConstants.SharingAbi,
         "storeAttestationBatch",
+        input.toArgs());
+  }
+
+  /**
+   * 按租户和批次业务 ID 只读查询 Merkle 批量存证记录。
+   */
+  public CallResponse getAttestationBatch(SharingGetAttestationBatchInputBO input) throws Exception {
+    return this.txProcessor.sendCall(
+        this.client.getCryptoSuite().getCryptoKeyPair().getAddress(),
+        this.address,
+        ContractConstants.SharingAbi,
+        "getAttestationBatch",
         input.toArgs());
   }
 

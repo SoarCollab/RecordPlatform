@@ -3,22 +3,23 @@
 # RecordPlatform Smart Contract Lifecycle Tool
 # ==============================================================================
 #
-# Automates the full FISCO BCOS contract lifecycle:
-#   1. Pre-flight checks  - console installed, node reachable
-#   2. Compile            - Storage.sol and Sharing.sol via FISCO console
-#   3. Deploy             - both contracts, capture on-chain addresses
-#   4. ABI sync           - overwrite platform-fisco/src/main/resources/abi/
-#   5. Address write-back - update FISCO_STORAGE_CONTRACT / FISCO_SHARING_CONTRACT in .env
-#   6. Verify             - call read-only methods to confirm deployment
+# Automates the guarded FISCO BCOS contract lifecycle:
+#   1. Pre-flight checks       - verify catalog, tools, console and exact chain/group
+#   2. Compile                 - produce fresh Storage/Sharing ABI and BIN
+#   3. Artifact verification   - compare compiled outputs with signed artifacts
+#   4. Deploy                  - capture address, transaction hash and block number
+#   5. On-chain verification   - require non-empty code and exact catalog identities
+#   6. Audited activation      - publish a receipt, then atomically activate complete evidence
 #
 # Usage:
 #   ./scripts/contract-deploy.sh [options]
 #
 # Options:
 #   --console-dir DIR    FISCO BCOS console directory (default: ~/fisco/console)
-#   --env-file FILE      Target .env file for address write-back (default: <project>/.env)
-#   --skip-verify        Skip post-deploy verification phase
-#   --dry-run            Print planned actions without executing them
+#   --env-file FILE      Target .env file for atomic activation (default: <project>/.env)
+#   --catalog-file FILE  Artifact catalog (default: platform-fisco/.../artifacts.json)
+#   --receipt-dir DIR    Deployment receipt directory (default: <project>/log/contract-deployments)
+#   --dry-run            Validate inputs and print actions without changing files or chain state
 #   -h, --help           Show this help message
 #
 # Exit codes:
@@ -97,8 +98,10 @@ is_contract_env_key_allowed() {
 }
 
 run_console() {
+    # 在清理 shell 注入变量后，以有界时长运行交互式 FISCO Console。
     local timeout_seconds="$1"
-    env -u BASH_ENV -u ENV -u SHELLOPTS -u CDPATH timeout "$timeout_seconds" ./console.sh
+    env -u BASH_ENV -u ENV -u SHELLOPTS -u CDPATH \
+        "$TIMEOUT_COMMAND" "$timeout_seconds" ./console.sh
 }
 
 # TCP connectivity probe (bash /dev/tcp → nc fallback, same as env-check.sh)
@@ -121,7 +124,8 @@ has_cmd() { command -v "$1" &>/dev/null; }
 # ==============================================================================
 CONSOLE_DIR="${FISCO_CONSOLE_DIR:-$HOME/fisco/console}"
 ENV_FILE=""
-SKIP_VERIFY=false
+CATALOG_FILE=""
+RECEIPT_DIR=""
 DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
@@ -136,7 +140,19 @@ while [[ $# -gt 0 ]]; do
                 echo "Option --env-file requires a file path"; exit 1
             fi
             ENV_FILE="$2"; shift 2 ;;
-        --skip-verify) SKIP_VERIFY=true; shift ;;
+        --catalog-file)
+            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+                echo "Option --catalog-file requires a file path"; exit 1
+            fi
+            CATALOG_FILE="$2"; shift 2 ;;
+        --receipt-dir)
+            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+                echo "Option --receipt-dir requires a directory path"; exit 1
+            fi
+            RECEIPT_DIR="$2"; shift 2 ;;
+        --skip-verify)
+            echo "Option --skip-verify is no longer supported; on-chain verification is mandatory"
+            exit 1 ;;
         --dry-run)     DRY_RUN=true; shift ;;
         -h|--help)
             sed -n '/^# Usage:/,/^# =====/{/^# =====/!p}' "$0" | sed 's/^# \{0,2\}//'
@@ -149,9 +165,20 @@ done
 if [ -z "$ENV_FILE" ]; then
     ENV_FILE="$PROJECT_ROOT/.env"
 fi
+if [ -z "$CATALOG_FILE" ]; then
+    CATALOG_FILE="$PROJECT_ROOT/platform-fisco/src/main/resources/contract-registry/artifacts.json"
+fi
 
 # Load current .env for FISCO config (node address, etc.)
 load_env_file "$ENV_FILE"
+
+# Resolve the receipt directory after loading .env so operators can configure it there.
+if [ -z "$RECEIPT_DIR" ]; then
+    RECEIPT_DIR="${CONTRACT_DEPLOYMENT_RECEIPT_DIR:-$PROJECT_ROOT/log/contract-deployments}"
+fi
+if [[ "$RECEIPT_DIR" != /* ]]; then
+    RECEIPT_DIR="$PROJECT_ROOT/$RECEIPT_DIR"
+fi
 
 # Enable errexit after environment loading
 set -e
@@ -161,13 +188,133 @@ set -e
 # ==============================================================================
 CONTRACT_SRC_DIR="$PROJECT_ROOT/platform-fisco/contract"
 ABI_DEST_DIR="$PROJECT_ROOT/platform-fisco/src/main/resources/abi"
+BIN_DEST_DIR="$PROJECT_ROOT/platform-fisco/src/main/resources/bin"
+FINGERPRINT_TOOL="$PROJECT_ROOT/tools/contracts/contract_fingerprint.py"
+SOLC_VERSION="0.8.35"
 CONSOLE_CONTRACT_DIR="$CONSOLE_DIR/contracts/solidity"
 CONSOLE_SDK_DIR="$CONSOLE_DIR/contracts/sdk"
+
+if command -v timeout >/dev/null 2>&1; then
+    TIMEOUT_COMMAND="$(command -v timeout)"
+elif command -v gtimeout >/dev/null 2>&1; then
+    TIMEOUT_COMMAND="$(command -v gtimeout)"
+else
+    TIMEOUT_COMMAND=""
+fi
 
 # FISCO BCOS node address from .env (fallback to default)
 FISCO_HOST="${FISCO_PEER_ADDRESS:-127.0.0.1:20200}"
 FISCO_NODE_HOST="${FISCO_HOST%%:*}"
 FISCO_NODE_PORT="${FISCO_HOST##*:}"
+
+# 从官方 getGroupInfo JSON 输出中提取唯一的 chainID/groupID 组合。
+extract_fisco_chain_identity() {
+    python3 -c '
+import json
+import re
+import sys
+
+text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", sys.stdin.read())
+decoder = json.JSONDecoder()
+candidates = set()
+
+def collect(value):
+    if isinstance(value, dict):
+        if "chainID" in value or "groupID" in value:
+            chain_id = value.get("chainID")
+            group_id = value.get("groupID")
+            if isinstance(chain_id, str) and isinstance(group_id, str):
+                if chain_id and group_id and not any(
+                    character.isspace() for character in chain_id + group_id
+                ):
+                    candidates.add((chain_id, group_id))
+        for nested in value.values():
+            collect(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            collect(nested)
+
+for index, character in enumerate(text):
+    if character not in "[{":
+        continue
+    try:
+        value, _ = decoder.raw_decode(text[index:])
+    except json.JSONDecodeError:
+        continue
+    collect(value)
+
+if len(candidates) != 1:
+    raise SystemExit(1)
+chain_id, group_id = next(iter(candidates))
+print(f"{chain_id}\t{group_id}")
+'
+}
+
+# 计算 catalog 原始文件 bytes 的版本化审计 SHA-256。
+calculate_catalog_sha256() {
+    python3 - "$CATALOG_FILE" <<'PY'
+import hashlib
+import sys
+from pathlib import Path
+
+print("sha256:" + hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest())
+PY
+}
+
+# 部署前查询节点身份，并与显式 FISCO_CHAIN_ID/FISCO_GROUP_ID 完全对账。
+verify_fisco_chain_identity() {
+    local active_chain="${BLOCKCHAIN_ACTIVE:-local-fisco}"
+    local expected_chain_id="${FISCO_CHAIN_ID:-}"
+    local expected_group_id="${FISCO_GROUP_ID:-}"
+    if [ "$active_chain" != "local-fisco" ]; then
+        fail "contract-deploy.sh supports only BLOCKCHAIN_ACTIVE=local-fisco (configured=$active_chain)"
+        return 1
+    fi
+    if [[ ! "$expected_chain_id" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+        fail "FISCO_CHAIN_ID must be explicitly configured with a valid non-empty value"
+        return 1
+    fi
+    if [[ ! "$expected_group_id" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+        fail "FISCO_GROUP_ID must be explicitly configured with a valid non-empty value"
+        return 1
+    fi
+
+    if [ "$DRY_RUN" = true ]; then
+        dry "getGroupInfo and compare chainID/groupID with $expected_chain_id/$expected_group_id"
+        ok "Dry-run: node chain/group query skipped; deployment would require an exact match"
+        return 0
+    fi
+
+    local output
+    if ! output=$(
+        cd "$CONSOLE_DIR"
+        printf 'getGroupInfo\nexit\n' | run_console 30 2>&1
+    ); then
+        fail "getGroupInfo command failed before deployment"
+        printf '%s\n' "$output" | tail -10 | sed 's/^/    /'
+        return 1
+    fi
+
+    local actual_identity
+    if ! actual_identity=$(printf '%s\n' "$output" | extract_fisco_chain_identity); then
+        fail "getGroupInfo did not return one valid chainID/groupID pair"
+        printf '%s\n' "$output" | tail -10 | sed 's/^/    /'
+        return 1
+    fi
+
+    local actual_chain_id
+    local actual_group_id
+    IFS=$'\t' read -r actual_chain_id actual_group_id <<< "$actual_identity"
+    if [ "$actual_chain_id" != "$expected_chain_id" ]; then
+        fail "FISCO chain mismatch: configured=$expected_chain_id, actual=$actual_chain_id"
+        return 1
+    fi
+    if [ "$actual_group_id" != "$expected_group_id" ]; then
+        fail "FISCO group mismatch: configured=$expected_group_id, actual=$actual_group_id"
+        return 1
+    fi
+    ok "FISCO node identity matches configured chain/group ($actual_chain_id/$actual_group_id)"
+}
 
 # ==============================================================================
 # Header
@@ -177,7 +324,9 @@ echo "${BOLD}RecordPlatform Smart Contract Deployment${RESET}"
 echo "Project root  : $PROJECT_ROOT"
 echo "Console dir   : $CONSOLE_DIR"
 echo "Env file      : $ENV_FILE"
-echo "Skip verify   : $SKIP_VERIFY"
+echo "Catalog file  : $CATALOG_FILE"
+echo "Receipt dir   : $RECEIPT_DIR"
+echo "Solidity      : solc $SOLC_VERSION"
 if [ "$DRY_RUN" = true ]; then
     echo "${YELLOW}${BOLD}DRY-RUN mode — no changes will be made${RESET}"
 fi
@@ -212,7 +361,54 @@ else
     exit 1
 fi
 
-# 1c. FISCO BCOS node is reachable
+# 1c. Required local tools and version-controlled registry are valid
+for command_name in bash python3 cmp awk mktemp mv chmod date; do
+    if has_cmd "$command_name"; then
+        ok "Required command found: $command_name"
+    else
+        fail "Required command missing: $command_name"
+    fi
+done
+if [ -n "$TIMEOUT_COMMAND" ]; then
+    ok "Timeout command found: $TIMEOUT_COMMAND"
+else
+    fail "Neither timeout nor gtimeout is available"
+fi
+if [ -f "$CONSOLE_DIR/contract2java.sh" ]; then
+    ok "contract2java.sh found"
+else
+    fail "contract2java.sh not found: $CONSOLE_DIR/contract2java.sh"
+fi
+if [ -f "$FINGERPRINT_TOOL" ] && [ -f "$CATALOG_FILE" ]; then
+    if python3 "$FINGERPRINT_TOOL" verify \
+        --project-root "$PROJECT_ROOT" \
+        --catalog "$CATALOG_FILE"; then
+        ok "Signed contract artifact catalog verified"
+    else
+        fail "Contract artifact catalog or signed artifacts drifted"
+    fi
+else
+    fail "Fingerprint tool or artifact catalog is missing"
+fi
+
+if [ $FAILURES -gt 0 ]; then
+    echo
+    echo "${RED}${BOLD}Pre-flight failed — cannot continue.${RESET}"
+    exit 1
+fi
+
+if [ "$DRY_RUN" = false ]; then
+    if [ -f "$ENV_FILE" ] && [ ! -L "$ENV_FILE" ]; then
+        ok "Activation target is an existing regular file: $ENV_FILE"
+    else
+        fail "Activation target must exist and must not be a symlink: $ENV_FILE"
+        echo
+        echo "${RED}${BOLD}Pre-flight failed — cannot continue.${RESET}"
+        exit 1
+    fi
+fi
+
+# 1d. FISCO BCOS node is reachable
 if [ "$DRY_RUN" = true ]; then
     dry "tcp_check $FISCO_NODE_HOST $FISCO_NODE_PORT"
     ok "Dry-run: node connectivity check skipped ($FISCO_NODE_HOST:$FISCO_NODE_PORT)"
@@ -227,7 +423,14 @@ else
     exit 1
 fi
 
-# 1d. Source contracts exist
+# 1e. Node chain/group identity matches the deployment target
+if ! verify_fisco_chain_identity; then
+    echo
+    echo "${RED}${BOLD}Pre-flight failed — cannot continue.${RESET}"
+    exit 1
+fi
+
+# 1f. Source contracts exist
 for sol in Storage.sol Sharing.sol; do
     if [ -f "$CONTRACT_SRC_DIR/$sol" ]; then
         ok "Source contract found: platform-fisco/contract/$sol"
@@ -247,241 +450,749 @@ fi
 # ==============================================================================
 section 2 "Compile Contracts"
 
-if [ "$DRY_RUN" = true ]; then
-    dry "mkdir -p $CONSOLE_CONTRACT_DIR"
-    dry "cp $CONTRACT_SRC_DIR/Storage.sol $CONSOLE_CONTRACT_DIR/"
-    dry "cp $CONTRACT_SRC_DIR/Sharing.sol  $CONSOLE_CONTRACT_DIR/"
-    dry "cd $CONSOLE_DIR && echo 'compileByContractLoader' | env -u BASH_ENV -u ENV -u SHELLOPTS -u CDPATH timeout 60 ./console.sh"
-    ok "Dry-run: compile step would copy contracts and invoke FISCO console"
-else
-    # Copy .sol files into the console's expected location
-    mkdir -p "$CONSOLE_CONTRACT_DIR"
-    cp "$CONTRACT_SRC_DIR/Storage.sol" "$CONSOLE_CONTRACT_DIR/"
-    cp "$CONTRACT_SRC_DIR/Sharing.sol"  "$CONSOLE_CONTRACT_DIR/"
-    ok "Contracts copied to console: $CONSOLE_CONTRACT_DIR"
-
-    # FISCO BCOS console compiles .sol files automatically on deploy.
-    # For explicit compilation (generates Java wrappers + ABI), run:
-    COMPILE_OUTPUT=""
-    COMPILE_OUTPUT=$(cd "$CONSOLE_DIR" && printf 'compileByContractLoader org.fisco.bcos.sdk.v3.contract.loadcontract.ContractLoader\nexit\n' | run_console 60 2>&1) || true
-
-    # Check that compilation produced ABI/BIN artefacts
-    if [ -f "$CONSOLE_SDK_DIR/Storage.abi" ] && [ -f "$CONSOLE_SDK_DIR/Sharing.abi" ]; then
-        ok "Compilation artefacts found in $CONSOLE_SDK_DIR"
+# 在 FISCO Console 支持的目录布局中定位一份编译产物。
+find_compiled_artifact() {
+    local kind="$1"
+    local name="$2"
+    local candidate
+    local candidates=()
+    if [ "$kind" = "abi" ]; then
+        candidates=(
+            "$CONSOLE_SDK_DIR/abi/$name.abi"
+            "$CONSOLE_SDK_DIR/abi/sm/$name.abi"
+            "$CONSOLE_SDK_DIR/$name.abi"
+        )
     else
-        # Fallback: FISCO 3.x console compiles on first deploy; note it here
-        warn "Explicit compile step did not produce artefacts in $CONSOLE_SDK_DIR"
-        info "Contracts will be compiled automatically during deployment (Phase 3)"
+        candidates=(
+            "$CONSOLE_SDK_DIR/bin/$name.bin"
+            "$CONSOLE_SDK_DIR/bin/sm/$name.bin"
+            "$CONSOLE_SDK_DIR/$name.bin"
+        )
     fi
-fi
-
-# ==============================================================================
-# Phase 3: Deploy Contracts
-# ==============================================================================
-section 3 "Deploy Contracts"
-
-deploy_contract() {
-    local name="$1"      # e.g. "Storage"
-    local result_var="$2" # name of the variable to set with the address
-
-    if [ "$DRY_RUN" = true ]; then
-        dry "cd $CONSOLE_DIR && printf 'deploy $name\\nexit\\n' | env -u BASH_ENV -u ENV -u SHELLOPTS -u CDPATH timeout 120 ./console.sh"
-        eval "$result_var=0xDRYRUN0000000000000000000000000000000001"
-        ok "Dry-run: $name would be deployed"
-        return
-    fi
-
-    info "Deploying $name.sol (this may take up to 120 s)..."
-
-    local output
-    output=$(
-        cd "$CONSOLE_DIR"
-        printf 'deploy %s\nexit\n' "$name" | run_console 120 2>&1
-    ) || true
-
-    # Extract contract address from console output.
-    # FISCO BCOS 3.x output format: "contract address: 0x<40 hex chars>"
-    local addr
-    addr=$(echo "$output" | grep -o 'contract address: 0x[0-9a-fA-F]\{40\}' | head -1 | grep -o '0x[0-9a-fA-F]\{40\}') || true
-
-    if [[ "$addr" =~ ^0x[0-9a-fA-F]{40}$ ]]; then
-        ok "$name deployed at $addr"
-        eval "$result_var='$addr'"
-    else
-        fail "$name deployment failed — no valid address in console output"
-        info "Console output (last 20 lines):"
-        echo "$output" | tail -20 | sed 's/^/    /'
-        return 1
-    fi
+    for candidate in "${candidates[@]}"; do
+        if [ -s "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
 }
 
-STORAGE_ADDR=""
-SHARING_ADDR=""
+# 复制指定合约源码，调用官方编译器，并返回 ABI/BIN 产物路径。
+compile_contract() {
+    local name="$1"
+    local abi_result_var="$2"
+    local bin_result_var="$3"
+    if [ "$DRY_RUN" = true ]; then
+        dry "copy $name.sol to $CONSOLE_CONTRACT_DIR and run contract2java.sh -v $SOLC_VERSION"
+        ok "Dry-run: $name compile would be executed"
+        return 0
+    fi
 
-deploy_contract "Storage" "STORAGE_ADDR"
-deploy_contract "Sharing" "SHARING_ADDR"
+    mkdir -p "$CONSOLE_CONTRACT_DIR"
+    cp "$CONTRACT_SRC_DIR/$name.sol" "$CONSOLE_CONTRACT_DIR/$name.sol"
+    if ! cmp -s "$CONTRACT_SRC_DIR/$name.sol" "$CONSOLE_CONTRACT_DIR/$name.sol"; then
+        fail "$name source changed while staging it into FISCO Console"
+        return 1
+    fi
 
-if [ $FAILURES -gt 0 ]; then
-    echo
-    echo "${RED}${BOLD}Deployment failed — skipping ABI sync, write-back and verification.${RESET}"
+    local output
+    if ! output=$(
+        cd "$CONSOLE_DIR"
+        bash ./contract2java.sh solidity \
+            -v "$SOLC_VERSION" \
+            -p cn.flying.contract.registry \
+            -s "contracts/solidity/$name.sol" 2>&1
+    ); then
+        fail "$name compilation failed"
+        printf '%s\n' "$output" | tail -20 | sed 's/^/    /'
+        return 1
+    fi
+
+    local abi_path
+    local bin_path
+    if ! abi_path=$(find_compiled_artifact abi "$name"); then
+        fail "$name compilation did not produce an ABI artifact"
+        return 1
+    fi
+    if ! bin_path=$(find_compiled_artifact bin "$name"); then
+        fail "$name compilation did not produce a BIN artifact"
+        return 1
+    fi
+    printf -v "$abi_result_var" '%s' "$abi_path"
+    printf -v "$bin_result_var" '%s' "$bin_path"
+    ok "$name compiled to ABI and BIN"
+}
+
+STORAGE_COMPILED_ABI=""
+STORAGE_COMPILED_BIN=""
+SHARING_COMPILED_ABI=""
+SHARING_COMPILED_BIN=""
+
+if ! compile_contract "Storage" STORAGE_COMPILED_ABI STORAGE_COMPILED_BIN; then
+    exit 1
+fi
+if ! compile_contract "Sharing" SHARING_COMPILED_ABI SHARING_COMPILED_BIN; then
     exit 1
 fi
 
 # ==============================================================================
-# Phase 4: ABI Sync
+# Phase 3: Artifact Verification
 # ==============================================================================
-section 4 "ABI Sync"
+section 3 "Artifact Verification"
 
-sync_abi() {
-    local name="$1"       # e.g. "Storage"
-    local abi_src=""
-
-    # Look for the compiled ABI in the console SDK output directory
-    if [ -f "$CONSOLE_SDK_DIR/${name}.abi" ]; then
-        abi_src="$CONSOLE_SDK_DIR/${name}.abi"
-    elif [ -f "$CONSOLE_DIR/contracts/sdk/${name}.abi" ]; then
-        abi_src="$CONSOLE_DIR/contracts/sdk/${name}.abi"
-    fi
-
+# 比较编译产物与签入 ABI/ECC/SM bytecode，任何漂移均在链写之前阻断。
+verify_compiled_artifacts() {
+    local name="$1"
+    local compiled_abi="$2"
+    local compiled_bin="$3"
     if [ "$DRY_RUN" = true ]; then
-        if [ -n "$abi_src" ]; then
-            dry "cp $abi_src $ABI_DEST_DIR/${name}.abi"
-            ok "Dry-run: $name.abi would be synced from console output"
-        else
-            warn "Dry-run: $name.abi not found in $CONSOLE_SDK_DIR — sync would be skipped"
-        fi
-        return
+        dry "compare compiled $name ABI/BIN with signed artifacts and catalog"
+        ok "Dry-run: $name artifact verification would be mandatory"
+        return 0
     fi
 
-    mkdir -p "$ABI_DEST_DIR"
+    if ! python3 "$FINGERPRINT_TOOL" compare-abi \
+        --expected "$ABI_DEST_DIR/$name.abi" \
+        --actual "$compiled_abi"; then
+        fail "$name compiled ABI does not match the signed ABI"
+        return 1
+    fi
 
-    if [ -n "$abi_src" ]; then
-        # Compute SHA-256 of existing ABI for change detection
-        local old_hash="" new_hash=""
-        if [ -f "$ABI_DEST_DIR/${name}.abi" ] && has_cmd sha256sum; then
-            old_hash=$(sha256sum "$ABI_DEST_DIR/${name}.abi" | awk '{print $1}')
-            new_hash=$(sha256sum "$abi_src" | awk '{print $1}')
-        fi
-
-        cp "$abi_src" "$ABI_DEST_DIR/${name}.abi"
-
-        if [ -n "$old_hash" ] && [ "$old_hash" = "$new_hash" ]; then
-            ok "$name.abi unchanged (SHA-256 match)"
-        elif [ -n "$old_hash" ]; then
-            ok "$name.abi updated (was: ${old_hash:0:16}…, now: ${new_hash:0:16}…)"
-        else
-            ok "$name.abi written to $ABI_DEST_DIR/"
-        fi
+    local ecc_result=""
+    local sm_result=""
+    if ecc_result=$(python3 "$FINGERPRINT_TOOL" compare-bytecode \
+        --expected "$BIN_DEST_DIR/ecc/$name.bin" \
+        --actual "$compiled_bin" 2>&1); then
+        ok "$name compiled bytecode matches signed ECC artifact"
+    elif sm_result=$(python3 "$FINGERPRINT_TOOL" compare-bytecode \
+        --expected "$BIN_DEST_DIR/sm/$name.bin" \
+        --actual "$compiled_bin" 2>&1); then
+        ok "$name compiled bytecode matches signed SM artifact"
     else
-        warn "$name.abi not found in console output — keeping existing file"
-        info "Expected location: $CONSOLE_SDK_DIR/${name}.abi"
-        info "The existing ABI in $ABI_DEST_DIR/ will remain unchanged"
+        fail "$name compiled bytecode matches neither signed ECC nor SM artifact"
+        info "ECC comparison: $ecc_result"
+        info "SM comparison: $sm_result"
+        return 1
     fi
 }
 
-sync_abi "Storage"
-sync_abi "Sharing"
+if ! verify_compiled_artifacts "Storage" "$STORAGE_COMPILED_ABI" "$STORAGE_COMPILED_BIN"; then
+    exit 1
+fi
+if ! verify_compiled_artifacts "Sharing" "$SHARING_COMPILED_ABI" "$SHARING_COMPILED_BIN"; then
+    exit 1
+fi
+if ! catalog_sha256_before_verify=$(calculate_catalog_sha256); then
+    fail "Could not calculate catalog SHA-256 before final verification"
+    exit 1
+fi
+if ! python3 "$FINGERPRINT_TOOL" verify \
+    --project-root "$PROJECT_ROOT" \
+    --catalog "$CATALOG_FILE"; then
+    fail "Signed artifacts changed between pre-flight and deployment"
+    exit 1
+fi
+if ! VERIFIED_CATALOG_SHA256=$(calculate_catalog_sha256); then
+    fail "Could not calculate catalog SHA-256 after final verification"
+    exit 1
+fi
+if [ "$catalog_sha256_before_verify" != "$VERIFIED_CATALOG_SHA256" ]; then
+    fail "Artifact catalog changed during final verification"
+    exit 1
+fi
+ok "Signed artifact catalog remained stable through compilation"
 
-# ==============================================================================
-# Phase 5: Address Write-back
-# ==============================================================================
-section 5 "Address Write-back"
+# 从已验证 catalog 中读取指定合约唯一 ACTIVE 条目的名称与语义版本。
+read_active_contract_identity() {
+    local contract_name="$1"
+    python3 - "$CATALOG_FILE" "$contract_name" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
 
-writeback_env() {
-    local key="$1"
-    local new_addr="$2"
-    local env_file="$3"
+catalog_path = Path(sys.argv[1])
+requested_name = sys.argv[2]
+with catalog_path.open("r", encoding="utf-8") as catalog_file:
+    catalog = json.load(catalog_file)
 
-    if [ "$DRY_RUN" = true ]; then
-        dry "sed -i 's|^${key}=.*|${key}=${new_addr}|' $env_file"
-        ok "Dry-run: $key would be set to $new_addr in $env_file"
-        return
-    fi
+contracts = catalog.get("contracts")
+if not isinstance(contracts, list):
+    raise SystemExit(1)
+matches = [
+    entry
+    for entry in contracts
+    if isinstance(entry, dict)
+    and entry.get("contractName") == requested_name
+    and entry.get("status") == "ACTIVE"
+]
+if len(matches) != 1:
+    raise SystemExit(1)
 
-    if [ ! -f "$env_file" ]; then
-        warn "$env_file not found — cannot write back $key"
-        info "Create it from the template: cp .env.example .env"
-        return
-    fi
-
-    local old_val=""
-    old_val=$(grep -E "^${key}=" "$env_file" | head -1 | cut -d'=' -f2-) || true
-
-    if grep -qE "^${key}=" "$env_file"; then
-        # Key exists — update in place
-        sed -i "s|^${key}=.*|${key}=${new_addr}|" "$env_file"
-    else
-        # Key absent — append
-        echo "${key}=${new_addr}" >> "$env_file"
-    fi
-
-    if [ -n "$old_val" ] && [ "$old_val" != "$new_addr" ]; then
-        ok "$key updated: ${old_val:0:14}… → $new_addr"
-    elif [ -n "$old_val" ]; then
-        ok "$key unchanged (already $new_addr)"
-    else
-        ok "$key added: $new_addr"
-    fi
+contract_name = matches[0].get("contractName")
+semantic_version = matches[0].get("semanticVersion")
+semantic_version_pattern = re.compile(
+    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
+)
+if contract_name != requested_name or not isinstance(semantic_version, str):
+    raise SystemExit(1)
+if not semantic_version_pattern.fullmatch(semantic_version):
+    raise SystemExit(1)
+print(f"{contract_name}\t{semantic_version}")
+PY
 }
 
-writeback_env "FISCO_STORAGE_CONTRACT" "$STORAGE_ADDR" "$ENV_FILE"
-writeback_env "FISCO_SHARING_CONTRACT" "$SHARING_ADDR" "$ENV_FILE"
+STORAGE_EXPECTED_NAME=""
+STORAGE_EXPECTED_VERSION=""
+SHARING_EXPECTED_NAME=""
+SHARING_EXPECTED_VERSION=""
+if ! storage_identity=$(read_active_contract_identity Storage); then
+    fail "Catalog must contain exactly one valid ACTIVE Storage identity"
+    exit 1
+fi
+if ! sharing_identity=$(read_active_contract_identity Sharing); then
+    fail "Catalog must contain exactly one valid ACTIVE Sharing identity"
+    exit 1
+fi
+IFS=$'\t' read -r STORAGE_EXPECTED_NAME STORAGE_EXPECTED_VERSION <<< "$storage_identity"
+IFS=$'\t' read -r SHARING_EXPECTED_NAME SHARING_EXPECTED_VERSION <<< "$sharing_identity"
+if ! catalog_sha256_after_identity=$(calculate_catalog_sha256); then
+    fail "Could not re-check catalog SHA-256 after selecting ACTIVE identities"
+    exit 1
+fi
+if [ "$catalog_sha256_after_identity" != "$VERIFIED_CATALOG_SHA256" ]; then
+    fail "Artifact catalog changed while selecting ACTIVE identities"
+    exit 1
+fi
+ok "Catalog identities selected: $STORAGE_EXPECTED_NAME@$STORAGE_EXPECTED_VERSION, $SHARING_EXPECTED_NAME@$SHARING_EXPECTED_VERSION"
+ok "Verified catalog bytes fixed at $VERIFIED_CATALOG_SHA256"
 
 # ==============================================================================
-# Phase 6: Deployment Verification
+# Phase 4: Deploy Contracts
 # ==============================================================================
-section 6 "Deployment Verification"
+section 4 "Deploy Contracts"
 
-if [ "$SKIP_VERIFY" = true ]; then
-    info "Verification skipped (--skip-verify)"
+# 从 FISCO Console 部署输出中提取规范化地址和交易哈希。
+parse_deployment_metadata() {
+    python3 -c '
+import re
+import sys
+
+text = sys.stdin.read()
+address_patterns = (
+    r"contract\s+address\s*:\s*(0x[0-9a-fA-F]{40})",
+    r"\"contractAddress\"\s*:\s*\"(0x[0-9a-fA-F]{40})\"",
+)
+transaction_patterns = (
+    r"transaction\s+hash\s*:\s*(0x[0-9a-fA-F]{64})",
+    r"\"transactionHash\"\s*:\s*\"(0x[0-9a-fA-F]{64})\"",
+)
+
+def first_match(patterns):
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1).lower()
+    return None
+
+address = first_match(address_patterns)
+transaction_hash = first_match(transaction_patterns)
+if not address or not transaction_hash:
+    raise SystemExit(1)
+print(f"{address}\t{transaction_hash}")
+'
+}
+
+# 从交易回执或部署输出中提取十进制区块号。
+extract_block_number() {
+    python3 -c '
+import re
+import sys
+
+text = sys.stdin.read()
+patterns = (
+    r"\"blockNumber\"\s*:\s*\"?((?:0x)?[0-9a-fA-F]+)\"?",
+    r"block\s+number\s*:\s*((?:0x)?[0-9a-fA-F]+)",
+    r"on\s+block\s*:\s*([0-9]+)",
+)
+for pattern in patterns:
+    match = re.search(pattern, text, re.IGNORECASE)
+    if match:
+        value = match.group(1)
+        print(int(value, 16) if value.lower().startswith("0x") else int(value, 10))
+        raise SystemExit(0)
+raise SystemExit(1)
+'
+}
+
+# 部署单个合约并强制取得地址、交易哈希和交易所在区块。
+deploy_contract() {
+    local name="$1"
+    local address_result_var="$2"
+    local transaction_result_var="$3"
+    local block_result_var="$4"
+    if [ "$DRY_RUN" = true ]; then
+        local dry_address="0x1111111111111111111111111111111111111111"
+        if [ "$name" = "Sharing" ]; then
+            dry_address="0x2222222222222222222222222222222222222222"
+        fi
+        printf -v "$address_result_var" '%s' "$dry_address"
+        printf -v "$transaction_result_var" '%s' \
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        printf -v "$block_result_var" '%s' "1"
+        dry "deploy $name and resolve its transaction receipt"
+        ok "Dry-run: $name deployment would collect address/transaction/block evidence"
+        return 0
+    fi
+
+    if ! cmp -s "$CONTRACT_SRC_DIR/$name.sol" "$CONSOLE_CONTRACT_DIR/$name.sol"; then
+        fail "$name staged source drifted after artifact verification"
+        return 1
+    fi
+
+    local output
+    if ! output=$(
+        cd "$CONSOLE_DIR"
+        printf 'deploy %s\nexit\n' "$name" | run_console 120 2>&1
+    ); then
+        fail "$name deployment command failed"
+        printf '%s\n' "$output" | tail -20 | sed 's/^/    /'
+        return 1
+    fi
+
+    local metadata
+    if ! metadata=$(printf '%s\n' "$output" | parse_deployment_metadata); then
+        fail "$name deployment did not return a valid address and transaction hash"
+        printf '%s\n' "$output" | tail -20 | sed 's/^/    /'
+        return 1
+    fi
+
+    local address
+    local transaction_hash
+    IFS=$'\t' read -r address transaction_hash <<< "$metadata"
+
+    local receipt_output
+    if ! receipt_output=$(
+        cd "$CONSOLE_DIR"
+        printf 'getTransactionReceipt %s\nexit\n' "$transaction_hash" | \
+            run_console 30 2>&1
+    ); then
+        fail "$name deployment receipt lookup failed"
+        return 1
+    fi
+
+    local block_number
+    if ! block_number=$(printf '%s\n%s\n' "$output" "$receipt_output" | extract_block_number); then
+        fail "$name deployment receipt did not contain a valid block number"
+        printf '%s\n' "$receipt_output" | tail -20 | sed 's/^/    /'
+        return 1
+    fi
+
+    printf -v "$address_result_var" '%s' "$address"
+    printf -v "$transaction_result_var" '%s' "$transaction_hash"
+    printf -v "$block_result_var" '%s' "$block_number"
+    ok "$name deployed at $address (tx=$transaction_hash, block=$block_number)"
+}
+
+STORAGE_ADDR=""
+STORAGE_TX=""
+STORAGE_BLOCK=""
+SHARING_ADDR=""
+SHARING_TX=""
+SHARING_BLOCK=""
+
+if ! deploy_contract Storage STORAGE_ADDR STORAGE_TX STORAGE_BLOCK; then
+    exit 1
+fi
+if ! deploy_contract Sharing SHARING_ADDR SHARING_TX SHARING_BLOCK; then
+    exit 1
+fi
+if [ "$STORAGE_ADDR" = "$SHARING_ADDR" ]; then
+    fail "Storage and Sharing deployments returned the same contract address"
+    exit 1
+fi
+
+# ==============================================================================
+# Phase 5: On-chain Verification
+# ==============================================================================
+section 5 "On-chain Verification"
+
+# 从 getCode 输出中提取独立一行或 JSON 字段中的非空 EVM runtime code。
+extract_runtime_code() {
+    python3 -c '
+import re
+import sys
+
+text = sys.stdin.read()
+patterns = (
+    r"(?im)^\s*\"?(0x[0-9a-fA-F]+)\"?\s*$",
+    r"\"(?:code|result)\"\s*:\s*\"(0x[0-9a-fA-F]+)\"",
+)
+for pattern in patterns:
+    matches = re.findall(pattern, text)
+    valid = [value for value in matches if value.lower() not in {"0x", "0x0"}]
+    if valid:
+        print(max(valid, key=len).lower())
+        raise SystemExit(0)
+raise SystemExit(1)
+'
+}
+
+# 强制校验目标地址存在非空 runtime code。
+verify_contract_code() {
+    local name="$1"
+    local address="$2"
+    if [ "$DRY_RUN" = true ]; then
+        dry "getCode $address"
+        ok "Dry-run: $name runtime code would be required"
+        return 0
+    fi
+
+    local output
+    if ! output=$(
+        cd "$CONSOLE_DIR"
+        printf 'getCode %s\nexit\n' "$address" | run_console 30 2>&1
+    ); then
+        fail "$name getCode request failed"
+        return 1
+    fi
+    local runtime_code
+    if ! runtime_code=$(printf '%s\n' "$output" | extract_runtime_code); then
+        fail "$name address has no verifiable runtime code: $address"
+        printf '%s\n' "$output" | tail -10 | sed 's/^/    /'
+        return 1
+    fi
+    ok "$name address returned non-empty runtime code (${#runtime_code} hex chars)"
+}
+
+# 从 contractIdentity 只读调用中提取唯一的合约名称和语义版本。
+extract_contract_identity_response() {
+    python3 -c '
+import re
+import sys
+
+text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", sys.stdin.read())
+if re.search(r"revert|exception|failed", text, re.IGNORECASE):
+    raise SystemExit(1)
+return_codes = re.findall(
+    r"(?im)^\s*Return code:\s*(-?[0-9]+)\s*$",
+    text,
+)
+if len(return_codes) != 1 or int(return_codes[0]) != 0:
+    raise SystemExit(1)
+return_values = re.findall(
+    r"(?im)^\s*Return values:\s*\(([^()\r\n]*)\)\s*$",
+    text,
+)
+if len(return_values) != 1:
+    raise SystemExit(1)
+identity = [part.strip() for part in return_values[0].split(",")]
+if len(identity) != 2 or not all(identity):
+    raise SystemExit(1)
+if any(any(character.isspace() for character in value) for value in identity):
+    raise SystemExit(1)
+print(f"{identity[0]}\t{identity[1]}")
+'
+}
+
+# 调用 contractIdentity，并与已验证 catalog 的 ACTIVE 名称/版本严格对账。
+verify_contract_identity() {
+    local name="$1"
+    local address="$2"
+    local expected_name="$3"
+    local expected_version="$4"
+    if [ "$DRY_RUN" = true ]; then
+        dry "call $name $address contractIdentity"
+        ok "Dry-run: $name identity would have to equal $expected_name@$expected_version"
+        return 0
+    fi
+
+    local output
+    if ! output=$(
+        cd "$CONSOLE_DIR"
+        printf 'call %s %s contractIdentity\nexit\n' "$name" "$address" | \
+            run_console 30 2>&1
+    ); then
+        fail "$name.contractIdentity verification command failed"
+        return 1
+    fi
+
+    local actual_identity
+    if ! actual_identity=$(printf '%s\n' "$output" | extract_contract_identity_response); then
+        fail "$name.contractIdentity did not return one parseable successful identity"
+        printf '%s\n' "$output" | tail -10 | sed 's/^/    /'
+        return 1
+    fi
+
+    local actual_name
+    local actual_version
+    IFS=$'\t' read -r actual_name actual_version <<< "$actual_identity"
+    if [ "$actual_name" != "$expected_name" ] || [ "$actual_version" != "$expected_version" ]; then
+        fail "$name identity mismatch: expected=$expected_name@$expected_version, actual=$actual_name@$actual_version"
+        return 1
+    fi
+    ok "$name identity matches verified catalog ($actual_name@$actual_version)"
+}
+
+if ! verify_contract_code Storage "$STORAGE_ADDR"; then
+    exit 1
+fi
+if ! verify_contract_identity Storage "$STORAGE_ADDR" \
+    "$STORAGE_EXPECTED_NAME" "$STORAGE_EXPECTED_VERSION"; then
+    exit 1
+fi
+if ! verify_contract_code Sharing "$SHARING_ADDR"; then
+    exit 1
+fi
+if ! verify_contract_identity Sharing "$SHARING_ADDR" \
+    "$SHARING_EXPECTED_NAME" "$SHARING_EXPECTED_VERSION"; then
+    exit 1
+fi
+
+# ==============================================================================
+# Phase 6: Audited Atomic Activation
+# ==============================================================================
+section 6 "Audited Atomic Activation"
+
+if ! python3 "$FINGERPRINT_TOOL" verify \
+    --project-root "$PROJECT_ROOT" \
+    --catalog "$CATALOG_FILE"; then
+    fail "Signed artifacts changed after deployment; receipt and activation are blocked"
+    exit 1
+fi
+if ! current_catalog_sha256=$(calculate_catalog_sha256); then
+    fail "Could not re-check catalog SHA-256 before audited activation"
+    exit 1
+fi
+if [ "$current_catalog_sha256" != "$VERIFIED_CATALOG_SHA256" ]; then
+    fail "Artifact catalog changed after verification; receipt and activation are blocked"
+    exit 1
+fi
+
+# 生成一次秒级 UTC ISO-8601 生效时间，并拒绝任何非规范日期输出。
+generate_deployment_effective_at() {
+    local effective_at
+    effective_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+    python3 - "$effective_at" <<'PY'
+import datetime
+import sys
+
+value = sys.argv[1]
+try:
+    parsed = datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+except ValueError:
+    raise SystemExit(1)
+if parsed.strftime("%Y-%m-%dT%H:%M:%SZ") != value:
+    raise SystemExit(1)
+print(value)
+PY
+}
+
+DEPLOYMENT_EFFECTIVE_AT=""
+DEPLOYMENT_RECEIPT=""
+if [ "$DRY_RUN" = true ]; then
+    DEPLOYMENT_EFFECTIVE_AT="not-generated-in-dry-run"
+    dry "generate one UTC effectiveAt after successful on-chain verification"
 else
-    verify_contract() {
-        local name="$1"
-        local addr="$2"
-        local method="$3"
-        local args="${4:-}"
+    if ! DEPLOYMENT_EFFECTIVE_AT=$(generate_deployment_effective_at); then
+        fail "Could not generate a canonical UTC deployment effective time"
+        exit 1
+    fi
+    ok "Deployment effective time fixed at $DEPLOYMENT_EFFECTIVE_AT"
+fi
 
-        if [ "$DRY_RUN" = true ]; then
-            dry "cd $CONSOLE_DIR && printf 'call $name $addr $method $args\\nexit\\n' | env -u BASH_ENV -u ENV -u SHELLOPTS -u CDPATH timeout 30 ./console.sh"
-            ok "Dry-run: $name.$method() would be called for verification"
-            return
+# 生成不含 RPC/凭据的结构化部署回执，并在同目录内原子发布。
+write_deployment_receipt() {
+    local receipt_dir="$1"
+    if [ "$DRY_RUN" = true ]; then
+        dry "atomically write a structured deployment receipt under $receipt_dir"
+        ok "Dry-run: no deployment receipt would be created"
+        return 0
+    fi
+
+    if [ -e "$receipt_dir" ]; then
+        if [ ! -d "$receipt_dir" ] || [ -L "$receipt_dir" ]; then
+            fail "Deployment receipt target must be a non-symlink directory: $receipt_dir"
+            return 1
         fi
+    elif ! mkdir -p "$receipt_dir"; then
+        fail "Could not create deployment receipt directory: $receipt_dir"
+        return 1
+    fi
 
-        info "Calling $name.$method() at ${addr:0:14}…"
+    local temporary_file
+    if ! temporary_file=$(mktemp "$receipt_dir/.contract-deployment-receipt.tmp.XXXXXX"); then
+        fail "Could not allocate a deployment receipt temporary file"
+        return 1
+    fi
+    local receipt_nonce="${temporary_file##*.tmp.}"
+    local receipt_name="record-platform-contract-deployment-${DEPLOYMENT_EFFECTIVE_AT//:/-}-$receipt_nonce.json"
+    local receipt_path="$receipt_dir/$receipt_name"
+    if [ -e "$receipt_path" ] || [ -L "$receipt_path" ]; then
+        fail "Deployment receipt path collision; temporary file retained: $temporary_file"
+        return 1
+    fi
+    chmod 600 "$temporary_file"
+    if ! python3 - \
+        "$VERIFIED_CATALOG_SHA256" \
+        "${FISCO_CHAIN_ID:-}" \
+        "${FISCO_GROUP_ID:-}" \
+        "$DEPLOYMENT_EFFECTIVE_AT" \
+        "$STORAGE_EXPECTED_NAME" \
+        "$STORAGE_EXPECTED_VERSION" \
+        "$STORAGE_ADDR" \
+        "$STORAGE_TX" \
+        "$STORAGE_BLOCK" \
+        "$SHARING_EXPECTED_NAME" \
+        "$SHARING_EXPECTED_VERSION" \
+        "$SHARING_ADDR" \
+        "$SHARING_TX" \
+        "$SHARING_BLOCK" > "$temporary_file" <<'PY'
+import json
+import sys
 
-        local cmd_input
-        if [ -n "$args" ]; then
-            cmd_input="call $name $addr $method $args"
-        else
-            cmd_input="call $name $addr $method"
-        fi
+(
+    catalog_sha256,
+    chain_id,
+    group_id,
+    effective_at,
+    storage_name,
+    storage_version,
+    storage_address,
+    storage_transaction,
+    storage_block,
+    sharing_name,
+    sharing_version,
+    sharing_address,
+    sharing_transaction,
+    sharing_block,
+) = sys.argv[1:]
+receipt = {
+    "schemaVersion": "record-platform-contract-deployment-receipt.v1",
+    "verificationStatus": "VERIFIED",
+    "catalogSha256": catalog_sha256,
+    "chainType": "LOCAL_FISCO",
+    "chainId": chain_id,
+    "groupId": group_id,
+    "effectiveAt": effective_at,
+    "contracts": [
+        {
+            "contractName": storage_name,
+            "semanticVersion": storage_version,
+            "address": storage_address,
+            "transactionHash": storage_transaction,
+            "blockNumber": int(storage_block),
+            "effectiveAt": effective_at,
+        },
+        {
+            "contractName": sharing_name,
+            "semanticVersion": sharing_version,
+            "address": sharing_address,
+            "transactionHash": sharing_transaction,
+            "blockNumber": int(sharing_block),
+            "effectiveAt": effective_at,
+        },
+    ],
+}
+json.dump(receipt, sys.stdout, ensure_ascii=False, indent=2)
+sys.stdout.write("\n")
+PY
+    then
+        fail "Could not render deployment receipt; temporary file retained: $temporary_file"
+        return 1
+    fi
+    if ! mv "$temporary_file" "$receipt_path"; then
+        fail "Could not atomically publish deployment receipt; temporary file retained: $temporary_file"
+        return 1
+    fi
+    DEPLOYMENT_RECEIPT="$receipt_path"
+    ok "Structured deployment receipt published atomically: $receipt_path"
+}
 
-        local output
-        output=$(
-            cd "$CONSOLE_DIR"
-            printf '%s\nexit\n' "$cmd_input" | run_console 30 2>&1
-        ) || true
+if ! write_deployment_receipt "$RECEIPT_DIR"; then
+    exit 1
+fi
 
-        # A successful call returns "Return value" or "[]" (empty result)
-        # A failure contains "Error" or "revert" or no "Return value"
-        if echo "$output" | grep -qiE 'Return value|transaction hash'; then
-            ok "$name.$method() returned successfully"
-        elif echo "$output" | grep -qiE 'Error|revert|Exception|failed'; then
-            fail "$name.$method() call failed"
-            info "Console output (last 10 lines):"
-            echo "$output" | tail -10 | sed 's/^/    /'
-        else
-            warn "$name.$method() response unclear — manual verification recommended"
-            info "Console output (last 5 lines):"
-            echo "$output" | tail -5 | sed 's/^/    /'
-        fi
-    }
+# 以同目录临时文件一次性更新地址和完整部署证据，避免只激活一半配置。
+writeback_deployment_env() {
+    local env_file="$1"
+    if [ "$DRY_RUN" = true ]; then
+        dry "atomically update contract addresses, transaction/block and effectiveAt in $env_file"
+        ok "Dry-run: activation file would remain unchanged"
+        return 0
+    fi
+    if [ ! -f "$env_file" ] || [ -L "$env_file" ]; then
+        fail "Activation target must be an existing regular non-symlink file: $env_file"
+        return 1
+    fi
 
-    # Verify Storage: getUserFiles(string) with a dummy uploader — expects empty list
-    verify_contract "Storage" "$STORAGE_ADDR" "getUserFiles" '"__verify__"'
+    local temporary_file
+    temporary_file=$(mktemp "${env_file}.tmp.XXXXXX")
+    chmod 600 "$temporary_file"
+    if ! awk \
+        -v storage_address="$STORAGE_ADDR" \
+        -v sharing_address="$SHARING_ADDR" \
+        -v storage_tx="$STORAGE_TX" \
+        -v sharing_tx="$SHARING_TX" \
+        -v storage_block="$STORAGE_BLOCK" \
+        -v sharing_block="$SHARING_BLOCK" \
+        -v storage_effective_at="$DEPLOYMENT_EFFECTIVE_AT" \
+        -v sharing_effective_at="$DEPLOYMENT_EFFECTIVE_AT" '
+        BEGIN {
+            values["FISCO_STORAGE_CONTRACT"] = storage_address
+            values["FISCO_SHARING_CONTRACT"] = sharing_address
+            values["FISCO_STORAGE_DEPLOYMENT_TX"] = storage_tx
+            values["FISCO_SHARING_DEPLOYMENT_TX"] = sharing_tx
+            values["FISCO_STORAGE_DEPLOYMENT_BLOCK"] = storage_block
+            values["FISCO_SHARING_DEPLOYMENT_BLOCK"] = sharing_block
+            values["FISCO_STORAGE_DEPLOYMENT_EFFECTIVE_AT"] = storage_effective_at
+            values["FISCO_SHARING_DEPLOYMENT_EFFECTIVE_AT"] = sharing_effective_at
+            order[1] = "FISCO_STORAGE_CONTRACT"
+            order[2] = "FISCO_SHARING_CONTRACT"
+            order[3] = "FISCO_STORAGE_DEPLOYMENT_TX"
+            order[4] = "FISCO_SHARING_DEPLOYMENT_TX"
+            order[5] = "FISCO_STORAGE_DEPLOYMENT_BLOCK"
+            order[6] = "FISCO_SHARING_DEPLOYMENT_BLOCK"
+            order[7] = "FISCO_STORAGE_DEPLOYMENT_EFFECTIVE_AT"
+            order[8] = "FISCO_SHARING_DEPLOYMENT_EFFECTIVE_AT"
+        }
+        {
+            candidate = $0
+            sub(/^[[:space:]]*/, "", candidate)
+            key = candidate
+            sub(/=.*/, "", key)
+            if (key in values) {
+                if (!seen[key]) {
+                    print key "=" values[key]
+                    seen[key] = 1
+                }
+                next
+            }
+            print $0
+        }
+        END {
+            for (position = 1; position <= 8; position++) {
+                key = order[position]
+                if (!seen[key]) {
+                    print key "=" values[key]
+                }
+            }
+        }
+    ' "$env_file" > "$temporary_file"; then
+        fail "Could not prepare atomic activation file; temporary file retained: $temporary_file"
+        return 1
+    fi
+    if ! mv "$temporary_file" "$env_file"; then
+        fail "Could not atomically replace activation file; temporary file retained: $temporary_file"
+        return 1
+    fi
+    ok "Contract addresses and complete deployment evidence activated atomically in $env_file"
+}
 
-    # Verify Sharing: getShareInfo(string) with a nonexistent code — expects empty struct
-    verify_contract "Sharing" "$SHARING_ADDR" "getShareInfo" '"__verify__"'
+if ! writeback_deployment_env "$ENV_FILE"; then
+    exit 1
 fi
 
 # ==============================================================================
@@ -495,9 +1206,18 @@ if [ "$DRY_RUN" = true ]; then
     echo "  Mode              : ${YELLOW}DRY-RUN (no changes made)${RESET}"
 fi
 echo "  Storage contract  : ${GREEN}$STORAGE_ADDR${RESET}"
+echo "  Storage tx/block  : $STORAGE_TX / $STORAGE_BLOCK"
 echo "  Sharing contract  : ${GREEN}$SHARING_ADDR${RESET}"
-echo "  ABI destination   : $ABI_DEST_DIR/"
-echo "  Env file updated  : $ENV_FILE"
+echo "  Sharing tx/block  : $SHARING_TX / $SHARING_BLOCK"
+echo "  Effective at      : $DEPLOYMENT_EFFECTIVE_AT"
+echo "  Artifact catalog  : $CATALOG_FILE"
+if [ "$DRY_RUN" = true ]; then
+    echo "  Deployment receipt: not created"
+    echo "  Activation target : $ENV_FILE (unchanged)"
+else
+    echo "  Deployment receipt: $DEPLOYMENT_RECEIPT"
+    echo "  Activation target : $ENV_FILE (updated atomically)"
+fi
 echo "${BOLD}========================================${RESET}"
 
 if [ $FAILURES -eq 0 ]; then

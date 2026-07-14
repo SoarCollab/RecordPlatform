@@ -9,6 +9,7 @@ import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
 import cn.flying.service.ShareAuditService;
 import cn.flying.service.proof.ProofBundleService;
+import cn.flying.service.proof.signed.SignedProofArchiveService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -46,6 +47,9 @@ class FileControllerExternalIdTest {
     private ProofBundleService proofBundleService;
 
     @Mock
+    private SignedProofArchiveService signedProofArchiveService;
+
+    @Mock
     private SecureIdCodec secureIdCodec;
 
     private FileController controller;
@@ -55,7 +59,12 @@ class FileControllerExternalIdTest {
      */
     @BeforeEach
     void setUp() {
-        controller = new FileController(fileQueryService, fileService, shareAuditService, proofBundleService);
+        controller = new FileController(
+                fileQueryService,
+                fileService,
+                shareAuditService,
+                proofBundleService,
+                signedProofArchiveService);
     }
 
     /**

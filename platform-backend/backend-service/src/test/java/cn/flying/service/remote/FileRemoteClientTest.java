@@ -5,13 +5,16 @@ import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.request.GetShareInfoRequest;
+import cn.flying.platformapi.request.GetAttestationBatchRequest;
 import cn.flying.platformapi.request.GetUserShareCodesRequest;
 import cn.flying.platformapi.request.StoreAttestationBatchRequest;
 import cn.flying.platformapi.response.StoreAttestationBatchResponse;
+import cn.flying.platformapi.response.GetAttestationBatchResponse;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.BlockChainMessage;
 import cn.flying.platformapi.response.FileDetailVO;
+import cn.flying.platformapi.response.ContractRegistryEntryResponse;
 import cn.flying.platformapi.response.SharingVO;
 import cn.flying.platformapi.security.BlockChainRpcAuth;
 import org.apache.dubbo.rpc.RpcContext;
@@ -107,13 +110,15 @@ class FileRemoteClientTest {
      */
     @Test
     void storeAttestationBatch_shouldUseDedicatedRpcAndAttachRpcToken() {
+        ContractRegistryEntryResponse registry = contractRegistry();
         StoreAttestationBatchRequest request = new StoreAttestationBatchRequest(
                 7L,
                 900L,
                 "MB-900",
                 "SHA-256-MERKLE-V1",
                 "root-hash",
-                2
+                2,
+                registry
         );
         Result<StoreAttestationBatchResponse> expected =
                 Result.success(new StoreAttestationBatchResponse("tx-root", "root-hash"));
@@ -134,6 +139,88 @@ class FileRemoteClientTest {
         assertThat(requestCaptor.getValue()).isEqualTo(request);
         assertThat(RpcContext.getClientAttachment().getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY))
                 .isNull();
+    }
+
+    /**
+     * 验证批量存证查询使用专用只读 RPC 并携带共享令牌。
+     */
+    @Test
+    void getAttestationBatch_shouldUseDedicatedRpcAndAttachRpcToken() {
+        GetAttestationBatchRequest request = new GetAttestationBatchRequest(
+                7L, 900L, contractRegistry());
+        Result<GetAttestationBatchResponse> expected =
+                Result.success(GetAttestationBatchResponse.notFound(7L, 900L));
+        when(blockChainService.getAttestationBatch(request)).thenAnswer(invocation -> {
+            assertThat(RpcContext.getClientAttachment().getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY))
+                    .isEqualTo(RPC_TOKEN);
+            return expected;
+        });
+
+        Result<GetAttestationBatchResponse> actual = fileRemoteClient.getAttestationBatch(request);
+
+        assertThat(actual).isSameAs(expected);
+        assertThat(RpcContext.getClientAttachment().getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY))
+                .isNull();
+    }
+
+    /**
+     * 验证注册表只读 RPC 携带共享令牌并返回完整列表。
+     */
+    @Test
+    void getContractRegistry_shouldAttachAndCleanRpcToken() {
+        Result<List<ContractRegistryEntryResponse>> expected =
+                Result.success(List.of(contractRegistry()));
+        when(blockChainService.getContractRegistry()).thenAnswer(invocation -> {
+            assertThat(RpcContext.getClientAttachment()
+                    .getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY))
+                    .isEqualTo(RPC_TOKEN);
+            return expected;
+        });
+
+        Result<List<ContractRegistryEntryResponse>> actual =
+                fileRemoteClient.getContractRegistry();
+
+        assertThat(actual).isSameAs(expected);
+        assertThat(RpcContext.getClientAttachment()
+                .getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY)).isNull();
+    }
+
+    /**
+     * 验证非幂等 batch 写方法不再被框架透明重试，而只读查询仍允许安全重试。
+     */
+    @Test
+    void attestationBatchRpcAnnotations_shouldOnlyRetryReadQuery() throws Exception {
+        Method write = FileRemoteClient.class.getMethod(
+                "storeAttestationBatch", StoreAttestationBatchRequest.class);
+        Method query = FileRemoteClient.class.getMethod(
+                "getAttestationBatch", GetAttestationBatchRequest.class);
+
+        assertThat(write.getAnnotation(io.github.resilience4j.retry.annotation.Retry.class)).isNull();
+        assertThat(query.getAnnotation(io.github.resilience4j.retry.annotation.Retry.class)).isNotNull();
+    }
+
+    /**
+     * 构造批次 RPC 使用的完整合约注册表快照。
+     */
+    private ContractRegistryEntryResponse contractRegistry() {
+        return new ContractRegistryEntryResponse(
+                "record-platform-contract-registry-entry.v1",
+                "sha256:" + "1".repeat(64),
+                "Sharing",
+                "2.0.0",
+                "LOCAL_FISCO",
+                "chain0",
+                "group0",
+                "0x1111111111111111111111111111111111111111",
+                "ABI-CANONICAL-JSON-SHA256-V1",
+                "sha256:" + "2".repeat(64),
+                "sha256:" + "3".repeat(64),
+                "sha256:" + "4".repeat(64),
+                null,
+                null,
+                "ACTIVE",
+                "2026-07-13T00:00:00Z",
+                "REDEPLOY_ADDRESS");
     }
 
     /**
@@ -284,5 +371,47 @@ class FileRemoteClientTest {
 
         assertThat(result.getCode()).isEqualTo(ResultEnum.GET_USER_SHARE_FILE_ERROR.getCode());
         assertThat(result.getData()).isNull();
+    }
+
+    /**
+     * 验证批次查询降级在空请求和完整请求下都返回显式区块链错误。
+     */
+    @Test
+    void getAttestationBatchFallback_shouldHandleNullAndBoundRequest() {
+        @SuppressWarnings("unchecked")
+        Result<GetAttestationBatchResponse> nullRequest = (Result<GetAttestationBatchResponse>)
+                ReflectionTestUtils.invokeMethod(
+                        fileRemoteClient,
+                        "getAttestationBatchFallback",
+                        null,
+                        new RuntimeException("boom"));
+        @SuppressWarnings("unchecked")
+        Result<GetAttestationBatchResponse> boundRequest = (Result<GetAttestationBatchResponse>)
+                ReflectionTestUtils.invokeMethod(
+                        fileRemoteClient,
+                        "getAttestationBatchFallback",
+                        new GetAttestationBatchRequest(7L, 900L, null),
+                        new RuntimeException("boom"));
+
+        assertThat(nullRequest.getCode()).isEqualTo(ResultEnum.BLOCKCHAIN_ERROR.getCode());
+        assertThat(boundRequest.getCode()).isEqualTo(ResultEnum.BLOCKCHAIN_ERROR.getCode());
+        assertThat(nullRequest.getData()).isNull();
+        assertThat(boundRequest.getData()).isNull();
+    }
+
+    /**
+     * 验证合约注册表查询降级返回空列表而非不确定的 null 数据。
+     */
+    @Test
+    void getContractRegistryFallback_shouldReturnExplicitEmptyRegistry() {
+        @SuppressWarnings("unchecked")
+        Result<List<ContractRegistryEntryResponse>> result =
+                (Result<List<ContractRegistryEntryResponse>>) ReflectionTestUtils.invokeMethod(
+                        fileRemoteClient,
+                        "getContractRegistryFallback",
+                        new RuntimeException("boom"));
+
+        assertThat(result.getCode()).isEqualTo(ResultEnum.BLOCKCHAIN_ERROR.getCode());
+        assertThat(result.getData()).isEmpty();
     }
 }

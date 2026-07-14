@@ -1,5 +1,7 @@
 package cn.flying.platformapi.request;
 
+import cn.flying.platformapi.response.ContractRegistryEntryResponse;
+
 import java.io.Serial;
 import java.io.Serializable;
 
@@ -12,6 +14,7 @@ import java.io.Serializable;
  * @param proofAlgorithm Merkle proof algorithm
  * @param merkleRoot Merkle batch root hash
  * @param leafCount number of leaves included in the batch
+ * @param contractRegistry immutable registry snapshot expected by the caller
  */
 public record StoreAttestationBatchRequest(
         Long tenantId,
@@ -19,7 +22,8 @@ public record StoreAttestationBatchRequest(
         String batchNo,
         String proofAlgorithm,
         String merkleRoot,
-        Integer leafCount
+        Integer leafCount,
+        ContractRegistryEntryResponse contractRegistry
 ) implements Serializable {
 
     @Serial

@@ -26,8 +26,8 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       automation: ${{ steps.filter.outputs.automation }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4
         id: filter
         with:
           filters: |
@@ -60,20 +60,50 @@ jobs:
       id-token: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           distribution: 'temurin'
           java-version: '21'
           cache: 'maven'
 
-      - name: Install platform-api
-        run: mvn -f platform-api/pom.xml clean install -DskipTests -q
+      - name: Test and Install platform-api
+        run: mvn -f platform-api/pom.xml clean install -q
 
       - name: Run Backend Tests
         run: mvn -f platform-backend/pom.xml clean verify -pl backend-common,backend-service,backend-web -am -Pit
+
+      - name: Require Signed Proof Concurrency IT Execution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          report = Path(
+              "platform-backend/backend-web/target/failsafe-reports/"
+              "TEST-cn.flying.test.proof.SignedProofLifecycleConcurrencyIT.xml"
+          )
+          if not report.is_file():
+              sys.exit(f"Missing required Failsafe report: {report}")
+
+          suite = ET.parse(report).getroot()
+
+          def require_count(name: str, expected: int) -> None:
+              """Require an exact JUnit suite counter from the signed-proof concurrency report."""
+              actual = int(suite.attrib.get(name, "-1"))
+              if actual != expected:
+                  sys.exit(
+                      f"SignedProofLifecycleConcurrencyIT {name}={actual}; expected {expected}"
+                  )
+
+          require_count("tests", 6)
+          require_count("skipped", 0)
+          require_count("failures", 0)
+          require_count("errors", 0)
+          PY
 
       - name: Run FISCO Tests
         run: mvn -f platform-fisco/pom.xml test
@@ -82,7 +112,7 @@ jobs:
         run: mvn -f platform-storage/pom.xml test
 
       - name: Upload Backend OpenAPI Artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: backend-openapi
@@ -90,7 +120,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload Backend Coverage Report
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
         if: always()
         with:
           use_oidc: true
@@ -114,15 +144,15 @@ jobs:
         working-directory: platform-frontend
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 10.26.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
           cache: pnpm
@@ -146,7 +176,7 @@ jobs:
         run: pnpm test:coverage
 
       - name: Upload Frontend Coverage Report
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
         if: always()
         with:
           use_oidc: true
@@ -163,21 +193,21 @@ jobs:
       contents: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Download Backend OpenAPI Artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: backend-openapi
           path: backend-openapi
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 10.26.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
           cache: pnpm
@@ -193,14 +223,26 @@ jobs:
         working-directory: platform-frontend
         run: OPENAPI_SOURCE=../backend-openapi/openapi.json pnpm types:gen:check
 
+      - name: Verify Contract Artifact Integrity
+        run: |
+          python3 -m unittest discover -s tools/contracts/tests -v
+          python3 tools/contracts/contract_fingerprint.py verify \
+            --project-root . \
+            --catalog platform-fisco/src/main/resources/contract-registry/artifacts.json
+
       - name: Generate Contract Fingerprints
         run: |
           mkdir -p contract-fingerprint
           shasum -a 256 backend-openapi/openapi.json | awk '{print $1}' > contract-fingerprint/openapi.sha256
           shasum -a 256 platform-frontend/src/lib/api/types/generated.ts | awk '{print $1}' > contract-fingerprint/generated-ts.sha256
+          shasum -a 256 platform-fisco/src/main/resources/contract-registry/artifacts.json | awk '{print $1}' > contract-fingerprint/catalog.sha256
+          python3 tools/contracts/contract_fingerprint.py refresh \
+            --project-root . \
+            --catalog platform-fisco/src/main/resources/contract-registry/artifacts.json \
+            --output contract-fingerprint/verified-artifacts.json
 
       - name: Upload Contract Fingerprints
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: contract-fingerprint
@@ -216,9 +258,9 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Run Trivy SARIF output
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -231,13 +273,13 @@ jobs:
 
       - name: Upload Trivy SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
         with:
           sarif_file: trivy-pr.sarif
           category: trivy-pr
 
       - name: Run Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -254,10 +296,10 @@ jobs:
     if: always() && !failure() && !cancelled() && (needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.automation == 'true')
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           distribution: 'temurin'
           java-version: '21'
@@ -271,12 +313,12 @@ jobs:
           mvn -f platform-storage/pom.xml clean package -DskipTests -q
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 10.26.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
           cache: pnpm

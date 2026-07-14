@@ -50,6 +50,9 @@ public class TenantFilter extends OncePerRequestFilter {
             "/error",
             // 公开分享相关端点
             "/api/v1/public/shares",
+            // 公开 proof 状态和历史签名公钥
+            "/api/v1/public/proofs",
+            "/api/v1/public/proof-keys",
             // 图片下载端点（img 标签无法携带自定义 header）
             "/api/v1/images/download"
     );

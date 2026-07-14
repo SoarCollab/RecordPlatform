@@ -84,6 +84,21 @@ class SecurityConfigurationTest {
     }
 
     /**
+     * 验证只公开 proof 的 GET 状态/公钥路径，导出和撤销仍落入认证规则。
+     */
+    @Test
+    void shouldPermitOnlyPublicProofReadEndpoints() throws Exception {
+        String securityConfiguration = Files.readString(Path.of("src/main/java/cn/flying/config/SecurityConfiguration.java"));
+
+        assertTrue(securityConfiguration.contains(
+                ".requestMatchers(HttpMethod.GET, \"/api/v1/public/proofs/*/status\").permitAll()"));
+        assertTrue(securityConfiguration.contains(
+                ".requestMatchers(HttpMethod.GET, \"/api/v1/public/proof-keys/*/versions/*\").permitAll()"));
+        assertFalse(securityConfiguration.contains(
+                ".requestMatchers(\"/api/v1/files/**\").permitAll()"));
+    }
+
+    /**
      * 验证 Knife4j 默认使用生产模式，避免默认暴露接口文档。
      */
     @Test

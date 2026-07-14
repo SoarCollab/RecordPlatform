@@ -34,6 +34,8 @@ public class AttestationBatch implements Serializable {
 
     private String batchNo;
 
+    private String idempotencyKey;
+
     private String merkleRoot;
 
     private String proofAlgorithm;
@@ -47,6 +49,42 @@ public class AttestationBatch implements Serializable {
     private String chainFileHash;
 
     private String chainError;
+
+    private Integer attemptCount;
+
+    private Date nextAttemptAt;
+
+    private String claimToken;
+
+    private Date leaseExpiresAt;
+
+    private String confirmationSource;
+
+    private String contractRegistryFingerprint;
+
+    private String contractRegistryJson;
+
+    private String chainType;
+
+    private String chainId;
+
+    private String chainGroupId;
+
+    private String contractName;
+
+    private String contractVersion;
+
+    private String contractAddress;
+
+    private String contractAbiSha256;
+
+    private String contractArtifactBytecodeSha256;
+
+    private String contractCodeSha256;
+
+    private String contractStatus;
+
+    private Long stateVersion;
 
     @TableField(fill = FieldFill.INSERT)
     private Date createTime;

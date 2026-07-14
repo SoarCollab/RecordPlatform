@@ -66,6 +66,8 @@ public class FileUploadState {
     private Long directFileId;
     @Schema(description = "直传完成后的文件哈希")
     private String directFileHash;
+    @Schema(description = "原文件整体内容 SHA-256")
+    private String contentHash;
     @Schema(description = "直传完成后的交易哈希")
     private String directTransactionHash;
     @Schema(description = "直传完成后的 manifest hash")

@@ -79,6 +79,19 @@ The `/actuator/health` endpoint includes:
 | `s3_node_online_status` | Gauge | Node online status (0/1), bridged via backend actuator from storage capacity snapshots |
 | `s3_node_usage_percent` | Gauge | Node disk usage percent (0-100), bridged via backend actuator from storage capacity snapshots |
 
+### Production Attestation Batch Metrics
+
+All labels are fixed enumerations. Tenant, file, candidate, and batch identifiers are deliberately excluded to keep metric cardinality bounded.
+
+| Metric | Type | Labels / Description |
+|--------|------|----------------------|
+| `app_attestation_candidate_total` | Counter | `result=admitted\|batched\|dead_letter` |
+| `app_attestation_candidate_backlog` | Gauge | Last scheduled global observation, `status=ready\|dead_letter` |
+| `app_attestation_batch_total` | Counter | `status=completed\|retry\|manual_review` |
+| `app_attestation_batch_size` | Distribution summary | Manifest-evidence leaves per created batch |
+| `app_attestation_batch_latency_seconds` | Timer | Candidate admission to local batch creation |
+| `app_attestation_production_run_total` | Counter | `result=completed\|disabled\|failed` |
+
 ## Health Thresholds
 
 Configure alerting thresholds:
@@ -254,6 +267,32 @@ The system periodically verifies active chunk manifests, S3-compatible object me
 When integrity anomalies are detected, the system pushes `INTEGRITY_ALERT` events to admins via SSE. Records and events include `alertType`, `severity`, bounded `evidence`, `actualHash`, and `chainHash` where applicable.
 
 New manifest-driven types are `MANIFEST_MISSING`, `MANIFEST_INVALID`, `OBJECT_NOT_FOUND`, `METADATA_MISMATCH`, `CONTENT_HASH_MISMATCH`, and `CHAIN_MISMATCH`; `CHAIN_NOT_FOUND` remains supported. Legacy `HASH_MISMATCH` and `FILE_NOT_FOUND` records remain readable for API compatibility. An unresolved alert with the same tenant, file, and type is not inserted or broadcast again. A distributed lock (Redisson) serializes scheduled and manual checks.
+
+## Production Merkle Batch Trigger
+
+Production admission is disabled until an operator explicitly enables it. When disabled, scheduled execution is not created and a manual trigger returns a disabled result without reading or writing candidates or batches.
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `attestation.production.enabled` | `false` | Enable candidate admission and flush |
+| `attestation.production.poll-interval-ms` | `30000` | Scheduler interval |
+| `attestation.production.initial-delay-ms` | `30000` | Initial scheduler delay |
+| `attestation.production.min-batch-size` | `50` | Automatic size threshold |
+| `attestation.production.max-batch-size` | `100` | Maximum candidates claimed for one batch |
+| `attestation.production.max-wait-seconds` | `600` | Flush the oldest ready candidate after this wait |
+| `attestation.production.seed-limit` | `200` | Maximum newly discovered candidates per tenant and run |
+| `attestation.production.max-batches-per-run` | `2` | Shared budget for recovered and new batches per tenant and run |
+| `attestation.production.claim-lease-seconds` | `120` | Candidate worker lease |
+| `attestation.production.candidate-max-attempts` | `3` | Failures before dead letter |
+
+Both endpoints require the admin role and derive the tenant from the authenticated request context; callers cannot supply a cross-tenant ID.
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/v1/admin/attestation-batches/production/trigger` | Force one bounded run for the current tenant |
+| `GET /api/v1/admin/attestation-batches/production/status` | Read feature state, effective limits, candidate backlog, and due batches |
+
+Rollout order: apply Flyway migrations first, deploy with `enabled=false`, inspect status and metrics, then enable one environment at a time. To roll back application behavior, set `enabled=false`; retain the candidate table and leaf evidence columns because deleting them could discard audit state or break already-created batches.
 
 ## SkyWalking Integration
 

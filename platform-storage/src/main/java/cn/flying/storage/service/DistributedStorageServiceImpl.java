@@ -305,9 +305,20 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             return Result.error(ResultEnum.PARAM_IS_INVALID, null);
         }
 
-        List<DirectMultipartCompletedPartVO> completedParts = new ArrayList<>(request.parts().size());
+        if (request.parts().stream().anyMatch(Objects::isNull)) {
+            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+        }
+        List<DirectMultipartCompletedPart> orderedParts = request.parts().stream()
+                .sorted(Comparator.comparingInt(DirectMultipartCompletedPart::partIndex))
+                .toList();
+        if (!hasContiguousDirectUploadParts(orderedParts)) {
+            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+        }
+
+        List<DirectMultipartCompletedPartVO> completedParts = new ArrayList<>(orderedParts.size());
+        MessageDigest contentDigest = sha256Digest();
         Long tenantId = TenantContextUtil.getTenantIdOrDefault();
-        for (DirectMultipartCompletedPart part : request.parts()) {
+        for (DirectMultipartCompletedPart part : orderedParts) {
             TrustedDirectUploadPart trustedPart;
             try {
                 trustedPart = toTrustedDirectUploadPart(request.sessionId(), part, tenantId);
@@ -317,7 +328,9 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 return Result.error(ResultEnum.PARAM_IS_INVALID, null);
             }
             try {
-                completedParts.add(promoteDirectUploadPart(trustedPart));
+                PromotedDirectUploadPart promotedPart = promoteDirectUploadPart(trustedPart);
+                completedParts.add(promotedPart.metadata());
+                contentDigest.update(promotedPart.plainBytes());
             } catch (Exception e) {
                 log.error("直传分片校验或晋级失败: sessionId={}, partIndex={}",
                         request.sessionId(), part != null ? part.partIndex() : null, e);
@@ -325,7 +338,24 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             }
         }
 
-        return Result.success(new CompleteDirectMultipartUploadResponse(request.sessionId(), completedParts));
+        String contentHash = HASH_PREFIX_SHA256 + HexFormat.of().formatHex(contentDigest.digest());
+        return Result.success(new CompleteDirectMultipartUploadResponse(
+                request.sessionId(),
+                contentHash,
+                completedParts));
+    }
+
+    /**
+     * 校验直传完成分片按索引从零连续，避免重排、重复或缺片生成错误的整体内容哈希。
+     */
+    private boolean hasContiguousDirectUploadParts(List<DirectMultipartCompletedPart> parts) {
+        for (int index = 0; index < parts.size(); index++) {
+            DirectMultipartCompletedPart part = parts.get(index);
+            if (part == null || part.partIndex() != index) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
@@ -400,7 +430,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     /**
      * Verifies a staging object and promotes it to enough final replicas to satisfy write quorum.
      */
-    private DirectMultipartCompletedPartVO promoteDirectUploadPart(TrustedDirectUploadPart part) {
+    private PromotedDirectUploadPart promoteDirectUploadPart(TrustedDirectUploadPart part) {
         S3Client client = clientManager.getClient(part.nodeName());
         if (client == null) {
             throw new IllegalStateException("S3 client is unavailable for node " + part.nodeName());
@@ -478,13 +508,15 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                     part.partIndex(), part.nodeName(), e);
         }
 
-        return toDirectMultipartCompletedPartVO(part, finalHead);
+        return new PromotedDirectUploadPart(
+                toDirectMultipartCompletedPartVO(part, finalHead),
+                stagingBytes);
     }
 
     /**
      * Completes a retry after the original request already promoted the staging object to final replicas.
      */
-    private DirectMultipartCompletedPartVO completeAlreadyPromotedDirectUploadPart(TrustedDirectUploadPart part) {
+    private PromotedDirectUploadPart completeAlreadyPromotedDirectUploadPart(TrustedDirectUploadPart part) {
         for (String nodeName : part.targetNodes()) {
             S3Client finalClient = clientManager.getClient(nodeName);
             if (finalClient == null) {
@@ -496,7 +528,15 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                         .key(part.finalObjectName())
                         .build());
                 validateDirectUploadFinalObject(part, finalHead, part.tenantId());
-                return toDirectMultipartCompletedPartVO(part, finalHead);
+                byte[] finalBytes = readAndVerifyDirectUploadObject(
+                        finalClient,
+                        part,
+                        finalHead,
+                        nodeName,
+                        part.finalObjectName());
+                return new PromotedDirectUploadPart(
+                        toDirectMultipartCompletedPartVO(part, finalHead),
+                        finalBytes);
             } catch (NoSuchKeyException e) {
                 log.debug("直传 final 分片不存在: partIndex={}, node={}", part.partIndex(), nodeName);
             } catch (S3Exception e) {
@@ -552,22 +592,38 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     private byte[] readAndVerifyDirectUploadStagingObject(S3Client client,
                                                           TrustedDirectUploadPart part,
                                                           HeadObjectResponse stagingHead) {
+        return readAndVerifyDirectUploadObject(
+                client,
+                part,
+                stagingHead,
+                part.nodeName(),
+                part.stagingObjectName());
+    }
+
+    /**
+     * 读取并校验一个直传对象，首次完成和 final-object 重试共用同一可信摘要边界。
+     */
+    private byte[] readAndVerifyDirectUploadObject(S3Client client,
+                                                   TrustedDirectUploadPart part,
+                                                   HeadObjectResponse objectHead,
+                                                   String bucket,
+                                                   String objectName) {
         if (!CHECKSUM_ALGORITHM_SHA256.equalsIgnoreCase(normalizeChecksumAlgorithm(part.checksumAlgorithm()))) {
             throw new IllegalArgumentException("unsupported direct-upload checksum algorithm");
         }
-        long stagingSize = stagingHead.contentLength() != null ? stagingHead.contentLength() : -1L;
-        if (stagingSize < 0) {
-            throw new IllegalArgumentException("staging object size is missing");
+        long objectSize = objectHead.contentLength() != null ? objectHead.contentLength() : -1L;
+        if (objectSize < 0) {
+            throw new IllegalArgumentException("direct-upload object size is missing");
         }
-        if (stagingSize > MAX_IN_MEMORY_FILE_SIZE) {
+        if (objectSize > MAX_IN_MEMORY_FILE_SIZE) {
             throw new IllegalArgumentException("direct-upload chunk exceeds in-memory verification limit");
         }
 
         MessageDigest digest = sha256Digest();
-        ByteArrayOutputStream output = new ByteArrayOutputStream((int) stagingSize);
+        ByteArrayOutputStream output = new ByteArrayOutputStream((int) objectSize);
         GetObjectRequest getRequest = GetObjectRequest.builder()
-                .bucket(part.nodeName())
-                .key(part.stagingObjectName())
+                .bucket(bucket)
+                .key(objectName)
                 .build();
         try (ResponseInputStream<GetObjectResponse> input = client.getObject(getRequest)) {
             byte[] buffer = new byte[BUFFER_SIZE];
@@ -588,7 +644,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             if (e instanceof IllegalArgumentException illegalArgumentException) {
                 throw illegalArgumentException;
             }
-            throw new IllegalStateException("failed to read direct-upload staging object", e);
+            throw new IllegalStateException("failed to read direct-upload object", e);
         }
 
         String actualCipherHash = HASH_PREFIX_SHA256 + HexFormat.of().formatHex(digest.digest());
@@ -596,6 +652,15 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             throw new IllegalArgumentException("staging object checksum mismatch");
         }
         return output.toByteArray();
+    }
+
+    /**
+     * 保存一个已晋级分片的公开元数据和经过摘要校验的明文字节。
+     */
+    private record PromotedDirectUploadPart(
+            DirectMultipartCompletedPartVO metadata,
+            byte[] plainBytes
+    ) {
     }
 
     /**

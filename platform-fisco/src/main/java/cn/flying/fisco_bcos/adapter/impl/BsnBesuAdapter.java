@@ -3,6 +3,7 @@ package cn.flying.fisco_bcos.adapter.impl;
 import cn.flying.fisco_bcos.adapter.BlockChainAdapter;
 import cn.flying.fisco_bcos.adapter.model.*;
 import cn.flying.fisco_bcos.config.BsnBesuConfig;
+import cn.flying.fisco_bcos.registry.ContractRegistryService;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -55,6 +56,7 @@ public class BsnBesuAdapter implements BlockChainAdapter {
     private final Credentials credentials;
     private final StaticGasProvider gasProvider;
     private final BsnBesuConfig besuConfig;
+    private final ContractRegistryService contractRegistryService;
 
     private String sharingContractAddress;
 
@@ -119,18 +121,10 @@ public class BsnBesuAdapter implements BlockChainAdapter {
 
     @PostConstruct
     public void init() {
-        this.sharingContractAddress = besuConfig.getContracts().getSharing();
-        if (sharingContractAddress == null || sharingContractAddress.isEmpty()) {
-            throw new IllegalStateException(
-                "[BSN Besu] Sharing 合约地址未配置，请设置 blockchain.bsn-besu.contracts.sharing");
-        }
+        this.sharingContractAddress = contractRegistryService
+                .getActiveEntry("Sharing")
+                .contractAddress();
         log.info("[BSN Besu] Sharing 合约地址: {}", sharingContractAddress);
-
-        // 验证 Storage 合约地址（如果后续需要）
-        String storageAddress = besuConfig.getContracts().getStorage();
-        if (storageAddress == null || storageAddress.isEmpty()) {
-            log.warn("[BSN Besu] Storage 合约地址未配置，部分功能可能不可用");
-        }
     }
 
     @Override
@@ -235,6 +229,61 @@ public class BsnBesuAdapter implements BlockChainAdapter {
         } catch (Exception e) {
             log.error("[BSN Besu storeAttestationBatch] 异常", e);
             throw new ChainException(ChainType.BSN_BESU, "storeAttestationBatch", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Queries a Merkle batch attestation by its stable tenant and batch business key.
+     */
+    @Override
+    public ChainAttestationBatch getAttestationBatch(Long tenantId, Long batchId) {
+        try {
+            org.web3j.abi.datatypes.Function abiFunction = new org.web3j.abi.datatypes.Function(
+                    "getAttestationBatch",
+                    Arrays.asList(
+                            new Utf8String(String.valueOf(tenantId)),
+                            new Uint256(BigInteger.valueOf(batchId))
+                    ),
+                    Arrays.asList(
+                            new TypeReference<org.web3j.abi.datatypes.Bool>() {
+                            },
+                            new TypeReference<Utf8String>() {
+                            },
+                            new TypeReference<Utf8String>() {
+                            },
+                            new TypeReference<Bytes32>() {
+                            },
+                            new TypeReference<Uint256>() {
+                            },
+                            new TypeReference<Uint256>() {
+                            }
+                    )
+            );
+
+            List<Type> result = callContract(abiFunction);
+            if (result.size() < 6) {
+                throw new ChainException(ChainType.BSN_BESU, "getAttestationBatch", "Invalid return value");
+            }
+            boolean exists = ((org.web3j.abi.datatypes.Bool) result.get(0)).getValue();
+            if (!exists) {
+                return ChainAttestationBatch.notFound(tenantId, batchId);
+            }
+
+            return ChainAttestationBatch.builder()
+                    .exists(true)
+                    .tenantId(tenantId)
+                    .batchId(batchId)
+                    .batchNo(((Utf8String) result.get(1)).getValue())
+                    .proofAlgorithm(((Utf8String) result.get(2)).getValue())
+                    .merkleRoot(Numeric.toHexStringNoPrefix(((Bytes32) result.get(3)).getValue()))
+                    .leafCount(((Uint256) result.get(4)).getValue().intValueExact())
+                    .recordedTime(((Uint256) result.get(5)).getValue().longValueExact())
+                    .build();
+        } catch (ChainException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("[BSN Besu getAttestationBatch] 异常", e);
+            throw new ChainException(ChainType.BSN_BESU, "getAttestationBatch", e.getMessage(), e);
         }
     }
 

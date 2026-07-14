@@ -10,16 +10,19 @@ import cn.flying.platformapi.request.CompleteDirectMultipartUploadRequest;
 import cn.flying.platformapi.request.CreateDirectMultipartUploadRequest;
 import cn.flying.platformapi.request.DeleteFilesRequest;
 import cn.flying.platformapi.request.GetShareInfoRequest;
+import cn.flying.platformapi.request.GetAttestationBatchRequest;
 import cn.flying.platformapi.request.GetUserShareCodesRequest;
 import cn.flying.platformapi.request.ShareFilesRequest;
 import cn.flying.platformapi.request.StoreAttestationBatchRequest;
 import cn.flying.platformapi.response.StoreAttestationBatchResponse;
+import cn.flying.platformapi.response.GetAttestationBatchResponse;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.SharingVO;
 import cn.flying.platformapi.response.BlockChainMessage;
 import cn.flying.platformapi.response.CompleteDirectMultipartUploadResponse;
+import cn.flying.platformapi.response.ContractRegistryEntryResponse;
 import cn.flying.platformapi.response.CreateDirectMultipartUploadResponse;
 import cn.flying.platformapi.response.StorageCapacityVO;
 import cn.flying.platformapi.response.StorageObjectHeadVO;
@@ -82,7 +85,6 @@ public class FileRemoteClient {
      * Stores a Merkle batch root through the dedicated blockchain batch-attestation RPC.
      */
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "storeAttestationBatchFallback")
-    @Retry(name = "blockChainService")
     public Result<StoreAttestationBatchResponse> storeAttestationBatch(StoreAttestationBatchRequest request) {
         return callBlockChain(() -> blockChainService.storeAttestationBatch(request));
     }
@@ -97,6 +99,46 @@ public class FileRemoteClient {
         log.error("BlockChain service storeAttestationBatch failed, batchNo={}",
                 request != null ? request.batchNo() : null, t);
         return new Result<>(ResultEnum.BLOCKCHAIN_ERROR, null);
+    }
+
+    /**
+     * Queries a Merkle batch by stable business key; read-only retries are safe.
+     */
+    @CircuitBreaker(name = "blockChainService", fallbackMethod = "getAttestationBatchFallback")
+    @Retry(name = "blockChainService")
+    public Result<GetAttestationBatchResponse> getAttestationBatch(GetAttestationBatchRequest request) {
+        return callBlockChain(() -> blockChainService.getAttestationBatch(request));
+    }
+
+    /**
+     * Converts batch query RPC failures into an explicit blockchain error result.
+     */
+    private Result<GetAttestationBatchResponse> getAttestationBatchFallback(
+            GetAttestationBatchRequest request,
+            Throwable t
+    ) {
+        log.error("BlockChain service getAttestationBatch failed, tenantId={}, batchId={}",
+                request != null ? request.tenantId() : null,
+                request != null ? request.batchId() : null,
+                t);
+        return new Result<>(ResultEnum.BLOCKCHAIN_ERROR, null);
+    }
+
+    /**
+     * 获取 provider 启动时已核验的 ACTIVE 合约注册表；只读调用允许安全重试。
+     */
+    @CircuitBreaker(name = "blockChainService", fallbackMethod = "getContractRegistryFallback")
+    @Retry(name = "blockChainService")
+    public Result<List<ContractRegistryEntryResponse>> getContractRegistry() {
+        return callBlockChain(blockChainService::getContractRegistry);
+    }
+
+    /**
+     * 把注册表 RPC 故障转换为显式区块链错误，禁止调用方猜测地址或 ABI。
+     */
+    private Result<List<ContractRegistryEntryResponse>> getContractRegistryFallback(Throwable t) {
+        log.error("BlockChain service getContractRegistry failed", t);
+        return new Result<>(ResultEnum.BLOCKCHAIN_ERROR, List.of());
     }
 
     private Result<StoreFileResponse> storeFileOnChainFallback(StoreFileRequest request, Throwable t) {
