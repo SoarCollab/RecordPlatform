@@ -3,6 +3,7 @@ package cn.flying.test;
 import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.external.DistributedStorageService;
 import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.response.ContractRegistryEntryResponse;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.test.config.MockDubboServicesConfig;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -32,6 +33,7 @@ import org.testcontainers.utility.MountableFile;
 import org.mockito.Mockito;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -200,7 +202,38 @@ public abstract class BaseIntegrationTest {
                 .when(fileRemoteClient.cancelShare(any()))
                 .thenReturn(Result.success(true));
 
+        Mockito.lenient()
+                .when(fileRemoteClient.getContractRegistry())
+                .thenReturn(Result.success(List.of(testContractRegistry())));
+
         ensureS3BucketExists();
+    }
+
+    /**
+     * 构造字段和 registry fingerprint 完全自洽的 ACTIVE Sharing 测试注册表。
+     *
+     * @return 可用于批次创建与 proof 签发的测试注册表
+     */
+    protected static ContractRegistryEntryResponse testContractRegistry() {
+        return new ContractRegistryEntryResponse(
+                "record-platform-contract-registry-entry.v1",
+                null,
+                "Sharing",
+                "2.0.0",
+                "LOCAL_FISCO",
+                "chain0",
+                "group0",
+                "0x1111111111111111111111111111111111111111",
+                "ABI-CANONICAL-JSON-SHA256-V1",
+                "sha256:" + "2".repeat(64),
+                "sha256:" + "3".repeat(64),
+                "sha256:" + "4".repeat(64),
+                "0x" + "a".repeat(64),
+                42L,
+                "ACTIVE",
+                "2020-01-01T00:00:00Z",
+                "REDEPLOY_ADDRESS")
+                .withCalculatedRegistryFingerprint();
     }
 
     /**

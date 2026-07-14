@@ -446,7 +446,7 @@ class AttestationBatchConsistencyIT extends BaseIntegrationTest {
     private ContractRegistryEntryResponse contractRegistry() {
         return new ContractRegistryEntryResponse(
                 "record-platform-contract-registry-entry.v1",
-                "sha256:" + "1".repeat(64),
+                null,
                 "Sharing",
                 "2.0.0",
                 "LOCAL_FISCO",
@@ -461,6 +461,7 @@ class AttestationBatchConsistencyIT extends BaseIntegrationTest {
                 42L,
                 "ACTIVE",
                 "2026-07-14T00:00:00Z",
-                "REDEPLOY_ADDRESS");
+                "REDEPLOY_ADDRESS")
+                .withCalculatedRegistryFingerprint();
     }
 }

@@ -47,6 +47,7 @@ import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
@@ -73,6 +74,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -815,6 +817,54 @@ class SignedProofArchiveServiceImplTest {
 
             assertThat(archive.compactJws()).isNotBlank();
             verify(issuanceMapper).insert(any(ProofBundleIssuance.class));
+        }
+    }
+
+    /**
+     * 验证全局 signing key 首次注册发生瞬态数据库锁竞争时会重跑完整签发事务。
+     */
+    @Test
+    void shouldRetryWholeIssuanceTransactionAfterTransientKeyRegistrationContention() {
+        File file = file();
+        AttestationLeaf leaf = leaf();
+        mockSuccessfulEvidence(file, leaf);
+        when(signingKeyMapper.registerKey(any(ProofSigningKeyRecord.class)))
+                .thenThrow(new CannotAcquireLockException("simulated signing key contention"))
+                .thenReturn(1);
+
+        try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+            security.when(SecurityUtils::isAdmin).thenReturn(false);
+
+            ProofArchive archive = service.exportByFileId(USER_ID, FILE_ID);
+
+            assertThat(archive.compactJws()).isNotBlank();
+            verify(transactionTemplate, times(2)).execute(any());
+            verify(signingKeyMapper, times(2)).registerKey(any(ProofSigningKeyRecord.class));
+            verify(issuanceMapper).insert(any(ProofBundleIssuance.class));
+        }
+    }
+
+    /**
+     * 验证签发事务连续遭遇瞬态数据库锁竞争时会在有限重试后返回可重试错误。
+     */
+    @Test
+    void shouldFailRetryablyAfterIssuanceTransactionContentionIsExhausted() {
+        File file = file();
+        AttestationLeaf leaf = leaf();
+        mockSuccessfulEvidence(file, leaf);
+        when(signingKeyMapper.registerKey(any(ProofSigningKeyRecord.class)))
+                .thenThrow(new CannotAcquireLockException("persistent signing key contention"));
+
+        try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+            security.when(SecurityUtils::isAdmin).thenReturn(false);
+
+            assertThatThrownBy(() -> service.exportByFileId(USER_ID, FILE_ID))
+                    .isInstanceOf(RetryableException.class)
+                    .satisfies(error -> assertThat(((RetryableException) error).getResultEnum())
+                            .isEqualTo(ResultEnum.SERVICE_UNAVAILABLE));
+            verify(transactionTemplate, times(3)).execute(any());
+            verify(signingKeyMapper, times(3)).registerKey(any(ProofSigningKeyRecord.class));
+            verify(issuanceMapper, never()).insert(any(ProofBundleIssuance.class));
         }
     }
 

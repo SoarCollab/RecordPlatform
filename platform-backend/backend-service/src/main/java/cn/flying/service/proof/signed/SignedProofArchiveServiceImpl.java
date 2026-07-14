@@ -39,6 +39,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -91,6 +92,7 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
     private static final String JCA_SIGNATURE_ALGORITHM = "Ed25519";
     private static final int MAX_MANIFEST_CHUNKS = 128;
     private static final int MAX_CONCURRENT_EXPORTS = 8;
+    private static final int MAX_ISSUANCE_TRANSACTION_ATTEMPTS = 3;
     private static final long MAX_STORAGE_VALIDATION_NANOS = TimeUnit.SECONDS.toNanos(60);
     private static final ExecutorService STORAGE_VALIDATION_EXECUTOR = new ThreadPoolExecutor(
             MAX_CONCURRENT_EXPORTS,
@@ -332,7 +334,7 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
     }
 
     /**
-     * 在版本链共享锁事务内首次签发，避免与新版本成功提交交错出错误 ACTIVE。
+     * 在版本链共享锁事务内首次签发，并对 MySQL 瞬态锁竞争执行有界整事务重试。
      */
     private ProofArchive issueNew(
             File file,
@@ -340,9 +342,20 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
             AttestationBatch batch,
             SignedProofBundleModel.EvidencePayloads payloads
     ) {
-        ProofFinalizationOutcome outcome = transactionTemplate.execute(status ->
-                issueNewLocked(file, leaf, batch, payloads));
-        return requireSuccessfulOutcome(outcome);
+        for (int attempt = 1; attempt <= MAX_ISSUANCE_TRANSACTION_ATTEMPTS; attempt++) {
+            try {
+                ProofFinalizationOutcome outcome = transactionTemplate.execute(status ->
+                        issueNewLocked(file, leaf, batch, payloads));
+                return requireSuccessfulOutcome(outcome);
+            } catch (TransientDataAccessException contention) {
+                if (attempt == MAX_ISSUANCE_TRANSACTION_ATTEMPTS) {
+                    throw new RetryableException(
+                            ResultEnum.SERVICE_UNAVAILABLE,
+                            Map.of("reason", "signed proof issuance database contention"));
+                }
+            }
+        }
+        throw new IllegalStateException("Signed proof issuance retry loop exited unexpectedly");
     }
 
     /**
