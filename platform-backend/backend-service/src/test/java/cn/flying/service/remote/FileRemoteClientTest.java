@@ -372,4 +372,46 @@ class FileRemoteClientTest {
         assertThat(result.getCode()).isEqualTo(ResultEnum.GET_USER_SHARE_FILE_ERROR.getCode());
         assertThat(result.getData()).isNull();
     }
+
+    /**
+     * 验证批次查询降级在空请求和完整请求下都返回显式区块链错误。
+     */
+    @Test
+    void getAttestationBatchFallback_shouldHandleNullAndBoundRequest() {
+        @SuppressWarnings("unchecked")
+        Result<GetAttestationBatchResponse> nullRequest = (Result<GetAttestationBatchResponse>)
+                ReflectionTestUtils.invokeMethod(
+                        fileRemoteClient,
+                        "getAttestationBatchFallback",
+                        null,
+                        new RuntimeException("boom"));
+        @SuppressWarnings("unchecked")
+        Result<GetAttestationBatchResponse> boundRequest = (Result<GetAttestationBatchResponse>)
+                ReflectionTestUtils.invokeMethod(
+                        fileRemoteClient,
+                        "getAttestationBatchFallback",
+                        new GetAttestationBatchRequest(7L, 900L, null),
+                        new RuntimeException("boom"));
+
+        assertThat(nullRequest.getCode()).isEqualTo(ResultEnum.BLOCKCHAIN_ERROR.getCode());
+        assertThat(boundRequest.getCode()).isEqualTo(ResultEnum.BLOCKCHAIN_ERROR.getCode());
+        assertThat(nullRequest.getData()).isNull();
+        assertThat(boundRequest.getData()).isNull();
+    }
+
+    /**
+     * 验证合约注册表查询降级返回空列表而非不确定的 null 数据。
+     */
+    @Test
+    void getContractRegistryFallback_shouldReturnExplicitEmptyRegistry() {
+        @SuppressWarnings("unchecked")
+        Result<List<ContractRegistryEntryResponse>> result =
+                (Result<List<ContractRegistryEntryResponse>>) ReflectionTestUtils.invokeMethod(
+                        fileRemoteClient,
+                        "getContractRegistryFallback",
+                        new RuntimeException("boom"));
+
+        assertThat(result.getCode()).isEqualTo(ResultEnum.BLOCKCHAIN_ERROR.getCode());
+        assertThat(result.getData()).isEmpty();
+    }
 }

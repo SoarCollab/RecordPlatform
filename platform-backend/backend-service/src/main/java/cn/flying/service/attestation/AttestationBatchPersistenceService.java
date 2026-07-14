@@ -148,7 +148,7 @@ public class AttestationBatchPersistenceService {
                                                   ContractRegistryEntryResponse contractRegistry) {
         Map<Long, AttestationLeafEvidence> evidenceByFileId = indexEvidence(tree, evidence);
 
-        Long batchId = snowflakeIdGenerator.nextId();
+        long batchId = snowflakeIdGenerator.nextId();
         AttestationBatch batch = new AttestationBatch()
                 .setId(batchId)
                 .setTenantId(tenantId)

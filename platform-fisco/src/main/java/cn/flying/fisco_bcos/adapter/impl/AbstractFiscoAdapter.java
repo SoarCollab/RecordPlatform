@@ -173,8 +173,11 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
                     new SharingGetAttestationBatchInputBO(
                             String.valueOf(tenantId),
                             BigInteger.valueOf(batchId)));
-            if (response == null || !(response.getReturnObject() instanceof List<?> values)
-                    || values.size() < 6) {
+            if (response == null) {
+                throw new ChainException(getChainType(), "getAttestationBatch", "Invalid return value");
+            }
+            List<Object> values = response.getReturnObject();
+            if (values == null || values.size() < 6) {
                 throw new ChainException(getChainType(), "getAttestationBatch", "Invalid return value");
             }
 

@@ -356,9 +356,9 @@ class AttestationBatchConsistencyIT extends BaseIntegrationTest {
                 registry)).isPresent();
         ContractRegistryEntryResponse staleRegistry = new ContractRegistryEntryResponse(
                 registry.schemaVersion(),
-                "sha256:" + "9".repeat(64),
+                null,
                 registry.contractName(),
-                registry.semanticVersion(),
+                "2.0.1",
                 registry.chainType(),
                 registry.chainId(),
                 registry.groupId(),
@@ -371,7 +371,8 @@ class AttestationBatchConsistencyIT extends BaseIntegrationTest {
                 registry.deploymentBlockNumber(),
                 registry.status(),
                 registry.effectiveAt(),
-                registry.upgradeStrategy());
+                registry.upgradeStrategy())
+                .withCalculatedRegistryFingerprint();
         assertThat(persistenceService.verifyContractRegistryClaim(
                 TENANT_ID,
                 batch.getId(),

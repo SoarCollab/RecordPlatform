@@ -28,6 +28,14 @@ public record AttestationBatchProductionRunResult(
     }
 
     /**
+     * 返回不可变的 batch ID 快照，避免调用方获取 record 的内部可变表示。
+     */
+    @Override
+    public List<Long> batchIds() {
+        return List.copyOf(batchIds);
+    }
+
+    /**
      * 创建一个不执行任何数据库工作的 disabled 结果。
      */
     public static AttestationBatchProductionRunResult disabled(boolean force) {

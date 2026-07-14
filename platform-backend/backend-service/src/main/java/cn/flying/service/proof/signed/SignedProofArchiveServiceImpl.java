@@ -342,13 +342,15 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
             AttestationBatch batch,
             SignedProofBundleModel.EvidencePayloads payloads
     ) {
-        for (int attempt = 1; attempt <= MAX_ISSUANCE_TRANSACTION_ATTEMPTS; attempt++) {
+        for (int remainingAttempts = MAX_ISSUANCE_TRANSACTION_ATTEMPTS;
+             remainingAttempts > 0;
+             remainingAttempts--) {
             try {
                 ProofFinalizationOutcome outcome = transactionTemplate.execute(status ->
                         issueNewLocked(file, leaf, batch, payloads));
                 return requireSuccessfulOutcome(outcome);
             } catch (TransientDataAccessException contention) {
-                if (attempt == MAX_ISSUANCE_TRANSACTION_ATTEMPTS) {
+                if (remainingAttempts == 1) {
                     throw new RetryableException(
                             ResultEnum.SERVICE_UNAVAILABLE,
                             Map.of("reason", "signed proof issuance database contention"));
@@ -504,7 +506,7 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
         try {
             SignedProofBundleModel.Manifest issuedManifest = parseIssuedManifest(issuance);
             validateIssuanceBinding(file, leaf, issuance);
-            validateIssuedManifest(file, leaf, batch, issuance, issuedManifest);
+            validateIssuedManifest(file, batch, issuance, issuedManifest);
             ProofSigningKeyMetadata key = new ProofSigningKeyMetadata(
                     issuance.getSignatureAlgorithm(),
                     issuance.getKeyId(),
@@ -1057,8 +1059,10 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
      */
     private SignedProofBundleModel.Manifest parseIssuedManifest(ProofBundleIssuance issuance) {
         String manifestJson = issuance == null ? null : issuance.getManifestJson();
-        if (!StringUtils.hasText(manifestJson)
-                || manifestJson.length() > MAX_PERSISTED_MANIFEST_CHARS) {
+        if (!StringUtils.hasText(manifestJson)) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "已签发证明 manifest 大小不合法");
+        }
+        if (manifestJson.length() > MAX_PERSISTED_MANIFEST_CHARS) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "已签发证明 manifest 大小不合法");
         }
         byte[] persistedBytes = manifestJson.getBytes(StandardCharsets.UTF_8);
@@ -1078,7 +1082,6 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
      */
     private void validateIssuedManifest(
             File file,
-            AttestationLeaf leaf,
             AttestationBatch batch,
             ProofBundleIssuance issuance,
             SignedProofBundleModel.Manifest manifest

@@ -1,6 +1,7 @@
 package cn.flying.fisco_bcos.adapter.impl;
 
 import cn.flying.fisco_bcos.adapter.model.ChainAttestationBatch;
+import cn.flying.fisco_bcos.adapter.model.ChainException;
 import cn.flying.fisco_bcos.adapter.model.ChainType;
 import cn.flying.fisco_bcos.service.SharingService;
 import org.fisco.bcos.sdk.v3.transaction.model.dto.CallResponse;
@@ -14,6 +15,7 @@ import java.math.BigInteger;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -78,6 +80,28 @@ class AbstractFiscoAdapterAttestationBatchTest {
 
         assertThat(actual).usingRecursiveComparison()
                 .isEqualTo(ChainAttestationBatch.notFound(7L, 900L));
+    }
+
+    /**
+     * 验证空响应、空返回列表和字段不足的返回值都会被拒绝。
+     */
+    @Test
+    void getAttestationBatch_shouldRejectMalformedContractResponse() throws Exception {
+        when(sharingService.getAttestationBatch(any())).thenReturn(null);
+        assertThatThrownBy(() -> adapter.getAttestationBatch(7L, 900L))
+                .isInstanceOf(ChainException.class)
+                .hasMessageContaining("Invalid return value");
+
+        when(sharingService.getAttestationBatch(any())).thenReturn(callResponse);
+        when(callResponse.getReturnObject()).thenReturn(null);
+        assertThatThrownBy(() -> adapter.getAttestationBatch(7L, 900L))
+                .isInstanceOf(ChainException.class)
+                .hasMessageContaining("Invalid return value");
+
+        when(callResponse.getReturnObject()).thenReturn(List.of(true));
+        assertThatThrownBy(() -> adapter.getAttestationBatch(7L, 900L))
+                .isInstanceOf(ChainException.class)
+                .hasMessageContaining("Invalid return value");
     }
 
     /**

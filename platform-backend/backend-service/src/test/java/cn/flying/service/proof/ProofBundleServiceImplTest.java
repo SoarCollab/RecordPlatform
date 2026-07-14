@@ -298,6 +298,68 @@ class ProofBundleServiceImplTest {
     }
 
     /**
+     * 验证 registry 快照解析异常时不会继续生成证明包。
+     */
+    @Test
+    void exportByFileId_shouldFailClosedWhenRegistrySnapshotIsInvalid() {
+        try (MockedStatic<SecurityUtils> ignored = mockStaticUser()) {
+            mockBundleUntilCompletedBatch();
+            when(attestationBatchPersistenceService.requireContractRegistry(any()))
+                    .thenThrow(new IllegalStateException("invalid registry snapshot"));
+
+            assertRegistryFailure();
+        }
+    }
+
+    /**
+     * 验证缺失 registry 快照时不会继续生成证明包。
+     */
+    @Test
+    void exportByFileId_shouldFailClosedWhenRegistrySnapshotIsMissing() {
+        try (MockedStatic<SecurityUtils> ignored = mockStaticUser()) {
+            mockBundleUntilCompletedBatch();
+            when(attestationBatchPersistenceService.requireContractRegistry(any())).thenReturn(null);
+
+            assertRegistryFailure();
+        }
+    }
+
+    /**
+     * 验证已撤销合约版本不能被用于导出新证明包。
+     */
+    @Test
+    void exportByFileId_shouldRejectRevokedContractRegistry() {
+        try (MockedStatic<SecurityUtils> ignored = mockStaticUser()) {
+            mockBundleUntilCompletedBatch();
+            when(attestationBatchPersistenceService.requireContractRegistry(any()))
+                    .thenReturn(contractRegistry("REVOKED"));
+
+            assertRegistryFailure();
+        }
+    }
+
+    /**
+     * Mock 到已完成 batch 为止的证明包依赖，确保 registry 校验先于存储读取。
+     */
+    private void mockBundleUntilCompletedBatch() {
+        when(fileMapper.selectById(FILE_ID)).thenReturn(file());
+        when(leafMapper.selectOne(any())).thenReturn(leaf());
+        when(batchMapper.selectById(BATCH_ID)).thenReturn(batch());
+    }
+
+    /**
+     * 断言 registry 失败统一映射为文件记录错误且不会访问分片存储。
+     */
+    private void assertRegistryFailure() {
+        assertThatThrownBy(() -> service.exportByFileId(USER_ID, FILE_ID))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getResultEnum())
+                        .isEqualTo(ResultEnum.FILE_RECORD_ERROR));
+        verify(chunkManifestService, never()).findActiveManifest(any(), any());
+        verify(fileRemoteClient, never()).headObject(any(), any());
+    }
+
+    /**
      * 组织成功导出所需的 mapper 与远程存储 HEAD 响应。
      */
     private void mockSuccessfulBundleDependencies(File file) {
@@ -413,6 +475,13 @@ class ProofBundleServiceImplTest {
      * 构造批次签发时已核验的 Sharing 合约注册表快照。
      */
     private ContractRegistryEntryResponse contractRegistry() {
+        return contractRegistry("ACTIVE");
+    }
+
+    /**
+     * 构造指定生命周期状态的 Sharing 合约注册表快照。
+     */
+    private ContractRegistryEntryResponse contractRegistry(String status) {
         return new ContractRegistryEntryResponse(
                 "record-platform-contract-registry-entry.v1",
                 "sha256:" + "1".repeat(64),
@@ -428,7 +497,7 @@ class ProofBundleServiceImplTest {
                 "sha256:" + "4".repeat(64),
                 null,
                 null,
-                "ACTIVE",
+                status,
                 "2026-07-13T00:00:00Z",
                 "REDEPLOY_ADDRESS");
     }

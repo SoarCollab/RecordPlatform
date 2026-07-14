@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -253,6 +254,68 @@ class DeterministicProofArchiveBuilderTest {
     }
 
     /**
+     * 验证 archive 对空字段、未知条目、总大小与输出流故障全部失败关闭。
+     */
+    @Test
+    void shouldRejectEveryArchiveBoundaryAndTranslateWriteFailure() {
+        ProofArchive valid = builder.buildNew("record-proof-fileA-1.zip", seed(), payloads(CONTENT_HASH));
+
+        assertThatThrownBy(() -> new ProofArchive(
+                null, valid.manifestHash(), valid.compactJws(), valid.entries()))
+                .isInstanceOf(GeneralException.class);
+        assertThatThrownBy(() -> new ProofArchive(
+                valid.fileName(), valid.manifestHash(), valid.compactJws(), null))
+                .isInstanceOf(GeneralException.class);
+        assertThatThrownBy(() -> new ProofArchive(
+                valid.fileName(), valid.manifestHash(), valid.compactJws(), valid.entries().subList(0, 7)))
+                .isInstanceOf(GeneralException.class);
+
+        List<ProofArchive.ArchiveEntry> nullEntry = new ArrayList<>(valid.entries());
+        nullEntry.set(0, null);
+        assertThatThrownBy(() -> new ProofArchive(
+                valid.fileName(), valid.manifestHash(), valid.compactJws(), nullEntry))
+                .isInstanceOf(GeneralException.class);
+
+        List<ProofArchive.ArchiveEntry> unknownEntry = new ArrayList<>(valid.entries());
+        unknownEntry.set(0, new ProofArchive.ArchiveEntry("unknown", "application/octet-stream", new byte[0]));
+        assertThatThrownBy(() -> new ProofArchive(
+                valid.fileName(), valid.manifestHash(), valid.compactJws(), unknownEntry))
+                .isInstanceOf(GeneralException.class);
+
+        List<ProofArchive.ArchiveEntry> totalOversized = new ArrayList<>(valid.entries());
+        for (int index = 0; index < 5; index++) {
+            ProofArchive.ArchiveEntry source = totalOversized.get(index);
+            totalOversized.set(index, new ProofArchive.ArchiveEntry(
+                    source.name(), source.mediaType(), new byte[1024 * 1024]));
+        }
+        assertThatThrownBy(() -> new ProofArchive(
+                valid.fileName(), valid.manifestHash(), valid.compactJws(), totalOversized))
+                .isInstanceOf(GeneralException.class);
+
+        assertThat(new ProofArchive.ArchiveEntry("empty", "text/plain", null).bytes()).isEmpty();
+        assertThatThrownBy(() -> valid.writeTo(null)).isInstanceOf(GeneralException.class);
+        assertThatThrownBy(() -> valid.writeTo(new FailingOutputStream()))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(error -> assertThat(((GeneralException) error).getResultEnum())
+                        .isEqualTo(ResultEnum.FILE_DOWNLOAD_ERROR));
+    }
+
+    /**
+     * 验证 canonical JSON 序列化和历史 manifest 解析错误使用稳定业务错误。
+     */
+    @Test
+    void shouldTranslateCanonicalJsonFailures() {
+        assertThatThrownBy(() -> canonicalizer.canonicalBytes(new SelfReferencingValue()))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(error -> assertThat(((GeneralException) error).getResultEnum())
+                        .isEqualTo(ResultEnum.JSON_PARSE_ERROR));
+        assertThatThrownBy(() -> canonicalizer.parseManifest("{} trailing"))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(error -> assertThat(((GeneralException) error).getResultEnum())
+                        .isEqualTo(ResultEnum.FILE_RECORD_ERROR));
+    }
+
+    /**
      * 构造稳定签发上下文。
      */
     private SignedProofBundleModel.ManifestSeed seed() {
@@ -412,6 +475,33 @@ class DeterministicProofArchiveBuilderTest {
         public void close() throws IOException {
             closed = true;
             super.close();
+        }
+    }
+
+    /**
+     * 在首次写入时模拟 HTTP 输出流故障。
+     */
+    private static final class FailingOutputStream extends OutputStream {
+
+        /**
+         * 始终抛出 I/O 异常，验证 ZIP writer 的错误映射。
+         */
+        @Override
+        public void write(int value) throws IOException {
+            throw new IOException("simulated output failure");
+        }
+    }
+
+    /**
+     * 构造 Jackson 可检测的直接自引用对象。
+     */
+    private static final class SelfReferencingValue {
+
+        /**
+         * 返回自身以触发 canonical JSON 自引用检测。
+         */
+        public SelfReferencingValue getSelf() {
+            return this;
         }
     }
 }

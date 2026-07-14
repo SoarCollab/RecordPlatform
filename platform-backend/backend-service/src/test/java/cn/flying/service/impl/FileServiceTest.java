@@ -20,12 +20,16 @@ import cn.flying.dao.vo.file.ShareInfoVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.request.CancelShareRequest;
+import cn.flying.platformapi.request.StoreFileResponse;
+import cn.flying.platformapi.response.DirectMultipartCompletedPartVO;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.service.QuotaService;
 import cn.flying.service.ShareAuditService;
 import cn.flying.service.key.FileKeyEnvelopeService;
+import cn.flying.service.key.FileParamEnvelopeResult;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.service.saga.FileSagaOrchestrator;
+import cn.flying.service.saga.FileUploadResult;
 import cn.flying.test.builders.FileTestBuilder;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
@@ -1062,6 +1066,181 @@ class FileServiceTest {
                     .setVersion(1)
                     .setIsLatest(1)
                     .setVersionGroupId(9001L);
+        }
+    }
+
+    @Nested
+    @DisplayName("File Store Integrity")
+    class FileStoreIntegrity {
+
+        private static final String CONTENT_HASH =
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        private static final String SANITIZED_FILE_PARAM =
+                "{\"contentHash\":\"" + CONTENT_HASH + "\"}";
+
+        /**
+         * 初始化普通上传和直传共享的 PREPARE 记录、事务回调与脱敏文件参数。
+         *
+         * @return 可推进为 SUCCESS 的首版本文件
+         */
+        private File prepareStoreFixture() {
+            File existing = new File()
+                    .setId(7001L)
+                    .setTenantId(2L)
+                    .setUid(USER_ID)
+                    .setFileName("stored.txt")
+                    .setVersion(1)
+                    .setVersionGroupId(7001L)
+                    .setStatus(cn.flying.common.constant.FileUploadStatus.PREPARE.getCode());
+            when(fileMapper.selectOne(any(), anyBoolean())).thenReturn(existing);
+            when(fileMapper.update(any(File.class), any())).thenReturn(1);
+            when(fileKeyEnvelopeService.prepareFileParam(anyString()))
+                    .thenReturn(FileParamEnvelopeResult.withoutEnvelope(SANITIZED_FILE_PARAM));
+            doAnswer(invocation -> {
+                Consumer<TransactionStatus> callback = invocation.getArgument(0);
+                callback.accept(mock(TransactionStatus.class));
+                return null;
+            }).when(transactionTemplate).executeWithoutResult(any());
+            return existing;
+        }
+
+        /**
+         * 验证普通分片上传成功后在事务内保存内容摘要、密钥信封并返回 SUCCESS 快照。
+         */
+        @Test
+        void storeFileShouldPersistTrustedContentHashAndTransactionResult() {
+            File existing = prepareStoreFixture();
+            when(sagaOrchestrator.executeUpload(any()))
+                    .thenReturn(FileUploadResult.success("tx-normal", "file-hash-normal"));
+
+            File actual = fileService.storeFile(
+                    USER_ID,
+                    existing.getId(),
+                    existing.getFileName(),
+                    List.of(new java.io.File("chunk-0")),
+                    List.of("chunk-hash-0"),
+                    "raw-file-param");
+
+            assertEquals(CONTENT_HASH, actual.getContentHash());
+            assertEquals("file-hash-normal", actual.getFileHash());
+            assertEquals("tx-normal", actual.getTransactionHash());
+            assertEquals(cn.flying.common.constant.FileUploadStatus.SUCCESS.getCode(), actual.getStatus());
+            verify(fileKeyEnvelopeService).saveOwnerEnvelope(
+                    eq(existing), eq("file-hash-normal"), eq(USER_ID), any(FileParamEnvelopeResult.class));
+            verify(fileMapper).update(any(File.class), any());
+        }
+
+        /**
+         * 验证直传完成元数据在链上登记成功后写回可信内容摘要与事务标识。
+         */
+        @Test
+        void storeDirectUploadedFileShouldPersistTrustedContentHashAndTransactionResult() {
+            File existing = prepareStoreFixture();
+            DirectMultipartCompletedPartVO part = new DirectMultipartCompletedPartVO(
+                    0,
+                    "s3://node-a/final-0",
+                    6L,
+                    "\"etag-0\"",
+                    "sha256:plain",
+                    "sha256:cipher",
+                    "SHA-256");
+            when(fileRemoteClient.storeFileOnChain(any()))
+                    .thenReturn(Result.success(new StoreFileResponse("tx-direct", "file-hash-direct")));
+
+            File actual = fileService.storeDirectUploadedFile(
+                    USER_ID,
+                    existing.getId(),
+                    existing.getFileName(),
+                    6L,
+                    List.of(part),
+                    "raw-file-param");
+
+            assertEquals(6L, actual.getFileSize());
+            assertEquals(CONTENT_HASH, actual.getContentHash());
+            assertEquals("file-hash-direct", actual.getFileHash());
+            assertEquals("tx-direct", actual.getTransactionHash());
+            assertEquals(cn.flying.common.constant.FileUploadStatus.SUCCESS.getCode(), actual.getStatus());
+            verify(fileKeyEnvelopeService).saveOwnerEnvelope(
+                    eq(existing), eq("file-hash-direct"), eq(USER_ID), any(FileParamEnvelopeResult.class));
+            verify(fileMapper).update(any(File.class), any());
+        }
+
+        /**
+         * 验证内容摘要仅接受规范字符串，并把 JSON、null、类型和格式漂移统一映射为记录错误。
+         */
+        @Test
+        void requireContentHashShouldRejectMalformedMetadataAndNormalizeValidHash() {
+            String normalized = ReflectionTestUtils.invokeMethod(
+                    fileService,
+                    "requireContentHash",
+                    "{\"contentHash\":\"  SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  \"}");
+            assertEquals(CONTENT_HASH, normalized);
+
+            for (String invalid : List.of("{", "null", "{\"contentHash\":42}", "{\"contentHash\":\"bad\"}")) {
+                GeneralException error = assertThrows(
+                        GeneralException.class,
+                        () -> ReflectionTestUtils.invokeMethod(fileService, "requireContentHash", invalid));
+                assertEquals(ResultEnum.FILE_RECORD_ERROR, error.getResultEnum());
+            }
+        }
+
+        /**
+         * 验证版本链锁在首版本跳过，并对空主键、缺失锚点和有效锚点分别处理。
+         */
+        @Test
+        void proofLifecycleLockShouldHandleFirstVersionAndFailClosedOnMissingAnchor() {
+            assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(
+                    fileService,
+                    "lockProofLifecycleVersionGroupBeforeFileMutation",
+                    new File().setVersion(null)));
+            assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(
+                    fileService,
+                    "lockProofLifecycleVersionGroupBeforeFileMutation",
+                    new File().setVersion(1)));
+
+            GeneralException missingTenant = assertThrows(
+                    GeneralException.class,
+                    () -> ReflectionTestUtils.invokeMethod(
+                            fileService, "lockProofLifecycleVersionGroup", null, 7001L, "missing chain"));
+            GeneralException missingGroup = assertThrows(
+                    GeneralException.class,
+                    () -> ReflectionTestUtils.invokeMethod(
+                            fileService, "lockProofLifecycleVersionGroup", 2L, null, "missing chain"));
+            when(fileMapper.lockVersionGroupForProofLifecycle(2L, 7001L)).thenReturn(null, 7001L, 7001L);
+            GeneralException missingAnchor = assertThrows(
+                    GeneralException.class,
+                    () -> ReflectionTestUtils.invokeMethod(
+                            fileService, "lockProofLifecycleVersionGroup", 2L, 7001L, "missing chain"));
+            assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(
+                    fileService, "lockProofLifecycleVersionGroup", 2L, 7001L, "missing chain"));
+            assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(
+                    fileService,
+                    "lockProofLifecycleVersionGroupBeforeFileMutation",
+                    new File().setTenantId(2L).setVersionGroupId(7001L).setVersion(2)));
+
+            assertEquals(ResultEnum.FILE_RECORD_ERROR, missingTenant.getResultEnum());
+            assertEquals(ResultEnum.FILE_RECORD_ERROR, missingGroup.getResultEnum());
+            assertEquals(ResultEnum.FILE_RECORD_ERROR, missingAnchor.getResultEnum());
+        }
+
+        /**
+         * 验证后续版本不存在旧成功文件时只完成版本链锁，不更新 proof 状态。
+         */
+        @Test
+        void markOlderProofIssuancesShouldReturnWhenNoOlderSuccessfulFileExists() {
+            File completedVersion = new File()
+                    .setId(7002L)
+                    .setTenantId(2L)
+                    .setVersionGroupId(7001L)
+                    .setVersion(2);
+            when(fileMapper.lockVersionGroupForProofLifecycle(2L, 7001L)).thenReturn(7001L);
+            when(fileMapper.selectList(any())).thenReturn(List.of());
+
+            ReflectionTestUtils.invokeMethod(
+                    fileService, "markOlderProofIssuancesSuperseded", completedVersion);
+
+            verify(fileMapper).selectList(any());
+            verifyNoInteractions(proofBundleIssuanceMapper);
         }
     }
 

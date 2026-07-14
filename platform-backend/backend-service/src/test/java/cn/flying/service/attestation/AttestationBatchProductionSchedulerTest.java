@@ -13,10 +13,12 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -84,6 +86,44 @@ class AttestationBatchProductionSchedulerTest {
         assertThat(conditional).isNotNull();
         assertThat(conditional.name()).containsExactly("attestation.production.enabled");
         assertThat(conditional.havingValue()).isEqualTo("true");
+    }
+
+    /**
+     * 验证空租户列表会刷新零 backlog，且不会调用生产服务。
+     */
+    @Test
+    void runScheduledShouldHandleNullAndEmptyTenantLists() {
+        AttestationBatchProductionScheduler scheduler = scheduler();
+        when(tenantMapper.selectActiveTenantIds()).thenReturn(null, List.of());
+
+        scheduler.runScheduled();
+        scheduler.runScheduled();
+
+        assertThat(meterRegistry.get("app.attestation.candidate.backlog")
+                .tag("status", "ready").gauge().value()).isZero();
+        assertThat(meterRegistry.get("app.attestation.candidate.backlog")
+                .tag("status", "dead_letter").gauge().value()).isZero();
+        verifyNoInteractions(productionService);
+    }
+
+    /**
+     * 验证空租户 ID 被跳过，且无消息异常不会阻断最终 backlog 刷新。
+     */
+    @Test
+    void runScheduledShouldHandleNullTenantAndMessageLessFailures() {
+        AttestationBatchProductionScheduler scheduler = scheduler();
+        when(tenantMapper.selectActiveTenantIds()).thenReturn(Arrays.asList(null, 7L));
+        when(productionService.runTenant(7L, false)).thenThrow(new IllegalStateException());
+        when(productionService.getStatus(7L)).thenThrow(new IllegalStateException());
+
+        scheduler.runScheduled();
+
+        verify(productionService).runTenant(7L, false);
+        verify(productionService).getStatus(7L);
+        assertThat(meterRegistry.get("app.attestation.candidate.backlog")
+                .tag("status", "ready").gauge().value()).isZero();
+        assertThat(meterRegistry.get("app.attestation.candidate.backlog")
+                .tag("status", "dead_letter").gauge().value()).isZero();
     }
 
     /**

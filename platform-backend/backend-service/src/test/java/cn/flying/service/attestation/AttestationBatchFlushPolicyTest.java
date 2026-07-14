@@ -58,6 +58,19 @@ class AttestationBatchFlushPolicyTest {
     }
 
     /**
+     * 验证缺失统计、空 backlog 和缺失最早时间均不会触发 flush 或 claim。
+     */
+    @Test
+    void missingOrEmptyStatsShouldRemainDeferred() {
+        Instant now = Instant.parse("2026-07-14T00:00:30Z");
+
+        assertThat(policy.shouldFlush(null, now, false, properties)).isFalse();
+        assertThat(policy.shouldFlush(stats(1, null), now, false, properties)).isFalse();
+        assertThat(policy.claimSize(null, properties)).isZero();
+        assertThat(policy.claimSize(stats(0, null), properties)).isZero();
+    }
+
+    /**
      * 验证 claim 大小不会超过配置最大值，异常配置会被安全收敛。
      */
     @Test
