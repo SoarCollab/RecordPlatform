@@ -342,22 +342,21 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
             AttestationBatch batch,
             SignedProofBundleModel.EvidencePayloads payloads
     ) {
-        for (int remainingAttempts = MAX_ISSUANCE_TRANSACTION_ATTEMPTS;
-             remainingAttempts > 0;
-             remainingAttempts--) {
+        int remainingAttempts = MAX_ISSUANCE_TRANSACTION_ATTEMPTS;
+        while (true) {
             try {
                 ProofFinalizationOutcome outcome = transactionTemplate.execute(status ->
                         issueNewLocked(file, leaf, batch, payloads));
                 return requireSuccessfulOutcome(outcome);
             } catch (TransientDataAccessException contention) {
-                if (remainingAttempts == 1) {
+                remainingAttempts--;
+                if (remainingAttempts == 0) {
                     throw new RetryableException(
                             ResultEnum.SERVICE_UNAVAILABLE,
                             Map.of("reason", "signed proof issuance database contention"));
                 }
             }
         }
-        throw new IllegalStateException("Signed proof issuance retry loop exited unexpectedly");
     }
 
     /**
@@ -1059,7 +1058,10 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
      */
     private SignedProofBundleModel.Manifest parseIssuedManifest(ProofBundleIssuance issuance) {
         String manifestJson = issuance == null ? null : issuance.getManifestJson();
-        if (!StringUtils.hasText(manifestJson)) {
+        if (manifestJson == null) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "已签发证明 manifest 大小不合法");
+        }
+        if (manifestJson.isBlank()) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "已签发证明 manifest 大小不合法");
         }
         if (manifestJson.length() > MAX_PERSISTED_MANIFEST_CHARS) {

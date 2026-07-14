@@ -400,6 +400,45 @@ class SignedProofArchiveServiceImplTest {
     }
 
     /**
+     * 验证历史签发记录缺失 manifest 时会失败关闭并推进 INVALID，不发生空指针解引用。
+     */
+    @Test
+    void shouldMarkMissingPersistedManifestInvalidWithoutNullDereference() {
+        File file = file();
+        AttestationLeaf leaf = leaf();
+        mockSuccessfulEvidence(file, leaf);
+
+        try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+            security.when(SecurityUtils::isAdmin).thenReturn(false);
+            service.exportByFileId(USER_ID, FILE_ID);
+
+            ArgumentCaptor<ProofBundleIssuance> issuanceCaptor =
+                    ArgumentCaptor.forClass(ProofBundleIssuance.class);
+            verify(issuanceMapper).insert(issuanceCaptor.capture());
+            ProofBundleIssuance issuance = issuanceCaptor.getValue()
+                    .setManifestJson(null)
+                    .setStatus("SUPERSEDED")
+                    .setStatusVersion(2L);
+            when(issuanceMapper.selectOne(any())).thenReturn(issuance);
+            when(issuanceMapper.selectByLeafForUpdate(TENANT_ID, LEAF_ID)).thenReturn(issuance);
+            when(issuanceMapper.update(eq(null), any(Wrapper.class))).thenReturn(1);
+            org.mockito.Mockito.clearInvocations(
+                    fileMapper,
+                    issuanceMapper,
+                    batchMapper,
+                    chunkManifestService,
+                    fileRemoteClient);
+
+            assertFileRecordError(() -> service.exportByLeafId(USER_ID, LEAF_ID));
+
+            verify(issuanceMapper).update(eq(null), any(Wrapper.class));
+            verify(batchMapper, never()).selectById(any());
+            verify(chunkManifestService, never()).findActiveManifest(any(), any());
+            verifyNoInteractions(fileRemoteClient);
+        }
+    }
+
+    /**
      * 验证已撤销证明不能重新导出，且拒绝路径不会把 REVOKED 覆盖为 INVALID。
      */
     @Test
