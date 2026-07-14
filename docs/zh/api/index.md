@@ -39,6 +39,8 @@ Authorization: Bearer <token>
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`
 - `GET /api/v1/images/download/images/**`
 - `GET /api/v1/shares/**`
+- `GET /api/v1/public/proofs/{proofId}/status`
+- `GET /api/v1/public/proof-keys/{keyId}/versions/{keyVersion}`
 - `GET /api/v1/sse/connect`（需短期令牌，见下文）
 
 ### 3) SSE 双令牌模式
@@ -93,6 +95,9 @@ Authorization: Bearer <token>
 | GET | `/api/v1/files/{id}` | 按文件 ID 查询详情 |
 | GET | `/api/v1/files/{id}/proof-bundle` | 按文件 ID 导出可验证证明包 |
 | GET | `/api/v1/files/attestation-leaves/{leafId}/proof-bundle` | 按存证叶子 ID 导出可验证证明包 |
+| GET | `/api/v1/files/{id}/proof-bundle.zip` | 按文件 ID 导出确定性 Ed25519 签名证明 ZIP |
+| GET | `/api/v1/files/attestation-leaves/{leafId}/proof-bundle.zip` | 按存证叶子 ID 导出确定性签名证明 ZIP |
+| POST | `/api/v1/files/attestation-leaves/{leafId}/proof-status/revoke` | 幂等撤销当前用户有权管理的签名证明 |
 | GET | `/api/v1/files/hash/{fileHash}` | 按文件哈希查询详情 |
 | GET | `/api/v1/files` | 用户文件分页（支持 `keyword`、`keywordMode=FUZZY/PREFIX/EXACT_HASH/AUTO`、`status`、`startTime`、`endTime`） |
 | GET | `/api/v1/files/stats` | 用户文件统计 |
@@ -120,6 +125,14 @@ Authorization: Bearer <token>
 | GET | `/api/v1/files/{id}/versions` | 查询文件版本链列表 |
 | POST | `/api/v1/files/{id}/versions` | 将文件标记为新版本的父版本 |
 
+`.zip` 是当前规范合同：固定八个根条目、固定顺序/时间戳/STORED metadata，canonical `manifest.json` 摘要绑定六个证据条目，`issuer-signature.jws` 使用专用 Ed25519 key 对 manifest 字节做 compact JWS 签名。导出前重新校验租户/owner、原文件 `contentHash`、active manifest、存储 HEAD、`MANIFEST_HASH` Merkle 路径、已完成 batch 和不可变 contract registry。完成批次只接受携带合法 32-byte 交易哈希的 `CHAIN_WRITE`，或交易哈希为空的两种链查询恢复来源；32-byte 链根必须等于 Merkle 根。`contentHash`、`chainRecordId`、`manifestHash`、`cipherHash`、`merkleRoot`、`abiFingerprint` 不允许互换。单条目上限 1 MiB，总逻辑 payload 上限 4 MiB，额外条目、嵌套路径和路径穿越均失败关闭。
+
+两个 ZIP 路由共享同一个租户/用户限流桶：普通用户每分钟 10 次，管理员和监控员每分钟 30 次。每个应用实例最多并发执行 8 个完整证明校验，每个证明最多接受 128 个 manifest 分片，并对 storage HEAD 校验施加 60 秒总预算。并发隔离饱和或存储预算耗尽属于可重试失败，不会把证明推进为 `INVALID`。
+
+签名 JSON schema 固定为 `record-platform-proof-manifest.v2`、`record-platform-proof-chunk-manifest.v2`、`record-platform-proof-merkle.v2`、`record-platform-proof-chain-receipt.v2` 和 `record-platform-proof-verification-policy.v2`。Canonical JSON 按字母排序 object key，并省略值为 null 的可选字段。被签名的 policy 以机器可读形式携带来源/交易/根模式、完整 registry 规则与指纹字段顺序、生命周期规则以及 ZIP/文本编码规则。`file.hash` 与 ASCII `issuer-signature.jws` 都以且仅以一个 LF 字节结尾。ZIP 成功响应公开 `Content-Disposition`、`Cache-Control`、`X-Proof-Manifest-Hash`；容量或 deadline 失败返回带 `Retry-After: 5` 的 JSON 503。
+
+公开只读接口 `GET /api/v1/public/proofs/{proofId}/status` 返回 `ACTIVE/REVOKED/SUPERSEDED/INVALID` 当前状态；`GET /api/v1/public/proof-keys/{keyId}/versions/{keyVersion}` 返回版本化 SPKI/指纹。二者无需 JWT 或租户头，且不返回租户、内部文件/叶子 ID 或私钥；共享 IP 维度 120 次/60 秒限流。`statusVersion` 是十进制 JSON 字符串。`issuedAt` 是第一次 Ed25519 签名真正成功的时间，不回溯为 leaf/batch 创建时间；确定性重建复用持久化时间与原 JWS。签名 manifest 中的 `issuedStatus` 只允许 `ACTIVE/SUPERSEDED`，验证方必须查询 `statusLocation`。`INVALID` 是终态，只能用于已持久化 canonical manifest、JWS、签名 key 身份或不可变签发快照发生确定性漂移，固定原因为 `immutable_snapshot_validation_failed`；storage、Merkle、registry、receipt 或其他依赖/读取失败只拒绝当前导出，不改变生命周期。租户内 owner 或管理员可撤销；撤销接口按用户 10 次/60 秒限流（管理员/监控角色 30 次），`REVOKED`、`INVALID` 不能恢复或再次撤销。旧 JSON 端点继续返回未签名 `proof-bundle.v1.1` 以兼容现有集成，但已弃用，不能作为签名真实性凭据。
+
 ### 管理员文件审计（`/api/v1/admin/files`）
 
 | 方法 | 端点 | 说明 |
@@ -132,6 +145,15 @@ Authorization: Bearer <token>
 | DELETE | `/api/v1/admin/files/shares/{shareCode}` | 强制取消分享 |
 | GET | `/api/v1/admin/files/shares/{shareCode}/logs` | 分享访问日志 |
 | GET | `/api/v1/admin/files/shares/{shareCode}/stats` | 分享访问统计 |
+
+### 管理员存证批次生产（`/api/v1/admin/attestation-batches/production`）
+
+两个操作都要求管理员角色，并且只使用认证上下文中的当前租户。
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| POST | `/api/v1/admin/attestation-batches/production/trigger` | 为当前租户强制执行一轮有界生产处理 |
+| GET | `/api/v1/admin/attestation-batches/production/status` | 查询有效配置、candidate backlog 和 due batch 数 |
 
 ### 管理员完整性告警（`/api/v1/admin/integrity-alerts`）
 

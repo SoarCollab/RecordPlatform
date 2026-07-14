@@ -36,6 +36,18 @@ contract Storage {
     // 删除文件事件
     event FileDeleted(string uploader, bytes32 fileHash);
     event FilesDeleted(string uploader, bytes32[] fileHashes);
+
+    /**
+     * 返回可由链外注册表严格核对的稳定合约名称和语义版本。
+     */
+    function contractIdentity()
+        public
+        pure
+        virtual
+        returns (string memory contractName, string memory semanticVersion)
+    {
+        return ("Storage", "1.0.0");
+    }
     
     // 生成文件hash
     function generateFileHash(

@@ -10,27 +10,27 @@ import java.util.List;
  */
 @Schema(description = "文件证明包")
 public record ProofBundleVO(
-        @Schema(description = "证明包合同版本")
+        @Schema(description = "证明包合同版本", requiredMode = Schema.RequiredMode.REQUIRED)
         String contractVersion,
-        @Schema(description = "证明包清单")
+        @Schema(description = "证明包清单", requiredMode = Schema.RequiredMode.REQUIRED)
         Manifest manifest,
-        @Schema(description = "文件公开元数据")
+        @Schema(description = "文件公开元数据", requiredMode = Schema.RequiredMode.REQUIRED)
         FileEvidence file,
-        @Schema(description = "存储公开元数据")
+        @Schema(description = "存储公开元数据", requiredMode = Schema.RequiredMode.REQUIRED)
         StorageEvidence storage,
-        @Schema(description = "Merkle 证明")
+        @Schema(description = "Merkle 证明", requiredMode = Schema.RequiredMode.REQUIRED)
         MerkleEvidence merkle,
-        @Schema(description = "链上回执摘要")
+        @Schema(description = "链上回执摘要", requiredMode = Schema.RequiredMode.REQUIRED)
         ChainEvidence chain,
-        @Schema(description = "签发方元数据")
+        @Schema(description = "签发方元数据", requiredMode = Schema.RequiredMode.REQUIRED)
         IssuerEvidence issuer,
-        @Schema(description = "验证策略")
+        @Schema(description = "验证策略", requiredMode = Schema.RequiredMode.REQUIRED)
         VerificationPolicy verificationPolicy,
-        @Schema(description = "人工验证说明")
+        @Schema(description = "人工验证说明", requiredMode = Schema.RequiredMode.REQUIRED)
         List<String> verificationGuide
 ) {
 
-    public static final String CONTRACT_VERSION = "proof-bundle.v1";
+    public static final String CONTRACT_VERSION = "proof-bundle.v1.1";
 
     /**
      * High-level proof bundle manifest.
@@ -150,12 +150,94 @@ public record ProofBundleVO(
      * Chain receipt metadata that can be cross-checked outside the platform.
      */
     public record ChainEvidence(
-            @Schema(description = "批量根上链交易哈希")
+            @Schema(
+                    description = "批量根上链交易哈希",
+                    requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+                    nullable = true)
             String batchTransactionHash,
-            @Schema(description = "批量根上链文件哈希")
+            @Schema(description = "批量根上链文件哈希", requiredMode = Schema.RequiredMode.REQUIRED)
             String batchChainFileHash,
-            @Schema(description = "文件上链交易哈希")
-            String fileTransactionHash
+            @Schema(
+                    description = "文件上链交易哈希",
+                    requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+                    nullable = true)
+            String fileTransactionHash,
+            @Schema(
+                    description = "批量根确认来源；响应丢失恢复时可为空",
+                    requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+                    nullable = true)
+            String batchConfirmationSource,
+            @Schema(
+                    description = "签发批次绑定的不可变合约注册表快照",
+                    requiredMode = Schema.RequiredMode.REQUIRED)
+            ContractRegistryEvidence contractRegistry
+    ) {
+
+        /**
+         * 兼容读取旧测试或旧 Java 调用构造的 v1 结构；验证器会对缺失注册表失败关闭。
+         */
+        public ChainEvidence(
+                String batchTransactionHash,
+                String batchChainFileHash,
+                String fileTransactionHash,
+                String batchConfirmationSource
+        ) {
+            this(
+                    batchTransactionHash,
+                    batchChainFileHash,
+                    fileTransactionHash,
+                    batchConfirmationSource,
+                    null);
+        }
+    }
+
+    /**
+     * Contract registry snapshot bound to the batch before the chain write.
+     */
+    public record ContractRegistryEvidence(
+            @Schema(description = "注册表条目 schema", requiredMode = Schema.RequiredMode.REQUIRED)
+            String schemaVersion,
+            @Schema(description = "注册表关键字段 SHA-256", requiredMode = Schema.RequiredMode.REQUIRED)
+            String registryFingerprint,
+            @Schema(description = "合约名称", requiredMode = Schema.RequiredMode.REQUIRED)
+            String contractName,
+            @Schema(description = "合约语义版本", requiredMode = Schema.RequiredMode.REQUIRED)
+            String semanticVersion,
+            @Schema(description = "链适配器类型", requiredMode = Schema.RequiredMode.REQUIRED)
+            String chainType,
+            @Schema(description = "节点链 ID", requiredMode = Schema.RequiredMode.REQUIRED)
+            String chainId,
+            @Schema(
+                    description = "FISCO 群组 ID；FISCO 必填，Besu 为空",
+                    requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+                    nullable = true)
+            String groupId,
+            @Schema(description = "合约地址", requiredMode = Schema.RequiredMode.REQUIRED)
+            String contractAddress,
+            @Schema(description = "ABI 指纹算法", requiredMode = Schema.RequiredMode.REQUIRED)
+            String abiFingerprintAlgorithm,
+            @Schema(description = "canonical ABI SHA-256", requiredMode = Schema.RequiredMode.REQUIRED)
+            String abiSha256,
+            @Schema(description = "creation bytecode SHA-256", requiredMode = Schema.RequiredMode.REQUIRED)
+            String artifactBytecodeSha256,
+            @Schema(description = "链上 runtime code SHA-256", requiredMode = Schema.RequiredMode.REQUIRED)
+            String onChainCodeSha256,
+            @Schema(
+                    description = "部署交易哈希；旧部署兼容时可与区块号同时为空",
+                    requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+                    nullable = true)
+            String deploymentTransactionHash,
+            @Schema(
+                    description = "部署区块号；旧部署兼容时可与交易哈希同时为空",
+                    requiredMode = Schema.RequiredMode.NOT_REQUIRED,
+                    nullable = true)
+            Long deploymentBlockNumber,
+            @Schema(description = "生命周期状态", requiredMode = Schema.RequiredMode.REQUIRED)
+            String status,
+            @Schema(description = "生效时间", requiredMode = Schema.RequiredMode.REQUIRED)
+            String effectiveAt,
+            @Schema(description = "升级策略", requiredMode = Schema.RequiredMode.REQUIRED)
+            String upgradeStrategy
     ) {
     }
 

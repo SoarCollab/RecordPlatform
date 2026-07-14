@@ -19,7 +19,8 @@ public class TenantLineHandlerImpl implements TenantLineHandler {
             "tenant",
             "sys_audit_config",
             "sys_config",
-            "processed_message"
+            "processed_message",
+            "proof_signing_key"
             // 注意：sys_operation_log 已移除，审计日志保持租户隔离
             // 超级管理员可通过 TenantContext.setIgnoreIsolation(true) 临时绕过
     );

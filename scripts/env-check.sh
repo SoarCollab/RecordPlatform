@@ -318,8 +318,25 @@ check_fisco() {
     local peer="${FISCO_PEER_ADDRESS:-127.0.0.1:20200}"
     local host="${peer%%:*}"
     local port="${peer##*:}"
+    local chain_id="${FISCO_CHAIN_ID:-}"
+    local group_id="${FISCO_GROUP_ID:-}"
 
     section 5 "FISCO BCOS ($host:$port)"
+
+    if [[ "$chain_id" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+        ok "Configured local FISCO chain ID: $chain_id"
+    else
+        fail "FISCO_CHAIN_ID must be explicitly configured"
+    fi
+    if [[ "$group_id" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+        ok "Configured local FISCO group ID: $group_id"
+    else
+        fail "FISCO_GROUP_ID must be explicitly configured"
+    fi
+    if [ "${BLOCKCHAIN_ACTIVE:-local-fisco}" = "bsn-fisco" ] \
+        && [[ ! "${BSN_FISCO_CHAIN_ID:-}" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+        fail "BSN_FISCO_CHAIN_ID is required when BLOCKCHAIN_ACTIVE=bsn-fisco"
+    fi
 
     if tcp_check "$host" "$port"; then
         ok "FISCO BCOS node is reachable"
@@ -458,6 +475,52 @@ check_certs() {
 # ==============================================================================
 # 8. Contract Addresses
 # ==============================================================================
+
+# 校验单个合约部署证据必须整组为空，或形成合法 tx/block/effectiveAt 三元组。
+validate_contract_deployment_evidence() {
+    local name="$1"
+    local upper_name
+    upper_name=$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')
+    local tx_key="FISCO_${upper_name}_DEPLOYMENT_TX"
+    local block_key="FISCO_${upper_name}_DEPLOYMENT_BLOCK"
+    local effective_at_key="FISCO_${upper_name}_DEPLOYMENT_EFFECTIVE_AT"
+    local transaction_hash="${!tx_key:-}"
+    local block_number="${!block_key:-}"
+    local effective_at="${!effective_at_key:-}"
+    local populated=0
+    [ -n "$transaction_hash" ] && populated=$((populated + 1))
+    [ -n "$block_number" ] && populated=$((populated + 1))
+    [ -n "$effective_at" ] && populated=$((populated + 1))
+
+    if [ "$populated" -eq 0 ]; then
+        warn "$name deployment evidence is absent (legacy compatibility mode)"
+        return 0
+    fi
+    if [ "$populated" -ne 3 ]; then
+        fail "$name deployment evidence must set $tx_key, $block_key and $effective_at_key together"
+        return 1
+    fi
+
+    local valid=true
+    if [[ ! "$transaction_hash" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+        fail "$tx_key must be 0x + 64 hex characters"
+        valid=false
+    fi
+    if [[ ! "$block_number" =~ ^(0|[1-9][0-9]*)$ ]]; then
+        fail "$block_key must be a non-negative decimal integer"
+        valid=false
+    fi
+    if [[ ! "$effective_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+        fail "$effective_at_key must use UTC ISO-8601 seconds (YYYY-MM-DDTHH:MM:SSZ)"
+        valid=false
+    fi
+    if [ "$valid" = true ]; then
+        ok "$name deployment evidence is a complete tx/block/effectiveAt triplet"
+    else
+        return 1
+    fi
+}
+
 check_contracts() {
     section 8 "Smart Contract Addresses"
 
@@ -479,6 +542,9 @@ check_contracts() {
             fail "$name contract address invalid: $addr (expected 0x + 40 hex chars)"
         fi
     done
+
+    validate_contract_deployment_evidence Storage || true
+    validate_contract_deployment_evidence Sharing || true
 }
 
 # ==============================================================================

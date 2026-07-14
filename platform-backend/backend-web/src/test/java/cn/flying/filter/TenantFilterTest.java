@@ -92,6 +92,27 @@ class TenantFilterTest {
     }
 
     /**
+     * 公开 proof 状态和历史公钥端点无需租户头，且不得建立残留租户上下文。
+     */
+    @Test
+    @DisplayName("should allow public proof endpoints without tenant header")
+    void shouldAllowPublicProofEndpointsWithoutTenantHeader() throws ServletException, IOException {
+        for (String path : new String[]{
+                "/api/v1/public/proofs/rp-proof-abc/status",
+                "/api/v1/public/proof-keys/key-main/versions/1"}) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
+            request.setServletPath(path);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            filter.doFilterInternal(request, response, filterChain);
+
+            verify(filterChain).doFilter(request, response);
+            clearInvocations(filterChain);
+            assertNull(TenantContext.getTenantId());
+        }
+    }
+
+    /**
      * 白名单路径不强制要求租户头，但若主动携带租户头，应写入 TenantContext 与 request attribute，
      * 以便后续 MyBatis-Plus 租户拦截器能正确注入 tenant_id 条件。
      */

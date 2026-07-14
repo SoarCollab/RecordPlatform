@@ -27,6 +27,9 @@ RUN rm /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/nginx.conf
 
-EXPOSE 80
+EXPOSE 8080
+
+# 运行阶段仅需读取静态资源，使用镜像内置的非特权用户。
+USER nginx
 
 CMD ["nginx", "-g", "daemon off;"]

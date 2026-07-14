@@ -26,7 +26,7 @@ RecordPlatform 部署和运维指南。
 | platform-backend | 8000 | HTTP/REST |
 | platform-fisco | 8091 | Dubbo Triple |
 | platform-storage | 8092 | Dubbo Triple |
-| platform-frontend | 5173 (开发) / 80 (生产) | HTTP |
+| platform-frontend | 5173（开发）/ 8080（容器端口，可按需映射宿主机 80） | HTTP |
 
 ### 启动顺序
 
@@ -45,4 +45,3 @@ RecordPlatform 部署和运维指南。
 | `local` | 本地开发 | Debug 日志、Swagger 启用 |
 | `dev` | 开发服务器 | 部分日志 |
 | `prod` | 生产环境 | Swagger 禁用、SSL 必需 |
-

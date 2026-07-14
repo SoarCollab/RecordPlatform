@@ -639,6 +639,23 @@ class FileAdminServiceImplTest {
             verify(fileMapper).selectById(FILE_ID);
             verify(fileMapper).update(isNull(), any());
         }
+
+        /**
+         * 验证管理员不能绕过上传、链和 proof 生命周期校验将未完成文件提升为成功。
+         */
+        @Test
+        @DisplayName("should reject admin promotion from prepare to success")
+        void updateFileStatus_prepareToSuccess_rejected() {
+            File file = createFile().setStatus(0);
+            when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+
+            GeneralException exception = assertThrows(
+                    GeneralException.class,
+                    () -> fileAdminService.updateFileStatus("ext_" + FILE_ID, 1, "manual promotion"));
+
+            assertEquals(ResultEnum.PARAM_ERROR, exception.getResultEnum());
+            verify(fileMapper, never()).update(isNull(), any());
+        }
     }
 
     @Nested

@@ -40,6 +40,10 @@ class FlywayMigrationVersionTest {
         assertTrue(migrationFiles.contains("V1.7.4__rename_file_contract_hash_to_transaction_hash.sql"));
         assertTrue(migrationFiles.contains("V1.7.5__replace_clean_log_procedures.sql"));
         assertTrue(migrationFiles.contains("V1.10.3__integrity_alert_evidence.sql"));
+        assertTrue(migrationFiles.contains("V1.11.0__attestation_batch_consistency.sql"));
+        assertTrue(migrationFiles.contains("V1.12.0__attestation_batch_production_trigger.sql"));
+        assertTrue(migrationFiles.contains("V1.13.0__attestation_contract_registry_snapshot.sql"));
+        assertTrue(migrationFiles.contains("V1.14.0__signed_proof_bundle.sql"));
         assertFalse(migrationFiles.contains("V1.0.1__add_account_nickname.sql"));
         assertFalse(migrationFiles.contains("V1.5.0__integrity_alert.sql"));
 
@@ -129,6 +133,107 @@ class FlywayMigrationVersionTest {
         assertTrue(sql.contains("ADD COLUMN `evidence` VARCHAR(1024)"));
         assertTrue(sql.contains("ADD INDEX `idx_integrity_alert_open_dedup`"));
         assertTrue(sql.contains("WHEN `alert_type` = 'CHAIN_NOT_FOUND' THEN 'ERROR'"));
+    }
+
+    /**
+     * 验证批量存证一致性迁移只追加状态字段、幂等唯一键和 attempt 审计表。
+     */
+    @Test
+    @DisplayName("should add recoverable attestation batch state through a forward migration")
+    void shouldAddRecoverableAttestationBatchStateThroughForwardMigration() throws IOException {
+        Path migration = resolveMigrationDir().resolve("V1.11.0__attestation_batch_consistency.sql");
+        String sql = Files.readString(migration);
+
+        assertTrue(sql.contains("ADD COLUMN `idempotency_key`"));
+        assertTrue(sql.contains("ADD UNIQUE KEY `uk_attestation_batch_idempotency`"));
+        assertTrue(sql.contains("ADD COLUMN `claim_token`"));
+        assertTrue(sql.contains("ADD COLUMN `lease_expires_at`"));
+        assertTrue(sql.contains("CREATE TABLE IF NOT EXISTS `attestation_batch_attempt`"));
+        assertTrue(sql.contains("UNIQUE KEY `uk_attestation_attempt_claim`"));
+        assertTrue(sql.contains("FOREIGN KEY (`batch_id`) REFERENCES `attestation_batch` (`id`)"));
+        assertFalse(sql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
+    }
+
+    /**
+     * 验证生产触发通过前向迁移增加 candidate 账本和显式 leaf 证据语义。
+     */
+    @Test
+    @DisplayName("should add durable production candidates and manifest evidence through a forward migration")
+    void shouldAddDurableProductionCandidatesAndManifestEvidence() throws IOException {
+        Path migration = resolveMigrationDir().resolve("V1.12.0__attestation_batch_production_trigger.sql");
+        String sql = Files.readString(migration);
+
+        assertTrue(sql.contains("ADD COLUMN `file_version`"));
+        assertTrue(sql.contains("ADD COLUMN `evidence_type`"));
+        assertTrue(sql.contains("ADD COLUMN `evidence_hash`"));
+        assertTrue(sql.contains("ADD COLUMN `chain_record_id`"));
+        assertTrue(sql.contains("CREATE TABLE IF NOT EXISTS `attestation_batch_candidate`"));
+        assertTrue(sql.contains("`evidence_hash`    VARCHAR(255) DEFAULT NULL"));
+        assertTrue(sql.contains("ADD KEY `idx_file_attestation_candidate`"));
+        assertTrue(sql.contains("ADD KEY `idx_manifest_attestation_candidate`"));
+        assertTrue(sql.contains("UNIQUE KEY `uk_attestation_candidate_file_version`"));
+        assertTrue(sql.contains("KEY `idx_attestation_candidate_ready` "
+                + "(`tenant_id`, `deleted`, `status`, `eligible_at`, `id`)"));
+        assertTrue(sql.contains("KEY `idx_attestation_candidate_claim` "
+                + "(`tenant_id`, `claim_token`, `status`, `deleted`)"));
+        assertTrue(sql.contains("KEY `idx_attestation_candidate_lease` "
+                + "(`tenant_id`, `deleted`, `status`, `lease_expires_at`)"));
+        assertTrue(sql.contains("KEY `idx_attestation_candidate_batch` "
+                + "(`tenant_id`, `deleted`, `batch_id`)"));
+        assertTrue(sql.contains("FOREIGN KEY (`manifest_id`) REFERENCES `file_chunk_manifest` (`id`)"));
+        assertTrue(sql.contains("FOREIGN KEY (`batch_id`) REFERENCES `attestation_batch` (`id`)"));
+        assertTrue(sql.contains("'LEGACY_CHAIN_RECORD_ID'"));
+        assertFalse(sql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
+    }
+
+    /**
+     * 验证合约注册表快照通过前向迁移追加，并保留历史批次为未知状态。
+     */
+    @Test
+    @DisplayName("should bind attestation batches to immutable contract registry snapshots")
+    void shouldAddContractRegistrySnapshotThroughForwardMigration() throws IOException {
+        Path migration = resolveMigrationDir().resolve(
+                "V1.13.0__attestation_contract_registry_snapshot.sql");
+        String sql = Files.readString(migration);
+
+        assertTrue(sql.contains("ADD COLUMN `contract_registry_fingerprint` VARCHAR(71)"));
+        assertTrue(sql.contains("ADD COLUMN `contract_registry_json` JSON DEFAULT NULL"));
+        assertTrue(sql.contains("ADD COLUMN `contract_address`"));
+        assertTrue(sql.contains("ADD COLUMN `contract_abi_sha256`"));
+        assertTrue(sql.contains("ADD COLUMN `contract_code_sha256`"));
+        assertTrue(sql.contains("ADD KEY `idx_attestation_batch_registry`"));
+        assertTrue(sql.contains("ADD KEY `idx_attestation_batch_contract`"));
+        assertFalse(sql.matches("(?is).*UPDATE\\s+`attestation_batch`.*"));
+        assertFalse(sql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
+    }
+
+    /**
+     * 验证签名证明迁移只前向增加 nullable contentHash、全局 key 注册表和签发状态表。
+     */
+    @Test
+    @DisplayName("should add signed proof issuance and content hash through a forward migration")
+    void shouldAddSignedProofIssuanceThroughForwardMigration() throws IOException {
+        Path migration = resolveMigrationDir().resolve("V1.14.0__signed_proof_bundle.sql");
+        String sql = Files.readString(migration);
+
+        assertTrue(sql.contains("ADD COLUMN `content_hash` VARCHAR(71) DEFAULT NULL"));
+        assertTrue(sql.contains("CREATE TABLE `proof_signing_key`"));
+        assertTrue(sql.contains("UNIQUE KEY `uk_proof_signing_key_identity` (`key_id`, `key_version`)"));
+        assertTrue(sql.contains("`first_seen_at`"));
+        assertTrue(sql.contains("CREATE TABLE `proof_bundle_issuance`"));
+        assertTrue(sql.contains("UNIQUE KEY `uk_proof_bundle_proof_id`"));
+        assertTrue(sql.contains("UNIQUE KEY `uk_proof_bundle_leaf` (`tenant_id`, `leaf_id`)"));
+        assertTrue(sql.contains("UNIQUE KEY `uk_file_tenant_id_version` (`tenant_id`, `id`, `version`)"));
+        assertTrue(sql.contains("UNIQUE KEY `uk_attestation_leaf_binding`"));
+        assertTrue(sql.contains("FOREIGN KEY (`tenant_id`, `file_id`, `file_version`)"));
+        assertTrue(sql.contains("FOREIGN KEY (`tenant_id`, `file_id`, `file_version`, `leaf_id`)"));
+        assertTrue(sql.contains("CONSTRAINT `fk_proof_bundle_signing_key`"));
+        assertTrue(sql.contains("REFERENCES `proof_signing_key` (`key_id`, `key_version`)"));
+        assertTrue(sql.contains("`issued_status`"));
+        assertTrue(sql.contains("`status_version`"));
+        assertTrue(sql.contains("`public_key_spki`"));
+        assertFalse(sql.matches("(?is).*UPDATE\\s+`file`.*"));
+        assertFalse(sql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
     }
 
     /**

@@ -21,6 +21,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/attestation-batches/production/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get production Merkle batch status for the current tenant */
+        get: operations["status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/attestation-batches/production/trigger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Trigger production Merkle batches for the current tenant */
+        post: operations["trigger"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/files": {
         parameters: {
             query?: never;
@@ -751,10 +785,48 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 按存证叶子导出文件证明包 */
+        /**
+         * 按存证叶子导出旧版 JSON 文件证明包
+         * @deprecated
+         * @description 兼容 proof-bundle.v1.1；新集成请使用同路径的 .zip 端点
+         */
         get: operations["exportProofBundleByLeaf"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/files/attestation-leaves/{leafId}/proof-bundle.zip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 按存证叶子导出签名文件证明 ZIP */
+        get: operations["exportSignedProofArchiveByLeaf"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/files/attestation-leaves/{leafId}/proof-status/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 撤销签名文件证明 */
+        post: operations["revokeSignedProof"];
         delete?: never;
         options?: never;
         head?: never;
@@ -990,8 +1062,29 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 导出文件证明包 */
+        /**
+         * 导出旧版 JSON 文件证明包
+         * @deprecated
+         * @description 兼容 proof-bundle.v1.1；新集成请使用同路径的 .zip 端点
+         */
         get: operations["exportProofBundleByFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/files/{id}/proof-bundle.zip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 导出签名文件证明 ZIP */
+        get: operations["exportSignedProofArchiveByFile"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1405,6 +1498,40 @@ export interface paths {
         };
         /** 获取未读私信总数 */
         get: operations["getUnreadCount_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/proof-keys/{keyId}/versions/{keyVersion}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询证明历史验证公钥 */
+        get: operations["getProofSigningKey"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/proofs/{proofId}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 查询公开证明状态 */
+        get: operations["getProofStatus"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2784,6 +2911,117 @@ export interface components {
             /** @description 公告标题 */
             title?: string;
         };
+        /** @description 生产 Merkle batch 运行结果 */
+        AttestationBatchProductionRunVO: {
+            /** @description 涉及的外部 batch ID */
+            batchIds?: string[];
+            /**
+             * Format: int32
+             * @description 本轮确认完成的 batch 数量
+             */
+            batchesCompleted?: number;
+            /**
+             * Format: int32
+             * @description 本轮创建的 batch 数量
+             */
+            batchesCreated?: number;
+            /**
+             * Format: int32
+             * @description 本轮进入人工处理的 batch 数量
+             */
+            batchesManualReview?: number;
+            /**
+             * Format: int32
+             * @description 本轮恢复提交的已有 batch 数量
+             */
+            batchesRecovered?: number;
+            /**
+             * Format: int32
+             * @description 本轮仍在等待或重试的 batch 数量
+             */
+            batchesRetrying?: number;
+            /**
+             * Format: int32
+             * @description 本轮新增 candidate 数量
+             */
+            candidatesAdmitted?: number;
+            /**
+             * Format: int32
+             * @description 本轮领取 candidate 数量
+             */
+            candidatesClaimed?: number;
+            /**
+             * Format: int32
+             * @description 本轮进入 dead-letter 的 candidate 数量
+             */
+            candidatesDeadLettered?: number;
+            /** @description 生产批次功能是否启用 */
+            enabled?: boolean;
+            /** @description 是否为管理员强制 flush */
+            force?: boolean;
+            /** @description 是否因数量和时间阈值未满足而延后 */
+            thresholdDeferred?: boolean;
+        };
+        /** @description 生产 Merkle batch 状态 */
+        AttestationBatchProductionStatusVO: {
+            /**
+             * Format: int64
+             * @description BATCHED candidate 数
+             */
+            batchedCandidates?: number;
+            /**
+             * Format: int64
+             * @description CLAIMED candidate 数
+             */
+            claimedCandidates?: number;
+            /**
+             * Format: int64
+             * @description DEAD_LETTER candidate 数
+             */
+            deadLetterCandidates?: number;
+            /**
+             * Format: int64
+             * @description 当前可恢复提交的 batch 数
+             */
+            dueBatches?: number;
+            /** @description 生产批次功能是否启用 */
+            enabled?: boolean;
+            /**
+             * Format: int32
+             * @description 单个 batch 最大 candidate 数
+             */
+            maxBatchSize?: number;
+            /**
+             * Format: int32
+             * @description 单轮最多处理 batch 数
+             */
+            maxBatchesPerRun?: number;
+            /**
+             * Format: int64
+             * @description 最老 candidate 最大等待秒数
+             */
+            maxWaitSeconds?: number;
+            /**
+             * Format: int32
+             * @description 数量 flush 阈值
+             */
+            minBatchSize?: number;
+            /**
+             * Format: date-time
+             * @description 最老 READY candidate 的 admission 时间
+             */
+            oldestReadyAt?: string;
+            /**
+             * Format: int64
+             * @description READY candidate 数
+             */
+            readyCandidates?: number;
+            /**
+             * Format: int32
+             * @description 单轮最多 admission 数
+             */
+            seedLimit?: number;
+        };
         /** @description 审计配置VO */
         AuditConfigVO: {
             /** @description 配置键 */
@@ -2908,11 +3146,14 @@ export interface components {
         /** @description 链上回执摘要 */
         ChainEvidence: {
             /** @description 批量根上链文件哈希 */
-            batchChainFileHash?: string;
+            batchChainFileHash: string;
+            /** @description 批量根确认来源；响应丢失恢复时可为空 */
+            batchConfirmationSource?: string | null;
             /** @description 批量根上链交易哈希 */
-            batchTransactionHash?: string;
+            batchTransactionHash?: string | null;
+            contractRegistry: components["schemas"]["ContractRegistryEvidence"];
             /** @description 文件上链交易哈希 */
-            fileTransactionHash?: string;
+            fileTransactionHash?: string | null;
         };
         /** @description 区块链状态信息 */
         ChainStatusVO: {
@@ -2974,6 +3215,46 @@ export interface components {
             code?: string;
             /** @description 邮箱 */
             email?: string;
+        };
+        /** @description 签发批次绑定的不可变合约注册表快照 */
+        ContractRegistryEvidence: {
+            /** @description ABI 指纹算法 */
+            abiFingerprintAlgorithm: string;
+            /** @description canonical ABI SHA-256 */
+            abiSha256: string;
+            /** @description creation bytecode SHA-256 */
+            artifactBytecodeSha256: string;
+            /** @description 节点链 ID */
+            chainId: string;
+            /** @description 链适配器类型 */
+            chainType: string;
+            /** @description 合约地址 */
+            contractAddress: string;
+            /** @description 合约名称 */
+            contractName: string;
+            /**
+             * Format: int64
+             * @description 部署区块号；旧部署兼容时可与交易哈希同时为空
+             */
+            deploymentBlockNumber?: number | null;
+            /** @description 部署交易哈希；旧部署兼容时可与区块号同时为空 */
+            deploymentTransactionHash?: string | null;
+            /** @description 生效时间 */
+            effectiveAt: string;
+            /** @description FISCO 群组 ID；FISCO 必填，Besu 为空 */
+            groupId?: string | null;
+            /** @description 链上 runtime code SHA-256 */
+            onChainCodeSha256: string;
+            /** @description 注册表关键字段 SHA-256 */
+            registryFingerprint: string;
+            /** @description 注册表条目 schema */
+            schemaVersion: string;
+            /** @description 合约语义版本 */
+            semanticVersion: string;
+            /** @description 生命周期状态 */
+            status: string;
+            /** @description 升级策略 */
+            upgradeStrategy: string;
         };
         /** @description 会话详情 */
         ConversationDetailVO: {
@@ -4042,17 +4323,17 @@ export interface components {
         };
         /** @description 文件证明包 */
         ProofBundleVO: {
-            chain?: components["schemas"]["ChainEvidence"];
+            chain: components["schemas"]["ChainEvidence"];
             /** @description 证明包合同版本 */
-            contractVersion?: string;
-            file?: components["schemas"]["FileEvidence"];
-            issuer?: components["schemas"]["IssuerEvidence"];
-            manifest?: components["schemas"]["Manifest"];
-            merkle?: components["schemas"]["MerkleEvidence"];
-            storage?: components["schemas"]["StorageEvidence"];
+            contractVersion: string;
+            file: components["schemas"]["FileEvidence"];
+            issuer: components["schemas"]["IssuerEvidence"];
+            manifest: components["schemas"]["Manifest"];
+            merkle: components["schemas"]["MerkleEvidence"];
+            storage: components["schemas"]["StorageEvidence"];
             /** @description 人工验证说明 */
-            verificationGuide?: string[];
-            verificationPolicy?: components["schemas"]["VerificationPolicy"];
+            verificationGuide: string[];
+            verificationPolicy: components["schemas"]["VerificationPolicy"];
         };
         /** @description 证明路径 */
         ProofNode: {
@@ -4060,6 +4341,58 @@ export interface components {
             hash?: string;
             /** @description 兄弟节点位置：LEFT/RIGHT */
             position?: string;
+        };
+        /** @description 证明签名公钥 */
+        ProofSigningKeyVO: {
+            /** @description JWS 算法 */
+            algorithm: string;
+            /** @description 签名 key id */
+            keyId: string;
+            /**
+             * Format: int32
+             * @description 签名 key 版本
+             */
+            keyVersion: number;
+            /** @description SPKI SHA-256 指纹 */
+            publicKeyFingerprint: string;
+            /** @description Base64 编码的 X.509 SPKI 公钥 */
+            publicKeySpki: string;
+        };
+        /** @description 证明包当前状态 */
+        ProofStatusVO: {
+            /**
+             * Format: date-time
+             * @description 签发时间
+             */
+            issuedAt: string;
+            /**
+             * @description 签发时不可变状态快照
+             * @enum {string}
+             */
+            issuedStatus: "ACTIVE" | "SUPERSEDED";
+            /** @description 签名 key id */
+            keyId: string;
+            /**
+             * Format: int32
+             * @description 签名 key 版本
+             */
+            keyVersion: number;
+            /** @description 不可枚举证明标识 */
+            proofId: string;
+            /** @description 状态原因；可能为空 */
+            reason?: string;
+            /**
+             * @description 证明当前生命周期状态
+             * @enum {string}
+             */
+            status: "ACTIVE" | "REVOKED" | "SUPERSEDED" | "INVALID";
+            /** @description 单调递增状态版本 */
+            statusVersion: string;
+            /**
+             * Format: date-time
+             * @description 状态更新时间
+             */
+            updatedAt: string;
         };
         /** @description 分享链路节点 */
         ProvenanceNode: {
@@ -4287,6 +4620,18 @@ export interface components {
             note: string;
         };
         /** @description 返回结果封装 */
+        Result: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            /** @description 结果数据 */
+            data?: Record<string, never>;
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
         ResultAccountVO: {
             /**
              * Format: int32
@@ -4316,6 +4661,28 @@ export interface components {
              */
             code?: number;
             data?: components["schemas"]["AnnouncementVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultAttestationBatchProductionRunVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["AttestationBatchProductionRunVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultAttestationBatchProductionStatusVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["AttestationBatchProductionStatusVO"];
             /** @description 提示信息 */
             message?: string;
         };
@@ -4856,6 +5223,28 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
+        ResultProofSigningKeyVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["ProofSigningKeyVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultProofStatusVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["ProofStatusVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
         ResultQuotaRolloutAuditVO: {
             /**
              * Format: int32
@@ -5064,6 +5453,11 @@ export interface components {
              * @description 总分片数量
              */
             totalChunks?: number;
+        };
+        /** @description 撤销证明包请求 */
+        RevokeProofRequest: {
+            /** @description 撤销原因，最多 256 字符 */
+            reason?: string;
         };
         /** @description 文件密钥信封轮换请求 */
         RotateKeyEnvelopeVO: {
@@ -5694,7 +6088,7 @@ export interface components {
             reason?: string;
             /**
              * Format: int32
-             * @description 文件状态：0-处理中，1-已完成，2-已删除，-1-失败
+             * @description 文件状态：0-处理中，1-已完成（仅已完成记录幂等设置），2-已删除，-1-失败；禁止通过管理接口将未完成文件提升为已完成
              */
             status: number;
         };
@@ -5844,6 +6238,46 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultIPageAnnouncementVO"];
+                };
+            };
+        };
+    };
+    status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultAttestationBatchProductionStatusVO"];
+                };
+            };
+        };
+    };
+    trigger: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultAttestationBatchProductionRunVO"];
                 };
             };
         };
@@ -6868,6 +7302,73 @@ export interface operations {
             };
         };
     };
+    exportSignedProofArchiveByLeaf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 存证叶子ID */
+                leafId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 签名证明 ZIP */
+            200: {
+                headers: {
+                    /** @description 证明包禁止缓存并要求重新验证 */
+                    "Cache-Control"?: string;
+                    /** @description RFC 5987 编码的安全附件文件名 */
+                    "Content-Disposition"?: string;
+                    /** @description ZIP 顶层 manifest 的 SHA-256 摘要 */
+                    "X-Proof-Manifest-Hash"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            /** @description 证明生成容量已满或依赖暂时不可用 */
+            503: {
+                headers: {
+                    /** @description 客户端再次尝试前需等待的秒数 */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Result"];
+                };
+            };
+        };
+    };
+    revokeSignedProof: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 存证叶子ID */
+                leafId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RevokeProofRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultProofStatusVO"];
+                };
+            };
+        };
+    };
     reportDownloadBatchMetrics: {
         parameters: {
             query?: never;
@@ -7206,6 +7707,46 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultProofBundleVO"];
+                };
+            };
+        };
+    };
+    exportSignedProofArchiveByFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 文件ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 签名证明 ZIP */
+            200: {
+                headers: {
+                    /** @description 证明包禁止缓存并要求重新验证 */
+                    "Cache-Control"?: string;
+                    /** @description RFC 5987 编码的安全附件文件名 */
+                    "Content-Disposition"?: string;
+                    /** @description ZIP 顶层 manifest 的 SHA-256 摘要 */
+                    "X-Proof-Manifest-Hash"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            /** @description 证明生成容量已满或依赖暂时不可用 */
+            503: {
+                headers: {
+                    /** @description 客户端再次尝试前需等待的秒数 */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Result"];
                 };
             };
         };
@@ -7813,6 +8354,54 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultMapStringInteger"];
+                };
+            };
+        };
+    };
+    getProofSigningKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 签名 key id */
+                keyId: string;
+                /** @description 签名 key 版本 */
+                keyVersion: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultProofSigningKeyVO"];
+                };
+            };
+        };
+    };
+    getProofStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description proof manifest 中的公开证明标识 */
+                proofId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultProofStatusVO"];
                 };
             };
         };

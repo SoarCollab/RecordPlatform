@@ -1,5 +1,6 @@
 package cn.flying.service.impl;
 
+import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.tenant.TenantContext;
@@ -210,6 +211,18 @@ public class FileAdminServiceImpl implements FileAdminService {
         File file = fileMapper.selectById(id);
         if (file == null) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "文件不存在");
+        }
+        FileUploadStatus targetStatus = status == null
+                ? FileUploadStatus.NOOP
+                : FileUploadStatus.getByCode(status);
+        if (targetStatus == FileUploadStatus.NOOP) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "文件状态不合法");
+        }
+        if (targetStatus == FileUploadStatus.SUCCESS
+                && !Objects.equals(file.getStatus(), FileUploadStatus.SUCCESS.getCode())) {
+            throw new GeneralException(
+                    ResultEnum.PARAM_ERROR,
+                    "管理员状态接口不能绕过上传校验将文件提升为成功状态");
         }
 
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()

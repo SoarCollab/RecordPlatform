@@ -1,0 +1,122 @@
+{
+  "schemaVersion": "record-platform-contract-fingerprint-vectors.v1",
+  "abiCases": [
+    {
+      "name": "top-level-order-and-internal-type",
+      "documents": [
+        [
+          {
+            "type": "function",
+            "name": "store",
+            "inputs": [
+              {
+                "name": "value",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              }
+            ],
+            "outputs": [],
+            "stateMutability": "nonpayable"
+          },
+          {
+            "type": "event",
+            "name": "Stored",
+            "inputs": [],
+            "anonymous": false
+          }
+        ],
+        [
+          {
+            "anonymous": false,
+            "inputs": [],
+            "name": "Stored",
+            "type": "event"
+          },
+          {
+            "outputs": [],
+            "inputs": [
+              {
+                "type": "bytes32",
+                "name": "value"
+              }
+            ],
+            "stateMutability": "nonpayable",
+            "name": "store",
+            "type": "function"
+          }
+        ]
+      ],
+      "canonicalJson": "[{\"anonymous\":false,\"inputs\":[],\"name\":\"Stored\",\"type\":\"event\"},{\"inputs\":[{\"name\":\"value\",\"type\":\"bytes32\"}],\"name\":\"store\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]",
+      "abiSha256": "sha256:95f69c89223ac924aec3d0c3a95bb6ff17d3711e2ba4f7a6345c3fde5d142e92"
+    },
+    {
+      "name": "unicode-code-point-object-key-order",
+      "documents": [
+        [
+          {
+            "𐀀": "supplementary",
+            "": "bmp",
+            "type": "function"
+          }
+        ],
+        [
+          {
+            "type": "function",
+            "": "bmp",
+            "𐀀": "supplementary"
+          }
+        ]
+      ],
+      "canonicalJson": "[{\"type\":\"function\",\"\":\"bmp\",\"𐀀\":\"supplementary\"}]",
+      "abiSha256": "sha256:9fa60acf3f1e344d3ffd961cc9e66a4559e494b2112b193caa74ec664019f21a"
+    },
+    {
+      "name": "unicode-code-point-entry-order",
+      "documents": [
+        [
+          {
+            "type": "function",
+            "𐀀": "supplementary"
+          },
+          {
+            "type": "function",
+            "": "bmp"
+          }
+        ],
+        [
+          {
+            "": "bmp",
+            "type": "function"
+          },
+          {
+            "𐀀": "supplementary",
+            "type": "function"
+          }
+        ]
+      ],
+      "canonicalJson": "[{\"type\":\"function\",\"\":\"bmp\"},{\"type\":\"function\",\"𐀀\":\"supplementary\"}]",
+      "abiSha256": "sha256:f05f30dd1db12228b88352e480729a339fc1b0ef37339bef7b50fa96d32f2ed4"
+    },
+    {
+      "name": "unicode-code-point-prefix-order",
+      "documents": [
+        [
+          {
+            "aa": "longer",
+            "a": "prefix",
+            "type": "function"
+          }
+        ],
+        [
+          {
+            "type": "function",
+            "a": "prefix",
+            "aa": "longer"
+          }
+        ]
+      ],
+      "canonicalJson": "[{\"a\":\"prefix\",\"aa\":\"longer\",\"type\":\"function\"}]",
+      "abiSha256": "sha256:c29fc498113b0323c290685c7337bc25aa3ef908e914b5940da0bb14783ac1b7"
+    }
+  ]
+}

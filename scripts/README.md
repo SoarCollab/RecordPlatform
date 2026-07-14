@@ -95,12 +95,15 @@ SW_AGENT_COLLECTOR_BACKEND_SERVICES=127.0.0.1:11800
 
 ## 6. 智能合约部署 (`contract-deploy.sh`)
 
-自动化完成 FISCO BCOS 智能合约的完整生命周期：编译 → 部署 → ABI 同步 → 地址回写 → 验证。
+自动化完成受指纹门禁保护的本地 FISCO BCOS 智能合约生命周期：catalog 校验 → chain/group 对账 → 编译 → ABI/BIN 比对 → 部署 → 链上身份核验 → 审计回执 → 原子激活。脚本不会覆盖仓库中已签入的 ABI/BIN；产物升级必须先经代码审查更新 catalog。
 
 ### 前置条件
 
 - FISCO BCOS 控制台已安装（默认路径 `~/fisco/console`）
-- FISCO BCOS 节点已启动且可达（`FISCO_PEER_ADDRESS` 已在 `.env` 中配置）
+- FISCO BCOS 节点已启动且可达；`.env` 必须显式配置 `FISCO_PEER_ADDRESS`、`FISCO_CHAIN_ID` 和 `FISCO_GROUP_ID`
+- 控制台包含支持 `-v 0.8.35` 的 `contract2java.sh`，系统已安装 `python3` 以及 `timeout`（macOS 可使用 `gtimeout`）
+- `.env` 已存在且不是符号链接；正常部署仅在全部链上检查通过后替换它
+- `CONTRACT_DEPLOYMENT_RECEIPT_DIR` 指向持久化、受限访问的非符号链接目录；默认使用仓库内已忽略的 `log/contract-deployments`
 
 ### 使用示例
 
@@ -114,11 +117,14 @@ SW_AGENT_COLLECTOR_BACKEND_SERVICES=127.0.0.1:11800
 # Dry-run 模式：打印将执行的步骤，不做任何实际操作
 ./scripts/contract-deploy.sh --dry-run
 
-# 跳过部署后验证
-./scripts/contract-deploy.sh --skip-verify
-
 # 指定 .env 文件写回目标
 ./scripts/contract-deploy.sh --env-file /etc/record-platform/.env
+
+# 显式指定受版本控制的 artifact catalog
+./scripts/contract-deploy.sh --catalog-file platform-fisco/src/main/resources/contract-registry/artifacts.json
+
+# 将不含凭据的结构化部署回执写入外部审计目录
+./scripts/contract-deploy.sh --receipt-dir /var/lib/record-platform/contract-deployments
 ```
 
 ### 选项
@@ -126,21 +132,30 @@ SW_AGENT_COLLECTOR_BACKEND_SERVICES=127.0.0.1:11800
 | 选项                  | 说明                                              |
 | --------------------- | ------------------------------------------------- |
 | `--console-dir DIR`   | FISCO BCOS 控制台目录（默认：`~/fisco/console`） |
-| `--env-file FILE`     | 地址写回目标文件（默认：项目根目录的 `.env`）     |
-| `--skip-verify`       | 跳过部署后的合约调用验证                          |
-| `--dry-run`           | 仅打印操作步骤，不执行任何更改                    |
+| `--env-file FILE`     | 地址与部署证据的原子激活文件（默认：项目根目录的 `.env`） |
+| `--catalog-file FILE` | 受版本控制的 artifact catalog 路径                        |
+| `--receipt-dir DIR`   | 结构化部署回执目录（默认：`CONTRACT_DEPLOYMENT_RECEIPT_DIR` 或 `log/contract-deployments`） |
+| `--dry-run`           | 校验输入并打印操作步骤，不修改文件或链状态                |
 | `-h`, `--help`        | 显示帮助信息                                      |
+
+部署前脚本通过官方 Console `getGroupInfo` 读取 `chainID`/`groupID`，必须与显式配置完全一致。部署后的 `getCode` 和 `contractIdentity()` 属于强制安全门禁；后者必须等于已验证 catalog 中唯一 `ACTIVE` 条目的名称和语义版本。`--skip-verify` 已被明确拒绝。Dry-run 不调用 Console、不生成时间、不创建回执，也不修改链或 `.env`。
+
+该脚本只负责 `BLOCKCHAIN_ACTIVE=local-fisco`；配置为 `bsn-fisco` 或 `bsn-besu` 时会在 Console 查询前拒绝执行，BSN 部署必须使用对应网络的受审查发布流程。
+
+当前签入的 `Storage`/`Sharing` ABI 与 BIN 由 solc `0.8.35` 生成。脚本固定向 Console 传入 `-v 0.8.35`，并对生成结果做 canonical ABI 和 decoded bytecode 比对；Console 不支持该版本或产物不一致时，会在第一笔部署交易之前失败。
 
 ### 执行阶段
 
 | 阶段 | 说明 |
 | ---- | ---- |
-| 1. Pre-flight  | 检查控制台目录、`console.sh` 可执行、节点连通性、合约源文件 |
-| 2. Compile     | 将 `Storage.sol` 和 `Sharing.sol` 复制至控制台，触发编译    |
-| 3. Deploy      | 部署双合约并捕获链上地址                                    |
-| 4. ABI Sync    | 将编译产物 `.abi` 覆盖至 `platform-fisco/src/main/resources/abi/` |
-| 5. Write-back  | 更新 `.env` 中的 `FISCO_STORAGE_CONTRACT` 和 `FISCO_SHARING_CONTRACT` |
-| 6. Verify      | 调用只读方法（`getUserFiles`、`getShareInfo`）确认合约响应正常 |
+| 1. Pre-flight  | 校验工具、catalog/源码/ABI/BIN、控制台、激活文件、节点连通性，并用 `getGroupInfo` 严格对账 chain/group |
+| 2. Compile     | 用官方 `contract2java.sh` 生成 `Storage`/`Sharing` ABI 与 BIN |
+| 3. Artifact Verification | canonical 比对 ABI，并按 decoded bytes 比对 ECC/SM bytecode |
+| 4. Deploy      | 顺序部署双合约，取得地址、交易哈希与交易回执区块号 |
+| 5. On-chain Verification | 对两个地址执行 `getCode` 和 `contractIdentity()`，严格核对 catalog 名称/版本，任一失败即停止 |
+| 6. Audited Atomic Activation | 固定一次 UTC `effectiveAt`，先原子发布结构化回执，再一次性写入两个地址及两组完整部署证据 |
+
+部署回执 schema 为 `record-platform-contract-deployment-receipt.v1`，`chainType` 使用 registry 的本地 FISCO 公共枚举值。回执仅记录 catalog SHA-256、chain/group、两个合约的名称、版本、地址、交易哈希、区块号和同一 `effectiveAt`，不记录 RPC URL、证书、私钥或令牌。回执写入失败时 `.env` 保持不变；若回执成功但随后 `.env` 原子替换失败，回执仍作为“链上部署已验证、尚未激活”的审计证据保留，不应被解释为运行时已启用。
 
 ### 部署后
 

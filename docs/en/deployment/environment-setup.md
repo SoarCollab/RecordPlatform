@@ -137,19 +137,42 @@ cp nodes/127.0.0.1/sdk/* platform-fisco/src/main/resources/conf/
 
 ### Deploy Smart Contracts
 
-Deploy `Storage.sol` and `Sharing.sol` using the FISCO BCOS console:
+Use the guarded deployment script instead of activating addresses manually. The script uses the FISCO BCOS console, verifies the version-controlled artifact catalog, compares `getGroupInfo` with the explicitly configured chain/group, compiles both contracts with solc `0.8.35`, compares canonical ABI and decoded bytecode before deployment, and verifies `getCode` plus `contractIdentity()` afterwards. It then publishes a structured audit receipt before atomically updating `.env`.
 
-```bash
-# Download and start the console
-# See: https://fisco-bcos-doc.readthedocs.io/zh-cn/latest/docs/quick_start/air_installation.html
+This script is intentionally limited to `BLOCKCHAIN_ACTIVE=local-fisco`. It rejects BSN FISCO/Besu activation before any Console query; those networks require their own reviewed provider deployment process.
 
-# After deployment, update contract addresses in .env
-FISCO_STORAGE_CONTRACT=0x<deployed-address>
-FISCO_SHARING_CONTRACT=0x<deployed-address>
+Set the target identity and durable audit location in `.env`:
+
+```dotenv
+FISCO_CHAIN_ID=chain0
+FISCO_GROUP_ID=group0
+CONTRACT_DEPLOYMENT_RECEIPT_DIR=/var/lib/record-platform/contract-deployments
 ```
 
+```bash
+# Preview every phase without changing the console, chain, or .env
+./scripts/contract-deploy.sh --dry-run --console-dir /opt/fisco/console
+
+# Deploy and atomically activate Storage and Sharing
+./scripts/contract-deploy.sh \
+  --console-dir /opt/fisco/console \
+  --env-file .env \
+  --receipt-dir /var/lib/record-platform/contract-deployments
+
+# Recheck the signed catalog independently
+python3 tools/contracts/contract_fingerprint.py verify \
+  --project-root . \
+  --catalog platform-fisco/src/main/resources/contract-registry/artifacts.json
+```
+
+Successful activation writes `FISCO_STORAGE_CONTRACT`, `FISCO_SHARING_CONTRACT`, and each contract's complete `FISCO_*_DEPLOYMENT_TX/BLOCK/EFFECTIVE_AT` triplet with one shared UTC effective time. Before activation it atomically publishes a `record-platform-contract-deployment-receipt.v1` JSON receipt containing the catalog SHA-256, `LOCAL_FISCO` chain/group identity, and both contracts' public name/version/address/transaction/block evidence. It never records RPC URLs, certificates, private keys, or tokens.
+
+Do not copy only one address or provide only part of an evidence triplet. Wrong chain/group, catalog identity mismatch, solc output drift, empty runtime code, non-zero/reverted identity calls, response parsing errors, or receipt write failures leave the previous `.env` unchanged. Dry-run performs no Console call, does not generate an effective time or receipt, and does not modify files or chain state. The Console's `contract2java.sh` must support `-v 0.8.35` and produce artifacts equivalent to the signed solc `0.8.35` ABI/BIN; any mismatch is blocked before the first deployment transaction.
+
+Artifact upgrades are reviewed changes: update both Solidity source copies, signed ABI/ECC/SM bytecode, semantic version, lifecycle status, and catalog fingerprints together. Retain deprecated/revoked artifacts and deployment receipts needed by historical proofs and audits. See [Blockchain Integration](../architecture/blockchain-integration.md#contract-registry-and-artifact-fingerprints) for upgrade and rollback rules and `scripts/README.md` for all script options.
+
 ::: info
-For detailed node setup and contract deployment, see the [FISCO BCOS Documentation](https://fisco-bcos-doc.readthedocs.io/zh-cn/latest/).
+For detailed node and console setup, see the [FISCO BCOS Documentation](https://fisco-bcos-doc.readthedocs.io/zh-cn/latest/). RecordPlatform contract activation must still use the guarded repository script above.
 :::
 
 ## Step 5: Verify Environment

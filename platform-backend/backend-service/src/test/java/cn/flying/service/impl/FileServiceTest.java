@@ -10,9 +10,11 @@ import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
 import cn.flying.dao.dto.FileSource;
+import cn.flying.dao.entity.ProofBundleIssuance;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.mapper.FileSourceMapper;
+import cn.flying.dao.mapper.ProofBundleIssuanceMapper;
 import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.dao.vo.file.ShareInfoVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
@@ -31,6 +33,7 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -108,6 +111,9 @@ class FileServiceTest {
     @Mock
     private FileKeyEnvelopeService fileKeyEnvelopeService;
 
+    @Mock
+    private ProofBundleIssuanceMapper proofBundleIssuanceMapper;
+
     @InjectMocks
     private FileServiceImpl fileService;
 
@@ -129,6 +135,7 @@ class FileServiceTest {
         MapperBuilderAssistant assistant = new MapperBuilderAssistant(configuration, "");
         TableInfoHelper.initTableInfo(assistant, File.class);
         TableInfoHelper.initTableInfo(assistant, FileShare.class);
+        TableInfoHelper.initTableInfo(assistant, ProofBundleIssuance.class);
     }
 
     @BeforeEach
@@ -923,26 +930,25 @@ class FileServiceTest {
                     .setTenantId(1L)
                     .setUid(OTHER_USER_ID)
                     .setFileHash("allowed-hash")
+                    .setContentHash("sha256:" + "a".repeat(64))
                     .setFileName("shared.txt")
                     .setFileParam("{\"fileSize\":1024,\"contentType\":\"text/plain\"}")
                     .setStatus(1)
                     .setDeleted(0)
-                    .setVersion(1)
+                    .setVersion(3)
+                    .setParentVersionId(98L)
                     .setIsLatest(1)
-                    .setVersionGroupId(99L);
+                    .setVersionGroupId(97L);
 
             when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
             when(fileMapper.selectList(any())).thenReturn(List.of(sourceFile));
             when(fileSourceMapper.selectByFileId(99L, 1L)).thenReturn(null);
-            when(fileMapper.insert(any(File.class))).thenAnswer(invocation -> {
-                File copied = invocation.getArgument(0);
-                copied.setId(300L);
-                return 1;
-            });
+            when(fileMapper.insert(any(File.class))).thenReturn(1);
 
             MDC.put(Const.ATTR_USER_ID, String.valueOf(USER_ID));
             TenantContext.setTenantId(2L);
-            try {
+            try (MockedStatic<IdUtils> idUtils = mockStatic(IdUtils.class)) {
+                idUtils.when(IdUtils::nextEntityId).thenReturn(300L);
                 fileService.saveShareFile(List.of("99"), SHARE_CODE, "127.0.0.1");
             } finally {
                 MDC.clear();
@@ -956,6 +962,11 @@ class FileServiceTest {
             assertEquals(99L, copied.getOrigin());
             assertEquals(OTHER_USER_ID, copied.getSharedFromUserId());
             assertEquals("allowed-hash", copied.getFileHash());
+            assertEquals("sha256:" + "a".repeat(64), copied.getContentHash());
+            assertEquals(1, copied.getVersion());
+            assertNull(copied.getParentVersionId());
+            assertEquals(1, copied.getIsLatest());
+            assertEquals(300L, copied.getVersionGroupId());
 
             ArgumentCaptor<FileSource> sourceCaptor = ArgumentCaptor.forClass(FileSource.class);
             verify(fileSourceMapper).insert(sourceCaptor.capture());
@@ -996,6 +1007,8 @@ class FileServiceTest {
                 TransactionCallback<File> callback = inv.getArgument(0);
                 return callback.doInTransaction(mock(TransactionStatus.class));
             });
+            when(fileMapper.lockVersionGroupForProofLifecycle(
+                    parent.getTenantId(), parent.getVersionGroupId())).thenReturn(parent.getId());
             when(fileMapper.insert(any(File.class))).thenReturn(1);
 
             try (MockedStatic<IdUtils> idUtils = mockStatic(IdUtils.class)) {
@@ -1006,7 +1019,11 @@ class FileServiceTest {
                 assertNotNull(result);
                 assertEquals(9002L, result.getId());
                 verify(quotaService).checkUploadQuota(parent.getTenantId(), USER_ID, 4096L);
-                verify(fileMapper).clearLatestInChain(parent.getVersionGroupId(), parent.getTenantId());
+                InOrder versionWriteOrder = inOrder(fileMapper);
+                versionWriteOrder.verify(fileMapper).lockVersionGroupForProofLifecycle(
+                        parent.getTenantId(), parent.getVersionGroupId());
+                versionWriteOrder.verify(fileMapper).clearLatestInChain(
+                        parent.getVersionGroupId(), parent.getTenantId());
                 verify(fileMapper).insert(any(File.class));
             }
         }
@@ -1045,6 +1062,75 @@ class FileServiceTest {
                     .setVersion(1)
                     .setIsLatest(1)
                     .setVersionGroupId(9001L);
+        }
+    }
+
+    @Nested
+    @DisplayName("Proof Status Lifecycle")
+    class ProofStatusLifecycle {
+
+        /**
+         * 验证新版本上传成功后，只按同租户版本链中的旧成功文件推进 ACTIVE proof 状态。
+         */
+        @Test
+        @DisplayName("should supersede active proofs for older successful versions")
+        void shouldSupersedeActiveProofsForOlderSuccessfulVersions() {
+            File completedVersion = new File()
+                    .setId(3003L)
+                    .setTenantId(2L)
+                    .setVersionGroupId(3001L)
+                    .setVersion(3);
+            when(fileMapper.lockVersionGroupForProofLifecycle(2L, 3001L)).thenReturn(3001L);
+            when(fileMapper.selectList(any())).thenReturn(List.of(
+                    new File().setId(3001L),
+                    new File().setId(3002L)));
+
+            ReflectionTestUtils.invokeMethod(
+                    fileService,
+                    "markOlderProofIssuancesSuperseded",
+                    completedVersion);
+
+            @SuppressWarnings("rawtypes")
+            ArgumentCaptor<com.baomidou.mybatisplus.core.conditions.Wrapper> wrapperCaptor =
+                    ArgumentCaptor.forClass(com.baomidou.mybatisplus.core.conditions.Wrapper.class);
+            InOrder lifecycleOrder = inOrder(fileMapper, proofBundleIssuanceMapper);
+            lifecycleOrder.verify(fileMapper).lockVersionGroupForProofLifecycle(2L, 3001L);
+            lifecycleOrder.verify(fileMapper).selectList(any());
+            lifecycleOrder.verify(proofBundleIssuanceMapper).update(isNull(), wrapperCaptor.capture());
+            com.baomidou.mybatisplus.core.conditions.Wrapper<?> wrapper = wrapperCaptor.getValue();
+            com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<?> updateWrapper =
+                    (com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<?>) wrapper;
+            assertTrue(wrapper.getSqlSegment().contains("tenant_id"));
+            assertTrue(wrapper.getSqlSegment().contains("file_id IN"));
+            assertTrue(wrapper.getSqlSegment().contains("status"));
+            assertTrue(updateWrapper.getParamNameValuePairs().containsValue(2L));
+            assertTrue(updateWrapper.getParamNameValuePairs().containsValue(3001L));
+            assertTrue(updateWrapper.getParamNameValuePairs().containsValue(3002L));
+            assertTrue(updateWrapper.getParamNameValuePairs().containsValue("ACTIVE"));
+            assertTrue(updateWrapper.getParamNameValuePairs().containsValue("SUPERSEDED"));
+            assertTrue(updateWrapper.getParamNameValuePairs().containsValue("newer_file_version"));
+            assertTrue(updateWrapper.getSqlSet().contains("status_version = status_version + 1"));
+        }
+
+        /**
+         * 验证首版本和 PREPARE 阶段不会提前产生不可逆的 superseded 状态。
+         */
+        @Test
+        @DisplayName("should not supersede proofs before a later version succeeds")
+        void shouldNotSupersedeProofsBeforeLaterVersionSucceeds() {
+            File firstVersion = new File()
+                    .setId(3001L)
+                    .setTenantId(2L)
+                    .setVersionGroupId(3001L)
+                    .setVersion(1);
+
+            ReflectionTestUtils.invokeMethod(
+                    fileService,
+                    "markOlderProofIssuancesSuperseded",
+                    firstVersion);
+
+            verify(fileMapper, never()).selectList(any());
+            verifyNoInteractions(proofBundleIssuanceMapper);
         }
     }
 

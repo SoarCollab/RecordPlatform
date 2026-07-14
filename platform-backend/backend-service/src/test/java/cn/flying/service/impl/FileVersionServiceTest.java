@@ -105,6 +105,7 @@ class FileVersionServiceTest {
                 when(redissonClient.getLock(anyString())).thenReturn(rLock);
                 when(rLock.tryLock(anyLong(), anyLong(), any(TimeUnit.class))).thenReturn(true);
                 when(rLock.isHeldByCurrentThread()).thenReturn(true);
+                when(fileMapper.lockVersionGroupForProofLifecycle(TENANT_ID, 1L)).thenReturn(1L);
                 when(fileMapper.clearLatestInChain(1L, TENANT_ID)).thenReturn(1);
                 when(fileMapper.insert(any(File.class))).thenReturn(1);
 

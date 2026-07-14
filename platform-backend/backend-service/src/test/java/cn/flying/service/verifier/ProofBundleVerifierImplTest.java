@@ -323,7 +323,7 @@ class ProofBundleVerifierImplTest {
         ProofBundleVO bundle = validBundle(originalFile);
         ProofBundleVO tampered = withChain(
                 bundle,
-                new ProofBundleVO.ChainEvidence("tx-batch", "different-root", "tx-file")
+                new ProofBundleVO.ChainEvidence("tx-batch", "different-root", "tx-file", "CHAIN_WRITE")
         );
 
         ProofVerificationResult result = verifier.verify(originalFile, tampered);
@@ -332,6 +332,124 @@ class ProofBundleVerifierImplTest {
         assertThat(result.issues())
                 .extracting(ProofVerificationIssue::code)
                 .contains(ProofVerificationCode.CHAIN_ROOT_MISMATCH);
+    }
+
+    /**
+     * 验证明包缺少签发时合约注册表快照时必须失败关闭。
+     */
+    @Test
+    void verify_shouldRejectMissingContractRegistrySnapshot() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO missingRegistry = withContractRegistry(bundle, null);
+
+        ProofVerificationResult result = verifier.verify(originalFile, missingRegistry);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.issues())
+                .extracting(ProofVerificationIssue::code)
+                .contains(ProofVerificationCode.CONTRACT_REGISTRY_INVALID);
+    }
+
+    /**
+     * 验证攻击者只改合约地址而保留旧 registry 指纹时会被重算校验拒绝。
+     */
+    @Test
+    void verify_shouldRejectTamperedContractRegistryFingerprint() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO.ContractRegistryEvidence registry = bundle.chain().contractRegistry();
+        ProofBundleVO.ContractRegistryEvidence tampered = new ProofBundleVO.ContractRegistryEvidence(
+                registry.schemaVersion(),
+                registry.registryFingerprint(),
+                registry.contractName(),
+                registry.semanticVersion(),
+                registry.chainType(),
+                registry.chainId(),
+                registry.groupId(),
+                "0x2222222222222222222222222222222222222222",
+                registry.abiFingerprintAlgorithm(),
+                registry.abiSha256(),
+                registry.artifactBytecodeSha256(),
+                registry.onChainCodeSha256(),
+                registry.deploymentTransactionHash(),
+                registry.deploymentBlockNumber(),
+                registry.status(),
+                registry.effectiveAt(),
+                registry.upgradeStrategy());
+
+        ProofVerificationResult result = verifier.verify(
+                originalFile,
+                withContractRegistry(bundle, tampered));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.issues())
+                .extracting(ProofVerificationIssue::code)
+                .contains(ProofVerificationCode.CONTRACT_REGISTRY_INVALID);
+    }
+
+    /**
+     * 验证已撤销合约的历史快照即使自身指纹正确也会返回独立撤销错误码。
+     */
+    @Test
+    void verify_shouldRejectRevokedContractRegistry() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+
+        ProofVerificationResult result = verifier.verify(
+                originalFile,
+                withContractRegistry(bundle, contractRegistry("REVOKED")));
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.issues())
+                .extracting(ProofVerificationIssue::code)
+                .contains(ProofVerificationCode.CONTRACT_REVOKED);
+    }
+
+    /**
+     * 验证响应丢失后按业务键回查确认的 batch 不会因缺少不可恢复的交易哈希被误判。
+     */
+    @Test
+    void verify_shouldAcceptChainQueryConfirmationWhenTransactionHashCannotBeRecovered() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO recovered = withChain(
+                bundle,
+                new ProofBundleVO.ChainEvidence(
+                        null,
+                        bundle.merkle().merkleRoot(),
+                        "tx-file",
+                        "CHAIN_QUERY_AFTER_WRITE")
+        );
+
+        ProofVerificationResult result = verifier.verify(originalFile, recovered);
+
+        assertThat(result.issues())
+                .extracting(ProofVerificationIssue::code)
+                .doesNotContain(ProofVerificationCode.CHAIN_RECEIPT_MISSING);
+    }
+
+    /**
+     * 验证未知来源不能替代交易哈希，防止调用方伪造任意确认文本。
+     */
+    @Test
+    void verify_shouldRejectMissingTransactionHashWithUnknownConfirmationSource() {
+        byte[] originalFile = bytes("hello proof");
+        ProofBundleVO bundle = validBundle(originalFile);
+        ProofBundleVO tampered = withChain(
+                bundle,
+                new ProofBundleVO.ChainEvidence(
+                        null,
+                        bundle.merkle().merkleRoot(),
+                        "tx-file",
+                        "UNTRUSTED_SOURCE")
+        );
+
+        ProofVerificationResult result = verifier.verify(originalFile, tampered);
+
+        assertThat(result.issues())
+                .extracting(ProofVerificationIssue::code)
+                .contains(ProofVerificationCode.CHAIN_RECEIPT_MISSING);
     }
 
     /**
@@ -409,7 +527,12 @@ class ProofBundleVerifierImplTest {
                                 .map(node -> new ProofBundleVO.ProofNode(node.position(), node.hash()))
                                 .toList()
                 ),
-                new ProofBundleVO.ChainEvidence("tx-batch", tree.merkleRoot(), "tx-file"),
+                new ProofBundleVO.ChainEvidence(
+                        "tx-batch",
+                        tree.merkleRoot(),
+                        "tx-file",
+                        "CHAIN_WRITE",
+                        contractRegistry("ACTIVE")),
                 new ProofBundleVO.IssuerEvidence("RecordPlatform", "P1.2-proof-bundle", "COMPLETED", null, null),
                 new ProofBundleVO.VerificationPolicy(
                         "RP-AES256-GCM-CHUNK-CHAIN-V1",
@@ -427,6 +550,60 @@ class ProofBundleVerifierImplTest {
                 ),
                 List.of("verify")
         );
+    }
+
+    /**
+     * 构造字段指纹自洽的合约注册表证明。
+     */
+    private ProofBundleVO.ContractRegistryEvidence contractRegistry(String status) {
+        String schemaVersion = "record-platform-contract-registry-entry.v1";
+        String contractName = "Sharing";
+        String semanticVersion = "2.0.0";
+        String chainType = "LOCAL_FISCO";
+        String chainId = "chain0";
+        String groupId = "group0";
+        String contractAddress = "0x1111111111111111111111111111111111111111";
+        String abiAlgorithm = "ABI-CANONICAL-JSON-SHA256-V1";
+        String abiSha256 = "sha256:" + "2".repeat(64);
+        String artifactBytecodeSha256 = "sha256:" + "3".repeat(64);
+        String onChainCodeSha256 = "sha256:" + "4".repeat(64);
+        String effectiveAt = "2026-07-13T00:00:00Z";
+        String upgradeStrategy = "REDEPLOY_ADDRESS";
+        String payload = String.join("\n",
+                "schemaVersion=" + schemaVersion,
+                "contractName=" + contractName,
+                "semanticVersion=" + semanticVersion,
+                "chainType=" + chainType,
+                "chainId=" + chainId,
+                "groupId=" + groupId,
+                "contractAddress=" + contractAddress,
+                "abiFingerprintAlgorithm=" + abiAlgorithm,
+                "abiSha256=" + abiSha256,
+                "artifactBytecodeSha256=" + artifactBytecodeSha256,
+                "onChainCodeSha256=" + onChainCodeSha256,
+                "deploymentTransactionHash=",
+                "deploymentBlockNumber=",
+                "status=" + status,
+                "effectiveAt=" + effectiveAt,
+                "upgradeStrategy=" + upgradeStrategy);
+        return new ProofBundleVO.ContractRegistryEvidence(
+                schemaVersion,
+                "sha256:" + sha256Hex(bytes(payload)),
+                contractName,
+                semanticVersion,
+                chainType,
+                chainId,
+                groupId,
+                contractAddress,
+                abiAlgorithm,
+                abiSha256,
+                artifactBytecodeSha256,
+                onChainCodeSha256,
+                null,
+                null,
+                status,
+                effectiveAt,
+                upgradeStrategy);
     }
 
     /**
@@ -461,6 +638,22 @@ class ProofBundleVerifierImplTest {
                 bundle.verificationPolicy(),
                 bundle.verificationGuide()
         );
+    }
+
+    /**
+     * 替换链证据中的合约注册表快照，同时保留其余链回执字段。
+     */
+    private ProofBundleVO withContractRegistry(
+            ProofBundleVO bundle,
+            ProofBundleVO.ContractRegistryEvidence registry
+    ) {
+        ProofBundleVO.ChainEvidence chain = bundle.chain();
+        return withChain(bundle, new ProofBundleVO.ChainEvidence(
+                chain.batchTransactionHash(),
+                chain.batchChainFileHash(),
+                chain.fileTransactionHash(),
+                chain.batchConfirmationSource(),
+                registry));
     }
 
     /**

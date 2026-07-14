@@ -100,6 +100,8 @@ public class SecurityConfiguration {
                         ).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/shares/*/files").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/public/shares/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/public/proofs/*/status").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/public/proof-keys/*/versions/*").permitAll()
                         .requestMatchers("/api/v1/images/download/images/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/shares/*/info").permitAll()
                         // SSE 短期令牌发行需要用户已认证

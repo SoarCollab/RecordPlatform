@@ -16,6 +16,7 @@ import cn.flying.dao.dto.File;
 import cn.flying.dao.dto.FileShare;
 import cn.flying.dao.dto.FileSource;
 import cn.flying.dao.mapper.FileMapper;
+import cn.flying.dao.mapper.ProofBundleIssuanceMapper;
 import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.mapper.FileSourceMapper;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
@@ -72,6 +73,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /**
  * @program: RecordPlatform
@@ -88,6 +90,7 @@ import java.util.concurrent.TimeUnit;
 public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements FileService {
 
     private static final long MAX_IN_MEMORY_TRANSFER_BYTES = 80L * 1024 * 1024;
+    private static final Pattern CONTENT_HASH_PATTERN = Pattern.compile("^sha256:[0-9a-f]{64}$");
 
     private final FileRemoteClient fileRemoteClient;
     private final FileSagaOrchestrator sagaOrchestrator;
@@ -99,6 +102,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     private final TransactionTemplate transactionTemplate;
     private final QuotaService quotaService;
     private final FileKeyEnvelopeService fileKeyEnvelopeService;
+    private final ProofBundleIssuanceMapper proofBundleIssuanceMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -208,6 +212,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         File existingFile = resolvePrepareFileForStore(userId, targetFileId, originFileName);
         FileParamEnvelopeResult envelopeResult = prepareFileParamEnvelope(fileParam);
         String sanitizedFileParam = envelopeResult.sanitizedFileParam();
+        String contentHash = requireContentHash(sanitizedFileParam);
 
         String requestId = UUID.randomUUID().toString();
         FileUploadCommand cmd = FileUploadCommand.builder()
@@ -238,11 +243,13 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 .setUid(userId)
                 .setFileName(existingFile.getFileName())
                 .setFileHash(result.getFileHash())
+                .setContentHash(contentHash)
                 .setTransactionHash(result.getTransactionHash())
                 .setFileParam(sanitizedFileParam)
                 .setStatus(FileUploadStatus.SUCCESS.getCode());
 
         transactionTemplate.executeWithoutResult(status -> {
+            lockProofLifecycleVersionGroupBeforeFileMutation(existingFile);
             boolean updated = this.update(file, wrapper);
             if (!updated) {
                 log.warn("文件状态更新失败，可能已被其他操作修改: fileId={}, userId={}, fileName={}",
@@ -250,10 +257,12 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 throw new GeneralException(ResultEnum.FAIL, "文件状态更新失败，请重试");
             }
             fileKeyEnvelopeService.saveOwnerEnvelope(existingFile, result.getFileHash(), userId, envelopeResult);
+            markOlderProofIssuancesSuperseded(existingFile);
         });
 
         return existingFile
                 .setFileHash(result.getFileHash())
+                .setContentHash(contentHash)
                 .setTransactionHash(result.getTransactionHash())
                 .setFileParam(sanitizedFileParam)
                 .setStatus(FileUploadStatus.SUCCESS.getCode());
@@ -273,6 +282,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         File existingFile = resolvePrepareFileForStore(userId, targetFileId, originFileName);
         FileParamEnvelopeResult envelopeResult = prepareFileParamEnvelope(fileParam);
         String sanitizedFileParam = envelopeResult.sanitizedFileParam();
+        String contentHash = requireContentHash(sanitizedFileParam);
         String fileContent = StoredObjectReferenceCodec.toChainContent(completedParts);
         Result<StoreFileResponse> result = fileRemoteClient.storeFileOnChain(new StoreFileRequest(
                 String.valueOf(userId),
@@ -295,21 +305,25 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 .setUid(userId)
                 .setFileName(existingFile.getFileName())
                 .setFileHash(chainResult.fileHash())
+                .setContentHash(contentHash)
                 .setTransactionHash(chainResult.transactionHash())
                 .setFileParam(sanitizedFileParam)
                 .setStatus(FileUploadStatus.SUCCESS.getCode());
 
         transactionTemplate.executeWithoutResult(status -> {
+            lockProofLifecycleVersionGroupBeforeFileMutation(existingFile);
             boolean updated = this.update(update, wrapper);
             if (!updated) {
                 throw new GeneralException(ResultEnum.FAIL, "文件状态更新失败，请重试");
             }
             fileKeyEnvelopeService.saveOwnerEnvelope(existingFile, chainResult.fileHash(), userId, envelopeResult);
+            markOlderProofIssuancesSuperseded(existingFile);
         });
 
         return existingFile
                 .setFileSize(fileSize)
                 .setFileHash(chainResult.fileHash())
+                .setContentHash(contentHash)
                 .setTransactionHash(chainResult.transactionHash())
                 .setFileParam(sanitizedFileParam)
                 .setStatus(FileUploadStatus.SUCCESS.getCode());
@@ -320,6 +334,103 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      */
     private FileParamEnvelopeResult prepareFileParamEnvelope(String fileParam) {
         return fileKeyEnvelopeService.prepareFileParam(fileParam);
+    }
+
+    /**
+     * 从已脱敏文件参数中读取并校验原文件整体 SHA-256，阻断链记录 ID 作为内容摘要写入。
+     *
+     * @param fileParam 已脱敏文件参数 JSON
+     * @return 小写规范内容摘要
+     */
+    private String requireContentHash(String fileParam) {
+        Map<?, ?> params;
+        try {
+            params = JsonConverter.parse(fileParam, Map.class);
+        } catch (RuntimeException e) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件参数缺少可信内容哈希");
+        }
+        Object value = params == null ? null : params.get("contentHash");
+        String normalized = value instanceof String text
+                ? text.trim().toLowerCase(java.util.Locale.ROOT)
+                : "";
+        if (!CONTENT_HASH_PATTERN.matcher(normalized).matches()) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件参数缺少可信内容哈希");
+        }
+        return normalized;
+    }
+
+    /**
+     * 新版本真正上传成功后推进旧版本 proof 在线状态；PREPARE/FAIL 不触发不可逆 superseded。
+     *
+     * @param completedFile 已完成上传的新版本 PREPARE 记录
+     */
+    private void markOlderProofIssuancesSuperseded(File completedFile) {
+        if (completedFile.getVersionGroupId() == null
+                || completedFile.getVersion() == null
+                || completedFile.getVersion() <= 1) {
+            return;
+        }
+        lockProofLifecycleVersionGroup(
+                completedFile.getTenantId(),
+                completedFile.getVersionGroupId(),
+                "文件版本链不存在，无法推进 proof 状态");
+        List<Long> olderFileIds = baseMapper.selectList(new LambdaQueryWrapper<File>()
+                        .select(File::getId)
+                        .eq(File::getTenantId, completedFile.getTenantId())
+                        .eq(File::getVersionGroupId, completedFile.getVersionGroupId())
+                        .lt(File::getVersion, completedFile.getVersion())
+                        .eq(File::getStatus, FileUploadStatus.SUCCESS.getCode())
+                        .eq(File::getDeleted, 0))
+                .stream()
+                .map(File::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (olderFileIds.isEmpty()) {
+            return;
+        }
+        proofBundleIssuanceMapper.update(null, new LambdaUpdateWrapper<cn.flying.dao.entity.ProofBundleIssuance>()
+                .eq(cn.flying.dao.entity.ProofBundleIssuance::getTenantId, completedFile.getTenantId())
+                .in(cn.flying.dao.entity.ProofBundleIssuance::getFileId, olderFileIds)
+                .eq(cn.flying.dao.entity.ProofBundleIssuance::getStatus, "ACTIVE")
+                .set(cn.flying.dao.entity.ProofBundleIssuance::getStatus, "SUPERSEDED")
+                .set(cn.flying.dao.entity.ProofBundleIssuance::getStatusReason, "newer_file_version")
+                .setSql("status_version = status_version + 1"));
+    }
+
+    /**
+     * 对版本 2+ 的上传完成事务先锁版本链锚点，再修改目标文件行，统一全局锁顺序。
+     *
+     * @param file 待从 PREPARE 推进为 SUCCESS 的文件
+     */
+    private void lockProofLifecycleVersionGroupBeforeFileMutation(File file) {
+        if (file.getVersion() == null || file.getVersion() <= 1) {
+            return;
+        }
+        lockProofLifecycleVersionGroup(
+                file.getTenantId(),
+                file.getVersionGroupId(),
+                "文件版本链不存在，无法完成版本上传");
+    }
+
+    /**
+     * 锁定版本链稳定锚点并对缺失链失败关闭。
+     *
+     * @param tenantId 租户ID
+     * @param versionGroupId 版本组ID
+     * @param failureMessage 锁定失败提示
+     */
+    private void lockProofLifecycleVersionGroup(
+            Long tenantId,
+            Long versionGroupId,
+            String failureMessage
+    ) {
+        if (tenantId == null || versionGroupId == null) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, failureMessage);
+        }
+        Long anchorFileId = baseMapper.lockVersionGroupForProofLifecycle(tenantId, versionGroupId);
+        if (anchorFileId == null) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, failureMessage);
+        }
     }
 
     /**
@@ -862,7 +973,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 depth = sourceFileSource.getDepth() + 1;
             }
 
-            File copiedFile = copyShareFileForUser(file, userId, originFileId);
+            Long copiedFileId = IdUtils.nextEntityId();
+            File copiedFile = copyShareFileForUser(file, userId, originFileId, copiedFileId);
 
             // 先保存文件以获取新ID
             this.save(copiedFile);
@@ -985,10 +1097,17 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      * @param sourceFile 分享源文件
      * @param userId 当前保存用户 ID
      * @param originFileId 原始文件 ID
+     * @param copiedFileId 新副本内部 ID，同时作为独立版本链 ID
      * @return 新文件记录
      */
-    private File copyShareFileForUser(File sourceFile, Long userId, Long originFileId) {
+    private File copyShareFileForUser(
+            File sourceFile,
+            Long userId,
+            Long originFileId,
+            Long copiedFileId
+    ) {
         return new File()
+                .setId(copiedFileId)
                 .setTenantId(TenantContext.getTenantIdOrDefault())
                 .setUid(userId)
                 .setOrigin(originFileId)
@@ -997,13 +1116,14 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 .setClassification(sourceFile.getClassification())
                 .setFileParam(sourceFile.getFileParam())
                 .setFileHash(sourceFile.getFileHash())
+                .setContentHash(sourceFile.getContentHash())
                 .setTransactionHash(sourceFile.getTransactionHash())
                 .setStatus(sourceFile.getStatus())
                 .setDeleted(0)
-                .setVersion(sourceFile.getVersion())
-                .setParentVersionId(sourceFile.getParentVersionId())
-                .setIsLatest(sourceFile.getIsLatest())
-                .setVersionGroupId(sourceFile.getVersionGroupId());
+                .setVersion(1)
+                .setParentVersionId(null)
+                .setIsLatest(1)
+                .setVersionGroupId(copiedFileId);
     }
 
     @Override
@@ -1641,6 +1761,10 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      */
     protected File doCreateNewVersion(Long userId, File parentFile, Long versionGroupId,
                                        String fileName, long fileSize, String contentType) {
+        lockProofLifecycleVersionGroup(
+                parentFile.getTenantId(),
+                versionGroupId,
+                "文件版本链不存在，无法创建新版本");
         // 清除版本链中所有文件的 isLatest
         baseMapper.clearLatestInChain(versionGroupId, parentFile.getTenantId());
 

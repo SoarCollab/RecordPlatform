@@ -2,6 +2,7 @@ package cn.flying.service.verifier;
 
 import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.vo.file.ProofBundleVO;
+import cn.flying.platformapi.response.ContractRegistryEntryResponse;
 import cn.flying.service.attestation.MerkleProofNode;
 import cn.flying.service.attestation.MerkleTreeService;
 import lombok.RequiredArgsConstructor;
@@ -9,14 +10,18 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Default offline verifier for proof-bundle.v1 Merkle proof bundles.
@@ -31,6 +36,23 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
     private static final String SUPPORTED_SIGNATURE_SUITE = "UNSIGNED-V1";
     private static final String SUPPORTED_KEM_SUITE = "NONE-V1";
     private static final String SUPPORTED_PROOF_SUITE = "RP-MERKLE-SHA256-V1";
+    private static final String CONTRACT_REGISTRY_SCHEMA =
+            "record-platform-contract-registry-entry.v1";
+    private static final String ABI_FINGERPRINT_ALGORITHM =
+            "ABI-CANONICAL-JSON-SHA256-V1";
+    private static final Pattern SHA256_PATTERN = Pattern.compile("sha256:[0-9a-f]{64}");
+    private static final Pattern ADDRESS_PATTERN = Pattern.compile("0x[0-9a-f]{40}");
+    private static final Pattern TRANSACTION_HASH_PATTERN = Pattern.compile("0x[0-9a-f]{64}");
+    private static final Pattern SEMANTIC_VERSION_PATTERN = Pattern.compile(
+            "[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?");
+    private static final Pattern EFFECTIVE_AT_PATTERN = Pattern.compile(
+            "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+                    + "(?:\\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2})");
+    private static final Set<String> FISCO_CHAIN_TYPES = Set.of("LOCAL_FISCO", "BSN_FISCO");
+    private static final Set<String> ALLOWED_CHAIN_TYPES = Set.of(
+            "LOCAL_FISCO", "BSN_FISCO", "BSN_BESU");
+    private static final Set<String> HISTORICALLY_VALID_CONTRACT_STATUS = Set.of(
+            "ACTIVE", "DEPRECATED");
 
     private final MerkleTreeService merkleTreeService;
 
@@ -392,12 +414,15 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
             issues.add(missing("chain", "缺少链上回执摘要"));
             return;
         }
-        if (!StringUtils.hasText(chain.batchTransactionHash())) {
+        validateContractRegistry(chain.contractRegistry(), issues);
+        boolean confirmedByBusinessKeyQuery = "CHAIN_QUERY_BEFORE_WRITE".equals(chain.batchConfirmationSource())
+                || "CHAIN_QUERY_AFTER_WRITE".equals(chain.batchConfirmationSource());
+        if (!StringUtils.hasText(chain.batchTransactionHash()) && !confirmedByBusinessKeyQuery) {
             issues.add(issue(
                     ProofVerificationCode.CHAIN_RECEIPT_MISSING,
                     ProofVerificationSeverity.ERROR,
                     "chain.batchTransactionHash",
-                    "缺少批量根上链交易哈希"
+                    "缺少批量根上链交易哈希或可信链查询确认来源"
             ));
         }
         if (!StringUtils.hasText(chain.batchChainFileHash())) {
@@ -419,6 +444,127 @@ public class ProofBundleVerifierImpl implements ProofBundleVerifier {
                     "链上文件哈希与证明包 Merkle 根不一致"
             ));
         }
+    }
+
+    /**
+     * 验证批次绑定的合约注册表字段、自身指纹、生命周期和链身份。
+     */
+    private void validateContractRegistry(
+            ProofBundleVO.ContractRegistryEvidence registry,
+            List<ProofVerificationIssue> issues
+    ) {
+        if (registry == null) {
+            issues.add(issue(
+                    ProofVerificationCode.CONTRACT_REGISTRY_INVALID,
+                    ProofVerificationSeverity.ERROR,
+                    "chain.contractRegistry",
+                    "缺少批次签发时绑定的合约注册表快照"));
+            return;
+        }
+        if ("REVOKED".equals(registry.status())) {
+            issues.add(issue(
+                    ProofVerificationCode.CONTRACT_REVOKED,
+                    ProofVerificationSeverity.ERROR,
+                    "chain.contractRegistry.status",
+                    "证明包引用的合约版本已撤销"));
+        }
+
+        boolean fiscoChain = FISCO_CHAIN_TYPES.contains(registry.chainType());
+        boolean deploymentEvidencePaired =
+                StringUtils.hasText(registry.deploymentTransactionHash())
+                        == (registry.deploymentBlockNumber() != null);
+        boolean structurallyValid = CONTRACT_REGISTRY_SCHEMA.equals(registry.schemaVersion())
+                && hasSha256(registry.registryFingerprint())
+                && "Sharing".equals(registry.contractName())
+                && StringUtils.hasText(registry.semanticVersion())
+                && SEMANTIC_VERSION_PATTERN.matcher(registry.semanticVersion()).matches()
+                && ALLOWED_CHAIN_TYPES.contains(registry.chainType())
+                && StringUtils.hasText(registry.chainId())
+                && (!fiscoChain || StringUtils.hasText(registry.groupId()))
+                && (fiscoChain || !StringUtils.hasText(registry.groupId()))
+                && registry.contractAddress() != null
+                && ADDRESS_PATTERN.matcher(registry.contractAddress()).matches()
+                && ABI_FINGERPRINT_ALGORITHM.equals(registry.abiFingerprintAlgorithm())
+                && hasSha256(registry.abiSha256())
+                && hasSha256(registry.artifactBytecodeSha256())
+                && hasSha256(registry.onChainCodeSha256())
+                && deploymentEvidencePaired
+                && (registry.deploymentTransactionHash() == null
+                        || TRANSACTION_HASH_PATTERN.matcher(
+                                registry.deploymentTransactionHash()).matches())
+                && (registry.deploymentBlockNumber() == null
+                        || registry.deploymentBlockNumber() >= 0)
+                && (HISTORICALLY_VALID_CONTRACT_STATUS.contains(registry.status())
+                        || "REVOKED".equals(registry.status()))
+                && "REDEPLOY_ADDRESS".equals(registry.upgradeStrategy())
+                && registry.effectiveAt() != null
+                && EFFECTIVE_AT_PATTERN.matcher(registry.effectiveAt()).matches();
+        if (!structurallyValid) {
+            issues.add(issue(
+                    ProofVerificationCode.CONTRACT_REGISTRY_INVALID,
+                    ProofVerificationSeverity.ERROR,
+                    "chain.contractRegistry",
+                    "合约注册表 schema、链身份、地址、ABI 或 runtime code 字段无效"));
+            return;
+        }
+
+        try {
+            OffsetDateTime effectiveAt = OffsetDateTime.parse(registry.effectiveAt());
+            if (effectiveAt.toInstant().isAfter(Instant.now())) {
+                issues.add(issue(
+                        ProofVerificationCode.CONTRACT_REGISTRY_INVALID,
+                        ProofVerificationSeverity.ERROR,
+                        "chain.contractRegistry.effectiveAt",
+                        "证明包引用的合约版本尚未生效"));
+            }
+        } catch (DateTimeParseException | NullPointerException e) {
+            issues.add(issue(
+                    ProofVerificationCode.CONTRACT_REGISTRY_INVALID,
+                    ProofVerificationSeverity.ERROR,
+                    "chain.contractRegistry.effectiveAt",
+                    "合约注册表生效时间无效"));
+        }
+
+        if (!toContractRegistryEntry(registry).hasValidRegistryFingerprint()) {
+            issues.add(issue(
+                    ProofVerificationCode.CONTRACT_REGISTRY_INVALID,
+                    ProofVerificationSeverity.ERROR,
+                    "chain.contractRegistry.registryFingerprint",
+                    "合约注册表关键字段指纹不一致"));
+        }
+    }
+
+    /**
+     * 把 proof evidence 转为共享 DTO，以复用 entry.v1 指纹算法。
+     */
+    private ContractRegistryEntryResponse toContractRegistryEntry(
+            ProofBundleVO.ContractRegistryEvidence registry
+    ) {
+        return new ContractRegistryEntryResponse(
+                registry.schemaVersion(),
+                registry.registryFingerprint(),
+                registry.contractName(),
+                registry.semanticVersion(),
+                registry.chainType(),
+                registry.chainId(),
+                registry.groupId(),
+                registry.contractAddress(),
+                registry.abiFingerprintAlgorithm(),
+                registry.abiSha256(),
+                registry.artifactBytecodeSha256(),
+                registry.onChainCodeSha256(),
+                registry.deploymentTransactionHash(),
+                registry.deploymentBlockNumber(),
+                registry.status(),
+                registry.effectiveAt(),
+                registry.upgradeStrategy());
+    }
+
+    /**
+     * 判断文本是否为统一 lowercase SHA-256 指纹。
+     */
+    private boolean hasSha256(String value) {
+        return value != null && SHA256_PATTERN.matcher(value).matches();
     }
 
     /**

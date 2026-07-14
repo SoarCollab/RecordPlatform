@@ -163,6 +163,52 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
         }
     }
 
+    /**
+     * Queries a Merkle batch attestation by its stable tenant and batch business key.
+     */
+    @Override
+    public ChainAttestationBatch getAttestationBatch(Long tenantId, Long batchId) {
+        try {
+            CallResponse response = getSharingService().getAttestationBatch(
+                    new SharingGetAttestationBatchInputBO(
+                            String.valueOf(tenantId),
+                            BigInteger.valueOf(batchId)));
+            if (response == null || !(response.getReturnObject() instanceof List<?> values)
+                    || values.size() < 6) {
+                throw new ChainException(getChainType(), "getAttestationBatch", "Invalid return value");
+            }
+
+            boolean exists = values.get(0) instanceof Boolean value
+                    ? value
+                    : Boolean.parseBoolean(String.valueOf(values.get(0)));
+            if (!exists) {
+                return ChainAttestationBatch.notFound(tenantId, batchId);
+            }
+
+            String merkleRoot = safeGet(values, 3, byte[].class)
+                    .map(Convert::bytesToHex)
+                    .map(this::normalizeHash)
+                    .orElseThrow(() -> new ChainException(
+                            getChainType(), "getAttestationBatch", "Invalid Merkle root"));
+            long leafCount = parseLong(values.get(4));
+            return ChainAttestationBatch.builder()
+                    .exists(true)
+                    .tenantId(tenantId)
+                    .batchId(batchId)
+                    .batchNo(safeGetString(values, 1).orElse(""))
+                    .proofAlgorithm(safeGetString(values, 2).orElse(""))
+                    .merkleRoot(merkleRoot)
+                    .leafCount(Math.toIntExact(leafCount))
+                    .recordedTime(parseLong(values.get(5)))
+                    .build();
+        } catch (ChainException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("{} [getAttestationBatch] 异常", getLogPrefix(), e);
+            throw new ChainException(getChainType(), "getAttestationBatch", e.getMessage(), e);
+        }
+    }
+
     @Override
     public List<ChainFileInfo> getUserFiles(String uploader) {
         try {

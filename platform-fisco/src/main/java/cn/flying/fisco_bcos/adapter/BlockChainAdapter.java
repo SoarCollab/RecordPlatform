@@ -62,6 +62,16 @@ public interface BlockChainAdapter {
     );
 
     /**
+     * 按稳定业务键查询链上的 Merkle 批量存证记录。
+     *
+     * @param tenantId 批次所属租户
+     * @param batchId 批量存证业务 ID
+     * @return 查询到的链上记录；不存在时 exists=false
+     * @throws ChainException 链查询异常
+     */
+    ChainAttestationBatch getAttestationBatch(Long tenantId, Long batchId);
+
+    /**
      * 获取用户的所有文件列表
      *
      * @param uploader 上传者标识

@@ -17,6 +17,8 @@ import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.vo.file.ProofBundleVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.StorageObjectHeadVO;
+import cn.flying.platformapi.response.ContractRegistryEntryResponse;
+import cn.flying.service.attestation.AttestationBatchPersistenceService;
 import cn.flying.service.attestation.MerkleTreeService;
 import cn.flying.service.key.CryptoSuitePolicyService;
 import cn.flying.service.key.FileKeyEnvelopeProperties;
@@ -42,6 +44,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -74,6 +77,9 @@ class ProofBundleServiceImplTest {
     @Mock
     private ChunkManifestService chunkManifestService;
 
+    @Mock
+    private AttestationBatchPersistenceService attestationBatchPersistenceService;
+
     private FileKeyEnvelopeProperties suiteProperties;
     private ProofBundleServiceImpl service;
 
@@ -89,8 +95,11 @@ class ProofBundleServiceImplTest {
                 batchMapper,
                 fileRemoteClient,
                 chunkManifestService,
-                new CryptoSuitePolicyService(suiteProperties)
+                new CryptoSuitePolicyService(suiteProperties),
+                attestationBatchPersistenceService
         );
+        lenient().when(attestationBatchPersistenceService.requireContractRegistry(any()))
+                .thenReturn(contractRegistry());
         TenantContext.setTenantId(TENANT_ID);
         ReflectionTestUtils.setField(
                 IdUtils.class,
@@ -131,6 +140,10 @@ class ProofBundleServiceImplTest {
             assertThat(bundle.verificationPolicy().proofSuite()).isEqualTo("RP-MERKLE-SHA256-V1");
             assertThat(bundle.verificationPolicy().keyVersion()).isEqualTo(1);
             assertThat(bundle.chain().batchTransactionHash()).isEqualTo("tx-batch");
+            assertThat(bundle.chain().batchConfirmationSource()).isEqualTo("CHAIN_WRITE");
+            assertThat(bundle.chain().contractRegistry().contractName()).isEqualTo("Sharing");
+            assertThat(bundle.chain().contractRegistry().contractAddress())
+                    .isEqualTo("0x1111111111111111111111111111111111111111");
             assertThat(bundle.storage().objects()).hasSize(1);
             ProofBundleVO.StorageObjectEvidence storageObject = bundle.storage().objects().getFirst();
             assertThat(storageObject.index()).isZero();
@@ -190,6 +203,49 @@ class ProofBundleServiceImplTest {
                             .isEqualTo(ResultEnum.FILE_RECORD_ERROR));
 
             verify(batchMapper, never()).selectById(any());
+            verify(fileRemoteClient, never()).headObject(any(), any());
+        }
+    }
+
+    /**
+     * 验证 P1-2 拆分证据合同前不会输出把 manifest hash 误当文件 hash 的伪证明。
+     */
+    @Test
+    void exportByFileId_shouldFailClosedForManifestEvidenceLeaf() {
+        try (MockedStatic<SecurityUtils> ignored = mockStaticUser()) {
+            when(fileMapper.selectById(FILE_ID)).thenReturn(file());
+            when(leafMapper.selectOne(any())).thenReturn(leaf().setEvidenceType("MANIFEST_HASH"));
+            when(batchMapper.selectById(BATCH_ID)).thenReturn(batch());
+
+            assertThatThrownBy(() -> service.exportByFileId(USER_ID, FILE_ID))
+                    .isInstanceOf(GeneralException.class)
+                    .satisfies(ex -> {
+                        GeneralException exception = (GeneralException) ex;
+                        assertThat(exception.getResultEnum()).isEqualTo(ResultEnum.FILE_RECORD_ERROR);
+                        assertThat(exception.getData()).asString().contains("证据类型");
+                    });
+
+            verify(chunkManifestService, never()).findActiveManifest(any(), any());
+            verify(fileRemoteClient, never()).headObject(any(), any());
+        }
+    }
+
+    /**
+     * 验证未知或缺失的叶子证据类型不会回退为旧文件哈希语义。
+     */
+    @Test
+    void exportByFileId_shouldFailClosedForUnknownEvidenceLeaf() {
+        try (MockedStatic<SecurityUtils> ignored = mockStaticUser()) {
+            when(fileMapper.selectById(FILE_ID)).thenReturn(file());
+            when(leafMapper.selectOne(any())).thenReturn(leaf().setEvidenceType("UNKNOWN_EVIDENCE"));
+            when(batchMapper.selectById(BATCH_ID)).thenReturn(batch());
+
+            assertThatThrownBy(() -> service.exportByFileId(USER_ID, FILE_ID))
+                    .isInstanceOf(GeneralException.class)
+                    .satisfies(ex -> assertThat(((GeneralException) ex).getResultEnum())
+                            .isEqualTo(ResultEnum.FILE_RECORD_ERROR));
+
+            verify(chunkManifestService, never()).findActiveManifest(any(), any());
             verify(fileRemoteClient, never()).headObject(any(), any());
         }
     }
@@ -324,6 +380,9 @@ class ProofBundleServiceImplTest {
                 .setBatchId(BATCH_ID)
                 .setFileId(FILE_ID)
                 .setFileHash(FILE_HASH)
+                .setEvidenceType("LEGACY_CHAIN_RECORD_ID")
+                .setEvidenceHash(FILE_HASH)
+                .setChainRecordId(FILE_HASH)
                 .setLeafHash("leaf-hash")
                 .setLeafIndex(0)
                 .setProofPathJson("[{\"position\":\"RIGHT\",\"hash\":\"sibling-hash\"}]")
@@ -346,7 +405,32 @@ class ProofBundleServiceImplTest {
                 .setStatus("COMPLETED")
                 .setChainTransactionHash("tx-batch")
                 .setChainFileHash("chain-root")
+                .setConfirmationSource("CHAIN_WRITE")
                 .setDeleted(0);
+    }
+
+    /**
+     * 构造批次签发时已核验的 Sharing 合约注册表快照。
+     */
+    private ContractRegistryEntryResponse contractRegistry() {
+        return new ContractRegistryEntryResponse(
+                "record-platform-contract-registry-entry.v1",
+                "sha256:" + "1".repeat(64),
+                "Sharing",
+                "2.0.0",
+                "LOCAL_FISCO",
+                "chain0",
+                "group0",
+                "0x1111111111111111111111111111111111111111",
+                "ABI-CANONICAL-JSON-SHA256-V1",
+                "sha256:" + "2".repeat(64),
+                "sha256:" + "3".repeat(64),
+                "sha256:" + "4".repeat(64),
+                null,
+                null,
+                "ACTIVE",
+                "2026-07-13T00:00:00Z",
+                "REDEPLOY_ADDRESS");
     }
 
     /**

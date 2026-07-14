@@ -10,12 +10,12 @@ import org.fisco.bcos.sdk.v3.transaction.manager.TransactionProcessorFactory;
 import org.fisco.bcos.sdk.v3.transaction.model.dto.CallResponse;
 import org.fisco.bcos.sdk.v3.transaction.model.dto.TransactionResponse;
 import cn.flying.fisco_bcos.constants.ContractConstants;
+import cn.flying.fisco_bcos.registry.ContractRegistryService;
 import cn.flying.fisco_bcos.model.bo.StorageDeleteFileInputBO;
 import cn.flying.fisco_bcos.model.bo.StorageDeleteFilesInputBO;
 import cn.flying.fisco_bcos.model.bo.StorageGetFileInputBO;
 import cn.flying.fisco_bcos.model.bo.StorageGetUserFilesInputBO;
 import cn.flying.fisco_bcos.model.bo.StorageStoreFileInputBO;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 
@@ -31,16 +31,19 @@ import org.springframework.stereotype.Service;
 @NoArgsConstructor
 @Getter
 public class StorageService {
-  @Value("${contract.storageAddress}")
   private String address;
 
   @Resource
   private Client client;
 
+  @Resource
+  private ContractRegistryService contractRegistryService;
+
   AssembleTransactionProcessor txProcessor;
 
   @PostConstruct
   public void init() {
+    this.address = contractRegistryService.getActiveEntry("Storage").contractAddress();
     this.txProcessor = TransactionProcessorFactory.createAssembleTransactionProcessor(this.client, this.client.getCryptoSuite().getCryptoKeyPair());
   }
 

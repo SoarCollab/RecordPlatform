@@ -1253,6 +1253,7 @@ class DistributedStorageServiceImplTest {
 
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData().sessionId()).isEqualTo("direct-session");
+            assertThat(result.getData().contentHash()).isEqualTo(chunkHash);
             assertThat(result.getData().parts()).hasSize(1);
             assertThat(result.getData().parts().getFirst().storagePath())
                     .isEqualTo(directStoragePath(chunkHash));
@@ -1299,6 +1300,11 @@ class DistributedStorageServiceImplTest {
                                     "cipher-hash", chunkHash
                             ))
                             .build());
+            when(s3Client.getObject(any(GetObjectRequest.class)))
+                    .thenReturn(new ResponseInputStream<>(
+                            GetObjectResponse.builder().build(),
+                            AbortableInputStream.create(new ByteArrayInputStream(chunkBytes))
+                    ));
 
             CompleteDirectMultipartUploadRequest request = new CompleteDirectMultipartUploadRequest(
                     "direct-session",
@@ -1319,12 +1325,13 @@ class DistributedStorageServiceImplTest {
             Result<CompleteDirectMultipartUploadResponse> result = storageService.completeDirectMultipartUpload(request);
 
             assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData().contentHash()).isEqualTo(chunkHash);
             assertThat(result.getData().parts()).hasSize(1);
             assertThat(result.getData().parts().getFirst().storagePath())
                     .isEqualTo(directStoragePath(chunkHash));
             assertThat(result.getData().parts().getFirst().eTag()).isEqualTo("\"etag-final\"");
 
-            verify(s3Client, never()).getObject(any(GetObjectRequest.class));
+            verify(s3Client).getObject(any(GetObjectRequest.class));
             verify(s3Client, never()).putObject(any(PutObjectRequest.class), any(software.amazon.awssdk.core.sync.RequestBody.class));
             verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
         }

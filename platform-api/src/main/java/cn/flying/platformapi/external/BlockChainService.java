@@ -4,6 +4,7 @@ import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.request.CancelShareRequest;
 import cn.flying.platformapi.request.DeleteFilesRequest;
 import cn.flying.platformapi.request.GetShareInfoRequest;
+import cn.flying.platformapi.request.GetAttestationBatchRequest;
 import cn.flying.platformapi.request.GetUserShareCodesRequest;
 import cn.flying.platformapi.request.ShareFilesRequest;
 import cn.flying.platformapi.request.StoreAttestationBatchRequest;
@@ -15,13 +16,20 @@ import cn.flying.platformapi.response.*;
 import java.util.List;
 
 /**
- * 区块链调用接口 v2.0.0
+ * 区块链调用接口 v2.1.0
  * 提供文件存证、查询、删除、分享等区块链操作。
  */
 public interface BlockChainService {
 
     /** Dubbo 服务版本号 */
-    String VERSION = "2.0.0";
+    String VERSION = "2.1.0";
+
+    /**
+     * 获取启动时已与当前链上 runtime code 核验的合约注册表。
+     *
+     * @return 当前链上所有 ACTIVE 合约的不可变快照
+     */
+    Result<List<ContractRegistryEntryResponse>> getContractRegistry();
 
     /**
      * 存储文件到区块链
@@ -38,6 +46,14 @@ public interface BlockChainService {
      * @return 存储结果（包含交易哈希和链上确认的 Merkle 根）
      */
     Result<StoreAttestationBatchResponse> storeAttestationBatch(StoreAttestationBatchRequest request);
+
+    /**
+     * 按租户和批次业务 ID 查询链上 Merkle 批量存证记录。
+     *
+     * @param request 批量存证查询请求
+     * @return 查询结果；记录不存在时返回成功且 exists=false
+     */
+    Result<GetAttestationBatchResponse> getAttestationBatch(GetAttestationBatchRequest request);
 
     /**
      * 获取用户所有文件列表

@@ -17,7 +17,7 @@
     <properties>
         <java.version>21</java.version>
         <tomcat.version>10.1.55</tomcat.version>
-        <jackson-bom.version>2.21.1</jackson-bom.version>
+        <jackson-bom.version>2.21.4</jackson-bom.version>
         <hutool.version>5.8.44</hutool.version>
         <mybatis-plus-bom.version>3.5.16</mybatis-plus-bom.version>
         <testcontainers.version>1.20.4</testcontainers.version>
@@ -41,7 +41,7 @@
             Testcontainers (docker-java) may require SystemProperties.getUserName(String) (>= 3.17.0).
          -->
         <commons-lang3.version>3.20.0</commons-lang3.version>
-        <netty.version>4.2.13.Final</netty.version>
+        <netty.version>4.2.15.Final</netty.version>
         <aws.sdk.version>2.44.4</aws.sdk.version>
         <!--
             Mockito inline mock maker relies on Byte Buddy instrumentation.

@@ -4,12 +4,14 @@ import cn.flying.fisco_bcos.adapter.BlockChainAdapter;
 import cn.flying.fisco_bcos.adapter.model.*;
 import cn.flying.fisco_bcos.exception.BlockChainExceptionHandler;
 import cn.flying.fisco_bcos.monitor.FiscoMetrics;
+import cn.flying.fisco_bcos.registry.ContractRegistryService;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.request.CancelShareRequest;
 import cn.flying.platformapi.request.DeleteFilesRequest;
 import cn.flying.platformapi.request.GetShareInfoRequest;
+import cn.flying.platformapi.request.GetAttestationBatchRequest;
 import cn.flying.platformapi.request.GetUserShareCodesRequest;
 import cn.flying.platformapi.request.ShareFilesRequest;
 import cn.flying.platformapi.request.StoreAttestationBatchRequest;
@@ -51,6 +53,9 @@ public class BlockChainServiceImpl implements BlockChainService {
     @Resource
     private FiscoMetrics fiscoMetrics;
 
+    @Resource
+    private ContractRegistryService contractRegistryService;
+
     @Value("${record-platform.rpc.blockchain-token:}")
     private String blockchainRpcToken;
 
@@ -62,6 +67,17 @@ public class BlockChainServiceImpl implements BlockChainService {
         if (!BlockChainRpcAuth.hasToken(blockchainRpcToken)) {
             throw new IllegalStateException(BlockChainRpcAuth.TOKEN_PROPERTY_NAME + " must be configured");
         }
+    }
+
+    /**
+     * 返回已由当前节点 runtime code 核验的 ACTIVE 合约注册表。
+     */
+    @Override
+    @Retry(name = "blockchain")
+    @ApiDoc(value = "获取合约注册表")
+    public Result<List<ContractRegistryEntryResponse>> getContractRegistry() {
+        requireTrustedRpcCaller();
+        return Result.success(contractRegistryService.getActiveEntries());
     }
 
     @Override
@@ -160,7 +176,6 @@ public class BlockChainServiceImpl implements BlockChainService {
      * 存储 Merkle 批量存证根，不复用普通文件 storeFile 合约记录。
      */
     @Override
-    @Retry(name = "blockchain")
     @ApiDoc(value = "保存 Merkle 批量存证根")
     public Result<StoreAttestationBatchResponse> storeAttestationBatch(StoreAttestationBatchRequest request) {
         requireTrustedRpcCaller();
@@ -173,6 +188,9 @@ public class BlockChainServiceImpl implements BlockChainService {
                         null
                 );
             }
+
+            contractRegistryService.requireActiveReference(
+                    request.contractRegistry(), "Sharing");
 
             ChainReceipt receipt = chainAdapter.storeAttestationBatch(
                     request.tenantId(),
@@ -198,6 +216,50 @@ public class BlockChainServiceImpl implements BlockChainService {
             return BlockChainExceptionHandler.handle(e, "storeAttestationBatch", ResultEnum.CONTRACT_ERROR, fiscoMetrics);
         } finally {
             fiscoMetrics.stopStoreTimer(timerSample);
+        }
+    }
+
+    /**
+     * 查询链上 Merkle 批量存证，用于写入结果未知时按业务键恢复。
+     */
+    @Override
+    @Retry(name = "blockchain")
+    @ApiDoc(value = "查询 Merkle 批量存证")
+    public Result<GetAttestationBatchResponse> getAttestationBatch(GetAttestationBatchRequest request) {
+        requireTrustedRpcCaller();
+        try {
+            if (request == null || request.tenantId() == null || request.tenantId() <= 0
+                    || request.batchId() == null || request.batchId() <= 0
+                    || request.contractRegistry() == null) {
+                return new Result<>(
+                        ResultEnum.PARAM_IS_INVALID.getCode(),
+                        "参数错误：tenantId 和 batchId 必须为正数",
+                        null
+                );
+            }
+
+            contractRegistryService.requireActiveReference(
+                    request.contractRegistry(), "Sharing");
+
+            ChainAttestationBatch batch = chainAdapter.getAttestationBatch(
+                    request.tenantId(), request.batchId());
+            if (batch == null || !Boolean.TRUE.equals(batch.getExists())) {
+                return Result.success(GetAttestationBatchResponse.notFound(
+                        request.tenantId(), request.batchId()));
+            }
+            return Result.success(new GetAttestationBatchResponse(
+                    true,
+                    request.tenantId(),
+                    request.batchId(),
+                    batch.getBatchNo(),
+                    batch.getProofAlgorithm(),
+                    batch.getMerkleRoot(),
+                    batch.getLeafCount(),
+                    batch.getRecordedTime()
+            ));
+        } catch (Exception e) {
+            return BlockChainExceptionHandler.handle(
+                    e, "getAttestationBatch", ResultEnum.CONTRACT_ERROR, fiscoMetrics);
         }
     }
 
@@ -425,12 +487,15 @@ public class BlockChainServiceImpl implements BlockChainService {
     private boolean isValidAttestationBatchRequest(StoreAttestationBatchRequest request) {
         return request != null
                 && request.tenantId() != null
+                && request.tenantId() > 0
                 && request.batchId() != null
+                && request.batchId() > 0
                 && hasText(request.batchNo())
                 && hasText(request.proofAlgorithm())
                 && isBytes32Hex(request.merkleRoot())
                 && request.leafCount() != null
-                && request.leafCount() > 0;
+                && request.leafCount() > 0
+                && request.contractRegistry() != null;
     }
 
     /**

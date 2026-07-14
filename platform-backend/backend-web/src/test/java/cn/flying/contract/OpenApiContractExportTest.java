@@ -8,6 +8,7 @@ import cn.flying.controller.AdminAnnouncementController;
 import cn.flying.controller.AdminTicketController;
 import cn.flying.controller.AnnouncementController;
 import cn.flying.controller.AuthorizeController;
+import cn.flying.controller.AttestationBatchAdminController;
 import cn.flying.controller.ConversationController;
 import cn.flying.controller.FileAdminController;
 import cn.flying.controller.FileController;
@@ -20,6 +21,7 @@ import cn.flying.controller.MessageController;
 import cn.flying.controller.PermissionController;
 import cn.flying.controller.QuotaAdminController;
 import cn.flying.controller.QuotaController;
+import cn.flying.controller.PublicProofController;
 import cn.flying.controller.RolePermissionController;
 import cn.flying.controller.ShareController;
 import cn.flying.controller.ShareRestController;
@@ -34,6 +36,7 @@ import cn.flying.dao.mapper.IntegrityAlertMapper;
 import cn.flying.dao.mapper.SysPermissionMapper;
 import cn.flying.dao.mapper.SysRolePermissionMapper;
 import cn.flying.service.AccountService;
+import cn.flying.service.attestation.AttestationBatchProductionService;
 import cn.flying.service.AnnouncementService;
 import cn.flying.service.ConversationService;
 import cn.flying.service.DownloadBatchMetricsService;
@@ -54,6 +57,7 @@ import cn.flying.service.SysAuditService;
 import cn.flying.service.SystemMonitorService;
 import cn.flying.service.TicketService;
 import cn.flying.service.proof.ProofBundleService;
+import cn.flying.service.proof.signed.SignedProofArchiveService;
 import cn.flying.service.sse.SseEmitterManager;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -154,6 +158,12 @@ class OpenApiContractExportTest {
     private ProofBundleService proofBundleService;
 
     @MockitoBean
+    private SignedProofArchiveService signedProofArchiveService;
+
+    @MockitoBean
+    private AttestationBatchProductionService attestationBatchProductionService;
+
+    @MockitoBean
     private DownloadBatchMetricsService downloadBatchMetricsService;
 
     @MockitoBean
@@ -249,11 +259,140 @@ class OpenApiContractExportTest {
         assertThat(rootNode.path("paths").has("/api/v1/files")).isTrue();
         assertThat(rootNode.path("paths").has("/api/v1/admin/quota/rollout/audits")).isTrue();
         assertThat(rootNode.path("paths").has("/api/v1/admin/integrity-alerts")).isTrue();
+        assertThat(rootNode.path("paths").has(
+                "/api/v1/admin/attestation-batches/production/trigger")).isTrue();
+        assertThat(rootNode.path("paths").has(
+                "/api/v1/admin/attestation-batches/production/status")).isTrue();
+        assertThat(rootNode.path("paths").has(
+                "/api/v1/files/{id}/proof-bundle.zip")).isTrue();
+        assertThat(rootNode.path("paths").has(
+                "/api/v1/files/attestation-leaves/{leafId}/proof-bundle.zip")).isTrue();
+        assertThat(rootNode.path("paths").has(
+                "/api/v1/public/proofs/{proofId}/status")).isTrue();
+        assertThat(rootNode.path("paths").has(
+                "/api/v1/public/proof-keys/{keyId}/versions/{keyVersion}")).isTrue();
+        assertSignedProofArchiveResponseContract(
+                rootNode, "/api/v1/files/{id}/proof-bundle.zip");
+        assertSignedProofArchiveResponseContract(
+                rootNode, "/api/v1/files/attestation-leaves/{leafId}/proof-bundle.zip");
         JsonNode integrityAlertSchema = rootNode.path("components").path("schemas").path("IntegrityAlertVO");
         assertThat(integrityAlertSchema.path("properties").has("severity")).isTrue();
         assertThat(integrityAlertSchema.path("properties").has("evidence")).isTrue();
+        JsonNode proofBundleSchema = rootNode.path("components").path("schemas").path("ProofBundleVO");
+        assertRequiredFields(
+                proofBundleSchema,
+                "contractVersion",
+                "manifest",
+                "file",
+                "storage",
+                "merkle",
+                "chain",
+                "issuer",
+                "verificationPolicy",
+                "verificationGuide");
+        assertNullableFields(proofBundleSchema);
+        JsonNode chainEvidenceSchema = rootNode.path("components").path("schemas").path("ChainEvidence");
+        assertRequiredFields(chainEvidenceSchema, "batchChainFileHash", "contractRegistry");
+        assertNullableFields(
+                chainEvidenceSchema,
+                "batchTransactionHash",
+                "fileTransactionHash",
+                "batchConfirmationSource");
+        JsonNode contractRegistrySchema = rootNode.path("components").path("schemas")
+                .path("ContractRegistryEvidence");
+        assertRequiredFields(
+                contractRegistrySchema,
+                "schemaVersion",
+                "registryFingerprint",
+                "contractName",
+                "semanticVersion",
+                "chainType",
+                "chainId",
+                "contractAddress",
+                "abiFingerprintAlgorithm",
+                "abiSha256",
+                "artifactBytecodeSha256",
+                "onChainCodeSha256",
+                "status",
+                "effectiveAt",
+                "upgradeStrategy");
+        assertNullableFields(
+                contractRegistrySchema,
+                "groupId",
+                "deploymentTransactionHash",
+                "deploymentBlockNumber");
+        JsonNode productionStatusSchema = rootNode.path("components").path("schemas")
+                .path("AttestationBatchProductionStatusVO");
+        assertThat(productionStatusSchema.path("properties").has("readyCandidates")).isTrue();
+        assertThat(productionStatusSchema.path("properties").has("deadLetterCandidates")).isTrue();
+        JsonNode proofStatusSchema = rootNode.path("components").path("schemas").path("ProofStatusVO");
+        assertThat(proofStatusSchema.path("properties").path("statusVersion").path("type").asText())
+                .isEqualTo("string");
+        List<String> currentStatuses = new ArrayList<>();
+        proofStatusSchema.path("properties").path("status").path("enum")
+                .forEach(value -> currentStatuses.add(value.asText()));
+        assertThat(currentStatuses)
+                .containsExactly("ACTIVE", "REVOKED", "SUPERSEDED", "INVALID");
+        List<String> issuedStatuses = new ArrayList<>();
+        proofStatusSchema.path("properties").path("issuedStatus").path("enum")
+                .forEach(value -> issuedStatuses.add(value.asText()));
+        assertThat(issuedStatuses).containsExactly("ACTIVE", "SUPERSEDED");
 
         return normalizeOpenApiDocument(rootNode);
+    }
+
+    /**
+     * 校验签名 ZIP operation 的成功响应头和可重试失败响应合同。
+     *
+     * @param rootNode OpenAPI 根节点
+     * @param path ZIP operation 路径
+     */
+    private void assertSignedProofArchiveResponseContract(JsonNode rootNode, String path) {
+        JsonNode responses = rootNode.path("paths").path(path).path("get").path("responses");
+        JsonNode successResponse = responses.path("200");
+        JsonNode successHeaders = successResponse.path("headers");
+        assertThat(successResponse.path("content").has("application/zip")).isTrue();
+        assertThat(successHeaders.has("Content-Disposition")).isTrue();
+        assertThat(successHeaders.has("Cache-Control")).isTrue();
+        assertThat(successHeaders.has("X-Proof-Manifest-Hash")).isTrue();
+
+        JsonNode retryableResponse = responses.path("503");
+        assertThat(retryableResponse.path("headers").path("Retry-After")
+                .path("schema").path("type").asText()).isEqualTo("integer");
+        assertThat(retryableResponse.path("headers").path("Retry-After")
+                .path("schema").path("format").asText()).isEqualTo("int32");
+        assertThat(retryableResponse.path("content").path("application/json")
+                .path("schema").path("$ref").asText()).isEqualTo("#/components/schemas/Result");
+    }
+
+    /**
+     * 精确校验 schema 的必填字段集合，防止必填性意外扩大或缩小。
+     *
+     * @param schema 待校验的 OpenAPI schema
+     * @param expectedFields 预期必填字段
+     */
+    private void assertRequiredFields(JsonNode schema, String... expectedFields) {
+        List<String> actualFields = new ArrayList<>();
+        schema.path("required").forEach(field -> actualFields.add(field.asText()));
+
+        assertThat(actualFields).containsExactlyInAnyOrder(expectedFields);
+    }
+
+    /**
+     * 精确校验 schema 中显式可空的字段集合，防止生成类型与响应合同漂移。
+     *
+     * @param schema 待校验的 OpenAPI schema
+     * @param expectedFields 预期显式可空字段
+     */
+    private void assertNullableFields(JsonNode schema, String... expectedFields) {
+        List<String> actualFields = new ArrayList<>();
+        schema.path("properties").properties().forEach(entry -> {
+            if (entry.getValue().path("nullable").asBoolean(false)) {
+                actualFields.add(entry.getKey());
+            }
+        });
+
+        assertThat(actualFields).containsExactlyInAnyOrder(expectedFields);
     }
 
     /**
@@ -375,6 +514,7 @@ class OpenApiContractExportTest {
     @Import({
             SwaggerConfiguration.class,
             AccountController.class,
+            AttestationBatchAdminController.class,
             AdminAnnouncementController.class,
             AdminTicketController.class,
             AnnouncementController.class,
@@ -391,6 +531,7 @@ class OpenApiContractExportTest {
             PermissionController.class,
             QuotaAdminController.class,
             QuotaController.class,
+            PublicProofController.class,
             RolePermissionController.class,
             ShareController.class,
             ShareRestController.class,

@@ -74,6 +74,18 @@ contract Sharing is Storage {
         _;
     }
 
+    /**
+     * 返回可由链外注册表严格核对的稳定合约名称和语义版本。
+     */
+    function contractIdentity()
+        public
+        pure
+        override
+        returns (string memory contractName, string memory semanticVersion)
+    {
+        return ("Sharing", "2.0.0");
+    }
+
     // 转移平台操作员权限
     function transferOperator(address newOperator) public onlyOperator {
         require(newOperator != address(0), "Operator cannot be zero address");
@@ -96,7 +108,7 @@ contract Sharing is Storage {
         require(bytes(proofAlgorithm).length > 0, "Proof algorithm cannot be empty");
         require(merkleRoot != bytes32(0), "Merkle root cannot be empty");
         require(leafCount > 0, "Leaf count must be greater than 0");
-        require(attestationBatches[tenantId][batchId].recordedTime == 0, "Attestation batch already exists");
+        require(bytes(attestationBatches[tenantId][batchId].batchNo).length == 0, "Attestation batch already exists");
 
         uint256 recordedTime = block.timestamp * 1000;
         attestationBatches[tenantId][batchId] = AttestationBatch({
@@ -111,6 +123,30 @@ contract Sharing is Storage {
 
         emit AttestationBatchStored(tenantId, batchId, batchNo, merkleRoot, leafCount, recordedTime);
         return merkleRoot;
+    }
+
+    // 按稳定业务键查询批量存证，供响应丢失后的链上对账使用
+    function getAttestationBatch(
+        string memory tenantId,
+        uint256 batchId
+    ) public view returns (
+        bool exists,
+        string memory batchNo,
+        string memory proofAlgorithm,
+        bytes32 merkleRoot,
+        uint256 leafCount,
+        uint256 recordedTime
+    ) {
+        AttestationBatch storage batch = attestationBatches[tenantId][batchId];
+        exists = bytes(batch.batchNo).length > 0;
+        return (
+            exists,
+            batch.batchNo,
+            batch.proofAlgorithm,
+            batch.merkleRoot,
+            batch.leafCount,
+            batch.recordedTime
+        );
     }
     
     // 生成分享码（基于合约上下文和递增 nonce，避免外部自调用依赖）

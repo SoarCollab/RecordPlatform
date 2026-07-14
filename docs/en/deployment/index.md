@@ -26,7 +26,7 @@ Deployment and operations guide for RecordPlatform.
 | platform-backend | 8000 | HTTP/REST |
 | platform-fisco | 8091 | Dubbo Triple |
 | platform-storage | 8092 | Dubbo Triple |
-| platform-frontend | 5173 (dev) / 80 (prod) | HTTP |
+| platform-frontend | 5173 (dev) / 8080 (container, map host 80 if needed) | HTTP |
 
 ### Startup Order
 
@@ -45,4 +45,3 @@ Deployment and operations guide for RecordPlatform.
 | `local` | Local development | Debug logging, Swagger enabled |
 | `dev` | Development server | Partial logging |
 | `prod` | Production | Swagger disabled, SSL required |
-

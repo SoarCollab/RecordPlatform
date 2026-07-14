@@ -27,6 +27,7 @@
   - [Friend File Share Module](#16-friend-file-share-module)
   - [Quota Module](#17-quota-module)
   - [Integrity Alerts Module](#18-integrity-alerts-module-admin)
+  - [Attestation Batch Production Module](#19-attestation-batch-production-module-admin)
 - [Appendix](#appendix)
 
 ---
@@ -81,6 +82,8 @@ POST /api/v1/auth/login
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info` - Public share decrypt metadata
 - `GET /api/v1/images/download/images/**` - Download images
 - `GET /api/v1/shares/{shareCode}/info` - Get share basic info (public)
+- `GET /api/v1/public/proofs/{proofId}/status` - Resolve current signed-proof status
+- `GET /api/v1/public/proof-keys/{keyId}/versions/{keyVersion}` - Resolve a versioned proof verification key
 - `GET /api/v1/sse/connect?token=...` - SSE connect entry (short-lived token required)
 
 `POST /api/v1/auth/logout` is also handled by Spring Security (non-controller endpoint) and requires authenticated context.
@@ -1247,6 +1250,9 @@ The following REST endpoints are also active in current controllers/OpenAPI and 
 | GET | `/api/v1/files/{id}` | Get file detail by ID |
 | GET | `/api/v1/files/{id}/proof-bundle` | Export verifier-ready proof bundle by file ID |
 | GET | `/api/v1/files/attestation-leaves/{leafId}/proof-bundle` | Export verifier-ready proof bundle by attestation leaf ID |
+| GET | `/api/v1/files/{id}/proof-bundle.zip` | Export a deterministic signed proof ZIP by file ID |
+| GET | `/api/v1/files/attestation-leaves/{leafId}/proof-bundle.zip` | Export a deterministic signed proof ZIP by attestation leaf ID |
+| POST | `/api/v1/files/attestation-leaves/{leafId}/proof-status/revoke` | Idempotently revoke an issued signed proof |
 | GET | `/api/v1/files/stats` | Get user file statistics |
 | GET | `/api/v1/files/shares` | Get current user's share list |
 | DELETE | `/api/v1/files/share/{shareCode}` | Cancel share by code |
@@ -1315,18 +1321,106 @@ POST /api/v1/files/download-batches/report
 
 ### 4.13 Export Proof Bundle
 
-Export verifier-ready `proof-bundle.v1` JSON. The bundle contains public proof inputs only: file metadata, storage HEAD evidence, Merkle proof data, chain receipt fields, issuer metadata, and required `verificationPolicy` suite metadata.
+The canonical export is a deterministic, Ed25519-signed `record-platform-proof-manifest.v2` ZIP. The two `proof-bundle.v1.1` JSON routes remain available for compatibility but are deprecated and unsigned.
 
 ```
+GET /api/v1/files/{id}/proof-bundle.zip
+GET /api/v1/files/attestation-leaves/{leafId}/proof-bundle.zip
+
+# Deprecated compatibility JSON
 GET /api/v1/files/{id}/proof-bundle
 GET /api/v1/files/attestation-leaves/{leafId}/proof-bundle
 ```
 
 **Authentication**: Bearer Token
 
-The export requires the current tenant and user to be authorized for the file. The bundle does not include raw file bytes, decrypt keys, RPC tokens, internal database IDs, or full `file_param`.
+The signed export requires the current tenant and owner (or an authorized administrator). Before issuing or rebuilding a ZIP, the backend revalidates the successful file version, the persisted original-byte `contentHash`, its protected upload source record, the active chunk manifest, every storage HEAD record, the `MANIFEST_HASH` Merkle leaf/path/root, the completed batch receipt, and the immutable contract-registry snapshot. A missing historical `contentHash` is not backfilled from `chainRecordId`; the export fails closed.
+
+The completed receipt accepts only `CHAIN_WRITE` with a valid 32-byte hexadecimal transaction hash, or `CHAIN_QUERY_BEFORE_WRITE` / `CHAIN_QUERY_AFTER_WRITE` with no transaction hash; in every case the 32-byte chain root must equal the persisted Merkle root. Both ZIP routes share one tenant/user rate-limit bucket: 10 requests per minute for regular users and 30 for administrator or monitor roles. One application instance validates at most eight proof exports concurrently, a proof manifest may contain at most 128 chunks, and storage HEAD validation has a 60-second overall budget. Capacity exhaustion and storage-budget expiry are retryable dependency failures and never mark an issuance `INVALID`.
+
+The successful response is `application/zip` with a safe `record-proof-{fileId}-{version}.zip` attachment name, `Cache-Control: no-store, must-revalidate`, and `X-Proof-Manifest-Hash`. A saturated export bulkhead or expired storage deadline returns JSON `503 SERVICE_UNAVAILABLE` with `Retry-After: 5`; clients may retry without assuming the proof became invalid. The archive always contains exactly eight root-level STORED entries in this order:
+
+1. `manifest.json`
+2. `file.hash`
+3. `chunk-manifest.json`
+4. `merkle-proof.json`
+5. `blockchain-receipt.json`
+6. `issuer-signature.jws`
+7. `verification-policy.json`
+8. `README.verify.md`
+
+Entry names, order, timestamp, CRC, canonical JSON, and byte encoding are fixed. Each entry is limited to 1 MiB and the logical payload total to 4 MiB. Additional, nested, absolute, or traversal entry names are rejected. `manifest.json` binds the six evidence entries by SHA-256 and byte length; `issuer-signature.jws` is compact JWS `EdDSA` whose decoded payload must equal the canonical manifest bytes exactly. The manifest and JWS are directly bound and therefore are not recursively listed as their own evidence entries.
+
+`file.hash` is UTF-8 and `issuer-signature.jws` is ASCII; each contains exactly one trailing LF byte. The canonicalizer sorts every JSON object key alphabetically. The canonical JSON schemas and their complete record fields are:
+
+| Schema | Required fields in the v2 record |
+| ------ | -------------------------------- |
+| `record-platform-proof-manifest.v2` | `schemaVersion`, `proofId`, `fileId`, `fileVersion`, `leafId`, `batchNo`, `issuedAt`, `issuedStatus`, `statusLocation`, `signature`, `entries` |
+| `record-platform-proof-chunk-manifest.v2` | `schemaVersion`, `fileId`, `fileVersion`, `contentHash`, `chainRecordId`, `manifestHash`, `sourceSchema`, `hashAlgorithm`, `chunkSize`, `chunkCount`, `totalSize`, `encryptionAlgorithm`, `storageBackend`, `chunks`; each chunk has `index`, `plainHash`, `cipherHash`, `size`, `objectPath`, `checksumAlgorithm` |
+| `record-platform-proof-merkle.v2` | `schemaVersion`, `evidenceType`, `evidenceHash`, `proofAlgorithm`, `merkleRoot`, `leafHash`, `leafIndex`, `proofPath`; each proof node has `position` and `hash` |
+| `record-platform-proof-chain-receipt.v2` | `schemaVersion`, `chainRecordId`, nullable `fileTransactionHash`, nullable `batchTransactionHash`, `batchChainRoot`, `confirmationSource`, `contractRegistry` |
+| `record-platform-proof-verification-policy.v2` | `schemaVersion`, `evidenceSchemas`, hash/Merkle rules, `chainReceiptPolicy`, `contractRegistryPolicy`, `signatureFormat`, `statusPolicy`, `zipPolicy`, `textEntryPolicy` |
+
+All listed fields are required except the fields explicitly marked nullable; null optional fields are omitted from canonical JSON. `verification-policy.json` freezes the accepted source/transaction/root patterns, registry fingerprint field order and allowed values, fixed ZIP rules, LF rules, and lifecycle boundary. Its `contractRegistryPolicy` maps the ZIP field `abiFingerprint` to the registry entry's canonical `abiSha256` value.
+
+Hash fields are not interchangeable:
+
+| Field | Meaning |
+| ----- | ------- |
+| `contentHash` / `file.hash` | `sha256:` digest of the original complete file bytes |
+| `chainRecordId` | Identifier returned for the historical single-file chain record |
+| `manifestHash` | Canonical active chunk-manifest digest used as `MANIFEST_HASH` evidence |
+| `cipherHash` | Digest of one stored encrypted object |
+| `merkleRoot` / `batchChainRoot` | Root committed by the attestation batch |
+| `abiFingerprint` | Canonical ABI SHA-256 from the immutable contract registry |
+
+Proof signing uses a dedicated Ed25519 key and never falls back to JWT or file-encryption secrets. `(keyId, keyVersion)` is globally unique and permanently bound to one SPKI/fingerprint. The first issuance stores an immutable manifest/JWS/key snapshot; repeat export revalidates current evidence and rebuilds the same bytes without silently re-signing. A newer file version changes an older proof to `SUPERSEDED` only after the newer upload reaches `SUCCESS`.
+
+`INVALID` is terminal and is assigned only when a previously persisted canonical manifest, compact JWS, signing-key identity, or immutable issuance snapshot deterministically drifts. The persisted reason is exactly `immutable_snapshot_validation_failed`. Storage HEAD failures/timeouts, Merkle or batch-receipt validation failures, registry read/validation failures, and other dependency failures reject only the current export and do not mutate lifecycle state. `REVOKED` and `INVALID` cannot be exported, restored, or revoked again. Signed `issuedStatus` is restricted to `ACTIVE` or `SUPERSEDED`.
+
+Lifecycle endpoints:
+
+| Method | Endpoint | Auth | Behavior |
+| ------ | -------- | ---- | -------- |
+| POST | `/api/v1/files/attestation-leaves/{leafId}/proof-status/revoke` | Bearer + tenant + owner/admin | Idempotently changes current status to `REVOKED`; optional body: `{"reason":"..."}` |
+| GET | `/api/v1/public/proofs/{proofId}/status` | Public | Returns `ACTIVE`, `REVOKED`, `SUPERSEDED`, or `INVALID`; response is not cacheable |
+| GET | `/api/v1/public/proof-keys/{keyId}/versions/{keyVersion}` | Public | Returns the versioned Ed25519 SPKI and SHA-256 fingerprint; no private key or tenant/file IDs |
+
+`issuedAt` is captured at the first successful Ed25519 signing operation, not backdated to the leaf or batch creation time; deterministic rebuilds reuse the persisted value and original JWS. `issuedStatus` is the signed issuance-time snapshot. Verifiers must always resolve `statusLocation` and must not interpret the immutable snapshot as the current lifecycle state. `ProofStatusVO.statusVersion` is serialized as a decimal JSON string so values remain lossless in JavaScript. Public status and key responses expose no tenant ID, internal file ID, leaf ID, signing private key, RPC credential, decrypt key, or full `file_param`. The two public verification endpoints share an IP limit of 120 requests per 60 seconds; revoke is limited to 10 requests per user per 60 seconds (30 for admin/monitor roles).
+
+#### Legacy JSON compatibility
+
+The deprecated JSON routes still return `proof-bundle.v1.1` for existing integrations. They contain public file/storage/Merkle/chain/registry fields and required `verificationPolicy` suite metadata, but remain `UNSIGNED-V1`. They must not be treated as an authentic signed proof and continue to reject `MANIFEST_HASH` production leaves whose semantics the legacy verifier cannot represent safely.
 
 `verificationPolicy.algorithmSuite`, `signatureSuite`, `kemSuite`, and `proofSuite` are required fields. Offline verification rejects missing or unsupported suite metadata with `UNSUPPORTED_ALGORITHM`.
+
+`chain.batchConfirmationSource` records how the Merkle root was confirmed. Normal writes use `CHAIN_WRITE`. If a transaction committed but its response was lost, reconciliation uses `CHAIN_QUERY_BEFORE_WRITE` or `CHAIN_QUERY_AFTER_WRITE`; in that case `batchTransactionHash` may be absent because the contract getter can recover the business record but not the historical receipt hash. `batchChainFileHash` remains required and must equal the Merkle root.
+
+`chain.contractRegistry` is required in `proof-bundle.v1.1` and is the exact `Sharing` registry entry bound before the batch chain write. It contains no RPC URL, certificate, private key, or shared token.
+
+The OpenAPI required sets are exact. All nine top-level fields (`contractVersion`, `manifest`, `file`, `storage`, `merkle`, `chain`, `issuer`, `verificationPolicy`, and `verificationGuide`) are required. Within `chain`, only `batchChainFileHash` and `contractRegistry` are required; `batchTransactionHash`, `fileTransactionHash`, and `batchConfirmationSource` are optional and nullable compatibility fields. Within `contractRegistry`, every field in the table below is required except `groupId`, `deploymentTransactionHash`, and `deploymentBlockNumber`. `groupId` is conditionally required for FISCO and null for Besu. Deployment transaction and block are optional nullable legacy metadata, but they must either both be present or both be absent.
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `schemaVersion` | string | `record-platform-contract-registry-entry.v1` |
+| `registryFingerprint` | string | SHA-256 over all stable entry fields in the documented entry order |
+| `contractName` | string | Must be `Sharing` for a batch proof |
+| `semanticVersion` | string | Contract artifact semantic version |
+| `chainType` | string | `LOCAL_FISCO`, `BSN_FISCO`, or `BSN_BESU` |
+| `chainId` | string | Chain ID returned by the active node |
+| `groupId` | string/null | Required for FISCO; absent for Besu |
+| `contractAddress` | string | Lowercase non-zero 20-byte address |
+| `abiFingerprintAlgorithm` | string | `ABI-CANONICAL-JSON-SHA256-V1` |
+| `abiSha256` | string | Canonical ABI fingerprint |
+| `artifactBytecodeSha256` | string | Signed ECC/SM creation-bytecode fingerprint used by the active chain |
+| `onChainCodeSha256` | string | Runtime-code fingerprint observed at the configured address |
+| `deploymentTransactionHash` | string/null | Optional deployment transaction; paired with block number |
+| `deploymentBlockNumber` | integer/null | Optional non-negative deployment block; paired with transaction hash |
+| `status` | string | `ACTIVE`, `DEPRECATED`, or `REVOKED` snapshot status |
+| `effectiveAt` | string | ISO-8601 effective time |
+| `upgradeStrategy` | string | `REDEPLOY_ADDRESS` |
+
+Export fails closed when the persisted registry JSON and denormalized batch columns disagree, when the snapshot is missing, or when its status is `REVOKED`. Offline verification recomputes `registryFingerprint`; missing, structurally invalid, or tampered fields produce `CONTRACT_REGISTRY_INVALID`, while a `REVOKED` snapshot produces `CONTRACT_REVOKED`. Deployment transaction/block may both be absent for a legacy deployment whose historical receipt cannot be reconstructed; one without the other is invalid.
 
 ---
 
@@ -2660,7 +2754,7 @@ PUT /api/v1/admin/files/{id}/status
 
 | Field  | Type   | Required | Description                |
 | ------ | ------ | -------- | -------------------------- |
-| status | int    | Yes      | New status (0-3)           |
+| status | int    | Yes      | New status (`-1`, `0`, `1`, or `2`). `1` is idempotent only for an already successful file; this endpoint cannot promote an unfinished file to success. |
 | reason | string | No       | Reason for status change   |
 
 **Response**:
@@ -3728,11 +3822,46 @@ PUT /api/v1/admin/integrity-alerts/{id}/resolve
 ---
 
 
-## 19. Controller-Aligned Endpoint Checklist
+## 19. Attestation Batch Production Module (Admin)
+
+Base Path: `/api/v1/admin/attestation-batches/production`
+
+Production admission is feature-flagged and disabled by default. Both operations require the admin role and derive the tenant from the authenticated request; neither endpoint accepts a tenant parameter.
+
+### 19.1 Trigger a Bounded Production Run
+
+Force one run for the current tenant. Force bypasses the size/time flush threshold, but the configured seed, batch-size, and per-run limits remain enforced. When the feature is disabled, the response has `enabled=false` and no candidate or batch state is read or changed.
+
+```
+POST /api/v1/admin/attestation-batches/production/trigger
+```
+
+**Authentication**: Bearer Token + Admin role (`@PreAuthorize("isAdmin()")`)
+
+**Response data**: `enabled`, `force`, candidate admission/claim/dead-letter counters, recovered/created/completed/retrying/manual-review batch counters, `thresholdDeferred`, and externally encoded `batchIds`.
+
+---
+
+### 19.2 Get Production Status
+
+Read the effective flush limits, persistent candidate backlog by state, oldest ready timestamp, and count of due chain-submission batches for the current tenant.
+
+```
+GET /api/v1/admin/attestation-batches/production/status
+```
+
+**Authentication**: Bearer Token + Admin role (`@PreAuthorize("isAdmin()")`)
+
+**Response data**: `enabled`, `minBatchSize`, `maxBatchSize`, `maxWaitSeconds`, `seedLimit`, `maxBatchesPerRun`, `readyCandidates`, `claimedCandidates`, `batchedCandidates`, `deadLetterCandidates`, `oldestReadyAt`, and `dueBatches`.
+
+---
+
+
+## 20. Controller-Aligned Endpoint Checklist
 
 > This checklist is the P1 governance baseline. All endpoints use REST-style paths.
 
-### 19.1 Current Primary REST Endpoints
+### 20.1 Current Primary REST Endpoints
 
 - `POST /api/v1/auth/login` (Spring Security managed endpoint)
 - `POST /api/v1/auth/logout` (Spring Security managed endpoint)
@@ -3780,6 +3909,8 @@ PUT /api/v1/admin/integrity-alerts/{id}/resolve
 - `GET /api/v1/files/quota`
 - `POST /api/v1/admin/quota/rollout/audits`
 - `GET /api/v1/admin/quota/rollout/audits`
+- `POST /api/v1/admin/attestation-batches/production/trigger`
+- `GET /api/v1/admin/attestation-batches/production/status`
 - `POST /api/v1/messages`
 - `PUT /api/v1/conversations/{id}/read-status`
 - `PUT /api/v1/announcements/{id}/read-status`
@@ -3801,7 +3932,7 @@ PUT /api/v1/admin/integrity-alerts/{id}/resolve
 - `POST /api/v1/system/audit/logs/backups`
 - `POST /api/v1/system/audit/anomalies/check`
 
-### 19.2 SSE Handshake and Event Types
+### 20.2 SSE Handshake and Event Types
 
 SSE short-lived token flow:
 
@@ -3935,12 +4066,12 @@ The `provenanceChain` array in file details shows the complete path from origina
 
 ### L. Crypto Suite Policy
 
-File key envelopes and proof bundles expose explicit crypto-agility metadata so verifiers and future migration jobs can reject unsupported algorithms deterministically.
+File key envelopes and legacy JSON proof bundles expose explicit crypto-agility metadata so verifiers and future migration jobs can reject unsupported algorithms deterministically. Signed ZIP v2 uses the separately versioned Ed25519/compact-JWS contract described in Section 4.13.
 
 | Field | Current Supported Value | Description |
 | ----- | ----------------------- | ----------- |
 | `algorithmSuite` | `RP-AES256-GCM-CHUNK-CHAIN-V1` | RecordPlatform content encryption suite using the current chunk key chain metadata model |
-| `signatureSuite` | `UNSIGNED-V1` | Proof bundle issuer signature suite; current v1 bundles are unsigned |
+| `signatureSuite` | `UNSIGNED-V1` | Deprecated `proof-bundle.v1.1` JSON issuer suite; signed ZIP v2 uses compact JWS `EdDSA` |
 | `kemSuite` | `NONE-V1` | Recipient KEM/key-establishment suite; current share-code envelopes use local wrapping, not public-key KEM |
 | `proofSuite` | `RP-MERKLE-SHA256-V1` | Merkle proof construction suite based on SHA-256 leaf/node rules |
 | `keyVersion` | Deployment configured integer | Wrapping key version used by envelope encryption |
@@ -3958,6 +4089,7 @@ Behavior:
 
 ## Changelog
 
+- **v1.5** - Added deterministic Ed25519-signed proof ZIP export, immutable issuance snapshots, public status/versioned-key discovery, and explicit content-hash semantics
 - **v1.4** - Added crypto suite policy metadata for key envelopes and proof bundles
 - **v1.3** - Added Quota Module (user quota query, admin rollout audit), batch download metrics reporting endpoint, Friend System error codes (60010-60019), storage/system/data/permission error code additions (28 new codes total)
 - **v1.2** - Added Friend Module, Friend File Share Module, public share info endpoint, auth token endpoints

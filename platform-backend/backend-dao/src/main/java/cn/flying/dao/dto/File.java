@@ -67,6 +67,9 @@ public class File implements Serializable {
     @Schema(description = "文件哈希")
     private String fileHash;
 
+    @Schema(description = "原文件内容 SHA-256，与区块链记录标识分离")
+    private String contentHash;
+
     @Schema(description = "交易哈希")
     private String transactionHash;
 

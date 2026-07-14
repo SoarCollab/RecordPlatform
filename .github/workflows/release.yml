@@ -16,14 +16,14 @@ jobs:
       contents: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
 
       # ── Java build ────────────────────────────────────────────────────────
       - name: Setup Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
           distribution: temurin
           java-version: '21'
@@ -38,12 +38,12 @@ jobs:
 
       # ── Frontend build ─────────────────────────────────────────────────────
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
           version: 10.26.1
 
       - name: Setup Node.js 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
           cache: pnpm
@@ -58,7 +58,7 @@ jobs:
 
       # ── SBOM ───────────────────────────────────────────────────────────────
       - name: Generate CycloneDX SBOM
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -68,12 +68,12 @@ jobs:
 
       # ── Docker image build, no registry token in this job ─────────────────
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
       # backend
       - name: Docker metadata -- backend
         id: meta-backend
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/recordplatform-backend
           tags: |
@@ -82,7 +82,7 @@ jobs:
             type=sha,prefix=sha-,format=short
 
       - name: Build image -- backend
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           file: platform-backend/Dockerfile
@@ -99,12 +99,13 @@ jobs:
         run: |
           mkdir -p release-images
           printf '%s\n' "$IMAGE_TAGS" > release-images/backend.tags
-          docker save $(printf '%s\n' "$IMAGE_TAGS") -o release-images/backend.tar
+          mapfile -t image_tags < <(printf '%s\n' "$IMAGE_TAGS")
+          docker save "${image_tags[@]}" -o release-images/backend.tar
 
       # fisco
       - name: Docker metadata -- fisco
         id: meta-fisco
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/recordplatform-fisco
           tags: |
@@ -113,7 +114,7 @@ jobs:
             type=sha,prefix=sha-,format=short
 
       - name: Build image -- fisco
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           file: platform-fisco/Dockerfile
@@ -130,12 +131,13 @@ jobs:
         run: |
           mkdir -p release-images
           printf '%s\n' "$IMAGE_TAGS" > release-images/fisco.tags
-          docker save $(printf '%s\n' "$IMAGE_TAGS") -o release-images/fisco.tar
+          mapfile -t image_tags < <(printf '%s\n' "$IMAGE_TAGS")
+          docker save "${image_tags[@]}" -o release-images/fisco.tar
 
       # storage
       - name: Docker metadata -- storage
         id: meta-storage
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/recordplatform-storage
           tags: |
@@ -144,7 +146,7 @@ jobs:
             type=sha,prefix=sha-,format=short
 
       - name: Build image -- storage
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           file: platform-storage/Dockerfile
@@ -161,12 +163,13 @@ jobs:
         run: |
           mkdir -p release-images
           printf '%s\n' "$IMAGE_TAGS" > release-images/storage.tags
-          docker save $(printf '%s\n' "$IMAGE_TAGS") -o release-images/storage.tar
+          mapfile -t image_tags < <(printf '%s\n' "$IMAGE_TAGS")
+          docker save "${image_tags[@]}" -o release-images/storage.tar
 
       # frontend
       - name: Docker metadata -- frontend
         id: meta-frontend
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/recordplatform-frontend
           tags: |
@@ -175,7 +178,7 @@ jobs:
             type=sha,prefix=sha-,format=short
 
       - name: Build image -- frontend
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: platform-frontend
           file: platform-frontend/Dockerfile
@@ -192,10 +195,11 @@ jobs:
         run: |
           mkdir -p release-images
           printf '%s\n' "$IMAGE_TAGS" > release-images/frontend.tags
-          docker save $(printf '%s\n' "$IMAGE_TAGS") -o release-images/frontend.tar
+          mapfile -t image_tags < <(printf '%s\n' "$IMAGE_TAGS")
+          docker save "${image_tags[@]}" -o release-images/frontend.tar
 
       - name: Upload release bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-bundle
           path: |
@@ -213,13 +217,13 @@ jobs:
       packages: write
     steps:
       - name: Download release bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-bundle
           path: release-bundle
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -240,7 +244,7 @@ jobs:
           done
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           generate_release_notes: true
           files: release-bundle/sbom.cdx.json

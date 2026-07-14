@@ -39,6 +39,8 @@ Based on `SecurityConfiguration`:
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`
 - `GET /api/v1/images/download/images/**`
 - `GET /api/v1/shares/**`
+- `GET /api/v1/public/proofs/{proofId}/status`
+- `GET /api/v1/public/proof-keys/{keyId}/versions/{keyVersion}`
 - `GET /api/v1/sse/connect` (still requires short-lived token)
 
 ### 3) SSE dual-token flow
@@ -93,6 +95,9 @@ Based on `SecurityConfiguration`:
 | GET | `/api/v1/files/{id}` | File detail by ID |
 | GET | `/api/v1/files/{id}/proof-bundle` | Export verifier-ready proof bundle by file ID |
 | GET | `/api/v1/files/attestation-leaves/{leafId}/proof-bundle` | Export verifier-ready proof bundle by attestation leaf ID |
+| GET | `/api/v1/files/{id}/proof-bundle.zip` | Export a deterministic Ed25519-signed proof ZIP by file ID |
+| GET | `/api/v1/files/attestation-leaves/{leafId}/proof-bundle.zip` | Export a deterministic signed proof ZIP by attestation leaf ID |
+| POST | `/api/v1/files/attestation-leaves/{leafId}/proof-status/revoke` | Idempotently revoke a signed proof managed by the current user |
 | GET | `/api/v1/files/hash/{fileHash}` | File detail by hash |
 | GET | `/api/v1/files` | User file page (supports `keyword`, `keywordMode=FUZZY/PREFIX/EXACT_HASH/AUTO`, `status`, `startTime`, `endTime`) |
 | GET | `/api/v1/files/stats` | User file stats |
@@ -120,6 +125,14 @@ Based on `SecurityConfiguration`:
 | GET | `/api/v1/files/{id}/versions` | List version chain for a file |
 | POST | `/api/v1/files/{id}/versions` | Mark file as parent for a new version upload |
 
+The `.zip` routes are the canonical contract: exactly eight root entries with fixed order/timestamp/STORED metadata, a canonical `manifest.json` that hashes six evidence entries, and an `issuer-signature.jws` compact JWS over the exact manifest bytes using a dedicated Ed25519 key. Export revalidates tenant/owner authorization, original-byte `contentHash`, active manifest, storage HEAD records, the `MANIFEST_HASH` Merkle path, completed batch, and immutable contract registry. A completed batch is accepted only for `CHAIN_WRITE` with a valid 32-byte transaction hash or one of the two chain-query recovery sources with no transaction hash; its 32-byte chain root must equal the Merkle root. `contentHash`, `chainRecordId`, `manifestHash`, `cipherHash`, `merkleRoot`, and `abiFingerprint` are never interchangeable. Each entry is capped at 1 MiB and the logical payload total at 4 MiB; additional entries, nested names, and traversal paths fail closed.
+
+The two ZIP routes share one tenant/user rate-limit bucket: 10 requests per minute for regular users and 30 for administrator or monitor roles. Each application instance runs at most eight complete proof validations concurrently, accepts at most 128 manifest chunks per proof, and enforces a 60-second total storage HEAD budget. A saturated bulkhead or expired storage budget is retryable and does not transition the proof to `INVALID`.
+
+The signed JSON schemas are `record-platform-proof-manifest.v2`, `record-platform-proof-chunk-manifest.v2`, `record-platform-proof-merkle.v2`, `record-platform-proof-chain-receipt.v2`, and `record-platform-proof-verification-policy.v2`. Canonical JSON sorts object keys and omits null optional fields. The signed policy carries machine-readable source/transaction/root patterns, complete registry rules and fingerprint field order, lifecycle rules, and ZIP/text encoding rules. `file.hash` and ASCII `issuer-signature.jws` each end with exactly one LF byte. Successful ZIP responses expose `Content-Disposition`, `Cache-Control`, and `X-Proof-Manifest-Hash`; capacity/deadline failures return JSON 503 with `Retry-After: 5`.
+
+The public read-only endpoint `GET /api/v1/public/proofs/{proofId}/status` returns the current `ACTIVE/REVOKED/SUPERSEDED/INVALID` state, while `GET /api/v1/public/proof-keys/{keyId}/versions/{keyVersion}` returns versioned SPKI/fingerprint material. Neither requires JWT or a tenant header, and neither exposes tenant IDs, internal file/leaf IDs, or private keys. They share an IP limit of 120 requests per 60 seconds. `statusVersion` is a decimal JSON string. `issuedAt` is the actual first successful Ed25519 signing time, not the leaf/batch creation time, and deterministic rebuilds reuse the persisted value and JWS. A signed manifest's `issuedStatus` is restricted to `ACTIVE/SUPERSEDED`; verifiers must resolve `statusLocation`. `INVALID` is terminal and is assigned only for deterministic drift of a persisted canonical manifest, JWS, signing-key identity, or immutable issuance snapshot, with reason `immutable_snapshot_validation_failed`. Storage, Merkle, registry, receipt, or other dependency/read failures reject only that export and never mutate lifecycle state. A tenant owner or administrator may revoke; revocation is limited to 10 requests per user per 60 seconds (30 for admin/monitor), and `REVOKED` and `INVALID` cannot be restored or revoked again. The old JSON routes remain as deprecated, unsigned `proof-bundle.v1.1` compatibility endpoints and must not be treated as signed authenticity evidence.
+
 ### Admin File Audit (`/api/v1/admin/files`)
 
 | Method | Endpoint | Description |
@@ -132,6 +145,15 @@ Based on `SecurityConfiguration`:
 | DELETE | `/api/v1/admin/files/shares/{shareCode}` | Force cancel share |
 | GET | `/api/v1/admin/files/shares/{shareCode}/logs` | Share access logs |
 | GET | `/api/v1/admin/files/shares/{shareCode}/stats` | Share access stats |
+
+### Admin Attestation Batch Production (`/api/v1/admin/attestation-batches/production`)
+
+Both operations require the admin role and always use the authenticated current tenant.
+
+| Method | Endpoint | Description |
+|------|------|------|
+| POST | `/api/v1/admin/attestation-batches/production/trigger` | Force one bounded production run for the current tenant |
+| GET | `/api/v1/admin/attestation-batches/production/status` | Get effective limits, candidate backlog, and due batch count |
 
 ### Admin Integrity Alerts (`/api/v1/admin/integrity-alerts`)
 

@@ -36,7 +36,17 @@ public class AttestationLeaf implements Serializable {
 
     private Long fileId;
 
+    private Integer fileVersion;
+
+    private Long manifestId;
+
     private String fileHash;
+
+    private String evidenceType;
+
+    private String evidenceHash;
+
+    private String chainRecordId;
 
     private String leafHash;
 

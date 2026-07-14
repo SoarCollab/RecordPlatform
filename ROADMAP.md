@@ -41,10 +41,10 @@
 
 | 指标 | 当前值 | 证据路径 |
 |------|--------|----------|
-| REST 控制器 | 28 | `platform-backend/backend-web/src/main/java` |
-| 后端服务类 | 106 | `platform-backend/backend-service/src/main/java` |
-| 后端测试文件 | 130 | `platform-backend/**/src/test/java` |
-| 数据库迁移 | 28（V1.0.0 ~ V1.10.3） | `platform-backend/backend-web/src/main/resources/db/migration` |
+| REST 控制器 | 30 | `platform-backend/backend-web/src/main/java` |
+| 后端服务类 | 135 | `platform-backend/backend-service/src/main/java` |
+| 后端测试文件 | 146 | `platform-backend/**/src/test/java` |
+| 数据库迁移 | 32（V1.0.0 ~ V1.14.0） | `platform-backend/backend-web/src/main/resources/db/migration` |
 | CI 流水线（核心） | 5 | `.github/workflows/test.yml`, `perf-smoke.yml`, `docs.yml`, `security-poc.yml`, `docs-consistency.yml` |
 
 ### 表 1：PR 合并阻断门禁（已就位）
@@ -145,7 +145,7 @@
   - `platform-backend/Dockerfile`：maven:3.9-eclipse-temurin-21 多阶段构建，runtime `eclipse-temurin:21-jre-noble`，非 root 用户，EXPOSE 8000
   - `platform-fisco/Dockerfile`：同上，额外创建 `/app/conf/` 挂载点（TLS 证书），用户 home 可写（FISCO SDK 解压 native libs），EXPOSE 8091
   - `platform-storage/Dockerfile`：同上，EXPOSE 8092
-  - `platform-frontend/Dockerfile`：node:20-alpine + pnpm 10 构建，nginx:1.27-alpine runtime，EXPOSE 80
+  - `platform-frontend/Dockerfile`：node:20-alpine + pnpm 10 构建，nginx:1.27-alpine 非特权 runtime，EXPOSE 8080（宿主机可映射 80）
   - `platform-frontend/nginx.conf`：gzip_static、SPA 路由回退、`/_app/` 不可变长缓存、`index.html` no-cache、安全头
   - `.github/workflows/release.yml`：tag push 触发，单 job（共享 Maven 缓存），Trivy CycloneDX SBOM，四镜像 ghcr.io 推送（semver + major.minor + sha tags），`softprops/action-gh-release@v2` 自动 Release Notes
 

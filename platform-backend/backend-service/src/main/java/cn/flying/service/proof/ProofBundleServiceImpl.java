@@ -15,6 +15,8 @@ import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.vo.file.ProofBundleVO;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.StorageObjectHeadVO;
+import cn.flying.platformapi.response.ContractRegistryEntryResponse;
+import cn.flying.service.attestation.AttestationBatchPersistenceService;
 import cn.flying.service.key.CryptoSuiteMetadata;
 import cn.flying.service.key.CryptoSuitePolicyService;
 import cn.flying.service.manifest.ChunkManifestChunk;
@@ -24,6 +26,7 @@ import cn.flying.service.remote.FileRemoteClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -36,6 +39,7 @@ import java.util.Objects;
  * Builds proof bundle JSON contracts from file, storage, chain, batch, and leaf metadata.
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class ProofBundleServiceImpl implements ProofBundleService {
 
@@ -44,6 +48,7 @@ public class ProofBundleServiceImpl implements ProofBundleService {
     private static final String PLATFORM = "RecordPlatform";
     private static final String ISSUER_CONTRACT = "P1.2-proof-bundle";
     private static final String COMPLETED_STATUS = "COMPLETED";
+    private static final String LEGACY_CHAIN_RECORD_EVIDENCE = "LEGACY_CHAIN_RECORD_ID";
 
     private final FileMapper fileMapper;
     private final AttestationLeafMapper leafMapper;
@@ -51,6 +56,7 @@ public class ProofBundleServiceImpl implements ProofBundleService {
     private final FileRemoteClient fileRemoteClient;
     private final ChunkManifestService chunkManifestService;
     private final CryptoSuitePolicyService suitePolicy;
+    private final AttestationBatchPersistenceService attestationBatchPersistenceService;
 
     /**
      * Export a proof bundle for a file version selected by internal file ID.
@@ -139,6 +145,24 @@ public class ProofBundleServiceImpl implements ProofBundleService {
         if (!COMPLETED_STATUS.equals(batch.getStatus())) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "批量存证尚未完成");
         }
+        ContractRegistryEntryResponse registry;
+        try {
+            registry = attestationBatchPersistenceService.requireContractRegistry(batch);
+        } catch (RuntimeException e) {
+            log.warn("批量存证合约注册表快照校验失败: tenantId={}, batchId={}",
+                    tenantId, batch.getId(), e);
+            throw new GeneralException(
+                    ResultEnum.FILE_RECORD_ERROR,
+                    "批量存证缺少一致的合约注册表快照，无法导出证明包");
+        }
+        if (registry == null) {
+            throw new GeneralException(
+                    ResultEnum.FILE_RECORD_ERROR,
+                    "批量存证缺少一致的合约注册表快照，无法导出证明包");
+        }
+        if ("REVOKED".equals(registry.status())) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "批量存证合约版本已撤销");
+        }
         return batch;
     }
 
@@ -146,6 +170,7 @@ public class ProofBundleServiceImpl implements ProofBundleService {
      * Build the immutable proof bundle from validated entities.
      */
     private ProofBundleVO buildBundle(File file, AttestationLeaf leaf, AttestationBatch batch) {
+        ensureProofContractSupportsLeaf(leaf);
         String externalFileId = IdUtils.toExternalId(file.getId());
         String externalLeafId = IdUtils.toExternalId(leaf.getId());
         ProofBundleVO.Manifest manifest = new ProofBundleVO.Manifest(
@@ -167,6 +192,17 @@ public class ProofBundleServiceImpl implements ProofBundleService {
                 buildVerificationPolicy(),
                 verificationGuide()
         );
+    }
+
+    /**
+     * P1-2 完成证据字段拆分前，只允许旧链记录证据，未知类型同样失败关闭。
+     */
+    private void ensureProofContractSupportsLeaf(AttestationLeaf leaf) {
+        if (!LEGACY_CHAIN_RECORD_EVIDENCE.equals(leaf.getEvidenceType())) {
+            throw new GeneralException(
+                    ResultEnum.FILE_RECORD_ERROR,
+                    "当前 proof-bundle.v1 不支持该叶子证据类型，请等待签名证明包合同");
+        }
     }
 
     /**
@@ -266,8 +302,38 @@ public class ProofBundleServiceImpl implements ProofBundleService {
         return new ProofBundleVO.ChainEvidence(
                 batch.getChainTransactionHash(),
                 batch.getChainFileHash(),
-                file.getTransactionHash()
+                file.getTransactionHash(),
+                batch.getConfirmationSource(),
+                buildContractRegistryEvidence(batch)
         );
+    }
+
+    /**
+     * 把持久化注册表快照映射为无需平台会话即可检查的证明字段。
+     */
+    private ProofBundleVO.ContractRegistryEvidence buildContractRegistryEvidence(
+            AttestationBatch batch
+    ) {
+        ContractRegistryEntryResponse registry =
+                attestationBatchPersistenceService.requireContractRegistry(batch);
+        return new ProofBundleVO.ContractRegistryEvidence(
+                registry.schemaVersion(),
+                registry.registryFingerprint(),
+                registry.contractName(),
+                registry.semanticVersion(),
+                registry.chainType(),
+                registry.chainId(),
+                registry.groupId(),
+                registry.contractAddress(),
+                registry.abiFingerprintAlgorithm(),
+                registry.abiSha256(),
+                registry.artifactBytecodeSha256(),
+                registry.onChainCodeSha256(),
+                registry.deploymentTransactionHash(),
+                registry.deploymentBlockNumber(),
+                registry.status(),
+                registry.effectiveAt(),
+                registry.upgradeStrategy());
     }
 
     /**

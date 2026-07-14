@@ -234,6 +234,31 @@ quota:
   reconcile:
     cron: 0 0/30 * * * ?
 
+# Production Merkle batch admission and flush (disabled until explicitly rolled out)
+attestation:
+  production:
+    enabled: false
+    poll-interval-ms: 30000
+    initial-delay-ms: 30000
+    min-batch-size: 50
+    max-batch-size: 100
+    max-wait-seconds: 600
+    seed-limit: 200
+    max-batches-per-run: 2
+    claim-lease-seconds: 120
+    candidate-max-attempts: 3
+
+# Dedicated signed-proof issuer key (disabled and fail-closed until explicitly configured)
+proof:
+  signing:
+    enabled: ${PROOF_SIGNING_ENABLED:false}
+    algorithm: Ed25519
+    key-id: ${PROOF_SIGNING_KEY_ID:}
+    key-version: ${PROOF_SIGNING_KEY_VERSION:1}
+    key-status: ${PROOF_SIGNING_KEY_STATUS:DISABLED}
+    private-key-pkcs8: ${PROOF_SIGNING_PRIVATE_KEY_PKCS8:}
+    public-key-spki: ${PROOF_SIGNING_PUBLIC_KEY_SPKI:}
+
 # Storage integrity check
 integrity:
   check:

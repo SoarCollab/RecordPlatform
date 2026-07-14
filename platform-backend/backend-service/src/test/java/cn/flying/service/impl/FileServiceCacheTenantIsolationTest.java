@@ -417,6 +417,7 @@ class FileServiceCacheTenantIsolationTest {
                     null,
                     null,
                     null,
+                    null,
                     null
             );
             ReflectionTestUtils.setField(service, "baseMapper", fileMapper);

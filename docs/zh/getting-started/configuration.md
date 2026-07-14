@@ -54,8 +54,17 @@ S3 兼容存储通过 Nacos 配置。基本环境变量：
 |------|------|------|
 | `BLOCKCHAIN_ACTIVE` | 激活的链类型 | `local-fisco`, `bsn-fisco`, `bsn-besu` |
 | `FISCO_PEER_ADDRESS` | FISCO 节点地址 | `127.0.0.1:20200` |
+| `FISCO_CHAIN_ID` | 预期的本地 FISCO chain ID | `chain0` |
+| `FISCO_GROUP_ID` | 预期的本地 FISCO group ID | `group0` |
+| `BSN_FISCO_CHAIN_ID` | 预期的 BSN FISCO chain ID；`BLOCKCHAIN_ACTIVE=bsn-fisco` 时无默认值且必填 | 服务商分配值 |
 | `FISCO_STORAGE_CONTRACT` | Storage 合约地址 | `0x...` |
 | `FISCO_SHARING_CONTRACT` | Sharing 合约地址 | `0x...` |
+| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_TX` | 部署交易哈希；必须作为完整证据三元组的一部分设置 | `0x` + 64 位 hex |
+| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_BLOCK` | 部署区块号；与交易/生效时间一起设置 | 非负十进制整数 |
+| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_EFFECTIVE_AT` | 实际激活时间；与交易/区块一起设置 | UTC `YYYY-MM-DDTHH:MM:SSZ` |
+| `CONTRACT_DEPLOYMENT_RECEIPT_DIR` | 保存公开部署审计回执的持久化受限目录 | 本地开发使用 `log/contract-deployments` |
+
+`scripts/contract-deploy.sh` 要求显式配置本地 chain/group，并在编译或部署前与 Console `getGroupInfo` 完全对账。每个合约的部署证据只能为 legacy 兼容而整组三项缺失，或完整提供 transaction/block/effective-time 三元组。门禁脚本用同一个生效时间原子写回两个三元组，并先发布不含凭据的结构化回执；生产环境应把回执目录放在非临时应用存储之外。
 
 ### SSL 配置（生产环境）
 
@@ -215,6 +224,21 @@ storage:
 
 > **提示**：建议先使用全局 `SHADOW` 模式观察配额使用情况，不会拒绝上传。
 > 全局 `ENFORCE` 下空白名单表示全部租户生效；如需控制灰度范围，使用非空白名单或 `force-shadow=true`。
+
+### 签名证明发行方
+
+签名 Proof ZIP 使用独立 Ed25519 key，默认关闭并失败关闭。该配置禁止回退到 `JWT_KEY`、文件信封 master key 或区块链 RPC token。
+
+| 环境变量 | 说明 | 默认值 |
+|------|------|--------|
+| `PROOF_SIGNING_ENABLED` | 是否允许新签发/历史重建 | `false` |
+| `PROOF_SIGNING_KEY_ID` | 稳定 key 标识，只允许字母、数字、点、下划线和连字符，最多 64 字符 | 空 |
+| `PROOF_SIGNING_KEY_VERSION` | 正整数 key 版本；轮换时必须递增 | `1` |
+| `PROOF_SIGNING_KEY_STATUS` | 新签发必须为 `ACTIVE` | `DISABLED` |
+| `PROOF_SIGNING_PRIVATE_KEY_PKCS8` | Base64 或 PEM 包装的 Ed25519 PKCS#8 私钥 | 空 |
+| `PROOF_SIGNING_PUBLIC_KEY_SPKI` | 与私钥配对的 Base64 或 PEM X.509 SPKI 公钥 | 空 |
+
+启用前必须同时配置匹配的 PKCS#8/SPKI、非空 key ID、正版本和 `ACTIVE` 状态。启动配置本身不会打印密钥；首次签发还会把 `(keyId, keyVersion)` 原子注册到全局 key 表。轮换时保留旧公开材料，把新密钥配置为新的更高版本，禁止复用同一 ID/version 绑定不同 SPKI。私钥应由部署密钥管理系统注入，不应写入 Git、日志或异常。
 
 ## 定时任务配置
 

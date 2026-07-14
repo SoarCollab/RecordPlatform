@@ -3,6 +3,7 @@ package cn.flying.service.impl;
 import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.exception.RetryableException;
 import cn.flying.common.lock.DistributedLock;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.IdUtils;
@@ -56,8 +57,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -95,6 +99,9 @@ class FileUploadServiceTest {
     private RLock quotaLock;
 
     @Mock
+    private RLock finalizationLock;
+
+    @Mock
     private FileRemoteClient fileRemoteClient;
 
     @Mock
@@ -109,6 +116,7 @@ class FileUploadServiceTest {
     private static final Long USER_ID = 100L;
     private static final String SUID = "encoded_uid_100";
     private static final String CLIENT_ID = "test_client_123";
+    private static final String CONTENT_HASH = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
     @BeforeAll
     static void setUpClass() {
@@ -134,6 +142,10 @@ class FileUploadServiceTest {
         ReflectionTestUtils.setField(fileUploadService, "eventPublisher", eventPublisher);
         // 让异步分片处理在测试中同步执行，避免线程池/时序不稳定
         ReflectionTestUtils.setField(fileUploadService, "fileProcessingExecutor", (java.util.concurrent.Executor) Runnable::run);
+        when(redissonClient.getLock(startsWith("distributed:lock:upload:finalize:session:")))
+                .thenReturn(finalizationLock);
+        when(finalizationLock.tryLock()).thenReturn(true);
+        when(finalizationLock.isHeldByCurrentThread()).thenReturn(true);
     }
 
     @AfterEach
@@ -169,6 +181,33 @@ class FileUploadServiceTest {
         part.setCipherHash(cipherHash);
         part.setChecksumAlgorithm("SHA-256");
         return part;
+    }
+
+    /**
+     * 构造一个单分片普通上传状态，可选择是否包含完整处理证据。
+     *
+     * @param clientId 客户端会话ID
+     * @param complete 是否写入完整 uploaded/processed/hash/key 状态
+     * @return 普通上传会话状态
+     */
+    private FileUploadState completionState(String clientId, boolean complete) {
+        FileUploadState state = new FileUploadState(
+                USER_ID,
+                "refresh.txt",
+                1024L,
+                "text/plain",
+                clientId,
+                1024,
+                1);
+        state.setTenantId(77L);
+        state.setSuid(SUID);
+        if (complete) {
+            state.getUploadedChunks().add(0);
+            state.getProcessedChunks().add(0);
+            state.getChunkHashes().put("chunk_0", "chunk-hash-0");
+            state.getKeys().put(0, new byte[]{1, 2, 3, 4});
+        }
+        return state;
     }
 
     /**
@@ -339,7 +378,10 @@ class FileUploadServiceTest {
         @Test
         @DisplayName("should complete direct upload, register file, and persist manifest")
         void shouldCompleteDirectUploadAndPersistManifest() {
-            FileUploadState state = directUploadState();
+            FileUploadState initialState = directUploadState();
+            FileUploadState lockedState = directUploadState();
+            FileUploadState preparedState = directUploadState();
+            preparedState.setContentHash(CONTENT_HASH);
             File storedFile = new File()
                     .setId(42L)
                     .setUid(USER_ID)
@@ -368,11 +410,15 @@ class FileUploadServiceTest {
                     List.of()
             );
 
-            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+            when(redisStateManager.getState(CLIENT_ID))
+                    .thenReturn(initialState, lockedState, preparedState);
             when(redissonClient.getLock("distributed:lock:upload:quota:complete:tenant:77")).thenReturn(quotaLock);
             when(quotaLock.isHeldByCurrentThread()).thenReturn(true);
             when(fileRemoteClient.completeDirectMultipartUpload(any()))
-                    .thenReturn(Result.success(new CompleteDirectMultipartUploadResponse(CLIENT_ID, completedParts)));
+                    .thenReturn(Result.success(new CompleteDirectMultipartUploadResponse(
+                            CLIENT_ID,
+                            CONTENT_HASH,
+                            completedParts)));
             when(fileService.storeDirectUploadedFile(anyLong(), any(), anyString(), anyLong(), anyList(), anyString()))
                     .thenReturn(storedFile);
             when(chunkManifestService.saveManifest(eq(USER_ID), eq(42L), any()))
@@ -406,7 +452,7 @@ class FileUploadServiceTest {
                     eq("direct.pdf"),
                     eq(1024L),
                     storedPartsCaptor.capture(),
-                    contains("DIRECT_MULTIPART")
+                    argThat(json -> json.contains("DIRECT_MULTIPART") && json.contains(CONTENT_HASH))
             );
             assertEquals(2, storedPartsCaptor.getValue().size());
             assertEquals("sha256:chunk-0", storedPartsCaptor.getValue().get(0).cipherHash());
@@ -420,13 +466,56 @@ class FileUploadServiceTest {
             assertEquals(2, manifestCaptor.getValue().chunks().size());
             assertEquals("S3", manifestCaptor.getValue().storageBackend());
 
-            assertEquals(42L, state.getDirectFileId());
-            assertEquals("file-hash", state.getDirectFileHash());
-            assertEquals("tx-1", state.getDirectTransactionHash());
-            assertEquals("manifest-hash", state.getDirectManifestHash());
-            verify(redisStateManager, atLeastOnce()).updateState(state);
+            assertNull(initialState.getDirectFileId());
+            assertTrue(preparedState.isPrepareStored());
+            assertEquals(CONTENT_HASH, preparedState.getContentHash());
+            assertEquals(42L, preparedState.getDirectFileId());
+            assertEquals("file-hash", preparedState.getDirectFileHash());
+            assertEquals("tx-1", preparedState.getDirectTransactionHash());
+            assertEquals("manifest-hash", preparedState.getDirectManifestHash());
+            verify(redisStateManager, atLeastOnce()).updateState(preparedState);
             verify(redisStateManager).markCompleted(CLIENT_ID, SUID, 300);
             verify(quotaService, times(2)).checkUploadQuota(77L, USER_ID, 1024L);
+        }
+
+        @Test
+        @DisplayName("should reject a concurrent direct upload finalizer before side effects")
+        void shouldRejectConcurrentDirectUploadFinalizerBeforeSideEffects() {
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(directUploadState());
+            when(finalizationLock.tryLock()).thenReturn(false);
+
+            assertThrows(
+                    RetryableException.class,
+                    () -> fileUploadService.completeDirectUpload(
+                            USER_ID,
+                            CLIENT_ID,
+                            directCompleteRequest()));
+
+            verifyNoInteractions(fileRemoteClient, fileService, quotaService, chunkManifestService);
+            verify(finalizationLock, never()).unlock();
+        }
+
+        /**
+         * 验证等待 finalizer 锁期间直传分片计划漂移时，不会调用对象存储或推进落库。
+         */
+        @Test
+        @DisplayName("should reject a changed direct upload plan before side effects")
+        void shouldRejectChangedDirectUploadPlanBeforeSideEffects() {
+            FileUploadState initialState = directUploadState();
+            FileUploadState changedState = directUploadState();
+            changedState.getDirectUploadParts().getFirst().setStagingObjectName("staging/tampered/0");
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(initialState, changedState);
+
+            GeneralException exception = assertThrows(
+                    GeneralException.class,
+                    () -> fileUploadService.completeDirectUpload(
+                            USER_ID,
+                            CLIENT_ID,
+                            directCompleteRequest()));
+
+            assertEquals(ResultEnum.FILE_UPLOAD_ERROR, exception.getResultEnum());
+            verifyNoInteractions(fileRemoteClient, fileService, quotaService, chunkManifestService);
+            verify(finalizationLock).unlock();
         }
 
         @Test
@@ -911,6 +1000,24 @@ class FileUploadServiceTest {
     class CompleteUploadQuotaGuard {
 
         /**
+         * 验证会话 finalizer 锁竞争失败时不会推进普通上传副作用。
+         */
+        @Test
+        @DisplayName("should reject a concurrent upload finalizer before side effects")
+        void shouldRejectConcurrentUploadFinalizerBeforeSideEffects() {
+            FileUploadState state = completionState(CLIENT_ID, true);
+            when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
+            when(finalizationLock.tryLock()).thenReturn(false);
+
+            assertThrows(
+                    RetryableException.class,
+                    () -> fileUploadService.completeUpload(USER_ID, CLIENT_ID));
+
+            verifyNoInteractions(quotaService, fileService, eventPublisher, fileRemoteClient);
+            verify(finalizationLock, never()).unlock();
+        }
+
+        /**
          * 反射调用 reserveQuotaAndPrepareStoreFile，便于单测覆盖幂等分支。
          *
          * @param userId 用户ID
@@ -996,6 +1103,115 @@ class FileUploadServiceTest {
             fileUploadService.completeUpload(USER_ID, CLIENT_ID);
 
             verify(redisStateManager, never()).updateLastActivityTime(CLIENT_ID);
+            verifyNoInteractions(redissonClient, quotaService, fileService, eventPublisher);
+        }
+
+        /**
+         * 验证等待异步处理后 completeUpload 使用重载快照，并在任何文件副作用前执行配额检查。
+         */
+        @Test
+        @DisplayName("should reload completed Redis state after async wait")
+        void shouldReloadCompletedRedisStateAfterAsyncWait() {
+            String clientId = "refresh-after-wait";
+            FileUploadState initial = completionState(clientId, false);
+            FileUploadState latest = completionState(clientId, true);
+            ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+            ReflectionTestUtils.setField(fileUploadService, "chunkProcessingWaitScheduler", scheduler);
+            TenantContext.setTenantId(77L);
+            when(redisStateManager.getState(clientId)).thenReturn(initial, latest, latest);
+            when(redissonClient.getLock("distributed:lock:upload:quota:complete:tenant:77"))
+                    .thenReturn(quotaLock);
+            when(quotaLock.isHeldByCurrentThread()).thenReturn(true);
+            doThrow(new GeneralException(ResultEnum.QUOTA_EXCEEDED, "quota exceeded"))
+                    .when(quotaService).checkUploadQuota(77L, USER_ID, 1024L);
+
+            try {
+                GeneralException error = assertThrows(
+                        GeneralException.class,
+                        () -> fileUploadService.completeUpload(USER_ID, clientId));
+
+                assertEquals(ResultEnum.QUOTA_EXCEEDED, error.getResultEnum());
+                verify(redisStateManager, atLeast(3)).getState(clientId);
+                verify(quotaService).checkUploadQuota(77L, USER_ID, 1024L);
+                verify(fileService, never()).prepareStoreFile(anyLong(), any(), anyString(), anyLong());
+                verifyNoInteractions(eventPublisher);
+            } finally {
+                scheduler.shutdownNow();
+            }
+        }
+
+        /**
+         * 验证重载快照的最后分片密钥会进入后续事件参数，而旧快照缺失的密钥不会被复用。
+         */
+        @Test
+        @DisplayName("should use refreshed keys when generating completion parameters")
+        void shouldUseRefreshedKeysWhenGeneratingCompletionParameters() {
+            String clientId = "refresh-key-state";
+            FileUploadState initial = completionState(clientId, false);
+            FileUploadState latest = completionState(clientId, true);
+            latest.setContentHash(CONTENT_HASH);
+            TenantContext.setTenantId(77L);
+            when(redisStateManager.getState(clientId)).thenReturn(latest);
+
+            FileUploadState refreshed = ReflectionTestUtils.invokeMethod(
+                    fileUploadService,
+                    "requireLatestCompletionState",
+                    USER_ID,
+                    clientId,
+                    initial,
+                    1);
+            String fileParam = ReflectionTestUtils.invokeMethod(
+                    fileUploadService, "generateFileParam", refreshed);
+
+            assertSame(latest, refreshed);
+            assertNotNull(fileParam);
+            assertTrue(fileParam.contains(Base64.getEncoder().encodeToString(latest.getKeys().get(0))));
+            assertTrue(fileParam.contains(CONTENT_HASH));
+        }
+
+        /**
+         * 验证完成等待后的状态丢失、所有者漂移和上传计划漂移均在副作用前失败关闭。
+         */
+        @Test
+        @DisplayName("should fail closed when refreshed completion state drifts")
+        void shouldFailClosedWhenRefreshedCompletionStateDrifts() {
+            String clientId = "refresh-drift-state";
+            FileUploadState initial = completionState(clientId, false);
+            FileUploadState otherOwner = completionState(clientId, true);
+            otherOwner.setUserId(999L);
+            FileUploadState changedPlan = completionState(clientId, true);
+            changedPlan.setTotalChunks(2);
+            TenantContext.setTenantId(77L);
+            when(redisStateManager.getState(clientId)).thenReturn(null, otherOwner, changedPlan);
+
+            GeneralException missing = assertThrows(GeneralException.class, () ->
+                    ReflectionTestUtils.invokeMethod(
+                            fileUploadService,
+                            "requireLatestCompletionState",
+                            USER_ID,
+                            clientId,
+                            initial,
+                            1));
+            GeneralException unauthorized = assertThrows(GeneralException.class, () ->
+                    ReflectionTestUtils.invokeMethod(
+                            fileUploadService,
+                            "requireLatestCompletionState",
+                            USER_ID,
+                            clientId,
+                            initial,
+                            1));
+            GeneralException drifted = assertThrows(GeneralException.class, () ->
+                    ReflectionTestUtils.invokeMethod(
+                            fileUploadService,
+                            "requireLatestCompletionState",
+                            USER_ID,
+                            clientId,
+                            initial,
+                            1));
+
+            assertEquals(ResultEnum.UPLOAD_SESSION_NOT_FOUND, missing.getResultEnum());
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, unauthorized.getResultEnum());
+            assertEquals(ResultEnum.FILE_UPLOAD_ERROR, drifted.getResultEnum());
             verifyNoInteractions(redissonClient, quotaService, fileService, eventPublisher);
         }
 
