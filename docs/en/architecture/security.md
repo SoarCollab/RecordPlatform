@@ -99,6 +99,10 @@ public Result<File> getFile(@PathVariable Long id) { ... }
 | `IP` | IP Address | Per-IP limit |
 | `API` | Endpoint | Global limit |
 
+### Public Proof Shared Bucket
+
+The public proof status and historical-key endpoints explicitly opt into a tenant-independent trusted-client-IP mode. They share `rate:limit:public:proof-verification:v2:ip:<canonical-ip>` at a fixed 120 requests per 60 seconds, even when a request carries a valid user/admin/monitor JWT. The key contains no tenant, user, endpoint method, or raw header; all other `@RateLimit` callers retain their legacy tenant, role, and forwarding-header behavior. By default the identity is the canonical direct socket peer and all forwarding headers are ignored. A numeric trusted-proxy allowlist is optional, empty by default, bounded to 4096 characters/64 ranges at startup, and parses one 1024-character/16-hop XFF chain right-to-left only after the immediate peer is trusted. Redis results other than `1`, including `null`, `0`, or dependency exceptions, never execute the controller.
+
 ### Distributed Rate Limiter
 
 Redis Lua script-based sliding window:
@@ -109,7 +113,7 @@ RATE_LIMITED → Window exceeded
 BLOCKED → In block list
 ```
 
-**Fallback**: Allows requests if Redis is unavailable.
+**Generic utility fallback**: The reusable distributed limiter allows requests if Redis is unavailable. This fallback does not apply to the public proof annotation bucket, which fails closed.
 
 ## ID Obfuscation
 

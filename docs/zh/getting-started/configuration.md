@@ -31,9 +31,14 @@ vim .env
 |------|------|------|
 | `JWT_KEY` | JWT 签名密钥 + ID 加密派生 | 至少 32 字符，高熵值 |
 | `PUBLIC_REGISTRATION_TENANT_ID` | 公开注册使用的服务端租户 | 显式配置；请求头不决定注册租户 |
+| `RATE_LIMIT_TRUSTED_PROXY_CIDRS` | 公共 proof 客户端 IP 限流使用的可信代理数字 IP/CIDR | 默认空；只配置平台控制的代理 |
 | `BLOCKCHAIN_RPC_TOKEN` | 后端调用 FISCO Dubbo 服务的共享令牌 | backend 与 fisco 两端必填且一致，无默认值 |
 | `RECORD_PLATFORM_UID_SALT` | UID 混淆用盐值 | 建议 8–16 字符随机字符串 |
 | `RECORD_PLATFORM_CLIENT_KEY` | UID 混淆用客户端密钥 | 建议 16–32 字符随机字符串 |
+
+`RATE_LIMIT_TRUSTED_PROXY_CIDRS` 最多接受 64 个逗号分隔的数字 IPv4/IPv6 地址或 CIDR，配置总长最多 4096 字符。直连部署以及代理拓扑尚未核验的部署必须保持为空；此时后端忽略 `X-Forwarded-For`、`X-Real-IP` 和 `Forwarded`，只使用规范化的直接 socket peer。反向代理后的空 allowlist 会把所有调用者安全地放入代理 peer 的同一个 120/60 桶，因而可能更早拒绝请求。hostname、URL、端口、zone ID、空项、非法前缀、`0.0.0.0/0` 和 `::/0` 会让应用启动失败。该配置是启动时固定的信任边界，修改后必须重启。
+
+只有立即 socket peer 命中 allowlist 时，后端才从右向左解析一条最多 1024 字符、16 hops 的 XFF header 并跳过可信 hop；仅在 XFF 缺失时考虑 `X-Real-IP`。重复、非法、超长或超 hop header 都回退立即 peer。每个受控代理都必须覆盖调用者原始转发头，或安全追加其从 socket 得到的上一跳。Spring/container 转发头重写固定为 `server.forward-headers-strategy=none`；配置 `server.tomcat.remoteip.remote-ip-header` 或 `server.tomcat.remoteip.protocol-header` 会启动失败。不得再安装 `ForwardedHeaderFilter`、外部 Tomcat `RemoteIpValve` 或等价的第二套解析器。
 
 ### 存储配置
 

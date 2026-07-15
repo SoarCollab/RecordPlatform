@@ -31,9 +31,14 @@ vim .env
 |----------|-------------|-------------|
 | `JWT_KEY` | JWT signing key + ID encryption derivation | Min 32 characters, high entropy |
 | `PUBLIC_REGISTRATION_TENANT_ID` | Server-side tenant for public registration | Set explicitly; request headers do not choose registration tenant |
+| `RATE_LIMIT_TRUSTED_PROXY_CIDRS` | Numeric trusted proxy IPs/CIDRs for public-proof client-IP rate limiting | Empty by default; configure only platform-controlled proxies |
 | `BLOCKCHAIN_RPC_TOKEN` | Shared token for backend-to-FISCO Dubbo calls | Required on both backend and fisco; no default |
 | `RECORD_PLATFORM_UID_SALT` | Salt for UID obfuscation | Recommended 8–16 random chars |
 | `RECORD_PLATFORM_CLIENT_KEY` | Client key for UID obfuscation | Recommended 16–32 random chars |
+
+`RATE_LIMIT_TRUSTED_PROXY_CIDRS` is a comma-separated list of at most 64 numeric IPv4/IPv6 addresses or CIDRs and at most 4096 characters in total. Direct deployments and deployments with an unverified proxy topology must leave it empty; the backend then ignores `X-Forwarded-For`, `X-Real-IP`, and `Forwarded` and uses the canonical direct socket peer. Behind a proxy, an empty allowlist safely places all callers in the proxy peer's shared 120/60 bucket and can reject traffic earlier. Hostnames, URLs, ports, zone IDs, empty entries, invalid prefixes, `0.0.0.0/0`, and `::/0` fail application startup. This configuration is an immutable startup trust boundary and requires a restart.
+
+When the immediate socket peer matches the allowlist, the backend parses one XFF line of at most 1024 characters and 16 hops from right to left and skips trusted hops; `X-Real-IP` is considered only when XFF is absent. Duplicate, invalid, overlong, or over-hop headers fall back to the immediate peer. Every controlled proxy must overwrite or safely append socket-derived forwarding data. Spring/container forwarding rewrites remain disabled with `server.forward-headers-strategy=none`; configuring `server.tomcat.remoteip.remote-ip-header` or `server.tomcat.remoteip.protocol-header` fails startup. Do not install a `ForwardedHeaderFilter`, external Tomcat `RemoteIpValve`, or equivalent second parser.
 
 ### Storage Configuration
 

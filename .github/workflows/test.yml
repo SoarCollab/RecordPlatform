@@ -138,6 +138,35 @@ jobs:
                   )
           PY
 
+      - name: Require Public Proof Rate Limit IT Execution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          report = Path(
+              "platform-backend/backend-web/target/failsafe-reports/"
+              "TEST-cn.flying.aspect.PublicProofRateLimitIT.xml"
+          )
+          if not report.is_file():
+              sys.exit(f"Missing required Failsafe report: {report}")
+
+          suite = ET.parse(report).getroot()
+          expected_counts = {
+              "tests": 1,
+              "skipped": 0,
+              "failures": 0,
+              "errors": 0,
+          }
+          for name, expected in expected_counts.items():
+              actual = int(suite.attrib.get(name, "-1"))
+              if actual != expected:
+                  sys.exit(
+                      f"PublicProofRateLimitIT {name}={actual}; expected {expected}"
+                  )
+          PY
+
       - name: Run FISCO Tests
         run: mvn -f platform-fisco/pom.xml test
 

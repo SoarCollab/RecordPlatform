@@ -48,9 +48,24 @@ public @interface RateLimit {
      */
     String key() default "";
 
+    /**
+     * 是否按当前租户隔离限流桶
+     */
+    boolean tenantScoped() default true;
+
+    /**
+     * 客户端 IP 的解析模式
+     */
+    ClientIpMode clientIpMode() default ClientIpMode.LEGACY_FORWARDED;
+
     enum LimitType {
         USER,   // 按用户
         IP,     // 按IP
         API     // 按接口（全局）
+    }
+
+    enum ClientIpMode {
+        LEGACY_FORWARDED, // 保持现有转发头优先级
+        TRUSTED_PEER      // 仅信任明确配置的代理链
     }
 }

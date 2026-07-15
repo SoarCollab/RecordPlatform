@@ -99,6 +99,10 @@ public Result<File> getFile(@PathVariable Long id) { ... }
 | `IP` | IP 地址 | 按 IP 限流 |
 | `API` | 端点 | 全局限流 |
 
+### 公共 proof 共享桶
+
+公共 proof 状态与历史公钥端点显式选择无租户的可信客户端 IP 模式。二者按 `rate:limit:public:proof-verification:v2:ip:<canonical-ip>` 共享固定 120 次/60 秒额度，即使请求携带有效的普通用户、管理员或监控员 JWT 也不会改变阈值。key 不包含 tenant、user、端点方法或原始 header；其他 `@RateLimit` 调用方继续保留 legacy tenant、角色和转发头行为。默认身份是规范化 direct socket peer，全部转发头都被忽略；可选的数字 trusted-proxy allowlist 默认空，启动时限制为 4096 字符/64 个网段，且仅在立即 peer 可信后从右向左解析一条 1024 字符/16 hops 的 XFF 链。Redis 结果不是 `1` 时（包括 `null`、`0` 或依赖异常）都不会执行 controller。
+
 ### 分布式限流器
 
 基于 Redis Lua 脚本的滑动窗口：
@@ -109,7 +113,7 @@ RATE_LIMITED → 超过窗口限制
 BLOCKED → 在封禁列表中
 ```
 
-**容错**：Redis 不可用时允许请求。
+**通用工具容错**：可复用的分布式限流器在 Redis 不可用时允许请求；该策略不适用于 fail closed 的公共 proof 注解桶。
 
 ## ID 混淆
 
@@ -195,4 +199,3 @@ security:
 - [ ] SQL 注入防护（参数化查询）
 - [ ] XSS 防护（输出编码）
 - [ ] 敏感数据不记录日志
-
