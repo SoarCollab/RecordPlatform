@@ -25,8 +25,8 @@ import java.util.UUID;
 
 /**
  * 租户过滤器
- * 从请求头 X-Tenant-ID 中解析租户ID，设置到 TenantContext
- * 对于未携带租户ID的请求（白名单除外），返回错误
+ * 对需要租户隔离的请求解析 X-Tenant-ID 并设置 TenantContext。
+ * 公开 proof 路径不信任调用者提供的租户头，其他未携带租户ID的请求（白名单除外）返回错误。
  */
 @Component
 @Order(Const.SECURITY_ORDER - 10)  // 在 JWT 过滤器之前执行
@@ -34,6 +34,14 @@ public class TenantFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(TenantFilter.class);
     private static final String TENANT_HEADER = "X-Tenant-ID";
+
+    /**
+     * 全局公开 proof 路径不依赖租户查询，必须忽略匿名调用者提供的租户头。
+     */
+    private static final Set<String> TENANT_HEADER_IGNORED_PATHS = Set.of(
+            "/api/v1/public/proofs",
+            "/api/v1/public/proof-keys"
+    );
 
     /**
      * 白名单路径 - 这些路径不需要租户ID
@@ -83,17 +91,19 @@ public class TenantFilter extends OncePerRequestFilter {
 
             // 检查是否在白名单中
             if (isWhitelisted(requestPath)) {
-                // 白名单路径不强制要求租户头，但若请求主动携带租户头则仍写入上下文，确保后续 DB 查询具备正确的 tenant_id 条件
-                String tenantIdHeader = request.getHeader(TENANT_HEADER);
-                if (tenantIdHeader != null && !tenantIdHeader.isEmpty()) {
-                    try {
-                        Long tenantId = Long.parseLong(tenantIdHeader);
-                        TenantContext.setTenantId(tenantId);
-                        request.setAttribute(Const.ATTR_TENANT_ID, tenantId);
-                    } catch (NumberFormatException e) {
-                        log.warn("租户ID格式错误: {}", tenantIdHeader);
-                        sendErrorResponse(response, ResultEnum.PARAM_IS_INVALID, "租户标识格式错误");
-                        return;
+                // 公开 proof 必须忽略租户头；其他白名单路径仍可使用租户头完成租户隔离查询
+                if (!shouldIgnoreTenantHeader(requestPath)) {
+                    String tenantIdHeader = request.getHeader(TENANT_HEADER);
+                    if (tenantIdHeader != null && !tenantIdHeader.isEmpty()) {
+                        try {
+                            Long tenantId = Long.parseLong(tenantIdHeader);
+                            TenantContext.setTenantId(tenantId);
+                            request.setAttribute(Const.ATTR_TENANT_ID, tenantId);
+                        } catch (NumberFormatException e) {
+                            log.warn("租户ID格式错误: {}", tenantIdHeader);
+                            sendErrorResponse(response, ResultEnum.PARAM_IS_INVALID, "租户标识格式错误");
+                            return;
+                        }
                     }
                 }
                 filterChain.doFilter(request, response);
@@ -156,6 +166,17 @@ public class TenantFilter extends OncePerRequestFilter {
             return true;
         }
         return WHITELIST_PATHS.stream().anyMatch(uri::startsWith);
+    }
+
+    /**
+     * 判断白名单路径是否必须忽略请求租户头，并使用路径段边界避免相似前缀误匹配。
+     */
+    private boolean shouldIgnoreTenantHeader(String uri) {
+        if (uri == null) {
+            return false;
+        }
+        return TENANT_HEADER_IGNORED_PATHS.stream()
+                .anyMatch(prefix -> uri.equals(prefix) || uri.startsWith(prefix + "/"));
     }
 
     /**

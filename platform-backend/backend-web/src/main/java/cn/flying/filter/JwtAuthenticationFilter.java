@@ -35,8 +35,8 @@ import java.util.UUID;
  * Validates JWT tokens, sets security context, tenant context and MDC for logging.
  * Also initializes traceId for distributed tracing.
  * 
- * 注意：租户ID由 TenantFilter 从请求头 X-Tenant-ID 设置，
- * 此过滤器验证 JWT 中的 tenantId 与请求头一致，防止跨租户攻击。
+ * 注意：受保护路径的租户ID由 TenantFilter 从请求头 X-Tenant-ID 设置，
+ * 此过滤器验证 JWT 中的 tenantId 与请求头一致；不信任租户头的公开路径则从有效 JWT 恢复真实租户。
  */
 @Component
 @Order(Const.SECURITY_ORDER)
@@ -63,7 +63,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         request.setAttribute(Const.TRACE_ID, traceId);
 
         try {
-            // 获取 TenantFilter 设置的租户ID（来自请求头 X-Tenant-ID）
+            // 获取 TenantFilter 设置的租户ID；公开路径可能因不信任租户头而没有该属性
             Long headerTenantId = (Long) request.getAttribute(Const.ATTR_TENANT_ID);
 
             String authorization = request.getHeader("Authorization");

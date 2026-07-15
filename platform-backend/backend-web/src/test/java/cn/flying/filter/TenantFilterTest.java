@@ -113,6 +113,67 @@ class TenantFilterTest {
     }
 
     /**
+     * 公开 proof 端点不得信任调用者提供的租户头，避免匿名请求污染指定租户的操作日志。
+     */
+    @Test
+    @DisplayName("should ignore tenant header for public proof endpoints")
+    void shouldIgnoreTenantHeaderForPublicProofEndpoints() throws ServletException, IOException {
+        AtomicLong chainCalls = new AtomicLong();
+        doAnswer(invocation -> {
+            MockHttpServletRequest chainedRequest = invocation.getArgument(0);
+            assertNull(TenantContext.getTenantId());
+            assertNull(chainedRequest.getAttribute(Const.ATTR_TENANT_ID));
+            chainCalls.incrementAndGet();
+            return null;
+        }).when(filterChain).doFilter(any(), any());
+
+        for (String path : new String[]{
+                "/api/v1/public/proofs/rp-proof-abc/status",
+                "/api/v1/public/proof-keys/key-main/versions/1"}) {
+            for (String tenantHeader : new String[]{"12", "spoofed-tenant", ""}) {
+                MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
+                request.setServletPath(path);
+                request.addHeader("X-Tenant-ID", tenantHeader);
+                MockHttpServletResponse response = new MockHttpServletResponse();
+
+                filter.doFilterInternal(request, response, filterChain);
+
+                assertNull(request.getAttribute(Const.ATTR_TENANT_ID));
+                assertNull(TenantContext.getTenantId());
+            }
+        }
+
+        assertEquals(6L, chainCalls.get());
+        verify(filterChain, times(6)).doFilter(any(), any());
+    }
+
+    /**
+     * 与公开 proof 前缀相似但不在该路径族内的请求不得误用忽略规则。
+     */
+    @Test
+    @DisplayName("should preserve tenant header for similar public proof prefix")
+    void shouldPreserveTenantHeaderForSimilarPublicProofPrefix() throws ServletException, IOException {
+        String path = "/api/v1/public/proofs-admin";
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
+        request.setServletPath(path);
+        request.addHeader("X-Tenant-ID", "12");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicLong capturedTenantId = new AtomicLong(-1L);
+        doAnswer(invocation -> {
+            Long tenantId = TenantContext.getTenantId();
+            capturedTenantId.set(tenantId == null ? -1L : tenantId);
+            return null;
+        }).when(filterChain).doFilter(request, response);
+
+        filter.doFilterInternal(request, response, filterChain);
+
+        assertEquals(12L, capturedTenantId.get());
+        assertEquals(12L, request.getAttribute(Const.ATTR_TENANT_ID));
+        assertNull(TenantContext.getTenantId());
+        verify(filterChain).doFilter(request, response);
+    }
+
+    /**
      * 白名单路径不强制要求租户头，但若主动携带租户头，应写入 TenantContext 与 request attribute，
      * 以便后续 MyBatis-Plus 租户拦截器能正确注入 tenant_id 条件。
      */

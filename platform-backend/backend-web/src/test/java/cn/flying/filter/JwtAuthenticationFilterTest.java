@@ -1,6 +1,7 @@
 package cn.flying.filter;
 
 import cn.flying.common.constant.ResultEnum;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.JwtUtils;
 import com.auth0.jwt.interfaces.Claim;
@@ -25,6 +26,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -136,13 +138,51 @@ class JwtAuthenticationFilterTest {
         }
 
         @Test
-        @DisplayName("should proceed when no tenant ID in header (non-tenant request)")
+        @DisplayName("should restore JWT tenant when no tenant request attribute exists")
         void shouldProceedWithoutHeaderTenantId() throws ServletException, IOException {
-            // No tenant ID in request attributes (non-tenant request)
+            AtomicLong capturedTenantId = new AtomicLong(-1L);
+            doAnswer(invocation -> {
+                Long tenantId = TenantContext.getTenantId();
+                capturedTenantId.set(tenantId == null ? -1L : tenantId);
+                return null;
+            }).when(filterChain).doFilter(request, response);
 
             filter.doFilterInternal(request, response, filterChain);
 
             assertNotNull(SecurityContextHolder.getContext().getAuthentication());
+            assertEquals(1L, capturedTenantId.get());
+            assertEquals(1L, request.getAttribute(Const.ATTR_TENANT_ID));
+            assertNull(TenantContext.getTenantId());
+            verify(filterChain).doFilter(request, response);
+        }
+
+        /**
+         * 验证公开 proof 路径忽略伪造租户头后，完整过滤器链仍从有效 JWT 恢复真实租户。
+         */
+        @Test
+        @DisplayName("should use JWT tenant for public proof path with forged tenant header")
+        void shouldUseJwtTenantForPublicProofPathWithForgedTenantHeader() throws ServletException, IOException {
+            String path = "/api/v1/public/proofs/rp-proof-abc/status";
+            request.setRequestURI(path);
+            request.setServletPath(path);
+            request.addHeader("X-Tenant-ID", "999");
+            AtomicLong capturedTenantId = new AtomicLong(-1L);
+            doAnswer(invocation -> {
+                Long tenantId = TenantContext.getTenantId();
+                capturedTenantId.set(tenantId == null ? -1L : tenantId);
+                return null;
+            }).when(filterChain).doFilter(request, response);
+
+            new TenantFilter().doFilterInternal(
+                    request,
+                    response,
+                    (filteredRequest, filteredResponse) ->
+                            filter.doFilterInternal(request, response, filterChain));
+
+            assertEquals(200, response.getStatus());
+            assertEquals(1L, capturedTenantId.get());
+            assertEquals(1L, request.getAttribute(Const.ATTR_TENANT_ID));
+            assertNull(TenantContext.getTenantId());
             verify(filterChain).doFilter(request, response);
         }
     }
