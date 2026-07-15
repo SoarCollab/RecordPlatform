@@ -26,6 +26,7 @@ import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.ContractRegistryEntryResponse;
 import cn.flying.platformapi.response.StorageObjectHeadVO;
 import cn.flying.service.attestation.AttestationBatchPersistenceService;
+import cn.flying.service.attestation.MerkleProofNode;
 import cn.flying.service.attestation.MerkleTreeService;
 import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestService;
@@ -579,6 +580,47 @@ class SignedProofArchiveServiceImplTest {
     }
 
     /**
+     * 验证 chainRecordId 的空白、超长和控制字符会在读取证明叶子前失败关闭。
+     */
+    @Test
+    void shouldRejectUnboundedChainRecordIdBeforeLeafLookup() {
+        List<String> invalidChainRecordIds = List.of(
+                "",
+                "a".repeat(257),
+                "chain-record\u0000id");
+
+        try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+            security.when(SecurityUtils::isAdmin).thenReturn(false);
+            for (String invalidChainRecordId : invalidChainRecordIds) {
+                when(fileMapper.selectById(FILE_ID))
+                        .thenReturn(file().setFileHash(invalidChainRecordId));
+
+                assertFileRecordError(() -> service.exportByFileId(USER_ID, FILE_ID));
+            }
+        }
+
+        verify(leafMapper, never()).selectOne(any());
+    }
+
+    /**
+     * 验证历史文件缺少可选的链上交易哈希时仍能导出公开证明。
+     */
+    @Test
+    void shouldAcceptFileWithoutTransactionHash() {
+        File file = file().setTransactionHash(null);
+        AttestationLeaf leaf = leaf();
+        mockSuccessfulEvidence(file, leaf);
+
+        try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+            security.when(SecurityUtils::isAdmin).thenReturn(false);
+
+            ProofArchive archive = service.exportByFileId(USER_ID, FILE_ID);
+
+            assertThat(archive.compactJws()).isNotBlank();
+        }
+    }
+
+    /**
      * 验证 Merkle 文本前像必须保持精确小写 canonical 形式，不能在签发时静默规范化。
      */
     @Test
@@ -654,6 +696,99 @@ class SignedProofArchiveServiceImplTest {
 
         verify(fileRemoteClient, never()).headObject(any(), any());
         verify(issuanceMapper, never()).insert(any(ProofBundleIssuance.class));
+    }
+
+    /**
+     * 验证左右两种规范 Merkle 路径都能归零 leafIndex 并重建已确认链根。
+     */
+    @Test
+    void shouldAcceptCanonicalMerklePathsForBothLeafSides() {
+        String siblingHash = "9".repeat(64);
+        List<AttestationLeaf> leaves = List.of(
+                leaf()
+                        .setLeafIndex(0)
+                        .setProofPathJson(JsonConverter.toJson(List.of(
+                                new MerkleProofNode(
+                                        MerkleProofNode.RIGHT,
+                                        siblingHash)))),
+                leaf()
+                        .setLeafIndex(1)
+                        .setProofPathJson(JsonConverter.toJson(List.of(
+                                new MerkleProofNode(
+                                        MerkleProofNode.LEFT,
+                                        siblingHash)))));
+
+        try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+            security.when(SecurityUtils::isAdmin).thenReturn(false);
+            for (AttestationLeaf proofLeaf : leaves) {
+                mockSuccessfulEvidence(file(), proofLeaf);
+                String merkleRoot = proofLeaf.getLeafIndex() == 0
+                        ? merkleTreeService.calculateParentHash(proofLeaf.getLeafHash(), siblingHash)
+                        : merkleTreeService.calculateParentHash(siblingHash, proofLeaf.getLeafHash());
+                when(batchMapper.selectById(BATCH_ID)).thenReturn(batch(proofLeaf)
+                        .setLeafCount(2)
+                        .setMerkleRoot(merkleRoot)
+                        .setChainFileHash(merkleRoot));
+
+                ProofArchive archive = service.exportByFileId(USER_ID, FILE_ID);
+
+                assertThat(archive.compactJws()).isNotBlank();
+            }
+        }
+    }
+
+    /**
+     * 验证 null、负数 leafIndex 与空 proof path 的组合均返回稳定业务错误。
+     */
+    @Test
+    void shouldRejectMissingOrNegativeMerkleLeafIndex() {
+        List<AttestationLeaf> invalidLeaves = List.of(
+                leaf().setLeafIndex(null),
+                leaf().setLeafIndex(-1));
+
+        try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+            security.when(SecurityUtils::isAdmin).thenReturn(false);
+            for (AttestationLeaf invalidLeaf : invalidLeaves) {
+                mockSuccessfulEvidence(file(), invalidLeaf);
+
+                assertFileRecordError(() -> service.exportByFileId(USER_ID, FILE_ID));
+            }
+        }
+
+        verify(fileRemoteClient, never()).headObject(any(), any());
+    }
+
+    /**
+     * 验证 null 节点、错误方向和非法 sibling hash 均由合同校验失败关闭。
+     */
+    @Test
+    void shouldRejectMalformedMerklePathNodesWithStableBusinessError() {
+        List<String> invalidProofPaths = List.of(
+                JsonConverter.toJson(Collections.singletonList(null)),
+                JsonConverter.toJson(List.of(new MerkleProofNode(
+                        MerkleProofNode.LEFT,
+                        "9".repeat(64)))),
+                JsonConverter.toJson(List.of(new MerkleProofNode(
+                        MerkleProofNode.RIGHT,
+                        "not-a-sha256"))));
+
+        try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+            security.when(SecurityUtils::isAdmin).thenReturn(false);
+            for (String invalidProofPath : invalidProofPaths) {
+                AttestationLeaf invalidLeaf = leaf().setProofPathJson(invalidProofPath);
+                mockSuccessfulEvidence(file(), invalidLeaf);
+
+                assertThatThrownBy(() -> service.exportByFileId(USER_ID, FILE_ID))
+                        .isInstanceOf(GeneralException.class)
+                        .satisfies(error -> {
+                            GeneralException exception = (GeneralException) error;
+                            assertThat(exception.getResultEnum()).isEqualTo(ResultEnum.FILE_RECORD_ERROR);
+                            assertThat(exception.getData()).isEqualTo("Merkle proof path 合同不合法");
+                        });
+            }
+        }
+
+        verify(fileRemoteClient, never()).headObject(any(), any());
     }
 
     /**

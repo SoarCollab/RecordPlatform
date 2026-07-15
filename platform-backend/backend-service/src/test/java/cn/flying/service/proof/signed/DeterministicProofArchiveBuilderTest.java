@@ -333,6 +333,10 @@ class DeterministicProofArchiveBuilderTest {
                 .isInstanceOf(GeneralException.class)
                 .satisfies(error -> assertThat(((GeneralException) error).getResultEnum())
                         .isEqualTo(ResultEnum.FILE_RECORD_ERROR));
+        assertThatThrownBy(() -> canonicalizer.parseManifest(" "))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(error -> assertThat(((GeneralException) error).getResultEnum())
+                        .isEqualTo(ResultEnum.FILE_RECORD_ERROR));
     }
 
     /**

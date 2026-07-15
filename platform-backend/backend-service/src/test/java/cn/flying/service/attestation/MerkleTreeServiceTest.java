@@ -138,4 +138,14 @@ class MerkleTreeServiceTest {
                 List.of(new MerkleProofNode(sibling.position(), " " + sibling.hash() + " ")),
                 result.merkleRoot())).isFalse();
     }
+
+    /**
+     * 验证 null proof 节点会由共享验证器安全拒绝，而不是在模型转换时抛出异常。
+     */
+    @Test
+    void calculateRootFromProof_shouldRejectNullProofNode() {
+        assertThat(merkleTreeService.calculateRootFromProof(
+                "a".repeat(64),
+                java.util.Collections.singletonList(null))).isNull();
+    }
 }

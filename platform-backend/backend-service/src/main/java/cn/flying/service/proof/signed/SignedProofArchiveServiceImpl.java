@@ -858,11 +858,11 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
         if (proofPath == null) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "Merkle proof path 不可解析");
         }
-        proofPath = List.copyOf(proofPath);
         if (proofPath.size() > MAX_MERKLE_PROOF_NODES) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "Merkle proof path 节点数超过限制");
         }
         validateMerklePathContract(leaf.getLeafIndex(), proofPath);
+        proofPath = List.copyOf(proofPath);
         String calculatedLeaf = merkleTreeService.calculateLeafHash(leaf.getEvidenceHash());
         if (!ProofHashes.RAW_SHA256.matcher(Objects.toString(leaf.getLeafHash(), "")).matches()
                 || !calculatedLeaf.equals(leaf.getLeafHash())
