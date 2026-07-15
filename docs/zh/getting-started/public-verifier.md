@@ -170,10 +170,15 @@ java -jar platform-verifier/web-verifier/target/platform-verifier-web.jar
 ```bash
 docker build -f platform-verifier/web-verifier/Dockerfile \
   -t recordplatform-verifier-web .
-docker run --rm -p 8093:8093 recordplatform-verifier-web
+VERIFIER_TMPFS_SIZE=10g
+docker run --rm \
+  --read-only \
+  --tmpfs "/tmp/record-platform-verifier:rw,noexec,nosuid,size=${VERIFIER_TMPFS_SIZE},mode=1777" \
+  -p 8093:8093 \
+  recordplatform-verifier-web
 ```
 
-镜像使用非 root 用户。生产运行时应保持根文件系统只读，并为 `/tmp/record-platform-verifier` 提供有容量上限的临时卷。
+镜像使用非 root 用户。临时卷挂载后会遮蔽镜像内的同名目录，因此必须保持可写；`mode=1777` 提供标准临时目录权限，`noexec`、`nosuid` 和容量上限继续保留运行时加固约束。容量至少按“最大 multipart 请求大小 × `VERIFIER_MAX_CONCURRENT` × 2”估算并预留运维余量：Servlet 会先落盘请求，验证器随后还会创建隔离工作副本。示例中的 `10g` 可覆盖默认 `1100MB` 请求上限和 `4` 路并发；调整任一限制时都必须重新计算。tmpfs 会消耗宿主机内存并可能使用交换空间，因此宿主机也要配置匹配的容量控制。
 
 ### 关键配置
 

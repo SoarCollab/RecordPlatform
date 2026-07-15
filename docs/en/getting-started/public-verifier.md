@@ -170,10 +170,15 @@ The default listener is port `8093`:
 ```bash
 docker build -f platform-verifier/web-verifier/Dockerfile \
   -t recordplatform-verifier-web .
-docker run --rm -p 8093:8093 recordplatform-verifier-web
+VERIFIER_TMPFS_SIZE=10g
+docker run --rm \
+  --read-only \
+  --tmpfs "/tmp/record-platform-verifier:rw,noexec,nosuid,size=${VERIFIER_TMPFS_SIZE},mode=1777" \
+  -p 8093:8093 \
+  recordplatform-verifier-web
 ```
 
-The image runs as a non-root user. In production, keep the root filesystem read-only and mount `/tmp/record-platform-verifier` as a capacity-limited temporary volume.
+The image runs as a non-root user. The temporary volume must remain writable after it masks the image directory; `mode=1777` provides standard temporary-directory permissions while `noexec`, `nosuid`, and the capacity limit retain the runtime hardening. Size the volume for at least two copies of the maximum multipart request times `VERIFIER_MAX_CONCURRENT`, plus operational headroom: the servlet spools the request before the verifier creates its isolated working copy. The `10g` example covers the default `1100MB` request and concurrency limit of `4`; recalculate it whenever either limit changes. A tmpfs consumes host memory and may use swap, so the host must enforce matching capacity controls.
 
 ### Key configuration
 

@@ -350,7 +350,7 @@ jobs:
 
           container_id="$(docker run -d \
             --read-only \
-            --tmpfs /tmp/record-platform-verifier:rw,noexec,nosuid,size=64m \
+            --tmpfs /tmp/record-platform-verifier:rw,noexec,nosuid,size=64m,mode=1777 \
             -p 127.0.0.1:18093:8093 \
             recordplatform-verifier-web:pr)"
           trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
