@@ -11,6 +11,8 @@ import cn.flying.dao.mapper.AttestationBatchCandidateMapper;
 import cn.flying.dao.mapper.AttestationBatchMapper;
 import cn.flying.dao.mapper.AttestationLeafMapper;
 import cn.flying.platformapi.response.ContractRegistryEntryResponse;
+import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -23,6 +25,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
@@ -361,6 +364,36 @@ class AttestationBatchPersistenceServiceTest {
     }
 
     /**
+     * 验证三个恢复入口都只限制待提交和退避批次，已过期的提交租约不受写入次数限制。
+     */
+    @Test
+    void recoverySql_shouldKeepExpiredSubmittingBatchesRecoverableAfterWriteLimit() throws Exception {
+        List<Method> recoveryMethods = List.of(
+                AttestationBatchMapper.class.getMethod(
+                        "selectDueBatchIds", Long.class, Date.class, int.class, int.class),
+                AttestationBatchMapper.class.getMethod(
+                        "countDueBatches", Long.class, Date.class, int.class),
+                AttestationBatchMapper.class.getMethod(
+                        "claimForSubmission", Long.class, Long.class, String.class,
+                        Date.class, Date.class, int.class));
+
+        assertThat(recoveryMethods)
+                .allSatisfy(method -> {
+                    String sql = normalizedMapperSql(method);
+                    assertThat(sql).contains("tenant_id = #{tenantId}", "deleted = 0");
+                    assertThat(sql.split("attempt_count < #\\{maxAttempts}", -1))
+                            .as(method.getName() + " 仅允许待提交和退避状态消耗链写次数")
+                            .hasSize(3);
+                    assertThat(sql)
+                            .as(method.getName() + " 必须允许恢复任意次数的过期提交租约")
+                            .contains("status = 'CHAIN_SUBMITTING' "
+                                    + "AND lease_expires_at IS NOT NULL "
+                                    + "AND lease_expires_at <= #{now}")
+                            .doesNotContain("status = 'CHAIN_SUBMITTING' AND attempt_count");
+                });
+    }
+
+    /**
      * 验证有效 claim 完成时同时记录确认来源、交易和根。
      */
     @Test
@@ -548,6 +581,16 @@ class AttestationBatchPersistenceServiceTest {
         return new MerkleTreeService().buildTree(List.of(
                 new MerkleLeafInput(11L, "hash-b"),
                 new MerkleLeafInput(12L, "hash-a")));
+    }
+
+    /**
+     * 读取并规范化 MyBatis 注解 SQL，供恢复谓词合同测试复用。
+     */
+    private String normalizedMapperSql(Method method) {
+        Select select = method.getAnnotation(Select.class);
+        Update update = method.getAnnotation(Update.class);
+        String[] fragments = select != null ? select.value() : update.value();
+        return String.join(" ", fragments).replaceAll("\\s+", " ").trim();
     }
 
     /**

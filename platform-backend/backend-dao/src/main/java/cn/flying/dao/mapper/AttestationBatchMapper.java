@@ -28,7 +28,7 @@ public interface AttestationBatchMapper extends BaseMapper<AttestationBatch> {
                     (status = 'CHAIN_PENDING' AND attempt_count < #{maxAttempts})
                  OR (status = 'CHAIN_RETRY' AND attempt_count < #{maxAttempts}
                      AND next_attempt_at IS NOT NULL AND next_attempt_at <= #{now})
-                 OR (status = 'CHAIN_SUBMITTING' AND attempt_count <= #{maxAttempts}
+                 OR (status = 'CHAIN_SUBMITTING'
                      AND lease_expires_at IS NOT NULL AND lease_expires_at <= #{now})
               )
             ORDER BY COALESCE(next_attempt_at, create_time) ASC, id ASC
@@ -53,7 +53,7 @@ public interface AttestationBatchMapper extends BaseMapper<AttestationBatch> {
                     (status = 'CHAIN_PENDING' AND attempt_count < #{maxAttempts})
                  OR (status = 'CHAIN_RETRY' AND attempt_count < #{maxAttempts}
                      AND next_attempt_at IS NOT NULL AND next_attempt_at <= #{now})
-                 OR (status = 'CHAIN_SUBMITTING' AND attempt_count <= #{maxAttempts}
+                 OR (status = 'CHAIN_SUBMITTING'
                      AND lease_expires_at IS NOT NULL AND lease_expires_at <= #{now})
               )
             """)
@@ -83,7 +83,7 @@ public interface AttestationBatchMapper extends BaseMapper<AttestationBatch> {
                     (status = 'CHAIN_PENDING' AND attempt_count < #{maxAttempts})
                  OR (status = 'CHAIN_RETRY' AND attempt_count < #{maxAttempts}
                      AND next_attempt_at IS NOT NULL AND next_attempt_at <= #{now})
-                 OR (status = 'CHAIN_SUBMITTING' AND attempt_count <= #{maxAttempts}
+                 OR (status = 'CHAIN_SUBMITTING'
                      AND lease_expires_at IS NOT NULL AND lease_expires_at <= #{now})
               )
             """)

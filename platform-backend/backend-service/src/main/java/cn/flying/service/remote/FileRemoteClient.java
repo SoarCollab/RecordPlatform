@@ -33,6 +33,7 @@ import io.github.resilience4j.retry.annotation.Retry;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
+import org.apache.dubbo.config.annotation.Method;
 import org.apache.dubbo.rpc.RpcContext;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -45,7 +46,11 @@ import java.util.function.Supplier;
 @Component
 public class FileRemoteClient {
 
-    @DubboReference(id = "blockChainServiceFileRemoteClient", version = BlockChainService.VERSION, providedBy = "RecordPlatform_fisco")
+    @DubboReference(
+            id = "blockChainServiceFileRemoteClient",
+            version = BlockChainService.VERSION,
+            providedBy = "RecordPlatform_fisco",
+            methods = @Method(name = "storeAttestationBatch", retries = 0))
     private BlockChainService blockChainService;
 
     @DubboReference(id = "storageServiceFileRemoteClient", version = DistributedStorageService.VERSION, providedBy = "RecordPlatform_storage")

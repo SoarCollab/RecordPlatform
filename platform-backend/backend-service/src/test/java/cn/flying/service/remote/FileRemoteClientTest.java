@@ -17,6 +17,7 @@ import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.ContractRegistryEntryResponse;
 import cn.flying.platformapi.response.SharingVO;
 import cn.flying.platformapi.security.BlockChainRpcAuth;
+import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.dubbo.rpc.RpcContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -190,11 +191,25 @@ class FileRemoteClientTest {
      */
     @Test
     void attestationBatchRpcAnnotations_shouldOnlyRetryReadQuery() throws Exception {
+        DubboReference blockChainReference = FileRemoteClient.class
+                .getDeclaredField("blockChainService")
+                .getAnnotation(DubboReference.class);
         Method write = FileRemoteClient.class.getMethod(
                 "storeAttestationBatch", StoreAttestationBatchRequest.class);
         Method query = FileRemoteClient.class.getMethod(
                 "getAttestationBatch", GetAttestationBatchRequest.class);
 
+        assertThat(blockChainReference).isNotNull();
+        assertThat(blockChainReference.retries())
+                .as("引用级重试策略不得影响无关区块链 RPC")
+                .isEqualTo((Integer) DubboReference.class.getMethod("retries").getDefaultValue());
+        assertThat(blockChainReference.methods())
+                .as("仅批量存证写 RPC 禁用 Dubbo failover 重试")
+                .singleElement()
+                .satisfies(method -> {
+                    assertThat(method.name()).isEqualTo("storeAttestationBatch");
+                    assertThat(method.retries()).isZero();
+                });
         assertThat(write.getAnnotation(io.github.resilience4j.retry.annotation.Retry.class)).isNull();
         assertThat(query.getAnnotation(io.github.resilience4j.retry.annotation.Retry.class)).isNotNull();
     }
