@@ -2,10 +2,9 @@ package cn.flying.security;
 
 import cn.flying.config.RateLimitClientIpProperties;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.autoconfigure.context.ConfigurationPropertiesAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Import;
 import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.util.ArrayList;
@@ -22,7 +21,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class TrustedClientIpResolverTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-            .withUserConfiguration(ResolverConfiguration.class);
+            .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
+            .withBean(RateLimitClientIpProperties.class)
+            .withBean(TrustedClientIpResolver.class);
 
     /**
      * 验证默认空 allowlist 只使用规范化 direct peer，并忽略所有转发头。
@@ -308,11 +309,5 @@ class TrustedClientIpResolverTest {
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.setRemoteAddr(remoteAddr);
         return request;
-    }
-
-    @Configuration(proxyBeanMethods = false)
-    @EnableConfigurationProperties(RateLimitClientIpProperties.class)
-    @Import(TrustedClientIpResolver.class)
-    static class ResolverConfiguration {
     }
 }
