@@ -1,5 +1,6 @@
 package cn.flying.migration;
 
+import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +13,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -44,14 +46,16 @@ class FlywayMigrationVersionTest {
         assertTrue(migrationFiles.contains("V1.12.0__attestation_batch_production_trigger.sql"));
         assertTrue(migrationFiles.contains("V1.13.0__attestation_contract_registry_snapshot.sql"));
         assertTrue(migrationFiles.contains("V1.14.0__signed_proof_bundle.sql"));
+        assertTrue(migrationFiles.contains("V1.15.0__proof_status_timestamp_precision.sql"));
         assertFalse(migrationFiles.contains("V1.0.1__add_account_nickname.sql"));
         assertFalse(migrationFiles.contains("V1.5.0__integrity_alert.sql"));
 
-        Set<String> versions = new HashSet<>();
+        Set<MigrationVersion> versions = new HashSet<>();
         for (String fileName : migrationFiles) {
             Matcher matcher = VERSION_PATTERN.matcher(fileName);
             assertTrue(matcher.matches(), "Invalid migration filename: " + fileName);
-            assertTrue(versions.add(matcher.group(1)), "Duplicate migration version: " + matcher.group(1));
+            MigrationVersion version = MigrationVersion.fromVersion(matcher.group(1));
+            assertTrue(versions.add(version), "Duplicate migration version: " + matcher.group(1));
         }
     }
 
@@ -234,6 +238,119 @@ class FlywayMigrationVersionTest {
         assertTrue(sql.contains("`public_key_spki`"));
         assertFalse(sql.matches("(?is).*UPDATE\\s+`file`.*"));
         assertFalse(sql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
+    }
+
+    /**
+     * 验证 proof 状态时间精度通过严格定向的前向迁移修复，且不改写生命周期或签名字段。
+     */
+    @Test
+    @DisplayName("should align proof status timestamp precision through a strict forward migration")
+    void shouldAlignProofStatusTimestampPrecisionThroughForwardMigration() throws IOException {
+        Path migration = resolveMigrationDir().resolve(
+                "V1.15.0__proof_status_timestamp_precision.sql");
+        assertTrue(Files.isRegularFile(migration), "Missing proof status timestamp precision migration");
+        String sql = Files.readString(migration);
+        String normalizedSql = sql.replaceAll("\\s+", " ").trim();
+
+        assertTrue(normalizedSql.contains("ALTER TABLE `proof_bundle_issuance`"));
+        assertTrue(normalizedSql.contains(
+                "MODIFY COLUMN `create_time` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)"));
+        assertTrue(normalizedSql.contains(
+                "MODIFY COLUMN `update_time` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)"));
+        assertTrue(normalizedSql.contains("ON UPDATE CURRENT_TIMESTAMP(3)"));
+        assertTrue(normalizedSql.contains(
+                "WHEN `create_time` < `issued_at` THEN `issued_at` ELSE `create_time` END"));
+        assertTrue(normalizedSql.contains(
+                "WHEN `update_time` < `issued_at` THEN `issued_at` ELSE `update_time` END"));
+        assertTrue(normalizedSql.contains(
+                "WHERE `create_time` < `issued_at` OR `update_time` < `issued_at`"));
+        assertFalse(normalizedSql.matches(
+                "(?is).*`(?:create_time|update_time)`\\s*<=\\s*`issued_at`.*"));
+
+        Pattern alterPattern = Pattern.compile(
+                "(?is)ALTER\\s+TABLE\\s+`proof_bundle_issuance`\\s+(.*?);");
+        Matcher alterMatcher = alterPattern.matcher(sql);
+        assertTrue(alterMatcher.find(), "Missing proof_bundle_issuance ALTER TABLE");
+        String alterClause = alterMatcher.group(1);
+        assertFalse(alterMatcher.find(), "Proof status precision must use one bounded ALTER TABLE");
+        assertEquals(
+                1,
+                countMatches(sql, Pattern.compile("(?i)ALTER\\s+TABLE\\s+")),
+                "Migration must not alter unrelated tables");
+        assertFalse(
+                Pattern.compile("(?i)\\b(?:ADD|DROP|CHANGE|RENAME)\\b")
+                        .matcher(alterClause)
+                        .find(),
+                "Migration ALTER must only modify the two timestamp columns");
+
+        Matcher modifiedColumnMatcher = Pattern.compile(
+                "(?i)MODIFY\\s+COLUMN\\s+`([^`]+)`")
+                .matcher(alterClause);
+        Set<String> modifiedColumns = new HashSet<>();
+        int modifiedColumnCount = 0;
+        while (modifiedColumnMatcher.find()) {
+            modifiedColumns.add(modifiedColumnMatcher.group(1).toLowerCase());
+            modifiedColumnCount++;
+        }
+        assertEquals(2, modifiedColumnCount, "Migration must modify exactly two columns");
+        assertEquals(
+                Set.of("create_time", "update_time"),
+                modifiedColumns,
+                "Migration must not modify lifecycle or signing columns");
+
+        Pattern updatePattern = Pattern.compile(
+                "(?is)UPDATE\\s+`proof_bundle_issuance`\\s+SET\\s+(.*?)\\s+WHERE\\s+.*?;");
+        Matcher updateMatcher = updatePattern.matcher(sql);
+        assertTrue(updateMatcher.find(), "Missing directed proof_bundle_issuance update");
+        String setClause = updateMatcher.group(1);
+        assertFalse(updateMatcher.find(), "Proof status timestamps must be repaired in one update");
+
+        for (String forbiddenColumn : List.of(
+                "issued_at",
+                "revoked_at",
+                "issued_status",
+                "status",
+                "status_version",
+                "status_reason",
+                "proof_id",
+                "manifest_hash",
+                "manifest_json",
+                "signature_jws",
+                "signature_algorithm",
+                "key_id",
+                "key_version",
+                "public_key_spki",
+                "public_key_fingerprint")) {
+            assertFalse(
+                    Pattern.compile("(?i)`?" + forbiddenColumn + "`?\\s*=")
+                            .matcher(setClause)
+                            .find(),
+                    "Migration must not assign protected column: " + forbiddenColumn);
+        }
+
+        assertEquals(
+                1,
+                countMatches(sql, Pattern.compile("(?i)UPDATE\\s+`proof_bundle_issuance`")),
+                "Proof status history must be repaired by exactly one directed update");
+        assertFalse(sql.matches("(?is).*ALTER\\s+TABLE\\s+`proof_signing_key`.*"));
+        assertFalse(sql.matches("(?is).*UPDATE\\s+`proof_signing_key`.*"));
+        assertFalse(sql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
+    }
+
+    /**
+     * 统计正则在迁移脚本中的非重叠匹配数量。
+     *
+     * @param value 待检查迁移文本
+     * @param pattern 目标正则
+     * @return 非重叠匹配数量
+     */
+    private int countMatches(String value, Pattern pattern) {
+        int count = 0;
+        Matcher matcher = pattern.matcher(value);
+        while (matcher.find()) {
+            count++;
+        }
+        return count;
     }
 
     /**
