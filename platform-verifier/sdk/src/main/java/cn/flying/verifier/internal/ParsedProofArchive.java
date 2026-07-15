@@ -15,6 +15,14 @@ public record ParsedProofArchive(Map<String, byte[]> entries) {
         entries = Map.copyOf(copy);
     }
 
+    /** Returns an immutable deep copy without exposing the stored entry arrays. */
+    @Override
+    public Map<String, byte[]> entries() {
+        LinkedHashMap<String, byte[]> copy = new LinkedHashMap<>();
+        entries.forEach((name, bytes) -> copy.put(name, bytes.clone()));
+        return Map.copyOf(copy);
+    }
+
     /** Returns a defensive copy of one required entry. */
     public byte[] required(String name) {
         byte[] value = entries.get(name);

@@ -39,6 +39,7 @@ class CoreVerifierContractsTest {
         source.clear();
         byte[] firstRead = archive.required("manifest.json");
         firstRead[1] = 9;
+        archive.entries().get("manifest.json")[2] = 9;
 
         assertThat(archive.required("manifest.json")).containsExactly(1, 2, 3);
         assertThat(archive.required("empty.txt")).isEmpty();
