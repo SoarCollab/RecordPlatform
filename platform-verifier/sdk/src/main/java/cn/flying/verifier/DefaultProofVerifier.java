@@ -342,8 +342,12 @@ public final class DefaultProofVerifier implements ProofVerifier {
     ) {
         SignedProofBundleModel.ChunkManifestEvidence chunk = evidence.chunkManifest();
         SignedProofBundleModel.Manifest manifest = evidence.manifest();
-        boolean valid = chunk != null
-                && SignedProofBundleContract.CHUNK_SCHEMA.equals(chunk.schemaVersion())
+        if (chunk == null) {
+            checks.fail("chunks.contract", "content", VerificationCode.CHUNK_MANIFEST_INVALID,
+                    "Chunk evidence schema, hashes, order, count, or total size is invalid");
+            return false;
+        }
+        boolean valid = SignedProofBundleContract.CHUNK_SCHEMA.equals(chunk.schemaVersion())
                 && Objects.equals(manifest.fileId(), chunk.fileId())
                 && Objects.equals(manifest.fileVersion(), chunk.fileVersion())
                 && ProofHashes.PREFIXED_SHA256.matcher(orEmpty(chunk.contentHash())).matches()
@@ -531,8 +535,14 @@ public final class DefaultProofVerifier implements ProofVerifier {
             Instant now
     ) {
         SignedProofBundleModel.BlockchainReceiptEvidence receipt = evidence.chainReceipt();
-        boolean receiptValid = receipt != null
-                && SignedProofBundleContract.CHAIN_SCHEMA.equals(receipt.schemaVersion())
+        if (receipt == null) {
+            checks.fail("chain.receipt", "chain", VerificationCode.CHAIN_RECEIPT_INVALID,
+                    "Signed batch receipt source, transaction, chain record, or root is invalid");
+            checks.fail("chain.registry", "chain", VerificationCode.CONTRACT_REGISTRY_INVALID,
+                    "Immutable Sharing contract registry snapshot or fingerprint is invalid");
+            return;
+        }
+        boolean receiptValid = SignedProofBundleContract.CHAIN_SCHEMA.equals(receipt.schemaVersion())
                 && hasBoundedText(receipt.chainRecordId(), 256)
                 && Objects.equals(receipt.chainRecordId(), evidence.chunkManifest().chainRecordId())
                 && ProofHashes.RAW_SHA256.matcher(orEmpty(receipt.batchChainRoot())).matches()

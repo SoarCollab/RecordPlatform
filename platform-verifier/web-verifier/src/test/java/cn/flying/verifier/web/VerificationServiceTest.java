@@ -227,6 +227,29 @@ class VerificationServiceTest {
         assertThat(rejected.getContentAsString()).contains("\"code\":\"RATE_LIMITED\"");
     }
 
+    /** Keeps no-argument multipart exception handlers bound to their stable public responses. */
+    @Test
+    void shouldReturnStableMultipartTransportErrors() {
+        VerifierExceptionHandler handler = new VerifierExceptionHandler();
+
+        var uploadLimit = handler.handleUploadLimit();
+        var missingPart = handler.handleMissingPart();
+        var malformed = handler.handleMultipart();
+
+        assertThat(uploadLimit.getStatusCode()).isEqualTo(HttpStatus.PAYLOAD_TOO_LARGE);
+        assertThat(uploadLimit.getBody())
+                .extracting(VerifierErrorResponse::code)
+                .isEqualTo("REQUEST_TOO_LARGE");
+        assertThat(missingPart.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(missingPart.getBody())
+                .extracting(VerifierErrorResponse::code)
+                .isEqualTo("PART_REQUIRED");
+        assertThat(malformed.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(malformed.getBody())
+                .extracting(VerifierErrorResponse::code)
+                .isEqualTo("MULTIPART_INVALID");
+    }
+
     /** Creates the minimum complete offline operator policy for service tests. */
     private VerifierProperties properties(long maxBytes, int concurrency, Duration acquireTimeout) {
         return new VerifierProperties(

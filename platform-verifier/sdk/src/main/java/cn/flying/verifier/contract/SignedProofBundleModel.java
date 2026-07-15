@@ -130,6 +130,11 @@ public final class SignedProofBundleModel {
         public MerkleProofEvidence {
             proofPath = immutableList(proofPath);
         }
+
+        /** Returns a defensive immutable copy so callers cannot retain or mutate record state. */
+        public List<ProofNode> proofPath() {
+            return immutableList(proofPath);
+        }
     }
 
     /** One ordered Merkle sibling node. */

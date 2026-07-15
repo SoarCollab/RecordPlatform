@@ -180,8 +180,11 @@ class CanonicalJsonSecurityTest {
                         "schema", "type", "hash", "algorithm", "root", "leaf", 0, source);
         source.clear();
 
-        assertThat(evidence.proofPath()).containsExactly((SignedProofBundleModel.ProofNode) null);
-        assertThatThrownBy(() -> evidence.proofPath().clear())
+        List<SignedProofBundleModel.ProofNode> firstRead = evidence.proofPath();
+        List<SignedProofBundleModel.ProofNode> secondRead = evidence.proofPath();
+        assertThat(firstRead).containsExactly((SignedProofBundleModel.ProofNode) null);
+        assertThat(secondRead).isNotSameAs(firstRead);
+        assertThatThrownBy(firstRead::clear)
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 }

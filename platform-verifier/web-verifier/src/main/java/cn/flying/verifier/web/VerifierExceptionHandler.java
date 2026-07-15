@@ -35,7 +35,7 @@ public class VerifierExceptionHandler {
 
     /** Maps container-level multipart size rejection to a stable 413 response. */
     @ExceptionHandler(MaxUploadSizeExceededException.class)
-    public ResponseEntity<VerifierErrorResponse> handleUploadLimit(MaxUploadSizeExceededException error) {
+    public ResponseEntity<VerifierErrorResponse> handleUploadLimit() {
         return response(
                 HttpStatus.PAYLOAD_TOO_LARGE,
                 "REQUEST_TOO_LARGE",
@@ -44,13 +44,13 @@ public class VerifierExceptionHandler {
 
     /** Maps missing required parts to a stable client error. */
     @ExceptionHandler(MissingServletRequestPartException.class)
-    public ResponseEntity<VerifierErrorResponse> handleMissingPart(MissingServletRequestPartException error) {
+    public ResponseEntity<VerifierErrorResponse> handleMissingPart() {
         return response(HttpStatus.BAD_REQUEST, "PART_REQUIRED", "Required multipart input is missing");
     }
 
     /** Maps malformed multipart framing to a stable client error. */
     @ExceptionHandler(MultipartException.class)
-    public ResponseEntity<VerifierErrorResponse> handleMultipart(MultipartException error) {
+    public ResponseEntity<VerifierErrorResponse> handleMultipart() {
         return response(HttpStatus.BAD_REQUEST, "MULTIPART_INVALID", "The multipart request is invalid");
     }
 

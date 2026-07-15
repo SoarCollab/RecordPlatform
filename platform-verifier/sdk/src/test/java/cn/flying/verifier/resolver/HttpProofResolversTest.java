@@ -192,6 +192,24 @@ class HttpProofResolversTest {
         assertThat(chainRequests).hasValue(0);
     }
 
+    /** Renders the optional FISCO group segment safely when a non-FISCO query has no group identifier. */
+    @Test
+    void shouldResolveChainQueryWithNullOptionalGroupId() {
+        ChainQuery withoutGroup = new ChainQuery(
+                "BSN_BESU",
+                fixture.chain().chainId(),
+                null,
+                fixture.chain().contractAddress(),
+                fixture.chain().batchNo(),
+                fixture.chain().transactionHash(),
+                fixture.chain().merkleRoot());
+
+        Resolution<ChainRootEvidence> result = resolver(true).resolve(withoutGroup);
+
+        assertThat(result.state()).isEqualTo(ResolutionState.RESOLVED);
+        assertThat(chainRequests).hasValue(1);
+    }
+
     /** Rejects insecure, non-allowlisted, query-bearing, and unbounded configurations at construction. */
     @Test
     void shouldValidateResolverSecurityConfiguration() {

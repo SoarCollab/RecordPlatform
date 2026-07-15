@@ -732,6 +732,26 @@ class DefaultProofVerifierTest {
         assertInvalidCode(registryArchive, VerificationCode.CONTRACT_REGISTRY_INVALID);
     }
 
+    /** Rejects an empty signed receipt without turning missing receipt fields into an internal failure. */
+    @Test
+    void shouldRejectMissingChainReceiptFieldsWithoutInternalError() throws Exception {
+        ObjectNode emptyReceipt = json.mapperCopy().createObjectNode();
+        Path malformed = writeMutatedJsonEntry(
+                "missing-chain-receipt-fields.zip",
+                SignedProofBundleContract.BLOCKCHAIN_RECEIPT_ENTRY,
+                emptyReceipt);
+
+        VerificationReport report = verifier.verify(
+                fixture.original(), malformed, VerifierTestFixture.context(fixture));
+
+        assertThat(report.outcome()).isEqualTo(VerificationOutcome.INVALID);
+        assertThat(report.checks()).extracting(check -> check.code())
+                .contains(
+                        VerificationCode.CHAIN_RECEIPT_INVALID,
+                        VerificationCode.CONTRACT_REGISTRY_INVALID)
+                .doesNotContain(VerificationCode.INTERNAL_ERROR);
+    }
+
     /** Rejects chunk cardinality overflow and overflow in the signed chunk-size sum. */
     @Test
     void shouldRejectChunkCountAndSizeSumOverflow() throws Exception {

@@ -372,7 +372,7 @@ public final class HttpProofResolvers implements SigningKeyResolver, ProofStatus
             case "{batchNo}" -> query.batchNo();
             default -> throw new IllegalArgumentException("Unknown chain URL template placeholder");
         };
-        if ("{groupId}".equals(placeholder) && value.isEmpty()) {
+        if ("{groupId}".equals(placeholder) && Objects.equals(value, "")) {
             return value;
         }
         if (value == null || value.isBlank() || value.length() > 192 || value.chars().anyMatch(Character::isISOControl)) {
