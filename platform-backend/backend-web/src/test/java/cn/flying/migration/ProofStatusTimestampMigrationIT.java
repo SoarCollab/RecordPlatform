@@ -16,10 +16,13 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -557,17 +560,8 @@ class ProofStatusTimestampMigrationIT {
      */
     private void verifyMillisecondBoundaries(Connection connection, boolean truncateFractional)
             throws SQLException {
-        if (truncateFractional) {
-            execute(
-                    connection,
-                    "SET SESSION sql_mode = "
-                            + "sys.list_add(@@SESSION.sql_mode, 'TIME_TRUNCATE_FRACTIONAL')");
-        } else {
-            execute(
-                    connection,
-                    "SET SESSION sql_mode = "
-                            + "sys.list_drop(@@SESSION.sql_mode, 'TIME_TRUNCATE_FRACTIONAL')");
-        }
+        String currentSqlMode = querySingleString(connection, "SELECT @@SESSION.sql_mode");
+        setSessionSqlMode(connection, sqlModeWithFractionalTruncation(currentSqlMode, truncateFractional));
 
         String activeMode = querySingleString(connection, "SELECT @@SESSION.sql_mode")
                 .toUpperCase(Locale.ROOT);
@@ -599,6 +593,21 @@ class ProofStatusTimestampMigrationIT {
         }
         verifyFractionalModeProbe(connection, truncateFractional);
         deleteBoundaryIssuance(connection);
+    }
+
+    /**
+     * 在 Java 中切换 TIME_TRUNCATE_FRACTIONAL，避免测试用户依赖 MySQL sys schema 的例程权限。
+     */
+    private String sqlModeWithFractionalTruncation(String sqlMode, boolean enabled) {
+        List<String> modes = Arrays.stream(sqlMode.split(","))
+                .map(String::trim)
+                .filter(mode -> !mode.isEmpty())
+                .filter(mode -> !"TIME_TRUNCATE_FRACTIONAL".equalsIgnoreCase(mode))
+                .collect(Collectors.toCollection(ArrayList::new));
+        if (enabled) {
+            modes.add("TIME_TRUNCATE_FRACTIONAL");
+        }
+        return String.join(",", modes);
     }
 
     /**
@@ -651,7 +660,7 @@ class ProofStatusTimestampMigrationIT {
     }
 
     /**
-     * 执行不返回结果集的会话级 SQL。
+     * 执行不返回结果集的固定会话级 SQL。
      */
     private void execute(Connection connection, String sql) throws SQLException {
         try (Statement statement = connection.createStatement()) {

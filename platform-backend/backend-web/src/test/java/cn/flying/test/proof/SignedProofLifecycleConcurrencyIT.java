@@ -94,6 +94,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.Date;
@@ -1329,10 +1330,12 @@ class SignedProofLifecycleConcurrencyIT extends BaseIntegrationTest {
             assertThat(statusData.path("statusVersion").isTextual()).isTrue();
             assertThat(statusData.path("statusVersion").asText())
                     .isEqualTo(Long.toString(persisted.statusVersion()));
-            assertThat(statusData.path("issuedAt").isIntegralNumber()).isTrue();
-            assertThat(statusData.path("updatedAt").isIntegralNumber()).isTrue();
-            assertThat(statusData.path("issuedAt").longValue()).isEqualTo(persisted.issuedAt().getTime());
-            assertThat(statusData.path("updatedAt").longValue()).isEqualTo(persisted.updateTime().getTime());
+            assertThat(statusData.path("issuedAt").isTextual()).isTrue();
+            assertThat(statusData.path("updatedAt").isTextual()).isTrue();
+            assertThat(OffsetDateTime.parse(statusData.path("issuedAt").textValue()).toInstant())
+                    .isEqualTo(persisted.issuedAt().toInstant());
+            assertThat(OffsetDateTime.parse(statusData.path("updatedAt").textValue()).toInstant())
+                    .isEqualTo(persisted.updateTime().toInstant());
             assertThat(statusResult.getResponse().getHeader(HttpHeaders.CACHE_CONTROL)).contains("no-store");
             assertThat(keyResult.getResponse().getHeader(HttpHeaders.CACHE_CONTROL))
                     .contains("max-age=300", "immutable");
