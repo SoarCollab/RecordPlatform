@@ -465,6 +465,131 @@ class AttestationBatchServiceImplTest {
     }
 
     /**
+     * 验证耗尽后的 registry 瞬时异常直接人工终结，不再安排重试或访问业务链记录。
+     */
+    @Test
+    void submitBatch_shouldFailClosedWhenExhaustedRegistryLookupIsTransient() {
+        MerkleTreeResult tree = sampleTree();
+        AttestationBatch claimed = pendingBatch(tree).setStatus("CHAIN_SUBMITTING")
+                .setClaimToken("claim-registry-exhausted").setAttemptCount(6);
+        AttestationBatch manual = pendingBatch(tree).setStatus("MANUAL_REVIEW").setAttemptCount(6);
+        when(persistenceService.claim(
+                eq(TENANT_ID),
+                eq(BATCH_ID),
+                anyString(),
+                any(Date.class),
+                any(Date.class),
+                eq(AttestationBatchServiceImpl.MAX_ATTEMPTS)))
+                .thenReturn(Optional.of(claimed));
+        when(fileRemoteClient.getContractRegistry())
+                .thenThrow(new IllegalStateException("registry unavailable"));
+        when(persistenceService.findById(TENANT_ID, BATCH_ID)).thenReturn(Optional.of(manual));
+
+        AttestationBatch actual = service.submitBatch(BATCH_ID);
+
+        assertThat(actual.getStatus()).isEqualTo("MANUAL_REVIEW");
+        verify(persistenceService, never()).retry(any(), any(), any(), any(), any());
+        verify(persistenceService).manualReview(
+                eq(TENANT_ID), eq(BATCH_ID), eq("claim-registry-exhausted"),
+                anyString(), eq(null), eq(null));
+        verify(persistenceService, never()).verifyContractRegistryClaim(any(), any(), any(), any());
+        verify(fileRemoteClient, never()).getAttestationBatch(any());
+        verify(fileRemoteClient, never()).storeAttestationBatch(any());
+    }
+
+    /**
+     * 验证耗尽后的非法 ACTIVE registry 响应直接人工终结，不得猜测合约或继续链查询。
+     */
+    @Test
+    void submitBatch_shouldFailClosedWhenExhaustedRegistryResponseIsInvalid() {
+        MerkleTreeResult tree = sampleTree();
+        AttestationBatch claimed = pendingBatch(tree).setStatus("CHAIN_SUBMITTING")
+                .setClaimToken("claim-registry-invalid").setAttemptCount(6);
+        AttestationBatch manual = pendingBatch(tree).setStatus("MANUAL_REVIEW").setAttemptCount(6);
+        when(persistenceService.claim(
+                eq(TENANT_ID),
+                eq(BATCH_ID),
+                anyString(),
+                any(Date.class),
+                any(Date.class),
+                eq(AttestationBatchServiceImpl.MAX_ATTEMPTS)))
+                .thenReturn(Optional.of(claimed));
+        when(fileRemoteClient.getContractRegistry()).thenReturn(Result.success(List.of()));
+        when(persistenceService.findById(TENANT_ID, BATCH_ID)).thenReturn(Optional.of(manual));
+
+        AttestationBatch actual = service.submitBatch(BATCH_ID);
+
+        assertThat(actual.getStatus()).isEqualTo("MANUAL_REVIEW");
+        verify(persistenceService, never()).retry(any(), any(), any(), any(), any());
+        verify(persistenceService).manualReview(
+                eq(TENANT_ID), eq(BATCH_ID), eq("claim-registry-invalid"),
+                anyString(), eq(null), eq(null));
+        verify(persistenceService, never()).verifyContractRegistryClaim(any(), any(), any(), any());
+        verify(fileRemoteClient, never()).getAttestationBatch(any());
+        verify(fileRemoteClient, never()).storeAttestationBatch(any());
+    }
+
+    /**
+     * 验证耗尽后的 registry 快照漂移直接人工终结，不能跨合约进入链查询或写入。
+     */
+    @Test
+    void submitBatch_shouldFailClosedWhenExhaustedRegistrySnapshotIsStale() {
+        MerkleTreeResult tree = sampleTree();
+        AttestationBatch claimed = pendingBatch(tree).setStatus("CHAIN_SUBMITTING")
+                .setClaimToken("claim-snapshot-exhausted").setAttemptCount(6);
+        AttestationBatch manual = pendingBatch(tree).setStatus("MANUAL_REVIEW").setAttemptCount(6);
+        when(persistenceService.claim(
+                eq(TENANT_ID),
+                eq(BATCH_ID),
+                anyString(),
+                any(Date.class),
+                any(Date.class),
+                eq(AttestationBatchServiceImpl.MAX_ATTEMPTS)))
+                .thenReturn(Optional.of(claimed));
+        when(persistenceService.verifyContractRegistryClaim(
+                TENANT_ID,
+                BATCH_ID,
+                "claim-snapshot-exhausted",
+                contractRegistry())).thenReturn(Optional.empty());
+        when(persistenceService.findById(TENANT_ID, BATCH_ID)).thenReturn(Optional.of(manual));
+
+        AttestationBatch actual = service.submitBatch(BATCH_ID);
+
+        assertThat(actual.getStatus()).isEqualTo("MANUAL_REVIEW");
+        verify(persistenceService, never()).retry(any(), any(), any(), any(), any());
+        verify(persistenceService).manualReview(
+                eq(TENANT_ID), eq(BATCH_ID), eq("claim-snapshot-exhausted"),
+                anyString(), eq(null), eq(null));
+        verify(fileRemoteClient, never()).getAttestationBatch(any());
+        verify(fileRemoteClient, never()).storeAttestationBatch(any());
+    }
+
+    /**
+     * 验证耗尽后的链查询缺少 exists 结果时人工终结，不得把未知状态当作不存在后写链。
+     */
+    @Test
+    void submitBatch_shouldFailClosedWhenExhaustedChainQueryIsIncomplete() {
+        MerkleTreeResult tree = sampleTree();
+        AttestationBatch claimed = pendingBatch(tree).setStatus("CHAIN_SUBMITTING")
+                .setClaimToken("claim-query-incomplete").setAttemptCount(6);
+        AttestationBatch manual = pendingBatch(tree).setStatus("MANUAL_REVIEW").setAttemptCount(6);
+        stubClaim(claimed);
+        when(fileRemoteClient.getAttestationBatch(any()))
+                .thenReturn(Result.success(new GetAttestationBatchResponse(
+                        null, TENANT_ID, BATCH_ID, null, null, null, null, null)));
+        when(persistenceService.findById(TENANT_ID, BATCH_ID)).thenReturn(Optional.of(manual));
+
+        AttestationBatch actual = service.submitBatch(BATCH_ID);
+
+        assertThat(actual.getStatus()).isEqualTo("MANUAL_REVIEW");
+        verify(persistenceService, never()).retry(any(), any(), any(), any(), any());
+        verify(persistenceService).manualReview(
+                eq(TENANT_ID), eq(BATCH_ID), eq("claim-query-incomplete"),
+                anyString(), eq(null), eq(null));
+        verify(fileRemoteClient, never()).storeAttestationBatch(any());
+    }
+
+    /**
      * 验证并发 worker 未取得 claim 时只返回当前状态，不调用任何链 RPC。
      */
     @Test

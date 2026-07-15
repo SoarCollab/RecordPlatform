@@ -79,6 +79,35 @@ jobs:
       - name: Run Backend Tests
         run: mvn -f platform-backend/pom.xml clean verify -pl backend-common,backend-service,backend-web -am -Pit
 
+      - name: Require Attestation Batch Consistency IT Execution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          report = Path(
+              "platform-backend/backend-web/target/failsafe-reports/"
+              "TEST-cn.flying.test.attestation.AttestationBatchConsistencyIT.xml"
+          )
+          if not report.is_file():
+              sys.exit(f"Missing required Failsafe report: {report}")
+
+          suite = ET.parse(report).getroot()
+          expected_counts = {
+              "tests": 8,
+              "skipped": 0,
+              "failures": 0,
+              "errors": 0,
+          }
+          for name, expected in expected_counts.items():
+              actual = int(suite.attrib.get(name, "-1"))
+              if actual != expected:
+                  sys.exit(
+                      f"AttestationBatchConsistencyIT {name}={actual}; expected {expected}"
+                  )
+          PY
+
       - name: Require Signed Proof Concurrency IT Execution
         run: |
           python3 - <<'PY'

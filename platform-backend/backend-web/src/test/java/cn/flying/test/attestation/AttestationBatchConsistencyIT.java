@@ -5,8 +5,10 @@ import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.IdUtils;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.entity.AttestationBatch;
+import cn.flying.dao.mapper.AttestationBatchMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.platformapi.constant.Result;
+import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.request.GetAttestationBatchRequest;
 import cn.flying.platformapi.request.StoreAttestationBatchRequest;
 import cn.flying.platformapi.response.ContractRegistryEntryResponse;
@@ -39,6 +41,7 @@ import java.util.concurrent.Future;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -57,6 +60,9 @@ class AttestationBatchConsistencyIT extends BaseIntegrationTest {
 
     @Autowired
     private AttestationBatchPersistenceService persistenceService;
+
+    @Autowired
+    private AttestationBatchMapper batchMapper;
 
     @Autowired
     private MerkleTreeService merkleTreeService;
@@ -276,6 +282,318 @@ class AttestationBatchConsistencyIT extends BaseIntegrationTest {
     }
 
     /**
+     * 验证第六次恢复再次崩溃后仍可被发现和领取，同时待提交与退避状态继续受五次上限约束。
+     */
+    @Test
+    void exhaustedExpiredLease_shouldRemainDueWithoutReopeningPendingOrRetryWrites() {
+        MerkleTreeResult tree = sampleTree();
+        Instant base = Instant.parse("2026-07-14T03:00:00Z");
+        AttestationBatch recovery = persistenceService.createOrGet(
+                TENANT_ID, "f".repeat(64), tree);
+        AttestationBatch sixthClaim = claimThroughAttempt(
+                recovery, 6, base, "claim-exhausted");
+        Instant sixthExpiry = sixthClaim.getLeaseExpiresAt().toInstant();
+        Date beforeExpiry = Date.from(sixthExpiry.minusSeconds(1));
+        Date afterExpiry = Date.from(sixthExpiry.plusSeconds(1));
+
+        AttestationBatch pendingAtLimit = persistenceService.createOrGet(
+                TENANT_ID, "g".repeat(64), tree);
+        AttestationBatch retryAtLimit = persistenceService.createOrGet(
+                TENANT_ID, "h".repeat(64), tree);
+        AttestationBatch deletedSubmitting = persistenceService.createOrGet(
+                TENANT_ID, "n".repeat(64), tree);
+        assertThat(jdbcTemplate.update(
+                "UPDATE attestation_batch SET status = 'CHAIN_PENDING', attempt_count = 5, "
+                        + "next_attempt_at = NULL, claim_token = NULL, lease_expires_at = NULL "
+                        + "WHERE tenant_id = ? AND id = ? AND deleted = 0",
+                TENANT_ID,
+                pendingAtLimit.getId())).isEqualTo(1);
+        assertThat(jdbcTemplate.update(
+                "UPDATE attestation_batch SET status = 'CHAIN_RETRY', attempt_count = 5, "
+                        + "next_attempt_at = ?, claim_token = NULL, lease_expires_at = NULL "
+                        + "WHERE tenant_id = ? AND id = ? AND deleted = 0",
+                Date.from(base.minusSeconds(1)),
+                TENANT_ID,
+                retryAtLimit.getId())).isEqualTo(1);
+        assertThat(jdbcTemplate.update(
+                "UPDATE attestation_batch SET status = 'CHAIN_SUBMITTING', attempt_count = 6, "
+                        + "claim_token = ?, lease_expires_at = ?, deleted = 1 "
+                        + "WHERE tenant_id = ? AND id = ? AND deleted = 0",
+                "claim-deleted",
+                Date.from(base.minusSeconds(1)),
+                TENANT_ID,
+                deletedSubmitting.getId())).isEqualTo(1);
+
+        assertThat(sixthClaim.getAttemptCount()).isEqualTo(6);
+        assertThat(batchMapper.countDueBatches(TENANT_ID, beforeExpiry, 5)).isZero();
+        assertThat(batchMapper.selectDueBatchIds(TENANT_ID, beforeExpiry, 5, 100)).isEmpty();
+        assertThat(persistenceService.claim(
+                TENANT_ID,
+                recovery.getId(),
+                "claim-exhausted-early",
+                beforeExpiry,
+                Date.from(beforeExpiry.toInstant().plusSeconds(120)),
+                5)).isEmpty();
+
+        assertThat(batchMapper.countDueBatches(OTHER_TENANT_ID, afterExpiry, 5)).isZero();
+        assertThat(batchMapper.selectDueBatchIds(OTHER_TENANT_ID, afterExpiry, 5, 100)).isEmpty();
+        assertThat(persistenceService.claim(
+                OTHER_TENANT_ID,
+                recovery.getId(),
+                "claim-other-tenant",
+                afterExpiry,
+                Date.from(afterExpiry.toInstant().plusSeconds(120)),
+                5)).isEmpty();
+
+        assertThat(batchMapper.countDueBatches(TENANT_ID, afterExpiry, 5)).isEqualTo(1);
+        assertThat(batchMapper.selectDueBatchIds(TENANT_ID, afterExpiry, 5, 100))
+                .containsExactly(recovery.getId());
+        assertThat(persistenceService.claim(
+                TENANT_ID,
+                deletedSubmitting.getId(),
+                "claim-deleted-recovery",
+                afterExpiry,
+                Date.from(afterExpiry.toInstant().plusSeconds(120)),
+                5)).isEmpty();
+        Optional<AttestationBatch> seventhClaim = persistenceService.claim(
+                TENANT_ID,
+                recovery.getId(),
+                "claim-exhausted-7",
+                afterExpiry,
+                Date.from(afterExpiry.toInstant().plusSeconds(120)),
+                5);
+
+        assertThat(seventhClaim).isPresent();
+        assertThat(seventhClaim.orElseThrow().getAttemptCount()).isEqualTo(7);
+        assertThat(persistenceService.claim(
+                TENANT_ID,
+                pendingAtLimit.getId(),
+                "claim-pending-limit",
+                afterExpiry,
+                Date.from(afterExpiry.toInstant().plusSeconds(120)),
+                5)).isEmpty();
+        assertThat(persistenceService.claim(
+                TENANT_ID,
+                retryAtLimit.getId(),
+                "claim-retry-limit",
+                afterExpiry,
+                Date.from(afterExpiry.toInstant().plusSeconds(120)),
+                5)).isEmpty();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM attestation_batch_attempt WHERE tenant_id = ? AND batch_id = ?",
+                Integer.class,
+                TENANT_ID,
+                recovery.getId())).isEqualTo(7);
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT attempt_no FROM attestation_batch_attempt "
+                        + "WHERE tenant_id = ? AND batch_id = ? ORDER BY attempt_no",
+                Integer.class,
+                TENANT_ID,
+                recovery.getId())).containsExactly(1, 2, 3, 4, 5, 6, 7);
+    }
+
+    /**
+     * 验证耗尽后的过期租约仍只有一个并发赢家，旧 token 无法迁移状态且人工终态不可再次领取。
+     */
+    @Test
+    void exhaustedConcurrentRecovery_shouldFenceStaleTokensAndKeepTerminalStateClosed()
+            throws Exception {
+        MerkleTreeResult tree = sampleTree();
+        Instant base = Instant.parse("2026-07-14T04:00:00Z");
+        AttestationBatch batch = persistenceService.createOrGet(
+                TENANT_ID, "i".repeat(64), tree);
+        AttestationBatch sixthClaim = claimThroughAttempt(batch, 6, base, "claim-race");
+        Date recoveryTime = Date.from(sixthClaim.getLeaseExpiresAt().toInstant().plusSeconds(1));
+        Date recoveryLease = Date.from(recoveryTime.toInstant().plusSeconds(120));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        AttestationBatch winner;
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Optional<AttestationBatch>> first = executor.submit(() -> concurrentClaim(
+                    batch.getId(), "claim-race-a", recoveryTime, recoveryLease, ready, start));
+            Future<Optional<AttestationBatch>> second = executor.submit(() -> concurrentClaim(
+                    batch.getId(), "claim-race-b", recoveryTime, recoveryLease, ready, start));
+            ready.await();
+            start.countDown();
+
+            List<Optional<AttestationBatch>> results = List.of(first.get(), second.get());
+            assertThat(results.stream().filter(Optional::isPresent)).hasSize(1);
+            winner = results.stream().flatMap(Optional::stream).findFirst().orElseThrow();
+        }
+
+        String loserToken = "claim-race-a".equals(winner.getClaimToken())
+                ? "claim-race-b"
+                : "claim-race-a";
+        assertThat(winner.getAttemptCount()).isEqualTo(7);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM attestation_batch_attempt WHERE tenant_id = ? AND batch_id = ?",
+                Integer.class,
+                TENANT_ID,
+                batch.getId())).isEqualTo(7);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM attestation_batch_attempt "
+                        + "WHERE tenant_id = ? AND batch_id = ? AND attempt_no = 7",
+                Integer.class,
+                TENANT_ID,
+                batch.getId())).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT claim_token FROM attestation_batch_attempt "
+                        + "WHERE tenant_id = ? AND batch_id = ? AND attempt_no = 7",
+                String.class,
+                TENANT_ID,
+                batch.getId())).isEqualTo(winner.getClaimToken());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM attestation_batch_attempt "
+                        + "WHERE tenant_id = ? AND batch_id = ? AND claim_token = ?",
+                Integer.class,
+                TENANT_ID,
+                batch.getId(),
+                loserToken)).isZero();
+
+        assertThat(persistenceService.confirm(
+                TENANT_ID,
+                batch.getId(),
+                "claim-race-6",
+                "c".repeat(64),
+                tree.merkleRoot(),
+                "CHAIN_WRITE")).isFalse();
+        assertThat(persistenceService.retry(
+                TENANT_ID,
+                batch.getId(),
+                "claim-race-6",
+                "stale retry",
+                Date.from(recoveryTime.toInstant().plusSeconds(300)))).isFalse();
+        assertThat(persistenceService.manualReview(
+                TENANT_ID,
+                batch.getId(),
+                loserToken,
+                "loser manual review",
+                null,
+                null)).isFalse();
+        assertThat(persistenceService.findById(TENANT_ID, batch.getId()))
+                .get()
+                .extracting(AttestationBatch::getStatus, AttestationBatch::getClaimToken)
+                .containsExactly("CHAIN_SUBMITTING", winner.getClaimToken());
+        assertThat(persistenceService.manualReview(
+                TENANT_ID,
+                batch.getId(),
+                winner.getClaimToken(),
+                "exhausted recovery reconciled",
+                null,
+                null)).isTrue();
+
+        Date terminalCheckTime = Date.from(recoveryTime.toInstant().plusSeconds(1_000));
+        assertThat(persistenceService.findById(TENANT_ID, batch.getId()))
+                .get()
+                .extracting(
+                        AttestationBatch::getStatus,
+                        AttestationBatch::getAttemptCount,
+                        AttestationBatch::getClaimToken,
+                        AttestationBatch::getLeaseExpiresAt)
+                .containsExactly("MANUAL_REVIEW", 7, null, null);
+        assertThat(batchMapper.countDueBatches(TENANT_ID, terminalCheckTime, 5)).isZero();
+        assertThat(batchMapper.selectDueBatchIds(TENANT_ID, terminalCheckTime, 5, 100)).isEmpty();
+        assertThat(persistenceService.claim(
+                TENANT_ID,
+                batch.getId(),
+                "claim-after-terminal",
+                terminalCheckTime,
+                Date.from(terminalCheckTime.toInstant().plusSeconds(120)),
+                5)).isEmpty();
+        assertThat(attemptStatus(batch.getId(), 6)).isEqualTo("STALE_IGNORED");
+        assertThat(attemptStatus(batch.getId(), 7)).isEqualTo("MANUAL_REVIEW");
+    }
+
+    /**
+     * 验证耗尽后的真实数据库 claim 对匹配、不存在、冲突和查询失败都只做链查询并收敛终态。
+     */
+    @Test
+    void exhaustedRecoveryOutcomes_shouldAlwaysRemainQueryOnlyAndTerminal() {
+        MerkleTreeResult tree = sampleTree();
+        Instant base = Instant.parse("2026-07-14T05:00:00Z");
+        AttestationBatch matching = createRegistryBatch("j", tree);
+        AttestationBatch missing = createRegistryBatch("k", tree);
+        AttestationBatch mismatch = createRegistryBatch("l", tree);
+        AttestationBatch queryError = createRegistryBatch("m", tree);
+        claimThroughAttempt(matching, 6, base, "claim-matching");
+        claimThroughAttempt(missing, 6, base, "claim-missing");
+        claimThroughAttempt(mismatch, 6, base, "claim-mismatch");
+        claimThroughAttempt(queryError, 6, base, "claim-query-error");
+
+        when(remoteClient.getContractRegistry()).thenAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return Result.success(List.of(testContractRegistry()));
+        });
+        when(remoteClient.getAttestationBatch(any(GetAttestationBatchRequest.class)))
+                .thenAnswer(invocation -> {
+                    assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+                    GetAttestationBatchRequest request = invocation.getArgument(0);
+                    if (matching.getId().equals(request.batchId())) {
+                        return Result.success(chainBatch(matching, matching.getMerkleRoot()));
+                    }
+                    if (missing.getId().equals(request.batchId())) {
+                        return Result.success(GetAttestationBatchResponse.notFound(
+                                TENANT_ID, missing.getId()));
+                    }
+                    if (mismatch.getId().equals(request.batchId())) {
+                        return Result.success(chainBatch(mismatch, "f".repeat(64)));
+                    }
+                    if (queryError.getId().equals(request.batchId())) {
+                        return Result.<GetAttestationBatchResponse>error(
+                                ResultEnum.BLOCKCHAIN_UNREACHABLE, null);
+                    }
+                    throw new AssertionError("Unexpected batch query: " + request.batchId());
+                });
+
+        List<AttestationBatch> outcomes = List.of(
+                attestationBatchService.submitBatch(matching.getId()),
+                attestationBatchService.submitBatch(missing.getId()),
+                attestationBatchService.submitBatch(mismatch.getId()),
+                attestationBatchService.submitBatch(queryError.getId()));
+
+        assertThat(outcomes)
+                .extracting(AttestationBatch::getStatus)
+                .containsExactly("COMPLETED", "MANUAL_REVIEW", "MANUAL_REVIEW", "MANUAL_REVIEW");
+        assertThat(outcomes)
+                .extracting(AttestationBatch::getAttemptCount)
+                .containsOnly(7);
+        verify(remoteClient, times(4)).getContractRegistry();
+        verify(remoteClient, times(4)).getAttestationBatch(any(GetAttestationBatchRequest.class));
+        verify(remoteClient, never()).storeAttestationBatch(any(StoreAttestationBatchRequest.class));
+        assertThat(attemptStatus(matching.getId(), 7)).isEqualTo("COMPLETED");
+        assertThat(attemptStatus(missing.getId(), 7)).isEqualTo("MANUAL_REVIEW");
+        assertThat(attemptStatus(mismatch.getId(), 7)).isEqualTo("MANUAL_REVIEW");
+        assertThat(attemptStatus(queryError.getId(), 7)).isEqualTo("MANUAL_REVIEW");
+        assertThat(attemptConfirmationSource(matching.getId(), 7))
+                .isEqualTo("CHAIN_QUERY_BEFORE_WRITE");
+        assertThat(attemptConfirmationSource(missing.getId(), 7)).isNull();
+        assertThat(attemptConfirmationSource(mismatch.getId(), 7))
+                .isEqualTo("CHAIN_QUERY_BEFORE_WRITE");
+        assertThat(attemptConfirmationSource(queryError.getId(), 7)).isNull();
+
+        Date terminalCheckTime = new Date();
+        assertThat(batchMapper.countDueBatches(TENANT_ID, terminalCheckTime, 5)).isZero();
+        assertThat(batchMapper.selectDueBatchIds(TENANT_ID, terminalCheckTime, 5, 100)).isEmpty();
+        for (AttestationBatch terminal : outcomes) {
+            assertThat(persistenceService.findById(TENANT_ID, terminal.getId()))
+                    .get()
+                    .extracting(
+                            AttestationBatch::getAttemptCount,
+                            AttestationBatch::getClaimToken,
+                            AttestationBatch::getLeaseExpiresAt)
+                    .containsExactly(7, null, null);
+            assertThat(persistenceService.claim(
+                    TENANT_ID,
+                    terminal.getId(),
+                    "claim-terminal-" + terminal.getId(),
+                    terminalCheckTime,
+                    Date.from(terminalCheckTime.toInstant().plusSeconds(120)),
+                    5)).isEmpty();
+        }
+    }
+
+    /**
      * 验证 Flyway JSON 列、MyBatis 映射和 claim CAS 对 registry 快照执行真实数据库闭环。
      */
     @Test
@@ -389,6 +707,99 @@ class AttestationBatchConsistencyIT extends BaseIntegrationTest {
         assertThatThrownBy(() -> persistenceService.requireContractRegistry(reloadedLegacy))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("no contract registry snapshot");
+    }
+
+    /**
+     * 使用相隔十一秒的领取时间把同一批次推进到目标 attempt，并保留最后一次提交态模拟崩溃。
+     */
+    private AttestationBatch claimThroughAttempt(
+            AttestationBatch batch,
+            int targetAttempt,
+            Instant base,
+            String tokenPrefix
+    ) {
+        AttestationBatch claimed = batch;
+        for (int attempt = 1; attempt <= targetAttempt; attempt++) {
+            Instant claimTime = base.plusSeconds((long) (attempt - 1) * 11L);
+            claimed = persistenceService.claim(
+                            TENANT_ID,
+                            batch.getId(),
+                            tokenPrefix + "-" + attempt,
+                            Date.from(claimTime),
+                            Date.from(claimTime.plusSeconds(10)),
+                            5)
+                    .orElseThrow();
+            assertThat(claimed.getAttemptCount()).isEqualTo(attempt);
+        }
+        return claimed;
+    }
+
+    /**
+     * 创建与测试 provider 当前 ACTIVE registry 完全一致的批次，供真实 service 恢复路径使用。
+     */
+    private AttestationBatch createRegistryBatch(String keySeed, MerkleTreeResult tree) {
+        return persistenceService.createOrGet(
+                TENANT_ID,
+                keySeed.repeat(64),
+                tree,
+                legacyEvidence(tree),
+                testContractRegistry());
+    }
+
+    /**
+     * 为测试 Merkle 叶构造与旧链记录兼容的不可变证据元数据。
+     */
+    private List<AttestationLeafEvidence> legacyEvidence(MerkleTreeResult tree) {
+        return tree.leaves().stream()
+                .map(leaf -> new AttestationLeafEvidence(
+                        leaf.fileId(),
+                        1,
+                        null,
+                        AttestationBatchPersistenceService.EVIDENCE_TYPE_LEGACY_CHAIN_RECORD_ID,
+                        leaf.fileHash(),
+                        leaf.fileHash()))
+                .toList();
+    }
+
+    /**
+     * 构造指定根哈希的链查询结果，其余不可变字段与真实数据库批次保持一致。
+     */
+    private GetAttestationBatchResponse chainBatch(AttestationBatch batch, String merkleRoot) {
+        return new GetAttestationBatchResponse(
+                true,
+                batch.getTenantId(),
+                batch.getId(),
+                batch.getBatchNo(),
+                batch.getProofAlgorithm(),
+                merkleRoot,
+                batch.getLeafCount(),
+                1_700_000_000_000L);
+    }
+
+    /**
+     * 读取指定 attempt 的真实审计终态。
+     */
+    private String attemptStatus(Long batchId, int attemptNo) {
+        return jdbcTemplate.queryForObject(
+                "SELECT status FROM attestation_batch_attempt "
+                        + "WHERE tenant_id = ? AND batch_id = ? AND attempt_no = ?",
+                String.class,
+                TENANT_ID,
+                batchId,
+                attemptNo);
+    }
+
+    /**
+     * 读取指定 attempt 的链确认来源，区分对账完成、冲突和无链证据的人工终结。
+     */
+    private String attemptConfirmationSource(Long batchId, int attemptNo) {
+        return jdbcTemplate.queryForObject(
+                "SELECT confirmation_source FROM attestation_batch_attempt "
+                        + "WHERE tenant_id = ? AND batch_id = ? AND attempt_no = ?",
+                String.class,
+                TENANT_ID,
+                batchId,
+                attemptNo);
     }
 
     /**
