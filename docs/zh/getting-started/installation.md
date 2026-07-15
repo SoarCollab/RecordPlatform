@@ -19,7 +19,15 @@ cd RecordPlatform
 mvn -f platform-api/pom.xml clean install
 ```
 
-### 2. 构建后端模块
+### 2. 安装并测试公开验证器
+
+后端使用 verifier SDK 中的共享签名证明合同，因此独立构建后端前必须先安装该 reactor：
+
+```bash
+mvn -f platform-verifier/pom.xml clean install
+```
+
+### 3. 构建后端模块
 
 ```bash
 # 构建后端（多模块）
@@ -32,7 +40,7 @@ mvn -f platform-fisco/pom.xml clean package -DskipTests
 mvn -f platform-storage/pom.xml clean package -DskipTests
 ```
 
-### 3. 构建前端
+### 4. 构建前端
 
 ```bash
 cd platform-frontend
@@ -136,4 +144,3 @@ CREATE DATABASE RecordPlatform
 **构建失败**
 - 确保 `platform-api` 已首先安装
 - 检查 Maven 和 JDK 版本
-

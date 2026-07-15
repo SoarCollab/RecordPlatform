@@ -1,16 +1,25 @@
-package cn.flying.service.proof.signed;
+package cn.flying.verifier.contract;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
- * Signed proof ZIP 中各 canonical JSON 条目的稳定业务合同。
+ * Stable business models shared by the signed proof producer and every public verifier entrypoint.
  */
 public final class SignedProofBundleModel {
 
     private SignedProofBundleModel() {
     }
 
-    /** 顶层签名 manifest。 */
+    /** Defensively copies a nullable contract list while preserving malformed null elements for validation. */
+    private static <T> List<T> immutableList(List<T> value) {
+        return value == null
+                ? null
+                : Collections.unmodifiableList(new ArrayList<>(value));
+    }
+
+    /** Top-level signed manifest. */
     public record Manifest(
             String schemaVersion,
             String proofId,
@@ -24,9 +33,12 @@ public final class SignedProofBundleModel {
             SignatureMetadata signature,
             List<EntryDigest> entries
     ) {
+        public Manifest {
+            entries = immutableList(entries);
+        }
     }
 
-    /** 顶层 manifest 中的签名 key 元数据。 */
+    /** Signing-key metadata bound by the top-level manifest. */
     public record SignatureMetadata(
             String algorithm,
             String keyId,
@@ -36,7 +48,7 @@ public final class SignedProofBundleModel {
     ) {
     }
 
-    /** 一个被 manifest 摘要绑定的 ZIP 证据条目。 */
+    /** Digest binding for one evidence entry. */
     public record EntryDigest(
             String name,
             String mediaType,
@@ -47,7 +59,7 @@ public final class SignedProofBundleModel {
     ) {
     }
 
-    /** manifest 构建所需、签发后不可变的上下文。 */
+    /** Immutable manifest context supplied by the producer. */
     public record ManifestSeed(
             String proofId,
             String fileId,
@@ -60,7 +72,7 @@ public final class SignedProofBundleModel {
     ) {
     }
 
-    /** 除顶层 manifest/JWS 外的证据 payload。 */
+    /** Evidence payloads other than the manifest and compact JWS. */
     public record EvidencePayloads(
             String contentHash,
             ChunkManifestEvidence chunkManifest,
@@ -71,7 +83,7 @@ public final class SignedProofBundleModel {
     ) {
     }
 
-    /** 明确拆分内容、链记录和 manifest 摘要的分片证据。 */
+    /** Chunk-manifest evidence with separated content, chain-record, and source-manifest hashes. */
     public record ChunkManifestEvidence(
             String schemaVersion,
             String fileId,
@@ -88,9 +100,12 @@ public final class SignedProofBundleModel {
             String storageBackend,
             List<ChunkEvidence> chunks
     ) {
+        public ChunkManifestEvidence {
+            chunks = immutableList(chunks);
+        }
     }
 
-    /** 一个按索引排序的分片证据。 */
+    /** One ordered chunk evidence item. */
     public record ChunkEvidence(
             int index,
             String plainHash,
@@ -101,7 +116,7 @@ public final class SignedProofBundleModel {
     ) {
     }
 
-    /** 明确绑定 evidenceHash 的 Merkle inclusion proof。 */
+    /** Merkle inclusion proof bound to the source-manifest evidence hash. */
     public record MerkleProofEvidence(
             String schemaVersion,
             String evidenceType,
@@ -112,16 +127,19 @@ public final class SignedProofBundleModel {
             Integer leafIndex,
             List<ProofNode> proofPath
     ) {
+        public MerkleProofEvidence {
+            proofPath = proofPath == null ? null : List.copyOf(proofPath);
+        }
     }
 
-    /** 一个 Merkle sibling 节点。 */
+    /** One ordered Merkle sibling node. */
     public record ProofNode(
             String position,
             String hash
     ) {
     }
 
-    /** 单文件链记录、批次根回执和合约注册表快照。 */
+    /** Single-file receipt, batch-root receipt, and immutable contract-registry snapshot. */
     public record BlockchainReceiptEvidence(
             String schemaVersion,
             String chainRecordId,
@@ -133,7 +151,7 @@ public final class SignedProofBundleModel {
     ) {
     }
 
-    /** 签发批次绑定的不可变 contract registry entry。 */
+    /** Immutable contract-registry entry used at issuance time. */
     public record ContractRegistryEvidence(
             String schemaVersion,
             String registryFingerprint,
@@ -155,7 +173,7 @@ public final class SignedProofBundleModel {
     ) {
     }
 
-    /** 外部 verifier 必须执行的确定性规则。 */
+    /** Deterministic verification rules signed into the archive. */
     public record VerificationPolicyEvidence(
             String schemaVersion,
             List<String> evidenceSchemas,
@@ -172,9 +190,12 @@ public final class SignedProofBundleModel {
             String zipPolicy,
             String textEntryPolicy
     ) {
+        public VerificationPolicyEvidence {
+            evidenceSchemas = immutableList(evidenceSchemas);
+        }
     }
 
-    /** 链回执来源、交易哈希和批次根的精确组合规则。 */
+    /** Exact chain receipt source, transaction, and root rules. */
     public record ChainReceiptPolicy(
             String rootPattern,
             String transactionHashPattern,
@@ -183,9 +204,12 @@ public final class SignedProofBundleModel {
             String writeTransactionRule,
             String queryTransactionRule
     ) {
+        public ChainReceiptPolicy {
+            querySources = immutableList(querySources);
+        }
     }
 
-    /** 签发时 contract registry 快照必须满足的结构与指纹规则。 */
+    /** Exact structure and fingerprint rules for the immutable registry snapshot. */
     public record ContractRegistryPolicy(
             String schemaVersion,
             String contractName,
@@ -203,5 +227,11 @@ public final class SignedProofBundleModel {
             String registryFingerprintRule,
             List<String> registryFingerprintFields
     ) {
+        public ContractRegistryPolicy {
+            allowedChainTypes = immutableList(allowedChainTypes);
+            fiscoChainTypes = immutableList(fiscoChainTypes);
+            issuableStatuses = immutableList(issuableStatuses);
+            registryFingerprintFields = immutableList(registryFingerprintFields);
+        }
     }
 }

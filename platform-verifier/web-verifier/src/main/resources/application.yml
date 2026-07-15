@@ -1,0 +1,56 @@
+server:
+  port: ${VERIFIER_PORT:8093}
+  shutdown: graceful
+  error:
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
+    whitelabel:
+      enabled: false
+
+spring:
+  application:
+    name: record-platform-public-verifier
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  servlet:
+    multipart:
+      enabled: true
+      file-size-threshold: 0B
+      max-file-size: ${VERIFIER_MULTIPART_MAX_FILE_SIZE:1GB}
+      max-request-size: ${VERIFIER_MULTIPART_MAX_REQUEST_SIZE:1100MB}
+      resolve-lazily: true
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          no-store: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
+verifier:
+  max-original-file-bytes: ${VERIFIER_MAX_ORIGINAL_FILE_BYTES:1073741824}
+  max-concurrent-verifications: ${VERIFIER_MAX_CONCURRENT:4}
+  acquire-timeout: ${VERIFIER_ACQUIRE_TIMEOUT:100ms}
+  rate-limit:
+    requests: ${VERIFIER_RATE_LIMIT_REQUESTS:20}
+    window: ${VERIFIER_RATE_LIMIT_WINDOW:1m}
+    max-clients: ${VERIFIER_RATE_LIMIT_MAX_CLIENTS:10000}
+  online:
+    enabled: ${VERIFIER_ONLINE_ENABLED:false}
+    issuer-base-uri: ${VERIFIER_ISSUER_BASE_URI:}
+    chain-url-template: ${VERIFIER_CHAIN_URL_TEMPLATE:}
+    allowed-hosts: ${VERIFIER_ALLOWED_HOSTS:}
+    allow-http: ${VERIFIER_ALLOW_HTTP:false}
+    allow-private-addresses: ${VERIFIER_ALLOW_PRIVATE_ADDRESSES:false}
+    connect-timeout: ${VERIFIER_CONNECT_TIMEOUT:3s}
+    request-timeout: ${VERIFIER_REQUEST_TIMEOUT:5s}

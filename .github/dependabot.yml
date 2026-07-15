@@ -14,6 +14,19 @@ updates:
           - minor
           - patch
 
+  # Maven - platform-verifier
+  - package-ecosystem: maven
+    directory: /platform-verifier
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
   # Maven - platform-backend
   - package-ecosystem: maven
     directory: /platform-backend

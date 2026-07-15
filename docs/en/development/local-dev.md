@@ -87,12 +87,15 @@ pnpm format      # Prettier formatting
 # 1. Shared interfaces (required by all other modules — build first)
 mvn -f platform-api/pom.xml clean install
 
-# 2. Backend services (order among these three is interchangeable)
+# 2. Shared proof/verifier SDK (required by backend-service)
+mvn -f platform-verifier/pom.xml -pl sdk -am clean install -DskipTests
+
+# 3. Backend services (order among these three is interchangeable)
 mvn -f platform-backend/pom.xml clean package -DskipTests
 mvn -f platform-fisco/pom.xml clean package -DskipTests
 mvn -f platform-storage/pom.xml clean package -DskipTests
 
-# 3. Frontend build
+# 4. Frontend build
 cd platform-frontend && pnpm build
 ```
 

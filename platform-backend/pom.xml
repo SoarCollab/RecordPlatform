@@ -41,7 +41,7 @@
             Testcontainers (docker-java) may require SystemProperties.getUserName(String) (>= 3.17.0).
          -->
         <commons-lang3.version>3.20.0</commons-lang3.version>
-        <netty.version>4.2.15.Final</netty.version>
+        <netty.version>4.2.16.Final</netty.version>
         <aws.sdk.version>2.44.4</aws.sdk.version>
         <!--
             Mockito inline mock maker relies on Byte Buddy instrumentation.
@@ -88,6 +88,11 @@
             <dependency>
                 <groupId>cn.flying</groupId>
                 <artifactId>backend-web</artifactId>
+                <version>0.0.2-SNAPSHOT</version>
+            </dependency>
+            <dependency>
+                <groupId>cn.flying</groupId>
+                <artifactId>platform-verifier-sdk</artifactId>
                 <version>0.0.2-SNAPSHOT</version>
             </dependency>
             <!-- AWS SDK v2 for S3-compatible storage -->

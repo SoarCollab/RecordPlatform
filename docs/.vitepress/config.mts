@@ -63,6 +63,10 @@ export default withMermaid(
                     text: "Frontend",
                     link: "/en/getting-started/frontend",
                   },
+                  {
+                    text: "Public Verifier",
+                    link: "/en/getting-started/public-verifier",
+                  },
                 ],
               },
             ],
@@ -194,6 +198,10 @@ export default withMermaid(
                   {
                     text: "前端开发",
                     link: "/zh/getting-started/frontend",
+                  },
+                  {
+                    text: "公开验证器",
+                    link: "/zh/getting-started/public-verifier",
                   },
                 ],
               },

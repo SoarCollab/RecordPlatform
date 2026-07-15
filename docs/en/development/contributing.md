@@ -5,7 +5,7 @@
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feat/your-feature`
 3. Follow the code style guidelines
-4. Ensure tests pass: `mvn -f platform-backend/pom.xml test`
+4. Install the shared verifier SDK, then ensure tests pass: `mvn -f platform-verifier/pom.xml -pl sdk -am clean install -DskipTests && mvn -f platform-backend/pom.xml test`
 5. Open a Pull Request against `main`
 
 ## Branch Naming

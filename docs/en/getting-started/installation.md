@@ -19,7 +19,15 @@ The `platform-api` module must be installed first as other modules depend on it:
 mvn -f platform-api/pom.xml clean install
 ```
 
-### 2. Build Backend Modules
+### 2. Install and Test the Public Verifier
+
+The backend consumes the verifier SDK's shared signed-proof contract, so install this reactor before an independent backend build:
+
+```bash
+mvn -f platform-verifier/pom.xml clean install
+```
+
+### 3. Build Backend Modules
 
 ```bash
 # Build backend (multi-module)
@@ -32,7 +40,7 @@ mvn -f platform-fisco/pom.xml clean package -DskipTests
 mvn -f platform-storage/pom.xml clean package -DskipTests
 ```
 
-### 3. Build Frontend
+### 4. Build Frontend
 
 ```bash
 cd platform-frontend
@@ -136,4 +144,3 @@ CREATE DATABASE RecordPlatform
 **Build failures**
 - Ensure `platform-api` is installed first
 - Check Maven and JDK versions
-

@@ -12,6 +12,7 @@ on:
       - 'tools/k6/README.md'
       - 'tools/docs/**'
       - 'platform-api/pom.xml'
+      - 'platform-verifier/**'
       - 'platform-backend/pom.xml'
       - 'platform-fisco/pom.xml'
       - 'platform-storage/pom.xml'
@@ -49,6 +50,9 @@ jobs:
 
       - name: Install platform-api
         run: mvn -f platform-api/pom.xml clean install -DskipTests -q
+
+      - name: Install verifier SDK
+        run: mvn -f platform-verifier/pom.xml -pl sdk -am clean install -DskipTests -q
 
       - name: Export OpenAPI
         run: >-

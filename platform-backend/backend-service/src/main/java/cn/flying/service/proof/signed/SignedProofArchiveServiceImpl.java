@@ -34,6 +34,9 @@ import cn.flying.service.manifest.ChunkManifestDraft;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.ChunkManifestView;
 import cn.flying.service.remote.FileRemoteClient;
+import cn.flying.verifier.contract.SignedProofBundleContract;
+import cn.flying.verifier.contract.SignedProofBundleModel;
+import cn.flying.verifier.crypto.ProofHashes;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -84,13 +87,12 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
 
     private static final String COMPLETED_STATUS = "COMPLETED";
     private static final String MANIFEST_EVIDENCE = "MANIFEST_HASH";
-    private static final String CHUNK_SCHEMA = "record-platform-proof-chunk-manifest.v2";
-    private static final String MERKLE_SCHEMA = "record-platform-proof-merkle.v2";
-    private static final String CHAIN_SCHEMA = "record-platform-proof-chain-receipt.v2";
-    private static final String POLICY_SCHEMA = "record-platform-proof-verification-policy.v2";
+    private static final String CHUNK_SCHEMA = SignedProofBundleContract.CHUNK_SCHEMA;
+    private static final String MERKLE_SCHEMA = SignedProofBundleContract.MERKLE_SCHEMA;
+    private static final String CHAIN_SCHEMA = SignedProofBundleContract.CHAIN_SCHEMA;
     private static final String JWS_SIGNATURE_ALGORITHM = "EdDSA";
     private static final String JCA_SIGNATURE_ALGORITHM = "Ed25519";
-    private static final int MAX_MANIFEST_CHUNKS = 128;
+    private static final int MAX_MANIFEST_CHUNKS = SignedProofBundleContract.MAX_CHUNKS;
     private static final int MAX_CONCURRENT_EXPORTS = 8;
     private static final int MAX_ISSUANCE_TRANSACTION_ATTEMPTS = 3;
     private static final long MAX_STORAGE_VALIDATION_NANOS = TimeUnit.SECONDS.toNanos(60);
@@ -106,10 +108,13 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
     private static final int MAX_MERKLE_PROOF_JSON_CHARS = 32 * 1024;
     private static final int MAX_PERSISTED_MANIFEST_CHARS = 1024 * 1024;
     private static final String INVALID_SNAPSHOT_REASON = "immutable_snapshot_validation_failed";
-    private static final Pattern SHA256_PATTERN = Pattern.compile("^sha256:[0-9a-f]{64}$");
+    private static final Pattern SHA256_PATTERN = ProofHashes.PREFIXED_SHA256;
     private static final Pattern PROOF_ID_PATTERN = Pattern.compile("^rp-proof-[0-9a-f]{64}$");
     private static final Pattern KEY_ID_PATTERN = Pattern.compile("^[A-Za-z0-9._-]{1,64}$");
     private static final Pattern EXTERNAL_ID_PATTERN = Pattern.compile("^[A-Za-z0-9_-]{1,192}$");
+    private static final Pattern BATCH_NO_PATTERN = Pattern.compile("^[A-Za-z0-9._:-]{1,128}$");
+    private static final Pattern TRANSACTION_HASH_PATTERN = Pattern.compile("^(?:0x)?[0-9A-Fa-f]{64}$");
+    private static final Set<String> FISCO_CHAIN_TYPES = Set.of("LOCAL_FISCO", "BSN_FISCO");
     private static final Set<String> PUBLIC_PROOF_STATUS = Set.of(
             STATUS_ACTIVE,
             STATUS_REVOKED,
@@ -120,22 +125,7 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
             STATUS_SUPERSEDED);
     private static final Set<String> PUBLIC_KEY_STATUS = Set.of("ACTIVE", "RETIRED");
 
-    private static final String README = """
-            # RecordPlatform Signed Proof Bundle v2
-
-            1. Verify `issuer-signature.jws` as compact JWS EdDSA and require its decoded payload to equal `manifest.json` byte-for-byte.
-            2. Verify every evidence entry listed by `manifest.json` using its SHA-256 and exact byte length.
-            3. Hash the original file with SHA-256 and compare it with `file.hash` and `chunk-manifest.json.contentHash`.
-            4. Re-split the original bytes by ordered chunk sizes and compare each `plainHash`; inspect `cipherHash` as stored-object evidence.
-            5. Recompute the Merkle leaf from `merkle-proof.json.evidenceHash`, apply the ordered proof path, and compare the result with the batch chain root.
-            6. Enforce the signed chain receipt matrix: `batchChainRoot` is exactly 64 hexadecimal characters without `0x`; `CHAIN_WRITE` requires a 64-hex transaction hash with optional `0x`; `CHAIN_QUERY_BEFORE_WRITE` and `CHAIN_QUERY_AFTER_WRITE` require an absent transaction hash.
-            7. Validate the immutable `record-platform-contract-registry-entry.v1` Sharing entry, its canonical registry fingerprint, semantic version, chain/group identity, 20-byte address, `ABI-CANONICAL-JSON-SHA256-V1` fingerprints, paired deployment transaction/block, effective time, ACTIVE/DEPRECATED status, and `REDEPLOY_ADDRESS` strategy.
-            8. The signed `issuedStatus` is only ACTIVE or SUPERSEDED. Query `statusLocation` for the current ACTIVE, REVOKED, SUPERSEDED, or INVALID state. INVALID is terminal and is used only when a previously persisted canonical manifest, JWS, signing-key identity, or immutable issuance snapshot deterministically drifts; its reason is `immutable_snapshot_validation_failed`. Storage, Merkle, registry, or receipt dependency/read failures reject only the current export and do not change lifecycle state.
-
-            Evidence schemas are `record-platform-proof-chunk-manifest.v2`, `record-platform-proof-merkle.v2`, `record-platform-proof-chain-receipt.v2`, and `record-platform-proof-verification-policy.v2`. `verification-policy.json` is signed evidence and contains the machine-readable exact rules.
-
-            The ZIP contains exactly eight STORED entries in fixed order: `manifest.json`, `file.hash`, `chunk-manifest.json`, `merkle-proof.json`, `blockchain-receipt.json`, `issuer-signature.jws`, `verification-policy.json`, and `README.verify.md`. `manifest.json` hashes the six evidence entries; it does not hash itself or `issuer-signature.jws`. Both `file.hash` and `issuer-signature.jws` contain exactly one trailing LF byte.
-            """;
+    private static final String README = SignedProofBundleContract.README;
 
     private final FileMapper fileMapper;
     private final AttestationLeafMapper leafMapper;
@@ -312,9 +302,9 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
 
         AttestationBatch batch = loadCompletedBatch(file.getTenantId(), leaf.getBatchId());
         ChunkManifestView manifest = loadAndValidateManifest(file, leaf);
-        validateStorageEvidence(file, manifest);
         List<MerkleProofNode> proofPath = validateMerkleEvidence(leaf, batch);
         ContractRegistryEntryResponse registry = requireRegistry(batch);
+        validateStorageEvidence(file, manifest);
         String externalFileId = issuedManifest == null
                 ? IdUtils.toExternalId(file.getId())
                 : issuedManifest.fileId();
@@ -574,8 +564,12 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件版本无效");
         }
         validatePersistedContentHash(file);
-        if (!StringUtils.hasText(file.getFileHash())) {
+        if (!hasBoundedText(file.getFileHash(), 256)) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件缺少 chainRecordId");
+        }
+        if (file.getTransactionHash() != null
+                && !TRANSACTION_HASH_PATTERN.matcher(file.getTransactionHash()).matches()) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件链上交易哈希格式不合法");
         }
         return file;
     }
@@ -625,6 +619,8 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
      */
     private void validateLeafBinding(File file, AttestationLeaf leaf) {
         if (leaf == null
+                || leaf.getId() == null
+                || leaf.getBatchId() == null
                 || !Objects.equals(file.getTenantId(), leaf.getTenantId())
                 || !Objects.equals(file.getId(), leaf.getFileId())
                 || !Objects.equals(file.getVersion(), leaf.getFileVersion())
@@ -633,7 +629,7 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
                 || !Objects.equals(file.getFileHash(), leaf.getChainRecordId())) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "证明叶子与文件版本或 chainRecordId 不一致");
         }
-        requireSha256(leaf.getEvidenceHash(), "证明叶子 manifestHash 不合法");
+        requireCanonicalSha256(leaf.getEvidenceHash(), "证明叶子 manifestHash 不合法");
     }
 
     /**
@@ -645,8 +641,9 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
                 || Integer.valueOf(1).equals(batch.getDeleted())
                 || !Objects.equals(tenantId, batch.getTenantId())
                 || !COMPLETED_STATUS.equals(batch.getStatus())
-                || !StringUtils.hasText(batch.getMerkleRoot())
-                || !StringUtils.hasText(batch.getChainFileHash())) {
+                || !BATCH_NO_PATTERN.matcher(Objects.toString(batch.getBatchNo(), "")).matches()
+                || !ProofHashes.RAW_SHA256.matcher(Objects.toString(batch.getMerkleRoot(), "")).matches()
+                || !ProofHashes.RAW_SHA256.matcher(Objects.toString(batch.getChainFileHash(), "")).matches()) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "批量存证未完成或链根回执缺失");
         }
         if (!AttestationConfirmationReceiptValidator.isValid(
@@ -655,7 +652,12 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
                 batch.getChainFileHash())) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "批量存证确认来源或交易回执不可信");
         }
-        if (!batch.getMerkleRoot().equalsIgnoreCase(batch.getChainFileHash())) {
+        boolean writeReceipt = AttestationConfirmationReceiptValidator.SOURCE_CHAIN_WRITE.equals(
+                batch.getConfirmationSource());
+        if ((writeReceipt && !TRANSACTION_HASH_PATTERN.matcher(
+                Objects.toString(batch.getChainTransactionHash(), "")).matches())
+                || (!writeReceipt && batch.getChainTransactionHash() != null)
+                || !batch.getMerkleRoot().equals(batch.getChainFileHash())) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "批量 Merkle 根与链上回执不一致");
         }
         return batch;
@@ -668,9 +670,11 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
         ChunkManifestView manifest = chunkManifestService.findActiveManifest(null, file.getId())
                 .orElseThrow(() -> new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件缺少 active chunk manifest"));
         if (!Objects.equals(leaf.getManifestId(), manifest.manifestId())
+                || !SignedProofBundleContract.SOURCE_CHUNK_MANIFEST_SCHEMA.equals(manifest.schemaId())
                 || !Objects.equals(file.getVersion(), manifest.fileVersion())
                 || !Objects.equals(file.getFileHash(), manifest.fileHash())
-                || !leaf.getEvidenceHash().equalsIgnoreCase(manifest.manifestHash())
+                || !SHA256_PATTERN.matcher(Objects.toString(manifest.manifestHash(), "")).matches()
+                || !leaf.getEvidenceHash().equals(manifest.manifestHash())
                 || manifest.chunks() == null
                 || manifest.chunks().isEmpty()
                 || manifest.chunks().size() > MAX_MANIFEST_CHUNKS
@@ -691,24 +695,41 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
                 manifest.storageBackend(),
                 manifest.chunks());
         String calculated = chunkManifestService.calculateManifestHash(draft);
-        if (!manifest.manifestHash().equalsIgnoreCase(calculated)) {
+        if (!manifest.manifestHash().equals(calculated)) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "chunk manifest canonical hash 不一致");
         }
         return manifest;
     }
 
     /**
-     * 在签名和远程 HEAD 前校验持久化分片的非空、顺序、正长度与聚合大小语义。
+     * 在签名和远程 HEAD 前校验持久化分片是否完全满足公共验证器合同。
      *
      * @param manifest 待签发的持久化 manifest
      */
     private void validateManifestChunkStructure(ChunkManifestView manifest) {
+        if (!ProofHashes.HASH_ALGORITHM.equals(manifest.hashAlgorithm())
+                || manifest.chunkSize() <= 0
+                || manifest.totalSize() <= 0
+                || !hasBoundedText(manifest.encryptionAlgorithm(), 128)
+                || !hasBoundedText(manifest.storageBackend(), 128)) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "chunk manifest 算法或顶层字段不合法");
+        }
         long aggregateSize = 0L;
         for (int position = 0; position < manifest.chunks().size(); position++) {
             ChunkManifestChunk chunk = manifest.chunks().get(position);
-            if (chunk == null || chunk.index() != position || chunk.size() <= 0) {
+            boolean finalChunk = position == manifest.chunks().size() - 1;
+            if (chunk == null
+                    || chunk.index() != position
+                    || chunk.size() <= 0
+                    || chunk.size() > manifest.chunkSize()
+                    || (!finalChunk && chunk.size() != manifest.chunkSize())
+                    || !hasBoundedText(chunk.storagePath(), 2048)
+                    || chunk.storagePath().chars().anyMatch(Character::isISOControl)
+                    || !ProofHashes.HASH_ALGORITHM.equals(chunk.checksumAlgorithm())) {
                 throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "chunk manifest 分片结构不合法");
             }
+            requireCanonicalSha256(chunk.plainHash(), "分片 plainHash 不合法");
+            requireCanonicalSha256(chunk.cipherHash(), "分片 cipherHash 不合法");
             try {
                 aggregateSize = Math.addExact(aggregateSize, chunk.size());
             } catch (ArithmeticException e) {
@@ -727,8 +748,6 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
         long startedAt = nanoTimeSource.getAsLong();
         long deadline = startedAt + storageValidationBudgetNanos;
         for (ChunkManifestChunk chunk : manifest.chunks()) {
-            requireSha256(chunk.plainHash(), "分片 plainHash 不合法");
-            requireSha256(chunk.cipherHash(), "分片 cipherHash 不合法");
             Result<StorageObjectHeadVO> result = headObjectWithinStorageBudget(chunk, deadline);
             requireStorageValidationBudget(deadline, chunk.index());
             StorageObjectHeadVO head = result != null && result.isSuccess() ? result.getData() : null;
@@ -839,12 +858,14 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
         if (proofPath == null) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "Merkle proof path 不可解析");
         }
-        proofPath = List.copyOf(proofPath);
         if (proofPath.size() > MAX_MERKLE_PROOF_NODES) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "Merkle proof path 节点数超过限制");
         }
+        validateMerklePathContract(leaf.getLeafIndex(), proofPath);
+        proofPath = List.copyOf(proofPath);
         String calculatedLeaf = merkleTreeService.calculateLeafHash(leaf.getEvidenceHash());
-        if (!equalsHash(calculatedLeaf, leaf.getLeafHash())
+        if (!ProofHashes.RAW_SHA256.matcher(Objects.toString(leaf.getLeafHash(), "")).matches()
+                || !calculatedLeaf.equals(leaf.getLeafHash())
                 || !merkleTreeService.verifyProof(calculatedLeaf, proofPath, batch.getMerkleRoot())) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "Merkle leaf 或 proof path 校验失败");
         }
@@ -862,7 +883,8 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "合约注册表快照校验失败");
         }
         if (registry == null
-                || !ContractRegistryEntryValidator.isValidIssuableSharingRegistry(registry)) {
+                || !ContractRegistryEntryValidator.isValidIssuableSharingRegistry(registry)
+                || !isPublicVerifierCompatibleRegistry(registry)) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "合约注册表快照不可用于签发");
         }
         return registry;
@@ -950,60 +972,7 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
                         registryEvidence);
 
         SignedProofBundleModel.VerificationPolicyEvidence policy =
-                new SignedProofBundleModel.VerificationPolicyEvidence(
-                        POLICY_SCHEMA,
-                        List.of(CHUNK_SCHEMA, MERKLE_SCHEMA, CHAIN_SCHEMA, POLICY_SCHEMA),
-                        "SHA-256",
-                        "file.hash = 'sha256:' + lowercase(hex(sha256(originalFileBytes)))",
-                        "manifestHash = 'sha256:' + lowercase(hex(sha256(canonical source manifest JSON)))",
-                        "lowercase(hex(sha256(utf8('leaf\\n' + evidenceHash.trim()))))",
-                        "lowercase(hex(sha256(utf8('node\\n' + leftHash.trim() + '\\n' + rightHash.trim()))))",
-                        "apply proofPath from leaf to root; LEFT prepends sibling and RIGHT appends sibling",
-                        new SignedProofBundleModel.ChainReceiptPolicy(
-                                "^[0-9A-Fa-f]{64}$",
-                                "^(?:0x)?[0-9A-Fa-f]{64}$",
-                                AttestationConfirmationReceiptValidator.SOURCE_CHAIN_WRITE,
-                                List.of(
-                                        AttestationConfirmationReceiptValidator.SOURCE_CHAIN_QUERY_BEFORE_WRITE,
-                                        AttestationConfirmationReceiptValidator.SOURCE_CHAIN_QUERY_AFTER_WRITE),
-                                "write source requires a matching transaction hash",
-                                "query sources require transaction hash to be absent"),
-                        new SignedProofBundleModel.ContractRegistryPolicy(
-                                "record-platform-contract-registry-entry.v1",
-                                "Sharing",
-                                "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$",
-                                List.of("LOCAL_FISCO", "BSN_FISCO", "BSN_BESU"),
-                                List.of("LOCAL_FISCO", "BSN_FISCO"),
-                                "groupId is required for FISCO chain types and absent for BSN_BESU",
-                                "^0x[0-9a-f]{40}$",
-                                "ABI-CANONICAL-JSON-SHA256-V1",
-                                "^sha256:[0-9a-f]{64}$",
-                                "deploymentTransactionHash and non-negative deploymentBlockNumber are both present or both absent",
-                                List.of("ACTIVE", "DEPRECATED"),
-                                "RFC3339 offset date-time not later than verification time",
-                                "REDEPLOY_ADDRESS",
-                                "'sha256:' + lowercase(hex(sha256(utf8(join ordered field=value lines with LF))))",
-                                List.of(
-                                        "schemaVersion",
-                                        "contractName",
-                                        "semanticVersion",
-                                        "chainType",
-                                        "chainId",
-                                        "groupId",
-                                        "contractAddress",
-                                        "abiFingerprintAlgorithm",
-                                        "abiSha256",
-                                        "artifactBytecodeSha256",
-                                        "onChainCodeSha256",
-                                        "deploymentTransactionHash",
-                                        "deploymentBlockNumber",
-                                        "status",
-                                        "effectiveAt",
-                                        "upgradeStrategy")),
-                        "JWS compact serialization with EdDSA; decoded payload must equal manifest.json bytes",
-                        "issuedStatus is ACTIVE or SUPERSEDED; current status comes from statusLocation; INVALID is terminal only for deterministic persisted immutable snapshot drift with reason immutable_snapshot_validation_failed; dependency/read validation failures do not change lifecycle state",
-                        "exactly eight STORED entries, fixed order, fixed timestamp, no nested or additional entries",
-                        "UTF-8 unless otherwise stated; file.hash and ASCII issuer-signature.jws each end with exactly one LF byte");
+                SignedProofBundleContract.expectedVerificationPolicy();
         return new SignedProofBundleModel.EvidencePayloads(
                 normalizeSha256(file.getContentHash()),
                 chunkEvidence,
@@ -1450,6 +1419,61 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
         if (!SHA256_PATTERN.matcher(normalized).matches()) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, message);
         }
+    }
+
+    /**
+     * 校验公共证明中的 SHA-256 文本已经是精确的小写 canonical 形式，避免规范化后破坏 Merkle 绑定。
+     */
+    private void requireCanonicalSha256(String value, String message) {
+        if (!SHA256_PATTERN.matcher(Objects.toString(value, "")).matches()) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, message);
+        }
+    }
+
+    /**
+     * 判断公共证明字段是否为非空且不超过合同长度上限的文本。
+     */
+    private boolean hasBoundedText(String value, int maxLength) {
+        return StringUtils.hasText(value)
+                && value.length() <= maxLength
+                && value.chars().noneMatch(Character::isISOControl);
+    }
+
+    /**
+     * 校验 Merkle 路径节点的规范哈希和与零基 leafIndex 一致的左右方向。
+     */
+    private void validateMerklePathContract(Integer leafIndex, List<MerkleProofNode> proofPath) {
+        if (leafIndex == null || leafIndex < 0) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "Merkle leafIndex 不合法");
+        }
+        int currentIndex = leafIndex;
+        for (MerkleProofNode node : proofPath) {
+            String expectedPosition = (currentIndex & 1) == 0
+                    ? MerkleProofNode.RIGHT
+                    : MerkleProofNode.LEFT;
+            if (node == null
+                    || !expectedPosition.equals(node.position())
+                    || !ProofHashes.RAW_SHA256.matcher(Objects.toString(node.hash(), "")).matches()) {
+                throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "Merkle proof path 合同不合法");
+            }
+            currentIndex >>>= 1;
+        }
+        if (currentIndex != 0) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "Merkle proof path 与 leafIndex 不一致");
+        }
+    }
+
+    /**
+     * 校验后端历史注册表字段是否满足公共验证器的精确长度和可选 groupId 语义。
+     */
+    private boolean isPublicVerifierCompatibleRegistry(ContractRegistryEntryResponse registry) {
+        boolean fisco = FISCO_CHAIN_TYPES.contains(registry.chainType());
+        return hasBoundedText(registry.semanticVersion(), 64)
+                && hasBoundedText(registry.chainId(), 128)
+                && (fisco
+                ? hasBoundedText(registry.groupId(), 128)
+                : registry.groupId() == null)
+                && hasBoundedText(registry.effectiveAt(), 128);
     }
 
     /**

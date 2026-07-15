@@ -87,12 +87,15 @@ pnpm format      # Prettier 格式化
 # 1. 共享接口（其他所有模块的依赖，必须最先执行）
 mvn -f platform-api/pom.xml clean install
 
-# 2. 后端服务（三者顺序无关）
+# 2. 共享证明/verifier SDK（backend-service 依赖）
+mvn -f platform-verifier/pom.xml -pl sdk -am clean install -DskipTests
+
+# 3. 后端服务（三者顺序无关）
 mvn -f platform-backend/pom.xml clean package -DskipTests
 mvn -f platform-fisco/pom.xml clean package -DskipTests
 mvn -f platform-storage/pom.xml clean package -DskipTests
 
-# 3. 前端构建
+# 4. 前端构建
 cd platform-frontend && pnpm build
 ```
 

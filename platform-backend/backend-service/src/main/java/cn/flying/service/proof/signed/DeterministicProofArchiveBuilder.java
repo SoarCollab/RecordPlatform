@@ -2,6 +2,8 @@ package cn.flying.service.proof.signed;
 
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.verifier.contract.SignedProofBundleContract;
+import cn.flying.verifier.contract.SignedProofBundleModel;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -17,12 +19,12 @@ import java.util.Locale;
 @RequiredArgsConstructor
 public class DeterministicProofArchiveBuilder {
 
-    public static final String MANIFEST_SCHEMA = "record-platform-proof-manifest.v2";
+    public static final String MANIFEST_SCHEMA = SignedProofBundleContract.MANIFEST_SCHEMA;
 
-    private static final String JSON_MEDIA_TYPE = "application/json";
-    private static final String TEXT_MEDIA_TYPE = "text/plain; charset=utf-8";
-    private static final String MARKDOWN_MEDIA_TYPE = "text/markdown; charset=utf-8";
-    private static final String JWS_MEDIA_TYPE = "application/jose";
+    private static final String JSON_MEDIA_TYPE = SignedProofBundleContract.JSON_MEDIA_TYPE;
+    private static final String TEXT_MEDIA_TYPE = SignedProofBundleContract.TEXT_MEDIA_TYPE;
+    private static final String MARKDOWN_MEDIA_TYPE = SignedProofBundleContract.MARKDOWN_MEDIA_TYPE;
+    private static final String JWS_MEDIA_TYPE = SignedProofBundleContract.JWS_MEDIA_TYPE;
 
     private final ProofCanonicalizer canonicalizer;
     private final ProofSigningProvider signingProvider;

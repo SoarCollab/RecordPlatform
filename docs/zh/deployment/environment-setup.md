@@ -216,16 +216,19 @@ Artifact 升级属于需审查的代码变更：两份 Solidity 源码、签入 
 # 1. 安装共享接口（首次或依赖变更时）
 mvn -f platform-api/pom.xml clean install
 
-# 2. 构建后端
+# 2. 安装 backend-service 依赖的共享证明/verifier SDK
+mvn -f platform-verifier/pom.xml -pl sdk -am clean install -DskipTests
+
+# 3. 构建后端
 mvn -f platform-backend/pom.xml clean package -DskipTests
 
-# 3. 构建 FISCO 服务
+# 4. 构建 FISCO 服务
 mvn -f platform-fisco/pom.xml clean package -DskipTests
 
-# 4. 构建存储服务
+# 5. 构建存储服务
 mvn -f platform-storage/pom.xml clean package -DskipTests
 
-# 5. 前端
+# 6. 前端
 cd platform-frontend && pnpm install && pnpm build
 ```
 

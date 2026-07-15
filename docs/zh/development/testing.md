@@ -15,6 +15,9 @@
 # 首次或依赖变更时安装共享接口
 mvn -f platform-api/pom.xml clean install -DskipTests
 
+# 安装 backend-service 依赖的共享 verifier SDK 合同
+mvn -f platform-verifier/pom.xml -pl sdk -am clean install -DskipTests
+
 # 单元测试（无需 Docker）
 mvn -f platform-backend/pom.xml test -pl backend-common,backend-service,backend-web -am
 
@@ -29,6 +32,13 @@ mvn -f platform-fisco/pom.xml test
 
 # 存储服务测试
 mvn -f platform-storage/pom.xml test
+```
+
+### 公开验证器
+
+```bash
+# SDK、CLI、Web、安全用例、fixture 和 SDK 覆盖率门禁
+mvn -f platform-verifier/pom.xml clean verify
 ```
 
 ### 前端

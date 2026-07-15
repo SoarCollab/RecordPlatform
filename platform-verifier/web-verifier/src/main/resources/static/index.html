@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>RecordPlatform 公开验证器</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+</head>
+<body>
+<main class="shell">
+    <header class="hero">
+        <p class="eyebrow">RECORDPLATFORM · PUBLIC VERIFIER</p>
+        <h1>独立验证文件证明</h1>
+        <p class="lede">核验原文件、签名证明、当前状态与链上根。离线或依赖不可用时只会给出“无法确定”，不会误报验证成功。</p>
+    </header>
+
+    <section class="panel" aria-labelledby="verify-heading">
+        <div class="section-heading">
+            <div>
+                <p class="step">01 · 输入</p>
+                <h2 id="verify-heading">选择原文件与证明包</h2>
+            </div>
+            <span class="privacy-pill">不写入业务存储</span>
+        </div>
+
+        <form id="verify-form">
+            <label class="file-field">
+                <span>原文件 <strong>必选</strong></span>
+                <input id="original" name="original" type="file" required>
+                <small>服务器以流式方式计算哈希，默认最大 1 GiB。</small>
+            </label>
+
+            <label class="file-field">
+                <span>签名证明 ZIP <strong>必选</strong></span>
+                <input id="proof" name="proof" type="file" accept=".zip,application/zip" required>
+                <small>仅接受固定八条目、无路径、STORED 格式的 v2 证明包。</small>
+            </label>
+
+            <label class="file-field optional">
+                <span>可信公钥 JSON <em>可选</em></span>
+                <input id="trusted-key" name="trustedKey" type="file" accept=".json,application/json">
+                <small>用于显式本地信任；不提供时仅使用运维配置的可信签发方。</small>
+            </label>
+
+            <label class="consent">
+                <input id="consent" type="checkbox" required>
+                <span>我理解所选文件会上传到此验证器实例；若实例启用在线验证，还会访问预配置且受白名单限制的状态与链网关。</span>
+            </label>
+
+            <button id="submit" type="submit">开始验证</button>
+        </form>
+        <p id="request-error" class="request-error" role="alert" hidden></p>
+    </section>
+
+    <section id="result" class="panel result" aria-live="polite" hidden>
+        <div class="section-heading">
+            <div>
+                <p class="step">02 · 结果</p>
+                <h2>验证报告</h2>
+            </div>
+            <span id="outcome" class="outcome">—</span>
+        </div>
+
+        <p id="outcome-help" class="outcome-help"></p>
+        <dl id="summary" class="summary-grid"></dl>
+
+        <div class="checks-heading">
+            <h3>逐项检查</h3>
+            <span id="check-count"></span>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>状态</th>
+                    <th>检查项</th>
+                    <th>代码</th>
+                    <th>说明</th>
+                </tr>
+                </thead>
+                <tbody id="checks"></tbody>
+            </table>
+        </div>
+        <p id="report-meta" class="report-meta"></p>
+    </section>
+
+    <aside class="trust-note">
+        <p class="step">判断边界</p>
+        <p><strong>VALID</strong> 同时要求本地内容、Merkle 路径、签发者签名、当前状态和实时链上根全部成立。<strong>INDETERMINATE</strong> 表示证据依赖不可用或未配置，并不等同于有效。</p>
+    </aside>
+</main>
+</body>
+</html>

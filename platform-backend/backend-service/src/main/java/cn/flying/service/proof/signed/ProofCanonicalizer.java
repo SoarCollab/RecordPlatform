@@ -2,18 +2,10 @@ package cn.flying.service.proof.signed;
 
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
+import cn.flying.verifier.contract.SignedProofBundleModel;
+import cn.flying.verifier.crypto.CanonicalJson;
+import cn.flying.verifier.crypto.ProofHashes;
 import org.springframework.stereotype.Component;
-
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 
 /**
  * Signed proof 专用 canonical JSON 与 SHA-256 实现。
@@ -21,15 +13,10 @@ import java.util.HexFormat;
 @Component
 public class ProofCanonicalizer {
 
-    public static final String HASH_ALGORITHM = "SHA-256";
-    public static final String HASH_PREFIX = "sha256:";
+    public static final String HASH_ALGORITHM = ProofHashes.HASH_ALGORITHM;
+    public static final String HASH_PREFIX = ProofHashes.HASH_PREFIX;
 
-    private final ObjectMapper mapper = new ObjectMapper()
-            .setSerializationInclusion(JsonInclude.Include.NON_NULL)
-            .configure(DeserializationFeature.FAIL_ON_TRAILING_TOKENS, true)
-            .configure(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY, true)
-            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
-            .configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+    private final CanonicalJson canonicalJson = new CanonicalJson();
 
     /**
      * 把受信任模型序列化为属性和 map key 稳定排序的 UTF-8 JSON。
@@ -39,8 +26,8 @@ public class ProofCanonicalizer {
      */
     public byte[] canonicalBytes(Object value) {
         try {
-            return mapper.writeValueAsBytes(value);
-        } catch (JsonProcessingException e) {
+            return canonicalJson.canonicalBytes(value);
+        } catch (IllegalArgumentException e) {
             throw new GeneralException(ResultEnum.JSON_PARSE_ERROR, "证明包 canonical JSON 生成失败");
         }
     }
@@ -52,9 +39,13 @@ public class ProofCanonicalizer {
      * @return 结构化 manifest
      */
     public SignedProofBundleModel.Manifest parseManifest(String value) {
+        if (value == null || value.isBlank()) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "已签发证明 manifest 不可解析");
+        }
         try {
-            return mapper.readValue(value, SignedProofBundleModel.Manifest.class);
-        } catch (JsonProcessingException | IllegalArgumentException e) {
+            return canonicalJson.read(value.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    SignedProofBundleModel.Manifest.class);
+        } catch (IllegalArgumentException e) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "已签发证明 manifest 不可解析");
         }
     }
@@ -66,12 +57,7 @@ public class ProofCanonicalizer {
      * @return 规范 SHA-256
      */
     public String sha256(byte[] value) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance(HASH_ALGORITHM);
-            return HASH_PREFIX + HexFormat.of().formatHex(digest.digest(value));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 摘要算法不可用", e);
-        }
+        return ProofHashes.sha256(value);
     }
 
     /**
@@ -81,6 +67,6 @@ public class ProofCanonicalizer {
      * @return 规范 SHA-256
      */
     public String sha256(String value) {
-        return sha256(value.getBytes(StandardCharsets.UTF_8));
+        return ProofHashes.sha256(value);
     }
 }

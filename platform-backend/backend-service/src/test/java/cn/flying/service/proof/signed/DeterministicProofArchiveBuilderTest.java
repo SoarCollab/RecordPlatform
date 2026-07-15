@@ -2,6 +2,7 @@ package cn.flying.service.proof.signed;
 
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.verifier.contract.SignedProofBundleModel;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,10 +14,14 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
-import java.security.KeyPairGenerator;
+import java.security.KeyFactory;
+import java.security.MessageDigest;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.X509EncodedKeySpec;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.TimeZone;
 import java.util.zip.ZipEntry;
@@ -34,6 +39,15 @@ class DeterministicProofArchiveBuilderTest {
     private static final String MANIFEST_HASH = "sha256:" + "2".repeat(64);
     private static final String PLAIN_HASH = "sha256:" + "3".repeat(64);
     private static final String CIPHER_HASH = "sha256:" + "4".repeat(64);
+    private static final String BASELINE_SOURCE_SCHEMA = "record-platform-chunk-manifest.v1";
+    private static final String BASELINE_MANIFEST_HASH =
+            "sha256:07b3bbb08704fb125f3865e381578d8eb10846f9c387cdc419a6bb18393f42e7";
+    private static final String BASELINE_ARCHIVE_SHA256 =
+            "5ee5cf098c27176aa77db07e001d75c34921931b40201ca1f54d8403a45a30d0";
+    private static final String FIXTURE_PRIVATE_KEY =
+            "MC4CAQAwBQYDK2VwBCIEIM9Y9vKvau3QSKkiO6r/QAxztslFWL8357aPnWdPcgh6";
+    private static final String FIXTURE_PUBLIC_KEY =
+            "MCowBQYDK2VwAyEA8wy43NzHvQljIDAPCeh24QcbLmygEvh3wrNBf9fkWNI=";
 
     private ProofCanonicalizer canonicalizer;
     private ProofSigningProvider signingProvider;
@@ -64,6 +78,8 @@ class DeterministicProofArchiveBuilderTest {
         assertThat(second.manifestHash()).isEqualTo(first.manifestHash());
         assertThat(second.compactJws()).isEqualTo(first.compactJws());
         assertThat(second.toByteArray()).isEqualTo(first.toByteArray());
+        assertThat(first.manifestHash()).isEqualTo(BASELINE_MANIFEST_HASH);
+        assertThat(rawSha256(first.toByteArray())).isEqualTo(BASELINE_ARCHIVE_SHA256);
         assertThat(first.entries()).extracting(ProofArchive.ArchiveEntry::name)
                 .containsExactlyElementsOf(ProofArchive.ENTRY_ORDER);
 
@@ -313,6 +329,14 @@ class DeterministicProofArchiveBuilderTest {
                 .isInstanceOf(GeneralException.class)
                 .satisfies(error -> assertThat(((GeneralException) error).getResultEnum())
                         .isEqualTo(ResultEnum.FILE_RECORD_ERROR));
+        assertThatThrownBy(() -> canonicalizer.parseManifest(null))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(error -> assertThat(((GeneralException) error).getResultEnum())
+                        .isEqualTo(ResultEnum.FILE_RECORD_ERROR));
+        assertThatThrownBy(() -> canonicalizer.parseManifest(" "))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(error -> assertThat(((GeneralException) error).getResultEnum())
+                        .isEqualTo(ResultEnum.FILE_RECORD_ERROR));
     }
 
     /**
@@ -342,7 +366,7 @@ class DeterministicProofArchiveBuilderTest {
                         contentHash,
                         "chain-record-1",
                         MANIFEST_HASH,
-                        "record-platform-chunk-manifest.v1",
+                        BASELINE_SOURCE_SCHEMA,
                         "SHA-256",
                         1024,
                         1,
@@ -455,10 +479,21 @@ class DeterministicProofArchiveBuilderTest {
     }
 
     /**
-     * 使用 JCA 生成测试专用 Ed25519 密钥对。
+     * 加载固定测试密钥，确保可与 P1-2 基线逐字节比较签名证明包。
      */
     private KeyPair generateKeyPair() throws Exception {
-        return KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        Base64.Decoder decoder = Base64.getDecoder();
+        KeyFactory factory = KeyFactory.getInstance("Ed25519");
+        return new KeyPair(
+                factory.generatePublic(new X509EncodedKeySpec(decoder.decode(FIXTURE_PUBLIC_KEY))),
+                factory.generatePrivate(new PKCS8EncodedKeySpec(decoder.decode(FIXTURE_PRIVATE_KEY))));
+    }
+
+    /**
+     * 计算不带算法前缀的小写 SHA-256，固定 ZIP 字节兼容性基线。
+     */
+    private String rawSha256(byte[] value) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
     }
 
     /**
