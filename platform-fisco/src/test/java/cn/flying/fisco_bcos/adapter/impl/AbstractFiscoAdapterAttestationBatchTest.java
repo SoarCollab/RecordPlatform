@@ -12,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigInteger;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -102,6 +103,28 @@ class AbstractFiscoAdapterAttestationBatchTest {
         assertThatThrownBy(() -> adapter.getAttestationBatch(7L, 900L))
                 .isInstanceOf(ChainException.class)
                 .hasMessageContaining("Invalid return value");
+    }
+
+    /**
+     * 验证 exists 只接受 ABI 解码后的布尔值，未知类型不能静默降级为链上不存在。
+     */
+    @Test
+    void getAttestationBatch_shouldRejectNullOrNonBooleanExistsFlag() throws Exception {
+        when(sharingService.getAttestationBatch(any())).thenReturn(callResponse);
+
+        for (Object invalidExists : Arrays.asList(null, "false", 0, "garbage")) {
+            when(callResponse.getReturnObject()).thenReturn(Arrays.asList(
+                    invalidExists,
+                    "",
+                    "",
+                    new byte[32],
+                    BigInteger.ZERO,
+                    BigInteger.ZERO));
+
+            assertThatThrownBy(() -> adapter.getAttestationBatch(7L, 900L))
+                    .isInstanceOf(ChainException.class)
+                    .hasMessageContaining("Invalid exists flag");
+        }
     }
 
     /**

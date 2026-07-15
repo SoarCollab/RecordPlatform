@@ -243,7 +243,10 @@ public class BlockChainServiceImpl implements BlockChainService {
 
             ChainAttestationBatch batch = chainAdapter.getAttestationBatch(
                     request.tenantId(), request.batchId());
-            if (batch == null || !Boolean.TRUE.equals(batch.getExists())) {
+            if (batch == null || batch.getExists() == null) {
+                return Result.error(ResultEnum.CONTRACT_ERROR, null);
+            }
+            if (Boolean.FALSE.equals(batch.getExists())) {
                 return Result.success(GetAttestationBatchResponse.notFound(
                         request.tenantId(), request.batchId()));
             }
