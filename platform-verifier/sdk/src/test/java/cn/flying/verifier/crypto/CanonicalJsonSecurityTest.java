@@ -170,11 +170,13 @@ class CanonicalJsonSecurityTest {
         assertThat(SignedProofBundleContract.mediaTypeForEvidenceEntry("unknown")).isNull();
     }
 
-    /** Keeps shared contract lists immutable without converting malformed null elements into parser crashes. */
+    /** Keeps shared contract lists as one immutable construction-time snapshot. */
     @Test
     void shouldDefensivelyCopyContractLists() {
         java.util.ArrayList<SignedProofBundleModel.ProofNode> source = new java.util.ArrayList<>();
-        source.add(null);
+        SignedProofBundleModel.ProofNode node =
+                new SignedProofBundleModel.ProofNode("RIGHT", "a".repeat(64));
+        source.add(node);
         SignedProofBundleModel.MerkleProofEvidence evidence =
                 new SignedProofBundleModel.MerkleProofEvidence(
                         "schema", "type", "hash", "algorithm", "root", "leaf", 0, source);
@@ -182,8 +184,8 @@ class CanonicalJsonSecurityTest {
 
         List<SignedProofBundleModel.ProofNode> firstRead = evidence.proofPath();
         List<SignedProofBundleModel.ProofNode> secondRead = evidence.proofPath();
-        assertThat(firstRead).containsExactly((SignedProofBundleModel.ProofNode) null);
-        assertThat(secondRead).isNotSameAs(firstRead);
+        assertThat(firstRead).containsExactly(node);
+        assertThat(secondRead).isSameAs(firstRead);
         assertThatThrownBy(firstRead::clear)
                 .isInstanceOf(UnsupportedOperationException.class);
     }

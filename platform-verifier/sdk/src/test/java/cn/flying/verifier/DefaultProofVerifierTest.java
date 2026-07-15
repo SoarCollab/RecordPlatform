@@ -399,6 +399,23 @@ class DefaultProofVerifierTest {
                 .doesNotContain(VerificationCode.INTERNAL_ERROR);
     }
 
+    /** Rejects a null Merkle sibling at the strict JSON boundary without leaking an internal error. */
+    @Test
+    void shouldRejectNullMerkleProofNodeSafely() throws Exception {
+        ObjectNode merkle = objectEntry(SignedProofBundleContract.MERKLE_PROOF_ENTRY);
+        ((ArrayNode) merkle.get("proofPath")).addNull();
+        Path malformed = writeMutatedJsonEntry(
+                "null-merkle-node.zip", SignedProofBundleContract.MERKLE_PROOF_ENTRY, merkle);
+
+        VerificationReport report = verifier.verify(
+                fixture.original(), malformed, VerifierTestFixture.context(fixture));
+
+        assertThat(report.outcome()).isEqualTo(VerificationOutcome.ERROR);
+        assertThat(report.checks()).extracting(check -> check.code())
+                .contains(VerificationCode.JSON_INVALID)
+                .doesNotContain(VerificationCode.INTERNAL_ERROR);
+    }
+
     /** Bounds and removes control characters from attacker-controlled report summary fields. */
     @Test
     void shouldSanitizeUntrustedSummaryText() throws Exception {
