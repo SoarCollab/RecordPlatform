@@ -43,7 +43,7 @@
 |------|--------|----------|
 | REST 控制器 | 30 | `platform-backend/backend-web/src/main/java` |
 | 后端服务类 | 134 | `platform-backend/backend-service/src/main/java` |
-| 后端测试文件 | 151 | `platform-backend/**/src/test/java` |
+| 后端测试文件 | 152 | `platform-backend/**/src/test/java` |
 | 数据库迁移 | 32（V1.0.0 ~ V1.14.0） | `platform-backend/backend-web/src/main/resources/db/migration` |
 | CI 流水线（核心） | 5 | `.github/workflows/test.yml`, `perf-smoke.yml`, `docs.yml`, `security-poc.yml`, `docs-consistency.yml` |
 
