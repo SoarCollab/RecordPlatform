@@ -35,7 +35,15 @@ public class PublicProofController {
      */
     @GetMapping("/proofs/{proofId}/status")
     @Operation(summary = "查询公开证明状态")
-    @RateLimit(limit = 120, period = 60, type = RateLimit.LimitType.IP, key = "public:proof-verification")
+    @RateLimit(
+            limit = 120,
+            period = 60,
+            adminLimit = 120,
+            monitorLimit = 120,
+            type = RateLimit.LimitType.IP,
+            key = "public:proof-verification",
+            tenantScoped = false,
+            clientIpMode = RateLimit.ClientIpMode.TRUSTED_PEER)
     @OperationLog(module = "公开证明验证", operationType = "查询", description = "查询公开证明状态")
     public ResponseEntity<Result<ProofStatusVO>> getProofStatus(
             @Parameter(description = "proof manifest 中的公开证明标识")
@@ -50,7 +58,15 @@ public class PublicProofController {
      */
     @GetMapping("/proof-keys/{keyId}/versions/{keyVersion}")
     @Operation(summary = "查询证明历史验证公钥")
-    @RateLimit(limit = 120, period = 60, type = RateLimit.LimitType.IP, key = "public:proof-verification")
+    @RateLimit(
+            limit = 120,
+            period = 60,
+            adminLimit = 120,
+            monitorLimit = 120,
+            type = RateLimit.LimitType.IP,
+            key = "public:proof-verification",
+            tenantScoped = false,
+            clientIpMode = RateLimit.ClientIpMode.TRUSTED_PEER)
     @OperationLog(module = "公开证明验证", operationType = "查询", description = "查询证明历史验证公钥")
     public ResponseEntity<Result<ProofSigningKeyVO>> getProofSigningKey(
             @Parameter(description = "签名 key id") @PathVariable String keyId,

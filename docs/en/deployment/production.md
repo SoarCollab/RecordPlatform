@@ -141,6 +141,28 @@ storage:
 
 > For complete configuration options, see [Nacos Config Template](/nacos-config-template.yaml)
 
+## Trusted Client IP for Public Proof Rate Limiting
+
+The two public proof status/key endpoints share one fixed 120-request/60-second Redis bucket per canonical trusted client IP. The bucket is global: it does not include a tenant, endpoint method, user, or JWT role.
+
+### Direct deployment
+
+Keep `RATE_LIMIT_TRUSTED_PROXY_CIDRS=` empty. The backend uses the direct socket peer and ignores every forwarding header. This is also the safe setting whenever the production proxy topology or header-cleaning behavior has not been verified. If an unconfigured reverse proxy is the immediate peer, all clients safely share that proxy's 120/60 bucket and may be rejected earlier; configure a verified allowlist or enforce an equivalent edge limit before production traffic.
+
+### Controlled reverse proxy
+
+Before setting the variable, record every platform-controlled immediate/multi-hop proxy IP or CIDR and verify that each proxy overwrites caller-supplied forwarding headers or appends only socket-derived hops. For example:
+
+```dotenv
+RATE_LIMIT_TRUSTED_PROXY_CIDRS=10.20.0.0/16,2001:db8:20::/48
+```
+
+Only a matching immediate peer can activate header parsing. The backend accepts one bounded `X-Forwarded-For` chain, walks it right-to-left, skips configured trusted hops, and selects the first untrusted numeric address. It uses a single `X-Real-IP` only when XFF is absent; invalid, duplicate, overlong, or over-hop headers fall back to the immediate peer. `Forwarded`, hostnames, ports, and DNS resolution are not supported.
+
+`server.forward-headers-strategy` is fixed to `none` so Spring/Tomcat cannot rewrite `request.getRemoteAddr()` before this resolver. Startup also rejects `server.tomcat.remoteip.remote-ip-header` and `server.tomcat.remoteip.protocol-header`, because either can install a `RemoteIpValve` independently. Do not configure a `ForwardedHeaderFilter`, external `RemoteIpValve`, ingress sidecar, or servlet-container equivalent that rewrites the remote address. Because framework forwarding inference is disabled, proxy TLS termination and absolute URL/scheme handling must be configured and verified independently; do not re-enable forwarded-header processing to solve those concerns.
+
+Before production rollout, verify both public endpoints alternately: requests 1–120 from one client must succeed, request 121 must be rejected, a second client must have an independent bucket, and the Redis TTL must be within 60 seconds. The new key namespace is `rate:limit:public:proof-verification:v2:ip:<canonical-ip>`. No old counters are copied; deploy and rollback can each reset one 60-second window. Roll out at low traffic with edge limiting retained. Rollback restores the old forwarding-header bypass, so enable an edge direct-source limit of 120/60 or stricter before reverting.
+
 ## SSL/TLS Configuration
 
 ### Generate Self-Signed Certificate (Testing)

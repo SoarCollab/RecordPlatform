@@ -1,13 +1,11 @@
 package cn.flying.aspect;
 
 import cn.flying.common.annotation.RateLimit;
-import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.constant.UserRole;
 import cn.flying.common.exception.GeneralException;
-import cn.flying.common.util.Const;
 import cn.flying.common.util.SecurityUtils;
-import jakarta.annotation.Resource;
+import cn.flying.security.TrustedClientIpResolver;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -22,7 +20,6 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.lang.reflect.Method;
 import java.util.Collections;
-import java.util.concurrent.TimeUnit;
 
 /**
  * 分级限流切面
@@ -33,12 +30,12 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class RateLimitAspect {
 
-    @Resource
-    private StringRedisTemplate stringRedisTemplate;
+    private final StringRedisTemplate stringRedisTemplate;
+    private final TrustedClientIpResolver trustedClientIpResolver;
 
     private static final String RATE_LIMIT_KEY_PREFIX = "rate:limit:";
 
-    // Lua 脚本实现滑动窗口限流
+    // Lua 脚本实现原子固定窗口限流
     private static final String RATE_LIMIT_LUA_SCRIPT = """
             local key = KEYS[1]
             local limit = tonumber(ARGV[1])
@@ -57,7 +54,11 @@ public class RateLimitAspect {
 
     private final DefaultRedisScript<Long> rateLimitScript;
 
-    public RateLimitAspect() {
+    public RateLimitAspect(
+            StringRedisTemplate stringRedisTemplate,
+            TrustedClientIpResolver trustedClientIpResolver) {
+        this.stringRedisTemplate = stringRedisTemplate;
+        this.trustedClientIpResolver = trustedClientIpResolver;
         this.rateLimitScript = new DefaultRedisScript<>();
         this.rateLimitScript.setScriptText(RATE_LIMIT_LUA_SCRIPT);
         this.rateLimitScript.setResultType(Long.class);
@@ -79,9 +80,9 @@ public class RateLimitAspect {
             return joinPoint.proceed();
         }
 
-        // 获取当前用户角色
+        boolean trustedPeerBucket = isTrustedPeerBucket(rateLimit);
         UserRole role = SecurityUtils.getLoginUserRole();
-        int limit = calculateLimit(rateLimit, role);
+        int limit = trustedPeerBucket ? rateLimit.limit() : calculateLimit(rateLimit, role);
         int period = rateLimit.period();
 
         // 构建限流 key
@@ -148,6 +149,12 @@ public class RateLimitAspect {
                     .append(":");
         }
 
+        if (isTrustedPeerBucket(rateLimit)) {
+            return keyBuilder.append("v2:ip:")
+                    .append(trustedClientIpResolver.resolve(getCurrentRequest()))
+                    .toString();
+        }
+
         // 添加租户隔离
         Long tenantId = SecurityUtils.getTenantId();
         keyBuilder.append("t").append(tenantId).append(":");
@@ -174,12 +181,10 @@ public class RateLimitAspect {
      * 获取客户端 IP
      */
     private String getClientIp() {
-        ServletRequestAttributes attributes =
-                (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
-        if (attributes == null) {
+        HttpServletRequest request = getCurrentRequest();
+        if (request == null) {
             return "unknown";
         }
-        HttpServletRequest request = attributes.getRequest();
 
         String ip = request.getHeader("X-Forwarded-For");
         if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
@@ -193,5 +198,31 @@ public class RateLimitAspect {
             ip = ip.split(",")[0].trim();
         }
         return ip;
+    }
+
+    /**
+     * 校验并识别无租户、可信客户端 IP 的公共共享桶模式。
+     */
+    private boolean isTrustedPeerBucket(RateLimit rateLimit) {
+        boolean usesTrustedPeer = rateLimit.clientIpMode() == RateLimit.ClientIpMode.TRUSTED_PEER;
+        boolean disablesTenantScope = !rateLimit.tenantScoped();
+        if (!usesTrustedPeer && !disablesTenantScope) {
+            return false;
+        }
+        if (!usesTrustedPeer || !disablesTenantScope || rateLimit.type() != RateLimit.LimitType.IP) {
+            throw new IllegalStateException(
+                    "TRUSTED_PEER rate limits require tenantScoped=false and type=IP");
+        }
+        return true;
+    }
+
+    /**
+     * 获取当前 servlet 请求；非请求线程返回 null 并进入受限的未知对端桶。
+     */
+    private HttpServletRequest getCurrentRequest() {
+        if (RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes) {
+            return attributes.getRequest();
+        }
+        return null;
     }
 }

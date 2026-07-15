@@ -62,6 +62,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
+        <!-- 纯数字 IPv4/IPv6 解析，不执行 DNS 查询 -->
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-common</artifactId>
+        </dependency>
         <!--    actuator组件    -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

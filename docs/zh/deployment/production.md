@@ -141,6 +141,28 @@ storage:
 
 > 完整配置项请参阅 [Nacos 配置模板](/nacos-config-template.yaml)
 
+## 公共 proof 限流的可信客户端 IP
+
+公共 proof 状态/历史公钥两个端点按规范化可信客户端 IP 共享一个固定 120 次/60 秒 Redis 桶。该桶是全局桶，不包含租户、端点方法、用户或 JWT 角色。
+
+### 直连部署
+
+保持 `RATE_LIMIT_TRUSTED_PROXY_CIDRS=` 为空。后端只使用直接 socket peer，并忽略全部转发头。只要生产代理拓扑或 header 清洗行为尚未核验，也必须使用这个安全设置。如果立即 peer 是未配置的反向代理，所有客户端会安全地共享该代理的 120/60 桶并可能更早被拒绝；生产流量接入前应配置已核验 allowlist，或在边缘实施等效限流。
+
+### 受控反向代理
+
+设置变量前，先记录平台控制的每个立即/多跳代理 IP 或 CIDR，并确认每个代理都会覆盖调用者提供的转发头，或只追加从 socket 得到的 hop。例如：
+
+```dotenv
+RATE_LIMIT_TRUSTED_PROXY_CIDRS=10.20.0.0/16,2001:db8:20::/48
+```
+
+只有立即 peer 命中 allowlist 时才启用 header 解析。后端只接受一条有界 `X-Forwarded-For` 链，从右向左跳过已配置的可信 hop，并选择第一个不可信数字地址。仅在 XFF 缺失时使用单值 `X-Real-IP`；非法、重复、超长或超 hop header 都回退立即 peer。不支持 `Forwarded`、hostname、端口或 DNS 查询。
+
+`server.forward-headers-strategy` 固定为 `none`，避免 Spring/Tomcat 在 resolver 前改写 `request.getRemoteAddr()`。应用还会拒绝 `server.tomcat.remoteip.remote-ip-header` 和 `server.tomcat.remoteip.protocol-header`，因为任一属性都可能独立安装 `RemoteIpValve`。不得配置会改写 remote address 的 `ForwardedHeaderFilter`、外部 `RemoteIpValve`、ingress sidecar 或 servlet-container 等价能力。由于框架不会推导转发后的 scheme/host，代理 TLS 终止以及绝对 URL/scheme 必须独立配置和验证；不能为解决这些问题重新启用转发头处理。
+
+生产发布前，交替请求两个公开端点并验证：同一客户端第 1–120 次成功、第 121 次拒绝，第二个客户端使用独立桶，Redis TTL 不超过 60 秒。新 key namespace 为 `rate:limit:public:proof-verification:v2:ip:<canonical-ip>`。旧计数不复制，发布和回滚都会产生一次最长 60 秒的窗口重置；应低峰发布并保留边缘限流。回滚会恢复旧转发头绕过，因此回滚前必须在边缘启用不弱于 120/60 的 direct-source 限流。
+
 ## SSL/TLS 配置
 
 ### 生成自签名证书（测试用）

@@ -109,4 +109,17 @@ class SecurityConfigurationTest {
         assertTrue(applicationYaml.contains("enable: ${KNIFE4J_BASIC_ENABLE:true}"));
         assertFalse(applicationYaml.contains("production: false"));
     }
+
+    /**
+     * 验证容器不预处理转发头，并由公共限流解析器独占可信代理配置。
+     */
+    @Test
+    void shouldDisableContainerForwardedHeaderRewriting() throws Exception {
+        String applicationYaml = Files.readString(Path.of("src/main/resources/application.yml"));
+
+        assertTrue(applicationYaml.contains("forward-headers-strategy: none"));
+        assertTrue(applicationYaml.contains("trusted-proxies: ${RATE_LIMIT_TRUSTED_PROXY_CIDRS:}"));
+        assertFalse(applicationYaml.contains("forward-headers-strategy: native"));
+        assertFalse(applicationYaml.contains("forward-headers-strategy: framework"));
+    }
 }

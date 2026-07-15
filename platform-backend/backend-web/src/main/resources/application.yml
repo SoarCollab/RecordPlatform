@@ -1,3 +1,7 @@
+server:
+  # 保留原始 socket peer；可信代理头只允许由 TrustedClientIpResolver 解析。
+  forward-headers-strategy: none
+
 spring:
   application:
     name: backend-web
@@ -54,6 +58,9 @@ spring:
   web:
     verify:
       mail-limit: 60
+    rate-limit:
+      client-ip:
+        trusted-proxies: ${RATE_LIMIT_TRUSTED_PROXY_CIDRS:}
     registration:
       tenant-id: ${PUBLIC_REGISTRATION_TENANT_ID:0}
     flow:

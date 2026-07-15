@@ -240,6 +240,14 @@ class SignedProofControllerTest {
         assertThat(keyRateLimit.limit()).isEqualTo(statusRateLimit.limit());
         assertThat(statusRateLimit.period()).isEqualTo(60);
         assertThat(keyRateLimit.period()).isEqualTo(statusRateLimit.period());
+        assertThat(statusRateLimit.adminLimit()).isEqualTo(120);
+        assertThat(keyRateLimit.adminLimit()).isEqualTo(statusRateLimit.adminLimit());
+        assertThat(statusRateLimit.monitorLimit()).isEqualTo(120);
+        assertThat(keyRateLimit.monitorLimit()).isEqualTo(statusRateLimit.monitorLimit());
+        assertThat(statusRateLimit.tenantScoped()).isFalse();
+        assertThat(keyRateLimit.tenantScoped()).isEqualTo(statusRateLimit.tenantScoped());
+        assertThat(statusRateLimit.clientIpMode()).isEqualTo(RateLimit.ClientIpMode.TRUSTED_PEER);
+        assertThat(keyRateLimit.clientIpMode()).isEqualTo(statusRateLimit.clientIpMode());
         assertThat(statusMethod.getAnnotation(OperationLog.class)).isNotNull();
         assertThat(keyMethod.getAnnotation(OperationLog.class)).isNotNull();
     }
