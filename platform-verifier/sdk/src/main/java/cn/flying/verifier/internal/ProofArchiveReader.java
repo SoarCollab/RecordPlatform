@@ -127,7 +127,12 @@ public final class ProofArchiveReader {
             VerificationLimits limits
     ) throws IOException {
         long size = channel.size();
-        if (size <= 0 || size > limits.maxArchiveBytes()) {
+        if (size <= 0) {
+            throw new ProofFormatException(
+                    VerificationCode.ARCHIVE_MALFORMED,
+                    "Proof archive must not be empty");
+        }
+        if (size > limits.maxArchiveBytes()) {
             throw new ProofFormatException(
                     VerificationCode.ARCHIVE_TOO_LARGE,
                     "Proof archive byte size exceeds the configured limit");

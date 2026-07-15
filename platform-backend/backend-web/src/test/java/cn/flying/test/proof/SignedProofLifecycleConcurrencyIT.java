@@ -501,7 +501,9 @@ class SignedProofLifecycleConcurrencyIT extends BaseIntegrationTest {
                 .setFileParam(fileParam)
                 .setFileHash(chainRecordId)
                 .setContentHash(contentHash)
-                .setTransactionHash("0x-file-" + discriminator)
+                .setTransactionHash("0x" + sha256(
+                        ("file-" + discriminator).getBytes(StandardCharsets.UTF_8))
+                        .substring("sha256:".length()))
                 .setStatus(FileUploadStatus.SUCCESS.getCode())
                 .setVersion(1)
                 .setIsLatest(1)

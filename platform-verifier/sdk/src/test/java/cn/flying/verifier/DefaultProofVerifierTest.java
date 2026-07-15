@@ -27,6 +27,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -191,29 +192,59 @@ class DefaultProofVerifierTest {
                 .contains(VerificationCode.SIGNATURE_INVALID);
     }
 
-    /** Rejects malformed compact JWS and never queries status or chain without a trusted signature. */
+    /** Rejects malformed compact JWS before querying even an otherwise resolvable signing key. */
     @Test
     void shouldRejectMalformedJwsBeforeStatusAndChainResolution() throws Exception {
-        LinkedHashMap<String, byte[]> entries = fixture.mutableEntries();
-        entries.put(SignedProofBundleContract.SIGNATURE_ENTRY,
-                "not-a-compact-jws\n".getBytes(StandardCharsets.US_ASCII));
-        Path malformed = directory.resolve("malformed-jws.zip");
-        VerifierTestFixture.writeStoredArchive(malformed, entries);
-        AtomicInteger keyRequests = new AtomicInteger();
-        AtomicInteger statusRequests = new AtomicInteger();
-        AtomicInteger chainRequests = new AtomicInteger();
+        assertMalformedJwsRejectedBeforeKeyResolution(
+                "malformed-jws-resolved-key.zip",
+                Resolution.resolved(fixture.key()));
+    }
 
-        VerificationReport report = verifier.verify(
-                fixture.original(),
-                malformed,
-                countingContext(VerificationLimits.defaults(), keyRequests, statusRequests, chainRequests));
+    /** Rejects malformed compact JWS before a definitive unknown-key lookup can change the outcome. */
+    @Test
+    void shouldRejectMalformedJwsBeforeUnknownKeyResolution() throws Exception {
+        assertMalformedJwsRejectedBeforeKeyResolution(
+                "malformed-jws-unknown-key.zip",
+                Resolution.notFound("unknown key"));
+    }
 
-        assertThat(report.outcome()).isEqualTo(VerificationOutcome.INVALID);
-        assertThat(report.checks()).extracting(check -> check.code())
-                .contains(VerificationCode.SIGNATURE_INVALID);
-        assertThat(keyRequests).hasValue(1);
-        assertThat(statusRequests).hasValue(0);
-        assertThat(chainRequests).hasValue(0);
+    /** Rejects malformed compact JWS before a failing key dependency can make verification indeterminate. */
+    @Test
+    void shouldRejectMalformedJwsBeforeFailedKeyResolution() throws Exception {
+        assertMalformedJwsRejectedBeforeKeyResolution(
+                "malformed-jws-key-error.zip",
+                Resolution.error("key service unavailable"));
+    }
+
+    /** Rejects a canonical protected-header identity conflict before querying an unknown key. */
+    @Test
+    void shouldRejectProtectedHeaderIdentityMismatchBeforeKeyResolution() throws Exception {
+        byte[] signatureEntry = fixture.entries().get(SignedProofBundleContract.SIGNATURE_ENTRY);
+        String compact = new String(signatureEntry, StandardCharsets.US_ASCII).trim();
+        String[] parts = compact.split("\\.", -1);
+        ObjectNode header = (ObjectNode) json.mapperCopy().readTree(
+                Base64.getUrlDecoder().decode(parts[0]));
+        header.put("kid", "untrusted-key-id");
+        parts[0] = Base64.getUrlEncoder().withoutPadding().encodeToString(json.canonicalBytes(header));
+
+        assertSignatureEntryRejectedBeforeKeyResolution(
+                "conflicting-jws-header.zip",
+                (String.join(".", parts) + "\n").getBytes(StandardCharsets.US_ASCII),
+                Resolution.notFound("unknown key"));
+    }
+
+    /** Rejects a canonical JWS payload that differs from manifest bytes before any key lookup. */
+    @Test
+    void shouldRejectJwsPayloadMismatchBeforeKeyResolution() throws Exception {
+        byte[] signatureEntry = fixture.entries().get(SignedProofBundleContract.SIGNATURE_ENTRY);
+        String[] parts = new String(signatureEntry, StandardCharsets.US_ASCII).trim().split("\\.", -1);
+        parts[1] = Base64.getUrlEncoder().withoutPadding().encodeToString(
+                "different-manifest".getBytes(StandardCharsets.UTF_8));
+
+        assertSignatureEntryRejectedBeforeKeyResolution(
+                "conflicting-jws-payload.zip",
+                (String.join(".", parts) + "\n").getBytes(StandardCharsets.US_ASCII),
+                Resolution.error("key service unavailable"));
     }
 
     /** Detects a canonical manifest identity change through the detached trusted signature. */
@@ -1098,6 +1129,56 @@ class DefaultProofVerifierTest {
                     return Resolution.resolved(fixture.chain());
                 },
                 Clock.fixed(VerifierTestFixture.NOW, ZoneOffset.UTC));
+    }
+
+    /** Requires malformed compact JWS bytes to fail locally without invoking any trust resolver. */
+    private void assertMalformedJwsRejectedBeforeKeyResolution(
+            String fileName,
+            Resolution<PublicSigningKey> keyResolution
+    ) throws Exception {
+        assertSignatureEntryRejectedBeforeKeyResolution(
+                fileName,
+                "not-a-compact-jws\n".getBytes(StandardCharsets.US_ASCII),
+                keyResolution);
+    }
+
+    /** Requires one locally invalid signature entry to fail before any trust resolver is invoked. */
+    private void assertSignatureEntryRejectedBeforeKeyResolution(
+            String fileName,
+            byte[] signatureEntry,
+            Resolution<PublicSigningKey> keyResolution
+    ) throws Exception {
+        LinkedHashMap<String, byte[]> entries = fixture.mutableEntries();
+        entries.put(SignedProofBundleContract.SIGNATURE_ENTRY, signatureEntry);
+        Path malformed = directory.resolve(fileName);
+        VerifierTestFixture.writeStoredArchive(malformed, entries);
+        AtomicInteger keyRequests = new AtomicInteger();
+        AtomicInteger statusRequests = new AtomicInteger();
+        AtomicInteger chainRequests = new AtomicInteger();
+        VerificationContext context = new VerificationContext(
+                VerificationLimits.defaults(),
+                (keyId, keyVersion) -> {
+                    keyRequests.incrementAndGet();
+                    return keyResolution;
+                },
+                proofId -> {
+                    statusRequests.incrementAndGet();
+                    return Resolution.resolved(fixture.status());
+                },
+                query -> {
+                    chainRequests.incrementAndGet();
+                    return Resolution.resolved(fixture.chain());
+                },
+                Clock.fixed(VerifierTestFixture.NOW, ZoneOffset.UTC));
+
+        VerificationReport report = verifier.verify(fixture.original(), malformed, context);
+
+        assertThat(report.outcome()).isEqualTo(VerificationOutcome.INVALID);
+        assertThat(report.checks()).extracting(check -> check.code())
+                .contains(VerificationCode.SIGNATURE_INVALID);
+        assertThat(keyRequests).hasValue(0);
+        assertThat(statusRequests).hasValue(0);
+        assertThat(chainRequests).hasValue(0);
     }
 
     /** Requires a focused malformed proof to reduce to INVALID with the expected layer code. */

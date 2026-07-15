@@ -127,9 +127,11 @@ class VerifierCliTest {
     @Test
     void shouldRenderHelp() {
         Invocation invocation = invoke("--help");
+        Invocation shortHelp = invoke("-h");
 
         assertThat(invocation.exitCode()).isEqualTo(VerifierCli.EXIT_VALID);
         assertThat(invocation.stdout()).contains("Usage:", "Offline or unavailable");
+        assertThat(shortHelp.exitCode()).isEqualTo(VerifierCli.EXIT_VALID);
     }
 
     /** Returns usage exit 64 for unknown flags and online settings without explicit opt-in. */
@@ -178,6 +180,133 @@ class VerifierCliTest {
         assertThat(invalidUri.stderr())
                 .contains("--issuer-base-url contains an invalid URI")
                 .doesNotContain("private-value");
+    }
+
+    /** Rejects missing, duplicate, malformed, and non-positive option values without invoking verification. */
+    @Test
+    void shouldRejectMalformedOptionValues() {
+        Invocation nullArguments = invoke((String[]) null);
+        Invocation wrongCommand = invoke("inspect");
+        Invocation missingValue = invoke("verify", "--file");
+        Invocation optionAsValue = invoke("verify", "--file", "--proof", fixture.proof().toString());
+        Invocation missingProof = invoke("verify", "--file", fixture.original().toString());
+        Invocation blankFile = invoke(
+                "verify", "--file", " ", "--proof", fixture.proof().toString());
+        Invocation invalidFormat = invoke(
+                "verify", "--file", fixture.original().toString(),
+                "--proof", fixture.proof().toString(), "--format", "yaml");
+        Invocation duplicateFile = invoke(
+                "verify", "--file", fixture.original().toString(),
+                "--file", fixture.original().toString(), "--proof", fixture.proof().toString());
+        Invocation duplicateFlag = invoke(
+                "verify", "--file", fixture.original().toString(),
+                "--proof", fixture.proof().toString(), "--online", "--online");
+        Invocation zeroLimit = invoke(
+                "verify", "--file", fixture.original().toString(),
+                "--proof", fixture.proof().toString(), "--max-file-bytes", "0");
+        Invocation malformedLimit = invoke(
+                "verify", "--file", fixture.original().toString(),
+                "--proof", fixture.proof().toString(), "--max-file-bytes", "not-a-number");
+        Invocation invalidPath = invoke(
+                "verify", "--file", "invalid\0path", "--proof", fixture.proof().toString());
+
+        assertThat(nullArguments.exitCode()).isEqualTo(VerifierCli.EXIT_USAGE);
+        assertThat(wrongCommand.exitCode()).isEqualTo(VerifierCli.EXIT_USAGE);
+        assertThat(missingValue.stderr()).contains("--file requires a value");
+        assertThat(optionAsValue.stderr()).contains("--file requires a value");
+        assertThat(missingProof.stderr()).contains("--proof is required");
+        assertThat(blankFile.stderr()).contains("--file is required");
+        assertThat(invalidFormat.stderr()).contains("--format must be json or text");
+        assertThat(duplicateFile.stderr()).contains("--file may be supplied only once");
+        assertThat(duplicateFlag.stderr()).contains("--online may be supplied only once");
+        assertThat(zeroLimit.stderr()).contains("--max-file-bytes must be a positive decimal integer");
+        assertThat(malformedLimit.stderr()).contains("--max-file-bytes must be a positive decimal integer");
+        assertThat(invalidPath.stderr())
+                .contains("--file contains an invalid path")
+                .doesNotContain("invalid\0path");
+    }
+
+    /** Requires every online prerequisite across issuer, template, host, and opt-in flag combinations. */
+    @Test
+    void shouldRejectIncompleteOnlineConfigurations() {
+        Invocation templateWithoutOnline = invoke(
+                "verify", "--file", fixture.original().toString(),
+                "--proof", fixture.proof().toString(),
+                "--chain-url-template", "https://chain.example/{batchNo}");
+        Invocation hostWithoutOnline = invoke(
+                "verify", "--file", fixture.original().toString(),
+                "--proof", fixture.proof().toString(), "--allow-host", "issuer.example");
+        Invocation httpWithoutOnline = invoke(
+                "verify", "--file", fixture.original().toString(),
+                "--proof", fixture.proof().toString(), "--allow-http");
+        Invocation privateWithoutOnline = invoke(
+                "verify", "--file", fixture.original().toString(),
+                "--proof", fixture.proof().toString(), "--allow-private-addresses");
+        Invocation missingTemplate = invoke(
+                "verify", "--file", fixture.original().toString(),
+                "--proof", fixture.proof().toString(), "--online",
+                "--issuer-base-url", "https://issuer.example", "--allow-host", "issuer.example");
+        Invocation blankTemplate = invoke(
+                "verify", "--file", fixture.original().toString(),
+                "--proof", fixture.proof().toString(), "--online",
+                "--issuer-base-url", "https://issuer.example",
+                "--chain-url-template", " ", "--allow-host", "issuer.example");
+        Invocation missingHost = invoke(
+                "verify", "--file", fixture.original().toString(),
+                "--proof", fixture.proof().toString(), "--online",
+                "--issuer-base-url", "https://issuer.example",
+                "--chain-url-template", "https://chain.example/{batchNo}");
+
+        assertThat(templateWithoutOnline.stderr()).contains("require --online");
+        assertThat(hostWithoutOnline.stderr()).contains("require --online");
+        assertThat(httpWithoutOnline.stderr()).contains("require --online");
+        assertThat(privateWithoutOnline.stderr()).contains("require --online");
+        assertThat(missingTemplate.stderr()).contains("--online requires");
+        assertThat(blankTemplate.stderr()).contains("--online requires");
+        assertThat(missingHost.stderr()).contains("--online requires");
+    }
+
+    /** Exercises disabled and enabled online key resolver selection without a local trust anchor. */
+    @Test
+    void shouldSelectKeyResolverFromExplicitTrustMode() throws Exception {
+        Invocation offline = invoke(
+                "verify", "--file", fixture.original().toString(),
+                "--proof", fixture.proof().toString());
+
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", this::respondWithTrustEvidence);
+        server.start();
+        String origin = "http://127.0.0.1:" + server.getAddress().getPort();
+        try {
+            Invocation online = invoke(
+                    "verify", "--file", fixture.original().toString(),
+                    "--proof", fixture.proof().toString(), "--online",
+                    "--issuer-base-url", origin,
+                    "--chain-url-template", origin + "/chain/{batchNo}",
+                    "--allow-host", "127.0.0.1", "--allow-http", "--allow-private-addresses");
+
+            assertThat(offline.exitCode()).isEqualTo(VerifierCli.EXIT_INDETERMINATE);
+            assertThat(offline.stdout()).contains("SIGNING_KEY_UNAVAILABLE");
+            assertThat(online.exitCode()).isEqualTo(VerifierCli.EXIT_INDETERMINATE);
+            assertThat(online.stdout()).contains("SIGNING_KEY_UNKNOWN");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /** Converts unexpected output initialization failures into the stable generic verifier error. */
+    @Test
+    void shouldHandleUnexpectedRuntimeInitializationFailure() {
+        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+
+        int exit = VerifierCli.run(
+                new String[]{"--help"},
+                null,
+                new PrintStream(stderr, true, StandardCharsets.UTF_8));
+
+        assertThat(exit).isEqualTo(VerifierCli.EXIT_ERROR);
+        assertThat(stderr.toString(StandardCharsets.UTF_8))
+                .contains("unable to initialize the requested verification context");
     }
 
     /** Serves issuer status and direct chain evidence for the valid online CLI vector. */

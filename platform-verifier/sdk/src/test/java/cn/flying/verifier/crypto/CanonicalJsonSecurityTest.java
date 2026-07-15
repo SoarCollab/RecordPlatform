@@ -123,16 +123,45 @@ class CanonicalJsonSecurityTest {
                 leaf, List.of(new SignedProofBundleModel.ProofNode("RIGHT", sibling))))
                 .isEqualTo(expected);
         assertThat(MerkleProofs.calculateRootFromProof(
+                leaf, List.of(new SignedProofBundleModel.ProofNode("LEFT", sibling))))
+                .isEqualTo(MerkleProofs.calculateParentHash(sibling, leaf));
+        assertThat(MerkleProofs.calculateRootFromProof(
                 leaf, List.of(new SignedProofBundleModel.ProofNode("RIGHT", "  " + sibling.toUpperCase() + "  "))))
                 .isNull();
         assertThat(MerkleProofs.calculateRootFromProof(
                 leaf, List.of(new SignedProofBundleModel.ProofNode("MIDDLE", sibling))))
                 .isNull();
         assertThat(MerkleProofs.calculateRootFromProof("bad", List.of())).isNull();
+        assertThat(MerkleProofs.calculateRootFromProof(null, List.of())).isNull();
+        assertThat(MerkleProofs.calculateRootFromProof(leaf, null)).isNull();
+        assertThat(MerkleProofs.calculateRootFromProof(
+                leaf, java.util.Collections.singletonList(null))).isNull();
+        assertThat(MerkleProofs.calculateRootFromProof(
+                leaf, List.of(new SignedProofBundleModel.ProofNode(null, sibling)))).isNull();
+        assertThat(MerkleProofs.calculateRootFromProof(
+                leaf, List.of(new SignedProofBundleModel.ProofNode("RIGHT", null)))).isNull();
+        assertThat(MerkleProofs.calculateRootFromProof(
+                leaf, List.of(new SignedProofBundleModel.ProofNode("R".repeat(17), sibling)))).isNull();
         assertThat(MerkleProofs.calculateRootFromProof(
                 leaf, List.of(new SignedProofBundleModel.ProofNode("RIGHT", "a".repeat(129)))))
                 .isNull();
+        assertThatThrownBy(() -> MerkleProofs.calculateLeafHash(null))
+                .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> MerkleProofs.calculateLeafHash(" "))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> MerkleProofs.calculateLeafHash("a".repeat(257)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> MerkleProofs.calculateParentHash(null, sibling))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> MerkleProofs.calculateParentHash(leaf, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> MerkleProofs.calculateParentHash(" ", sibling))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> MerkleProofs.calculateParentHash(leaf, " "))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> MerkleProofs.calculateParentHash("a".repeat(129), sibling))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> MerkleProofs.calculateParentHash(leaf, "a".repeat(129)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

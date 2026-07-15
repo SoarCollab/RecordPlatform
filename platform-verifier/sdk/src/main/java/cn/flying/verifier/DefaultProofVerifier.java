@@ -584,6 +584,15 @@ public final class DefaultProofVerifier implements ProofVerifier {
                     "Manifest signing metadata is missing");
             return false;
         }
+        ParsedCompactJws compactJws = parseCompactJws(
+                archive.required(SignedProofBundleContract.MANIFEST_ENTRY),
+                archive.required(SignedProofBundleContract.SIGNATURE_ENTRY),
+                signatureMetadata);
+        if (compactJws == null) {
+            checks.fail("signature.jws", "signature", VerificationCode.SIGNATURE_INVALID,
+                    "Compact JWS structure, canonical encoding, payload, or protected header is invalid");
+            return false;
+        }
         Resolution<PublicSigningKey> resolution;
         try {
             resolution = context.signingKeyResolver().resolve(
@@ -611,10 +620,7 @@ public final class DefaultProofVerifier implements ProofVerifier {
                 && Objects.equals(signatureMetadata.keyVersion(), key.keyVersion())
                 && Objects.equals(signatureMetadata.algorithm(), key.algorithm())
                 && ProofHashes.equalsSha256(signatureMetadata.publicKeyFingerprint(), key.publicKeyFingerprint());
-        boolean signatureValid = metadataMatches && verifyCompactJws(
-                archive.required(SignedProofBundleContract.MANIFEST_ENTRY),
-                archive.required(SignedProofBundleContract.SIGNATURE_ENTRY),
-                key);
+        boolean signatureValid = metadataMatches && verifyCompactJws(compactJws, key);
         if (signatureValid) {
             summary.keySource = key.source();
             checks.pass("signature.jws", "signature", VerificationCode.SIGNATURE_VALID,
@@ -762,13 +768,17 @@ public final class DefaultProofVerifier implements ProofVerifier {
         }
     }
 
-    /** Verifies compact-JWS canonical encoding, protected header, payload, key fingerprint, and Ed25519 signature. */
-    private boolean verifyCompactJws(byte[] manifestBytes, byte[] jwsEntry, PublicSigningKey key) {
+    /** Parses every compact-JWS property that can be rejected without resolving a trusted key. */
+    private ParsedCompactJws parseCompactJws(
+            byte[] manifestBytes,
+            byte[] jwsEntry,
+            SignedProofBundleModel.SignatureMetadata signatureMetadata
+    ) {
         try {
             String compact = parseAsciiLine(jwsEntry);
             String[] parts = compact.split("\\.", -1);
             if (parts.length != 3) {
-                return false;
+                return null;
             }
             Base64.Decoder decoder = Base64.getUrlDecoder();
             Base64.Encoder encoder = Base64.getUrlEncoder().withoutPadding();
@@ -780,16 +790,27 @@ public final class DefaultProofVerifier implements ProofVerifier {
                     || !parts[1].equals(encoder.encodeToString(payloadBytes))
                     || !parts[2].equals(encoder.encodeToString(signatureBytes))
                     || !MessageDigest.isEqual(payloadBytes, manifestBytes)) {
-                return false;
+                return null;
             }
             JwsHeader header = canonicalJson.read(headerBytes, JwsHeader.class);
             if (!canonicalJson.isCanonical(headerBytes, header)
                     || !"EdDSA".equals(header.alg())
-                    || !Objects.equals(key.keyId(), header.kid())
-                    || !Objects.equals(key.keyVersion(), header.keyVersion())
-                    || !"JOSE".equals(header.typ())) {
-                return false;
+                    || !"JOSE".equals(header.typ())
+                    || !Objects.equals(signatureMetadata.algorithm(), header.alg())
+                    || !Objects.equals(signatureMetadata.keyId(), header.kid())
+                    || !Objects.equals(signatureMetadata.keyVersion(), header.keyVersion())) {
+                return null;
             }
+            return new ParsedCompactJws(parts[0], parts[1], parts[2]);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** Verifies the locally validated compact-JWS signature against one trusted Ed25519 key. */
+    private boolean verifyCompactJws(ParsedCompactJws compactJws, PublicSigningKey key) {
+        try {
+            byte[] signatureBytes = Base64.getUrlDecoder().decode(compactJws.signature());
             byte[] spki = Base64.getDecoder().decode(key.publicKeySpki());
             if (!ProofHashes.equalsSha256(ProofHashes.sha256(spki), key.publicKeyFingerprint())) {
                 return false;
@@ -798,7 +819,7 @@ public final class DefaultProofVerifier implements ProofVerifier {
                     .generatePublic(new X509EncodedKeySpec(spki));
             Signature verifier = Signature.getInstance("Ed25519");
             verifier.initVerify(publicKey);
-            verifier.update((parts[0] + "." + parts[1]).getBytes(StandardCharsets.US_ASCII));
+            verifier.update(compactJws.signingInput().getBytes(StandardCharsets.US_ASCII));
             return verifier.verify(signatureBytes);
         } catch (RuntimeException | java.security.GeneralSecurityException e) {
             return false;
@@ -1024,6 +1045,15 @@ public final class DefaultProofVerifier implements ProofVerifier {
 
     /** Strict protected JWS header. */
     private record JwsHeader(String alg, String kid, Integer keyVersion, String typ) {
+    }
+
+    /** Locally validated immutable compact-JWS segments retained until trusted-key verification. */
+    private record ParsedCompactJws(String protectedHeader, String payload, String signature) {
+
+        /** Returns the exact ASCII signing input authenticated by Ed25519. */
+        private String signingInput() {
+            return protectedHeader + "." + payload;
+        }
     }
 
     /** Parsed evidence entries plus deferred access to file.hash bytes. */
