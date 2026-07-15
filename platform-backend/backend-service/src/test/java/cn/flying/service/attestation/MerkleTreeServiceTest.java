@@ -116,4 +116,26 @@ class MerkleTreeServiceTest {
         assertThat(merkleTreeService.verifyProof(leaf.leafHash(), tamperedPath, result.merkleRoot()))
                 .isFalse();
     }
+
+    /**
+     * Verifies proof validation does not normalize non-canonical case or surrounding whitespace.
+     */
+    @Test
+    void verifyProof_shouldRejectNonCanonicalSiblingEncoding() {
+        MerkleTreeResult result = merkleTreeService.buildTree(List.of(
+                new MerkleLeafInput(1L, "hash-a"),
+                new MerkleLeafInput(2L, "hash-b")
+        ));
+        MerkleLeafProof leaf = result.leaves().getFirst();
+        MerkleProofNode sibling = leaf.proofPath().getFirst();
+
+        assertThat(merkleTreeService.verifyProof(
+                leaf.leafHash(),
+                List.of(new MerkleProofNode(sibling.position(), sibling.hash().toUpperCase())),
+                result.merkleRoot())).isFalse();
+        assertThat(merkleTreeService.verifyProof(
+                leaf.leafHash(),
+                List.of(new MerkleProofNode(sibling.position(), " " + sibling.hash() + " ")),
+                result.merkleRoot())).isFalse();
+    }
 }

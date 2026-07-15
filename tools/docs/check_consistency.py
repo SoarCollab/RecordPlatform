@@ -16,6 +16,7 @@ from xml.etree import ElementTree
 CORE_WORKFLOWS = ("test.yml", "perf-smoke.yml", "docs.yml", "security-poc.yml", "docs-consistency.yml")
 SPRING_BOOT_POMS = (
     "platform-api/pom.xml",
+    "platform-verifier/pom.xml",
     "platform-backend/pom.xml",
     "platform-fisco/pom.xml",
     "platform-storage/pom.xml",
@@ -59,6 +60,7 @@ ALLOWED_NON_OPENAPI_METHOD_ROUTES = {
     ("POST", "/api/v1/auth/login"),
     ("POST", "/api/v1/auth/logout"),
     ("GET", "/api/v1/shares/**"),
+    ("POST", "/api/v1/verify"),
 }
 
 ALLOWED_NON_OPENAPI_PATHS = {

@@ -31,6 +31,10 @@
             <artifactId>backend-api</artifactId>
         </dependency>
         <dependency>
+            <groupId>cn.flying</groupId>
+            <artifactId>platform-verifier-sdk</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.github.resilience4j</groupId>
             <artifactId>resilience4j-spring-boot3</artifactId>
             <version>${resilience4j.version}</version>

@@ -5,7 +5,7 @@
 1. Fork 本仓库
 2. 创建功能分支：`git checkout -b feat/your-feature`
 3. 遵循代码规范进行修改
-4. 确保测试通过：`mvn -f platform-backend/pom.xml test`
+4. 先安装共享 verifier SDK，再确保测试通过：`mvn -f platform-verifier/pom.xml -pl sdk -am clean install -DskipTests && mvn -f platform-backend/pom.xml test`
 5. 向 `main` 分支发起 Pull Request
 
 ## 分支命名规范

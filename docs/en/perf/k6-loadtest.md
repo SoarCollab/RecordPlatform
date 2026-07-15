@@ -18,6 +18,7 @@ export LOADTEST_PASSWORD="<set-a-local-test-password>"
 Start the backend (example):
 
 ```bash
+mvn -f platform-verifier/pom.xml -pl sdk -am clean install -DskipTests
 mvn -f platform-backend/pom.xml -pl backend-web -am spring-boot:run \
   -Dspring-boot.run.profiles=local \
   -Dspring-boot.run.arguments=--loadtest.seed.enabled=true

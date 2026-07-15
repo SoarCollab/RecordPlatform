@@ -14,6 +14,7 @@
     <!-- Reactor module order: shared API first, then providers, then consumer -->
     <modules>
         <module>platform-api</module>
+        <module>platform-verifier</module>
         <module>platform-fisco</module>
         <module>platform-storage</module>
         <module>platform-backend</module>

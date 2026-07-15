@@ -24,6 +24,7 @@ RecordPlatform 是一个开源的企业级文件存证平台，将**区块链不
 - 📜 **可审计的溯源链** — 每次上传、分享、下载均可追踪并链上可验证
 - 🏢 **多租户隔离** — 按租户隔离存储、缓存和数据路径
 - 🔒 **端到端加密** — AES-GCM/ChaCha20-Poly1305，每个分片独立密钥链
+- ✅ **独立公开验真** — 签名证明 ZIP v2 SDK、CLI 与独立 Web 验证器，支持实时状态和链上根核验
 
 ---
 
@@ -147,6 +148,9 @@ docker compose -f docker-compose.infra.yml up -d
 # 安装共享接口（必须首先执行）
 mvn -f platform-api/pom.xml clean install
 
+# 构建并测试独立公开验证器
+mvn -f platform-verifier/pom.xml clean install
+
 # 构建所有后端模块
 mvn -f platform-backend/pom.xml clean package -DskipTests
 mvn -f platform-fisco/pom.xml clean package -DskipTests
@@ -202,6 +206,7 @@ cd platform-frontend && pnpm install && pnpm dev
 | 指南 | 说明 |
 | ---- | ---- |
 | [快速开始](docs/zh/getting-started/index.md) | 前置依赖、安装部署、配置说明 |
+| [公开验证器](docs/zh/getting-started/public-verifier.md) | 使用 SDK、CLI 或独立 Web 服务验证签名证明 ZIP |
 | [架构设计](docs/zh/architecture/index.md) | 系统架构、分布式存储、区块链、安全机制 |
 | [部署运维](docs/zh/deployment/index.md) | Docker Compose、生产环境、监控告警 |
 | [API 参考](docs/zh/api/index.md) | REST 端点、认证规则、错误码 |
@@ -215,6 +220,7 @@ cd platform-frontend && pnpm install && pnpm dev
 ```
 RecordPlatform/
 ├── platform-api/          # 共享 Dubbo 接口定义
+├── platform-verifier/     # 公开证明 SDK、CLI 与独立 Web 验证器（:8093）
 ├── platform-backend/      # REST API 服务（Dubbo Consumer, :8000）
 │   ├── backend-web/       # 控制器、JWT 过滤器、限流
 │   ├── backend-service/   # 业务逻辑、Saga 编排、Outbox

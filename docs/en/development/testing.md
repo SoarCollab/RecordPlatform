@@ -15,6 +15,9 @@
 # Install shared interfaces first (one-time / when dependencies change)
 mvn -f platform-api/pom.xml clean install -DskipTests
 
+# Install the shared verifier SDK contract required by backend-service
+mvn -f platform-verifier/pom.xml -pl sdk -am clean install -DskipTests
+
 # Unit tests only (no Docker needed)
 mvn -f platform-backend/pom.xml test -pl backend-common,backend-service,backend-web -am
 
@@ -29,6 +32,13 @@ mvn -f platform-fisco/pom.xml test
 
 # Storage service tests
 mvn -f platform-storage/pom.xml test
+```
+
+### Public Verifier
+
+```bash
+# SDK, CLI, Web, security cases, fixtures, and SDK coverage gate
+mvn -f platform-verifier/pom.xml clean verify
 ```
 
 ### Frontend

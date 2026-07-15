@@ -2,6 +2,7 @@ package cn.flying.service.manifest;
 
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.verifier.contract.SignedProofBundleContract;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.MapperFeature;
@@ -27,7 +28,7 @@ import java.util.TreeMap;
 @Service
 public class ChunkManifestCanonicalizer {
 
-    public static final String SCHEMA_ID = "cn.flying.chunk-manifest.v1";
+    public static final String SCHEMA_ID = SignedProofBundleContract.SOURCE_CHUNK_MANIFEST_SCHEMA;
     public static final String HASH_ALGORITHM = "SHA-256";
     public static final String MANIFEST_HASH_PREFIX = "sha256:";
     private static final String DEFAULT_STORAGE_BACKEND = "S3";

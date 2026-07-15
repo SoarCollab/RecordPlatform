@@ -1,15 +1,13 @@
 package cn.flying.service.attestation;
 
+import cn.flying.verifier.contract.SignedProofBundleModel;
+import cn.flying.verifier.crypto.MerkleProofs;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
-import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -20,8 +18,7 @@ import java.util.Set;
 @Service
 public class MerkleTreeService {
 
-    public static final String PROOF_ALGORITHM = "SHA-256-MERKLE-V1";
-    private static final String DIGEST_ALGORITHM = "SHA-256";
+    public static final String PROOF_ALGORITHM = MerkleProofs.PROOF_ALGORITHM;
 
     /**
      * Builds a deterministic Merkle tree with stable leaf ordering and inclusion proofs.
@@ -97,20 +94,12 @@ public class MerkleTreeService {
         if (!StringUtils.hasText(leafHash) || proofPath == null) {
             return null;
         }
-        String current = leafHash.trim();
-        for (MerkleProofNode proofNode : proofPath) {
-            if (proofNode == null || !StringUtils.hasText(proofNode.hash())) {
-                return null;
-            }
-            if (MerkleProofNode.LEFT.equals(proofNode.position())) {
-                current = calculateParentHash(proofNode.hash(), current);
-            } else if (MerkleProofNode.RIGHT.equals(proofNode.position())) {
-                current = calculateParentHash(current, proofNode.hash());
-            } else {
-                return null;
-            }
-        }
-        return current;
+        List<SignedProofBundleModel.ProofNode> sharedPath = proofPath.stream()
+                .map(node -> node == null
+                        ? null
+                        : new SignedProofBundleModel.ProofNode(node.position(), node.hash()))
+                .toList();
+        return MerkleProofs.calculateRootFromProof(leafHash, sharedPath);
     }
 
     private List<MerkleLeafInput> canonicalize(List<MerkleLeafInput> inputs) {
@@ -148,26 +137,14 @@ public class MerkleTreeService {
      * Calculate a public leaf hash from the file hash so exported bundles can verify it offline.
      */
     public String calculateLeafHash(String fileHash) {
-        return sha256Hex("leaf\n" + fileHash.trim());
+        return MerkleProofs.calculateLeafHash(fileHash);
     }
 
     /**
      * Calculate the Merkle parent hash from ordered left and right child hashes.
      */
     public String calculateParentHash(String leftHash, String rightHash) {
-        return sha256Hex("node\n" + leftHash.trim() + "\n" + rightHash.trim());
-    }
-
-    /**
-     * Calculate SHA-256 as lowercase hexadecimal text.
-     */
-    private String sha256Hex(String value) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance(DIGEST_ALGORITHM);
-            return HexFormat.of().formatHex(digest.digest(value.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 digest is not available", e);
-        }
+        return MerkleProofs.calculateParentHash(leftHash, rightHash);
     }
 
     private record Node(String hash, List<Integer> leafIndexes) {

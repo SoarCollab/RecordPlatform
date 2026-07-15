@@ -24,6 +24,7 @@ Built for teams that need:
 - 📜 **Auditable provenance** — every upload, share, and download tracked and verifiable on-chain
 - 🏢 **Multi-tenant isolation** — separate storage, cache, and data paths per tenant
 - 🔒 **End-to-end encryption** — AES-GCM/ChaCha20-Poly1305 with per-chunk key chains
+- ✅ **Independent public verification** — signed proof ZIP v2 SDK, CLI, and standalone Web verifier with live status/chain checks
 
 ---
 
@@ -155,6 +156,9 @@ set +a
 # Install shared interfaces (required first)
 mvn -f platform-api/pom.xml clean install
 
+# Build and test the independent public verifier
+mvn -f platform-verifier/pom.xml clean install
+
 # Build all backend services
 mvn -f platform-backend/pom.xml clean package -DskipTests
 mvn -f platform-fisco/pom.xml clean package -DskipTests
@@ -210,6 +214,7 @@ Verify the installation at:
 | Guide | Description |
 | ----- | ----------- |
 | [Getting Started](docs/en/getting-started/index.md) | Prerequisites, installation, configuration |
+| [Public Verifier](docs/en/getting-started/public-verifier.md) | Verify signed proof ZIPs through SDK, CLI, or standalone Web service |
 | [Architecture](docs/en/architecture/index.md) | System overview, distributed storage, blockchain, security |
 | [Deployment](docs/en/deployment/index.md) | Docker Compose, production setup, monitoring |
 | [API Reference](docs/en/api/index.md) | REST endpoints, authentication, error codes |
@@ -223,6 +228,7 @@ Verify the installation at:
 ```
 RecordPlatform/
 ├── platform-api/          # Shared Dubbo interface definitions
+├── platform-verifier/     # Public proof SDK, CLI, and standalone Web verifier (:8093)
 ├── platform-backend/      # REST API service (Dubbo Consumer, :8000)
 │   ├── backend-web/       # Controllers, JWT filters, rate limiting
 │   ├── backend-service/   # Business logic, Saga orchestration, Outbox

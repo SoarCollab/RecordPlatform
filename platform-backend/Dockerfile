@@ -1,4 +1,4 @@
-# Build context: repository root (platform-api is a cross-module dependency)
+# Build context: repository root (platform-api and verifier SDK are cross-module dependencies)
 # Usage: docker build -f platform-backend/Dockerfile -t recordplatform-backend .
 
 # ── Stage 1: Build ──────────────────────────────────────────────────────────
@@ -9,6 +9,10 @@ WORKDIR /workspace
 # Install platform-api (shared interface definitions required by backend)
 COPY platform-api/ platform-api/
 RUN mvn -f platform-api/pom.xml clean install -DskipTests -q
+
+# Install the shared signed-proof contract and verifier SDK required by backend-service
+COPY platform-verifier/ platform-verifier/
+RUN mvn -f platform-verifier/pom.xml -pl sdk -am clean install -DskipTests -q
 
 # Build backend-web and its module dependencies
 COPY platform-backend/ platform-backend/

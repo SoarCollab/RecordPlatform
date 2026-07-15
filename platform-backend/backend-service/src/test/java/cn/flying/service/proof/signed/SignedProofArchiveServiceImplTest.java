@@ -31,6 +31,16 @@ import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.ChunkManifestView;
 import cn.flying.service.remote.FileRemoteClient;
+import cn.flying.verifier.DefaultProofVerifier;
+import cn.flying.verifier.VerificationContext;
+import cn.flying.verifier.VerificationLimits;
+import cn.flying.verifier.contract.SignedProofBundleContract;
+import cn.flying.verifier.contract.SignedProofBundleModel;
+import cn.flying.verifier.model.ChainRootEvidence;
+import cn.flying.verifier.model.PublicProofStatus;
+import cn.flying.verifier.model.PublicSigningKey;
+import cn.flying.verifier.model.VerificationOutcome;
+import cn.flying.verifier.resolver.Resolution;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
@@ -40,6 +50,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -55,10 +66,16 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -92,14 +109,20 @@ class SignedProofArchiveServiceImplTest {
     private static final Long LEAF_ID = 901L;
     private static final Long BATCH_ID = 900L;
     private static final Long MANIFEST_ID = 800L;
-    private static final String CONTENT_HASH = "sha256:" + "1".repeat(64);
+    private static final String ORIGINAL_TEXT = "abc";
+    private static final String CONTENT_HASH =
+            "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
     private static final String MANIFEST_HASH = "sha256:" + "2".repeat(64);
-    private static final String PLAIN_HASH = "sha256:" + "3".repeat(64);
+    private static final String PLAIN_HASH = CONTENT_HASH;
     private static final String CIPHER_HASH = "sha256:" + "4".repeat(64);
+    private static final String FILE_TRANSACTION_HASH = "0x" + "a".repeat(64);
     private static final String BATCH_TRANSACTION_HASH = "0x" + "b".repeat(64);
     private static final String CHAIN_RECORD_ID = "chain-record-11";
     private static final String STORAGE_PATH = "tenant/7/file/11/chunk/0";
     private static final Date ISSUED_AT = new Date(1_752_451_200_123L);
+
+    @TempDir
+    Path tempDirectory;
 
     @Mock
     private FileMapper fileMapper;
@@ -238,6 +261,7 @@ class SignedProofArchiveServiceImplTest {
                     .contains("REDEPLOY_ADDRESS")
                     .contains("immutable_snapshot_validation_failed")
                     .contains("exactly one trailing LF byte");
+            assertPublicVerifierAccepts(first, issuance);
             InOrder lifecycleOrder = inOrder(fileMapper, issuanceMapper);
             lifecycleOrder.verify(fileMapper)
                     .lockVersionGroupForProofLifecycle(TENANT_ID, FILE_ID);
@@ -485,6 +509,154 @@ class SignedProofArchiveServiceImplTest {
     }
 
     /**
+     * 验证签发前拒绝公共 verifier 无法解释的 source 合同和文件交易哈希。
+     */
+    @Test
+    void shouldRejectUnverifiableSourceContractBeforeRemoteEvidence() {
+        File file = file();
+        AttestationLeaf leaf = leaf();
+        mockSuccessfulEvidence(file, leaf);
+        ChunkManifestChunk validChunk = manifest().chunks().getFirst();
+        List<ChunkManifestView> unsupportedManifests = List.of(
+                manifestWithContract(
+                        "cn.flying.chunk-manifest.v999", "SHA-256", 3, "NONE", "S3", validChunk),
+                manifestWithContract(
+                        SignedProofBundleContract.SOURCE_CHUNK_MANIFEST_SCHEMA,
+                        "SHA-512", 3, "NONE", "S3", validChunk),
+                manifestWithContract(
+                        SignedProofBundleContract.SOURCE_CHUNK_MANIFEST_SCHEMA,
+                        "SHA-256", 2, "NONE", "S3", validChunk),
+                manifestWithContract(
+                        SignedProofBundleContract.SOURCE_CHUNK_MANIFEST_SCHEMA,
+                        "SHA-256", 3, "NONE", "S3",
+                        new ChunkManifestChunk(
+                                0, PLAIN_HASH, CIPHER_HASH, 3, STORAGE_PATH,
+                                "S3", "etag", "SHA-512")),
+                manifestWithContract(
+                        SignedProofBundleContract.SOURCE_CHUNK_MANIFEST_SCHEMA,
+                        "SHA-256", 3, "NONE", "S3",
+                        new ChunkManifestChunk(
+                                0, PLAIN_HASH.toUpperCase(Locale.ROOT), CIPHER_HASH, 3, STORAGE_PATH,
+                                "S3", "etag", "SHA-256")),
+                manifestWithContract(
+                        SignedProofBundleContract.SOURCE_CHUNK_MANIFEST_SCHEMA,
+                        "SHA-256", 3, "NONE", "S3",
+                        new ChunkManifestChunk(
+                                0, PLAIN_HASH, " " + CIPHER_HASH, 3, STORAGE_PATH,
+                                "S3", "etag", "SHA-256")),
+                manifestWithContract(
+                        SignedProofBundleContract.SOURCE_CHUNK_MANIFEST_SCHEMA,
+                        "SHA-256", 3, "NONE", "S3",
+                        new ChunkManifestChunk(
+                                0, PLAIN_HASH, CIPHER_HASH, 3, "storage\u0000path",
+                                "S3", "etag", "SHA-256")),
+                manifestWithContract(
+                        SignedProofBundleContract.SOURCE_CHUNK_MANIFEST_SCHEMA,
+                        "SHA-256", 3, "NONE\u0000", "S3", validChunk),
+                manifestWithContract(
+                        SignedProofBundleContract.SOURCE_CHUNK_MANIFEST_SCHEMA,
+                        "SHA-256", 3, "NONE", "S3\u0000", validChunk));
+
+        for (ChunkManifestView unsupported : unsupportedManifests) {
+            when(chunkManifestService.findActiveManifest(null, FILE_ID))
+                    .thenReturn(Optional.of(unsupported));
+            try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+                security.when(SecurityUtils::isAdmin).thenReturn(false);
+                assertFileRecordError(() -> service.exportByFileId(USER_ID, FILE_ID));
+            }
+        }
+        verify(fileRemoteClient, never()).headObject(any(), any());
+
+        when(chunkManifestService.findActiveManifest(null, FILE_ID)).thenReturn(Optional.of(manifest()));
+        for (String invalidTransactionHash : List.of("", "not-a-chain-transaction")) {
+            file.setTransactionHash(invalidTransactionHash);
+            try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+                security.when(SecurityUtils::isAdmin).thenReturn(false);
+                assertFileRecordError(() -> service.exportByFileId(USER_ID, FILE_ID));
+            }
+        }
+        verify(fileRemoteClient, never()).headObject(any(), any());
+    }
+
+    /**
+     * 验证 Merkle 文本前像必须保持精确小写 canonical 形式，不能在签发时静默规范化。
+     */
+    @Test
+    void shouldRejectNonCanonicalLeafEvidenceHashBeforeDependentLookup() {
+        File file = file();
+        AttestationLeaf leaf = leaf().setEvidenceHash(MANIFEST_HASH.toUpperCase(Locale.ROOT));
+        when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+        when(leafMapper.selectOne(any())).thenReturn(leaf);
+
+        try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+            security.when(SecurityUtils::isAdmin).thenReturn(false);
+
+            assertFileRecordError(() -> service.exportByFileId(USER_ID, FILE_ID));
+        }
+
+        verify(issuanceMapper, never()).selectOne(any());
+        verify(batchMapper, never()).selectById(any());
+        verify(fileRemoteClient, never()).headObject(any(), any());
+        verify(issuanceMapper, never()).insert(any(ProofBundleIssuance.class));
+    }
+
+    /**
+     * 验证 active manifest 的摘要文本必须与 leaf 精确一致且为 canonical 形式。
+     */
+    @Test
+    void shouldRejectNonCanonicalActiveManifestHashBeforeStorageHead() {
+        File file = file();
+        AttestationLeaf leaf = leaf();
+        mockSuccessfulEvidence(file, leaf);
+        ChunkManifestView source = manifest();
+        ChunkManifestView nonCanonical = new ChunkManifestView(
+                source.manifestId(),
+                source.fileId(),
+                source.fileVersion(),
+                source.schemaId(),
+                source.fileHash(),
+                source.manifestHash().toUpperCase(Locale.ROOT),
+                source.hashAlgorithm(),
+                source.chunkSize(),
+                source.chunkCount(),
+                source.totalSize(),
+                source.merkleRoot(),
+                source.encryptionAlgorithm(),
+                source.storageBackend(),
+                source.chunks());
+        when(chunkManifestService.findActiveManifest(null, FILE_ID)).thenReturn(Optional.of(nonCanonical));
+
+        try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+            security.when(SecurityUtils::isAdmin).thenReturn(false);
+
+            assertFileRecordError(() -> service.exportByFileId(USER_ID, FILE_ID));
+        }
+
+        verify(chunkManifestService, never()).calculateManifestHash(any());
+        verify(fileRemoteClient, never()).headObject(any(), any());
+        verify(issuanceMapper, never()).insert(any(ProofBundleIssuance.class));
+    }
+
+    /**
+     * 验证 leafIndex 无法由 proof path 完整归零时在远程 storage HEAD 前失败关闭。
+     */
+    @Test
+    void shouldRejectNonCanonicalMerkleContractBeforeStorageHead() {
+        File file = file();
+        AttestationLeaf leaf = leaf().setLeafIndex(1);
+        mockSuccessfulEvidence(file, leaf);
+
+        try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+            security.when(SecurityUtils::isAdmin).thenReturn(false);
+
+            assertFileRecordError(() -> service.exportByFileId(USER_ID, FILE_ID));
+        }
+
+        verify(fileRemoteClient, never()).headObject(any(), any());
+        verify(issuanceMapper, never()).insert(any(ProofBundleIssuance.class));
+    }
+
+    /**
      * 验证 leaf 的 chainRecordId、evidenceType 或 manifestHash 不能与其他摘要混用。
      */
     @Test
@@ -503,6 +675,31 @@ class SignedProofArchiveServiceImplTest {
             security.when(SecurityUtils::isAdmin).thenReturn(false);
             assertFileRecordError(() -> service.exportByFileId(USER_ID, FILE_ID));
         }
+    }
+
+    /**
+     * 验证缺少持久化叶子主键或批次主键时在后续 Mapper 与远程存储调用前失败关闭。
+     */
+    @Test
+    void shouldRejectLeafWithoutPersistentIdentifiersBeforeDependentLookup() {
+        File file = file();
+        when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+        List<AttestationLeaf> invalidLeaves = List.of(
+                leaf().setId(null),
+                leaf().setBatchId(null));
+
+        for (AttestationLeaf invalidLeaf : invalidLeaves) {
+            when(leafMapper.selectOne(any())).thenReturn(invalidLeaf);
+            try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+                security.when(SecurityUtils::isAdmin).thenReturn(false);
+                assertFileRecordError(() -> service.exportByFileId(USER_ID, FILE_ID));
+            }
+        }
+
+        verify(issuanceMapper, never()).selectOne(any());
+        verify(batchMapper, never()).selectById(any());
+        verify(fileRemoteClient, never()).headObject(any(), any());
+        verify(issuanceMapper, never()).insert(any(ProofBundleIssuance.class));
     }
 
     /**
@@ -554,6 +751,34 @@ class SignedProofArchiveServiceImplTest {
     }
 
     /**
+     * 验证批次编号、规范根哈希和 query 回执空值语义均在远程 storage HEAD 前精确校验。
+     */
+    @Test
+    void shouldRejectNonCanonicalBatchReceiptBeforeStorageHead() {
+        File file = file();
+        AttestationLeaf leaf = leaf();
+        mockSuccessfulEvidence(file, leaf);
+        String uppercaseRoot = leaf.getLeafHash().toUpperCase(Locale.ROOT);
+        List<AttestationBatch> invalidBatches = List.of(
+                batch(leaf).setBatchNo("batch/900"),
+                batch(leaf).setMerkleRoot(uppercaseRoot).setChainFileHash(uppercaseRoot),
+                batch(leaf)
+                        .setConfirmationSource("CHAIN_QUERY_AFTER_WRITE")
+                        .setChainTransactionHash(""));
+
+        for (AttestationBatch invalidBatch : invalidBatches) {
+            when(batchMapper.selectById(BATCH_ID)).thenReturn(invalidBatch);
+            try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+                security.when(SecurityUtils::isAdmin).thenReturn(false);
+                assertFileRecordError(() -> service.exportByFileId(USER_ID, FILE_ID));
+            }
+        }
+
+        verify(fileRemoteClient, never()).headObject(any(), any());
+        verify(issuanceMapper, never()).insert(any(ProofBundleIssuance.class));
+    }
+
+    /**
      * 验证链查询恢复得到的合法完成批次仍可导出签名证明。
      */
     @Test
@@ -597,7 +822,7 @@ class SignedProofArchiveServiceImplTest {
                 MANIFEST_ID,
                 FILE_ID,
                 1,
-                "record-platform-chunk-manifest.v1",
+                SignedProofBundleContract.SOURCE_CHUNK_MANIFEST_SCHEMA,
                 CHAIN_RECORD_ID,
                 MANIFEST_HASH,
                 "SHA-256",
@@ -770,6 +995,46 @@ class SignedProofArchiveServiceImplTest {
                         assertThat(exception.getData()).isEqualTo("合约注册表快照不可用于签发");
                     });
         }
+    }
+
+    /**
+     * 验证后端旧校验允许但公共 verifier 明确拒绝的 registry 字段不会进入签名包。
+     */
+    @Test
+    void shouldRejectRegistryThatPublicVerifierCannotInterpret() {
+        File file = file();
+        AttestationLeaf leaf = leaf();
+        mockSuccessfulEvidence(file, leaf);
+        ContractRegistryEntryResponse valid = contractRegistry();
+        ContractRegistryEntryResponse besuWithEmptyGroup = new ContractRegistryEntryResponse(
+                valid.schemaVersion(),
+                null,
+                valid.contractName(),
+                valid.semanticVersion(),
+                "BSN_BESU",
+                valid.chainId(),
+                "",
+                valid.contractAddress(),
+                valid.abiFingerprintAlgorithm(),
+                valid.abiSha256(),
+                valid.artifactBytecodeSha256(),
+                valid.onChainCodeSha256(),
+                valid.deploymentTransactionHash(),
+                valid.deploymentBlockNumber(),
+                valid.status(),
+                valid.effectiveAt(),
+                valid.upgradeStrategy()).withCalculatedRegistryFingerprint();
+        when(attestationBatchPersistenceService.requireContractRegistry(any()))
+                .thenReturn(besuWithEmptyGroup);
+
+        try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+            security.when(SecurityUtils::isAdmin).thenReturn(false);
+
+            assertFileRecordError(() -> service.exportByFileId(USER_ID, FILE_ID));
+        }
+
+        verify(fileRemoteClient, never()).headObject(any(), any());
+        verify(issuanceMapper, never()).insert(any(ProofBundleIssuance.class));
     }
 
     /**
@@ -1013,7 +1278,7 @@ class SignedProofArchiveServiceImplTest {
                         "contentHash", CONTENT_HASH)))
                 .setFileHash(CHAIN_RECORD_ID)
                 .setContentHash(CONTENT_HASH)
-                .setTransactionHash("0x-file-tx")
+                .setTransactionHash(FILE_TRANSACTION_HASH)
                 .setStatus(FileUploadStatus.SUCCESS.getCode())
                 .setDeleted(0)
                 .setVersion(1)
@@ -1088,7 +1353,7 @@ class SignedProofArchiveServiceImplTest {
                 MANIFEST_ID,
                 FILE_ID,
                 1,
-                "record-platform-chunk-manifest.v1",
+                SignedProofBundleContract.SOURCE_CHUNK_MANIFEST_SCHEMA,
                 CHAIN_RECORD_ID,
                 MANIFEST_HASH,
                 "SHA-256",
@@ -1099,6 +1364,34 @@ class SignedProofArchiveServiceImplTest {
                 "NONE",
                 "S3",
                 chunks);
+    }
+
+    /**
+     * 构造可定向破坏 source schema、算法、尺寸或分片字段的 manifest。
+     */
+    private ChunkManifestView manifestWithContract(
+            String schemaId,
+            String hashAlgorithm,
+            long chunkSize,
+            String encryptionAlgorithm,
+            String storageBackend,
+            ChunkManifestChunk chunk
+    ) {
+        return new ChunkManifestView(
+                MANIFEST_ID,
+                FILE_ID,
+                1,
+                schemaId,
+                CHAIN_RECORD_ID,
+                MANIFEST_HASH,
+                hashAlgorithm,
+                chunkSize,
+                1,
+                3,
+                PLAIN_HASH,
+                encryptionAlgorithm,
+                storageBackend,
+                List.of(chunk));
     }
 
     /**
@@ -1206,6 +1499,62 @@ class SignedProofArchiveServiceImplTest {
                 .setStatus(status)
                 .setFirstSeenAt(ISSUED_AT)
                 .setDeleted(0);
+    }
+
+    /**
+     * 使用独立 SDK 对后端刚签发的真实 ZIP、JWS 和共享合同执行端到端验收。
+     */
+    private void assertPublicVerifierAccepts(ProofArchive archive, ProofBundleIssuance issuance) {
+        try {
+            Path original = tempDirectory.resolve("backend-produced-original.txt");
+            Path proof = tempDirectory.resolve("backend-produced-proof.zip");
+            Files.writeString(original, ORIGINAL_TEXT);
+            Files.write(proof, archive.toByteArray());
+
+            ProofSigningKeyMetadata key = signingProvider.currentKey();
+            PublicSigningKey publicKey = new PublicSigningKey(
+                    key.keyId(),
+                    key.keyVersion(),
+                    key.algorithm(),
+                    key.publicKeySpki(),
+                    key.publicKeyFingerprint(),
+                    "backend-production-test");
+            Instant issuedAt = issuance.getIssuedAt().toInstant();
+            PublicProofStatus status = new PublicProofStatus(
+                    issuance.getProofId(),
+                    "ACTIVE",
+                    String.valueOf(issuance.getStatusVersion()),
+                    issuance.getIssuedStatus(),
+                    issuance.getKeyId(),
+                    issuance.getKeyVersion(),
+                    null,
+                    issuedAt.toString(),
+                    issuedAt.toString(),
+                    "backend-production-test");
+            ContractRegistryEntryResponse registry = contractRegistry();
+            ChainRootEvidence chain = new ChainRootEvidence(
+                    ChainRootEvidence.SCHEMA_VERSION,
+                    registry.chainType(),
+                    registry.chainId(),
+                    registry.groupId(),
+                    registry.contractAddress(),
+                    "MB-900",
+                    leaf().getLeafHash(),
+                    BATCH_TRANSACTION_HASH,
+                    100L,
+                    "backend-production-test");
+            VerificationContext context = new VerificationContext(
+                    VerificationLimits.defaults(),
+                    (keyId, keyVersion) -> Resolution.resolved(publicKey),
+                    proofId -> Resolution.resolved(status),
+                    query -> Resolution.resolved(chain),
+                    Clock.fixed(issuedAt.plusSeconds(1), ZoneOffset.UTC));
+
+            assertThat(new DefaultProofVerifier().verify(original, proof, context).outcome())
+                    .isEqualTo(VerificationOutcome.VALID);
+        } catch (java.io.IOException e) {
+            throw new AssertionError("公共 verifier 兼容性 fixture 写入失败", e);
+        }
     }
 
     /**

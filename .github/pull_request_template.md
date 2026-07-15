@@ -9,6 +9,7 @@
 
 ## 测试与验证
 
+- [ ] 共享合同：`mvn -f platform-verifier/pom.xml clean install`
 - [ ] 后端测试：`mvn -f platform-backend/pom.xml test -pl backend-service,backend-web -am`
 - [ ] 前端质量：`pnpm --dir platform-frontend lint && pnpm --dir platform-frontend check`
 - [ ] 前端测试：`pnpm --dir platform-frontend test`

@@ -2,12 +2,12 @@ package cn.flying.service.proof.signed;
 
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.verifier.contract.SignedProofBundleContract;
 
 import java.io.ByteArrayOutputStream;
 import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -20,30 +20,21 @@ import java.util.zip.ZipOutputStream;
  */
 public final class ProofArchive {
 
-    public static final String MANIFEST_ENTRY = "manifest.json";
-    public static final String FILE_HASH_ENTRY = "file.hash";
-    public static final String CHUNK_MANIFEST_ENTRY = "chunk-manifest.json";
-    public static final String MERKLE_PROOF_ENTRY = "merkle-proof.json";
-    public static final String BLOCKCHAIN_RECEIPT_ENTRY = "blockchain-receipt.json";
-    public static final String SIGNATURE_ENTRY = "issuer-signature.jws";
-    public static final String VERIFICATION_POLICY_ENTRY = "verification-policy.json";
-    public static final String README_ENTRY = "README.verify.md";
+    public static final String MANIFEST_ENTRY = SignedProofBundleContract.MANIFEST_ENTRY;
+    public static final String FILE_HASH_ENTRY = SignedProofBundleContract.FILE_HASH_ENTRY;
+    public static final String CHUNK_MANIFEST_ENTRY = SignedProofBundleContract.CHUNK_MANIFEST_ENTRY;
+    public static final String MERKLE_PROOF_ENTRY = SignedProofBundleContract.MERKLE_PROOF_ENTRY;
+    public static final String BLOCKCHAIN_RECEIPT_ENTRY = SignedProofBundleContract.BLOCKCHAIN_RECEIPT_ENTRY;
+    public static final String SIGNATURE_ENTRY = SignedProofBundleContract.SIGNATURE_ENTRY;
+    public static final String VERIFICATION_POLICY_ENTRY = SignedProofBundleContract.VERIFICATION_POLICY_ENTRY;
+    public static final String README_ENTRY = SignedProofBundleContract.README_ENTRY;
 
-    public static final List<String> ENTRY_ORDER = List.of(
-            MANIFEST_ENTRY,
-            FILE_HASH_ENTRY,
-            CHUNK_MANIFEST_ENTRY,
-            MERKLE_PROOF_ENTRY,
-            BLOCKCHAIN_RECEIPT_ENTRY,
-            SIGNATURE_ENTRY,
-            VERIFICATION_POLICY_ENTRY,
-            README_ENTRY);
+    public static final List<String> ENTRY_ORDER = SignedProofBundleContract.ENTRY_ORDER;
 
     private static final Set<String> ENTRY_NAMES = Set.copyOf(ENTRY_ORDER);
     // 避开 JDK 将 1980-01-01 00:00 视为 DOS 时间哨兵并写入时区相关扩展时间戳。
-    private static final LocalDateTime FIXED_ZIP_LOCAL_TIME = LocalDateTime.of(1980, 1, 2, 0, 0);
-    private static final int MAX_ENTRY_BYTES = 1024 * 1024;
-    private static final int MAX_TOTAL_BYTES = 4 * 1024 * 1024;
+    private static final int MAX_ENTRY_BYTES = SignedProofBundleContract.MAX_ENTRY_BYTES;
+    private static final int MAX_TOTAL_BYTES = SignedProofBundleContract.MAX_TOTAL_ENTRY_BYTES;
 
     private final String fileName;
     private final String manifestHash;
@@ -108,7 +99,7 @@ public final class ProofArchive {
 
                 ZipEntry zipEntry = new ZipEntry(archiveEntry.name());
                 zipEntry.setMethod(ZipEntry.STORED);
-                zipEntry.setTimeLocal(FIXED_ZIP_LOCAL_TIME);
+                zipEntry.setTimeLocal(SignedProofBundleContract.FIXED_ZIP_LOCAL_TIME);
                 zipEntry.setSize(bytes.length);
                 zipEntry.setCompressedSize(bytes.length);
                 zipEntry.setCrc(crc.getValue());

@@ -32,9 +32,38 @@ jobs:
       - name: Build all Java modules
         run: |
           mvn -f platform-api/pom.xml clean install -DskipTests -q
+          mvn -f platform-verifier/pom.xml clean install -q
           mvn -f platform-backend/pom.xml clean package -DskipTests -q
           mvn -f platform-fisco/pom.xml clean package -DskipTests -q
           mvn -f platform-storage/pom.xml clean package -DskipTests -q
+
+      - name: Package public verifier release files
+        run: |
+          mkdir -p platform-verifier/target
+          tar \
+            --sort=name \
+            --mtime='1980-01-02 00:00:00Z' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -czf platform-verifier/target/record-platform-verifier-fixture.tar.gz \
+            -C platform-verifier/sdk/target/verifier-fixtures .
+          artifacts=(
+            platform-verifier/sdk/target/platform-verifier-sdk-0.0.2-SNAPSHOT.jar
+            platform-verifier/cli-verifier/target/record-platform-verifier-exec.jar
+            platform-verifier/web-verifier/target/platform-verifier-web.jar
+            platform-verifier/target/record-platform-verifier-fixture.tar.gz
+          )
+          : > platform-verifier/target/record-platform-verifier-SHA256SUMS
+          for artifact in "${artifacts[@]}"; do
+            digest="$(sha256sum "$artifact" | cut -d ' ' -f 1)"
+            printf '%s  %s\n' "$digest" "$(basename "$artifact")" \
+              >> platform-verifier/target/record-platform-verifier-SHA256SUMS
+          done
+          if grep -qE '  .*/' platform-verifier/target/record-platform-verifier-SHA256SUMS; then
+            echo 'Release checksum entries must use downloadable asset basenames' >&2
+            exit 1
+          fi
 
       # ── Frontend build ─────────────────────────────────────────────────────
       - name: Setup pnpm
@@ -101,6 +130,38 @@ jobs:
           printf '%s\n' "$IMAGE_TAGS" > release-images/backend.tags
           mapfile -t image_tags < <(printf '%s\n' "$IMAGE_TAGS")
           docker save "${image_tags[@]}" -o release-images/backend.tar
+
+      # public verifier
+      - name: Docker metadata -- public verifier
+        id: meta-verifier
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/recordplatform-verifier-web
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build image -- public verifier
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: platform-verifier/web-verifier/Dockerfile
+          push: false
+          load: true
+          tags: ${{ steps.meta-verifier.outputs.tags }}
+          labels: ${{ steps.meta-verifier.outputs.labels }}
+          cache-from: type=gha,scope=verifier
+          cache-to: type=gha,mode=max,scope=verifier
+
+      - name: Save image -- public verifier
+        env:
+          IMAGE_TAGS: ${{ steps.meta-verifier.outputs.tags }}
+        run: |
+          mkdir -p release-images
+          printf '%s\n' "$IMAGE_TAGS" > release-images/verifier.tags
+          mapfile -t image_tags < <(printf '%s\n' "$IMAGE_TAGS")
+          docker save "${image_tags[@]}" -o release-images/verifier.tar
 
       # fisco
       - name: Docker metadata -- fisco
@@ -204,6 +265,11 @@ jobs:
           name: release-bundle
           path: |
             sbom.cdx.json
+            platform-verifier/sdk/target/platform-verifier-sdk-0.0.2-SNAPSHOT.jar
+            platform-verifier/cli-verifier/target/record-platform-verifier-exec.jar
+            platform-verifier/web-verifier/target/platform-verifier-web.jar
+            platform-verifier/target/record-platform-verifier-fixture.tar.gz
+            platform-verifier/target/record-platform-verifier-SHA256SUMS
             release-images/*.tar
             release-images/*.tags
           retention-days: 1
@@ -247,4 +313,10 @@ jobs:
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           generate_release_notes: true
-          files: release-bundle/sbom.cdx.json
+          files: |
+            release-bundle/sbom.cdx.json
+            release-bundle/platform-verifier/sdk/target/platform-verifier-sdk-0.0.2-SNAPSHOT.jar
+            release-bundle/platform-verifier/cli-verifier/target/record-platform-verifier-exec.jar
+            release-bundle/platform-verifier/web-verifier/target/platform-verifier-web.jar
+            release-bundle/platform-verifier/target/record-platform-verifier-fixture.tar.gz
+            release-bundle/platform-verifier/target/record-platform-verifier-SHA256SUMS

@@ -216,16 +216,19 @@ Check a single service:
 # 1. Install shared interfaces (first time or when dependencies change)
 mvn -f platform-api/pom.xml clean install
 
-# 2. Build backend
+# 2. Install the shared proof/verifier SDK required by backend-service
+mvn -f platform-verifier/pom.xml -pl sdk -am clean install -DskipTests
+
+# 3. Build backend
 mvn -f platform-backend/pom.xml clean package -DskipTests
 
-# 3. Build FISCO service
+# 4. Build FISCO service
 mvn -f platform-fisco/pom.xml clean package -DskipTests
 
-# 4. Build storage service
+# 5. Build storage service
 mvn -f platform-storage/pom.xml clean package -DskipTests
 
-# 5. Frontend
+# 6. Frontend
 cd platform-frontend && pnpm install && pnpm build
 ```
 

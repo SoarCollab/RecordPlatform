@@ -33,6 +33,7 @@ jobs:
           filters: |
             backend:
               - 'platform-api/**'
+              - 'platform-verifier/**'
               - 'platform-backend/**'
               - 'platform-fisco/**'
               - 'platform-storage/**'
@@ -71,6 +72,9 @@ jobs:
 
       - name: Test and Install platform-api
         run: mvn -f platform-api/pom.xml clean install -q
+
+      - name: Test and Install Public Verifier
+        run: mvn -f platform-verifier/pom.xml clean install
 
       - name: Run Backend Tests
         run: mvn -f platform-backend/pom.xml clean verify -pl backend-common,backend-service,backend-web -am -Pit
@@ -130,6 +134,27 @@ jobs:
             platform-backend/backend-web/target/site/jacoco/jacoco.xml
           flags: backend
           fail_ci_if_error: false
+
+      - name: Upload Verifier Coverage Report
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
+        if: always()
+        with:
+          use_oidc: true
+          files: platform-verifier/sdk/target/site/jacoco/jacoco.xml
+          flags: verifier
+          fail_ci_if_error: false
+
+      - name: Upload Public Verifier Artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: public-verifier
+          path: |
+            platform-verifier/sdk/target/platform-verifier-sdk-*.jar
+            platform-verifier/cli-verifier/target/record-platform-verifier-exec.jar
+            platform-verifier/web-verifier/target/platform-verifier-web.jar
+            platform-verifier/sdk/target/verifier-fixtures/**
+          if-no-files-found: error
 
   frontend-test:
     name: Frontend Tests
@@ -308,9 +333,49 @@ jobs:
       - name: Build Backend
         run: |
           mvn -f platform-api/pom.xml clean install -DskipTests -q
+          mvn -f platform-verifier/pom.xml clean install -q
           mvn -f platform-backend/pom.xml clean package -DskipTests -q
           mvn -f platform-fisco/pom.xml clean package -DskipTests -q
           mvn -f platform-storage/pom.xml clean package -DskipTests -q
+
+      - name: Build Backend and Public Verifier Images
+        run: |
+          docker build -f platform-backend/Dockerfile -t recordplatform-backend:pr .
+          docker build -f platform-verifier/web-verifier/Dockerfile -t recordplatform-verifier-web:pr .
+
+      - name: Verify Public Verifier Container
+        run: |
+          verifier_uid="$(docker run --rm --entrypoint id recordplatform-verifier-web:pr -u)"
+          test "$verifier_uid" != "0"
+
+          container_id="$(docker run -d \
+            --read-only \
+            --tmpfs /tmp/record-platform-verifier:rw,noexec,nosuid,size=64m \
+            -p 127.0.0.1:18093:8093 \
+            recordplatform-verifier-web:pr)"
+          trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18093/actuator/health >/tmp/verifier-health.json; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs "$container_id"
+              exit 1
+            fi
+            sleep 1
+          done
+          jq -e '.status == "UP"' /tmp/verifier-health.json
+
+          status="$(curl --silent --show-error \
+            --output /tmp/verifier-report.json \
+            --write-out '%{http_code}' \
+            --form original=@platform-verifier/sdk/target/verifier-fixtures/original.txt \
+            --form proof=@platform-verifier/sdk/target/verifier-fixtures/proof.zip \
+            --form trustedKey=@platform-verifier/sdk/target/verifier-fixtures/trusted-key.json \
+            http://127.0.0.1:18093/api/v1/verify)"
+          test "$status" = "200"
+          jq -e '.outcome == "INDETERMINATE"' /tmp/verifier-report.json
 
       - name: Setup pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
