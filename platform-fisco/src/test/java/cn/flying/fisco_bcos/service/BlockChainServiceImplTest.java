@@ -364,6 +364,41 @@ class BlockChainServiceImplTest {
         }
 
         /**
+         * 验证 adapter 未返回查询模型时 provider 失败关闭，而不是伪造链上不存在。
+         */
+        @Test
+        @DisplayName("Should reject missing adapter query model")
+        void getAttestationBatch_shouldRejectMissingAdapterModel() {
+            when(chainAdapter.getAttestationBatch(7L, 900L)).thenReturn(null);
+
+            Result<GetAttestationBatchResponse> result = blockChainService.getAttestationBatch(
+                    new GetAttestationBatchRequest(7L, 900L, CONTRACT_REGISTRY));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.CONTRACT_ERROR.getCode());
+            assertThat(result.getData()).isNull();
+        }
+
+        /**
+         * 验证 exists 缺失属于未知查询状态，provider 不得把它映射为成功的 notFound。
+         */
+        @Test
+        @DisplayName("Should reject missing adapter exists state")
+        void getAttestationBatch_shouldRejectMissingExistsState() {
+            when(chainAdapter.getAttestationBatch(7L, 900L)).thenReturn(
+                    ChainAttestationBatch.builder()
+                            .exists(null)
+                            .tenantId(7L)
+                            .batchId(900L)
+                            .build());
+
+            Result<GetAttestationBatchResponse> result = blockChainService.getAttestationBatch(
+                    new GetAttestationBatchRequest(7L, 900L, CONTRACT_REGISTRY));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.CONTRACT_ERROR.getCode());
+            assertThat(result.getData()).isNull();
+        }
+
+        /**
          * 验证无效业务键在 provider 入口被拒绝且不调用链适配器。
          */
         @Test

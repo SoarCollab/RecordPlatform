@@ -181,9 +181,10 @@ public abstract class AbstractFiscoAdapter implements BlockChainAdapter {
                 throw new ChainException(getChainType(), "getAttestationBatch", "Invalid return value");
             }
 
-            boolean exists = values.get(0) instanceof Boolean value
-                    ? value
-                    : Boolean.parseBoolean(String.valueOf(values.get(0)));
+            if (!(values.get(0) instanceof Boolean exists)) {
+                throw new ChainException(
+                        getChainType(), "getAttestationBatch", "Invalid exists flag");
+            }
             if (!exists) {
                 return ChainAttestationBatch.notFound(tenantId, batchId);
             }
