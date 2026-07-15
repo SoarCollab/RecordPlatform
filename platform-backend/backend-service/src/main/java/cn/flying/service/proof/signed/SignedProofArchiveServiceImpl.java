@@ -142,6 +142,7 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
     private final SnowflakeIdGenerator snowflakeIdGenerator;
     private final TransactionTemplate transactionTemplate;
     private final Semaphore exportPermits = new Semaphore(MAX_CONCURRENT_EXPORTS, true);
+    private volatile LongSupplier currentTimeMillisSource = System::currentTimeMillis;
     private volatile LongSupplier nanoTimeSource = System::nanoTime;
     private volatile long storageValidationBudgetNanos = MAX_STORAGE_VALIDATION_NANOS;
 
@@ -228,7 +229,7 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
             throw new GeneralException(ResultEnum.VERSION_CONFLICT, "证明状态版本无效");
         }
         String normalizedReason = normalizeReason(reason, "owner_revoked");
-        Date now = new Date();
+        Date now = currentDate();
         int updated = issuanceMapper.update(null, new LambdaUpdateWrapper<ProofBundleIssuance>()
                 .eq(ProofBundleIssuance::getTenantId, tenantId)
                 .eq(ProofBundleIssuance::getId, issuance.getId())
@@ -402,7 +403,7 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
             return rebuildExistingLocked(file, leaf, batch, payloads, concurrent);
         }
 
-        Date issuedAt = new Date();
+        Date issuedAt = currentDate();
         String issuedStatus = hasNewerSuccessfulVersion(file)
                 ? STATUS_SUPERSEDED
                 : STATUS_ACTIVE;
@@ -1196,7 +1197,7 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
                 || issuance.getStatusVersion() == Long.MAX_VALUE) {
             throw new GeneralException(ResultEnum.VERSION_CONFLICT, "证明状态无法推进为 INVALID");
         }
-        Date now = new Date();
+        Date now = currentDate();
         int updated = issuanceMapper.update(null, new LambdaUpdateWrapper<ProofBundleIssuance>()
                 .eq(ProofBundleIssuance::getTenantId, issuance.getTenantId())
                 .eq(ProofBundleIssuance::getId, issuance.getId())
@@ -1225,7 +1226,7 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
         if (issuance.getStatusVersion() == null || issuance.getStatusVersion() == Long.MAX_VALUE) {
             throw new GeneralException(ResultEnum.VERSION_CONFLICT, "证明状态版本无效");
         }
-        Date now = new Date();
+        Date now = currentDate();
         int updated = issuanceMapper.update(null, new LambdaUpdateWrapper<ProofBundleIssuance>()
                 .eq(ProofBundleIssuance::getTenantId, file.getTenantId())
                 .eq(ProofBundleIssuance::getId, issuance.getId())
@@ -1509,6 +1510,13 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
     private String normalizeReason(String reason, String fallback) {
         String normalized = StringUtils.hasText(reason) ? reason.trim() : fallback;
         return normalized.length() <= 256 ? normalized : normalized.substring(0, 256);
+    }
+
+    /**
+     * 从统一毫秒时间源创建生命周期时间，生产默认保持系统时钟语义并允许确定性测试。
+     */
+    private Date currentDate() {
+        return new Date(currentTimeMillisSource.getAsLong());
     }
 
     /**

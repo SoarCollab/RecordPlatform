@@ -321,6 +321,22 @@ class DefaultProofVerifierTest {
                 .contains(VerificationCode.STATUS_INVALID);
     }
 
+    /** 验证状态更新时间早于签发时间时，严格拒绝该公开状态身份。 */
+    @Test
+    void shouldRejectStatusUpdatedBeforeIssuance() {
+        String updatedAt = Instant.parse(fixture.status().issuedAt()).minusMillis(1).toString();
+
+        assertStatusTimestampRejected(updatedAt);
+    }
+
+    /** 验证状态更新时间晚于校验时钟时，严格拒绝该未来状态时间。 */
+    @Test
+    void shouldRejectStatusUpdatedAfterVerificationClock() {
+        String updatedAt = VerifierTestFixture.NOW.plusMillis(1).toString();
+
+        assertStatusTimestampRejected(updatedAt);
+    }
+
     /** Rejects non-canonical or out-of-range lifecycle version strings from custom resolvers. */
     @ParameterizedTest
     @ValueSource(strings = {"+1", "01", "9223372036854775808"})
@@ -1187,6 +1203,38 @@ class DefaultProofVerifierTest {
                 fixture.original(), archive, VerifierTestFixture.context(fixture));
         assertThat(report.outcome()).isEqualTo(VerificationOutcome.INVALID);
         assertThat(report.checks()).extracting(check -> check.code()).contains(code);
+    }
+
+    /** 使用完整可信身份仅替换状态更新时间，并断言时间顺序失败唯一落到当前状态检查。 */
+    private void assertStatusTimestampRejected(String updatedAt) {
+        PublicProofStatus status = new PublicProofStatus(
+                fixture.status().proofId(),
+                fixture.status().status(),
+                fixture.status().statusVersion(),
+                fixture.status().issuedStatus(),
+                fixture.status().keyId(),
+                fixture.status().keyVersion(),
+                fixture.status().reason(),
+                fixture.status().issuedAt(),
+                updatedAt,
+                fixture.status().source());
+        VerificationContext context = new VerificationContext(
+                VerificationLimits.defaults(),
+                (keyId, keyVersion) -> Resolution.resolved(fixture.key()),
+                proofId -> Resolution.resolved(status),
+                query -> Resolution.resolved(fixture.chain()),
+                Clock.fixed(VerifierTestFixture.NOW, ZoneOffset.UTC));
+
+        VerificationReport report = verifier.verify(fixture.original(), fixture.proof(), context);
+
+        assertThat(report.outcome()).isEqualTo(VerificationOutcome.INVALID);
+        assertThat(report.checks())
+                .filteredOn(check -> "status.current".equals(check.id()))
+                .singleElement()
+                .satisfies(check -> {
+                    assertThat(check.status()).isEqualTo(VerificationCheckStatus.FAIL);
+                    assertThat(check.code()).isEqualTo(VerificationCode.STATUS_INVALID);
+                });
     }
 
     /** Requires a stable archive input error for one malformed ZIP path. */

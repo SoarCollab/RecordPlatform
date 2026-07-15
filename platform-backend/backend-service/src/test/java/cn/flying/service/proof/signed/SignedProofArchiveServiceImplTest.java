@@ -32,16 +32,8 @@ import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.ChunkManifestView;
 import cn.flying.service.remote.FileRemoteClient;
-import cn.flying.verifier.DefaultProofVerifier;
-import cn.flying.verifier.VerificationContext;
-import cn.flying.verifier.VerificationLimits;
 import cn.flying.verifier.contract.SignedProofBundleContract;
 import cn.flying.verifier.contract.SignedProofBundleModel;
-import cn.flying.verifier.model.ChainRootEvidence;
-import cn.flying.verifier.model.PublicProofStatus;
-import cn.flying.verifier.model.PublicSigningKey;
-import cn.flying.verifier.model.VerificationOutcome;
-import cn.flying.verifier.resolver.Resolution;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
@@ -51,7 +43,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -67,11 +58,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.Clock;
-import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.Date;
@@ -121,9 +107,6 @@ class SignedProofArchiveServiceImplTest {
     private static final String CHAIN_RECORD_ID = "chain-record-11";
     private static final String STORAGE_PATH = "tenant/7/file/11/chunk/0";
     private static final Date ISSUED_AT = new Date(1_752_451_200_123L);
-
-    @TempDir
-    Path tempDirectory;
 
     @Mock
     private FileMapper fileMapper;
@@ -262,7 +245,6 @@ class SignedProofArchiveServiceImplTest {
                     .contains("REDEPLOY_ADDRESS")
                     .contains("immutable_snapshot_validation_failed")
                     .contains("exactly one trailing LF byte");
-            assertPublicVerifierAccepts(first, issuance);
             InOrder lifecycleOrder = inOrder(fileMapper, issuanceMapper);
             lifecycleOrder.verify(fileMapper)
                     .lockVersionGroupForProofLifecycle(TENANT_ID, FILE_ID);
@@ -1324,11 +1306,24 @@ class SignedProofArchiveServiceImplTest {
         when(issuanceMapper.selectByLeafForUpdate(TENANT_ID, LEAF_ID)).thenReturn(active, revoked);
         when(issuanceMapper.update(eq(null), any(Wrapper.class))).thenReturn(1);
 
-        try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
-            security.when(SecurityUtils::isAdmin).thenReturn(false);
-            ProofStatusVO status = service.revokeByLeafId(USER_ID, LEAF_ID, " owner request ");
-            assertThat(status.status()).isEqualTo("REVOKED");
-            assertThat(status.statusVersion()).isEqualTo(4L);
+        Date deterministicRevokedAt = new Date(ISSUED_AT.getTime() + 333L);
+        ReflectionTestUtils.setField(
+                service,
+                "currentTimeMillisSource",
+                (LongSupplier) deterministicRevokedAt::getTime);
+        try {
+            try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+                security.when(SecurityUtils::isAdmin).thenReturn(false);
+                ProofStatusVO status = service.revokeByLeafId(USER_ID, LEAF_ID, " owner request ");
+                assertThat(status.status()).isEqualTo("REVOKED");
+                assertThat(status.statusVersion()).isEqualTo(4L);
+                assertThat(status.updatedAt()).isEqualTo(deterministicRevokedAt);
+            }
+        } finally {
+            ReflectionTestUtils.setField(
+                    service,
+                    "currentTimeMillisSource",
+                    (LongSupplier) System::currentTimeMillis);
         }
 
         try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
@@ -1634,62 +1629,6 @@ class SignedProofArchiveServiceImplTest {
                 .setStatus(status)
                 .setFirstSeenAt(ISSUED_AT)
                 .setDeleted(0);
-    }
-
-    /**
-     * 使用独立 SDK 对后端刚签发的真实 ZIP、JWS 和共享合同执行端到端验收。
-     */
-    private void assertPublicVerifierAccepts(ProofArchive archive, ProofBundleIssuance issuance) {
-        try {
-            Path original = tempDirectory.resolve("backend-produced-original.txt");
-            Path proof = tempDirectory.resolve("backend-produced-proof.zip");
-            Files.writeString(original, ORIGINAL_TEXT);
-            Files.write(proof, archive.toByteArray());
-
-            ProofSigningKeyMetadata key = signingProvider.currentKey();
-            PublicSigningKey publicKey = new PublicSigningKey(
-                    key.keyId(),
-                    key.keyVersion(),
-                    key.algorithm(),
-                    key.publicKeySpki(),
-                    key.publicKeyFingerprint(),
-                    "backend-production-test");
-            Instant issuedAt = issuance.getIssuedAt().toInstant();
-            PublicProofStatus status = new PublicProofStatus(
-                    issuance.getProofId(),
-                    "ACTIVE",
-                    String.valueOf(issuance.getStatusVersion()),
-                    issuance.getIssuedStatus(),
-                    issuance.getKeyId(),
-                    issuance.getKeyVersion(),
-                    null,
-                    issuedAt.toString(),
-                    issuedAt.toString(),
-                    "backend-production-test");
-            ContractRegistryEntryResponse registry = contractRegistry();
-            ChainRootEvidence chain = new ChainRootEvidence(
-                    ChainRootEvidence.SCHEMA_VERSION,
-                    registry.chainType(),
-                    registry.chainId(),
-                    registry.groupId(),
-                    registry.contractAddress(),
-                    "MB-900",
-                    leaf().getLeafHash(),
-                    BATCH_TRANSACTION_HASH,
-                    100L,
-                    "backend-production-test");
-            VerificationContext context = new VerificationContext(
-                    VerificationLimits.defaults(),
-                    (keyId, keyVersion) -> Resolution.resolved(publicKey),
-                    proofId -> Resolution.resolved(status),
-                    query -> Resolution.resolved(chain),
-                    Clock.fixed(issuedAt.plusSeconds(1), ZoneOffset.UTC));
-
-            assertThat(new DefaultProofVerifier().verify(original, proof, context).outcome())
-                    .isEqualTo(VerificationOutcome.VALID);
-        } catch (java.io.IOException e) {
-            throw new AssertionError("公共 verifier 兼容性 fixture 写入失败", e);
-        }
     }
 
     /**

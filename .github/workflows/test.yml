@@ -109,6 +109,35 @@ jobs:
           require_count("errors", 0)
           PY
 
+      - name: Require Proof Status Timestamp Migration IT Execution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          report = Path(
+              "platform-backend/backend-web/target/failsafe-reports/"
+              "TEST-cn.flying.migration.ProofStatusTimestampMigrationIT.xml"
+          )
+          if not report.is_file():
+              sys.exit(f"Missing required Failsafe report: {report}")
+
+          suite = ET.parse(report).getroot()
+          expected_counts = {
+              "tests": 1,
+              "skipped": 0,
+              "failures": 0,
+              "errors": 0,
+          }
+          for name, expected in expected_counts.items():
+              actual = int(suite.attrib.get(name, "-1"))
+              if actual != expected:
+                  sys.exit(
+                      f"ProofStatusTimestampMigrationIT {name}={actual}; expected {expected}"
+                  )
+          PY
+
       - name: Require Public Proof Audit Isolation IT Execution
         run: |
           python3 - <<'PY'
