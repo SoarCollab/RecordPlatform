@@ -137,7 +137,7 @@ cp nodes/127.0.0.1/sdk/* platform-fisco/src/main/resources/conf/
 
 ### 部署智能合约
 
-必须使用带门禁的部署脚本，禁止手工激活地址。脚本通过 FISCO BCOS 控制台执行：先校验版本控制中的 artifact catalog，将 `getGroupInfo` 与显式配置的 chain/group 对账，用 solc `0.8.35` 编译两个合约，并在部署前比较 canonical ABI 与 decoded bytecode；部署后校验 `getCode` 和 `contractIdentity()`。随后先发布结构化审计回执，再原子更新 `.env`。
+必须使用带门禁的部署脚本，禁止手工激活地址。脚本通过 FISCO BCOS 控制台执行：先校验版本控制中的 artifact catalog，将 `getGroupInfo` 的 chain/group/crypto/VM 与显式 EVM 部署目标对账，用固定的 FISCO solc `0.8.11+commit.6b4cc280` keccak256/sm3 编译器重建两个合约的 ECC/SM creation 与 deployed runtime，并在部署前比较 canonical ABI 与 decoded bytecode；部署后先校验 `getCode` 的完整 runtime bytes，再校验 `contractIdentity()`。随后先发布结构化审计回执，再原子更新 `.env`。
 
 该脚本有意仅支持 `BLOCKCHAIN_ACTIVE=local-fisco`。BSN FISCO/Besu 激活配置会在任何 Console 查询前被拒绝；这些网络必须使用各自经审查的 provider 部署流程。
 
@@ -167,9 +167,9 @@ python3 tools/contracts/contract_fingerprint.py verify \
 
 激活成功会同时写入 `FISCO_STORAGE_CONTRACT`、`FISCO_SHARING_CONTRACT`，以及两个合约各自完整的 `FISCO_*_DEPLOYMENT_TX/BLOCK/EFFECTIVE_AT` 三元组；两者共用同一个 UTC 生效时间。激活前会原子发布 `record-platform-contract-deployment-receipt.v1` JSON 回执，记录 catalog SHA-256、`LOCAL_FISCO` chain/group 身份和两个合约公开的名称/版本/地址/交易/区块证据，绝不记录 RPC URL、证书、私钥或令牌。
 
-禁止只复制一个地址或只配置证据三元组的一部分。chain/group 错误、catalog 身份不一致、solc 产物漂移、runtime code 为空、身份调用非零/revert、响应解析错误或回执写入失败时，原 `.env` 保持不变。Dry-run 不调用 Console、不生成生效时间或回执，也不修改文件或链状态。Console 的 `contract2java.sh` 必须支持 `-v 0.8.35`，并产出与签入 solc `0.8.35` ABI/BIN 等价的制品；任何不一致都会在第一笔部署交易前被阻断。
+禁止只复制一个地址或只配置证据三元组的一部分。chain/group 错误、WASM/crypto 组合不受支持、catalog 身份不一致、solc 产物漂移、runtime code 缺失或与实际 ECC/SM 变体的签入 runtime 不一致、身份调用非零/revert、响应解析错误或回执写入失败时，原 `.env` 保持不变。Dry-run 不调用 Console、不生成生效时间或回执，也不修改文件或链状态。Console 的 `contract2java.sh` 必须支持 `-v 0.8.11`，并能提供 `$HOME/.fisco/solc/0.8.11/{keccak256,sm3}/solc`；任何 ABI、creation 或 runtime 不一致都会在第一笔部署交易前被阻断。
 
-Artifact 升级属于需审查的代码变更：两份 Solidity 源码、签入 ABI/ECC/SM bytecode、语义版本、生命周期状态和 catalog 指纹必须一起更新。历史 proof 与审计需要的 deprecated/revoked 制品及部署回执必须保留。升级与回滚规则见[区块链集成](../architecture/blockchain-integration.md#合约-registry-与制品指纹)，脚本全部参数见 `scripts/README.md`。
+Artifact 升级属于需审查的代码变更：两份 Solidity 源码、签入 ABI、ECC/SM creation/runtime bytecode、语义版本、生命周期状态和 catalog 指纹必须一起更新。历史 proof 与审计需要的 deprecated/revoked 制品及部署回执必须保留。升级与回滚规则见[区块链集成](../architecture/blockchain-integration.md#合约-registry-与制品指纹)，脚本全部参数见 `scripts/README.md`。
 
 ::: info
 节点和控制台搭建流程请参考 [FISCO BCOS 官方文档](https://fisco-bcos-doc.readthedocs.io/zh-cn/latest/)。RecordPlatform 合约激活仍必须使用上方仓库门禁脚本。

@@ -17,11 +17,19 @@ public class ContractConstants {
 
   public static final String SharingGmBinary;
 
+  public static final String SharingRuntimeBinary;
+
+  public static final String SharingGmRuntimeBinary;
+
   public static final String StorageAbi;
 
   public static final String StorageBinary;
 
   public static final String StorageGmBinary;
+
+  public static final String StorageRuntimeBinary;
+
+  public static final String StorageGmRuntimeBinary;
 
   static {
     try {
@@ -30,9 +38,13 @@ public class ContractConstants {
       SharingAbi = loadResource(classLoader, "abi/Sharing.abi");
       SharingBinary = loadResource(classLoader, "bin/ecc/Sharing.bin");
       SharingGmBinary = loadResource(classLoader, "bin/sm/Sharing.bin");
+      SharingRuntimeBinary = loadResource(classLoader, "bin/runtime/ecc/Sharing.bin");
+      SharingGmRuntimeBinary = loadResource(classLoader, "bin/runtime/sm/Sharing.bin");
       StorageAbi = loadResource(classLoader, "abi/Storage.abi");
       StorageBinary = loadResource(classLoader, "bin/ecc/Storage.bin");
       StorageGmBinary = loadResource(classLoader, "bin/sm/Storage.bin");
+      StorageRuntimeBinary = loadResource(classLoader, "bin/runtime/ecc/Storage.bin");
+      StorageGmRuntimeBinary = loadResource(classLoader, "bin/runtime/sm/Storage.bin");
 
       log.info("合约 ABI 和二进制文件加载成功");
     } catch (Exception e) {

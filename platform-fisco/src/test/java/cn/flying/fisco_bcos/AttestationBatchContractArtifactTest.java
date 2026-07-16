@@ -31,16 +31,25 @@ class AttestationBatchContractArtifactTest {
     }
 
     /**
-     * 验证 ECC 与 SM 部署目录使用同一个已更新且非空的 EVM 字节码产物。
+     * 验证 ECC/SM creation 与 deployed runtime 均为独立、非空的真实编译产物。
      */
     @Test
-    void sharingContractBinaries_shouldBeUpdatedAndSynchronized() throws Exception {
+    void sharingContractBinaries_shouldKeepCreationAndRuntimeVariantsDistinct() throws Exception {
         String ecc = Files.readString(modulePath("src/main/resources/bin/ecc/Sharing.bin"));
         String sm = Files.readString(modulePath("src/main/resources/bin/sm/Sharing.bin"));
+        String eccRuntime = Files.readString(
+                modulePath("src/main/resources/bin/runtime/ecc/Sharing.bin"));
+        String smRuntime = Files.readString(
+                modulePath("src/main/resources/bin/runtime/sm/Sharing.bin"));
 
-        assertThat(ecc).isNotBlank().isEqualTo(sm);
+        assertThat(ecc).isNotBlank().isNotEqualTo(sm);
+        assertThat(eccRuntime).isNotBlank().isNotEqualTo(smRuntime);
+        assertThat(eccRuntime).isNotEqualTo(ecc);
+        assertThat(smRuntime).isNotEqualTo(sm);
         assertThat(ContractConstants.SharingBinary).isEqualTo(ecc);
         assertThat(ContractConstants.SharingGmBinary).isEqualTo(sm);
+        assertThat(ContractConstants.SharingRuntimeBinary).isEqualTo(eccRuntime);
+        assertThat(ContractConstants.SharingGmRuntimeBinary).isEqualTo(smRuntime);
     }
 
     /**

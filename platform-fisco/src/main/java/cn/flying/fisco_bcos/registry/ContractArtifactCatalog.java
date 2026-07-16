@@ -32,8 +32,10 @@ public record ContractArtifactCatalog(
      * @param sourceSha256 规范化源码指纹
      * @param abiPath ABI 路径
      * @param abiSha256 canonical ABI 指纹
-     * @param bytecodePaths ECC/SM creation bytecode 路径
-     * @param bytecodeSha256 ECC/SM creation bytecode 指纹
+     * @param creationBytecodePaths ECC/SM creation bytecode 路径
+     * @param creationBytecodeSha256 ECC/SM creation bytecode 指纹
+     * @param runtimeBytecodePaths ECC/SM deployed runtime bytecode 路径
+     * @param runtimeBytecodeSha256 ECC/SM deployed runtime bytecode 指纹
      */
     public record ContractArtifact(
             String contractName,
@@ -45,8 +47,10 @@ public record ContractArtifactCatalog(
             String sourceSha256,
             String abiPath,
             String abiSha256,
-            Map<String, String> bytecodePaths,
-            Map<String, String> bytecodeSha256
+            Map<String, String> creationBytecodePaths,
+            Map<String, String> creationBytecodeSha256,
+            Map<String, String> runtimeBytecodePaths,
+            Map<String, String> runtimeBytecodeSha256
     ) {
     }
 }

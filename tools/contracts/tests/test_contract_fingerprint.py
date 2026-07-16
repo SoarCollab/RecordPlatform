@@ -172,6 +172,25 @@ class ContractFingerprintTest(unittest.TestCase):
             with self.assertRaisesRegex(FingerprintError, "abiSha256 drift"):
                 verify_catalog(root, catalog_path)
 
+    def test_runtime_bytecode_drift_is_independent_from_creation_bytecode(self) -> None:
+        """仅 runtime 漂移时也必须失败，creation 指纹不能替代运行时锚点。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            self._write_artifacts(root)
+            catalog_path = root / "catalog.json"
+            refreshed = refresh_catalog(root, self._catalog_template())
+            catalog_path.write_text(
+                json.dumps(refreshed, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            (root / "bin/runtime/ecc/Sharing.bin").write_text(
+                "60046004",
+                encoding="ascii",
+            )
+
+            with self.assertRaisesRegex(FingerprintError, "runtime.*drift"):
+                verify_catalog(root, catalog_path)
+
     def test_source_copy_drift_is_rejected_during_refresh(self) -> None:
         """部署源与运行时源不一致时不得生成新的 catalog。"""
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -264,14 +283,16 @@ class ContractFingerprintTest(unittest.TestCase):
         with self.assertRaisesRegex(FingerprintError, "versioned schema"):
             refresh_catalog(Path.cwd(), catalog)
 
-    def test_bytecode_fingerprint_map_rejects_extra_algorithms(self) -> None:
-        """签入 hash map 必须与 Java 一样只接受 ecc 和 sm。"""
+    def test_bytecode_fingerprint_maps_reject_extra_variants(self) -> None:
+        """creation/runtime hash map 都必须与 Java 一样只接受 ecc 和 sm。"""
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             self._write_artifacts(root)
             catalog_path = root / "catalog.json"
             catalog = refresh_catalog(root, self._catalog_template())
-            catalog["contracts"][0]["bytecodeSha256"]["legacy"] = "sha256:" + "0" * 64
+            catalog["contracts"][0]["runtimeBytecodeSha256"]["legacy"] = (
+                "sha256:" + "0" * 64
+            )
             catalog_path.write_text(
                 json.dumps(catalog, ensure_ascii=False),
                 encoding="utf-8",
@@ -280,9 +301,30 @@ class ContractFingerprintTest(unittest.TestCase):
             with self.assertRaisesRegex(FingerprintError, "exactly ecc and sm"):
                 verify_catalog(root, catalog_path)
 
+    def test_creation_and_runtime_must_use_distinct_artifact_paths(self) -> None:
+        """同一文件不得同时冒充 creation 与 deployed runtime 制品。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            self._write_artifacts(root)
+            catalog = self._catalog_template()
+            catalog["contracts"][0]["runtimeBytecodePaths"]["ecc"] = (
+                catalog["contracts"][0]["creationBytecodePaths"]["ecc"]
+            )
+
+            with self.assertRaisesRegex(FingerprintError, "distinct artifact paths"):
+                refresh_catalog(root, catalog)
+
     def _write_artifacts(self, root: Path) -> None:
         """创建 catalog 测试所需的最小双份源码、ABI 和 bin。"""
-        for directory in ("contract", "runtime", "abi", "bin/ecc", "bin/sm"):
+        for directory in (
+            "contract",
+            "runtime",
+            "abi",
+            "bin/ecc",
+            "bin/sm",
+            "bin/runtime/ecc",
+            "bin/runtime/sm",
+        ):
             (root / directory).mkdir(parents=True, exist_ok=True)
         for contract_name in ("Sharing", "Storage"):
             source = (
@@ -301,7 +343,15 @@ class ContractFingerprintTest(unittest.TestCase):
                 encoding="ascii",
             )
             (root / f"bin/sm/{contract_name}.bin").write_text(
-                "60006000",
+                "60016001",
+                encoding="ascii",
+            )
+            (root / f"bin/runtime/ecc/{contract_name}.bin").write_text(
+                "60026002",
+                encoding="ascii",
+            )
+            (root / f"bin/runtime/sm/{contract_name}.bin").write_text(
+                "60036003",
                 encoding="ascii",
             )
 
@@ -333,11 +383,19 @@ class ContractFingerprintTest(unittest.TestCase):
             "sourceSha256": "sha256:" + "0" * 64,
             "abiPath": f"abi/{contract_name}.abi",
             "abiSha256": "sha256:" + "0" * 64,
-            "bytecodePaths": {
+            "creationBytecodePaths": {
                 "ecc": f"bin/ecc/{contract_name}.bin",
                 "sm": f"bin/sm/{contract_name}.bin",
             },
-            "bytecodeSha256": {
+            "creationBytecodeSha256": {
+                "ecc": "sha256:" + "0" * 64,
+                "sm": "sha256:" + "0" * 64,
+            },
+            "runtimeBytecodePaths": {
+                "ecc": f"bin/runtime/ecc/{contract_name}.bin",
+                "sm": f"bin/runtime/sm/{contract_name}.bin",
+            },
+            "runtimeBytecodeSha256": {
                 "ecc": "sha256:" + "0" * 64,
                 "sm": "sha256:" + "0" * 64,
             },

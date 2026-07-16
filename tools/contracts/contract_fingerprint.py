@@ -16,7 +16,7 @@ from typing import Any, Sequence
 ABI_ALGORITHM = "ABI-CANONICAL-JSON-SHA256-V1"
 BYTECODE_ALGORITHM = "EVM-BYTECODE-SHA256-V1"
 SOURCE_ALGORITHM = "SOURCE-UTF8-LF-SHA256-V1"
-CATALOG_SCHEMA = "record-platform-contract-artifacts.v1"
+CATALOG_SCHEMA = "record-platform-contract-artifacts.v2"
 MAX_ARTIFACT_BYTES = 5 * 1024 * 1024
 HASH_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 SEMANTIC_VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
@@ -43,9 +43,12 @@ CONTRACT_FIELDS = {
     "sourceSha256",
     "abiPath",
     "abiSha256",
-    "bytecodePaths",
-    "bytecodeSha256",
+    "creationBytecodePaths",
+    "creationBytecodeSha256",
+    "runtimeBytecodePaths",
+    "runtimeBytecodeSha256",
 }
+BYTECODE_VARIANTS = ("ecc", "sm")
 
 
 class FingerprintError(ValueError):
@@ -176,6 +179,18 @@ def fingerprint_bytecode(path: Path) -> str:
     return sha256_label(normalize_bytecode(_read_bounded_bytes(path), path))
 
 
+def fingerprint_bytecode_stream(stream: Any) -> str:
+    """从大小受限的二进制流计算 EVM bytecode 指纹。"""
+    raw = stream.read(MAX_ARTIFACT_BYTES + 1)
+    if not raw:
+        raise FingerprintError("Bytecode is empty: <stdin>")
+    if len(raw) > MAX_ARTIFACT_BYTES:
+        raise FingerprintError(
+            f"Artifact exceeds {MAX_ARTIFACT_BYTES} bytes: <stdin>"
+        )
+    return sha256_label(normalize_bytecode(raw, Path("<stdin>")))
+
+
 def fingerprint_source(path: Path) -> str:
     """以 UTF-8 和 LF 换行规范计算 Solidity 源码指纹。"""
     raw = _read_bounded_bytes(path)
@@ -279,6 +294,24 @@ def _validate_catalog_lifecycle(contracts: list[dict[str, Any]]) -> None:
         )
 
 
+def _resolve_bytecode_paths(
+    project_root: Path,
+    contract: dict[str, Any],
+    identity: tuple[str, str],
+    field_name: str,
+) -> dict[str, Path]:
+    """解析且严格校验一组 ECC/SM creation 或 runtime artifact 路径。"""
+    paths = contract.get(field_name)
+    if not isinstance(paths, dict) or set(paths) != set(BYTECODE_VARIANTS):
+        raise FingerprintError(
+            f"{identity[0]} {field_name} must contain exactly ecc and sm"
+        )
+    return {
+        variant: _resolve_catalog_path(project_root, paths[variant])
+        for variant in BYTECODE_VARIANTS
+    }
+
+
 def refresh_catalog(project_root: Path, catalog: dict[str, Any]) -> dict[str, Any]:
     """重算 catalog 中所有 artifact 指纹并返回不修改输入的副本。"""
     refreshed = copy.deepcopy(_validate_catalog_header(catalog))
@@ -318,14 +351,29 @@ def refresh_catalog(project_root: Path, catalog: dict[str, Any]) -> dict[str, An
         abi_path = _resolve_catalog_path(project_root, contract.get("abiPath"))
         contract["abiSha256"] = fingerprint_abi(abi_path)
 
-        bytecode_paths = contract.get("bytecodePaths")
-        if not isinstance(bytecode_paths, dict) or set(bytecode_paths) != {"ecc", "sm"}:
-            raise FingerprintError(f"{identity[0]} bytecodePaths must contain ecc and sm")
-        contract["bytecodeSha256"] = {
-            crypto_type: fingerprint_bytecode(
-                _resolve_catalog_path(project_root, bytecode_paths[crypto_type])
+        creation_paths = _resolve_bytecode_paths(
+            project_root,
+            contract,
+            identity,
+            "creationBytecodePaths",
+        )
+        runtime_paths = _resolve_bytecode_paths(
+            project_root,
+            contract,
+            identity,
+            "runtimeBytecodePaths",
+        )
+        if len(set(creation_paths.values()) | set(runtime_paths.values())) != 4:
+            raise FingerprintError(
+                f"{identity[0]} creation/runtime variants must use distinct artifact paths"
             )
-            for crypto_type in ("ecc", "sm")
+        contract["creationBytecodeSha256"] = {
+            variant: fingerprint_bytecode(creation_paths[variant])
+            for variant in BYTECODE_VARIANTS
+        }
+        contract["runtimeBytecodeSha256"] = {
+            variant: fingerprint_bytecode(runtime_paths[variant])
+            for variant in BYTECODE_VARIANTS
         }
     return refreshed
 
@@ -342,20 +390,27 @@ def verify_catalog(project_root: Path, catalog_path: Path) -> dict[str, Any]:
                 raise FingerprintError(
                     f"{name} {field} drift: expected {expected[field]}, actual {actual[field]}"
                 )
-        expected_bytecode = expected.get("bytecodeSha256")
-        if not isinstance(expected_bytecode, dict) or set(expected_bytecode) != {"ecc", "sm"}:
-            raise FingerprintError(f"{name}.bytecodeSha256 must contain exactly ecc and sm")
-        for crypto_type in ("ecc", "sm"):
-            _validate_hash(
-                expected_bytecode.get(crypto_type),
-                f"{name}.bytecodeSha256.{crypto_type}",
-            )
-            if expected_bytecode[crypto_type] != actual["bytecodeSha256"][crypto_type]:
+        for artifact_kind in ("creation", "runtime"):
+            field = f"{artifact_kind}BytecodeSha256"
+            expected_bytecode = expected.get(field)
+            if (
+                not isinstance(expected_bytecode, dict)
+                or set(expected_bytecode) != set(BYTECODE_VARIANTS)
+            ):
                 raise FingerprintError(
-                    f"{name} {crypto_type} bytecode drift: expected "
-                    f"{expected_bytecode[crypto_type]}, actual "
-                    f"{actual['bytecodeSha256'][crypto_type]}"
+                    f"{name}.{field} must contain exactly ecc and sm"
                 )
+            for variant in BYTECODE_VARIANTS:
+                _validate_hash(
+                    expected_bytecode.get(variant),
+                    f"{name}.{field}.{variant}",
+                )
+                if expected_bytecode[variant] != actual[field][variant]:
+                    raise FingerprintError(
+                        f"{name} {variant} {artifact_kind} bytecode drift: expected "
+                        f"{expected_bytecode[variant]}, actual "
+                        f"{actual[field][variant]}"
+                    )
     return catalog
 
 
@@ -391,7 +446,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="比较两份 EVM bytecode 指纹",
     )
     compare_bytecode.add_argument("--expected", type=Path, required=True)
-    compare_bytecode.add_argument("--actual", type=Path, required=True)
+    actual_bytecode = compare_bytecode.add_mutually_exclusive_group(required=True)
+    actual_bytecode.add_argument("--actual", type=Path)
+    actual_bytecode.add_argument(
+        "--actual-stdin",
+        action="store_true",
+        help="从 stdin 读取实际 bytecode，避免把链上 code 写入临时文件",
+    )
 
     fingerprint = subparsers.add_parser("fingerprint", help="输出单个 ABI 或 bytecode 指纹")
     group = fingerprint.add_mutually_exclusive_group(required=True)
@@ -423,7 +484,11 @@ def run_command(args: argparse.Namespace) -> int:
         return 0
     if args.command == "compare-bytecode":
         expected = fingerprint_bytecode(args.expected)
-        actual = fingerprint_bytecode(args.actual)
+        actual = (
+            fingerprint_bytecode_stream(sys.stdin.buffer)
+            if getattr(args, "actual_stdin", False)
+            else fingerprint_bytecode(args.actual)
+        )
         if expected != actual:
             raise FingerprintError(
                 f"EVM bytecode mismatch: expected {expected}, actual {actual}"

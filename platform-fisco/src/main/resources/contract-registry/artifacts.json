@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "record-platform-contract-artifacts.v1",
+  "schemaVersion": "record-platform-contract-artifacts.v2",
   "abiFingerprintAlgorithm": "ABI-CANONICAL-JSON-SHA256-V1",
   "bytecodeFingerprintAlgorithm": "EVM-BYTECODE-SHA256-V1",
   "sourceFingerprintAlgorithm": "SOURCE-UTF8-LF-SHA256-V1",
@@ -17,13 +17,21 @@
       "sourceSha256": "sha256:902bb69845b56fa846191ea71c6159fa6b3b02c37d111b908ff33aa3501bcbbd",
       "abiPath": "platform-fisco/src/main/resources/abi/Sharing.abi",
       "abiSha256": "sha256:ceab3800ebf3303970fccbdf885adf51e5bdfe2b320ea1c08328744891502f20",
-      "bytecodePaths": {
+      "creationBytecodePaths": {
         "ecc": "platform-fisco/src/main/resources/bin/ecc/Sharing.bin",
         "sm": "platform-fisco/src/main/resources/bin/sm/Sharing.bin"
       },
-      "bytecodeSha256": {
-        "ecc": "sha256:84a9388521295d8999985b4231e15bb8b78ea702259b1c331825471bdb7bf436",
-        "sm": "sha256:84a9388521295d8999985b4231e15bb8b78ea702259b1c331825471bdb7bf436"
+      "creationBytecodeSha256": {
+        "ecc": "sha256:15ff448c9bd852895c990dd43fbb259b7cd840078da1159b3a5197cf4380c470",
+        "sm": "sha256:9a3a297c9a8f207e3a7b50b53cb14463877d8f6ae0f1fc9721ebf59e0d139805"
+      },
+      "runtimeBytecodePaths": {
+        "ecc": "platform-fisco/src/main/resources/bin/runtime/ecc/Sharing.bin",
+        "sm": "platform-fisco/src/main/resources/bin/runtime/sm/Sharing.bin"
+      },
+      "runtimeBytecodeSha256": {
+        "ecc": "sha256:1d3ab92fcecd2984920b195bcf432e4ccf446a4ec33c1c092da1581c19a5dc41",
+        "sm": "sha256:f7b34ec938cf5619b8fa500b9931997013e8dc6e36bad05181e9d6bd86b4db55"
       }
     },
     {
@@ -39,13 +47,21 @@
       "sourceSha256": "sha256:e38c55a39ce33d9ae9a39745ada76b8acae9ae3d23d57a1f21eb5d40e3733246",
       "abiPath": "platform-fisco/src/main/resources/abi/Storage.abi",
       "abiSha256": "sha256:f62e5ade6b39d589ddcf2e53b15f0afb1cfb6550257ec468e9dff9cbe23cedf4",
-      "bytecodePaths": {
+      "creationBytecodePaths": {
         "ecc": "platform-fisco/src/main/resources/bin/ecc/Storage.bin",
         "sm": "platform-fisco/src/main/resources/bin/sm/Storage.bin"
       },
-      "bytecodeSha256": {
-        "ecc": "sha256:0b4118f24b33d68fc6bfa4b5ed6e581cc6df5705dc2dc7ba9c56170442f6822c",
-        "sm": "sha256:0b4118f24b33d68fc6bfa4b5ed6e581cc6df5705dc2dc7ba9c56170442f6822c"
+      "creationBytecodeSha256": {
+        "ecc": "sha256:6f48980a86c9b63345eeb3413351145c5da4510d188e1231a17a85ee5ad48ec8",
+        "sm": "sha256:86014b1ffa14fecdd9376b4c10385395e81f19be69a7d340c494a28b6b552275"
+      },
+      "runtimeBytecodePaths": {
+        "ecc": "platform-fisco/src/main/resources/bin/runtime/ecc/Storage.bin",
+        "sm": "platform-fisco/src/main/resources/bin/runtime/sm/Storage.bin"
+      },
+      "runtimeBytecodeSha256": {
+        "ecc": "sha256:9b77467916b58921f0577ec173539144a91a4e10103cd6191ff331f03fa10204",
+        "sm": "sha256:b15d1d1f223f031fc9c34640ca97960adda1b80aafe97562a7f5dfe9b48e6620"
       }
     }
   ]

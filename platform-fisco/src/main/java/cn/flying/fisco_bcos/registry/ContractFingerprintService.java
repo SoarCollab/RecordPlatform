@@ -47,6 +47,7 @@ public class ContractFingerprintService {
                 .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
                 .build();
         this.strictObjectMapper = new ObjectMapper(factory)
+                .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
     }
 
