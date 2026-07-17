@@ -402,6 +402,7 @@ class OperationLogAspectTest {
                 description = "sensitive audit",
                 saveRequestData = false)
         private ResponseEntity<Void> executeSensitive(String token) {
+            assertThat(token).isNotNull();
             return ResponseEntity.ok().build();
         }
     }

@@ -121,8 +121,8 @@ public class SseController {
             return null;
         }
         try {
-            Long userId = Long.parseLong(userInfo[0]);
-            Long tenantId = Long.parseLong(userInfo[1]);
+            long userId = Long.parseLong(userInfo[0]);
+            long tenantId = Long.parseLong(userInfo[1]);
             UserRole role = UserRole.getRole(userInfo[2]);
             if (userId <= 0 || tenantId <= 0 || role == UserRole.ROLE_NOOP) {
                 return null;
