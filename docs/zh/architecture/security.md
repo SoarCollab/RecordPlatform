@@ -25,8 +25,10 @@ EventSource 不支持自定义 Header，因此 SSE 使用 URL Token：
 
 ```
 1. POST /api/v1/auth/tokens/sse → 获取短期 Token（30 秒，一次性）
-2. GET /api/v1/sse/connect?token=<token> → 建立 SSE 连接
+2. GET /api/v1/sse/connect?token=<token>&x-tenant-id=<tenantHint> → 建立 SSE 连接
 ```
+
+`X-Tenant-ID` 请求头、`x-tenant-id` query 和旧 `tenantId` query 都只是不可信的 namespace 提示。只有 Redis 原子消费短令牌且令牌 tenant 与提示一致后，服务端才会建立 `TenantContext`、请求审计属性和 MDC 身份。无效、过期、重放、损坏、租户不匹配或 Redis 异常的握手均不会创建 emitter；匿名失败审计固定落在 system tenant `0`，一次性 token 原文不会进入文本日志和数据库请求参数。
 
 ## 授权 (RBAC)
 

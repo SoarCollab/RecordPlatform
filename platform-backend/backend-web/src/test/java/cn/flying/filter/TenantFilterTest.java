@@ -447,17 +447,16 @@ class TenantFilterTest {
     }
 
     /**
-     * SSE 连接端点允许从 query 参数读取租户 ID（EventSource 不支持自定义 Header）。
+     * SSE 连接端点只能把 query 租户 ID 保存为不可信提示，不能提前建立权威租户上下文。
      */
     @Test
-    @DisplayName("should read tenant id from query params for SSE connect")
-    void shouldReadTenantIdFromQueryParamsForSseConnect() throws ServletException, IOException {
+    @DisplayName("should keep SSE query tenant as an untrusted hint")
+    void shouldKeepSseQueryTenantAsUntrustedHint() throws ServletException, IOException {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/sse/connect");
         request.setServletPath("/api/v1/sse/connect");
         request.addParameter("x-tenant-id", "7");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        // 使用 AtomicLong 在过滤链执行期间捕获 TenantContext
         AtomicLong capturedTenantId = new AtomicLong(-1);
         doAnswer(invocation -> {
             capturedTenantId.set(TenantContext.getTenantId() != null ? TenantContext.getTenantId() : -1);
@@ -467,11 +466,53 @@ class TenantFilterTest {
         filter.doFilterInternal(request, response, filterChain);
 
         verify(filterChain).doFilter(request, response);
-        // 在过滤链执行期间 TenantContext 应已设置
-        assertEquals(7L, capturedTenantId.get());
-        // 请求属性应被设置
-        assertEquals(7L, request.getAttribute(Const.ATTR_TENANT_ID));
-        // 过滤器完成后 TenantContext 应被清理
+        assertEquals(-1L, capturedTenantId.get());
+        assertNull(request.getAttribute(Const.ATTR_TENANT_ID));
+        assertEquals(7L, request.getAttribute(Const.ATTR_SSE_TENANT_HINT));
+        assertNull(TenantContext.getTenantId());
+    }
+
+    /**
+     * SSE 连接头中的租户 ID 也只能作为 namespace 提示，不能建立权威上下文。
+     */
+    @Test
+    @DisplayName("should keep SSE header tenant as an untrusted hint")
+    void shouldKeepSseHeaderTenantAsUntrustedHint() throws ServletException, IOException {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/sse/connect");
+        request.setServletPath("/api/v1/sse/connect");
+        request.addHeader("X-Tenant-ID", "8");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        AtomicLong capturedTenantId = new AtomicLong(-1);
+        doAnswer(invocation -> {
+            capturedTenantId.set(TenantContext.getTenantId() != null ? TenantContext.getTenantId() : -1);
+            return null;
+        }).when(filterChain).doFilter(any(), any());
+
+        filter.doFilterInternal(request, response, filterChain);
+
+        assertEquals(-1L, capturedTenantId.get());
+        assertNull(request.getAttribute(Const.ATTR_TENANT_ID));
+        assertEquals(8L, request.getAttribute(Const.ATTR_SSE_TENANT_HINT));
+        assertNull(TenantContext.getTenantId());
+    }
+
+    /**
+     * 旧 tenantId query 参数继续兼容，但仍只能产生不可信提示。
+     */
+    @Test
+    @DisplayName("should keep legacy SSE tenantId query as an untrusted hint")
+    void shouldKeepLegacySseTenantIdAsUntrustedHint() throws ServletException, IOException {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/sse/connect");
+        request.setServletPath("/api/v1/sse/connect");
+        request.addParameter("tenantId", "9");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilterInternal(request, response, filterChain);
+
+        verify(filterChain).doFilter(request, response);
+        assertNull(request.getAttribute(Const.ATTR_TENANT_ID));
+        assertEquals(9L, request.getAttribute(Const.ATTR_SSE_TENANT_HINT));
         assertNull(TenantContext.getTenantId());
     }
 

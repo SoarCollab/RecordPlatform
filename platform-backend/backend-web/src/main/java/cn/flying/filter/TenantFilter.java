@@ -115,9 +115,10 @@ public class TenantFilter extends OncePerRequestFilter {
                 return;
             }
 
+            boolean sseConnectRequest = SSE_CONNECT_PATH.equals(requestPath);
             if (tenantIdHeader == null) {
-                // 仅对 SSE 连接接口允许从参数中获取租户ID，因为 EventSource 不支持自定义 Header
-                if (SSE_CONNECT_PATH.equals(requestPath)) {
+                // 仅对 SSE 连接接口允许从参数中获取租户提示，因为 EventSource 不支持自定义 Header
+                if (sseConnectRequest) {
                     tenantIdHeader = request.getParameter("x-tenant-id");
                     if (tenantIdHeader == null || tenantIdHeader.isEmpty()) {
                         tenantIdHeader = request.getParameter("tenantId");
@@ -141,6 +142,14 @@ public class TenantFilter extends OncePerRequestFilter {
             } catch (NumberFormatException e) {
                 log.warn("租户ID格式错误: {}", tenantIdHeader);
                 sendErrorResponse(response, ResultEnum.PARAM_IS_INVALID, "租户标识格式错误");
+                return;
+            }
+
+            if (sseConnectRequest) {
+                // SSE 匿名握手只能获得 Redis namespace 提示，短令牌消费成功前不能建立权威租户上下文
+                request.setAttribute(Const.ATTR_SSE_TENANT_HINT, tenantId);
+                log.debug("SSE 租户提示已解析: uri={}", requestUri);
+                filterChain.doFilter(request, response);
                 return;
             }
 

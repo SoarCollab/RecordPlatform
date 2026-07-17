@@ -507,9 +507,9 @@ flowchart LR
 SSE connections use a short-lived one-time token:
 
 1. Call `POST /api/v1/auth/tokens/sse` with regular JWT auth
-2. Connect via `GET /api/v1/sse/connect?token={sseToken}&connectionId={optional}`
+2. Connect via `GET /api/v1/sse/connect?token={sseToken}&x-tenant-id={tenantHint}`
 
-> `GET /api/v1/sse/connect` is publicly exposed in Spring Security but still requires valid short-lived token authentication.
+> `GET /api/v1/sse/connect` is publicly exposed in Spring Security but still requires valid short-lived token authentication. The tenant value is only a Redis namespace hint; validated token tenant/user/role data is authoritative.
 
 ### Monitoring Capacity Semantics
 

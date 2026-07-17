@@ -28,6 +28,7 @@ public final class Const {
     public final static String ATTR_USER_ID = "userId";
     public final static String ATTR_USER_ROLE = "userRole";
     public final static String ATTR_TENANT_ID = "tenantId";
+    public final static String ATTR_SSE_TENANT_HINT = "sseTenantHint";
     public final static String ATTR_REQ_ID = "reqId";
     public final static String ATTR_LOGIN_USERNAME = "loginUsername";
     //分布式追踪

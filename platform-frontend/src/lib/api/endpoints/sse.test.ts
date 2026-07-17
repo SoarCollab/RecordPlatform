@@ -96,6 +96,7 @@ describe("sse endpoints", () => {
     const es = getLatestEventSource();
     expect(es.url).toContain("/sse/connect?");
     expect(es.url).toContain("token=short-token");
+    expect(es.url).toContain("x-tenant-id=1");
     expect(es.url).not.toContain("connectionId=");
 
     es.emitOpen();

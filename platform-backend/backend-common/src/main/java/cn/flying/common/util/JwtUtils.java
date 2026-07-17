@@ -403,7 +403,7 @@ public class JwtUtils {
         String value = userId + ":" + tenantId + ":" + role;
         template.opsForValue().set(key, value, Const.SSE_TOKEN_TTL, TimeUnit.SECONDS);
 
-        log.debug("SSE token created for user {}: {}", userId, token);
+        log.debug("SSE token created: userId={}, tenantId={}", userId, tenantId);
         return token;
     }
 
@@ -424,17 +424,17 @@ public class JwtUtils {
         // 原子性地获取并删除（防止并发消费）
         String value = template.opsForValue().getAndDelete(key);
         if (value == null) {
-            log.debug("SSE token not found or already consumed: {}", token);
+            log.debug("SSE token not found or already consumed");
             return null;
         }
 
-        String[] parts = value.split(":");
+        String[] parts = value.split(":", -1);
         if (parts.length != 3) {
-            log.warn("Invalid SSE token format: {}", token);
+            log.warn("Invalid SSE token payload format");
             return null;
         }
 
-        log.debug("SSE token consumed for user {}: {}", parts[0], token);
+        log.debug("SSE token consumed");
         return parts;
     }
 }

@@ -46,7 +46,7 @@ Based on `SecurityConfiguration`:
 ### 3) SSE dual-token flow
 
 - `POST /api/v1/auth/tokens/sse`: requires standard JWT
-- `GET /api/v1/sse/connect?token=...`: public route, but short-lived one-time token is mandatory
+- `GET /api/v1/sse/connect?token=...&x-tenant-id=...`: public route, but a short-lived one-time token is mandatory. The tenant query value is only a Redis namespace hint; the consumed token is the authority for tenant, user, and role.
 
 ## Endpoints by Module
 
@@ -321,8 +321,10 @@ Recommended flow:
 
 ```text
 1) POST /api/v1/auth/tokens/sse   (Authorization: Bearer <jwt>)
-2) GET  /api/v1/sse/connect?token=<sseToken>&connectionId=<optional>
+2) GET  /api/v1/sse/connect?token=<sseToken>&x-tenant-id=<tenantHint>
 ```
+
+Clients capable of custom headers may use `X-Tenant-ID`; `tenantId` remains accepted as a legacy query alias for `x-tenant-id`. A missing or mismatched hint, an invalid/expired/consumed token, or a damaged token payload fails before an emitter is created. The raw one-time token is omitted from operation logs and persisted audit parameters.
 
 Typical event types:
 

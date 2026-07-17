@@ -17,6 +17,7 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.annotation.Pointcut;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.slf4j.MDC;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.stereotype.Component;
@@ -142,14 +143,14 @@ public class OperationLogAspect {
                 authorities = user.getAuthorities().toString();
             }
             
-            // 获取请求参数
-            String requestParams = getRequestParams(request, joinPoint);
-            
             // 获取操作注解信息
             OperationLog operationLogAnnotation = getOperationLogAnnotation(joinPoint);
             String module = operationLogAnnotation != null ? operationLogAnnotation.module() : "";
             String operationType = operationLogAnnotation != null ? operationLogAnnotation.operationType() : "";
             String description = operationLogAnnotation != null ? operationLogAnnotation.description() : "";
+            String requestParams = operationLogAnnotation != null && !operationLogAnnotation.saveRequestData()
+                    ? "<omitted>"
+                    : getRequestParams(request, joinPoint);
             
             // 记录请求开始的日志
             log.info("操作日志 - 开始 | 模块: {} | 类型: {} | 描述: {} | URL: \"{}\" ({}) | IP: {} | 用户: {} | 角色: {} | 参数: {}",
@@ -243,14 +244,16 @@ public class OperationLogAspect {
                         : SensitiveDataMasker.maskAndSerialize(result));
             }
             
-            // 设置操作状态和时间
-            operationLog.setStatus(e == null ? 0 : 1);
+            // 设置操作状态和时间，ResponseEntity 4xx/5xx 也属于失败
+            String failureMessage = resolveFailureMessage(result, e);
+            boolean failed = failureMessage != null;
+            operationLog.setStatus(failed ? 1 : 0);
             operationLog.setOperationTime(LocalDateTime.now());
             operationLog.setExecutionTime(executionTime);
             
             // 设置异常信息
-            if (e != null) {
-                operationLog.setErrorMsg(e.getMessage());
+            if (failed) {
+                operationLog.setErrorMsg(failureMessage);
             }
             
             // 保存操作日志
@@ -260,7 +263,7 @@ public class OperationLogAspect {
             log.info("操作日志 - 结束 | 模块: {} | 类型: {} | 描述: {} | 用户ID: {} | 用户名: {} | 耗时: {}ms | 状态: {}",
                     operationLog.getModule(), operationLog.getOperationType(), operationLog.getDescription(),
                     operationLog.getUserId(), operationLog.getUsername(),
-                    executionTime, e == null ? "成功" : "失败(" + e.getMessage() + ")");
+                    executionTime, failed ? "失败(" + failureMessage + ")" : "成功");
             
         } catch (Exception ex) {
             log.error("记录操作日志异常", ex);
@@ -277,6 +280,26 @@ public class OperationLogAspect {
         MethodSignature signature = (MethodSignature) joinPoint.getSignature();
         Method method = signature.getMethod();
         return method.getAnnotation(OperationLog.class);
+    }
+
+    /**
+     * 将异常或 HTTP 错误响应归一化为审计失败原因。
+     *
+     * @param result 控制器返回结果
+     * @param exception 控制器抛出的异常
+     * @return 失败原因；成功时返回 null
+     */
+    private String resolveFailureMessage(Object result, Exception exception) {
+        if (exception != null) {
+            return exception.getMessage() != null
+                    ? exception.getMessage()
+                    : exception.getClass().getSimpleName();
+        }
+        if (result instanceof ResponseEntity<?> responseEntity
+                && responseEntity.getStatusCode().isError()) {
+            return "HTTP " + responseEntity.getStatusCode().value();
+        }
+        return null;
     }
 
     /**

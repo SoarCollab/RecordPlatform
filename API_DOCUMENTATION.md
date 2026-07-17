@@ -84,7 +84,7 @@ POST /api/v1/auth/login
 - `GET /api/v1/shares/{shareCode}/info` - Get share basic info (public)
 - `GET /api/v1/public/proofs/{proofId}/status` - Resolve current signed-proof status
 - `GET /api/v1/public/proof-keys/{keyId}/versions/{keyVersion}` - Resolve a versioned proof verification key
-- `GET /api/v1/sse/connect?token=...` - SSE connect entry (short-lived token required)
+- `GET /api/v1/sse/connect?token=...&x-tenant-id=...` - SSE connect entry (short-lived token required; tenant value is an untrusted Redis namespace hint)
 
 `POST /api/v1/auth/logout` is also handled by Spring Security (non-controller endpoint) and requires authenticated context.
 
@@ -2493,10 +2493,12 @@ Server-Sent Events for real-time push notifications.
 Establish SSE connection for real-time updates.
 
 ```
-GET /api/v1/sse/connect
+GET /api/v1/sse/connect?token=<sseToken>&x-tenant-id=<tenantHint>
 ```
 
 **Authentication**: Short-lived SSE token in query param (`token`), obtained via `POST /api/v1/auth/tokens/sse` with Bearer JWT.
+
+`X-Tenant-ID` header, `x-tenant-id` query (or legacy `tenantId` query) only locate the existing tenant-scoped Redis token key. The atomically consumed token supplies the trusted tenant, user, and role; a mismatch, replay, expiry, damaged payload, or Redis failure creates no emitter. Raw one-time tokens are not persisted in operation audit parameters.
 
 **Response**: `text/event-stream`
 
@@ -3937,7 +3939,7 @@ GET /api/v1/admin/attestation-batches/production/status
 SSE short-lived token flow:
 
 1. `POST /api/v1/auth/tokens/sse` with JWT
-2. `GET /api/v1/sse/connect?token=<sseToken>&connectionId=<optional>`
+2. `GET /api/v1/sse/connect?token=<sseToken>&x-tenant-id=<tenantHint>`
 
 Current event types include:
 
