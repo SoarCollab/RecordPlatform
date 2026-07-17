@@ -29,6 +29,7 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -147,7 +148,7 @@ class SseAuditTenantIsolationIT extends BaseControllerIntegrationTest {
         assertThat(row.requestParam()).isNull();
         assertAuditDoesNotContain(row, validToken);
         verify(sseEmitterManager, times(1))
-                .createConnection(TRUSTED_TENANT_ID, SSE_USER_ID, org.mockito.ArgumentMatchers.anyString());
+                .createConnection(eq(TRUSTED_TENANT_ID), eq(SSE_USER_ID), anyString());
     }
 
     /**
@@ -167,7 +168,7 @@ class SseAuditTenantIsolationIT extends BaseControllerIntegrationTest {
 
         assertFailureAuditIsSystemTenant(requestIp, validToken);
         verify(sseEmitterManager, times(1))
-                .createConnection(TRUSTED_TENANT_ID, SSE_USER_ID, org.mockito.ArgumentMatchers.anyString());
+                .createConnection(eq(TRUSTED_TENANT_ID), eq(SSE_USER_ID), anyString());
     }
 
     /**
