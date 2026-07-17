@@ -454,10 +454,34 @@ jobs:
           mvn -f platform-fisco/pom.xml clean package -DskipTests -q
           mvn -f platform-storage/pom.xml clean package -DskipTests -q
 
-      - name: Build Backend and Public Verifier Images
+      - name: Build Backend, FISCO and Public Verifier Images
         run: |
           docker build -f platform-backend/Dockerfile -t recordplatform-backend:pr .
+          docker build -f platform-fisco/Dockerfile -t recordplatform-fisco:pr .
           docker build -f platform-verifier/web-verifier/Dockerfile -t recordplatform-verifier-web:pr .
+
+      - name: Verify FISCO Non-Root Nonce Volume
+        run: |
+          fisco_uid="$(docker run --rm --entrypoint id recordplatform-fisco:pr -u)"
+          test "$fisco_uid" != "0"
+
+          volume_name="recordplatform-fisco-nonce-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker volume create "$volume_name" >/dev/null
+          trap 'docker volume rm -f "$volume_name" >/dev/null 2>&1 || true' EXIT
+
+          docker run --rm \
+            --read-only \
+            --entrypoint sh \
+            -v "$volume_name:/var/lib/record-platform/besu-nonce" \
+            recordplatform-fisco:pr \
+            -c 'test "$(id -u)" != "0" && touch /var/lib/record-platform/besu-nonce/first.state'
+
+          docker run --rm \
+            --read-only \
+            --entrypoint sh \
+            -v "$volume_name:/var/lib/record-platform/besu-nonce" \
+            recordplatform-fisco:pr \
+            -c 'test -f /var/lib/record-platform/besu-nonce/first.state && touch /var/lib/record-platform/besu-nonce/second.state'
 
       - name: Verify Public Verifier Container
         run: |

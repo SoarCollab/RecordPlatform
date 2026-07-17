@@ -57,6 +57,7 @@ public class BsnBesuAdapter implements BlockChainAdapter {
     private final StaticGasProvider gasProvider;
     private final BsnBesuConfig besuConfig;
     private final ContractRegistryService contractRegistryService;
+    private final BsnBesuNonceCoordinator nonceCoordinator;
 
     private String sharingContractAddress;
 
@@ -729,13 +730,55 @@ public class BsnBesuAdapter implements BlockChainAdapter {
         return FunctionReturnDecoder.decode(response.getValue(), abiFunction.getOutputParameters());
     }
 
-    private EthSendTransaction sendTransaction(org.web3j.abi.datatypes.Function abiFunction) throws Exception {
+    /**
+     * 通过按 signer 协调器完成 PENDING 同步、本地签名和一次同步广播。
+     */
+    private EthSendTransaction sendTransaction(
+            org.web3j.abi.datatypes.Function abiFunction
+    ) throws Exception {
+        return nonceCoordinator.send(
+                credentials.getAddress(),
+                this::loadPendingNonce,
+                nonce -> buildSignedRawTransaction(abiFunction, nonce),
+                signedRawTransaction -> web3j
+                        .ethSendRawTransaction(signedRawTransaction)
+                        .send()
+        );
+    }
+
+    /**
+     * 查询并严格校验节点 PENDING nonce，避免忽略 JSON-RPC 错误。
+     */
+    private BigInteger loadPendingNonce() throws Exception {
+        EthGetTransactionCount response = web3j.ethGetTransactionCount(
+                credentials.getAddress(),
+                DefaultBlockParameterName.PENDING
+        ).send();
+        if (response == null) {
+            throw new ChainException(
+                    ChainType.BSN_BESU,
+                    "getPendingNonce",
+                    "Empty PENDING nonce response"
+            );
+        }
+        if (response.hasError()) {
+            throw new ChainException(
+                    ChainType.BSN_BESU,
+                    "getPendingNonce",
+                    response.getError().getMessage()
+            );
+        }
+        return response.getTransactionCount();
+    }
+
+    /**
+     * 使用已保留 nonce 在本地完成 ABI 编码、原始交易构造和签名。
+     */
+    private String buildSignedRawTransaction(
+            org.web3j.abi.datatypes.Function abiFunction,
+            BigInteger nonce
+    ) {
         String encodedFunction = FunctionEncoder.encode(abiFunction);
-
-        BigInteger nonce = web3j.ethGetTransactionCount(
-                credentials.getAddress(), DefaultBlockParameterName.LATEST
-        ).send().getTransactionCount();
-
         RawTransaction rawTransaction = RawTransaction.createTransaction(
                 nonce,
                 gasProvider.getGasPrice(),
@@ -745,9 +788,7 @@ public class BsnBesuAdapter implements BlockChainAdapter {
         );
 
         byte[] signedMessage = TransactionEncoder.signMessage(rawTransaction, credentials);
-        String hexValue = Numeric.toHexString(signedMessage);
-
-        return web3j.ethSendRawTransaction(hexValue).send();
+        return Numeric.toHexString(signedMessage);
     }
 
     private TransactionReceipt waitForReceipt(String txHash) throws Exception {

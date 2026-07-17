@@ -32,7 +32,7 @@ public class Web3jConfig {
 
     @Bean
     public Web3j web3j() {
-        log.info("[BSN Besu] 初始化 Web3j 连接, rpcUrl={}", besuConfig.getRpcUrl());
+        log.info("[BSN Besu] 初始化 Web3j 连接");
         this.web3jInstance = Web3j.build(new HttpService(besuConfig.getRpcUrl()));
         return this.web3jInstance;
     }

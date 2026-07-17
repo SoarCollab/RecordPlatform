@@ -62,6 +62,12 @@ Fault domain configuration is managed through Nacos and supports runtime refresh
 | `FISCO_CHAIN_ID` | Expected local FISCO chain ID | `chain0` |
 | `FISCO_GROUP_ID` | Expected local FISCO group ID | `group0` |
 | `BSN_FISCO_CHAIN_ID` | Expected BSN FISCO chain ID; required with no default when `BLOCKCHAIN_ACTIVE=bsn-fisco` | Provider-assigned value |
+| `BSN_BESU_RPC_URL` | BSN Besu JSON-RPC endpoint; required when `BLOCKCHAIN_ACTIVE=bsn-besu` | Provider-assigned HTTPS URL |
+| `BSN_BESU_CHAIN_ID` | Expected BSN Besu numeric chain ID | Provider-assigned value |
+| `BSN_BESU_PRIVATE_KEY` | Local Besu signer private key | Deployment secret; never commit a value |
+| `BSN_BESU_CONTRACT_STORAGE` | Verified BSN Besu Storage contract address | `0x...` |
+| `BSN_BESU_CONTRACT_SHARING` | Verified BSN Besu Sharing contract address | `0x...` |
+| `BSN_BESU_NONCE_STATE_DIRECTORY` | Durable nonce journal and signer ownership-lock directory | `/var/lib/record-platform/besu-nonce` |
 | `FISCO_STORAGE_CONTRACT` | Storage contract address | `0x...` |
 | `FISCO_SHARING_CONTRACT` | Sharing contract address | `0x...` |
 | `FISCO_{STORAGE,SHARING}_DEPLOYMENT_TX` | Required deployment transaction hash; the active-chain receipt must exist and match the configured address/block | `0x` + 64 hex |
@@ -70,6 +76,8 @@ Fault domain configuration is managed through Nacos and supports runtime refresh
 | `CONTRACT_DEPLOYMENT_RECEIPT_DIR` | Durable restricted directory for public deployment audit receipts | `log/contract-deployments` for local development |
 
 `scripts/contract-deploy.sh` requires explicit local chain/group values and compares them with Console `getGroupInfo` before compilation and every deployment. It fetches each transaction receipt together with `getGroupInfo` in one Console session, requires explicit FISCO success status `0`, and derives the final transaction/address/block fields from that one receipt. All three deployment evidence fields are mandatory for both contracts; an entirely empty legacy triplet now fails startup. The same variable names carry reviewed BSN deployment evidence, where startup revalidates the receipt through the selected BSN FISCO or Besu client (Besu requires explicit status `1`). The guarded local script writes both triplets with one shared effective time and first publishes a credential-free structured receipt; production should place that receipt directory outside ephemeral application storage. `env-check.sh` validates shape only; restart `platform-fisco` to perform the authoritative active-chain receipt, runtime-code, and identity checks.
+
+BSN Besu raw writes reserve nonces per canonical signer from the node's `PENDING` count and a durable local high-watermark. `BSN_BESU_NONCE_STATE_DIRECTORY` has no runtime default: it must support reliable Java/POSIX file locks and atomic replacement, survive process/container restarts, and be shared by every supported process that could use the same `(chainId, signer)`. Startup holds an exclusive signer lock for the JVM lifetime, so a second writer on that shared directory fails closed. The configured signer key is exclusive to this coordinator and must not be used by an external wallet or uncoordinated process. Do not place the directory on ephemeral container storage, delete its state files to clear an incident, or run the same signer active-active on independent hosts. A cold standby may take over only after the old writer is externally fenced and its lock/state volume is available.
 
 ### SSL Configuration (Production)
 

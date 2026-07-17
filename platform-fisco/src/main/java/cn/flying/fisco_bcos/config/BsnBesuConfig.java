@@ -42,6 +42,11 @@ public class BsnBesuConfig {
      */
     private GasConfig gas = new GasConfig();
 
+    /**
+     * Nonce 协调与单 writer 状态配置
+     */
+    private NonceConfig nonce = new NonceConfig();
+
     @Data
     public static class Wallet {
         /**
@@ -79,5 +84,13 @@ public class BsnBesuConfig {
          * Gas 限制
          */
         private Long gasLimit = 4_500_000L;
+    }
+
+    @Data
+    public static class NonceConfig {
+        /**
+         * 持久 nonce 状态和 signer 独占锁目录
+         */
+        private String stateDirectory;
     }
 }

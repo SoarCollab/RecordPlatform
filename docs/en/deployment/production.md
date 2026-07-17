@@ -69,12 +69,14 @@ flowchart TB
 |-----------|------------|-------------|
 | backend | 2 instances | 3+ instances |
 | storage | 2 instances | 3+ instances |
-| fisco | 1 instance | 2 instances |
+| fisco | 1 active writer per signer | BSN Besu same-signer mode: 1 active + fenced cold standby |
 | MySQL | 1 primary + 1 replica | 1 primary + 2 replicas + MHA |
 | Redis | Sentinel (3 nodes) | Cluster (6 nodes) |
 | S3 Storage | 2 nodes (A/B domains) | 3+ nodes (A/B/STANDBY) |
 | Nacos | 3 nodes | 3 nodes |
 | RabbitMQ | 3 nodes (cluster) | 3 nodes (mirrored) |
+
+The `fisco` recommendation is chain-mode dependent. With `BLOCKCHAIN_ACTIVE=bsn-besu` and one local signer key, only one active writer may own that `(chainId, signer)`. It must use a durable `BSN_BESU_NONCE_STATE_DIRECTORY`; a cold standby can start only after the old writer is externally fenced and the same reliable lock/state volume is available. Do not place two same-signer instances behind a load balancer or perform a rolling update with overlap. Multi-host active-active requires different signers or a separate distributed nonce/lease design and is not supported by the file-lock gate.
 
 ### Storage Fault Domains
 

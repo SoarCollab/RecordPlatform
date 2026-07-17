@@ -107,7 +107,7 @@ Nacos serves as the configuration center. Application configs must be imported.
 | `platform-storage.yaml` | DEFAULT_GROUP | Storage service config (S3 node list, encryption params) |
 
 ::: warning Important
-Sensitive credentials (DB password, Redis password, etc.) are stored in Nacos configurations, not in `.env`. The infrastructure credentials in `.env` are only used by docker-compose. `platform-fisco` reads blockchain node and contract settings from `.env` (`FISCO_*`), not from a Nacos Data ID.
+Sensitive credentials (DB password, Redis password, etc.) are stored in Nacos configurations, not in `.env`. The infrastructure credentials in `.env` are only used by docker-compose. `platform-fisco` reads blockchain node, contract, signer, and nonce-state settings from deployment environment variables (`FISCO_*` or `BSN_*`), not from a Nacos Data ID. Supply `BSN_BESU_PRIVATE_KEY` through the deployment secret manager rather than committing it to `.env`.
 :::
 
 ## Step 4: FISCO BCOS Node

@@ -31,8 +31,9 @@ RUN chmod 644 /opt/otel/opentelemetry-javaagent.jar
 
 COPY --from=build /workspace/platform-fisco/target/platform-fisco-0.0.2-SNAPSHOT.jar app.jar
 
-# Directory for TLS certificate files (mount at runtime)
-RUN mkdir -p /app/conf && chown -R app:app /app
+# Prepare writable runtime directories before switching to the non-root user.
+RUN mkdir -p /app/conf /var/lib/record-platform/besu-nonce \
+    && chown -R app:app /app /var/lib/record-platform
 USER app
 
 EXPOSE 8091

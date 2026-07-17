@@ -210,9 +210,29 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - NACOS_HOST=nacos
+      - NACOS_PORT=${NACOS_PORT:-8848}
+      - NACOS_USERNAME=${NACOS_USERNAME:?Set NACOS_USERNAME in .env}
+      - NACOS_PASSWORD=${NACOS_PASSWORD:?Set NACOS_PASSWORD in .env}
       - DUBBO_HOST=${DUBBO_HOST:-host.docker.internal}  # Docker 环境必须配置
+      - BLOCKCHAIN_RPC_TOKEN=${BLOCKCHAIN_RPC_TOKEN:?Set BLOCKCHAIN_RPC_TOKEN in .env}
+      - BLOCKCHAIN_ACTIVE=${BLOCKCHAIN_ACTIVE:-local-fisco}
+      - BSN_BESU_RPC_URL=${BSN_BESU_RPC_URL:-}
+      - BSN_BESU_CHAIN_ID=${BSN_BESU_CHAIN_ID:-}
+      - BSN_BESU_PRIVATE_KEY=${BSN_BESU_PRIVATE_KEY:-}  # 生产环境应使用部署密钥
+      - BSN_BESU_CONTRACT_STORAGE=${BSN_BESU_CONTRACT_STORAGE:-}
+      - BSN_BESU_CONTRACT_SHARING=${BSN_BESU_CONTRACT_SHARING:-}
+      - BSN_BESU_NONCE_STATE_DIRECTORY=/var/lib/record-platform/besu-nonce
+      # 所选活动链必须提供完整的部署回执证据。
+      - FISCO_SHARING_DEPLOYMENT_TX=${FISCO_SHARING_DEPLOYMENT_TX:?Set FISCO_SHARING_DEPLOYMENT_TX in .env}
+      - FISCO_SHARING_DEPLOYMENT_BLOCK=${FISCO_SHARING_DEPLOYMENT_BLOCK:?Set FISCO_SHARING_DEPLOYMENT_BLOCK in .env}
+      - FISCO_SHARING_DEPLOYMENT_EFFECTIVE_AT=${FISCO_SHARING_DEPLOYMENT_EFFECTIVE_AT:?Set FISCO_SHARING_DEPLOYMENT_EFFECTIVE_AT in .env}
+      - FISCO_STORAGE_DEPLOYMENT_TX=${FISCO_STORAGE_DEPLOYMENT_TX:?Set FISCO_STORAGE_DEPLOYMENT_TX in .env}
+      - FISCO_STORAGE_DEPLOYMENT_BLOCK=${FISCO_STORAGE_DEPLOYMENT_BLOCK:?Set FISCO_STORAGE_DEPLOYMENT_BLOCK in .env}
+      - FISCO_STORAGE_DEPLOYMENT_EFFECTIVE_AT=${FISCO_STORAGE_DEPLOYMENT_EFFECTIVE_AT:?Set FISCO_STORAGE_DEPLOYMENT_EFFECTIVE_AT in .env}
     volumes:
       - ./platform-fisco/src/main/resources/conf:/app/conf
+      # BLOCKCHAIN_ACTIVE=bsn-besu 时必需；镜像已为 app 用户预建该目录。
+      - besu_nonce_data:/var/lib/record-platform/besu-nonce
     depends_on:
       - nacos
     restart: unless-stopped
@@ -248,6 +268,10 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  # 本地具名卷：在当前 Docker 主机上替换容器后仍保留。
+  besu_nonce_data:
 ```
 
 ## 部署步骤
@@ -304,6 +328,8 @@ docker-compose -f docker-compose.app.yml up -d --scale backend=3
 ```
 
 在 backend 实例前使用负载均衡器（nginx, traefik）。
+
+当 `BLOCKCHAIN_ACTIVE=bsn-besu` 的实例共享同一 signer 时，禁止扩容 `fisco` 服务。固定容器名只是额外的 Compose 防误操作措施；权威 JVM 启动门禁是 `BSN_BESU_NONCE_STATE_DIRECTORY` 中按 `(chainId, signer)` 持有的独占文件锁。示例使用镜像预建权限的具名卷，使非 root `app` 用户能够写入；该卷必须持久化，并且在同一 Docker 主机上只能挂给已完成 fencing 的替代实例。若运维改成 bind/shared mount，必须先把挂载预配为镜像 `app` 用户可写，并在激活前验证 atomic move、目录 fsync 和文件锁语义。独立主机目录以及未经验证锁语义的普通远程文件系统不能提供跨主机 fencing，因此当前不支持同 signer active-active。
 
 ## DUBBO_HOST 配置说明
 

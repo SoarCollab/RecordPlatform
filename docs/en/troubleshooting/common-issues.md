@@ -327,6 +327,37 @@ Solutions for frequently encountered problems.
              max-attempts: 5
    ```
 
+## BSN Besu Nonce Coordination
+
+### Signer Writer Lock Prevents Startup
+
+**Symptom**: `platform-fisco` fails with `current chainId/signer is already owned by another writer` (the runtime log may be localized).
+
+**Resolution**:
+
+1. Treat this as a safety gate. Do not point the new process at a different or empty `BSN_BESU_NONCE_STATE_DIRECTORY` to bypass it.
+2. Locate every process/container that has the same signer secret. Fence and stop the old active writer first.
+3. Verify the replacement uses the same durable state directory and a filesystem with reliable file-lock and atomic-move semantics.
+4. Start exactly one replacement. The empty `.lock` file may remain after shutdown; ownership is the live OS file lock, so deleting that file is neither required nor a safe fencing mechanism.
+
+Same-signer active-active across independent hosts is unsupported. Use a cold standby, distinct signers, or a separately reviewed distributed lease/nonce coordinator.
+
+### Unresolved Broadcast Blocks New Writes
+
+**Symptom**: a send timed out, disconnected, returned `already known`/a nonce conflict, or returned an invalid transaction hash; subsequent writes fail with `unresolved broadcast; manual reconciliation is required`.
+
+This is fail-closed behavior. The durable `.state` file records the schema, chain ID, signer, `lastNonce`, `nextNonce`, outcome, local transaction hash, optional remote hash, and update time. It never records the private key or signed raw transaction.
+
+**Reconciliation**:
+
+1. Stop new writes for this signer and fence every possible writer. Keep the state file as incident evidence; never delete or edit it while a process is running.
+2. Read `lastNonce` and `localTransactionHash` from the state file. Against the same BSN provider endpoint, query the transaction by that exact hash and query both `eth_getTransactionCount(signer, "pending")` and `"latest"`.
+3. If the exact transaction exists, keep the state file and wait for the provider's `pending` nonce to advance beyond `lastNonce`. Transaction visibility confirms that `lastNonce` must not be reused, but it does not bypass the coordinator's PENDING gate.
+4. Only after the provider's `pending` nonce is greater than `lastNonce` should you restart the single writer. The coordinator will then observe the advanced PENDING value and continue at `max(nodePending, durableNextNonce)`. If the transaction is absent and PENDING has not advanced, that observation alone does not prove the request was never accepted. Wait for provider reconciliation or obtain explicit provider evidence that the transaction was definitively rejected. Do not submit a different payload with `lastNonce`.
+5. Only after conclusive non-acceptance evidence, with every old writer fenced and the service stopped, archive the complete `.state` file with the incident record and move it out of the configured directory. Restart the single writer so it rebuilds from the node's stable PENDING nonce. If acceptance remains uncertain, preserve the state and keep writes blocked.
+
+A contract revert or failed receipt still consumes the nonce and never justifies rolling the state back. Rollback of this code must also preserve the state directory until all recorded transactions are reconciled.
+
 ## Quota Issues
 
 ### Upload Fails with QUOTA_EXCEEDED
