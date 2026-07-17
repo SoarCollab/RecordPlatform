@@ -148,6 +148,30 @@ class TenantFilterTest {
     }
 
     /**
+     * 公开 proof 路径必须完整忽略重复租户头，避免新校验改变匿名 proof 合同。
+     */
+    @Test
+    @DisplayName("should ignore duplicate tenant headers for public proof endpoints")
+    void shouldIgnoreDuplicateTenantHeadersForPublicProofEndpoints() throws ServletException, IOException {
+        for (String path : new String[]{
+                "/api/v1/public/proofs/rp-proof-abc/status",
+                "/api/v1/public/proof-keys/key-main/versions/1"}) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
+            request.setServletPath(path);
+            request.addHeader("X-Tenant-ID", "12");
+            request.addHeader("X-Tenant-ID", "13");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            filter.doFilterInternal(request, response, filterChain);
+
+            assertNull(request.getAttribute(Const.ATTR_TENANT_ID));
+            assertNull(TenantContext.getTenantId());
+        }
+
+        verify(filterChain, times(2)).doFilter(any(), any());
+    }
+
+    /**
      * 与公开 proof 前缀相似但不在该路径族内的请求不得误用忽略规则。
      */
     @Test
@@ -197,6 +221,118 @@ class TenantFilterTest {
         assertEquals(12L, capturedTenantId.get());
         assertEquals(12L, request.getAttribute(Const.ATTR_TENANT_ID));
         assertNull(TenantContext.getTenantId());
+    }
+
+    /**
+     * 非 proof 白名单路径携带畸形租户头时应返回 400，且不得污染请求属性或线程租户上下文。
+     */
+    @Test
+    @DisplayName("should reject invalid tenant header for non-proof whitelisted path")
+    void shouldRejectInvalidTenantHeaderForNonProofWhitelistedPath() throws ServletException, IOException {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/shares/abc/info");
+        request.setServletPath("/api/v1/shares/abc/info");
+        request.addHeader("X-Tenant-ID", "invalid-tenant");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        TenantContext.setTenantId(999L);
+
+        filter.doFilterInternal(request, response, filterChain);
+
+        verify(filterChain, never()).doFilter(request, response);
+        assertEquals(400, response.getStatus());
+        assertTrue(response.getContentAsString().contains(String.valueOf(ResultEnum.PARAM_IS_INVALID.getCode())));
+        assertNull(request.getAttribute(Const.ATTR_TENANT_ID));
+        assertNull(TenantContext.getTenantId());
+    }
+
+    /**
+     * 显式空租户头必须按畸形输入拒绝；SSE 也不得用 query 参数覆盖调用方已提供的空头。
+     */
+    @Test
+    @DisplayName("should reject a single empty tenant header outside public proof endpoints")
+    void shouldRejectSingleEmptyTenantHeaderOutsidePublicProofEndpoints() throws ServletException, IOException {
+        for (String path : new String[]{"/api/v1/shares/abc/info", "/api/v1/sse/connect"}) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
+            request.setServletPath(path);
+            request.addHeader("X-Tenant-ID", "");
+            request.addParameter("x-tenant-id", "7");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            TenantContext.setTenantId(999L);
+
+            filter.doFilterInternal(request, response, filterChain);
+
+            assertEquals(400, response.getStatus());
+            assertTrue(response.getContentAsString()
+                    .contains(String.valueOf(ResultEnum.PARAM_IS_INVALID.getCode())));
+            assertNull(request.getAttribute(Const.ATTR_TENANT_ID));
+            assertNull(TenantContext.getTenantId());
+        }
+
+        verifyNoInteractions(filterChain);
+    }
+
+    /**
+     * 非 proof 白名单和受保护路径都必须拒绝重复租户头，避免有歧义的租户身份被静默采用。
+     */
+    @Test
+    @DisplayName("should reject duplicate tenant headers outside public proof endpoints")
+    void shouldRejectDuplicateTenantHeadersOutsidePublicProofEndpoints() throws ServletException, IOException {
+        String[] paths = {"/api/v1/shares/abc/info", "/api/v1/files"};
+        String[][] duplicateValues = {
+                {"12", "12"},
+                {"12", "13"},
+                {"", "12"},
+                {"12", ""}
+        };
+
+        for (String path : paths) {
+            for (String[] values : duplicateValues) {
+                MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
+                request.setServletPath(path);
+                request.addHeader("X-Tenant-ID", values[0]);
+                request.addHeader("X-Tenant-ID", values[1]);
+                MockHttpServletResponse response = new MockHttpServletResponse();
+
+                TenantContext.setTenantId(999L);
+
+                filter.doFilterInternal(request, response, filterChain);
+
+                assertEquals(400, response.getStatus());
+                assertTrue(response.getContentAsString()
+                        .contains(String.valueOf(ResultEnum.PARAM_IS_INVALID.getCode())));
+                assertNull(request.getAttribute(Const.ATTR_TENANT_ID));
+                assertNull(TenantContext.getTenantId());
+            }
+        }
+
+        verifyNoInteractions(filterChain);
+    }
+
+    /**
+     * 与白名单相似但缺少路径段边界的请求必须按受保护路径处理。
+     */
+    @Test
+    @DisplayName("should reject paths with whitelisted prefix but no segment boundary")
+    void shouldRejectPathsWithWhitelistedPrefixButNoSegmentBoundary() throws ServletException, IOException {
+        for (String path : new String[]{
+                "/api/v1/public/proofs-admin",
+                "/actuator/healthcheck",
+                "/swagger-ui-admin",
+                "/api/v1/images/download-private",
+                "/api/v1/shares/abc/extra/info"}) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
+            request.setServletPath(path);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            filter.doFilterInternal(request, response, filterChain);
+
+            assertEquals(400, response.getStatus());
+            assertNull(request.getAttribute(Const.ATTR_TENANT_ID));
+            assertNull(TenantContext.getTenantId());
+        }
+
+        verifyNoInteractions(filterChain);
     }
 
     /**
@@ -288,6 +424,29 @@ class TenantFilterTest {
     }
 
     /**
+     * 下游抛出的 NumberFormatException 必须原样传播，不能被误写成租户头格式错误。
+     */
+    @Test
+    @DisplayName("should propagate number format exception from downstream filter")
+    void shouldPropagateNumberFormatExceptionFromDownstreamFilter() throws ServletException, IOException {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/files");
+        request.setServletPath("/api/v1/files");
+        request.addHeader("X-Tenant-ID", "12");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        NumberFormatException downstreamFailure = new NumberFormatException("downstream failure");
+        doThrow(downstreamFailure).when(filterChain).doFilter(request, response);
+
+        NumberFormatException actual = assertThrows(NumberFormatException.class,
+                () -> filter.doFilterInternal(request, response, filterChain));
+
+        assertSame(downstreamFailure, actual);
+        assertEquals(200, response.getStatus());
+        assertEquals("", response.getContentAsString());
+        assertEquals(12L, request.getAttribute(Const.ATTR_TENANT_ID));
+        assertNull(TenantContext.getTenantId());
+    }
+
+    /**
      * SSE 连接端点允许从 query 参数读取租户 ID（EventSource 不支持自定义 Header）。
      */
     @Test
@@ -314,5 +473,30 @@ class TenantFilterTest {
         assertEquals(7L, request.getAttribute(Const.ATTR_TENANT_ID));
         // 过滤器完成后 TenantContext 应被清理
         assertNull(TenantContext.getTenantId());
+    }
+
+    /**
+     * 只有精确 SSE connect 路径允许 query 租户参数，相似路径仍必须提供租户头。
+     */
+    @Test
+    @DisplayName("should only use query tenant for exact SSE connect path")
+    void shouldOnlyUseQueryTenantForExactSseConnectPath() throws ServletException, IOException {
+        for (String path : new String[]{
+                "/api/v1/sse/connectivity",
+                "/api/v1/admin/sse/connect",
+                "/api/v1/sse/connect/extra"}) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
+            request.setServletPath(path);
+            request.addParameter("tenantId", "7");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            filter.doFilterInternal(request, response, filterChain);
+
+            assertEquals(400, response.getStatus());
+            assertNull(request.getAttribute(Const.ATTR_TENANT_ID));
+            assertNull(TenantContext.getTenantId());
+        }
+
+        verifyNoInteractions(filterChain);
     }
 }

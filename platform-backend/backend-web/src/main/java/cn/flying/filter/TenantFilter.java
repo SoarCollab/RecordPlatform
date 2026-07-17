@@ -20,6 +20,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.Enumeration;
 import java.util.Set;
 import java.util.UUID;
 
@@ -34,6 +35,7 @@ public class TenantFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(TenantFilter.class);
     private static final String TENANT_HEADER = "X-Tenant-ID";
+    private static final String SSE_CONNECT_PATH = "/api/v1/sse/connect";
 
     /**
      * 全局公开 proof 路径不依赖租户查询，必须忽略匿名调用者提供的租户头。
@@ -89,33 +91,33 @@ public class TenantFilter extends OncePerRequestFilter {
                 requestPath = requestUri;
             }
 
-            // 检查是否在白名单中
-            if (isWhitelisted(requestPath)) {
-                // 公开 proof 必须忽略租户头；其他白名单路径仍可使用租户头完成租户隔离查询
-                if (!shouldIgnoreTenantHeader(requestPath)) {
-                    String tenantIdHeader = request.getHeader(TENANT_HEADER);
-                    if (tenantIdHeader != null && !tenantIdHeader.isEmpty()) {
-                        try {
-                            Long tenantId = Long.parseLong(tenantIdHeader);
-                            TenantContext.setTenantId(tenantId);
-                            request.setAttribute(Const.ATTR_TENANT_ID, tenantId);
-                        } catch (NumberFormatException e) {
-                            log.warn("租户ID格式错误: {}", tenantIdHeader);
-                            sendErrorResponse(response, ResultEnum.PARAM_IS_INVALID, "租户标识格式错误");
-                            return;
-                        }
-                    }
-                }
+            boolean whitelisted = isWhitelisted(requestPath);
+
+            // 公开 proof 必须完整忽略调用者租户头，包括重复或畸形值
+            if (whitelisted && shouldIgnoreTenantHeader(requestPath)) {
                 filterChain.doFilter(request, response);
                 return;
             }
 
-            // 从请求头获取租户ID
+            // 租户身份头必须唯一，避免代理与 Servlet 对重复头采用不同解释
+            if (hasMultipleTenantHeaders(request)) {
+                log.warn("请求包含重复的租户ID头: {} {}", request.getMethod(), requestUri);
+                sendErrorResponse(response, ResultEnum.PARAM_IS_INVALID, "租户标识格式错误");
+                return;
+            }
+
             String tenantIdHeader = request.getHeader(TENANT_HEADER);
 
-            if (tenantIdHeader == null || tenantIdHeader.isEmpty()) {
+            // 显式空头属于畸形租户身份，不能降级成“未提供”或让 SSE query 覆盖
+            if (tenantIdHeader != null && tenantIdHeader.isEmpty()) {
+                log.warn("租户ID头为空: {} {}", request.getMethod(), requestUri);
+                sendErrorResponse(response, ResultEnum.PARAM_IS_INVALID, "租户标识格式错误");
+                return;
+            }
+
+            if (tenantIdHeader == null) {
                 // 仅对 SSE 连接接口允许从参数中获取租户ID，因为 EventSource 不支持自定义 Header
-                if (requestPath.contains("/sse/connect")) {
+                if (SSE_CONNECT_PATH.equals(requestPath)) {
                     tenantIdHeader = request.getParameter("x-tenant-id");
                     if (tenantIdHeader == null || tenantIdHeader.isEmpty()) {
                         tenantIdHeader = request.getParameter("tenantId");
@@ -124,25 +126,33 @@ public class TenantFilter extends OncePerRequestFilter {
             }
 
             if (tenantIdHeader == null || tenantIdHeader.isEmpty()) {
+                if (whitelisted) {
+                    filterChain.doFilter(request, response);
+                    return;
+                }
                 log.warn("请求缺少租户ID: {} {}", request.getMethod(), requestUri);
                 sendErrorResponse(response, ResultEnum.PARAM_IS_INVALID, "缺少租户标识 (X-Tenant-ID)");
                 return;
             }
 
+            Long tenantId;
             try {
-                Long tenantId = Long.parseLong(tenantIdHeader);
-                // 设置租户上下文（会被 MyBatis-Plus 租户拦截器使用）
-                TenantContext.setTenantId(tenantId);
-                // 存储到请求属性，供 JWT 过滤器之后使用
-                request.setAttribute(Const.ATTR_TENANT_ID, tenantId);
-
-                log.debug("租户上下文已设置: tenantId={}, uri={}", tenantId, requestUri);
-
-                filterChain.doFilter(request, response);
+                tenantId = Long.parseLong(tenantIdHeader);
             } catch (NumberFormatException e) {
                 log.warn("租户ID格式错误: {}", tenantIdHeader);
                 sendErrorResponse(response, ResultEnum.PARAM_IS_INVALID, "租户标识格式错误");
+                return;
             }
+
+            // 设置租户上下文（会被 MyBatis-Plus 租户拦截器使用）
+            TenantContext.setTenantId(tenantId);
+            // 存储到请求属性，供 JWT 过滤器之后使用
+            request.setAttribute(Const.ATTR_TENANT_ID, tenantId);
+
+            log.debug("租户上下文已设置: tenantId={}, uri={}", tenantId, requestUri);
+
+            // 解析异常捕获必须止于租户头，避免吞掉下游业务抛出的 NumberFormatException
+            filterChain.doFilter(request, response);
             // 注意：正常路径不在这里清理 TenantContext，由 JwtAuthenticationFilter 统一清理
         } finally {
             TenantContext.clear();
@@ -159,24 +169,40 @@ public class TenantFilter extends OncePerRequestFilter {
         if (uri == null) {
             return false;
         }
-        if (uri.startsWith("/api/v1/shares/") && uri.endsWith("/info")) {
+        if (uri.matches("^/api/v1/shares/[^/]+/info/?$")) {
             return true;
         }
         if (uri.matches("^/api/v1/shares/[^/]+/files/?$")) {
             return true;
         }
-        return WHITELIST_PATHS.stream().anyMatch(uri::startsWith);
+        return WHITELIST_PATHS.stream().anyMatch(prefix -> matchesPathOrDescendant(uri, prefix));
     }
 
     /**
      * 判断白名单路径是否必须忽略请求租户头，并使用路径段边界避免相似前缀误匹配。
      */
     private boolean shouldIgnoreTenantHeader(String uri) {
-        if (uri == null) {
+        return TENANT_HEADER_IGNORED_PATHS.stream()
+                .anyMatch(prefix -> matchesPathOrDescendant(uri, prefix));
+    }
+
+    /**
+     * 检查请求是否包含多个租户身份头；重复值同样视为有歧义并拒绝。
+     */
+    private boolean hasMultipleTenantHeaders(HttpServletRequest request) {
+        Enumeration<String> values = request.getHeaders(TENANT_HEADER);
+        if (values == null || !values.hasMoreElements()) {
             return false;
         }
-        return TENANT_HEADER_IGNORED_PATHS.stream()
-                .anyMatch(prefix -> uri.equals(prefix) || uri.startsWith(prefix + "/"));
+        values.nextElement();
+        return values.hasMoreElements();
+    }
+
+    /**
+     * 按完整路径段匹配白名单族，避免相似字符串前缀被误认为公开路径。
+     */
+    private boolean matchesPathOrDescendant(String path, String prefix) {
+        return path.equals(prefix) || path.startsWith(prefix + "/");
     }
 
     /**
