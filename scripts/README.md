@@ -101,7 +101,7 @@ SW_AGENT_COLLECTOR_BACKEND_SERVICES=127.0.0.1:11800
 
 - FISCO BCOS 控制台已安装（默认路径 `~/fisco/console`）
 - FISCO BCOS 节点已启动且可达；`.env` 必须显式配置 `FISCO_PEER_ADDRESS`、`FISCO_CHAIN_ID` 和 `FISCO_GROUP_ID`
-- 控制台包含支持 `-v 0.8.35` 的 `contract2java.sh`，系统已安装 `python3` 以及 `timeout`（macOS 可使用 `gtimeout`）
+- 控制台包含支持 `-v 0.8.11` 的 `contract2java.sh`，且 `$HOME/.fisco/solc/0.8.11/keccak256/solc` 与 `$HOME/.fisco/solc/0.8.11/sm3/solc` 两套官方编译器可执行；系统已安装 `python3` 以及 `timeout`（macOS 可使用 `gtimeout`）
 - `.env` 已存在且不是符号链接；正常部署仅在全部链上检查通过后替换它
 - `CONTRACT_DEPLOYMENT_RECEIPT_DIR` 指向持久化、受限访问的非符号链接目录；默认使用仓库内已忽略的 `log/contract-deployments`
 
@@ -138,21 +138,21 @@ SW_AGENT_COLLECTOR_BACKEND_SERVICES=127.0.0.1:11800
 | `--dry-run`           | 校验输入并打印操作步骤，不修改文件或链状态                |
 | `-h`, `--help`        | 显示帮助信息                                      |
 
-部署前脚本通过官方 Console `getGroupInfo` 读取 `chainID`/`groupID`，必须与显式配置完全一致。部署后的 `getCode` 和 `contractIdentity()` 属于强制安全门禁；后者必须等于已验证 catalog 中唯一 `ACTIVE` 条目的名称和语义版本。`--skip-verify` 已被明确拒绝。Dry-run 不调用 Console、不生成时间、不创建回执，也不修改链或 `.env`。
+部署前脚本通过官方 Console `getGroupInfo` 读取唯一的 `chainID`/`groupID`/`smCryptoType`/`wasm` 元组：chain/group 必须与显式配置完全一致，WASM 或无法确定的 crypto/VM 组合会失败关闭。部署后的 `getCode` 必须先与节点实际 ECC/SM 变体对应的完整签入 runtime bytecode 完全一致，随后 `contractIdentity()` 还必须等于已验证 catalog 中唯一 `ACTIVE` 条目的名称和语义版本。`--skip-verify` 已被明确拒绝。Dry-run 不调用 Console、不生成时间、不创建回执，也不修改链或 `.env`。
 
 该脚本只负责 `BLOCKCHAIN_ACTIVE=local-fisco`；配置为 `bsn-fisco` 或 `bsn-besu` 时会在 Console 查询前拒绝执行，BSN 部署必须使用对应网络的受审查发布流程。
 
-当前签入的 `Storage`/`Sharing` ABI 与 BIN 由 solc `0.8.35` 生成。脚本固定向 Console 传入 `-v 0.8.35`，并对生成结果做 canonical ABI 和 decoded bytecode 比对；Console 不支持该版本或产物不一致时，会在第一笔部署交易之前失败。
+当前签入的 `Storage`/`Sharing` ABI、ECC/SM creation bytecode 与 ECC/SM deployed runtime bytecode 由 FISCO solc `0.8.11+commit.6b4cc280` 生成。构建画像固定为 EVM London、optimizer disabled、metadata IPFS；脚本既校验 Console `-v 0.8.11` 生成的两套 creation 制品，也用 Console 缓存的 keccak256/sm3 官方编译器在不可预测的系统临时目录中独立重建 creation/runtime，退出时安全清理。Console 源码使用同目录私有临时文件原子替换，失败退出时也会受限清理；源码/制品路径不得为符号链接，每笔部署交易前会再次核验 catalog、staged source、ABI 与两套 creation；任何缺失、替换、变体回退或字节漂移都会在对应链写之前失败。
 
 ### 执行阶段
 
 | 阶段 | 说明 |
 | ---- | ---- |
-| 1. Pre-flight  | 校验工具、catalog/源码/ABI/BIN、控制台、激活文件、节点连通性，并用 `getGroupInfo` 严格对账 chain/group |
-| 2. Compile     | 用官方 `contract2java.sh` 生成 `Storage`/`Sharing` ABI 与 BIN |
-| 3. Artifact Verification | canonical 比对 ABI，并按 decoded bytes 比对 ECC/SM bytecode |
+| 1. Pre-flight  | 校验工具、catalog/源码/ABI/creation/runtime、控制台、激活文件、节点连通性，并用 `getGroupInfo` 严格对账 chain/group/crypto/VM |
+| 2. Compile     | 用官方 `contract2java.sh` 生成 ABI 与 ECC/SM creation，并用固定 keccak256/sm3 solc 重建 creation/runtime |
+| 3. Artifact Verification | canonical 比对 ABI，并按 decoded bytes 比对 ECC/SM creation/runtime bytecode |
 | 4. Deploy      | 顺序部署双合约，取得地址、交易哈希与交易回执区块号 |
-| 5. On-chain Verification | 对两个地址执行 `getCode` 和 `contractIdentity()`，严格核对 catalog 名称/版本，任一失败即停止 |
+| 5. On-chain Verification | 对两个地址先执行 `getCode` 并匹配节点实际 crypto 变体的完整 runtime，再执行 `contractIdentity()` 核对 catalog 名称/版本，任一失败即停止 |
 | 6. Audited Atomic Activation | 固定一次 UTC `effectiveAt`，先原子发布结构化回执，再一次性写入两个地址及两组完整部署证据 |
 
 部署回执 schema 为 `record-platform-contract-deployment-receipt.v1`，`chainType` 使用 registry 的本地 FISCO 公共枚举值。回执仅记录 catalog SHA-256、chain/group、两个合约的名称、版本、地址、交易哈希、区块号和同一 `effectiveAt`，不记录 RPC URL、证书、私钥或令牌。回执写入失败时 `.env` 保持不变；若回执成功但随后 `.env` 原子替换失败，回执仍作为“链上部署已验证、尚未激活”的审计证据保留，不应被解释为运行时已启用。

@@ -8,7 +8,7 @@
 #   2. Compile                 - produce fresh Storage/Sharing ABI and BIN
 #   3. Artifact verification   - compare compiled outputs with signed artifacts
 #   4. Deploy                  - capture address, transaction hash and block number
-#   5. On-chain verification   - require non-empty code and exact catalog identities
+#   5. On-chain verification   - match signed runtime bytes and exact catalog identities
 #   6. Audited activation      - publish a receipt, then atomically activate complete evidence
 #
 # Usage:
@@ -190,9 +190,24 @@ CONTRACT_SRC_DIR="$PROJECT_ROOT/platform-fisco/contract"
 ABI_DEST_DIR="$PROJECT_ROOT/platform-fisco/src/main/resources/abi"
 BIN_DEST_DIR="$PROJECT_ROOT/platform-fisco/src/main/resources/bin"
 FINGERPRINT_TOOL="$PROJECT_ROOT/tools/contracts/contract_fingerprint.py"
-SOLC_VERSION="0.8.35"
+SOLC_VERSION="0.8.11"
+SOLC_BUILD_ID="0.8.11+commit.6b4cc280"
 CONSOLE_CONTRACT_DIR="$CONSOLE_DIR/contracts/solidity"
 CONSOLE_SDK_DIR="$CONSOLE_DIR/contracts/sdk"
+ECC_SOLC="$HOME/.fisco/solc/$SOLC_VERSION/keccak256/solc"
+SM_SOLC="$HOME/.fisco/solc/$SOLC_VERSION/sm3/solc"
+REPRO_BUILD_DIR=""
+ECC_REPRO_BUILD_DIR=""
+SM_REPRO_BUILD_DIR=""
+STAGED_SOURCE_TEMP=""
+STAGED_SOURCE_DIRECTORY=""
+STAGED_SOURCE_DIRECTORY_DEVICE=""
+STAGED_SOURCE_DIRECTORY_INODE=""
+STAGED_SOURCE_TEMP_NAME=""
+STAGED_SOURCE_TEMP_DEVICE=""
+STAGED_SOURCE_TEMP_INODE=""
+REPRO_TEMP_ROOT="${TMPDIR:-/tmp}"
+FISCO_CRYPTO_VARIANT=""
 
 if command -v timeout >/dev/null 2>&1; then
     TIMEOUT_COMMAND="$(command -v timeout)"
@@ -207,7 +222,7 @@ FISCO_HOST="${FISCO_PEER_ADDRESS:-127.0.0.1:20200}"
 FISCO_NODE_HOST="${FISCO_HOST%%:*}"
 FISCO_NODE_PORT="${FISCO_HOST##*:}"
 
-# 从官方 getGroupInfo JSON 输出中提取唯一的 chainID/groupID 组合。
+# 从官方 getGroupInfo JSON 输出中提取唯一的 chain/group/crypto/VM 组合。
 extract_fisco_chain_identity() {
     python3 -c '
 import json
@@ -220,18 +235,38 @@ candidates = set()
 
 def collect(value):
     if isinstance(value, dict):
-        if "chainID" in value or "groupID" in value:
+        identity_fields = {"chainID", "groupID", "smCryptoType", "wasm"}
+        if identity_fields.intersection(value):
             chain_id = value.get("chainID")
             group_id = value.get("groupID")
-            if isinstance(chain_id, str) and isinstance(group_id, str):
+            sm_crypto = value.get("smCryptoType")
+            wasm = value.get("wasm")
+            if (
+                isinstance(chain_id, str)
+                and isinstance(group_id, str)
+                and isinstance(sm_crypto, bool)
+                and isinstance(wasm, bool)
+            ):
                 if chain_id and group_id and not any(
                     character.isspace() for character in chain_id + group_id
                 ):
-                    candidates.add((chain_id, group_id))
+                    candidates.add((
+                        chain_id,
+                        group_id,
+                        "sm" if sm_crypto else "ecc",
+                        "wasm" if wasm else "evm",
+                    ))
         for nested in value.values():
             collect(nested)
     elif isinstance(value, list):
         for nested in value:
+            collect(nested)
+    elif isinstance(value, str):
+        try:
+            nested = json.loads(value)
+        except json.JSONDecodeError:
+            return
+        if isinstance(nested, (dict, list)):
             collect(nested)
 
 for index, character in enumerate(text):
@@ -245,8 +280,8 @@ for index, character in enumerate(text):
 
 if len(candidates) != 1:
     raise SystemExit(1)
-chain_id, group_id = next(iter(candidates))
-print(f"{chain_id}\t{group_id}")
+chain_id, group_id, crypto_variant, vm_type = next(iter(candidates))
+print(f"{chain_id}\t{group_id}\t{crypto_variant}\t{vm_type}")
 '
 }
 
@@ -261,7 +296,7 @@ print("sha256:" + hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest())
 PY
 }
 
-# 部署前查询节点身份，并与显式 FISCO_CHAIN_ID/FISCO_GROUP_ID 完全对账。
+# 部署前查询节点身份，并与显式 chain/group 及 EVM crypto 变体完全对账。
 verify_fisco_chain_identity() {
     local active_chain="${BLOCKCHAIN_ACTIVE:-local-fisco}"
     local expected_chain_id="${FISCO_CHAIN_ID:-}"
@@ -280,8 +315,8 @@ verify_fisco_chain_identity() {
     fi
 
     if [ "$DRY_RUN" = true ]; then
-        dry "getGroupInfo and compare chainID/groupID with $expected_chain_id/$expected_group_id"
-        ok "Dry-run: node chain/group query skipped; deployment would require an exact match"
+        dry "getGroupInfo and compare chain/group/crypto/VM with configured EVM deployment"
+        ok "Dry-run: node identity query skipped; deployment would require exact EVM metadata"
         return 0
     fi
 
@@ -297,14 +332,17 @@ verify_fisco_chain_identity() {
 
     local actual_identity
     if ! actual_identity=$(printf '%s\n' "$output" | extract_fisco_chain_identity); then
-        fail "getGroupInfo did not return one valid chainID/groupID pair"
+        fail "getGroupInfo did not return one valid chain/group/crypto/VM tuple"
         printf '%s\n' "$output" | tail -10 | sed 's/^/    /'
         return 1
     fi
 
     local actual_chain_id
     local actual_group_id
-    IFS=$'\t' read -r actual_chain_id actual_group_id <<< "$actual_identity"
+    local actual_crypto_variant
+    local actual_vm_type
+    IFS=$'\t' read -r actual_chain_id actual_group_id \
+        actual_crypto_variant actual_vm_type <<< "$actual_identity"
     if [ "$actual_chain_id" != "$expected_chain_id" ]; then
         fail "FISCO chain mismatch: configured=$expected_chain_id, actual=$actual_chain_id"
         return 1
@@ -313,7 +351,16 @@ verify_fisco_chain_identity() {
         fail "FISCO group mismatch: configured=$expected_group_id, actual=$actual_group_id"
         return 1
     fi
-    ok "FISCO node identity matches configured chain/group ($actual_chain_id/$actual_group_id)"
+    if [ "$actual_vm_type" != "evm" ]; then
+        fail "FISCO WASM group cannot deploy EVM contract artifacts"
+        return 1
+    fi
+    if [ "$actual_crypto_variant" != "ecc" ] && [ "$actual_crypto_variant" != "sm" ]; then
+        fail "Unsupported FISCO crypto variant: $actual_crypto_variant"
+        return 1
+    fi
+    FISCO_CRYPTO_VARIANT="$actual_crypto_variant"
+    ok "FISCO node identity matches chain/group; crypto=$actual_crypto_variant, vm=evm"
 }
 
 # ==============================================================================
@@ -450,10 +497,11 @@ fi
 # ==============================================================================
 section 2 "Compile Contracts"
 
-# 在 FISCO Console 支持的目录布局中定位一份编译产物。
-find_compiled_artifact() {
+# 在 FISCO Console 目录中按 ABI/ECC/SM 精确定位编译产物，禁止跨变体回退。
+find_console_artifact() {
     local kind="$1"
-    local name="$2"
+    local variant="$2"
+    local name="$3"
     local candidate
     local candidates=()
     if [ "$kind" = "abi" ]; then
@@ -462,15 +510,21 @@ find_compiled_artifact() {
             "$CONSOLE_SDK_DIR/abi/sm/$name.abi"
             "$CONSOLE_SDK_DIR/$name.abi"
         )
-    else
+    elif [ "$variant" = "ecc" ]; then
         candidates=(
             "$CONSOLE_SDK_DIR/bin/$name.bin"
-            "$CONSOLE_SDK_DIR/bin/sm/$name.bin"
             "$CONSOLE_SDK_DIR/$name.bin"
         )
+    elif [ "$variant" = "sm" ]; then
+        candidates=(
+            "$CONSOLE_SDK_DIR/bin/sm/$name.bin"
+            "$CONSOLE_SDK_DIR/sm/$name.bin"
+        )
+    else
+        return 1
     fi
     for candidate in "${candidates[@]}"; do
-        if [ -s "$candidate" ]; then
+        if [ -s "$candidate" ] && [ ! -L "$candidate" ]; then
             printf '%s\n' "$candidate"
             return 0
         fi
@@ -478,25 +532,350 @@ find_compiled_artifact() {
     return 1
 }
 
-# 复制指定合约源码，调用官方编译器，并返回 ABI/BIN 产物路径。
+# 校验固定输出目录中的 Console artifact 确实由本次编译刷新。
+artifact_is_fresh() {
+    local artifact_path="$1"
+    local started_at_ns="$2"
+    python3 - "$artifact_path" "$started_at_ns" <<'PY'
+import pathlib
+import sys
+
+artifact = pathlib.Path(sys.argv[1])
+started_at_ns = int(sys.argv[2])
+raise SystemExit(0 if artifact.stat().st_mtime_ns >= started_at_ns else 1)
+PY
+}
+
+# 拒绝 Console 固定源码、输出目录或候选 artifact 通过符号链接重定向写入。
+validate_console_compile_paths() {
+    local name="$1"
+    local path
+    for path in \
+        "$CONSOLE_DIR/contracts" \
+        "$CONSOLE_CONTRACT_DIR" \
+        "$CONSOLE_SDK_DIR" \
+        "$CONSOLE_SDK_DIR/abi" \
+        "$CONSOLE_SDK_DIR/abi/sm" \
+        "$CONSOLE_SDK_DIR/bin" \
+        "$CONSOLE_SDK_DIR/bin/sm" \
+        "$CONSOLE_SDK_DIR/sm" \
+        "$CONSOLE_CONTRACT_DIR/$name.sol" \
+        "$CONSOLE_SDK_DIR/abi/$name.abi" \
+        "$CONSOLE_SDK_DIR/abi/sm/$name.abi" \
+        "$CONSOLE_SDK_DIR/$name.abi" \
+        "$CONSOLE_SDK_DIR/bin/$name.bin" \
+        "$CONSOLE_SDK_DIR/$name.bin" \
+        "$CONSOLE_SDK_DIR/bin/sm/$name.bin" \
+        "$CONSOLE_SDK_DIR/sm/$name.bin"; do
+        if [ -L "$path" ]; then
+            fail "$name Console compile path must not be a symlink: $path"
+            return 1
+        fi
+    done
+}
+
+# 在已验证的 Console 源码目录中创建私有临时普通文件，并记录目录/文件身份。
+prepare_staged_source_temp() {
+    local name="$1"
+    local metadata
+    if ! metadata=$(python3 - "$CONSOLE_CONTRACT_DIR" "$name" <<'PY'
+import os
+import re
+import secrets
+import stat
+import sys
+from pathlib import Path
+
+requested_directory = Path(sys.argv[1])
+contract_name = sys.argv[2]
+if contract_name not in {"Storage", "Sharing"}:
+    raise SystemExit(1)
+
+directory_flags = os.O_RDONLY
+directory_flags |= getattr(os, "O_DIRECTORY", 0)
+directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+requested_fd = os.open(requested_directory, directory_flags)
+try:
+    requested_metadata = os.fstat(requested_fd)
+    if not stat.S_ISDIR(requested_metadata.st_mode):
+        raise SystemExit(1)
+    canonical_directory = requested_directory.resolve(strict=True)
+    canonical_fd = os.open(canonical_directory, directory_flags)
+    try:
+        canonical_metadata = os.fstat(canonical_fd)
+        if (
+            canonical_metadata.st_dev != requested_metadata.st_dev
+            or canonical_metadata.st_ino != requested_metadata.st_ino
+        ):
+            raise SystemExit(1)
+
+        temporary_name = None
+        temporary_metadata = None
+        try:
+            for _ in range(32):
+                candidate_name = (
+                    f".record-platform-{contract_name}.{secrets.token_hex(8)}"
+                )
+                if re.fullmatch(
+                    r"\.record-platform-(?:Storage|Sharing)\.[0-9a-f]{16}",
+                    candidate_name,
+                ) is None:
+                    raise SystemExit(1)
+                flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                flags |= getattr(os, "O_NOFOLLOW", 0)
+                try:
+                    temporary_fd = os.open(
+                        candidate_name,
+                        flags,
+                        0o600,
+                        dir_fd=canonical_fd,
+                    )
+                except FileExistsError:
+                    continue
+                temporary_name = candidate_name
+                try:
+                    os.fchmod(temporary_fd, 0o600)
+                    temporary_metadata = os.fstat(temporary_fd)
+                    if not stat.S_ISREG(temporary_metadata.st_mode):
+                        raise SystemExit(1)
+                finally:
+                    os.close(temporary_fd)
+                break
+            if temporary_name is None or temporary_metadata is None:
+                raise SystemExit(1)
+            print(
+                canonical_directory,
+                canonical_metadata.st_dev,
+                canonical_metadata.st_ino,
+                temporary_name,
+                temporary_metadata.st_dev,
+                temporary_metadata.st_ino,
+                sep="\t",
+            )
+        except BaseException:
+            if temporary_name is not None:
+                try:
+                    os.unlink(temporary_name, dir_fd=canonical_fd)
+                except FileNotFoundError:
+                    pass
+            raise
+    finally:
+        os.close(canonical_fd)
+finally:
+    os.close(requested_fd)
+PY
+    ); then
+        fail "$name could not allocate a private Console source staging file"
+        return 1
+    fi
+
+    IFS=$'\t' read -r \
+        STAGED_SOURCE_DIRECTORY \
+        STAGED_SOURCE_DIRECTORY_DEVICE \
+        STAGED_SOURCE_DIRECTORY_INODE \
+        STAGED_SOURCE_TEMP_NAME \
+        STAGED_SOURCE_TEMP_DEVICE \
+        STAGED_SOURCE_TEMP_INODE <<< "$metadata"
+    if [ -z "$STAGED_SOURCE_DIRECTORY" ] \
+        || [ -z "$STAGED_SOURCE_DIRECTORY_DEVICE" ] \
+        || [ -z "$STAGED_SOURCE_DIRECTORY_INODE" ] \
+        || [ -z "$STAGED_SOURCE_TEMP_NAME" ] \
+        || [ -z "$STAGED_SOURCE_TEMP_DEVICE" ] \
+        || [ -z "$STAGED_SOURCE_TEMP_INODE" ]; then
+        fail "$name private Console source staging metadata is incomplete"
+        return 1
+    fi
+    STAGED_SOURCE_TEMP="$STAGED_SOURCE_DIRECTORY/$STAGED_SOURCE_TEMP_NAME"
+}
+
+# 通过已捕获的目录身份写入源码并原子替换同目录普通目标，拒绝目录目标语义。
+populate_and_replace_staged_source() {
+    local name="$1"
+    local source_path="$2"
+    python3 - \
+        "$source_path" \
+        "$STAGED_SOURCE_DIRECTORY" \
+        "$STAGED_SOURCE_DIRECTORY_DEVICE" \
+        "$STAGED_SOURCE_DIRECTORY_INODE" \
+        "$STAGED_SOURCE_TEMP_NAME" \
+        "$STAGED_SOURCE_TEMP_DEVICE" \
+        "$STAGED_SOURCE_TEMP_INODE" \
+        "$name.sol" <<'PY'
+import os
+import re
+import stat
+import sys
+from pathlib import Path
+
+(
+    source_path_text,
+    directory_path_text,
+    expected_directory_device,
+    expected_directory_inode,
+    temporary_name,
+    expected_temporary_device,
+    expected_temporary_inode,
+    target_name,
+) = sys.argv[1:]
+if re.fullmatch(
+    r"\.record-platform-(?:Storage|Sharing)\.[0-9a-f]{16}",
+    temporary_name,
+) is None:
+    raise SystemExit(1)
+if target_name not in {"Storage.sol", "Sharing.sol"}:
+    raise SystemExit(1)
+
+directory_flags = os.O_RDONLY
+directory_flags |= getattr(os, "O_DIRECTORY", 0)
+directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+directory_fd = os.open(Path(directory_path_text), directory_flags)
+try:
+    directory_metadata = os.fstat(directory_fd)
+    if (
+        directory_metadata.st_dev != int(expected_directory_device)
+        or directory_metadata.st_ino != int(expected_directory_inode)
+    ):
+        raise SystemExit(1)
+
+    temporary_flags = os.O_WRONLY
+    temporary_flags |= getattr(os, "O_NOFOLLOW", 0)
+    temporary_fd = os.open(temporary_name, temporary_flags, dir_fd=directory_fd)
+    try:
+        temporary_metadata = os.fstat(temporary_fd)
+        if (
+            not stat.S_ISREG(temporary_metadata.st_mode)
+            or temporary_metadata.st_dev != int(expected_temporary_device)
+            or temporary_metadata.st_ino != int(expected_temporary_inode)
+        ):
+            raise SystemExit(1)
+        os.ftruncate(temporary_fd, 0)
+
+        source_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        source_fd = os.open(Path(source_path_text), source_flags)
+        try:
+            source_metadata = os.fstat(source_fd)
+            if not stat.S_ISREG(source_metadata.st_mode):
+                raise SystemExit(1)
+            if source_metadata.st_size <= 0 or source_metadata.st_size > 5 * 1024 * 1024:
+                raise SystemExit(1)
+            source_bytes = bytearray()
+            while len(source_bytes) <= 5 * 1024 * 1024:
+                chunk = os.read(source_fd, 64 * 1024)
+                if not chunk:
+                    break
+                source_bytes.extend(chunk)
+            if not source_bytes or len(source_bytes) > 5 * 1024 * 1024:
+                raise SystemExit(1)
+        finally:
+            os.close(source_fd)
+
+        written = 0
+        while written < len(source_bytes):
+            write_count = os.write(temporary_fd, source_bytes[written:])
+            if write_count <= 0:
+                raise SystemExit(1)
+            written += write_count
+        os.fchmod(temporary_fd, 0o600)
+        os.fsync(temporary_fd)
+    finally:
+        os.close(temporary_fd)
+
+    try:
+        target_metadata = os.stat(
+            target_name,
+            dir_fd=directory_fd,
+            follow_symlinks=False,
+        )
+    except FileNotFoundError:
+        target_metadata = None
+    if target_metadata is not None and not stat.S_ISREG(target_metadata.st_mode):
+        raise SystemExit(1)
+
+    os.replace(
+        temporary_name,
+        target_name,
+        src_dir_fd=directory_fd,
+        dst_dir_fd=directory_fd,
+    )
+
+    target_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    target_fd = os.open(target_name, target_flags, dir_fd=directory_fd)
+    try:
+        target_metadata = os.fstat(target_fd)
+        if not stat.S_ISREG(target_metadata.st_mode):
+            raise SystemExit(1)
+        target_bytes = bytearray()
+        while len(target_bytes) <= 5 * 1024 * 1024:
+            chunk = os.read(target_fd, 64 * 1024)
+            if not chunk:
+                break
+            target_bytes.extend(chunk)
+        if target_bytes != source_bytes:
+            raise SystemExit(1)
+    finally:
+        os.close(target_fd)
+finally:
+    os.close(directory_fd)
+PY
+}
+
+# 清空已成功原子替换的源码 staging 跟踪信息。
+clear_staged_source_tracking() {
+    STAGED_SOURCE_TEMP=""
+    STAGED_SOURCE_DIRECTORY=""
+    STAGED_SOURCE_DIRECTORY_DEVICE=""
+    STAGED_SOURCE_DIRECTORY_INODE=""
+    STAGED_SOURCE_TEMP_NAME=""
+    STAGED_SOURCE_TEMP_DEVICE=""
+    STAGED_SOURCE_TEMP_INODE=""
+}
+
+# 通过同目录私有临时普通文件原子替换 Console 源码，禁止跟随 symlink 或目录目标。
+stage_contract_source() {
+    local name="$1"
+    local source_path="$CONTRACT_SRC_DIR/$name.sol"
+    local target_path="$CONSOLE_CONTRACT_DIR/$name.sol"
+    if ! validate_console_compile_paths "$name"; then
+        return 1
+    fi
+    mkdir -p "$CONSOLE_CONTRACT_DIR"
+    if ! validate_console_compile_paths "$name"; then
+        return 1
+    fi
+
+    if ! prepare_staged_source_temp "$name"; then
+        return 1
+    fi
+    if ! populate_and_replace_staged_source "$name" "$source_path"; then
+        fail "$name source could not be atomically staged into FISCO Console"
+        return 1
+    fi
+    clear_staged_source_tracking
+    if [ -L "$target_path" ] || ! cmp -s "$source_path" "$target_path"; then
+        fail "$name source changed while staging it into FISCO Console"
+        return 1
+    fi
+}
+
+# 复制指定源码，调用 Console 生成 wrapper，并返回 ABI/ECC/SM creation 路径。
 compile_contract() {
     local name="$1"
     local abi_result_var="$2"
-    local bin_result_var="$3"
+    local ecc_result_var="$3"
+    local sm_result_var="$4"
     if [ "$DRY_RUN" = true ]; then
         dry "copy $name.sol to $CONSOLE_CONTRACT_DIR and run contract2java.sh -v $SOLC_VERSION"
         ok "Dry-run: $name compile would be executed"
         return 0
     fi
 
-    mkdir -p "$CONSOLE_CONTRACT_DIR"
-    cp "$CONTRACT_SRC_DIR/$name.sol" "$CONSOLE_CONTRACT_DIR/$name.sol"
-    if ! cmp -s "$CONTRACT_SRC_DIR/$name.sol" "$CONSOLE_CONTRACT_DIR/$name.sol"; then
-        fail "$name source changed while staging it into FISCO Console"
+    if ! stage_contract_source "$name"; then
         return 1
     fi
 
     local output
+    local compile_started_at
+    compile_started_at=$(python3 -c 'import time; print(time.time_ns())')
     if ! output=$(
         cd "$CONSOLE_DIR"
         bash ./contract2java.sh solidity \
@@ -508,31 +887,254 @@ compile_contract() {
         printf '%s\n' "$output" | tail -20 | sed 's/^/    /'
         return 1
     fi
+    if ! validate_console_compile_paths "$name"; then
+        return 1
+    fi
 
     local abi_path
-    local bin_path
-    if ! abi_path=$(find_compiled_artifact abi "$name"); then
+    local ecc_path
+    local sm_path
+    if ! abi_path=$(find_console_artifact abi any "$name"); then
         fail "$name compilation did not produce an ABI artifact"
         return 1
     fi
-    if ! bin_path=$(find_compiled_artifact bin "$name"); then
-        fail "$name compilation did not produce a BIN artifact"
+    if ! ecc_path=$(find_console_artifact creation ecc "$name"); then
+        fail "$name compilation did not produce an ECC creation artifact"
+        return 1
+    fi
+    if ! sm_path=$(find_console_artifact creation sm "$name"); then
+        fail "$name compilation did not produce an independent SM creation artifact"
+        return 1
+    fi
+    for artifact_path in "$abi_path" "$ecc_path" "$sm_path"; do
+        if ! artifact_is_fresh "$artifact_path" "$compile_started_at"; then
+            fail "$name compilation left a stale artifact: $artifact_path"
+            return 1
+        fi
+    done
+    if [ "$ecc_path" = "$sm_path" ]; then
+        fail "$name ECC and SM creation artifacts must use distinct paths"
         return 1
     fi
     printf -v "$abi_result_var" '%s' "$abi_path"
-    printf -v "$bin_result_var" '%s' "$bin_path"
-    ok "$name compiled to ABI and BIN"
+    printf -v "$ecc_result_var" '%s' "$ecc_path"
+    printf -v "$sm_result_var" '%s' "$sm_path"
+    ok "$name compiled to ABI plus independent ECC/SM creation artifacts"
+}
+
+# 安全删除本次系统临时目录；只允许固定前缀的直属目录，绝不跟随 symlink。
+cleanup_reproducible_build_directory() {
+    if [ -z "$REPRO_BUILD_DIR" ]; then
+        return 0
+    fi
+    if [ ! -e "$REPRO_BUILD_DIR" ] && [ ! -L "$REPRO_BUILD_DIR" ]; then
+        return 0
+    fi
+    python3 - "$REPRO_BUILD_DIR" "$REPRO_TEMP_ROOT" <<'PY'
+import re
+import shutil
+import sys
+from pathlib import Path
+
+candidate = Path(sys.argv[1]).absolute()
+temporary_root = Path(sys.argv[2]).resolve()
+if candidate.parent.resolve() != temporary_root:
+    raise SystemExit(1)
+if re.fullmatch(r"record-platform-contract-build\.[A-Za-z0-9]+", candidate.name) is None:
+    raise SystemExit(1)
+if candidate.is_symlink() or not candidate.is_dir():
+    raise SystemExit(1)
+shutil.rmtree(candidate)
+PY
+}
+
+# 删除仍被跟踪的 Console 私有源码临时文件，严格限制目录、名称和文件类型。
+cleanup_staged_source_temp() {
+    if [ -z "$STAGED_SOURCE_TEMP_NAME" ]; then
+        return 0
+    fi
+    python3 - \
+        "$STAGED_SOURCE_DIRECTORY" \
+        "$STAGED_SOURCE_DIRECTORY_DEVICE" \
+        "$STAGED_SOURCE_DIRECTORY_INODE" \
+        "$STAGED_SOURCE_TEMP_NAME" \
+        "$STAGED_SOURCE_TEMP_DEVICE" \
+        "$STAGED_SOURCE_TEMP_INODE" <<'PY'
+import os
+import re
+import stat
+import sys
+from pathlib import Path
+
+(
+    source_directory_text,
+    expected_directory_device,
+    expected_directory_inode,
+    temporary_name,
+    expected_temporary_device,
+    expected_temporary_inode,
+) = sys.argv[1:]
+if re.fullmatch(
+    r"\.record-platform-(?:Storage|Sharing)\.[0-9a-f]{16}",
+    temporary_name,
+) is None:
+    raise SystemExit(1)
+
+directory_flags = os.O_RDONLY
+directory_flags |= getattr(os, "O_DIRECTORY", 0)
+directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+directory_fd = os.open(Path(source_directory_text), directory_flags)
+try:
+    directory_metadata = os.fstat(directory_fd)
+    if (
+        directory_metadata.st_dev != int(expected_directory_device)
+        or directory_metadata.st_ino != int(expected_directory_inode)
+    ):
+        raise SystemExit(1)
+    try:
+        metadata = os.stat(
+            temporary_name,
+            dir_fd=directory_fd,
+            follow_symlinks=False,
+        )
+    except FileNotFoundError:
+        raise SystemExit(0)
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_dev != int(expected_temporary_device)
+        or metadata.st_ino != int(expected_temporary_inode)
+    ):
+        raise SystemExit(1)
+    os.unlink(temporary_name, dir_fd=directory_fd)
+finally:
+    os.close(directory_fd)
+PY
+}
+
+# 保留原始退出状态，并把成功路径上的任一临时制品清理失败视为错误。
+finish_contract_deploy() {
+    local status=$?
+    trap - EXIT
+    if ! cleanup_staged_source_temp; then
+        warn "Could not safely clean private Console source staging file: $STAGED_SOURCE_TEMP"
+        if [ "$status" -eq 0 ]; then
+            status=1
+        fi
+    fi
+    if ! cleanup_reproducible_build_directory; then
+        warn "Could not safely clean reproducible build directory: $REPRO_BUILD_DIR"
+        if [ "$status" -eq 0 ]; then
+            status=1
+        fi
+    fi
+    exit "$status"
+}
+
+trap finish_contract_deploy EXIT
+
+# 用不可预测的系统临时目录承载本次可复现编译输出，避免并发或永久累积。
+prepare_reproducible_build_directory() {
+    if [ "$DRY_RUN" = true ]; then
+        return 0
+    fi
+    if [ ! -d "$REPRO_TEMP_ROOT" ] || [ -L "$REPRO_TEMP_ROOT" ]; then
+        fail "Temporary build root must be a non-symlink directory: $REPRO_TEMP_ROOT"
+        return 1
+    fi
+    if ! REPRO_BUILD_DIR=$(mktemp -d "$REPRO_TEMP_ROOT/record-platform-contract-build.XXXXXX"); then
+        fail "Cannot create an isolated reproducible artifact build directory"
+        return 1
+    fi
+    ECC_REPRO_BUILD_DIR="$REPRO_BUILD_DIR/ecc"
+    SM_REPRO_BUILD_DIR="$REPRO_BUILD_DIR/sm"
+}
+
+# 使用固定 FISCO solc 画像生成可复现 creation 与 deployed runtime 制品。
+compile_reproducible_variant() {
+    local variant="$1"
+    local compiler
+    local output_dir
+    local required_version_line
+    if [ "$variant" = "ecc" ]; then
+        compiler="$ECC_SOLC"
+        output_dir="$ECC_REPRO_BUILD_DIR"
+        required_version_line="Version: $SOLC_BUILD_ID"
+    elif [ "$variant" = "sm" ]; then
+        compiler="$SM_SOLC"
+        output_dir="$SM_REPRO_BUILD_DIR"
+        required_version_line="Gm version: $SOLC_BUILD_ID"
+    else
+        fail "Unsupported reproducible compiler variant: $variant"
+        return 1
+    fi
+    if [ "$DRY_RUN" = true ]; then
+        dry "compile ECC/SM creation and runtime with FISCO solc $SOLC_BUILD_ID"
+        return 0
+    fi
+    if [ ! -x "$compiler" ]; then
+        fail "FISCO $variant solc not found after Console compilation: $compiler"
+        return 1
+    fi
+    local version_output
+    if ! version_output=$("$compiler" --version 2>&1) \
+        || [[ "$version_output" != *"$required_version_line"* ]]; then
+        fail "FISCO $variant solc must report $required_version_line"
+        return 1
+    fi
+    mkdir -p "$output_dir"
+    local output
+    if ! output=$(
+        cd "$CONTRACT_SRC_DIR"
+        "$compiler" \
+            --base-path . \
+            --include-path . \
+            --evm-version london \
+            --metadata-hash ipfs \
+            --abi \
+            --bin \
+            --bin-runtime \
+            --metadata \
+            --overwrite \
+            -o "$output_dir" \
+            Storage.sol Sharing.sol 2>&1
+    ); then
+        fail "FISCO $variant reproducible artifact compilation failed"
+        printf '%s\n' "$output" | tail -20 | sed 's/^/    /'
+        return 1
+    fi
+    for name in Storage Sharing; do
+        for suffix in abi bin bin-runtime; do
+            if [ ! -s "$output_dir/$name.$suffix" ]; then
+                fail "FISCO $variant compiler did not produce $name.$suffix"
+                return 1
+            fi
+        done
+    done
+    ok "FISCO $variant reproducible creation/runtime artifacts generated"
 }
 
 STORAGE_COMPILED_ABI=""
-STORAGE_COMPILED_BIN=""
+STORAGE_COMPILED_ECC=""
+STORAGE_COMPILED_SM=""
 SHARING_COMPILED_ABI=""
-SHARING_COMPILED_BIN=""
+SHARING_COMPILED_ECC=""
+SHARING_COMPILED_SM=""
 
-if ! compile_contract "Storage" STORAGE_COMPILED_ABI STORAGE_COMPILED_BIN; then
+if ! compile_contract "Storage" STORAGE_COMPILED_ABI \
+    STORAGE_COMPILED_ECC STORAGE_COMPILED_SM; then
     exit 1
 fi
-if ! compile_contract "Sharing" SHARING_COMPILED_ABI SHARING_COMPILED_BIN; then
+if ! compile_contract "Sharing" SHARING_COMPILED_ABI \
+    SHARING_COMPILED_ECC SHARING_COMPILED_SM; then
+    exit 1
+fi
+if ! prepare_reproducible_build_directory; then
+    exit 1
+fi
+if ! compile_reproducible_variant ecc; then
+    exit 1
+fi
+if ! compile_reproducible_variant sm; then
     exit 1
 fi
 
@@ -541,13 +1143,14 @@ fi
 # ==============================================================================
 section 3 "Artifact Verification"
 
-# 比较编译产物与签入 ABI/ECC/SM bytecode，任何漂移均在链写之前阻断。
+# 比较 Console 与可复现编译的 ABI/creation/runtime，任何漂移均在链写前阻断。
 verify_compiled_artifacts() {
     local name="$1"
     local compiled_abi="$2"
-    local compiled_bin="$3"
+    local compiled_ecc="$3"
+    local compiled_sm="$4"
     if [ "$DRY_RUN" = true ]; then
-        dry "compare compiled $name ABI/BIN with signed artifacts and catalog"
+        dry "compare compiled $name ABI plus ECC/SM creation/runtime with signed catalog"
         ok "Dry-run: $name artifact verification would be mandatory"
         return 0
     fi
@@ -559,28 +1162,51 @@ verify_compiled_artifacts() {
         return 1
     fi
 
-    local ecc_result=""
-    local sm_result=""
-    if ecc_result=$(python3 "$FINGERPRINT_TOOL" compare-bytecode \
+    if ! python3 "$FINGERPRINT_TOOL" compare-bytecode \
         --expected "$BIN_DEST_DIR/ecc/$name.bin" \
-        --actual "$compiled_bin" 2>&1); then
-        ok "$name compiled bytecode matches signed ECC artifact"
-    elif sm_result=$(python3 "$FINGERPRINT_TOOL" compare-bytecode \
-        --expected "$BIN_DEST_DIR/sm/$name.bin" \
-        --actual "$compiled_bin" 2>&1); then
-        ok "$name compiled bytecode matches signed SM artifact"
-    else
-        fail "$name compiled bytecode matches neither signed ECC nor SM artifact"
-        info "ECC comparison: $ecc_result"
-        info "SM comparison: $sm_result"
+        --actual "$compiled_ecc"; then
+        fail "$name Console ECC creation bytecode does not match the signed artifact"
         return 1
     fi
+    if ! python3 "$FINGERPRINT_TOOL" compare-bytecode \
+        --expected "$BIN_DEST_DIR/sm/$name.bin" \
+        --actual "$compiled_sm"; then
+        fail "$name Console SM creation bytecode does not match the signed artifact"
+        return 1
+    fi
+    for variant in ecc sm; do
+        local build_dir="$ECC_REPRO_BUILD_DIR"
+        if [ "$variant" = "sm" ]; then
+            build_dir="$SM_REPRO_BUILD_DIR"
+        fi
+        if ! python3 "$FINGERPRINT_TOOL" compare-abi \
+            --expected "$ABI_DEST_DIR/$name.abi" \
+            --actual "$build_dir/$name.abi"; then
+            fail "$name $variant reproducible ABI does not match the signed ABI"
+            return 1
+        fi
+        if ! python3 "$FINGERPRINT_TOOL" compare-bytecode \
+            --expected "$BIN_DEST_DIR/$variant/$name.bin" \
+            --actual "$build_dir/$name.bin"; then
+            fail "$name $variant creation bytecode does not match the signed artifact"
+            return 1
+        fi
+        if ! python3 "$FINGERPRINT_TOOL" compare-bytecode \
+            --expected "$BIN_DEST_DIR/runtime/$variant/$name.bin" \
+            --actual "$build_dir/$name.bin-runtime"; then
+            fail "$name $variant runtime bytecode does not match the signed artifact"
+            return 1
+        fi
+    done
+    ok "$name ABI plus ECC/SM creation/runtime match signed artifacts"
 }
 
-if ! verify_compiled_artifacts "Storage" "$STORAGE_COMPILED_ABI" "$STORAGE_COMPILED_BIN"; then
+if ! verify_compiled_artifacts "Storage" "$STORAGE_COMPILED_ABI" \
+    "$STORAGE_COMPILED_ECC" "$STORAGE_COMPILED_SM"; then
     exit 1
 fi
-if ! verify_compiled_artifacts "Sharing" "$SHARING_COMPILED_ABI" "$SHARING_COMPILED_BIN"; then
+if ! verify_compiled_artifacts "Sharing" "$SHARING_COMPILED_ABI" \
+    "$SHARING_COMPILED_ECC" "$SHARING_COMPILED_SM"; then
     exit 1
 fi
 if ! catalog_sha256_before_verify=$(calculate_catalog_sha256); then
@@ -705,6 +1331,64 @@ print(f"{address}\t{transaction_hash}")
 '
 }
 
+# 每笔链写紧前重新核验 catalog、staged source 与 Console ABI/ECC/SM creation。
+revalidate_contract_deploy_inputs() {
+    local name="$1"
+    local compiled_abi="$2"
+    local compiled_ecc="$3"
+    local compiled_sm="$4"
+    local crypto_variant="$5"
+    if [ "$crypto_variant" != "ecc" ] && [ "$crypto_variant" != "sm" ]; then
+        fail "$name cannot deploy with unsupported crypto variant: $crypto_variant"
+        return 1
+    fi
+    if ! validate_console_compile_paths "$name"; then
+        return 1
+    fi
+    for artifact_path in "$compiled_abi" "$compiled_ecc" "$compiled_sm"; do
+        if [ ! -s "$artifact_path" ] || [ -L "$artifact_path" ]; then
+            fail "$name verified Console artifact was replaced before deployment: $artifact_path"
+            return 1
+        fi
+    done
+    if [ -L "$CONSOLE_CONTRACT_DIR/$name.sol" ] \
+        || ! cmp -s "$CONTRACT_SRC_DIR/$name.sol" "$CONSOLE_CONTRACT_DIR/$name.sol"; then
+        fail "$name staged source drifted after artifact verification"
+        return 1
+    fi
+    if ! python3 "$FINGERPRINT_TOOL" verify \
+        --project-root "$PROJECT_ROOT" \
+        --catalog "$CATALOG_FILE"; then
+        fail "$name signed artifacts changed before deployment"
+        return 1
+    fi
+    local current_catalog_sha256
+    if ! current_catalog_sha256=$(calculate_catalog_sha256) \
+        || [ "$current_catalog_sha256" != "$VERIFIED_CATALOG_SHA256" ]; then
+        fail "$name artifact catalog changed before deployment"
+        return 1
+    fi
+    if ! python3 "$FINGERPRINT_TOOL" compare-abi \
+        --expected "$ABI_DEST_DIR/$name.abi" \
+        --actual "$compiled_abi"; then
+        fail "$name Console ABI changed after artifact verification"
+        return 1
+    fi
+    if ! python3 "$FINGERPRINT_TOOL" compare-bytecode \
+        --expected "$BIN_DEST_DIR/ecc/$name.bin" \
+        --actual "$compiled_ecc"; then
+        fail "$name Console ECC creation changed after artifact verification"
+        return 1
+    fi
+    if ! python3 "$FINGERPRINT_TOOL" compare-bytecode \
+        --expected "$BIN_DEST_DIR/sm/$name.bin" \
+        --actual "$compiled_sm"; then
+        fail "$name Console SM creation changed after artifact verification"
+        return 1
+    fi
+    ok "$name deploy inputs revalidated immediately before $crypto_variant chain write"
+}
+
 # 从交易回执或部署输出中提取十进制区块号。
 extract_block_number() {
     python3 -c '
@@ -733,6 +1417,9 @@ deploy_contract() {
     local address_result_var="$2"
     local transaction_result_var="$3"
     local block_result_var="$4"
+    local compiled_abi="$5"
+    local compiled_ecc="$6"
+    local compiled_sm="$7"
     if [ "$DRY_RUN" = true ]; then
         local dry_address="0x1111111111111111111111111111111111111111"
         if [ "$name" = "Sharing" ]; then
@@ -747,8 +1434,9 @@ deploy_contract() {
         return 0
     fi
 
-    if ! cmp -s "$CONTRACT_SRC_DIR/$name.sol" "$CONSOLE_CONTRACT_DIR/$name.sol"; then
-        fail "$name staged source drifted after artifact verification"
+    if ! revalidate_contract_deploy_inputs \
+        "$name" "$compiled_abi" "$compiled_ecc" "$compiled_sm" \
+        "$FISCO_CRYPTO_VARIANT"; then
         return 1
     fi
 
@@ -803,10 +1491,12 @@ SHARING_ADDR=""
 SHARING_TX=""
 SHARING_BLOCK=""
 
-if ! deploy_contract Storage STORAGE_ADDR STORAGE_TX STORAGE_BLOCK; then
+if ! deploy_contract Storage STORAGE_ADDR STORAGE_TX STORAGE_BLOCK \
+    "$STORAGE_COMPILED_ABI" "$STORAGE_COMPILED_ECC" "$STORAGE_COMPILED_SM"; then
     exit 1
 fi
-if ! deploy_contract Sharing SHARING_ADDR SHARING_TX SHARING_BLOCK; then
+if ! deploy_contract Sharing SHARING_ADDR SHARING_TX SHARING_BLOCK \
+    "$SHARING_COMPILED_ABI" "$SHARING_COMPILED_ECC" "$SHARING_COMPILED_SM"; then
     exit 1
 fi
 if [ "$STORAGE_ADDR" = "$SHARING_ADDR" ]; then
@@ -819,7 +1509,7 @@ fi
 # ==============================================================================
 section 5 "On-chain Verification"
 
-# 从 getCode 输出中提取独立一行或 JSON 字段中的非空 EVM runtime code。
+# 从 getCode 输出中提取独立一行或 JSON 字段中的候选 EVM runtime code。
 extract_runtime_code() {
     python3 -c '
 import re
@@ -830,23 +1520,28 @@ patterns = (
     r"(?im)^\s*\"?(0x[0-9a-fA-F]+)\"?\s*$",
     r"\"(?:code|result)\"\s*:\s*\"(0x[0-9a-fA-F]+)\"",
 )
+candidates = set()
 for pattern in patterns:
     matches = re.findall(pattern, text)
-    valid = [value for value in matches if value.lower() not in {"0x", "0x0"}]
-    if valid:
-        print(max(valid, key=len).lower())
-        raise SystemExit(0)
-raise SystemExit(1)
+    candidates.update(
+        value.lower()
+        for value in matches
+        if value.lower() not in {"0x", "0x0"}
+    )
+if len(candidates) != 1:
+    raise SystemExit(1)
+print(next(iter(candidates)))
 '
 }
 
-# 强制校验目标地址存在非空 runtime code。
+# 强制校验目标地址完整 runtime code 与实际链 crypto 变体的签入制品一致。
 verify_contract_code() {
     local name="$1"
     local address="$2"
+    local crypto_variant="$3"
     if [ "$DRY_RUN" = true ]; then
         dry "getCode $address"
-        ok "Dry-run: $name runtime code would be required"
+        ok "Dry-run: $name runtime code would have to match the node-selected variant"
         return 0
     fi
 
@@ -864,7 +1559,14 @@ verify_contract_code() {
         printf '%s\n' "$output" | tail -10 | sed 's/^/    /'
         return 1
     fi
-    ok "$name address returned non-empty runtime code (${#runtime_code} hex chars)"
+    if ! printf '%s\n' "$runtime_code" | python3 "$FINGERPRINT_TOOL" \
+        compare-bytecode \
+        --expected "$BIN_DEST_DIR/runtime/$crypto_variant/$name.bin" \
+        --actual-stdin; then
+        fail "$name runtime bytecode mismatch for FISCO $crypto_variant variant"
+        return 1
+    fi
+    ok "$name runtime bytecode matches signed $crypto_variant artifact"
 }
 
 # 从 contractIdentity 只读调用中提取唯一的合约名称和语义版本。
@@ -936,14 +1638,16 @@ verify_contract_identity() {
     ok "$name identity matches verified catalog ($actual_name@$actual_version)"
 }
 
-if ! verify_contract_code Storage "$STORAGE_ADDR"; then
+if ! verify_contract_code Storage "$STORAGE_ADDR" \
+    "${FISCO_CRYPTO_VARIANT:-node-selected}"; then
     exit 1
 fi
 if ! verify_contract_identity Storage "$STORAGE_ADDR" \
     "$STORAGE_EXPECTED_NAME" "$STORAGE_EXPECTED_VERSION"; then
     exit 1
 fi
-if ! verify_contract_code Sharing "$SHARING_ADDR"; then
+if ! verify_contract_code Sharing "$SHARING_ADDR" \
+    "${FISCO_CRYPTO_VARIANT:-node-selected}"; then
     exit 1
 fi
 if ! verify_contract_identity Sharing "$SHARING_ADDR" \

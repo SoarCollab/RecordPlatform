@@ -61,11 +61,23 @@ class ContractFingerprintServiceTest {
         assertThat(service.fingerprintAbi(ContractConstants.SharingAbi))
                 .isEqualTo(sharing.abiSha256());
         assertThat(service.fingerprintBytecode(ContractConstants.SharingBinary))
-                .isEqualTo(sharing.bytecodeSha256().get("ecc"));
+                .isEqualTo(sharing.creationBytecodeSha256().get("ecc"));
+        assertThat(service.fingerprintBytecode(ContractConstants.SharingGmBinary))
+                .isEqualTo(sharing.creationBytecodeSha256().get("sm"));
+        assertThat(service.fingerprintBytecode(ContractConstants.SharingRuntimeBinary))
+                .isEqualTo(sharing.runtimeBytecodeSha256().get("ecc"));
+        assertThat(service.fingerprintBytecode(ContractConstants.SharingGmRuntimeBinary))
+                .isEqualTo(sharing.runtimeBytecodeSha256().get("sm"));
         assertThat(service.fingerprintAbi(ContractConstants.StorageAbi))
                 .isEqualTo(storage.abiSha256());
         assertThat(service.fingerprintBytecode(ContractConstants.StorageBinary))
-                .isEqualTo(storage.bytecodeSha256().get("ecc"));
+                .isEqualTo(storage.creationBytecodeSha256().get("ecc"));
+        assertThat(service.fingerprintBytecode(ContractConstants.StorageGmBinary))
+                .isEqualTo(storage.creationBytecodeSha256().get("sm"));
+        assertThat(service.fingerprintBytecode(ContractConstants.StorageRuntimeBinary))
+                .isEqualTo(storage.runtimeBytecodeSha256().get("ecc"));
+        assertThat(service.fingerprintBytecode(ContractConstants.StorageGmRuntimeBinary))
+                .isEqualTo(storage.runtimeBytecodeSha256().get("sm"));
     }
 
     /**
@@ -118,6 +130,27 @@ class ContractFingerprintServiceTest {
         byte[] trailingCatalog = (new String(catalog, StandardCharsets.UTF_8) + "\n{}")
                 .getBytes(StandardCharsets.UTF_8);
         assertThatThrownBy(() -> service.readCatalog(trailingCatalog))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Invalid contract artifact catalog");
+    }
+
+    /**
+     * 验证 catalog 未声明字段不会被 Java 解析器静默忽略。
+     */
+    @Test
+    void shouldRejectUnknownCatalogFields() throws Exception {
+        byte[] catalog;
+        try (InputStream inputStream = getClass().getResourceAsStream(
+                "/contract-registry/artifacts.json")) {
+            catalog = inputStream.readAllBytes();
+        }
+        byte[] catalogWithUnknownField = new String(catalog, StandardCharsets.UTF_8)
+                .replace(
+                        "\"contracts\": [",
+                        "\"unsupportedField\": true,\n  \"contracts\": [")
+                .getBytes(StandardCharsets.UTF_8);
+
+        assertThatThrownBy(() -> service.readCatalog(catalogWithUnknownField))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Invalid contract artifact catalog");
     }

@@ -93,7 +93,7 @@ contract-registry:
 
 ## Contract Registry and Artifact Fingerprints
 
-`platform-fisco/src/main/resources/contract-registry/artifacts.json` is the version-controlled source of truth for the `Sharing` and `Storage` build artifacts. Each entry records its semantic version, lifecycle status, effective time, upgrade strategy, both Solidity source copies, canonical ABI fingerprint, and ECC/SM creation-bytecode fingerprints.
+`platform-fisco/src/main/resources/contract-registry/artifacts.json` is the version-controlled source of truth for the `Sharing` and `Storage` build artifacts. Each entry records its semantic version, lifecycle status, effective time, upgrade strategy, both Solidity source copies, canonical ABI fingerprint, and ECC/SM creation and deployed-runtime bytecode fingerprints.
 
 The supported lifecycle states are:
 
@@ -107,16 +107,16 @@ The ABI algorithm is `ABI-CANONICAL-JSON-SHA256-V1`. It removes `internalType`, 
 
 At startup, `ContractRegistryService` fails closed unless all of the following hold:
 
-1. the catalog schema and all signed source/ABI/ECC/SM fingerprints are valid;
+1. the catalog schema and all signed source/ABI/ECC/SM creation/runtime fingerprints are valid;
 2. exactly one `ACTIVE` artifact exists for both `Sharing` and `Storage`;
 3. the active adapter's actual chain ID and FISCO group match configuration;
 4. the selected address is a non-zero 20-byte address in the active chain's own configuration namespace;
-5. the node returns non-empty runtime code and `contractIdentity()` exactly matches the selected catalog name/version; and
+5. the node's complete runtime-code fingerprint matches the signed runtime artifact for the actual chain/crypto variant, and `contractIdentity()` exactly matches the selected catalog name/version; and
 6. deployment transaction hash, block number, and actual activation time are either all present or all absent.
 
 The resulting `record-platform-contract-registry-entry.v1` fingerprint binds chain type/ID/group, address, semantic version, ABI and creation-bytecode hashes, observed runtime-code hash, deployment evidence, status, effective time, and upgrade strategy. Catalog `effectiveAt` is the earliest artifact lifecycle time; when a complete deployment triplet exists, its `FISCO_*_DEPLOYMENT_EFFECTIVE_AT` is the actual active-chain time recorded in the runtime entry. `SharingService`, `StorageService`, and the Besu adapter only use the resolved registry address. Registry RPC reads and batch store/query RPCs remain protected by the backend-to-FISCO shared token.
 
-The local FISCO deployment script queries official Console `getGroupInfo` before compilation and requires an exact match with `FISCO_CHAIN_ID`/`FISCO_GROUP_ID`. It fixes compilation to solc `0.8.35`, which must produce artifacts equivalent to the signed ABI/BIN, then checks both deployed addresses through `getCode` and catalog-derived `contractIdentity()`. After successful verification it generates one UTC effective time, atomically publishes a credential-free `record-platform-contract-deployment-receipt.v1` receipt with `chainType=LOCAL_FISCO`, and only then atomically writes both addresses and complete deployment triplets to `.env`. Receipt failure, parsing failure, chain/group mismatch, identity mismatch, or revert prevents activation. Dry-run performs no Console call and writes no receipt or environment file.
+The local FISCO deployment script queries official Console `getGroupInfo` before compilation and requires its unique chain/group/crypto/VM tuple to match `FISCO_CHAIN_ID`/`FISCO_GROUP_ID` and an EVM target. It fixes the build profile to FISCO solc `0.8.11+commit.6b4cc280`, EVM London, optimizer disabled, and IPFS metadata, then uses separate keccak256/sm3 compilers to rebuild ECC/SM creation/runtime artifacts. Every output must match the signed artifacts. It then checks the complete `getCode` bytes for the node's actual crypto variant before catalog-derived `contractIdentity()`. After successful verification it generates one UTC effective time, atomically publishes a credential-free `record-platform-contract-deployment-receipt.v1` receipt with `chainType=LOCAL_FISCO`, and only then atomically writes both addresses and complete deployment triplets to `.env`. Receipt failure, parsing failure, chain/group/crypto/VM mismatch, runtime or identity mismatch, or revert prevents activation. Dry-run performs no Console call and writes no receipt or environment file.
 
 Every new attestation batch persists the complete `Sharing` registry entry. The provider checks the same entry before query or write, and retries refuse to cross to a different registry fingerprint. Proof export reads that immutable snapshot instead of current environment variables, so an address or ABI change cannot rewrite historical evidence. Legacy batches whose historical contract identity cannot be reconstructed remain unresolved and are not given fabricated registry metadata.
 
@@ -124,8 +124,8 @@ Every new attestation batch persists the complete `Sharing` registry entry. The 
 
 Contract upgrades use `REDEPLOY_ADDRESS`; proxy behavior is not assumed.
 
-1. Add the reviewed source, ABI, ECC/SM bytecode, semantic version, and fingerprints to the catalog. Retain the previous entry and change it to `DEPRECATED`; never delete an entry referenced by a proof.
-2. Run `contract_fingerprint.py verify`, then `scripts/contract-deploy.sh`. The Console must support solc `0.8.35`. The script validates chain/group and compiled artifacts before deployment, verifies runtime code plus exact catalog identity afterwards, publishes the structured deployment receipt, and atomically activates both addresses plus transaction/block/effective-time evidence.
+1. Add the reviewed source, ABI, ECC/SM creation/runtime bytecode, semantic version, and fingerprints to the catalog. Retain the previous entry and change it to `DEPRECATED`; never delete an entry referenced by a proof.
+2. Run `contract_fingerprint.py verify`, then `scripts/contract-deploy.sh`. The Console must support solc `0.8.11` and provide both official keccak256/sm3 compilers. The script validates chain/group/crypto/VM and compiled artifacts before deployment, verifies complete runtime code plus exact catalog identity afterwards, publishes the structured deployment receipt, and atomically activates both addresses plus transaction/block/effective-time evidence.
 3. Restart `platform-fisco`. New batches bind the new `ACTIVE` entry. An already-claimed batch remains bound to its old fingerprint and moves to manual review rather than silently switching contracts.
 4. Use `REVOKED` only for a confirmed security or integrity incident. A status change is a reviewed catalog change; do not edit already-persisted batch snapshots to manufacture a different historical state.
 

@@ -9,6 +9,7 @@ import shutil
 import socket
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -111,7 +112,13 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertNotIn("getShareInfo", calls)
             self.assertLess(calls.index("getGroupInfo"), calls.index("deploy Storage"))
             compiler_calls = fixture["compiler_log"].read_text(encoding="utf-8")
-            self.assertEqual(compiler_calls.count("-v 0.8.35"), 2)
+            self.assertEqual(compiler_calls.count("-v 0.8.11"), 2)
+            artifact_compiler_calls = fixture["artifact_compiler_log"].read_text(
+                encoding="utf-8",
+            )
+            self.assertIn("ecc", artifact_compiler_calls)
+            self.assertIn("sm", artifact_compiler_calls)
+            self.assertEqual(artifact_compiler_calls.count("--bin-runtime"), 2)
 
             receipt_files = list(fixture["receipt_dir"].glob("*.json"))
             self.assertEqual(len(receipt_files), 1)
@@ -186,6 +193,8 @@ class ContractDeployScriptTest(unittest.TestCase):
                 .read_bytes(),
                 signed_abi,
             )
+            self._assert_no_staged_source_residue(fixture)
+            self._assert_no_reproducible_build_residue(fixture)
 
     def test_abi_drift_blocks_all_deployment_and_activation(self) -> None:
         """编译 ABI 漂移必须在第一笔部署交易之前失败并保留旧配置。"""
@@ -205,6 +214,214 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertEqual(fixture["env_file"].read_bytes(), original_env)
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertIn("getGroupInfo", calls)
+            self.assertNotIn("deploy ", calls)
+
+    def test_compiled_runtime_drift_blocks_first_deployment(self) -> None:
+        """新编译 runtime 与签入 catalog 不一致时必须在第一笔链写前失败。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            original_env = fixture["env_file"].read_bytes()
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_RUNTIME_ARTIFACT_DRIFT": "Sharing"},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("runtime bytecode does not match", result.stdout + result.stderr)
+            self.assertEqual(fixture["env_file"].read_bytes(), original_env)
+            calls = fixture["call_log"].read_text(encoding="utf-8")
+            self.assertNotIn("deploy ", calls)
+            self._assert_no_reproducible_build_residue(fixture)
+
+    def test_missing_sm_creation_artifact_blocks_first_deployment(self) -> None:
+        """Console 未生成独立 SM creation 时不得回退使用 ECC 文件。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_MISSING_SM_BIN": "Sharing"},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("SM creation", result.stdout + result.stderr)
+            calls = fixture["call_log"].read_text(encoding="utf-8")
+            self.assertNotIn("deploy ", calls)
+
+    def test_symlink_console_artifact_blocks_first_deployment(self) -> None:
+        """Console 输出使用符号链接时不得把外部目标当作本次独立编译证据。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_SYMLINK_ECC_BIN": "Storage"},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must not be a symlink", result.stdout + result.stderr)
+            calls = fixture["call_log"].read_text(encoding="utf-8")
+            self.assertNotIn("deploy ", calls)
+
+    def test_symlink_console_source_target_is_rejected_without_following(self) -> None:
+        """源码 staging 不得跟随 Console 中预置的目标 symlink 覆盖其外部文件。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            source_directory = fixture["console_dir"] / "contracts/solidity"
+            source_directory.mkdir(parents=True)
+            symlink_target = fixture["root"] / "must-not-change.sol"
+            symlink_target.write_text("preserve-me\n", encoding="utf-8")
+            (source_directory / "Storage.sol").symlink_to(symlink_target)
+
+            result = self._run_script(fixture)
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must not be a symlink", result.stdout + result.stderr)
+            self.assertEqual(
+                symlink_target.read_text(encoding="utf-8"),
+                "preserve-me\n",
+            )
+            calls = fixture["call_log"].read_text(encoding="utf-8")
+            self.assertNotIn("deploy ", calls)
+
+    def test_directory_source_target_cleans_private_staging_file(self) -> None:
+        """源码目标为目录时不得触发 mv 容器语义或遗留嵌套 staging 文件。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            invalid_target = fixture["console_dir"] / "contracts/solidity/Storage.sol"
+            invalid_target.mkdir(parents=True)
+
+            result = self._run_script(fixture)
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "source could not be atomically staged into FISCO Console",
+                result.stdout + result.stderr,
+            )
+            calls = fixture["call_log"].read_text(encoding="utf-8")
+            self.assertNotIn("deploy ", calls)
+            self._assert_no_staged_source_residue(fixture)
+
+    def test_source_directory_swap_does_not_redirect_staging_cleanup(self) -> None:
+        """源码目录被换成 symlink 时不得写入或删除重定向目录中的同名文件。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            external_directory = fixture["root"] / "external-source-directory"
+            external_directory.mkdir()
+            moved_symlink = fixture["root"] / "moved-source-directory-symlink"
+
+            result = self._run_script(
+                fixture,
+                extra_env={
+                    "FAKE_SWAP_SOURCE_DIRECTORY_BEFORE_POPULATE": "Storage",
+                    "FAKE_SOURCE_SWAP_EXTERNAL": str(external_directory),
+                    "FAKE_SOURCE_SWAP_LINK": str(moved_symlink),
+                },
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "source could not be atomically staged into FISCO Console",
+                result.stdout + result.stderr,
+            )
+            external_decoys = list(
+                external_directory.glob(".record-platform-Storage.*"),
+            )
+            self.assertEqual(len(external_decoys), 1)
+            self.assertEqual(
+                external_decoys[0].read_text(encoding="utf-8"),
+                "preserve-me\n",
+            )
+            self.assertTrue(moved_symlink.is_symlink())
+            calls = fixture["call_log"].read_text(encoding="utf-8")
+            self.assertNotIn("deploy ", calls)
+            self._assert_no_staged_source_residue(fixture)
+
+    def test_staged_source_entry_swap_does_not_truncate_decoy(self) -> None:
+        """私有 staging 目录项被替换时必须先核对 inode，禁止截断替代文件。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            original_staging = fixture["root"] / "original-staged-source"
+            preserved_decoy = fixture["root"] / "preserved-staged-source-decoy"
+
+            result = self._run_script(
+                fixture,
+                extra_env={
+                    "FAKE_SWAP_STAGED_SOURCE_FILE_BEFORE_POPULATE": "Storage",
+                    "FAKE_STAGED_SOURCE_ORIGINAL": str(original_staging),
+                    "FAKE_STAGED_SOURCE_DECOY": str(preserved_decoy),
+                },
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "source could not be atomically staged into FISCO Console",
+                result.stdout + result.stderr,
+            )
+            self.assertEqual(
+                preserved_decoy.read_text(encoding="utf-8"),
+                "preserve-me\n",
+            )
+            self.assertFalse(original_staging.exists())
+            calls = fixture["call_log"].read_text(encoding="utf-8")
+            self.assertNotIn("deploy ", calls)
+            self._assert_no_staged_source_residue(fixture)
+
+    def test_symlink_console_sm_fallback_directory_is_rejected(self) -> None:
+        """SM fallback 的父目录为 symlink 时也必须在编译和链写前失败关闭。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            sdk_directory = fixture["console_dir"] / "contracts/sdk"
+            sdk_directory.mkdir(parents=True)
+            external_sm_directory = fixture["root"] / "external-sm"
+            external_sm_directory.mkdir()
+            (sdk_directory / "sm").symlink_to(
+                external_sm_directory,
+                target_is_directory=True,
+            )
+
+            result = self._run_script(fixture)
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must not be a symlink", result.stdout + result.stderr)
+            calls = fixture["call_log"].read_text(encoding="utf-8")
+            self.assertNotIn("deploy ", calls)
+
+    def test_verified_console_artifact_drift_blocks_chain_write(self) -> None:
+        """Phase 3 后替换 Console creation 时必须在第一笔部署交易前重新阻断。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_TAMPER_CONSOLE_AFTER_VERIFY": "Storage"},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "Console ECC creation changed after artifact verification",
+                result.stdout + result.stderr,
+            )
+            calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertNotIn("deploy ", calls)
 
     def test_chain_mismatch_blocks_compile_deployment_and_activation(self) -> None:
@@ -308,12 +525,30 @@ class ContractDeployScriptTest(unittest.TestCase):
 
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
-                "did not return one valid chainID/groupID pair",
+                "did not return one valid chain/group/crypto/VM tuple",
                 result.stdout + result.stderr,
             )
             self.assertEqual(fixture["env_file"].read_bytes(), original_env)
             calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertIn("getGroupInfo", calls)
+            self.assertNotIn("deploy ", calls)
+
+    def test_wasm_group_is_rejected_before_compile_and_deployment(self) -> None:
+        """EVM 制品部署工具不得在 FISCO WASM 群组上继续编译或链写。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_WASM": "true"},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("WASM", result.stdout + result.stderr)
+            self.assertFalse(fixture["compiler_log"].exists())
+            calls = fixture["call_log"].read_text(encoding="utf-8")
             self.assertNotIn("deploy ", calls)
 
     def test_empty_runtime_code_blocks_activation(self) -> None:
@@ -336,6 +571,66 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertIn("deploy Storage", calls)
             self.assertIn("deploy Sharing", calls)
             self.assertIn(f"getCode {SHARING_ADDRESS}", calls)
+
+    def test_arbitrary_nonempty_runtime_blocks_identity_and_activation(self) -> None:
+        """任意非空 code 即使身份夹具正确，也必须在身份调用前被 runtime 锚点拒绝。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            original_env = fixture["env_file"].read_bytes()
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_RUNTIME_CODE_DRIFT": "Sharing"},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("runtime bytecode mismatch", result.stdout + result.stderr)
+            self.assertEqual(fixture["env_file"].read_bytes(), original_env)
+            calls = fixture["call_log"].read_text(encoding="utf-8")
+            self.assertIn(f"getCode {SHARING_ADDRESS}", calls)
+            self.assertNotIn(
+                f"call Sharing {SHARING_ADDRESS} contractIdentity",
+                calls,
+            )
+
+    def test_ambiguous_runtime_output_blocks_identity_and_activation(self) -> None:
+        """同一次 getCode 输出出现两个不同候选值时必须失败关闭而非择长接受。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            original_env = fixture["env_file"].read_bytes()
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_AMBIGUOUS_CODE_ADDRESS": SHARING_ADDRESS},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("no verifiable runtime code", result.stdout + result.stderr)
+            self.assertEqual(fixture["env_file"].read_bytes(), original_env)
+            calls = fixture["call_log"].read_text(encoding="utf-8")
+            self.assertNotIn(
+                f"call Sharing {SHARING_ADDRESS} contractIdentity",
+                calls,
+            )
+
+    def test_sm_group_selects_sm_creation_and_runtime_artifacts(self) -> None:
+        """国密群组必须用同一 SM 变体完成部署前与链上 runtime 对账。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_SM_CRYPTO_TYPE": "true"},
+            )
+            listener.join(timeout=5)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("crypto=sm", result.stdout)
 
     def test_duplicate_contract_addresses_block_activation(self) -> None:
         """继承合约只读调用兼容时，重复地址仍必须在激活前被显式拒绝。"""
@@ -445,8 +740,11 @@ class ContractDeployScriptTest(unittest.TestCase):
         bin_dir.mkdir(parents=True)
         call_log = root / "console-calls.log"
         compiler_log = root / "compiler-calls.log"
+        artifact_compiler_log = root / "artifact-compiler-calls.log"
         date_log = root / "date-calls.log"
         receipt_dir = root / "receipts"
+        temporary_build_root = root / "tmp"
+        temporary_build_root.mkdir()
         env_file = root / ".env"
         env_file.write_text(
             "# deployment fixture\n"
@@ -473,17 +771,64 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 name="$(basename "$source_path" .sol)"
-mkdir -p contracts/sdk/abi contracts/sdk/bin
+mkdir -p contracts/sdk/abi contracts/sdk/bin contracts/sdk/bin/sm
 cp "$FAKE_PROJECT_ROOT/platform-fisco/src/main/resources/abi/$name.abi" \
     "contracts/sdk/abi/$name.abi"
-cp "$FAKE_PROJECT_ROOT/platform-fisco/src/main/resources/bin/ecc/$name.bin" \
-    "contracts/sdk/bin/$name.bin"
+if [[ "${FAKE_SYMLINK_ECC_BIN:-}" == "$name" ]]; then
+    ln -s "$FAKE_PROJECT_ROOT/platform-fisco/src/main/resources/bin/ecc/$name.bin" \
+        "contracts/sdk/bin/$name.bin"
+else
+    cp "$FAKE_PROJECT_ROOT/platform-fisco/src/main/resources/bin/ecc/$name.bin" \
+        "contracts/sdk/bin/$name.bin"
+fi
+if [[ "${FAKE_MISSING_SM_BIN:-}" != "$name" ]]; then
+    cp "$FAKE_PROJECT_ROOT/platform-fisco/src/main/resources/bin/sm/$name.bin" \
+        "contracts/sdk/bin/sm/$name.bin"
+fi
 if [[ "${FAKE_ABI_DRIFT:-}" == "$name" ]]; then
     printf '[{"type":"function","name":"drifted","inputs":[]}]\n' \
         > "contracts/sdk/abi/$name.abi"
 fi
 """,
         )
+        for variant, crypto_directory in (("ecc", "keccak256"), ("sm", "sm3")):
+            self._write_executable(
+                root / f".fisco/solc/0.8.11/{crypto_directory}/solc",
+                f"""#!/usr/bin/env bash
+set -euo pipefail
+variant="{variant}"
+if [[ "$*" == "--version" ]]; then
+    if [[ "$variant" == "sm" ]]; then
+        printf 'solc, the solidity compiler commandline interface\n'
+        printf 'Gm version: 0.8.11+commit.6b4cc280.Linux.g++\n'
+    else
+        printf 'solc, the solidity compiler commandline interface\n'
+        printf 'Version: 0.8.11+commit.6b4cc280.Linux.g++\n'
+    fi
+    exit 0
+fi
+printf '%s %s\n' "$variant" "$*" >> "$FAKE_ARTIFACT_COMPILER_LOG"
+output_dir=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -o) output_dir="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+mkdir -p "$output_dir"
+for name in Storage Sharing; do
+    cp "$FAKE_PROJECT_ROOT/platform-fisco/src/main/resources/abi/$name.abi" \
+        "$output_dir/$name.abi"
+    cp "$FAKE_PROJECT_ROOT/platform-fisco/src/main/resources/bin/$variant/$name.bin" \
+        "$output_dir/$name.bin"
+    cp "$FAKE_PROJECT_ROOT/platform-fisco/src/main/resources/bin/runtime/$variant/$name.bin" \
+        "$output_dir/$name.bin-runtime"
+    if [[ "${{FAKE_RUNTIME_ARTIFACT_DRIFT:-}}" == "$name" ]]; then
+        printf '60006000\n' > "$output_dir/$name.bin-runtime"
+    fi
+done
+""",
+            )
         self._write_executable(
             console_dir / "console.sh",
             f"""#!/usr/bin/env bash
@@ -495,8 +840,9 @@ case "$input" in
         if [[ "${{FAKE_GROUP_INFO_MALFORMED:-}}" == "1" ]]; then
             printf '{{"chainID":"chain0"\n'
         else
-            printf '{{"chainID":"%s","groupID":"%s","nodeList":[]}}\n' \
-                "${{FAKE_CHAIN_ID:-chain0}}" "${{FAKE_GROUP_ID:-group0}}"
+            printf '{{"chainID":"%s","groupID":"%s","wasm":%s,"smCryptoType":%s,"nodeList":[]}}\n' \
+                "${{FAKE_CHAIN_ID:-chain0}}" "${{FAKE_GROUP_ID:-group0}}" \
+                "${{FAKE_WASM:-false}}" "${{FAKE_SM_CRYPTO_TYPE:-false}}"
         fi
         ;;
     *"deploy Storage"*)
@@ -521,8 +867,29 @@ case "$input" in
         if [[ -n "${{FAKE_EMPTY_CODE_ADDRESS:-}}" \
             && "$input" == *"$FAKE_EMPTY_CODE_ADDRESS"* ]]; then
             printf '0x\n'
-        else
+        elif [[ "${{FAKE_RUNTIME_CODE_DRIFT:-}}" == "Storage" \
+            && "$input" == *"{STORAGE_ADDRESS}"* ]]; then
             printf '0x60006000\n'
+        elif [[ "${{FAKE_RUNTIME_CODE_DRIFT:-}}" == "Sharing" \
+            && "$input" == *"{SHARING_ADDRESS}"* ]]; then
+            printf '0x60006000\n'
+        else
+            variant="ecc"
+            if [[ "${{FAKE_SM_CRYPTO_TYPE:-false}}" == "true" ]]; then
+                variant="sm"
+            fi
+            name="Sharing"
+            if [[ "$input" == *"{STORAGE_ADDRESS}"* ]]; then
+                name="Storage"
+            fi
+            printf '0x'
+            tr -d '[:space:]' < \
+                "$FAKE_PROJECT_ROOT/platform-fisco/src/main/resources/bin/runtime/$variant/$name.bin"
+            printf '\n'
+            if [[ -n "${{FAKE_AMBIGUOUS_CODE_ADDRESS:-}}" \
+                && "$input" == *"$FAKE_AMBIGUOUS_CODE_ADDRESS"* ]]; then
+                printf '{{"result":"0x60006000"}}\n'
+            fi
         fi
         ;;
     *"call Storage"*"contractIdentity"*)
@@ -559,6 +926,64 @@ exec "$@"
 """,
         )
         self._write_executable(
+            bin_dir / "python3",
+            """#!/usr/bin/env bash
+set -euo pipefail
+if [[ $# -ge 9 \
+    && "$1" == "-" \
+    && -n "${FAKE_SWAP_SOURCE_DIRECTORY_BEFORE_POPULATE:-}" \
+    && "$(basename "$2")" == "${FAKE_SWAP_SOURCE_DIRECTORY_BEFORE_POPULATE}.sol" \
+    && "$6" == ".record-platform-${FAKE_SWAP_SOURCE_DIRECTORY_BEFORE_POPULATE}."* ]]; then
+    source_directory="$3"
+    original_directory="${source_directory}.record-platform-original"
+    mv "$source_directory" "$original_directory"
+    ln -s "$FAKE_SOURCE_SWAP_EXTERNAL" "$source_directory"
+    printf 'preserve-me\n' > "$FAKE_SOURCE_SWAP_EXTERNAL/$6"
+    set +e
+    "$FAKE_REAL_PYTHON" "$@"
+    status=$?
+    set -e
+    mv "$source_directory" "$FAKE_SOURCE_SWAP_LINK"
+    mv "$original_directory" "$source_directory"
+    exit "$status"
+fi
+if [[ $# -ge 9 \
+    && "$1" == "-" \
+    && -n "${FAKE_SWAP_STAGED_SOURCE_FILE_BEFORE_POPULATE:-}" \
+    && "$(basename "$2")" == "${FAKE_SWAP_STAGED_SOURCE_FILE_BEFORE_POPULATE}.sol" \
+    && "$6" == ".record-platform-${FAKE_SWAP_STAGED_SOURCE_FILE_BEFORE_POPULATE}."* ]]; then
+    mv "$3/$6" "$FAKE_STAGED_SOURCE_ORIGINAL"
+    printf 'preserve-me\n' > "$3/$6"
+    set +e
+    "$FAKE_REAL_PYTHON" "$@"
+    status=$?
+    set -e
+    mv "$3/$6" "$FAKE_STAGED_SOURCE_DECOY"
+    mv "$FAKE_STAGED_SOURCE_ORIGINAL" "$3/$6"
+    exit "$status"
+fi
+if [[ "$*" == *"contract_fingerprint.py verify"* ]]; then
+    count=0
+    if [[ -f "$FAKE_PYTHON_STATE" ]]; then
+        count="$(<"$FAKE_PYTHON_STATE")"
+    fi
+    count=$((count + 1))
+    printf '%s\n' "$count" > "$FAKE_PYTHON_STATE"
+    set +e
+    "$FAKE_REAL_PYTHON" "$@"
+    status=$?
+    set -e
+    if [[ $status -eq 0 && $count -eq 2 \
+        && -n "${FAKE_TAMPER_CONSOLE_AFTER_VERIFY:-}" ]]; then
+        name="$FAKE_TAMPER_CONSOLE_AFTER_VERIFY"
+        printf '60006000\n' > "$FAKE_CONSOLE_DIR/contracts/sdk/bin/$name.bin"
+    fi
+    exit "$status"
+fi
+exec "$FAKE_REAL_PYTHON" "$@"
+""",
+        )
+        self._write_executable(
             bin_dir / "date",
             f"""#!/usr/bin/env bash
 set -euo pipefail
@@ -572,8 +997,10 @@ printf '{FIXED_EFFECTIVE_AT}\n'
             "bin_dir": bin_dir,
             "call_log": call_log,
             "compiler_log": compiler_log,
+            "artifact_compiler_log": artifact_compiler_log,
             "date_log": date_log,
             "receipt_dir": receipt_dir,
+            "temporary_build_root": temporary_build_root,
             "env_file": env_file,
         }
 
@@ -590,7 +1017,13 @@ printf '{FIXED_EFFECTIVE_AT}\n'
             "FAKE_PROJECT_ROOT": str(PROJECT_ROOT),
             "FAKE_CALL_LOG": str(fixture["call_log"]),
             "FAKE_COMPILER_LOG": str(fixture["compiler_log"]),
+            "FAKE_ARTIFACT_COMPILER_LOG": str(fixture["artifact_compiler_log"]),
             "FAKE_DATE_LOG": str(fixture["date_log"]),
+            "FAKE_REAL_PYTHON": sys.executable,
+            "FAKE_PYTHON_STATE": str(fixture["root"] / "python-state"),
+            "FAKE_CONSOLE_DIR": str(fixture["console_dir"]),
+            "TMPDIR": str(fixture["temporary_build_root"]),
+            "HOME": str(fixture["root"]),
             "PATH": f"{fixture['bin_dir']}{os.pathsep}{environment['PATH']}",
         })
         if extra_env:
@@ -614,6 +1047,31 @@ printf '{FIXED_EFFECTIVE_AT}\n'
             check=False,
         )
 
+    def _assert_no_reproducible_build_residue(
+        self,
+        fixture: dict[str, Path],
+    ) -> None:
+        """断言成功或失败退出后均未遗留可复现编译临时目录。"""
+        self.assertEqual(
+            list(fixture["temporary_build_root"].glob(
+                "record-platform-contract-build.*",
+            )),
+            [],
+        )
+
+    def _assert_no_staged_source_residue(
+        self,
+        fixture: dict[str, Path],
+    ) -> None:
+        """断言成功或 staging 失败退出后均未遗留 Console 私有源码临时文件。"""
+        source_directory = fixture["console_dir"] / "contracts/solidity"
+        if not source_directory.exists():
+            return
+        self.assertEqual(
+            list(source_directory.rglob(".record-platform-*")),
+            [],
+        )
+
     def _start_tcp_probe(self) -> tuple[threading.Thread, int]:
         """启动一次性本地 TCP listener，供脚本真实执行连通性探测。"""
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -635,6 +1093,7 @@ printf '{FIXED_EFFECTIVE_AT}\n'
 
     def _write_executable(self, path: Path, content: str) -> None:
         """写入 UTF-8 shell fixture，并授予仅测试用户可执行权限。"""
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         path.chmod(0o700)
 

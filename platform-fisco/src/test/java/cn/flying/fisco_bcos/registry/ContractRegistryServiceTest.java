@@ -1,5 +1,6 @@
 package cn.flying.fisco_bcos.registry;
 
+import cn.flying.fisco_bcos.constants.ContractConstants;
 import cn.flying.platformapi.response.ContractRegistryEntryResponse;
 import org.fisco.bcos.sdk.v3.client.Client;
 import org.fisco.bcos.sdk.v3.client.protocol.response.Code;
@@ -51,6 +52,9 @@ class ContractRegistryServiceTest {
     private Code codeResponse;
 
     @Mock
+    private Code storageCodeResponse;
+
+    @Mock
     private ObjectProvider<Client> clientProvider;
 
     @Mock
@@ -72,7 +76,13 @@ class ContractRegistryServiceTest {
     private Request<?, EthGetCode> getCodeRequest;
 
     @Mock
+    private Request<?, EthGetCode> storageGetCodeRequest;
+
+    @Mock
     private EthGetCode getCodeResponse;
+
+    @Mock
+    private EthGetCode storageGetCodeResponse;
 
     private MockEnvironment environment;
     private ContractRegistryService service;
@@ -95,8 +105,12 @@ class ContractRegistryServiceTest {
         lenient().when(client.getChainId()).thenReturn("chain0");
         lenient().when(client.getGroup()).thenReturn("group0");
         lenient().when(client.getCryptoType()).thenReturn(CryptoType.ECDSA_TYPE);
-        lenient().when(client.getCode(anyString())).thenReturn(codeResponse);
-        lenient().when(codeResponse.getCode()).thenReturn("0x60006000");
+        lenient().when(client.isWASM()).thenReturn(false);
+        lenient().when(client.getCode(SHARING_ADDRESS)).thenReturn(codeResponse);
+        lenient().when(client.getCode(STORAGE_ADDRESS)).thenReturn(storageCodeResponse);
+        lenient().when(codeResponse.getCode()).thenReturn(ContractConstants.SharingRuntimeBinary);
+        lenient().when(storageCodeResponse.getCode())
+                .thenReturn(ContractConstants.StorageRuntimeBinary);
         lenient().when(identityProbe.inspectFisco(
                         eq(client),
                         eq(SHARING_ADDRESS),
@@ -186,6 +200,78 @@ class ContractRegistryServiceTest {
     }
 
     /**
+     * 验证旧 catalog schema 不能在 runtime 字段语义不明确时继续启动。
+     */
+    @Test
+    void shouldRejectLegacyCatalogSchema() throws IOException {
+        Path catalogPath = writeCatalogWithReplacement(
+                "record-platform-contract-artifacts.v2",
+                "record-platform-contract-artifacts.v1");
+        ContractRegistryProperties properties = new ContractRegistryProperties();
+        properties.setCatalogLocation(catalogPath.toUri().toString());
+        service = newService(properties);
+
+        assertThatThrownBy(service::initialize)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Unsupported or empty contract artifact catalog");
+    }
+
+    /**
+     * 验证 ACTIVE 条目缺少完整 runtime 变体时不能通过元数据校验。
+     */
+    @Test
+    void shouldRejectMissingRuntimeBytecodeVariant() throws IOException {
+        Path catalogPath = writeCatalogWithReplacement(
+                "\"runtimeBytecodePaths\": {\n"
+                        + "        \"ecc\": \"platform-fisco/src/main/resources/bin/runtime/ecc/Sharing.bin\",\n"
+                        + "        \"sm\": \"platform-fisco/src/main/resources/bin/runtime/sm/Sharing.bin\"\n"
+                        + "      }",
+                "\"runtimeBytecodePaths\": {}");
+        ContractRegistryProperties properties = new ContractRegistryProperties();
+        properties.setCatalogLocation(catalogPath.toUri().toString());
+        service = newService(properties);
+
+        assertThatThrownBy(service::initialize)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Invalid contract artifact metadata");
+    }
+
+    /**
+     * 验证 creation 与 runtime 不能通过不同字段复用同一文件路径。
+     */
+    @Test
+    void shouldRejectCreationAndRuntimePathReuse() throws IOException {
+        Path catalogPath = writeCatalogWithReplacement(
+                "platform-fisco/src/main/resources/bin/runtime/ecc/Sharing.bin",
+                "platform-fisco/src/main/resources/bin/ecc/Sharing.bin");
+        ContractRegistryProperties properties = new ContractRegistryProperties();
+        properties.setCatalogLocation(catalogPath.toUri().toString());
+        service = newService(properties);
+
+        assertThatThrownBy(service::initialize)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Invalid contract artifact metadata");
+    }
+
+    /**
+     * 验证 catalog runtime 指纹漂移在访问链客户端前由打包制品重算阻断。
+     */
+    @Test
+    void shouldRejectPackagedRuntimeFingerprintDrift() throws IOException {
+        Path catalogPath = writeCatalogWithReplacement(
+                "sha256:1d3ab92fcecd2984920b195bcf432e4ccf446a4ec33c1c092da1581c19a5dc41",
+                "sha256:" + "0".repeat(64));
+        ContractRegistryProperties properties = new ContractRegistryProperties();
+        properties.setCatalogLocation(catalogPath.toUri().toString());
+        service = newService(properties);
+
+        assertThatThrownBy(service::initialize)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Sharing ECC runtime bytecode fingerprint drift");
+        verify(client, never()).getCode(anyString());
+    }
+
+    /**
      * 验证节点地址没有部署代码时服务启动失败。
      */
     @Test
@@ -198,6 +284,45 @@ class ContractRegistryServiceTest {
     }
 
     /**
+     * 验证任意非空 EVM code 即使自报身份正确，也不能冒充已审查 runtime 制品。
+     */
+    @Test
+    void shouldRejectArbitraryNonEmptyRuntimeBeforeIdentityProbe() {
+        when(codeResponse.getCode()).thenReturn("0x60006000");
+
+        assertThatThrownBy(service::initialize)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("runtime bytecode fingerprint drift");
+        verify(identityProbe, never()).inspectFisco(any(), anyString(), anyString());
+    }
+
+    /**
+     * 验证不受 catalog 支持的 FISCO 加密类型不能静默回退到 ECC 制品。
+     */
+    @Test
+    void shouldRejectUnsupportedFiscoCryptoTypeBeforeContractInspection() {
+        when(client.getCryptoType()).thenReturn(99);
+
+        assertThatThrownBy(service::initialize)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Unsupported FISCO crypto type");
+        verify(client, never()).getCode(anyString());
+    }
+
+    /**
+     * 验证 EVM runtime catalog 不能用于激活 FISCO WASM 群组。
+     */
+    @Test
+    void shouldRejectFiscoWasmRuntimeBeforeContractInspection() {
+        when(client.isWASM()).thenReturn(true);
+
+        assertThatThrownBy(service::initialize)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("WASM");
+        verify(client, never()).getCode(anyString());
+    }
+
+    /**
      * 验证 FISCO getCode 返回 RPC error 时即使携带文本也不能继续身份探测。
      */
     @Test
@@ -207,6 +332,54 @@ class ContractRegistryServiceTest {
         assertThatThrownBy(service::initialize)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("No FISCO runtime code");
+    }
+
+    /**
+     * 验证实际 SM 群组会同时选择 SM creation 与 SM runtime 制品。
+     */
+    @Test
+    void shouldBuildVerifiedSmFiscoEntries() {
+        when(client.getCryptoType()).thenReturn(CryptoType.SM_TYPE);
+        when(codeResponse.getCode()).thenReturn(ContractConstants.SharingGmRuntimeBinary);
+        when(storageCodeResponse.getCode()).thenReturn(ContractConstants.StorageGmRuntimeBinary);
+
+        service.initialize();
+
+        ContractRegistryEntryResponse sharing = service.getActiveEntry("Sharing");
+        assertThat(sharing.artifactBytecodeSha256())
+                .isEqualTo(new ContractFingerprintService()
+                        .fingerprintBytecode(ContractConstants.SharingGmBinary));
+        assertThat(sharing.onChainCodeSha256())
+                .isEqualTo(new ContractFingerprintService()
+                        .fingerprintBytecode(ContractConstants.SharingGmRuntimeBinary));
+    }
+
+    /**
+     * 验证 ECDSA 群组返回 SM runtime 时按错误变体拒绝，而不是尝试另一套指纹。
+     */
+    @Test
+    void shouldRejectRuntimeFromWrongCryptoVariant() {
+        when(codeResponse.getCode()).thenReturn(ContractConstants.SharingGmRuntimeBinary);
+
+        assertThatThrownBy(service::initialize)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("runtime bytecode fingerprint drift");
+        verify(identityProbe, never()).inspectFisco(any(), anyString(), anyString());
+    }
+
+    /**
+     * 验证第二个合约 runtime 不匹配时不会留下第一个合约的半成品 ACTIVE 条目。
+     */
+    @Test
+    void shouldRejectPartialRuntimeMatchWithoutPublication() {
+        when(storageCodeResponse.getCode()).thenReturn("0x60006000");
+
+        assertThatThrownBy(service::initialize)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("runtime bytecode fingerprint drift");
+        assertThatThrownBy(() -> service.getActiveEntry("Sharing"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("No ACTIVE contract registry entry");
     }
 
     /**
@@ -299,6 +472,8 @@ class ContractRegistryServiceTest {
                 .thenReturn(new ContractIdentityProbe.ContractIdentity("Sharing", "2.0.0"));
         when(identityProbe.inspectFisco(eq(client), eq(bsnStorage), anyString()))
                 .thenReturn(new ContractIdentityProbe.ContractIdentity("Storage", "1.0.0"));
+        when(client.getCode(bsnSharing)).thenReturn(codeResponse);
+        when(client.getCode(bsnStorage)).thenReturn(storageCodeResponse);
         service = newService();
 
         service.initialize();
@@ -560,9 +735,16 @@ class ContractRegistryServiceTest {
         doReturn(chainIdRequest).when(web3j).ethChainId();
         when(chainIdRequest.send()).thenReturn(chainIdResponse);
         when(chainIdResponse.getChainId()).thenReturn(actualChainId);
-        lenient().doReturn(getCodeRequest).when(web3j).ethGetCode(anyString(), any());
+        lenient().doAnswer(invocation -> STORAGE_ADDRESS.equals(invocation.getArgument(0))
+                        ? storageGetCodeRequest
+                        : getCodeRequest)
+                .when(web3j).ethGetCode(anyString(), any());
         lenient().when(getCodeRequest.send()).thenReturn(getCodeResponse);
-        lenient().when(getCodeResponse.getCode()).thenReturn("0x60006000");
+        lenient().when(storageGetCodeRequest.send()).thenReturn(storageGetCodeResponse);
+        lenient().when(getCodeResponse.getCode())
+                .thenReturn(ContractConstants.SharingRuntimeBinary);
+        lenient().when(storageGetCodeResponse.getCode())
+                .thenReturn(ContractConstants.StorageRuntimeBinary);
     }
 
     /**

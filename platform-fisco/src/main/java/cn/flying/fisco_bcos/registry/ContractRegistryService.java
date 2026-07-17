@@ -42,7 +42,7 @@ public class ContractRegistryService {
 
     public static final String ENTRY_SCHEMA = "record-platform-contract-registry-entry.v1";
 
-    private static final String CATALOG_SCHEMA = "record-platform-contract-artifacts.v1";
+    private static final String CATALOG_SCHEMA = "record-platform-contract-artifacts.v2";
     private static final int MAX_CATALOG_BYTES = 5 * 1024 * 1024;
     private static final Pattern CONTRACT_NAME_PATTERN = Pattern.compile("[A-Za-z][A-Za-z0-9_]*");
     private static final Pattern SEMANTIC_VERSION_PATTERN = Pattern.compile(
@@ -111,6 +111,7 @@ public class ContractRegistryService {
             }
             String runtimeCode = readRuntimeCode(runtime, address);
             String runtimeCodeSha256 = fingerprintService.fingerprintBytecode(runtimeCode);
+            validateRuntimeCodeFingerprint(runtime, artifact, runtimeCodeSha256);
             validateContractIdentity(runtime, artifact, address);
             ContractRegistryEntryResponse entry = buildEntry(
                     runtime, artifact, address, runtimeCodeSha256);
@@ -236,18 +237,26 @@ public class ContractRegistryService {
                 || !ALLOWED_STATUS.contains(artifact.status())
                 || !"REDEPLOY_ADDRESS".equals(artifact.upgradeStrategy())
                 || !hasValidArtifactPaths(artifact)
-                || artifact.bytecodeSha256() == null
-                || !artifact.bytecodeSha256().keySet().equals(Set.of("ecc", "sm"))) {
+                || artifact.creationBytecodeSha256() == null
+                || !artifact.creationBytecodeSha256().keySet().equals(Set.of("ecc", "sm"))
+                || artifact.runtimeBytecodeSha256() == null
+                || !artifact.runtimeBytecodeSha256().keySet().equals(Set.of("ecc", "sm"))) {
             throw new IllegalStateException("Invalid contract artifact metadata");
         }
         validateHash(artifact.sourceSha256(), artifact.contractName() + ".sourceSha256");
         validateHash(artifact.abiSha256(), artifact.contractName() + ".abiSha256");
         validateHash(
-                artifact.bytecodeSha256().get("ecc"),
-                artifact.contractName() + ".bytecodeSha256.ecc");
+                artifact.creationBytecodeSha256().get("ecc"),
+                artifact.contractName() + ".creationBytecodeSha256.ecc");
         validateHash(
-                artifact.bytecodeSha256().get("sm"),
-                artifact.contractName() + ".bytecodeSha256.sm");
+                artifact.creationBytecodeSha256().get("sm"),
+                artifact.contractName() + ".creationBytecodeSha256.sm");
+        validateHash(
+                artifact.runtimeBytecodeSha256().get("ecc"),
+                artifact.contractName() + ".runtimeBytecodeSha256.ecc");
+        validateHash(
+                artifact.runtimeBytecodeSha256().get("sm"),
+                artifact.contractName() + ".runtimeBytecodeSha256.sm");
         if (artifact.effectiveAt() == null
                 || !EFFECTIVE_AT_PATTERN.matcher(artifact.effectiveAt()).matches()) {
             throw new IllegalStateException(
@@ -266,7 +275,7 @@ public class ContractRegistryService {
     }
 
     /**
-     * 校验源码、ABI 和 ECC/SM bytecode 路径均为安全相对路径，且源码副本互不重复。
+     * 校验源码、ABI 和 ECC/SM creation/runtime 路径均安全且互不复用。
      */
     private boolean hasValidArtifactPaths(ContractArtifactCatalog.ContractArtifact artifact) {
         if (artifact.sourcePaths() == null || artifact.sourcePaths().size() < 2) {
@@ -280,12 +289,24 @@ public class ContractRegistryService {
             }
         }
         if (normalizeArtifactPath(artifact.abiPath()) == null
-                || artifact.bytecodePaths() == null
-                || !artifact.bytecodePaths().keySet().equals(Set.of("ecc", "sm"))) {
+                || artifact.creationBytecodePaths() == null
+                || !artifact.creationBytecodePaths().keySet().equals(Set.of("ecc", "sm"))
+                || artifact.runtimeBytecodePaths() == null
+                || !artifact.runtimeBytecodePaths().keySet().equals(Set.of("ecc", "sm"))) {
             return false;
         }
-        return artifact.bytecodePaths().values().stream()
-                .allMatch(path -> normalizeArtifactPath(path) != null);
+        Set<String> normalizedBytecodePaths = new LinkedHashSet<>();
+        for (String artifactPath : List.of(
+                artifact.creationBytecodePaths().get("ecc"),
+                artifact.creationBytecodePaths().get("sm"),
+                artifact.runtimeBytecodePaths().get("ecc"),
+                artifact.runtimeBytecodePaths().get("sm"))) {
+            String normalized = normalizeArtifactPath(artifactPath);
+            if (normalized == null || !normalizedBytecodePaths.add(normalized)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -307,7 +328,7 @@ public class ContractRegistryService {
     }
 
     /**
-     * 用 Java 重算当前 ACTIVE ABI 和 ECC/SM bytecode；历史制品由 catalog CI 校验并保留。
+     * 用 Java 重算当前 ACTIVE ABI 与 ECC/SM creation/runtime；历史制品由 catalog CI 校验。
      */
     private void validatePackagedArtifacts(
             List<ContractArtifactCatalog.ContractArtifact> activeArtifacts
@@ -315,20 +336,30 @@ public class ContractRegistryService {
         for (ContractArtifactCatalog.ContractArtifact artifact : activeArtifacts) {
             String contractName = artifact.contractName();
             String abi = packagedAbi(contractName);
-            String eccBytecode = packagedBytecode(contractName, "ecc");
-            String smBytecode = packagedBytecode(contractName, "sm");
+            String eccCreation = packagedCreationBytecode(contractName, "ecc");
+            String smCreation = packagedCreationBytecode(contractName, "sm");
+            String eccRuntime = packagedRuntimeBytecode(contractName, "ecc");
+            String smRuntime = packagedRuntimeBytecode(contractName, "sm");
             requireEqualFingerprint(
                     artifact.abiSha256(),
                     fingerprintService.fingerprintAbi(abi),
                     contractName + " ABI");
             requireEqualFingerprint(
-                    artifact.bytecodeSha256().get("ecc"),
-                    fingerprintService.fingerprintBytecode(eccBytecode),
-                    contractName + " ECC bytecode");
+                    artifact.creationBytecodeSha256().get("ecc"),
+                    fingerprintService.fingerprintBytecode(eccCreation),
+                    contractName + " ECC creation bytecode");
             requireEqualFingerprint(
-                    artifact.bytecodeSha256().get("sm"),
-                    fingerprintService.fingerprintBytecode(smBytecode),
-                    contractName + " SM bytecode");
+                    artifact.creationBytecodeSha256().get("sm"),
+                    fingerprintService.fingerprintBytecode(smCreation),
+                    contractName + " SM creation bytecode");
+            requireEqualFingerprint(
+                    artifact.runtimeBytecodeSha256().get("ecc"),
+                    fingerprintService.fingerprintBytecode(eccRuntime),
+                    contractName + " ECC runtime bytecode");
+            requireEqualFingerprint(
+                    artifact.runtimeBytecodeSha256().get("sm"),
+                    fingerprintService.fingerprintBytecode(smRuntime),
+                    contractName + " SM runtime bytecode");
         }
     }
 
@@ -393,7 +424,23 @@ public class ContractRegistryService {
             throw new IllegalStateException(
                     "FISCO group mismatch: configured=" + configuredGroup + ", actual=" + groupId);
         }
-        String cryptoType = client.getCryptoType() == CryptoType.SM_TYPE ? "sm" : "ecc";
+        Boolean wasm = client.isWASM();
+        if (wasm == null) {
+            throw new IllegalStateException("FISCO VM type is unavailable");
+        }
+        if (wasm) {
+            throw new IllegalStateException("FISCO WASM groups cannot use EVM runtime artifacts");
+        }
+        int actualCryptoType = client.getCryptoType();
+        String cryptoType;
+        if (actualCryptoType == CryptoType.ECDSA_TYPE) {
+            cryptoType = "ecc";
+        } else if (actualCryptoType == CryptoType.SM_TYPE) {
+            cryptoType = "sm";
+        } else {
+            throw new IllegalStateException(
+                    "Unsupported FISCO crypto type: " + actualCryptoType);
+        }
         String chainType = "bsn-fisco".equals(mode) ? "BSN_FISCO" : "LOCAL_FISCO";
         return new RuntimeContext(mode, chainType, chainId, groupId, cryptoType, client, null);
     }
@@ -479,6 +526,22 @@ public class ContractRegistryService {
     }
 
     /**
+     * 把完整链上 runtime code 指纹与实际链加密变体的签入产物严格对账。
+     */
+    private void validateRuntimeCodeFingerprint(
+            RuntimeContext runtime,
+            ContractArtifactCatalog.ContractArtifact artifact,
+            String actualRuntimeSha256
+    ) {
+        String expectedRuntimeSha256 = artifact.runtimeBytecodeSha256()
+                .get(runtime.cryptoType());
+        requireEqualFingerprint(
+                expectedRuntimeSha256,
+                actualRuntimeSha256,
+                artifact.contractName() + " " + runtime.cryptoType() + " runtime bytecode");
+    }
+
+    /**
      * 只读调用链上 contractIdentity，并与 catalog 名称和版本严格对账。
      */
     private void validateContractIdentity(
@@ -521,7 +584,7 @@ public class ContractRegistryService {
         ResolvedDeploymentEvidence resolvedDeployment = validateDeploymentEvidence(
                 deployment,
                 artifact);
-        String artifactBytecode = artifact.bytecodeSha256().get(runtime.cryptoType());
+        String artifactBytecode = artifact.creationBytecodeSha256().get(runtime.cryptoType());
         return new ContractRegistryEntryResponse(
                 ENTRY_SCHEMA,
                 null,
@@ -627,7 +690,7 @@ public class ContractRegistryService {
     /**
      * 返回打包的 ECC 或 SM creation bytecode。
      */
-    private String packagedBytecode(String contractName, String cryptoType) {
+    private String packagedCreationBytecode(String contractName, String cryptoType) {
         return switch (contractName + ":" + cryptoType) {
             case "Sharing:ecc" -> ContractConstants.SharingBinary;
             case "Sharing:sm" -> ContractConstants.SharingGmBinary;
@@ -635,6 +698,21 @@ public class ContractRegistryService {
             case "Storage:sm" -> ContractConstants.StorageGmBinary;
             default -> throw new IllegalStateException(
                     "Unsupported packaged bytecode: " + contractName + "/" + cryptoType);
+        };
+    }
+
+    /**
+     * 返回打包的 ECC 或 SM deployed runtime bytecode。
+     */
+    private String packagedRuntimeBytecode(String contractName, String cryptoType) {
+        return switch (contractName + ":" + cryptoType) {
+            case "Sharing:ecc" -> ContractConstants.SharingRuntimeBinary;
+            case "Sharing:sm" -> ContractConstants.SharingGmRuntimeBinary;
+            case "Storage:ecc" -> ContractConstants.StorageRuntimeBinary;
+            case "Storage:sm" -> ContractConstants.StorageGmRuntimeBinary;
+            default -> throw new IllegalStateException(
+                    "Unsupported packaged runtime bytecode: "
+                            + contractName + "/" + cryptoType);
         };
     }
 
