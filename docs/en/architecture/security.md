@@ -25,8 +25,10 @@ EventSource doesn't support custom headers, so SSE uses URL token:
 
 ```
 1. POST /api/v1/auth/tokens/sse → Get short-lived token (30s, single-use)
-2. GET /api/v1/sse/connect?token=<token> → Establish SSE connection
+2. GET /api/v1/sse/connect?token=<token>&x-tenant-id=<tenantHint> → Establish SSE connection
 ```
+
+The `X-Tenant-ID` header, `x-tenant-id` query value, and legacy `tenantId` query value are untrusted namespace hints only. `TenantContext`, request audit attributes, and MDC identity are established only after Redis atomically consumes the token and its tenant matches the hint. Invalid, expired, replayed, damaged, mismatched, or Redis-failed handshakes create no emitter. Anonymous failures are audited under system tenant `0`, and raw one-time tokens are excluded from text logs and persisted request parameters.
 
 ## Authorization (RBAC)
 

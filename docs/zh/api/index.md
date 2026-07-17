@@ -46,7 +46,7 @@ Authorization: Bearer <token>
 ### 3) SSE 双令牌模式
 
 - `POST /api/v1/auth/tokens/sse`：需要常规 JWT（登录态）
-- `GET /api/v1/sse/connect?token=...`：公开路由，但必须携带有效一次性短期令牌
+- `GET /api/v1/sse/connect?token=...&x-tenant-id=...`：公开路由，但必须携带有效一次性短期令牌。租户 query 值只用于定位 Redis namespace，连接的租户、用户和角色以消费后的短令牌为准。
 
 ## API 端点（按模块）
 
@@ -321,8 +321,10 @@ Authorization: Bearer <token>
 
 ```text
 1) POST /api/v1/auth/tokens/sse   (Authorization: Bearer <jwt>)
-2) GET  /api/v1/sse/connect?token=<sseToken>&connectionId=<optional>
+2) GET  /api/v1/sse/connect?token=<sseToken>&x-tenant-id=<tenantHint>
 ```
+
+可设置自定义请求头的客户端也可使用 `X-Tenant-ID`；旧 `tenantId` query 参数继续作为 `x-tenant-id` 的兼容别名。提示缺失或与令牌租户不一致、令牌无效/过期/已消费、载荷损坏时，服务端会在创建 emitter 前失败关闭；一次性 token 原文不会写入操作日志或数据库审计参数。
 
 常见事件类型：
 

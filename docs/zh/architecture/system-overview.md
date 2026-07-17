@@ -507,9 +507,9 @@ flowchart LR
 SSE 连接采用短期一次性令牌：
 
 1. 登录态下调用 `POST /api/v1/auth/tokens/sse` 获取短期令牌（需常规 JWT）
-2. 使用 `GET /api/v1/sse/connect?token={sseToken}&connectionId={optional}` 建立连接
+2. 使用 `GET /api/v1/sse/connect?token={sseToken}&x-tenant-id={tenantHint}` 建立连接
 
-> `GET /api/v1/sse/connect` 为公开端点，但依赖短期令牌完成认证；不是匿名开放连接。
+> `GET /api/v1/sse/connect` 为公开端点，但依赖短期令牌完成认证；不是匿名开放连接。租户值仅用于定位 Redis namespace，可信租户、用户和角色均来自验证后的短令牌。
 
 ### 监控容量口径
 

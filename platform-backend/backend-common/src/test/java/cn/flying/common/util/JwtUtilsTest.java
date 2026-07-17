@@ -1,6 +1,10 @@
 package cn.flying.common.util;
 
 import com.auth0.jwt.interfaces.DecodedJWT;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -12,6 +16,7 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -510,6 +515,42 @@ class JwtUtilsTest {
             String[] result = jwtUtils.validateAndConsumeSseToken("malformed-token");
 
             assertThat(result).isNull();
+        }
+
+        /**
+         * 验证创建、未命中和损坏载荷日志都不会包含一次性短令牌原文。
+         */
+        @Test
+        @DisplayName("should never log raw SSE tokens")
+        void sseTokenOperations_neverLogRawTokens() {
+            when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+            when(valueOperations.getAndDelete(anyString()))
+                    .thenReturn(null, "invalid-format");
+
+            Logger jwtLogger = (Logger) LoggerFactory.getLogger(JwtUtils.class);
+            Level previousLevel = jwtLogger.getLevel();
+            ListAppender<ILoggingEvent> appender = new ListAppender<>();
+            appender.start();
+            jwtLogger.setLevel(Level.DEBUG);
+            jwtLogger.addAppender(appender);
+            List<String> sensitiveTokens = new java.util.ArrayList<>();
+            try {
+                sensitiveTokens.add(jwtUtils.createSseToken(123L, 456L, "user"));
+                sensitiveTokens.add("missing-sensitive-sse-token");
+                sensitiveTokens.add("malformed-sensitive-sse-token");
+                assertThat(jwtUtils.validateAndConsumeSseToken(sensitiveTokens.get(1))).isNull();
+                assertThat(jwtUtils.validateAndConsumeSseToken(sensitiveTokens.get(2))).isNull();
+            } finally {
+                jwtLogger.detachAppender(appender);
+                jwtLogger.setLevel(previousLevel);
+                appender.stop();
+            }
+
+            List<String> messages = appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .toList();
+            assertThat(messages).allSatisfy(message ->
+                    assertThat(sensitiveTokens).noneMatch(message::contains));
         }
     }
 

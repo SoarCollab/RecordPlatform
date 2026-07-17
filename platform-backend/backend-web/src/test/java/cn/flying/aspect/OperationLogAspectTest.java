@@ -16,6 +16,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -267,6 +268,48 @@ class OperationLogAspectTest {
     }
 
     /**
+     * 验证 saveRequestData=false 同时约束开始日志和落库参数，并把 HTTP 401 记为失败。
+     */
+    @Test
+    @DisplayName("Should omit sensitive request data and classify HTTP errors")
+    void shouldOmitSensitiveRequestDataAndClassifyHttpErrors() throws Throwable {
+        String secretToken = "sse-secret-token-that-must-never-be-logged";
+        SysOperationLogService operationLogService = mock(SysOperationLogService.class);
+        OperationLogAspect aspect = new OperationLogAspect(operationLogService, newResolver(""));
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/sse/connect");
+        request.setServletPath("/api/v1/sse/connect");
+        request.setRemoteAddr("198.51.100.31");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+
+        ProceedingJoinPoint joinPoint = sensitiveAuditedJoinPoint(
+                secretToken,
+                ResponseEntity.status(401).build());
+        Logger aspectLogger = (Logger) LoggerFactory.getLogger(OperationLogAspect.class);
+        Level previousLevel = aspectLogger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        aspectLogger.setLevel(Level.INFO);
+        aspectLogger.addAppender(appender);
+        try {
+            assertThat(aspect.doAround(joinPoint)).isInstanceOf(ResponseEntity.class);
+        } finally {
+            aspectLogger.detachAppender(appender);
+            aspectLogger.setLevel(previousLevel);
+            appender.stop();
+        }
+
+        var captor = org.mockito.ArgumentCaptor.forClass(SysOperationLog.class);
+        verify(operationLogService).saveOperationLog(captor.capture());
+        assertThat(captor.getValue().getRequestParam()).isNull();
+        assertThat(captor.getValue().getStatus()).isEqualTo(1);
+        assertThat(captor.getValue().getErrorMsg()).isEqualTo("HTTP 401");
+
+        List<String> messages = appender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+        assertThat(messages).anyMatch(message -> message.contains("参数: <omitted>"));
+        assertThat(messages).noneMatch(message -> message.contains(secretToken));
+    }
+
+    /**
      * 验证无 HTTP 请求上下文时仍执行目标方法且不会尝试持久化操作日志。
      */
     @Test
@@ -322,6 +365,24 @@ class OperationLogAspectTest {
         return joinPoint;
     }
 
+    /**
+     * 构造携带敏感参数并返回指定 HTTP 响应的测试连接点。
+     */
+    private ProceedingJoinPoint sensitiveAuditedJoinPoint(
+            String token,
+            ResponseEntity<Void> response) throws Throwable {
+        ProceedingJoinPoint joinPoint = mock(ProceedingJoinPoint.class);
+        MethodSignature signature = mock(MethodSignature.class);
+        Method method = AuditedFixture.class.getDeclaredMethod("executeSensitive", String.class);
+        when(joinPoint.getSignature()).thenReturn(signature);
+        when(joinPoint.getArgs()).thenReturn(new Object[]{token});
+        when(joinPoint.proceed()).thenReturn(response);
+        when(signature.getMethod()).thenReturn(method);
+        when(signature.getDeclaringTypeName()).thenReturn(AuditedFixture.class.getName());
+        when(signature.getName()).thenReturn(method.getName());
+        return joinPoint;
+    }
+
     private static final class AuditedFixture {
 
         /**
@@ -330,6 +391,18 @@ class OperationLogAspectTest {
         @OperationLog(module = "test", operationType = "query", description = "test audit")
         private String execute() {
             return "ok";
+        }
+
+        /**
+         * 提供禁止保存敏感请求参数的测试目标方法。
+         */
+        @OperationLog(
+                module = "sse",
+                operationType = "connect",
+                description = "sensitive audit",
+                saveRequestData = false)
+        private ResponseEntity<Void> executeSensitive(String token) {
+            return ResponseEntity.ok().build();
         }
     }
 }

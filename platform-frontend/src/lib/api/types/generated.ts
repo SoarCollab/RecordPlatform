@@ -1702,7 +1702,7 @@ export interface paths {
         };
         /**
          * 建立SSE连接
-         * @description 使用短期SSE令牌建立长连接，接收实时消息推送。支持多设备/多标签页连接。
+         * @description 使用一次性短期SSE令牌建立长连接。X-Tenant-ID请求头、x-tenant-id query（旧客户端可使用tenantId）仅用于Redis namespace查找，连接与审计身份以短令牌中的tenant/user/role为准。
          */
         get: operations["connect"];
         put?: never;
@@ -8624,9 +8624,19 @@ export interface operations {
     connect: {
         parameters: {
             query: {
+                /**
+                 * @deprecated
+                 * @description 旧客户端兼容的Redis namespace提示；建议改用x-tenant-id
+                 */
+                tenantId?: number;
                 token: string;
+                /** @description Redis namespace提示；与旧tenantId参数二选一，不作为可信租户身份 */
+                "x-tenant-id"?: number;
             };
-            header?: never;
+            header?: {
+                /** @description 可设置自定义请求头的客户端使用的Redis namespace提示，不作为可信租户身份 */
+                "X-Tenant-ID"?: number;
+            };
             path?: never;
             cookie?: never;
         };
