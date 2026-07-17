@@ -6,8 +6,8 @@ import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.JsonConverter;
 import cn.flying.common.util.SensitiveDataMasker;
 import cn.flying.dao.dto.SysOperationLog;
+import cn.flying.security.TrustedClientIpResolver;
 import cn.flying.service.SysOperationLogService;
-import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.JoinPoint;
@@ -37,8 +37,18 @@ import java.util.Set;
 @Slf4j
 public class OperationLogAspect {
 
-    @Resource
-    private SysOperationLogService operationLogService;
+    private final SysOperationLogService operationLogService;
+    private final TrustedClientIpResolver trustedClientIpResolver;
+
+    /**
+     * 注入操作日志持久化服务和统一的可信客户端 IP 解析器。
+     */
+    public OperationLogAspect(
+            SysOperationLogService operationLogService,
+            TrustedClientIpResolver trustedClientIpResolver) {
+        this.operationLogService = operationLogService;
+        this.trustedClientIpResolver = trustedClientIpResolver;
+    }
     
     // 忽略的非业务URL前缀（保留 /api/file 等核心接口的审计记录）
     private final Set<String> ignores = Set.of(
@@ -328,26 +338,12 @@ public class OperationLogAspect {
     }
 
     /**
-     * 获取客户端IP
+     * 通过统一可信代理边界获取规范化客户端 IP。
      *
      * @param request 请求对象
      * @return IP地址
      */
     private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("Proxy-Client-IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("WL-Proxy-Client-IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getRemoteAddr();
-        }
-        // 多个代理的情况，第一个IP为客户端真实IP
-        if (ip != null && ip.contains(",")) {
-            ip = ip.split(",")[0].trim();
-        }
-        return ip;
+        return trustedClientIpResolver.resolve(request);
     }
-} 
+}
