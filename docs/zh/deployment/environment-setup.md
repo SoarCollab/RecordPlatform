@@ -107,7 +107,7 @@ Nacos 作为配置中心，需要导入应用配置。
 | `platform-storage.yaml` | DEFAULT_GROUP | 存储服务配置（S3 节点列表、加密参数） |
 
 ::: warning 重要
-数据库密码、Redis 密码等敏感信息存储在 Nacos 配置中，而非 `.env` 文件。`.env` 中的基础设施凭据仅供 docker-compose 使用。`platform-fisco` 的区块链节点与合约地址配置来自 `.env` 中的 `FISCO_*` 变量，而不是 Nacos Data ID。
+数据库密码、Redis 密码等敏感信息存储在 Nacos 配置中，而非 `.env` 文件。`.env` 中的基础设施凭据仅供 docker-compose 使用。`platform-fisco` 的区块链节点、合约、签名账户和 nonce 状态配置来自部署环境变量（`FISCO_*` 或 `BSN_*`），而不是 Nacos Data ID。`BSN_BESU_PRIVATE_KEY` 应由部署密钥管理器注入，不得提交到 `.env`。
 :::
 
 ## 步骤 4：FISCO BCOS 节点

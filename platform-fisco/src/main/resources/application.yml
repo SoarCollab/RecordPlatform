@@ -31,6 +31,9 @@ blockchain:
     gas:
       gas-price: 0
       gas-limit: 4500000
+    nonce:
+      # 必须是可持久化且仅由同一 signer writer 共享的原子替换/文件锁目录
+      state-directory: ${BSN_BESU_NONCE_STATE_DIRECTORY:}
 
 ### Java sdk configuration (Local FISCO BCOS)
 bcos:

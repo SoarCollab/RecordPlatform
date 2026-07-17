@@ -327,6 +327,37 @@
              max-attempts: 5
    ```
 
+## BSN Besu nonce 协调
+
+### signer writer 锁阻止启动
+
+**现象**：`platform-fisco` 启动失败，提示当前 `chainId/signer` 已被另一个 writer 持有。
+
+**处理方式**：
+
+1. 这是安全门禁，禁止通过给新进程改成另一个空的 `BSN_BESU_NONCE_STATE_DIRECTORY` 绕过。
+2. 找到所有持有同一 signer secret 的进程/容器，先从外部 fence 并停止旧 active writer。
+3. 确认替代实例仍使用同一持久状态目录，且文件系统支持可靠文件锁和原子 move。
+4. 只启动一个替代实例。正常停止后空 `.lock` 文件可以保留；真实所有权是仍存活的 OS 文件锁，删除文件既非必要操作，也不能替代 fencing。
+
+当前不支持独立主机上的同 signer active-active。应使用冷备、不同 signer，或另行实现并审查分布式租约/nonce coordinator。
+
+### 未决广播阻止新写入
+
+**现象**：发送发生超时、断连、`already known`/nonce 冲突，或节点返回错误交易哈希；后续写入提示 `unresolved broadcast; manual reconciliation is required`。
+
+这是失败关闭行为。持久 `.state` 文件记录 schema、chain ID、signer、`lastNonce`、`nextNonce`、outcome、本地交易哈希、可选远端哈希和更新时间；其中不包含私钥或签名 raw transaction。
+
+**对账步骤**：
+
+1. 停止该 signer 的新写入并 fence 所有可能 writer。保留状态文件作为事故证据，进程运行期间禁止删除或编辑。
+2. 从状态文件读取 `lastNonce` 和 `localTransactionHash`。在同一个 BSN provider 端点按精确哈希查询交易，并分别查询 `eth_getTransactionCount(signer, "pending")` 与 `"latest"`。
+3. 若精确交易存在，保留状态文件并等待 provider 的 `pending` nonce 前进到大于 `lastNonce`。查到交易只能证明 `lastNonce` 不得复用，不能绕过 coordinator 的 PENDING 门禁。
+4. 只有 provider 的 `pending` nonce 已大于 `lastNonce` 时，才重启唯一 writer。coordinator 会识别已前进的 PENDING，并按 `max(nodePending, durableNextNonce)` 继续。若交易不存在且 PENDING 未前进，仅凭一次空查询不能证明请求从未被接受；必须等待 provider 对账或取得其明确拒绝证据，禁止用 `lastNonce` 发送不同 payload。
+5. 只有在取得确定未接受证据、所有旧 writer 已 fence 且服务停止后，才可把完整 `.state` 文件连同事故记录归档并移出配置目录，然后重启唯一 writer，从稳定的节点 PENDING 重新建立状态。若是否接受仍不确定，必须保留状态并继续阻止写入。
+
+合约 revert 或失败 receipt 仍会消耗 nonce，绝不能据此回滚状态。回滚本次代码时也必须保留状态目录，直到其中记录的交易全部完成对账。
+
 ## 配额问题
 
 ### 上传失败，提示 QUOTA_EXCEEDED

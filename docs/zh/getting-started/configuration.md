@@ -62,6 +62,12 @@ S3 兼容存储通过 Nacos 配置。基本环境变量：
 | `FISCO_CHAIN_ID` | 预期的本地 FISCO chain ID | `chain0` |
 | `FISCO_GROUP_ID` | 预期的本地 FISCO group ID | `group0` |
 | `BSN_FISCO_CHAIN_ID` | 预期的 BSN FISCO chain ID；`BLOCKCHAIN_ACTIVE=bsn-fisco` 时无默认值且必填 | 服务商分配值 |
+| `BSN_BESU_RPC_URL` | BSN Besu JSON-RPC 地址；`BLOCKCHAIN_ACTIVE=bsn-besu` 时必填 | 服务商分配的 HTTPS URL |
+| `BSN_BESU_CHAIN_ID` | 预期的 BSN Besu 数字 chain ID | 服务商分配值 |
+| `BSN_BESU_PRIVATE_KEY` | 本地 Besu signer 私钥 | 仅由部署密钥注入，禁止提交值 |
+| `BSN_BESU_CONTRACT_STORAGE` | 已核验的 BSN Besu Storage 合约地址 | `0x...` |
+| `BSN_BESU_CONTRACT_SHARING` | 已核验的 BSN Besu Sharing 合约地址 | `0x...` |
+| `BSN_BESU_NONCE_STATE_DIRECTORY` | 持久 nonce journal 与 signer 所有权锁目录 | `/var/lib/record-platform/besu-nonce` |
 | `FISCO_STORAGE_CONTRACT` | Storage 合约地址 | `0x...` |
 | `FISCO_SHARING_CONTRACT` | Sharing 合约地址 | `0x...` |
 | `FISCO_{STORAGE,SHARING}_DEPLOYMENT_TX` | 必填部署交易哈希；活动链回执必须存在并匹配配置地址/区块 | `0x` + 64 位 hex |
@@ -70,6 +76,8 @@ S3 兼容存储通过 Nacos 配置。基本环境变量：
 | `CONTRACT_DEPLOYMENT_RECEIPT_DIR` | 保存公开部署审计回执的持久化受限目录 | 本地开发使用 `log/contract-deployments` |
 
 `scripts/contract-deploy.sh` 要求显式配置本地 chain/group，并在编译及每笔部署前与 Console `getGroupInfo` 完全对账。脚本在同一个 Console 会话中查询每笔交易回执和 `getGroupInfo`，要求 FISCO 显式成功状态 `0`，最终 transaction/address/block 全部取自该同一回执。两个合约的三项部署证据均为必填；legacy 整组空值现在会阻止服务启动。经审查的 BSN 部署沿用这些变量名，启动时由所选 BSN FISCO 或 Besu 客户端重新验证（Besu 必须显式为状态 `1`）。门禁脚本用同一个生效时间原子写回两个三元组，并先发布不含凭据的结构化回执；生产环境应把回执目录放在非临时应用存储之外。`env-check.sh` 只校验格式，最终必须重启 `platform-fisco` 执行活动链回执、runtime code 和身份核验。
+
+BSN Besu 原始交易按规范化 signer，以节点 `PENDING` nonce 和本地持久高水位共同保留 nonce。`BSN_BESU_NONCE_STATE_DIRECTORY` 没有运行时默认值：目录必须支持可靠的 Java/POSIX 文件锁和原子替换，能够跨进程/容器重启保留，并由所有可能使用同一 `(chainId, signer)` 的受支持进程共享。服务在整个 JVM 生命周期持有 signer 独占锁，因此共享该目录的第二个 writer 会启动失败。配置的 signer key 只能由该 coordinator 使用，禁止外部钱包或未协调进程复用。禁止把目录放在容器临时层、通过删除状态文件处理事故，或让同一 signer 在独立主机上 active-active。冷备接管前必须先从外部 fence 旧 writer，并复用同一锁/状态卷。
 
 ### SSL 配置（生产环境）
 

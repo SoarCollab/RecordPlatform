@@ -69,12 +69,14 @@ flowchart TB
 |------|---------|----------|
 | backend | 2 实例 | 3+ 实例 |
 | storage | 2 实例 | 3+ 实例 |
-| fisco | 1 实例 | 2 实例 |
+| fisco | 每个 signer 1 个 active writer | BSN Besu 同 signer：1 active + 已 fencing 的冷备 |
 | MySQL | 1 主 + 1 从 | 1 主 + 2 从 + MHA |
 | Redis | Sentinel (3 节点) | Cluster (6 节点) |
 | S3 存储 | 2 节点 (A/B 域) | 3+ 节点 (A/B/STANDBY) |
 | Nacos | 3 节点 | 3 节点 |
 | RabbitMQ | 3 节点 (集群) | 3 节点 (镜像) |
+
+`fisco` 建议必须按链模式理解。`BLOCKCHAIN_ACTIVE=bsn-besu` 且使用同一份本地 signer key 时，一个 `(chainId, signer)` 只允许一个 active writer，并必须使用持久化的 `BSN_BESU_NONCE_STATE_DIRECTORY`。冷备只能在旧 writer 已从外部 fence 且能够使用同一个可靠锁/状态卷后启动。禁止把两个同 signer 实例放在负载均衡后，也禁止有新旧实例重叠的滚动更新。多主机 active-active 必须使用不同 signer，或另行实现分布式 nonce/租约；当前文件锁门禁不支持该拓扑。
 
 ### 存储故障域
 

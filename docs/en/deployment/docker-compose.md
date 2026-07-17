@@ -210,9 +210,29 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - NACOS_HOST=nacos
+      - NACOS_PORT=${NACOS_PORT:-8848}
+      - NACOS_USERNAME=${NACOS_USERNAME:?Set NACOS_USERNAME in .env}
+      - NACOS_PASSWORD=${NACOS_PASSWORD:?Set NACOS_PASSWORD in .env}
       - DUBBO_HOST=${DUBBO_HOST:-host.docker.internal}  # Required for Docker
+      - BLOCKCHAIN_RPC_TOKEN=${BLOCKCHAIN_RPC_TOKEN:?Set BLOCKCHAIN_RPC_TOKEN in .env}
+      - BLOCKCHAIN_ACTIVE=${BLOCKCHAIN_ACTIVE:-local-fisco}
+      - BSN_BESU_RPC_URL=${BSN_BESU_RPC_URL:-}
+      - BSN_BESU_CHAIN_ID=${BSN_BESU_CHAIN_ID:-}
+      - BSN_BESU_PRIVATE_KEY=${BSN_BESU_PRIVATE_KEY:-}  # Use a deployment secret in production
+      - BSN_BESU_CONTRACT_STORAGE=${BSN_BESU_CONTRACT_STORAGE:-}
+      - BSN_BESU_CONTRACT_SHARING=${BSN_BESU_CONTRACT_SHARING:-}
+      - BSN_BESU_NONCE_STATE_DIRECTORY=/var/lib/record-platform/besu-nonce
+      # Required deployment receipt evidence for the selected active chain.
+      - FISCO_SHARING_DEPLOYMENT_TX=${FISCO_SHARING_DEPLOYMENT_TX:?Set FISCO_SHARING_DEPLOYMENT_TX in .env}
+      - FISCO_SHARING_DEPLOYMENT_BLOCK=${FISCO_SHARING_DEPLOYMENT_BLOCK:?Set FISCO_SHARING_DEPLOYMENT_BLOCK in .env}
+      - FISCO_SHARING_DEPLOYMENT_EFFECTIVE_AT=${FISCO_SHARING_DEPLOYMENT_EFFECTIVE_AT:?Set FISCO_SHARING_DEPLOYMENT_EFFECTIVE_AT in .env}
+      - FISCO_STORAGE_DEPLOYMENT_TX=${FISCO_STORAGE_DEPLOYMENT_TX:?Set FISCO_STORAGE_DEPLOYMENT_TX in .env}
+      - FISCO_STORAGE_DEPLOYMENT_BLOCK=${FISCO_STORAGE_DEPLOYMENT_BLOCK:?Set FISCO_STORAGE_DEPLOYMENT_BLOCK in .env}
+      - FISCO_STORAGE_DEPLOYMENT_EFFECTIVE_AT=${FISCO_STORAGE_DEPLOYMENT_EFFECTIVE_AT:?Set FISCO_STORAGE_DEPLOYMENT_EFFECTIVE_AT in .env}
     volumes:
       - ./platform-fisco/src/main/resources/conf:/app/conf
+      # Required when BLOCKCHAIN_ACTIVE=bsn-besu; the image prepares this path for user app.
+      - besu_nonce_data:/var/lib/record-platform/besu-nonce
     depends_on:
       - nacos
     restart: unless-stopped
@@ -248,6 +268,10 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  # Local named volume: durable across container replacement on this Docker host.
+  besu_nonce_data:
 ```
 
 ## Deployment Steps
@@ -304,6 +328,8 @@ docker-compose -f docker-compose.app.yml up -d --scale backend=3
 ```
 
 Use a load balancer (nginx, traefik) in front of backend instances.
+
+Do not scale the `fisco` service when `BLOCKCHAIN_ACTIVE=bsn-besu` instances share one signer. The fixed container name is only an additional Compose guard; the authoritative JVM startup gate is the exclusive `(chainId, signer)` file lock in `BSN_BESU_NONCE_STATE_DIRECTORY`. The example uses an image-prepared named volume so the non-root `app` user can write it; keep that volume durable and attach it to only the fenced replacement on the same Docker host. If an operator replaces it with a bind/shared mount, that mount must be pre-provisioned writable by the image's `app` user and verified for atomic-move, directory-fsync, and file-lock semantics before activation. Independent host directories and ordinary remote filesystems with unverified lock semantics do not provide cross-host fencing; same-signer active-active therefore remains unsupported.
 
 ## DUBBO_HOST Configuration
 
