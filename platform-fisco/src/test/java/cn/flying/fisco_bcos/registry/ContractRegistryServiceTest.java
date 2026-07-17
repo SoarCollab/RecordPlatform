@@ -44,6 +44,11 @@ class ContractRegistryServiceTest {
             "0x1111111111111111111111111111111111111111";
     private static final String STORAGE_ADDRESS =
             "0x2222222222222222222222222222222222222222";
+    private static final String SHARING_TRANSACTION = "0x" + "a".repeat(64);
+    private static final String STORAGE_TRANSACTION = "0x" + "b".repeat(64);
+    private static final long SHARING_BLOCK = 101L;
+    private static final long STORAGE_BLOCK = 102L;
+    private static final String DEPLOYMENT_EFFECTIVE_AT = "2026-07-13T00:30:00Z";
 
     @Mock
     private Client client;
@@ -62,6 +67,9 @@ class ContractRegistryServiceTest {
 
     @Mock
     private ContractIdentityProbe identityProbe;
+
+    @Mock
+    private ContractDeploymentReceiptProbe deploymentReceiptProbe;
 
     @Mock
     private Web3j web3j;
@@ -125,6 +133,26 @@ class ContractRegistryServiceTest {
                 .thenReturn(new ContractIdentityProbe.ContractIdentity("Sharing", "2.0.0"));
         lenient().when(identityProbe.inspectBesu(web3j, STORAGE_ADDRESS))
                 .thenReturn(new ContractIdentityProbe.ContractIdentity("Storage", "1.0.0"));
+        lenient().when(deploymentReceiptProbe.inspectFisco(client, SHARING_TRANSACTION))
+                .thenReturn(new ContractDeploymentReceiptProbe.DeploymentReceipt(
+                        SHARING_TRANSACTION,
+                        SHARING_ADDRESS,
+                        SHARING_BLOCK));
+        lenient().when(deploymentReceiptProbe.inspectFisco(client, STORAGE_TRANSACTION))
+                .thenReturn(new ContractDeploymentReceiptProbe.DeploymentReceipt(
+                        STORAGE_TRANSACTION,
+                        STORAGE_ADDRESS,
+                        STORAGE_BLOCK));
+        lenient().when(deploymentReceiptProbe.inspectBesu(web3j, SHARING_TRANSACTION))
+                .thenReturn(new ContractDeploymentReceiptProbe.DeploymentReceipt(
+                        SHARING_TRANSACTION,
+                        SHARING_ADDRESS,
+                        SHARING_BLOCK));
+        lenient().when(deploymentReceiptProbe.inspectBesu(web3j, STORAGE_TRANSACTION))
+                .thenReturn(new ContractDeploymentReceiptProbe.DeploymentReceipt(
+                        STORAGE_TRANSACTION,
+                        STORAGE_ADDRESS,
+                        STORAGE_BLOCK));
         service = newService();
     }
 
@@ -145,7 +173,7 @@ class ContractRegistryServiceTest {
         assertThat(sharing.abiSha256()).startsWith("sha256:");
         assertThat(sharing.onChainCodeSha256()).startsWith("sha256:");
         assertThat(sharing.registryFingerprint()).startsWith("sha256:");
-        assertThat(sharing.effectiveAt()).isEqualTo("2026-07-13T00:00:00Z");
+        assertThat(sharing.effectiveAt()).isEqualTo(DEPLOYMENT_EFFECTIVE_AT);
         service.requireActiveReference(sharing, "Sharing");
     }
 
@@ -157,6 +185,7 @@ class ContractRegistryServiceTest {
         ContractRegistryProperties properties = new ContractRegistryProperties();
         properties.setCatalogLocation(
                 "classpath:contract-registry/artifacts-with-history.json");
+        configureCompleteDeployment(properties, DEPLOYMENT_EFFECTIVE_AT);
         service = newService(properties);
 
         service.initialize();
@@ -474,6 +503,16 @@ class ContractRegistryServiceTest {
                 .thenReturn(new ContractIdentityProbe.ContractIdentity("Storage", "1.0.0"));
         when(client.getCode(bsnSharing)).thenReturn(codeResponse);
         when(client.getCode(bsnStorage)).thenReturn(storageCodeResponse);
+        when(deploymentReceiptProbe.inspectFisco(client, SHARING_TRANSACTION))
+                .thenReturn(new ContractDeploymentReceiptProbe.DeploymentReceipt(
+                        SHARING_TRANSACTION,
+                        bsnSharing,
+                        SHARING_BLOCK));
+        when(deploymentReceiptProbe.inspectFisco(client, STORAGE_TRANSACTION))
+                .thenReturn(new ContractDeploymentReceiptProbe.DeploymentReceipt(
+                        STORAGE_TRANSACTION,
+                        bsnStorage,
+                        STORAGE_BLOCK));
         service = newService();
 
         service.initialize();
@@ -591,7 +630,110 @@ class ContractRegistryServiceTest {
 
         assertThatThrownBy(service::initialize)
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("must be provided together");
+                .hasMessageContaining("must all be configured");
+    }
+
+    /**
+     * 验证两个合约均不得继续使用缺少链上回执的 legacy 空证据配置。
+     */
+    @Test
+    void shouldRejectMissingDeploymentEvidence() {
+        service = newService(new ContractRegistryProperties());
+
+        assertThatThrownBy(service::initialize)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("must all be configured");
+        verify(deploymentReceiptProbe, never()).inspectFisco(any(), anyString());
+        assertThatThrownBy(() -> service.getActiveEntry("Sharing"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("No ACTIVE contract registry entry");
+    }
+
+    /**
+     * 验证配置地址被篡改后，即使 tx 存在也不能进入 ACTIVE registry。
+     */
+    @Test
+    void shouldRejectDeploymentReceiptAddressMismatch() {
+        when(deploymentReceiptProbe.inspectFisco(client, SHARING_TRANSACTION))
+                .thenReturn(new ContractDeploymentReceiptProbe.DeploymentReceipt(
+                        SHARING_TRANSACTION,
+                        STORAGE_ADDRESS,
+                        SHARING_BLOCK));
+
+        assertThatThrownBy(service::initialize)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("address does not match deployment receipt");
+        verify(identityProbe, never()).inspectFisco(any(), anyString(), anyString());
+    }
+
+    /**
+     * 验证配置区块号被篡改后不能被有效交易哈希掩盖。
+     */
+    @Test
+    void shouldRejectDeploymentReceiptBlockMismatch() {
+        when(deploymentReceiptProbe.inspectFisco(client, SHARING_TRANSACTION))
+                .thenReturn(new ContractDeploymentReceiptProbe.DeploymentReceipt(
+                        SHARING_TRANSACTION,
+                        SHARING_ADDRESS,
+                        SHARING_BLOCK + 1));
+
+        assertThatThrownBy(service::initialize)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("block number does not match chain receipt");
+    }
+
+    /**
+     * 验证回执 RPC 不可用时异常直接阻断启动且不发布部分条目。
+     */
+    @Test
+    void shouldRejectDeploymentReceiptProbeFailureWithoutPartialPublication() {
+        when(deploymentReceiptProbe.inspectFisco(client, SHARING_TRANSACTION))
+                .thenThrow(new IllegalStateException("receipt RPC unavailable"));
+
+        assertThatThrownBy(service::initialize)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("receipt RPC unavailable");
+        assertThatThrownBy(() -> service.getActiveEntry("Sharing"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("No ACTIVE contract registry entry");
+    }
+
+    /**
+     * 验证探测器异常返回空回执时仍然严格失败关闭。
+     */
+    @Test
+    void shouldRejectMissingDeploymentReceiptProbeResult() {
+        when(deploymentReceiptProbe.inspectFisco(client, SHARING_TRANSACTION))
+                .thenReturn(null);
+
+        assertThatThrownBy(service::initialize)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Deployment receipt probe returned no result");
+    }
+
+    /**
+     * 验证两个合约不得复用同一部署交易，即使探测器返回不同地址。
+     */
+    @Test
+    void shouldRejectDuplicateDeploymentTransactions() {
+        ContractRegistryProperties properties = completeDeploymentProperties(
+                DEPLOYMENT_EFFECTIVE_AT);
+        properties.getDeployment().getStorage().setTransactionHash(SHARING_TRANSACTION);
+        when(deploymentReceiptProbe.inspectFisco(client, SHARING_TRANSACTION))
+                .thenReturn(
+                        new ContractDeploymentReceiptProbe.DeploymentReceipt(
+                                SHARING_TRANSACTION,
+                                SHARING_ADDRESS,
+                                SHARING_BLOCK),
+                        new ContractDeploymentReceiptProbe.DeploymentReceipt(
+                                SHARING_TRANSACTION,
+                                STORAGE_ADDRESS,
+                                STORAGE_BLOCK));
+        service = newService(properties);
+
+        assertThatThrownBy(service::initialize)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("distinct deployment transactions");
     }
 
     /**
@@ -768,17 +910,27 @@ class ContractRegistryServiceTest {
      */
     private ContractRegistryProperties completeDeploymentProperties(String effectiveAt) {
         ContractRegistryProperties properties = new ContractRegistryProperties();
+        configureCompleteDeployment(properties, effectiveAt);
+        return properties;
+    }
+
+    /**
+     * 为已有属性对象填充两个合约的完整部署证据。
+     */
+    private void configureCompleteDeployment(
+            ContractRegistryProperties properties,
+            String effectiveAt
+    ) {
         configureDeployment(
                 properties.getDeployment().getSharing(),
-                "0x" + "A".repeat(64),
-                101L,
+                SHARING_TRANSACTION,
+                SHARING_BLOCK,
                 effectiveAt);
         configureDeployment(
                 properties.getDeployment().getStorage(),
-                "0x" + "B".repeat(64),
-                102L,
+                STORAGE_TRANSACTION,
+                STORAGE_BLOCK,
                 effectiveAt);
-        return properties;
     }
 
     /**
@@ -799,7 +951,7 @@ class ContractRegistryServiceTest {
      * 创建使用 classpath catalog 的被测服务。
      */
     private ContractRegistryService newService() {
-        return newService(new ContractRegistryProperties());
+        return newService(completeDeploymentProperties(DEPLOYMENT_EFFECTIVE_AT));
     }
 
     /**
@@ -810,6 +962,7 @@ class ContractRegistryServiceTest {
                 properties,
                 new ContractFingerprintService(),
                 identityProbe,
+                deploymentReceiptProbe,
                 new DefaultResourceLoader(),
                 environment,
                 clientProvider,

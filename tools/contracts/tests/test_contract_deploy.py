@@ -98,6 +98,14 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertIn("deploy Sharing", calls)
             self.assertIn(f"getTransactionReceipt {STORAGE_TRANSACTION}", calls)
             self.assertIn(f"getTransactionReceipt {SHARING_TRANSACTION}", calls)
+            self.assertIn(
+                f"getGroupInfo\ngetTransactionReceipt {STORAGE_TRANSACTION}",
+                calls,
+            )
+            self.assertIn(
+                f"getGroupInfo\ngetTransactionReceipt {SHARING_TRANSACTION}",
+                calls,
+            )
             self.assertIn(f"getCode {STORAGE_ADDRESS}", calls)
             self.assertIn(f"getCode {SHARING_ADDRESS}", calls)
             self.assertIn(
@@ -142,7 +150,7 @@ class ContractDeployScriptTest(unittest.TestCase):
             self.assertNotIn("BLOCKCHAIN_RPC_TOKEN", receipt_text)
             self.assertEqual(
                 receipt["schemaVersion"],
-                "record-platform-contract-deployment-receipt.v1",
+                "record-platform-contract-deployment-receipt.v2",
             )
             self.assertEqual(receipt["verificationStatus"], "VERIFIED")
             self.assertEqual(receipt["chainType"], "LOCAL_FISCO")
@@ -164,6 +172,7 @@ class ContractDeployScriptTest(unittest.TestCase):
                     "contractName": "Storage",
                     "semanticVersion": ACTIVE_IDENTITIES["Storage"],
                     "address": STORAGE_ADDRESS,
+                    "receiptStatus": "SUCCESS",
                     "transactionHash": STORAGE_TRANSACTION,
                     "blockNumber": 16,
                     "effectiveAt": FIXED_EFFECTIVE_AT,
@@ -175,6 +184,7 @@ class ContractDeployScriptTest(unittest.TestCase):
                     "contractName": "Sharing",
                     "semanticVersion": ACTIVE_IDENTITIES["Sharing"],
                     "address": SHARING_ADDRESS,
+                    "receiptStatus": "SUCCESS",
                     "transactionHash": SHARING_TRANSACTION,
                     "blockNumber": 17,
                     "effectiveAt": FIXED_EFFECTIVE_AT,
@@ -195,6 +205,165 @@ class ContractDeployScriptTest(unittest.TestCase):
             )
             self._assert_no_staged_source_residue(fixture)
             self._assert_no_reproducible_build_residue(fixture)
+
+    def test_failed_receipt_status_blocks_verification_and_activation(self) -> None:
+        """部署交易回执状态非零时不得继续 runtime/identity 或发布证据。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            original_env = fixture["env_file"].read_bytes()
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_STORAGE_RECEIPT_STATUS": "0x10"},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "receipt was missing, failed, ambiguous or mismatched",
+                result.stdout + result.stderr,
+            )
+            self.assertEqual(fixture["env_file"].read_bytes(), original_env)
+            self.assertFalse(fixture["receipt_dir"].exists())
+            self.assertNotIn("getCode", fixture["call_log"].read_text(encoding="utf-8"))
+
+    def test_missing_receipt_blocks_verification_and_activation(self) -> None:
+        """RPC 返回 null 表示回执尚不存在时必须失败关闭而非补默认字段。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            original_env = fixture["env_file"].read_bytes()
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_RECEIPT_MISSING": "Storage"},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(fixture["env_file"].read_bytes(), original_env)
+            self.assertFalse(fixture["receipt_dir"].exists())
+
+    def test_partial_receipt_shape_blocks_activation(self) -> None:
+        """缺少 contractAddress 的部分 JSON 回执不得与部署文本拼接。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            original_env = fixture["env_file"].read_bytes()
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_RECEIPT_MALFORMED": "Storage"},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(fixture["env_file"].read_bytes(), original_env)
+            self.assertFalse(fixture["receipt_dir"].exists())
+
+    def test_receipt_transaction_hash_mismatch_blocks_activation(self) -> None:
+        """查询 tx 与回执内部 transactionHash 不一致时不得使用任一侧字段。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            original_env = fixture["env_file"].read_bytes()
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_STORAGE_RECEIPT_TRANSACTION": SHARING_TRANSACTION},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(fixture["env_file"].read_bytes(), original_env)
+            self.assertFalse(fixture["receipt_dir"].exists())
+
+    def test_receipt_contract_address_mismatch_blocks_activation(self) -> None:
+        """部署输出地址与成功回执 contractAddress 不一致时必须拒绝。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            original_env = fixture["env_file"].read_bytes()
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_STORAGE_RECEIPT_ADDRESS": SHARING_ADDRESS},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(fixture["env_file"].read_bytes(), original_env)
+            self.assertFalse(fixture["receipt_dir"].exists())
+
+    def test_ambiguous_receipt_block_number_blocks_activation(self) -> None:
+        """同一 RPC 输出出现两个不同区块候选时不得选择首个值。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            original_env = fixture["env_file"].read_bytes()
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_RECEIPT_AMBIGUOUS": "Storage"},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(fixture["env_file"].read_bytes(), original_env)
+            self.assertFalse(fixture["receipt_dir"].exists())
+
+    def test_receipt_block_number_overflow_blocks_activation(self) -> None:
+        """超出 registry Long 字段的区块号不得生成无法启动的配置。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            original_env = fixture["env_file"].read_bytes()
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_STORAGE_RECEIPT_BLOCK": str(2**63)},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(fixture["env_file"].read_bytes(), original_env)
+            self.assertFalse(fixture["receipt_dir"].exists())
+
+    def test_receipt_json_rpc_error_blocks_activation(self) -> None:
+        """结构化 JSON-RPC error 不能被同一输出中的其他文本掩盖。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            original_env = fixture["env_file"].read_bytes()
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_RECEIPT_JSON_RPC_ERROR": "Storage"},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(fixture["env_file"].read_bytes(), original_env)
+            self.assertFalse(fixture["receipt_dir"].exists())
+
+    def test_receipt_chain_context_mismatch_blocks_activation(self) -> None:
+        """回执查询与 getGroupInfo 同一会话返回错误 chain 时必须失败关闭。"""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            listener, port = self._start_tcp_probe()
+            fixture = self._create_fixture(Path(temporary_directory), port=port)
+            original_env = fixture["env_file"].read_bytes()
+
+            result = self._run_script(
+                fixture,
+                extra_env={"FAKE_RECEIPT_CHAIN_ID": "chain1"},
+            )
+            listener.join(timeout=5)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("receipt came from an unexpected chain/group", result.stdout)
+            self.assertEqual(fixture["env_file"].read_bytes(), original_env)
+            self.assertFalse(fixture["receipt_dir"].exists())
 
     def test_abi_drift_blocks_all_deployment_and_activation(self) -> None:
         """编译 ABI 漂移必须在第一笔部署交易之前失败并保留旧配置。"""
@@ -835,15 +1004,75 @@ done
 set -euo pipefail
 input="$(cat)"
 printf '%s\n---\n' "$input" >> "$FAKE_CALL_LOG"
+print_group_info() {{
+    if [[ "${{FAKE_GROUP_INFO_MALFORMED:-}}" == "1" ]]; then
+        printf '{{"chainID":"chain0"\n'
+    else
+        printf '{{"chainID":"%s","groupID":"%s","wasm":%s,"smCryptoType":%s,"nodeList":[]}}\n' \
+            "${{FAKE_CHAIN_ID:-chain0}}" "${{FAKE_GROUP_ID:-group0}}" \
+            "${{FAKE_WASM:-false}}" "${{FAKE_SM_CRYPTO_TYPE:-false}}"
+    fi
+}}
+print_receipt() {{
+    name="$1"
+    default_transaction="$2"
+    default_address="$3"
+    default_block="$4"
+    if [[ "$name" == "Storage" ]]; then
+        prefix="FAKE_STORAGE_RECEIPT_"
+    else
+        prefix="FAKE_SHARING_RECEIPT_"
+    fi
+    status_key="${{prefix}}STATUS"
+    transaction_key="${{prefix}}TRANSACTION"
+    address_key="${{prefix}}ADDRESS"
+    block_key="${{prefix}}BLOCK"
+    status="${{!status_key:-0x0}}"
+    transaction="${{!transaction_key:-$default_transaction}}"
+    address="${{!address_key:-$default_address}}"
+    block="${{!block_key:-$default_block}}"
+    if [[ "$name" == "Sharing" && "${{FAKE_DUPLICATE_ADDRESS:-}}" == "1" ]]; then
+        address="{STORAGE_ADDRESS}"
+    fi
+    if [[ "${{FAKE_RECEIPT_RPC_FAILURE:-}}" == "$name" ]]; then
+        printf 'receipt RPC failed\n' >&2
+        return 3
+    fi
+    if [[ "${{FAKE_RECEIPT_MISSING:-}}" == "$name" ]]; then
+        printf '{{"jsonrpc":"2.0","result":null}}\n'
+        return 0
+    fi
+    if [[ "${{FAKE_RECEIPT_MALFORMED:-}}" == "$name" ]]; then
+        printf '{{"result":{{"status":"%s","transactionHash":"%s","blockNumber":"%s"}}}}\n' \
+            "$status" "$transaction" "$block"
+        return 0
+    fi
+    if [[ "${{FAKE_RECEIPT_JSON_RPC_ERROR:-}}" == "$name" ]]; then
+        printf '{{"jsonrpc":"2.0","error":{{"code":-32000,"message":"failed"}}}}\n'
+        return 0
+    fi
+    printf '{{"jsonrpc":"2.0","result":{{"status":"%s","transactionHash":"%s","contractAddress":"%s","blockNumber":"%s"}}}}\n' \
+        "$status" "$transaction" "$address" "$block"
+    if [[ "${{FAKE_RECEIPT_AMBIGUOUS:-}}" == "$name" ]]; then
+        printf '{{"status":"0x0","transactionHash":"%s","contractAddress":"%s","blockNumber":"0x7f"}}\n' \
+            "$transaction" "$address"
+    fi
+}}
 case "$input" in
+    *"getTransactionReceipt {STORAGE_TRANSACTION}"*)
+        FAKE_CHAIN_ID="${{FAKE_RECEIPT_CHAIN_ID:-${{FAKE_CHAIN_ID:-chain0}}}}" \
+            FAKE_GROUP_ID="${{FAKE_RECEIPT_GROUP_ID:-${{FAKE_GROUP_ID:-group0}}}}" \
+            print_group_info
+        print_receipt Storage "{STORAGE_TRANSACTION}" "{STORAGE_ADDRESS}" "0x10"
+        ;;
+    *"getTransactionReceipt {SHARING_TRANSACTION}"*)
+        FAKE_CHAIN_ID="${{FAKE_RECEIPT_CHAIN_ID:-${{FAKE_CHAIN_ID:-chain0}}}}" \
+            FAKE_GROUP_ID="${{FAKE_RECEIPT_GROUP_ID:-${{FAKE_GROUP_ID:-group0}}}}" \
+            print_group_info
+        print_receipt Sharing "{SHARING_TRANSACTION}" "{SHARING_ADDRESS}" "0x11"
+        ;;
     *"getGroupInfo"*)
-        if [[ "${{FAKE_GROUP_INFO_MALFORMED:-}}" == "1" ]]; then
-            printf '{{"chainID":"chain0"\n'
-        else
-            printf '{{"chainID":"%s","groupID":"%s","wasm":%s,"smCryptoType":%s,"nodeList":[]}}\n' \
-                "${{FAKE_CHAIN_ID:-chain0}}" "${{FAKE_GROUP_ID:-group0}}" \
-                "${{FAKE_WASM:-false}}" "${{FAKE_SM_CRYPTO_TYPE:-false}}"
-        fi
+        print_group_info
         ;;
     *"deploy Storage"*)
         printf 'transaction hash: {STORAGE_TRANSACTION}\n'
@@ -856,12 +1085,6 @@ case "$input" in
         else
             printf 'contract address: {SHARING_ADDRESS}\n'
         fi
-        ;;
-    *"getTransactionReceipt {STORAGE_TRANSACTION}"*)
-        printf '{{"blockNumber":"0x10"}}\n'
-        ;;
-    *"getTransactionReceipt {SHARING_TRANSACTION}"*)
-        printf '{{"blockNumber":"0x11"}}\n'
         ;;
     *"getCode "*)
         if [[ -n "${{FAKE_EMPTY_CODE_ADDRESS:-}}" \
@@ -1120,6 +1343,20 @@ class EnvironmentContractCheckTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(
             "FISCO_SHARING_DEPLOYMENT_EFFECTIVE_AT together",
+            result.stdout + result.stderr,
+        )
+
+    def test_missing_deployment_triplet_fails(self) -> None:
+        """完整空缺的 legacy 证据也必须失败，避免 registry 无回执启动。"""
+        result = self._run_contract_check({
+            "FISCO_STORAGE_DEPLOYMENT_TX": "",
+            "FISCO_STORAGE_DEPLOYMENT_BLOCK": "",
+            "FISCO_STORAGE_DEPLOYMENT_EFFECTIVE_AT": "",
+        })
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "Storage deployment evidence must set",
             result.stdout + result.stderr,
         )
 

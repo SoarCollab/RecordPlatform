@@ -64,12 +64,12 @@ S3 兼容存储通过 Nacos 配置。基本环境变量：
 | `BSN_FISCO_CHAIN_ID` | 预期的 BSN FISCO chain ID；`BLOCKCHAIN_ACTIVE=bsn-fisco` 时无默认值且必填 | 服务商分配值 |
 | `FISCO_STORAGE_CONTRACT` | Storage 合约地址 | `0x...` |
 | `FISCO_SHARING_CONTRACT` | Sharing 合约地址 | `0x...` |
-| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_TX` | 部署交易哈希；必须作为完整证据三元组的一部分设置 | `0x` + 64 位 hex |
-| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_BLOCK` | 部署区块号；与交易/生效时间一起设置 | 非负十进制整数 |
-| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_EFFECTIVE_AT` | 实际激活时间；与交易/区块一起设置 | UTC `YYYY-MM-DDTHH:MM:SSZ` |
+| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_TX` | 必填部署交易哈希；活动链回执必须存在并匹配配置地址/区块 | `0x` + 64 位 hex |
+| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_BLOCK` | 必填部署区块号，必须来自同一成功回执 | 非负十进制整数 |
+| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_EFFECTIVE_AT` | 必填实际激活时间，与交易/区块一起配置 | UTC `YYYY-MM-DDTHH:MM:SSZ` |
 | `CONTRACT_DEPLOYMENT_RECEIPT_DIR` | 保存公开部署审计回执的持久化受限目录 | 本地开发使用 `log/contract-deployments` |
 
-`scripts/contract-deploy.sh` 要求显式配置本地 chain/group，并在编译或部署前与 Console `getGroupInfo` 完全对账。每个合约的部署证据只能为 legacy 兼容而整组三项缺失，或完整提供 transaction/block/effective-time 三元组。门禁脚本用同一个生效时间原子写回两个三元组，并先发布不含凭据的结构化回执；生产环境应把回执目录放在非临时应用存储之外。
+`scripts/contract-deploy.sh` 要求显式配置本地 chain/group，并在编译及每笔部署前与 Console `getGroupInfo` 完全对账。脚本在同一个 Console 会话中查询每笔交易回执和 `getGroupInfo`，要求 FISCO 显式成功状态 `0`，最终 transaction/address/block 全部取自该同一回执。两个合约的三项部署证据均为必填；legacy 整组空值现在会阻止服务启动。经审查的 BSN 部署沿用这些变量名，启动时由所选 BSN FISCO 或 Besu 客户端重新验证（Besu 必须显式为状态 `1`）。门禁脚本用同一个生效时间原子写回两个三元组，并先发布不含凭据的结构化回执；生产环境应把回执目录放在非临时应用存储之外。`env-check.sh` 只校验格式，最终必须重启 `platform-fisco` 执行活动链回执、runtime code 和身份核验。
 
 ### SSL 配置（生产环境）
 

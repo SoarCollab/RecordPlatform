@@ -60,6 +60,7 @@ public class ContractRegistryService {
     private final ContractRegistryProperties properties;
     private final ContractFingerprintService fingerprintService;
     private final ContractIdentityProbe identityProbe;
+    private final ContractDeploymentReceiptProbe deploymentReceiptProbe;
     private final ResourceLoader resourceLoader;
     private final Environment environment;
     private final ObjectProvider<Client> clientProvider;
@@ -74,6 +75,7 @@ public class ContractRegistryService {
             ContractRegistryProperties properties,
             ContractFingerprintService fingerprintService,
             ContractIdentityProbe identityProbe,
+            ContractDeploymentReceiptProbe deploymentReceiptProbe,
             ResourceLoader resourceLoader,
             Environment environment,
             ObjectProvider<Client> clientProvider,
@@ -82,6 +84,7 @@ public class ContractRegistryService {
         this.properties = properties;
         this.fingerprintService = fingerprintService;
         this.identityProbe = identityProbe;
+        this.deploymentReceiptProbe = deploymentReceiptProbe;
         this.resourceLoader = resourceLoader;
         this.environment = environment;
         this.clientProvider = clientProvider;
@@ -102,6 +105,7 @@ public class ContractRegistryService {
         RuntimeContext runtime = inspectRuntimeContext();
         Map<String, ContractRegistryEntryResponse> resolved = new LinkedHashMap<>();
         Set<String> resolvedAddresses = new LinkedHashSet<>();
+        Set<String> resolvedTransactions = new LinkedHashSet<>();
         for (String contractName : List.of("Sharing", "Storage")) {
             ContractArtifactCatalog.ContractArtifact artifact = activeArtifacts.get(contractName);
             String address = resolveContractAddress(runtime.mode(), contractName);
@@ -109,22 +113,37 @@ public class ContractRegistryService {
                 throw new IllegalStateException(
                         "Sharing and Storage must use distinct contract addresses");
             }
+            ResolvedDeploymentEvidence deployment = resolveDeploymentEvidence(
+                    runtime,
+                    artifact,
+                    address);
+            if (!resolvedTransactions.add(deployment.transactionHash())) {
+                throw new IllegalStateException(
+                        "Sharing and Storage must use distinct deployment transactions");
+            }
             String runtimeCode = readRuntimeCode(runtime, address);
             String runtimeCodeSha256 = fingerprintService.fingerprintBytecode(runtimeCode);
             validateRuntimeCodeFingerprint(runtime, artifact, runtimeCodeSha256);
             validateContractIdentity(runtime, artifact, address);
             ContractRegistryEntryResponse entry = buildEntry(
-                    runtime, artifact, address, runtimeCodeSha256);
+                    runtime,
+                    artifact,
+                    address,
+                    runtimeCodeSha256,
+                    deployment);
             resolved.put(contractName, entry);
             log.info(
                     "合约注册表核验通过: contract={}, version={}, chainType={}, chainId={}, "
-                            + "groupId={}, address={}, abiSha256={}, onChainCodeSha256={}",
+                            + "groupId={}, address={}, deploymentTx={}, deploymentBlock={}, "
+                            + "abiSha256={}, onChainCodeSha256={}",
                     contractName,
                     entry.semanticVersion(),
                     entry.chainType(),
                     entry.chainId(),
                     entry.groupId(),
                     entry.contractAddress(),
+                    entry.deploymentTransactionHash(),
+                    entry.deploymentBlockNumber(),
                     entry.abiSha256(),
                     entry.onChainCodeSha256());
         }
@@ -577,13 +596,9 @@ public class ContractRegistryService {
             RuntimeContext runtime,
             ContractArtifactCatalog.ContractArtifact artifact,
             String address,
-            String runtimeCodeSha256
+            String runtimeCodeSha256,
+            ResolvedDeploymentEvidence resolvedDeployment
     ) {
-        ContractRegistryProperties.DeploymentEvidence deployment =
-                deploymentEvidence(artifact.contractName());
-        ResolvedDeploymentEvidence resolvedDeployment = validateDeploymentEvidence(
-                deployment,
-                artifact);
         String artifactBytecode = artifact.creationBytecodeSha256().get(runtime.cryptoType());
         return new ContractRegistryEntryResponse(
                 ENTRY_SCHEMA,
@@ -607,7 +622,7 @@ public class ContractRegistryService {
     }
 
     /**
-     * 根据合约名返回可选部署交易证据。
+     * 根据合约名返回必需的部署交易证据配置。
      */
     private ContractRegistryProperties.DeploymentEvidence deploymentEvidence(String contractName) {
         if (properties.getDeployment() == null) {
@@ -621,13 +636,15 @@ public class ContractRegistryService {
     }
 
     /**
-     * 部署交易哈希、区块号和生效时间必须同时提供；
-     * legacy 三项均缺省时回退 artifact 时间。
+     * 部署交易哈希、区块号和生效时间必须完整提供，并与活动链成功回执逐字段一致。
      */
-    private ResolvedDeploymentEvidence validateDeploymentEvidence(
-            ContractRegistryProperties.DeploymentEvidence evidence,
-            ContractArtifactCatalog.ContractArtifact artifact
+    private ResolvedDeploymentEvidence resolveDeploymentEvidence(
+            RuntimeContext runtime,
+            ContractArtifactCatalog.ContractArtifact artifact,
+            String configuredAddress
     ) {
+        ContractRegistryProperties.DeploymentEvidence evidence =
+                deploymentEvidence(artifact.contractName());
         String contractName = artifact.contractName();
         if (evidence == null) {
             throw new IllegalStateException("Missing deployment evidence holder for " + contractName);
@@ -638,11 +655,11 @@ public class ContractRegistryService {
         boolean transactionPresent = transactionHash != null;
         boolean blockPresent = blockNumber != null;
         boolean effectiveAtPresent = effectiveAt != null;
-        if (transactionPresent != blockPresent || transactionPresent != effectiveAtPresent) {
+        if (!transactionPresent || !blockPresent || !effectiveAtPresent) {
             throw new IllegalStateException(
                     contractName
                             + " deployment transaction hash, block number and effectiveAt"
-                            + " must be provided together");
+                            + " must all be configured");
         }
         if (transactionHash != null
                 && !TRANSACTION_HASH_PATTERN.matcher(transactionHash).matches()) {
@@ -650,9 +667,6 @@ public class ContractRegistryService {
         }
         if (blockNumber != null && blockNumber < 0) {
             throw new IllegalStateException("Invalid deployment block number for " + contractName);
-        }
-        if (!transactionPresent) {
-            return new ResolvedDeploymentEvidence(null, null, artifact.effectiveAt());
         }
         try {
             OffsetDateTime artifactTime = OffsetDateTime.parse(artifact.effectiveAt());
@@ -665,8 +679,33 @@ public class ContractRegistryService {
                 throw new IllegalStateException(
                         contractName + " deployment effectiveAt is in the future");
             }
+            String normalizedTransactionHash = transactionHash.toLowerCase(Locale.ROOT);
+            ContractDeploymentReceiptProbe.DeploymentReceipt receipt =
+                    runtime.client() != null
+                            ? deploymentReceiptProbe.inspectFisco(
+                                    runtime.client(),
+                                    normalizedTransactionHash)
+                            : deploymentReceiptProbe.inspectBesu(
+                                    runtime.web3j(),
+                                    normalizedTransactionHash);
+            if (receipt == null) {
+                throw new IllegalStateException(
+                        "Deployment receipt probe returned no result for " + contractName);
+            }
+            if (!normalizedTransactionHash.equals(receipt.transactionHash())) {
+                throw new IllegalStateException(
+                        contractName + " deployment transaction hash does not match chain receipt");
+            }
+            if (!configuredAddress.equals(receipt.contractAddress())) {
+                throw new IllegalStateException(
+                        contractName + " contract address does not match deployment receipt");
+            }
+            if (blockNumber.longValue() != receipt.blockNumber()) {
+                throw new IllegalStateException(
+                        contractName + " deployment block number does not match chain receipt");
+            }
             return new ResolvedDeploymentEvidence(
-                    transactionHash.toLowerCase(Locale.ROOT),
+                    normalizedTransactionHash,
                     blockNumber,
                     deploymentTime.toInstant().toString());
         } catch (DateTimeParseException e) {
@@ -807,7 +846,7 @@ public class ContractRegistryService {
     }
 
     /**
-     * 表示规范化后的可选部署证据和 registry 生效时间。
+     * 表示经活动链回执验证后的部署证据和 registry 生效时间。
      */
     private record ResolvedDeploymentEvidence(
             String transactionHash,

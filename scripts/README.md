@@ -138,7 +138,7 @@ SW_AGENT_COLLECTOR_BACKEND_SERVICES=127.0.0.1:11800
 | `--dry-run`           | 校验输入并打印操作步骤，不修改文件或链状态                |
 | `-h`, `--help`        | 显示帮助信息                                      |
 
-部署前脚本通过官方 Console `getGroupInfo` 读取唯一的 `chainID`/`groupID`/`smCryptoType`/`wasm` 元组：chain/group 必须与显式配置完全一致，WASM 或无法确定的 crypto/VM 组合会失败关闭。部署后的 `getCode` 必须先与节点实际 ECC/SM 变体对应的完整签入 runtime bytecode 完全一致，随后 `contractIdentity()` 还必须等于已验证 catalog 中唯一 `ACTIVE` 条目的名称和语义版本。`--skip-verify` 已被明确拒绝。Dry-run 不调用 Console、不生成时间、不创建回执，也不修改链或 `.env`。
+部署前脚本通过官方 Console `getGroupInfo` 读取唯一的 `chainID`/`groupID`/`smCryptoType`/`wasm` 元组：chain/group 必须与显式配置完全一致，WASM 或无法确定的 crypto/VM 组合会失败关闭。每笔链写前都会再次核验该上下文；部署后在同一个 Console 会话中执行 `getGroupInfo` 和 `getTransactionReceipt`，只接受唯一结构化回执，并要求显式 `status=0`、回执内 `transactionHash`/`contractAddress` 与部署输出一致、`blockNumber` 为非负整数。最终发布字段全部来自该同一成功回执，不会从多段文本拼接。随后 `getCode` 必须与节点实际 ECC/SM 变体对应的完整签入 runtime bytecode 完全一致，`contractIdentity()` 还必须等于已验证 catalog 中唯一 `ACTIVE` 条目的名称和语义版本。`--skip-verify` 已被明确拒绝。Dry-run 不调用 Console、不生成时间、不创建回执，也不修改链或 `.env`。
 
 该脚本只负责 `BLOCKCHAIN_ACTIVE=local-fisco`；配置为 `bsn-fisco` 或 `bsn-besu` 时会在 Console 查询前拒绝执行，BSN 部署必须使用对应网络的受审查发布流程。
 
@@ -151,11 +151,13 @@ SW_AGENT_COLLECTOR_BACKEND_SERVICES=127.0.0.1:11800
 | 1. Pre-flight  | 校验工具、catalog/源码/ABI/creation/runtime、控制台、激活文件、节点连通性，并用 `getGroupInfo` 严格对账 chain/group/crypto/VM |
 | 2. Compile     | 用官方 `contract2java.sh` 生成 ABI 与 ECC/SM creation，并用固定 keccak256/sm3 solc 重建 creation/runtime |
 | 3. Artifact Verification | canonical 比对 ABI，并按 decoded bytes 比对 ECC/SM creation/runtime bytecode |
-| 4. Deploy      | 顺序部署双合约，取得地址、交易哈希与交易回执区块号 |
+| 4. Deploy      | 顺序部署双合约；每笔链写前重验 chain/group，随后从同一上下文中的唯一成功结构化回执取得并交叉核对 tx/address/block |
 | 5. On-chain Verification | 对两个地址先执行 `getCode` 并匹配节点实际 crypto 变体的完整 runtime，再执行 `contractIdentity()` 核对 catalog 名称/版本，任一失败即停止 |
 | 6. Audited Atomic Activation | 固定一次 UTC `effectiveAt`，先原子发布结构化回执，再一次性写入两个地址及两组完整部署证据 |
 
-部署回执 schema 为 `record-platform-contract-deployment-receipt.v1`，`chainType` 使用 registry 的本地 FISCO 公共枚举值。回执仅记录 catalog SHA-256、chain/group、两个合约的名称、版本、地址、交易哈希、区块号和同一 `effectiveAt`，不记录 RPC URL、证书、私钥或令牌。回执写入失败时 `.env` 保持不变；若回执成功但随后 `.env` 原子替换失败，回执仍作为“链上部署已验证、尚未激活”的审计证据保留，不应被解释为运行时已启用。
+新部署回执 schema 为 `record-platform-contract-deployment-receipt.v2`；历史 `v1` 回执只作为旧审计记录保留，不能替代启动时 RPC 校验。`chainType` 使用 registry 的本地 FISCO 公共枚举值，每个合约额外记录 `receiptStatus=SUCCESS`；地址、交易哈希和区块号均来自同一笔成功回执。回执还记录 catalog SHA-256、chain/group、名称、版本和同一 `effectiveAt`，但不记录 RPC URL、证书、私钥或令牌。回执写入失败时 `.env` 保持不变；若回执成功但随后 `.env` 原子替换失败，回执仍只是“链上部署已验证、尚未激活”的审计证据，不应被解释为运行时已启用。
+
+`platform-fisco` 启动时还会通过当前 active chain 客户端重新查询每个配置交易：FISCO 必须为显式 `status=0`，Besu 必须为显式 `status=1`；缺失状态、RPC 错误、未出块/不存在的回执、普通交易的空/零合约地址、tx/address/block 任一不一致、重复地址或重复部署交易都会阻止发布任何 `ACTIVE` registry。`FISCO_*_DEPLOYMENT_TX`、`FISCO_*_DEPLOYMENT_BLOCK` 和 `FISCO_*_DEPLOYMENT_EFFECTIVE_AT` 不再支持整组留空；旧环境必须先从当前链取得真实成功回执并完整配置，无法证明时应重新部署，禁止手填或复制其他交易证据。
 
 ### 部署后
 
@@ -166,3 +168,5 @@ SW_AGENT_COLLECTOR_BACKEND_SERVICES=127.0.0.1:11800
 # 验证合约地址已正确配置
 ./scripts/env-check.sh --service contracts
 ```
+
+`env-check.sh` 只检查字段格式和完整性。最终验收必须实际重启 `platform-fisco` 并确认 registry 初始化成功，因为只有服务启动校验会读取活动链回执、runtime code 和 `contractIdentity()`。回滚时应把上一版已审查的 catalog、两个地址及其各自真实 tx/block/effectiveAt 一次恢复；若任一旧回执无法在当前 chain/group 上复核，则保持服务停止并重新部署，不得删除校验或伪造证据。

@@ -296,6 +296,42 @@ print("sha256:" + hashlib.sha256(Path(sys.argv[1]).read_bytes()).hexdigest())
 PY
 }
 
+# 将已解析的节点身份与显式 chain/group 及固定 EVM crypto 变体完全对账。
+validate_observed_fisco_chain_identity() {
+    local actual_identity="$1"
+    local expected_chain_id="${FISCO_CHAIN_ID:-}"
+    local expected_group_id="${FISCO_GROUP_ID:-}"
+    local actual_chain_id
+    local actual_group_id
+    local actual_crypto_variant
+    local actual_vm_type
+    IFS=$'\t' read -r actual_chain_id actual_group_id \
+        actual_crypto_variant actual_vm_type <<< "$actual_identity"
+    if [ "$actual_chain_id" != "$expected_chain_id" ]; then
+        fail "FISCO chain mismatch: configured=$expected_chain_id, actual=$actual_chain_id"
+        return 1
+    fi
+    if [ "$actual_group_id" != "$expected_group_id" ]; then
+        fail "FISCO group mismatch: configured=$expected_group_id, actual=$actual_group_id"
+        return 1
+    fi
+    if [ "$actual_vm_type" != "evm" ]; then
+        fail "FISCO WASM group cannot deploy EVM contract artifacts"
+        return 1
+    fi
+    if [ "$actual_crypto_variant" != "ecc" ] && [ "$actual_crypto_variant" != "sm" ]; then
+        fail "Unsupported FISCO crypto variant: $actual_crypto_variant"
+        return 1
+    fi
+    if [ -n "$FISCO_CRYPTO_VARIANT" ] \
+        && [ "$FISCO_CRYPTO_VARIANT" != "$actual_crypto_variant" ]; then
+        fail "FISCO crypto variant changed during deployment: expected=$FISCO_CRYPTO_VARIANT, actual=$actual_crypto_variant"
+        return 1
+    fi
+    FISCO_CRYPTO_VARIANT="$actual_crypto_variant"
+    ok "FISCO node identity matches chain/group; crypto=$actual_crypto_variant, vm=evm"
+}
+
 # 部署前查询节点身份，并与显式 chain/group 及 EVM crypto 变体完全对账。
 verify_fisco_chain_identity() {
     local active_chain="${BLOCKCHAIN_ACTIVE:-local-fisco}"
@@ -336,31 +372,7 @@ verify_fisco_chain_identity() {
         printf '%s\n' "$output" | tail -10 | sed 's/^/    /'
         return 1
     fi
-
-    local actual_chain_id
-    local actual_group_id
-    local actual_crypto_variant
-    local actual_vm_type
-    IFS=$'\t' read -r actual_chain_id actual_group_id \
-        actual_crypto_variant actual_vm_type <<< "$actual_identity"
-    if [ "$actual_chain_id" != "$expected_chain_id" ]; then
-        fail "FISCO chain mismatch: configured=$expected_chain_id, actual=$actual_chain_id"
-        return 1
-    fi
-    if [ "$actual_group_id" != "$expected_group_id" ]; then
-        fail "FISCO group mismatch: configured=$expected_group_id, actual=$actual_group_id"
-        return 1
-    fi
-    if [ "$actual_vm_type" != "evm" ]; then
-        fail "FISCO WASM group cannot deploy EVM contract artifacts"
-        return 1
-    fi
-    if [ "$actual_crypto_variant" != "ecc" ] && [ "$actual_crypto_variant" != "sm" ]; then
-        fail "Unsupported FISCO crypto variant: $actual_crypto_variant"
-        return 1
-    fi
-    FISCO_CRYPTO_VARIANT="$actual_crypto_variant"
-    ok "FISCO node identity matches chain/group; crypto=$actual_crypto_variant, vm=evm"
+    validate_observed_fisco_chain_identity "$actual_identity"
 }
 
 # ==============================================================================
@@ -1300,7 +1312,7 @@ ok "Verified catalog bytes fixed at $VERIFIED_CATALOG_SHA256"
 # ==============================================================================
 section 4 "Deploy Contracts"
 
-# 从 FISCO Console 部署输出中提取规范化地址和交易哈希。
+# 从 FISCO Console 部署输出中提取唯一的规范化地址和交易哈希。
 parse_deployment_metadata() {
     python3 -c '
 import re
@@ -1316,17 +1328,20 @@ transaction_patterns = (
     r"\"transactionHash\"\s*:\s*\"(0x[0-9a-fA-F]{64})\"",
 )
 
-def first_match(patterns):
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return match.group(1).lower()
-    return None
-
-address = first_match(address_patterns)
-transaction_hash = first_match(transaction_patterns)
-if not address or not transaction_hash:
+addresses = {
+    match.lower()
+    for pattern in address_patterns
+    for match in re.findall(pattern, text, re.IGNORECASE)
+}
+transaction_hashes = {
+    match.lower()
+    for pattern in transaction_patterns
+    for match in re.findall(pattern, text, re.IGNORECASE)
+}
+if len(addresses) != 1 or len(transaction_hashes) != 1:
     raise SystemExit(1)
+address = next(iter(addresses))
+transaction_hash = next(iter(transaction_hashes))
 print(f"{address}\t{transaction_hash}")
 '
 }
@@ -1389,26 +1404,106 @@ revalidate_contract_deploy_inputs() {
     ok "$name deploy inputs revalidated immediately before $crypto_variant chain write"
 }
 
-# 从交易回执或部署输出中提取十进制区块号。
-extract_block_number() {
+# 从结构化 RPC 输出中提取唯一、成功且与部署输出一致的完整回执。
+parse_successful_deployment_receipt() {
+    local expected_transaction_hash="$1"
+    local expected_contract_address="$2"
     python3 -c '
+import json
 import re
 import sys
 
-text = sys.stdin.read()
-patterns = (
-    r"\"blockNumber\"\s*:\s*\"?((?:0x)?[0-9a-fA-F]+)\"?",
-    r"block\s+number\s*:\s*((?:0x)?[0-9a-fA-F]+)",
-    r"on\s+block\s*:\s*([0-9]+)",
-)
-for pattern in patterns:
-    match = re.search(pattern, text, re.IGNORECASE)
-    if match:
-        value = match.group(1)
-        print(int(value, 16) if value.lower().startswith("0x") else int(value, 10))
-        raise SystemExit(0)
-raise SystemExit(1)
-'
+expected_transaction_hash = sys.argv[1].lower()
+expected_contract_address = sys.argv[2].lower()
+text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", sys.stdin.read())
+decoder = json.JSONDecoder()
+required_fields = {"status", "transactionHash", "contractAddress", "blockNumber"}
+transaction_pattern = re.compile(r"0x[0-9a-f]{64}", re.IGNORECASE)
+address_pattern = re.compile(r"0x[0-9a-f]{40}", re.IGNORECASE)
+candidates = set()
+invalid_receipt_shape = False
+rpc_error = False
+
+def parse_quantity(value):
+    if isinstance(value, bool):
+        raise ValueError
+    if isinstance(value, int):
+        if value < 0:
+            raise ValueError
+        return value
+    if not isinstance(value, str):
+        raise ValueError
+    if re.fullmatch(r"0[xX][0-9a-fA-F]+", value):
+        return int(value, 16)
+    if re.fullmatch(r"0|[1-9][0-9]*", value):
+        return int(value, 10)
+    raise ValueError
+
+def collect(value):
+    global invalid_receipt_shape, rpc_error
+    if isinstance(value, dict):
+        if value.get("error") not in (None, {}, []):
+            rpc_error = True
+        present_fields = required_fields.intersection(value)
+        if present_fields.intersection({"transactionHash", "contractAddress"}):
+            if present_fields != required_fields:
+                invalid_receipt_shape = True
+            else:
+                try:
+                    status = parse_quantity(value["status"])
+                    block_number = parse_quantity(value["blockNumber"])
+                    transaction_hash = value["transactionHash"]
+                    contract_address = value["contractAddress"]
+                    if (
+                        status != 0
+                        or block_number > 9223372036854775807
+                        or not isinstance(transaction_hash, str)
+                        or transaction_pattern.fullmatch(transaction_hash) is None
+                        or not isinstance(contract_address, str)
+                        or address_pattern.fullmatch(contract_address) is None
+                        or contract_address.lower()
+                            == "0x0000000000000000000000000000000000000000"
+                    ):
+                        raise ValueError
+                    candidates.add((
+                        transaction_hash.lower(),
+                        contract_address.lower(),
+                        block_number,
+                    ))
+                except (TypeError, ValueError):
+                    invalid_receipt_shape = True
+        for nested in value.values():
+            collect(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            collect(nested)
+    elif isinstance(value, str):
+        try:
+            nested = json.loads(value)
+        except json.JSONDecodeError:
+            return
+        if isinstance(nested, (dict, list)):
+            collect(nested)
+
+for index, character in enumerate(text):
+    if character not in "[{":
+        continue
+    try:
+        value, _ = decoder.raw_decode(text[index:])
+    except json.JSONDecodeError:
+        continue
+    collect(value)
+
+if rpc_error or invalid_receipt_shape or len(candidates) != 1:
+    raise SystemExit(1)
+transaction_hash, contract_address, block_number = next(iter(candidates))
+if (
+    transaction_hash != expected_transaction_hash
+    or contract_address != expected_contract_address
+):
+    raise SystemExit(1)
+print(f"{transaction_hash}\t{contract_address}\t{block_number}")
+' "$expected_transaction_hash" "$expected_contract_address"
 }
 
 # 部署单个合约并强制取得地址、交易哈希和交易所在区块。
@@ -1439,6 +1534,10 @@ deploy_contract() {
         "$FISCO_CRYPTO_VARIANT"; then
         return 1
     fi
+    if ! verify_fisco_chain_identity; then
+        fail "$name chain/group context changed before deployment"
+        return 1
+    fi
 
     local output
     if ! output=$(
@@ -1464,24 +1563,46 @@ deploy_contract() {
     local receipt_output
     if ! receipt_output=$(
         cd "$CONSOLE_DIR"
-        printf 'getTransactionReceipt %s\nexit\n' "$transaction_hash" | \
+        printf 'getGroupInfo\ngetTransactionReceipt %s\nexit\n' "$transaction_hash" | \
             run_console 30 2>&1
     ); then
         fail "$name deployment receipt lookup failed"
         return 1
     fi
 
-    local block_number
-    if ! block_number=$(printf '%s\n%s\n' "$output" "$receipt_output" | extract_block_number); then
-        fail "$name deployment receipt did not contain a valid block number"
+    local receipt_chain_identity
+    if ! receipt_chain_identity=$(
+        printf '%s\n' "$receipt_output" | extract_fisco_chain_identity
+    ); then
+        fail "$name deployment receipt lookup did not return one chain/group context"
+        printf '%s\n' "$receipt_output" | tail -20 | sed 's/^/    /'
+        return 1
+    fi
+    if ! validate_observed_fisco_chain_identity "$receipt_chain_identity"; then
+        fail "$name deployment receipt came from an unexpected chain/group context"
+        return 1
+    fi
+
+    local receipt_metadata
+    if ! receipt_metadata=$(
+        printf '%s\n' "$receipt_output" \
+            | parse_successful_deployment_receipt "$transaction_hash" "$address"
+    ); then
+        fail "$name deployment receipt was missing, failed, ambiguous or mismatched"
         printf '%s\n' "$receipt_output" | tail -20 | sed 's/^/    /'
         return 1
     fi
 
-    printf -v "$address_result_var" '%s' "$address"
-    printf -v "$transaction_result_var" '%s' "$transaction_hash"
+    local receipt_transaction_hash
+    local receipt_address
+    local block_number
+    IFS=$'\t' read -r receipt_transaction_hash receipt_address block_number \
+        <<< "$receipt_metadata"
+
+    printf -v "$address_result_var" '%s' "$receipt_address"
+    printf -v "$transaction_result_var" '%s' "$receipt_transaction_hash"
     printf -v "$block_result_var" '%s' "$block_number"
-    ok "$name deployed at $address (tx=$transaction_hash, block=$block_number)"
+    ok "$name deployed with a successful chain-bound receipt at $receipt_address (tx=$receipt_transaction_hash, block=$block_number)"
 }
 
 STORAGE_ADDR=""
@@ -1774,7 +1895,7 @@ import sys
     sharing_block,
 ) = sys.argv[1:]
 receipt = {
-    "schemaVersion": "record-platform-contract-deployment-receipt.v1",
+    "schemaVersion": "record-platform-contract-deployment-receipt.v2",
     "verificationStatus": "VERIFIED",
     "catalogSha256": catalog_sha256,
     "chainType": "LOCAL_FISCO",
@@ -1786,6 +1907,7 @@ receipt = {
             "contractName": storage_name,
             "semanticVersion": storage_version,
             "address": storage_address,
+            "receiptStatus": "SUCCESS",
             "transactionHash": storage_transaction,
             "blockNumber": int(storage_block),
             "effectiveAt": effective_at,
@@ -1794,6 +1916,7 @@ receipt = {
             "contractName": sharing_name,
             "semanticVersion": sharing_version,
             "address": sharing_address,
+            "receiptStatus": "SUCCESS",
             "transactionHash": sharing_transaction,
             "blockNumber": int(sharing_block),
             "effectiveAt": effective_at,
