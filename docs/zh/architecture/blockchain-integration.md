@@ -111,12 +111,13 @@ ABI 使用 `ABI-CANONICAL-JSON-SHA256-V1`：移除 `internalType`，排序 objec
 2. `Sharing`、`Storage` 各自恰好存在一个 `ACTIVE` artifact；
 3. active adapter 返回的真实 chain ID 和 FISCO group 与配置一致；
 4. 从 active chain 自己的配置命名空间选出的地址是非零 20-byte 地址；
-5. 节点在该地址返回的完整 runtime code 指纹与实际链/crypto 变体的签入 runtime 制品一致，且 `contractIdentity()` 与选中 catalog 名称/版本完全一致；
-6. 部署交易哈希、区块号和实际激活时间必须全部存在或全部缺失。
+5. 每个合约都完整配置交易哈希、区块号和实际激活时间，legacy 空证据或部分证据均被拒绝；
+6. 活动链客户端从显式成功的部署回执（FISCO 状态 `0`、Besu 状态 `1`）返回相同交易哈希、配置合约地址和区块号；
+7. 节点在该地址返回的完整 runtime code 指纹与实际链/crypto 变体的签入 runtime 制品一致，且 `contractIdentity()` 与选中 catalog 名称/版本完全一致。
 
-最终的 `record-platform-contract-registry-entry.v1` 指纹绑定 chain type/ID/group、地址、语义版本、ABI/creation-bytecode hash、观测到的 runtime-code hash、部署证据、状态、生效时间和升级策略。Catalog `effectiveAt` 表示 artifact 生命周期最早时间；存在完整部署三元组时，runtime entry 使用 `FISCO_*_DEPLOYMENT_EFFECTIVE_AT` 表示实际 active-chain 时间。`SharingService`、`StorageService` 与 Besu adapter 只使用 registry 解析出的地址。Registry 查询以及 batch store/query RPC 继续由 backend-to-FISCO 共享令牌保护。
+最终的 `record-platform-contract-registry-entry.v1` 指纹绑定 chain type/ID/group、地址、语义版本、ABI/creation-bytecode hash、观测到的 runtime-code hash、部署证据、状态、生效时间和升级策略。Catalog `effectiveAt` 表示 artifact 生命周期最早时间；必填的 `FISCO_*_DEPLOYMENT_EFFECTIVE_AT` 表示实际 active-chain 时间。回执查询复用已经核验 chain/group 身份的活动客户端，因此配置三元组不能从另一个链命名空间取得证明。回执缺失、JSON-RPC 错误、失败或未知状态、交易/地址/区块不一致、重复地址或重复部署交易都会阻止发布不可变 registry map。`SharingService`、`StorageService` 与 Besu adapter 只使用 registry 解析出的地址。Registry 查询以及 batch store/query RPC 继续由 backend-to-FISCO 共享令牌保护。
 
-本地 FISCO 部署脚本在编译前通过官方 Console `getGroupInfo` 查询唯一的 chain/group/crypto/VM 元组，要求与 `FISCO_CHAIN_ID`/`FISCO_GROUP_ID` 及 EVM 目标完全一致。脚本固定使用 FISCO solc `0.8.11+commit.6b4cc280`、EVM London、optimizer disabled、metadata IPFS，并分别使用 keccak256/sm3 编译器重建 ECC/SM creation/runtime；所有产物都必须与签入 artifact 等价。随后先用 `getCode` 按节点实际 crypto 变体严格核验完整 runtime bytes，再执行从 catalog 派生的 `contractIdentity()`。链上验证成功后只生成一次 UTC 生效时间，先原子发布不含凭据、`chainType=LOCAL_FISCO` 的 `record-platform-contract-deployment-receipt.v1` 回执，再原子写回两个地址和完整部署三元组。回执写入失败、解析失败、chain/group/crypto/VM、runtime 或身份不一致、revert 都会阻断激活。Dry-run 不调用 Console，也不写回回执或环境文件。
+本地 FISCO 部署脚本在编译前和每笔链写前通过官方 Console `getGroupInfo` 查询唯一的 chain/group/crypto/VM 元组，要求与 `FISCO_CHAIN_ID`/`FISCO_GROUP_ID` 及 EVM 目标完全一致。脚本固定使用 FISCO solc `0.8.11+commit.6b4cc280`、EVM London、optimizer disabled、metadata IPFS，并分别使用 keccak256/sm3 编译器重建 ECC/SM creation/runtime；所有产物都必须与签入 artifact 等价。每条 deploy 命令完成后，脚本在同一个 Console 会话中执行 `getGroupInfo` 和 `getTransactionReceipt`，只接受一份显式状态 `0` 的结构化回执，并把其中交易哈希、合约地址与唯一部署输出交叉核对；最终 tx/address/block 全部来自该回执。随后先用 `getCode` 按节点实际 crypto 变体严格核验完整 runtime bytes，再执行从 catalog 派生的 `contractIdentity()`。链上验证成功后只生成一次 UTC 生效时间，先原子发布不含凭据、`chainType=LOCAL_FISCO` 且每个合约含 `receiptStatus=SUCCESS` 的 `record-platform-contract-deployment-receipt.v2` 回执，再原子写回两个地址和完整部署三元组。历史 `v1` 文件仍作为旧审计记录保留，但不能绕过启动 RPC 核验。回执缺失/失败/歧义、解析或字段不一致、chain/group/crypto/VM、runtime 或身份不一致、revert 都会阻断激活。Dry-run 不调用 Console，也不写回回执或环境文件。
 
 每个新存证 batch 都会持久化完整的 `Sharing` registry entry。Provider 在查询或写入前再次校验同一条目，重试不得跨越不同 registry fingerprint。Proof 导出读取该不可变快照，而不是当前环境变量，因此地址或 ABI 变更不能改写历史证据。无法还原历史合约身份的 legacy batch 保持 unresolved，不伪造 registry 元数据。
 
@@ -125,11 +126,11 @@ ABI 使用 `ABI-CANONICAL-JSON-SHA256-V1`：移除 `internalType`，排序 objec
 合约升级固定采用 `REDEPLOY_ADDRESS`，不假设 proxy 行为。
 
 1. 将经审查的源码、ABI、ECC/SM creation/runtime bytecode、语义版本和指纹加入 catalog。保留旧条目并改为 `DEPRECATED`，禁止删除已被 proof 引用的条目。
-2. 先运行 `contract_fingerprint.py verify`，再运行 `scripts/contract-deploy.sh`。Console 必须支持 solc `0.8.11` 并提供 keccak256/sm3 两套官方编译器。脚本部署前验证 chain/group/crypto/VM 和编译制品，部署后验证完整 runtime code 与精确 catalog 身份，发布结构化部署回执，最后原子激活两个地址及其交易/区块/生效时间证据。
+2. 先运行 `contract_fingerprint.py verify`，再运行 `scripts/contract-deploy.sh`。Console 必须支持 solc `0.8.11` 并提供 keccak256/sm3 两套官方编译器。脚本部署前验证 chain/group/crypto/VM 和编译制品，把每次部署绑定到一份显式成功回执，部署后验证完整 runtime code 与精确 catalog 身份，发布结构化部署回执，最后原子激活两个地址及其交易/区块/生效时间证据。
 3. 重启 `platform-fisco`。新 batch 绑定新的 `ACTIVE` 条目；已被领取的 batch 保持旧 fingerprint，并进入人工处理，禁止静默切换合约。
 4. 只有确认发生安全或完整性事件时才使用 `REVOKED`。状态变更必须经过 catalog 代码审查；不得修改已持久化 batch 快照来伪造不同的历史状态。
 
-应用回滚时，先关闭生产批次创建，把上一版本已审查的 catalog/制品集合、两个地址和两组完整交易/区块/生效时间三元组作为一个整体恢复，再重启 `platform-fisco`。必须保留全部部署回执、`V1.13.0` 迁移和全部快照；删除列、删除旧 catalog 条目/回执或改写快照都会破坏审计证据。
+应用回滚时，先关闭生产批次创建，把上一版本已审查的 catalog/制品集合、两个地址和两组完整交易/区块/生效时间三元组作为一个整体恢复，再重启 `platform-fisco`。启动过程必须能从当前配置链重新读取两份成功回执才接受回滚；任一历史回执无法证明时应保持服务停止并重新部署，禁止伪造三元组或放宽启动门禁。必须保留全部部署回执、`V1.13.0` 迁移和全部快照；删除列、删除旧 catalog 条目/回执或改写快照都会破坏审计证据。
 
 ### 适配器架构
 

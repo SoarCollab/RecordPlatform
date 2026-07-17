@@ -476,7 +476,7 @@ check_certs() {
 # 8. Contract Addresses
 # ==============================================================================
 
-# 校验单个合约部署证据必须整组为空，或形成合法 tx/block/effectiveAt 三元组。
+# 校验单个合约部署证据必须形成完整合法的 tx/block/effectiveAt 三元组。
 validate_contract_deployment_evidence() {
     local name="$1"
     local upper_name
@@ -493,8 +493,8 @@ validate_contract_deployment_evidence() {
     [ -n "$effective_at" ] && populated=$((populated + 1))
 
     if [ "$populated" -eq 0 ]; then
-        warn "$name deployment evidence is absent (legacy compatibility mode)"
-        return 0
+        fail "$name deployment evidence must set $tx_key, $block_key and $effective_at_key together"
+        return 1
     fi
     if [ "$populated" -ne 3 ]; then
         fail "$name deployment evidence must set $tx_key, $block_key and $effective_at_key together"

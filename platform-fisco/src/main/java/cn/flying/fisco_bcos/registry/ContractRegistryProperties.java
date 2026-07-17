@@ -5,7 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * 合约注册表 catalog 位置与可选部署证据配置。
+ * 合约注册表 catalog 位置与必需部署证据配置。
  */
 @Data
 @Configuration
@@ -15,7 +15,7 @@ public class ContractRegistryProperties {
     /** classpath 或文件系统中的 artifact catalog。 */
     private String catalogLocation = "classpath:contract-registry/artifacts.json";
 
-    /** 已知部署交易元数据；tx、block、effectiveAt 必须同时提供或同时保持为空。 */
+    /** 已知部署交易元数据；tx、block、effectiveAt 必须同时完整提供。 */
     private Deployment deployment = new Deployment();
 
     /**
@@ -28,7 +28,7 @@ public class ContractRegistryProperties {
     }
 
     /**
-     * 单个合约的可选部署交易与实际生效时间证据。
+     * 单个合约的必需部署交易与实际生效时间证据。
      */
     @Data
     public static class DeploymentEvidence {

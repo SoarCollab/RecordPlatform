@@ -64,12 +64,12 @@ Fault domain configuration is managed through Nacos and supports runtime refresh
 | `BSN_FISCO_CHAIN_ID` | Expected BSN FISCO chain ID; required with no default when `BLOCKCHAIN_ACTIVE=bsn-fisco` | Provider-assigned value |
 | `FISCO_STORAGE_CONTRACT` | Storage contract address | `0x...` |
 | `FISCO_SHARING_CONTRACT` | Sharing contract address | `0x...` |
-| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_TX` | Deployment transaction hash; set as part of the complete evidence triplet | `0x` + 64 hex |
-| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_BLOCK` | Deployment block number; set with transaction/effective time | Non-negative decimal |
-| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_EFFECTIVE_AT` | Actual activation time; set with transaction/block | UTC `YYYY-MM-DDTHH:MM:SSZ` |
+| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_TX` | Required deployment transaction hash; the active-chain receipt must exist and match the configured address/block | `0x` + 64 hex |
+| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_BLOCK` | Required deployment block number from the same successful receipt | Non-negative decimal |
+| `FISCO_{STORAGE,SHARING}_DEPLOYMENT_EFFECTIVE_AT` | Required actual activation time, configured with transaction/block | UTC `YYYY-MM-DDTHH:MM:SSZ` |
 | `CONTRACT_DEPLOYMENT_RECEIPT_DIR` | Durable restricted directory for public deployment audit receipts | `log/contract-deployments` for local development |
 
-`scripts/contract-deploy.sh` requires explicit local chain/group values and compares them with Console `getGroupInfo` before compilation or deployment. The deployment evidence fields for each contract must be all absent for legacy compatibility or all present as one transaction/block/effective-time triplet. The guarded script writes the two triplets with one shared effective time and first publishes a credential-free structured receipt; production should place that receipt directory outside ephemeral application storage.
+`scripts/contract-deploy.sh` requires explicit local chain/group values and compares them with Console `getGroupInfo` before compilation and every deployment. It fetches each transaction receipt together with `getGroupInfo` in one Console session, requires explicit FISCO success status `0`, and derives the final transaction/address/block fields from that one receipt. All three deployment evidence fields are mandatory for both contracts; an entirely empty legacy triplet now fails startup. The same variable names carry reviewed BSN deployment evidence, where startup revalidates the receipt through the selected BSN FISCO or Besu client (Besu requires explicit status `1`). The guarded local script writes both triplets with one shared effective time and first publishes a credential-free structured receipt; production should place that receipt directory outside ephemeral application storage. `env-check.sh` validates shape only; restart `platform-fisco` to perform the authoritative active-chain receipt, runtime-code, and identity checks.
 
 ### SSL Configuration (Production)
 
