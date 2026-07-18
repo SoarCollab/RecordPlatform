@@ -231,6 +231,26 @@ class ShareAuditServiceImplTest {
         }
     }
 
+    /**
+     * 验证三类异步审计写入失败均被隔离，不能反向破坏公开分享主流程。
+     */
+    @Test
+    @DisplayName("should isolate persistence failures for every share audit action")
+    void shouldIsolatePersistenceFailuresForEveryShareAuditAction() {
+        when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(createFileShare());
+        when(shareAccessLogMapper.insert(any(ShareAccessLog.class)))
+                .thenThrow(new IllegalStateException("audit unavailable"));
+
+        assertDoesNotThrow(() -> shareAuditService.logShareView(
+                SHARE_CODE, USER_ID, IP_ADDRESS, USER_AGENT));
+        assertDoesNotThrow(() -> shareAuditService.logShareDownload(
+                SHARE_CODE, USER_ID, FILE_HASH, FILE_NAME, IP_ADDRESS));
+        assertDoesNotThrow(() -> shareAuditService.logShareSave(
+                SHARE_CODE, USER_ID, FILE_HASH, FILE_NAME, IP_ADDRESS));
+
+        verify(shareAccessLogMapper, times(3)).insert(any(ShareAccessLog.class));
+    }
+
     @Nested
     @DisplayName("getShareAccessLogs")
     class GetShareAccessLogs {

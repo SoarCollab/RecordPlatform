@@ -475,12 +475,21 @@ class TenantFilterTest {
     @Test
     @DisplayName("should reject missing tenant header for protected shares path")
     void shouldRejectMissingTenantHeaderForProtectedSharesPath() throws ServletException, IOException {
-        for (String path : new String[]{
-                "/api/v1/shares",
-                "/api/v1/shares/abc/files/save",
-                "/api/v1/shares/abc/files/hash-1/chunks",
-                "/api/v1/shares/abc/files/hash-1/decrypt-info"}) {
-            MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
+        String[][] protectedRequests = {
+                {"POST", "/api/v1/shares"},
+                {"POST", "/api/v1/shares/abc/info"},
+                {"POST", "/api/v1/shares/abc/files"},
+                {"POST", "/api/v1/shares/abc/files/save"},
+                {"POST", "/api/v1/shares/abc/files/hash-1/chunks"},
+                {"POST", "/api/v1/shares/abc/files/hash-1/decrypt-info"},
+                {"POST", "/api/v1/public/shares/abc/files/hash-1/chunks"},
+                {"POST", "/api/v1/public/shares/abc/files/hash-1/decrypt-info"},
+                {"GET", "/api/v1/public/shares/abc/files/hash-1/metadata"}
+        };
+        for (String[] protectedRequest : protectedRequests) {
+            String method = protectedRequest[0];
+            String path = protectedRequest[1];
+            MockHttpServletRequest request = new MockHttpServletRequest(method, path);
             request.setServletPath(path);
             MockHttpServletResponse response = new MockHttpServletResponse();
 

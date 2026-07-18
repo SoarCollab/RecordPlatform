@@ -238,6 +238,57 @@ class SensitiveDataMaskerTest {
         );
     }
 
+    /**
+     * 验证路由规范化对空输入、相对路径和容器尾部分隔符语义保持稳定。
+     */
+    @Test
+    @DisplayName("路由匹配路径应稳定处理空输入和尾部分隔符")
+    void normalizePathForRouteMatching_shouldHandleEmptyAndTrailingSegments() {
+        assertNull(SensitiveDataMasker.normalizePathForRouteMatching(null));
+        assertEquals("   ", SensitiveDataMasker.normalizePathForRouteMatching("   "));
+        assertEquals("api/v1/shares", SensitiveDataMasker.normalizePathForRouteMatching("api/v1/shares"));
+        assertEquals("", SensitiveDataMasker.normalizePathForRouteMatching("."));
+        assertEquals("/", SensitiveDataMasker.normalizePathForRouteMatching("/"));
+        assertEquals("/api/", SensitiveDataMasker.normalizePathForRouteMatching("/api/"));
+        assertEquals("/", SensitiveDataMasker.normalizePathForRouteMatching("/api/.."));
+        assertEquals("/api", SensitiveDataMasker.normalizePathForRouteMatching("/../api"));
+        assertEquals("/api", SensitiveDataMasker.normalizePathForRouteMatching("/api/;x=1"));
+        assertEquals("/", SensitiveDataMasker.normalizePathForRouteMatching("/;x=1"));
+        assertEquals("/api", SensitiveDataMasker.normalizePathForRouteMatching("/api"));
+    }
+
+    /**
+     * 验证终止路由、导航段和非法编码均不会绕过或误触发敏感路径变量脱敏。
+     */
+    @Test
+    @DisplayName("异常路由目标应按实际路径变量语义脱敏")
+    void maskSensitivePathSegments_shouldHandleTerminalNavigationAndInvalidTargets() {
+        assertEquals(
+                "/api/v1/upload-sessions",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/upload-sessions")
+        );
+        assertEquals(
+                "/api/v1/hash",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/hash")
+        );
+        assertEquals(
+                "/api/v1/files",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/files")
+        );
+        assertEquals(
+                "/api/v1/shares/../public",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/shares/../public")
+        );
+        assertEquals(
+                "/api/v1/shares/***",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/shares/%ZZ")
+        );
+        assertEquals(
+                "/api/v1/shares/***",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/shares/%ZZ;bad=%ZZ")
+        );
+    }
+
     @Test
     @DisplayName("日志路径脱敏不应误替换静态文件路由段")
     void maskSensitivePathSegments_shouldKeepStaticFileRouteSegments() {

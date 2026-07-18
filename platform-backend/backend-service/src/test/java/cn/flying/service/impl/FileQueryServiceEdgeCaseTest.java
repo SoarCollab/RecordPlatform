@@ -383,6 +383,77 @@ class FileQueryServiceEdgeCaseTest {
             }
             verify(fileMapper, never()).selectList(any());
         }
+
+        /**
+         * 验证全局分享码无法解析 owner 租户时立即按分享不存在失败关闭。
+         */
+        @Test
+        @DisplayName("should reject when global share tenant cannot be resolved")
+        void shouldRejectWhenGlobalShareTenantCannotBeResolved() {
+            when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(null);
+
+            GeneralException ex = assertThrows(
+                    GeneralException.class,
+                    () -> fileQueryService.getShareFile(SHARE_CODE));
+
+            assertThat(ex.getResultEnum()).isEqualTo(ResultEnum.SHARE_NOT_FOUND);
+            verify(fileShareMapper, never()).selectByShareCode(anyString());
+            verifyNoInteractions(fileMapper);
+        }
+
+        /**
+         * 验证 owner 租户内分享记录消失时不会跨租户回退读取文件。
+         */
+        @Test
+        @DisplayName("should reject when share is missing inside owner tenant")
+        void shouldRejectWhenShareIsMissingInsideOwnerTenant() {
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(null);
+
+            GeneralException ex = assertThrows(
+                    GeneralException.class,
+                    () -> fileQueryService.getShareFile(SHARE_CODE));
+
+            assertThat(ex.getResultEnum()).isEqualTo(ResultEnum.SHARE_NOT_FOUND);
+            verifyNoInteractions(fileMapper);
+        }
+
+        /**
+         * 验证有效公开分享未绑定文件时返回不可变空列表且不执行文件查询。
+         */
+        @Test
+        @DisplayName("should return empty list when public share has no file hashes")
+        void shouldReturnEmptyListWhenPublicShareHasNoFileHashes() {
+            FileShare share = createShare(FileShare.STATUS_ACTIVE, null, ShareType.PUBLIC.getCode())
+                    .setFileHashes("[]");
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
+
+            List<ShareFileVO> result = fileQueryService.getShareFile(SHARE_CODE);
+
+            assertThat(result).isEmpty();
+            verifyNoInteractions(fileMapper);
+        }
+
+        /**
+         * 验证数据库原子过期更新命中后，内存中的旧 active 状态也必须按已过期拒绝。
+         */
+        @Test
+        @DisplayName("should reject when database atomically marks share expired")
+        void shouldRejectWhenDatabaseAtomicallyMarksShareExpired() {
+            FileShare share = createShare(
+                    FileShare.STATUS_ACTIVE,
+                    new Date(System.currentTimeMillis() + 60_000),
+                    ShareType.PUBLIC.getCode());
+            when(fileShareMapper.markAsExpiredIfNecessary(SHARE_CODE)).thenReturn(1);
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
+
+            GeneralException ex = assertThrows(
+                    GeneralException.class,
+                    () -> fileQueryService.getShareFile(SHARE_CODE));
+
+            assertThat(ex.getResultEnum()).isEqualTo(ResultEnum.SHARE_EXPIRED);
+            assertThat(share.getStatus()).isEqualTo(FileShare.STATUS_EXPIRED);
+            verifyNoInteractions(fileMapper);
+        }
     }
 
     @Nested

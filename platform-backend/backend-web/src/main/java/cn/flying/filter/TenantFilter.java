@@ -130,7 +130,7 @@ public class TenantFilter extends OncePerRequestFilter {
             }
 
             if (tenantIdHeader == null || tenantIdHeader.isEmpty()) {
-                if (whitelisted) {
+                if (whitelisted && !isSharePathFamily(routeMatchingPath)) {
                     filterChain.doFilter(request, response);
                     return;
                 }
@@ -210,6 +210,17 @@ public class TenantFilter extends OncePerRequestFilter {
             return true;
         }
         return uri.matches("^/api/v1/public/shares/[^/]+/files/[^/]+/(chunks|decrypt-info)/?$");
+    }
+
+    /**
+     * 判断请求是否属于分享路径族，避免通用前缀白名单放宽非匿名 GET 或受保护 mutation。
+     *
+     * @param uri 请求路径
+     * @return 是否属于公开或受保护分享路径族
+     */
+    private boolean isSharePathFamily(String uri) {
+        return matchesPathOrDescendant(uri, "/api/v1/shares")
+                || matchesPathOrDescendant(uri, "/api/v1/public/shares");
     }
 
     /**
