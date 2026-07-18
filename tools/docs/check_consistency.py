@@ -59,12 +59,7 @@ LEGACY_ROUTE_RULES = (
 ALLOWED_NON_OPENAPI_METHOD_ROUTES = {
     ("POST", "/api/v1/auth/login"),
     ("POST", "/api/v1/auth/logout"),
-    ("GET", "/api/v1/shares/**"),
     ("POST", "/api/v1/verify"),
-}
-
-ALLOWED_NON_OPENAPI_PATHS = {
-    "/api/v1/shares/**",
 }
 
 FORBIDDEN_ENV_VARS = {
@@ -214,8 +209,6 @@ def check_routes(root: Path, openapi_path: Path) -> CheckResult:
             line = line_number_from_index(content, match.start())
 
             if (method, route) in ALLOWED_NON_OPENAPI_METHOD_ROUTES:
-                continue
-            if route in ALLOWED_NON_OPENAPI_PATHS:
                 continue
 
             supported_methods = openapi_methods.get(route)

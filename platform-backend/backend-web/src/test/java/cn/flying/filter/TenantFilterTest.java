@@ -1,5 +1,9 @@
 package cn.flying.filter;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
@@ -11,11 +15,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import java.io.IOException;
-
+import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -198,39 +203,97 @@ class TenantFilterTest {
     }
 
     /**
-     * 白名单路径不强制要求租户头，但若主动携带租户头，应写入 TenantContext 与 request attribute，
-     * 以便后续 MyBatis-Plus 租户拦截器能正确注入 tenant_id 条件。
+     * 四类匿名公开分享 GET 及其等价编码形式必须完整忽略调用者租户头。
      */
     @Test
-    @DisplayName("should set tenant context for whitelisted path when tenant header present")
-    void shouldSetTenantContextForWhitelistedPathWhenTenantHeaderPresent() throws ServletException, IOException {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/shares/abc/info");
-        request.setServletPath("/api/v1/shares/abc/info");
-        request.addHeader("X-Tenant-ID", "12");
-        MockHttpServletResponse response = new MockHttpServletResponse();
-
-        AtomicLong capturedTenantId = new AtomicLong(-1);
+    @DisplayName("should ignore every tenant header form for anonymous public share GET endpoints")
+    void shouldIgnoreEveryTenantHeaderFormForAnonymousPublicShareGetEndpoints()
+            throws ServletException, IOException {
+        AtomicLong chainCalls = new AtomicLong();
         doAnswer(invocation -> {
-            capturedTenantId.set(TenantContext.getTenantId() != null ? TenantContext.getTenantId() : -1);
+            MockHttpServletRequest chainedRequest = invocation.getArgument(0);
+            assertNull(TenantContext.getTenantId());
+            assertNull(chainedRequest.getAttribute(Const.ATTR_TENANT_ID));
+            chainCalls.incrementAndGet();
             return null;
         }).when(filterChain).doFilter(any(), any());
 
-        filter.doFilterInternal(request, response, filterChain);
+        String[] paths = {
+                "/api/v1/shares/abc/info",
+                "/api/v1/shares/abc/files",
+                "/api/v1/public/shares/abc/files/hash-1/chunks",
+                "/api/v1/public/shares/abc/files/hash-1/decrypt-info",
+                "/api/v1/sh%61res/abc/info",
+                "/api/v1/shares;x=1/abc/files",
+                "/api/v1/public/sh%61res/abc/f%69les/hash-1/chunks",
+                "/api/v1/public/shares;x=1/abc/files;v=2/hash-1/decrypt-info",
+                "/api/v1/shares/./abc/info",
+                "/api/v1/shares//abc/files",
+                "/api/v1/public/shares/%2E/abc/files/hash-1/chunks",
+                "/api/v1/public/shares/decoy/../abc/files/hash-1/decrypt-info",
+                "/api/v1/public/shares/encoded-decoy/%2e%2E/abc/files/hash-1/chunks"
+        };
+        String[] tenantHeaders = {null, "0", "12", "invalid-tenant", ""};
 
-        verify(filterChain).doFilter(request, response);
-        assertEquals(12L, capturedTenantId.get());
-        assertEquals(12L, request.getAttribute(Const.ATTR_TENANT_ID));
-        assertNull(TenantContext.getTenantId());
+        for (String path : paths) {
+            for (String tenantHeader : tenantHeaders) {
+                MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
+                request.setServletPath(path);
+                if (tenantHeader != null) {
+                    request.addHeader("X-Tenant-ID", tenantHeader);
+                }
+                MockHttpServletResponse response = new MockHttpServletResponse();
+
+                filter.doFilterInternal(request, response, filterChain);
+
+                assertEquals(200, response.getStatus());
+                assertNull(request.getAttribute(Const.ATTR_TENANT_ID));
+                assertNull(TenantContext.getTenantId());
+            }
+        }
+
+        assertEquals(65L, chainCalls.get());
+        verify(filterChain, times(65)).doFilter(any(), any());
     }
 
     /**
-     * 非 proof 白名单路径携带畸形租户头时应返回 400，且不得污染请求属性或线程租户上下文。
+     * 匿名公开分享 GET 对重复租户头也必须完全忽略，不能让代理差异改变公开合同。
+     */
+    @Test
+    @DisplayName("should ignore duplicate tenant headers for anonymous public share GET endpoints")
+    void shouldIgnoreDuplicateTenantHeadersForAnonymousPublicShareGetEndpoints()
+            throws ServletException, IOException {
+        for (String path : new String[]{
+                "/api/v1/shares/abc/info",
+                "/api/v1/shares/abc/files",
+                "/api/v1/public/shares/abc/files/hash-1/chunks",
+                "/api/v1/public/shares/abc/files/hash-1/decrypt-info",
+                "/api/v1/public/sh%61res/abc/f%69les/hash-1/chunks",
+                "/api/v1/public/shares/%2E/abc/files/hash-1/chunks"}) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
+            request.setServletPath(path);
+            request.addHeader("X-Tenant-ID", "12");
+            request.addHeader("X-Tenant-ID", "13");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            filter.doFilterInternal(request, response, filterChain);
+
+            assertEquals(200, response.getStatus());
+            assertNull(request.getAttribute(Const.ATTR_TENANT_ID));
+            assertNull(TenantContext.getTenantId());
+        }
+
+        verify(filterChain, times(6)).doFilter(any(), any());
+    }
+
+    /**
+     * 非公开资源白名单路径携带畸形租户头时应返回 400，且不得污染请求属性或线程租户上下文。
      */
     @Test
     @DisplayName("should reject invalid tenant header for non-proof whitelisted path")
     void shouldRejectInvalidTenantHeaderForNonProofWhitelistedPath() throws ServletException, IOException {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/shares/abc/info");
-        request.setServletPath("/api/v1/shares/abc/info");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/actuator/health");
+        request.setServletPath("/actuator/health");
         request.addHeader("X-Tenant-ID", "invalid-tenant");
         MockHttpServletResponse response = new MockHttpServletResponse();
 
@@ -251,7 +314,7 @@ class TenantFilterTest {
     @Test
     @DisplayName("should reject a single empty tenant header outside public proof endpoints")
     void shouldRejectSingleEmptyTenantHeaderOutsidePublicProofEndpoints() throws ServletException, IOException {
-        for (String path : new String[]{"/api/v1/shares/abc/info", "/api/v1/sse/connect"}) {
+        for (String path : new String[]{"/actuator/health", "/api/v1/sse/connect"}) {
             MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
             request.setServletPath(path);
             request.addHeader("X-Tenant-ID", "");
@@ -273,12 +336,12 @@ class TenantFilterTest {
     }
 
     /**
-     * 非 proof 白名单和受保护路径都必须拒绝重复租户头，避免有歧义的租户身份被静默采用。
+     * 非公开资源白名单和受保护路径都必须拒绝重复租户头，避免有歧义的租户身份被静默采用。
      */
     @Test
     @DisplayName("should reject duplicate tenant headers outside public proof endpoints")
     void shouldRejectDuplicateTenantHeadersOutsidePublicProofEndpoints() throws ServletException, IOException {
-        String[] paths = {"/api/v1/shares/abc/info", "/api/v1/files"};
+        String[] paths = {"/actuator/health", "/api/v1/files"};
         String[][] duplicateValues = {
                 {"12", "12"},
                 {"12", "13"},
@@ -307,6 +370,57 @@ class TenantFilterTest {
         }
 
         verifyNoInteractions(filterChain);
+    }
+
+    /**
+     * 验证租户头拒绝分支和正常调试日志均不会暴露分享码或文件哈希。
+     */
+    @Test
+    @DisplayName("should mask share credentials in tenant filter logs")
+    void shouldMaskShareCredentialsInTenantFilterLogs() throws ServletException, IOException {
+        String shareCode = "share-secret-credential";
+        String fileHash = "file-hash-secret";
+        String path = "/api/v1/shares/" + shareCode + "/files/" + fileHash + "/chunks";
+
+        Logger logger = (Logger) LoggerFactory.getLogger(TenantFilter.class);
+        Level previousLevel = logger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.setLevel(Level.DEBUG);
+        logger.addAppender(appender);
+        try {
+            MockHttpServletRequest duplicateHeaderRequest = new MockHttpServletRequest("GET", path);
+            duplicateHeaderRequest.setServletPath(path);
+            duplicateHeaderRequest.addHeader("X-Tenant-ID", "12");
+            duplicateHeaderRequest.addHeader("X-Tenant-ID", "13");
+            filter.doFilterInternal(duplicateHeaderRequest, new MockHttpServletResponse(), filterChain);
+
+            MockHttpServletRequest emptyHeaderRequest = new MockHttpServletRequest("GET", path);
+            emptyHeaderRequest.setServletPath(path);
+            emptyHeaderRequest.addHeader("X-Tenant-ID", "");
+            filter.doFilterInternal(emptyHeaderRequest, new MockHttpServletResponse(), filterChain);
+
+            MockHttpServletRequest missingHeaderRequest = new MockHttpServletRequest("GET", path);
+            missingHeaderRequest.setServletPath(path);
+            filter.doFilterInternal(missingHeaderRequest, new MockHttpServletResponse(), filterChain);
+
+            MockHttpServletRequest validHeaderRequest = new MockHttpServletRequest("GET", path);
+            validHeaderRequest.setServletPath(path);
+            validHeaderRequest.addHeader("X-Tenant-ID", "12");
+            filter.doFilterInternal(validHeaderRequest, new MockHttpServletResponse(), filterChain);
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(previousLevel);
+            appender.stop();
+        }
+
+        List<String> messages = appender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                .toList();
+        assertTrue(messages.stream().anyMatch(message ->
+                message.contains("/api/v1/shares/***/files/***/chunks")));
+        assertTrue(messages.stream().noneMatch(message ->
+                message.contains(shareCode) || message.contains(fileHash)));
     }
 
     /**
@@ -356,20 +470,28 @@ class TenantFilterTest {
     }
 
     /**
-     * /api/v1/shares 下除公开文件列表外的路径必须携带租户头，防止绕过租户校验。
+     * /api/v1/shares 下除两个匿名 GET 外的路径必须携带租户头，防止绕过租户校验。
      */
     @Test
     @DisplayName("should reject missing tenant header for protected shares path")
     void shouldRejectMissingTenantHeaderForProtectedSharesPath() throws ServletException, IOException {
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/shares");
-        request.setServletPath("/api/v1/shares");
-        MockHttpServletResponse response = new MockHttpServletResponse();
+        for (String path : new String[]{
+                "/api/v1/shares",
+                "/api/v1/shares/abc/files/save",
+                "/api/v1/shares/abc/files/hash-1/chunks",
+                "/api/v1/shares/abc/files/hash-1/decrypt-info"}) {
+            MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
+            request.setServletPath(path);
+            MockHttpServletResponse response = new MockHttpServletResponse();
 
-        filter.doFilterInternal(request, response, filterChain);
+            filter.doFilterInternal(request, response, filterChain);
 
-        verify(filterChain, never()).doFilter(request, response);
-        assertEquals(400, response.getStatus());
-        assertTrue(response.getContentAsString().contains(String.valueOf(ResultEnum.PARAM_IS_INVALID.getCode())));
+            assertEquals(400, response.getStatus());
+            assertTrue(response.getContentAsString()
+                    .contains(String.valueOf(ResultEnum.PARAM_IS_INVALID.getCode())));
+        }
+
+        verifyNoInteractions(filterChain);
     }
 
     /**

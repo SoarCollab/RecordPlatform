@@ -1,5 +1,9 @@
 package cn.flying.filter.handler;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import cn.flying.common.constant.ErrorPayload;
 import cn.flying.common.constant.Result;
 import cn.flying.common.constant.ResultEnum;
@@ -12,6 +16,7 @@ import jakarta.validation.Path;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BeanPropertyBindingResult;
@@ -27,6 +32,7 @@ import org.springframework.web.multipart.support.MissingServletRequestPartExcept
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -36,6 +42,28 @@ import static org.mockito.Mockito.when;
 class GlobalExceptionHandlerTest {
 
     private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
+
+    /**
+     * 捕获全局异常处理器日志，供敏感路径脱敏断言复用。
+     */
+    private List<String> captureLogMessages(Level level, Runnable action) {
+        Logger logger = (Logger) LoggerFactory.getLogger(GlobalExceptionHandler.class);
+        Level previousLevel = logger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.setLevel(level);
+        logger.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(previousLevel);
+            appender.stop();
+        }
+        return appender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                .toList();
+    }
 
     // ---- existing tests (refactored to use shared handler instance) ----
 
@@ -386,6 +414,28 @@ class GlobalExceptionHandlerTest {
 
             assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
         }
+
+        /**
+         * 验证异步超时日志不会暴露匿名分享的路径凭据。
+         */
+        @Test
+        @DisplayName("should mask public share credentials in timeout logs")
+        void shouldMaskPublicShareCredentialsInTimeoutLogs() {
+            String shareCode = "share-secret-credential";
+            String fileHash = "file-hash-secret";
+            HttpServletRequest request = mock(HttpServletRequest.class);
+            when(request.getRequestURI()).thenReturn(
+                    "/api/v1/public/shares/" + shareCode + "/files/" + fileHash + "/chunks");
+            when(request.getHeader("Accept")).thenReturn("application/json");
+
+            List<String> messages = captureLogMessages(Level.WARN, () ->
+                    handler.handleAsyncRequestTimeoutException(new AsyncRequestTimeoutException(), request));
+
+            assertTrue(messages.stream().anyMatch(message ->
+                    message.contains("/api/v1/public/shares/***/files/***/chunks")));
+            assertTrue(messages.stream().noneMatch(message ->
+                    message.contains(shareCode) || message.contains(fileHash)));
+        }
     }
 
     @Nested
@@ -416,6 +466,28 @@ class GlobalExceptionHandlerTest {
                     new IOException("Connection reset"), request);
 
             assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, response.getStatusCode());
+        }
+
+        /**
+         * 验证 IO 异常日志不会暴露匿名分享的路径凭据。
+         */
+        @Test
+        @DisplayName("should mask public share credentials in IO exception logs")
+        void shouldMaskPublicShareCredentialsInIoExceptionLogs() {
+            String shareCode = "share-secret-credential";
+            String fileHash = "file-hash-secret";
+            HttpServletRequest request = mock(HttpServletRequest.class);
+            when(request.getRequestURI()).thenReturn(
+                    "/api/v1/public/shares/" + shareCode + "/files/" + fileHash + "/decrypt-info");
+            when(request.getHeader("Accept")).thenReturn("application/json");
+
+            List<String> messages = captureLogMessages(Level.WARN, () ->
+                    handler.handleIOException(new IOException("Connection reset"), request));
+
+            assertTrue(messages.stream().anyMatch(message ->
+                    message.contains("/api/v1/public/shares/***/files/***/decrypt-info")));
+            assertTrue(messages.stream().noneMatch(message ->
+                    message.contains(shareCode) || message.contains(fileHash)));
         }
     }
 

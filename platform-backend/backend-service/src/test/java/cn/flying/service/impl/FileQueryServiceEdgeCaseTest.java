@@ -18,6 +18,7 @@ import cn.flying.service.key.FileKeyEnvelopeService;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.remote.FileRemoteClient;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -73,6 +74,14 @@ class FileQueryServiceEdgeCaseTest {
     private static final Long FILE_ID = 1L;
     private static final String FILE_HASH = "sha256_edge_hash";
     private static final String SHARE_CODE = "EDGE01";
+
+    /**
+     * 为公开分享边界用例提供全局分享码到 owner 租户的最小解析结果。
+     */
+    @BeforeEach
+    void setUpPublicShareTenant() {
+        lenient().when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(1L);
+    }
 
     /**
      * 构造本地分享记录，供公开分享元数据路径测试使用。
@@ -335,6 +344,44 @@ class FileQueryServiceEdgeCaseTest {
             GeneralException ex = assertThrows(GeneralException.class, () -> fileQueryService.getShareFile(SHARE_CODE));
 
             assertThat(ex.getResultEnum()).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED);
+        }
+
+        /**
+         * 验证缺失或未知分享状态不会被匿名入口按有效分享处理。
+         */
+        @Test
+        @DisplayName("should reject missing or unknown share status")
+        void shouldRejectMissingOrUnknownShareStatus() {
+            for (Integer invalidStatus : new Integer[]{null, 99}) {
+                when(fileShareMapper.selectByShareCode(SHARE_CODE))
+                        .thenReturn(createShare(invalidStatus, null, ShareType.PUBLIC.getCode()));
+
+                GeneralException ex = assertThrows(
+                        GeneralException.class,
+                        () -> fileQueryService.getShareFile(SHARE_CODE));
+
+                assertThat(ex.getResultEnum()).isEqualTo(ResultEnum.FAIL);
+            }
+            verify(fileMapper, never()).selectList(any());
+        }
+
+        /**
+         * 验证缺失或未知分享类型不会因枚举默认值而降级成公开分享。
+         */
+        @Test
+        @DisplayName("should reject missing or unknown share type")
+        void shouldRejectMissingOrUnknownShareType() {
+            for (Integer invalidType : new Integer[]{null, 99}) {
+                when(fileShareMapper.selectByShareCode(SHARE_CODE))
+                        .thenReturn(createShare(FileShare.STATUS_ACTIVE, null, invalidType));
+
+                GeneralException ex = assertThrows(
+                        GeneralException.class,
+                        () -> fileQueryService.getShareFile(SHARE_CODE));
+
+                assertThat(ex.getResultEnum()).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED);
+            }
+            verify(fileMapper, never()).selectList(any());
         }
     }
 

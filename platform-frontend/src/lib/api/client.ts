@@ -121,6 +121,7 @@ export interface RequestConfig {
   params?: RequestParams;
   timeout?: number;
   skipAuth?: boolean;
+  skipTenant?: boolean;
   retries?: number;
 }
 
@@ -169,7 +170,9 @@ function buildHeaders(
     ...(config?.headers || {}),
   });
 
-  if (tenantId) {
+  if (config?.skipTenant) {
+    headers.delete("X-Tenant-ID");
+  } else if (tenantId) {
     headers.set("X-Tenant-ID", tenantId);
   }
 

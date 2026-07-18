@@ -1,6 +1,7 @@
 package cn.flying.dao.mapper;
 
 import cn.flying.dao.dto.FileShare;
+import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -17,6 +18,16 @@ import java.util.List;
  */
 @Mapper
 public interface FileShareMapper extends BaseMapper<FileShare> {
+
+    /**
+     * 按全局唯一分享码只解析所属租户，不扩大跨租户读取字段范围。
+     *
+     * @param shareCode 分享码
+     * @return 分享所属租户，不存在返回 null
+     */
+    @InterceptorIgnore(tenantLine = "true")
+    @Select("SELECT tenant_id FROM file_share WHERE share_code = #{shareCode} AND deleted = 0 LIMIT 1")
+    Long selectTenantIdByShareCodeGlobally(@Param("shareCode") String shareCode);
 
     /**
      * 根据分享码查询分享记录

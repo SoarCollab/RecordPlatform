@@ -1,5 +1,9 @@
 package cn.flying.filter;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.DistributedRateLimiter;
 import cn.flying.common.util.DistributedRateLimiter.RateLimitResult;
@@ -8,6 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -100,6 +105,143 @@ class FlowLimitingFilterTest {
             filter.doFilter(request, response, filterChain);
 
             assertThat(response.getStatus()).isEqualTo(429);
+        }
+
+        /**
+         * 验证限流拒绝日志不会暴露可用于重放匿名分享请求的分享码和文件哈希。
+         */
+        @Test
+        @DisplayName("Should mask public share credentials in rate limit logs")
+        void shouldMaskPublicShareCredentialsInRateLimitLogs() throws ServletException, IOException {
+            String shareCode = "share-secret-credential";
+            String fileHash = "file-hash-secret";
+            request.setMethod("GET");
+            request.setRequestURI("/api/v1/public/sh%61res/" + shareCode
+                    + ";probe=1/f%69les/" + fileHash + ";probe=2/chunks");
+            request.setRemoteAddr("192.168.1.1");
+            when(rateLimiter.tryAcquireWithBlock(anyString(), anyString(), anyInt(), anyInt(), anyInt()))
+                    .thenReturn(RateLimitResult.RATE_LIMITED);
+
+            Logger logger = (Logger) LoggerFactory.getLogger(FlowLimitingFilter.class);
+            Level previousLevel = logger.getLevel();
+            ListAppender<ILoggingEvent> appender = new ListAppender<>();
+            appender.start();
+            logger.setLevel(Level.WARN);
+            logger.addAppender(appender);
+            try {
+                filter.doFilter(request, response, filterChain);
+            } finally {
+                logger.detachAppender(appender);
+                logger.setLevel(previousLevel);
+                appender.stop();
+            }
+
+            List<String> messages = appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .toList();
+            assertThat(messages).anyMatch(message ->
+                    message.contains("/api/v1/public/sh%61res/***/f%69les/***/chunks"));
+            assertThat(messages).noneMatch(message ->
+                    message.contains(shareCode) || message.contains(fileHash));
+        }
+
+        /**
+         * 验证静态段编码且矩阵参数非法时，限流拒绝日志仍不会暴露匿名分享凭据。
+         */
+        @Test
+        @DisplayName("Should mask credentials when encoded routes contain invalid matrix parameters")
+        void shouldMaskCredentialsWhenEncodedRoutesContainInvalidMatrixParameters()
+                throws ServletException, IOException {
+            String shareCode = "share-secret-credential";
+            String fileHash = "file-hash-secret";
+            request.setMethod("GET");
+            request.setRequestURI("/api/v1/public/sh%61res;bad=%ZZ/" + shareCode
+                    + "/f%69les;bad=%ZZ/" + fileHash + "/chunks");
+            request.setRemoteAddr("192.168.1.1");
+            when(rateLimiter.tryAcquireWithBlock(anyString(), anyString(), anyInt(), anyInt(), anyInt()))
+                    .thenReturn(RateLimitResult.RATE_LIMITED);
+
+            Logger logger = (Logger) LoggerFactory.getLogger(FlowLimitingFilter.class);
+            Level previousLevel = logger.getLevel();
+            ListAppender<ILoggingEvent> appender = new ListAppender<>();
+            appender.start();
+            logger.setLevel(Level.WARN);
+            logger.addAppender(appender);
+            try {
+                filter.doFilter(request, response, filterChain);
+            } finally {
+                logger.detachAppender(appender);
+                logger.setLevel(previousLevel);
+                appender.stop();
+            }
+
+            List<String> messages = appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .toList();
+            assertThat(messages).anyMatch(message -> message.contains(
+                    "/api/v1/public/sh%61res;bad=%ZZ/***/f%69les;bad=%ZZ/***/chunks"));
+            assertThat(messages).noneMatch(message ->
+                    message.contains(shareCode) || message.contains(fileHash));
+        }
+
+        /**
+         * 验证容器规范化空段、点段和父段时，限流拒绝日志仍不会暴露实际分享凭据。
+         */
+        @Test
+        @DisplayName("Should mask credentials in container-normalized public share routes")
+        void shouldMaskCredentialsInContainerNormalizedPublicShareRoutes()
+                throws ServletException, IOException {
+            String shareCode = "share-secret-credential";
+            String fileHash = "file-hash-secret";
+            List<String> requestUris = List.of(
+                    "/api/v1/public/shares/./" + shareCode + "/files/" + fileHash + "/chunks",
+                    "/api/v1/public/shares//" + shareCode + "/files/" + fileHash + "/chunks",
+                    "/api/v1/public/shares/%2E/" + shareCode + "/files/" + fileHash + "/chunks",
+                    "/api/v1/public/shares/decoy-secret/../" + shareCode
+                            + "/files/" + fileHash + "/chunks",
+                    "/api/v1/public/shares/encoded-decoy/%2e%2E/" + shareCode
+                            + "/files/" + fileHash + "/chunks"
+            );
+            request.setMethod("GET");
+            request.setRemoteAddr("192.168.1.1");
+            when(rateLimiter.tryAcquireWithBlock(anyString(), anyString(), anyInt(), anyInt(), anyInt()))
+                    .thenReturn(RateLimitResult.RATE_LIMITED);
+
+            Logger logger = (Logger) LoggerFactory.getLogger(FlowLimitingFilter.class);
+            Level previousLevel = logger.getLevel();
+            ListAppender<ILoggingEvent> appender = new ListAppender<>();
+            appender.start();
+            logger.setLevel(Level.WARN);
+            logger.addAppender(appender);
+            try {
+                for (String requestUri : requestUris) {
+                    request.setRequestURI(requestUri);
+                    filter.doFilter(request, new MockHttpServletResponse(), filterChain);
+                }
+            } finally {
+                logger.detachAppender(appender);
+                logger.setLevel(previousLevel);
+                appender.stop();
+            }
+
+            List<String> messages = appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .toList();
+            assertThat(messages).anyMatch(message ->
+                    message.contains("/api/v1/public/shares/./***/files/***/chunks"));
+            assertThat(messages).anyMatch(message ->
+                    message.contains("/api/v1/public/shares//***/files/***/chunks"));
+            assertThat(messages).anyMatch(message ->
+                    message.contains("/api/v1/public/shares/%2E/***/files/***/chunks"));
+            assertThat(messages).anyMatch(message ->
+                    message.contains("/api/v1/public/shares/***/../***/files/***/chunks"));
+            assertThat(messages).anyMatch(message ->
+                    message.contains("/api/v1/public/shares/***/%2e%2E/***/files/***/chunks"));
+            assertThat(messages).noneMatch(message ->
+                    message.contains(shareCode)
+                            || message.contains(fileHash)
+                            || message.contains("decoy-secret")
+                            || message.contains("encoded-decoy"));
         }
     }
 

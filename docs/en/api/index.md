@@ -34,14 +34,16 @@ Based on `SecurityConfiguration`:
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/password-resets/confirm`
 - `PUT /api/v1/auth/password-resets`
+- `GET /api/v1/shares/{shareCode}/info`
 - `GET /api/v1/shares/{shareCode}/files`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`
 - `GET /api/v1/images/download/images/**`
-- `GET /api/v1/shares/**`
 - `GET /api/v1/public/proofs/{proofId}/status`
 - `GET /api/v1/public/proof-keys/{keyId}/versions/{keyVersion}`
 - `GET /api/v1/sse/connect` (still requires short-lived token)
+
+The anonymous public-share surface is limited to the four exact `GET` routes above. No other share route is implicitly public.
 
 ### 3) SSE dual-token flow
 
@@ -124,6 +126,10 @@ Based on `SecurityConfiguration`:
 | POST | `/api/v1/files/download-batches/report` | Report batch download quality metrics |
 | GET | `/api/v1/files/{id}/versions` | List version chain for a file |
 | POST | `/api/v1/files/{id}/versions` | Mark file as parent for a new version upload |
+
+The exact anonymous public-share contract consists of `GET /api/v1/shares/{shareCode}/info`, `GET /api/v1/shares/{shareCode}/files`, `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`, and `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`. These routes require neither Bearer authentication nor a tenant header. Any supplied `X-Tenant-ID`, including `0`, another tenant, or a malformed value, is ignored for authorization and data selection. The backend resolves the owner tenant from the matching `shareCode` metadata; the cross-tenant scope is restricted to that metadata lookup, and subsequent file, key-envelope, access-count, and share-access-audit work runs in the owner tenant. Anonymous `sys_operation_log` rows use system tenant `0`; any `share_access_log` row uses the owner tenant. Both audit paths use the same canonical trusted-client IP.
+
+The public chunk and decrypt-info routes share one tenant-independent 30-request/60-second bucket, `rate:limit:public:share-access:v2:ip:<canonical-ip>`. Changing `X-Tenant-ID`, JWT role, endpoint, `X-Forwarded-For`, or `X-Real-IP` cannot split the bucket unless the direct peer is in the configured trusted-proxy allowlist and supplies a valid chain. The first 30 combined requests may enter the controller; the current 31st-request contract remains HTTP 200 with business code `70005`. Share visibility, active/expiry state, unknown type/status, and included-file checks remain fail closed. The current model has no share-password field; password-protected shares require a separate end-to-end feature. Share writes, saving a share into a user account, and the authenticated `/api/v1/shares/{shareCode}/files/{fileHash}/chunks` and `/decrypt-info` routes still require a Bearer token.
 
 The `.zip` routes are the canonical contract: exactly eight root entries with fixed order/timestamp/STORED metadata, a canonical `manifest.json` that hashes six evidence entries, and an `issuer-signature.jws` compact JWS over the exact manifest bytes using a dedicated Ed25519 key. Export revalidates tenant/owner authorization, original-byte `contentHash`, active manifest, storage HEAD records, the `MANIFEST_HASH` Merkle path, completed batch, and immutable contract registry. A completed batch is accepted only for `CHAIN_WRITE` with a valid 32-byte transaction hash or one of the two chain-query recovery sources with no transaction hash; its 32-byte chain root must equal the Merkle root. `contentHash`, `chainRecordId`, `manifestHash`, `cipherHash`, `merkleRoot`, and `abiFingerprint` are never interchangeable. Each entry is capped at 1 MiB and the logical payload total at 4 MiB; additional entries, nested names, and traversal paths fail closed.
 

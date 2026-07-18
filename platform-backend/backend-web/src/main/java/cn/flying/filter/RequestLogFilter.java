@@ -21,6 +21,7 @@ import org.springframework.web.util.ContentCachingResponseWrapper;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -161,7 +162,8 @@ public class RequestLogFilter extends OncePerRequestFilter {
         if (requestUri == null) {
             return false;
         }
-        String normalizedPath = requestUri.toLowerCase();
+        String normalizedPath = SensitiveDataMasker.normalizePathForRouteMatching(requestUri)
+                .toLowerCase(Locale.ROOT);
         return SENSITIVE_RESPONSE_PATH_MARKERS.stream().anyMatch(normalizedPath::contains);
     }
 

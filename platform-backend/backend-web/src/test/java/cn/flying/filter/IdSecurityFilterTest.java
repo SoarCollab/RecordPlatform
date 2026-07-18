@@ -1,9 +1,14 @@
 package cn.flying.filter;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -157,6 +162,36 @@ class IdSecurityFilterTest {
             filter.doFilterInternal(request, response, filterChain);
 
             assertThat(request.getAttribute("secureResourceId")).isEqualTo(550L);
+        }
+
+        /**
+         * 验证超长 ID 异常日志会脱敏分享码和文件哈希，避免异常路径泄露访问凭据。
+         */
+        @Test
+        @DisplayName("Should mask share credentials in invalid ID logs")
+        void shouldMaskShareCredentialsInInvalidIdLogs() throws ServletException, IOException {
+            String shareCode = "999999999999999999999999999999";
+            String fileHash = "file-hash-secret";
+            request.setMethod("GET");
+            request.setRequestURI("/api/shares/" + shareCode + "/files/" + fileHash + "/chunks");
+
+            Logger logger = (Logger) LoggerFactory.getLogger(IdSecurityFilter.class);
+            Level previousLevel = logger.getLevel();
+            ListAppender<ILoggingEvent> appender = new ListAppender<>();
+            appender.start();
+            logger.setLevel(Level.WARN);
+            logger.addAppender(appender);
+            try {
+                filter.doFilterInternal(request, response, filterChain);
+            } finally {
+                logger.detachAppender(appender);
+                logger.setLevel(previousLevel);
+                appender.stop();
+            }
+
+            assertThat(appender.list.stream().map(ILoggingEvent::getFormattedMessage))
+                    .anyMatch(message -> message.contains("/api/shares/***/files/***/chunks"))
+                    .noneMatch(message -> message.contains(shareCode) || message.contains(fileHash));
         }
     }
 

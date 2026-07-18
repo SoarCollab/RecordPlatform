@@ -139,6 +139,105 @@ class SensitiveDataMaskerTest {
         );
     }
 
+    /**
+     * 验证脱敏字面量与 Spring 路由的逐段解码和矩阵参数语义保持一致。
+     */
+    @Test
+    @DisplayName("编码或矩阵参数路径中的分享凭据应被脱敏")
+    void maskSensitivePathSegments_shouldMaskEncodedAndMatrixParameterizedRoutes() {
+        assertEquals(
+                "/api/v1/public/sh%61res/***/f%69les/***/chunks",
+                SensitiveDataMasker.maskSensitivePathSegments(
+                        "/api/v1/public/sh%61res/share-secret/f%69les/hash-secret/chunks")
+        );
+        assertEquals(
+                "/api/v1/public/shares;x=1/***/files;v=2/***/decrypt-info",
+                SensitiveDataMasker.maskSensitivePathSegments(
+                        "/api/v1/public/shares;x=1/share-secret;probe=1/files;v=2/hash-secret;probe=2/decrypt-info")
+        );
+        assertEquals(
+                "/api/v1/public/shares;bad=%ZZ/***",
+                SensitiveDataMasker.maskSensitivePathSegments(
+                        "/api/v1/public/shares;bad=%ZZ/share-secret")
+        );
+        assertEquals(
+                "/api/v1/public/sh%61res;bad=%ZZ/***/f%69les;bad=%ZZ/***/chunks",
+                SensitiveDataMasker.maskSensitivePathSegments(
+                        "/api/v1/public/sh%61res;bad=%ZZ/share-secret/f%69les;bad=%ZZ/file-hash-secret/chunks")
+        );
+    }
+
+    /**
+     * 验证容器折叠空段、点段和父段后，实际参与路由的分享凭据仍会被脱敏。
+     */
+    @Test
+    @DisplayName("容器规范化路径中的实际分享凭据应被脱敏")
+    void maskSensitivePathSegments_shouldMaskContainerNormalizedRoutes() {
+        assertEquals(
+                "/api/v1/public/shares/./***/files/***/chunks",
+                SensitiveDataMasker.maskSensitivePathSegments(
+                        "/api/v1/public/shares/./share-secret/files/file-hash-secret/chunks")
+        );
+        assertEquals(
+                "/api/v1/public/shares//***/files/***/chunks",
+                SensitiveDataMasker.maskSensitivePathSegments(
+                        "/api/v1/public/shares//share-secret/files/file-hash-secret/chunks")
+        );
+        assertEquals(
+                "/api/v1/public/shares/%2E/***/files/***/chunks",
+                SensitiveDataMasker.maskSensitivePathSegments(
+                        "/api/v1/public/shares/%2E/share-secret/files/file-hash-secret/chunks")
+        );
+        assertEquals(
+                "/api/v1/public/shares/***/../***/files/***/chunks",
+                SensitiveDataMasker.maskSensitivePathSegments(
+                        "/api/v1/public/shares/decoy-secret/../share-secret/files/file-hash-secret/chunks")
+        );
+        assertEquals(
+                "/api/v1/public/shares/***/%2e%2E/***/files/***/chunks",
+                SensitiveDataMasker.maskSensitivePathSegments(
+                        "/api/v1/public/shares/encoded-decoy/%2e%2E/share-secret/files/file-hash-secret/chunks")
+        );
+    }
+
+    /**
+     * 验证路由分类使用的规范路径会逐段解码、移除矩阵参数并忽略非路径后缀。
+     */
+    @Test
+    @DisplayName("路由匹配路径应遵循 Spring 的逐段解码语义")
+    void normalizePathForRouteMatching_shouldDecodeSegmentsAndRemoveMatrixParameters() {
+        assertEquals(
+                "/api/v1/public/shares/share-secret/files/hash-secret/chunks",
+                SensitiveDataMasker.normalizePathForRouteMatching(
+                        "/api/v1/public/sh%61res;x=1/share-secret/f%69les;v=2/hash-secret/chunks?download=true")
+        );
+        assertEquals(
+                "/api/v1/public/sh/ares/share-secret",
+                SensitiveDataMasker.normalizePathForRouteMatching(
+                        "/api/v1/public/sh%2Fares/share-secret")
+        );
+        assertEquals(
+                "/api/v1/public/shares/share-secret/files/file-hash-secret/chunks",
+                SensitiveDataMasker.normalizePathForRouteMatching(
+                        "/api/v1/public/sh%61res;bad=%ZZ/share-secret/f%69les;bad=%ZZ/file-hash-secret/chunks")
+        );
+        assertEquals(
+                "/api/v1/public/shares/share-secret/files/file-hash-secret/chunks",
+                SensitiveDataMasker.normalizePathForRouteMatching(
+                        "/api//v1/public/shares/%2E/decoy-secret/../share-secret/files//file-hash-secret/chunks")
+        );
+        assertEquals(
+                "/api/v1/public/shares/share-secret/files/file-hash-secret/chunks",
+                SensitiveDataMasker.normalizePathForRouteMatching(
+                        "/api/v1/public/shares/encoded-decoy/%2e%2E/share-secret/files/file-hash-secret/chunks")
+        );
+        assertEquals(
+                "/api/v1/public/shares/share-secret/",
+                SensitiveDataMasker.normalizePathForRouteMatching(
+                        "/api/v1/public/shares/share-secret/.")
+        );
+    }
+
     @Test
     @DisplayName("日志路径脱敏不应误替换静态文件路由段")
     void maskSensitivePathSegments_shouldKeepStaticFileRouteSegments() {
@@ -153,6 +252,10 @@ class SensitiveDataMaskerTest {
         assertEquals(
                 "/api/v1/shares/***/files/save",
                 SensitiveDataMasker.maskSensitivePathSegments("/api/v1/shares/ABC123/files/save")
+        );
+        assertEquals(
+                "/api/v1/f%69les;x=1/st%61ts;view=summary",
+                SensitiveDataMasker.maskSensitivePathSegments("/api/v1/f%69les;x=1/st%61ts;view=summary")
         );
     }
 

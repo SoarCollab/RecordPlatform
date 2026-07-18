@@ -6,6 +6,7 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.ErrorPayloadFactory;
+import cn.flying.common.util.SensitiveDataMasker;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -27,7 +28,7 @@ import java.util.UUID;
 /**
  * 租户过滤器
  * 对需要租户隔离的请求解析 X-Tenant-ID 并设置 TenantContext。
- * 公开 proof 路径不信任调用者提供的租户头，其他未携带租户ID的请求（白名单除外）返回错误。
+ * 匿名公开 proof/share 路径不信任调用者提供的租户头，其他未携带租户ID的请求（白名单除外）返回错误。
  */
 @Component
 @Order(Const.SECURITY_ORDER - 10)  // 在 JWT 过滤器之前执行
@@ -86,22 +87,24 @@ public class TenantFilter extends OncePerRequestFilter {
             TenantContext.clear();
 
             String requestUri = request.getRequestURI();
+            String maskedRequestUri = SensitiveDataMasker.maskSensitivePathSegments(requestUri);
             String requestPath = request.getServletPath();
             if (requestPath == null || requestPath.isEmpty()) {
                 requestPath = requestUri;
             }
+            String routeMatchingPath = SensitiveDataMasker.normalizePathForRouteMatching(requestPath);
 
-            boolean whitelisted = isWhitelisted(requestPath);
+            boolean whitelisted = isWhitelisted(routeMatchingPath);
 
-            // 公开 proof 必须完整忽略调用者租户头，包括重复或畸形值
-            if (whitelisted && shouldIgnoreTenantHeader(requestPath)) {
+            // 匿名公开资源必须完整忽略调用者租户头，包括重复或畸形值
+            if (whitelisted && shouldIgnoreTenantHeader(request.getMethod(), routeMatchingPath)) {
                 filterChain.doFilter(request, response);
                 return;
             }
 
             // 租户身份头必须唯一，避免代理与 Servlet 对重复头采用不同解释
             if (hasMultipleTenantHeaders(request)) {
-                log.warn("请求包含重复的租户ID头: {} {}", request.getMethod(), requestUri);
+                log.warn("请求包含重复的租户ID头: {} {}", request.getMethod(), maskedRequestUri);
                 sendErrorResponse(response, ResultEnum.PARAM_IS_INVALID, "租户标识格式错误");
                 return;
             }
@@ -110,12 +113,12 @@ public class TenantFilter extends OncePerRequestFilter {
 
             // 显式空头属于畸形租户身份，不能降级成“未提供”或让 SSE query 覆盖
             if (tenantIdHeader != null && tenantIdHeader.isEmpty()) {
-                log.warn("租户ID头为空: {} {}", request.getMethod(), requestUri);
+                log.warn("租户ID头为空: {} {}", request.getMethod(), maskedRequestUri);
                 sendErrorResponse(response, ResultEnum.PARAM_IS_INVALID, "租户标识格式错误");
                 return;
             }
 
-            boolean sseConnectRequest = SSE_CONNECT_PATH.equals(requestPath);
+            boolean sseConnectRequest = SSE_CONNECT_PATH.equals(routeMatchingPath);
             if (tenantIdHeader == null) {
                 // 仅对 SSE 连接接口允许从参数中获取租户提示，因为 EventSource 不支持自定义 Header
                 if (sseConnectRequest) {
@@ -131,7 +134,7 @@ public class TenantFilter extends OncePerRequestFilter {
                     filterChain.doFilter(request, response);
                     return;
                 }
-                log.warn("请求缺少租户ID: {} {}", request.getMethod(), requestUri);
+                log.warn("请求缺少租户ID: {} {}", request.getMethod(), maskedRequestUri);
                 sendErrorResponse(response, ResultEnum.PARAM_IS_INVALID, "缺少租户标识 (X-Tenant-ID)");
                 return;
             }
@@ -148,7 +151,7 @@ public class TenantFilter extends OncePerRequestFilter {
             if (sseConnectRequest) {
                 // SSE 匿名握手只能获得 Redis namespace 提示，短令牌消费成功前不能建立权威租户上下文
                 request.setAttribute(Const.ATTR_SSE_TENANT_HINT, tenantId);
-                log.debug("SSE 租户提示已解析: uri={}", requestUri);
+                log.debug("SSE 租户提示已解析: uri={}", maskedRequestUri);
                 filterChain.doFilter(request, response);
                 return;
             }
@@ -158,7 +161,7 @@ public class TenantFilter extends OncePerRequestFilter {
             // 存储到请求属性，供 JWT 过滤器之后使用
             request.setAttribute(Const.ATTR_TENANT_ID, tenantId);
 
-            log.debug("租户上下文已设置: tenantId={}, uri={}", tenantId, requestUri);
+            log.debug("租户上下文已设置: tenantId={}, uri={}", tenantId, maskedRequestUri);
 
             // 解析异常捕获必须止于租户头，避免吞掉下游业务抛出的 NumberFormatException
             filterChain.doFilter(request, response);
@@ -188,11 +191,25 @@ public class TenantFilter extends OncePerRequestFilter {
     }
 
     /**
-     * 判断白名单路径是否必须忽略请求租户头，并使用路径段边界避免相似前缀误匹配。
+     * 判断白名单路径是否必须忽略请求租户头，并使用方法及路径段边界避免扩大匿名分享范围。
+     *
+     * @param method HTTP 方法
+     * @param uri 请求路径
+     * @return 是否忽略租户头
      */
-    private boolean shouldIgnoreTenantHeader(String uri) {
-        return TENANT_HEADER_IGNORED_PATHS.stream()
+    private boolean shouldIgnoreTenantHeader(String method, String uri) {
+        boolean publicProof = TENANT_HEADER_IGNORED_PATHS.stream()
                 .anyMatch(prefix -> matchesPathOrDescendant(uri, prefix));
+        if (publicProof) {
+            return true;
+        }
+        if (!"GET".equalsIgnoreCase(method)) {
+            return false;
+        }
+        if (uri.matches("^/api/v1/shares/[^/]+/(info|files)/?$")) {
+            return true;
+        }
+        return uri.matches("^/api/v1/public/shares/[^/]+/files/[^/]+/(chunks|decrypt-info)/?$");
     }
 
     /**

@@ -344,6 +344,31 @@ class RequestLogFilterTest {
         }
 
         /**
+         * 验证编码字面量和矩阵参数不能绕过公开分享响应体的缓存与日志禁用规则。
+         */
+        @Test
+        @DisplayName("Should not wrap encoded public share responses")
+        void shouldNotWrapEncodedPublicShareResponses() throws ServletException, IOException {
+            String path = "/api/v1/public/sh%61res;x=1/%2E/share-secret/f%69les;v=2//hash-secret/chunks";
+            request.setRequestURI(path);
+            request.setServletPath(path);
+            request.setMethod("GET");
+
+            filter.doFilter(request, response, filterChain);
+
+            assertThat(filterChain.getResponse()).isNotInstanceOf(ContentCachingResponseWrapper.class);
+            String content = ReflectionTestUtils.invokeMethod(
+                    filter,
+                    "buildResponseLogContent",
+                    request,
+                    "application/json",
+                    HttpServletResponse.SC_OK,
+                    "chunk-response-secret".getBytes(StandardCharsets.UTF_8)
+            );
+            assertThat(content).isEqualTo("<skipped>");
+        }
+
+        /**
          * 验证日志路径会脱敏分享码、文件哈希和交易哈希。
          */
         @Test

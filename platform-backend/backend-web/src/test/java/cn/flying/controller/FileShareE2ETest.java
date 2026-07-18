@@ -330,12 +330,12 @@ class FileShareE2ETest extends BaseControllerIntegrationTest {
     }
 
     @Nested
-    @DisplayName("Tenant Isolation")
-    class TenantIsolation {
+    @DisplayName("Anonymous Tenant Boundary")
+    class AnonymousTenantBoundary {
 
         @Test
-        @DisplayName("should not access share from different tenant")
-        void shouldNotAccessShareFromDifferentTenant() throws Exception {
+        @DisplayName("should resolve public share from owner tenant despite caller tenant header")
+        void shouldResolvePublicShareFromOwnerTenantDespiteCallerTenantHeader() throws Exception {
             File file = createTestFile(ownerUserId);
 
             FileSharingVO sharingVO = new FileSharingVO();
@@ -350,14 +350,18 @@ class FileShareE2ETest extends BaseControllerIntegrationTest {
             String shareCode = objectMapper.readTree(createResult.getResponse().getContentAsString())
                     .get("data").asText();
 
-            setTestUser(recipientUserId, 999L);
-            MvcResult accessResult = performGet(SHARE_URL + "/" + shareCode + "/info")
+            mockMvc.perform(get(SHARE_URL + "/" + shareCode + "/info"))
                     .andExpect(status().isOk())
-                    .andReturn();
+                    .andExpect(jsonPath("$.code").value(200))
+                    .andExpect(jsonPath("$.data.files[0].fileHash").value(file.getFileHash()));
 
-            int code = objectMapper.readTree(accessResult.getResponse().getContentAsString())
-                    .get("code").asInt();
-            assertThat(code).isNotEqualTo(200);
+            for (String tenantHeader : List.of("999", "invalid-tenant")) {
+                mockMvc.perform(get(SHARE_URL + "/" + shareCode + "/info")
+                                .header(HEADER_TENANT_ID, tenantHeader))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.code").value(200))
+                        .andExpect(jsonPath("$.data.files[0].fileHash").value(file.getFileHash()));
+            }
         }
     }
 

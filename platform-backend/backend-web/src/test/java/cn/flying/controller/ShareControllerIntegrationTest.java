@@ -143,9 +143,8 @@ class ShareControllerIntegrationTest extends BaseControllerIntegrationTest {
             createFileShare(testUserId, testTenantId, shareCode, "[\"" + fileHash + "\"]",
                     FileShare.STATUS_ACTIVE, new Date(System.currentTimeMillis() + 3600000));
 
-            // Request without Authorization header
-            mockMvc.perform(get(BASE_URL + "/" + shareCode + "/info")
-                            .header(HEADER_TENANT_ID, testTenantId))
+            // 不发送 Authorization 或租户头，服务端仅通过分享码恢复 owner tenant。
+            mockMvc.perform(get(BASE_URL + "/" + shareCode + "/info"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data.shareCode").value(shareCode));
@@ -164,8 +163,7 @@ class ShareControllerIntegrationTest extends BaseControllerIntegrationTest {
                     "[\"" + fileHash1 + "\",\"" + fileHash2 + "\"]",
                     FileShare.STATUS_ACTIVE, new Date(System.currentTimeMillis() + 3600000));
 
-            mockMvc.perform(get(BASE_URL + "/" + shareCode + "/info")
-                            .header(HEADER_TENANT_ID, testTenantId))
+            mockMvc.perform(get(BASE_URL + "/" + shareCode + "/info"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data.files").isArray())
@@ -211,8 +209,7 @@ class ShareControllerIntegrationTest extends BaseControllerIntegrationTest {
             createFileShare(testUserId, testTenantId, shareCode, "[\"" + fileHash + "\"]",
                     FileShare.STATUS_CANCELLED, new Date(System.currentTimeMillis() + 3600000));
 
-            mockMvc.perform(get(BASE_URL + "/" + shareCode + "/info")
-                            .header(HEADER_TENANT_ID, testTenantId))
+            mockMvc.perform(get(BASE_URL + "/" + shareCode + "/info"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(50011))
                     .andExpect(jsonPath("$.message").value("分享链接已被取消"));
@@ -396,8 +393,7 @@ class ShareControllerIntegrationTest extends BaseControllerIntegrationTest {
             share.setShareType(0); // public
             TenantContext.runWithTenant(testTenantId, () -> fileShareMapper.updateById(share));
 
-            mockMvc.perform(get(BASE_URL + "/" + shareCode + "/info")
-                            .header(HEADER_TENANT_ID, testTenantId))
+            mockMvc.perform(get(BASE_URL + "/" + shareCode + "/info"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(200))
                     .andExpect(jsonPath("$.data.shareType").value(0));
@@ -415,8 +411,7 @@ class ShareControllerIntegrationTest extends BaseControllerIntegrationTest {
             share.setShareType(1); // private
             TenantContext.runWithTenant(testTenantId, () -> fileShareMapper.updateById(share));
 
-            mockMvc.perform(get(BASE_URL + "/" + shareCode + "/info")
-                            .header(HEADER_TENANT_ID, testTenantId))
+            mockMvc.perform(get(BASE_URL + "/" + shareCode + "/info"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.code").value(ResultEnum.PERMISSION_UNAUTHORIZED.getCode()))
                     .andExpect(jsonPath("$.message").value("此分享需要登录后才能访问"));

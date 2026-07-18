@@ -30,6 +30,19 @@ EventSource 不支持自定义 Header，因此 SSE 使用 URL Token：
 
 `X-Tenant-ID` 请求头、`x-tenant-id` query 和旧 `tenantId` query 都只是不可信的 namespace 提示。只有 Redis 原子消费短令牌且令牌 tenant 与提示一致后，服务端才会建立 `TenantContext`、请求审计属性和 MDC 身份。无效、过期、重放、损坏、租户不匹配或 Redis 异常的握手均不会创建 emitter；匿名失败审计固定落在 system tenant `0`，一次性 token 原文不会进入文本日志和数据库请求参数。
 
+## 匿名公开分享租户边界
+
+匿名面仅包含以下四条精确路由：
+
+- `GET /api/v1/shares/{shareCode}/info`
+- `GET /api/v1/shares/{shareCode}/files`
+- `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`
+- `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`
+
+它们既不需要 JWT，也不需要租户头。调用者控制的 `X-Tenant-ID` 会被忽略，不会成为权威 `TenantContext`。服务端通过匹配的 `shareCode` 元数据解析 owner tenant；只有这次分享元数据查询跨越租户隔离。文件元数据、key envelope、访问计数变更和分享访问审计随后都在 owner tenant 内执行。公开性、有效/取消/过期或未知状态、合法分享类型和文件归属校验继续失败关闭。当前模型没有分享密码字段；密码保护不属于本次变更。
+
+匿名系统操作审计始终归 system tenant `0`；`share_access_log` 归解析出的 owner tenant，绝不采用调用者头。系统审计、分享审计与公开分享限流使用同一个规范化可信客户端 IP。分享创建/更新/取消、保存分享文件，以及登录态分享下载/解密路由仍受 Bearer 认证保护。
+
 ## 授权 (RBAC)
 
 ### 角色定义
@@ -105,6 +118,10 @@ public Result<File> getFile(@PathVariable Long id) { ... }
 
 公共 proof 状态与历史公钥端点显式选择无租户的可信客户端 IP 模式。二者按 `rate:limit:public:proof-verification:v2:ip:<canonical-ip>` 共享固定 120 次/60 秒额度，即使请求携带有效的普通用户、管理员或监控员 JWT 也不会改变阈值。key 不包含 tenant、user、端点方法或原始 header；其他 `@RateLimit` 调用方继续保留 legacy tenant、角色和转发头行为。默认身份是规范化 direct socket peer，全部转发头都被忽略；可选的数字 trusted-proxy allowlist 默认空，启动时限制为 4096 字符/64 个网段，且仅在立即 peer 可信后从右向左解析一条 1024 字符/16 hops 的 XFF 链。Redis 结果不是 `1` 时（包括 `null`、`0` 或依赖异常）都不会执行 controller。
 
+### 公开分享共享桶
+
+公开 chunks 与 decrypt-info 端点按 `rate:limit:public:share-access:v2:ip:<canonical-ip>` 共享固定 30 次/60 秒额度。key 不包含 tenant、JWT 角色、端点方法或调用者提供的 header 值，因此修改 `X-Tenant-ID` 或在两个端点间交替都不能拆桶。可信代理边界与上文一致：只有立即 peer 命中已配置的数字 allowlist 时才处理转发头。前 30 次合计请求可以进入 controller；当前第 31 次通过现有响应包装保持 HTTP 200，并返回业务码 `70005`。Redis 结果不是 `1`（包括依赖异常）时会在 controller 执行前失败关闭。
+
 ### 分布式限流器
 
 基于 Redis Lua 脚本的滑动窗口：
@@ -115,7 +132,7 @@ RATE_LIMITED → 超过窗口限制
 BLOCKED → 在封禁列表中
 ```
 
-**通用工具容错**：可复用的分布式限流器在 Redis 不可用时允许请求；该策略不适用于 fail closed 的公共 proof 注解桶。
+**通用工具容错**：可复用的分布式限流器在 Redis 不可用时允许请求；该策略不适用于 fail closed 的公共 proof 或公开分享注解桶。
 
 ## ID 混淆
 

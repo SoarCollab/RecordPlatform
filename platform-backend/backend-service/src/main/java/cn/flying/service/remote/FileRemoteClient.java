@@ -275,7 +275,7 @@ public class FileRemoteClient {
     }
 
     private Result<SharingVO> getSharedFilesFallback(String sharingCode, Throwable t) {
-        log.error("BlockChain service getSharedFiles failed, code={}", sharingCode, t);
+        log.error("BlockChain service getSharedFiles failed, errorType={}", t.getClass().getSimpleName());
         return new Result<>(ResultEnum.GET_USER_SHARE_FILE_ERROR, null);
     }
 
@@ -308,7 +308,7 @@ public class FileRemoteClient {
     }
 
     private Result<Boolean> cancelShareFallback(CancelShareRequest request, Throwable t) {
-        log.error("BlockChain service cancelShare failed, shareCode={}", request.shareCode(), t);
+        log.error("BlockChain service cancelShare failed, errorType={}", t.getClass().getSimpleName());
         return new Result<>(ResultEnum.BLOCKCHAIN_ERROR, false);
     }
 
@@ -332,7 +332,8 @@ public class FileRemoteClient {
     }
 
     private Result<SharingVO> getShareInfoFallback(String shareCode, String requester, Throwable t) {
-        log.error("BlockChain service getShareInfo failed, shareCode={}, requester={}", shareCode, requester, t);
+        log.error("BlockChain service getShareInfo failed, requester={}, errorType={}",
+                requester, t.getClass().getSimpleName());
         return new Result<>(ResultEnum.GET_USER_SHARE_FILE_ERROR, null);
     }
 

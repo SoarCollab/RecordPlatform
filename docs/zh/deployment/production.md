@@ -143,13 +143,13 @@ storage:
 
 > 完整配置项请参阅 [Nacos 配置模板](/nacos-config-template.yaml)
 
-## 公共 proof 限流的可信客户端 IP
+## 公共限流与审计的可信客户端 IP
 
-公共 proof 状态/历史公钥两个端点按规范化可信客户端 IP 共享一个固定 120 次/60 秒 Redis 桶。该桶是全局桶，不包含租户、端点方法、用户或 JWT 角色。
+公共 proof 状态/历史公钥两个端点按规范化可信客户端 IP 共享一个固定 120 次/60 秒 Redis 桶。公开分享 chunks/decrypt 两个端点另行按规范化 IP 共享固定 30 次/60 秒桶。两个桶都不包含租户、端点方法、用户或 JWT 角色。匿名公开分享的系统审计与分享访问审计使用和分享桶相同的 resolver 输出。
 
 ### 直连部署
 
-保持 `RATE_LIMIT_TRUSTED_PROXY_CIDRS=` 为空。后端只使用直接 socket peer，并忽略全部转发头。只要生产代理拓扑或 header 清洗行为尚未核验，也必须使用这个安全设置。如果立即 peer 是未配置的反向代理，所有客户端会安全地共享该代理的 120/60 桶并可能更早被拒绝；生产流量接入前应配置已核验 allowlist，或在边缘实施等效限流。
+保持 `RATE_LIMIT_TRUSTED_PROXY_CIDRS=` 为空。后端只使用直接 socket peer，并忽略全部转发头。只要生产代理拓扑或 header 清洗行为尚未核验，也必须使用这个安全设置。如果立即 peer 是未配置的反向代理，所有客户端会安全地共享该代理的 proof 120/60 桶和公开分享 30/60 桶，并可能更早被拒绝；生产流量接入前应配置已核验 allowlist，或在边缘实施等效限流。
 
 ### 受控反向代理
 
@@ -163,7 +163,15 @@ RATE_LIMIT_TRUSTED_PROXY_CIDRS=10.20.0.0/16,2001:db8:20::/48
 
 `server.forward-headers-strategy` 固定为 `none`，避免 Spring/Tomcat 在 resolver 前改写 `request.getRemoteAddr()`。应用还会拒绝 `server.tomcat.remoteip.remote-ip-header` 和 `server.tomcat.remoteip.protocol-header`，因为任一属性都可能独立安装 `RemoteIpValve`。不得配置会改写 remote address 的 `ForwardedHeaderFilter`、外部 `RemoteIpValve`、ingress sidecar 或 servlet-container 等价能力。由于框架不会推导转发后的 scheme/host，代理 TLS 终止以及绝对 URL/scheme 必须独立配置和验证；不能为解决这些问题重新启用转发头处理。
 
-生产发布前，交替请求两个公开端点并验证：同一客户端第 1–120 次成功、第 121 次拒绝，第二个客户端使用独立桶，Redis TTL 不超过 60 秒。新 key namespace 为 `rate:limit:public:proof-verification:v2:ip:<canonical-ip>`。旧计数不复制，发布和回滚都会产生一次最长 60 秒的窗口重置；应低峰发布并保留边缘限流。回滚会恢复旧转发头绕过，因此回滚前必须在边缘启用不弱于 120/60 的 direct-source 限流。
+### 生产验证与回滚
+
+生产发布前，先交替请求两个公共 proof 端点：同一客户端第 1–120 次必须成功，第 121 次必须拒绝，第二个客户端必须使用独立桶，Redis TTL 不超过 60 秒。proof namespace 为 `rate:limit:public:proof-verification:v2:ip:<canonical-ip>`。
+
+为非 system tenant 创建公开分享，分别用无 `X-Tenant-ID`、`0`、其他租户和畸形值调用四条精确匿名 `GET`；所有 header 变体必须得到相同的合法结果。同时确认匿名分享写入和登录态分享下载/解密在没有 Bearer 时仍被拒绝。用同一规范化客户端交替调用公开 chunks 与 decrypt-info：合计第 1–30 次必须成功，第 31 次保持当前 HTTP 200 并返回业务码 `70005`；第二个客户端必须使用独立桶。第一个客户端在 Redis 中只能产生 `rate:limit:public:share-access:v2:ip:<canonical-ip>`，TTL 不超过 60 秒；修改租户头或不可信转发头不得产生额外 key。配置可信代理时，用合法代理链重复验证，并确认使用预期的规范化客户端地址。
+
+放量前查询审计结果：匿名 `sys_operation_log.tenant_id` 必须为 `0`，`share_access_log.tenant_id` 必须为解析出的 owner tenant，两个 IP 字段都必须等于 Redis key 中的规范化 IP。监控限流业务码 `70005`、异常租户归属和公开分享授权失败。
+
+旧计数不会复制，因此发布和回滚都可能重置一次最长 60 秒的窗口。应低峰发布并保留边缘 direct-source 限流（公共 proof 120/60，公开分享 chunks/decrypt 30/60）。公开分享的租户、服务、审计和限流改动必须整组回滚；部分回滚可能破坏非 system tenant 分享，或重新打开跨租户归属问题。回滚前保留边缘 30/60 限流；如果旧租户/审计边界会重新暴露，应临时限制四条匿名分享路由。回滚期间不得删除或改写历史可疑审计行，只做只读评估。
 
 ## SSL/TLS 配置
 

@@ -34,14 +34,16 @@ Authorization: Bearer <token>
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/password-resets/confirm`
 - `PUT /api/v1/auth/password-resets`
+- `GET /api/v1/shares/{shareCode}/info`
 - `GET /api/v1/shares/{shareCode}/files`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`
 - `GET /api/v1/images/download/images/**`
-- `GET /api/v1/shares/**`
 - `GET /api/v1/public/proofs/{proofId}/status`
 - `GET /api/v1/public/proof-keys/{keyId}/versions/{keyVersion}`
 - `GET /api/v1/sse/connect`（需短期令牌，见下文）
+
+匿名公开分享面仅限上面的四条精确 `GET` 路由；其他分享路由不会因此隐式公开。
 
 ### 3) SSE 双令牌模式
 
@@ -124,6 +126,10 @@ Authorization: Bearer <token>
 | POST | `/api/v1/files/download-batches/report` | 上报批量下载质量指标 |
 | GET | `/api/v1/files/{id}/versions` | 查询文件版本链列表 |
 | POST | `/api/v1/files/{id}/versions` | 将文件标记为新版本的父版本 |
+
+精确的匿名公开分享合同仅包含 `GET /api/v1/shares/{shareCode}/info`、`GET /api/v1/shares/{shareCode}/files`、`GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks` 和 `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`。这些路由既不需要 Bearer，也不需要租户头。调用者即使提供 `X-Tenant-ID=0`、其他租户或畸形值，该值也会在授权和数据选择中被忽略。后端只从匹配的 `shareCode` 元数据解析 owner tenant；跨租户范围仅覆盖这次元数据查询，后续文件、key envelope、访问计数和分享访问审计都在 owner tenant 内完成。匿名 `sys_operation_log` 固定使用 system tenant `0`；产生的 `share_access_log` 使用 owner tenant。两类审计使用同一个规范化可信客户端 IP。
+
+公开 chunks 与 decrypt-info 路由按 `rate:limit:public:share-access:v2:ip:<canonical-ip>` 共享一个无租户的固定 30 次/60 秒桶。除非 direct peer 命中已配置的 trusted-proxy allowlist 且提供合法代理链，否则修改 `X-Tenant-ID`、JWT 角色、端点、`X-Forwarded-For` 或 `X-Real-IP` 都不能拆分该桶。前 30 次合计请求可以进入 controller；当前第 31 次仍保持 HTTP 200，并返回业务码 `70005`。分享公开性、有效/过期状态、未知类型/状态和 included-file 校验继续失败关闭。当前模型没有分享密码字段；密码分享需要另建端到端功能任务。分享写入、保存分享文件到当前用户空间，以及登录态 `/api/v1/shares/{shareCode}/files/{fileHash}/chunks` 和 `/decrypt-info` 路由仍必须携带 Bearer。
 
 `.zip` 是当前规范合同：固定八个根条目、固定顺序/时间戳/STORED metadata，canonical `manifest.json` 摘要绑定六个证据条目，`issuer-signature.jws` 使用专用 Ed25519 key 对 manifest 字节做 compact JWS 签名。导出前重新校验租户/owner、原文件 `contentHash`、active manifest、存储 HEAD、`MANIFEST_HASH` Merkle 路径、已完成 batch 和不可变 contract registry。完成批次只接受携带合法 32-byte 交易哈希的 `CHAIN_WRITE`，或交易哈希为空的两种链查询恢复来源；32-byte 链根必须等于 Merkle 根。`contentHash`、`chainRecordId`、`manifestHash`、`cipherHash`、`merkleRoot`、`abiFingerprint` 不允许互换。单条目上限 1 MiB，总逻辑 payload 上限 4 MiB，额外条目、嵌套路径和路径穿越均失败关闭。
 

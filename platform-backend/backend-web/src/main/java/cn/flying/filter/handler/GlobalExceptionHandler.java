@@ -6,6 +6,7 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.exception.RetryableException;
 import cn.flying.common.util.ErrorPayloadFactory;
+import cn.flying.common.util.SensitiveDataMasker;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -274,13 +275,14 @@ public class GlobalExceptionHandler {
             AsyncRequestTimeoutException ex, HttpServletRequest request) {
         String contentType = request.getHeader("Accept");
         String uri = request.getRequestURI();
+        String maskedUri = SensitiveDataMasker.maskSensitivePathSegments(uri);
 
         if (uri.contains("/sse/") || (contentType != null && contentType.contains("text/event-stream"))) {
-            log.debug("SSE 请求超时/断开: uri={}, error={}", uri, ex.getMessage());
+            log.debug("SSE 请求超时/断开: uri={}, error={}", maskedUri, ex.getMessage());
             return ResponseEntity.ok().build();
         }
 
-        log.warn("异步请求超时: uri={}, error={}", uri, ex.getMessage());
+        log.warn("异步请求超时: uri={}, error={}", maskedUri, ex.getMessage());
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
     }
 
@@ -292,15 +294,16 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Void> handleIOException(IOException ex, HttpServletRequest request) {
         String contentType = request.getHeader("Accept");
         String uri = request.getRequestURI();
+        String maskedUri = SensitiveDataMasker.maskSensitivePathSegments(uri);
 
         // SSE 连接断开是正常行为，只记录 debug 日志
         if (uri.contains("/sse/") || (contentType != null && contentType.contains("text/event-stream"))) {
-            log.debug("SSE 连接断开: uri={}, error={}", uri, ex.getMessage());
+            log.debug("SSE 连接断开: uri={}, error={}", maskedUri, ex.getMessage());
             return ResponseEntity.ok().build();
         }
 
         // 其他 IO 异常记录 warn 日志
-        log.warn("IO 异常: uri={}, error={}", uri, ex.getMessage());
+        log.warn("IO 异常: uri={}, error={}", maskedUri, ex.getMessage());
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
     }
 

@@ -3,7 +3,9 @@ package cn.flying.common.util;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.http.server.PathContainer;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -182,41 +184,127 @@ public final class SensitiveDataMasker {
 
         PathParts pathParts = splitPath(path);
         String[] segments = pathParts.path().split("/", -1);
-        for (int i = 0; i < segments.length; i++) {
-            String segment = segments[i].toLowerCase(Locale.ROOT);
-            if (("shares".equals(segment) || "share".equals(segment) || "transactions".equals(segment))
-                    && hasMaskableNextSegment(segments, i)) {
-                segments[++i] = PATH_MASKED_VALUE;
-                continue;
-            }
-
-            if ("upload-sessions".equals(segment) && hasMaskableNextSegment(segments, i)) {
-                segments[++i] = PATH_MASKED_VALUE;
-                continue;
-            }
-
-            if ("hash".equals(segment) && hasMaskableNextSegment(segments, i)) {
-                segments[++i] = PATH_MASKED_VALUE;
-                continue;
-            }
-
-            if ("files".equals(segment)
-                    && hasMaskableNextSegment(segments, i)
-                    && isSensitiveFilePathVariable(segments[i + 1])) {
-                segments[++i] = PATH_MASKED_VALUE;
-            }
-        }
+        RouteSegments rawRouteSegments = collectRouteSegments(segments, false);
+        RouteSegments canonicalRouteSegments = collectRouteSegments(segments, true);
+        maskSensitiveRouteTargets(segments, rawRouteSegments);
+        maskSensitiveRouteTargets(segments, canonicalRouteSegments);
         return String.join("/", segments) + pathParts.suffix();
     }
 
     /**
-     * 判断指定位置后是否存在可脱敏路径段。
+     * 按 Spring 路由语义规范化路径，仅供内存中的路由分类使用，返回值禁止直接写入日志。
+     *
+     * @param path 原始请求路径
+     * @return 逐段解码并移除矩阵参数后的路径，不包含查询参数或 fragment
      */
-    private static boolean hasMaskableNextSegment(String[] segments, int currentIndex) {
-        return currentIndex + 1 < segments.length
-                && segments[currentIndex + 1] != null
-                && !segments[currentIndex + 1].isBlank()
-                && !PATH_MASKED_VALUE.equals(segments[currentIndex + 1]);
+    public static String normalizePathForRouteMatching(String path) {
+        if (path == null || path.isBlank()) {
+            return path;
+        }
+
+        String rawPath = splitPath(path).path();
+        String[] segments = rawPath.split("/", -1);
+        RouteSegments canonicalRouteSegments = collectRouteSegments(segments, true);
+        String normalizedPath = String.join("/", canonicalRouteSegments.values());
+        if (rawPath.startsWith("/")) {
+            normalizedPath = "/" + normalizedPath;
+        }
+        if (hasCanonicalTrailingSeparator(rawPath, segments)
+                && !normalizedPath.isEmpty()
+                && !normalizedPath.endsWith("/")) {
+            normalizedPath += "/";
+        }
+        return normalizedPath;
+    }
+
+    /**
+     * 按原始顺序或容器规范化顺序收集参与路由匹配的路径段。
+     */
+    private static RouteSegments collectRouteSegments(String[] segments, boolean resolveParentSegments) {
+        List<Integer> rawIndexes = new ArrayList<>(segments.length);
+        List<String> values = new ArrayList<>(segments.length);
+        for (int i = 0; i < segments.length; i++) {
+            String value = pathSegmentValueToMatch(segments[i]);
+            if (value == null || value.isEmpty() || ".".equals(value)) {
+                continue;
+            }
+            if ("..".equals(value) && resolveParentSegments) {
+                if (!values.isEmpty()) {
+                    int lastIndex = values.size() - 1;
+                    values.remove(lastIndex);
+                    rawIndexes.remove(lastIndex);
+                }
+                continue;
+            }
+            rawIndexes.add(i);
+            values.add(value);
+        }
+        return new RouteSegments(rawIndexes, values);
+    }
+
+    /**
+     * 按给定的路由视图定位并替换敏感路径变量。
+     */
+    private static void maskSensitiveRouteTargets(String[] rawSegments, RouteSegments routeSegments) {
+        for (int i = 0; i < routeSegments.values().size(); i++) {
+            String segment = routeSegments.values().get(i).toLowerCase(Locale.ROOT);
+            if (("shares".equals(segment) || "share".equals(segment) || "transactions".equals(segment))
+                    && hasMaskableRouteTarget(routeSegments, i)) {
+                maskRouteTarget(rawSegments, routeSegments, ++i);
+                continue;
+            }
+
+            if ("upload-sessions".equals(segment) && hasMaskableRouteTarget(routeSegments, i)) {
+                maskRouteTarget(rawSegments, routeSegments, ++i);
+                continue;
+            }
+
+            if ("hash".equals(segment) && hasMaskableRouteTarget(routeSegments, i)) {
+                maskRouteTarget(rawSegments, routeSegments, ++i);
+                continue;
+            }
+
+            if ("files".equals(segment)
+                    && hasMaskableRouteTarget(routeSegments, i)
+                    && isSensitiveFilePathVariable(routeSegments.values().get(i + 1))) {
+                maskRouteTarget(rawSegments, routeSegments, ++i);
+            }
+        }
+    }
+
+    /**
+     * 判断路由字面量后是否存在非导航路径变量。
+     */
+    private static boolean hasMaskableRouteTarget(RouteSegments routeSegments, int currentIndex) {
+        if (currentIndex + 1 >= routeSegments.values().size()) {
+            return false;
+        }
+        String targetValue = routeSegments.values().get(currentIndex + 1);
+        return targetValue != null && !targetValue.isBlank() && !"..".equals(targetValue);
+    }
+
+    /**
+     * 将路由视图中的路径变量映射回原始 URI 段并整体替换。
+     */
+    private static void maskRouteTarget(String[] rawSegments, RouteSegments routeSegments, int routeIndex) {
+        rawSegments[routeSegments.rawIndexes().get(routeIndex)] = PATH_MASKED_VALUE;
+    }
+
+    /**
+     * 判断容器规范化后的路径是否仍保留尾部分隔符。
+     */
+    private static boolean hasCanonicalTrailingSeparator(String rawPath, String[] segments) {
+        if (rawPath.endsWith("/")) {
+            return true;
+        }
+        for (int i = segments.length - 1; i >= 0; i--) {
+            String value = pathSegmentValueToMatch(segments[i]);
+            if (value == null || value.isEmpty()) {
+                continue;
+            }
+            return ".".equals(value) || "..".equals(value);
+        }
+        return false;
     }
 
     /**
@@ -226,7 +314,46 @@ public final class SensitiveDataMasker {
         if (segment == null || segment.isBlank()) {
             return false;
         }
-        return !FILE_ROUTE_LITERALS.contains(segment.toLowerCase(Locale.ROOT));
+        return !FILE_ROUTE_LITERALS.contains(pathSegmentValueToMatch(segment).toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * 按 Spring 路由匹配语义解码单个路径段并移除矩阵参数，避免编码形式绕过脱敏。
+     */
+    private static String pathSegmentValueToMatch(String segment) {
+        if (segment == null || segment.isEmpty()) {
+            return segment;
+        }
+        if (segment.indexOf('%') < 0 && segment.indexOf(';') < 0) {
+            return segment;
+        }
+        try {
+            return parsePathSegmentValueToMatch(segment);
+        } catch (IllegalArgumentException exception) {
+            int matrixParameterIndex = segment.indexOf(';');
+            if (matrixParameterIndex < 0) {
+                return segment;
+            }
+
+            String segmentWithoutMatrixParameters = segment.substring(0, matrixParameterIndex);
+            try {
+                return parsePathSegmentValueToMatch(segmentWithoutMatrixParameters);
+            } catch (IllegalArgumentException ignored) {
+                return segmentWithoutMatrixParameters;
+            }
+        }
+    }
+
+    /**
+     * 解析单个路径段，返回 Spring 路由匹配实际使用的解码值。
+     */
+    private static String parsePathSegmentValueToMatch(String segment) {
+        return PathContainer.parsePath(segment).elements().stream()
+                .filter(PathContainer.PathSegment.class::isInstance)
+                .map(PathContainer.PathSegment.class::cast)
+                .map(PathContainer.PathSegment::valueToMatch)
+                .findFirst()
+                .orElse(segment);
     }
 
     /**
@@ -347,5 +474,11 @@ public final class SensitiveDataMasker {
     }
 
     private record PathParts(String path, String suffix) {
+    }
+
+    /**
+     * 保存规范路由段及其在原始 URI 中的索引映射。
+     */
+    private record RouteSegments(List<Integer> rawIndexes, List<String> values) {
     }
 }

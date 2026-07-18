@@ -218,6 +218,75 @@ class TenantContextTest {
     }
 
     @Nested
+    @DisplayName("Context Switching - isolated tenant")
+    class IsolatedTenantTests {
+
+        /**
+         * 验证隔离执行会覆盖上游跨租户标志，并在成功后完整恢复原上下文。
+         */
+        @Test
+        @DisplayName("should force isolation and restore previous context after success")
+        void shouldForceIsolationAndRestorePreviousContextAfterSuccess() {
+            TenantContext.setTenantId(100L);
+            TenantContext.setIgnoreIsolation(true);
+
+            String result = TenantContext.callWithTenantIsolation(600L, () -> {
+                assertThat(TenantContext.getTenantId()).isEqualTo(600L);
+                assertThat(TenantContext.isIgnoreIsolation()).isFalse();
+                return "isolated";
+            });
+
+            assertThat(result).isEqualTo("isolated");
+            assertThat(TenantContext.getTenantId()).isEqualTo(100L);
+            assertThat(TenantContext.isIgnoreIsolation()).isTrue();
+        }
+
+        /**
+         * 验证隔离执行抛出异常时仍恢复原租户与跨租户标志。
+         */
+        @Test
+        @DisplayName("should restore previous context after isolated action fails")
+        void shouldRestorePreviousContextAfterIsolatedActionFails() {
+            TenantContext.setTenantId(100L);
+            TenantContext.setIgnoreIsolation(true);
+
+            assertThatThrownBy(() -> TenantContext.runWithTenantIsolation(700L, () -> {
+                assertThat(TenantContext.getTenantId()).isEqualTo(700L);
+                assertThat(TenantContext.isIgnoreIsolation()).isFalse();
+                throw new IllegalStateException("expected");
+            })).isInstanceOf(IllegalStateException.class);
+
+            assertThat(TenantContext.getTenantId()).isEqualTo(100L);
+            assertThat(TenantContext.isIgnoreIsolation()).isTrue();
+        }
+
+        /**
+         * 验证无原租户时隔离执行结束后不会残留线程上下文。
+         */
+        @Test
+        @DisplayName("should clear isolated context when no previous tenant exists")
+        void shouldClearIsolatedContextWhenNoPreviousTenantExists() {
+            TenantContext.runWithTenantIsolation(800L, () -> {
+                assertThat(TenantContext.getTenantId()).isEqualTo(800L);
+                assertThat(TenantContext.isIgnoreIsolation()).isFalse();
+            });
+
+            assertThat(TenantContext.getTenantId()).isNull();
+            assertThat(TenantContext.isIgnoreIsolation()).isFalse();
+        }
+
+        /**
+         * 验证隔离执行拒绝空租户，避免意外沿用调用方租户。
+         */
+        @Test
+        @DisplayName("should reject null tenant for isolated execution")
+        void shouldRejectNullTenantForIsolatedExecution() {
+            assertThatThrownBy(() -> TenantContext.callWithTenantIsolation(null, () -> "unexpected"))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Nested
     @DisplayName("Cross-Tenant Operations - runWithoutIsolation")
     class RunWithoutIsolationTests {
 

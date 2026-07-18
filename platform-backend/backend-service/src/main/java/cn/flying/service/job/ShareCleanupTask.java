@@ -6,8 +6,6 @@ import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.mapper.TenantMapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.Cache;
-import org.springframework.cache.CacheManager;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -28,9 +26,6 @@ public class ShareCleanupTask {
 
     @Resource
     private TenantMapper tenantMapper;
-
-    @Resource(name = "cacheManager")
-    private CacheManager cacheManager;
 
     /**
      * 批量更新过期分享状态。
@@ -53,8 +48,6 @@ public class ShareCleanupTask {
                     if (updated > 0) {
                         totalUpdated += updated;
                         log.info("租户 {} 更新了 {} 条过期分享", tenantId, updated);
-                        // 清除 sharedFiles 缓存
-                        evictSharedFilesCache();
                     }
                 } catch (Exception e) {
                     log.error("租户 {} 更新过期分享失败: {}", tenantId, e.getMessage(), e);
@@ -74,15 +67,4 @@ public class ShareCleanupTask {
         }
     }
 
-    /**
-     * 清除 sharedFiles 缓存
-     * 由于无法确定具体的 shareCode，清除所有条目
-     */
-    private void evictSharedFilesCache() {
-        Cache cache = cacheManager.getCache("sharedFiles");
-        if (cache != null) {
-            cache.clear();
-            log.debug("已清除 sharedFiles 缓存");
-        }
-    }
 }
