@@ -3,6 +3,7 @@ package cn.flying.service.impl;
 import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.SecurityUtils;
 import cn.flying.dao.dto.Account;
@@ -36,6 +37,7 @@ import org.mockito.quality.Strictness;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -85,11 +87,18 @@ class FileQueryServiceTest {
     private static final Long FILE_ID = 1L;
     private static final String FILE_HASH = "sha256_test_hash";
     private static final String TRANSACTION_HASH = "0xtxhash";
-
     @BeforeEach
     void setUp() {
         FileTestBuilder.resetIdCounter();
         AccountTestBuilder.resetIdCounter();
+    }
+
+    /**
+     * 清理测试设置的租户上下文，避免 ThreadLocal 跨用例污染。
+     */
+    @AfterEach
+    void clearTenantContext() {
+        TenantContext.clear();
     }
 
     @Nested
@@ -468,10 +477,35 @@ class FileQueryServiceTest {
                 a.setUsername("owner");
             });
 
-            when(fileShareMapper.markAsExpiredIfNecessary("PUBLIC1")).thenReturn(0);
-            when(fileShareMapper.selectByShareCode("PUBLIC1")).thenReturn(share);
-            when(fileMapper.selectList(any())).thenReturn(List.of(sourceFile));
-            when(accountMapper.selectById(OTHER_USER_ID)).thenReturn(owner);
+            AtomicInteger shareLookups = new AtomicInteger();
+            when(fileShareMapper.selectTenantIdByShareCodeGlobally("PUBLIC1")).thenAnswer(invocation -> {
+                assertFalse(TenantContext.isIgnoreIsolation());
+                assertEquals(99L, TenantContext.getTenantId());
+                return share.getTenantId();
+            });
+            when(fileShareMapper.selectByShareCode("PUBLIC1")).thenAnswer(invocation -> {
+                shareLookups.incrementAndGet();
+                assertFalse(TenantContext.isIgnoreIsolation());
+                assertEquals(share.getTenantId(), TenantContext.getTenantId());
+                return share;
+            });
+            when(fileShareMapper.markAsExpiredIfNecessary("PUBLIC1")).thenAnswer(invocation -> {
+                assertFalse(TenantContext.isIgnoreIsolation());
+                assertEquals(share.getTenantId(), TenantContext.getTenantId());
+                return 0;
+            });
+            when(fileMapper.selectList(any())).thenAnswer(invocation -> {
+                assertFalse(TenantContext.isIgnoreIsolation());
+                assertEquals(share.getTenantId(), TenantContext.getTenantId());
+                return List.of(sourceFile);
+            });
+            when(accountMapper.selectById(OTHER_USER_ID)).thenAnswer(invocation -> {
+                assertFalse(TenantContext.isIgnoreIsolation());
+                assertEquals(share.getTenantId(), TenantContext.getTenantId());
+                return owner;
+            });
+
+            TenantContext.setTenantId(99L);
 
             List<ShareFileVO> result;
             try (MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
@@ -483,6 +517,50 @@ class FileQueryServiceTest {
             assertEquals("ext_7", result.get(0).id());
             assertEquals("public.txt", result.get(0).fileName());
             assertEquals("owner", result.get(0).ownerName());
+            assertEquals(1, shareLookups.get());
+            assertEquals(99L, TenantContext.getTenantId());
+            assertFalse(TenantContext.isIgnoreIsolation());
+        }
+
+        /**
+         * 验证文件列表命中缓存后仍会实时校验分享状态，避免自然到期被缓存绕过。
+         */
+        @Test
+        @DisplayName("should validate share expiration before returning cached public files")
+        void shouldValidateShareExpirationBeforeReturningCachedPublicFiles() {
+            FileShare share = new FileShare()
+                    .setTenantId(1L)
+                    .setUserId(OTHER_USER_ID)
+                    .setShareCode("PUBLIC1")
+                    .setShareType(cn.flying.common.constant.ShareType.PUBLIC.getCode())
+                    .setFileHashes("[\"" + FILE_HASH + "\"]")
+                    .setExpireTime(new java.util.Date(System.currentTimeMillis() + 60_000))
+                    .setStatus(FileShare.STATUS_ACTIVE);
+            File sourceFile = new File()
+                    .setId(7L)
+                    .setTenantId(1L)
+                    .setUid(OTHER_USER_ID)
+                    .setFileName("public.txt")
+                    .setFileHash(FILE_HASH);
+
+            when(fileShareMapper.selectTenantIdByShareCodeGlobally("PUBLIC1")).thenReturn(1L);
+            when(fileShareMapper.selectByShareCode("PUBLIC1")).thenReturn(share);
+            when(fileShareMapper.markAsExpiredIfNecessary("PUBLIC1")).thenReturn(0);
+            when(fileMapper.selectList(any())).thenReturn(List.of(sourceFile));
+            when(accountMapper.selectById(OTHER_USER_ID)).thenReturn(null);
+
+            try (MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                idUtilsMock.when(() -> IdUtils.toExternalId(7L)).thenReturn("ext_7");
+                assertEquals(1, fileQueryService.getShareFile("PUBLIC1").size());
+            }
+            share.setExpireTime(new java.util.Date(System.currentTimeMillis() - 1_000));
+            GeneralException ex = assertThrows(
+                    GeneralException.class,
+                    () -> fileQueryService.getShareFile("PUBLIC1"));
+
+            assertEquals(ResultEnum.SHARE_EXPIRED, ex.getResultEnum());
+            verify(fileShareMapper, times(2)).selectByShareCode("PUBLIC1");
+            verify(fileMapper, times(1)).selectList(any());
         }
 
         /**
@@ -495,6 +573,7 @@ class FileQueryServiceTest {
                     () -> fileQueryService.getShareFile(" "));
 
             assertEquals(ResultEnum.PARAM_IS_INVALID.getCode(), ex.getResultEnum().getCode());
+            verify(fileShareMapper, never()).selectTenantIdByShareCodeGlobally(anyString());
             verify(fileShareMapper, never()).selectByShareCode(anyString());
         }
     }

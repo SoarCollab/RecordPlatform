@@ -1547,7 +1547,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 公开分享下载文件（REST） */
+        /**
+         * 公开分享下载文件（REST）
+         * @description 匿名 GET；不需要 JWT 或租户头，X-Tenant-ID 不参与授权。服务端按 shareCode 恢复 owner tenant，并与公开解密接口共享规范客户端 IP 的 30 次/60 秒限流桶；第 31 次当前以 HTTP 200、业务码 70005 拒绝。
+         */
         get: operations["publicDownload"];
         put?: never;
         post?: never;
@@ -1564,7 +1567,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 公开分享获取解密信息（REST） */
+        /**
+         * 公开分享获取解密信息（REST）
+         * @description 匿名 GET；不需要 JWT 或租户头，X-Tenant-ID 不参与授权。服务端按 shareCode 恢复 owner tenant，并与公开下载接口共享规范客户端 IP 的 30 次/60 秒限流桶；第 31 次当前以 HTTP 200、业务码 70005 拒绝。
+         */
         get: operations["publicDecryptInfo"];
         put?: never;
         post?: never;
@@ -1615,7 +1621,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 获取分享文件列表（REST） */
+        /**
+         * 获取分享文件列表（REST）
+         * @description 匿名 GET；不需要 JWT 或租户头。调用者提供的 X-Tenant-ID 不参与授权或数据选择，服务端仅按 shareCode 解析 owner tenant，并实时校验公开、有效和未过期状态。
+         */
         get: operations["getSharedFiles"];
         put?: never;
         post?: never;
@@ -1683,7 +1692,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 获取分享详情 */
+        /**
+         * 获取分享详情
+         * @description 匿名 GET；不需要 JWT 或租户头。即使提供 X-Tenant-ID 也会被忽略，服务端仅按 shareCode 解析 owner tenant，并在该租户内读取分享、文件、访问计数和分享审计数据。
+         */
         get: operations["getShareInfo"];
         put?: never;
         post?: never;

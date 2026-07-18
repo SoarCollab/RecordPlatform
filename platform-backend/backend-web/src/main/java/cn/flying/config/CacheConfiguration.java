@@ -20,7 +20,6 @@ import java.util.concurrent.TimeUnit;
  * <ul>
  *   <li><b>Query 缓存</b>：userFiles, fileDecryptInfo, fileAddress - 高命中率读操作</li>
  *   <li><b>元数据缓存</b>：fileMeta, fileList - 文件元信息</li>
- *   <li><b>分享缓存</b>：sharedFiles - 分享文件查询</li>
  * </ul>
  *
  * <h3>缓存策略</h3>
@@ -42,7 +41,6 @@ public class CacheConfiguration {
     public static final String CACHE_USER_FILES = "userFiles";
     public static final String CACHE_FILE_DECRYPT_INFO = "fileDecryptInfo";
     public static final String CACHE_FILE_ADDRESS = "fileAddress";
-    public static final String CACHE_SHARED_FILES = "sharedFiles";
     public static final String CACHE_FILE_META = "fileMeta";
     public static final String CACHE_FILE_LIST = "fileList";
     public static final String CACHE_TRANSACTION = "transaction";
@@ -59,7 +57,6 @@ public class CacheConfiguration {
                 CACHE_USER_FILES,
                 CACHE_FILE_DECRYPT_INFO,
                 CACHE_FILE_ADDRESS,
-                CACHE_SHARED_FILES,
                 CACHE_TRANSACTION,
                 // 元数据缓存
                 CACHE_FILE_META,

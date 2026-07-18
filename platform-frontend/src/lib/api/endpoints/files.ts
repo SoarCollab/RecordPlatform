@@ -156,6 +156,7 @@ export async function getSharedFiles(
 ): Promise<SharedFileVO[]> {
   return api.get<SharedFileVO[]>(`/shares/${sharingCode}/files`, {
     skipAuth: true,
+    skipTenant: true,
   });
 }
 
@@ -281,6 +282,7 @@ export async function publicDownloadEncryptedChunks(
     `/public/shares/${shareCode}/files/${fileHash}/chunks`,
     {
       skipAuth: true,
+      skipTenant: true,
     },
   );
 }
@@ -300,6 +302,7 @@ export async function publicGetDecryptInfo(
     `/public/shares/${shareCode}/files/${fileHash}/decrypt-info`,
     {
       skipAuth: true,
+      skipTenant: true,
     },
   );
 }

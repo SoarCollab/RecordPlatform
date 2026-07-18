@@ -99,6 +99,27 @@ class SecurityConfigurationTest {
     }
 
     /**
+     * 验证公开分享只放行四个精确 GET 合同，近似前缀和写操作仍需认证。
+     */
+    @Test
+    void shouldPermitOnlyExactPublicShareReadEndpoints() throws Exception {
+        String securityConfiguration = Files.readString(Path.of("src/main/java/cn/flying/config/SecurityConfiguration.java"));
+
+        assertTrue(securityConfiguration.contains(
+                ".requestMatchers(HttpMethod.GET, \"/api/v1/shares/*/info\").permitAll()"));
+        assertTrue(securityConfiguration.contains(
+                ".requestMatchers(HttpMethod.GET, \"/api/v1/shares/*/files\").permitAll()"));
+        assertTrue(securityConfiguration.contains(
+                "\"/api/v1/public/shares/*/files/*/chunks\","));
+        assertTrue(securityConfiguration.contains(
+                "\"/api/v1/public/shares/*/files/*/decrypt-info\").permitAll()"));
+        assertFalse(securityConfiguration.contains(
+                ".requestMatchers(HttpMethod.GET, \"/api/v1/public/shares/**\").permitAll()"));
+        assertFalse(securityConfiguration.contains(
+                ".requestMatchers(\"/api/v1/public/shares/**\").permitAll()"));
+    }
+
+    /**
      * 验证 Knife4j 默认使用生产模式，避免默认暴露接口文档。
      */
     @Test

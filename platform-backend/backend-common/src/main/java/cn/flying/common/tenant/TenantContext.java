@@ -126,6 +126,64 @@ public final class TenantContext {
         }
     }
 
+    /**
+     * 在指定租户内执行操作，并在执行期间强制启用租户隔离。
+     * 适用于从窄全局元数据查询恢复 owner tenant 后的完整数据访问。
+     */
+    public static void runWithTenantIsolation(Long tenantId, Runnable action) {
+        Long previousTenantId = getTenantId();
+        boolean previousIgnoreIsolation = isIgnoreIsolation();
+        try {
+            TENANT_HOLDER.set(requireIsolationTenantId(tenantId));
+            IGNORE_ISOLATION.set(false);
+            action.run();
+        } finally {
+            restoreContext(previousTenantId, previousIgnoreIsolation);
+        }
+    }
+
+    /**
+     * 在指定租户内执行有返回值的操作，并在执行期间强制启用租户隔离。
+     * 结束时完整恢复调用前的租户与跨租户标志。
+     */
+    public static <T> T callWithTenantIsolation(Long tenantId, Supplier<T> action) {
+        Long previousTenantId = getTenantId();
+        boolean previousIgnoreIsolation = isIgnoreIsolation();
+        try {
+            TENANT_HOLDER.set(requireIsolationTenantId(tenantId));
+            IGNORE_ISOLATION.set(false);
+            return action.get();
+        } finally {
+            restoreContext(previousTenantId, previousIgnoreIsolation);
+        }
+    }
+
+    /**
+     * 校验隔离执行必须具备明确租户，防止空值沿用调用方上下文。
+     */
+    private static Long requireIsolationTenantId(Long tenantId) {
+        if (tenantId == null) {
+            throw new IllegalArgumentException("tenantId must not be null for isolated execution");
+        }
+        return tenantId;
+    }
+
+    /**
+     * 恢复隔离执行前的完整线程上下文。
+     */
+    private static void restoreContext(Long previousTenantId, boolean previousIgnoreIsolation) {
+        if (previousTenantId == null) {
+            TENANT_HOLDER.remove();
+        } else {
+            TENANT_HOLDER.set(previousTenantId);
+        }
+        if (previousIgnoreIsolation) {
+            IGNORE_ISOLATION.set(true);
+        } else {
+            IGNORE_ISOLATION.remove();
+        }
+    }
+
     // ========== Cross-Tenant Operation Support ==========
 
     /**

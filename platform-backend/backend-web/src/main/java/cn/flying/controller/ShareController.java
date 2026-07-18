@@ -9,6 +9,7 @@ import cn.flying.dao.vo.file.ShareInfoVO;
 import cn.flying.service.FileService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -43,7 +44,11 @@ public class ShareController {
      * @return 分享详情
      */
     @GetMapping("/{shareCode}/info")
-    @Operation(summary = "获取分享详情")
+    @Operation(
+            summary = "获取分享详情",
+            description = "匿名 GET；不需要 JWT 或租户头。即使提供 X-Tenant-ID 也会被忽略，服务端仅按 shareCode "
+                    + "解析 owner tenant，并在该租户内读取分享、文件、访问计数和分享审计数据。")
+    @SecurityRequirements
     @OperationLog(module = "分享", operationType = "查询", description = "获取分享详情")
     public Result<ShareInfoVO> getShareInfo(@Parameter(description = "分享码") @PathVariable String shareCode) {
         if (CommonUtils.isBlank(shareCode) || shareCode.length() > 64) {

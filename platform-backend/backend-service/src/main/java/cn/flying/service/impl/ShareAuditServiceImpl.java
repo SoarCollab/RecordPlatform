@@ -31,6 +31,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * 分享审计服务实现
@@ -54,18 +55,9 @@ public class ShareAuditServiceImpl implements ShareAuditService {
     @Override
     @Async
     public void logShareView(String shareCode, Long actorUserId, String ip, String userAgent) {
-        // 异步方法中需要显式设置租户上下文，因为ThreadLocal在异步线程中会丢失
-        // 访问日志使用分享所有者的租户ID
         try {
-            FileShare share = TenantContext.runWithoutIsolation(() ->
-                    fileShareMapper.selectByShareCode(shareCode));
-            if (share == null) {
-                log.warn("记录分享查看日志时分享不存在: {}", shareCode);
-                return;
-            }
-
-            Long tenantId = share.getTenantId();
-            TenantContext.runWithTenant(tenantId, () -> {
+            runWithShareOwnerTenant(shareCode, "查看", share -> {
+                Long tenantId = share.getTenantId();
                 ShareAccessLog logEntry = new ShareAccessLog()
                         .setShareCode(shareCode)
                         .setShareOwnerId(share.getUserId())
@@ -77,10 +69,10 @@ public class ShareAuditServiceImpl implements ShareAuditService {
                         .setTenantId(tenantId);
 
                 shareAccessLogMapper.insert(logEntry);
-                log.debug("记录分享查看: shareCode={}, actor={}", shareCode, actorUserId);
+                log.debug("记录分享查看: shareId={}, actor={}", share.getId(), actorUserId);
             });
         } catch (Exception e) {
-            log.error("记录分享查看日志失败: {}", e.getMessage());
+            log.error("记录分享查看日志失败: errorType={}", e.getClass().getSimpleName());
         }
     }
 
@@ -88,15 +80,8 @@ public class ShareAuditServiceImpl implements ShareAuditService {
     @Async
     public void logShareDownload(String shareCode, Long actorUserId, String fileHash, String fileName, String ip) {
         try {
-            FileShare share = TenantContext.runWithoutIsolation(() ->
-                    fileShareMapper.selectByShareCode(shareCode));
-            if (share == null) {
-                log.warn("记录分享下载日志时分享不存在: {}", shareCode);
-                return;
-            }
-
-            Long tenantId = share.getTenantId();
-            TenantContext.runWithTenant(tenantId, () -> {
+            runWithShareOwnerTenant(shareCode, "下载", share -> {
+                Long tenantId = share.getTenantId();
                 ShareAccessLog logEntry = new ShareAccessLog()
                         .setShareCode(shareCode)
                         .setShareOwnerId(share.getUserId())
@@ -109,10 +94,10 @@ public class ShareAuditServiceImpl implements ShareAuditService {
                         .setTenantId(tenantId);
 
                 shareAccessLogMapper.insert(logEntry);
-                log.debug("记录分享下载: shareCode={}, fileHash={}, actor={}", shareCode, fileHash, actorUserId);
+                log.debug("记录分享下载: shareId={}, actor={}", share.getId(), actorUserId);
             });
         } catch (Exception e) {
-            log.error("记录分享下载日志失败: {}", e.getMessage());
+            log.error("记录分享下载日志失败: errorType={}", e.getClass().getSimpleName());
         }
     }
 
@@ -120,15 +105,8 @@ public class ShareAuditServiceImpl implements ShareAuditService {
     @Async
     public void logShareSave(String shareCode, Long actorUserId, String fileHash, String fileName, String ip) {
         try {
-            FileShare share = TenantContext.runWithoutIsolation(() ->
-                    fileShareMapper.selectByShareCode(shareCode));
-            if (share == null) {
-                log.warn("记录分享保存日志时分享不存在: {}", shareCode);
-                return;
-            }
-
-            Long tenantId = share.getTenantId();
-            TenantContext.runWithTenant(tenantId, () -> {
+            runWithShareOwnerTenant(shareCode, "保存", share -> {
+                Long tenantId = share.getTenantId();
                 ShareAccessLog logEntry = new ShareAccessLog()
                         .setShareCode(shareCode)
                         .setShareOwnerId(share.getUserId())
@@ -141,11 +119,36 @@ public class ShareAuditServiceImpl implements ShareAuditService {
                         .setTenantId(tenantId);
 
                 shareAccessLogMapper.insert(logEntry);
-                log.debug("记录分享保存: shareCode={}, fileHash={}, actor={}", shareCode, fileHash, actorUserId);
+                log.debug("记录分享保存: shareId={}, actor={}", share.getId(), actorUserId);
             });
         } catch (Exception e) {
-            log.error("记录分享保存日志失败: {}", e.getMessage());
+            log.error("记录分享保存日志失败: errorType={}", e.getClass().getSimpleName());
         }
+    }
+
+    /**
+     * 仅用全局分享码解析 owner 租户，随后在 owner 租户内重新读取完整分享并执行审计动作。
+     *
+     * @param shareCode 分享码
+     * @param actionName 审计动作名称
+     * @param action owner 租户内的审计动作
+     */
+    private void runWithShareOwnerTenant(String shareCode,
+                                         String actionName,
+                                         Consumer<FileShare> action) {
+        Long tenantId = fileShareMapper.selectTenantIdByShareCodeGlobally(shareCode);
+        if (tenantId == null) {
+            log.warn("记录分享{}日志时分享不存在", actionName);
+            return;
+        }
+        TenantContext.runWithTenantIsolation(tenantId, () -> {
+            FileShare share = fileShareMapper.selectByShareCode(shareCode);
+            if (share == null) {
+                log.warn("记录分享{}日志时 owner 租户内分享不存在", actionName);
+                return;
+            }
+            action.accept(share);
+        });
     }
 
     // ==================== 访问日志查询（管理员专用）====================

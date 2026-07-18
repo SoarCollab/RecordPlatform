@@ -86,6 +86,8 @@ POST /api/v1/auth/login
 - `GET /api/v1/public/proof-keys/{keyId}/versions/{keyVersion}` - Resolve a versioned proof verification key
 - `GET /api/v1/sse/connect?token=...&x-tenant-id=...` - SSE connect entry (short-lived token required; tenant value is an untrusted Redis namespace hint)
 
+The anonymous public-share allowlist is exactly `GET /api/v1/shares/{shareCode}/info`, `GET /api/v1/shares/{shareCode}/files`, `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`, and `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`. No other share route is public by implication. These four routes require neither JWT nor `X-Tenant-ID`; a supplied tenant header is ignored. Share writes, saving shared files, and the authenticated share download/decrypt routes still require a Bearer token.
+
 `POST /api/v1/auth/logout` is also handled by Spring Security (non-controller endpoint) and requires authenticated context.
 
 ---
@@ -284,7 +286,7 @@ POST /api/v1/auth/login
 
 **Authentication**: None
 
-**Query Parameters**:
+**Path Parameters**:
 
 | Parameter | Type   | Required | Description |
 | --------- | ------ | -------- | ----------- |
@@ -1207,7 +1209,7 @@ POST /api/v1/shares
 
 ### 4.9 Get Shared Files
 
-Get files by sharing code.
+Get files by sharing code under the anonymous public-share tenant boundary.
 
 ```
 GET /api/v1/shares/{shareCode}/files
@@ -1215,11 +1217,26 @@ GET /api/v1/shares/{shareCode}/files
 
 **Authentication**: None
 
-**Query Parameters**:
+`X-Tenant-ID` is not an authorization or data-selection input on this route. The backend resolves the owner tenant from the matching `shareCode` metadata, limits cross-tenant access to that metadata lookup, and performs every applicable subsequent file, key-envelope, access-count, and share-access-audit operation inside the owner tenant.
+
+**Path Parameters**:
 
 | Parameter   | Type   | Required | Description  |
 | ----------- | ------ | -------- | ------------ |
-| sharingCode | string | Yes      | Sharing code |
+| shareCode   | string | Yes      | Sharing code |
+
+#### Anonymous Public-Share Contract
+
+| Method | Endpoint | Rate Limit |
+| ------ | -------- | ---------- |
+| GET | `/api/v1/shares/{shareCode}/info` | Not part of the 30/60 transfer bucket |
+| GET | `/api/v1/shares/{shareCode}/files` | Not part of the 30/60 transfer bucket |
+| GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/chunks` | Shared canonical-IP bucket, 30/60 seconds |
+| GET | `/api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info` | Shared canonical-IP bucket, 30/60 seconds |
+
+All four routes ignore caller-supplied `X-Tenant-ID`, including `0`, another tenant, or malformed values. The server derives the owner tenant from `shareCode`; public/private, active/cancelled/expired, unknown type/status, and included-file checks remain fail closed. The current model has no share-password field; password-protected shares require a separate end-to-end feature. Anonymous `sys_operation_log` rows use system tenant `0`, while emitted `share_access_log` rows use the owner tenant. Both audit paths use the same canonical trusted-client IP used by public-share rate limiting.
+
+The public chunk and decrypt-info routes share `rate:limit:public:share-access:v2:ip:<canonical-ip>`. The key contains no tenant, JWT role, endpoint method, or raw forwarding-header value. Unless the direct peer matches the configured numeric trusted-proxy allowlist, `X-Forwarded-For` and `X-Real-IP` are ignored. The first 30 combined requests may enter the controller; the current 31st request remains HTTP 200 with business code `70005`.
 
 ---
 
@@ -3900,6 +3917,7 @@ GET /api/v1/admin/attestation-batches/production/status
 - `GET /api/v1/upload-sessions/{clientId}/progress`
 - `POST /api/v1/shares`
 - `PATCH /api/v1/shares/{shareCode}`
+- `GET /api/v1/shares/{shareCode}/info`
 - `GET /api/v1/shares/{shareCode}/files`
 - `POST /api/v1/shares/{shareCode}/files/save`
 - `DELETE /api/v1/files/share/{shareCode}`

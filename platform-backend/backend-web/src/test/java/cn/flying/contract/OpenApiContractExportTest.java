@@ -59,6 +59,7 @@ import cn.flying.service.TicketService;
 import cn.flying.service.proof.ProofBundleService;
 import cn.flying.service.proof.signed.SignedProofArchiveService;
 import cn.flying.service.sse.SseEmitterManager;
+import cn.flying.security.TrustedClientIpResolver;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -147,6 +148,9 @@ class OpenApiContractExportTest {
 
     @MockitoBean
     private ShareAuditService shareAuditService;
+
+    @MockitoBean
+    private TrustedClientIpResolver trustedClientIpResolver;
 
     @MockitoBean
     private FileQueryService fileQueryService;
@@ -271,6 +275,39 @@ class OpenApiContractExportTest {
                 "/api/v1/public/proofs/{proofId}/status")).isTrue();
         assertThat(rootNode.path("paths").has(
                 "/api/v1/public/proof-keys/{keyId}/versions/{keyVersion}")).isTrue();
+        assertPublicOperation(
+                rootNode,
+                "/api/v1/shares/{shareCode}/info",
+                "#/components/schemas/ResultShareInfoVO",
+                "shareCode");
+        assertPublicOperation(
+                rootNode,
+                "/api/v1/shares/{shareCode}/files",
+                "#/components/schemas/ResultListShareFileVO",
+                "shareCode");
+        assertPublicOperation(
+                rootNode,
+                "/api/v1/public/shares/{shareCode}/files/{fileHash}/chunks",
+                "#/components/schemas/ResultListByte[]",
+                "shareCode",
+                "fileHash");
+        assertPublicOperation(
+                rootNode,
+                "/api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info",
+                "#/components/schemas/ResultFileDecryptInfoVO",
+                "shareCode",
+                "fileHash");
+        assertProtectedOperation(rootNode, "/api/v1/shares", "post");
+        assertProtectedOperation(rootNode, "/api/v1/shares/{shareCode}", "patch");
+        assertProtectedOperation(rootNode, "/api/v1/shares/{shareCode}/files/save", "post");
+        assertProtectedOperation(
+                rootNode,
+                "/api/v1/shares/{shareCode}/files/{fileHash}/chunks",
+                "get");
+        assertProtectedOperation(
+                rootNode,
+                "/api/v1/shares/{shareCode}/files/{fileHash}/decrypt-info",
+                "get");
         assertSignedProofArchiveResponseContract(
                 rootNode, "/api/v1/files/{id}/proof-bundle.zip");
         assertSignedProofArchiveResponseContract(
@@ -339,6 +376,55 @@ class OpenApiContractExportTest {
         assertThat(issuedStatuses).containsExactly("ACTIVE", "SUPERSEDED");
 
         return normalizeOpenApiDocument(rootNode);
+    }
+
+    /**
+     * 验证匿名分享 GET 在 OpenAPI 中显式覆盖全局 Bearer 要求，且不声明租户请求头。
+     *
+     * @param rootNode OpenAPI 根节点
+     * @param path 匿名分享路径模板
+     * @param responseSchemaRef 成功响应 schema 引用
+     * @param pathParameters 必需路径参数
+     */
+    private void assertPublicOperation(JsonNode rootNode,
+                                       String path,
+                                       String responseSchemaRef,
+                                       String... pathParameters) {
+        JsonNode operation = rootNode.path("paths").path(path).path("get");
+
+        assertThat(operation.isMissingNode()).isFalse();
+        assertThat(operation.path("security").isArray()).isTrue();
+        assertThat(operation.path("security")).isEmpty();
+        assertThat(operation.path("description").asText()).contains("X-Tenant-ID", "owner tenant");
+
+        List<String> allParameterNames = operation.path("parameters").findValuesAsText("name");
+        assertThat(allParameterNames).noneMatch(name -> "X-Tenant-ID".equalsIgnoreCase(name));
+
+        List<String> actualPathParameters = new ArrayList<>();
+        operation.path("parameters").forEach(parameter -> {
+            if ("path".equals(parameter.path("in").asText())) {
+                actualPathParameters.add(parameter.path("name").asText());
+                assertThat(parameter.path("required").asBoolean()).isTrue();
+                assertThat(parameter.path("schema").path("type").asText()).isEqualTo("string");
+            }
+        });
+        assertThat(actualPathParameters).containsExactlyInAnyOrder(pathParameters);
+        assertThat(operation.path("responses").path("200").path("content").path("*/*")
+                .path("schema").path("$ref").asText()).isEqualTo(responseSchemaRef);
+    }
+
+    /**
+     * 校验分享写入和登录态文件入口继续继承全局 Bearer 合同。
+     *
+     * @param rootNode OpenAPI 根节点
+     * @param path 受保护路径
+     * @param method 小写 HTTP 方法
+     */
+    private void assertProtectedOperation(JsonNode rootNode, String path, String method) {
+        JsonNode operation = rootNode.path("paths").path(path).path(method);
+
+        assertThat(operation.isMissingNode()).isFalse();
+        assertThat(operation.has("security")).isFalse();
     }
 
     /**

@@ -230,6 +230,7 @@ describe("files endpoints", () => {
     expect(result).toEqual([{ id: "shared-1" }]);
     expect(clientMocks.api.get).toHaveBeenCalledWith("/shares/code-a/files", {
       skipAuth: true,
+      skipTenant: true,
     });
   });
 
@@ -275,12 +276,12 @@ describe("files endpoints", () => {
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       1,
       "/public/shares/share-public/files/hash-2/chunks",
-      { skipAuth: true },
+      { skipAuth: true, skipTenant: true },
     );
     expect(clientMocks.api.get).toHaveBeenNthCalledWith(
       2,
       "/public/shares/share-public/files/hash-2/decrypt-info",
-      { skipAuth: true },
+      { skipAuth: true, skipTenant: true },
     );
   });
 

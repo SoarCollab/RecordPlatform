@@ -9,11 +9,13 @@ import cn.flying.dao.vo.file.FileSharingVO;
 import cn.flying.dao.vo.file.SaveSharingFile;
 import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
+import cn.flying.security.TrustedClientIpResolver;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
 import cn.flying.service.ShareAuditService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import jakarta.servlet.http.HttpServletRequest;
@@ -44,6 +46,8 @@ public class ShareRestController {
     private final FileQueryService fileQueryService;
 
     private final ShareAuditService shareAuditService;
+
+    private final TrustedClientIpResolver trustedClientIpResolver;
 
     /**
      * 创建分享（REST 新路径）。
@@ -94,7 +98,11 @@ public class ShareRestController {
      * @return 文件列表
      */
     @GetMapping("/api/v1/shares/{shareCode}/files")
-    @Operation(summary = "获取分享文件列表（REST）")
+    @Operation(
+            summary = "获取分享文件列表（REST）",
+            description = "匿名 GET；不需要 JWT 或租户头。调用者提供的 X-Tenant-ID 不参与授权或数据选择，"
+                    + "服务端仅按 shareCode 解析 owner tenant，并实时校验公开、有效和未过期状态。")
+    @SecurityRequirements
     @OperationLog(module = "文件操作", operationType = "查询", description = "获取分享文件列表（REST）")
     public Result<List<ShareFileVO>> getSharedFiles(@PathVariable String shareCode,
                                                     @RequestAttribute(value = Const.ATTR_USER_ID, required = false) Long userId,
@@ -171,8 +179,19 @@ public class ShareRestController {
      */
     @OperationLog(module = "文件操作", operationType = "查询", description = "公开分享下载文件")
     @GetMapping("/api/v1/public/shares/{shareCode}/files/{fileHash}/chunks")
-    @RateLimit(limit = 30, type = RateLimit.LimitType.IP, key = "public:download")
-    @Operation(summary = "公开分享下载文件（REST）")
+    @SecurityRequirements
+    @RateLimit(
+            limit = 30,
+            type = RateLimit.LimitType.IP,
+            key = "public:share-access",
+            tenantScoped = false,
+            clientIpMode = RateLimit.ClientIpMode.TRUSTED_PEER
+    )
+    @Operation(
+            summary = "公开分享下载文件（REST）",
+            description = "匿名 GET；不需要 JWT 或租户头，X-Tenant-ID 不参与授权。服务端按 shareCode 恢复 owner tenant，"
+                    + "并与公开解密接口共享规范客户端 IP 的 30 次/60 秒限流桶；第 31 次当前以 HTTP 200、"
+                    + "业务码 70005 拒绝。")
     public Result<List<byte[]>> publicDownload(@PathVariable String shareCode,
                                                @PathVariable String fileHash,
                                                HttpServletRequest request) {
@@ -190,8 +209,19 @@ public class ShareRestController {
      */
     @OperationLog(module = "文件操作", operationType = "查询", description = "获取公开分享文件解密信息")
     @GetMapping("/api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info")
-    @RateLimit(limit = 30, type = RateLimit.LimitType.IP, key = "public:decryptInfo")
-    @Operation(summary = "公开分享获取解密信息（REST）")
+    @SecurityRequirements
+    @RateLimit(
+            limit = 30,
+            type = RateLimit.LimitType.IP,
+            key = "public:share-access",
+            tenantScoped = false,
+            clientIpMode = RateLimit.ClientIpMode.TRUSTED_PEER
+    )
+    @Operation(
+            summary = "公开分享获取解密信息（REST）",
+            description = "匿名 GET；不需要 JWT 或租户头，X-Tenant-ID 不参与授权。服务端按 shareCode 恢复 owner tenant，"
+                    + "并与公开下载接口共享规范客户端 IP 的 30 次/60 秒限流桶；第 31 次当前以 HTTP 200、"
+                    + "业务码 70005 拒绝。")
     public Result<FileDecryptInfoVO> publicDecryptInfo(@Parameter(description = "分享码") @PathVariable String shareCode,
                                                        @Parameter(description = "文件哈希") @PathVariable String fileHash) {
         return Result.success(fileService.getPublicFileDecryptInfo(shareCode, fileHash));
@@ -201,9 +231,9 @@ public class ShareRestController {
      * 获取审计用客户端 IP。
      *
      * @param request 当前请求
-     * @return servlet 容器确认的客户端 IP
+     * @return 按可信代理配置规范化后的客户端 IP
      */
     private String getClientIp(HttpServletRequest request) {
-        return request.getRemoteAddr();
+        return trustedClientIpResolver.resolve(request);
     }
 }

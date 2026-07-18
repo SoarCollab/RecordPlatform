@@ -28,6 +28,7 @@ import java.lang.reflect.Method;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -344,7 +345,8 @@ public class OperationLogAspect {
         if (contextPath != null && !contextPath.isBlank() && path.startsWith(contextPath)) {
             path = path.substring(contextPath.length());
         }
-        String normalized = path.toLowerCase();
+        String normalized = SensitiveDataMasker.normalizePathForRouteMatching(path)
+                .toLowerCase(Locale.ROOT);
         return normalized.startsWith("/api/file")
                 || normalized.startsWith("/api/v1/files")
                 || normalized.startsWith("/api/v1/shares")

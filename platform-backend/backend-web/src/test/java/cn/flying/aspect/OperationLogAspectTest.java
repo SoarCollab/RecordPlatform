@@ -136,6 +136,52 @@ class OperationLogAspectTest {
     }
 
     /**
+     * 验证编码字面量和矩阵参数不能绕过操作日志的敏感文件参数与响应省略规则。
+     */
+    @Test
+    @DisplayName("Should omit encoded public share credentials from operation logs")
+    void shouldOmitEncodedPublicShareCredentialsFromOperationLogs() throws Throwable {
+        String shareCode = "share-secret-credential";
+        String fileHash = "file-hash-secret";
+        String responseSecret = "chunk-response-secret";
+        String path = "/api/v1/public/sh%61res;x=1/%2E/" + shareCode
+                + "/f%69les;v=2//" + fileHash + "/chunks";
+        SysOperationLogService operationLogService = mock(SysOperationLogService.class);
+        OperationLogAspect aspect = new OperationLogAspect(operationLogService, newResolver(""));
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
+        request.setServletPath(path);
+        request.setRemoteAddr("198.51.100.32");
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+
+        ProceedingJoinPoint joinPoint = publicShareAuditedJoinPoint(shareCode, fileHash, responseSecret);
+        Logger aspectLogger = (Logger) LoggerFactory.getLogger(OperationLogAspect.class);
+        Level previousLevel = aspectLogger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        aspectLogger.setLevel(Level.INFO);
+        aspectLogger.addAppender(appender);
+        try {
+            assertThat(aspect.doAround(joinPoint)).isEqualTo(responseSecret);
+        } finally {
+            aspectLogger.detachAppender(appender);
+            aspectLogger.setLevel(previousLevel);
+            appender.stop();
+        }
+
+        var captor = org.mockito.ArgumentCaptor.forClass(SysOperationLog.class);
+        verify(operationLogService).saveOperationLog(captor.capture());
+        assertThat(captor.getValue().getRequestParam()).isEqualTo("<sensitive-file-operation>");
+        assertThat(captor.getValue().getResponseResult()).isEqualTo("<sensitive-file-operation>");
+        assertThat(captor.getValue().getRequestUrl())
+                .isEqualTo("/api/v1/public/sh%61res;x=1/%2E/***/f%69les;v=2//***/chunks");
+
+        List<String> messages = appender.list.stream().map(ILoggingEvent::getFormattedMessage).toList();
+        assertThat(messages).noneMatch(message -> message.contains(shareCode)
+                || message.contains(fileHash)
+                || message.contains(responseSecret));
+    }
+
+    /**
      * 验证系统审计接口本身也会进入操作日志，避免敏感管理动作缺失审计记录。
      */
     @Test
@@ -383,6 +429,29 @@ class OperationLogAspectTest {
         return joinPoint;
     }
 
+    /**
+     * 构造携带公开分享凭据和敏感响应的测试连接点。
+     */
+    private ProceedingJoinPoint publicShareAuditedJoinPoint(
+            String shareCode,
+            String fileHash,
+            String response) throws Throwable {
+        ProceedingJoinPoint joinPoint = mock(ProceedingJoinPoint.class);
+        MethodSignature signature = mock(MethodSignature.class);
+        Method method = AuditedFixture.class.getDeclaredMethod(
+                "executePublicShare",
+                String.class,
+                String.class
+        );
+        when(joinPoint.getSignature()).thenReturn(signature);
+        when(joinPoint.getArgs()).thenReturn(new Object[]{shareCode, fileHash});
+        when(joinPoint.proceed()).thenReturn(response);
+        when(signature.getMethod()).thenReturn(method);
+        when(signature.getDeclaringTypeName()).thenReturn(AuditedFixture.class.getName());
+        when(signature.getName()).thenReturn(method.getName());
+        return joinPoint;
+    }
+
     private static final class AuditedFixture {
 
         /**
@@ -404,6 +473,20 @@ class OperationLogAspectTest {
         private ResponseEntity<Void> executeSensitive(String token) {
             assertThat(token).isNotNull();
             return ResponseEntity.ok().build();
+        }
+
+        /**
+         * 提供会保存响应数据的公开分享审计目标方法。
+         */
+        @OperationLog(
+                module = "file",
+                operationType = "query",
+                description = "public share audit",
+                saveResponseData = true)
+        private String executePublicShare(String shareCode, String fileHash) {
+            assertThat(shareCode).isNotBlank();
+            assertThat(fileHash).isNotBlank();
+            return "ok";
         }
     }
 }

@@ -6,6 +6,7 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.DistributedRateLimiter;
 import cn.flying.common.util.ErrorPayloadFactory;
+import cn.flying.common.util.SensitiveDataMasker;
 import cn.flying.common.util.DistributedRateLimiter.RateLimitResult;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
@@ -116,7 +117,9 @@ public class FlowLimitingFilter extends HttpFilter {
         } else {
             Object tenantId = request.getAttribute(Const.ATTR_TENANT_ID);
             log.warn("Rate limited request: ip={}, uri={}, method={}, tenantId={}, result={}, limit={}, period={}, block={}",
-                    clientIp, request.getRequestURI(), request.getMethod(), tenantId, result, limit, period, blockTime);
+                    clientIp,
+                    SensitiveDataMasker.maskSensitivePathSegments(request.getRequestURI()),
+                    request.getMethod(), tenantId, result, limit, period, blockTime);
             writeBlockMessage(response, result);
         }
     }

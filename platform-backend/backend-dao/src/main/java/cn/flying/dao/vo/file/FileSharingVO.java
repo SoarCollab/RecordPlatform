@@ -1,9 +1,10 @@
 package cn.flying.dao.vo.file;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Positive;
 import lombok.Getter;
 import lombok.Setter;
@@ -31,6 +32,8 @@ public class FileSharingVO {
     @Schema(description = "分享有效期（分钟），最大 43200（30 天）")
     private Integer expireMinutes;
 
+    @Min(value = 0, message = "分享类型必须是 0 或 1")
+    @Max(value = 1, message = "分享类型必须是 0 或 1")
     @Schema(description = "分享类型：0-公开（无需登录），1-私密（需要登录），默认公开")
     private Integer shareType = 0;
 }

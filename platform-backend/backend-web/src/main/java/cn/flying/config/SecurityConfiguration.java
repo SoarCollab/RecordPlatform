@@ -99,7 +99,9 @@ public class SecurityConfiguration {
                                 "/error"
                         ).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/shares/*/files").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/public/shares/**").permitAll()
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/v1/public/shares/*/files/*/chunks",
+                                "/api/v1/public/shares/*/files/*/decrypt-info").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/public/proofs/*/status").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/public/proof-keys/*/versions/*").permitAll()
                         .requestMatchers("/api/v1/images/download/images/**").permitAll()

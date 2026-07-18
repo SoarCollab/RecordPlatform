@@ -73,6 +73,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 /**
@@ -793,6 +794,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         if (expireMinutes == null || expireMinutes <= 0) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "过期时间必须为正数");
         }
+        int validatedShareType = shareType != null ? shareType : ShareType.PUBLIC.getCode();
+        requireSupportedShareType(validatedShareType, ResultEnum.PARAM_IS_INVALID);
 
         // 去重后验证用户拥有所有要分享的文件（避免重复 hash 导致误报）
         List<String> distinctHashes = fileHash.stream().distinct().toList();
@@ -820,7 +823,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         Date expireTime = new Date(System.currentTimeMillis() + (long) expireMinutes * 60 * 1000L);
 
         // 分享码全局唯一（跨租户），提前检测避免唯一索引冲突导致 500
-        boolean exists = TenantContext.runWithoutIsolation(() -> fileShareMapper.selectByShareCode(sharingCode) != null);
+        boolean exists = findShareTenantIdGlobally(sharingCode) != null;
         if (exists) {
             throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "分享码冲突，请重试");
         }
@@ -829,7 +832,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                 .setTenantId(tenantId != null ? tenantId : 0L)
                 .setUserId(userId)
                 .setShareCode(sharingCode)
-                .setShareType(shareType != null ? shareType : ShareType.PUBLIC.getCode())
+                .setShareType(validatedShareType)
                 .setFileHashes(JsonConverter.toJson(fileHash))
                 .setExpireTime(expireTime)
                 .setAccessCount(0)
@@ -839,8 +842,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         fileShareMapper.insert(fileShare);
         List<File> ownedFiles = this.list(ownershipWrapper);
         fileKeyEnvelopeService.saveShareEnvelopes(fileShare, ownedFiles, userId, "SHARE_CREATE");
-        log.info("分享码已生成: userId={}, shareCode={}, shareType={}, fileCount={}",
-                userId, sharingCode, ShareType.fromCode(fileShare.getShareType()).getName(), fileHash.size());
+        log.info("分享已生成: userId={}, shareId={}, shareType={}, fileCount={}",
+                userId, fileShare.getId(), ShareType.fromCode(fileShare.getShareType()).getName(), fileHash.size());
 
         return sharingCode;
     }
@@ -850,14 +853,20 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      */
     @Override
     public List<ShareFileVO> getShareFile(String sharingCode) {
-        FileShare share = requirePublicActiveShare(sharingCode);
-        List<String> fileHashList = parseFileHashes(share.getFileHashes());
-        if (CommonUtils.isEmpty(fileHashList)) {
-            return List.of();
+        Long shareTenantId = findShareTenantIdGlobally(sharingCode);
+        if (shareTenantId == null) {
+            throw new GeneralException(ResultEnum.SHARE_NOT_FOUND);
         }
+        return TenantContext.callWithTenantIsolation(shareTenantId, () -> {
+            FileShare share = requirePublicActiveShare(sharingCode);
+            List<String> fileHashList = parseFileHashes(share.getFileHashes());
+            if (CommonUtils.isEmpty(fileHashList)) {
+                return List.of();
+            }
 
-        List<File> files = listShareFilesInShareTenant(share, fileHashList);
-        return files.stream().map(ShareFileVO::fromFile).toList();
+            List<File> files = listShareFilesInShareTenant(share, fileHashList);
+            return files.stream().map(ShareFileVO::fromFile).toList();
+        });
     }
 
     /**
@@ -871,20 +880,28 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "分享码不能为空");
         }
 
-        FileShare share = getShareByCode(shareCode);
+        int expiredCount = fileShareMapper.markAsExpiredIfNecessary(shareCode);
+        FileShare share = fileShareMapper.selectByShareCode(shareCode);
         if (share == null) {
             throw new GeneralException(ResultEnum.SHARE_NOT_FOUND);
         }
-        if (share.getStatus() == FileShare.STATUS_CANCELLED) {
+        if (expiredCount > 0) {
+            share.setStatus(FileShare.STATUS_EXPIRED);
+        }
+        if (Objects.equals(share.getStatus(), FileShare.STATUS_CANCELLED)) {
             throw new GeneralException(ResultEnum.SHARE_CANCELLED);
         }
-        if (share.getStatus() == FileShare.STATUS_EXPIRED
+        if (Objects.equals(share.getStatus(), FileShare.STATUS_EXPIRED)
                 || (share.getExpireTime() != null && share.getExpireTime().before(new Date()))) {
             throw new GeneralException(ResultEnum.SHARE_EXPIRED);
         }
-        if (ShareType.fromCode(share.getShareType()).isPrivate()) {
+        if (!Objects.equals(share.getStatus(), FileShare.STATUS_ACTIVE)) {
+            throw new GeneralException(ResultEnum.FAIL, "分享状态无效");
+        }
+        if (!Objects.equals(share.getShareType(), ShareType.PUBLIC.getCode())) {
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "此分享需要登录后才能访问");
         }
+        fileShareMapper.incrementAccessCountIfActive(shareCode);
         return share;
     }
 
@@ -897,7 +914,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      */
     private List<File> listShareFilesInShareTenant(FileShare share, List<String> fileHashList) {
         Long shareTenantId = share.getTenantId() != null ? share.getTenantId() : 0L;
-        return TenantContext.callWithTenant(shareTenantId, () -> {
+        return TenantContext.callWithTenantIsolation(shareTenantId, () -> {
             LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
                     .eq(File::getUid, share.getUserId())
                     .in(File::getFileHash, fileHashList);
@@ -966,7 +983,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             // 计算链路深度：查询源文件的深度并加1
             int depth = 1;
             Long sourceTenantId = file.getTenantId() != null ? file.getTenantId() : TenantContext.getTenantIdOrDefault();
-            FileSource sourceFileSource = TenantContext.callWithTenant(
+            FileSource sourceFileSource = TenantContext.callWithTenantIsolation(
                     sourceTenantId,
                     () -> fileSourceMapper.selectByFileId(sourceFileId, sourceTenantId));
             if (sourceFileSource != null) {
@@ -1012,7 +1029,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             }
         }
 
-        log.info("成功保存分享文件: userId={}, 文件数量={}, shareCode={}", userId, fileList.size(), shareCode);
+        log.info("成功保存分享文件: userId={}, 文件数量={}", userId, fileList.size());
     }
 
     /**
@@ -1026,7 +1043,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "分享码不能为空");
         }
 
-        FileShare share = TenantContext.runWithoutIsolation(() -> {
+        Long shareTenantId = findShareTenantIdGlobally(shareCode);
+        if (shareTenantId == null) {
+            throw new GeneralException(ResultEnum.SHARE_NOT_FOUND);
+        }
+        FileShare share = TenantContext.callWithTenantIsolation(shareTenantId, () -> {
             int expiredCount = fileShareMapper.markAsExpiredIfNecessary(shareCode);
             FileShare current = fileShareMapper.selectByShareCode(shareCode);
             if (current != null && expiredCount > 0) {
@@ -1038,13 +1059,17 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         if (share == null) {
             throw new GeneralException(ResultEnum.SHARE_NOT_FOUND);
         }
-        if (share.getStatus() == FileShare.STATUS_CANCELLED) {
+        if (Objects.equals(share.getStatus(), FileShare.STATUS_CANCELLED)) {
             throw new GeneralException(ResultEnum.SHARE_CANCELLED);
         }
-        if (share.getStatus() == FileShare.STATUS_EXPIRED
+        if (Objects.equals(share.getStatus(), FileShare.STATUS_EXPIRED)
                 || (share.getExpireTime() != null && share.getExpireTime().before(new Date()))) {
             throw new GeneralException(ResultEnum.SHARE_EXPIRED);
         }
+        if (!Objects.equals(share.getStatus(), FileShare.STATUS_ACTIVE)) {
+            throw new GeneralException(ResultEnum.FAIL, "分享状态无效");
+        }
+        requireSupportedShareType(share.getShareType(), ResultEnum.FAIL);
         return share;
     }
 
@@ -1057,7 +1082,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      */
     private List<File> listRequestedShareFiles(FileShare share, List<String> sharingFileIdList) {
         Long shareTenantId = share.getTenantId() != null ? share.getTenantId() : 0L;
-        return TenantContext.callWithTenant(shareTenantId, () -> {
+        return TenantContext.callWithTenantIsolation(shareTenantId, () -> {
             LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
                     .in(File::getId, sharingFileIdList);
             List<File> files = this.list(wrapper);
@@ -1198,7 +1223,6 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @CacheEvict(cacheNames = "sharedFiles", key = "#shareCode")
     public void cancelShare(Long userId, String shareCode) {
         // 先验证分享是否属于该用户（从数据库查询）
         FileShare fileShare = fileShareMapper.selectByShareCode(shareCode);
@@ -1235,12 +1259,18 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         fileShareMapper.update(null, wrapper);
         fileKeyEnvelopeService.revokeShareEnvelopes(fileShare, userId, "USER_CANCEL_SHARE");
 
-        log.info("分享已取消: userId={}, shareCode={}", userId, shareCode);
+        log.info("分享已取消: userId={}, shareId={}", userId, fileShare.getId());
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateShare(Long userId, UpdateShareVO updateVO) {
+        if (updateVO.getShareType() != null) {
+            requireSupportedShareType(updateVO.getShareType(), ResultEnum.PARAM_IS_INVALID);
+        }
+        if (updateVO.getShareType() == null && updateVO.getExtendMinutes() == null) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "至少需要更新一项分享设置");
+        }
         FileShare fileShare = fileShareMapper.selectByShareCode(updateVO.getShareCode());
         if (fileShare == null) {
             throw new GeneralException(ResultEnum.FAIL, "分享记录不存在");
@@ -1252,13 +1282,19 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         }
 
         // 检查是否已取消
-        if (fileShare.getStatus() == FileShare.STATUS_CANCELLED) {
+        if (Objects.equals(fileShare.getStatus(), FileShare.STATUS_CANCELLED)) {
             throw new GeneralException(ResultEnum.FAIL, "分享已被取消，无法修改");
         }
+        if (!Objects.equals(fileShare.getStatus(), FileShare.STATUS_ACTIVE)
+                && !Objects.equals(fileShare.getStatus(), FileShare.STATUS_EXPIRED)) {
+            throw new GeneralException(ResultEnum.FAIL, "分享状态无效");
+        }
 
-        // 构建更新条件
+        // 条件更新保证并发取消一旦提交，延期或类型更新不能覆盖取消状态
         LambdaUpdateWrapper<FileShare> wrapper = new LambdaUpdateWrapper<FileShare>()
-                .eq(FileShare::getShareCode, updateVO.getShareCode());
+                .eq(FileShare::getShareCode, updateVO.getShareCode())
+                .eq(FileShare::getUserId, userId)
+                .ne(FileShare::getStatus, FileShare.STATUS_CANCELLED);
 
         // 更新分享类型
         if (updateVO.getShareType() != null) {
@@ -1268,30 +1304,36 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         // 延长有效期（从当前时间开始计算）
         if (updateVO.getExtendMinutes() != null && updateVO.getExtendMinutes() > 0) {
             Date newExpireTime = new Date(System.currentTimeMillis() + (long) updateVO.getExtendMinutes() * 60 * 1000L);
-            wrapper.set(FileShare::getExpireTime, newExpireTime);
-            // 如果已过期，重新激活
-            if (fileShare.getStatus() == FileShare.STATUS_EXPIRED) {
-                wrapper.set(FileShare::getStatus, FileShare.STATUS_ACTIVE);
-            }
+            wrapper.set(FileShare::getExpireTime, newExpireTime)
+                    .set(FileShare::getStatus, FileShare.STATUS_ACTIVE);
         }
 
-        fileShareMapper.update(null, wrapper);
-        log.info("分享设置已更新: userId={}, shareCode={}", userId, updateVO.getShareCode());
+        int updated = fileShareMapper.update(null, wrapper);
+        if (updated != 1) {
+            throw new GeneralException(ResultEnum.FAIL, "分享状态已变化，请刷新后重试");
+        }
+        log.info("分享设置已更新: userId={}, shareId={}", userId, fileShare.getId());
     }
 
     @Override
     public FileShare getShareByCode(String shareCode) {
-        if (!TenantContext.isSet()) {
-            return TenantContext.runWithoutIsolation(() -> getShareByCodeInternal(shareCode));
+        if (TenantContext.isSet()) {
+            return TenantContext.callWithTenantIsolation(
+                    TenantContext.requireTenantId(),
+                    () -> getShareByCodeInternal(shareCode));
         }
-        return getShareByCodeInternal(shareCode);
+        Long shareTenantId = findShareTenantIdGlobally(shareCode);
+        if (shareTenantId == null) {
+            return null;
+        }
+        return TenantContext.callWithTenantIsolation(shareTenantId, () -> getShareByCodeInternal(shareCode));
     }
 
     /**
      * 根据分享码查询分享记录，并在查询前做过期标记与访问计数更新。
      * <p>
-     * 注意：公开分享相关端点可能处于租户过滤白名单（无 X-Tenant-ID），调用方可通过
-     * {@link TenantContext#runWithoutIsolation(java.util.function.Supplier)} 在无租户上下文时跨租户查询。
+     * 注意：公开分享入口必须先通过 mapper 级窄查询恢复 owner tenant，再在 owner tenant
+     * 调用本方法；无租户上下文的跨租户兼容分支仅保留给既有服务接口，不得用于公开入口。
      * </p>
      *
      * @param shareCode 分享码
@@ -1309,7 +1351,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             }
             // 原子操作：仅当分享处于活跃状态时增加访问计数
             // 避免 TOCTOU 竞态条件
-            if (fileShare.getStatus() == FileShare.STATUS_ACTIVE) {
+            if (Objects.equals(fileShare.getStatus(), FileShare.STATUS_ACTIVE)) {
                 fileShareMapper.incrementAccessCountIfActive(shareCode);
             }
         }
@@ -1318,25 +1360,44 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     public ShareInfoVO getShareInfo(String shareCode) {
-        FileShare fileShare = getShareByCode(shareCode);
+        Long shareTenantId = findShareTenantIdGlobally(shareCode);
+        if (shareTenantId == null) {
+            return null;
+        }
+        return TenantContext.callWithTenantIsolation(shareTenantId, () -> getShareInfoInCurrentTenant(shareCode));
+    }
+
+    /**
+     * 在已经恢复的分享 owner 租户内读取分享详情及安全文件视图。
+     *
+     * @param shareCode 分享码
+     * @return 分享详情，不存在返回 null
+     */
+    private ShareInfoVO getShareInfoInCurrentTenant(String shareCode) {
+        int expiredCount = fileShareMapper.markAsExpiredIfNecessary(shareCode);
+        FileShare fileShare = fileShareMapper.selectByShareCode(shareCode);
         if (fileShare == null) {
             return null;
         }
+        if (expiredCount > 0) {
+            fileShare.setStatus(FileShare.STATUS_EXPIRED);
+        }
 
         // 分享状态校验
-        if (fileShare.getStatus() != null) {
-            if (fileShare.getStatus() == FileShare.STATUS_CANCELLED) {
-                ShareInfoVO cancelled = new ShareInfoVO();
-                cancelled.setShareCode(shareCode);
-                cancelled.setStatus(FileShare.STATUS_CANCELLED);
-                return cancelled;
-            }
-            if (fileShare.getStatus() == FileShare.STATUS_EXPIRED) {
-                ShareInfoVO expired = new ShareInfoVO();
-                expired.setShareCode(shareCode);
-                expired.setStatus(FileShare.STATUS_EXPIRED);
-                return expired;
-            }
+        if (Objects.equals(fileShare.getStatus(), FileShare.STATUS_CANCELLED)) {
+            ShareInfoVO cancelled = new ShareInfoVO();
+            cancelled.setShareCode(shareCode);
+            cancelled.setStatus(FileShare.STATUS_CANCELLED);
+            return cancelled;
+        }
+        if (Objects.equals(fileShare.getStatus(), FileShare.STATUS_EXPIRED)) {
+            ShareInfoVO expired = new ShareInfoVO();
+            expired.setShareCode(shareCode);
+            expired.setStatus(FileShare.STATUS_EXPIRED);
+            return expired;
+        }
+        if (!Objects.equals(fileShare.getStatus(), FileShare.STATUS_ACTIVE)) {
+            throw new GeneralException(ResultEnum.FAIL, "分享状态无效");
         }
 
         // 过期时间校验
@@ -1347,9 +1408,10 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             return expired;
         }
 
-        if (ShareType.fromCode(fileShare.getShareType()).isPrivate()) {
+        if (!Objects.equals(fileShare.getShareType(), ShareType.PUBLIC.getCode())) {
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "此分享需要登录后才能访问");
         }
+        fileShareMapper.incrementAccessCountIfActive(shareCode);
 
         // 解析文件哈希
         List<String> fileHashes = parseFileHashes(fileShare.getFileHashes());
@@ -1372,44 +1434,76 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     public List<byte[]> getPublicFile(String shareCode, String fileHash) {
-        // 验证分享有效性（公开分享）
-        ShareAccessContext accessContext = resolveShareAccess(shareCode, fileHash, ShareType.PUBLIC);
-        validateOwnerFileForInMemoryTransfer(accessContext.ownerId(), fileHash);
+        return callWithPublicShareAccess(shareCode, fileHash, accessContext -> {
+            validateOwnerFileForInMemoryTransfer(accessContext.ownerId(), fileHash);
 
-        // 使用 owner 的身份获取文件
-        Result<FileDetailVO> filePointer = fileRemoteClient.getFile(String.valueOf(accessContext.ownerId()), fileHash);
-        FileDetailVO detailVO = ResultUtils.getData(filePointer);
-        if (detailVO == null) {
-            throw new GeneralException(ResultEnum.FAIL, "无法获取文件详情");
-        }
-        String fileContent = detailVO.content();
-        if (CommonUtils.isEmpty(fileContent)) {
-            throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
-        }
-        List<StoredObjectReference> references = StoredObjectReferenceCodec.parseChainContent(fileContent);
-        Result<List<byte[]>> fileListResult = fileRemoteClient.getFileListByHash(
-                references.stream().map(StoredObjectReference::storagePath).toList(),
-                references.stream().map(StoredObjectReference::cipherHash).toList());
-        List<byte[]> files = ResultUtils.getData(fileListResult);
-        incrementShareAccessCount(accessContext);
-        return files;
+            // 使用 owner 的身份获取文件
+            Result<FileDetailVO> filePointer = fileRemoteClient.getFile(
+                    String.valueOf(accessContext.ownerId()), fileHash);
+            FileDetailVO detailVO = ResultUtils.getData(filePointer);
+            if (detailVO == null) {
+                throw new GeneralException(ResultEnum.FAIL, "无法获取文件详情");
+            }
+            String fileContent = detailVO.content();
+            if (CommonUtils.isEmpty(fileContent)) {
+                throw new GeneralException(ResultEnum.FAIL, "文件内容为空");
+            }
+            List<StoredObjectReference> references = StoredObjectReferenceCodec.parseChainContent(fileContent);
+            Result<List<byte[]>> fileListResult = fileRemoteClient.getFileListByHash(
+                    references.stream().map(StoredObjectReference::storagePath).toList(),
+                    references.stream().map(StoredObjectReference::cipherHash).toList());
+            List<byte[]> files = ResultUtils.getData(fileListResult);
+            incrementShareAccessCount(accessContext);
+            return files;
+        });
     }
 
     @Override
     public FileDecryptInfoVO getPublicFileDecryptInfo(String shareCode, String fileHash) {
-        // 验证分享有效性（公开分享）
-        ShareAccessContext accessContext = resolveShareAccess(shareCode, fileHash, ShareType.PUBLIC);
+        return callWithPublicShareAccess(shareCode, fileHash, accessContext -> {
+            // 查询文件元数据
+            LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
+                    .eq(File::getUid, accessContext.ownerId())
+                    .eq(File::getFileHash, fileHash);
+            File file = this.getOne(wrapper);
+            if (file == null) {
+                throw new GeneralException(ResultEnum.FAIL, "文件不存在");
+            }
 
-        // 查询文件元数据
-        LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<File>()
-                .eq(File::getUid, accessContext.ownerId())
-                .eq(File::getFileHash, fileHash);
-        File file = this.getOne(wrapper);
-        if (file == null) {
-            throw new GeneralException(ResultEnum.FAIL, "文件不存在");
+            return buildShareFileDecryptInfo(file, fileHash, accessContext, null);
+        });
+    }
+
+    /**
+     * 通过全局唯一分享码只解析 owner 租户，再在该租户内完成公开文件授权与业务操作。
+     *
+     * @param shareCode 分享码
+     * @param fileHash 文件哈希
+     * @param action owner 租户内执行的业务动作
+     * @param <T> 返回类型
+     * @return 业务结果
+     */
+    private <T> T callWithPublicShareAccess(String shareCode,
+                                            String fileHash,
+                                            Function<ShareAccessContext, T> action) {
+        Long shareTenantId = findShareTenantIdGlobally(shareCode);
+        if (shareTenantId == null) {
+            throw new GeneralException(ResultEnum.FAIL, "分享不存在");
         }
+        return TenantContext.callWithTenantIsolation(shareTenantId, () -> {
+            ShareAccessContext accessContext = resolveShareAccess(shareCode, fileHash, ShareType.PUBLIC);
+            return action.apply(accessContext);
+        });
+    }
 
-        return buildShareFileDecryptInfo(file, fileHash, accessContext, null);
+    /**
+     * 使用 mapper 级单条 SQL 例外只读取全局分享所属租户，避免打开线程级跨租户模式。
+     *
+     * @param shareCode 分享码
+     * @return 分享所属租户，不存在返回 null
+     */
+    private Long findShareTenantIdGlobally(String shareCode) {
+        return fileShareMapper.selectTenantIdByShareCodeGlobally(shareCode);
     }
 
     /**
@@ -1570,8 +1664,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         } catch (GeneralException e) {
             throw e;
         } catch (Exception e) {
-            log.error("解析分享文件参数失败: fileHash={}, shareCode={}, error={}",
-                    fileHash, accessContext.fileShare().getShareCode(), e.getMessage());
+            log.error("解析分享文件参数失败: fileId={}, shareId={}, errorType={}",
+                    file.getId(), accessContext.fileShare().getId(), e.getClass().getSimpleName());
             throw new GeneralException(ResultEnum.FAIL, "解析文件元数据失败");
         }
     }
@@ -1588,25 +1682,31 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      * 验证分享访问权限并解析分享上下文
      */
     private ShareAccessContext resolveShareAccess(String shareCode, String fileHash, ShareType requiredType) {
+        int expiredCount = fileShareMapper.markAsExpiredIfNecessary(shareCode);
         FileShare fileShare = fileShareMapper.selectByShareCode(shareCode);
         if (fileShare != null) {
-            ShareType actualType = ShareType.fromCode(fileShare.getShareType());
-            if (requiredType != null && actualType != requiredType) {
+            if (expiredCount > 0) {
+                fileShare.setStatus(FileShare.STATUS_EXPIRED);
+            }
+            requireSupportedShareType(fileShare.getShareType(), ResultEnum.FAIL);
+            if (requiredType != null && !Objects.equals(fileShare.getShareType(), requiredType.getCode())) {
                 throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "此分享需要登录后才能访问");
             }
 
-            if (fileShare.getStatus() == FileShare.STATUS_CANCELLED) {
+            if (Objects.equals(fileShare.getStatus(), FileShare.STATUS_CANCELLED)) {
                 throw new GeneralException(ResultEnum.FAIL, "分享已被取消");
+            }
+
+            if (Objects.equals(fileShare.getStatus(), FileShare.STATUS_EXPIRED)) {
+                throw new GeneralException(ResultEnum.SHARE_EXPIRED);
+            }
+
+            if (!Objects.equals(fileShare.getStatus(), FileShare.STATUS_ACTIVE)) {
+                throw new GeneralException(ResultEnum.FAIL, "分享状态无效");
             }
 
             Date now = new Date();
             if (fileShare.getExpireTime() != null && fileShare.getExpireTime().before(now)) {
-                if (fileShare.getStatus() != FileShare.STATUS_EXPIRED) {
-                    LambdaUpdateWrapper<FileShare> wrapper = new LambdaUpdateWrapper<FileShare>()
-                            .eq(FileShare::getShareCode, shareCode)
-                            .set(FileShare::getStatus, FileShare.STATUS_EXPIRED);
-                    fileShareMapper.update(null, wrapper);
-                }
                 throw new GeneralException(ResultEnum.SHARE_EXPIRED);
             }
 
@@ -1619,6 +1719,19 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         }
 
         throw new GeneralException(ResultEnum.FAIL, "分享不存在");
+    }
+
+    /**
+     * 校验持久化或调用方提供的分享类型，未知值不得降级为公开分享。
+     *
+     * @param shareType 分享类型代码
+     * @param errorType 非法类型对应的错误分类
+     */
+    private void requireSupportedShareType(Integer shareType, ResultEnum errorType) {
+        if (!Objects.equals(shareType, ShareType.PUBLIC.getCode())
+                && !Objects.equals(shareType, ShareType.PRIVATE.getCode())) {
+            throw new GeneralException(errorType, "分享类型必须是 0 或 1");
+        }
     }
 
     /**

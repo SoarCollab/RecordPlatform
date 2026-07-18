@@ -130,6 +130,18 @@ class FileServiceCacheTenantIsolationTest {
     }
 
     /**
+     * 验证匿名分享文件查询不受方法级缓存短路，确保每次请求都重新校验授权与文件状态。
+     */
+    @Test
+    @DisplayName("should not cache authorization-sensitive public share file lookup")
+    void shouldNotCacheAuthorizationSensitivePublicShareFileLookup() throws NoSuchMethodException {
+        CacheOperationSource source = new AnnotationCacheOperationSource();
+        Method method = FileQueryServiceImpl.class.getMethod("getShareFile", String.class);
+
+        assertThat(source.getCacheOperations(method, FileQueryServiceImpl.class)).isNullOrEmpty();
+    }
+
+    /**
      * 证明相同用户在两个租户下各自首次回源，后续及交错切换均命中自己的缓存。
      */
     @Test

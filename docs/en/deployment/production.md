@@ -143,13 +143,13 @@ storage:
 
 > For complete configuration options, see [Nacos Config Template](/nacos-config-template.yaml)
 
-## Trusted Client IP for Public Proof Rate Limiting
+## Trusted Client IP for Public Rate Limiting and Audit
 
-The two public proof status/key endpoints share one fixed 120-request/60-second Redis bucket per canonical trusted client IP. The bucket is global: it does not include a tenant, endpoint method, user, or JWT role.
+The two public proof status/key endpoints share one fixed 120-request/60-second Redis bucket per canonical trusted client IP. Public-share chunk/decrypt endpoints separately share one fixed 30-request/60-second bucket per canonical IP. Neither bucket contains a tenant, endpoint method, user, or JWT role. Anonymous public-share system audit and share-access audit use the same resolver output as the share bucket.
 
 ### Direct deployment
 
-Keep `RATE_LIMIT_TRUSTED_PROXY_CIDRS=` empty. The backend uses the direct socket peer and ignores every forwarding header. This is also the safe setting whenever the production proxy topology or header-cleaning behavior has not been verified. If an unconfigured reverse proxy is the immediate peer, all clients safely share that proxy's 120/60 bucket and may be rejected earlier; configure a verified allowlist or enforce an equivalent edge limit before production traffic.
+Keep `RATE_LIMIT_TRUSTED_PROXY_CIDRS=` empty. The backend uses the direct socket peer and ignores every forwarding header. This is also the safe setting whenever the production proxy topology or header-cleaning behavior has not been verified. If an unconfigured reverse proxy is the immediate peer, all clients safely share that proxy's proof 120/60 and public-share 30/60 buckets and may be rejected earlier; configure a verified allowlist or enforce equivalent edge limits before production traffic.
 
 ### Controlled reverse proxy
 
@@ -163,7 +163,15 @@ Only a matching immediate peer can activate header parsing. The backend accepts 
 
 `server.forward-headers-strategy` is fixed to `none` so Spring/Tomcat cannot rewrite `request.getRemoteAddr()` before this resolver. Startup also rejects `server.tomcat.remoteip.remote-ip-header` and `server.tomcat.remoteip.protocol-header`, because either can install a `RemoteIpValve` independently. Do not configure a `ForwardedHeaderFilter`, external `RemoteIpValve`, ingress sidecar, or servlet-container equivalent that rewrites the remote address. Because framework forwarding inference is disabled, proxy TLS termination and absolute URL/scheme handling must be configured and verified independently; do not re-enable forwarded-header processing to solve those concerns.
 
-Before production rollout, verify both public endpoints alternately: requests 1–120 from one client must succeed, request 121 must be rejected, a second client must have an independent bucket, and the Redis TTL must be within 60 seconds. The new key namespace is `rate:limit:public:proof-verification:v2:ip:<canonical-ip>`. No old counters are copied; deploy and rollback can each reset one 60-second window. Roll out at low traffic with edge limiting retained. Rollback restores the old forwarding-header bypass, so enable an edge direct-source limit of 120/60 or stricter before reverting.
+### Production verification and rollback
+
+Before production rollout, verify the public proof endpoints alternately: requests 1–120 from one client must succeed, request 121 must be rejected, a second client must have an independent bucket, and the Redis TTL must be within 60 seconds. The proof namespace is `rate:limit:public:proof-verification:v2:ip:<canonical-ip>`.
+
+For a public share owned by a non-system tenant, call all four exact anonymous `GET` routes with no `X-Tenant-ID`, `0`, another tenant, and a malformed value; each header variant must produce the same authorized result. Confirm that anonymous share writes and the authenticated share download/decrypt routes still reject requests without Bearer authentication. Alternate the public chunk and decrypt-info routes from one canonical client: combined requests 1–30 must succeed, and request 31 must keep the current HTTP 200 response with business code `70005`. A second client must receive an independent bucket. Redis must contain only `rate:limit:public:share-access:v2:ip:<canonical-ip>` for that first client, with a TTL no greater than 60 seconds; tenant-header changes and untrusted forwarding headers must not create extra keys. For a configured trusted proxy, repeat with a valid chain and confirm that the expected canonical client address is used.
+
+Query the resulting audit rows before admitting traffic: anonymous `sys_operation_log.tenant_id` must be `0`, `share_access_log.tenant_id` must be the resolved owner tenant, and both IP columns must equal the canonical IP used in the Redis key. Monitor rate-limit code `70005`, unexpected tenant attribution, and public-share authorization failures.
+
+No old counters are copied, so deployment and rollback can each reset one 60-second window. Roll out at low traffic with edge direct-source limits retained (120/60 for public proof and 30/60 for public-share chunk/decrypt). Revert the public-share tenant, service, audit, and rate-limit changes as one unit; a partial revert can break non-system-tenant shares or reopen cross-tenant attribution. Before reverting, keep the 30/60 edge limit and temporarily restrict the four anonymous share routes if the old tenant/audit boundary would otherwise be exposed. Do not delete or rewrite historical suspicious audit rows during rollback; assess them read-only.
 
 ## SSL/TLS Configuration
 

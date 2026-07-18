@@ -1,5 +1,6 @@
 package cn.flying.controller;
 
+import cn.flying.common.annotation.RateLimit;
 import cn.flying.common.constant.Result;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileSharingVO;
@@ -9,6 +10,8 @@ import cn.flying.dao.vo.file.UpdateShareVO;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
 import cn.flying.service.ShareAuditService;
+import cn.flying.security.TrustedClientIpResolver;
+import jakarta.validation.Validation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -20,9 +23,11 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -41,6 +46,9 @@ class ShareRestControllerTest {
     @Mock
     private ShareAuditService shareAuditService;
 
+    @Mock
+    private TrustedClientIpResolver trustedClientIpResolver;
+
     private ShareRestController controller;
 
     /**
@@ -48,7 +56,13 @@ class ShareRestControllerTest {
      */
     @BeforeEach
     void setUp() {
-        controller = new ShareRestController(fileService, fileQueryService, shareAuditService);
+        controller = new ShareRestController(
+                fileService,
+                fileQueryService,
+                shareAuditService,
+                trustedClientIpResolver
+        );
+        lenient().when(trustedClientIpResolver.resolve(any())).thenReturn("203.0.113.7");
     }
 
     /**
@@ -108,8 +122,11 @@ class ShareRestControllerTest {
         assertEquals(fileHash, publicDecryptResult.getData().fileHash());
 
         verify(fileService).updateShare(eq(userId), any(UpdateShareVO.class));
-        verify(shareAuditService).logShareView(eq(shareCode), eq(userId), eq("10.0.0.10"), eq("JUnit"));
-        verify(shareAuditService).logShareDownload(eq(shareCode), eq(userId), eq(fileHash), eq(null), eq("10.0.0.10"));
+        verify(shareAuditService).logShareView(eq(shareCode), eq(userId), eq("203.0.113.7"), eq("JUnit"));
+        verify(shareAuditService).logShareDownload(
+                eq(shareCode), eq(userId), eq(fileHash), eq(null), eq("203.0.113.7"));
+        verify(shareAuditService).logShareDownload(
+                eq(shareCode), eq(null), eq(fileHash), eq(null), eq("203.0.113.7"));
     }
 
     /**
@@ -128,6 +145,48 @@ class ShareRestControllerTest {
 
         assertEquals("保存成功", result.getData());
         assertEquals("path-code", saveVO.getShareCode());
-        verify(fileService).saveShareFile(eq(List.of("f-1")), eq("path-code"), eq("127.0.0.1"));
+        verify(fileService).saveShareFile(eq(List.of("f-1")), eq("path-code"), eq("203.0.113.7"));
+    }
+
+    /**
+     * 验证两个匿名公开下载端点共用可信客户端 IP，且限流桶不再按调用者租户拆分。
+     */
+    @Test
+    void shouldUseGlobalTrustedPeerRateLimitForAnonymousPublicShareEndpoints() throws NoSuchMethodException {
+        RateLimit downloadRateLimit = ShareRestController.class
+                .getMethod("publicDownload", String.class, String.class, jakarta.servlet.http.HttpServletRequest.class)
+                .getAnnotation(RateLimit.class);
+        RateLimit decryptRateLimit = ShareRestController.class
+                .getMethod("publicDecryptInfo", String.class, String.class)
+                .getAnnotation(RateLimit.class);
+
+        assertNotNull(downloadRateLimit);
+        assertNotNull(decryptRateLimit);
+        assertFalse(downloadRateLimit.tenantScoped());
+        assertFalse(decryptRateLimit.tenantScoped());
+        assertEquals(RateLimit.ClientIpMode.TRUSTED_PEER, downloadRateLimit.clientIpMode());
+        assertEquals(RateLimit.ClientIpMode.TRUSTED_PEER, decryptRateLimit.clientIpMode());
+        assertEquals(RateLimit.LimitType.IP, downloadRateLimit.type());
+        assertEquals(RateLimit.LimitType.IP, decryptRateLimit.type());
+        assertEquals(downloadRateLimit.key(), decryptRateLimit.key());
+        assertEquals(30, downloadRateLimit.limit());
+        assertEquals(60, downloadRateLimit.period());
+    }
+
+    /**
+     * 验证创建分享请求在控制器校验阶段只接受公开或私密两种类型。
+     */
+    @Test
+    void shouldRejectUnsupportedCreateShareTypeAtValidationBoundary() {
+        FileSharingVO request = new FileSharingVO();
+        request.setFileHash(List.of("hash-1"));
+        request.setExpireMinutes(60);
+        request.setShareType(99);
+
+        try (var factory = Validation.buildDefaultValidatorFactory()) {
+            var violations = factory.getValidator().validate(request);
+            assertEquals(1, violations.size());
+            assertEquals("shareType", violations.iterator().next().getPropertyPath().toString());
+        }
     }
 }

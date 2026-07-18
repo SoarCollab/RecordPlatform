@@ -388,7 +388,7 @@ public class FileAdminServiceImpl implements FileAdminService {
 
         fileShareMapper.update(null, wrapper);
         fileKeyEnvelopeService.revokeShareEnvelopes(share, SecurityUtils.getUserId(), reason);
-        LOGGER.info("管理员强制取消分享: shareCode={}, reason={}", shareCode, reason);
+        LOGGER.info("管理员强制取消分享: shareId={}, reason={}", share.getId(), reason);
     }
 
     // ==================== 工具方法 ====================

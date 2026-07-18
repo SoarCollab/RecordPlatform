@@ -1,5 +1,8 @@
 package cn.flying.service.impl;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.constant.ShareType;
 import cn.flying.common.exception.GeneralException;
@@ -15,6 +18,7 @@ import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.mapper.FileSourceMapper;
 import cn.flying.dao.mapper.ProofBundleIssuanceMapper;
+import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.dao.vo.file.ShareInfoVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
@@ -32,6 +36,8 @@ import cn.flying.service.saga.FileSagaOrchestrator;
 import cn.flying.service.saga.FileUploadResult;
 import cn.flying.test.builders.FileTestBuilder;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.*;
@@ -45,6 +51,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
@@ -56,6 +63,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -149,6 +158,14 @@ class FileServiceTest {
         when(cacheManager.getCache(anyString())).thenReturn(cache);
     }
 
+    /**
+     * 清理测试设置的租户上下文，避免 ThreadLocal 跨用例污染。
+     */
+    @AfterEach
+    void clearTenantContext() {
+        TenantContext.clear();
+    }
+
     // ================== Helper Methods ==================
 
     private FileShare aFileShare() {
@@ -200,6 +217,7 @@ class FileServiceTest {
             when(fileMapper.selectCount(any())).thenReturn(1L);
             setupShareResultSuccess(SHARE_CODE);
             when(fileRemoteClient.shareFiles(any())).thenReturn(shareResult);
+            when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(null);
             doAnswer(inv -> {
                 FileShare fs = inv.getArgument(0);
                 fs.setId(1L);
@@ -234,6 +252,7 @@ class FileServiceTest {
             when(fileMapper.selectCount(any())).thenReturn(1L);
             setupShareResultSuccess(SHARE_CODE);
             when(fileRemoteClient.shareFiles(any())).thenReturn(shareResult);
+            when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(null);
             doAnswer(inv -> {
                 FileShare fs = inv.getArgument(0);
                 fs.setId(1L);
@@ -249,6 +268,42 @@ class FileServiceTest {
             ArgumentCaptor<FileShare> shareCaptor = ArgumentCaptor.forClass(FileShare.class);
             verify(fileShareMapper).insert(shareCaptor.capture());
             assertEquals(ShareType.PRIVATE.getCode(), shareCaptor.getValue().getShareType());
+        }
+
+        /**
+         * 验证创建公开分享时应用文本日志不会写入可直接使用的分享码。
+         */
+        @Test
+        @DisplayName("should not log raw share code after creation")
+        void shouldNotLogRawShareCodeAfterCreation() {
+            when(fileMapper.selectCount(any())).thenReturn(1L);
+            setupShareResultSuccess(SHARE_CODE);
+            when(fileRemoteClient.shareFiles(any())).thenReturn(shareResult);
+            when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(null);
+            doAnswer(invocation -> {
+                FileShare share = invocation.getArgument(0);
+                share.setId(10L);
+                return 1;
+            }).when(fileShareMapper).insert(any(FileShare.class));
+
+            Logger logger = (Logger) LoggerFactory.getLogger(FileServiceImpl.class);
+            ListAppender<ILoggingEvent> appender = new ListAppender<>();
+            appender.start();
+            logger.addAppender(appender);
+            try {
+                fileService.generateSharingCode(
+                        USER_ID,
+                        List.of(FILE_HASH),
+                        60,
+                        ShareType.PUBLIC.getCode());
+            } finally {
+                logger.detachAppender(appender);
+                appender.stop();
+            }
+
+            assertTrue(appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .noneMatch(message -> message.contains(SHARE_CODE)));
         }
 
         @Test
@@ -276,6 +331,21 @@ class FileServiceTest {
             GeneralException ex2 = assertThrows(GeneralException.class, () ->
                     fileService.generateSharingCode(USER_ID, fileHashes, 0, ShareType.PUBLIC.getCode()));
             assertEquals(ResultEnum.PARAM_ERROR.getCode(), ex2.getResultEnum().getCode());
+        }
+
+        /**
+         * 验证服务边界不会把未知分享类型降级为公开分享。
+         */
+        @Test
+        @DisplayName("should reject unsupported share type before remote or database side effects")
+        void shouldRejectUnsupportedShareType() {
+            GeneralException error = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.generateSharingCode(USER_ID, List.of(FILE_HASH), 60, 99));
+
+            assertEquals(ResultEnum.PARAM_IS_INVALID, error.getResultEnum());
+            verifyNoInteractions(fileRemoteClient);
+            verify(fileShareMapper, never()).insert(any(FileShare.class));
         }
 
         @Test
@@ -392,6 +462,63 @@ class FileServiceTest {
 
             assertEquals(ResultEnum.FAIL.getCode(), ex.getResultEnum().getCode());
         }
+
+        /**
+         * 验证直接调用服务时未知分享类型也在读取或更新数据库前被拒绝。
+         */
+        @Test
+        @DisplayName("should reject unsupported share type before update lookup")
+        void shouldRejectUnsupportedShareType() {
+            UpdateShareVO updateVO = createUpdateShareVO(SHARE_CODE, 99, null);
+
+            GeneralException error = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.updateShare(USER_ID, updateVO));
+
+            assertEquals(ResultEnum.PARAM_IS_INVALID, error.getResultEnum());
+            verify(fileShareMapper, never()).selectByShareCode(anyString());
+            verify(fileShareMapper, never()).update(any(), any());
+        }
+
+        /**
+         * 验证延期使用 owner、非取消状态条件，并在同一 SQL 中恢复 active 状态。
+         */
+        @Test
+        @DisplayName("should extend expired share with one cancellation-safe conditional update")
+        void shouldExtendExpiredShareWithConditionalUpdate() {
+            FileShare share = aFileShare(s -> s.setStatus(FileShare.STATUS_EXPIRED));
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
+            when(fileShareMapper.update(isNull(), any())).thenReturn(1);
+            UpdateShareVO updateVO = createUpdateShareVO(SHARE_CODE, null, 60);
+
+            fileService.updateShare(USER_ID, updateVO);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Wrapper<FileShare>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+            verify(fileShareMapper).update(isNull(), wrapperCaptor.capture());
+            LambdaUpdateWrapper<FileShare> wrapper = (LambdaUpdateWrapper<FileShare>) wrapperCaptor.getValue();
+            assertTrue(wrapper.getSqlSet().contains("expire_time"));
+            assertTrue(wrapper.getSqlSet().contains("status"));
+            assertTrue(wrapper.getSqlSegment().contains("share_code"));
+            assertTrue(wrapper.getSqlSegment().contains("user_id"));
+            assertTrue(wrapper.getSqlSegment().contains("status"));
+        }
+
+        /**
+         * 验证空更新不会生成无 SET 子句的数据库语句。
+         */
+        @Test
+        @DisplayName("should reject update without any changed field")
+        void shouldRejectUpdateWithoutAnyChangedField() {
+            UpdateShareVO updateVO = createUpdateShareVO(SHARE_CODE, null, null);
+
+            GeneralException error = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.updateShare(USER_ID, updateVO));
+
+            assertEquals(ResultEnum.PARAM_IS_INVALID, error.getResultEnum());
+            verify(fileShareMapper, never()).selectByShareCode(anyString());
+        }
     }
 
     // ================== Delete Files Tests ==================
@@ -467,6 +594,14 @@ class FileServiceTest {
     @DisplayName("Get Share By Code")
     class GetShareByCode {
 
+        /**
+         * 为无请求租户上下文的兼容入口提供窄全局租户定位。
+         */
+        @BeforeEach
+        void stubGlobalTenantLookup() {
+            lenient().when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(1L);
+        }
+
         @Test
         @DisplayName("should return active share and increment access count")
         void shouldReturnActiveShareAndIncrementCount() {
@@ -485,6 +620,8 @@ class FileServiceTest {
             assertEquals(USER_ID, result.getUserId());
             assertTrue(result.getFileHashes().contains(FILE_HASH));
             verify(fileShareMapper).incrementAccessCountIfActive(SHARE_CODE);
+            assertFalse(TenantContext.isSet());
+            assertFalse(TenantContext.isIgnoreIsolation());
         }
 
         @Test
@@ -728,8 +865,9 @@ class FileServiceTest {
         @Test
         @DisplayName("should throw cancelled when expiration is negative")
         void shouldThrowCancelledWhenExpirationIsNegative() {
-            when(fileShareMapper.selectByShareCode(SHARE_CODE))
-                    .thenReturn(aFileShare(s -> s.setStatus(FileShare.STATUS_CANCELLED)));
+            FileShare share = aFileShare(s -> s.setStatus(FileShare.STATUS_CANCELLED));
+            when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(share.getTenantId());
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
 
             GeneralException ex = assertThrows(GeneralException.class, () -> fileService.getShareFile(SHARE_CODE));
 
@@ -742,8 +880,9 @@ class FileServiceTest {
         @Test
         @DisplayName("should throw expired when share is timeout")
         void shouldThrowExpiredWhenShareIsTimeout() {
-            when(fileShareMapper.selectByShareCode(SHARE_CODE))
-                    .thenReturn(aFileShare(s -> s.setExpireTime(new Date(System.currentTimeMillis() - 1000))));
+            FileShare share = aFileShare(s -> s.setExpireTime(new Date(System.currentTimeMillis() - 1000)));
+            when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(share.getTenantId());
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
 
             GeneralException ex = assertThrows(GeneralException.class, () -> fileService.getShareFile(SHARE_CODE));
 
@@ -756,8 +895,9 @@ class FileServiceTest {
         @Test
         @DisplayName("should throw cancelled when share is invalid")
         void shouldThrowCancelledWhenShareIsInvalid() {
-            when(fileShareMapper.selectByShareCode(SHARE_CODE))
-                    .thenReturn(aFileShare(s -> s.setStatus(FileShare.STATUS_CANCELLED)));
+            FileShare share = aFileShare(s -> s.setStatus(FileShare.STATUS_CANCELLED));
+            when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(share.getTenantId());
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
 
             GeneralException ex = assertThrows(GeneralException.class, () -> fileService.getShareFile(SHARE_CODE));
 
@@ -779,7 +919,9 @@ class FileServiceTest {
                     .setFileSize(1024L)
                     .setContentType("text/plain")
                     .setDeleted(0);
-            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(aFileShare());
+            FileShare share = aFileShare();
+            when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(share.getTenantId());
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
             when(fileMapper.selectList(any())).thenReturn(List.of(sourceFile));
 
             List<ShareFileVO> result;
@@ -805,6 +947,7 @@ class FileServiceTest {
         @Test
         @DisplayName("should return safe file view for public share info")
         void shouldReturnSafeFileViewForPublicShareInfo() {
+            FileShare share = aFileShare();
             File sourceFile = new File()
                     .setId(1L)
                     .setTenantId(1L)
@@ -813,8 +956,26 @@ class FileServiceTest {
                     .setFileHash(FILE_HASH)
                     .setFileParam("{\"initialKey\":\"secret\"}")
                     .setDeleted(0);
-            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(aFileShare());
+            when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenAnswer(invocation -> {
+                assertFalse(TenantContext.isIgnoreIsolation());
+                assertEquals(99L, TenantContext.getTenantId());
+                return share.getTenantId();
+            });
+            AtomicInteger shareLookups = new AtomicInteger();
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenAnswer(invocation -> {
+                shareLookups.incrementAndGet();
+                assertFalse(TenantContext.isIgnoreIsolation());
+                assertEquals(share.getTenantId(), TenantContext.getTenantId());
+                return share;
+            });
+            when(fileShareMapper.markAsExpiredIfNecessary(SHARE_CODE)).thenAnswer(invocation -> {
+                assertFalse(TenantContext.isIgnoreIsolation());
+                assertEquals(share.getTenantId(), TenantContext.getTenantId());
+                return 0;
+            });
             when(fileMapper.selectList(any())).thenReturn(List.of(sourceFile));
+
+            TenantContext.setTenantId(99L);
 
             ShareInfoVO info;
             try (MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
@@ -827,6 +988,9 @@ class FileServiceTest {
             assertEquals(1, info.getFiles().size());
             assertEquals("ext_1", info.getFiles().get(0).id());
             assertEquals("public.txt", info.getFiles().get(0).fileName());
+            assertEquals(99L, TenantContext.getTenantId());
+            assertFalse(TenantContext.isIgnoreIsolation());
+            assertEquals(1, shareLookups.get());
         }
 
         /**
@@ -835,13 +999,46 @@ class FileServiceTest {
         @Test
         @DisplayName("should reject private share info")
         void shouldRejectPrivateShareInfo() {
-            when(fileShareMapper.selectByShareCode(SHARE_CODE))
-                    .thenReturn(aFileShare(s -> s.setShareType(ShareType.PRIVATE.getCode())));
+            FileShare share = aFileShare(s -> s.setShareType(ShareType.PRIVATE.getCode()));
+            when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(share.getTenantId());
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
 
             GeneralException ex = assertThrows(GeneralException.class, () -> fileService.getShareInfo(SHARE_CODE));
 
             assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), ex.getResultEnum().getCode());
             verify(fileMapper, never()).selectList(any());
+            verify(fileShareMapper, never()).incrementAccessCountIfActive(SHARE_CODE);
+        }
+
+        /**
+         * 验证匿名分享详情对缺失或未知状态、类型均失败关闭。
+         */
+        @Test
+        @DisplayName("should reject invalid status or type on public share info")
+        void shouldRejectInvalidStatusOrTypeOnPublicShareInfo() {
+            for (Integer invalidStatus : new Integer[]{null, 99}) {
+                FileShare share = aFileShare(s -> s.setStatus(invalidStatus));
+                when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(share.getTenantId());
+                when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
+
+                GeneralException ex = assertThrows(
+                        GeneralException.class,
+                        () -> fileService.getShareInfo(SHARE_CODE));
+                assertEquals(ResultEnum.FAIL, ex.getResultEnum());
+            }
+
+            for (Integer invalidType : new Integer[]{null, 99}) {
+                FileShare share = aFileShare(s -> s.setShareType(invalidType));
+                when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(share.getTenantId());
+                when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
+
+                GeneralException ex = assertThrows(
+                        GeneralException.class,
+                        () -> fileService.getShareInfo(SHARE_CODE));
+                assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, ex.getResultEnum());
+            }
+            verify(fileMapper, never()).selectList(any());
+            verify(fileShareMapper, never()).incrementAccessCountIfActive(SHARE_CODE);
         }
 
         /**
@@ -850,8 +1047,9 @@ class FileServiceTest {
         @Test
         @DisplayName("should return empty status when share has no file hashes")
         void shouldReturnEmptyStatusWhenShareHasNoFileHashes() {
-            when(fileShareMapper.selectByShareCode(SHARE_CODE))
-                    .thenReturn(aFileShare(s -> s.setFileHashes("[]")));
+            FileShare share = aFileShare(s -> s.setFileHashes("[]"));
+            when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(share.getTenantId());
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
 
             ShareInfoVO info = fileService.getShareInfo(SHARE_CODE);
 
@@ -859,6 +1057,332 @@ class FileServiceTest {
             assertEquals(SHARE_CODE, info.getShareCode());
             assertEquals(ShareInfoVO.STATUS_EMPTY_FILES, info.getStatus());
             verify(fileMapper, never()).selectList(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Public Share Tenant Boundary")
+    class PublicShareTenantBoundary {
+
+        /**
+         * 验证公开分片下载只跨租户定位分享元数据，随后所有文件读取、远程调用和计数都在 owner 租户执行。
+         */
+        @Test
+        @DisplayName("should execute public download in share owner tenant and restore caller context")
+        void shouldExecutePublicDownloadInShareOwnerTenantAndRestoreCallerContext() {
+            FileShare share = aFileShare(s -> s.setTenantId(7L));
+            File sourceFile = new File()
+                    .setId(8L)
+                    .setTenantId(7L)
+                    .setUid(USER_ID)
+                    .setFileName("public.txt")
+                    .setFileHash(FILE_HASH)
+                    .setFileSize(3L);
+            AtomicInteger shareLookups = stubGlobalThenOwnerShareLookup(share, 99L);
+
+            when(fileMapper.selectOne(any())).thenAnswer(invocation -> {
+                assertOwnerTenant(7L);
+                return sourceFile;
+            });
+            when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH)).thenAnswer(invocation -> {
+                assertOwnerTenant(7L);
+                return Result.success(new FileDetailVO(
+                        String.valueOf(USER_ID),
+                        "public.txt",
+                        null,
+                        "{\"cipher-hash\":\"chunks/public-0\"}",
+                        FILE_HASH,
+                        null,
+                        null,
+                        3L,
+                        "text/plain"
+                ));
+            });
+            when(fileRemoteClient.getFileListByHash(
+                    List.of("chunks/public-0"), List.of("cipher-hash"))).thenAnswer(invocation -> {
+                assertOwnerTenant(7L);
+                return Result.success(List.of("abc".getBytes()));
+            });
+            when(fileShareMapper.incrementAccessCount(SHARE_CODE)).thenAnswer(invocation -> {
+                assertOwnerTenant(7L);
+                return 1;
+            });
+
+            TenantContext.setTenantId(99L);
+            TenantContext.setIgnoreIsolation(true);
+            List<byte[]> chunks = fileService.getPublicFile(SHARE_CODE, FILE_HASH);
+
+            assertEquals(1, chunks.size());
+            assertArrayEquals("abc".getBytes(), chunks.getFirst());
+            assertEquals(1, shareLookups.get());
+            assertEquals(99L, TenantContext.getTenantId());
+            assertTrue(TenantContext.isIgnoreIsolation());
+        }
+
+        /**
+         * 验证公开解密信息在 owner 租户读取文件和密钥信封，并在返回后恢复原调用者租户。
+         */
+        @Test
+        @DisplayName("should execute public decrypt lookup in share owner tenant and restore caller context")
+        void shouldExecutePublicDecryptLookupInShareOwnerTenantAndRestoreCallerContext() {
+            FileShare share = aFileShare(s -> s.setTenantId(7L));
+            File sourceFile = new File()
+                    .setId(8L)
+                    .setTenantId(7L)
+                    .setUid(USER_ID)
+                    .setFileName("public.txt")
+                    .setFileHash(FILE_HASH)
+                    .setFileParam("""
+                            {"encryptionAlgorithm":"AES-GCM","fileName":"public.txt","fileSize":3,"contentType":"text/plain","chunkCount":1}
+                            """);
+            AtomicInteger shareLookups = stubGlobalThenOwnerShareLookup(share, 99L);
+
+            when(fileMapper.selectOne(any(), anyBoolean())).thenAnswer(invocation -> {
+                assertOwnerTenant(7L);
+                return sourceFile;
+            });
+            when(fileKeyEnvelopeService.unwrapActiveShareInitialKey(
+                    eq(sourceFile),
+                    eq(FILE_HASH),
+                    eq(share),
+                    isNull(),
+                    eq("SHARE_DECRYPT")
+            )).thenAnswer(invocation -> {
+                assertOwnerTenant(7L);
+                return Optional.of("owner-share-key");
+            });
+
+            TenantContext.setTenantId(99L);
+            FileDecryptInfoVO decryptInfo = fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH);
+
+            assertEquals("owner-share-key", decryptInfo.initialKey());
+            assertEquals(FILE_HASH, decryptInfo.fileHash());
+            assertEquals(1, shareLookups.get());
+            assertEquals(99L, TenantContext.getTenantId());
+            assertFalse(TenantContext.isIgnoreIsolation());
+        }
+
+        /**
+         * 验证匿名公开入口不能借分享码读取私密分享的文件内容或解密信息。
+         */
+        @Test
+        @DisplayName("should reject private share on both anonymous public file endpoints")
+        void shouldRejectPrivateShareOnAnonymousPublicFileEndpoints() {
+            FileShare share = aFileShare(s -> s.setShareType(ShareType.PRIVATE.getCode()));
+            stubPublicShareLookup(share);
+
+            GeneralException downloadError = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.getPublicFile(SHARE_CODE, FILE_HASH));
+            GeneralException decryptError = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH));
+
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, downloadError.getResultEnum());
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, decryptError.getResultEnum());
+            assertNoPublicFileDataWasRead();
+        }
+
+        /**
+         * 验证取消状态的分享在两个匿名公开文件入口都失败关闭。
+         */
+        @Test
+        @DisplayName("should reject cancelled share on both anonymous public file endpoints")
+        void shouldRejectCancelledShareOnAnonymousPublicFileEndpoints() {
+            FileShare share = aFileShare(s -> s.setStatus(FileShare.STATUS_CANCELLED));
+            stubPublicShareLookup(share);
+
+            GeneralException downloadError = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.getPublicFile(SHARE_CODE, FILE_HASH));
+            GeneralException decryptError = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH));
+
+            assertEquals(ResultEnum.FAIL, downloadError.getResultEnum());
+            assertEquals(ResultEnum.FAIL, decryptError.getResultEnum());
+            assertNoPublicFileDataWasRead();
+        }
+
+        /**
+         * 验证数据库已标记过期的分享即使过期时间异常地仍在未来，也不能被公开入口读取。
+         */
+        @Test
+        @DisplayName("should reject expired status even when expire time is still in future")
+        void shouldRejectExpiredStatusEvenWhenExpireTimeIsStillInFuture() {
+            FileShare share = aFileShare(s -> s.setStatus(FileShare.STATUS_EXPIRED));
+            stubPublicShareLookup(share);
+
+            GeneralException downloadError = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.getPublicFile(SHARE_CODE, FILE_HASH));
+            GeneralException decryptError = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH));
+
+            assertEquals(ResultEnum.SHARE_EXPIRED, downloadError.getResultEnum());
+            assertEquals(ResultEnum.SHARE_EXPIRED, decryptError.getResultEnum());
+            assertNoPublicFileDataWasRead();
+        }
+
+        /**
+         * 验证缺失或未知状态在两个匿名文件入口都失败关闭且不会触发数据读取。
+         */
+        @Test
+        @DisplayName("should reject missing or unknown status on anonymous public file endpoints")
+        void shouldRejectMissingOrUnknownStatusOnAnonymousPublicFileEndpoints() {
+            for (Integer invalidStatus : new Integer[]{null, 99}) {
+                FileShare share = aFileShare(s -> s.setStatus(invalidStatus));
+                stubPublicShareLookup(share);
+
+                GeneralException downloadError = assertThrows(
+                        GeneralException.class,
+                        () -> fileService.getPublicFile(SHARE_CODE, FILE_HASH));
+                GeneralException decryptError = assertThrows(
+                        GeneralException.class,
+                        () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH));
+
+                assertEquals(ResultEnum.FAIL, downloadError.getResultEnum());
+                assertEquals(ResultEnum.FAIL, decryptError.getResultEnum());
+            }
+            assertNoPublicFileDataWasRead();
+        }
+
+        /**
+         * 验证缺失或未知类型不能借枚举默认值降级成公开分享。
+         */
+        @Test
+        @DisplayName("should reject missing or unknown type on anonymous public file endpoints")
+        void shouldRejectMissingOrUnknownTypeOnAnonymousPublicFileEndpoints() {
+            for (Integer invalidType : new Integer[]{null, 99}) {
+                FileShare share = aFileShare(s -> s.setShareType(invalidType));
+                stubPublicShareLookup(share);
+
+                GeneralException downloadError = assertThrows(
+                        GeneralException.class,
+                        () -> fileService.getPublicFile(SHARE_CODE, FILE_HASH));
+                GeneralException decryptError = assertThrows(
+                        GeneralException.class,
+                        () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH));
+
+                assertEquals(ResultEnum.FAIL, downloadError.getResultEnum());
+                assertEquals(ResultEnum.FAIL, decryptError.getResultEnum());
+            }
+            assertNoPublicFileDataWasRead();
+        }
+
+        /**
+         * 验证未知持久化类型不能通过登录态分享下载或解密入口绕过类型校验。
+         */
+        @Test
+        @DisplayName("should reject unknown type on authenticated share file endpoints")
+        void shouldRejectUnknownTypeOnAuthenticatedShareFileEndpoints() {
+            FileShare share = aFileShare(s -> s.setShareType(99));
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
+
+            GeneralException downloadError = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.getSharedFileContent(OTHER_USER_ID, SHARE_CODE, FILE_HASH));
+            GeneralException decryptError = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.getSharedFileDecryptInfo(OTHER_USER_ID, SHARE_CODE, FILE_HASH));
+
+            assertEquals(ResultEnum.FAIL, downloadError.getResultEnum());
+            assertEquals(ResultEnum.FAIL, decryptError.getResultEnum());
+            assertNoPublicFileDataWasRead();
+        }
+
+        /**
+         * 验证自然过期只调用带状态和时间条件的原子更新，不再执行无条件状态覆盖。
+         */
+        @Test
+        @DisplayName("should avoid unconditional status update when share expires naturally")
+        void shouldAvoidUnconditionalStatusUpdateWhenShareExpiresNaturally() {
+            FileShare share = aFileShare(s -> s.setExpireTime(new Date(System.currentTimeMillis() - 1_000L)));
+            stubPublicShareLookup(share);
+            when(fileShareMapper.markAsExpiredIfNecessary(SHARE_CODE)).thenReturn(1);
+
+            GeneralException error = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.getPublicFile(SHARE_CODE, FILE_HASH));
+
+            assertEquals(ResultEnum.SHARE_EXPIRED, error.getResultEnum());
+            verify(fileShareMapper).markAsExpiredIfNecessary(SHARE_CODE);
+            verify(fileShareMapper, never()).update(any(), any());
+            assertNoPublicFileDataWasRead();
+        }
+
+        /**
+         * 验证分享未授权的文件哈希不能触发文件、密钥或远端存储读取。
+         */
+        @Test
+        @DisplayName("should reject file hash that is not included in public share")
+        void shouldRejectFileHashThatIsNotIncludedInPublicShare() {
+            FileShare share = aFileShare();
+            stubPublicShareLookup(share);
+            String unauthorizedHash = "sha256_not_in_share";
+
+            GeneralException downloadError = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.getPublicFile(SHARE_CODE, unauthorizedHash));
+            GeneralException decryptError = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, unauthorizedHash));
+
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, downloadError.getResultEnum());
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, decryptError.getResultEnum());
+            assertNoPublicFileDataWasRead();
+        }
+
+        /**
+         * 为失败关闭用例伪造窄全局租户定位与 owner 租户内分享查询。
+         *
+         * @param share 待校验分享
+         */
+        private void stubPublicShareLookup(FileShare share) {
+            when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(share.getTenantId());
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
+        }
+
+        /**
+         * 断言授权失败发生在读取租户文件、密钥或远端存储之前。
+         */
+        private void assertNoPublicFileDataWasRead() {
+            verify(fileMapper, never()).selectOne(any());
+            verify(fileMapper, never()).selectOne(any(), anyBoolean());
+            verify(fileShareMapper, never()).incrementAccessCount(SHARE_CODE);
+            verifyNoInteractions(fileRemoteClient, fileKeyEnvelopeService);
+        }
+
+        /**
+         * 伪造全局分享定位与 owner 租户内的二次查询，并校验两阶段隔离边界。
+         *
+         * @param share 分享记录
+         * @param callerTenantId 原调用者租户
+         * @return 分享查询次数
+         */
+        private AtomicInteger stubGlobalThenOwnerShareLookup(FileShare share, long callerTenantId) {
+            AtomicInteger shareLookups = new AtomicInteger();
+            when(fileShareMapper.selectTenantIdByShareCodeGlobally(share.getShareCode())).thenAnswer(invocation -> {
+                assertEquals(callerTenantId, TenantContext.getTenantId());
+                return share.getTenantId();
+            });
+            when(fileShareMapper.selectByShareCode(share.getShareCode())).thenAnswer(invocation -> {
+                shareLookups.incrementAndGet();
+                assertOwnerTenant(share.getTenantId());
+                return share;
+            });
+            return shareLookups;
+        }
+
+        /**
+         * 断言当前执行只受 owner 租户隔离，未扩大跨租户绕过范围。
+         *
+         * @param ownerTenantId 分享 owner 租户
+         */
+        private void assertOwnerTenant(Long ownerTenantId) {
+            assertEquals(ownerTenantId, TenantContext.getTenantId());
+            assertFalse(TenantContext.isIgnoreIsolation());
         }
     }
 

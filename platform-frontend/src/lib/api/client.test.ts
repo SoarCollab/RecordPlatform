@@ -320,6 +320,42 @@ describe("API Client", () => {
         expect(options.headers.get("Authorization")).toBeNull();
       });
 
+      it("should skip tenant header only when skipTenant is true", async () => {
+        const mockFetch = createMockFetch({});
+        const api = createApiClient({
+          baseUrl: "https://api.test.com",
+          fetch: mockFetch,
+          tenantId: "tenant-123",
+          getToken: () => "my-auth-token",
+        });
+
+        await api.get("/public-share", {
+          skipAuth: true,
+          skipTenant: true,
+        });
+
+        const [, options] = mockFetch.mock.calls[0];
+        expect(options.headers.get("Authorization")).toBeNull();
+        expect(options.headers.get("X-Tenant-ID")).toBeNull();
+      });
+
+      it("should remove a caller-provided tenant header when skipTenant is true", async () => {
+        const mockFetch = createMockFetch({});
+        const api = createApiClient({
+          baseUrl: "https://api.test.com",
+          fetch: mockFetch,
+          tenantId: "tenant-123",
+        });
+
+        await api.get("/public-share", {
+          skipTenant: true,
+          headers: { "x-tenant-id": "forged-tenant" },
+        });
+
+        const [, options] = mockFetch.mock.calls[0];
+        expect(options.headers.get("X-Tenant-ID")).toBeNull();
+      });
+
       it("should include tenant ID header", async () => {
         const mockFetch = createMockFetch({});
         const api = createApiClient({

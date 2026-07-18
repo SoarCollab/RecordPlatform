@@ -1,9 +1,14 @@
 package cn.flying.service.remote;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.constant.ResultEnum;
 import cn.flying.platformapi.external.BlockChainService;
 import cn.flying.platformapi.external.DistributedStorageService;
+import cn.flying.platformapi.request.CancelShareRequest;
 import cn.flying.platformapi.request.GetShareInfoRequest;
 import cn.flying.platformapi.request.GetAttestationBatchRequest;
 import cn.flying.platformapi.request.GetUserShareCodesRequest;
@@ -27,6 +32,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.lang.reflect.Method;
@@ -386,6 +392,66 @@ class FileRemoteClientTest {
 
         assertThat(result.getCode()).isEqualTo(ResultEnum.GET_USER_SHARE_FILE_ERROR.getCode());
         assertThat(result.getData()).isNull();
+    }
+
+    /**
+     * 验证公开分享查询与取消分享降级路径返回稳定错误且不泄露原始分享码。
+     */
+    @Test
+    void publicShareFallbacks_shouldReturnStableErrors() throws Exception {
+        String shareCode = "share-secret";
+        Method getSharedFilesFallback = FileRemoteClient.class.getDeclaredMethod(
+                "getSharedFilesFallback",
+                String.class,
+                Throwable.class
+        );
+        Method cancelShareFallback = FileRemoteClient.class.getDeclaredMethod(
+                "cancelShareFallback",
+                CancelShareRequest.class,
+                Throwable.class
+        );
+
+        assertThat(getSharedFilesFallback.getReturnType()).isEqualTo(Result.class);
+        assertThat(cancelShareFallback.getReturnType()).isEqualTo(Result.class);
+        Logger logger = (Logger) LoggerFactory.getLogger(FileRemoteClient.class);
+        Level previousLevel = logger.getLevel();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.setLevel(Level.ERROR);
+        logger.addAppender(appender);
+
+        Result<SharingVO> sharedFilesResult;
+        Result<Boolean> cancelShareResult;
+        try {
+            @SuppressWarnings("unchecked")
+            Result<SharingVO> sharedFilesFallback = (Result<SharingVO>) ReflectionTestUtils.invokeMethod(
+                    fileRemoteClient,
+                    "getSharedFilesFallback",
+                    shareCode,
+                    new RuntimeException("boom")
+            );
+            sharedFilesResult = sharedFilesFallback;
+            @SuppressWarnings("unchecked")
+            Result<Boolean> cancelFallback = (Result<Boolean>) ReflectionTestUtils.invokeMethod(
+                    fileRemoteClient,
+                    "cancelShareFallback",
+                    new CancelShareRequest(shareCode, "owner", "viewer"),
+                    new RuntimeException("boom")
+            );
+            cancelShareResult = cancelFallback;
+        } finally {
+            logger.detachAppender(appender);
+            logger.setLevel(previousLevel);
+            appender.stop();
+        }
+
+        assertThat(sharedFilesResult.getCode()).isEqualTo(ResultEnum.GET_USER_SHARE_FILE_ERROR.getCode());
+        assertThat(sharedFilesResult.getData()).isNull();
+        assertThat(cancelShareResult.getCode()).isEqualTo(ResultEnum.BLOCKCHAIN_ERROR.getCode());
+        assertThat(cancelShareResult.getData()).isFalse();
+        assertThat(appender.list)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .noneMatch(message -> message.contains(shareCode));
     }
 
     /**

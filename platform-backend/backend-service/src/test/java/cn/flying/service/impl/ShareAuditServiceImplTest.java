@@ -1,5 +1,9 @@
 package cn.flying.service.impl;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.tenant.TenantContext;
@@ -21,10 +25,10 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.*;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 
 import java.util.Date;
 import java.util.List;
-import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -63,18 +67,13 @@ class ShareAuditServiceImplTest {
 
     private MockedStatic<TenantContext> tenantContextMock;
 
-    @SuppressWarnings("unchecked")
     @BeforeEach
     void setUp() {
+        lenient().when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(TENANT_ID);
         tenantContextMock = mockStatic(TenantContext.class);
         tenantContextMock.when(TenantContext::getTenantId).thenReturn(TENANT_ID);
         tenantContextMock.when(TenantContext::requireTenantId).thenReturn(TENANT_ID);
-        tenantContextMock.when(() -> TenantContext.runWithoutIsolation(any(Supplier.class)))
-                .thenAnswer(inv -> {
-                    Supplier<?> supplier = inv.getArgument(0);
-                    return supplier.get();
-                });
-        tenantContextMock.when(() -> TenantContext.runWithTenant(anyLong(), any(Runnable.class)))
+        tenantContextMock.when(() -> TenantContext.runWithTenantIsolation(anyLong(), any(Runnable.class)))
                 .thenAnswer(inv -> {
                     Runnable runnable = inv.getArgument(1);
                     runnable.run();
@@ -99,7 +98,18 @@ class ShareAuditServiceImplTest {
 
             shareAuditService.logShareView(SHARE_CODE, USER_ID, IP_ADDRESS, USER_AGENT);
 
-            verify(shareAccessLogMapper).insert(any(ShareAccessLog.class));
+            ArgumentCaptor<ShareAccessLog> captor = ArgumentCaptor.forClass(ShareAccessLog.class);
+            verify(shareAccessLogMapper).insert(captor.capture());
+            ShareAccessLog inserted = captor.getValue();
+            assertEquals(TENANT_ID, inserted.getTenantId());
+            assertEquals(USER_ID, inserted.getShareOwnerId());
+            assertEquals(USER_ID, inserted.getActorUserId());
+            assertEquals(IP_ADDRESS, inserted.getActorIp());
+            assertEquals(USER_AGENT, inserted.getActorUa());
+            assertEquals(ShareAccessLog.ACTION_VIEW, inserted.getActionType());
+            verify(fileShareMapper).selectTenantIdByShareCodeGlobally(SHARE_CODE);
+            verify(fileShareMapper).selectByShareCode(SHARE_CODE);
+            tenantContextMock.verify(() -> TenantContext.runWithTenantIsolation(eq(TENANT_ID), any(Runnable.class)));
         }
 
         @Test
@@ -136,7 +146,15 @@ class ShareAuditServiceImplTest {
 
             shareAuditService.logShareDownload(SHARE_CODE, USER_ID, FILE_HASH, FILE_NAME, IP_ADDRESS);
 
-            verify(shareAccessLogMapper).insert(any(ShareAccessLog.class));
+            ArgumentCaptor<ShareAccessLog> captor = ArgumentCaptor.forClass(ShareAccessLog.class);
+            verify(shareAccessLogMapper).insert(captor.capture());
+            ShareAccessLog inserted = captor.getValue();
+            assertEquals(TENANT_ID, inserted.getTenantId());
+            assertEquals(USER_ID, inserted.getShareOwnerId());
+            assertEquals(FILE_HASH, inserted.getFileHash());
+            assertEquals(FILE_NAME, inserted.getFileName());
+            assertEquals(IP_ADDRESS, inserted.getActorIp());
+            assertEquals(ShareAccessLog.ACTION_DOWNLOAD, inserted.getActionType());
         }
 
         @Test
@@ -147,6 +165,43 @@ class ShareAuditServiceImplTest {
             shareAuditService.logShareDownload(SHARE_CODE, USER_ID, FILE_HASH, FILE_NAME, IP_ADDRESS);
 
             verify(shareAccessLogMapper, never()).insert(any(ShareAccessLog.class));
+        }
+
+        /**
+         * 验证成功和缺失分支的文本日志都不会泄露分享码或文件哈希。
+         */
+        @Test
+        @DisplayName("should not log raw share credentials")
+        void shouldNotLogRawShareCredentials() {
+            FileShare share = createFileShare();
+            when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(share);
+
+            Logger logger = (Logger) LoggerFactory.getLogger(ShareAuditServiceImpl.class);
+            Level previousLevel = logger.getLevel();
+            ListAppender<ILoggingEvent> appender = new ListAppender<>();
+            appender.start();
+            logger.setLevel(Level.DEBUG);
+            logger.addAppender(appender);
+            try {
+                shareAuditService.logShareDownload(
+                        SHARE_CODE,
+                        USER_ID,
+                        FILE_HASH,
+                        FILE_NAME,
+                        IP_ADDRESS);
+                when(fileShareMapper.selectTenantIdByShareCodeGlobally(SHARE_CODE)).thenReturn(null);
+                shareAuditService.logShareView(SHARE_CODE, USER_ID, IP_ADDRESS, USER_AGENT);
+            } finally {
+                logger.detachAppender(appender);
+                logger.setLevel(previousLevel);
+                appender.stop();
+            }
+
+            List<String> messages = appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .toList();
+            assertTrue(messages.stream().noneMatch(message -> message.contains(SHARE_CODE)));
+            assertTrue(messages.stream().noneMatch(message -> message.contains(FILE_HASH)));
         }
     }
 
@@ -174,6 +229,26 @@ class ShareAuditServiceImplTest {
 
             verify(shareAccessLogMapper, never()).insert(any(ShareAccessLog.class));
         }
+    }
+
+    /**
+     * 验证三类异步审计写入失败均被隔离，不能反向破坏公开分享主流程。
+     */
+    @Test
+    @DisplayName("should isolate persistence failures for every share audit action")
+    void shouldIsolatePersistenceFailuresForEveryShareAuditAction() {
+        when(fileShareMapper.selectByShareCode(SHARE_CODE)).thenReturn(createFileShare());
+        when(shareAccessLogMapper.insert(any(ShareAccessLog.class)))
+                .thenThrow(new IllegalStateException("audit unavailable"));
+
+        assertDoesNotThrow(() -> shareAuditService.logShareView(
+                SHARE_CODE, USER_ID, IP_ADDRESS, USER_AGENT));
+        assertDoesNotThrow(() -> shareAuditService.logShareDownload(
+                SHARE_CODE, USER_ID, FILE_HASH, FILE_NAME, IP_ADDRESS));
+        assertDoesNotThrow(() -> shareAuditService.logShareSave(
+                SHARE_CODE, USER_ID, FILE_HASH, FILE_NAME, IP_ADDRESS));
+
+        verify(shareAccessLogMapper, times(3)).insert(any(ShareAccessLog.class));
     }
 
     @Nested

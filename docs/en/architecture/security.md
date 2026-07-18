@@ -30,6 +30,19 @@ EventSource doesn't support custom headers, so SSE uses URL token:
 
 The `X-Tenant-ID` header, `x-tenant-id` query value, and legacy `tenantId` query value are untrusted namespace hints only. `TenantContext`, request audit attributes, and MDC identity are established only after Redis atomically consumes the token and its tenant matches the hint. Invalid, expired, replayed, damaged, mismatched, or Redis-failed handshakes create no emitter. Anonymous failures are audited under system tenant `0`, and raw one-time tokens are excluded from text logs and persisted request parameters.
 
+## Anonymous Public-Share Tenant Boundary
+
+Only these four exact routes are anonymous:
+
+- `GET /api/v1/shares/{shareCode}/info`
+- `GET /api/v1/shares/{shareCode}/files`
+- `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`
+- `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`
+
+They require neither JWT nor a tenant header. Caller-controlled `X-Tenant-ID` values are ignored rather than becoming an authoritative `TenantContext`. The service uses the matching `shareCode` metadata to resolve the owner tenant; only that share-metadata lookup crosses tenant isolation. File metadata, key envelopes, access-count changes, and share-access auditing then execute inside the owner tenant. Checks for public visibility, active/cancelled/expired or unknown state, supported share type, and file membership remain fail closed. The current model has no share-password field; password protection is outside this change.
+
+Anonymous system operation audit is always attributed to system tenant `0`. A `share_access_log` row is attributed to the resolved owner tenant, never to a caller header. System audit, share audit, and public-share rate limiting consume the same canonical trusted-client IP. Share creation/update/cancellation, saving shared files, and the authenticated share download/decrypt routes remain protected by Bearer authentication.
+
 ## Authorization (RBAC)
 
 ### Role Definitions
@@ -105,6 +118,10 @@ public Result<File> getFile(@PathVariable Long id) { ... }
 
 The public proof status and historical-key endpoints explicitly opt into a tenant-independent trusted-client-IP mode. They share `rate:limit:public:proof-verification:v2:ip:<canonical-ip>` at a fixed 120 requests per 60 seconds, even when a request carries a valid user/admin/monitor JWT. The key contains no tenant, user, endpoint method, or raw header; all other `@RateLimit` callers retain their legacy tenant, role, and forwarding-header behavior. By default the identity is the canonical direct socket peer and all forwarding headers are ignored. A numeric trusted-proxy allowlist is optional, empty by default, bounded to 4096 characters/64 ranges at startup, and parses one 1024-character/16-hop XFF chain right-to-left only after the immediate peer is trusted. Redis results other than `1`, including `null`, `0`, or dependency exceptions, never execute the controller.
 
+### Public Share Shared Bucket
+
+The public chunk and decrypt-info endpoints share `rate:limit:public:share-access:v2:ip:<canonical-ip>` at a fixed 30 requests per 60 seconds. The key contains no tenant, JWT role, endpoint method, or caller-supplied header value, so changing `X-Tenant-ID` or alternating between the two endpoints cannot split the bucket. The trusted-proxy boundary is the same one described above: forwarding headers are ignored unless the immediate peer matches the configured numeric allowlist. The first 30 combined requests may enter the controller; the current 31st request is denied through the existing response wrapper as HTTP 200 with business code `70005`. A Redis result other than `1`, including an exception, fails closed before the controller executes.
+
 ### Distributed Rate Limiter
 
 Redis Lua script-based sliding window:
@@ -115,7 +132,7 @@ RATE_LIMITED → Window exceeded
 BLOCKED → In block list
 ```
 
-**Generic utility fallback**: The reusable distributed limiter allows requests if Redis is unavailable. This fallback does not apply to the public proof annotation bucket, which fails closed.
+**Generic utility fallback**: The reusable distributed limiter allows requests if Redis is unavailable. This fallback does not apply to the public proof or public-share annotation buckets, which fail closed.
 
 ## ID Obfuscation
 

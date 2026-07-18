@@ -2,6 +2,7 @@ package cn.flying.filter;
 
 
 import cn.flying.common.util.Const;
+import cn.flying.common.util.SensitiveDataMasker;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -59,7 +60,7 @@ public class IdSecurityFilter extends OncePerRequestFilter {
                     request.setAttribute("resourceType", resourceType);
                     
                 } catch (NumberFormatException e) {
-                    log.warn("无效的ID格式: {}", request.getRequestURI());
+                    log.warn("无效的ID格式: {}", SensitiveDataMasker.maskSensitivePathSegments(requestURI));
                 }
             }
         }
@@ -78,4 +79,4 @@ public class IdSecurityFilter extends OncePerRequestFilter {
         // 仅处理GET请求并且是API路径
         return "GET".equals(method) && path.startsWith("/api/");
     }
-} 
+}
