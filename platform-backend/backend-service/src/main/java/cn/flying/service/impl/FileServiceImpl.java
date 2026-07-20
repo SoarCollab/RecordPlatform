@@ -72,6 +72,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -585,7 +586,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         String oldFileParam = file.getFileParam();
         String claimedFileParam = writeFinalizationClaim(sanitizedFileParam, claimed);
         try {
-            if (!casPreparedFileParam(file.getId(), userId, oldFileParam, claimedFileParam)
+            if (!casPreparedFileParam(file, userId, oldFileParam, claimedFileParam)
                     && !hasExactPreparedFileParam(
                         file.getId(), userId, claimedFileParam)) {
                 throw finalizationCasConflict(file.getId());
@@ -627,7 +628,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         String nextFileParam = writeFinalizationClaim(expected.fileParamSnapshot(), nextClaim);
         try {
             if (!casPreparedFileParam(
-                    file.getId(), userId, expected.fileParamSnapshot(), nextFileParam)
+                    file, userId, expected.fileParamSnapshot(), nextFileParam)
                     && !hasExactPreparedFileParam(file.getId(), userId, nextFileParam)) {
                 throw finalizationCasConflict(file.getId());
             }
@@ -757,13 +758,13 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         if (oldFileParam == null) {
             wrapper.isNull(File::getFileParam);
         } else {
-            wrapper.apply("BINARY file_param = BINARY {0}", oldFileParam);
+            wrapper.apply("HEX(file_param) = HEX({0})", oldFileParam);
         }
         return wrapper;
     }
 
     /**
-     * 原子替换 PREPARE 的 file_param，不改变文件业务终态。
+     * 先锁定版本组锚点，再原子替换 PREPARE 的 file_param，不改变文件业务终态。
      */
     private boolean casPreparedFileParam(
             Long fileId,
@@ -771,9 +772,31 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             String oldFileParam,
             String nextFileParam
     ) {
-        return this.update(
-                new File().setFileParam(nextFileParam),
-                preparedFileParamCasWrapper(fileId, userId, oldFileParam));
+        return casPreparedFileParam(
+                this.getById(fileId), userId, oldFileParam, nextFileParam);
+    }
+
+    /**
+     * 使用已校验的 PREPARE 快照锁定版本组锚点，并在同一短事务中执行 file_param CAS。
+     */
+    private boolean casPreparedFileParam(
+            File targetFile,
+            Long userId,
+            String oldFileParam,
+            String nextFileParam
+    ) {
+        if (targetFile == null || !Objects.equals(targetFile.getUid(), userId)) {
+            return false;
+        }
+        AtomicBoolean updated = new AtomicBoolean(false);
+        transactionTemplate.executeWithoutResult(status -> {
+            lockProofLifecycleVersionGroupBeforeFileMutation(targetFile);
+            updated.set(this.update(
+                    new File().setFileParam(nextFileParam),
+                    preparedFileParamCasWrapper(
+                            targetFile.getId(), userId, oldFileParam)));
+        });
+        return updated.get();
     }
 
     /**

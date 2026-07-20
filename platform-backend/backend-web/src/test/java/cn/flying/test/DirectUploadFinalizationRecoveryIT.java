@@ -100,7 +100,7 @@ class DirectUploadFinalizationRecoveryIT extends BaseIntegrationTest {
     @Resource
     private JdbcTemplate jdbcTemplate;
 
-    @Resource
+    @Resource(name = "stringRedisTemplate")
     private StringRedisTemplate redisTemplate;
 
     private final List<String> createdClientIds = new ArrayList<>();

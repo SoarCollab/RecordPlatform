@@ -446,21 +446,26 @@ public class FileSagaOrchestrator {
     }
 
     /**
-     * 重试单个 Saga 的补偿操作。
-     * 不使用外层事务，因为：
-     * 1. 外部调用（S3 存储删除）不受事务管理
-     * 2. 每个补偿步骤完成后使用独立事务 (REQUIRES_NEW) 持久化状态
-     * 3. 避免长事务导致的锁竞争和连接占用
+     * 将历史待补偿 Saga 失败关闭并发布死信，禁止删除可能被其他文件共享的内容寻址对象。
      */
     public void retryCompensation(FileSaga saga) {
         Timer.Sample timerSample = sagaMetrics.startCompensationTimer();
         log.info("开始重试 Saga 补偿: id={}, retryCount={}", saga.getId(), saga.getRetryCount());
         try {
+            if (!FileSagaStatus.PENDING_COMPENSATION.name().equals(saga.getStatus())) {
+                log.info("忽略非待补偿 Saga: id={}, status={}", saga.getId(), saga.getStatus());
+                return;
+            }
+            boolean retriesExhausted = saga.isMaxRetriesExceeded(maxCompensationRetries);
+            IllegalStateException closureReason = new IllegalStateException(retriesExhausted
+                    ? "历史补偿已达到重试上限，内容寻址对象保留等待人工处理"
+                    : "历史自动物理删除补偿已停用，内容寻址对象保留等待人工处理");
             FileSagaStatus terminalStatus = saga.reachedStep(FileSagaStep.CHAIN_STORING)
                     ? FileSagaStatus.MANUAL_RECONCILIATION
                     : FileSagaStatus.FAILED;
-            saga.markStatus(terminalStatus);
-            compensationHelper.updateSagaStatusInNewTransaction(saga);
+            saga.markStatus(terminalStatus).recordError(closureReason);
+            persistHistoricalCompensationClosure(saga, closureReason);
+            sagaMetrics.recordSagaFailed();
             log.warn("历史待补偿 Saga 已失败关闭且未删除共享对象: id={}, status={}",
                     saga.getId(), terminalStatus);
         } finally {
@@ -469,36 +474,31 @@ public class FileSagaOrchestrator {
     }
 
     /**
-     * 发布死信事件，用于补偿失败后的人工介入
+     * 原子持久化历史补偿终态与死信，写入失败时保留数据库待补偿状态供下轮重试。
      */
-    private void publishDeadLetterEvent(FileSaga saga, Exception error) {
+    private void persistHistoricalCompensationClosure(FileSaga saga, Exception error) {
         if (!deadLetterEnabled) {
-            log.warn("死信事件发布已禁用，跳过: sagaId={}", saga.getId());
+            compensationHelper.updateSagaStatusInNewTransaction(saga);
+            log.warn("死信事件发布已禁用，仅持久化 Saga 终态: sagaId={}", saga.getId());
             return;
         }
 
-        try {
-            Map<String, Object> deadLetterData = new HashMap<>();
-            deadLetterData.put("sagaId", saga.getId());
-            deadLetterData.put("requestId", saga.getRequestId());
-            deadLetterData.put("userId", saga.getUserId());
-            deadLetterData.put("fileName", saga.getFileName());
-            deadLetterData.put("currentStep", saga.getCurrentStep());
-            deadLetterData.put("retryCount", saga.getRetryCount());
-            deadLetterData.put("lastError", error != null ? error.getMessage() : "unknown");
-            deadLetterData.put("payload", saga.getPayload());
-            deadLetterData.put("failedAt", System.currentTimeMillis());
+        Map<String, Object> deadLetterData = new HashMap<>();
+        deadLetterData.put("sagaId", saga.getId());
+        deadLetterData.put("requestId", saga.getRequestId());
+        deadLetterData.put("userId", saga.getUserId());
+        deadLetterData.put("fileName", saga.getFileName());
+        deadLetterData.put("currentStep", saga.getCurrentStep());
+        deadLetterData.put("retryCount", saga.getRetryCount());
+        deadLetterData.put("lastError", error != null ? error.getMessage() : "unknown");
+        deadLetterData.put("payload", saga.getPayload());
+        deadLetterData.put("failedAt", System.currentTimeMillis());
 
-            // 使用 REQUIRES_NEW 事务发布事件，因为 retryCompensation() 没有事务上下文
-            compensationHelper.publishEventInNewTransaction(outboxService,
-                    "SAGA_DEAD_LETTER", saga.getId(), "saga.compensation.failed",
-                    JsonConverter.toJson(deadLetterData));
-
-            log.warn("已发布 Saga 死信事件: sagaId={}, requestId={}", saga.getId(), saga.getRequestId());
-        } catch (Exception e) {
-            // 死信事件发布失败不应影响主流程
-            log.error("发布死信事件失败: sagaId={}", saga.getId(), e);
-        }
+        compensationHelper.updateSagaStatusAndPublishEventInNewTransaction(
+                saga, outboxService, "SAGA_DEAD_LETTER", saga.getId(),
+                "saga.compensation.failed", JsonConverter.toJson(deadLetterData));
+        log.warn("已原子关闭 Saga 并发布死信: sagaId={}, requestId={}",
+                saga.getId(), saga.getRequestId());
     }
 
     @Setter

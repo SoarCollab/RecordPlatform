@@ -396,7 +396,13 @@ class FileSagaOrchestratorTest {
             orchestrator.retryCompensation(saga);
 
             assertEquals(FileSagaStatus.FAILED.name(), saga.getStatus());
-            verify(compensationHelper).updateSagaStatusInNewTransaction(saga);
+            assertEquals(2, saga.getRetryCount());
+            assertTrue(saga.getLastError().contains("自动物理删除补偿已停用"));
+            verify(compensationHelper).updateSagaStatusAndPublishEventInNewTransaction(
+                    eq(saga),
+                    eq(outboxService), eq("SAGA_DEAD_LETTER"), eq(1L),
+                    eq("saga.compensation.failed"), anyString());
+            verify(sagaMetrics).recordSagaFailed();
             verify(fileRemoteClient, never()).deleteStorageFile(anyMap());
         }
 
@@ -415,8 +421,56 @@ class FileSagaOrchestratorTest {
             orchestrator.retryCompensation(saga);
 
             assertEquals(FileSagaStatus.MANUAL_RECONCILIATION.name(), saga.getStatus());
-            verify(compensationHelper).updateSagaStatusInNewTransaction(saga);
+            assertEquals(2, saga.getRetryCount());
+            verify(compensationHelper).updateSagaStatusAndPublishEventInNewTransaction(
+                    eq(saga),
+                    eq(outboxService), eq("SAGA_DEAD_LETTER"), eq(1L),
+                    eq("saga.compensation.failed"), anyString());
+            verify(sagaMetrics).recordSagaFailed();
             verify(fileRemoteClient, never()).deleteStorageFile(anyMap());
+        }
+
+        /**
+         * 验证终态 Saga 的重复调度不会再次发布死信或修改持久状态。
+         */
+        @Test
+        void retryTerminalSagaShouldBeIdempotent() {
+            FileSaga saga = new FileSaga()
+                    .setId(1L)
+                    .setCurrentStep(FileSagaStep.S3_UPLOADED.name())
+                    .setStatus(FileSagaStatus.FAILED.name())
+                    .setRetryCount(2);
+
+            orchestrator.retryCompensation(saga);
+
+            assertEquals(2, saga.getRetryCount());
+            verifyNoInteractions(compensationHelper);
+            verify(sagaMetrics, never()).recordSagaFailed();
+            verify(fileRemoteClient, never()).deleteStorageFile(anyMap());
+        }
+
+        /**
+         * 验证显式禁用死信时仍能关闭历史 Saga，且不会伪造 Outbox 事件。
+         */
+        @Test
+        void retryWithDeadLetterDisabledShouldPersistTerminalStateOnly() {
+            ReflectionTestUtils.setField(orchestrator, "deadLetterEnabled", false);
+            FileSaga saga = new FileSaga()
+                    .setId(1L)
+                    .setCurrentStep(FileSagaStep.S3_UPLOADED.name())
+                    .setStatus(FileSagaStatus.PENDING_COMPENSATION.name())
+                    .setRetryCount(1);
+
+            try {
+                orchestrator.retryCompensation(saga);
+            } finally {
+                ReflectionTestUtils.setField(orchestrator, "deadLetterEnabled", true);
+            }
+
+            assertEquals(FileSagaStatus.FAILED.name(), saga.getStatus());
+            verify(compensationHelper).updateSagaStatusInNewTransaction(saga);
+            verify(compensationHelper, never()).updateSagaStatusAndPublishEventInNewTransaction(
+                    any(), any(), anyString(), anyLong(), anyString(), anyString());
         }
     }
 
