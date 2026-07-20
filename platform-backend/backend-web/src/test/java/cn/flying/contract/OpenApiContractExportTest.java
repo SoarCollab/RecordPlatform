@@ -315,6 +315,68 @@ class OpenApiContractExportTest {
         JsonNode integrityAlertSchema = rootNode.path("components").path("schemas").path("IntegrityAlertVO");
         assertThat(integrityAlertSchema.path("properties").has("severity")).isTrue();
         assertThat(integrityAlertSchema.path("properties").has("evidence")).isTrue();
+        JsonNode directCompletePartSchema = rootNode.path("components").path("schemas")
+                .path("DirectUploadCompletePartRequest");
+        assertThat(directCompletePartSchema.path("properties").has("eTag")).isTrue();
+        assertThat(directCompletePartSchema.path("properties").has("etag")).isFalse();
+        assertThat(directCompletePartSchema.path("properties").path("eTag")
+                .path("maxLength").asInt()).isEqualTo(255);
+        assertThat(directCompletePartSchema.path("properties").path("eTag")
+                .path("minLength").asInt()).isEqualTo(1);
+        assertThat(directCompletePartSchema.path("properties").path("eTag")
+                .path("pattern").asText()).isEqualTo("^[\\x21-\\x7E]{1,255}$");
+        assertRequiredFields(directCompletePartSchema, "index", "eTag");
+        JsonNode directCompletePartsSchema = rootNode.path("components").path("schemas")
+                .path("DirectUploadCompleteRequest").path("properties").path("parts");
+        assertThat(directCompletePartsSchema.path("minItems").asInt()).isEqualTo(1);
+        assertThat(directCompletePartsSchema.path("maxItems").asInt()).isEqualTo(10_000);
+        JsonNode directSessionPartsSchema = rootNode.path("components").path("schemas")
+                .path("DirectUploadSessionRequest").path("properties").path("parts");
+        assertThat(directSessionPartsSchema.path("minItems").asInt()).isEqualTo(1);
+        assertThat(directSessionPartsSchema.path("maxItems").asInt()).isEqualTo(10_000);
+        JsonNode directPartRequestSchema = rootNode.path("components").path("schemas")
+                .path("DirectUploadPartRequest");
+        JsonNode directPartProperties = directPartRequestSchema.path("properties");
+        assertThat(directPartProperties.path("plainHash").path("maxLength").asInt()).isEqualTo(71);
+        assertThat(directPartProperties.path("cipherHash").path("maxLength").asInt()).isEqualTo(71);
+        assertThat(directPartProperties.path("checksumAlgorithm").path("maxLength").asInt()).isEqualTo(16);
+        assertRequiredFields(
+                directPartRequestSchema, "index", "size", "plainHash", "cipherHash");
+        JsonNode directSessionRequestSchema = rootNode.path("components").path("schemas")
+                .path("DirectUploadSessionRequest");
+        assertRequiredFields(
+                directSessionRequestSchema,
+                "fileName",
+                "fileSize",
+                "contentType",
+                "chunkSize",
+                "totalChunks",
+                "parts");
+        assertRequiredFields(
+                rootNode.path("components").path("schemas").path("DirectUploadPartUrlVO"),
+                "index",
+                "size",
+                "uploadUrl",
+                "expiresAtEpochSeconds",
+                "storagePath",
+                "plainHash",
+                "cipherHash");
+        assertRequiredFields(
+                rootNode.path("components").path("schemas").path("DirectUploadSessionVO"),
+                "clientId",
+                "chunkSize",
+                "totalChunks",
+                "resumed",
+                "manifestSchemaId",
+                "parts");
+        assertRequiredFields(
+                rootNode.path("components").path("schemas").path("DirectUploadCompleteVO"),
+                "clientId",
+                "fileId",
+                "fileHash",
+                "transactionHash",
+                "manifestHash",
+                "status");
         JsonNode proofBundleSchema = rootNode.path("components").path("schemas").path("ProofBundleVO");
         assertRequiredFields(
                 proofBundleSchema,

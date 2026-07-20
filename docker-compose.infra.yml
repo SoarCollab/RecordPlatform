@@ -98,6 +98,7 @@ services:
     environment:
       - MINIO_ROOT_USER=${S3_ACCESS_KEY:?Set S3_ACCESS_KEY in .env}
       - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:?Set S3_SECRET_KEY in .env}
+      - MINIO_API_CORS_ALLOW_ORIGIN=${CORS_ALLOWED_ORIGINS:?Set CORS_ALLOWED_ORIGINS in .env}
     command: server /data --console-address ":9001"
     volumes:
       - minio_a_data:/data
@@ -118,6 +119,7 @@ services:
     environment:
       - MINIO_ROOT_USER=${S3_ACCESS_KEY:?Set S3_ACCESS_KEY in .env}
       - MINIO_ROOT_PASSWORD=${S3_SECRET_KEY:?Set S3_SECRET_KEY in .env}
+      - MINIO_API_CORS_ALLOW_ORIGIN=${CORS_ALLOWED_ORIGINS:?Set CORS_ALLOWED_ORIGINS in .env}
     command: server /data --console-address ":9001"
     volumes:
       - minio_b_data:/data

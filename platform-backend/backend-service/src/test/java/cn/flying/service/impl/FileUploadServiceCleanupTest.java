@@ -16,6 +16,7 @@ import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -24,6 +25,7 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -56,6 +58,9 @@ class FileUploadServiceCleanupTest {
 
     @Mock
     private RedissonClient redissonClient;
+
+    @Mock
+    private RLock finalizationLock;
 
     @InjectMocks
     private FileUploadServiceImpl fileUploadService;
@@ -91,6 +96,15 @@ class FileUploadServiceCleanupTest {
     void setUp() throws IOException {
         FileUploadStateTestBuilder.resetClientIdCounter();
         ReflectionTestUtils.setField(fileUploadService, "eventPublisher", eventPublisher);
+        lenient().when(redissonClient.getLock(anyString())).thenReturn(finalizationLock);
+        lenient().when(finalizationLock.tryLock()).thenReturn(true);
+        lenient().when(redisStateManager.executeWithSessionStateLock(anyString(), any()))
+                .thenAnswer(invocation -> {
+                    String clientId = invocation.getArgument(0);
+                    @SuppressWarnings("unchecked")
+                    Function<FileUploadState, Object> action = invocation.getArgument(1);
+                    return action.apply(redisStateManager.getState(clientId));
+                });
 
         // Create temp directories for testing
         uploadTempPath = tempDir.resolve("uploads").resolve(SUID).resolve(CLIENT_ID);
@@ -118,7 +132,7 @@ class FileUploadServiceCleanupTest {
         state.setSuid(SUID);
         state.setUploadTempPath(uploadTempPath.toString());
         state.setProcessedTempPath(processedTempPath.toString());
-        state.setCleanupRetryCount(0);
+        state.setCleanupRetryCount(null);
 
         when(redisStateManager.getState(CLIENT_ID)).thenReturn(state);
         doNothing().when(redisStateManager).removeSession(CLIENT_ID, SUID);
@@ -134,7 +148,7 @@ class FileUploadServiceCleanupTest {
 
         // Assert
         assertTrue(result, "Cleanup should succeed");
-        verify(redisStateManager, times(1)).getState(CLIENT_ID);
+        verify(redisStateManager, times(2)).getState(CLIENT_ID);
         verify(redisStateManager, times(1)).removeSession(CLIENT_ID, SUID);
         verify(redisStateManager, never()).updateState(any());
 
@@ -170,7 +184,7 @@ class FileUploadServiceCleanupTest {
 
         // Assert
         assertTrue(result, "Cleanup should succeed even without SUID");
-        verify(redisStateManager, times(1)).getState(CLIENT_ID);
+        verify(redisStateManager, times(2)).getState(CLIENT_ID);
         verify(redisStateManager, times(1)).removeSession(CLIENT_ID, SUID);
 
         // Verify directories are cleaned up
@@ -210,7 +224,7 @@ class FileUploadServiceCleanupTest {
 
     /**
      * Test 4: Cleanup exceeds max retries
-     * Verifies that cleanup forcefully removes Redis state after max retries
+     * Verifies that cleanup retains bounded manual-reconciliation evidence after max retries
      */
     @Test
     @DisplayName("testCleanupRetry_ExceedsMaxRetries - Force cleanup after max retries")
@@ -230,9 +244,11 @@ class FileUploadServiceCleanupTest {
         boolean result = invokeCleanupUploadSessionInternal(SUID, CLIENT_ID);
 
         // Assert
-        assertTrue(result, "Cleanup should succeed by forcing Redis cleanup");
-        verify(redisStateManager, times(1)).removeSession(CLIENT_ID, SUID);
+        assertFalse(result, "Cleanup should retain evidence after reaching max retries");
+        verify(redisStateManager, never()).removeSession(CLIENT_ID, SUID);
         verify(redisStateManager, never()).updateState(any());
+        verify(redisStateManager).retainManualReconciliationState(
+                eq(state), eq("cleanup_manual_required"), eq(7L * 24 * 60 * 60));
     }
 
     /**
@@ -261,13 +277,13 @@ class FileUploadServiceCleanupTest {
 
         // Assert
         assertTrue(result, "Cleanup should succeed with SUID fallback");
-        verify(redisStateManager, times(1)).getState(CLIENT_ID);
+        verify(redisStateManager, times(2)).getState(CLIENT_ID);
         verify(redisStateManager, times(1)).removeSession(CLIENT_ID, SUID);
     }
 
     /**
      * Test 6: Cleanup with null SUID and null persisted paths
-     * Verifies that cleanup skips filesystem cleanup but removes Redis state
+     * Verifies that unverifiable paths retain Redis evidence for retry
      */
     @Test
     @DisplayName("testCleanup_NullSuidAndNullPaths - Skips filesystem, clears Redis")
@@ -287,8 +303,9 @@ class FileUploadServiceCleanupTest {
         boolean result = invokeCleanupUploadSessionInternal("", CLIENT_ID);
 
         // Assert
-        assertTrue(result, "Cleanup should skip filesystem and only clear Redis");
-        verify(redisStateManager, times(1)).removeSession(CLIENT_ID, "");
+        assertFalse(result, "Cleanup must retain state when no verified path identity exists");
+        verify(redisStateManager, never()).removeSession(CLIENT_ID, "");
+        verify(redisStateManager).updateState(state);
     }
 
     /**
@@ -327,15 +344,15 @@ class FileUploadServiceCleanupTest {
     void testCleanup_StateNotFound() throws Exception {
         // Arrange
         when(redisStateManager.getState(CLIENT_ID)).thenReturn(null);
-        when(redisStateManager.removePausedSession(CLIENT_ID)).thenReturn(true);
 
         // Act
         boolean result = invokeCleanupUploadSessionInternal(SUID, CLIENT_ID);
 
         // Assert
         assertFalse(result, "Cleanup should return false when state not found");
-        verify(redisStateManager, times(1)).removePausedSession(CLIENT_ID);
-        verify(redisStateManager, never()).removeSession(anyString(), anyString());
+        verify(redisStateManager, never()).removeSession(eq(CLIENT_ID), anyString());
+        verify(redisStateManager).clearSessionIndexes(CLIENT_ID);
+        verify(redisStateManager, never()).removePausedSession(CLIENT_ID);
     }
 
     /**
@@ -394,7 +411,7 @@ class FileUploadServiceCleanupTest {
 
         // Assert
         assertTrue(result);
-        verify(redisStateManager, times(1)).getState(CLIENT_ID);
+        verify(redisStateManager, times(2)).getState(CLIENT_ID);
         verify(redisStateManager, times(1)).removeSession(CLIENT_ID, SUID);
 
         // Verify paths were used (directories should be deleted)

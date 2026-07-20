@@ -31,6 +31,13 @@ dubbo:
 
 # Storage 配置
 storage:
+  # 每个节点必须配置稳定的 physical-storage-id；同一底层存储的 DNS/端口别名必须复用同一值。
+  # 多副本直传只把不同 physical-storage-id 计入仲裁，缺失或重复时失败关闭。
+  # nodes:
+  #   - name: local-minio
+  #     endpoint: http://localhost:9000
+  #     physical-storage-id: minio-local
+
   # 活跃域名称列表（按优先级排序）
   # - 本地/开发环境：若未配置（且未配置 nodes/domains），服务仍可启动（用于占位/等待 Nacos 下发配置）
   # - 生产环境：若已配置 nodes/domains，则必须配置 active-domains
@@ -42,6 +49,20 @@ storage:
   # 格式：http://host:port（不带尾部斜杠）
   # 如果未配置，则使用各节点的 endpoint 配置
   # external-endpoint: http://10.1.0.2:9000
+
+  # 对象存储直传完成链路：固定缓冲流式校验/转发、分布式互斥和 staging 生命周期
+  direct-upload:
+    max-file-size-bytes: 4294967296       # 单文件最大 4 GiB
+    max-part-size-bytes: 104857600        # 单分片最大 100 MiB
+    stream-buffer-bytes: 65536            # 流式校验/跨端点转发缓冲区 64 KiB
+    transfer-timeout-seconds: 300         # 一组副本晋升的最长等待时间
+    lock-wait-seconds: 5                  # complete/abort 获取同一分片 watchdog 锁的等待时间
+    staging-retention-hours: 48           # 必须长于 24 小时预签名 URL 生命周期
+    cleanup-enabled: true
+    cleanup-interval-millis: 3600000      # 允许 60000～86400000ms；非正值回退 1 小时
+    cleanup-initial-delay-millis: 300000  # 允许 0～86400000ms；负值回退 5 分钟
+    cleanup-batch-size: 200               # 集群同时最多领取的生命周期记录数
+    cleanup-claim-lease-seconds: 600      # 集群批次 fencing 租约；批次预算会提前 30～60 秒退出
 
   # 副本策略配置 (v3.1.0 新增)
   replication:
@@ -57,6 +78,12 @@ storage:
     enabled: true                 # 是否允许降级写入
     min-replicas: 1               # 降级模式下的最小副本数
     track-for-sync: true          # 是否记录降级写入以便后续同步
+    max-sync-failures: 12         # 同一租户/对象/缺失域连续失败达到该次数后进入死信
+    sync-batch-size: 100          # 单实例每轮最多原子领取的恢复记录数（硬上限 1000）
+    claim-lease-seconds: 600      # 多实例互斥领取租约，过期后允许其他实例接管
+    repair-timeout-seconds: 120   # 单次立即修复（含重试、流传输、校验）的整体超时
+    retry-backoff-seconds: 60     # 修复失败后的基础指数退避秒数
+    max-retry-backoff-seconds: 3600 # 修复失败指数退避的最大秒数
 
   # 副本一致性修复配置
   consistency:

@@ -12,6 +12,12 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
@@ -42,6 +48,7 @@ class FaultDomainManagerTest {
         node.setFaultDomain(domain);
         node.setEnabled(enabled);
         node.setWeight(weight);
+        node.setPhysicalStorageId("physical-" + name);
         return node;
     }
 
@@ -168,6 +175,36 @@ class FaultDomainManagerTest {
             assertThat(targets).containsAnyOf("node-a1", "node-b1");
         }
 
+        /**
+         * 验证 Nacos 刷新把两个计划目标漂移到同一物理集群后，整份 placement 快照失败关闭。
+         */
+        @Test
+        @DisplayName("Duplicate physical storage after topology refresh should invalidate every planned target")
+        void shouldFailClosedAfterPhysicalStorageIdentityDrift() {
+            NodeConfig nodeA = createNode("node-a1", "domain-A", true, 100);
+            NodeConfig nodeB = createNode("node-b1", "domain-B", true, 100);
+            when(storageProperties.getNodes()).thenReturn(List.of(nodeA, nodeB));
+            manager.rebuildRings();
+
+            Map<String, String> healthySnapshot = manager.getPlannedTargetsSnapshot("physical-drift");
+            assertThat(healthySnapshot)
+                    .containsEntry("domain-A", "node-a1")
+                    .containsEntry("domain-B", "node-b1");
+            assertThat(manager.areNodesOnIndependentPhysicalStorage("node-a1", "node-b1"))
+                    .isTrue();
+
+            nodeB.setPhysicalStorageId(nodeA.getPhysicalStorageId());
+            manager.rebuildRings();
+
+            Map<String, String> driftedSnapshot = manager.getPlannedTargetsSnapshot("physical-drift");
+            assertThat(driftedSnapshot).containsOnlyKeys("domain-A", "domain-B");
+            assertThat(driftedSnapshot.values()).containsOnlyNulls();
+            assertThat(manager.getTargetNodeInDomain("physical-drift", "domain-A")).isNull();
+            assertThat(manager.getTargetNodeInDomain("physical-drift", "domain-B")).isNull();
+            assertThat(manager.areNodesOnIndependentPhysicalStorage("node-a1", "node-b1"))
+                    .isFalse();
+        }
+
         @Test
         @DisplayName("Should skip offline nodes and use fallback")
         void shouldSkipOfflineNodesAndUseFallback() {
@@ -187,6 +224,116 @@ class FaultDomainManagerTest {
             List<String> targets = manager.getTargetNodes("test-chunk-hash");
 
             assertThat(targets).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("Should plan factor two from three active domains while excluding read-only domains")
+        void shouldPlanWritableDomainsIndependentOfHealth() {
+            when(storageProperties.getNodes()).thenReturn(Arrays.asList(
+                    createNode("node-a1", "domain-A", true, 100),
+                    createNode("node-b1", "domain-B", true, 100),
+                    createNode("node-c1", "domain-C", true, 100)
+            ));
+            when(storageProperties.getDomains()).thenReturn(Arrays.asList(
+                    createDomainConfig("domain-A", true, 1),
+                    createDomainConfig("domain-B", false, 1),
+                    createDomainConfig("domain-C", true, 1)
+            ));
+            when(storageProperties.getActiveDomains())
+                    .thenReturn(Arrays.asList("domain-A", "domain-B", "domain-C"));
+            when(storageProperties.getEffectiveReplicationFactor()).thenReturn(2);
+            when(s3Monitor.isNodeOnline(anyString())).thenReturn(false);
+            manager.rebuildRings();
+
+            assertThat(manager.getPlannedTargetDomains("test-chunk-hash"))
+                    .containsExactly("domain-A", "domain-C");
+        }
+
+        @Test
+        @DisplayName("Should not replace an offline hash target with another node in the same domain")
+        void shouldNotFallbackForExactDomainPlacement() {
+            when(storageProperties.getNodes()).thenReturn(Arrays.asList(
+                    createNode("node-a1", "domain-A", true, 100),
+                    createNode("node-a2", "domain-A", true, 100)
+            ));
+            when(storageProperties.getDomains()).thenReturn(List.of(
+                    createDomainConfig("domain-A", true, 1)
+            ));
+            when(storageProperties.getActiveDomains()).thenReturn(List.of("domain-A"));
+            when(s3Monitor.isNodeOnline(anyString())).thenReturn(true);
+            manager.rebuildRings();
+
+            String exactTarget = manager.getPlannedTargetNodeInDomain("test-chunk-hash", "domain-A");
+            assertThat(exactTarget).isNotNull();
+            assertThat(manager.getTargetNodeInDomain("test-chunk-hash", "domain-A"))
+                    .isEqualTo(exactTarget);
+            when(s3Monitor.isNodeOnline(exactTarget)).thenReturn(false);
+
+            assertThat(manager.getPlannedTargetNodeInDomain("test-chunk-hash", "domain-A"))
+                    .isEqualTo(exactTarget);
+            assertThat(manager.getTargetNodeInDomain("test-chunk-hash", "domain-A")).isNull();
+        }
+
+        @Test
+        @DisplayName("Fallback write target should remain distinct from the exact planned target")
+        void shouldKeepFallbackDistinctFromExactPlannedTarget() {
+            when(storageProperties.getNodes()).thenReturn(Arrays.asList(
+                    createNode("node-a1", "domain-A", true, 100),
+                    createNode("node-a2", "domain-A", true, 100)
+            ));
+            when(storageProperties.getDomains()).thenReturn(List.of(
+                    createDomainConfig("domain-A", true, 1)
+            ));
+            when(storageProperties.getActiveDomains()).thenReturn(List.of("domain-A"));
+            when(storageProperties.getEffectiveReplicationFactor()).thenReturn(1);
+            when(s3Monitor.isNodeOnline(anyString())).thenReturn(true);
+            manager.rebuildRings();
+
+            String objectHash = "fallback-placement-hash";
+            String plannedTarget = manager.getPlannedTargetNodeInDomain(objectHash, "domain-A");
+            String fallbackNode = "node-a1".equals(plannedTarget) ? "node-a2" : "node-a1";
+            when(s3Monitor.isNodeOnline(plannedTarget)).thenReturn(false);
+            when(s3Monitor.isNodeOnline(fallbackNode)).thenReturn(true);
+
+            assertThat(manager.getTargetNodes(objectHash)).containsExactly(fallbackNode);
+            assertThat(manager.getPlannedTargetNodeInDomain(objectHash, "domain-A"))
+                    .isEqualTo(plannedTarget)
+                    .isNotEqualTo(fallbackNode);
+        }
+
+        @Test
+        @DisplayName("Should expose the new exact target after a same-domain ring change")
+        void shouldExposeSameDomainRingTargetChangeIndependentOfHealth() {
+            when(storageProperties.getNodes()).thenReturn(List.of(
+                    createNode("node-a1", "domain-A", true, 100)
+            ));
+            when(storageProperties.getDomains()).thenReturn(List.of(
+                    createDomainConfig("domain-A", true, 1)
+            ));
+            when(storageProperties.getActiveDomains()).thenReturn(List.of("domain-A"));
+            when(storageProperties.getEffectiveReplicationFactor()).thenReturn(1);
+            when(s3Monitor.isNodeOnline(anyString())).thenReturn(false);
+            manager.rebuildRings();
+
+            when(storageProperties.getNodes()).thenReturn(List.of(
+                    createNode("node-a1", "domain-A", true, 100),
+                    createNode("node-a2", "domain-A", true, 100)
+            ));
+            manager.rebuildRings();
+
+            String movedHash = null;
+            for (int index = 0; index < 10_000; index++) {
+                String candidate = "same-domain-move-" + index;
+                if ("node-a2".equals(manager.getPlannedTargetNodeInDomain(candidate, "domain-A"))) {
+                    movedHash = candidate;
+                    break;
+                }
+            }
+
+            assertThat(movedHash).isNotNull();
+            assertThat(manager.getPlannedTargetNodeInDomain(movedHash, "domain-A"))
+                    .isEqualTo("node-a2");
+            assertThat(manager.getTargetNodeInDomain(movedHash, "domain-A")).isNull();
         }
     }
 
@@ -409,6 +556,74 @@ class FaultDomainManagerTest {
             boolean result = manager.changeNodeDomain("node-a1", "domain-A");
 
             assertThat(result).isTrue();
+        }
+
+        /**
+         * 验证节点迁移不会修改已发布 ring，且 planned-target 读取只能观察迁移前或迁移后的完整拓扑。
+         */
+        @Test
+        @DisplayName("Should publish one immutable planned-target topology during concurrent domain move")
+        void shouldPublishConsistentSnapshotDuringConcurrentDomainMove() throws Exception {
+            NodeConfig movingNode = createNode("node-to-move", "domain-A", true, 100);
+            when(storageProperties.getNodes()).thenReturn(List.of(movingNode));
+            when(storageProperties.getDomains()).thenReturn(List.of(
+                    createDomainConfig("domain-A", true, 1),
+                    createDomainConfig("domain-B", true, 1)
+            ));
+            when(storageProperties.getActiveDomains()).thenReturn(List.of("domain-A", "domain-B"));
+            when(storageProperties.getEffectiveReplicationFactor()).thenReturn(2);
+            manager.rebuildRings();
+
+            Map<String, String> beforeMove = manager.getPlannedTargetsSnapshot("moving-object");
+            assertThat(beforeMove.get("domain-A")).isEqualTo("node-to-move");
+            assertThat(beforeMove).containsKey("domain-B");
+            assertThat(beforeMove.get("domain-B")).isNull();
+            assertThat(beforeMove.values().stream().filter("node-to-move"::equals)).hasSize(1);
+
+            CountDownLatch ringRebuildEntered = new CountDownLatch(1);
+            CountDownLatch releaseRingRebuild = new CountDownLatch(1);
+            AtomicBoolean blockNextRingBuild = new AtomicBoolean(true);
+            when(storageProperties.getVirtualNodesPerNode()).thenAnswer(invocation -> {
+                if (blockNextRingBuild.compareAndSet(true, false)) {
+                    ringRebuildEntered.countDown();
+                    if (!releaseRingRebuild.await(5, TimeUnit.SECONDS)) {
+                        throw new AssertionError("timed out waiting to release ring rebuild");
+                    }
+                }
+                return 150;
+            });
+
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+            try {
+                Future<Boolean> moveFuture = executor.submit(
+                        () -> manager.changeNodeDomain("node-to-move", "domain-B")
+                );
+                assertThat(ringRebuildEntered.await(5, TimeUnit.SECONDS)).isTrue();
+
+                // 迁移尚未发布时，无锁 reader 仍必须看到完整旧 ring。
+                assertThat(manager.getPlannedTargetNodeInDomain("moving-object", "domain-A"))
+                        .isEqualTo("node-to-move");
+
+                CountDownLatch snapshotStarted = new CountDownLatch(1);
+                Future<Map<String, String>> snapshotFuture = executor.submit(() -> {
+                    snapshotStarted.countDown();
+                    return manager.getPlannedTargetsSnapshot("moving-object");
+                });
+                assertThat(snapshotStarted.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(snapshotFuture).isNotDone();
+
+                releaseRingRebuild.countDown();
+                assertThat(moveFuture.get(5, TimeUnit.SECONDS)).isTrue();
+                Map<String, String> afterMove = snapshotFuture.get(5, TimeUnit.SECONDS);
+
+                assertThat(afterMove).containsKey("domain-A");
+                assertThat(afterMove.get("domain-A")).isNull();
+                assertThat(afterMove.get("domain-B")).isEqualTo("node-to-move");
+                assertThat(afterMove.values().stream().filter("node-to-move"::equals)).hasSize(1);
+            } finally {
+                releaseRingRebuild.countDown();
+                executor.shutdownNow();
+            }
         }
     }
 

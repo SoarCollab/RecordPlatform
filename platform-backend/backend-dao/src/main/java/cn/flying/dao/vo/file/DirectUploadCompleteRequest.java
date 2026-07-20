@@ -1,8 +1,10 @@
 package cn.flying.dao.vo.file;
 
+import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -18,7 +20,16 @@ import java.util.List;
 @Schema(description = "直传上传完成请求")
 public class DirectUploadCompleteRequest {
     @NotEmpty
+    @Size(min = 1, max = 10000)
     @Valid
-    @Schema(description = "分片完成元数据")
+    @ArraySchema(
+            arraySchema = @Schema(
+                    description = "分片完成元数据",
+                    requiredMode = Schema.RequiredMode.REQUIRED
+            ),
+            schema = @Schema(implementation = DirectUploadCompletePartRequest.class),
+            minItems = 1,
+            maxItems = 10000
+    )
     private List<DirectUploadCompletePartRequest> parts;
 }

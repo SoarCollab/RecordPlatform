@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
  *
  * <h3>缓存分类</h3>
  * <ul>
- *   <li><b>Query 缓存</b>：userFiles, fileDecryptInfo, fileAddress - 高命中率读操作</li>
+ *   <li><b>Query 缓存</b>：fileDecryptInfo, fileAddress - 高命中率读操作</li>
  *   <li><b>元数据缓存</b>：fileMeta, fileList - 文件元信息</li>
  * </ul>
  *
@@ -38,7 +38,6 @@ public class CacheConfiguration {
     /**
      * CQRS 读模型缓存名称
      */
-    public static final String CACHE_USER_FILES = "userFiles";
     public static final String CACHE_FILE_DECRYPT_INFO = "fileDecryptInfo";
     public static final String CACHE_FILE_ADDRESS = "fileAddress";
     public static final String CACHE_FILE_META = "fileMeta";
@@ -54,7 +53,6 @@ public class CacheConfiguration {
                 .recordStats());
         manager.setCacheNames(List.of(
                 // CQRS Query 缓存
-                CACHE_USER_FILES,
                 CACHE_FILE_DECRYPT_INFO,
                 CACHE_FILE_ADDRESS,
                 CACHE_TRANSACTION,

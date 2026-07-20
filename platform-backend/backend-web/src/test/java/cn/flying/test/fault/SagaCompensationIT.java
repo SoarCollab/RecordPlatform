@@ -21,7 +21,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.DefaultTransactionDefinition;
 
-import java.util.Date;
 import java.util.List;
 import java.util.UUID;
 
@@ -29,9 +28,9 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 
 /**
- * Saga 故障补偿集成测试。
- * 使用真实 MySQL（Testcontainers）验证 Saga 编排器在外部服务故障下的数据库状态转换，
- * 以及 REQUIRES_NEW 事务独立提交语义。
+ * Saga 故障与历史补偿失败关闭集成测试。
+ * 使用真实 MySQL（Testcontainers）验证 Saga 编排器不会删除共享内容寻址对象，
+ * 并验证终态、死信和 REQUIRES_NEW 独立提交语义。
  */
 class SagaCompensationIT extends FaultInjectionBaseIT {
 
@@ -50,10 +49,10 @@ class SagaCompensationIT extends FaultInjectionBaseIT {
     // ──────────────────────────── Test 1 ────────────────────────────
 
     /**
-     * S3 上传失败 → 补偿：文件状态变 FAIL，Saga 状态变 COMPENSATED，无 outbox 成功事件。
+     * S3 上传失败时 Saga 在链边界前失败关闭，不删除对象，也不越权回写文件业务状态。
      */
     @Test
-    void executeUpload_s3Fails_sagaCompensatedAndFileMarkedFail() throws Exception {
+    void executeUpload_s3Fails_sagaFailsClosedAndFileRemainsPrepare() throws Exception {
         File file = insertTestFile(TEST_USER_ID, FileUploadStatus.PREPARE.getCode());
         java.io.File tempFile = createTempFileWithContent("chunk-data");
         String requestId = UUID.randomUUID().toString();
@@ -81,23 +80,23 @@ class SagaCompensationIT extends FaultInjectionBaseIT {
         assertNotNull(saga, "Saga 应已持久化到 DB");
         trackSagaId(saga.getId());
 
-        // S3 未成功上传（未到达 S3_UPLOADED 步骤）→ 无需 S3 补偿 → 直接 COMPENSATED
-        assertEquals(FileSagaStatus.COMPENSATED.name(), saga.getStatus(),
-                "S3 失败时补偿应成功完成（无需删除 S3 数据）");
+        assertEquals(FileSagaStatus.FAILED.name(), saga.getStatus(),
+                "链边界前失败应持久化为 FAILED");
+        Mockito.verify(fileRemoteClient, Mockito.never()).deleteStorageFile(any());
 
-        // 文件应被标记为 FAIL
+        // Saga 编排器不直接越权修改文件表，调用方按自身 claim 状态决定后续处理。
         File updatedFile = fileMapper.selectById(file.getId());
-        assertEquals(FileUploadStatus.FAIL.getCode(), updatedFile.getStatus().intValue(),
-                "S3 失败后文件状态应为 FAIL");
+        assertEquals(FileUploadStatus.PREPARE.getCode(), updatedFile.getStatus().intValue(),
+                "Saga 失败关闭不应直接覆盖 PREPARE 文件状态");
     }
 
     // ──────────────────────────── Test 2 ────────────────────────────
 
     /**
-     * S3 成功 + 区块链失败 → S3 数据被补偿删除，Saga 最终 COMPENSATED。
+     * S3 成功后链响应失败时保留对象和现场，Saga 进入人工对账。
      */
     @Test
-    void executeUpload_s3SuccessChainFails_s3CompensatedAndSagaCompensated() throws Exception {
+    void executeUpload_s3SuccessChainFails_requiresManualReconciliationWithoutDelete() throws Exception {
         File file = insertTestFile(TEST_USER_ID, FileUploadStatus.PREPARE.getCode());
         java.io.File tempFile = createTempFileWithContent("chunk-data");
         String requestId = UUID.randomUUID().toString();
@@ -109,13 +108,8 @@ class SagaCompensationIT extends FaultInjectionBaseIT {
 
         // 区块链返回 null（ResultUtils.getData 会抛出异常）
         Mockito.lenient()
-                .when(fileRemoteClient.storeFileOnChain(any()))
+                .when(fileRemoteClient.storeFileOnChainOnce(any()))
                 .thenReturn(null);
-
-        // S3 补偿删除成功
-        Mockito.lenient()
-                .when(fileRemoteClient.deleteStorageFile(any()))
-                .thenReturn(Result.success(true));
 
         FileUploadCommand cmd = FileUploadCommand.builder()
                 .requestId(requestId)
@@ -134,27 +128,23 @@ class SagaCompensationIT extends FaultInjectionBaseIT {
         assertNotNull(saga);
         trackSagaId(saga.getId());
 
-        // S3 已上传 → 补偿删除 S3 → COMPENSATED
-        assertEquals(FileSagaStatus.COMPENSATED.name(), saga.getStatus(),
-                "区块链失败后 S3 数据应被补偿删除，Saga 应为 COMPENSATED");
+        assertEquals(FileSagaStatus.MANUAL_RECONCILIATION.name(), saga.getStatus(),
+                "越过链调用边界后必须保留现场并进入人工对账");
+        Mockito.verify(fileRemoteClient, Mockito.never()).deleteStorageFile(any());
 
-        // 验证 S3 删除被调用（补偿发生）
-        Mockito.verify(fileRemoteClient, Mockito.atLeastOnce()).deleteStorageFile(any());
-
-        // 验证 saga payload 包含 S3_DELETED 步骤
+        // payload 保留存储证据，且不能伪造已删除步骤。
         assertNotNull(saga.getPayload());
-        assertTrue(saga.getPayload().contains("S3_DELETED"),
-                "Payload 应记录 S3 补偿步骤已完成");
+        assertTrue(saga.getPayload().contains("storedObjects"));
+        assertFalse(saga.getPayload().contains("S3_DELETED"));
     }
 
     // ──────────────────────────── Test 3 ────────────────────────────
 
     /**
-     * PENDING_COMPENSATION Saga：第一次补偿失败（S3 不可用），第二次成功。
-     * 验证：retryCount 递增，最终状态 COMPENSATED。
+     * 未达到旧版重试上限的历史 PENDING_COMPENSATION 也必须失败关闭并发布死信。
      */
     @Test
-    void retryCompensation_persistsStateAcrossRetries() {
+    void retryCompensation_beforeRetryLimit_failsClosedWithoutDeletingSharedObject() {
         File file = insertTestFile(TEST_USER_ID, FileUploadStatus.PREPARE.getCode());
         String payloadJson = "{\"storedPaths\":{\"hash1\":\"path/to/file\"},\"compensatedSteps\":[]}";
         String requestId = UUID.randomUUID().toString();
@@ -162,33 +152,20 @@ class SagaCompensationIT extends FaultInjectionBaseIT {
         FileSaga saga = insertTestSaga(file.getId(), requestId,
                 FileSagaStatus.PENDING_COMPENSATION.name(),
                 FileSagaStep.S3_UPLOADED.name(), 1, payloadJson);
-        // 确保 isRetryDue() 返回 true
-        saga.setNextRetryAt(new Date(0));
-        sagaMapper.updateById(saga);
-
-        // 第一次调用：S3 删除失败；第二次：成功
-        Mockito.lenient()
-                .when(fileRemoteClient.deleteStorageFile(any()))
-                .thenThrow(new RuntimeException("S3 unavailable"))
-                .thenReturn(Result.success(true));
-
-        // ── 第一次补偿重试 ──
         orchestrator.retryCompensation(saga);
 
-        FileSaga afterFirst = sagaMapper.selectByRequestId(requestId, TEST_TENANT_ID);
-        assertNotNull(afterFirst);
-        assertEquals(FileSagaStatus.PENDING_COMPENSATION.name(), afterFirst.getStatus(),
-                "S3 删除失败后 Saga 应保持 PENDING_COMPENSATION");
-        assertEquals(2, afterFirst.getRetryCount().intValue(),
+        FileSaga updated = sagaMapper.selectByRequestId(requestId, TEST_TENANT_ID);
+        assertNotNull(updated);
+        assertEquals(FileSagaStatus.FAILED.name(), updated.getStatus(),
+                "历史物理删除补偿必须失败关闭");
+        assertEquals(2, updated.getRetryCount().intValue(),
                 "retryCount 应从 1 递增到 2");
+        assertTrue(updated.getLastError().contains("自动物理删除补偿已停用"));
+        Mockito.verify(fileRemoteClient, Mockito.never()).deleteStorageFile(any());
 
-        // ── 第二次补偿重试（使用从 DB 刷新的 saga）──
-        orchestrator.retryCompensation(afterFirst);
-
-        FileSaga afterSecond = sagaMapper.selectByRequestId(requestId, TEST_TENANT_ID);
-        assertNotNull(afterSecond);
-        assertEquals(FileSagaStatus.COMPENSATED.name(), afterSecond.getStatus(),
-                "第二次补偿成功后 Saga 应为 COMPENSATED");
+        OutboxEvent deadLetter = findDeadLetter(saga.getId());
+        assertNotNull(deadLetter, "失败关闭后应发布死信事件");
+        trackOutboxId(deadLetter.getId());
     }
 
     // ──────────────────────────── Test 4 ────────────────────────────
@@ -207,11 +184,6 @@ class SagaCompensationIT extends FaultInjectionBaseIT {
                 FileSagaStatus.PENDING_COMPENSATION.name(),
                 FileSagaStep.S3_UPLOADED.name(), 5, payloadJson);
 
-        // S3 删除始终失败
-        Mockito.lenient()
-                .when(fileRemoteClient.deleteStorageFile(any()))
-                .thenThrow(new RuntimeException("S3 permanently unavailable"));
-
         orchestrator.retryCompensation(saga);
 
         // Saga 应变 FAILED（超过最大重试）
@@ -221,14 +193,23 @@ class SagaCompensationIT extends FaultInjectionBaseIT {
                 "超过 maxRetries 后 Saga 应为 FAILED");
         assertEquals(6, updated.getRetryCount().intValue(),
                 "recordError 后 retryCount 应从 5 增到 6");
+        assertTrue(updated.getLastError().contains("达到重试上限"));
+        Mockito.verify(fileRemoteClient, Mockito.never()).deleteStorageFile(any());
 
         // outbox 表应有 saga.compensation.failed 死信事件
-        OutboxEvent deadLetter = outboxMapper.selectOne(
-                new LambdaQueryWrapper<OutboxEvent>()
-                        .eq(OutboxEvent::getEventType, "saga.compensation.failed")
-                        .eq(OutboxEvent::getAggregateId, saga.getId()));
+        OutboxEvent deadLetter = findDeadLetter(saga.getId());
         assertNotNull(deadLetter, "超过最大重试后应向 outbox 发布死信事件");
         trackOutboxId(deadLetter.getId());
+    }
+
+    /**
+     * 按 Saga 主键查询失败关闭时发布的死信事件。
+     */
+    private OutboxEvent findDeadLetter(Long sagaId) {
+        return outboxMapper.selectOne(
+                new LambdaQueryWrapper<OutboxEvent>()
+                        .eq(OutboxEvent::getEventType, "saga.compensation.failed")
+                        .eq(OutboxEvent::getAggregateId, sagaId));
     }
 
     // ──────────────────────────── Test 5 ────────────────────────────

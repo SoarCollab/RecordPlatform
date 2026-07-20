@@ -200,7 +200,7 @@ describe("upload store", () => {
     });
   });
 
-  it("轮询遇到 40006 会话清理时应标记 completed", async () => {
+  it("轮询遇到 40006 会话不存在或过期时不得标记 completed", async () => {
     mocks.getUploadProgress.mockRejectedValue(
       new MockApiError(40006, "session not found"),
     );
@@ -210,9 +210,113 @@ describe("upload store", () => {
 
     await vi.waitFor(() => {
       const task = upload.tasks.find((item) => item.id === id);
-      expect(task?.status).toBe("completed");
-      expect(task?.progress).toBe(100);
+      expect(task?.status).toBe("failed");
+      expect(task?.error).toBe("上传会话不存在或已过期，请重新上传");
     });
+  });
+
+  it("完成响应失败后应使用原 clientId 和 ETag 重试而不重复 PUT", async () => {
+    mocks.getUploadProgress.mockImplementation(() => new Promise(() => {}));
+    mocks.completeDirectUpload.mockRejectedValueOnce(
+      new Error("complete response lost"),
+    );
+
+    const upload = await loadUploadStore();
+    const id = await upload.addFile(createFile(1024));
+
+    await vi.waitFor(() => {
+      expect(findTask(upload, id)?.status).toBe("failed");
+      expect(findTask(upload, id)?.error).toBe("complete response lost");
+    });
+    const originalCompletion = mocks.completeDirectUpload.mock.calls[0];
+    expect(originalCompletion?.[0]).toBe("direct-client");
+    expect(originalCompletion?.[1]).toEqual({
+      parts: [{ index: 0, eTag: '"etag"' }],
+    });
+
+    mocks.startDirectUpload.mockClear();
+    mocks.uploadDirectPart.mockClear();
+    await upload.retryUpload(id);
+
+    expect(mocks.completeDirectUpload).toHaveBeenCalledTimes(2);
+    expect(mocks.completeDirectUpload).toHaveBeenLastCalledWith(
+      "direct-client",
+      originalCompletion?.[1],
+    );
+    expect(mocks.startDirectUpload).not.toHaveBeenCalled();
+    expect(mocks.uploadDirectPart).not.toHaveBeenCalled();
+    expect(mocks.abortDirectUpload).not.toHaveBeenCalled();
+    expect(findTask(upload, id)?.status).toBe("processing");
+  });
+
+  it("同会话完成重试确认会话已消失后才应清理并创建新会话", async () => {
+    mocks.getUploadProgress.mockImplementation(() => new Promise(() => {}));
+    mocks.completeDirectUpload
+      .mockRejectedValueOnce(new Error("complete response lost"))
+      .mockRejectedValueOnce(new MockApiError(40006, "session expired"));
+    mocks.abortDirectUpload.mockRejectedValueOnce(
+      new MockApiError(50001, "session already gone"),
+    );
+
+    const upload = await loadUploadStore();
+    const id = await upload.addFile(createFile(1024));
+
+    await vi.waitFor(() => expect(findTask(upload, id)?.status).toBe("failed"));
+
+    await upload.retryUpload(id);
+
+    expect(mocks.completeDirectUpload).toHaveBeenCalledTimes(3);
+    expect(mocks.completeDirectUpload).toHaveBeenNthCalledWith(
+      2,
+      "direct-client",
+      {
+        parts: [{ index: 0, eTag: '"etag"' }],
+      },
+    );
+    expect(mocks.abortDirectUpload).toHaveBeenCalledTimes(1);
+    expect(mocks.abortDirectUpload).toHaveBeenCalledWith("direct-client");
+    expect(mocks.startDirectUpload).toHaveBeenCalledTimes(2);
+    expect(mocks.uploadDirectPart).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * 验证旧会话清理出现普通失败时保留 clientId 与 ETag，禁止误启新会话或重复 PUT。
+   */
+  it("新会话重试清理失败时应保留原完成证据且停止后续上传", async () => {
+    mocks.getUploadProgress.mockImplementation(() => new Promise(() => {}));
+    mocks.completeDirectUpload
+      .mockRejectedValueOnce(new Error("complete response lost"))
+      .mockRejectedValueOnce(new MockApiError(40006, "session expired"));
+    mocks.abortDirectUpload.mockRejectedValueOnce(
+      new MockApiError(50000, "abort unavailable"),
+    );
+
+    const upload = await loadUploadStore();
+    const id = await upload.addFile(createFile(1024));
+
+    await vi.waitFor(() => expect(findTask(upload, id)?.status).toBe("failed"));
+    const originalTask = findMutableTask(upload, id);
+    expect(originalTask?.clientId).toBe("direct-client");
+    expect(originalTask?.directCompletedParts).toEqual([
+      { index: 0, eTag: '"etag"' },
+    ]);
+
+    mocks.startDirectUpload.mockClear();
+    mocks.uploadDirectPart.mockClear();
+    await upload.retryUpload(id);
+
+    const failedTask = findMutableTask(upload, id);
+    expect(failedTask?.status).toBe("failed");
+    expect(failedTask?.error).toBe("abort unavailable");
+    expect(failedTask?.clientId).toBe("direct-client");
+    expect(failedTask?.directCompletedParts).toEqual([
+      { index: 0, eTag: '"etag"' },
+    ]);
+    expect(mocks.completeDirectUpload).toHaveBeenCalledTimes(2);
+    expect(mocks.abortDirectUpload).toHaveBeenCalledTimes(1);
+    expect(mocks.abortDirectUpload).toHaveBeenCalledWith("direct-client");
+    expect(mocks.startDirectUpload).not.toHaveBeenCalled();
+    expect(mocks.uploadDirectPart).not.toHaveBeenCalled();
   });
 
   it("cancelUpload 应取消活动任务并调用后端取消接口", async () => {
@@ -244,12 +348,12 @@ describe("upload store", () => {
 
     await upload.pauseUpload(id);
     expect(upload.tasks.find((item) => item.id === id)?.status).toBe("paused");
-    expect(mocks.pauseUpload).not.toHaveBeenCalled();
+    expect(mocks.pauseUpload).toHaveBeenCalledWith("direct-client");
 
     deferred.resolve();
     await upload.resumeUpload(id);
 
-    expect(mocks.resumeUpload).not.toHaveBeenCalled();
+    expect(mocks.resumeUpload).toHaveBeenCalledWith("direct-client");
     await vi.waitFor(() =>
       expect(mocks.completeDirectUpload).toHaveBeenCalled(),
     );
@@ -258,6 +362,67 @@ describe("upload store", () => {
         upload.tasks.find((item) => item.id === id)?.status || "",
       ),
     ).toBe(true);
+  });
+
+  it("pauseUpload 后端失败时不应保留伪暂停状态", async () => {
+    const deferred = createDeferred<void>();
+    mocks.uploadDirectPart.mockImplementation(() => deferred.promise);
+    mocks.pauseUpload.mockRejectedValueOnce(new Error("pause unavailable"));
+
+    const upload = await loadUploadStore();
+    const id = await upload.addFile(createFile(1024));
+    await vi.waitFor(() => expect(mocks.uploadDirectPart).toHaveBeenCalled());
+
+    await expect(upload.pauseUpload(id)).rejects.toThrow("pause unavailable");
+
+    expect(findTask(upload, id)?.status).toBe("failed");
+    expect(findTask(upload, id)?.error).toBe("pause unavailable");
+    expect(mocks.pauseUpload).toHaveBeenCalledWith("direct-client");
+    deferred.resolve();
+  });
+
+  it("会话创建响应前暂停时应在任何直传 PUT 前同步后端暂停", async () => {
+    const session =
+      createDeferred<ReturnType<typeof createDirectSessionResponse>>();
+    mocks.startDirectUpload.mockImplementationOnce(() => session.promise);
+
+    const upload = await loadUploadStore();
+    const id = await upload.addFile(createFile(1024));
+    await vi.waitFor(() => expect(mocks.startDirectUpload).toHaveBeenCalled());
+
+    await upload.pauseUpload(id);
+    session.resolve(
+      createDirectSessionResponse(mocks.startDirectUpload.mock.calls[0][0]),
+    );
+
+    await vi.waitFor(() =>
+      expect(mocks.pauseUpload).toHaveBeenCalledWith("direct-client"),
+    );
+    expect(findTask(upload, id)?.status).toBe("paused");
+    expect(mocks.uploadDirectPart).not.toHaveBeenCalled();
+    expect(mocks.completeDirectUpload).not.toHaveBeenCalled();
+  });
+
+  it("会话创建响应前取消时应立即中止新建直传会话", async () => {
+    const session =
+      createDeferred<ReturnType<typeof createDirectSessionResponse>>();
+    mocks.startDirectUpload.mockImplementationOnce(() => session.promise);
+
+    const upload = await loadUploadStore();
+    const id = await upload.addFile(createFile(1024));
+    await vi.waitFor(() => expect(mocks.startDirectUpload).toHaveBeenCalled());
+
+    await upload.cancelUpload(id);
+    session.resolve(
+      createDirectSessionResponse(mocks.startDirectUpload.mock.calls[0][0]),
+    );
+
+    await vi.waitFor(() =>
+      expect(mocks.abortDirectUpload).toHaveBeenCalledWith("direct-client"),
+    );
+    expect(findTask(upload, id)?.status).toBe("cancelled");
+    expect(mocks.uploadDirectPart).not.toHaveBeenCalled();
+    expect(mocks.completeDirectUpload).not.toHaveBeenCalled();
   });
 
   it("resumeUpload 遇到过期直传 URL 时应标记 failed 并允许重试", async () => {
@@ -295,6 +460,7 @@ describe("upload store", () => {
     mocks.startDirectUpload.mockClear();
     await upload.retryUpload(id);
 
+    expect(mocks.abortDirectUpload).toHaveBeenCalledWith("direct-client");
     await vi.waitFor(() =>
       expect(mocks.startDirectUpload).toHaveBeenCalledTimes(1),
     );
@@ -499,15 +665,18 @@ describe("upload store extra branches", () => {
 
   it("direct PUT 与 abort 的异常分支应被覆盖", async () => {
     mocks.getUploadProgress.mockImplementation(() => new Promise(() => {}));
-    mocks.uploadDirectPart.mockRejectedValueOnce(new Error("put failed"));
+    mocks.uploadDirectPart.mockRejectedValueOnce(
+      new Error("对象存储未暴露 ETag"),
+    );
 
     const upload = await loadUploadStore();
     const id = await upload.addFile(createFile(1024));
 
     await vi.waitFor(() => {
       expect(findTask(upload, id)?.status).toBe("failed");
-      expect(findTask(upload, id)?.error).toBe("put failed");
+      expect(findTask(upload, id)?.error).toBe("对象存储未暴露 ETag");
     });
+    expect(mocks.completeDirectUpload).not.toHaveBeenCalled();
 
     const deferred = createDeferred<void>();
     mocks.uploadDirectPart.mockClear();

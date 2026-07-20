@@ -27,6 +27,7 @@ import cn.flying.platformapi.request.CancelShareRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.DirectMultipartCompletedPartVO;
 import cn.flying.platformapi.response.FileDetailVO;
+import cn.flying.service.FileService;
 import cn.flying.service.QuotaService;
 import cn.flying.service.ShareAuditService;
 import cn.flying.service.key.FileKeyEnvelopeService;
@@ -53,7 +54,6 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
-import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.TransactionStatus;
@@ -63,8 +63,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -105,9 +107,6 @@ class FileServiceTest {
 
     @Mock
     private CacheManager cacheManager;
-
-    @Mock
-    private Cache cache;
 
     @Mock
     private RedissonClient redissonClient;
@@ -155,7 +154,6 @@ class FileServiceTest {
     void setUp() {
         FileTestBuilder.resetIdCounter();
         ReflectionTestUtils.setField(fileService, "baseMapper", fileMapper);
-        when(cacheManager.getCache(anyString())).thenReturn(cache);
     }
 
     /**
@@ -1603,6 +1601,135 @@ class FileServiceTest {
                 "{\"contentHash\":\"" + CONTENT_HASH + "\"}";
 
         /**
+         * 验证同名直传会话只按稳定主键创建和复用 PREPARE，不执行按文件名取最新记录的查询。
+         */
+        @Test
+        void prepareStoreFileWithStableIdShouldIsolateSameNameSessionsAndRemainIdempotent() {
+            AtomicReference<File> firstInserted = new AtomicReference<>();
+            AtomicReference<File> secondInserted = new AtomicReference<>();
+            when(fileMapper.selectById(8101L)).thenAnswer(invocation -> firstInserted.get());
+            when(fileMapper.selectById(8102L)).thenAnswer(invocation -> secondInserted.get());
+            when(fileMapper.insert(any(File.class))).thenAnswer(invocation -> {
+                File inserted = invocation.getArgument(0);
+                if (Objects.equals(inserted.getId(), 8101L)) {
+                    firstInserted.set(inserted);
+                } else if (Objects.equals(inserted.getId(), 8102L)) {
+                    secondInserted.set(inserted);
+                }
+                return 1;
+            });
+
+            File first = fileService.prepareStoreFileWithStableId(
+                    USER_ID, null, 8101L, "same-name.pdf", 1024L);
+            File second = fileService.prepareStoreFileWithStableId(
+                    USER_ID, null, 8102L, "same-name.pdf", 1024L);
+            File firstRetry = fileService.prepareStoreFileWithStableId(
+                    USER_ID, null, 8101L, "same-name.pdf", 1024L);
+
+            assertEquals(8101L, first.getId());
+            assertEquals(8102L, second.getId());
+            assertSame(first, firstRetry);
+            assertEquals("same-name.pdf", first.getFileName());
+            assertEquals("same-name.pdf", second.getFileName());
+            verify(fileMapper, times(2)).insert(any(File.class));
+            verify(fileMapper, never()).selectOne(any(), anyBoolean());
+        }
+
+        /**
+         * 验证兼容预存储入口生成稳定主键，并在数据库创建失败时保持失败关闭。
+         */
+        @Test
+        void prepareStoreFileShouldGenerateStableIdAndRejectFailedInsert() {
+            when(fileMapper.insert(any(File.class))).thenReturn(1, 0);
+            try (MockedStatic<IdUtils> idUtils = mockStatic(IdUtils.class)) {
+                idUtils.when(IdUtils::nextEntityId).thenReturn(8201L, 8202L);
+
+                assertDoesNotThrow(() -> fileService.prepareStoreFile(
+                        USER_ID, null, "generated.txt", 2048L));
+                GeneralException failed = assertThrows(
+                        GeneralException.class,
+                        () -> fileService.prepareStoreFile(
+                                USER_ID, null, "failed.txt", 4096L));
+
+                assertEquals(ResultEnum.FAIL, failed.getResultEnum());
+            }
+            ArgumentCaptor<File> inserted = ArgumentCaptor.forClass(File.class);
+            verify(fileMapper, times(2)).insert(inserted.capture());
+            assertEquals(List.of(8201L, 8202L), inserted.getAllValues().stream()
+                    .map(File::getId)
+                    .toList());
+            assertTrue(inserted.getAllValues().getFirst().getFileParam().contains("2048"));
+        }
+
+        /**
+         * 验证稳定 PREPARE 主键、目标版本及既有快照的所有边界均严格校验。
+         */
+        @Test
+        void prepareStoreFileWithStableIdShouldRejectInvalidOrConflictingSnapshots() {
+            assertEquals(ResultEnum.PARAM_IS_INVALID, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.prepareStoreFileWithStableId(
+                            USER_ID, null, null, "invalid.txt", 1L)).getResultEnum());
+            assertEquals(ResultEnum.PARAM_IS_INVALID, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.prepareStoreFileWithStableId(
+                            USER_ID, null, 0L, "invalid.txt", 1L)).getResultEnum());
+            assertEquals(ResultEnum.PARAM_IS_INVALID, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.prepareStoreFileWithStableId(
+                            USER_ID, 8301L, 8302L, "invalid.txt", 1L)).getResultEnum());
+            assertEquals(ResultEnum.FILE_NOT_EXIST, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.prepareStoreFileWithStableId(
+                            USER_ID, 8303L, 8303L, "missing.txt", 1L)).getResultEnum());
+
+            File foreign = prepareSnapshot(8311L, OTHER_USER_ID, "same.txt", 1L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode());
+            File completed = prepareSnapshot(8312L, USER_ID, "same.txt", 1L,
+                    cn.flying.common.constant.FileUploadStatus.SUCCESS.getCode());
+            File wrongName = prepareSnapshot(8313L, USER_ID, "other.txt", 1L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode());
+            File wrongSize = prepareSnapshot(8314L, USER_ID, "same.txt", 2L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode());
+            when(fileMapper.selectById(8311L)).thenReturn(foreign);
+            when(fileMapper.selectById(8312L)).thenReturn(completed);
+            when(fileMapper.selectById(8313L)).thenReturn(wrongName);
+            when(fileMapper.selectById(8314L)).thenReturn(wrongSize);
+
+            assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.prepareStoreFileWithStableId(
+                            USER_ID, null, 8311L, "same.txt", 1L)).getResultEnum());
+            assertEquals(ResultEnum.VERSION_SOURCE_INVALID, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.prepareStoreFileWithStableId(
+                            USER_ID, null, 8312L, "same.txt", 1L)).getResultEnum());
+            assertEquals(ResultEnum.PARAM_ERROR, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.prepareStoreFileWithStableId(
+                            USER_ID, null, 8313L, "same.txt", 1L)).getResultEnum());
+            assertEquals(ResultEnum.PARAM_ERROR, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.prepareStoreFileWithStableId(
+                            USER_ID, null, 8314L, "same.txt", 1L)).getResultEnum());
+        }
+
+        /**
+         * 构造稳定 PREPARE 快照，便于覆盖所有权、状态、名称和大小校验。
+         */
+        private File prepareSnapshot(Long id, Long userId, String fileName, Long fileSize, Integer status) {
+            return new File()
+                    .setId(id)
+                    .setTenantId(2L)
+                    .setUid(userId)
+                    .setFileName(fileName)
+                    .setFileSize(fileSize)
+                    .setVersion(1)
+                    .setVersionGroupId(id)
+                    .setStatus(status);
+        }
+
+        /**
          * 初始化普通上传和直传共享的 PREPARE 记录、事务回调与脱敏文件参数。
          *
          * @return 可推进为 SUCCESS 的首版本文件
@@ -1613,6 +1740,7 @@ class FileServiceTest {
                     .setTenantId(2L)
                     .setUid(USER_ID)
                     .setFileName("stored.txt")
+                    .setFileSize(1024L)
                     .setVersion(1)
                     .setVersionGroupId(7001L)
                     .setStatus(cn.flying.common.constant.FileUploadStatus.PREPARE.getCode());
@@ -1634,8 +1762,17 @@ class FileServiceTest {
         @Test
         void storeFileShouldPersistTrustedContentHashAndTransactionResult() {
             File existing = prepareStoreFixture();
-            when(sagaOrchestrator.executeUpload(any()))
-                    .thenReturn(FileUploadResult.success("tx-normal", "file-hash-normal"));
+            when(sagaOrchestrator.executeUpload(any(), any(), any()))
+                    .thenAnswer(invocation -> {
+                        Runnable beforeChain = invocation.getArgument(1);
+                        Consumer<StoreFileResponse> afterChain = invocation.getArgument(2);
+                        StoreFileResponse chainResult =
+                                new StoreFileResponse("tx-normal", "file-hash-normal");
+                        beforeChain.run();
+                        afterChain.accept(chainResult);
+                        return FileUploadResult.success(
+                                chainResult.transactionHash(), chainResult.fileHash());
+                    });
 
             File actual = fileService.storeFile(
                     USER_ID,
@@ -1646,12 +1783,27 @@ class FileServiceTest {
                     "raw-file-param");
 
             assertEquals(CONTENT_HASH, actual.getContentHash());
+            assertEquals(1024L, actual.getFileSize());
             assertEquals("file-hash-normal", actual.getFileHash());
             assertEquals("tx-normal", actual.getTransactionHash());
             assertEquals(cn.flying.common.constant.FileUploadStatus.SUCCESS.getCode(), actual.getStatus());
             verify(fileKeyEnvelopeService).saveOwnerEnvelope(
                     eq(existing), eq("file-hash-normal"), eq(USER_ID), any(FileParamEnvelopeResult.class));
-            verify(fileMapper).update(any(File.class), any());
+            ArgumentCaptor<File> updates = ArgumentCaptor.forClass(File.class);
+            verify(fileMapper, times(4)).update(updates.capture(), any());
+            File successUpdate = updates.getAllValues().stream()
+                    .filter(update -> Objects.equals(
+                            update.getStatus(),
+                            cn.flying.common.constant.FileUploadStatus.SUCCESS.getCode()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(SANITIZED_FILE_PARAM, successUpdate.getFileParam());
+            assertFalse(successUpdate.getFileParam().contains("_finalizationClaim"));
+            ArgumentCaptor<cn.flying.service.saga.FileUploadCommand> commandCaptor =
+                    ArgumentCaptor.forClass(cn.flying.service.saga.FileUploadCommand.class);
+            verify(sagaOrchestrator).executeUpload(
+                    commandCaptor.capture(), any(Runnable.class), any(Consumer.class));
+            assertFalse(commandCaptor.getValue().getFileParam().contains("_finalizationClaim"));
         }
 
         /**
@@ -1668,7 +1820,7 @@ class FileServiceTest {
                     "sha256:plain",
                     "sha256:cipher",
                     "SHA-256");
-            when(fileRemoteClient.storeFileOnChain(any()))
+            when(fileRemoteClient.storeFileOnChainOnce(any()))
                     .thenReturn(Result.success(new StoreFileResponse("tx-direct", "file-hash-direct")));
 
             File actual = fileService.storeDirectUploadedFile(
@@ -1686,7 +1838,607 @@ class FileServiceTest {
             assertEquals(cn.flying.common.constant.FileUploadStatus.SUCCESS.getCode(), actual.getStatus());
             verify(fileKeyEnvelopeService).saveOwnerEnvelope(
                     eq(existing), eq("file-hash-direct"), eq(USER_ID), any(FileParamEnvelopeResult.class));
-            verify(fileMapper).update(any(File.class), any());
+            ArgumentCaptor<File> updates = ArgumentCaptor.forClass(File.class);
+            verify(fileMapper, times(4)).update(updates.capture(), any());
+            File successUpdate = updates.getAllValues().stream()
+                    .filter(update -> Objects.equals(
+                            update.getStatus(),
+                            cn.flying.common.constant.FileUploadStatus.SUCCESS.getCode()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(SANITIZED_FILE_PARAM, successUpdate.getFileParam());
+            assertFalse(successUpdate.getFileParam().contains("_finalizationClaim"));
+            ArgumentCaptor<cn.flying.platformapi.request.StoreFileRequest> requestCaptor =
+                    ArgumentCaptor.forClass(cn.flying.platformapi.request.StoreFileRequest.class);
+            verify(fileRemoteClient).storeFileOnChainOnce(requestCaptor.capture());
+            assertFalse(requestCaptor.getValue().param().contains("_finalizationClaim"));
+        }
+
+        /**
+         * 验证普通上传对空分片、哈希数量漂移、空分片与 Saga 失败结果全部失败关闭。
+         */
+        @Test
+        void storeFileShouldRejectMalformedInputsAndSagaFailures() {
+            GeneralException emptyParts = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.storeFile(
+                            USER_ID, 7001L, "stored.txt", List.of(), List.of(), "raw-file-param"));
+            assertEquals(ResultEnum.PARAM_ERROR, emptyParts.getResultEnum());
+
+            File existing = prepareStoreFixture();
+            GeneralException hashCountMismatch = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.storeFile(
+                            USER_ID, existing.getId(), existing.getFileName(),
+                            List.of(new java.io.File("chunk-0")), List.of(), "raw-file-param"));
+            assertEquals(ResultEnum.FILE_UPLOAD_ERROR, hashCountMismatch.getResultEnum());
+
+            GeneralException nullPart = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.storeFile(
+                            USER_ID, existing.getId(), existing.getFileName(),
+                            java.util.Arrays.asList((java.io.File) null), List.of("hash"),
+                            "raw-file-param"));
+            assertEquals(ResultEnum.FILE_UPLOAD_ERROR, nullPart.getResultEnum());
+
+            when(sagaOrchestrator.executeUpload(any(), any(), any())).thenReturn(
+                    FileUploadResult.failure("saga failed"),
+                    FileUploadResult.failure(null),
+                    FileUploadResult.success("", ""),
+                    FileUploadResult.success("tx-without-durable-claim", "file-without-durable-claim"));
+
+            GeneralException sagaFailure = assertThrows(
+                    GeneralException.class,
+                    () -> invokeLegacyStoreWithCleanClaim(existing));
+            assertEquals(ResultEnum.FAIL, sagaFailure.getResultEnum());
+            assertEquals("saga failed", sagaFailure.getData());
+
+            existing.setFileParam(null);
+            GeneralException fallbackFailure = assertThrows(
+                    GeneralException.class,
+                    () -> invokeLegacyStoreWithCleanClaim(existing));
+            assertEquals(ResultEnum.FAIL, fallbackFailure.getResultEnum());
+
+            existing.setFileParam(null);
+            GeneralException invalidChain = assertThrows(
+                    GeneralException.class,
+                    () -> invokeLegacyStoreWithCleanClaim(existing));
+            assertEquals(ResultEnum.BLOCKCHAIN_ERROR, invalidChain.getResultEnum());
+
+            existing.setFileParam(null);
+            GeneralException missingDurableAttestation = assertThrows(
+                    GeneralException.class,
+                    () -> invokeLegacyStoreWithCleanClaim(existing));
+            assertEquals(ResultEnum.FILE_RECORD_ERROR, missingDurableAttestation.getResultEnum());
+        }
+
+        /**
+         * 验证普通上传在 CLAIMED、ATTESTING 与 ATTESTED durable 阶段分别阻断抢占、要求对账和安全恢复。
+         */
+        @Test
+        void storeFileShouldHonorEveryDurableClaimRecoveryPhase() {
+            File existing = prepareStoreFixture();
+            when(sagaOrchestrator.executeUpload(any(), any(), any()))
+                    .thenAnswer(invocation -> FileUploadResult.failure("before chain"))
+                    .thenAnswer(invocation -> {
+                        Runnable beforeChain = invocation.getArgument(1);
+                        beforeChain.run();
+                        return FileUploadResult.failure("chain response unknown");
+                    })
+                    .thenAnswer(invocation -> {
+                        Runnable beforeChain = invocation.getArgument(1);
+                        Consumer<StoreFileResponse> afterChain = invocation.getArgument(2);
+                        beforeChain.run();
+                        afterChain.accept(new StoreFileResponse("tx-durable", "file-durable"));
+                        return FileUploadResult.failure("local response lost");
+                    });
+
+            assertThrows(GeneralException.class, () -> invokeLegacyStoreWithCleanClaim(existing));
+            assertThrows(cn.flying.common.exception.RetryableException.class, () -> fileService.storeFile(
+                    USER_ID,
+                    existing.getId(),
+                    existing.getFileName(),
+                    List.of(new java.io.File("chunk-0")),
+                    List.of("chunk-hash-0"),
+                    "raw-file-param",
+                    "another-owner"));
+
+            existing.setFileParam(null);
+            assertThrows(GeneralException.class, () -> invokeLegacyStoreWithCleanClaim(existing));
+            GeneralException manualReconciliation = assertThrows(
+                    GeneralException.class,
+                    () -> invokeLegacyStoreWithCleanClaim(existing));
+            assertEquals(ResultEnum.BLOCKCHAIN_ERROR, manualReconciliation.getResultEnum());
+
+            existing.setFileParam(null);
+            assertThrows(GeneralException.class, () -> invokeLegacyStoreWithCleanClaim(existing));
+            File recovered = invokeLegacyStoreWithCleanClaim(existing);
+
+            assertEquals("tx-durable", recovered.getTransactionHash());
+            assertEquals("file-durable", recovered.getFileHash());
+            verify(sagaOrchestrator, times(3)).executeUpload(any(), any(), any());
+        }
+
+        /**
+         * 使用固定输入调用普通上传，确保每次失败分支都从干净 PREPARE claim 开始。
+         */
+        private File invokeLegacyStoreWithCleanClaim(File existing) {
+            return fileService.storeFile(
+                    USER_ID,
+                    existing.getId(),
+                    existing.getFileName(),
+                    List.of(new java.io.File("chunk-0")),
+                    List.of("chunk-hash-0"),
+                    "raw-file-param",
+                    "legacy-owner");
+        }
+
+        /**
+         * 验证直传登记拒绝缺失会话、空分片、空分片元素及无效链结果。
+         */
+        @Test
+        void attestDirectUploadedFileShouldRejectMalformedInputsAndChainResult() {
+            assertEquals(ResultEnum.PARAM_ERROR, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.attestDirectUploadedFile(
+                            USER_ID, 7001L, "stored.txt", List.of(), "raw-file-param"))
+                    .getResultEnum());
+            DirectMultipartCompletedPartVO validPart = completedPart();
+            assertEquals(ResultEnum.PARAM_IS_INVALID, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.attestDirectUploadedFile(
+                            USER_ID, null, "stored.txt", List.of(validPart), "raw-file-param"))
+                    .getResultEnum());
+
+            File existing = prepareStoreFixture();
+            assertEquals(ResultEnum.PARAM_ERROR, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.attestDirectUploadedFile(
+                            USER_ID, existing.getId(), existing.getFileName(),
+                            java.util.Arrays.asList((DirectMultipartCompletedPartVO) null),
+                            "raw-file-param", "direct-owner"))
+                    .getResultEnum());
+
+            when(fileRemoteClient.storeFileOnChainOnce(any())).thenReturn(Result.success(null));
+            GeneralException invalidChain = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.attestDirectUploadedFile(
+                            USER_ID, existing.getId(), existing.getFileName(),
+                            List.of(validPart), "raw-file-param", "direct-owner"));
+            assertEquals(ResultEnum.BLOCKCHAIN_ERROR, invalidChain.getResultEnum());
+        }
+
+        /**
+         * 构造规范的直传完成分片。
+         */
+        private DirectMultipartCompletedPartVO completedPart() {
+            return new DirectMultipartCompletedPartVO(
+                    0,
+                    "s3://node-a/final-0",
+                    6L,
+                    "\"etag-0\"",
+                    "sha256:plain",
+                    "sha256:cipher",
+                    "SHA-256");
+        }
+
+        /**
+         * 验证已持久化 SUCCESS 只在链标识、内容摘要和大小全部一致时幂等返回。
+         */
+        @Test
+        void persistDirectUploadedFileShouldStrictlyValidateExistingSuccess() {
+            StoreFileResponse expected = new StoreFileResponse("tx-direct", "file-hash-direct");
+            when(fileKeyEnvelopeService.prepareFileParam(anyString()))
+                    .thenReturn(FileParamEnvelopeResult.withoutEnvelope(SANITIZED_FILE_PARAM));
+            File valid = successfulDirectFile("file-hash-direct", "tx-direct", CONTENT_HASH, 6L);
+            File wrongHash = successfulDirectFile("other", "tx-direct", CONTENT_HASH, 6L);
+            File wrongTransaction = successfulDirectFile("file-hash-direct", "other", CONTENT_HASH, 6L);
+            File wrongContent = successfulDirectFile("file-hash-direct", "tx-direct", "sha256:bbbb", 6L);
+            File missingSize = successfulDirectFile("file-hash-direct", "tx-direct", CONTENT_HASH, null);
+            File zeroSize = successfulDirectFile("file-hash-direct", "tx-direct", CONTENT_HASH, 0L);
+            File wrongSize = successfulDirectFile("file-hash-direct", "tx-direct", CONTENT_HASH, 7L);
+            when(fileMapper.selectOne(any(), anyBoolean())).thenReturn(
+                    valid,
+                    wrongHash,
+                    wrongTransaction,
+                    wrongContent,
+                    valid,
+                    missingSize,
+                    zeroSize,
+                    wrongSize);
+
+            File recovered = fileService.persistDirectUploadedFile(
+                    USER_ID, 7001L, "stored.txt", 6L,
+                    "raw-file-param", expected, "direct-owner");
+            assertSame(valid, recovered);
+
+            assertPersistedDirectMismatch(expected, 6L);
+            assertPersistedDirectMismatch(expected, 6L);
+            assertPersistedDirectMismatch(expected, 6L);
+            assertPersistedDirectMismatch(expected, 0L);
+            assertPersistedDirectMismatch(expected, 6L);
+            assertPersistedDirectMismatch(expected, 6L);
+            assertPersistedDirectMismatch(expected, 6L);
+        }
+
+        /**
+         * 断言既有 SUCCESS 与指定检查点不一致时返回文件记录错误。
+         */
+        private void assertPersistedDirectMismatch(StoreFileResponse chainResult, long fileSize) {
+            GeneralException mismatch = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.persistDirectUploadedFile(
+                            USER_ID, 7001L, "stored.txt", fileSize,
+                            "raw-file-param", chainResult, "direct-owner"));
+            assertEquals(ResultEnum.FILE_RECORD_ERROR, mismatch.getResultEnum());
+        }
+
+        /**
+         * 构造用于直传幂等恢复校验的 SUCCESS 记录。
+         */
+        private File successfulDirectFile(
+                String fileHash,
+                String transactionHash,
+                String contentHash,
+                Long fileSize
+        ) {
+            return new File()
+                    .setId(7001L)
+                    .setTenantId(2L)
+                    .setUid(USER_ID)
+                    .setFileName("stored.txt")
+                    .setFileHash(fileHash)
+                    .setTransactionHash(transactionHash)
+                    .setContentHash(contentHash)
+                    .setFileSize(fileSize)
+                    .setStatus(cn.flying.common.constant.FileUploadStatus.SUCCESS.getCode());
+        }
+
+        /**
+         * 验证直传持久化拒绝缺失元数据、错误状态以及缺失或不一致的 durable claim。
+         */
+        @Test
+        void persistDirectUploadedFileShouldRejectInvalidRecoveryCheckpoints() {
+            StoreFileResponse expected = new StoreFileResponse("tx-direct", "file-hash-direct");
+            assertEquals(ResultEnum.PARAM_IS_INVALID, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.persistDirectUploadedFile(
+                            USER_ID, null, "stored.txt", 6L, "raw-file-param", expected))
+                    .getResultEnum());
+            assertEquals(ResultEnum.PARAM_IS_INVALID, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.persistDirectUploadedFile(
+                            USER_ID, 7001L, "stored.txt", 6L, "raw-file-param", null))
+                    .getResultEnum());
+
+            File failed = prepareSnapshot(7001L, USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.FAIL.getCode());
+            File noClaim = prepareSnapshot(7001L, USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode());
+            File attesting = prepareSnapshot(7001L, USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode())
+                    .setFileParam(finalizationClaimJson("1", "CHAIN_ATTESTING", "", ""));
+            File claimed = prepareSnapshot(7001L, USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode())
+                    .setFileParam(finalizationClaimJson("1", "CLAIMED", "", ""));
+            File mismatchedAttested = prepareSnapshot(7001L, USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode())
+                    .setFileParam(finalizationClaimJson(
+                            "1", "CHAIN_ATTESTED", "other-tx", "other-file"));
+            when(fileMapper.selectOne(any(), anyBoolean())).thenReturn(
+                    null, failed, noClaim, attesting, claimed, mismatchedAttested);
+            when(fileKeyEnvelopeService.prepareFileParam(anyString()))
+                    .thenReturn(FileParamEnvelopeResult.withoutEnvelope(SANITIZED_FILE_PARAM));
+
+            assertEquals(ResultEnum.FAIL, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.persistDirectUploadedFile(
+                            USER_ID, 7001L, "stored.txt", 6L,
+                            "raw-file-param", expected, "owner"))
+                    .getResultEnum());
+            assertEquals(ResultEnum.FILE_RECORD_ERROR, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.persistDirectUploadedFile(
+                            USER_ID, 7001L, "stored.txt", 6L,
+                            "raw-file-param", expected, "owner"))
+                    .getResultEnum());
+            assertEquals(ResultEnum.FILE_RECORD_ERROR, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.persistDirectUploadedFile(
+                            USER_ID, 7001L, "stored.txt", 6L,
+                            "raw-file-param", expected, "owner"))
+                    .getResultEnum());
+            assertEquals(ResultEnum.BLOCKCHAIN_ERROR, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.persistDirectUploadedFile(
+                            USER_ID, 7001L, "stored.txt", 6L,
+                            "raw-file-param", expected, "owner"))
+                    .getResultEnum());
+            assertEquals(ResultEnum.FILE_RECORD_ERROR, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.persistDirectUploadedFile(
+                            USER_ID, 7001L, "stored.txt", 6L,
+                            "raw-file-param", expected, "owner"))
+                    .getResultEnum());
+            assertEquals(ResultEnum.FILE_RECORD_ERROR, assertThrows(
+                    GeneralException.class,
+                    () -> fileService.persistDirectUploadedFile(
+                            USER_ID, 7001L, "stored.txt", 6L,
+                            "raw-file-param", expected, "owner"))
+                    .getResultEnum());
+        }
+
+        /**
+         * 验证 SUCCESS 最终写入仍以 PREPARE exact claim CAS 为门禁，冲突时可安全重试。
+         */
+        @Test
+        void persistDirectUploadedFileShouldRejectFinalSuccessCasConflict() {
+            StoreFileResponse expected = new StoreFileResponse("tx-direct", "file-hash-direct");
+            File attested = prepareSnapshot(7601L, USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode())
+                    .setFileParam(finalizationClaimJson(
+                            "1", "CHAIN_ATTESTED", "tx-direct", "file-hash-direct"));
+            when(fileMapper.selectOne(any(), anyBoolean())).thenReturn(attested);
+            when(fileMapper.update(any(File.class), any())).thenReturn(0);
+            when(fileKeyEnvelopeService.prepareFileParam(anyString()))
+                    .thenReturn(FileParamEnvelopeResult.withoutEnvelope(SANITIZED_FILE_PARAM));
+            doAnswer(invocation -> {
+                Consumer<TransactionStatus> callback = invocation.getArgument(0);
+                callback.accept(mock(TransactionStatus.class));
+                return null;
+            }).when(transactionTemplate).executeWithoutResult(any());
+
+            cn.flying.common.exception.RetryableException conflict = assertThrows(
+                    cn.flying.common.exception.RetryableException.class,
+                    () -> fileService.persistDirectUploadedFile(
+                            USER_ID,
+                            attested.getId(),
+                            attested.getFileName(),
+                            6L,
+                            "raw-file-param",
+                            expected,
+                            "owner"));
+
+            assertEquals(ResultEnum.SERVICE_UNAVAILABLE, conflict.getResultEnum());
+            verify(fileKeyEnvelopeService, never()).saveOwnerEnvelope(any(), anyString(), anyLong(), any());
+        }
+
+        /**
+         * 验证损坏阶段的既有 claim 会在任何链调用前被状态不变量拦截。
+         */
+        @Test
+        void attestDirectUploadedFileShouldRejectInvalidExistingClaimInvariant() {
+            File invalidClaim = prepareSnapshot(7602L, USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode())
+                    .setFileParam(finalizationClaimJson("1", "UNKNOWN", "", ""));
+            when(fileMapper.selectOne(any(), anyBoolean())).thenReturn(invalidClaim);
+            when(fileKeyEnvelopeService.prepareFileParam(anyString()))
+                    .thenReturn(FileParamEnvelopeResult.withoutEnvelope(SANITIZED_FILE_PARAM));
+
+            GeneralException rejected = assertThrows(
+                    GeneralException.class,
+                    () -> fileService.attestDirectUploadedFile(
+                            USER_ID,
+                            invalidClaim.getId(),
+                            invalidClaim.getFileName(),
+                            List.of(completedPart()),
+                            "raw-file-param",
+                            "owner"));
+
+            assertEquals(ResultEnum.FILE_RECORD_ERROR, rejected.getResultEnum());
+            verifyNoInteractions(fileRemoteClient);
+        }
+
+        /**
+         * 验证只读恢复接口准确区分缺失、终态、各 durable claim 阶段和损坏状态。
+         */
+        @Test
+        void finalizationRecoveryPhaseShouldExposeCompleteDurableStateMatrix() {
+            File foreign = prepareSnapshot(7402L, OTHER_USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode());
+            File success = prepareSnapshot(7403L, USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.SUCCESS.getCode());
+            File failed = prepareSnapshot(7404L, USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.FAIL.getCode());
+            File noClaim = prepareSnapshot(7405L, USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode());
+            File claimed = prepareSnapshot(7406L, USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode())
+                    .setFileParam(finalizationClaimJson("1", "CLAIMED", "", ""));
+            File attesting = prepareSnapshot(7407L, USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode())
+                    .setFileParam(finalizationClaimJson("1", "CHAIN_ATTESTING", "", ""));
+            File attested = prepareSnapshot(7408L, USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode())
+                    .setFileParam(finalizationClaimJson("1", "CHAIN_ATTESTED", "tx", "file"));
+            File malformed = prepareSnapshot(7409L, USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode())
+                    .setFileParam("{\"_finalizationClaim\":\"broken\"}");
+            when(fileMapper.selectById(7402L)).thenReturn(foreign);
+            when(fileMapper.selectById(7403L)).thenReturn(success);
+            when(fileMapper.selectById(7404L)).thenReturn(failed);
+            when(fileMapper.selectById(7405L)).thenReturn(noClaim);
+            when(fileMapper.selectById(7406L)).thenReturn(claimed);
+            when(fileMapper.selectById(7407L)).thenReturn(attesting);
+            when(fileMapper.selectById(7408L)).thenReturn(attested);
+            when(fileMapper.selectById(7409L)).thenReturn(malformed);
+
+            assertEquals(FileService.FinalizationRecoveryPhase.NONE,
+                    fileService.getFinalizationRecoveryPhase(USER_ID, null));
+            assertEquals(FileService.FinalizationRecoveryPhase.NONE,
+                    fileService.getFinalizationRecoveryPhase(USER_ID, 7401L));
+            assertEquals(FileService.FinalizationRecoveryPhase.NONE,
+                    fileService.getFinalizationRecoveryPhase(USER_ID, 7402L));
+            assertEquals(FileService.FinalizationRecoveryPhase.SUCCESS,
+                    fileService.getFinalizationRecoveryPhase(USER_ID, 7403L));
+            assertEquals(FileService.FinalizationRecoveryPhase.NONE,
+                    fileService.getFinalizationRecoveryPhase(USER_ID, 7404L));
+            assertEquals(FileService.FinalizationRecoveryPhase.NONE,
+                    fileService.getFinalizationRecoveryPhase(USER_ID, 7405L));
+            assertEquals(FileService.FinalizationRecoveryPhase.CLAIMED,
+                    fileService.getFinalizationRecoveryPhase(USER_ID, 7406L));
+            assertEquals(FileService.FinalizationRecoveryPhase.CHAIN_ATTESTING,
+                    fileService.getFinalizationRecoveryPhase(USER_ID, 7407L));
+            assertTrue(fileService.requiresManualFinalizationReconciliation(USER_ID, 7407L));
+            assertEquals(FileService.FinalizationRecoveryPhase.CHAIN_ATTESTED,
+                    fileService.getFinalizationRecoveryPhase(USER_ID, 7408L));
+            assertEquals(FileService.FinalizationRecoveryPhase.UNKNOWN,
+                    fileService.getFinalizationRecoveryPhase(USER_ID, 7409L));
+        }
+
+        /**
+         * 验证直传链响应不确定后 durable claim 阻断其他 owner，且不会再次调用链客户端。
+         */
+        @Test
+        void directAmbiguousChainResultShouldBlockAnotherOwnerWithoutReplay() {
+            File existing = prepareStoreFixture();
+            DirectMultipartCompletedPartVO part = new DirectMultipartCompletedPartVO(
+                    0, "s3://node-a/final-0", 6L, "\"etag-0\"",
+                    "sha256:plain", "sha256:cipher", "SHA-256");
+            when(fileRemoteClient.storeFileOnChainOnce(any()))
+                    .thenThrow(new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "response lost"));
+
+            assertThrows(GeneralException.class, () -> fileService.attestDirectUploadedFile(
+                    USER_ID, existing.getId(), existing.getFileName(), List.of(part),
+                    "raw-file-param", "direct-owner-a"));
+            GeneralException sameOwnerBlocked = assertThrows(GeneralException.class, () ->
+                    fileService.attestDirectUploadedFile(
+                            USER_ID, existing.getId(), existing.getFileName(), List.of(part),
+                            "raw-file-param", "direct-owner-a"));
+            GeneralException blocked = assertThrows(GeneralException.class, () ->
+                    fileService.attestDirectUploadedFile(
+                            USER_ID, existing.getId(), existing.getFileName(), List.of(part),
+                            "raw-file-param", "direct-owner-b"));
+
+            assertEquals(ResultEnum.BLOCKCHAIN_ERROR, sameOwnerBlocked.getResultEnum());
+            assertEquals(ResultEnum.BLOCKCHAIN_ERROR, blocked.getResultEnum());
+            assertTrue(existing.getFileParam().contains("\"phase\":\"CHAIN_ATTESTING\""));
+            verify(fileRemoteClient, times(1)).storeFileOnChainOnce(any());
+        }
+
+        /**
+         * 验证 DB 更新返回零但精确回读已提交时，claim 和阶段转换均可安全收敛。
+         */
+        @Test
+        void directAttestationShouldRecoverFromUnknownCasResponseByExactReadback() {
+            assertDirectAttestationRecoversUnknownWrite(false);
+        }
+
+        /**
+         * 验证 DB 更新抛出响应异常但精确回读已提交时，不会错误重放链操作。
+         */
+        @Test
+        void directAttestationShouldRecoverFromThrownCasResponseByExactReadback() {
+            assertDirectAttestationRecoversUnknownWrite(true);
+        }
+
+        /**
+         * 构造数据库写响应未知场景，并验证 exact file_param 回读是唯一恢复依据。
+         */
+        private void assertDirectAttestationRecoversUnknownWrite(boolean throwAfterPersist) {
+            File existing = prepareSnapshot(7501L, USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode());
+            File persisted = prepareSnapshot(7501L, USER_ID, "stored.txt", 6L,
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode());
+            when(fileMapper.selectOne(any(), anyBoolean())).thenReturn(existing);
+            when(fileMapper.selectById(7501L)).thenReturn(persisted);
+            when(fileKeyEnvelopeService.prepareFileParam(anyString()))
+                    .thenReturn(FileParamEnvelopeResult.withoutEnvelope(SANITIZED_FILE_PARAM));
+            doAnswer(invocation -> {
+                Consumer<TransactionStatus> callback = invocation.getArgument(0);
+                callback.accept(mock(TransactionStatus.class));
+                return null;
+            }).when(transactionTemplate).executeWithoutResult(any());
+            when(fileMapper.update(any(File.class), any())).thenAnswer(invocation -> {
+                File update = invocation.getArgument(0);
+                persisted.setFileParam(update.getFileParam());
+                if (throwAfterPersist) {
+                    throw new IllegalStateException("database response lost");
+                }
+                return 0;
+            });
+            when(fileRemoteClient.storeFileOnChainOnce(any())).thenReturn(Result.success(
+                    new StoreFileResponse("tx-exact-readback", "file-exact-readback")));
+
+            StoreFileResponse result = fileService.attestDirectUploadedFile(
+                    USER_ID,
+                    existing.getId(),
+                    existing.getFileName(),
+                    List.of(completedPart()),
+                    "raw-file-param",
+                    "direct-owner");
+
+            assertEquals("tx-exact-readback", result.transactionHash());
+            assertEquals("file-exact-readback", result.fileHash());
+            verify(fileRemoteClient, times(1)).storeFileOnChainOnce(any());
+        }
+
+        /**
+         * 验证 DB 已持久化 ATTESTED 后同 owner 重入直接复用 tx/fileHash，不重复上链。
+         */
+        @Test
+        void directAttestedClaimShouldRecoverWithoutRechain() {
+            File existing = prepareStoreFixture();
+            DirectMultipartCompletedPartVO part = new DirectMultipartCompletedPartVO(
+                    0, "s3://node-a/final-0", 6L, "\"etag-0\"",
+                    "sha256:plain", "sha256:cipher", "SHA-256");
+            StoreFileResponse expected = new StoreFileResponse("tx-direct", "file-hash-direct");
+            when(fileRemoteClient.storeFileOnChainOnce(any())).thenReturn(Result.success(expected));
+
+            StoreFileResponse first = fileService.attestDirectUploadedFile(
+                    USER_ID, existing.getId(), existing.getFileName(), List.of(part),
+                    "raw-file-param", "direct-owner-a");
+            StoreFileResponse recovered = fileService.attestDirectUploadedFile(
+                    USER_ID, existing.getId(), existing.getFileName(), List.of(part),
+                    "raw-file-param", "direct-owner-a");
+
+            assertEquals(expected, first);
+            assertEquals(expected, recovered);
+            assertTrue(existing.getFileParam().contains("\"phase\":\"CHAIN_ATTESTED\""));
+            verify(fileRemoteClient, times(1)).storeFileOnChainOnce(any());
+        }
+
+        /**
+         * 验证首次 claim CAS 冲突在任何链或 Saga 副作用前以可重试错误失败。
+         */
+        @Test
+        void finalizationClaimCasConflictShouldFailBeforeExternalCalls() {
+            File existing = prepareStoreFixture();
+            when(fileMapper.update(any(File.class), any())).thenReturn(0);
+            DirectMultipartCompletedPartVO part = new DirectMultipartCompletedPartVO(
+                    0, "s3://node-a/final-0", 6L, "\"etag-0\"",
+                    "sha256:plain", "sha256:cipher", "SHA-256");
+
+            assertThrows(cn.flying.common.exception.RetryableException.class, () ->
+                    fileService.attestDirectUploadedFile(
+                            USER_ID, existing.getId(), existing.getFileName(), List.of(part),
+                            "raw-file-param", "direct-owner-a"));
+
+            verifyNoInteractions(fileRemoteClient, sagaOrchestrator);
+        }
+
+        /**
+         * 验证直传 owner 已进入 ATTESTING 后普通上传 loser 在 Saga/S3 前被同一 DB claim 阻断。
+         */
+        @Test
+        void directClaimShouldBlockLegacySagaForSamePreparedFile() {
+            File existing = prepareStoreFixture();
+            DirectMultipartCompletedPartVO part = new DirectMultipartCompletedPartVO(
+                    0, "s3://node-a/final-0", 6L, "\"etag-0\"",
+                    "sha256:plain", "sha256:cipher", "SHA-256");
+            when(fileRemoteClient.storeFileOnChainOnce(any()))
+                    .thenThrow(new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "response lost"));
+
+            assertThrows(GeneralException.class, () -> fileService.attestDirectUploadedFile(
+                    USER_ID, existing.getId(), existing.getFileName(), List.of(part),
+                    "raw-file-param", "direct-owner"));
+            assertThrows(GeneralException.class, () -> fileService.storeFile(
+                    USER_ID, existing.getId(), existing.getFileName(),
+                    List.of(new java.io.File("chunk-0")), List.of("chunk-hash-0"),
+                    "raw-file-param", "legacy-owner"));
+
+            verify(fileRemoteClient, times(1)).storeFileOnChainOnce(any());
+            verifyNoInteractions(sagaOrchestrator);
         }
 
         /**
@@ -1706,6 +2458,203 @@ class FileServiceTest {
                         () -> ReflectionTestUtils.invokeMethod(fileService, "requireContentHash", invalid));
                 assertEquals(ResultEnum.FILE_RECORD_ERROR, error.getResultEnum());
             }
+        }
+
+        /**
+         * 验证迟到的失败监听器不会把已经提交的 SUCCESS 文件反写为 FAIL。
+         */
+        @Test
+        void markFileUploadFailedShouldIgnorePersistedSuccess() {
+            File success = new File()
+                    .setId(7201L)
+                    .setTenantId(2L)
+                    .setUid(USER_ID)
+                    .setStatus(cn.flying.common.constant.FileUploadStatus.SUCCESS.getCode());
+            when(fileMapper.selectById(7201L)).thenReturn(success);
+
+            boolean safeToDelete = fileService.markFileUploadFailed(USER_ID, 7201L);
+
+            assertFalse(safeToDelete);
+            verify(fileMapper, never()).update(any(File.class), any());
+        }
+
+        /**
+         * 验证失败回写的数据库条件显式限定 PREPARE，关闭查询后状态并发推进的竞态。
+         */
+        @Test
+        void markFileUploadFailedShouldUsePrepareStatusCas() {
+            File prepare = new File()
+                    .setId(7202L)
+                    .setTenantId(2L)
+                    .setUid(USER_ID)
+                    .setStatus(cn.flying.common.constant.FileUploadStatus.PREPARE.getCode());
+            when(fileMapper.selectById(7202L)).thenReturn(prepare);
+            when(fileMapper.update(any(File.class), any())).thenReturn(1);
+
+            boolean safeToDelete = fileService.markFileUploadFailed(USER_ID, 7202L);
+
+            assertTrue(safeToDelete);
+            ArgumentCaptor<Wrapper<File>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+            ArgumentCaptor<File> updateCaptor = ArgumentCaptor.forClass(File.class);
+            verify(fileMapper).update(updateCaptor.capture(), wrapperCaptor.capture());
+            assertEquals(
+                    cn.flying.common.constant.FileUploadStatus.FAIL.getCode(),
+                    updateCaptor.getValue().getStatus());
+            LambdaUpdateWrapper<File> wrapper =
+                    (LambdaUpdateWrapper<File>) wrapperCaptor.getValue();
+            assertTrue(wrapper.getSqlSegment().contains("status"));
+            assertTrue(wrapper.getParamNameValuePairs().containsValue(
+                    cn.flying.common.constant.FileUploadStatus.PREPARE.getCode()));
+        }
+
+        /**
+         * 验证 PREPARE CAS 失败时不会继续恢复父版本 latest，避免覆盖并发成功事务。
+         */
+        @Test
+        void markFileUploadFailedShouldStopWhenPrepareCasLosesRace() {
+            File prepare = new File()
+                    .setId(7203L)
+                    .setTenantId(2L)
+                    .setUid(USER_ID)
+                    .setParentVersionId(7100L)
+                    .setIsLatest(1)
+                    .setStatus(cn.flying.common.constant.FileUploadStatus.PREPARE.getCode());
+            when(fileMapper.selectById(7203L)).thenReturn(prepare);
+            when(fileMapper.update(any(File.class), any())).thenReturn(0);
+
+            boolean safeToDelete = fileService.markFileUploadFailed(USER_ID, 7203L);
+
+            assertFalse(safeToDelete);
+            verify(fileMapper, times(1)).update(any(File.class), any());
+            verify(fileMapper, never()).selectById(7100L);
+        }
+
+        /**
+         * 验证版本组锚点锁后的重读观察到并发新 latest 时，失败回写不得复活父版本形成双 latest。
+         */
+        @Test
+        void markFileUploadFailedShouldRespectLatestChangedUnderStableVersionGroupLock() {
+            File staleLatest = new File()
+                    .setId(7210L)
+                    .setTenantId(2L)
+                    .setUid(USER_ID)
+                    .setVersion(2)
+                    .setVersionGroupId(7100L)
+                    .setParentVersionId(7100L)
+                    .setIsLatest(1)
+                    .setStatus(cn.flying.common.constant.FileUploadStatus.PREPARE.getCode());
+            File noLongerLatest = new File()
+                    .setId(7210L)
+                    .setTenantId(2L)
+                    .setUid(USER_ID)
+                    .setVersion(2)
+                    .setVersionGroupId(7100L)
+                    .setParentVersionId(7100L)
+                    .setIsLatest(0)
+                    .setStatus(cn.flying.common.constant.FileUploadStatus.PREPARE.getCode());
+            when(fileMapper.selectById(7210L)).thenReturn(staleLatest, noLongerLatest);
+            when(fileMapper.lockVersionGroupForProofLifecycle(2L, 7100L)).thenReturn(7100L);
+            when(fileMapper.update(any(File.class), any())).thenReturn(1);
+
+            boolean safeToDelete = fileService.markFileUploadFailed(USER_ID, 7210L);
+
+            InOrder order = inOrder(fileMapper);
+            order.verify(fileMapper).selectById(7210L);
+            order.verify(fileMapper).lockVersionGroupForProofLifecycle(2L, 7100L);
+            order.verify(fileMapper).selectById(7210L);
+            ArgumentCaptor<File> updateCaptor = ArgumentCaptor.forClass(File.class);
+            ArgumentCaptor<Wrapper<File>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+            order.verify(fileMapper).update(updateCaptor.capture(), wrapperCaptor.capture());
+            assertEquals(cn.flying.common.constant.FileUploadStatus.FAIL.getCode(),
+                    updateCaptor.getValue().getStatus());
+            assertNull(updateCaptor.getValue().getIsLatest());
+            LambdaUpdateWrapper<File> failWrapper =
+                    (LambdaUpdateWrapper<File>) wrapperCaptor.getValue();
+            assertTrue(failWrapper.getSqlSegment().contains("is_latest"));
+            assertTrue(failWrapper.getParamNameValuePairs().containsValue(0));
+            verify(fileMapper, never()).selectById(7100L);
+            assertTrue(safeToDelete);
+        }
+
+        /**
+         * 验证未知高低版本、分数版本和半完成 ATTESTED claim 全部映射为 UNKNOWN，不能降级成可重试。
+         */
+        @Test
+        void finalizationRecoveryPhaseShouldRejectUnsupportedOrMalformedClaims() {
+            File prepare = new File()
+                    .setId(7220L)
+                    .setTenantId(2L)
+                    .setUid(USER_ID)
+                    .setStatus(cn.flying.common.constant.FileUploadStatus.PREPARE.getCode());
+            when(fileMapper.selectById(7220L)).thenReturn(prepare);
+
+            for (String claim : List.of(
+                    finalizationClaimJson("0", "CLAIMED", "", ""),
+                    finalizationClaimJson("2", "CLAIMED", "", ""),
+                    finalizationClaimJson("1.5", "CLAIMED", "", ""),
+                    finalizationClaimJson("1", "CHAIN_ATTESTED", "tx-only", ""),
+                    "null",
+                    "{\"contentHash\":\"" + CONTENT_HASH + "\","
+                            + "\"_finalizationClaim\":{\"v\":1,\"ownerToken\":1,"
+                            + "\"mode\":\"DIRECT\",\"fingerprint\":\"fingerprint\","
+                            + "\"phase\":\"CLAIMED\",\"txHash\":\"\",\"fileHash\":\"\"}}")) {
+                prepare.setFileParam(claim);
+                assertEquals(
+                        FileService.FinalizationRecoveryPhase.UNKNOWN,
+                        fileService.getFinalizationRecoveryPhase(USER_ID, 7220L));
+            }
+        }
+
+        /**
+         * 构造精确版本和阶段的最终化 claim JSON，供恢复边界测试复用。
+         */
+        private String finalizationClaimJson(
+                String version,
+                String phase,
+                String transactionHash,
+                String fileHash
+        ) {
+            return "{\"contentHash\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\","
+                    + "\"_finalizationClaim\":{\"v\":" + version
+                    + ",\"ownerToken\":\"owner\",\"mode\":\"DIRECT\",\"fingerprint\":\"fingerprint\","
+                    + "\"phase\":\"" + phase + "\",\"txHash\":\"" + transactionHash
+                    + "\",\"fileHash\":\"" + fileHash + "\"}}";
+        }
+
+        /**
+         * 验证文件已经处于 FAIL 时清理许可保持幂等，不再执行数据库更新。
+         */
+        @Test
+        void markFileUploadFailedShouldAllowCleanupForExistingFail() {
+            File failed = new File()
+                    .setId(7204L)
+                    .setTenantId(2L)
+                    .setUid(USER_ID)
+                    .setStatus(cn.flying.common.constant.FileUploadStatus.FAIL.getCode());
+            when(fileMapper.selectById(7204L)).thenReturn(failed);
+
+            boolean safeToDelete = fileService.markFileUploadFailed(USER_ID, 7204L);
+
+            assertTrue(safeToDelete);
+            verify(fileMapper, never()).update(any(File.class), any());
+        }
+
+        /**
+         * 验证空主键、缺失记录和跨用户记录都不能授权删除上传会话。
+         */
+        @Test
+        void markFileUploadFailedShouldRejectMissingOrCrossUserTarget() {
+            File otherUserFile = new File()
+                    .setId(7205L)
+                    .setTenantId(2L)
+                    .setUid(USER_ID + 1)
+                    .setStatus(cn.flying.common.constant.FileUploadStatus.PREPARE.getCode());
+            when(fileMapper.selectById(7205L)).thenReturn(otherUserFile);
+
+            assertFalse(fileService.markFileUploadFailed(USER_ID, null));
+            assertFalse(fileService.markFileUploadFailed(USER_ID, 7999L));
+            assertFalse(fileService.markFileUploadFailed(USER_ID, 7205L));
+            verify(fileMapper, never()).update(any(File.class), any());
         }
 
         /**

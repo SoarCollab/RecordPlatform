@@ -47,6 +47,20 @@ public final class TenantContextUtil {
     }
 
     /**
+     * 要求 Dubbo 调用携带明确租户上下文，供不能安全回退到默认租户的写入边界使用。
+     *
+     * @return 调用方显式传递的租户 ID
+     * @throws IllegalStateException 租户 attachment 缺失或格式无效时抛出
+     */
+    public static Long requireTenantId() {
+        Long tenantId = getTenantId();
+        if (tenantId == null || tenantId < 0) {
+            throw new IllegalStateException("Tenant context is required for storage writes");
+        }
+        return tenantId;
+    }
+
+    /**
      * 构建分片存储路径（故障域模式）。
      * 格式: storage/tenant/{tenantId}/chunk/{objectName}
      * 不再包含逻辑节点名，因为分片分布由一致性哈希决定。

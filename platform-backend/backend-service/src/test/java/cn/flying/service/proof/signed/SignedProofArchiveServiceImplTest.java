@@ -312,6 +312,34 @@ class SignedProofArchiveServiceImplTest {
     }
 
     /**
+     * 验证更高版本已有 durable claim 时首次签发释放短事务重判，并在上传成功后签为 SUPERSEDED。
+     */
+    @Test
+    void shouldRecheckPendingNewerFinalizationBeforeFirstIssuance() {
+        File file = file();
+        AttestationLeaf leaf = leaf();
+        mockSuccessfulEvidence(file, leaf);
+        File pendingVersion = new File().setFileParam(JsonConverter.toJson(java.util.Map.of(
+                "_finalizationClaim", java.util.Map.of("phase", "CLAIMED"))));
+        when(fileMapper.selectList(any()))
+                .thenReturn(List.of(pendingVersion), List.of());
+        when(fileMapper.selectCount(any())).thenReturn(1L);
+
+        try (MockedStatic<SecurityUtils> security = mockStatic(SecurityUtils.class)) {
+            security.when(SecurityUtils::isAdmin).thenReturn(false);
+
+            service.exportByFileId(USER_ID, FILE_ID);
+
+            ArgumentCaptor<ProofBundleIssuance> issuanceCaptor =
+                    ArgumentCaptor.forClass(ProofBundleIssuance.class);
+            verify(transactionTemplate, times(2)).execute(any());
+            verify(issuanceMapper).insert(issuanceCaptor.capture());
+            assertThat(issuanceCaptor.getValue().getIssuedStatus()).isEqualTo("SUPERSEDED");
+            assertThat(issuanceCaptor.getValue().getStatus()).isEqualTo("SUPERSEDED");
+        }
+    }
+
+    /**
      * 验证不可变签发快照漂移会失败关闭并以 CAS 推进 INVALID 公开终态。
      */
     @Test

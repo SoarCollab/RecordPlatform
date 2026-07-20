@@ -14,7 +14,7 @@ import java.util.List;
 public class FileStorageEvent extends ApplicationEvent {
     private final Long tenantId;         // 租户ID
     private final Long uid;              // 用户ID
-    private final Long fileId;           // 目标文件ID（可为空）
+    private final Long preparedFileId;   // 稳定 PREPARE 文件ID（生产上传事件不能为空）
     private final String fileName;         // 文件名
     private final String sessionId;        // 上传会话ID
     private final String clientId;         // 客户端ID
@@ -48,7 +48,7 @@ public class FileStorageEvent extends ApplicationEvent {
      * @param source 事件源
      * @param tenantId 租户ID
      * @param uid 用户ID
-     * @param fileId 目标文件ID（可为空）
+     * @param preparedFileId 稳定 PREPARE 文件ID（兼容旧调用时可为空）
      * @param fileName 文件名
      * @param sessionId 上传会话ID
      * @param clientId 客户端ID
@@ -56,19 +56,28 @@ public class FileStorageEvent extends ApplicationEvent {
      * @param fileHashes 文件哈希列表
      * @param fileParam 文件参数
      */
-    public FileStorageEvent(Object source, Long tenantId, Long uid, Long fileId, String fileName,
+    public FileStorageEvent(Object source, Long tenantId, Long uid, Long preparedFileId, String fileName,
                             String sessionId, String clientId,
                             List<File> processedFiles, List<String> fileHashes,
                             String fileParam) {
         super(source);
         this.tenantId = tenantId;
         this.uid = uid;
-        this.fileId = fileId;
+        this.preparedFileId = preparedFileId;
         this.fileName = fileName;
         this.sessionId = sessionId;
         this.clientId = clientId;
         this.processedFiles = processedFiles;
         this.fileHashes = fileHashes;
         this.fileParam = fileParam;
+    }
+
+    /**
+     * 兼容旧监听代码的 fileId 访问器；语义已收敛为稳定 PREPARE 文件ID。
+     *
+     * @return 稳定 PREPARE 文件ID
+     */
+    public Long getFileId() {
+        return preparedFileId;
     }
 }

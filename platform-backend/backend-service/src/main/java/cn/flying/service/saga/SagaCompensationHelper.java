@@ -53,6 +53,30 @@ public class SagaCompensationHelper {
     }
 
     /**
+     * 在同一个独立事务中更新 Saga 终态并写入 Outbox 事件，避免终态已提交但死信丢失。
+     *
+     * @param saga Saga 实体
+     * @param outboxService Outbox 服务
+     * @param aggregateType 聚合类型
+     * @param aggregateId 聚合ID
+     * @param eventType 事件类型
+     * @param payload 事件载荷
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public void updateSagaStatusAndPublishEventInNewTransaction(
+            FileSaga saga,
+            OutboxService outboxService,
+            String aggregateType,
+            Long aggregateId,
+            String eventType,
+            String payload
+    ) {
+        sagaMapper.updateById(saga);
+        outboxService.appendEvent(aggregateType, aggregateId, eventType, payload);
+        log.debug("Saga 状态与 Outbox 事件已原子提交: id={}, type={}", saga.getId(), eventType);
+    }
+
+    /**
      * 在独立事务中记录补偿步骤完成。
      * 包含 payload 和 Saga 主表的更新。
      *

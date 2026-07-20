@@ -82,7 +82,6 @@ import java.util.concurrent.CompletableFuture;
  * <p>
  * 使用 Caffeine 本地缓存，缓存名称定义在 CacheConfiguration 中：
  * <ul>
- *   <li>userFiles - 用户文件列表（高命中率，key 格式: tenantId:userId）</li>
  *   <li>transaction - 区块链交易信息（key 格式: transactionHash）</li>
  * </ul>
  * 匿名分享文件列表涉及实时授权、过期和删除状态，明确不使用方法级缓存。
@@ -181,7 +180,6 @@ public class FileQueryServiceImpl implements FileQueryService {
     }
 
     @Override
-    @Cacheable(cacheNames = "userFiles", key = "T(cn.flying.common.util.TenantKeyUtils).currentTenantUserKey(#userId)", unless = "#result == null || #result.isEmpty()")
     public List<File> getUserFilesList(Long userId) {
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
         // 所有用户（包括管理员）只能查询自己的文件

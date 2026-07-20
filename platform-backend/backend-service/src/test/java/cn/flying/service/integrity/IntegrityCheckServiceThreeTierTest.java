@@ -175,6 +175,36 @@ class IntegrityCheckServiceThreeTierTest {
     }
 
     /**
+     * Verifies provider-local replica ETags are not treated as cross-node content hashes.
+     */
+    @Test
+    void lightweight_shouldAcceptDifferentReplicaEtagWhenContentEvidenceMatches() {
+        File file = file(8L);
+        ChunkManifestView manifest = manifest(file, bytes("content!"));
+        prepareFileAndManifest(file, manifest);
+        ChunkManifestChunk chunk = manifest.chunks().getFirst();
+        when(fileRemoteClient.headObject(chunk.storagePath(), chunk.cipherHash()))
+                .thenReturn(successHead(new StorageObjectHeadVO(
+                        true,
+                        chunk.storagePath(),
+                        chunk.cipherHash(),
+                        TENANT_ID,
+                        TENANT_ID,
+                        "repaired-node-b",
+                        chunk.size(),
+                        "\"provider-local-repair-etag\"",
+                        chunk.cipherHash()
+                )));
+
+        IntegrityCheckStatsVO stats = service.checkIntegrityWithLevel(
+                IntegrityCheckService.IntegrityCheckLevel.LIGHTWEIGHT);
+
+        assertThat(stats).isEqualTo(new IntegrityCheckStatsVO(1, 0, 0));
+        verify(integrityAlertMapper, never()).insert(any(IntegrityAlert.class));
+        verify(fileRemoteClient, never()).getFileListByHash(anyList(), anyList());
+    }
+
+    /**
      * Verifies a file without active manifest produces a distinct migration warning.
      */
     @Test

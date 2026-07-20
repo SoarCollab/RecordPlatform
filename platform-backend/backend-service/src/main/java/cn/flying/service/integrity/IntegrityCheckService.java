@@ -634,11 +634,9 @@ public class IntegrityCheckService {
             return metadataMismatch(chunk, "metadataHash", chunk.cipherHash(),
                     head.metadataHash(), head.metadataHash());
         }
-        if (StringUtils.hasText(chunk.etag())
-                && (!StringUtils.hasText(head.eTag())
-                || !normalizeEtag(chunk.etag()).equals(normalizeEtag(head.eTag())))) {
-            return metadataMismatch(chunk, "etag", chunk.etag(), head.eTag(), null);
-        }
+        // S3 ETag 是 provider/副本局部的版本条件，不是跨节点内容摘要。副本间一致性由
+        // contentLength、tenant/hash metadata 以及重校验 SHA-256 证明，不能把单一 manifest
+        // ETag 与任意候选副本严格比较，否则合法的跨端点修复会产生误报。
         return null;
     }
 
@@ -868,17 +866,6 @@ public class IntegrityCheckService {
      */
     private String normalizeHash(String value) {
         return trimToEmpty(value).toLowerCase(Locale.ROOT);
-    }
-
-    /**
-     * Removes provider-added quote characters before ETag comparison.
-     */
-    private String normalizeEtag(String value) {
-        String normalized = trimToEmpty(value);
-        if (normalized.length() >= 2 && normalized.startsWith("\"") && normalized.endsWith("\"")) {
-            return normalized.substring(1, normalized.length() - 1);
-        }
-        return normalized;
     }
 
     /**

@@ -245,6 +245,9 @@ class FileVersionServiceTest {
             File failedVersion = FileTestBuilder.aFile(f -> {
                 f.setId(10L);
                 f.setUid(USER_ID);
+                f.setTenantId(TENANT_ID);
+                f.setVersion(2);
+                f.setVersionGroupId(9L);
                 f.setStatus(FileUploadStatus.PREPARE.getCode());
                 f.setIsLatest(1);
                 f.setParentVersionId(9L);
@@ -252,15 +255,19 @@ class FileVersionServiceTest {
             File parentVersion = FileTestBuilder.aFile(f -> {
                 f.setId(9L);
                 f.setUid(USER_ID);
+                f.setTenantId(TENANT_ID);
+                f.setVersion(1);
+                f.setVersionGroupId(9L);
                 f.setStatus(FileUploadStatus.SUCCESS.getCode());
                 f.setIsLatest(0);
             });
 
             when(fileMapper.selectById(10L)).thenReturn(failedVersion);
             when(fileMapper.selectById(9L)).thenReturn(parentVersion);
+            when(fileMapper.lockVersionGroupForProofLifecycle(TENANT_ID, 9L)).thenReturn(9L);
             when(fileMapper.update(any(File.class), any())).thenReturn(1);
 
-            fileService.markFileUploadFailed(USER_ID, 10L);
+            assertTrue(fileService.markFileUploadFailed(USER_ID, 10L));
 
             ArgumentCaptor<File> updateCaptor = ArgumentCaptor.forClass(File.class);
             verify(fileMapper, times(2)).update(updateCaptor.capture(), any());
@@ -272,6 +279,7 @@ class FileVersionServiceTest {
             assertEquals(0, failedUpdate.getIsLatest());
             assertNull(parentUpdate.getStatus());
             assertEquals(1, parentUpdate.getIsLatest());
+            verify(fileMapper).lockVersionGroupForProofLifecycle(TENANT_ID, 9L);
         }
 
         /**
@@ -283,16 +291,17 @@ class FileVersionServiceTest {
             File normalFile = FileTestBuilder.aFile(f -> {
                 f.setId(20L);
                 f.setUid(USER_ID);
+                f.setStatus(FileUploadStatus.PREPARE.getCode());
                 f.setParentVersionId(null);
                 f.setIsLatest(1);
             });
             when(fileMapper.selectById(20L)).thenReturn(normalFile);
             when(fileMapper.update(any(File.class), any())).thenReturn(1);
 
-            fileService.markFileUploadFailed(USER_ID, 20L);
+            assertTrue(fileService.markFileUploadFailed(USER_ID, 20L));
 
             verify(fileMapper, times(1)).update(any(File.class), any());
-            verify(fileMapper, times(1)).selectById(20L);
+            verify(fileMapper, times(2)).selectById(20L);
         }
     }
 }

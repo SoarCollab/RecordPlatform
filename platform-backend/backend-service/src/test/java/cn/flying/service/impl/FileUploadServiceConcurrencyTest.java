@@ -17,6 +17,8 @@ import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -48,6 +50,12 @@ class FileUploadServiceConcurrencyTest {
     @Mock
     private QuotaService quotaService;
 
+    @Mock
+    private RedissonClient redissonClient;
+
+    @Mock
+    private RLock finalizationLock;
+
     @InjectMocks
     private FileUploadServiceImpl fileUploadService;
 
@@ -76,6 +84,11 @@ class FileUploadServiceConcurrencyTest {
         ReflectionTestUtils.setField(fileUploadService, "eventPublisher", eventPublisher);
         // 让异步分片处理在测试中同步执行，避免线程池/时序不稳定
         ReflectionTestUtils.setField(fileUploadService, "fileProcessingExecutor", (java.util.concurrent.Executor) Runnable::run);
+        when(redissonClient.getLock(startsWith("distributed:lock:upload:finalize:session:")))
+                .thenReturn(finalizationLock);
+        when(finalizationLock.tryLock()).thenReturn(true);
+        lenient().when(redisStateManager.addPausedSession(anyString()))
+                .thenReturn(FileUploadRedisStateManager.PauseTransitionResult.PAUSED);
     }
 
     @Nested
@@ -86,7 +99,7 @@ class FileUploadServiceConcurrencyTest {
         @DisplayName("should handle concurrent upload starts from same user")
         void shouldHandleConcurrentStartsFromSameUser() throws Exception {
             Long userId = 100L;
-            when(redisStateManager.getSessionIdByFileClientKey(anyString(), anyString())).thenReturn(null);
+            when(redisStateManager.getSessionIdByFileClientKey(anyLong(), anyString(), anyString())).thenReturn(null);
 
             ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);
             CountDownLatch latch = new CountDownLatch(THREAD_COUNT);
@@ -125,7 +138,7 @@ class FileUploadServiceConcurrencyTest {
         @Test
         @DisplayName("should handle concurrent upload starts from different users")
         void shouldHandleConcurrentStartsFromDifferentUsers() throws Exception {
-            when(redisStateManager.getSessionIdByFileClientKey(anyString(), anyString())).thenReturn(null);
+            when(redisStateManager.getSessionIdByFileClientKey(anyLong(), anyString(), anyString())).thenReturn(null);
 
             ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);
             CountDownLatch latch = new CountDownLatch(THREAD_COUNT);
@@ -313,7 +326,7 @@ class FileUploadServiceConcurrencyTest {
         @Test
         @DisplayName("should handle high volume of mixed operations")
         void shouldHandleHighVolumeOfMixedOperations() throws Exception {
-            when(redisStateManager.getSessionIdByFileClientKey(anyString(), anyString())).thenReturn(null);
+            when(redisStateManager.getSessionIdByFileClientKey(anyLong(), anyString(), anyString())).thenReturn(null);
 
             Map<String, FileUploadState> stateStore = new ConcurrentHashMap<>();
 
@@ -431,7 +444,7 @@ class FileUploadServiceConcurrencyTest {
         @Test
         @DisplayName("should measure start upload throughput")
         void shouldMeasureStartUploadThroughput() throws Exception {
-            when(redisStateManager.getSessionIdByFileClientKey(anyString(), anyString())).thenReturn(null);
+            when(redisStateManager.getSessionIdByFileClientKey(anyLong(), anyString(), anyString())).thenReturn(null);
 
             int operationCount = 100;
             ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);

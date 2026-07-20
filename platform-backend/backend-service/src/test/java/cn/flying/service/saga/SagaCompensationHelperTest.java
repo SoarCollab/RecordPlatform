@@ -8,6 +8,7 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -89,6 +90,31 @@ class SagaCompensationHelperTest {
             FileSaga captured = captor.getValue();
             assertThat(captured.getStatus()).isEqualTo(FileSagaStatus.COMPENSATING.name());
             assertThat(captured.getCurrentStep()).isEqualTo("ROLLBACK_STORAGE");
+        }
+    }
+
+    @Nested
+    @DisplayName("updateSagaStatusAndPublishEventInNewTransaction Tests")
+    class UpdateStatusAndPublishEventTests {
+
+        @Mock
+        private OutboxService outboxService;
+
+        /**
+         * 验证 Saga 终态与 Outbox 事件由同一个辅助方法按顺序写入。
+         */
+        @Test
+        void updateStatusAndPublishEvent_writesBothRecords() {
+            testSaga.setStatus(FileSagaStatus.FAILED.name());
+
+            compensationHelper.updateSagaStatusAndPublishEventInNewTransaction(
+                    testSaga, outboxService, "SAGA_DEAD_LETTER", 1L,
+                    "saga.compensation.failed", "{\"sagaId\":1}");
+
+            InOrder inOrder = inOrder(sagaMapper, outboxService);
+            inOrder.verify(sagaMapper).updateById(testSaga);
+            inOrder.verify(outboxService).appendEvent(
+                    "SAGA_DEAD_LETTER", 1L, "saga.compensation.failed", "{\"sagaId\":1}");
         }
     }
 
@@ -226,6 +252,17 @@ class SagaCompensationHelperTest {
                     org.springframework.transaction.annotation.Transactional.class);
             assertThat(transactional2).isNotNull();
             assertThat(transactional2.propagation())
+                    .isEqualTo(org.springframework.transaction.annotation.Propagation.REQUIRES_NEW);
+
+            // Verify atomic Saga status and Outbox update
+            var updateAndPublishMethod = SagaCompensationHelper.class.getMethod(
+                    "updateSagaStatusAndPublishEventInNewTransaction",
+                    FileSaga.class, OutboxService.class, String.class, Long.class,
+                    String.class, String.class);
+            var transactional3 = updateAndPublishMethod.getAnnotation(
+                    org.springframework.transaction.annotation.Transactional.class);
+            assertThat(transactional3).isNotNull();
+            assertThat(transactional3.propagation())
                     .isEqualTo(org.springframework.transaction.annotation.Propagation.REQUIRES_NEW);
         }
     }
