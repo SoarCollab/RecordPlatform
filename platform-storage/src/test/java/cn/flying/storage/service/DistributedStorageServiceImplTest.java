@@ -16,6 +16,7 @@ import cn.flying.platformapi.request.DirectMultipartUploadPartRequest;
 import cn.flying.platformapi.response.CompleteDirectMultipartUploadResponse;
 import cn.flying.platformapi.response.CreateDirectMultipartUploadResponse;
 import cn.flying.platformapi.response.StorageObjectHeadVO;
+import org.apache.dubbo.rpc.RpcContext;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -76,10 +77,19 @@ class DistributedStorageServiceImplTest {
     private DegradedWriteTracker degradedWriteTracker;
 
     @Mock
+    private DirectUploadPromotionService directUploadPromotionService;
+
+    @Mock
+    private DirectUploadStagingTracker directUploadStagingTracker;
+
+    @Mock
     private S3Client s3Client;
 
     @Mock
     private S3Presigner s3Presigner;
+
+    @Mock
+    private S3ClientManager.TopologyLease topologyLease;
 
     @InjectMocks
     private DistributedStorageServiceImpl storageService;
@@ -96,6 +106,14 @@ class DistributedStorageServiceImplTest {
     void setUp() {
         uploadExecutor = Executors.newFixedThreadPool(4);
         ReflectionTestUtils.setField(storageService, "uploadExecutor", uploadExecutor);
+        lenient().when(storageProperties.getDirectUpload())
+                .thenReturn(new StorageProperties.DirectUploadConfig());
+        lenient().when(clientManager.acquireTopologyLease()).thenReturn(topologyLease);
+        lenient().when(topologyLease.revision()).thenReturn(1L);
+        lenient().when(topologyLease.getClient(anyString()))
+                .thenAnswer(invocation -> clientManager.getClient(invocation.getArgument(0)));
+        lenient().when(topologyLease.getPresigner(anyString()))
+                .thenAnswer(invocation -> clientManager.getPresigner(invocation.getArgument(0)));
     }
 
     /**
@@ -141,9 +159,62 @@ class DistributedStorageServiceImplTest {
         return "storage/tenant/0/chunk/" + chunkHash;
     }
 
+    /**
+     * 构建单分片直传完成请求，便于覆盖副本拓扑与 ETag 边界。
+     */
+    private CompleteDirectMultipartUploadRequest directCompleteRequest(byte[] chunkBytes, String eTag) {
+        String chunkHash = sha256Prefixed(chunkBytes);
+        return new CompleteDirectMultipartUploadRequest(
+                "direct-session",
+                List.of(new DirectMultipartCompletedPart(
+                        0,
+                        directStagingObjectName("direct-session", 0),
+                        directFinalObjectName(chunkHash),
+                        "node1",
+                        directStoragePath(chunkHash),
+                        chunkBytes.length,
+                        eTag,
+                        chunkHash,
+                        chunkHash,
+                        "SHA-256"
+                ))
+        );
+    }
+
     @Nested
     @DisplayName("Store File Chunk Tests")
     class StoreFileChunkTests {
+
+        /**
+         * 配置三副本两仲裁写入，并让第三个副本确定失败。
+         */
+        private void stubThreeReplicaQuorumWithThirdNodeFailure() {
+            when(faultDomainManager.getTargetNodes(TEST_FILE_HASH))
+                    .thenReturn(List.of("node1", "node2", "node3"));
+            when(storageProperties.getEffectiveReplicationFactor()).thenReturn(3);
+            when(storageProperties.getEffectiveQuorum()).thenReturn(2);
+
+            StorageProperties.DegradedWriteConfig degradedConfig = new StorageProperties.DegradedWriteConfig();
+            degradedConfig.setEnabled(true);
+            degradedConfig.setMinReplicas(2);
+            degradedConfig.setTrackForSync(true);
+            when(storageProperties.getDegradedWrite()).thenReturn(degradedConfig);
+
+            when(s3Monitor.isNodeOnline(anyString())).thenReturn(true);
+            when(clientManager.getClient(anyString())).thenReturn(s3Client);
+            when(s3Client.headBucket(any(HeadBucketRequest.class)))
+                    .thenReturn(HeadBucketResponse.builder().build());
+            when(s3Client.putObject(
+                    any(PutObjectRequest.class),
+                    any(software.amazon.awssdk.core.sync.RequestBody.class)
+            )).thenAnswer(invocation -> {
+                PutObjectRequest request = invocation.getArgument(0);
+                if ("node3".equals(request.bucket())) {
+                    throw new IllegalStateException("node3 write failed");
+                }
+                return PutObjectResponse.builder().eTag("ok-" + request.bucket()).build();
+            });
+        }
 
         @Test
         @DisplayName("Should return error for null file data")
@@ -217,13 +288,74 @@ class DistributedStorageServiceImplTest {
 
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData()).contains(TEST_FILE_HASH);
-            verify(degradedWriteTracker).recordDegradedWrite(eq(TEST_FILE_HASH), anyList(), anyLong());
+            verify(degradedWriteTracker).recordAuthoritativeDegradedWrite(
+                    eq(TEST_FILE_HASH),
+                    anyList(),
+                    anyLong()
+            );
 
             ArgumentCaptor<PutObjectRequest> putRequestCaptor = ArgumentCaptor.forClass(PutObjectRequest.class);
             verify(s3Client).putObject(putRequestCaptor.capture(), any(software.amazon.awssdk.core.sync.RequestBody.class));
             assertThat(putRequestCaptor.getValue().metadata())
                     .containsEntry("file-hash", TEST_FILE_HASH)
                     .containsEntry("tenant-id", "0");
+        }
+
+        /**
+         * 验证完整三副本拓扑只达到两仲裁时也会先持久化权威成功节点，修复失败不会丢失入口。
+         */
+        @Test
+        @DisplayName("Should retain durable degraded evidence when immediate repair fails after quorum")
+        void shouldRetainDurableDegradedEvidenceWhenImmediateRepairFailsAfterQuorum() {
+            stubThreeReplicaQuorumWithThirdNodeFailure();
+            when(consistencyRepairService.scheduleImmediateRepairByNodesAsync(
+                    anyString(), anyString(), anyString()
+            )).thenReturn(CompletableFuture.completedFuture(false));
+
+            Result<String> result = storageService.storeFileChunk(TEST_FILE_DATA, TEST_FILE_HASH);
+
+            assertThat(result.getCode()).isEqualTo(200);
+            assertThat(result.getData()).contains(TEST_FILE_HASH);
+            var evidenceOrder = inOrder(degradedWriteTracker, consistencyRepairService);
+            evidenceOrder.verify(degradedWriteTracker).recordAuthoritativeDegradedWrite(
+                    eq(TEST_FILE_HASH),
+                    argThat(nodes -> new HashSet<>(nodes).equals(Set.of("node1", "node2"))),
+                    eq(0L)
+            );
+            evidenceOrder.verify(consistencyRepairService).scheduleImmediateRepairByNodesAsync(
+                    eq("tenant/0/" + TEST_FILE_HASH),
+                    eq("node1"),
+                    eq("node3")
+            );
+            verify(degradedWriteTracker, never()).markNodeRepaired(anyString(), anyLong(), anyString());
+        }
+
+        /**
+         * 验证即时修复只有在真实成功后才清除对应缺失节点。
+         */
+        @Test
+        @DisplayName("Should mark the missing node repaired only after immediate repair succeeds")
+        void shouldMarkMissingNodeRepairedOnlyAfterImmediateRepairSucceeds() {
+            stubThreeReplicaQuorumWithThirdNodeFailure();
+            when(consistencyRepairService.scheduleImmediateRepairByNodesAsync(
+                    anyString(), anyString(), anyString()
+            )).thenReturn(CompletableFuture.completedFuture(true));
+
+            Result<String> result = storageService.storeFileChunk(TEST_FILE_DATA, TEST_FILE_HASH);
+
+            assertThat(result.getCode()).isEqualTo(200);
+            var repairOrder = inOrder(degradedWriteTracker, consistencyRepairService);
+            repairOrder.verify(degradedWriteTracker).recordAuthoritativeDegradedWrite(
+                    eq(TEST_FILE_HASH),
+                    argThat(nodes -> new HashSet<>(nodes).equals(Set.of("node1", "node2"))),
+                    eq(0L)
+            );
+            repairOrder.verify(consistencyRepairService).scheduleImmediateRepairByNodesAsync(
+                    eq("tenant/0/" + TEST_FILE_HASH),
+                    eq("node1"),
+                    eq("node3")
+            );
+            repairOrder.verify(degradedWriteTracker).markNodeRepaired(TEST_FILE_HASH, 0L, "node3");
         }
 
         /**
@@ -1082,6 +1214,22 @@ class DistributedStorageServiceImplTest {
     @DisplayName("Direct Multipart Upload Tests")
     class DirectMultipartUploadTests {
 
+        /**
+         * 为直传 RPC 注入显式 tenant attachment，模拟经过 backend Dubbo filter 的真实调用。
+         */
+        @BeforeEach
+        void setDirectUploadTenantContext() {
+            RpcContext.getServerAttachment().setAttachment("tenant.id", "0");
+        }
+
+        /**
+         * 清理 Dubbo tenant attachment，避免上下文泄漏到同 JVM 的其他测试。
+         */
+        @AfterEach
+        void clearDirectUploadTenantContext() {
+            RpcContext.getServerAttachment().removeAttachment("tenant.id");
+        }
+
         @Test
         @DisplayName("Should create presigned PUT URLs for direct upload parts")
         void shouldCreatePresignedPutUrlsForDirectUploadParts() {
@@ -1140,6 +1288,77 @@ class DistributedStorageServiceImplTest {
             assertThat(presignCaptor.getValue().putObjectRequest().bucket()).isEqualTo("node1");
             assertThat(presignCaptor.getValue().putObjectRequest().key())
                     .isEqualTo(directStagingObjectName("direct-session", 0));
+            verify(clientManager).acquireTopologyLease();
+            verify(topologyLease).getClient("node1");
+            verify(topologyLease).getPresigner("node1");
+            verify(topologyLease).verifyCurrent();
+            verify(topologyLease).close();
+            verify(directUploadStagingTracker).record(argThat(descriptor ->
+                    descriptor.tenantId() == 0L
+                            && descriptor.sessionId().equals("direct-session")
+                            && descriptor.partIndex() == 0
+                            && descriptor.nodeName().equals("node1")
+                            && descriptor.objectName().equals(directStagingObjectName("direct-session", 0))));
+        }
+
+        /**
+         * 验证 topology 刷新后不会复用上一 endpoint 的 Bucket 存在性缓存。
+         */
+        @Test
+        @DisplayName("Should isolate direct-upload bucket cache by topology revision")
+        void shouldIsolateDirectUploadBucketCacheByTopologyRevision() {
+            byte[] chunkBytes = "direct-upload-topology-cache".getBytes(StandardCharsets.UTF_8);
+            String chunkHash = sha256Prefixed(chunkBytes);
+            when(faultDomainManager.getTargetNodes(chunkHash)).thenReturn(List.of("node1"));
+            when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
+            when(clientManager.getClient("node1")).thenReturn(s3Client);
+            when(clientManager.getPresigner("node1")).thenReturn(s3Presigner);
+            when(topologyLease.revision()).thenReturn(11L, 12L);
+            when(s3Client.headBucket(any(HeadBucketRequest.class)))
+                    .thenReturn(HeadBucketResponse.builder().build());
+            when(s3Presigner.presignPutObject(any(PutObjectPresignRequest.class)))
+                    .thenReturn(PresignedPutObjectRequest.builder()
+                            .expiration(Instant.now().plusSeconds(900))
+                            .isBrowserExecutable(true)
+                            .signedHeaders(Map.of("host", List.of("storage.example")))
+                            .httpRequest(SdkHttpFullRequest.builder()
+                                    .method(SdkHttpMethod.PUT)
+                                    .uri(URI.create("https://storage.example/upload/part-0"))
+                                    .build())
+                            .build());
+
+            CreateDirectMultipartUploadRequest firstRequest = new CreateDirectMultipartUploadRequest(
+                    "topology-session-1",
+                    "direct.pdf",
+                    512L,
+                    512,
+                    "application/pdf",
+                    List.of(new DirectMultipartUploadPartRequest(
+                            0,
+                            chunkHash,
+                            512L,
+                            "application/pdf",
+                            chunkHash,
+                            chunkHash,
+                            "SHA-256"
+                    ))
+            );
+            CreateDirectMultipartUploadRequest secondRequest = new CreateDirectMultipartUploadRequest(
+                    "topology-session-2",
+                    firstRequest.fileName(),
+                    firstRequest.totalSize(),
+                    firstRequest.chunkSize(),
+                    firstRequest.contentType(),
+                    firstRequest.parts()
+            );
+
+            assertThat(storageService.createDirectMultipartUpload(firstRequest).getCode()).isEqualTo(200);
+            assertThat(storageService.createDirectMultipartUpload(secondRequest).getCode()).isEqualTo(200);
+
+            verify(s3Client, times(2)).headBucket(any(HeadBucketRequest.class));
+            verify(clientManager, times(2)).acquireTopologyLease();
+            verify(topologyLease, times(2)).verifyCurrent();
+            verify(topologyLease, times(2)).close();
         }
 
         @Test
@@ -1195,6 +1414,38 @@ class DistributedStorageServiceImplTest {
                             "SHA-256"
                     ))
             );
+            CreateDirectMultipartUploadRequest nonCanonicalHashRequest = new CreateDirectMultipartUploadRequest(
+                    "direct-session",
+                    "direct.pdf",
+                    512L,
+                    512,
+                    "application/pdf",
+                    List.of(new DirectMultipartUploadPartRequest(
+                            0,
+                            chunkHash.toUpperCase(),
+                            512L,
+                            "application/pdf",
+                            chunkHash.toUpperCase(),
+                            chunkHash.toUpperCase(),
+                            "SHA-256"
+                    ))
+            );
+            CreateDirectMultipartUploadRequest paddedAlgorithmRequest = new CreateDirectMultipartUploadRequest(
+                    "direct-session",
+                    "direct.pdf",
+                    512L,
+                    512,
+                    "application/pdf",
+                    List.of(new DirectMultipartUploadPartRequest(
+                            0,
+                            chunkHash,
+                            512L,
+                            "application/pdf",
+                            chunkHash,
+                            chunkHash,
+                            " SHA-256 "
+                    ))
+            );
 
             assertThat(storageService.createDirectMultipartUpload(invalidHashRequest).getCode())
                     .isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
@@ -1202,7 +1453,56 @@ class DistributedStorageServiceImplTest {
                     .isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
             assertThat(storageService.createDirectMultipartUpload(oversizedRequest).getCode())
                     .isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+            assertThat(storageService.createDirectMultipartUpload(nonCanonicalHashRequest).getCode())
+                    .isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+            assertThat(storageService.createDirectMultipartUpload(paddedAlgorithmRequest).getCode())
+                    .isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
             verifyNoInteractions(s3Client, s3Presigner);
+        }
+
+        @Test
+        @DisplayName("Should reject non-canonical hashes and checksum text at the storage RPC boundary")
+        void shouldRejectNonCanonicalCompletionIdentity() {
+            byte[] chunkBytes = "direct-upload-canonical-complete".getBytes(StandardCharsets.UTF_8);
+            String chunkHash = sha256Prefixed(chunkBytes);
+            List<DirectMultipartCompletedPart> invalidParts = List.of(
+                    new DirectMultipartCompletedPart(
+                            0,
+                            directStagingObjectName("direct-session", 0),
+                            directFinalObjectName(chunkHash),
+                            "node1",
+                            directStoragePath(chunkHash),
+                            chunkBytes.length,
+                            "\"etag-0\"",
+                            chunkHash.toUpperCase(),
+                            chunkHash.toUpperCase(),
+                            "SHA-256"
+                    ),
+                    new DirectMultipartCompletedPart(
+                            0,
+                            directStagingObjectName("direct-session", 0),
+                            directFinalObjectName(chunkHash),
+                            "node1",
+                            directStoragePath(chunkHash),
+                            chunkBytes.length,
+                            "\"etag-0\"",
+                            chunkHash,
+                            chunkHash,
+                            " SHA-256 "
+                    )
+            );
+
+            for (DirectMultipartCompletedPart invalidPart : invalidParts) {
+                Result<CompleteDirectMultipartUploadResponse> result =
+                        storageService.completeDirectMultipartUpload(
+                                new CompleteDirectMultipartUploadRequest(
+                                        "direct-session",
+                                        List.of(invalidPart)
+                                )
+                        );
+                assertThat(result.getCode()).isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+            }
+            verifyNoInteractions(directUploadPromotionService);
         }
 
         @Test
@@ -1214,24 +1514,14 @@ class DistributedStorageServiceImplTest {
             when(storageProperties.getEffectiveReplicationFactor()).thenReturn(2);
             when(storageProperties.getEffectiveQuorum()).thenReturn(2);
             when(storageProperties.getDegradedWrite()).thenReturn(new StorageProperties.DegradedWriteConfig());
-            when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
-            when(s3Monitor.isNodeOnline("node2")).thenReturn(true);
-            when(clientManager.getClient("node1")).thenReturn(s3Client);
-            when(clientManager.getClient("node2")).thenReturn(s3Client);
-            when(s3Client.headBucket(any(HeadBucketRequest.class))).thenReturn(HeadBucketResponse.builder().build());
-            when(s3Client.headObject(any(HeadObjectRequest.class)))
-                    .thenReturn(
-                            HeadObjectResponse.builder().contentLength((long) chunkBytes.length).eTag("\"etag-0\"").build(),
-                            HeadObjectResponse.builder().contentLength((long) chunkBytes.length).eTag("\"etag-final\"").build()
-                    );
-            when(s3Client.getObject(any(GetObjectRequest.class)))
-                    .thenReturn(new ResponseInputStream<>(
-                            GetObjectResponse.builder().build(),
-                            AbortableInputStream.create(new ByteArrayInputStream(chunkBytes))
-                    ));
-            when(s3Client.putObject(any(PutObjectRequest.class), any(software.amazon.awssdk.core.sync.RequestBody.class)))
-                    .thenReturn(PutObjectResponse.builder().eTag("\"etag-final\"").build());
-            when(s3Client.deleteObject(any(DeleteObjectRequest.class))).thenReturn(DeleteObjectResponse.builder().build());
+            when(directUploadPromotionService.promote(any(), any(DirectUploadDigestAccumulator.class)))
+                    .thenAnswer(invocation -> {
+                        DirectUploadDigestAccumulator aggregateDigest = invocation.getArgument(1);
+                        MessageDigest candidateDigest = aggregateDigest.fork();
+                        candidateDigest.update(chunkBytes);
+                        aggregateDigest.commit(candidateDigest);
+                        return new DirectUploadPromotionResult(chunkBytes.length, "\"etag-final\"");
+                    });
 
             CompleteDirectMultipartUploadRequest request = new CompleteDirectMultipartUploadRequest(
                     "direct-session",
@@ -1260,23 +1550,121 @@ class DistributedStorageServiceImplTest {
             assertThat(result.getData().parts().getFirst().eTag()).isEqualTo("\"etag-final\"");
             assertThat(result.getData().parts().getFirst().cipherHash()).isEqualTo(chunkHash);
 
-            ArgumentCaptor<PutObjectRequest> putCaptor = ArgumentCaptor.forClass(PutObjectRequest.class);
-            verify(s3Client, times(2)).putObject(putCaptor.capture(), any(software.amazon.awssdk.core.sync.RequestBody.class));
-            assertThat(putCaptor.getAllValues())
-                    .extracting(PutObjectRequest::bucket)
-                    .containsExactlyInAnyOrder("node1", "node2");
-            assertThat(putCaptor.getAllValues())
-                    .extracting(PutObjectRequest::key)
-                    .containsOnly(directFinalObjectName(chunkHash));
-            assertThat(putCaptor.getAllValues().getFirst().metadata())
-                    .containsEntry("file-hash", chunkHash)
-                    .containsEntry("cipher-hash", chunkHash)
-                    .containsEntry("checksum-algorithm", "SHA-256");
+            ArgumentCaptor<DirectUploadPartDescriptor> descriptorCaptor =
+                    ArgumentCaptor.forClass(DirectUploadPartDescriptor.class);
+            verify(directUploadPromotionService).promote(
+                    descriptorCaptor.capture(),
+                    any(DirectUploadDigestAccumulator.class)
+            );
+            DirectUploadPartDescriptor descriptor = descriptorCaptor.getValue();
+            assertThat(descriptor.tenantId()).isEqualTo(0L);
+            assertThat(descriptor.sessionId()).isEqualTo("direct-session");
+            assertThat(descriptor.targetNodes()).containsExactly("node1", "node2");
+            assertThat(descriptor.requiredQuorum()).isEqualTo(2);
+            assertThat(descriptor.stagingObjectName())
+                    .isEqualTo(directStagingObjectName("direct-session", 0));
+            assertThat(descriptor.finalObjectName()).isEqualTo(directFinalObjectName(chunkHash));
+            verifyNoInteractions(s3Client);
+        }
 
-            ArgumentCaptor<DeleteObjectRequest> deleteCaptor = ArgumentCaptor.forClass(DeleteObjectRequest.class);
-            verify(s3Client).deleteObject(deleteCaptor.capture());
-            assertThat(deleteCaptor.getValue().bucket()).isEqualTo("node1");
-            assertThat(deleteCaptor.getValue().key()).isEqualTo(directStagingObjectName("direct-session", 0));
+        /**
+         * 验证故障域返回重复节点不会被误当作两个可用副本。
+         */
+        @Test
+        @DisplayName("Should reject duplicate target nodes when degraded writes are disabled")
+        void shouldRejectDuplicateDirectUploadTargetsWithoutDegradedWrite() {
+            byte[] chunkBytes = "direct-upload-duplicate-targets".getBytes(StandardCharsets.UTF_8);
+            String chunkHash = sha256Prefixed(chunkBytes);
+            when(faultDomainManager.getTargetNodes(chunkHash)).thenReturn(List.of("node1", "node1"));
+            when(storageProperties.getEffectiveReplicationFactor()).thenReturn(2);
+            StorageProperties.DegradedWriteConfig degradedConfig = new StorageProperties.DegradedWriteConfig();
+            degradedConfig.setEnabled(false);
+            when(storageProperties.getDegradedWrite()).thenReturn(degradedConfig);
+
+            Result<CompleteDirectMultipartUploadResponse> result = storageService.completeDirectMultipartUpload(
+                    directCompleteRequest(chunkBytes, "\"etag-0\""));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.STORAGE_INSUFFICIENT_REPLICAS.getCode());
+            verifyNoInteractions(directUploadPromotionService);
+        }
+
+        /**
+         * 验证开启降级且唯一副本达到 min-replicas 时，仅传递去重节点并使用单副本仲裁。
+         */
+        @Test
+        @DisplayName("Should allow one unique duplicate target at the degraded minimum")
+        void shouldAllowDeduplicatedTargetAtDegradedMinimum() {
+            byte[] chunkBytes = "direct-upload-degraded-duplicate".getBytes(StandardCharsets.UTF_8);
+            String chunkHash = sha256Prefixed(chunkBytes);
+            when(faultDomainManager.getTargetNodes(chunkHash)).thenReturn(List.of("node1", "node1"));
+            when(storageProperties.getEffectiveReplicationFactor()).thenReturn(2);
+            StorageProperties.DegradedWriteConfig degradedConfig = new StorageProperties.DegradedWriteConfig();
+            degradedConfig.setEnabled(true);
+            degradedConfig.setMinReplicas(1);
+            when(storageProperties.getDegradedWrite()).thenReturn(degradedConfig);
+            when(directUploadPromotionService.promote(any(), any(DirectUploadDigestAccumulator.class)))
+                    .thenAnswer(invocation -> {
+                        DirectUploadDigestAccumulator aggregateDigest = invocation.getArgument(1);
+                        MessageDigest candidateDigest = aggregateDigest.fork();
+                        candidateDigest.update(chunkBytes);
+                        aggregateDigest.commit(candidateDigest);
+                        return new DirectUploadPromotionResult(chunkBytes.length, "\"etag-final\"");
+                    });
+
+            Result<CompleteDirectMultipartUploadResponse> result = storageService.completeDirectMultipartUpload(
+                    directCompleteRequest(chunkBytes, "\"etag-0\""));
+
+            assertThat(result.getCode()).isEqualTo(200);
+            ArgumentCaptor<DirectUploadPartDescriptor> descriptorCaptor =
+                    ArgumentCaptor.forClass(DirectUploadPartDescriptor.class);
+            verify(directUploadPromotionService).promote(
+                    descriptorCaptor.capture(),
+                    any(DirectUploadDigestAccumulator.class));
+            assertThat(descriptorCaptor.getValue().targetNodes()).containsExactly("node1");
+            assertThat(descriptorCaptor.getValue().requiredQuorum()).isEqualTo(1);
+        }
+
+        /**
+         * 验证动态配置把降级写和同步追踪组合成不安全状态时，请求边界立即拒绝。
+         */
+        @Test
+        @DisplayName("Should reject direct upload when degraded write tracking is disabled")
+        void shouldRejectDirectUploadWhenDegradedTrackingIsDisabled() {
+            byte[] chunkBytes = "direct-upload-untracked-degraded".getBytes(StandardCharsets.UTF_8);
+            StorageProperties.DegradedWriteConfig degradedConfig = new StorageProperties.DegradedWriteConfig();
+            degradedConfig.setEnabled(true);
+            degradedConfig.setMinReplicas(1);
+            degradedConfig.setTrackForSync(false);
+            when(storageProperties.getDegradedWrite()).thenReturn(degradedConfig);
+            doCallRealMethod().when(storageProperties).validateDegradedWriteTracking();
+
+            Result<CompleteDirectMultipartUploadResponse> result = storageService.completeDirectMultipartUpload(
+                    directCompleteRequest(chunkBytes, "\"etag-0\""));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.STORAGE_INSUFFICIENT_REPLICAS.getCode());
+            verifyNoInteractions(directUploadPromotionService);
+        }
+
+        /**
+         * 验证去重后唯一副本低于降级 min-replicas 时仍必须拒绝。
+         */
+        @Test
+        @DisplayName("Should reject deduplicated targets below degraded minimum replicas")
+        void shouldRejectDeduplicatedTargetsBelowDegradedMinimum() {
+            byte[] chunkBytes = "direct-upload-degraded-minimum".getBytes(StandardCharsets.UTF_8);
+            String chunkHash = sha256Prefixed(chunkBytes);
+            when(faultDomainManager.getTargetNodes(chunkHash)).thenReturn(List.of("node1", "node1"));
+            when(storageProperties.getEffectiveReplicationFactor()).thenReturn(2);
+            StorageProperties.DegradedWriteConfig degradedConfig = new StorageProperties.DegradedWriteConfig();
+            degradedConfig.setEnabled(true);
+            degradedConfig.setMinReplicas(2);
+            when(storageProperties.getDegradedWrite()).thenReturn(degradedConfig);
+
+            Result<CompleteDirectMultipartUploadResponse> result = storageService.completeDirectMultipartUpload(
+                    directCompleteRequest(chunkBytes, "\"etag-0\""));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.STORAGE_INSUFFICIENT_REPLICAS.getCode());
+            verifyNoInteractions(directUploadPromotionService);
         }
 
         @Test
@@ -1285,26 +1673,16 @@ class DistributedStorageServiceImplTest {
             byte[] chunkBytes = "direct-upload-chunk".getBytes(StandardCharsets.UTF_8);
             String chunkHash = sha256Prefixed(chunkBytes);
             when(faultDomainManager.getTargetNodes(chunkHash)).thenReturn(List.of("node1", "node2"));
-            when(clientManager.getClient("node1")).thenReturn(s3Client);
-            when(s3Client.headBucket(any(HeadBucketRequest.class))).thenReturn(HeadBucketResponse.builder().build());
-            when(s3Client.headObject(any(HeadObjectRequest.class)))
-                    .thenThrow(NoSuchKeyException.builder().message("staging missing").build())
-                    .thenReturn(HeadObjectResponse.builder()
-                            .contentLength((long) chunkBytes.length)
-                            .eTag("\"etag-final\"")
-                            .metadata(Map.of(
-                                    "file-hash", chunkHash,
-                                    "tenant-id", "0",
-                                    "checksum-algorithm", "SHA-256",
-                                    "plain-hash", chunkHash,
-                                    "cipher-hash", chunkHash
-                            ))
-                            .build());
-            when(s3Client.getObject(any(GetObjectRequest.class)))
-                    .thenReturn(new ResponseInputStream<>(
-                            GetObjectResponse.builder().build(),
-                            AbortableInputStream.create(new ByteArrayInputStream(chunkBytes))
-                    ));
+            when(storageProperties.getEffectiveReplicationFactor()).thenReturn(2);
+            when(storageProperties.getEffectiveQuorum()).thenReturn(2);
+            when(directUploadPromotionService.promote(any(), any(DirectUploadDigestAccumulator.class)))
+                    .thenAnswer(invocation -> {
+                        DirectUploadDigestAccumulator aggregateDigest = invocation.getArgument(1);
+                        MessageDigest candidateDigest = aggregateDigest.fork();
+                        candidateDigest.update(chunkBytes);
+                        aggregateDigest.commit(candidateDigest);
+                        return new DirectUploadPromotionResult(chunkBytes.length, "\"etag-final\"");
+                    });
 
             CompleteDirectMultipartUploadRequest request = new CompleteDirectMultipartUploadRequest(
                     "direct-session",
@@ -1331,9 +1709,11 @@ class DistributedStorageServiceImplTest {
                     .isEqualTo(directStoragePath(chunkHash));
             assertThat(result.getData().parts().getFirst().eTag()).isEqualTo("\"etag-final\"");
 
-            verify(s3Client).getObject(any(GetObjectRequest.class));
-            verify(s3Client, never()).putObject(any(PutObjectRequest.class), any(software.amazon.awssdk.core.sync.RequestBody.class));
-            verify(s3Client, never()).deleteObject(any(DeleteObjectRequest.class));
+            verify(directUploadPromotionService).promote(
+                    any(),
+                    any(DirectUploadDigestAccumulator.class)
+            );
+            verifyNoInteractions(s3Client);
         }
 
         @Test
@@ -1361,7 +1741,216 @@ class DistributedStorageServiceImplTest {
             Result<CompleteDirectMultipartUploadResponse> result = storageService.completeDirectMultipartUpload(request);
 
             assertThat(result.getCode()).isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
-            verifyNoInteractions(s3Client);
+            verifyNoInteractions(directUploadPromotionService, s3Client);
+        }
+
+        /**
+         * 验证所有完成分片在首个 promotion 前完成可信路径重绑定，后续非法分片不会留下部分 final。
+         */
+        @Test
+        @DisplayName("Should validate every completed part before promoting any object")
+        void shouldValidateEveryCompletedPartBeforePromotingAnyObject() {
+            byte[] chunkBytes = "direct-upload-chunk".getBytes(StandardCharsets.UTF_8);
+            String chunkHash = sha256Prefixed(chunkBytes);
+            when(faultDomainManager.getTargetNodes(chunkHash)).thenReturn(List.of("node1"));
+            when(storageProperties.getEffectiveReplicationFactor()).thenReturn(1);
+            when(storageProperties.getEffectiveQuorum()).thenReturn(1);
+            when(storageProperties.getDegradedWrite()).thenReturn(new StorageProperties.DegradedWriteConfig());
+
+            List<DirectMultipartCompletedPart> parts = List.of(
+                    new DirectMultipartCompletedPart(
+                            0,
+                            directStagingObjectName("direct-session", 0),
+                            directFinalObjectName(chunkHash),
+                            "node1",
+                            directStoragePath(chunkHash),
+                            chunkBytes.length,
+                            "\"etag-0\"",
+                            chunkHash,
+                            chunkHash,
+                            "SHA-256"
+                    ),
+                    new DirectMultipartCompletedPart(
+                            1,
+                            directStagingObjectName("other-session", 1),
+                            directFinalObjectName(chunkHash),
+                            "node1",
+                            directStoragePath(chunkHash),
+                            chunkBytes.length,
+                            "\"etag-1\"",
+                            chunkHash,
+                            chunkHash,
+                            "SHA-256"
+                    )
+            );
+
+            Result<CompleteDirectMultipartUploadResponse> result =
+                    storageService.completeDirectMultipartUpload(
+                            new CompleteDirectMultipartUploadRequest("direct-session", parts));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+            verifyNoInteractions(directUploadPromotionService);
+        }
+
+        /**
+         * 验证三个直传写 RPC 在 tenant attachment 缺失或畸形时均失败关闭。
+         */
+        @Test
+        @DisplayName("Should reject direct upload writes without an explicit tenant")
+        void shouldRejectDirectUploadWritesWithoutExplicitTenant() {
+            byte[] chunkBytes = "direct-upload-tenant".getBytes(StandardCharsets.UTF_8);
+            String chunkHash = sha256Prefixed(chunkBytes);
+            DirectMultipartCompletedPart completedPart = new DirectMultipartCompletedPart(
+                    0,
+                    directStagingObjectName("direct-session", 0),
+                    directFinalObjectName(chunkHash),
+                    "node1",
+                    directStoragePath(chunkHash),
+                    chunkBytes.length,
+                    "\"etag-0\"",
+                    chunkHash,
+                    chunkHash,
+                    "SHA-256"
+            );
+            CreateDirectMultipartUploadRequest createRequest = new CreateDirectMultipartUploadRequest(
+                    "direct-session",
+                    "direct.pdf",
+                    chunkBytes.length,
+                    chunkBytes.length,
+                    "application/pdf",
+                    List.of(new DirectMultipartUploadPartRequest(
+                            0,
+                            chunkHash,
+                            chunkBytes.length,
+                            "application/pdf",
+                            chunkHash,
+                            chunkHash,
+                            "SHA-256"
+                    ))
+            );
+
+            for (String invalidTenant : new String[]{null, "not-a-number", "-1"}) {
+                if (invalidTenant == null) {
+                    RpcContext.getServerAttachment().removeAttachment("tenant.id");
+                } else {
+                    RpcContext.getServerAttachment().setAttachment("tenant.id", invalidTenant);
+                }
+
+                assertThat(storageService.createDirectMultipartUpload(createRequest).getCode())
+                        .isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+                assertThat(storageService.completeDirectMultipartUpload(
+                        new CompleteDirectMultipartUploadRequest("direct-session", List.of(completedPart))).getCode())
+                        .isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+                assertThat(storageService.abortDirectMultipartUpload(
+                        new AbortDirectMultipartUploadRequest("direct-session", List.of(completedPart))).getCode())
+                        .isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+            }
+
+            verifyNoInteractions(directUploadPromotionService, directUploadStagingTracker, s3Client, s3Presigner);
+        }
+
+        @Test
+        @DisplayName("Should reject completion without a bounded provider ETag")
+        void shouldRejectCompletionWithoutBoundedProviderEtag() {
+            byte[] chunkBytes = "direct-upload-chunk".getBytes(StandardCharsets.UTF_8);
+            String chunkHash = sha256Prefixed(chunkBytes);
+            for (String invalidEtag : new String[]{null, "", " ", "line\nbreak", "e".repeat(256)}) {
+                CompleteDirectMultipartUploadRequest request = new CompleteDirectMultipartUploadRequest(
+                        "direct-session",
+                        List.of(new DirectMultipartCompletedPart(
+                                0,
+                                directStagingObjectName("direct-session", 0),
+                                directFinalObjectName(chunkHash),
+                                "node1",
+                                directStoragePath(chunkHash),
+                                chunkBytes.length,
+                                invalidEtag,
+                                chunkHash,
+                                chunkHash,
+                                "SHA-256"
+                        ))
+                );
+
+                Result<CompleteDirectMultipartUploadResponse> result =
+                        storageService.completeDirectMultipartUpload(request);
+
+                assertThat(result.getCode()).isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+            }
+            verifyNoInteractions(directUploadPromotionService);
+        }
+
+        /**
+         * 验证 manifest 列可容纳的 255 字符可见 ASCII ETag 不会被边界误拒。
+         */
+        @Test
+        @DisplayName("Should accept a 255-character visible ASCII completion ETag")
+        void shouldAcceptMaximumLengthCompletionEtag() {
+            byte[] chunkBytes = "direct-upload-max-etag".getBytes(StandardCharsets.UTF_8);
+            String chunkHash = sha256Prefixed(chunkBytes);
+            String maximumEtag = "e".repeat(255);
+            when(faultDomainManager.getTargetNodes(chunkHash)).thenReturn(List.of("node1"));
+            when(storageProperties.getEffectiveReplicationFactor()).thenReturn(1);
+            when(storageProperties.getEffectiveQuorum()).thenReturn(1);
+            when(storageProperties.getDegradedWrite()).thenReturn(new StorageProperties.DegradedWriteConfig());
+            when(directUploadPromotionService.promote(any(), any(DirectUploadDigestAccumulator.class)))
+                    .thenAnswer(invocation -> {
+                        DirectUploadDigestAccumulator aggregateDigest = invocation.getArgument(1);
+                        MessageDigest candidateDigest = aggregateDigest.fork();
+                        candidateDigest.update(chunkBytes);
+                        aggregateDigest.commit(candidateDigest);
+                        return new DirectUploadPromotionResult(chunkBytes.length, "\"etag-final\"");
+                    });
+
+            Result<CompleteDirectMultipartUploadResponse> result = storageService.completeDirectMultipartUpload(
+                    directCompleteRequest(chunkBytes, maximumEtag));
+
+            assertThat(result.getCode()).isEqualTo(200);
+            verify(directUploadPromotionService).promote(
+                    argThat(descriptor -> maximumEtag.equals(descriptor.eTag())),
+                    any(DirectUploadDigestAccumulator.class));
+        }
+
+        @Test
+        @DisplayName("Should reject completion whose aggregate size exceeds the configured file limit")
+        void shouldRejectCompletionAboveAggregateFileSizeLimit() {
+            String chunkHash = sha256Prefixed("aggregate-limit".getBytes(StandardCharsets.UTF_8));
+            StorageProperties.DirectUploadConfig config = new StorageProperties.DirectUploadConfig();
+            config.setMaxFileSizeBytes(10);
+            config.setMaxPartSizeBytes(10);
+            when(storageProperties.getDirectUpload()).thenReturn(config);
+            List<DirectMultipartCompletedPart> parts = List.of(
+                    new DirectMultipartCompletedPart(
+                            0,
+                            directStagingObjectName("direct-session", 0),
+                            directFinalObjectName(chunkHash),
+                            "node1",
+                            directStoragePath(chunkHash),
+                            6,
+                            "\"etag-0\"",
+                            chunkHash,
+                            chunkHash,
+                            "SHA-256"
+                    ),
+                    new DirectMultipartCompletedPart(
+                            1,
+                            directStagingObjectName("direct-session", 1),
+                            directFinalObjectName(chunkHash),
+                            "node1",
+                            directStoragePath(chunkHash),
+                            6,
+                            "\"etag-1\"",
+                            chunkHash,
+                            chunkHash,
+                            "SHA-256"
+                    )
+            );
+
+            Result<CompleteDirectMultipartUploadResponse> result =
+                    storageService.completeDirectMultipartUpload(
+                            new CompleteDirectMultipartUploadRequest("direct-session", parts));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+            verifyNoInteractions(directUploadPromotionService);
         }
 
         @Test
@@ -1369,10 +1958,6 @@ class DistributedStorageServiceImplTest {
         void shouldAbortDirectMultipartUploadWithoutDeletingSharedFinalChunks() {
             byte[] chunkBytes = "direct-upload-chunk".getBytes(StandardCharsets.UTF_8);
             String chunkHash = sha256Prefixed(chunkBytes);
-            when(faultDomainManager.getTargetNodes(chunkHash)).thenReturn(List.of("node1"));
-            when(s3Monitor.isNodeOnline("node1")).thenReturn(true);
-            when(clientManager.getClient("node1")).thenReturn(s3Client);
-            when(s3Client.deleteObject(any(DeleteObjectRequest.class))).thenReturn(DeleteObjectResponse.builder().build());
 
             AbortDirectMultipartUploadRequest request = new AbortDirectMultipartUploadRequest(
                     "direct-session",
@@ -1395,12 +1980,56 @@ class DistributedStorageServiceImplTest {
             assertThat(result.getCode()).isEqualTo(200);
             assertThat(result.getData()).isTrue();
 
-            ArgumentCaptor<DeleteObjectRequest> deleteCaptor = ArgumentCaptor.forClass(DeleteObjectRequest.class);
-            verify(s3Client).deleteObject(deleteCaptor.capture());
-            assertThat(deleteCaptor.getValue().bucket()).isEqualTo("node1");
-            assertThat(deleteCaptor.getValue().key())
+            ArgumentCaptor<DirectUploadStagingDescriptor> descriptorCaptor =
+                    ArgumentCaptor.forClass(DirectUploadStagingDescriptor.class);
+            verify(directUploadPromotionService).abort(descriptorCaptor.capture());
+            assertThat(descriptorCaptor.getValue().nodeName()).isEqualTo("node1");
+            assertThat(descriptorCaptor.getValue().objectName())
                     .isEqualTo(directStagingObjectName("direct-session", 0));
-            assertThat(deleteCaptor.getValue().key()).isNotEqualTo(directFinalObjectName(chunkHash));
+            assertThat(descriptorCaptor.getValue().objectName()).isNotEqualTo(directFinalObjectName(chunkHash));
+            verifyNoInteractions(s3Client);
+        }
+
+        /**
+         * 验证 abort 先校验全部规范 staging 身份，后续非法分片不会导致前面分片被部分删除。
+         */
+        @Test
+        @DisplayName("Should validate every abort part before deleting any staging object")
+        void shouldValidateEveryAbortPartBeforeDeletingAnyStagingObject() {
+            byte[] chunkBytes = "direct-upload-abort".getBytes(StandardCharsets.UTF_8);
+            String chunkHash = sha256Prefixed(chunkBytes);
+            List<DirectMultipartCompletedPart> parts = List.of(
+                    new DirectMultipartCompletedPart(
+                            0,
+                            directStagingObjectName("direct-session", 0),
+                            directFinalObjectName(chunkHash),
+                            "node1",
+                            directStoragePath(chunkHash),
+                            chunkBytes.length,
+                            null,
+                            chunkHash,
+                            chunkHash,
+                            "SHA-256"
+                    ),
+                    new DirectMultipartCompletedPart(
+                            1,
+                            directStagingObjectName("other-session", 1),
+                            directFinalObjectName(chunkHash),
+                            "node1",
+                            directStoragePath(chunkHash),
+                            chunkBytes.length,
+                            null,
+                            chunkHash,
+                            chunkHash,
+                            "SHA-256"
+                    )
+            );
+
+            Result<Boolean> result = storageService.abortDirectMultipartUpload(
+                    new AbortDirectMultipartUploadRequest("direct-session", parts));
+
+            assertThat(result.getCode()).isEqualTo(ResultEnum.PARAM_IS_INVALID.getCode());
+            verifyNoInteractions(directUploadPromotionService);
         }
     }
 
@@ -1428,6 +2057,7 @@ class DistributedStorageServiceImplTest {
         config.setName(name);
         config.setEnabled(enabled);
         config.setFaultDomain(faultDomain);
+        config.setPhysicalStorageId("physical-" + name);
         return config;
     }
 }

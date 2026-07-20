@@ -1,17 +1,14 @@
 package cn.flying.service.saga;
 
 import cn.flying.api.utils.ResultUtils;
-import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.lock.DistributedLock;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.JsonConverter;
-import cn.flying.dao.dto.File;
 import cn.flying.dao.entity.FileSaga;
 import cn.flying.dao.entity.FileSagaStatus;
 import cn.flying.dao.entity.FileSagaStep;
-import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileSagaMapper;
 import cn.flying.dao.mapper.TenantMapper;
 import cn.flying.platformapi.constant.Result;
@@ -36,11 +33,12 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.Semaphore;
+import java.util.function.Consumer;
 
 /**
  * 文件上传 Saga 编排器。
- * 协调 S3 兼容存储上传 + 区块链存储的分布式事务，失败时自动补偿。
- * 支持指数退避重试策略。
+ * 协调 S3 兼容存储上传 + 区块链存储的分布式事务。
+ * content-addressed 最终对象不做物理补偿删除，失败对象交由引用感知 GC 治理。
  * 集成 Prometheus 监控指标。
  * 多租户隔离：按租户分别执行补偿任务。
  */
@@ -49,13 +47,10 @@ import java.util.concurrent.Semaphore;
 @RequiredArgsConstructor
 public class FileSagaOrchestrator {
 
-    private static final String COMP_STEP_S3 = "S3_DELETED";
-    private static final String COMP_STEP_DB = "DB_ROLLBACK";
     private static final String DEFAULT_MAX_IN_MEMORY_CHUNK_BYTES = "83886080";
     private final FileSagaMapper sagaMapper;
     private final FileRemoteClient fileRemoteClient;
     private final OutboxService outboxService;
-    private final FileMapper fileMapper;
     private final SagaMetrics sagaMetrics;
     private final TenantMapper tenantMapper;
     private final SagaCompensationHelper compensationHelper;
@@ -71,7 +66,7 @@ public class FileSagaOrchestrator {
 
     /**
      * 执行文件上传 Saga。
-     * 区块链存储失败时自动补偿删除 S3 存储数据。
+     * content-addressed 存储对象不在 Saga 失败时删除，避免破坏其他文件共享引用。
      * <p>
      * 注意：此方法不使用 @Transactional，因为：
      * 1. Saga 模式通过补偿（而非事务回滚）实现最终一致性
@@ -80,6 +75,22 @@ public class FileSagaOrchestrator {
      * 4. 避免长事务导致的锁竞争和连接占用
      */
     public FileUploadResult executeUpload(FileUploadCommand cmd) {
+        return executeUpload(cmd, () -> { }, ignored -> { });
+    }
+
+    /**
+     * 执行上传 Saga，并在链 RPC 前后同步持久化 DB claim 检查点。
+     *
+     * @param cmd 上传命令
+     * @param beforeChain S3 完成后、链 RPC 前的 DB 检查点
+     * @param afterChain 链结果校验后、outbox 前的 DB 检查点
+     * @return 上传结果
+     */
+    public FileUploadResult executeUpload(
+            FileUploadCommand cmd,
+            Runnable beforeChain,
+            Consumer<StoreFileResponse> afterChain
+    ) {
         Timer.Sample timerSample = sagaMetrics.startSagaTimer();
         sagaMetrics.recordSagaStarted();
 
@@ -87,7 +98,8 @@ public class FileSagaOrchestrator {
 
         try {
             List<StoredObjectReference> storedObjects = executeS3Upload(saga, cmd);
-            StoreFileResponse chainResult = executeBlockchainStore(saga, cmd, storedObjects);
+            StoreFileResponse chainResult = executeBlockchainStore(
+                    saga, cmd, storedObjects, beforeChain, afterChain);
 
             publishSuccessEvent(saga, cmd, chainResult);
             completeSaga(saga);
@@ -259,15 +271,31 @@ public class FileSagaOrchestrator {
         }
     }
 
-    private StoreFileResponse executeBlockchainStore(FileSaga saga, FileUploadCommand cmd,
-                                                     List<StoredObjectReference> storedObjects) {
+    /**
+     * 按 DB ATTESTING、Saga CHAIN_STORING、单次链 RPC、DB ATTESTED 的顺序越过链边界。
+     */
+    private StoreFileResponse executeBlockchainStore(
+            FileSaga saga,
+            FileUploadCommand cmd,
+            List<StoredObjectReference> storedObjects,
+            Runnable beforeChain,
+            Consumer<StoreFileResponse> afterChain
+    ) {
+        if (saga.reachedStep(FileSagaStep.CHAIN_STORING)) {
+            throw new GeneralException(
+                    ResultEnum.BLOCKCHAIN_ERROR,
+                    "Saga 链写响应不确定，禁止自动重放");
+        }
+        // DB ATTESTING 必须先确定提交；确定性 CAS/校验失败时 Saga 尚未越过链边界。
+        beforeChain.run();
+        // DB 已确认后推进内存边界；Saga 检查点或链响应未知都进入人工对账。
         saga.advanceTo(FileSagaStep.CHAIN_STORING);
         compensationHelper.updateSagaStepInNewTransaction(saga);
 
         String fileContent = StoredObjectReferenceCodec.toReferenceChainContent(storedObjects);
         String userIdStr = String.valueOf(cmd.getUserId());
 
-        Result<StoreFileResponse> result = fileRemoteClient.storeFileOnChain(new StoreFileRequest(
+        Result<StoreFileResponse> result = fileRemoteClient.storeFileOnChainOnce(new StoreFileRequest(
                 userIdStr,
                 cmd.getFileName(),
                 cmd.getFileParam(),
@@ -278,6 +306,7 @@ public class FileSagaOrchestrator {
         if (res == null || res.transactionHash() == null || res.fileHash() == null) {
             throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "区块链存储返回无效结果");
         }
+        afterChain.accept(res);
 
         return res;
     }
@@ -303,20 +332,16 @@ public class FileSagaOrchestrator {
     }
 
     private void handleFailure(FileSaga saga, FileUploadCommand cmd, Exception ex) {
-        saga.markStatus(FileSagaStatus.COMPENSATING).recordError(ex);
+        FileSagaStatus terminalStatus = saga.reachedStep(FileSagaStep.CHAIN_STORING)
+                ? FileSagaStatus.MANUAL_RECONCILIATION
+                : FileSagaStatus.FAILED;
+        saga.markStatus(terminalStatus).recordError(ex);
         compensationHelper.updateSagaStatusInNewTransaction(saga);
-
-        try {
-            compensate(saga, loadPayloadContext(saga));
-            saga.markStatus(FileSagaStatus.COMPENSATED);
-        } catch (Exception compEx) {
-            log.error("补偿失败: saga={}", saga.getId(), compEx);
-            // 使用指数退避安排下次重试
-            saga.scheduleNextRetry()
-                    .markStatus(FileSagaStatus.PENDING_COMPENSATION);
-            log.info("安排补偿重试: id={}, nextRetryAt={}", saga.getId(), saga.getNextRetryAt());
+        if (terminalStatus == FileSagaStatus.MANUAL_RECONCILIATION) {
+            log.error("Saga 已越过链写边界，保留存储与 DB 现场等待人工对账: sagaId={}", saga.getId());
+        } else {
+            log.warn("Saga 在链写前失败；共享最终对象保留给引用感知 GC: sagaId={}", saga.getId());
         }
-        compensationHelper.updateSagaStatusInNewTransaction(saga);
     }
 
     private SagaPayloadContext loadPayloadContext(FileSaga saga) {
@@ -371,109 +396,6 @@ public class FileSagaOrchestrator {
         String payloadJson = JsonConverter.toJsonWithPretty(context);
         saga.setPayload(payloadJson);
         compensationHelper.persistPayloadInNewTransaction(saga, payloadJson);
-    }
-
-    /**
-     * 补偿操作：删除已上传到 S3 存储的文件
-     * 设计为幂等操作，重复调用不会产生副作用
-     */
-    private void compensate(FileSaga saga, SagaPayloadContext context) {
-        // 检查是否已经补偿过（幂等性保证）
-        if (FileSagaStatus.COMPENSATED.name().equals(saga.getStatus())) {
-            log.info("Saga 已经补偿完成，跳过: sagaId={}", saga.getId());
-            return;
-        }
-
-        boolean s3Compensated = compensateS3Upload(saga, context);
-        boolean dbCompensated = compensateDatabaseState(saga, context);
-
-        if (!s3Compensated || !dbCompensated) {
-            throw new RuntimeException("补偿未完全成功: s3Compensated=" + s3Compensated
-                    + ", dbCompensated=" + dbCompensated);
-        }
-    }
-
-    /**
-     * 补偿 S3 存储上传。
-     * 外部调用成功后使用独立事务持久化状态，确保即使后续操作失败，
-     * S3 补偿完成的状态也不会丢失。
-     */
-    private boolean compensateS3Upload(FileSaga saga, SagaPayloadContext context) {
-        if (context.isStepDone(COMP_STEP_S3)) {
-            log.info("S3 存储补偿已完成（幂等跳过）：sagaId={}", saga.getId());
-            return true;
-        }
-        if (!saga.reachedStep(FileSagaStep.S3_UPLOADED)) {
-            log.info("无需补偿 S3 存储数据（未到达 S3_UPLOADED 步骤）: sagaId={}", saga.getId());
-            return true;
-        }
-
-        Map<String, String> storedPaths = toStoredPathMap(context.getStoredObjects());
-        if (storedPaths.isEmpty() && context.getStoredPaths() != null) {
-            storedPaths = context.getStoredPaths();
-        }
-        if (storedPaths == null || storedPaths.isEmpty()) {
-            log.info("存储路径为空，跳过 S3 存储补偿: sagaId={}", saga.getId());
-            return true;
-        }
-
-        log.info("开始补偿 S3 存储上传: sagaId={}, 文件数量={}", saga.getId(), storedPaths.size());
-
-        Result<Boolean> result = fileRemoteClient.deleteStorageFile(storedPaths);
-        boolean success = ResultUtils.isSuccess(result);
-        boolean fileNotExist = result != null && result.getCode() == ResultEnum.FILE_NOT_EXIST.getCode();
-
-        if (success || fileNotExist) {
-            // 外部调用成功，立即在独立事务中持久化补偿步骤完成状态
-            // 即使后续 DB 补偿失败事务回滚，此状态也已持久化
-            context.markStepDone(COMP_STEP_S3);
-            String payloadJson = JsonConverter.toJsonWithPretty(context);
-            compensationHelper.persistPayloadInNewTransaction(saga, payloadJson);
-            log.info("S3 存储补偿完成并已持久化: sagaId={}", saga.getId());
-            return true;
-        } else {
-            log.warn("S3 存储补偿失败: sagaId={}, result={}", saga.getId(),
-                    result != null ? result.getCode() + ":" + result.getMessage() : "null");
-            return false;
-        }
-    }
-
-    /**
-     * 补偿数据库状态。
-     * 使用独立事务持久化步骤完成状态，确保补偿进度不会因事务回滚丢失。
-     */
-    private boolean compensateDatabaseState(FileSaga saga, SagaPayloadContext context) {
-        if (context.isStepDone(COMP_STEP_DB)) {
-            log.debug("数据库状态补偿已完成（幂等跳过）：sagaId={}", saga.getId());
-            return true;
-        }
-
-        if (saga.getFileId() == null) {
-            log.debug("Saga 未关联业务文件记录，跳过数据库补偿: sagaId={}", saga.getId());
-            context.markStepDone(COMP_STEP_DB);
-            String payloadJson = JsonConverter.toJsonWithPretty(context);
-            compensationHelper.persistPayloadInNewTransaction(saga, payloadJson);
-            return true;
-        }
-
-        try {
-            File file = new File()
-                    .setId(saga.getFileId())
-                    .setStatus(FileUploadStatus.FAIL.getCode())
-                    .setFileHash(null)
-                    .setTransactionHash(null);
-            int updated = fileMapper.updateById(file);
-            log.info("数据库补偿结果: sagaId={}, fileId={}, updated={}", saga.getId(), saga.getFileId(), updated);
-
-            // 数据库补偿成功，在独立事务中持久化步骤完成状态
-            context.markStepDone(COMP_STEP_DB);
-            String payloadJson = JsonConverter.toJsonWithPretty(context);
-            compensationHelper.persistPayloadInNewTransaction(saga, payloadJson);
-            return true;
-        } catch (Exception e) {
-            log.error("数据库状态补偿失败: sagaId={}, fileId={}, error={}", saga.getId(), saga.getFileId(), e.getMessage(), e);
-            return false;
-        }
     }
 
     /**
@@ -533,41 +455,14 @@ public class FileSagaOrchestrator {
     public void retryCompensation(FileSaga saga) {
         Timer.Sample timerSample = sagaMetrics.startCompensationTimer();
         log.info("开始重试 Saga 补偿: id={}, retryCount={}", saga.getId(), saga.getRetryCount());
-
-        // 1. 先更新状态为 COMPENSATING（独立事务）
-        saga.markStatus(FileSagaStatus.COMPENSATING);
-        compensationHelper.updateSagaStatusInNewTransaction(saga);
-
         try {
-            // 2. 执行补偿操作（每个步骤完成后独立持久化）
-            compensate(saga, loadPayloadContext(saga));
-
-            // 3. 补偿成功，更新最终状态
-            saga.markStatus(FileSagaStatus.COMPENSATED);
+            FileSagaStatus terminalStatus = saga.reachedStep(FileSagaStep.CHAIN_STORING)
+                    ? FileSagaStatus.MANUAL_RECONCILIATION
+                    : FileSagaStatus.FAILED;
+            saga.markStatus(terminalStatus);
             compensationHelper.updateSagaStatusInNewTransaction(saga);
-
-            sagaMetrics.recordSagaCompensated();
-            log.info("Saga 补偿成功: id={}", saga.getId());
-
-        } catch (Exception e) {
-            saga.recordError(e);
-
-            if (saga.isMaxRetriesExceeded(maxCompensationRetries)) {
-                saga.markStatus(FileSagaStatus.FAILED);
-                sagaMetrics.recordSagaFailed();
-                log.error("Saga 补偿超过最大重试次数，标记为失败: id={}, retryCount={}",
-                        saga.getId(), saga.getRetryCount());
-                publishDeadLetterEvent(saga, e);
-            } else {
-                saga.scheduleNextRetry()
-                        .markStatus(FileSagaStatus.PENDING_COMPENSATION);
-                log.warn("Saga 补偿失败，安排下次重试: id={}, nextRetryAt={}",
-                        saga.getId(), saga.getNextRetryAt());
-            }
-
-            // 更新失败/重试状态
-            compensationHelper.updateSagaStatusInNewTransaction(saga);
-
+            log.warn("历史待补偿 Saga 已失败关闭且未删除共享对象: id={}, status={}",
+                    saga.getId(), terminalStatus);
         } finally {
             sagaMetrics.stopCompensationTimer(timerSample);
         }

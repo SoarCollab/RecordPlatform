@@ -12,6 +12,7 @@ import type {
 } from "../types";
 
 const BASE = "/upload-sessions";
+const DIRECT_UPLOAD_ETAG_PATTERN = /^[\x21-\x7e]{1,255}$/;
 
 /**
  * 开始上传（初始化或恢复）。
@@ -75,7 +76,7 @@ export async function uploadChunk(
 export async function uploadDirectPart(
   uploadUrl: string,
   chunk: Blob,
-): Promise<string | null> {
+): Promise<string> {
   const response = await fetch(uploadUrl, {
     method: "PUT",
     body: chunk,
@@ -85,7 +86,16 @@ export async function uploadDirectPart(
     throw new Error(`直传分片失败 (${response.status})`);
   }
 
-  return response.headers.get("ETag");
+  const eTag = response.headers.get("ETag");
+  if (!eTag) {
+    throw new Error(
+      "对象存储未暴露 ETag，请检查 bucket CORS 的 ExposeHeaders 配置",
+    );
+  }
+  if (!DIRECT_UPLOAD_ETAG_PATTERN.test(eTag)) {
+    throw new Error("对象存储返回的 ETag 必须是 1 到 255 个可见 ASCII 字符");
+  }
+  return eTag;
 }
 
 /**

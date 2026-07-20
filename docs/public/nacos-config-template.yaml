@@ -80,6 +80,24 @@ storage:
   # external-endpoint: http://10.1.0.2:9000
 
   # --------------------------------------------------------------------------
+  # 对象存储直传完成链路（P2）
+  # 完成操作先以固定缓冲校验 staging，再优先使用同端点 CopyObject；跨端点才流式转发。
+  # staging 过期清理由 Redis 到期索引驱动，不会扫描整个 bucket。
+  # --------------------------------------------------------------------------
+  direct-upload:
+    max-file-size-bytes: 4294967296       # 单文件最大 4 GiB
+    max-part-size-bytes: 104857600        # 单分片最大 100 MiB
+    stream-buffer-bytes: 65536            # 允许范围 8 KiB～1 MiB
+    transfer-timeout-seconds: 300
+    lock-wait-seconds: 5                  # complete/abort 使用 Redisson watchdog 自动续期
+    staging-retention-hours: 48           # 必须长于 24 小时 URL 有效期
+    cleanup-enabled: true
+    cleanup-interval-millis: 3600000      # 允许 60000～86400000ms；非正值回退 1 小时
+    cleanup-initial-delay-millis: 300000  # 允许 0～86400000ms；负值回退 5 分钟
+    cleanup-batch-size: 200               # 集群同时最多领取的生命周期记录数
+    cleanup-claim-lease-seconds: 600      # 集群批次 fencing 租约；批次预算会提前 30～60 秒退出
+
+  # --------------------------------------------------------------------------
   # 可选：备用域（用于故障转移）
   # 开发环境可不配置
   # --------------------------------------------------------------------------
@@ -103,6 +121,12 @@ storage:
     enabled: true                 # 是否允许降级写入（当某个故障域完全不可用时）
     min-replicas: 1               # 降级模式下的最小副本数（低于此值拒绝写入）
     track-for-sync: true          # 是否记录降级写入以便后续同步
+    max-sync-failures: 12         # 同一租户/对象/缺失域连续失败达到该次数后进入死信
+    sync-batch-size: 100          # 单实例每轮最多原子领取的恢复记录数（硬上限 1000）
+    claim-lease-seconds: 600      # 多实例互斥领取租约，过期后允许其他实例接管
+    repair-timeout-seconds: 120   # 单次立即修复（含重试、流传输、校验）的整体超时
+    retry-backoff-seconds: 60     # 修复失败后的基础指数退避秒数
+    max-retry-backoff-seconds: 3600 # 修复失败指数退避的最大秒数
 
   # --------------------------------------------------------------------------
   # 一致性哈希配置
@@ -128,11 +152,14 @@ storage:
 
   # --------------------------------------------------------------------------
   # 存储节点配置
+  # physical-storage-id 是底层物理存储集群的稳定身份，不是访问 endpoint。
+  # 同一集群的 DNS/端口别名必须使用相同值；多副本直传要求各副本值非空且互异。
   # --------------------------------------------------------------------------
   nodes:
     # 域 A 节点
     - name: node-a1
       endpoint: http://s3-a1:9000
+      physical-storage-id: storage-cluster-a
       accessKey: YOUR_ACCESS_KEY
       secretKey: YOUR_SECRET_KEY
       faultDomain: domain-a
@@ -143,6 +170,7 @@ storage:
     # 域 B 节点
     - name: node-b1
       endpoint: http://s3-b1:9000
+      physical-storage-id: storage-cluster-b
       accessKey: YOUR_ACCESS_KEY
       secretKey: YOUR_SECRET_KEY
       faultDomain: domain-b
@@ -153,6 +181,7 @@ storage:
     # 备用节点（可选）
     - name: standby-node1
       endpoint: http://s3-standby:9000
+      physical-storage-id: storage-cluster-standby
       accessKey: YOUR_ACCESS_KEY
       secretKey: YOUR_SECRET_KEY
       faultDomain: standby
@@ -188,6 +217,7 @@ storage:
 #   nodes:
 #     - name: local-minio
 #       endpoint: http://localhost:9000
+#       physical-storage-id: minio-local
 #       accessKey: minioadmin
 #       secretKey: minioadmin
 #       faultDomain: local

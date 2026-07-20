@@ -25,6 +25,8 @@
         <logstash.logback.version>9.0</logstash.logback.version>
         <skywalking.toolkit.version>9.6.0</skywalking.toolkit.version>
         <netty.version>4.2.16.Final</netty.version>
+        <testcontainers.version>1.20.4</testcontainers.version>
+        <maven-failsafe-plugin.version>3.5.5</maven-failsafe-plugin.version>
     </properties>
     <dependencies>
         <dependency>
@@ -162,6 +164,18 @@
             <version>${redisson.version}</version>
         </dependency>
 
+        <!-- MinIO provider and Redis lifecycle integration tests use the generic Testcontainers API. -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
     </dependencies>
 
     <dependencyManagement>
@@ -188,6 +202,13 @@
                 <groupId>io.netty</groupId>
                 <artifactId>netty-bom</artifactId>
                 <version>${netty.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -243,5 +264,89 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+            Provider and Redis lifecycle integration tests require a real Docker daemon and must never be silently skipped in CI.
+            DirectUploadConstrainedHeapIT is isolated because it has a dedicated fork and heap ceiling.
+        -->
+        <profile>
+            <id>it</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <version>${maven-failsafe-plugin.version}</version>
+                        <configuration>
+                            <includes>
+                                <include>**/*IT.java</include>
+                            </includes>
+                            <excludes>
+                                <exclude>**/DirectUploadConstrainedHeapIT.java</exclude>
+                            </excludes>
+                            <failIfNoTests>true</failIfNoTests>
+                            <systemPropertyVariables>
+                                <user.home>${project.build.directory}</user.home>
+                            </systemPropertyVariables>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <goals>
+                                    <goal>integration-test</goal>
+                                    <goal>verify</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!--
+            A 96 MiB generated object runs under an 80 MiB heap. An object-sized allocation cannot
+            fit in this fork, while the bounded streaming path remains within the public part contract.
+        -->
+        <profile>
+            <id>direct-upload-constrained-heap</id>
+            <build>
+                <plugins>
+                    <!-- Unit tests run in the regular storage gate; keep this fork dedicated to the heap proof. -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <skipTests>true</skipTests>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <version>${maven-failsafe-plugin.version}</version>
+                        <configuration>
+                            <includes>
+                                <include>**/DirectUploadConstrainedHeapIT.java</include>
+                            </includes>
+                            <failIfNoTests>true</failIfNoTests>
+                            <forkCount>1</forkCount>
+                            <reuseForks>false</reuseForks>
+                            <argLine>-Xmx80m -XX:+ExitOnOutOfMemoryError</argLine>
+                            <systemPropertyVariables>
+                                <user.home>${project.build.directory}</user.home>
+                            </systemPropertyVariables>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <goals>
+                                    <goal>integration-test</goal>
+                                    <goal>verify</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>

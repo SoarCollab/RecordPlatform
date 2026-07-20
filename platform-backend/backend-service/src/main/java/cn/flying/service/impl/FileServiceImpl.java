@@ -6,6 +6,7 @@ import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.constant.ShareType;
 import cn.flying.common.exception.GeneralException;
+import cn.flying.common.exception.RetryableException;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.CommonUtils;
 import cn.flying.common.util.Const;
@@ -55,9 +56,6 @@ import org.redisson.api.RedissonClient;
 import org.slf4j.MDC;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
-import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
-import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -66,6 +64,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -73,17 +72,18 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.regex.Pattern;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 /**
  * @program: RecordPlatform
  * @description: 文件服务实现类
  * @author flyingcoding
  * @create: 2025-03-12 21:22
- *
- * 缓存 key 格式: tenantId:userId
- * 确保多租户环境下缓存隔离
  */
 @Slf4j
 @Service
@@ -92,6 +92,13 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     private static final long MAX_IN_MEMORY_TRANSFER_BYTES = 80L * 1024 * 1024;
     private static final Pattern CONTENT_HASH_PATTERN = Pattern.compile("^sha256:[0-9a-f]{64}$");
+    private static final String FINALIZATION_CLAIM_KEY = "_finalizationClaim";
+    private static final int FINALIZATION_CLAIM_VERSION = 1;
+    private static final String FINALIZATION_MODE_DIRECT = "DIRECT";
+    private static final String FINALIZATION_MODE_LEGACY = "LEGACY";
+    private static final String FINALIZATION_PHASE_CLAIMED = "CLAIMED";
+    private static final String FINALIZATION_PHASE_CHAIN_ATTESTING = "CHAIN_ATTESTING";
+    private static final String FINALIZATION_PHASE_CHAIN_ATTESTED = "CHAIN_ATTESTED";
 
     private final FileRemoteClient fileRemoteClient;
     private final FileSagaOrchestrator sagaOrchestrator;
@@ -122,37 +129,52 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void prepareStoreFile(Long userId, Long targetFileId, String originFileName, long fileSize) {
-        if (targetFileId != null) {
-            validatePreparedTargetFile(userId, targetFileId, originFileName, fileSize);
-            return;
+        Long preparedFileId = targetFileId != null ? targetFileId : IdUtils.nextEntityId();
+        prepareStoreFileWithStableId(userId, targetFileId, preparedFileId, originFileName, fileSize);
+    }
+
+    /**
+     * 使用会话预先保存的稳定主键创建或幂等复用 PREPARE 记录。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public File prepareStoreFileWithStableId(Long userId, Long targetFileId, Long preparedFileId,
+                                             String originFileName, long fileSize) {
+        if (preparedFileId == null || preparedFileId <= 0) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "PREPARE 文件ID无效");
+        }
+        if (targetFileId != null && !Objects.equals(targetFileId, preparedFileId)) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "目标版本与 PREPARE 文件ID不一致");
         }
 
-        Long id = IdUtils.nextEntityId();
+        File existing = this.getById(preparedFileId);
+        if (existing != null) {
+            validatePreparedFileSnapshot(existing, userId, originFileName, fileSize);
+            return existing;
+        }
+        if (targetFileId != null) {
+            throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
+        }
+
         File file = new File()
-                .setId(id)
+                .setId(preparedFileId)
                 .setUid(userId)
                 .setFileName(originFileName)
                 .setFileParam(buildPrepareFileParam(fileSize))
                 .setStatus(FileUploadStatus.PREPARE.getCode())
                 .setVersion(1)
                 .setIsLatest(1)
-                .setVersionGroupId(id);
-        this.save(file);
+                .setVersionGroupId(preparedFileId);
+        if (!this.save(file)) {
+            throw new GeneralException(ResultEnum.FAIL, "PREPARE 文件创建失败");
+        }
+        return file;
     }
 
     /**
-     * 校验版本上传场景下绑定的 PREPARE 目标文件是否合法。
-     *
-     * @param userId 用户ID
-     * @param targetFileId 目标文件ID
-     * @param originFileName 原始文件名
-     * @param fileSize 文件大小
+     * 校验稳定 PREPARE 快照的所有权、状态、文件名和预占大小。
      */
-    private void validatePreparedTargetFile(Long userId, Long targetFileId, String originFileName, long fileSize) {
-        File targetFile = this.getById(targetFileId);
-        if (targetFile == null) {
-            throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
-        }
+    private void validatePreparedFileSnapshot(File targetFile, Long userId, String originFileName, long fileSize) {
         if (!Objects.equals(targetFile.getUid(), userId)) {
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
         }
@@ -186,7 +208,6 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      * 注意：此方法不使用类级别事务，Saga 编排器内部管理自己的事务
      */
     @Override
-    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.util.TenantKeyUtils).currentTenantUserKey(#userId)")
     public File storeFile(Long userId, String OriginFileName, List<java.io.File> fileList, List<String> fileHashList, String fileParam) {
         return storeFile(userId, null, OriginFileName, fileList, fileHashList, fileParam);
     }
@@ -203,9 +224,18 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      * @return 存储成功后的文件记录
      */
     @Override
-    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.util.TenantKeyUtils).currentTenantUserKey(#userId)")
     public File storeFile(Long userId, Long targetFileId, String originFileName,
                           List<java.io.File> fileList, List<String> fileHashList, String fileParam) {
+        return storeFile(userId, targetFileId, originFileName, fileList, fileHashList, fileParam, null);
+    }
+
+    /**
+     * 在进入普通上传 Saga 前持久化 PREPARE 文件级 claim，阻断其他会话或直传模式并发执行外部调用。
+     */
+    @Override
+    public File storeFile(Long userId, Long targetFileId, String originFileName,
+                          List<java.io.File> fileList, List<String> fileHashList,
+                          String fileParam, String ownerToken) {
         if (CommonUtils.isEmpty(fileList)) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "File list cannot be empty");
         }
@@ -215,119 +245,828 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         String sanitizedFileParam = envelopeResult.sanitizedFileParam();
         String contentHash = requireContentHash(sanitizedFileParam);
 
-        String requestId = UUID.randomUUID().toString();
-        FileUploadCommand cmd = FileUploadCommand.builder()
-                .requestId(requestId)
-                .fileId(existingFile.getId())
-                .userId(userId)
-                .tenantId(existingFile.getTenantId())
-                .fileName(existingFile.getFileName())
-                .fileParam(sanitizedFileParam)
-                .fileList(fileList)
-                .fileHashList(fileHashList)
-                .build();
+        String resolvedOwnerToken = normalizeFinalizationOwnerToken(
+                ownerToken, FINALIZATION_MODE_LEGACY, existingFile.getId());
+        String fingerprint = calculateLegacyFinalizationFingerprint(
+                sanitizedFileParam, fileList, fileHashList);
+        FinalizationClaimSnapshot claimSnapshot = claimFinalization(
+                existingFile,
+                userId,
+                resolvedOwnerToken,
+                FINALIZATION_MODE_LEGACY,
+                fingerprint,
+                sanitizedFileParam);
 
-        FileUploadResult result = sagaOrchestrator.executeUpload(cmd);
+        StoreFileResponse chainResult;
+        if (FINALIZATION_PHASE_CHAIN_ATTESTED.equals(claimSnapshot.claim().phase())) {
+            chainResult = claimSnapshot.claim().toChainResult();
+        } else {
+            if (FINALIZATION_PHASE_CHAIN_ATTESTING.equals(claimSnapshot.claim().phase())) {
+                throw unresolvedFinalizationException(existingFile.getId());
+            }
 
-        if (!result.isSuccess()) {
-            String errorMsg = result.getErrorMessage();
-            throw new GeneralException(ResultEnum.FAIL, errorMsg != null ? errorMsg : "File upload failed");
+            String requestId = UUID.randomUUID().toString();
+            FileUploadCommand cmd = FileUploadCommand.builder()
+                    .requestId(requestId)
+                    .fileId(existingFile.getId())
+                    .userId(userId)
+                    .tenantId(existingFile.getTenantId())
+                    .fileName(existingFile.getFileName())
+                    .fileParam(sanitizedFileParam)
+                    .fileList(fileList)
+                    .fileHashList(fileHashList)
+                    .build();
+
+            AtomicReference<FinalizationClaimSnapshot> durableClaim =
+                    new AtomicReference<>(claimSnapshot);
+            FileUploadResult result = sagaOrchestrator.executeUpload(
+                    cmd,
+                    () -> durableClaim.set(transitionFinalizationClaim(
+                            existingFile,
+                            userId,
+                            durableClaim.get(),
+                            FINALIZATION_PHASE_CHAIN_ATTESTING,
+                            "",
+                            "")),
+                    attestedResult -> durableClaim.set(transitionFinalizationClaim(
+                            existingFile,
+                            userId,
+                            durableClaim.get(),
+                            FINALIZATION_PHASE_CHAIN_ATTESTED,
+                            attestedResult.transactionHash(),
+                            attestedResult.fileHash())));
+
+            if (!result.isSuccess()) {
+                String errorMsg = result.getErrorMessage();
+                throw new GeneralException(ResultEnum.FAIL, errorMsg != null ? errorMsg : "File upload failed");
+            }
+            chainResult = new StoreFileResponse(result.getTransactionHash(), result.getFileHash());
+            if (!isValidDirectChainResult(chainResult)) {
+                throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "区块链存储返回无效结果");
+            }
+            claimSnapshot = durableClaim.get();
+            if (!FINALIZATION_PHASE_CHAIN_ATTESTED.equals(claimSnapshot.claim().phase())
+                    || !Objects.equals(chainResult.transactionHash(), claimSnapshot.claim().txHash())
+                    || !Objects.equals(chainResult.fileHash(), claimSnapshot.claim().fileHash())) {
+                throw new GeneralException(
+                        ResultEnum.FILE_RECORD_ERROR,
+                        "Saga 链结果未持久化到 ATTESTED claim");
+            }
         }
 
-        // 使用文件ID精确匹配，避免误更新同名文件
-        LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
-                .eq(File::getId, existingFile.getId())
-                .eq(File::getUid, userId)  // 安全校验：确保是该用户的文件
-                .eq(File::getStatus, FileUploadStatus.PREPARE.getCode());  // 只更新 PREPARE 状态的记录
-
-        File file = new File()
-                .setUid(userId)
-                .setFileName(existingFile.getFileName())
-                .setFileHash(result.getFileHash())
-                .setContentHash(contentHash)
-                .setTransactionHash(result.getTransactionHash())
-                .setFileParam(sanitizedFileParam)
-                .setStatus(FileUploadStatus.SUCCESS.getCode());
-
-        transactionTemplate.executeWithoutResult(status -> {
-            lockProofLifecycleVersionGroupBeforeFileMutation(existingFile);
-            boolean updated = this.update(file, wrapper);
-            if (!updated) {
-                log.warn("文件状态更新失败，可能已被其他操作修改: fileId={}, userId={}, fileName={}",
-                        existingFile.getId(), userId, existingFile.getFileName());
-                throw new GeneralException(ResultEnum.FAIL, "文件状态更新失败，请重试");
-            }
-            fileKeyEnvelopeService.saveOwnerEnvelope(existingFile, result.getFileHash(), userId, envelopeResult);
-            markOlderProofIssuancesSuperseded(existingFile);
-        });
-
-        return existingFile
-                .setFileHash(result.getFileHash())
-                .setContentHash(contentHash)
-                .setTransactionHash(result.getTransactionHash())
-                .setFileParam(sanitizedFileParam)
-                .setStatus(FileUploadStatus.SUCCESS.getCode());
+        return persistFinalizationSuccess(
+                existingFile,
+                userId,
+                null,
+                sanitizedFileParam,
+                contentHash,
+                chainResult,
+                envelopeResult,
+                claimSnapshot);
     }
 
     /**
      * Registers chunks that were uploaded directly to object storage without proxying bytes through backend.
      */
     @Override
-    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.util.TenantKeyUtils).currentTenantUserKey(#userId)")
-    public File storeDirectUploadedFile(Long userId, Long targetFileId, String originFileName, long fileSize,
+    public File storeDirectUploadedFile(Long userId, Long preparedFileId, String originFileName, long fileSize,
                                         List<DirectMultipartCompletedPartVO> completedParts, String fileParam) {
+        StoreFileResponse chainResult = attestDirectUploadedFile(
+                userId, preparedFileId, originFileName, completedParts, fileParam);
+        return persistDirectUploadedFile(
+                userId, preparedFileId, originFileName, fileSize, fileParam, chainResult);
+    }
+
+    /**
+     * 仅执行直传文件的链上登记，使调用方能先把链结果写入可恢复会话检查点。
+     */
+    @Override
+    public StoreFileResponse attestDirectUploadedFile(Long userId, Long preparedFileId,
+                                                      String originFileName,
+                                                      List<DirectMultipartCompletedPartVO> completedParts,
+                                                      String fileParam) {
+        return attestDirectUploadedFile(
+                userId, preparedFileId, originFileName, completedParts, fileParam, null);
+    }
+
+    /**
+     * 使用稳定会话 owner 在 DB 中 claim 直传目标，并在链 RPC 前推进为不可自动重放阶段。
+     */
+    @Override
+    public StoreFileResponse attestDirectUploadedFile(Long userId, Long preparedFileId,
+                                                      String originFileName,
+                                                      List<DirectMultipartCompletedPartVO> completedParts,
+                                                      String fileParam,
+                                                      String ownerToken) {
         if (CommonUtils.isEmpty(completedParts)) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "Stored parts cannot be empty");
         }
+        if (preparedFileId == null) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "PREPARE 文件ID不能为空");
+        }
 
-        File existingFile = resolvePrepareFileForStore(userId, targetFileId, originFileName);
+        File existingFile = resolvePrepareFileForStore(userId, preparedFileId, originFileName);
         FileParamEnvelopeResult envelopeResult = prepareFileParamEnvelope(fileParam);
         String sanitizedFileParam = envelopeResult.sanitizedFileParam();
-        String contentHash = requireContentHash(sanitizedFileParam);
+        requireContentHash(sanitizedFileParam);
+        String resolvedOwnerToken = normalizeFinalizationOwnerToken(
+                ownerToken, FINALIZATION_MODE_DIRECT, existingFile.getId());
+        String fingerprint = calculateDirectFinalizationFingerprint(sanitizedFileParam, completedParts);
+        FinalizationClaimSnapshot claimSnapshot = claimFinalization(
+                existingFile,
+                userId,
+                resolvedOwnerToken,
+                FINALIZATION_MODE_DIRECT,
+                fingerprint,
+                sanitizedFileParam);
+        if (FINALIZATION_PHASE_CHAIN_ATTESTED.equals(claimSnapshot.claim().phase())) {
+            return claimSnapshot.claim().toChainResult();
+        }
+        if (FINALIZATION_PHASE_CHAIN_ATTESTING.equals(claimSnapshot.claim().phase())) {
+            throw unresolvedFinalizationException(existingFile.getId());
+        }
+        claimSnapshot = transitionFinalizationClaim(
+                existingFile,
+                userId,
+                claimSnapshot,
+                FINALIZATION_PHASE_CHAIN_ATTESTING,
+                "",
+                "");
+
         String fileContent = StoredObjectReferenceCodec.toChainContent(completedParts);
-        Result<StoreFileResponse> result = fileRemoteClient.storeFileOnChain(new StoreFileRequest(
+        Result<StoreFileResponse> result = fileRemoteClient.storeFileOnChainOnce(new StoreFileRequest(
                 String.valueOf(userId),
                 existingFile.getFileName(),
                 sanitizedFileParam,
                 fileContent
         ));
         StoreFileResponse chainResult = ResultUtils.getData(result);
-        if (chainResult == null || CommonUtils.isEmpty(chainResult.fileHash())
-                || CommonUtils.isEmpty(chainResult.transactionHash())) {
+        if (!isValidDirectChainResult(chainResult)) {
             throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "区块链存储返回无效结果");
         }
+        FinalizationClaimSnapshot attestedSnapshot = transitionFinalizationClaim(
+                existingFile,
+                userId,
+                claimSnapshot,
+                FINALIZATION_PHASE_CHAIN_ATTESTED,
+                chainResult.transactionHash(),
+                chainResult.fileHash());
+        return attestedSnapshot.claim().toChainResult();
+    }
 
-        LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
-                .eq(File::getId, existingFile.getId())
+    /**
+     * 使用 Redis 已保存的链结果幂等推进稳定 PREPARE 记录，重试时不再重复上链。
+     */
+    @Override
+    public File persistDirectUploadedFile(Long userId, Long preparedFileId, String originFileName,
+                                          long fileSize, String fileParam, StoreFileResponse chainResult) {
+        return persistDirectUploadedFile(
+                userId, preparedFileId, originFileName, fileSize, fileParam, chainResult, null);
+    }
+
+    /**
+     * 仅使用同 owner 的 ATTESTED claim 完成 DB SUCCESS 精确 CAS，禁止调用方注入链结果。
+     */
+    @Override
+    public File persistDirectUploadedFile(Long userId, Long preparedFileId, String originFileName,
+                                          long fileSize, String fileParam, StoreFileResponse chainResult,
+                                          String ownerToken) {
+        if (preparedFileId == null || !isValidDirectChainResult(chainResult)) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "直传文件检查点无效");
+        }
+
+        File existingFile = loadDirectFileByStableId(userId, preparedFileId, originFileName);
+        FileParamEnvelopeResult envelopeResult = prepareFileParamEnvelope(fileParam);
+        String sanitizedFileParam = envelopeResult.sanitizedFileParam();
+        String contentHash = requireContentHash(sanitizedFileParam);
+        if (Objects.equals(existingFile.getStatus(), FileUploadStatus.SUCCESS.getCode())) {
+            validatePersistedDirectFile(existingFile, chainResult, contentHash, fileSize);
+            return existingFile.setFileSize(fileSize);
+        }
+        if (!Objects.equals(existingFile.getStatus(), FileUploadStatus.PREPARE.getCode())) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "直传目标文件状态不可恢复");
+        }
+        String resolvedOwnerToken = normalizeFinalizationOwnerToken(
+                ownerToken, FINALIZATION_MODE_DIRECT, existingFile.getId());
+        FinalizationClaimSnapshot claimSnapshot = requireOwnedAttestedClaim(
+                existingFile,
+                resolvedOwnerToken,
+                FINALIZATION_MODE_DIRECT,
+                chainResult);
+        return persistFinalizationSuccess(
+                existingFile,
+                userId,
+                fileSize,
+                sanitizedFileParam,
+                contentHash,
+                chainResult,
+                envelopeResult,
+                claimSnapshot);
+    }
+
+    /**
+     * 按稳定主键加载直传文件，并校验租户拦截器范围内的所有权和文件名。
+     */
+    private File loadDirectFileByStableId(Long userId, Long preparedFileId, String originFileName) {
+        File file = this.getOne(new LambdaQueryWrapper<File>()
+                .eq(File::getId, preparedFileId)
                 .eq(File::getUid, userId)
-                .eq(File::getStatus, FileUploadStatus.PREPARE.getCode());
+                .eq(CommonUtils.isNotEmpty(originFileName), File::getFileName, originFileName));
+        if (file == null) {
+            throw new GeneralException(ResultEnum.FAIL, "File metadata not initialized for upload");
+        }
+        return file;
+    }
 
+    /**
+     * 校验链结果具备恢复本地 SUCCESS 所需的两个稳定标识。
+     */
+    private boolean isValidDirectChainResult(StoreFileResponse chainResult) {
+        return chainResult != null
+                && CommonUtils.isNotEmpty(chainResult.fileHash())
+                && CommonUtils.isNotEmpty(chainResult.transactionHash());
+    }
+
+    /**
+     * 校验已存在的 SUCCESS 记录与会话链检查点完全一致，禁止错误会话借用终态。
+     */
+    private void validatePersistedDirectFile(File existingFile, StoreFileResponse chainResult,
+                                             String contentHash, long fileSize) {
+        Long persistedSize = existingFile.getFileSize();
+        if (!Objects.equals(existingFile.getFileHash(), chainResult.fileHash())
+                || !Objects.equals(existingFile.getTransactionHash(), chainResult.transactionHash())
+                || !Objects.equals(existingFile.getContentHash(), contentHash)
+                || fileSize <= 0
+                || persistedSize == null
+                || persistedSize <= 0
+                || persistedSize.longValue() != fileSize) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "直传 SUCCESS 记录与会话检查点不一致");
+        }
+    }
+
+    /**
+     * 判断目标文件是否已经进入链结果不允许自动重放的持久化阶段。
+     */
+    @Override
+    public boolean requiresManualFinalizationReconciliation(Long userId, Long preparedFileId) {
+        return getFinalizationRecoveryPhase(userId, preparedFileId)
+                == FinalizationRecoveryPhase.CHAIN_ATTESTING;
+    }
+
+    /**
+     * 只读解析稳定文件记录的最终化阶段，ATTESTED 与 ATTESTING 采用不同恢复策略。
+     */
+    @Override
+    public FinalizationRecoveryPhase getFinalizationRecoveryPhase(
+            Long userId,
+            Long preparedFileId
+    ) {
+        if (preparedFileId == null) {
+            return FinalizationRecoveryPhase.NONE;
+        }
+        File file = this.getById(preparedFileId);
+        if (file == null || !Objects.equals(file.getUid(), userId)) {
+            return FinalizationRecoveryPhase.NONE;
+        }
+        if (Objects.equals(file.getStatus(), FileUploadStatus.SUCCESS.getCode())) {
+            return FinalizationRecoveryPhase.SUCCESS;
+        }
+        if (!Objects.equals(file.getStatus(), FileUploadStatus.PREPARE.getCode())) {
+            return FinalizationRecoveryPhase.NONE;
+        }
+        FinalizationClaim claim;
+        try {
+            claim = readFinalizationClaim(file.getFileParam());
+        } catch (RuntimeException malformedClaim) {
+            return FinalizationRecoveryPhase.UNKNOWN;
+        }
+        if (claim == null) {
+            return FinalizationRecoveryPhase.NONE;
+        }
+        if (!isValidFinalizationClaim(claim)) {
+            return FinalizationRecoveryPhase.UNKNOWN;
+        }
+        return switch (claim.phase()) {
+            case FINALIZATION_PHASE_CLAIMED -> FinalizationRecoveryPhase.CLAIMED;
+            case FINALIZATION_PHASE_CHAIN_ATTESTING ->
+                    FinalizationRecoveryPhase.CHAIN_ATTESTING;
+            case FINALIZATION_PHASE_CHAIN_ATTESTED ->
+                    FinalizationRecoveryPhase.CHAIN_ATTESTED;
+            default -> FinalizationRecoveryPhase.UNKNOWN;
+        };
+    }
+
+    /**
+     * 创建或幂等复用文件级最终化 claim，首次写入使用 file_param 精确快照 CAS。
+     */
+    private FinalizationClaimSnapshot claimFinalization(
+            File file,
+            Long userId,
+            String ownerToken,
+            String mode,
+            String fingerprint,
+            String sanitizedFileParam
+    ) {
+        FinalizationClaim currentClaim = readFinalizationClaim(file.getFileParam());
+        if (currentClaim != null) {
+            validateOwnedClaim(file.getId(), currentClaim, ownerToken, mode, fingerprint);
+            validateClaimCleanFileParam(file.getFileParam(), sanitizedFileParam);
+            return new FinalizationClaimSnapshot(file.getFileParam(), currentClaim);
+        }
+
+        FinalizationClaim claimed = new FinalizationClaim(
+                FINALIZATION_CLAIM_VERSION,
+                ownerToken,
+                mode,
+                fingerprint,
+                FINALIZATION_PHASE_CLAIMED,
+                "",
+                "");
+        String oldFileParam = file.getFileParam();
+        String claimedFileParam = writeFinalizationClaim(sanitizedFileParam, claimed);
+        try {
+            if (!casPreparedFileParam(file.getId(), userId, oldFileParam, claimedFileParam)
+                    && !hasExactPreparedFileParam(
+                        file.getId(), userId, claimedFileParam)) {
+                throw finalizationCasConflict(file.getId());
+            }
+        } catch (RuntimeException claimWriteError) {
+            if (!hasExactPreparedFileParam(file.getId(), userId, claimedFileParam)) {
+                throw claimWriteError;
+            }
+            log.warn("CLAIMED 检查点写响应异常但精确回读确认已提交: fileId={}",
+                    file.getId(), claimWriteError);
+        }
+        file.setFileParam(claimedFileParam);
+        return new FinalizationClaimSnapshot(claimedFileParam, claimed);
+    }
+
+    /**
+     * 以 exact old file_param 快照推进 claim 阶段，确保并发 owner 无法覆盖彼此状态。
+     */
+    private FinalizationClaimSnapshot transitionFinalizationClaim(
+            File file,
+            Long userId,
+            FinalizationClaimSnapshot expected,
+            String nextPhase,
+            String transactionHash,
+            String fileHash
+    ) {
+        if (!isValidFinalizationClaim(expected.claim())) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "最终化 claim 状态不变量无效");
+        }
+        validateFinalizationTransition(expected.claim().phase(), nextPhase);
+        FinalizationClaim nextClaim = new FinalizationClaim(
+                expected.claim().v(),
+                expected.claim().ownerToken(),
+                expected.claim().mode(),
+                expected.claim().fingerprint(),
+                nextPhase,
+                Objects.requireNonNullElse(transactionHash, ""),
+                Objects.requireNonNullElse(fileHash, ""));
+        String nextFileParam = writeFinalizationClaim(expected.fileParamSnapshot(), nextClaim);
+        try {
+            if (!casPreparedFileParam(
+                    file.getId(), userId, expected.fileParamSnapshot(), nextFileParam)
+                    && !hasExactPreparedFileParam(file.getId(), userId, nextFileParam)) {
+                throw finalizationCasConflict(file.getId());
+            }
+        } catch (RuntimeException transitionError) {
+            if (!hasExactPreparedFileParam(file.getId(), userId, nextFileParam)) {
+                throw transitionError;
+            }
+            log.warn("最终化阶段写响应异常但精确回读确认已提交: fileId={}, phase={}",
+                    file.getId(), nextPhase, transitionError);
+        }
+        file.setFileParam(nextFileParam);
+        return new FinalizationClaimSnapshot(nextFileParam, nextClaim);
+    }
+
+    /**
+     * 校验直接完成阶段只能消费当前 owner 的 ATTESTED claim 和其中的链结果。
+     */
+    private FinalizationClaimSnapshot requireOwnedAttestedClaim(
+            File file,
+            String ownerToken,
+            String mode,
+            StoreFileResponse chainResult
+    ) {
+        FinalizationClaim claim = readFinalizationClaim(file.getFileParam());
+        if (claim == null) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "最终化 claim 不存在");
+        }
+        validateOwnedClaim(file.getId(), claim, ownerToken, mode, claim.fingerprint());
+        if (FINALIZATION_PHASE_CHAIN_ATTESTING.equals(claim.phase())) {
+            throw unresolvedFinalizationException(file.getId());
+        }
+        if (!FINALIZATION_PHASE_CHAIN_ATTESTED.equals(claim.phase())
+                || !Objects.equals(claim.txHash(), chainResult.transactionHash())
+                || !Objects.equals(claim.fileHash(), chainResult.fileHash())) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "链检查点与最终化 claim 不一致");
+        }
+        return new FinalizationClaimSnapshot(file.getFileParam(), claim);
+    }
+
+    /**
+     * 使用 ATTESTED 快照精确 CAS 到 SUCCESS，并以无内部 claim 的干净 file_param 覆盖 PREPARE。
+     */
+    private File persistFinalizationSuccess(
+            File existingFile,
+            Long userId,
+            Long fileSize,
+            String sanitizedFileParam,
+            String contentHash,
+            StoreFileResponse chainResult,
+            FileParamEnvelopeResult envelopeResult,
+            FinalizationClaimSnapshot claimSnapshot
+    ) {
+        FinalizationClaim claim = claimSnapshot.claim();
+        if (!isValidFinalizationClaim(claim)
+                || !FINALIZATION_PHASE_CHAIN_ATTESTED.equals(claim.phase())
+                || !Objects.equals(claim.txHash(), chainResult.transactionHash())
+                || !Objects.equals(claim.fileHash(), chainResult.fileHash())) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "最终化 claim 尚未完成链确认");
+        }
+        Map<String, Object> claimedCleanParams = parseFileParamMap(claimSnapshot.fileParamSnapshot());
+        claimedCleanParams.remove(FINALIZATION_CLAIM_KEY);
+        Map<String, Object> suppliedCleanParams = parseFileParamMap(sanitizedFileParam);
+        if (!Objects.equals(claimedCleanParams, suppliedCleanParams)) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件参数与最终化 claim 不一致");
+        }
+        String cleanFileParam = JsonConverter.toJson(claimedCleanParams);
+        if (CommonUtils.isEmpty(cleanFileParam)) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "无法清理最终化 claim");
+        }
+
+        LambdaUpdateWrapper<File> wrapper = preparedFileParamCasWrapper(
+                existingFile.getId(), userId, claimSnapshot.fileParamSnapshot());
         File update = new File()
                 .setUid(userId)
                 .setFileName(existingFile.getFileName())
                 .setFileHash(chainResult.fileHash())
                 .setContentHash(contentHash)
                 .setTransactionHash(chainResult.transactionHash())
-                .setFileParam(sanitizedFileParam)
+                .setFileParam(cleanFileParam)
                 .setStatus(FileUploadStatus.SUCCESS.getCode());
 
         transactionTemplate.executeWithoutResult(status -> {
             lockProofLifecycleVersionGroupBeforeFileMutation(existingFile);
-            boolean updated = this.update(update, wrapper);
-            if (!updated) {
-                throw new GeneralException(ResultEnum.FAIL, "文件状态更新失败，请重试");
+            if (!this.update(update, wrapper)) {
+                throw finalizationCasConflict(existingFile.getId());
             }
-            fileKeyEnvelopeService.saveOwnerEnvelope(existingFile, chainResult.fileHash(), userId, envelopeResult);
+            existingFile.setFileParam(cleanFileParam);
+            fileKeyEnvelopeService.saveOwnerEnvelope(
+                    existingFile, chainResult.fileHash(), userId, envelopeResult);
             markOlderProofIssuancesSuperseded(existingFile);
         });
 
+        if (fileSize != null) {
+            existingFile.setFileSize(fileSize);
+        }
         return existingFile
-                .setFileSize(fileSize)
                 .setFileHash(chainResult.fileHash())
                 .setContentHash(contentHash)
                 .setTransactionHash(chainResult.transactionHash())
-                .setFileParam(sanitizedFileParam)
+                .setFileParam(cleanFileParam)
                 .setStatus(FileUploadStatus.SUCCESS.getCode());
+    }
+
+    /**
+     * 校验重入请求的干净参数与既有 claim 绑定的业务参数完全一致。
+     */
+    private void validateClaimCleanFileParam(String claimedFileParam, String sanitizedFileParam) {
+        Map<String, Object> claimedCleanParams = parseFileParamMap(claimedFileParam);
+        claimedCleanParams.remove(FINALIZATION_CLAIM_KEY);
+        if (!Objects.equals(claimedCleanParams, parseFileParamMap(sanitizedFileParam))) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件参数与最终化 claim 不一致");
+        }
+    }
+
+    /**
+     * 以文件主键、用户、PREPARE 状态及 exact old file_param 构造 CAS 条件。
+     */
+    private LambdaUpdateWrapper<File> preparedFileParamCasWrapper(
+            Long fileId,
+            Long userId,
+            String oldFileParam
+    ) {
+        LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
+                .eq(File::getId, fileId)
+                .eq(File::getUid, userId)
+                .eq(File::getStatus, FileUploadStatus.PREPARE.getCode());
+        if (oldFileParam == null) {
+            wrapper.isNull(File::getFileParam);
+        } else {
+            wrapper.apply("BINARY file_param = BINARY {0}", oldFileParam);
+        }
+        return wrapper;
+    }
+
+    /**
+     * 原子替换 PREPARE 的 file_param，不改变文件业务终态。
+     */
+    private boolean casPreparedFileParam(
+            Long fileId,
+            Long userId,
+            String oldFileParam,
+            String nextFileParam
+    ) {
+        return this.update(
+                new File().setFileParam(nextFileParam),
+                preparedFileParamCasWrapper(fileId, userId, oldFileParam));
+    }
+
+    /**
+     * 精确回读 PREPARE 的 file_param 字节快照，用于收敛数据库写响应未知。
+     */
+    private boolean hasExactPreparedFileParam(
+            Long fileId,
+            Long userId,
+            String expectedFileParam
+    ) {
+        File persisted = this.getById(fileId);
+        return persisted != null
+                && Objects.equals(persisted.getUid(), userId)
+                && Objects.equals(
+                    persisted.getStatus(), FileUploadStatus.PREPARE.getCode())
+                && Objects.equals(persisted.getFileParam(), expectedFileParam);
+    }
+
+    /**
+     * 校验 claim 只能按 CLAIMED -> CHAIN_ATTESTING -> CHAIN_ATTESTED 单向推进。
+     */
+    private void validateFinalizationTransition(String currentPhase, String nextPhase) {
+        boolean valid = FINALIZATION_PHASE_CLAIMED.equals(currentPhase)
+                && FINALIZATION_PHASE_CHAIN_ATTESTING.equals(nextPhase)
+                || FINALIZATION_PHASE_CHAIN_ATTESTING.equals(currentPhase)
+                && FINALIZATION_PHASE_CHAIN_ATTESTED.equals(nextPhase);
+        if (!valid) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "最终化 claim 阶段转换非法");
+        }
+    }
+
+    /**
+     * 校验既有 claim 属于同一 owner、模式和输入指纹；不同 owner 在外部调用前失败关闭。
+     */
+    private void validateOwnedClaim(
+            Long fileId,
+            FinalizationClaim claim,
+            String ownerToken,
+            String mode,
+            String fingerprint
+    ) {
+        if (!isValidFinalizationClaim(claim)) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "最终化 claim 状态不变量无效");
+        }
+        if (!Objects.equals(claim.ownerToken(), ownerToken)
+                || !Objects.equals(claim.mode(), mode)
+                || !Objects.equals(claim.fingerprint(), fingerprint)) {
+            if (FINALIZATION_PHASE_CLAIMED.equals(claim.phase())) {
+                throw new RetryableException(
+                        ResultEnum.SERVICE_UNAVAILABLE,
+                        Map.of("reason", "prepared file finalization is owned by another upload"));
+            }
+            throw unresolvedFinalizationException(fileId);
+        }
+    }
+
+    /**
+     * 校验最终化 claim 的版本、身份、模式与阶段链结果不变量，未知或半提交组合一律视为不可信。
+     */
+    private boolean isValidFinalizationClaim(FinalizationClaim claim) {
+        if (claim == null
+                || claim.v() != FINALIZATION_CLAIM_VERSION
+                || claim.ownerToken() == null || claim.ownerToken().isBlank()
+                || claim.fingerprint() == null || claim.fingerprint().isBlank()
+                || !Set.of(FINALIZATION_MODE_LEGACY, FINALIZATION_MODE_DIRECT)
+                    .contains(claim.mode())) {
+            return false;
+        }
+        boolean hasTransactionHash = claim.txHash() != null && !claim.txHash().isBlank();
+        boolean hasFileHash = claim.fileHash() != null && !claim.fileHash().isBlank();
+        if (FINALIZATION_PHASE_CLAIMED.equals(claim.phase())
+                || FINALIZATION_PHASE_CHAIN_ATTESTING.equals(claim.phase())) {
+            return !hasTransactionHash && !hasFileHash;
+        }
+        if (FINALIZATION_PHASE_CHAIN_ATTESTED.equals(claim.phase())) {
+            return hasTransactionHash && hasFileHash;
+        }
+        return false;
+    }
+
+    /**
+     * 将 claim 写入保留业务字段的 file_param 顶层命名空间。
+     */
+    private String writeFinalizationClaim(String fileParam, FinalizationClaim claim) {
+        Map<String, Object> params = parseFileParamMap(fileParam);
+        Map<String, Object> claimMap = new LinkedHashMap<>();
+        claimMap.put("v", claim.v());
+        claimMap.put("ownerToken", claim.ownerToken());
+        claimMap.put("mode", claim.mode());
+        claimMap.put("fingerprint", claim.fingerprint());
+        claimMap.put("phase", claim.phase());
+        claimMap.put("txHash", claim.txHash());
+        claimMap.put("fileHash", claim.fileHash());
+        params.put(FINALIZATION_CLAIM_KEY, claimMap);
+        String serialized = JsonConverter.toJson(params);
+        if (CommonUtils.isEmpty(serialized)) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "最终化 claim 序列化失败");
+        }
+        return serialized;
+    }
+
+    /**
+     * 从 file_param 读取并严格校验内部 claim 字段。
+     */
+    private FinalizationClaim readFinalizationClaim(String fileParam) {
+        Map<String, Object> params = parseFileParamMap(fileParam);
+        Object rawClaim = params.get(FINALIZATION_CLAIM_KEY);
+        if (rawClaim == null) {
+            return null;
+        }
+        if (!(rawClaim instanceof Map<?, ?> claimMap)) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "最终化 claim 格式无效");
+        }
+        Object version = claimMap.get("v");
+        if (!(version instanceof Number number)) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "最终化 claim 版本无效");
+        }
+        int parsedVersion = number.intValue();
+        if (Double.compare(number.doubleValue(), parsedVersion) != 0) {
+            parsedVersion = Integer.MIN_VALUE;
+        }
+        return new FinalizationClaim(
+                parsedVersion,
+                requireClaimText(claimMap, "ownerToken"),
+                requireClaimText(claimMap, "mode"),
+                requireClaimText(claimMap, "fingerprint"),
+                requireClaimText(claimMap, "phase"),
+                requireClaimText(claimMap, "txHash"),
+                requireClaimText(claimMap, "fileHash"));
+    }
+
+    /**
+     * 将 file_param 解析为可保序修改的 JSON 对象；空 PREPARE 参数按空对象处理。
+     */
+    private Map<String, Object> parseFileParamMap(String fileParam) {
+        if (fileParam == null || fileParam.isBlank()) {
+            return new LinkedHashMap<>();
+        }
+        Map<?, ?> parsed = JsonConverter.parse(fileParam, Map.class);
+        if (parsed == null) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件参数格式无效");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : parsed.entrySet()) {
+            if (!(entry.getKey() instanceof String key)) {
+                throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件参数字段无效");
+            }
+            result.put(key, entry.getValue());
+        }
+        return result;
+    }
+
+    /**
+     * 读取 claim 必需字符串字段，允许未产生链结果的阶段以空字符串占位。
+     */
+    private String requireClaimText(Map<?, ?> claimMap, String field) {
+        Object value = claimMap.get(field);
+        if (!(value instanceof String text)) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "最终化 claim 字段无效: " + field);
+        }
+        return text;
+    }
+
+    /**
+     * 生成跨重试稳定的 owner；生产事件会显式传 clientId，旧 API 使用文件级兼容 owner。
+     */
+    private String normalizeFinalizationOwnerToken(String ownerToken, String mode, Long fileId) {
+        if (ownerToken != null && !ownerToken.isBlank()) {
+            return ownerToken;
+        }
+        return mode.toLowerCase(java.util.Locale.ROOT) + "-compat:" + fileId;
+    }
+
+    /**
+     * 计算普通上传输入的稳定 SHA-256 指纹，覆盖干净参数、分片顺序、名称、大小和哈希。
+     */
+    private String calculateLegacyFinalizationFingerprint(
+            String sanitizedFileParam,
+            List<java.io.File> fileList,
+            List<String> fileHashList
+    ) {
+        if (fileHashList == null || fileList.size() != fileHashList.size()) {
+            throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR, "文件分片与哈希数量不一致");
+        }
+        List<String> components = new ArrayList<>();
+        components.add(FINALIZATION_MODE_LEGACY);
+        components.add(sanitizedFileParam);
+        for (int index = 0; index < fileList.size(); index++) {
+            java.io.File part = fileList.get(index);
+            if (part == null) {
+                throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR, "文件分片不能为空");
+            }
+            components.add(String.valueOf(index));
+            components.add(part.getName());
+            components.add(String.valueOf(part.length()));
+            components.add(Objects.requireNonNullElse(fileHashList.get(index), ""));
+        }
+        return sha256Fingerprint(components);
+    }
+
+    /**
+     * 计算直传输入拓扑的稳定 SHA-256 指纹，确保同内容但不同分片布局不会共享 claim。
+     */
+    private String calculateDirectFinalizationFingerprint(
+            String sanitizedFileParam,
+            List<DirectMultipartCompletedPartVO> completedParts
+    ) {
+        List<String> components = new ArrayList<>();
+        components.add(FINALIZATION_MODE_DIRECT);
+        components.add(sanitizedFileParam);
+        for (DirectMultipartCompletedPartVO part : completedParts) {
+            if (part == null) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "Stored part cannot be null");
+            }
+            components.add(String.valueOf(part.partIndex()));
+            components.add(part.storagePath());
+            components.add(String.valueOf(part.size()));
+            components.add(part.eTag());
+            components.add(part.plainHash());
+            components.add(part.cipherHash());
+            components.add(part.checksumAlgorithm());
+        }
+        return sha256Fingerprint(components);
+    }
+
+    /**
+     * 使用长度前缀编码计算稳定 SHA-256，避免字段拼接歧义。
+     */
+    private String sha256Fingerprint(List<String> components) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (String component : components) {
+                byte[] value = Objects.requireNonNullElse(component, "")
+                        .getBytes(StandardCharsets.UTF_8);
+                digest.update(Integer.toString(value.length).getBytes(StandardCharsets.US_ASCII));
+                digest.update((byte) ':');
+                digest.update(value);
+                digest.update((byte) ';');
+            }
+            return "sha256:" + java.util.HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    /**
+     * 构造 CAS 冲突可安全重试异常；调用方重试后会重新读取 DB claim。
+     */
+    private RetryableException finalizationCasConflict(Long fileId) {
+        return new RetryableException(
+                ResultEnum.SERVICE_UNAVAILABLE,
+                Map.of("reason", "prepared file finalization CAS conflict", "fileId", fileId));
+    }
+
+    /**
+     * 构造链结果未知或已确认但尚未收敛到 SUCCESS 的人工对账错误。
+     */
+    private GeneralException unresolvedFinalizationException(Long fileId) {
+        return new GeneralException(
+                ResultEnum.BLOCKCHAIN_ERROR,
+                "文件最终化链结果不可自动重放，请先完成链上对账: fileId=" + fileId);
+    }
+
+    /**
+     * file_param 中持久化的最终化 claim。
+     */
+    private record FinalizationClaim(
+            int v,
+            String ownerToken,
+            String mode,
+            String fingerprint,
+            String phase,
+            String txHash,
+            String fileHash
+    ) {
+        /**
+         * 将已确认 claim 恢复为链结果。
+         */
+        private StoreFileResponse toChainResult() {
+            if (txHash == null || txHash.isBlank() || fileHash == null || fileHash.isBlank()) {
+                throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "最终化 claim 缺少链结果");
+            }
+            return new StoreFileResponse(txHash, fileHash);
+        }
+    }
+
+    /**
+     * claim 与其 exact file_param CAS 快照。
+     */
+    private record FinalizationClaimSnapshot(
+            String fileParamSnapshot,
+            FinalizationClaim claim
+    ) {
     }
 
     /**
@@ -468,19 +1207,6 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.util.TenantKeyUtils).currentTenantUserKey(#userId)")
-    public void changeFileStatusByName(Long userId, String fileName, Integer fileStatus) {
-        LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
-                .eq(File::getFileName, fileName)
-                .eq(File::getUid, userId);
-        File file = new File()
-                .setStatus(fileStatus);
-        this.update(file,wrapper);
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.util.TenantKeyUtils).currentTenantUserKey(#userId)")
     public void changeFileStatusByHash(Long userId, String fileHash, Integer fileStatus) {
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getFileHash, fileHash)
@@ -499,7 +1225,6 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.util.TenantKeyUtils).currentTenantUserKey(#userId)")
     public void changeFileStatusById(Long userId, Long fileId, Integer fileStatus) {
         LambdaUpdateWrapper<File> wrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getId, fileId)
@@ -509,22 +1234,52 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     /**
-     * 将目标文件标记为失败；若该文件为版本链最新节点，则恢复其父版本为 latest。
+     * 将 PREPARE 文件以 CAS 方式标记为失败，并返回关联上传会话是否可以安全清理。
      *
      * @param userId 用户ID
      * @param fileId 目标文件ID
+     * @return 已安全进入或原本已处于 FAIL 时返回 true；SUCCESS、其他状态或 CAS 冲突返回 false
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.util.TenantKeyUtils).currentTenantUserKey(#userId)")
-    public void markFileUploadFailed(Long userId, Long fileId) {
+    public boolean markFileUploadFailed(Long userId, Long fileId) {
         if (fileId == null) {
-            return;
+            return false;
         }
 
         File targetFile = this.getById(fileId);
         if (targetFile == null || !Objects.equals(targetFile.getUid(), userId)) {
-            return;
+            return false;
+        }
+        if (Objects.equals(targetFile.getStatus(), FileUploadStatus.FAIL.getCode())) {
+            return true;
+        }
+        if (!Objects.equals(targetFile.getStatus(), FileUploadStatus.PREPARE.getCode())) {
+            log.info("忽略非 PREPARE 文件的迟到失败回写: userId={}, fileId={}, status={}",
+                    userId, fileId, targetFile.getStatus());
+            return false;
+        }
+        // 与完成、新建版本统一使用版本组锚点锁；锁后必须重读，禁止基于过期 isLatest 恢复父版本。
+        lockProofLifecycleVersionGroupBeforeFileMutation(targetFile);
+        targetFile = this.getById(fileId);
+        if (targetFile == null
+                || !Objects.equals(targetFile.getUid(), userId)
+                || !Objects.equals(targetFile.getStatus(), FileUploadStatus.PREPARE.getCode())) {
+            return false;
+        }
+        FinalizationClaim latestClaim;
+        try {
+            latestClaim = readFinalizationClaim(targetFile.getFileParam());
+        } catch (RuntimeException malformedClaim) {
+            log.warn("文件最终化 claim 无法解析，拒绝失败回写并保留现场: userId={}, fileId={}",
+                    userId, fileId, malformedClaim);
+            return false;
+        }
+        if (latestClaim != null && (!isValidFinalizationClaim(latestClaim)
+                || !FINALIZATION_PHASE_CLAIMED.equals(latestClaim.phase()))) {
+            log.warn("文件最终化 claim 已进入不可逆阶段，拒绝失败回写: userId={}, fileId={}, phase={}",
+                    userId, fileId, latestClaim.phase());
+            return false;
         }
 
         boolean shouldRestoreParentLatest = targetFile.getParentVersionId() != null
@@ -534,14 +1289,23 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
         if (shouldRestoreParentLatest) {
             failUpdate.setIsLatest(0);
         }
-        LambdaUpdateWrapper<File> failWrapper = new LambdaUpdateWrapper<File>()
-                .eq(File::getId, targetFile.getId())
-                .eq(File::getUid, userId);
-        this.update(failUpdate, failWrapper);
+        LambdaUpdateWrapper<File> failWrapper = preparedFileParamCasWrapper(
+                targetFile.getId(), userId, targetFile.getFileParam());
+        if (targetFile.getIsLatest() == null) {
+            failWrapper.isNull(File::getIsLatest);
+        } else {
+            failWrapper.eq(File::getIsLatest, targetFile.getIsLatest());
+        }
+        if (!this.update(failUpdate, failWrapper)) {
+            log.info("文件状态已并发离开 PREPARE，跳过迟到失败回写: userId={}, fileId={}",
+                    userId, fileId);
+            return false;
+        }
 
         if (shouldRestoreParentLatest) {
             restoreParentVersionAsLatest(targetFile);
         }
+        return true;
     }
 
     /**
@@ -555,17 +1319,37 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             return;
         }
 
+        File currentParent = this.getById(parentVersionId);
+        if (currentParent == null
+                || !Objects.equals(currentParent.getUid(), failedVersion.getUid())
+                || !Objects.equals(currentParent.getStatus(), FileUploadStatus.SUCCESS.getCode())) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "父版本不存在或不是可恢复的 SUCCESS");
+        }
+        if (Objects.equals(currentParent.getIsLatest(), 1)) {
+            return;
+        }
+
         LambdaUpdateWrapper<File> parentWrapper = new LambdaUpdateWrapper<File>()
                 .eq(File::getId, parentVersionId)
                 .eq(File::getUid, failedVersion.getUid())
-                .eq(File::getStatus, FileUploadStatus.SUCCESS.getCode());
+                .eq(File::getStatus, FileUploadStatus.SUCCESS.getCode())
+                .eq(File::getIsLatest, currentParent.getIsLatest());
         File parentUpdate = new File().setIsLatest(1);
-        this.update(parentUpdate, parentWrapper);
+        if (this.update(parentUpdate, parentWrapper)) {
+            return;
+        }
+
+        File latestParent = this.getById(parentVersionId);
+        if (latestParent == null
+                || !Objects.equals(latestParent.getUid(), failedVersion.getUid())
+                || !Objects.equals(latestParent.getStatus(), FileUploadStatus.SUCCESS.getCode())
+                || !Objects.equals(latestParent.getIsLatest(), 1)) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "父版本 latest 恢复失败");
+        }
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.util.TenantKeyUtils).currentTenantUserKey(#userId)")
     public void deleteFiles(Long userId, List<String> identifiers) {
         if (CommonUtils.isEmpty(identifiers)) {
             return;
@@ -661,7 +1445,6 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
-    @Cacheable(cacheNames = "userFiles", key = "T(cn.flying.common.util.TenantKeyUtils).currentTenantUserKey(#userId)", unless = "#result == null || #result.isEmpty()")
     public List<File> getUserFilesList(Long userId) {
         LambdaQueryWrapper<File> wrapper = new LambdaQueryWrapper<>();
         // 所有用户（包括管理员）只能查询自己的文件
@@ -1802,7 +2585,6 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
     }
 
     @Override
-    @CacheEvict(cacheNames = "userFiles", key = "T(cn.flying.common.util.TenantKeyUtils).currentTenantUserKey(#userId)")
     public File createNewVersion(Long userId, Long parentFileId, String fileName, long fileSize, String contentType) {
         File parentFile = validateVersionSourceFile(userId, parentFileId);
 

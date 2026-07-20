@@ -1,11 +1,13 @@
 package cn.flying.dao.vo.file;
 
+import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
@@ -28,10 +30,11 @@ public class DirectUploadSessionRequest {
     @Schema(description = "文件名")
     private String fileName;
 
+    @NotNull
     @Min(1)
     @Max(4294967296L)
-    @Schema(description = "文件大小")
-    private long fileSize;
+    @Schema(description = "文件大小", requiredMode = Schema.RequiredMode.REQUIRED)
+    private Long fileSize;
 
     @NotBlank
     @Schema(description = "文件类型")
@@ -41,21 +44,32 @@ public class DirectUploadSessionRequest {
     @Schema(description = "客户端会话 ID")
     private String clientId;
 
+    @NotNull
     @Min(1)
     @Max(83886080)
-    @Schema(description = "分片大小")
-    private int chunkSize;
+    @Schema(description = "分片大小", requiredMode = Schema.RequiredMode.REQUIRED)
+    private Integer chunkSize;
 
+    @NotNull
     @Min(1)
     @Max(10000)
-    @Schema(description = "分片总数")
-    private int totalChunks;
+    @Schema(description = "分片总数", requiredMode = Schema.RequiredMode.REQUIRED)
+    private Integer totalChunks;
 
     @Schema(description = "目标文件ID（可选）")
     private String fileId;
 
     @NotEmpty
+    @Size(min = 1, max = 10000)
     @Valid
-    @Schema(description = "分片元数据")
+    @ArraySchema(
+            arraySchema = @Schema(
+                    description = "分片元数据",
+                    requiredMode = Schema.RequiredMode.REQUIRED
+            ),
+            schema = @Schema(implementation = DirectUploadPartRequest.class),
+            minItems = 1,
+            maxItems = 10000
+    )
     private List<DirectUploadPartRequest> parts;
 }

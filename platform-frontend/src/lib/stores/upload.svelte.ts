@@ -40,6 +40,8 @@ export interface UploadTask {
   endTime: number | null;
 }
 
+type DirectCompletionRetryOutcome = "handled" | "session-missing";
+
 /**
  * 新建上传任务的可选参数。
  */
@@ -69,6 +71,9 @@ const MAX_CONCURRENT_CHUNKS = 3;
 const DIRECT_UPLOAD_CHECKSUM_ALGORITHM = "SHA-256";
 const DIRECT_UPLOAD_HASH_PREFIX = "sha256:";
 const DIRECT_URL_EXPIRY_BUFFER_MS = 60 * 1000;
+const UPLOAD_SESSION_NOT_FOUND_CODE = 40006;
+const RESULT_DATA_NONE_CODE = 50001;
+const UPLOAD_SESSION_EXPIRED_MESSAGE = "上传会话不存在或已过期，请重新上传";
 
 /**
  * 根据文件大小计算最优分片大小
@@ -202,6 +207,58 @@ function isDirectPartUrlExpired(part: DirectUploadPartUrlVO): boolean {
   );
 }
 
+/**
+ * 判断 API 错误是否表示上传会话已经不存在。
+ *
+ * @param error API 调用异常。
+ * @returns 是否为上传会话不存在或过期错误。
+ */
+function isUploadSessionNotFoundError(error: unknown): boolean {
+  return (
+    error instanceof ApiError && error.code === UPLOAD_SESSION_NOT_FOUND_CODE
+  );
+}
+
+/**
+ * 判断中止接口是否确认旧直传会话已经不存在。
+ *
+ * @param error 中止调用异常。
+ * @returns 是否可视为旧会话已经清理。
+ */
+function isDirectAbortSessionGoneError(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.code === UPLOAD_SESSION_NOT_FOUND_CODE ||
+      error.code === RESULT_DATA_NONE_CODE)
+  );
+}
+
+/**
+ * 校验任务是否保留了覆盖全部分片的直传完成证据。
+ *
+ * @param task 上传任务快照。
+ * @returns 是否可以直接重试同一会话的完成请求。
+ */
+function hasCompleteDirectUploadEvidence(task: UploadTask): boolean {
+  if (
+    !task.directUpload ||
+    !task.clientId ||
+    task.totalChunks <= 0 ||
+    task.directCompletedParts.length !== task.totalChunks
+  ) {
+    return false;
+  }
+
+  const indexes = new Set(task.directCompletedParts.map((part) => part.index));
+  return (
+    indexes.size === task.totalChunks &&
+    Array.from(indexes).every(
+      (index) =>
+        Number.isInteger(index) && index >= 0 && index < task.totalChunks,
+    )
+  );
+}
+
 const sse = useSSE();
 let unsubscribeSSE: (() => void) | null = null;
 let visibilityListenerBound = false;
@@ -310,17 +367,12 @@ async function pollServerProgress(id: string): Promise<void> {
       return;
     }
   } catch (error) {
-    // 如果返回 40006，说明会话已被清理（上传已完成或过期）
-    // 后端约定：UPLOAD_SESSION_NOT_FOUND = 40006
-    if (error instanceof ApiError && error.code === 40006) {
-      updateTask(id, {
-        status: "completed",
-        progress: 100,
-        processProgress: 100,
-        serverProgress: 100,
-        endTime: Date.now(),
-      });
-      stopProgressPolling(id);
+    if (isUploadSessionNotFoundError(error)) {
+      markTaskFailed(
+        id,
+        new Error(UPLOAD_SESSION_EXPIRED_MESSAGE),
+        UPLOAD_SESSION_EXPIRED_MESSAGE,
+      );
       return;
     }
     // 其他错误继续重试
@@ -554,6 +606,90 @@ function markTaskFailed(
   });
 }
 
+/**
+ * 将已完成直传最终化请求的任务切换到服务端处理阶段。
+ *
+ * @param id 任务 ID。
+ * @param task 完成请求成功时的任务快照。
+ */
+function markTaskProcessing(id: string, task: UploadTask): void {
+  updateTask(id, {
+    status: "processing",
+    progress: 100,
+    processProgress: Math.max(task.processProgress, 0),
+    serverProgress: Math.max(task.serverProgress, 0),
+  });
+  startProgressPolling(id, true);
+}
+
+/**
+ * 使用原 clientId 和原始 ETag 证据重试直传完成请求。
+ *
+ * @param id 任务 ID。
+ * @param task 失败任务快照。
+ * @returns 已处理失败/成功，或服务端明确确认会话不存在。
+ */
+async function retryDirectCompletion(
+  id: string,
+  task: UploadTask,
+): Promise<DirectCompletionRetryOutcome> {
+  const clientId = task.clientId;
+  if (!clientId) {
+    return "session-missing";
+  }
+
+  updateTask(id, {
+    status: "uploading",
+    error: null,
+    endTime: null,
+  });
+
+  try {
+    await uploadApi.completeDirectUpload(clientId, {
+      parts: task.directCompletedParts,
+    });
+  } catch (error) {
+    if (isUploadSessionNotFoundError(error)) {
+      return "session-missing";
+    }
+    markTaskFailed(id, error, "完成上传失败");
+    return "handled";
+  }
+
+  const currentTask = tasks.find((item) => item.id === id);
+  if (currentTask?.status === "uploading") {
+    markTaskProcessing(id, currentTask);
+  }
+  return "handled";
+}
+
+/**
+ * 在创建新会话前显式清理旧直传会话，避免遗留 staging 对象。
+ *
+ * @param id 任务 ID。
+ * @param task 需要重新开始的任务快照。
+ * @returns 是否可以安全创建新会话。
+ */
+async function cleanupDirectSessionBeforeFreshRetry(
+  id: string,
+  task: UploadTask,
+): Promise<boolean> {
+  if (!task.directUpload || !task.clientId) {
+    return true;
+  }
+
+  try {
+    await uploadApi.abortDirectUpload(task.clientId);
+    return true;
+  } catch (error) {
+    if (isDirectAbortSessionGoneError(error)) {
+      return true;
+    }
+    markTaskFailed(id, error, "清理旧直传会话失败");
+    return false;
+  }
+}
+
 // ===== Actions =====
 
 /**
@@ -656,6 +792,23 @@ async function startUpload(id: string): Promise<void> {
       serverProgress: 0,
     });
 
+    const taskAfterSessionCreation = tasks.find((item) => item.id === id);
+    if (
+      !taskAfterSessionCreation ||
+      taskAfterSessionCreation.status === "cancelled"
+    ) {
+      await uploadApi.abortDirectUpload(result.clientId);
+      return;
+    }
+    if (taskAfterSessionCreation.status === "paused") {
+      await uploadApi.pauseUpload(result.clientId);
+      return;
+    }
+    if (taskAfterSessionCreation.status !== "uploading") {
+      await uploadApi.abortDirectUpload(result.clientId);
+      return;
+    }
+
     startProgressPolling(id, true);
 
     uploadedChunkSets.set(id, new Set());
@@ -667,13 +820,7 @@ async function startUpload(id: string): Promise<void> {
       await uploadApi.completeDirectUpload(finalTask.clientId!, {
         parts: finalTask.directCompletedParts,
       });
-      updateTask(id, {
-        status: "processing",
-        progress: 100,
-        processProgress: Math.max(finalTask.processProgress, 0),
-        serverProgress: Math.max(finalTask.serverProgress, 0),
-      });
-      startProgressPolling(id, true);
+      markTaskProcessing(id, finalTask);
     }
   } catch (err) {
     markTaskFailed(id, err, "上传失败");
@@ -697,8 +844,13 @@ async function pauseUpload(id: string): Promise<void> {
   updateTask(id, { status: "paused" });
   stopProgressPolling(id);
 
-  if (task.clientId && !task.directUpload) {
-    await uploadApi.pauseUpload(task.clientId);
+  try {
+    if (task.clientId) {
+      await uploadApi.pauseUpload(task.clientId);
+    }
+  } catch (error) {
+    markTaskFailed(id, error, "暂停失败");
+    throw error;
   }
 }
 
@@ -707,16 +859,18 @@ async function resumeUpload(id: string): Promise<void> {
   if (!task || task.status !== "paused") return;
 
   try {
-    if (task.clientId && !task.directUpload) {
+    if (task.clientId) {
       const result = await uploadApi.resumeUpload(task.clientId);
-      // Sync chunk set with server state
-      uploadedChunkSets.set(id, new Set(result.processedChunks));
-      updateTask(id, {
-        uploadedChunks: result.processedChunks,
-        progress: Math.round(
-          (result.processedChunks.length / task.totalChunks) * 100,
-        ),
-      });
+      if (!task.directUpload) {
+        // Sync chunk set with server state
+        uploadedChunkSets.set(id, new Set(result.processedChunks));
+        updateTask(id, {
+          uploadedChunks: result.processedChunks,
+          progress: Math.round(
+            (result.processedChunks.length / task.totalChunks) * 100,
+          ),
+        });
+      }
     }
 
     updateTask(id, { status: "uploading", error: null });
@@ -736,13 +890,7 @@ async function resumeUpload(id: string): Promise<void> {
       } else {
         await uploadApi.completeUpload(finalTask.clientId!);
       }
-      updateTask(id, {
-        status: "processing",
-        progress: 100,
-        processProgress: Math.max(finalTask.processProgress, 0),
-        serverProgress: Math.max(finalTask.serverProgress, 0),
-      });
-      startProgressPolling(id, true);
+      markTaskProcessing(id, finalTask);
     }
   } catch (err) {
     markTaskFailed(id, err, "恢复失败");
@@ -770,8 +918,20 @@ async function retryUpload(id: string): Promise<void> {
   const task = tasks.find((t) => t.id === id);
   if (!task || !["failed", "cancelled"].includes(task.status)) return;
 
-  uploadedChunkSets.delete(id);
   stopProgressPolling(id);
+
+  if (task.status === "failed" && hasCompleteDirectUploadEvidence(task)) {
+    const outcome = await retryDirectCompletion(id, task);
+    if (outcome === "handled") {
+      return;
+    }
+  }
+
+  if (!(await cleanupDirectSessionBeforeFreshRetry(id, task))) {
+    return;
+  }
+
+  uploadedChunkSets.delete(id);
 
   updateTask(id, {
     status: "pending",

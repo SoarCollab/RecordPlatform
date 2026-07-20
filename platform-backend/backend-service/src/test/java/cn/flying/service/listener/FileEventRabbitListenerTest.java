@@ -35,7 +35,7 @@ class FileEventRabbitListenerTest {
     private CacheManager cacheManager;
 
     @Mock
-    private Cache userFilesCache;
+    private Cache fileMetaCache;
 
     /**
      * 清理租户上下文，避免消息测试间污染。
@@ -46,13 +46,12 @@ class FileEventRabbitListenerTest {
     }
 
     /**
-     * 验证文件存储事件按消息租户驱逐 tenantId:userId 缓存。
+     * 验证文件存储事件不再维护已移除的用户文件列表缓存。
      */
     @Test
-    void shouldEvictTenantScopedUserFilesCacheForStoredEvent() {
+    void shouldProcessStoredEventWithoutUserFilesCacheMaintenance() {
         FileEventRabbitListener listener = new FileEventRabbitListener(processedMessageMapper, cacheManager);
         when(processedMessageMapper.exists("msg-stored")).thenReturn(false);
-        when(cacheManager.getCache("userFiles")).thenReturn(userFilesCache);
 
         listener.handleFileStored(message(
                 "msg-stored",
@@ -60,19 +59,18 @@ class FileEventRabbitListenerTest {
                 "{\"userId\":42,\"fileName\":\"a.pdf\",\"fileHash\":\"hash-a\",\"transactionHash\":\"tx-a\"}"
         ));
 
-        verify(userFilesCache).evict("8:42");
-        verify(userFilesCache, never()).evict(42L);
+        verify(cacheManager, never()).getCache("userFiles");
         assertProcessedEvent("file.stored");
     }
 
     /**
-     * 验证文件删除事件按消息租户驱逐 tenantId:userId 缓存。
+     * 验证文件删除事件只清理仍在使用的文件元数据缓存。
      */
     @Test
-    void shouldEvictTenantScopedUserFilesCacheForDeletedEvent() {
+    void shouldEvictOnlyFileMetadataCacheForDeletedEvent() {
         FileEventRabbitListener listener = new FileEventRabbitListener(processedMessageMapper, cacheManager);
         when(processedMessageMapper.exists("msg-deleted")).thenReturn(false);
-        when(cacheManager.getCache("userFiles")).thenReturn(userFilesCache);
+        when(cacheManager.getCache("fileMeta")).thenReturn(fileMetaCache);
 
         listener.handleFileDeleted(message(
                 "msg-deleted",
@@ -80,8 +78,8 @@ class FileEventRabbitListenerTest {
                 "{\"userId\":43,\"fileHash\":\"hash-b\"}"
         ));
 
-        verify(userFilesCache).evict("9:43");
-        verify(userFilesCache, never()).evict(43L);
+        verify(cacheManager, never()).getCache("userFiles");
+        verify(fileMetaCache).evict("hash-b");
         assertProcessedEvent("file.deleted");
     }
 

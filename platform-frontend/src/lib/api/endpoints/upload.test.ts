@@ -155,6 +155,90 @@ describe("upload endpoints", () => {
     expect(eTag).toBe('"etag-1"');
   });
 
+  it("uploadDirectPart 应在对象存储未暴露 ETag 时失败关闭", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 200 })),
+    );
+
+    await expect(
+      uploadApi.uploadDirectPart(
+        "https://storage.example/upload",
+        new Blob(["abc"]),
+      ),
+    ).rejects.toThrow("对象存储未暴露 ETag");
+
+    expect(clientMocks.api.post).not.toHaveBeenCalled();
+  });
+
+  it("uploadDirectPart 应拒绝对象存储返回的空白 ETag", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: { get: () => "   " },
+      }),
+    );
+
+    await expect(
+      uploadApi.uploadDirectPart(
+        "https://storage.example/upload",
+        new Blob(["abc"]),
+      ),
+    ).rejects.toThrow("ETag 必须是 1 到 255 个可见 ASCII 字符");
+
+    expect(clientMocks.api.post).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["1", "x"],
+    ["255", "x".repeat(255)],
+  ])(
+    "uploadDirectPart 应原样返回合法边界 ETag（长度 %s）",
+    async (_length, eTag) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+          ok: true,
+          status: 200,
+          headers: { get: () => eTag },
+        }),
+      );
+
+      await expect(
+        uploadApi.uploadDirectPart(
+          "https://storage.example/upload",
+          new Blob(["abc"]),
+        ),
+      ).resolves.toBe(eTag);
+    },
+  );
+
+  it.each([
+    ["前后空格", ' "etag" '],
+    ["控制字符", "etag\nbreak"],
+    ["DEL 字符", "etag\u007f"],
+    ["非 ASCII", '"étag"'],
+    ["超过长度上限", "x".repeat(256)],
+  ])("uploadDirectPart 应拒绝%s的 ETag", async (_caseName, eTag) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: { get: () => eTag },
+      }),
+    );
+
+    await expect(
+      uploadApi.uploadDirectPart(
+        "https://storage.example/upload",
+        new Blob(["abc"]),
+      ),
+    ).rejects.toThrow("ETag 必须是 1 到 255 个可见 ASCII 字符");
+  });
+
   it("complete/pause/resume/cancel 应携带 clientId 参数", async () => {
     clientMocks.api.post
       .mockResolvedValueOnce(undefined)

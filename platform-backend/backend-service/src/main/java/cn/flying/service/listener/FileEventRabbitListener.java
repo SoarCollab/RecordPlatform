@@ -3,7 +3,6 @@ package cn.flying.service.listener;
 import cn.flying.common.tenant.TenantContext;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.JsonConverter;
-import cn.flying.common.util.TenantKeyUtils;
 import cn.flying.dao.entity.ProcessedMessage;
 import cn.flying.dao.mapper.ProcessedMessageMapper;
 import cn.flying.service.outbox.OutboxPublisher;
@@ -144,8 +143,6 @@ public class FileEventRabbitListener {
         log.info("Processing file stored: userId={}, fileName={}, fileHash={}, txHash={}",
                 userId, fileName, fileHash, transactionHash);
 
-        // 清理用户文件列表缓存，确保下次查询获取最新数据
-        evictUserFilesCache(userId);
     }
 
     private void processFileDeletedEvent(Map<String, Object> event) {
@@ -159,22 +156,8 @@ public class FileEventRabbitListener {
 
         log.info("Processing file deleted: userId={}, fileHash={}", userId, fileHash);
 
-        // 清理用户文件列表缓存
-        evictUserFilesCache(userId);
         // 清理文件元数据缓存
         evictFileMetaCache(fileHash);
-    }
-
-    /**
-     * 清理用户文件列表缓存
-     */
-    private void evictUserFilesCache(Long userId) {
-        var cache = cacheManager.getCache("userFiles");
-        if (cache != null) {
-            String cacheKey = TenantKeyUtils.currentTenantUserKey(userId);
-            cache.evict(cacheKey);
-            log.debug("Evicted userFiles cache for key={}", cacheKey);
-        }
     }
 
     /**

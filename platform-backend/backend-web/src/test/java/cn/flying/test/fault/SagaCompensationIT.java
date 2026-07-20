@@ -109,7 +109,7 @@ class SagaCompensationIT extends FaultInjectionBaseIT {
 
         // 区块链返回 null（ResultUtils.getData 会抛出异常）
         Mockito.lenient()
-                .when(fileRemoteClient.storeFileOnChain(any()))
+                .when(fileRemoteClient.storeFileOnChainOnce(any()))
                 .thenReturn(null);
 
         // S3 补偿删除成功

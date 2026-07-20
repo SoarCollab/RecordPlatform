@@ -37,6 +37,7 @@ jobs:
               - 'platform-backend/**'
               - 'platform-fisco/**'
               - 'platform-storage/**'
+              - 'docs/public/nacos-config-template.yaml'
               - 'pom.xml'
               - '.github/workflows/**'
             frontend:
@@ -49,6 +50,7 @@ jobs:
               - 'tools/**'
               - 'docker-compose.infra.yml'
               - '.env.example'
+              - 'docs/public/nacos-config-template.yaml'
               - 'platform-frontend/.env.example'
 
   backend-test:
@@ -312,11 +314,169 @@ jobs:
                   )
           PY
 
+      - name: Require Direct Upload Finalization Recovery IT Execution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          required_suites = {
+              "cn.flying.test.FileParamBinaryCasIT": 2,
+              "cn.flying.test.DirectUploadFinalizationRecoveryIT": 6,
+          }
+
+          def require_suite(class_name: str, expected_tests: int) -> None:
+              """Require an exact, fully executed direct-upload Failsafe suite."""
+              report = Path(
+                  "platform-backend/backend-web/target/failsafe-reports/"
+                  f"TEST-{class_name}.xml"
+              )
+              if not report.is_file():
+                  sys.exit(f"Missing required Failsafe report: {report}")
+
+              suite = ET.parse(report).getroot()
+              expected_counts = {
+                  "tests": expected_tests,
+                  "skipped": 0,
+                  "failures": 0,
+                  "errors": 0,
+              }
+              for name, expected in expected_counts.items():
+                  actual = int(suite.attrib.get(name, "-1"))
+                  if actual != expected:
+                      sys.exit(
+                          f"{class_name} {name}={actual}; expected {expected}"
+                      )
+
+          for required_class, required_tests in required_suites.items():
+              require_suite(required_class, required_tests)
+          PY
+
       - name: Run FISCO Tests
         run: mvn -f platform-fisco/pom.xml test
 
-      - name: Run Storage Tests
-        run: mvn -f platform-storage/pom.xml test
+      - name: Run Storage Tests and MinIO Provider Contracts
+        run: mvn -f platform-storage/pom.xml clean verify -Pit
+
+      - name: Require Direct Upload MinIO Provider Contract Execution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          report = Path(
+              "platform-storage/target/failsafe-reports/"
+              "TEST-cn.flying.storage.service.DirectUploadPromotionMinioIT.xml"
+          )
+          if not report.is_file():
+              sys.exit(f"Missing required Failsafe report: {report}")
+
+          suite = ET.parse(report).getroot()
+          expected_counts = {
+              "tests": 8,
+              "skipped": 0,
+              "failures": 0,
+              "errors": 0,
+          }
+          for name, expected in expected_counts.items():
+              actual = int(suite.attrib.get(name, "-1"))
+              if actual != expected:
+                  sys.exit(
+                      f"DirectUploadPromotionMinioIT {name}={actual}; expected {expected}"
+                  )
+          PY
+
+      - name: Require Direct Upload Redis Lifecycle Execution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          report = Path(
+              "platform-storage/target/failsafe-reports/"
+              "TEST-cn.flying.storage.service.DirectUploadRedisLifecycleIT.xml"
+          )
+          if not report.is_file():
+              sys.exit(f"Missing required Failsafe report: {report}")
+
+          suite = ET.parse(report).getroot()
+          expected_counts = {
+              "tests": 7,
+              "skipped": 0,
+              "failures": 0,
+              "errors": 0,
+          }
+          for name, expected in expected_counts.items():
+              actual = int(suite.attrib.get(name, "-1"))
+              if actual != expected:
+                  sys.exit(
+                      f"DirectUploadRedisLifecycleIT {name}={actual}; expected {expected}"
+                  )
+          PY
+
+      - name: Require Degraded Write Revision CAS Redis Execution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          report = Path(
+              "platform-storage/target/failsafe-reports/"
+              "TEST-cn.flying.storage.service.DegradedWriteTrackerRedisIT.xml"
+          )
+          if not report.is_file():
+              sys.exit(f"Missing required Failsafe report: {report}")
+
+          suite = ET.parse(report).getroot()
+          expected_counts = {
+              "tests": 4,
+              "skipped": 0,
+              "failures": 0,
+              "errors": 0,
+          }
+          for name, expected in expected_counts.items():
+              actual = int(suite.attrib.get(name, "-1"))
+              if actual != expected:
+                  sys.exit(
+                      f"DegradedWriteTrackerRedisIT {name}={actual}; expected {expected}"
+                  )
+          PY
+
+      - name: Run Direct Upload Constrained Heap Test
+        run: mvn -f platform-storage/pom.xml verify -Pdirect-upload-constrained-heap
+
+      - name: Require Direct Upload Constrained Heap Execution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          report = Path(
+              "platform-storage/target/failsafe-reports/"
+              "TEST-cn.flying.storage.service.DirectUploadConstrainedHeapIT.xml"
+          )
+          if not report.is_file():
+              sys.exit(f"Missing required Failsafe report: {report}")
+
+          suite = ET.parse(report).getroot()
+          expected_counts = {
+              "tests": 1,
+              "skipped": 0,
+              "failures": 0,
+              "errors": 0,
+          }
+          for name, expected in expected_counts.items():
+              actual = int(suite.attrib.get(name, "-1"))
+              if actual != expected:
+                  sys.exit(
+                      f"DirectUploadConstrainedHeapIT {name}={actual}; expected {expected}"
+                  )
+          PY
 
       - name: Upload Backend OpenAPI Artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -526,6 +686,138 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
+      - name: Require Exact MinIO Direct Upload Origins
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import subprocess
+          from urllib.parse import urlsplit
+          import sys
+
+          env_lines = Path(".env.example").read_text(encoding="utf-8").splitlines()
+          values = [
+              line.split("=", 1)[1]
+              for line in env_lines
+              if line.startswith("CORS_ALLOWED_ORIGINS=")
+          ]
+          if len(values) != 1:
+              sys.exit(".env.example must define CORS_ALLOWED_ORIGINS exactly once")
+          origins = values[0].split(",")
+          if not origins or any(origin != origin.strip() for origin in origins):
+              sys.exit("MinIO origins must be comma-separated without surrounding spaces")
+          for origin in origins:
+              parsed = urlsplit(origin)
+              if (
+                  "*" in origin
+                  or parsed.scheme not in {"http", "https"}
+                  or not parsed.netloc
+                  or parsed.hostname is None
+                  or parsed.username is not None
+                  or parsed.password is not None
+                  or parsed.path
+                  or parsed.query
+                  or parsed.fragment
+              ):
+                  sys.exit(f"Unsafe MinIO direct-upload origin: {origin}")
+
+          resolved = subprocess.run(
+              [
+                  "docker",
+                  "compose",
+                  "--env-file",
+                  ".env.example",
+                  "-f",
+                  "docker-compose.infra.yml",
+                  "config",
+                  "--format",
+                  "json",
+              ],
+              check=True,
+              capture_output=True,
+              text=True,
+          )
+          compose = json.loads(resolved.stdout)
+          services = compose.get("services")
+          if not isinstance(services, dict):
+              sys.exit("Resolved Compose config is missing services")
+          for service_name in ("minio-a", "minio-b"):
+              service = services.get(service_name)
+              environment = service.get("environment") if isinstance(service, dict) else None
+              if not isinstance(environment, dict):
+                  sys.exit(f"Resolved Compose service {service_name} is missing environment")
+              actual = environment.get("MINIO_API_CORS_ALLOW_ORIGIN")
+              if actual != values[0]:
+                  sys.exit(
+                      f"{service_name} MINIO_API_CORS_ALLOW_ORIGIN={actual!r}; "
+                      f"expected exact CORS_ALLOWED_ORIGINS value {values[0]!r}"
+                  )
+
+          def direct_upload_defaults(path: str) -> dict[str, str]:
+              """Parse the flat storage.direct-upload scalar block without accepting comments as config."""
+              result: dict[str, str] = {}
+              in_storage = False
+              in_direct_upload = False
+              for line_number, raw_line in enumerate(
+                  Path(path).read_text(encoding="utf-8").splitlines(),
+                  start=1,
+              ):
+                  if "\t" in raw_line:
+                      sys.exit(f"{path}:{line_number} contains a tab")
+                  stripped = raw_line.strip()
+                  if not stripped or stripped.startswith("#"):
+                      continue
+                  indent = len(raw_line) - len(raw_line.lstrip(" "))
+                  if indent == 0:
+                      if in_direct_upload:
+                          break
+                      in_storage = stripped == "storage:"
+                      continue
+                  if not in_storage:
+                      continue
+                  if indent == 2:
+                      if in_direct_upload:
+                          break
+                      in_direct_upload = stripped == "direct-upload:"
+                      continue
+                  if not in_direct_upload:
+                      continue
+                  if indent != 4:
+                      sys.exit(f"{path}:{line_number} direct-upload must remain a flat scalar map")
+                  declaration = stripped.split("#", 1)[0].rstrip()
+                  key, separator, value = declaration.partition(":")
+                  if not separator or not key or not value.strip() or key in result:
+                      sys.exit(f"{path}:{line_number} has an invalid direct-upload entry")
+                  result[key] = value.strip()
+              if not in_direct_upload:
+                  sys.exit(f"{path} is missing storage.direct-upload")
+              return result
+
+          expected_defaults = {
+              "max-file-size-bytes": "4294967296",
+              "max-part-size-bytes": "104857600",
+              "stream-buffer-bytes": "65536",
+              "transfer-timeout-seconds": "300",
+              "lock-wait-seconds": "5",
+              "staging-retention-hours": "48",
+              "cleanup-enabled": "true",
+              "cleanup-interval-millis": "3600000",
+              "cleanup-initial-delay-millis": "300000",
+              "cleanup-batch-size": "200",
+              "cleanup-claim-lease-seconds": "600",
+          }
+          for config_path in (
+              "platform-storage/src/main/resources/application.yml",
+              "docs/public/nacos-config-template.yaml",
+          ):
+              actual_defaults = direct_upload_defaults(config_path)
+              if actual_defaults != expected_defaults:
+                  sys.exit(
+                      f"{config_path} storage.direct-upload defaults drifted: "
+                      f"actual={actual_defaults!r}, expected={expected_defaults!r}"
+                  )
+          PY
+
       - name: Setup Java 21
         uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
         with:
@@ -541,10 +833,11 @@ jobs:
           mvn -f platform-fisco/pom.xml clean package -DskipTests -q
           mvn -f platform-storage/pom.xml clean package -DskipTests -q
 
-      - name: Build Backend, FISCO and Public Verifier Images
+      - name: Build Backend, FISCO, Storage and Public Verifier Images
         run: |
           docker build -f platform-backend/Dockerfile -t recordplatform-backend:pr .
           docker build -f platform-fisco/Dockerfile -t recordplatform-fisco:pr .
+          docker build -f platform-storage/Dockerfile -t recordplatform-storage:pr .
           docker build -f platform-verifier/web-verifier/Dockerfile -t recordplatform-verifier-web:pr .
 
       - name: Verify FISCO Non-Root Nonce Volume

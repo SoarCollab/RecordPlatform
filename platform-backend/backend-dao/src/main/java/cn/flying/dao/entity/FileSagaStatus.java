@@ -25,6 +25,10 @@ public enum FileSagaStatus {
      */
     PENDING_COMPENSATION,
     /**
+     * 已越过链写边界，外部结果不确定，禁止自动补偿。
+     */
+    MANUAL_RECONCILIATION,
+    /**
      * 最终失败（超过最大重试次数）
      */
     FAILED

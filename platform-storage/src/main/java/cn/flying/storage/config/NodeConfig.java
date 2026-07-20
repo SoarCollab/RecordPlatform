@@ -17,6 +17,13 @@ public class NodeConfig {
      */
     private String endpoint;
     /**
+     * 物理存储集群的稳定身份。
+     *
+     * <p>同一个底层存储集群即使通过不同 DNS、端口或网关访问，也必须配置相同值；
+     * 只有不同值才能作为独立副本计入直传仲裁。</p>
+     */
+    private String physicalStorageId;
+    /**
      * 访问密钥
      */
     @ToString.Exclude
@@ -58,4 +65,4 @@ public class NodeConfig {
      * - 留空则禁用指标采集
      */
     private String metricsPath = "/minio/v2/metrics/node";
-} 
+}

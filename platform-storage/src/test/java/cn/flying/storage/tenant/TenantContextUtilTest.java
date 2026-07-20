@@ -1,11 +1,43 @@
 package cn.flying.storage.tenant;
 
+import org.apache.dubbo.rpc.RpcContext;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TenantContextUtilTest {
+
+    /**
+     * 清理 Dubbo attachment，避免租户上下文跨测试泄漏。
+     */
+    @AfterEach
+    void clearTenantAttachment() {
+        RpcContext.getServerAttachment().removeAttachment("tenant.id");
+    }
+
+    /**
+     * 验证关键写边界只接受调用方显式传递的合法租户上下文。
+     */
+    @Test
+    @DisplayName("Should require an explicit valid tenant attachment")
+    void shouldRequireExplicitValidTenantAttachment() {
+        assertThatThrownBy(TenantContextUtil::requireTenantId)
+                .isInstanceOf(IllegalStateException.class);
+
+        RpcContext.getServerAttachment().setAttachment("tenant.id", "invalid");
+        assertThatThrownBy(TenantContextUtil::requireTenantId)
+                .isInstanceOf(IllegalStateException.class);
+
+        RpcContext.getServerAttachment().setAttachment("tenant.id", "-1");
+        assertThatThrownBy(TenantContextUtil::requireTenantId)
+                .isInstanceOf(IllegalStateException.class);
+
+        RpcContext.getServerAttachment().setAttachment("tenant.id", "42");
+        assertThat(TenantContextUtil.requireTenantId()).isEqualTo(42L);
+    }
 
     /**
      * 验证当前分片路径仍解析到租户隔离对象 key。

@@ -1,14 +1,11 @@
 package cn.flying.service.saga;
 
-import cn.flying.common.constant.FileUploadStatus;
 import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.tenant.TenantContext;
-import cn.flying.dao.dto.File;
 import cn.flying.dao.entity.FileSaga;
 import cn.flying.dao.entity.FileSagaStatus;
 import cn.flying.dao.entity.FileSagaStep;
-import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileSagaMapper;
 import cn.flying.dao.mapper.TenantMapper;
 import cn.flying.platformapi.constant.Result;
@@ -40,7 +37,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -61,8 +58,6 @@ class FileSagaOrchestratorTest {
     private FileRemoteClient fileRemoteClient;
     @Mock
     private OutboxService outboxService;
-    @Mock
-    private FileMapper fileMapper;
     @Mock
     private SagaMetrics sagaMetrics;
     @Mock
@@ -159,6 +154,9 @@ class FileSagaOrchestratorTest {
     @DisplayName("Execute Upload")
     class ExecuteUpload {
 
+        @TempDir
+        private Path tempDir;
+
         /**
          * 验证普通上传链上内容使用有序数组，重复分片哈希不会被 Map 覆盖。
          */
@@ -185,14 +183,14 @@ class FileSagaOrchestratorTest {
                 when(sagaMapper.selectByRequestId("req-ordered", 77L)).thenReturn(null);
                 when(fileRemoteClient.storeFileChunk(any(byte[].class), eq("hash-same")))
                         .thenReturn(Result.success("storage/tenant/77/chunk/hash-same"));
-                when(fileRemoteClient.storeFileOnChain(any()))
+                when(fileRemoteClient.storeFileOnChainOnce(any()))
                         .thenReturn(Result.success(new StoreFileResponse("tx-1", "chain-hash")));
 
                 FileUploadResult result = orchestrator.executeUpload(command);
 
                 assertTrue(result.isSuccess());
                 ArgumentCaptor<StoreFileRequest> requestCaptor = ArgumentCaptor.forClass(StoreFileRequest.class);
-                verify(fileRemoteClient).storeFileOnChain(requestCaptor.capture());
+                verify(fileRemoteClient).storeFileOnChainOnce(requestCaptor.capture());
                 List<StoredObjectReference> references =
                         StoredObjectReferenceCodec.parseChainContent(requestCaptor.getValue().content());
                 assertEquals(2, references.size());
@@ -206,6 +204,90 @@ class FileSagaOrchestratorTest {
                 Files.deleteIfExists(firstChunk);
                 Files.deleteIfExists(secondChunk);
             }
+        }
+
+        /**
+         * 验证 DB 链前检查点确定失败时 Saga 不推进链边界且链 RPC 为零次。
+         */
+        @Test
+        void definiteBeforeChainFailureShouldRemainBeforeChainBoundary() throws Exception {
+            FileUploadCommand command = prepareBoundaryCommand("req-before-chain-fail");
+            RuntimeException checkpointFailure = new IllegalStateException("claim CAS conflict");
+            AtomicReference<FileSaga> insertedSaga = captureInsertedSaga();
+
+            RuntimeException actual = assertThrows(
+                    RuntimeException.class,
+                    () -> orchestrator.executeUpload(
+                            command,
+                            () -> { throw checkpointFailure; },
+                            ignored -> fail("链后检查点不应执行")));
+
+            assertSame(checkpointFailure, actual);
+            assertEquals(FileSagaStep.S3_UPLOADED.name(), insertedSaga.get().getCurrentStep());
+            assertEquals(FileSagaStatus.FAILED.name(), insertedSaga.get().getStatus());
+            verify(fileRemoteClient, never()).storeFileOnChainOnce(any());
+        }
+
+        /**
+         * 验证 DB ATTESTING 已确认后 Saga 链边界检查点响应未知会转人工且不发链 RPC。
+         */
+        @Test
+        void sagaChainBoundaryCheckpointFailureShouldRequireManualReconciliation() throws Exception {
+            FileUploadCommand command = prepareBoundaryCommand("req-saga-boundary-fail");
+            AtomicReference<FileSaga> insertedSaga = captureInsertedSaga();
+            doAnswer(invocation -> {
+                FileSaga saga = invocation.getArgument(0);
+                if (FileSagaStep.CHAIN_STORING.name().equals(saga.getCurrentStep())) {
+                    throw new IllegalStateException("saga checkpoint response unknown");
+                }
+                return null;
+            }).when(compensationHelper).updateSagaStepInNewTransaction(any(FileSaga.class));
+
+            assertThrows(
+                    IllegalStateException.class,
+                    () -> orchestrator.executeUpload(command, () -> { }, ignored -> { }));
+
+            assertEquals(FileSagaStep.CHAIN_STORING.name(), insertedSaga.get().getCurrentStep());
+            assertEquals(
+                    FileSagaStatus.MANUAL_RECONCILIATION.name(),
+                    insertedSaga.get().getStatus());
+            verify(fileRemoteClient, never()).storeFileOnChainOnce(any());
+        }
+
+        /**
+         * 构造边界测试的单分片命令和存储 RPC 响应。
+         */
+        private FileUploadCommand prepareBoundaryCommand(String requestId) throws Exception {
+            TenantContext.setTenantId(77L);
+            Path chunk = tempDir.resolve(requestId + ".bin");
+            Files.writeString(chunk, "chunk", StandardCharsets.UTF_8);
+            when(sagaMapper.selectByRequestId(requestId, 77L)).thenReturn(null);
+            when(fileRemoteClient.storeFileChunk(any(byte[].class), eq("cipher-hash")))
+                    .thenReturn(Result.success("storage/tenant/77/cipher-hash"));
+            return FileUploadCommand.builder()
+                    .requestId(requestId)
+                    .fileId(100L)
+                    .userId(1L)
+                    .tenantId(77L)
+                    .fileName("boundary.txt")
+                    .fileParam("{}")
+                    .fileList(List.of(chunk.toFile()))
+                    .fileHashList(List.of("cipher-hash"))
+                    .build();
+        }
+
+        /**
+         * 捕获新建 Saga，并模拟独立事务插入后分配稳定主键。
+         */
+        private AtomicReference<FileSaga> captureInsertedSaga() {
+            AtomicReference<FileSaga> captured = new AtomicReference<>();
+            doAnswer(invocation -> {
+                FileSaga saga = invocation.getArgument(0);
+                saga.setId(9001L).setTenantId(77L);
+                captured.set(saga);
+                return null;
+            }).when(compensationHelper).insertSagaInNewTransaction(any(FileSaga.class));
+            return captured;
         }
     }
 
@@ -226,7 +308,7 @@ class FileSagaOrchestratorTest {
             prepareNewSaga("req-small");
             when(fileRemoteClient.storeFileChunk(any(byte[].class), eq("hash-small")))
                     .thenReturn(Result.success("minio/tenant/77/hash-small"));
-            when(fileRemoteClient.storeFileOnChain(any(StoreFileRequest.class)))
+            when(fileRemoteClient.storeFileOnChainOnce(any(StoreFileRequest.class)))
                     .thenReturn(Result.success(new StoreFileResponse("tx-small", "file-hash")));
 
             FileUploadResult result = orchestrator.executeUpload(FileUploadCommand.builder()
@@ -242,7 +324,7 @@ class FileSagaOrchestratorTest {
             verify(fileRemoteClient).storeFileChunk(
                     ArgumentMatchers.<byte[]>argThat(bytes -> Arrays.equals(bytes, new byte[] {1, 2, 3, 4})),
                     eq("hash-small"));
-            verify(fileRemoteClient).storeFileOnChain(any(StoreFileRequest.class));
+            verify(fileRemoteClient).storeFileOnChainOnce(any(StoreFileRequest.class));
         }
 
         /**
@@ -267,7 +349,7 @@ class FileSagaOrchestratorTest {
             assertEquals(ResultEnum.FILE_UPLOAD_ERROR, exception.getResultEnum());
             assertEquals("分片大小超过后端代理上传上限，请使用 Multipart 直传链路", exception.getData());
             verify(fileRemoteClient, never()).storeFileChunk(any(), any());
-            verify(fileRemoteClient, never()).storeFileOnChain(any());
+            verify(fileRemoteClient, never()).storeFileOnChainOnce(any());
         }
 
         /**
@@ -297,9 +379,11 @@ class FileSagaOrchestratorTest {
     @DisplayName("Retry Compensation")
     class RetryCompensation {
 
+        /**
+         * 验证历史链前补偿任务只收敛 FAILED 状态，不删除共享对象或直接回写文件表。
+         */
         @Test
-        @DisplayName("should compensate successfully on retry")
-        void shouldCompensateOnRetry() {
+        void retryBeforeChainBoundaryShouldFailClosedWithoutDestructiveCompensation() {
             FileSaga saga = new FileSaga()
                     .setId(1L)
                     .setFileId(100L)
@@ -307,119 +391,32 @@ class FileSagaOrchestratorTest {
                     .setUserId(1L)
                     .setCurrentStep(FileSagaStep.S3_UPLOADED.name())
                     .setStatus(FileSagaStatus.PENDING_COMPENSATION.name())
-                    .setRetryCount(1)
-                    .setPayload("{\"storedPaths\":{\"hash1\":\"path1\"},\"compensatedSteps\":[]}");
-
-            // Mock S3 deletion success
-            Result<Boolean> deleteResult = Result.success(true);
-            when(fileRemoteClient.deleteStorageFile(anyMap())).thenReturn(deleteResult);
-
-            // Mock DB update
-            when(fileMapper.updateById(any(File.class))).thenReturn(1);
+                    .setRetryCount(1);
 
             orchestrator.retryCompensation(saga);
 
-            // Verify status updates
-            ArgumentCaptor<FileSaga> sagaCaptor = ArgumentCaptor.forClass(FileSaga.class);
-            verify(compensationHelper, atLeastOnce()).updateSagaStatusInNewTransaction(sagaCaptor.capture());
-
-            // Should end in COMPENSATED status
-            List<FileSaga> capturedSagas = sagaCaptor.getAllValues();
-            assertTrue(capturedSagas.stream()
-                    .anyMatch(s -> FileSagaStatus.COMPENSATED.name().equals(s.getStatus())));
-
-            verify(sagaMetrics).recordSagaCompensated();
+            assertEquals(FileSagaStatus.FAILED.name(), saga.getStatus());
+            verify(compensationHelper).updateSagaStatusInNewTransaction(saga);
+            verify(fileRemoteClient, never()).deleteStorageFile(anyMap());
         }
 
         /**
-         * 验证旧版 payload 中直接保存的 hash -> path 映射仍会参与 S3 补偿。
+         * 验证已经越过链边界的历史任务转人工对账，仍不执行对象删除或数据库回滚。
          */
         @Test
-        @DisplayName("should compensate legacy raw stored path payload")
-        void shouldCompensateLegacyRawStoredPathPayload() {
+        void retryAfterChainBoundaryShouldRequireManualReconciliationWithoutDeletes() {
             FileSaga saga = new FileSaga()
                     .setId(1L)
                     .setFileId(100L)
-                    .setRequestId("req-legacy")
-                    .setUserId(1L)
-                    .setCurrentStep(FileSagaStep.S3_UPLOADED.name())
+                    .setCurrentStep(FileSagaStep.CHAIN_STORING.name())
                     .setStatus(FileSagaStatus.PENDING_COMPENSATION.name())
-                    .setRetryCount(1)
-                    .setPayload("{\"hash1\":\"minio/node/node-a/hash1\"}");
-
-            when(fileRemoteClient.deleteStorageFile(anyMap())).thenReturn(Result.success(true));
-            when(fileMapper.updateById(any(File.class))).thenReturn(1);
+                    .setRetryCount(1);
 
             orchestrator.retryCompensation(saga);
 
-            ArgumentCaptor<Map<String, String>> storedPathsCaptor = ArgumentCaptor.captor();
-            verify(fileRemoteClient).deleteStorageFile(storedPathsCaptor.capture());
-            assertEquals(Map.of("hash1", "minio/node/node-a/hash1"), storedPathsCaptor.getValue());
-            verify(sagaMetrics).recordSagaCompensated();
-        }
-
-        @Test
-        @DisplayName("should schedule retry on compensation failure")
-        void shouldScheduleRetryOnFailure() {
-            FileSaga saga = new FileSaga()
-                    .setId(1L)
-                    .setFileId(100L)
-                    .setCurrentStep(FileSagaStep.S3_UPLOADED.name())
-                    .setStatus(FileSagaStatus.PENDING_COMPENSATION.name())
-                    .setRetryCount(1)
-                    .setPayload("{\"storedPaths\":{\"hash1\":\"path1\"},\"compensatedSteps\":[]}");
-
-            // Mock S3 deletion failure
-            Result<Boolean> deleteResult = new Result<>(500, "S3 error", null);
-            when(fileRemoteClient.deleteStorageFile(anyMap())).thenReturn(deleteResult);
-
-            orchestrator.retryCompensation(saga);
-
-            // Should schedule next retry
-            assertNotNull(saga.getNextRetryAt());
-            assertEquals(2, saga.getRetryCount());
-
-            ArgumentCaptor<FileSaga> sagaCaptor = ArgumentCaptor.forClass(FileSaga.class);
-            verify(compensationHelper, atLeastOnce()).updateSagaStatusInNewTransaction(sagaCaptor.capture());
-
-            // Should be in PENDING_COMPENSATION for retry
-            assertTrue(sagaCaptor.getAllValues().stream()
-                    .anyMatch(s -> FileSagaStatus.PENDING_COMPENSATION.name().equals(s.getStatus())));
-        }
-
-        @Test
-        @DisplayName("should mark as failed after max retries exceeded")
-        void shouldMarkFailedAfterMaxRetries() {
-            FileSaga saga = new FileSaga()
-                    .setId(1L)
-                    .setFileId(100L)
-                    .setCurrentStep(FileSagaStep.S3_UPLOADED.name())
-                    .setStatus(FileSagaStatus.PENDING_COMPENSATION.name())
-                    .setRetryCount(5) // At max
-                    .setPayload("{\"storedPaths\":{\"hash1\":\"path1\"},\"compensatedSteps\":[]}");
-
-            // Mock S3 deletion failure
-            Result<Boolean> deleteResult = new Result<>(500, "S3 error", null);
-            when(fileRemoteClient.deleteStorageFile(anyMap())).thenReturn(deleteResult);
-
-            orchestrator.retryCompensation(saga);
-
-            // Should be marked as FAILED
-            ArgumentCaptor<FileSaga> sagaCaptor = ArgumentCaptor.forClass(FileSaga.class);
-            verify(compensationHelper, atLeastOnce()).updateSagaStatusInNewTransaction(sagaCaptor.capture());
-
-            assertTrue(sagaCaptor.getAllValues().stream()
-                    .anyMatch(s -> FileSagaStatus.FAILED.name().equals(s.getStatus())));
-
-            // Should publish dead letter event
-            verify(compensationHelper).publishEventInNewTransaction(
-                    eq(outboxService),
-                    eq("SAGA_DEAD_LETTER"),
-                    eq(1L),
-                    eq("saga.compensation.failed"),
-                    anyString());
-
-            verify(sagaMetrics).recordSagaFailed();
+            assertEquals(FileSagaStatus.MANUAL_RECONCILIATION.name(), saga.getStatus());
+            verify(compensationHelper).updateSagaStatusInNewTransaction(saga);
+            verify(fileRemoteClient, never()).deleteStorageFile(anyMap());
         }
     }
 
@@ -469,47 +466,6 @@ class FileSagaOrchestratorTest {
     }
 
     @Nested
-    @DisplayName("Idempotency")
-    class Idempotency {
-
-        @Test
-        @DisplayName("should skip already compensated saga")
-        void shouldSkipAlreadyCompensated() {
-            FileSaga saga = new FileSaga()
-                    .setId(1L)
-                    .setStatus(FileSagaStatus.COMPENSATED.name())
-                    .setPayload("{\"storedPaths\":{},\"compensatedSteps\":[\"S3_DELETED\",\"DB_ROLLBACK\"]}");
-
-            orchestrator.retryCompensation(saga);
-
-            // Should not attempt S3 deletion
-            verify(fileRemoteClient, never()).deleteStorageFile(anyMap());
-        }
-
-        @Test
-        @DisplayName("should skip S3 compensation if already done")
-        void shouldSkipS3IfDone() {
-            FileSaga saga = new FileSaga()
-                    .setId(1L)
-                    .setFileId(100L)
-                    .setCurrentStep(FileSagaStep.S3_UPLOADED.name())
-                    .setStatus(FileSagaStatus.PENDING_COMPENSATION.name())
-                    .setRetryCount(1)
-                    .setPayload("{\"storedPaths\":{\"hash1\":\"path1\"},\"compensatedSteps\":[\"S3_DELETED\"]}");
-
-            // Only DB update needed
-            when(fileMapper.updateById(any(File.class))).thenReturn(1);
-
-            orchestrator.retryCompensation(saga);
-
-            // Should not call S3 deletion
-            verify(fileRemoteClient, never()).deleteStorageFile(anyMap());
-            // Should update DB
-            verify(fileMapper).updateById(any(File.class));
-        }
-    }
-
-    @Nested
     @DisplayName("Scheduled Compensation")
     class ScheduledCompensation {
 
@@ -551,58 +507,4 @@ class FileSagaOrchestratorTest {
         }
     }
 
-    @Nested
-    @DisplayName("Dead Letter")
-    class DeadLetter {
-
-        @Test
-        @DisplayName("should publish dead letter event on max retries")
-        void shouldPublishDeadLetter() {
-            ReflectionTestUtils.setField(orchestrator, "deadLetterEnabled", true);
-
-            FileSaga saga = new FileSaga()
-                    .setId(1L)
-                    .setRequestId("req-123")
-                    .setUserId(100L)
-                    .setFileName("test.txt")
-                    .setCurrentStep(FileSagaStep.S3_UPLOADED.name())
-                    .setStatus(FileSagaStatus.PENDING_COMPENSATION.name())
-                    .setRetryCount(5)
-                    .setPayload("{\"storedPaths\":{\"hash1\":\"path1\"},\"compensatedSteps\":[]}");
-
-            Result<Boolean> deleteResult = new Result<>(500, "S3 error", null);
-            when(fileRemoteClient.deleteStorageFile(anyMap())).thenReturn(deleteResult);
-
-            orchestrator.retryCompensation(saga);
-
-            verify(compensationHelper).publishEventInNewTransaction(
-                    eq(outboxService),
-                    eq("SAGA_DEAD_LETTER"),
-                    eq(1L),
-                    eq("saga.compensation.failed"),
-                    argThat(json -> json.contains("req-123") && json.contains("test.txt")));
-        }
-
-        @Test
-        @DisplayName("should skip dead letter if disabled")
-        void shouldSkipDeadLetterIfDisabled() {
-            ReflectionTestUtils.setField(orchestrator, "deadLetterEnabled", false);
-
-            FileSaga saga = new FileSaga()
-                    .setId(1L)
-                    .setCurrentStep(FileSagaStep.S3_UPLOADED.name())
-                    .setStatus(FileSagaStatus.PENDING_COMPENSATION.name())
-                    .setRetryCount(5)
-                    .setPayload("{\"storedPaths\":{\"hash1\":\"path1\"},\"compensatedSteps\":[]}");
-
-            Result<Boolean> deleteResult = new Result<>(500, "S3 error", null);
-            when(fileRemoteClient.deleteStorageFile(anyMap())).thenReturn(deleteResult);
-
-            orchestrator.retryCompensation(saga);
-
-            // Should not publish dead letter event
-            verify(compensationHelper, never()).publishEventInNewTransaction(
-                    any(), eq("SAGA_DEAD_LETTER"), any(), any(), any());
-        }
-    }
 }

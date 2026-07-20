@@ -29,6 +29,7 @@ import cn.flying.platformapi.request.CompleteDirectMultipartUploadRequest;
 import cn.flying.platformapi.request.CreateDirectMultipartUploadRequest;
 import cn.flying.platformapi.request.DirectMultipartCompletedPart;
 import cn.flying.platformapi.request.DirectMultipartUploadPartRequest;
+import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.CompleteDirectMultipartUploadResponse;
 import cn.flying.platformapi.response.CreateDirectMultipartUploadResponse;
 import cn.flying.platformapi.response.DirectMultipartCompletedPartVO;
@@ -45,7 +46,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
 import java.io.*;
+import java.net.URI;
+import java.nio.channels.Channels;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.security.DigestInputStream;
@@ -54,8 +59,6 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -85,18 +88,41 @@ public class FileUploadServiceImpl implements FileUploadService {
     private static final int MAX_TOTAL_CHUNKS = 10_000;
     private static final int PROGRESS_UPDATE_INTERVAL_MS = 1000; // 进度日志更新间隔（毫秒）
     private static final Pattern SAFE_FILENAME_PATTERN = Pattern.compile("^[\\p{IsHan}a-zA-Z0-9\\u4e00-\\u9fa5._\\-\\s,;!@#$%&()+=]+$");
+    private static final Pattern DIRECT_SHA256_PATTERN = Pattern.compile("^sha256:[0-9a-f]{64}$");
+    private static final Pattern DIRECT_STORAGE_NODE_PATTERN = Pattern.compile("^[A-Za-z0-9._-]{1,128}$");
     private static final String HASH_ALGORITHM = "SHA-256"; // 哈希算法
     private static final String CONTENT_HASH_PREFIX = "sha256:";
     private static final String HASH_SEPARATOR = "\n--HASH--\n"; // 哈希值前的分隔符
     private static final String KEY_SEPARATOR = "\n--NEXT_KEY--\n"; // 下一个密钥前的分隔符
-    private static final byte[] KEY_SEPARATOR_BYTES = KEY_SEPARATOR.getBytes(StandardCharsets.UTF_8);
     private static final int NEXT_KEY_TAIL_SCAN_BYTES = 512;
     private static final String UPLOAD_FINALIZATION_LOCK_KEY_PREFIX =
             "distributed:lock:upload:finalize:session:";
+    private static final String PREPARED_FILE_FINALIZATION_LOCK_KEY_PREFIX =
+            "distributed:lock:upload:finalize:prepared-file:";
+    private static final String CHUNK_PROCESSING_LOCK_KEY_PREFIX =
+            "distributed:lock:upload:process:chunk:";
+    private static final long ASYNC_FINALIZATION_LOCK_WAIT_SECONDS = 5L;
+    private static final long PREPARED_FILE_FINALIZATION_LOCK_WAIT_SECONDS = 5L;
     private static final String QUOTA_COMPLETE_LOCK_KEY_PREFIX = "distributed:lock:upload:quota:complete:tenant:";
-    private static final long QUOTA_COMPLETE_LOCK_LEASE_SECONDS = 60L;
+    private static final long QUOTA_COMPLETE_LOCK_WAIT_SECONDS = 5L;
     private static final int MAX_CLEANUP_RETRIES = 3;
+    private static final int CURRENT_RECOVERY_SCHEMA_VERSION = 1;
+    private static final String UPLOAD_SESSION_STATUS_CLEANUP_MANUAL_REQUIRED =
+            "cleanup_manual_required";
+    private static final String UPLOAD_SESSION_STATUS_FINALIZATION_RECOVERY_PENDING =
+            "finalization_recovery_pending";
+    private static final String UPLOAD_SESSION_STATUS_FINALIZATION_MANUAL_REQUIRED =
+            "finalization_manual_reconciliation_required";
+    private static final long MANUAL_RECONCILIATION_TTL_SECONDS = 7 * 24 * 60 * 60L;
     private static final String UPLOAD_SESSION_STATUS_COMPLETED = "completed";
+    private static final String DIRECT_STAGE_SESSION_CREATED = "SESSION_CREATED";
+    private static final String DIRECT_STAGE_STORAGE_COMPLETED = "STORAGE_COMPLETED";
+    private static final String DIRECT_STAGE_PREPARE_ID_ALLOCATED = "PREPARE_ID_ALLOCATED";
+    private static final String DIRECT_STAGE_PREPARE_STORED = "PREPARE_STORED";
+    private static final String DIRECT_STAGE_CHAIN_ATTESTING = "CHAIN_ATTESTING";
+    private static final String DIRECT_STAGE_CHAIN_ATTESTED = "CHAIN_ATTESTED";
+    private static final String DIRECT_STAGE_FILE_STORED = "FILE_STORED";
+    private static final String DIRECT_STAGE_MANIFEST_STORED = "MANIFEST_STORED";
     // --- 允许的文件类型 ---
     private static final Set<String> ALLOWED_FILE_EXTENSIONS = Set.of(
             "jpg", "jpeg", "png", "gif", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "zip", "rar", "7z"
@@ -118,8 +144,6 @@ public class FileUploadServiceImpl implements FileUploadService {
     private final ApplicationEventPublisher eventPublisher;
     // Redis状态管理器
     private final FileUploadRedisStateManager redisStateManager;
-    @Qualifier("chunkProcessingWaitScheduler")
-    private final ScheduledExecutorService chunkProcessingWaitScheduler;
     // 加密策略工厂
     private final EncryptionStrategyFactory encryptionStrategyFactory;
     private final FileService fileService;
@@ -157,62 +181,83 @@ public class FileUploadServiceImpl implements FileUploadService {
                 TimeUnit.MILLISECONDS.toHours(timeoutMillis));
 
         Set<String> activeSessionIds = redisStateManager.getAllActiveSessionIds();
-        List<String> expiredSessionIds = new ArrayList<>();
-        List<String> pausedExpiredSessionIds = new ArrayList<>();
+        List<ScheduledCleanupCandidate> expiredSessions = new ArrayList<>();
+        List<ScheduledCleanupCandidate> pausedExpiredSessions = new ArrayList<>();
 
         for (String clientId : activeSessionIds) {
             FileUploadState state = redisStateManager.getState(clientId);
             if (state != null) {
-                long inactiveDuration = now - state.getLastActivityTime();
                 boolean isPaused = redisStateManager.isSessionPaused(clientId);
+                long effectiveLastActivityTime = isPaused
+                        ? redisStateManager.getPauseAwareLastActivityTime(state)
+                        : state.getLastActivityTime();
+                long inactiveDuration = now - effectiveLastActivityTime;
 
                 // 暂停会话使用更长的超时时间
                 long currentTimeoutMillis = isPaused ? pausedTimeoutMillis : timeoutMillis;
 
                 if (inactiveDuration >= currentTimeoutMillis) {
                     if (isPaused) {
-                        pausedExpiredSessionIds.add(clientId);
+                        pausedExpiredSessions.add(new ScheduledCleanupCandidate(
+                                clientId, now - pausedTimeoutMillis, true));
                         log.warn("发现过期暂停会话: 客户端ID={}, 文件名={}, 上次活动时间={}, 暂停时长={}小时",
                                 clientId, state.getFileName(),
-                                Instant.ofEpochMilli(state.getLastActivityTime()),
+                                Instant.ofEpochMilli(effectiveLastActivityTime),
                                 TimeUnit.MILLISECONDS.toHours(inactiveDuration));
                     } else {
-                        expiredSessionIds.add(clientId);
+                        expiredSessions.add(new ScheduledCleanupCandidate(
+                                clientId, now - timeoutMillis, false));
                         log.warn("发现过期活跃会话: 客户端ID={}, 文件名={}, 上次活动时间={}, 未活动时长={}小时",
                                 clientId, state.getFileName(),
-                                Instant.ofEpochMilli(state.getLastActivityTime()),
+                                Instant.ofEpochMilli(effectiveLastActivityTime),
                                 TimeUnit.MILLISECONDS.toHours(inactiveDuration));
                     }
                 }
             } else {
                 // 处理状态丢失但仍在活跃集合中的会话
-                expiredSessionIds.add(clientId);
+                expiredSessions.add(new ScheduledCleanupCandidate(
+                        clientId, now - timeoutMillis, false));
                 log.warn("发现状态丢失的会话ID: {}", clientId);
             }
         }
 
         // 使用通用的SUID，避免依赖MDC
         int cleanedCount = 0;
-        for (String clientId : expiredSessionIds) {
-            if (cleanupUploadSessionInternal("", clientId)) { // 传空SUID，让内部方法处理
+        for (ScheduledCleanupCandidate candidate : expiredSessions) {
+            if (cleanupUploadSessionInternal("", candidate.clientId(), candidate)) {
                 cleanedCount++;
             }
         }
-        for (String clientId : pausedExpiredSessionIds) {
-            if (cleanupUploadSessionInternal("", clientId)) {
+        for (ScheduledCleanupCandidate candidate : pausedExpiredSessions) {
+            if (cleanupUploadSessionInternal("", candidate.clientId(), candidate)) {
                 cleanedCount++;
             }
         }
 
         if (cleanedCount > 0) {
             log.info("定时清理完成，共清理 {} 个过期上传会话（活跃: {}, 暂停: {}）。",
-                    cleanedCount, expiredSessionIds.size(), pausedExpiredSessionIds.size());
+                    cleanedCount, expiredSessions.size(), pausedExpiredSessions.size());
         } else {
             log.info("定时清理完成，未发现需要清理的过期上传会话。");
         }
     }
 
     // === Service 方法实现 ===
+
+    /**
+     * 记录定时扫描时采用的截止时间和暂停分类，供 finalizer 锁内重新判定。
+     */
+    private record ScheduledCleanupCandidate(String clientId, long cutoffMillis, boolean paused) {
+    }
+
+    /**
+     * 表示稳定数据库目标在清理前的收敛结果。
+     */
+    private enum CleanupDatabaseDecision {
+        ALLOW_DELETE,
+        RECOVERED,
+        RETAIN
+    }
 
     /**
      * 内部方法清理指定 clientId 的上传状态和相关文件目录
@@ -222,95 +267,557 @@ public class FileUploadServiceImpl implements FileUploadService {
      * 这样即使系统崩溃，定时清理任务仍可通过 Redis 状态找到残留文件
      */
     private boolean cleanupUploadSessionInternal(String SUID, String clientId) {
-        FileUploadState state = redisStateManager.getState(clientId);
-        if (state != null) {
-            log.info("--------------------开始清理会话 {} 的相关文件-----------------", clientId);
+        return cleanupUploadSessionInternal(SUID, clientId, null);
+    }
 
-            // Check retry count and increment
-            int retryCount = state.getCleanupRetryCount();
-            if (retryCount >= MAX_CLEANUP_RETRIES) {
-                log.error("会话 {} 清理重试次数已达上限 ({}), 强制清理 Redis 状态", clientId, MAX_CLEANUP_RETRIES);
-                redisStateManager.removeSession(state.getClientId(), state.getSuid());
-                return true;
-            }
+    /**
+     * 在会话 finalizer 锁内重新读取状态并执行显式或定时清理。
+     */
+    private boolean cleanupUploadSessionInternal(
+            String suid,
+            String clientId,
+            ScheduledCleanupCandidate scheduledCandidate
+    ) {
+        FileUploadState expectedState = redisStateManager.getState(clientId);
+        if (expectedState == null) {
+            redisStateManager.clearSessionIndexes(clientId);
+            log.warn("清理会话 {} 时主状态已不存在，仅收敛孤儿调度索引并保留辅助证据自然过期。", clientId);
+            return false;
+        }
 
-            if (state.isDirectUpload()) {
-                return cleanupDirectUploadSessionInternal(clientId, state, retryCount);
-            }
-
-            // Use persisted paths from state
-            final String persistedSuid = state.getSuid();
-            final String uploadPath = state.getUploadTempPath();
-            final String processedPath = state.getProcessedTempPath();
-
-            if (uploadPath == null || processedPath == null) {
-                log.warn("会话 {} 缺少持久化路径信息，回退到 SUID 构建路径", clientId);
-                // Fallback to SUID-based construction
-                final String actualSUID = (SUID == null || SUID.isEmpty()) ? "" : SUID;
-                if (actualSUID.isEmpty()) {
-                    log.warn("SUID 为空且无持久化路径，跳过文件系统清理，仅清理 Redis 状态: 客户端ID={}", clientId);
-                    redisStateManager.removeSession(state.getClientId(), actualSUID);
-                    return true;
-                }
-                try {
-                    Path uploadDir = getUploadSessionDir(actualSUID, clientId);
-                    cleanupDirectory(uploadDir);
-                    Path processedDir = getProcessedSessionDir(actualSUID, clientId);
-                    cleanupDirectory(processedDir);
-                    log.info("会话 {} 文件清理完成。", clientId);
-                } catch (Exception e) {
-                    log.error("会话 {} 文件清理失败，将保留 Redis 状态以便重试: {}", clientId, e.getMessage());
-                    state.setCleanupRetryCount(retryCount + 1);
-                    redisStateManager.updateState(state);
+        RLock finalizationLock;
+        try {
+            finalizationLock = acquireUploadFinalizationLock(clientId);
+        } catch (RetryableException e) {
+            log.info("上传会话 {} 正在最终化，跳过本轮清理。", clientId);
+            return false;
+        }
+        try {
+            return redisStateManager.executeWithSessionStateLock(clientId, latestState -> {
+                if (!hasSameUploadPlan(expectedState, latestState, clientId)) {
+                    log.warn("上传会话 {} 清理时上传计划发生变化，保留最新状态。", clientId);
                     return false;
                 }
-            } else {
-                // Use persisted paths
-                try {
-                    Path uploadDir = Paths.get(uploadPath);
-                    cleanupDirectory(uploadDir);
-                    Path processedDir = Paths.get(processedPath);
-                    cleanupDirectory(processedDir);
-                    log.info("会话 {} 文件清理完成（使用持久化路径）。", clientId);
-                } catch (Exception e) {
-                    log.error("会话 {} 文件清理失败，将保留 Redis 状态以便重试: {}", clientId, e.getMessage());
-                    state.setCleanupRetryCount(retryCount + 1);
-                    redisStateManager.updateState(state);
+                if (!hasCurrentRecoverySchema(latestState)) {
+                    retainFinalizationForManualReconciliation(
+                            latestState,
+                            "上传会话恢复协议版本缺失或不受支持");
                     return false;
                 }
-            }
+                if (!isScheduledCleanupStillEligible(latestState, scheduledCandidate)) {
+                    log.info("上传会话 {} 在获得清理锁前已恢复活动或暂停分类变化，跳过清理。", clientId);
+                    return false;
+                }
+                if (isUploadSessionCompleted(latestState)) {
+                    convergeCompletedSessionState(latestState);
+                    return false;
+                }
+                if (isManualReconciliationState(latestState)) {
+                    redisStateManager.clearSessionIndexes(clientId);
+                    return false;
+                }
 
-            // 文件清理成功后，从Redis中移除状态
-            redisStateManager.removeSession(state.getClientId(), persistedSuid != null ? persistedSuid : SUID);
-
-            return true; // 状态已找到并清理完成
-        } else {
-            // 尝试从暂停集合中移除，以防状态已丢失但仍在暂停集合中
-            boolean removedFromPaused = redisStateManager.removePausedSession(clientId);
-            if (removedFromPaused) {
-                log.warn("清理会话 {} 时，状态已不存在，但从暂停集合移除成功。", clientId);
-            } else {
-                log.debug("尝试清理会话 {}，但状态已不存在。", clientId);
-            }
-            return false; // 会话状态未找到
+                log.info("--------------------开始清理会话 {} 的相关文件-----------------", clientId);
+                int retryCount = latestState.getCleanupRetryCount() == null
+                        ? 0
+                        : latestState.getCleanupRetryCount();
+                if (latestState.isDirectUpload()) {
+                    return cleanupDirectUploadSessionWithFinalizationLock(
+                            clientId, latestState, retryCount);
+                }
+                return cleanupLegacyUploadSessionWithFinalizationLock(
+                        suid, clientId, latestState, retryCount);
+            });
+        } catch (IllegalStateException missingOrInvalidState) {
+            clearCleanupIndexesOnlyWhenMainStateMissing(clientId);
+            log.warn("上传会话 {} 清理时状态已消失或不再可安全清理。", clientId, missingOrInvalidState);
+            return false;
+        } finally {
+            releaseUploadFinalizationLock(finalizationLock, clientId);
         }
     }
 
     /**
-     * Cleans an expired direct-upload session by aborting object-storage staging objects before dropping Redis state.
+     * 锁内状态读取失败后仅在严格回读确认主状态缺失时清理调度索引；损坏或 Redis 错误保留现场。
      */
-    private boolean cleanupDirectUploadSessionInternal(String clientId, FileUploadState state, int retryCount) {
+    private void clearCleanupIndexesOnlyWhenMainStateMissing(String clientId) {
+        try {
+            if (redisStateManager.getState(clientId) == null) {
+                redisStateManager.clearSessionIndexes(clientId);
+            }
+        } catch (RuntimeException stateReadError) {
+            log.warn("清理会话 {} 时无法确认主状态是否缺失，保留全部 Redis 证据。",
+                    clientId, stateReadError);
+        }
+    }
+
+    /**
+     * 锁内复核定时清理候选的活动时间和暂停分类，显式用户清理不受截止时间约束。
+     */
+    private boolean isScheduledCleanupStillEligible(
+            FileUploadState state,
+            ScheduledCleanupCandidate candidate
+    ) {
+        if (candidate == null) {
+            return true;
+        }
+        boolean paused = redisStateManager.isSessionPaused(state.getClientId());
+        long effectiveLastActivityTime = paused
+                ? redisStateManager.getPauseAwareLastActivityTime(state)
+                : state.getLastActivityTime();
+        return paused == candidate.paused()
+                && effectiveLastActivityTime <= candidate.cutoffMillis();
+    }
+
+    /**
+     * 在已持有会话 finalizer 锁时清理普通上传，只有 DB 和文件系统都安全收敛才删除 Redis。
+     */
+    private boolean cleanupLegacyUploadSessionWithFinalizationLock(
+            String suid,
+            String clientId,
+            FileUploadState state,
+            int retryCount
+    ) {
+        if (retryCount >= MAX_CLEANUP_RETRIES) {
+            retainCleanupForManualReconciliation(state, "普通上传清理已达到重试上限");
+            return false;
+        }
+
+        CleanupDatabaseDecision databaseDecision = reconcileStableTargetBeforeCleanup(state);
+        if (databaseDecision == CleanupDatabaseDecision.RECOVERED
+                || databaseDecision == CleanupDatabaseDecision.RETAIN) {
+            return false;
+        }
+
+        String persistedSuid = state.getSuid();
+        String actualSuid = CommonUtils.isNotEmpty(persistedSuid) ? persistedSuid : suid;
+        try {
+            if (state.getUploadTempPath() != null && state.getProcessedTempPath() != null) {
+                cleanupDirectory(Paths.get(state.getUploadTempPath()));
+                cleanupDirectory(Paths.get(state.getProcessedTempPath()));
+            } else {
+                if (CommonUtils.isEmpty(actualSuid)) {
+                    throw new IOException("会话缺少可验证的临时目录路径和 SUID");
+                }
+                cleanupDirectory(getUploadSessionDir(actualSuid, clientId));
+                cleanupDirectory(getProcessedSessionDir(actualSuid, clientId));
+            }
+        } catch (IOException | RuntimeException cleanupError) {
+            recordCleanupFailure(state, retryCount, cleanupError);
+            return false;
+        }
+
+        redisStateManager.removeSession(clientId, actualSuid == null ? "" : actualSuid);
+        log.info("普通上传会话 {} 文件与 Redis 状态清理完成。", clientId);
+        return true;
+    }
+
+    /**
+     * 在已持有会话 finalizer 锁时清理或恢复直传会话。
+     */
+    private boolean cleanupDirectUploadSessionWithFinalizationLock(
+            String clientId,
+            FileUploadState state,
+            int retryCount
+    ) {
+        if (state.isPrepareStored()
+                && (state.getPreparedFileId() == null || state.getPreparedFileId() <= 0)) {
+            retainFinalizationForManualReconciliation(
+                    state,
+                    "旧直传会话已记录 PREPARE 但缺少稳定 preparedFileId");
+            return false;
+        }
+        if (hasDirectFinalizationCheckpoint(state)) {
+            return resumeExpiredDirectFinalization(clientId, state);
+        }
+
+        CleanupDatabaseDecision databaseDecision = reconcileStableTargetBeforeCleanup(state);
+        if (databaseDecision == CleanupDatabaseDecision.RECOVERED
+                || databaseDecision == CleanupDatabaseDecision.RETAIN) {
+            return false;
+        }
+
         try {
             abortDirectUploadStorage(clientId, state);
             redisStateManager.removeSession(clientId, state.getSuid());
             log.info("直传会话 {} staging 清理完成。", clientId);
             return true;
-        } catch (Exception e) {
-            log.error("直传会话 {} staging 清理失败，将保留 Redis 状态以便重试: {}", clientId, e.getMessage());
-            state.setCleanupRetryCount(retryCount + 1);
+        } catch (Exception cleanupError) {
+            recordCleanupFailure(state, retryCount, cleanupError);
+            return false;
+        }
+    }
+
+    /**
+     * 判断直传会话是否已退出自动调度并进入人工清理或人工最终化状态。
+     *
+     * @param state 直传会话状态
+     * @return 已进入人工状态时返回 true
+     */
+    private boolean isManualReconciliationState(FileUploadState state) {
+        return state != null
+                && (UPLOAD_SESSION_STATUS_CLEANUP_MANUAL_REQUIRED.equals(state.getStatus())
+                    || UPLOAD_SESSION_STATUS_FINALIZATION_MANUAL_REQUIRED.equals(state.getStatus()));
+    }
+
+    /**
+     * 在删除任何上传证据前收敛稳定 DB 目标，防止遗留 PREPARE 或覆盖不可逆 claim。
+     */
+    private CleanupDatabaseDecision reconcileStableTargetBeforeCleanup(FileUploadState state) {
+        if (!hasCurrentRecoverySchema(state)) {
+            retainFinalizationForManualReconciliation(
+                    state,
+                    "上传会话恢复协议版本缺失或不受支持");
+            return CleanupDatabaseDecision.RETAIN;
+        }
+        if (state.isPrepareStored()
+                && (state.getPreparedFileId() == null || state.getPreparedFileId() <= 0)) {
+            retainFinalizationForManualReconciliation(
+                    state,
+                    "旧上传会话已记录 PREPARE 但缺少稳定 preparedFileId");
+            return CleanupDatabaseDecision.RETAIN;
+        }
+
+        Long stableTargetId = state.getPreparedFileId() != null
+                ? state.getPreparedFileId()
+                : state.getTargetFileId();
+        if (stableTargetId == null) {
+            return CleanupDatabaseDecision.ALLOW_DELETE;
+        }
+        Long userId = state.getUserId();
+        Long tenantId = state.getTenantId();
+        if (stableTargetId <= 0 || userId == null || userId <= 0 || tenantId == null || tenantId < 0) {
+            retainFinalizationForManualReconciliation(state, "稳定 DB 目标身份无效");
+            return CleanupDatabaseDecision.RETAIN;
+        }
+
+        return TenantContext.callWithTenantIsolation(
+                tenantId,
+                () -> reconcileStableTargetBeforeCleanup(state, userId, stableTargetId));
+    }
+
+    /**
+     * 在租户上下文中读取最新 DB 目标并按 SUCCESS、PREPARE claim 或 FAIL 状态收敛。
+     */
+    private CleanupDatabaseDecision reconcileStableTargetBeforeCleanup(
+            FileUploadState state,
+            Long userId,
+            Long stableTargetId
+    ) {
+        cn.flying.dao.dto.File persistedFile = fileService.getById(stableTargetId);
+        if (persistedFile == null || !Objects.equals(persistedFile.getUid(), userId)) {
+            retainFinalizationForManualReconciliation(state, "稳定 DB 目标不存在或不属于当前用户");
+            return CleanupDatabaseDecision.RETAIN;
+        }
+        if (Objects.equals(persistedFile.getStatus(), FileUploadStatus.SUCCESS.getCode())) {
+            if (!state.isDirectUpload()
+                    && state.isPrepareStored()
+                    && Objects.equals(state.getPreparedFileId(), stableTargetId)
+                    && recoverLegacySuccessFinalization(userId, state.getSuid(), state)) {
+                return CleanupDatabaseDecision.RECOVERED;
+            }
+            retainFinalizationForManualReconciliation(state, "DB SUCCESS 缺少可严格绑定的自动恢复证据");
+            return CleanupDatabaseDecision.RETAIN;
+        }
+        if (!Objects.equals(persistedFile.getStatus(), FileUploadStatus.PREPARE.getCode())
+                && !Objects.equals(persistedFile.getStatus(), FileUploadStatus.FAIL.getCode())) {
+            retainFinalizationForManualReconciliation(state, "稳定 DB 目标状态不可自动清理");
+            return CleanupDatabaseDecision.RETAIN;
+        }
+        if (Objects.equals(persistedFile.getStatus(), FileUploadStatus.PREPARE.getCode())) {
+            FileService.FinalizationRecoveryPhase phase =
+                    fileService.getFinalizationRecoveryPhase(userId, stableTargetId);
+            if (phase == FileService.FinalizationRecoveryPhase.CHAIN_ATTESTING) {
+                retainFinalizationForManualReconciliation(
+                        state,
+                        "DB 最终化 claim 的链结果仍不确定");
+                return CleanupDatabaseDecision.RETAIN;
+            }
+            if (phase == FileService.FinalizationRecoveryPhase.CHAIN_ATTESTED) {
+                if (!state.isDirectUpload()
+                        && recoverLegacyAttestedFinalization(userId, state)) {
+                    return CleanupDatabaseDecision.RECOVERED;
+                }
+                state.setStatus(UPLOAD_SESSION_STATUS_FINALIZATION_RECOVERY_PENDING);
+                redisStateManager.updateState(state);
+                return CleanupDatabaseDecision.RETAIN;
+            }
+        }
+        if (fileService.markFileUploadFailed(userId, stableTargetId)) {
+            return CleanupDatabaseDecision.ALLOW_DELETE;
+        }
+
+        cn.flying.dao.dto.File latestFile = fileService.getById(stableTargetId);
+        if (!state.isDirectUpload()
+                && latestFile != null
+                && Objects.equals(latestFile.getStatus(), FileUploadStatus.SUCCESS.getCode())
+                && state.isPrepareStored()
+                && Objects.equals(state.getPreparedFileId(), stableTargetId)
+                && recoverLegacySuccessFinalization(userId, state.getSuid(), state)) {
+            return CleanupDatabaseDecision.RECOVERED;
+        }
+        retainFinalizationForManualReconciliation(state, "DB 目标未能安全进入 FAIL");
+        return CleanupDatabaseDecision.RETAIN;
+    }
+
+    /**
+     * 直接消费同 owner 的 durable ATTESTED claim 到 SUCCESS，不重放 Saga、链 RPC 或事件。
+     */
+    private boolean recoverLegacyAttestedFinalization(
+            Long userId,
+            FileUploadState state
+    ) {
+        if (state == null
+                || !state.isPrepareStored()
+                || state.getPreparedFileId() == null) {
+            return false;
+        }
+        List<File> processedFiles = collectProcessedFiles(
+                state.getSuid(), state.getClientId());
+        List<String> cipherHashes = collectCipherFileHashes(state, processedFiles);
+        if (processedFiles == null || cipherHashes == null) {
+            state.setStatus(UPLOAD_SESSION_STATUS_FINALIZATION_RECOVERY_PENDING);
             redisStateManager.updateState(state);
             return false;
         }
+        try {
+            cn.flying.dao.dto.File recovered = fileService.storeFile(
+                    userId,
+                    state.getPreparedFileId(),
+                    state.getFileName(),
+                    processedFiles,
+                    cipherHashes,
+                    generateFileParam(state),
+                    state.getClientId());
+            if (recovered == null
+                    || !Objects.equals(
+                        recovered.getStatus(), FileUploadStatus.SUCCESS.getCode())) {
+                return false;
+            }
+            return recoverLegacySuccessFinalization(userId, state.getSuid(), state);
+        } catch (RuntimeException recoveryError) {
+            state.setStatus(UPLOAD_SESSION_STATUS_FINALIZATION_RECOVERY_PENDING);
+            redisStateManager.updateState(state);
+            log.error("消费 legacy ATTESTED claim 到 SUCCESS 失败，将保留 active/state 重试: clientId={}",
+                    state.getClientId(), recoveryError);
+            return false;
+        }
+    }
+
+    /**
+     * 累加文件或对象存储清理失败次数，达到上限后保留七天人工诊断。
+     */
+    private void recordCleanupFailure(
+            FileUploadState state,
+            int retryCount,
+            Exception cleanupError
+    ) {
+        int persistedRetryCount = state.getCleanupRetryCount() == null
+                ? retryCount
+                : state.getCleanupRetryCount();
+        int nextRetryCount = Math.min(MAX_CLEANUP_RETRIES, persistedRetryCount + 1);
+        state.setCleanupRetryCount(nextRetryCount);
+        if (nextRetryCount >= MAX_CLEANUP_RETRIES) {
+            retainCleanupForManualReconciliation(state, cleanupError.getMessage());
+            return;
+        }
+        redisStateManager.updateState(state);
+        log.error("上传会话 {} 清理失败，将保留 Redis 状态以便重试: attempt={}/{}, reason={}",
+                state.getClientId(), nextRetryCount, MAX_CLEANUP_RETRIES, cleanupError.getMessage());
+    }
+
+    /**
+     * 将达到重试上限的清理状态转为有界人工诊断，禁止强删唯一恢复入口。
+     */
+    private void retainCleanupForManualReconciliation(FileUploadState state, String reason) {
+        redisStateManager.retainManualReconciliationState(
+                state,
+                UPLOAD_SESSION_STATUS_CLEANUP_MANUAL_REQUIRED,
+                MANUAL_RECONCILIATION_TTL_SECONDS);
+        log.error("上传会话清理已转人工处理: clientId={}, reason={}", state.getClientId(), reason);
+    }
+
+    /**
+     * 将不可自动绑定或恢复的最终化状态保留为七天人工诊断。
+     */
+    private void retainFinalizationForManualReconciliation(FileUploadState state, String reason) {
+        redisStateManager.retainManualReconciliationState(
+                state,
+                UPLOAD_SESSION_STATUS_FINALIZATION_MANUAL_REQUIRED,
+                MANUAL_RECONCILIATION_TTL_SECONDS);
+        log.error("上传最终化已转人工对账: clientId={}, preparedFileId={}, reason={}",
+                state.getClientId(), state.getPreparedFileId(), reason);
+    }
+
+    /**
+     * 在当前会话 finalizer 锁内恢复过期直传检查点，避免重复加锁或永久跳过已完成 storage 的会话。
+     *
+     * @param clientId 上传会话ID
+     * @param state 最新可信会话状态
+     * @return 最终化已恢复完成时返回 true
+     */
+    private boolean resumeExpiredDirectFinalization(String clientId, FileUploadState state) {
+        try {
+            Long userId = state.getUserId();
+            Long tenantId = state.getTenantId();
+            if (userId == null || userId <= 0 || tenantId == null || tenantId < 0) {
+                throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "直传恢复身份无效");
+            }
+            DirectUploadCompleteRequest recoveryRequest = buildDirectFinalizationRecoveryRequest(state);
+            TenantContext.callWithTenantIsolation(
+                    tenantId,
+                    () -> completeDirectUploadWithFinalizationLock(
+                            userId,
+                            clientId,
+                            recoveryRequest,
+                            state));
+            log.info("过期直传会话已从可信检查点恢复完成: clientId={}, stage={}",
+                    clientId, state.getDirectFinalizationStage());
+            return true;
+        } catch (RuntimeException recoveryError) {
+            FileUploadState latestFailureState = redisStateManager.getState(clientId);
+            if (latestFailureState == null) {
+                redisStateManager.clearSessionIndexes(clientId);
+                log.error("直传恢复失败后主状态已不存在，仅退出调度索引并保留辅助证据: clientId={}",
+                        clientId, recoveryError);
+                return false;
+            }
+            if (!hasSameUploadPlan(state, latestFailureState, clientId)) {
+                log.error("直传恢复失败后上传计划已变化，禁止用旧快照覆盖最新状态: clientId={}",
+                        clientId, recoveryError);
+                return false;
+            }
+            recordDirectFinalizationRecoveryFailure(latestFailureState, recoveryError);
+            return false;
+        }
+    }
+
+    /**
+     * 使用已持久化并验证过的完成分片 ETag 构造内部恢复请求，不采信定时任务外部输入。
+     *
+     * @param state 直传会话状态
+     * @return 可重入 complete 的可信请求
+     */
+    private DirectUploadCompleteRequest buildDirectFinalizationRecoveryRequest(FileUploadState state) {
+        List<FileUploadState.DirectUploadCompletedPartState> completedParts = state.getDirectCompletedParts();
+        if (completedParts == null
+                || completedParts.isEmpty()
+                || completedParts.size() != state.getTotalChunks()
+                || completedParts.size() > MAX_TOTAL_CHUNKS) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "直传恢复检查点缺少完整分片证据");
+        }
+
+        boolean[] seen = new boolean[state.getTotalChunks()];
+        List<DirectUploadCompletePartRequest> recoveryParts = new ArrayList<>(completedParts.size());
+        for (FileUploadState.DirectUploadCompletedPartState completedPart : completedParts) {
+            if (completedPart == null
+                    || completedPart.getIndex() < 0
+                    || completedPart.getIndex() >= state.getTotalChunks()
+                    || seen[completedPart.getIndex()]
+                    || !isSafeDirectUploadEtag(completedPart.getETag())) {
+                throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "直传恢复分片证据无效");
+            }
+            seen[completedPart.getIndex()] = true;
+            DirectUploadCompletePartRequest recoveryPart = new DirectUploadCompletePartRequest();
+            recoveryPart.setIndex(completedPart.getIndex());
+            recoveryPart.setETag(completedPart.getETag());
+            recoveryParts.add(recoveryPart);
+        }
+        recoveryParts.sort(Comparator.comparingInt(DirectUploadCompletePartRequest::getIndex));
+
+        DirectUploadCompleteRequest recoveryRequest = new DirectUploadCompleteRequest();
+        recoveryRequest.setParts(recoveryParts);
+        return recoveryRequest;
+    }
+
+    /**
+     * 累加直传最终化恢复失败次数；达到上限后退出调度索引并保留有限期诊断。
+     *
+     * @param state 直传会话状态
+     * @param recoveryError 本轮恢复异常
+     */
+    private void recordDirectFinalizationRecoveryFailure(
+            FileUploadState state,
+            RuntimeException recoveryError
+    ) {
+        if (isUploadSessionCompleted(state)) {
+            convergeCompletedSessionState(state);
+            log.warn("直传恢复已写入完成态但收尾返回异常，保持完成态: clientId={}",
+                    state.getClientId(), recoveryError);
+            return;
+        }
+        if (isManualReconciliationState(state)) {
+            redisStateManager.clearSessionIndexes(state.getClientId());
+            log.warn("直传恢复已进入人工对账终态，禁止失败记录回写为可重试状态: clientId={}",
+                    state.getClientId(), recoveryError);
+            return;
+        }
+        if (DIRECT_STAGE_CHAIN_ATTESTING.equals(state.getDirectFinalizationStage())) {
+            FileService.FinalizationRecoveryPhase durablePhase =
+                    fileService.getFinalizationRecoveryPhase(
+                            state.getUserId(), state.getPreparedFileId());
+            if (durablePhase == FileService.FinalizationRecoveryPhase.NONE
+                    || durablePhase == FileService.FinalizationRecoveryPhase.CLAIMED) {
+                retainDirectPreChainFinalizationForRetry(state, durablePhase);
+                return;
+            }
+            if (durablePhase == FileService.FinalizationRecoveryPhase.CHAIN_ATTESTED
+                    || durablePhase == FileService.FinalizationRecoveryPhase.SUCCESS) {
+                state.setStatus(UPLOAD_SESSION_STATUS_FINALIZATION_RECOVERY_PENDING);
+                redisStateManager.updateState(state);
+                return;
+            }
+            retainDirectFinalizationForManualReconciliation(state,
+                    durablePhase == FileService.FinalizationRecoveryPhase.CHAIN_ATTESTING
+                            ? "链存证调用结果不确定，禁止自动重放"
+                            : "直传 durable claim 无法安全分类");
+            return;
+        }
+
+        int currentRetryCount = state.getCleanupRetryCount() == null
+                ? 0
+                : Math.max(0, state.getCleanupRetryCount());
+        int nextRetryCount = Math.min(MAX_CLEANUP_RETRIES, currentRetryCount + 1);
+        state.setCleanupRetryCount(nextRetryCount);
+        if (nextRetryCount >= MAX_CLEANUP_RETRIES) {
+            retainDirectFinalizationForManualReconciliation(state, recoveryError.getMessage());
+            return;
+        }
+
+        state.setStatus(UPLOAD_SESSION_STATUS_FINALIZATION_RECOVERY_PENDING);
+        redisStateManager.updateState(state);
+        log.error("直传最终化检查点恢复失败，将在后续清理周期重试: clientId={}, attempt={}/{}",
+                state.getClientId(), nextRetryCount, MAX_CLEANUP_RETRIES, recoveryError);
+    }
+
+    /**
+     * durable NONE/CLAIMED 证明链 RPC 尚未开始；清除旧 Redis 伪边界并保留同 owner 会话安全重试。
+     *
+     * @param state 当前直传会话状态
+     * @param durablePhase DB 中确认的最终化阶段
+     */
+    private void retainDirectPreChainFinalizationForRetry(
+            FileUploadState state,
+            FileService.FinalizationRecoveryPhase durablePhase
+    ) {
+        state.setDirectFinalizationStage(DIRECT_STAGE_PREPARE_STORED);
+        state.setStatus(UPLOAD_SESSION_STATUS_FINALIZATION_RECOVERY_PENDING);
+        redisStateManager.updateState(state);
+        log.warn("直传 durable claim 尚未进入链调用，保留同会话安全重试: clientId={}, preparedFileId={}, phase={}",
+                state.getClientId(), state.getPreparedFileId(), durablePhase);
+    }
+
+    /**
+     * 将不可安全自动恢复的直传会话转入人工对账，并保留有界诊断 TTL。
+     *
+     * @param state 直传会话状态
+     * @param reason 转人工原因
+     */
+    private void retainDirectFinalizationForManualReconciliation(
+            FileUploadState state,
+            String reason
+    ) {
+        retainFinalizationForManualReconciliation(state, reason);
     }
 
     // === 路径构建辅助方法 ===
@@ -326,18 +833,23 @@ public class FileUploadServiceImpl implements FileUploadService {
     /**
      * 递归删除目录及其内容
      */
-    private void cleanupDirectory(Path dirPath) {
-        if (Files.exists(dirPath)) {
-            try (Stream<Path> walk = Files.walk(dirPath)) {
-                walk.sorted(Comparator.reverseOrder())
-                        .forEach(this::tryDelete);
-                log.info("已清理目录: {}", dirPath);
-            } catch (IOException e) {
-                log.error("清理目录时发生错误: {}", dirPath, e);
-            }
-        } else {
+    private void cleanupDirectory(Path dirPath) throws IOException {
+        List<Path> paths;
+        try (Stream<Path> walk = Files.walk(dirPath)) {
+            paths = walk.sorted(Comparator.reverseOrder()).toList();
+        } catch (NoSuchFileException e) {
             log.debug("尝试清理目录，但目录不存在: {}", dirPath);
+            return;
         }
+
+        for (Path path : paths) {
+            try {
+                Files.delete(path);
+            } catch (NoSuchFileException e) {
+                log.debug("清理路径已被并发删除: {}", path);
+            }
+        }
+        log.info("已清理目录: {}", dirPath);
     }
 
     private Path getProcessedSessionDir(String SUID, String clientId) {
@@ -425,6 +937,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             FileUploadState existingByClientId = redisStateManager.getState(clientId);
             if (existingByClientId != null) {
                 validateUploadOwnership(userId, existingByClientId, clientId);
+                rejectUnsupportedRecoverySchema(existingByClientId);
                 if (!Objects.equals(existingByClientId.getFileName(), fileName) || existingByClientId.getFileSize() != fileSize) {
                     throw new GeneralException("客户端ID与上传会话不匹配");
                 }
@@ -439,7 +952,8 @@ public class FileUploadServiceImpl implements FileUploadService {
             }
         } else {
             // --- 未提供 clientId：按 fileName + SUID 自动恢复 ---
-            String existClientId = redisStateManager.getSessionIdByFileClientKey(fileName, SUID);
+            String existClientId = redisStateManager.getSessionIdByFileClientKey(
+                    tenantId, fileName, SUID);
             if (existClientId != null) {
                 FileUploadState existingState = redisStateManager.getState(existClientId);
                 if (existingState != null && existingState.getFileSize() == fileSize) {
@@ -452,6 +966,7 @@ public class FileUploadServiceImpl implements FileUploadService {
                 }
                 if (existingState != null && existingState.getFileSize() == fileSize
                         && isSessionTargetMatched(existingState, targetFileId)) {
+                    rejectUnsupportedRecoverySchema(existingState);
                     log.info("发现可恢复的上传会话: 客户端ID={}, 文件客户端键={}", existClientId, fileClientKey);
                     redisStateManager.removePausedSession(existClientId); // 恢复会话（如果之前暂停了）
                     redisStateManager.updateLastActivityTime(existClientId);
@@ -486,6 +1001,7 @@ public class FileUploadServiceImpl implements FileUploadService {
                     userId, fileName, fileSize, contentType, clientId, chunkSize, totalChunks, targetFileId
             );
             newState.setTenantId(tenantId);
+            newState.setRecoverySchemaVersion(CURRENT_RECOVERY_SCHEMA_VERSION);
 
             // 确保客户端和会话的目录存在
             Path uploadDir = getUploadSessionDir(SUID, clientId);
@@ -531,45 +1047,53 @@ public class FileUploadServiceImpl implements FileUploadService {
         String clientId = CommonUtils.isBlank(request.getClientId())
                 ? UidEncoder.encodeCid(suid)
                 : request.getClientId();
-        FileUploadState existingState = redisStateManager.getState(clientId);
-        if (existingState != null) {
-            validateUploadOwnership(userId, existingState, clientId);
-            if (!existingState.isDirectUpload()) {
-                throw new GeneralException(ResultEnum.PARAM_ERROR, "客户端ID已被普通上传会话占用");
+        RLock finalizationLock = acquireUploadFinalizationLock(clientId);
+        try {
+            FileUploadState existingState = redisStateManager.getState(clientId);
+            if (existingState != null) {
+                validateUploadOwnership(userId, existingState, clientId);
+                rejectUnsupportedRecoverySchema(existingState);
+                if (!existingState.isDirectUpload()) {
+                    throw new GeneralException(ResultEnum.PARAM_ERROR, "客户端ID已被普通上传会话占用");
+                }
+                rejectManualDirectUploadResume(existingState);
+                validateDirectUploadResumeRequest(existingState, request, targetFileId);
+                redisStateManager.updateLastActivityTime(clientId);
+                return toDirectUploadSessionVO(existingState, true);
             }
-            validateDirectUploadResumeRequest(existingState, request, targetFileId);
-            redisStateManager.updateLastActivityTime(clientId);
-            return toDirectUploadSessionVO(existingState, true);
+
+            Long tenantId = TenantContext.getTenantId();
+            checkQuotaForNewUploadSession(tenantId, userId, request.getFileSize(), targetFileId);
+
+            CreateDirectMultipartUploadResponse storageResponse = ResultUtils.getData(
+                    fileRemoteClient.createDirectMultipartUpload(toStorageCreateRequest(clientId, request))
+            );
+            List<FileUploadState.DirectUploadPartState> directUploadParts =
+                    validateAndBuildDirectUploadPartStates(clientId, tenantId, request, storageResponse);
+
+            FileUploadState state = new FileUploadState(
+                    userId,
+                    request.getFileName(),
+                    request.getFileSize(),
+                    request.getContentType(),
+                    clientId,
+                    request.getChunkSize(),
+                    request.getTotalChunks(),
+                    targetFileId
+            );
+            state.setTenantId(tenantId);
+            state.setSuid(suid);
+            state.setRecoverySchemaVersion(CURRENT_RECOVERY_SCHEMA_VERSION);
+            state.setDirectUpload(true);
+            state.setDirectUploadParts(directUploadParts);
+            state.setDirectFinalizationStage(DIRECT_STAGE_SESSION_CREATED);
+
+            redisStateManager.saveNewState(state, suid);
+            redisStateManager.updateState(state);
+            return toDirectUploadSessionVO(state, false);
+        } finally {
+            releaseUploadFinalizationLock(finalizationLock, clientId);
         }
-
-        Long tenantId = TenantContext.getTenantId();
-        checkQuotaForNewUploadSession(tenantId, userId, request.getFileSize(), targetFileId);
-
-        CreateDirectMultipartUploadResponse storageResponse = ResultUtils.getData(
-                fileRemoteClient.createDirectMultipartUpload(toStorageCreateRequest(clientId, request))
-        );
-        if (storageResponse == null || CommonUtils.isEmpty(storageResponse.parts())) {
-            throw new GeneralException(ResultEnum.FILE_SERVICE_ERROR, "对象存储未返回直传 URL");
-        }
-
-        FileUploadState state = new FileUploadState(
-                userId,
-                request.getFileName(),
-                request.getFileSize(),
-                request.getContentType(),
-                clientId,
-                request.getChunkSize(),
-                request.getTotalChunks(),
-                targetFileId
-        );
-        state.setTenantId(tenantId);
-        state.setSuid(suid);
-        state.setDirectUpload(true);
-        state.setDirectUploadParts(buildDirectUploadPartStates(request, storageResponse.parts()));
-
-        redisStateManager.saveNewState(state, suid);
-        redisStateManager.updateState(state);
-        return toDirectUploadSessionVO(state, false);
     }
 
     /**
@@ -587,10 +1111,14 @@ public class FileUploadServiceImpl implements FileUploadService {
             throw new GeneralException(ResultEnum.UPLOAD_SESSION_NOT_FOUND);
         }
         validateUploadOwnership(userId, state, clientId);
+        rejectUnsupportedRecoverySchema(state);
         if (!state.isDirectUpload()) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "该会话不是直传上传会话");
         }
+        rejectManualDirectUploadResume(state);
+        rejectUnboundPreparedCheckpoint(state);
         if (isUploadSessionCompleted(state)) {
+            convergeCompletedSessionState(state);
             return new DirectUploadCompleteVO(
                     clientId,
                     IdUtils.toExternalId(state.getDirectFileId()),
@@ -602,57 +1130,66 @@ public class FileUploadServiceImpl implements FileUploadService {
         }
         RLock finalizationLock = acquireUploadFinalizationLock(clientId);
         try {
-            state = requireLatestUploadState(userId, clientId, state);
-            if (isUploadSessionCompleted(state)) {
-                return new DirectUploadCompleteVO(
-                        clientId,
-                        IdUtils.toExternalId(state.getDirectFileId()),
-                        state.getDirectFileHash(),
-                        state.getDirectTransactionHash(),
-                        state.getDirectManifestHash(),
-                        UPLOAD_SESSION_STATUS_COMPLETED
-                );
-            }
-            if (request == null || CommonUtils.isEmpty(request.getParts())) {
-                throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "分片完成元数据不能为空");
-            }
+            return completeDirectUploadWithFinalizationLock(userId, clientId, request, state);
+        } finally {
+            releaseUploadFinalizationLock(finalizationLock, clientId);
+        }
+    }
 
-            Map<Integer, DirectUploadCompletePartRequest> completedPartMap = indexCompletedParts(request);
-            List<DirectMultipartCompletedPart> storageParts = buildStorageCompleteParts(state, completedPartMap);
-
-            recheckQuotaBeforeFinalProcessing(userId, state);
-            CompleteDirectMultipartUploadResponse storageResponse = ResultUtils.getData(
-                    fileRemoteClient.completeDirectMultipartUpload(
-                            new CompleteDirectMultipartUploadRequest(clientId, storageParts)
-                    )
+    /**
+     * 在调用方已持有会话 finalizer 锁时完成直传最终化，供请求与定时恢复复用且避免锁重入。
+     *
+     * @param userId 上传用户ID
+     * @param clientId 上传会话ID
+     * @param request 完成分片证据
+     * @param expectedState 加锁前的可信会话快照
+     * @return 直传完成结果
+     */
+    private DirectUploadCompleteVO completeDirectUploadWithFinalizationLock(
+            Long userId,
+            String clientId,
+            DirectUploadCompleteRequest request,
+            FileUploadState expectedState
+    ) {
+        FileUploadState state = requireLatestUploadState(userId, clientId, expectedState);
+        if (!state.isDirectUpload()) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "该会话不是直传上传会话");
+        }
+        rejectManualDirectUploadResume(state);
+        if (isUploadSessionCompleted(state)) {
+            convergeCompletedSessionState(state);
+            return new DirectUploadCompleteVO(
+                    clientId,
+                    IdUtils.toExternalId(state.getDirectFileId()),
+                    state.getDirectFileHash(),
+                    state.getDirectTransactionHash(),
+                    state.getDirectManifestHash(),
+                    UPLOAD_SESSION_STATUS_COMPLETED
             );
-            if (storageResponse == null || CommonUtils.isEmpty(storageResponse.parts())) {
-                throw new GeneralException(ResultEnum.FILE_SERVICE_ERROR, "对象存储未返回直传完成结果");
-            }
-            String contentHash = requireContentHash(storageResponse.contentHash());
-            state.setContentHash(contentHash);
-            redisStateManager.updateState(state);
+        }
+        if (request == null || CommonUtils.isEmpty(request.getParts())) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "分片完成元数据不能为空");
+        }
 
-            state = reserveQuotaAndPrepareStoreFile(userId, state);
-            cn.flying.dao.dto.File storedFile = fileService.storeDirectUploadedFile(
-                    userId,
-                    state.getTargetFileId(),
-                    state.getFileName(),
-                    state.getFileSize(),
-                    storageResponse.parts(),
-                    generateDirectUploadFileParam(state)
-            );
+        Map<Integer, DirectUploadCompletePartRequest> completedPartMap = indexCompletedParts(request);
+        List<DirectMultipartCompletedPart> storageParts = buildStorageCompleteParts(state, completedPartMap);
+        CompleteDirectMultipartUploadResponse storageResponse = resolveDirectStorageCompletion(
+                userId, clientId, state, completedPartMap, storageParts);
+        DirectPreparedFinalizationReservation reservation =
+                reserveDirectQuotaPrepareAndAcquireFileLock(userId, state);
+        state = reservation.state();
+        Long preparedFileId = reservation.preparedFileId();
+        RLock preparedFileLock = reservation.preparedFileLock();
+        try {
+            state = requireLatestPreparedCompletionState(userId, clientId, state, preparedFileId);
+            String fileParam = generateDirectUploadFileParam(state);
+            cn.flying.dao.dto.File storedFile = resolveDirectStoredFile(
+                    userId, state, storageResponse.parts(), fileParam);
+            ChunkManifestView manifest = resolveDirectManifest(
+                    userId, state, storedFile, storageResponse.parts());
 
-            ChunkManifestView manifest = chunkManifestService.saveManifest(
-                    userId,
-                    storedFile.getId(),
-                    buildChunkManifestDraft(storedFile, state, storageResponse.parts())
-            );
-
-            state.setDirectFileId(storedFile.getId());
-            state.setDirectFileHash(storedFile.getFileHash());
-            state.setDirectTransactionHash(storedFile.getTransactionHash());
             state.setDirectManifestHash(manifest.manifestHash());
+            state.setDirectFinalizationStage(DIRECT_STAGE_MANIFEST_STORED);
             redisStateManager.updateState(state);
             redisStateManager.markCompleted(clientId, state.getSuid(), 300);
 
@@ -665,7 +1202,7 @@ public class FileUploadServiceImpl implements FileUploadService {
                     UPLOAD_SESSION_STATUS_COMPLETED
             );
         } finally {
-            releaseUploadFinalizationLock(finalizationLock, clientId);
+            releasePreparedFileFinalizationLock(preparedFileLock, preparedFileId);
         }
     }
 
@@ -678,26 +1215,63 @@ public class FileUploadServiceImpl implements FileUploadService {
      */
     @Override
     public boolean abortDirectUpload(Long userId, String clientId) {
-        FileUploadState state = redisStateManager.getState(clientId);
-        if (state == null) {
+        FileUploadState expectedState = redisStateManager.getState(clientId);
+        if (expectedState == null) {
             return false;
         }
-        validateUploadOwnership(userId, state, clientId);
-        if (!state.isDirectUpload()) {
+        validateUploadOwnership(userId, expectedState, clientId);
+        if (!expectedState.isDirectUpload()) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "该会话不是直传上传会话");
         }
-        abortDirectUploadStorage(clientId, state);
-        redisStateManager.removeSession(clientId, state.getSuid());
-        return true;
+
+        RLock finalizationLock = acquireUploadFinalizationLock(clientId);
+        try {
+            FileUploadState latestState = redisStateManager.getState(clientId);
+            if (latestState == null) {
+                return false;
+            }
+            validateUploadOwnership(userId, latestState, clientId);
+            rejectUnsupportedRecoverySchema(latestState);
+            if (!latestState.isDirectUpload()) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "该会话不是直传上传会话");
+            }
+            if (!hasSameUploadPlan(expectedState, latestState, clientId)) {
+                throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR, "上传会话状态在取消期间发生变化");
+            }
+            if (isUploadSessionCompleted(latestState)) {
+                convergeCompletedSessionState(latestState);
+                return false;
+            }
+            if (hasDirectFinalizationCheckpoint(latestState)) {
+                throw new RetryableException(
+                        ResultEnum.SERVICE_UNAVAILABLE,
+                        Map.of("reason", "direct upload finalization must be resumed before abort"));
+            }
+            if (reconcileStableTargetBeforeCleanup(latestState)
+                    != CleanupDatabaseDecision.ALLOW_DELETE) {
+                return false;
+            }
+            abortDirectUploadStorage(clientId, latestState);
+            redisStateManager.removeSession(clientId, latestState.getSuid());
+            return true;
+        } finally {
+            releaseUploadFinalizationLock(finalizationLock, clientId);
+        }
     }
 
     /**
      * Aborts session-scoped direct-upload staging objects and verifies the remote result.
      */
     private void abortDirectUploadStorage(String clientId, FileUploadState state) {
-        Boolean aborted = ResultUtils.getData(fileRemoteClient.abortDirectMultipartUpload(
-                new AbortDirectMultipartUploadRequest(clientId, buildStorageAbortParts(state))
-        ));
+        Long tenantId = state == null ? null : state.getTenantId();
+        if (tenantId == null || tenantId < 0) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "直传会话 tenantId 无效，禁止清理 staging");
+        }
+        Boolean aborted = TenantContext.callWithTenantIsolation(
+                tenantId,
+                () -> ResultUtils.getData(fileRemoteClient.abortDirectMultipartUpload(
+                        new AbortDirectMultipartUploadRequest(clientId, buildStorageAbortParts(state))
+                )));
         if (!Boolean.TRUE.equals(aborted)) {
             throw new GeneralException(ResultEnum.FILE_SERVICE_ERROR, "直传 staging 清理失败");
         }
@@ -724,11 +1298,18 @@ public class FileUploadServiceImpl implements FileUploadService {
         if (!isValidFileName(request.getFileName())) {
             throw new GeneralException("文件名包含非法字符");
         }
-        if (request.getFileSize() <= 0 || request.getFileSize() > MAX_FILE_SIZE_BYTES) {
+        if (request.getFileSize() == null
+                || request.getFileSize() <= 0
+                || request.getFileSize() > MAX_FILE_SIZE_BYTES) {
             throw new GeneralException(ResultEnum.FILE_MAX_SIZE_OVERFLOW);
         }
-        if (request.getChunkSize() <= 0 || request.getChunkSize() > MAX_CHUNK_SIZE_BYTES) {
+        if (request.getChunkSize() == null
+                || request.getChunkSize() <= 0
+                || request.getChunkSize() > MAX_CHUNK_SIZE_BYTES) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "分片大小超出允许范围");
+        }
+        if (request.getTotalChunks() == null) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "分片总数不能为空");
         }
         validateUploadPlan(request.getFileSize(), request.getChunkSize(), request.getTotalChunks());
         if (!isFileTypeAllowed(request.getFileName(), request.getContentType())) {
@@ -748,8 +1329,12 @@ public class FileUploadServiceImpl implements FileUploadService {
         boolean[] seen = new boolean[request.getTotalChunks()];
         long sizeSum = 0L;
         for (DirectUploadPartRequest part : request.getParts()) {
-            if (part == null || part.getIndex() < 0 || part.getIndex() >= request.getTotalChunks()) {
+            if (part == null || part.getIndex() == null
+                    || part.getIndex() < 0 || part.getIndex() >= request.getTotalChunks()) {
                 throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片索引无效");
+            }
+            if (part.getSize() == null) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片大小不能为空");
             }
             if (seen[part.getIndex()]) {
                 throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片索引重复");
@@ -762,7 +1347,21 @@ public class FileUploadServiceImpl implements FileUploadService {
             if (CommonUtils.isEmpty(part.getPlainHash()) || CommonUtils.isEmpty(part.getCipherHash())) {
                 throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片哈希不能为空");
             }
-            if (!normalizeDirectUploadHash(part.getPlainHash()).equals(normalizeDirectUploadHash(part.getCipherHash()))) {
+            if (part.getPlainHash().length() > 71 || part.getCipherHash().length() > 71) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片哈希长度超出限制");
+            }
+            String plainHash = normalizeDirectUploadHash(part.getPlainHash());
+            String cipherHash = normalizeDirectUploadHash(part.getCipherHash());
+            if (!DIRECT_SHA256_PATTERN.matcher(plainHash).matches()
+                    || !DIRECT_SHA256_PATTERN.matcher(cipherHash).matches()) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片哈希必须是规范 SHA-256 摘要");
+            }
+            String checksumAlgorithm = part.getChecksumAlgorithm();
+            if (checksumAlgorithm != null && !checksumAlgorithm.isBlank()
+                    && (checksumAlgorithm.length() > 16 || !HASH_ALGORITHM.equalsIgnoreCase(checksumAlgorithm.trim()))) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "直传分片校验算法仅支持 SHA-256");
+            }
+            if (!plainHash.equals(cipherHash)) {
                 throw new GeneralException(ResultEnum.PARAM_ERROR, "未加密直传分片的明文哈希与密文哈希必须一致");
             }
             sizeSum = Math.addExact(sizeSum, part.getSize());
@@ -843,11 +1442,11 @@ public class FileUploadServiceImpl implements FileUploadService {
                 .sorted(Comparator.comparingInt(DirectUploadPartRequest::getIndex))
                 .map(part -> new DirectMultipartUploadPartRequest(
                         part.getIndex(),
-                        part.getCipherHash(),
+                        normalizeDirectUploadHash(part.getCipherHash()),
                         part.getSize(),
                         request.getContentType(),
-                        part.getPlainHash(),
-                        part.getCipherHash(),
+                        normalizeDirectUploadHash(part.getPlainHash()),
+                        normalizeDirectUploadHash(part.getCipherHash()),
                         normalizeChecksumAlgorithm(part.getChecksumAlgorithm())
                 ))
                 .toList();
@@ -862,27 +1461,65 @@ public class FileUploadServiceImpl implements FileUploadService {
     }
 
     /**
-     * Builds the Redis-persisted direct-upload part states from storage RPC output.
+     * 完整校验 storage 创建响应后构造 Redis 直传计划，任何字段漂移都禁止写入会话。
      */
-    private List<FileUploadState.DirectUploadPartState> buildDirectUploadPartStates(
+    private List<FileUploadState.DirectUploadPartState> validateAndBuildDirectUploadPartStates(
+            String clientId,
+            Long tenantId,
             DirectUploadSessionRequest request,
-            List<DirectMultipartUploadPartUrl> storageParts) {
+            CreateDirectMultipartUploadResponse response) {
+        if (response == null
+                || tenantId == null
+                || !Objects.equals(clientId, response.sessionId())
+                || response.parts() == null
+                || response.parts().size() != request.getTotalChunks()
+                || response.parts().size() > MAX_TOTAL_CHUNKS) {
+            throw invalidDirectStorageCreateResponse();
+        }
+
         Map<Integer, DirectUploadPartRequest> declaredParts = new HashMap<>();
         for (DirectUploadPartRequest part : request.getParts()) {
             declaredParts.put(part.getIndex(), part);
         }
 
-        List<FileUploadState.DirectUploadPartState> states = new ArrayList<>(storageParts.size());
-        for (DirectMultipartUploadPartUrl storagePart : storageParts) {
+        long nowEpochSeconds = Instant.now().getEpochSecond();
+        Set<Integer> returnedIndexes = new HashSet<>();
+        Set<String> returnedStagingObjects = new HashSet<>();
+        Set<String> returnedUploadUrls = new HashSet<>();
+        List<FileUploadState.DirectUploadPartState> states = new ArrayList<>(response.parts().size());
+        for (DirectMultipartUploadPartUrl storagePart : response.parts()) {
+            if (storagePart == null
+                    || storagePart.partIndex() < 0
+                    || storagePart.partIndex() >= request.getTotalChunks()
+                    || !returnedIndexes.add(storagePart.partIndex())) {
+                throw invalidDirectStorageCreateResponse();
+            }
             DirectUploadPartRequest declaredPart = declaredParts.get(storagePart.partIndex());
-            if (declaredPart == null) {
-                throw new GeneralException(ResultEnum.FILE_SERVICE_ERROR, "对象存储返回了未知分片");
+            String cipherHash = declaredPart == null
+                    ? ""
+                    : normalizeDirectUploadHash(declaredPart.getCipherHash());
+            String expectedStoragePath = "storage/tenant/" + tenantId + "/chunk/" + cipherHash;
+            String expectedStagingObject = "tenant/" + tenantId + "/staging/direct-upload/"
+                    + clientId + "/part-" + storagePart.partIndex();
+            String expectedFinalObject = "tenant/" + tenantId + "/" + cipherHash;
+            if (declaredPart == null
+                    || storagePart.size() != declaredPart.getSize()
+                    || !Objects.equals(expectedStoragePath, storagePart.storagePath())
+                    || !Objects.equals(expectedStagingObject, storagePart.stagingObjectName())
+                    || !Objects.equals(expectedFinalObject, storagePart.finalObjectName())
+                    || !isSafeDirectStorageNode(storagePart.nodeName())
+                    || !isSafeDirectUploadUrl(storagePart.uploadUrl())
+                    || storagePart.expiresAtEpochSeconds() <= nowEpochSeconds
+                    || storagePart.expiresAtEpochSeconds() > nowEpochSeconds + TimeUnit.DAYS.toSeconds(7)
+                    || !returnedStagingObjects.add(storagePart.stagingObjectName())
+                    || !returnedUploadUrls.add(storagePart.uploadUrl())) {
+                throw invalidDirectStorageCreateResponse();
             }
             states.add(new FileUploadState.DirectUploadPartState(
                     storagePart.partIndex(),
                     storagePart.size(),
-                    declaredPart.getPlainHash(),
-                    declaredPart.getCipherHash(),
+                    normalizeDirectUploadHash(declaredPart.getPlainHash()),
+                    cipherHash,
                     normalizeChecksumAlgorithm(declaredPart.getChecksumAlgorithm()),
                     storagePart.uploadUrl(),
                     storagePart.expiresAtEpochSeconds(),
@@ -893,7 +1530,45 @@ public class FileUploadServiceImpl implements FileUploadService {
             ));
         }
         states.sort(Comparator.comparingInt(FileUploadState.DirectUploadPartState::getIndex));
+        for (int index = 0; index < states.size(); index++) {
+            if (states.get(index).getIndex() != index) {
+                throw invalidDirectStorageCreateResponse();
+            }
+        }
         return states;
+    }
+
+    /**
+     * 校验预签名 URL 仅使用无凭据、无 fragment 的 HTTP(S) 绝对地址。
+     */
+    private boolean isSafeDirectUploadUrl(String uploadUrl) {
+        if (CommonUtils.isEmpty(uploadUrl) || uploadUrl.length() > 4096) {
+            return false;
+        }
+        try {
+            URI uri = URI.create(uploadUrl);
+            return uri.isAbsolute()
+                    && ("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))
+                    && CommonUtils.isNotEmpty(uri.getHost())
+                    && uri.getUserInfo() == null
+                    && uri.getFragment() == null;
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
+    /**
+     * 校验 storage 节点名是有界安全标识，禁止路径或控制字符进入 Redis 可信计划。
+     */
+    private boolean isSafeDirectStorageNode(String nodeName) {
+        return nodeName != null && DIRECT_STORAGE_NODE_PATTERN.matcher(nodeName).matches();
+    }
+
+    /**
+     * 构造统一的 storage 创建响应错误，保证调用方不会保存部分可信状态。
+     */
+    private GeneralException invalidDirectStorageCreateResponse() {
+        return new GeneralException(ResultEnum.FILE_SERVICE_ERROR, "对象存储直传创建响应与上传计划不一致");
     }
 
     /**
@@ -926,9 +1601,22 @@ public class FileUploadServiceImpl implements FileUploadService {
      * Indexes completion parts and rejects duplicates.
      */
     private Map<Integer, DirectUploadCompletePartRequest> indexCompletedParts(DirectUploadCompleteRequest request) {
+        if (request.getParts().size() > MAX_TOTAL_CHUNKS) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR,
+                    "直传完成分片数量不能超过 " + MAX_TOTAL_CHUNKS);
+        }
         Map<Integer, DirectUploadCompletePartRequest> result = new HashMap<>();
         for (DirectUploadCompletePartRequest part : request.getParts()) {
-            if (part == null || result.put(part.getIndex(), part) != null) {
+            if (part == null) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "直传完成分片不能为空");
+            }
+            String eTag = part.getETag();
+            if (!isSafeDirectUploadEtag(eTag)) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR,
+                        "直传完成分片 ETag 必须是 1 到 255 个可见 ASCII 字符");
+            }
+            if (part.getIndex() == null || part.getIndex() < 0
+                    || result.put(part.getIndex(), part) != null) {
                 throw new GeneralException(ResultEnum.PARAM_ERROR, "直传完成分片索引重复或为空");
             }
         }
@@ -941,7 +1629,9 @@ public class FileUploadServiceImpl implements FileUploadService {
     private List<DirectMultipartCompletedPart> buildStorageCompleteParts(
             FileUploadState state,
             Map<Integer, DirectUploadCompletePartRequest> completedPartMap) {
-        if (state.getDirectUploadParts().size() != state.getTotalChunks()
+        if (state.getDirectUploadParts() == null
+                || state.getDirectUploadParts().size() > MAX_TOTAL_CHUNKS
+                || state.getDirectUploadParts().size() != state.getTotalChunks()
                 || completedPartMap.size() != state.getTotalChunks()) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "直传完成分片数量与上传计划不匹配");
         }
@@ -956,6 +1646,235 @@ public class FileUploadServiceImpl implements FileUploadService {
         }
         parts.sort(Comparator.comparingInt(DirectMultipartCompletedPart::partIndex));
         return parts;
+    }
+
+    /**
+     * 复用已校验的 storage 检查点，或首次调用 storage 并在任何上链动作前持久化完整证据。
+     */
+    private CompleteDirectMultipartUploadResponse resolveDirectStorageCompletion(
+            Long userId,
+            String clientId,
+            FileUploadState state,
+            Map<Integer, DirectUploadCompletePartRequest> completedPartMap,
+            List<DirectMultipartCompletedPart> storageParts
+    ) {
+        CompleteDirectMultipartUploadResponse candidate;
+        if (state.getDirectCompletedParts() != null && !state.getDirectCompletedParts().isEmpty()) {
+            candidate = restoreDirectStorageCompletion(clientId, state);
+        } else {
+            recheckQuotaBeforeFinalProcessing(userId, state);
+            candidate = ResultUtils.getData(fileRemoteClient.completeDirectMultipartUpload(
+                    new CompleteDirectMultipartUploadRequest(clientId, storageParts)));
+        }
+
+        CompleteDirectMultipartUploadResponse validated = validateDirectStorageCompletion(
+                clientId, state, completedPartMap, candidate);
+        if (state.getDirectCompletedParts() == null || state.getDirectCompletedParts().isEmpty()) {
+            state.setContentHash(validated.contentHash());
+            state.setDirectCompletedParts(toDirectCompletedPartStates(validated.parts()));
+            state.setDirectFinalizationStage(DIRECT_STAGE_STORAGE_COMPLETED);
+            redisStateManager.updateState(state);
+        }
+        return validated;
+    }
+
+    /**
+     * 从 Redis 检查点重建 storage 完成响应，重试不再依赖远端重复返回相同元数据。
+     */
+    private CompleteDirectMultipartUploadResponse restoreDirectStorageCompletion(
+            String clientId,
+            FileUploadState state
+    ) {
+        List<DirectMultipartCompletedPartVO> parts = state.getDirectCompletedParts().stream()
+                .map(part -> new DirectMultipartCompletedPartVO(
+                        part.getIndex(),
+                        part.getStoragePath(),
+                        part.getSize(),
+                        part.getETag(),
+                        part.getPlainHash(),
+                        part.getCipherHash(),
+                        part.getChecksumAlgorithm()))
+                .toList();
+        return new CompleteDirectMultipartUploadResponse(clientId, state.getContentHash(), parts);
+    }
+
+    /**
+     * 将 storage 完成响应逐字段绑定到 Redis 上传计划，并分别校验 staging 与 final ETag。
+     */
+    private CompleteDirectMultipartUploadResponse validateDirectStorageCompletion(
+            String clientId,
+            FileUploadState state,
+            Map<Integer, DirectUploadCompletePartRequest> completedPartMap,
+            CompleteDirectMultipartUploadResponse response
+    ) {
+        if (response == null
+                || !Objects.equals(clientId, response.sessionId())
+                || response.parts() == null
+                || response.parts().size() != state.getTotalChunks()
+                || response.parts().size() > MAX_TOTAL_CHUNKS) {
+            throw invalidDirectStorageCompletion();
+        }
+
+        String contentHash;
+        try {
+            contentHash = requireContentHash(response.contentHash());
+        } catch (GeneralException exception) {
+            throw invalidDirectStorageCompletion();
+        }
+        if (CommonUtils.isNotEmpty(state.getContentHash())
+                && !Objects.equals(requireContentHash(state.getContentHash()), contentHash)) {
+            throw invalidDirectStorageCompletion();
+        }
+
+        Map<Integer, FileUploadState.DirectUploadPartState> trustedPlan = indexTrustedDirectParts(state);
+        Map<Integer, DirectMultipartCompletedPartVO> returnedParts = new HashMap<>();
+        long returnedSize = 0L;
+        for (DirectMultipartCompletedPartVO returnedPart : response.parts()) {
+            if (returnedPart == null
+                    || returnedPart.partIndex() < 0
+                    || returnedPart.partIndex() >= state.getTotalChunks()
+                    || returnedParts.put(returnedPart.partIndex(), returnedPart) != null) {
+                throw invalidDirectStorageCompletion();
+            }
+            FileUploadState.DirectUploadPartState trustedPart = trustedPlan.get(returnedPart.partIndex());
+            DirectUploadCompletePartRequest declaredPart = completedPartMap.get(returnedPart.partIndex());
+            if (!matchesDirectStoragePart(trustedPart, declaredPart, returnedPart)) {
+                throw invalidDirectStorageCompletion();
+            }
+            try {
+                returnedSize = Math.addExact(returnedSize, returnedPart.size());
+            } catch (ArithmeticException e) {
+                throw invalidDirectStorageCompletion();
+            }
+        }
+        if (returnedSize != state.getFileSize() || returnedParts.size() != trustedPlan.size()) {
+            throw invalidDirectStorageCompletion();
+        }
+
+        if (state.getTotalChunks() == 1) {
+            String singlePartHash = normalizeDirectUploadHash(
+                    trustedPlan.get(0) == null ? null : trustedPlan.get(0).getPlainHash());
+            if (singlePartHash.matches("^sha256:[0-9a-f]{64}$")
+                    && !Objects.equals(singlePartHash, contentHash)) {
+                throw invalidDirectStorageCompletion();
+            }
+        }
+
+        List<DirectMultipartCompletedPartVO> orderedParts = returnedParts.values().stream()
+                .sorted(Comparator.comparingInt(DirectMultipartCompletedPartVO::partIndex))
+                .toList();
+        return new CompleteDirectMultipartUploadResponse(clientId, contentHash, orderedParts);
+    }
+
+    /**
+     * 为可信 Redis 直传计划建立唯一索引，并拒绝缺片、重复或越界状态。
+     */
+    private Map<Integer, FileUploadState.DirectUploadPartState> indexTrustedDirectParts(FileUploadState state) {
+        if (state.getDirectUploadParts() == null
+                || state.getDirectUploadParts().size() != state.getTotalChunks()
+                || state.getDirectUploadParts().size() > MAX_TOTAL_CHUNKS) {
+            throw invalidDirectStorageCompletion();
+        }
+        Map<Integer, FileUploadState.DirectUploadPartState> indexed = new HashMap<>();
+        for (FileUploadState.DirectUploadPartState part : state.getDirectUploadParts()) {
+            if (part == null
+                    || part.getIndex() < 0
+                    || part.getIndex() >= state.getTotalChunks()
+                    || indexed.put(part.getIndex(), part) != null) {
+                throw invalidDirectStorageCompletion();
+            }
+        }
+        return indexed;
+    }
+
+    /**
+     * 核对单个 storage 完成分片的索引外全部可信字段。
+     * 前端 ETag 只证明 staging 上传并原样传给 storage；provider 完成后返回的 final ETag 独立校验并进入检查点。
+     */
+    private boolean matchesDirectStoragePart(
+            FileUploadState.DirectUploadPartState trustedPart,
+            DirectUploadCompletePartRequest declaredPart,
+            DirectMultipartCompletedPartVO returnedPart
+    ) {
+        return trustedPart != null
+                && declaredPart != null
+                && returnedPart.size() == trustedPart.getSize()
+                && Objects.equals(returnedPart.storagePath(), trustedPart.getStoragePath())
+                && isCanonicalDirectUploadHash(returnedPart.plainHash())
+                && isCanonicalDirectUploadHash(trustedPart.getPlainHash())
+                && Objects.equals(
+                        normalizeDirectUploadHash(returnedPart.plainHash()),
+                        normalizeDirectUploadHash(trustedPart.getPlainHash()))
+                && isCanonicalDirectUploadHash(returnedPart.cipherHash())
+                && isCanonicalDirectUploadHash(trustedPart.getCipherHash())
+                && Objects.equals(
+                        normalizeDirectUploadHash(returnedPart.cipherHash()),
+                        normalizeDirectUploadHash(trustedPart.getCipherHash()))
+                && isSupportedDirectChecksum(returnedPart.checksumAlgorithm())
+                && isSupportedDirectChecksum(trustedPart.getChecksumAlgorithm())
+                && normalizeChecksumAlgorithm(returnedPart.checksumAlgorithm())
+                        .equalsIgnoreCase(normalizeChecksumAlgorithm(trustedPart.getChecksumAlgorithm()))
+                && isSafeDirectUploadEtag(declaredPart.getETag())
+                && isSafeDirectUploadEtag(returnedPart.eTag());
+    }
+
+    /**
+     * 校验直传摘要是有界规范 SHA-256，避免异常 RPC 响应放大字符串处理成本。
+     */
+    private boolean isCanonicalDirectUploadHash(String value) {
+        return value != null
+                && value.length() <= 71
+                && DIRECT_SHA256_PATTERN.matcher(normalizeDirectUploadHash(value)).matches();
+    }
+
+    /**
+     * 校验直传 checksum 是有界 SHA-256 标识，拒绝异常 RPC 或旧状态中的算法漂移。
+     */
+    private boolean isSupportedDirectChecksum(String value) {
+        return value != null
+                && value.length() <= 16
+                && HASH_ALGORITHM.equalsIgnoreCase(value.trim());
+    }
+
+    /**
+     * 将已校验的 storage 响应复制为 Redis 可序列化检查点。
+     */
+    private List<FileUploadState.DirectUploadCompletedPartState> toDirectCompletedPartStates(
+            List<DirectMultipartCompletedPartVO> completedParts
+    ) {
+        return completedParts.stream()
+                .map(part -> new FileUploadState.DirectUploadCompletedPartState(
+                        part.partIndex(),
+                        part.storagePath(),
+                        part.size(),
+                        part.eTag(),
+                        part.plainHash(),
+                        part.cipherHash(),
+                        normalizeChecksumAlgorithm(part.checksumAlgorithm())))
+                .toList();
+    }
+
+    /**
+     * 构造统一的 storage 完成证据错误，确保调用方不会继续上链或发布 manifest。
+     */
+    private GeneralException invalidDirectStorageCompletion() {
+        return new GeneralException(ResultEnum.FILE_SERVICE_ERROR, "对象存储直传完成证据与上传计划不一致");
+    }
+
+    /**
+     * 校验 ETag 仅由有界可见 ASCII 字符组成，阻断空白、控制字符和日志换行。
+     */
+    private boolean isSafeDirectUploadEtag(String eTag) {
+        if (eTag == null || eTag.length() < 1 || eTag.length() > 255) {
+            return false;
+        }
+        for (int index = 0; index < eTag.length(); index++) {
+            char value = eTag.charAt(index);
+            if (value < 0x21 || value > 0x7E) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -1026,7 +1945,7 @@ public class FileUploadServiceImpl implements FileUploadService {
         params.put("fileName", state.getFileName());
         params.put("fileSize", state.getFileSize());
         params.put("contentType", state.getContentType());
-        params.put("uploadTime", System.currentTimeMillis());
+        params.put("uploadTime", state.getStartTime());
         params.put("chunkCount", state.getTotalChunks());
         params.put("uploadMode", "DIRECT_MULTIPART");
         params.put("encryptionAlgorithm", "NONE");
@@ -1038,9 +1957,11 @@ public class FileUploadServiceImpl implements FileUploadService {
      * Applies the default checksum algorithm used by the P2-3 manifest contract.
      */
     private String normalizeChecksumAlgorithm(String checksumAlgorithm) {
-        return CommonUtils.isEmpty(checksumAlgorithm)
-                ? ChunkManifestCanonicalizer.HASH_ALGORITHM
-                : checksumAlgorithm.trim();
+        if (CommonUtils.isEmpty(checksumAlgorithm)) {
+            return ChunkManifestCanonicalizer.HASH_ALGORITHM;
+        }
+        String normalized = checksumAlgorithm.trim();
+        return HASH_ALGORITHM.equalsIgnoreCase(normalized) ? HASH_ALGORITHM : normalized;
     }
 
     /**
@@ -1070,7 +1991,10 @@ public class FileUploadServiceImpl implements FileUploadService {
         }
 
         Long targetFileSize = targetFile.getFileSize();
-        if (targetFileSize != null && targetFileSize > 0 && targetFileSize.longValue() != fileSize) {
+        if (fileSize <= 0
+                || targetFileSize == null
+                || targetFileSize <= 0
+                || targetFileSize.longValue() != fileSize) {
             throw new GeneralException(ResultEnum.PARAM_ERROR, "上传文件大小与目标版本不一致");
         }
     }
@@ -1141,13 +2065,51 @@ public class FileUploadServiceImpl implements FileUploadService {
      *
      * @param userId 用户ID
      * @param state 上传会话状态
+     * @return DB 目标已安全进入 FAIL、允许删除会话恢复入口时返回 true
      */
-    private void markUploadTargetFailed(Long userId, FileUploadState state) {
+    private boolean markUploadTargetFailed(Long userId, FileUploadState state) {
+        if (state.getPreparedFileId() != null) {
+            return fileService.markFileUploadFailed(userId, state.getPreparedFileId());
+        }
         if (state.getTargetFileId() != null) {
-            fileService.markFileUploadFailed(userId, state.getTargetFileId());
+            return fileService.markFileUploadFailed(userId, state.getTargetFileId());
+        }
+        // 没有稳定主键时禁止按文件名批量回写，避免污染同名历史版本。
+        return false;
+    }
+
+    /**
+     * DB 已安全进入 FAIL 后严格删除普通上传两类临时目录，最后才移除 Redis 恢复入口。
+     */
+    private void cleanupFailedLegacyFinalization(
+            Long userId,
+            FileUploadState state,
+            String suid
+    ) {
+        if (!markUploadTargetFailed(userId, state)) {
             return;
         }
-        fileService.changeFileStatusByName(userId, state.getFileName(), FileUploadStatus.FAIL.getCode());
+        try {
+            cleanupLegacyTemporaryFilesStrict(state);
+        } catch (IOException | RuntimeException cleanupError) {
+            log.warn("普通上传失败态已收敛但临时目录清理失败，保留 active/state 重试: clientId={}",
+                    state.getClientId(), cleanupError);
+            throw new RetryableException(ResultEnum.SERVICE_UNAVAILABLE, cleanupError);
+        }
+        redisStateManager.removeSession(state.getClientId(), suid);
+    }
+
+    /**
+     * 使用会话持久化的规范路径严格清理原始与密文临时目录，目录不存在按幂等成功处理。
+     */
+    private void cleanupLegacyTemporaryFilesStrict(FileUploadState state) throws IOException {
+        if (state == null
+                || CommonUtils.isEmpty(state.getUploadTempPath())
+                || CommonUtils.isEmpty(state.getProcessedTempPath())) {
+            throw new IOException("上传会话缺少可验证的临时目录路径");
+        }
+        cleanupDirectory(Paths.get(state.getUploadTempPath()));
+        cleanupDirectory(Paths.get(state.getProcessedTempPath()));
     }
 
     /**
@@ -1160,6 +2122,23 @@ public class FileUploadServiceImpl implements FileUploadService {
      * @throws GeneralException 安全相关操作失败 (如哈希)
      */
     public void uploadChunk(Long userId, String clientId, int chunkNumber, MultipartFile file) {
+        RLock finalizationLock = acquireUploadFinalizationLock(clientId);
+        try {
+            uploadChunkWithFinalizationLock(userId, clientId, chunkNumber, file);
+        } finally {
+            releaseUploadFinalizationLock(finalizationLock, clientId);
+        }
+    }
+
+    /**
+     * 在会话 finalizer 锁内重读状态、落盘原始分片并提交 Redis 上传证据。
+     */
+    private void uploadChunkWithFinalizationLock(
+            Long userId,
+            String clientId,
+            int chunkNumber,
+            MultipartFile file
+    ) {
         //获取加密后的uid，防止数据泄漏
         String SUID = UidEncoder.encodeUid(String.valueOf(userId));
 
@@ -1170,6 +2149,7 @@ public class FileUploadServiceImpl implements FileUploadService {
 
         // 验证用户权限
         validateUploadOwnership(userId, state, clientId);
+        rejectUnsupportedRecoverySchema(state);
 
         if (redisStateManager.isSessionPaused(clientId)) {
             throw new GeneralException("上传已暂停，请先恢复上传: 客户端ID=" + clientId);
@@ -1187,14 +2167,39 @@ public class FileUploadServiceImpl implements FileUploadService {
 
         // --- 优化：边保存边计算哈希 ---
         Path chunkPath = getChunkUploadPath(SUID, clientId, chunkNumber);
+        Path rawTaskPath = chunkPath.resolveSibling(
+                chunkPath.getFileName() + "." + UUID.randomUUID() + ".uploading");
         String calculatedHashBase64;
+        boolean rawPublished = false;
+        boolean uploadedEvidenceCommitted = false;
 
         try {
-            // 检查是否已处理
-            if (state.getProcessedChunks().contains(chunkNumber)) {
-                log.info("分片 {} 已处理过，跳过: 客户端ID={}", chunkNumber, clientId);
-                // 注意：这里不抛异常，因为可能客户端重传了已处理的分片
-                return; // 直接返回，不报错
+            if (state.getUploadedChunks().contains(chunkNumber)
+                    || state.getProcessedChunks().contains(chunkNumber)) {
+                String persistedHash = state.getChunkHashes().get("chunk_" + chunkNumber);
+                String incomingHash = calculateMultipartHashBase64(file);
+                if (CommonUtils.isEmpty(persistedHash)
+                        || !Objects.equals(persistedHash, incomingHash)) {
+                    throw new GeneralException(
+                            ResultEnum.FILE_UPLOAD_ERROR,
+                            "同一分片重复上传内容与既有哈希不一致");
+                }
+                if (state.getProcessedChunks().contains(chunkNumber)) {
+                    validateProcessedChunkEvidence(
+                            state,
+                            chunkNumber,
+                            getChunkProcessedPath(SUID, clientId, chunkNumber));
+                    log.info("分片 {} 已处理且证据完整，幂等返回: 客户端ID={}", chunkNumber, clientId);
+                    return;
+                }
+                if (!Files.isRegularFile(chunkPath)) {
+                    throw new GeneralException(
+                            ResultEnum.FILE_UPLOAD_ERROR,
+                            "已上传分片缺少可恢复的原始文件或哈希证据");
+                }
+                processChunkImmediately(SUID, state, chunkNumber, chunkPath, persistedHash);
+                log.info("分片 {} 已上传但尚未处理，已幂等排队处理: 客户端ID={}", chunkNumber, clientId);
+                return;
             }
 
             log.debug("开始保存分片: 路径={}", chunkPath);
@@ -1204,9 +2209,13 @@ public class FileUploadServiceImpl implements FileUploadService {
             long bytesWritten;
             try (InputStream inputStream = file.getInputStream();
                  DigestInputStream digestInputStream = new DigestInputStream(inputStream, digest);
-                 OutputStream outputStream = Files.newOutputStream(chunkPath, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                 FileChannel rawChannel = FileChannel.open(
+                         rawTaskPath, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+                 OutputStream outputStream = Channels.newOutputStream(rawChannel)) {
 
                 bytesWritten = digestInputStream.transferTo(outputStream);
+                outputStream.flush();
+                rawChannel.force(true);
             }
 
             if (bytesWritten != file.getSize()) {
@@ -1219,14 +2228,21 @@ public class FileUploadServiceImpl implements FileUploadService {
             byte[] hashBytes = digest.digest();
             calculatedHashBase64 = Base64.getUrlEncoder().withoutPadding().encodeToString(hashBytes);
 
+            Files.move(
+                    rawTaskPath,
+                    chunkPath,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+            rawPublished = true;
+
             log.info("分片 {} 保存成功: 客户端ID={}, 大小={}, 哈希={}", chunkNumber, clientId, bytesWritten, calculatedHashBase64);
 
             // 使用原子操作同时更新已上传分片集合和分片哈希，确保高并发下的数据一致性
             if (!redisStateManager.addUploadedChunkWithHash(clientId, chunkNumber, calculatedHashBase64)) {
                 log.error("Redis 原子更新失败: 客户端ID={}, 分片={}", clientId, chunkNumber);
-                tryDelete(chunkPath);
                 throw new GeneralException("更新上传状态失败");
             }
+            uploadedEvidenceCommitted = true;
 
             // --- 触发异步处理 ---
             processChunkImmediately(SUID, state, chunkNumber, chunkPath, calculatedHashBase64);
@@ -1235,26 +2251,54 @@ public class FileUploadServiceImpl implements FileUploadService {
 
         } catch (NoSuchAlgorithmException e) {
             log.error("哈希算法 {} 不可用!", HASH_ALGORITHM, e);
-            tryDelete(chunkPath);
+            tryDelete(rawTaskPath);
+            cleanupRawChunkOnlyWhenEvidenceAbsent(
+                    clientId, chunkNumber, chunkPath, rawPublished, uploadedEvidenceCommitted);
             throw new GeneralException("内部服务器错误：哈希算法不可用");
         } catch (IOException e) {
             log.error("保存或哈希分片 {} 失败: 客户端ID={}", chunkNumber, state.getClientId(), e);
-            tryDelete(chunkPath);
+            tryDelete(rawTaskPath);
+            cleanupRawChunkOnlyWhenEvidenceAbsent(
+                    clientId, chunkNumber, chunkPath, rawPublished, uploadedEvidenceCommitted);
             throw new GeneralException("保存分片失败: " + e.getMessage());
         } catch (Exception e) { // 捕获其他潜在异常
             log.error("处理分片 {} 时发生未知错误: 客户端ID={}", chunkNumber, state.getClientId(), e);
-            tryDelete(chunkPath);
+            tryDelete(rawTaskPath);
+            cleanupRawChunkOnlyWhenEvidenceAbsent(
+                    clientId, chunkNumber, chunkPath, rawPublished, uploadedEvidenceCommitted);
 
-            //根据异常类型决定是否清理Redis状态
-            if (isCriticalUploadError(e)) {
-                try {
-                    redisStateManager.removeSession(clientId, SUID);
-                    log.info("严重异常，已清理Redis状态: 客户端ID={}, 异常类型={}", clientId, e.getClass().getSimpleName());
-                } catch (Exception cleanupEx) {
-                    log.warn("清理Redis状态时发生异常: 客户端ID={}", clientId, cleanupEx);
-                }
-            }
+            // 未与稳定 DB 目标和 finalizer 状态共同收敛前，保留 Redis 恢复入口。
             throw new RuntimeException("处理分片时发生未知错误: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 仅在严格回读确认 Redis 未提交上传证据时删除本次发布的原始分片。
+     */
+    private void cleanupRawChunkOnlyWhenEvidenceAbsent(
+            String clientId,
+            int chunkNumber,
+            Path chunkPath,
+            boolean rawPublished,
+            boolean evidenceCommitted
+    ) {
+        if (!rawPublished || evidenceCommitted) {
+            return;
+        }
+        try {
+            FileUploadState latestState = redisStateManager.getState(clientId);
+            if (latestState != null
+                    && (latestState.getUploadedChunks().contains(chunkNumber)
+                    || latestState.getProcessedChunks().contains(chunkNumber)
+                    || latestState.getChunkHashes().containsKey("chunk_" + chunkNumber))) {
+                log.warn("上传证据写响应不确定但回读发现已提交，保留原始分片: clientId={}, chunk={}",
+                        clientId, chunkNumber);
+                return;
+            }
+            tryDelete(chunkPath);
+        } catch (RuntimeException readError) {
+            log.warn("无法确认上传证据是否提交，保留原始分片供重试: clientId={}, chunk={}",
+                    clientId, chunkNumber, readError);
         }
     }
 
@@ -1339,7 +2383,9 @@ public class FileUploadServiceImpl implements FileUploadService {
             throw new GeneralException(ResultEnum.UPLOAD_SESSION_NOT_FOUND);
         }
         validateUploadOwnership(userId, state, clientId);
+        rejectUnsupportedRecoverySchema(state);
         if (isUploadSessionCompleted(state)) {
+            convergeCompletedSessionState(state, SUID);
             log.info("上传会话已完成，忽略重复完成请求: 客户端ID={}, 文件名={}", clientId, state.getFileName());
             return;
         }
@@ -1367,8 +2413,13 @@ public class FileUploadServiceImpl implements FileUploadService {
             FileUploadState expectedState
     ) {
         FileUploadState state = requireLatestUploadState(userId, clientId, expectedState);
+        rejectUnboundPreparedCheckpoint(state);
         if (isUploadSessionCompleted(state)) {
+            convergeCompletedSessionState(state, SUID);
             log.info("上传会话已被并发完成，忽略重复完成请求: 客户端ID={}", clientId);
+            return;
+        }
+        if (recoverLegacySuccessFinalization(userId, SUID, state)) {
             return;
         }
 
@@ -1382,20 +2433,23 @@ public class FileUploadServiceImpl implements FileUploadService {
         if (!allProcessed) {
             log.warn("请求完成上传时，并非所有分片都已处理: 客户端ID={}, 已处理={}, 总数={}",
                     clientId, state.getProcessedChunks().size(), expectedChunks);
-
-            // 使用非阻塞方式等待异步处理完成
-            allProcessed = waitForChunkProcessingCompletionNonBlocking(clientId, expectedChunks);
-            if (!allProcessed) {
-                log.error("等待超时，仍有分片未处理完成: 客户端ID={}, 已处理={}, 总数={}",
-                        clientId, state.getProcessedChunks().size(), expectedChunks);
-                throw new RetryableException(ResultEnum.SERVICE_UNAVAILABLE,
-                        Map.of("processed", state.getProcessedChunks().size(), "expected", expectedChunks));
-            }
+            int requeuedChunks = requeueMissingProcessedChunks(SUID, state);
+            // 异步分片也必须先拿同一 finalizer 锁；锁内等待会形成 complete 与 async 互等。
+            // 先从持久化 uploaded/hash/raw 证据恢复丢失的内存任务，再立即返回并释放锁。
+            throw new RetryableException(ResultEnum.SERVICE_UNAVAILABLE,
+                    Map.of(
+                            "processed", state.getProcessedChunks().size(),
+                            "expected", expectedChunks,
+                            "requeued", requeuedChunks));
         }
 
         state = requireLatestCompletionState(userId, clientId, state, expectedChunks);
         if (isUploadSessionCompleted(state)) {
+            convergeCompletedSessionState(state, SUID);
             log.info("上传会话已被并发完成，忽略重复完成请求: 客户端ID={}", clientId);
+            return;
+        }
+        if (recoverLegacySuccessFinalization(userId, SUID, state)) {
             return;
         }
 
@@ -1425,20 +2479,14 @@ public class FileUploadServiceImpl implements FileUploadService {
             List<File> processedFiles = collectProcessedFiles(SUID, clientId);
             if (processedFiles == null) {
                 log.error("收集处理后的文件失败，无法继续存证流程: 客户端ID={}, 文件名={}", clientId, state.getFileName());
-                // 更新文件状态为失败
-                markUploadTargetFailed(userId, state);
-                // 清理Redis状态
-                redisStateManager.removeSession(state.getClientId(), SUID);
+                cleanupFailedLegacyFinalization(userId, state, SUID);
                 throw new GeneralException("收集处理后的文件失败，文件存证中止");
             }
 
-            List<String> fileHashes = collectFileHashes(state);
+            List<String> fileHashes = collectCipherFileHashes(state, processedFiles);
             if (fileHashes == null) {
                 log.error("收集文件哈希值失败，无法继续存证流程: 客户端ID={}, 文件名={}", clientId, state.getFileName());
-                // 更新文件状态为失败
-                markUploadTargetFailed(userId, state);
-                // 清理Redis状态
-                redisStateManager.removeSession(state.getClientId(), SUID);
+                cleanupFailedLegacyFinalization(userId, state, SUID);
                 throw new GeneralException("收集文件哈希值失败，文件存证中止");
             }
 
@@ -1446,73 +2494,81 @@ public class FileUploadServiceImpl implements FileUploadService {
             if (processedFiles.size() != fileHashes.size()) {
                 log.error("处理后的文件数量({})与哈希值数量({})不匹配: 客户端ID={}, 文件名={}",
                         processedFiles.size(), fileHashes.size(), clientId, state.getFileName());
-                // 更新文件状态为失败
-                markUploadTargetFailed(userId, state);
-                // 清理Redis状态
-                redisStateManager.removeSession(state.getClientId(), SUID);
+                cleanupFailedLegacyFinalization(userId, state, SUID);
                 throw new GeneralException("文件数量与哈希数量不匹配，文件存证中止");
             }
 
             log.info("成功收集文件和哈希值: 客户端ID={}, 文件名={}, 分片数量={}",
                     clientId, state.getFileName(), processedFiles.size());
 
-            // 发布文件存证事件，触发异步存证处理
-            if (CommonUtils.isNotEmpty(eventPublisher)) {
-                eventPublisher.publishEvent(new FileStorageEvent(
-                        this,
-                        state.getTenantId(),
-                        userId,
-                        state.getTargetFileId(),
-                        state.getFileName(),
-                        SUID,
-                        state.getClientId(),
-                        processedFiles,
-                        fileHashes,
-                        generateFileParam(state) // 生成文件参数
-                ));
-
-                log.info("已发布文件存证事件: 用户={}, 文件名={}, 分片数量={}", userId, state.getFileName(), processedFiles.size());
-
-                // 标记状态为完成，设置 TTL 让其自动过期（供前端轮询检测完成）
-                try {
-                    redisStateManager.markCompleted(state.getClientId(), SUID, 300); // 5 分钟 TTL
-                    log.info("上传完成，已标记Redis状态为completed: 客户端ID={}", clientId);
-                } catch (Exception e) {
-                    log.warn("标记Redis状态为completed失败，但不影响主流程: 客户端ID={}", clientId, e);
-                }
-            } else {
+            if (eventPublisher == null) {
                 log.error("事件发布器未初始化，无法发送文件存证事件: 客户端ID={}, 文件名={}", clientId, state.getFileName());
-                // 更新文件状态为失败
-                markUploadTargetFailed(userId, state);
-                // 事件发布器未初始化时也清理Redis状态
-                redisStateManager.removeSession(state.getClientId(), SUID);
+                cleanupFailedLegacyFinalization(userId, state, SUID);
                 throw new GeneralException("事件发布器未初始化，文件存证中止");
             }
-
+            publishFileStorageEventAndMarkCompleted(userId, SUID, state, processedFiles, fileHashes);
 
         } catch (IOException e) {
             log.error("完成文件处理或清理时失败: 客户端ID={}", clientId, e);
-            // 确保在异常情况下也清理Redis状态
-            try {
-                redisStateManager.removeSession(clientId, SUID);
-                log.info("异常情况下已清理Redis状态: 客户端ID={}", clientId);
-            } catch (Exception cleanupEx) {
-                log.warn("清理Redis状态时发生异常: 客户端ID={}", clientId, cleanupEx);
-            }
+            // 保留已持久化的内容摘要与会话检查点，下一次 finalizer 可安全重试目录清理。
             throw new GeneralException("完成处理失败：" + e.getMessage());
+        } catch (RetryableException e) {
+            // DB SUCCESS 后补 Redis 完成态失败时必须保留会话，下一次 complete 可安全恢复。
+            throw e;
         } catch (GeneralException e) {
             // GeneralException已经包含了状态清理逻辑，直接重新抛出
             throw e;
         } catch (Exception e) {
             log.error("完成文件处理时发生未知错误: 客户端ID={}", clientId, e);
-            // 确保在异常情况下也清理Redis状态
-            try {
-                redisStateManager.removeSession(clientId, SUID);
-                log.info("异常情况下已清理Redis状态: 客户端ID={}", clientId);
-            } catch (Exception cleanupEx) {
-                log.warn("清理Redis状态时发生异常: 客户端ID={}", clientId, cleanupEx);
-            }
+            // 未证明 DB 最终化和版本链可安全回滚前，不删除唯一 Redis 恢复入口。
             throw new RuntimeException("完成处理时发生未知错误：" + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 同步发布文件存证事件，并且仅在监听器成功返回后标记 Redis 上传完成态。
+     *
+     * @param userId 上传用户ID
+     * @param SUID 编码后的用户ID
+     * @param state 上传会话状态
+     * @param processedFiles 已处理分片
+     * @param fileHashes 分片哈希
+     */
+    private void publishFileStorageEventAndMarkCompleted(
+            Long userId,
+            String SUID,
+            FileUploadState state,
+            List<File> processedFiles,
+            List<String> fileHashes
+    ) {
+        try {
+            eventPublisher.publishEvent(new FileStorageEvent(
+                    this,
+                    state.getTenantId(),
+                    userId,
+                    state.getPreparedFileId(),
+                    state.getFileName(),
+                    SUID,
+                    state.getClientId(),
+                    processedFiles,
+                    fileHashes,
+                    generateFileParam(state)
+            ));
+        } catch (RuntimeException storageError) {
+            cleanupFailedLegacyFinalization(userId, state, SUID);
+            throw storageError;
+        }
+        log.info("文件存证事件已同步完成: 用户={}, 文件名={}, 分片数量={}",
+                userId, state.getFileName(), processedFiles.size());
+
+        try {
+            cleanupLegacyTemporaryFilesStrict(state);
+            redisStateManager.markCompleted(state.getClientId(), SUID, 300);
+            log.info("上传完成，已标记Redis状态为completed: 客户端ID={}", state.getClientId());
+        } catch (IOException | RuntimeException completionStateError) {
+            log.warn("标记Redis状态为completed失败，保留 DB SUCCESS 并要求客户端安全重试: 客户端ID={}",
+                    state.getClientId(), completionStateError);
+            throw new RetryableException(ResultEnum.SERVICE_UNAVAILABLE, completionStateError);
         }
     }
 
@@ -1543,7 +2599,7 @@ public class FileUploadServiceImpl implements FileUploadService {
     }
 
     /**
-     * 仅由持锁线程释放上传会话 finalizer 锁，释放失败时保留 watchdog 超时兜底。
+     * 直接释放上传会话 finalizer 锁，避免额外所有权查询失败时跳过 unlock 并永久续租。
      *
      * @param lock 会话锁
      * @param clientId 上传会话ID
@@ -1553,12 +2609,187 @@ public class FileUploadServiceImpl implements FileUploadService {
             return;
         }
         try {
-            if (lock.isHeldByCurrentThread()) {
-                lock.unlock();
-            }
+            lock.unlock();
+        } catch (IllegalMonitorStateException e) {
+            log.debug("上传会话 finalizer 锁已不属于当前线程: clientId={}", clientId);
         } catch (RuntimeException e) {
             log.warn("释放上传会话 finalizer 锁失败: clientId={}", clientId, e);
         }
+    }
+
+    /**
+     * 有界等待稳定 PREPARE 文件级最终化锁，成功后使用 Redisson watchdog 自动续租。
+     *
+     * @param preparedFileId 稳定 PREPARE 文件ID
+     * @return 当前线程持有的文件级锁
+     */
+    private RLock acquirePreparedFileFinalizationLock(Long preparedFileId) {
+        RLock lock;
+        String lockKey = PREPARED_FILE_FINALIZATION_LOCK_KEY_PREFIX + preparedFileId;
+        try {
+            lock = redissonClient.getLock(lockKey);
+            if (lock == null || !lock.tryLock(
+                    PREPARED_FILE_FINALIZATION_LOCK_WAIT_SECONDS,
+                    TimeUnit.SECONDS)) {
+                throw new RetryableException(
+                        ResultEnum.SERVICE_UNAVAILABLE,
+                        Map.of("reason", "prepared file finalization is already in progress"));
+            }
+            return lock;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RetryableException(
+                    ResultEnum.SERVICE_UNAVAILABLE,
+                    Map.of("reason", "prepared file finalization lock wait was interrupted"));
+        } catch (RetryableException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            log.warn("获取 PREPARE 文件最终化锁失败: lockKey={}", lockKey, e);
+            throw new RetryableException(
+                    ResultEnum.SERVICE_UNAVAILABLE,
+                    Map.of("reason", "prepared file finalization lock is unavailable"));
+        }
+    }
+
+    /**
+     * 直接释放 PREPARE 文件级最终化锁，非持有异常表示锁已过期或已被释放。
+     *
+     * @param lock 文件级最终化锁
+     * @param preparedFileId 稳定 PREPARE 文件ID
+     */
+    private void releasePreparedFileFinalizationLock(RLock lock, Long preparedFileId) {
+        if (lock == null) {
+            return;
+        }
+        try {
+            lock.unlock();
+        } catch (IllegalMonitorStateException e) {
+            log.debug("PREPARE 文件最终化锁已不属于当前线程: preparedFileId={}", preparedFileId);
+        } catch (RuntimeException e) {
+            log.warn("释放 PREPARE 文件最终化锁失败: preparedFileId={}", preparedFileId, e);
+        }
+    }
+
+    /**
+     * 有界等待租户配额完成锁，获取成功后由 Redisson watchdog 自动续租。
+     *
+     * @param tenantId 租户ID
+     * @return 当前线程持有的租户配额锁
+     */
+    private RLock acquireQuotaCompletionLock(Long tenantId) {
+        String lockKey = QUOTA_COMPLETE_LOCK_KEY_PREFIX + tenantId;
+        try {
+            RLock lock = redissonClient.getLock(lockKey);
+            if (lock == null || !lock.tryLock(QUOTA_COMPLETE_LOCK_WAIT_SECONDS, TimeUnit.SECONDS)) {
+                throw new RetryableException(
+                        ResultEnum.SERVICE_UNAVAILABLE,
+                        Map.of("reason", "quota completion lock is busy"));
+            }
+            return lock;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RetryableException(
+                    ResultEnum.SERVICE_UNAVAILABLE,
+                    Map.of("reason", "quota completion lock wait was interrupted"));
+        } catch (RetryableException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            log.warn("获取上传完成配额锁失败: lockKey={}", lockKey, e);
+            throw new RetryableException(
+                    ResultEnum.SERVICE_UNAVAILABLE,
+                    Map.of("reason", "quota completion lock is unavailable"));
+        }
+    }
+
+    /**
+     * 直接释放租户配额完成锁，避免 ownership 查询成为 watchdog 解锁的单点故障。
+     *
+     * @param lock 租户配额锁
+     * @param tenantId 租户ID
+     */
+    private void releaseQuotaCompletionLock(RLock lock, Long tenantId) {
+        if (lock == null) {
+            return;
+        }
+        try {
+            lock.unlock();
+        } catch (IllegalMonitorStateException e) {
+            log.debug("租户配额完成锁已不属于当前线程: tenantId={}", tenantId);
+        } catch (RuntimeException e) {
+            log.warn("释放上传完成配额锁失败: tenantId={}", tenantId, e);
+        }
+    }
+
+    /**
+     * 按“会话锁 -> 租户配额锁 -> PREPARE 文件锁”顺序完成直传预占位，并把文件锁交给最终化阶段持有。
+     *
+     * @param userId 用户ID
+     * @param state 当前直传会话状态
+     * @return 已持有 PREPARE 文件锁的最终化预留
+     */
+    private DirectPreparedFinalizationReservation reserveDirectQuotaPrepareAndAcquireFileLock(
+            Long userId,
+            FileUploadState state
+    ) {
+        Long tenantId = resolveTenantId(state);
+        RLock quotaLock = acquireQuotaCompletionLock(tenantId);
+        RLock preparedFileLock = null;
+        Long preparedFileId = null;
+        try {
+            FileUploadState latestState = requireLatestUploadState(userId, state.getClientId(), state);
+            if (!latestState.isDirectUpload()) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR, "该会话不是直传上传会话");
+            }
+            if (!latestState.isPrepareStored() && shouldCheckQuotaForSession(latestState)) {
+                quotaService.checkUploadQuota(tenantId, userId, latestState.getFileSize());
+            }
+            if (latestState.getPreparedFileId() == null) {
+                rejectUnsupportedRecoverySchema(latestState);
+                preparedFileId = latestState.getTargetFileId() != null
+                        ? latestState.getTargetFileId()
+                        : IdUtils.nextEntityId();
+                if (preparedFileId == null || preparedFileId <= 0) {
+                    throw new GeneralException(ResultEnum.FILE_RECORD_ERROR,
+                            "无法分配稳定 PREPARE 文件ID");
+                }
+                latestState.setPreparedFileId(preparedFileId);
+                latestState.setDirectFinalizationStage(DIRECT_STAGE_PREPARE_ID_ALLOCATED);
+                redisStateManager.updateState(latestState);
+            } else {
+                preparedFileId = requirePreparedFileId(latestState);
+            }
+
+            preparedFileLock = acquirePreparedFileFinalizationLock(preparedFileId);
+            if (!latestState.isPrepareStored()) {
+                cn.flying.dao.dto.File preparedFile = fileService.prepareStoreFileWithStableId(
+                        userId,
+                        latestState.getTargetFileId(),
+                        preparedFileId,
+                        latestState.getFileName(),
+                        latestState.getFileSize());
+                validatePreparedFile(latestState, preparedFile, userId);
+                latestState.setDirectFinalizationStage(DIRECT_STAGE_PREPARE_STORED);
+                latestState.setPrepareStored(true);
+                redisStateManager.updateState(latestState);
+            }
+            return new DirectPreparedFinalizationReservation(
+                    latestState, preparedFileId, preparedFileLock);
+        } catch (RuntimeException exception) {
+            releasePreparedFileFinalizationLock(preparedFileLock, preparedFileId);
+            throw exception;
+        } finally {
+            releaseQuotaCompletionLock(quotaLock, tenantId);
+        }
+    }
+
+    /**
+     * 直传配额预留结果；PREPARE 文件锁必须由调用方在 manifest 和完成检查点之后释放。
+     */
+    private record DirectPreparedFinalizationReservation(
+            FileUploadState state,
+            Long preparedFileId,
+            RLock preparedFileLock
+    ) {
     }
 
     /**
@@ -1570,13 +2801,15 @@ public class FileUploadServiceImpl implements FileUploadService {
      */
     private FileUploadState reserveQuotaAndPrepareStoreFile(Long userId, FileUploadState state) {
         Long tenantId = resolveTenantId(state);
-        String lockKey = QUOTA_COMPLETE_LOCK_KEY_PREFIX + tenantId;
-        RLock lock = redissonClient.getLock(lockKey);
-        lock.lock(QUOTA_COMPLETE_LOCK_LEASE_SECONDS, TimeUnit.SECONDS);
+        RLock lock = acquireQuotaCompletionLock(tenantId);
         try {
             FileUploadState latestState = requireLatestUploadState(
                     userId, state.getClientId(), state);
             if (latestState.isPrepareStored()) {
+                if (latestState.getPreparedFileId() == null) {
+                    throw new GeneralException(ResultEnum.FILE_RECORD_ERROR,
+                            "上传会话缺少稳定 PREPARE 文件ID");
+                }
                 log.info("上传会话已完成 PREPARE 落库，跳过重复预占位: clientId={}", latestState.getClientId());
                 return latestState;
             }
@@ -1584,24 +2817,423 @@ public class FileUploadServiceImpl implements FileUploadService {
             if (shouldCheckQuotaForSession(latestState)) {
                 quotaService.checkUploadQuota(tenantId, userId, latestState.getFileSize());
             }
-            fileService.prepareStoreFile(
+            if (latestState.getPreparedFileId() == null) {
+                rejectUnsupportedRecoverySchema(latestState);
+                Long preparedFileId = latestState.getTargetFileId() != null
+                        ? latestState.getTargetFileId()
+                        : IdUtils.nextEntityId();
+                if (preparedFileId == null || preparedFileId <= 0) {
+                    throw new GeneralException(ResultEnum.FILE_RECORD_ERROR,
+                            "无法分配稳定 PREPARE 文件ID");
+                }
+                latestState.setPreparedFileId(preparedFileId);
+                if (latestState.isDirectUpload()) {
+                    latestState.setDirectFinalizationStage(DIRECT_STAGE_PREPARE_ID_ALLOCATED);
+                }
+                redisStateManager.updateState(latestState);
+            }
+            cn.flying.dao.dto.File preparedFile = fileService.prepareStoreFileWithStableId(
                     userId,
                     latestState.getTargetFileId(),
+                    latestState.getPreparedFileId(),
                     latestState.getFileName(),
-                    latestState.getFileSize()
-            );
+                    latestState.getFileSize());
+            validatePreparedFile(latestState, preparedFile, userId);
+            if (latestState.isDirectUpload()) {
+                latestState.setDirectFinalizationStage(DIRECT_STAGE_PREPARE_STORED);
+            }
             latestState.setPrepareStored(true);
             redisStateManager.updateState(latestState);
             return latestState;
         } finally {
-            if (lock.isHeldByCurrentThread()) {
-                try {
-                    lock.unlock();
-                } catch (IllegalMonitorStateException ex) {
-                    log.warn("上传完成配额锁释放异常: lockKey={}", lockKey, ex);
-                }
-            }
+            releaseQuotaCompletionLock(lock, tenantId);
         }
+    }
+
+    /**
+     * 校验 PREPARE 服务返回值确实绑定当前直传会话分配的稳定主键。
+     */
+    private void validatePreparedFile(
+            FileUploadState state,
+            cn.flying.dao.dto.File preparedFile,
+            Long userId
+    ) {
+        if (preparedFile == null
+                || !Objects.equals(preparedFile.getId(), state.getPreparedFileId())
+                || !Objects.equals(preparedFile.getUid(), userId)
+                || !Objects.equals(preparedFile.getTenantId(), state.getTenantId())
+                || (state.getTargetFileId() != null
+                    && !Objects.equals(state.getTargetFileId(), state.getPreparedFileId()))
+                || !Objects.equals(preparedFile.getFileName(), state.getFileName())
+                || !Objects.equals(preparedFile.getStatus(), FileUploadStatus.PREPARE.getCode())) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "PREPARE 文件与上传会话不一致");
+        }
+        Long preparedSize = preparedFile.getFileSize();
+        if (state.getFileSize() <= 0
+                || preparedSize == null
+                || preparedSize <= 0
+                || preparedSize.longValue() != state.getFileSize()) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "PREPARE 文件大小与上传会话不一致");
+        }
+    }
+
+    /**
+     * 读取并校验会话稳定 PREPARE 文件ID。
+     */
+    private Long requirePreparedFileId(FileUploadState state) {
+        Long preparedFileId = state == null ? null : state.getPreparedFileId();
+        if (preparedFileId == null || preparedFileId <= 0) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "上传会话缺少稳定 PREPARE 文件ID");
+        }
+        return preparedFileId;
+    }
+
+    /**
+     * 获取文件级锁后重读会话，并验证稳定 PREPARE 绑定未被并发替换。
+     */
+    private FileUploadState requireLatestPreparedCompletionState(
+            Long userId,
+            String clientId,
+            FileUploadState expectedState,
+            Long preparedFileId
+    ) {
+        FileUploadState latestState = requireLatestUploadState(userId, clientId, expectedState);
+        if (!latestState.isPrepareStored()
+                || !Objects.equals(latestState.getPreparedFileId(), preparedFileId)) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "上传会话 PREPARE 绑定发生变化");
+        }
+        return latestState;
+    }
+
+    /**
+     * 按 Redis 与 DB claim 检查点恢复链结果和 DB SUCCESS，避免重试重复上链或按文件名串单。
+     */
+    private cn.flying.dao.dto.File resolveDirectStoredFile(
+            Long userId,
+            FileUploadState state,
+            List<DirectMultipartCompletedPartVO> completedParts,
+            String fileParam
+    ) {
+        Long preparedFileId = state.getPreparedFileId();
+        if (preparedFileId == null) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "直传会话缺少稳定 PREPARE 文件ID");
+        }
+
+        cn.flying.dao.dto.File persistedFile = fileService.getById(preparedFileId);
+        validateDirectFileIdentity(state, persistedFile, userId);
+        if (Objects.equals(persistedFile.getStatus(), FileUploadStatus.SUCCESS.getCode())) {
+            recoverDirectSuccessCheckpoint(state, persistedFile);
+            redisStateManager.updateState(state);
+            return persistedFile;
+        }
+        if (!Objects.equals(persistedFile.getStatus(), FileUploadStatus.PREPARE.getCode())) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "直传目标文件状态不可恢复");
+        }
+
+        StoreFileResponse chainResult = resolveDirectChainCheckpoint(
+                userId, state, completedParts, fileParam);
+        cn.flying.dao.dto.File storedFile = fileService.persistDirectUploadedFile(
+                userId,
+                preparedFileId,
+                state.getFileName(),
+                state.getFileSize(),
+                fileParam,
+                chainResult,
+                state.getClientId());
+        validateDirectStoredFile(state, storedFile, userId, chainResult);
+        state.setDirectFileId(storedFile.getId());
+        state.setDirectFileHash(storedFile.getFileHash());
+        state.setDirectTransactionHash(storedFile.getTransactionHash());
+        state.setDirectFinalizationStage(DIRECT_STAGE_FILE_STORED);
+        redisStateManager.updateState(state);
+        return storedFile;
+    }
+
+    /**
+     * 复用已保存的链结果；首次链边界只由 FileService 的 durable claim 表达，Redis 不预写伪 ATTESTING。
+     */
+    private StoreFileResponse resolveDirectChainCheckpoint(
+            Long userId,
+            FileUploadState state,
+            List<DirectMultipartCompletedPartVO> completedParts,
+            String fileParam
+    ) {
+        boolean hasFileHash = CommonUtils.isNotEmpty(state.getDirectFileHash());
+        boolean hasTransactionHash = CommonUtils.isNotEmpty(state.getDirectTransactionHash());
+        if (hasFileHash != hasTransactionHash) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "直传链检查点不完整");
+        }
+        if (hasFileHash) {
+            if (!hasTrustedDirectChainStage(state.getDirectFinalizationStage())) {
+                throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "直传链结果与最终化阶段不一致");
+            }
+            return new StoreFileResponse(state.getDirectTransactionHash(), state.getDirectFileHash());
+        }
+        if ((DIRECT_STAGE_FILE_STORED.equals(state.getDirectFinalizationStage())
+                || DIRECT_STAGE_MANIFEST_STORED.equals(state.getDirectFinalizationStage()))) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "直传最终化阶段缺少链结果");
+        }
+
+        StoreFileResponse chainResult;
+        try {
+            chainResult = fileService.attestDirectUploadedFile(
+                    userId,
+                    state.getPreparedFileId(),
+                    state.getFileName(),
+                    completedParts,
+                    fileParam,
+                    state.getClientId());
+        } catch (RuntimeException attestationError) {
+            chainResult = recoverDirectChainResultAfterAttestationFailure(
+                    userId,
+                    state,
+                    completedParts,
+                    fileParam,
+                    attestationError);
+        }
+        if (chainResult == null
+                || CommonUtils.isEmpty(chainResult.fileHash())
+                || CommonUtils.isEmpty(chainResult.transactionHash())) {
+            retainDirectFinalizationForManualReconciliation(
+                    state,
+                    "区块链存储返回无效且不可安全重放的结果");
+            throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "区块链存储返回无效结果");
+        }
+        state.setDirectFileHash(chainResult.fileHash());
+        state.setDirectTransactionHash(chainResult.transactionHash());
+        state.setDirectFinalizationStage(DIRECT_STAGE_CHAIN_ATTESTED);
+        redisStateManager.updateState(state);
+        return chainResult;
+    }
+
+    /**
+     * 首次链调用异常后按 durable claim 分类：NONE/CLAIMED 可安全重试、ATTESTED 可消费、ATTESTING 转人工。
+     */
+    private StoreFileResponse recoverDirectChainResultAfterAttestationFailure(
+            Long userId,
+            FileUploadState state,
+            List<DirectMultipartCompletedPartVO> completedParts,
+            String fileParam,
+            RuntimeException attestationError
+    ) {
+        cn.flying.dao.dto.File persistedFile;
+        FileService.FinalizationRecoveryPhase durablePhase;
+        try {
+            persistedFile = fileService.getById(state.getPreparedFileId());
+            validateDirectFileIdentity(state, persistedFile, userId);
+            if (Objects.equals(persistedFile.getStatus(), FileUploadStatus.SUCCESS.getCode())) {
+                recoverDirectSuccessCheckpoint(state, persistedFile);
+                redisStateManager.updateState(state);
+                return new StoreFileResponse(
+                        persistedFile.getTransactionHash(), persistedFile.getFileHash());
+            }
+            durablePhase = fileService.getFinalizationRecoveryPhase(
+                    userId, state.getPreparedFileId());
+        } catch (RuntimeException recoveryReadError) {
+            retainDirectFinalizationForManualReconciliation(
+                    state, "链调用异常后 durable claim 无法读取或绑定");
+            throw uncertainDirectChainResult(attestationError, recoveryReadError);
+        }
+        if (!Objects.equals(persistedFile.getStatus(), FileUploadStatus.PREPARE.getCode())) {
+            retainDirectFinalizationForManualReconciliation(
+                    state, "链调用异常后 DB 目标状态不可恢复");
+            throw uncertainDirectChainResult(attestationError, null);
+        }
+        if (durablePhase == FileService.FinalizationRecoveryPhase.NONE
+                || durablePhase == FileService.FinalizationRecoveryPhase.CLAIMED) {
+            retainDirectPreChainFinalizationForRetry(state, durablePhase);
+            throw new RetryableException(
+                    ResultEnum.SERVICE_UNAVAILABLE,
+                    Map.of("reason", "direct finalization remains safely retryable before chain"));
+        }
+        if (durablePhase == FileService.FinalizationRecoveryPhase.CHAIN_ATTESTING) {
+            retainDirectFinalizationForManualReconciliation(
+                    state, "链调用结果不确定，禁止自动重放");
+            throw new GeneralException(
+                    ResultEnum.BLOCKCHAIN_ERROR,
+                    "直传链调用结果不确定，已转人工对账");
+        }
+        if (durablePhase != FileService.FinalizationRecoveryPhase.CHAIN_ATTESTED) {
+            retainDirectFinalizationForManualReconciliation(
+                    state, "直传 durable claim 不足以证明链结果可恢复");
+            throw uncertainDirectChainResult(attestationError, null);
+        }
+        try {
+            StoreFileResponse recovered = fileService.attestDirectUploadedFile(
+                    userId,
+                    state.getPreparedFileId(),
+                    state.getFileName(),
+                    completedParts,
+                    fileParam,
+                    state.getClientId());
+            if (recovered == null
+                    || CommonUtils.isEmpty(recovered.fileHash())
+                    || CommonUtils.isEmpty(recovered.transactionHash())) {
+                throw new GeneralException(ResultEnum.BLOCKCHAIN_ERROR, "durable claim 链结果无效");
+            }
+            return recovered;
+        } catch (RuntimeException recoveryError) {
+            retainDirectFinalizationForManualReconciliation(
+                    state,
+                    "链调用异常后 durable claim 无法安全恢复");
+            log.error("直传链调用异常后已失败关闭并保留人工诊断: clientId={}",
+                    state.getClientId(), recoveryError);
+            throw uncertainDirectChainResult(attestationError, recoveryError);
+        }
+    }
+
+    /**
+     * 构造直传链结果无法自动证明时的统一失败，并保留原始调用类型供诊断。
+     */
+    private GeneralException uncertainDirectChainResult(
+            RuntimeException attestationError,
+            RuntimeException recoveryError
+    ) {
+        GeneralException failure = new GeneralException(
+                ResultEnum.FILE_RECORD_ERROR,
+                Map.of(
+                        "reason", "直传链结果不确定，已转人工对账",
+                        "cause", attestationError.getClass().getSimpleName()));
+        if (recoveryError != null) {
+            failure.addSuppressed(recoveryError);
+        }
+        return failure;
+    }
+
+    /**
+     * 仅允许链已确认及其合法后继阶段复用 tx/fileHash，拒绝早期阶段注入伪造链结果。
+     */
+    private boolean hasTrustedDirectChainStage(String stage) {
+        return DIRECT_STAGE_CHAIN_ATTESTED.equals(stage)
+                || DIRECT_STAGE_FILE_STORED.equals(stage)
+                || DIRECT_STAGE_MANIFEST_STORED.equals(stage);
+    }
+
+    /**
+     * 从 DB SUCCESS 恢复 Redis 文件检查点，覆盖 DB 已提交但会话尚未更新的崩溃窗口。
+     */
+    private void recoverDirectSuccessCheckpoint(
+            FileUploadState state,
+            cn.flying.dao.dto.File persistedFile
+    ) {
+        requireDirectSuccessEvidence(state, persistedFile);
+        state.setDirectFileId(persistedFile.getId());
+        state.setDirectFileHash(persistedFile.getFileHash());
+        state.setDirectTransactionHash(persistedFile.getTransactionHash());
+        state.setDirectFinalizationStage(DIRECT_STAGE_FILE_STORED);
+    }
+
+    /**
+     * 校验稳定主键加载到的文件属于当前会话，禁止同名或跨用户记录被借用。
+     */
+    private void validateDirectFileIdentity(
+            FileUploadState state,
+            cn.flying.dao.dto.File file,
+            Long userId
+    ) {
+        if (file == null
+                || !Objects.equals(file.getId(), state.getPreparedFileId())
+                || !Objects.equals(file.getUid(), userId)
+                || !Objects.equals(file.getTenantId(), state.getTenantId())
+                || (state.getTargetFileId() != null
+                    && !Objects.equals(state.getTargetFileId(), state.getPreparedFileId()))
+                || !Objects.equals(file.getFileName(), state.getFileName())) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "稳定 PREPARE 文件与直传会话不一致");
+        }
+        Long fileSize = file.getFileSize();
+        if (state.getFileSize() <= 0
+                || fileSize == null
+                || fileSize <= 0
+                || fileSize.longValue() != state.getFileSize()) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "直传文件大小与会话不一致");
+        }
+    }
+
+    /**
+     * 校验 DB SUCCESS 中的链结果和内容摘要可作为当前 clientId 的恢复证据。
+     */
+    private void requireDirectSuccessEvidence(
+            FileUploadState state,
+            cn.flying.dao.dto.File file
+    ) {
+        String contentHash = requireContentHash(file.getContentHash());
+        if (!Objects.equals(contentHash, requireContentHash(state.getContentHash()))
+                || CommonUtils.isEmpty(file.getFileHash())
+                || CommonUtils.isEmpty(file.getTransactionHash())
+                || (CommonUtils.isNotEmpty(state.getDirectFileHash())
+                    && !Objects.equals(state.getDirectFileHash(), file.getFileHash()))
+                || (CommonUtils.isNotEmpty(state.getDirectTransactionHash())
+                    && !Objects.equals(state.getDirectTransactionHash(), file.getTransactionHash()))) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "直传 SUCCESS 证据与会话检查点不一致");
+        }
+    }
+
+    /**
+     * 校验本轮 DB 推进结果完整且与已保存链检查点一致。
+     */
+    private void validateDirectStoredFile(
+            FileUploadState state,
+            cn.flying.dao.dto.File storedFile,
+            Long userId,
+            StoreFileResponse chainResult
+    ) {
+        validateDirectFileIdentity(state, storedFile, userId);
+        if (!Objects.equals(storedFile.getStatus(), FileUploadStatus.SUCCESS.getCode())
+                || !Objects.equals(storedFile.getFileHash(), chainResult.fileHash())
+                || !Objects.equals(storedFile.getTransactionHash(), chainResult.transactionHash())
+                || !Objects.equals(requireContentHash(storedFile.getContentHash()),
+                        requireContentHash(state.getContentHash()))) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "直传文件落库结果与链检查点不一致");
+        }
+    }
+
+    /**
+     * 复用相同 canonical hash 的 active manifest，覆盖 manifest 已提交但 Redis 未更新的窗口。
+     */
+    private ChunkManifestView resolveDirectManifest(
+            Long userId,
+            FileUploadState state,
+            cn.flying.dao.dto.File storedFile,
+            List<DirectMultipartCompletedPartVO> completedParts
+    ) {
+        ChunkManifestDraft draft = buildChunkManifestDraft(storedFile, state, completedParts);
+        String expectedManifestHash = chunkManifestService.calculateManifestHash(draft);
+        if (CommonUtils.isEmpty(expectedManifestHash)) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "无法计算直传 manifest hash");
+        }
+
+        Optional<ChunkManifestView> activeManifest = chunkManifestService.findActiveManifest(
+                userId, storedFile.getId());
+        ChunkManifestView manifest = activeManifest.orElseGet(() ->
+                chunkManifestService.saveManifest(userId, storedFile.getId(), draft));
+        if (manifest == null
+                || !Objects.equals(manifest.fileId(), storedFile.getId())
+                || !Objects.equals(manifest.fileHash(), storedFile.getFileHash())
+                || !Objects.equals(manifest.manifestHash(), expectedManifestHash)
+                || (CommonUtils.isNotEmpty(state.getDirectManifestHash())
+                    && !Objects.equals(state.getDirectManifestHash(), manifest.manifestHash()))) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "直传 manifest 与会话检查点不一致");
+        }
+        return manifest;
+    }
+
+    /**
+     * 判断直传会话是否已经产生必须通过 complete 恢复的阶段检查点。
+     */
+    private boolean hasDirectFinalizationCheckpoint(FileUploadState state) {
+        if (state == null || !state.isDirectUpload()) {
+            return false;
+        }
+        String stage = state.getDirectFinalizationStage();
+        return state.isPrepareStored()
+                || state.getPreparedFileId() != null
+                || CommonUtils.isNotEmpty(state.getContentHash())
+                || (state.getDirectCompletedParts() != null && !state.getDirectCompletedParts().isEmpty())
+                || state.getDirectFileId() != null
+                || CommonUtils.isNotEmpty(state.getDirectFileHash())
+                || CommonUtils.isNotEmpty(state.getDirectTransactionHash())
+                || CommonUtils.isNotEmpty(state.getDirectManifestHash())
+                || (CommonUtils.isNotEmpty(stage) && !DIRECT_STAGE_SESSION_CREATED.equals(stage));
     }
 
     /**
@@ -1625,6 +3257,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             throw new GeneralException(ResultEnum.UPLOAD_SESSION_NOT_FOUND);
         }
         validateUploadOwnership(userId, latestState, clientId);
+        rejectUnsupportedRecoverySchema(latestState);
         if (!hasSameUploadPlan(expectedState, latestState, clientId)) {
             throw new GeneralException(
                     ResultEnum.FILE_UPLOAD_ERROR,
@@ -1652,6 +3285,9 @@ public class FileUploadServiceImpl implements FileUploadService {
                 && expectedState.getChunkSize() == latestState.getChunkSize()
                 && expectedState.getTotalChunks() == latestState.getTotalChunks()
                 && expectedState.isDirectUpload() == latestState.isDirectUpload()
+                && Objects.equals(
+                    expectedState.getRecoverySchemaVersion(),
+                    latestState.getRecoverySchemaVersion())
                 && hasSameDirectUploadPlan(expectedState, latestState);
     }
 
@@ -1786,21 +3422,13 @@ public class FileUploadServiceImpl implements FileUploadService {
      */
     private void recheckQuotaBeforeFinalProcessing(Long userId, FileUploadState state) {
         Long tenantId = resolveTenantId(state);
-        String lockKey = QUOTA_COMPLETE_LOCK_KEY_PREFIX + tenantId;
-        RLock lock = redissonClient.getLock(lockKey);
-        lock.lock(QUOTA_COMPLETE_LOCK_LEASE_SECONDS, TimeUnit.SECONDS);
+        RLock lock = acquireQuotaCompletionLock(tenantId);
         try {
             if (shouldCheckQuotaForSession(state)) {
                 quotaService.checkUploadQuota(tenantId, userId, state.getFileSize());
             }
         } finally {
-            if (lock.isHeldByCurrentThread()) {
-                try {
-                    lock.unlock();
-                } catch (IllegalMonitorStateException ex) {
-                    log.warn("上传完成前置配额锁释放异常: lockKey={}", lockKey, ex);
-                }
-            }
+            releaseQuotaCompletionLock(lock, tenantId);
         }
     }
 
@@ -1832,6 +3460,129 @@ public class FileUploadServiceImpl implements FileUploadService {
     }
 
     /**
+     * 从稳定 PREPARE 主键安全借用已经提交的普通上传 SUCCESS，并只补 Redis 完成态。
+     *
+     * @param userId 当前用户ID
+     * @param suid 编码后的用户ID
+     * @param state 当前普通上传会话状态
+     * @return true 表示 DB SUCCESS 已验证且 Redis 完成态已补齐
+     */
+    private boolean recoverLegacySuccessFinalization(
+            Long userId,
+            String suid,
+            FileUploadState state
+    ) {
+        if (state == null || state.isDirectUpload() || !state.isPrepareStored()) {
+            return false;
+        }
+        Long preparedFileId = requirePreparedFileId(state);
+        cn.flying.dao.dto.File persistedFile = fileService.getById(preparedFileId);
+        if (persistedFile == null) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "普通上传 PREPARE 文件不存在");
+        }
+        if (Objects.equals(persistedFile.getStatus(), FileUploadStatus.PREPARE.getCode())) {
+            return false;
+        }
+        if (!Objects.equals(persistedFile.getStatus(), FileUploadStatus.SUCCESS.getCode())) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "普通上传目标文件状态不可恢复");
+        }
+
+        validateLegacySuccessEvidence(userId, state, persistedFile);
+        try {
+            cleanupLegacyTemporaryFilesStrict(state);
+            redisStateManager.markCompleted(state.getClientId(), suid, 300);
+        } catch (IOException | RuntimeException completionStateError) {
+            throw new RetryableException(ResultEnum.SERVICE_UNAVAILABLE, completionStateError);
+        }
+        log.info("普通上传已从 DB SUCCESS 补齐 Redis 完成态: clientId={}, preparedFileId={}",
+                state.getClientId(), preparedFileId);
+        return true;
+    }
+
+    /**
+     * 严格校验普通上传 SUCCESS 与当前租户、用户、稳定主键和内容摘要完全一致。
+     */
+    private void validateLegacySuccessEvidence(
+            Long userId,
+            FileUploadState state,
+            cn.flying.dao.dto.File persistedFile
+    ) {
+        Long preparedFileId = requirePreparedFileId(state);
+        Long tenantId = resolveTenantId(state);
+        Long persistedSize = persistedFile.getFileSize();
+        if (!Objects.equals(persistedFile.getId(), preparedFileId)
+                || !Objects.equals(persistedFile.getUid(), userId)
+                || !Objects.equals(persistedFile.getTenantId(), tenantId)
+                || !Objects.equals(persistedFile.getFileName(), state.getFileName())
+                || persistedSize == null
+                || persistedSize.longValue() != state.getFileSize()
+                || (state.getTargetFileId() != null
+                    && !Objects.equals(state.getTargetFileId(), preparedFileId))
+                || CommonUtils.isEmpty(persistedFile.getFileHash())
+                || CommonUtils.isEmpty(persistedFile.getTransactionHash())
+                || !Objects.equals(
+                        requireContentHash(persistedFile.getContentHash()),
+                        requireContentHash(state.getContentHash()))) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR,
+                    "普通上传 SUCCESS 记录与会话证据不一致");
+        }
+    }
+
+    /**
+     * 拒绝恢复需要人工对账的直传会话，避免刷新活动时间并缩短诊断 TTL。
+     */
+    private void rejectManualDirectUploadResume(FileUploadState state) {
+        if (state != null
+                && (UPLOAD_SESSION_STATUS_FINALIZATION_MANUAL_REQUIRED.equals(state.getStatus())
+                    || UPLOAD_SESSION_STATUS_CLEANUP_MANUAL_REQUIRED.equals(state.getStatus()))) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR,
+                    "直传会话需要人工对账，禁止自动恢复");
+        }
+    }
+
+    /**
+     * 拒绝自动猜测旧会话中已落库但缺失稳定主键的 PREPARE 绑定，并保留人工诊断。
+     */
+    private void rejectUnboundPreparedCheckpoint(FileUploadState state) {
+        if (state == null
+                || !state.isPrepareStored()
+                || state.getPreparedFileId() != null && state.getPreparedFileId() > 0) {
+            return;
+        }
+        retainFinalizationForManualReconciliation(
+                state,
+                "旧上传会话已记录 PREPARE 但缺少稳定 preparedFileId");
+        throw new GeneralException(
+                ResultEnum.FILE_RECORD_ERROR,
+                "上传会话 PREPARE 绑定缺少稳定文件ID，无法自动恢复");
+    }
+
+    /**
+     * 在分配稳定 PREPARE 主键前校验确定性的恢复协议版本，旧会话一律失败关闭。
+     */
+    private void rejectUnsupportedRecoverySchema(FileUploadState state) {
+        if (hasCurrentRecoverySchema(state)) {
+            return;
+        }
+        retainFinalizationForManualReconciliation(
+                state,
+                "上传会话恢复协议版本缺失或不受支持");
+        throw new GeneralException(
+                ResultEnum.FILE_RECORD_ERROR,
+                "上传会话恢复协议版本不受支持，必须人工对账");
+    }
+
+    /**
+     * 判断会话是否精确采用当前恢复协议；未知更高版本也必须失败关闭。
+     */
+    private boolean hasCurrentRecoverySchema(FileUploadState state) {
+        return state != null
+                && Objects.equals(
+                    state.getRecoverySchemaVersion(),
+                    CURRENT_RECOVERY_SCHEMA_VERSION);
+    }
+
+    /**
      * 判断上传会话是否已进入完成终态，用于阻止重复完成请求重放不可逆副作用。
      *
      * @param state 上传会话状态
@@ -1839,6 +3590,31 @@ public class FileUploadServiceImpl implements FileUploadService {
      */
     private boolean isUploadSessionCompleted(FileUploadState state) {
         return state != null && UPLOAD_SESSION_STATUS_COMPLETED.equalsIgnoreCase(state.getStatus());
+    }
+
+    /**
+     * 对已写入 completed 主状态的会话重新执行可幂等终态收敛，确保辅助键 TTL、恢复映射和调度索引全部闭环。
+     *
+     * @param state 已进入完成终态的最新会话状态
+     */
+    private void convergeCompletedSessionState(FileUploadState state) {
+        convergeCompletedSessionState(state, state.getSuid());
+    }
+
+    /**
+     * 使用调用链中已验证的用户编码收敛完成态，兼容旧会话主体缺少 suid 的情况。
+     *
+     * @param state 已进入完成终态的最新会话状态
+     * @param suid 已验证的用户编码
+     */
+    private void convergeCompletedSessionState(FileUploadState state, String suid) {
+        try {
+            redisStateManager.markCompleted(state.getClientId(), suid, 300);
+        } catch (RetryableException exception) {
+            throw exception;
+        } catch (RuntimeException completionError) {
+            throw new RetryableException(ResultEnum.SERVICE_UNAVAILABLE, completionError);
+        }
     }
 
     /**
@@ -1860,17 +3636,45 @@ public class FileUploadServiceImpl implements FileUploadService {
      * @throws GeneralException 会话不存在或无权限
      */
     public void pauseUpload(Long userId, String clientId) {
-        FileUploadState state = redisStateManager.getState(clientId);
-        if (state == null) {
+        FileUploadState expectedState = redisStateManager.getState(clientId);
+        if (expectedState == null) {
             throw new GeneralException(ResultEnum.UPLOAD_SESSION_NOT_FOUND);
         }
 
-        // 验证用户权限
-        validateUploadOwnership(userId, state, clientId);
+        validateUploadOwnership(userId, expectedState, clientId);
+        rejectUnsupportedRecoverySchema(expectedState);
 
-        redisStateManager.addPausedSession(clientId);
-        redisStateManager.updateLastActivityTime(clientId);
-        log.info("上传会话已暂停: 客户端ID={}", clientId);
+        RLock finalizationLock = acquireUploadFinalizationLock(clientId);
+        try {
+            FileUploadState latestState = requireLatestUploadState(
+                    userId, clientId, expectedState);
+            rejectTerminalUploadPause(latestState);
+            FileUploadRedisStateManager.PauseTransitionResult pauseResult =
+                    redisStateManager.addPausedSession(clientId);
+            if (pauseResult == FileUploadRedisStateManager.PauseTransitionResult.SESSION_NOT_FOUND) {
+                throw new GeneralException(ResultEnum.UPLOAD_SESSION_NOT_FOUND);
+            }
+            if (pauseResult == FileUploadRedisStateManager.PauseTransitionResult.TERMINAL) {
+                throw new GeneralException(ResultEnum.FILE_RECORD_ERROR,
+                        "上传会话已进入终态，禁止暂停");
+            }
+            if (pauseResult != FileUploadRedisStateManager.PauseTransitionResult.PAUSED) {
+                throw new IllegalStateException("暂停状态原子转换返回未知结果");
+            }
+            log.info("上传会话已暂停: 客户端ID={}", clientId);
+        } finally {
+            releaseUploadFinalizationLock(finalizationLock, clientId);
+        }
+    }
+
+    /**
+     * 拒绝把已完成或人工对账终态重新加入无 TTL 的暂停索引。
+     */
+    private void rejectTerminalUploadPause(FileUploadState state) {
+        if (isUploadSessionCompleted(state) || isManualReconciliationState(state)) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR,
+                    "上传会话已进入终态，禁止暂停");
+        }
     }
 
     /**
@@ -1886,9 +3690,9 @@ public class FileUploadServiceImpl implements FileUploadService {
 
         // 验证用户权限
         validateUploadOwnership(userId, state, clientId);
+        rejectUnsupportedRecoverySchema(state);
 
         boolean wasPaused = redisStateManager.removePausedSession(clientId);
-        redisStateManager.updateLastActivityTime(clientId);
 
         // 创建包含已处理分片列表的恢复响应 DTO
         ResumeUploadVO responseDto = new ResumeUploadVO(
@@ -1913,6 +3717,7 @@ public class FileUploadServiceImpl implements FileUploadService {
 
         // 验证用户权限
         validateUploadOwnership(userId, state, clientId);
+        rejectUnsupportedRecoverySchema(state);
 
         redisStateManager.updateLastActivityTime(clientId);
         boolean isPaused = redisStateManager.isSessionPaused(clientId);
@@ -2044,64 +3849,288 @@ public class FileUploadServiceImpl implements FileUploadService {
         CompletableFuture.runAsync(() -> {
             String clientId = state.getClientId();
             Path processedChunkPath = getChunkProcessedPath(SUID, clientId, chunkNumber);
+            Path taskTempPath = processedChunkPath.resolveSibling(
+                    processedChunkPath.getFileName() + ".tmp-" + UUID.randomUUID());
+            RLock finalizationLock = null;
+            RLock chunkLock = null;
             log.debug("-------------开始异步处理分片 {}: 原始路径={}, 加密算法={} -------------",
                     chunkNumber, chunkPath, encryptionStrategyFactory.getCurrentAlgorithmName());
 
             try {
-                // 获取当前加密策略
-                ChunkEncryptionStrategy strategy = encryptionStrategyFactory.getStrategy();
-
-                // 1. 生成密钥和 IV
-                SecretKey chunkSecretKey = strategy.generateKey();
-                byte[] iv = strategy.generateIv();
-                // 将密钥存储到Redis中
-                redisStateManager.addChunkKey(clientId, chunkNumber, chunkSecretKey.getEncoded());
-
-                // 2. 创建加密上下文（流式加密）
-                EncryptionContext encryptionContext = strategy.createEncryptionContext(chunkSecretKey, iv);
-
-                // 3. 加密并写入
-                Files.createDirectories(processedChunkPath.getParent());
-                try (InputStream fis = Files.newInputStream(chunkPath);
-                     OutputStream fos = Files.newOutputStream(processedChunkPath, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
-
-                    // 写入版本头（标识加密算法版本）
-                    byte[] header = ChunkFileHeader.createHeader(strategy);
-                    fos.write(header);
-
-                    fos.write(iv); // 写入 IV/Nonce
-                    byte[] buffer = new byte[BUFFER_SIZE];
-                    int bytesRead;
-                    while ((bytesRead = fis.read(buffer)) != -1) {
-                        byte[] encryptedBytes = strategy.encryptUpdate(encryptionContext, buffer, 0, bytesRead);
-                        if (encryptedBytes.length > 0) fos.write(encryptedBytes);
-                    }
-                    byte[] finalBytes = strategy.encryptFinal(encryptionContext);
-                    if (finalBytes.length > 0) fos.write(finalBytes);
-
-                    // 追加哈希
-                    fos.write(HASH_SEPARATOR.getBytes(StandardCharsets.UTF_8));
-                    fos.write(chunkHashBase64.getBytes(StandardCharsets.UTF_8));
-                }
-
-                // 4. 标记处理完成
-                redisStateManager.addProcessedChunk(clientId, chunkNumber);
-                FileUploadState updatedState = redisStateManager.getState(clientId);
-                if (updatedState != null) {
-                    updateUploadProgress(updatedState, "处理完分片 " + chunkNumber);
-                }
+                finalizationLock = acquireAsyncChunkFinalizationLock(clientId, chunkNumber);
+                chunkLock = acquireChunkProcessingLock(clientId, chunkNumber);
+                redisStateManager.executeWithSessionStateLock(clientId, latestState -> {
+                    processChunkWithSessionAndChunkLocks(
+                            SUID,
+                            state,
+                            latestState,
+                            chunkNumber,
+                            chunkPath,
+                            processedChunkPath,
+                            taskTempPath,
+                            chunkHashBase64);
+                    return null;
+                });
                 log.info("分片 {} 处理成功: 客户端ID={}, 处理后路径={}, 算法={}",
-                        chunkNumber, clientId, processedChunkPath, strategy.getAlgorithmName());
+                        chunkNumber, clientId, processedChunkPath,
+                        encryptionStrategyFactory.getCurrentAlgorithmName());
 
             } catch (GeneralException e) {
                 log.error("分片 {} 加密失败: 客户端ID={}, 算法={}", chunkNumber, clientId,
                         encryptionStrategyFactory.getCurrentAlgorithmName(), e);
-                tryDelete(processedChunkPath);
             } catch (Exception e) {
                 log.error("异步处理分片 {} 失败: 客户端ID={}", chunkNumber, clientId, e);
-                tryDelete(processedChunkPath);
+            } finally {
+                tryDelete(taskTempPath);
+                releaseChunkProcessingLock(chunkLock, clientId, chunkNumber);
+                releaseUploadFinalizationLock(finalizationLock, clientId);
             }
         }, fileProcessingExecutor);
+    }
+
+    /**
+     * 用 Redis 主状态与规范原始分片路径重建进程重启后丢失的异步任务。
+     * 仅调度同时具备 uploaded、稳定哈希和匹配 raw 文件的未处理分片，任何证据冲突都失败关闭。
+     */
+    private int requeueMissingProcessedChunks(String suid, FileUploadState state) {
+        int requeued = 0;
+        for (int chunkNumber = 0; chunkNumber < state.getTotalChunks(); chunkNumber++) {
+            if (state.getProcessedChunks().contains(chunkNumber)
+                    || !state.getUploadedChunks().contains(chunkNumber)) {
+                continue;
+            }
+            String chunkHash = state.getChunkHashes().get("chunk_" + chunkNumber);
+            Path rawChunkPath = getChunkUploadPath(
+                    suid, state.getClientId(), chunkNumber);
+            try {
+                if (CommonUtils.isEmpty(chunkHash)
+                        || !Files.isRegularFile(rawChunkPath)
+                        || !Objects.equals(chunkHash, calculateChunkHashBase64(rawChunkPath))) {
+                    throw new GeneralException(
+                            ResultEnum.FILE_RECORD_ERROR,
+                            "未处理分片缺少可验证的 uploaded/hash/raw 恢复证据");
+                }
+            } catch (IOException rawReadError) {
+                throw new GeneralException(
+                        ResultEnum.FILE_RECORD_ERROR,
+                        "读取未处理分片恢复证据失败");
+            }
+            processChunkImmediately(
+                    suid, state, chunkNumber, rawChunkPath, chunkHash);
+            requeued++;
+        }
+        return requeued;
+    }
+
+    /**
+     * 分片异步任务按有界周期等待同一会话 finalizer 锁，直到 upload 释放后接续处理。
+     * 每轮等待都由 Redisson watchdog 锁语义保护，避免一次非阻塞失败把已持久化任务静默丢弃。
+     */
+    private RLock acquireAsyncChunkFinalizationLock(String clientId, int chunkNumber) {
+        RLock lock;
+        try {
+            lock = redissonClient.getLock(UPLOAD_FINALIZATION_LOCK_KEY_PREFIX + clientId);
+            if (lock == null) {
+                throw new IllegalStateException("上传会话 finalizer 锁不存在");
+            }
+            while (!lock.tryLock(ASYNC_FINALIZATION_LOCK_WAIT_SECONDS, TimeUnit.SECONDS)) {
+                log.info("异步分片等待会话 finalizer 锁: clientId={}, chunk={}",
+                        clientId, chunkNumber);
+            }
+            return lock;
+        } catch (InterruptedException interruptedError) {
+            Thread.currentThread().interrupt();
+            throw new RetryableException(
+                    ResultEnum.SERVICE_UNAVAILABLE,
+                    Map.of("reason", "async chunk finalization lock wait was interrupted"));
+        } catch (RuntimeException lockError) {
+            throw new RetryableException(
+                    ResultEnum.SERVICE_UNAVAILABLE,
+                    Map.of("reason", "async chunk finalization lock is unavailable"));
+        }
+    }
+
+    /**
+     * 在跨实例分片锁和 session state 锁内生成稳定密钥、原子发布密文并最后提交 processed 证据。
+     */
+    private void processChunkWithSessionAndChunkLocks(
+            String suid,
+            FileUploadState expectedState,
+            FileUploadState latestState,
+            int chunkNumber,
+            Path chunkPath,
+            Path processedChunkPath,
+            Path taskTempPath,
+            String queuedHash
+    ) {
+        String clientId = latestState.getClientId();
+        if (!hasSameUploadPlan(expectedState, latestState, clientId)) {
+            throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR, "异步处理期间上传计划发生变化");
+        }
+        if (isUploadSessionCompleted(latestState) || isManualReconciliationState(latestState)) {
+            throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR, "上传会话已进入不可处理终态");
+        }
+        if (latestState.getProcessedChunks().contains(chunkNumber)) {
+            validateProcessedChunkEvidence(latestState, chunkNumber, processedChunkPath);
+            return;
+        }
+
+        String trustedHash = latestState.getChunkHashes().get("chunk_" + chunkNumber);
+        if (CommonUtils.isEmpty(trustedHash) || !Objects.equals(trustedHash, queuedHash)) {
+            throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR, "异步分片哈希检查点不一致");
+        }
+        try {
+            if (!Files.isRegularFile(chunkPath)
+                    || !Objects.equals(trustedHash, calculateChunkHashBase64(chunkPath))) {
+                throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR, "原始分片与 Redis 哈希证据不一致");
+            }
+
+            ChunkEncryptionStrategy strategy = encryptionStrategyFactory.getStrategy();
+            SecretKey candidateKey = strategy.generateKey();
+            byte[] stableKeyBytes = redisStateManager.getOrCreateChunkKey(
+                    clientId, chunkNumber, candidateKey.getEncoded());
+            SecretKey stableKey = new SecretKeySpec(
+                    stableKeyBytes, resolveSecretKeyAlgorithm(strategy));
+            byte[] iv = strategy.generateIv();
+            EncryptionContext encryptionContext = strategy.createEncryptionContext(stableKey, iv);
+
+            Files.createDirectories(processedChunkPath.getParent());
+            try (InputStream input = Files.newInputStream(chunkPath);
+                 FileChannel tempChannel = FileChannel.open(
+                         taskTempPath, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+                 OutputStream output = Channels.newOutputStream(tempChannel)) {
+                output.write(ChunkFileHeader.createHeader(strategy));
+                output.write(iv);
+                byte[] buffer = new byte[BUFFER_SIZE];
+                int bytesRead;
+                while ((bytesRead = input.read(buffer)) != -1) {
+                    byte[] encryptedBytes = strategy.encryptUpdate(
+                            encryptionContext, buffer, 0, bytesRead);
+                    if (encryptedBytes.length > 0) {
+                        output.write(encryptedBytes);
+                    }
+                }
+                byte[] finalBytes = strategy.encryptFinal(encryptionContext);
+                if (finalBytes.length > 0) {
+                    output.write(finalBytes);
+                }
+                output.write(HASH_SEPARATOR.getBytes(StandardCharsets.UTF_8));
+                output.write(trustedHash.getBytes(StandardCharsets.UTF_8));
+                output.flush();
+                tempChannel.force(true);
+            }
+
+            Files.move(
+                    taskTempPath,
+                    processedChunkPath,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+            if (!Files.isRegularFile(processedChunkPath)) {
+                throw new IOException("原子发布后的处理分片不存在");
+            }
+            latestState.getKeys().put(chunkNumber, stableKeyBytes);
+            redisStateManager.addProcessedChunk(clientId, chunkNumber);
+            FileUploadState updatedState = redisStateManager.getState(clientId);
+            if (updatedState != null) {
+                updateUploadProgress(updatedState, "处理完分片 " + chunkNumber);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("异步分片文件处理失败", e);
+        }
+    }
+
+    /**
+     * 已处理证据存在时校验最终密文文件和稳定密钥同时存在，禁止盲目幂等跳过。
+     */
+    private void validateProcessedChunkEvidence(
+            FileUploadState state,
+            int chunkNumber,
+            Path processedChunkPath
+    ) {
+        byte[] stableKey = state.getKeys().get(chunkNumber);
+        if (stableKey == null || stableKey.length == 0 || !Files.isRegularFile(processedChunkPath)) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "processed 证据缺少密钥或最终密文");
+        }
+    }
+
+    /**
+     * 计算原始分片 URL-safe SHA-256，供异步任务确认磁盘内容没有被重复请求覆盖。
+     */
+    private String calculateChunkHashBase64(Path chunkPath) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance(HASH_ALGORITHM);
+            try (InputStream input = Files.newInputStream(chunkPath);
+                 DigestInputStream digestInput = new DigestInputStream(input, digest)) {
+                digestInput.transferTo(OutputStream.nullOutputStream());
+            }
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest.digest());
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 算法不可用", e);
+        }
+    }
+
+    /**
+     * 流式计算重复请求分片的 SHA-256，比较既有证据且不覆盖原始文件。
+     */
+    private String calculateMultipartHashBase64(MultipartFile file) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance(HASH_ALGORITHM);
+            try (InputStream input = file.getInputStream();
+                 DigestInputStream digestInput = new DigestInputStream(input, digest)) {
+                digestInput.transferTo(OutputStream.nullOutputStream());
+            }
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(digest.digest());
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 算法不可用", e);
+        }
+    }
+
+    /**
+     * 将持久化密钥字节恢复成当前加密策略需要的 JCA 密钥类型。
+     */
+    private String resolveSecretKeyAlgorithm(ChunkEncryptionStrategy strategy) {
+        return strategy.getAlgorithmName().toLowerCase(Locale.ROOT).contains("chacha")
+                ? "ChaCha20"
+                : "AES";
+    }
+
+    /**
+     * 阻塞获取跨实例 session+chunk watchdog 锁，串行化稳定密钥到 processed 证据的完整区间。
+     */
+    private RLock acquireChunkProcessingLock(String clientId, int chunkNumber) {
+        try {
+            RLock lock = redissonClient.getLock(
+                    CHUNK_PROCESSING_LOCK_KEY_PREFIX + clientId + ":" + chunkNumber);
+            if (lock == null) {
+                throw new IllegalStateException("分片处理锁不存在");
+            }
+            lock.lock();
+            return lock;
+        } catch (RuntimeException lockError) {
+            throw new RetryableException(
+                    ResultEnum.SERVICE_UNAVAILABLE,
+                    Map.of("reason", "chunk processing lock is unavailable"));
+        }
+    }
+
+    /**
+     * 释放跨实例分片处理锁，失败仅记录且不删除任何已发布 final 文件。
+     */
+    private void releaseChunkProcessingLock(
+            RLock lock,
+            String clientId,
+            int chunkNumber
+    ) {
+        if (lock == null) {
+            return;
+        }
+        try {
+            lock.unlock();
+        } catch (IllegalMonitorStateException e) {
+            log.debug("分片处理锁已不属于当前线程: clientId={}, chunk={}", clientId, chunkNumber);
+        } catch (RuntimeException e) {
+            log.warn("释放分片处理锁失败: clientId={}, chunk={}", clientId, chunkNumber, e);
+        }
     }
 
     /**
@@ -2133,7 +4162,11 @@ public class FileUploadServiceImpl implements FileUploadService {
         for (int i = 0; i < totalChunks - 1; i++) {
             Path currentChunkPath = getChunkProcessedPath(SUID, state.getClientId(), i);
             byte[] nextChunkKey = keys.get(i + 1);
-            appendKeyToFile(currentChunkPath, nextChunkKey, i);
+            appendKeyToFile(
+                    currentChunkPath,
+                    nextChunkKey,
+                    requirePlainChunkHash(state, i),
+                    i);
         }
 
         // 为最后一个分片追加第一个分片的密钥（形成环形链）
@@ -2141,81 +4174,116 @@ public class FileUploadServiceImpl implements FileUploadService {
             int lastChunkIndex = totalChunks - 1;
             Path lastChunkPath = getChunkProcessedPath(SUID, state.getClientId(), lastChunkIndex);
             byte[] firstChunkKey = keys.get(0);
-            appendKeyToFile(lastChunkPath, firstChunkKey, lastChunkIndex);
+            appendKeyToFile(
+                    lastChunkPath,
+                    firstChunkKey,
+                    requirePlainChunkHash(state, lastChunkIndex),
+                    lastChunkIndex);
         }
 
         log.info("最终处理步骤 (追加下一个分片密钥) 完成: 客户端ID={}", state.getClientId());
     }
 
     /**
-     * 辅助方法：追加密钥到文件。
-     * 若检测到 NEXT_KEY 已存在，则跳过写入，保证重复调用不会污染分片尾部格式。
+     * 读取完成态追加所需的权威明文分片哈希，缺失时禁止修改 processed 文件。
+     */
+    private String requirePlainChunkHash(FileUploadState state, int chunkIndex) throws IOException {
+        String hash = state.getChunkHashes().get("chunk_" + chunkIndex);
+        if (CommonUtils.isEmpty(hash)) {
+            throw new IOException("分片 " + chunkIndex + " 缺少权威明文哈希");
+        }
+        return hash;
+    }
+
+    /**
+     * 使用同目录临时文件原子发布 NEXT_KEY 元数据，避免原文件原地追加产生半写尾部。
      *
      * @param filePath 分片文件路径
      * @param keyBytes 待追加密钥
      * @param chunkIndex 分片序号
      * @throws IOException 文件读写异常
      */
-    private void appendKeyToFile(Path filePath, byte[] keyBytes, int chunkIndex) throws IOException {
-        if (Files.exists(filePath)) {
-            if (isNextKeyAlreadyAppended(filePath)) {
-                log.info("分片 {} 已存在 NEXT_KEY 元数据，跳过重复追加: {}", chunkIndex, filePath);
-                return;
-            }
-            try {
-                String keyBase64 = Base64.getEncoder().encodeToString(keyBytes);
-                byte[] dataToAppend = (KEY_SEPARATOR + keyBase64).getBytes(StandardCharsets.UTF_8);
-                try (OutputStream fos = Files.newOutputStream(filePath, StandardOpenOption.APPEND)) {
-                    fos.write(dataToAppend);
-                }
-                log.debug("已将下一个密钥追加到分片 {}", chunkIndex);
-            } catch (IOException e) {
-                log.error("追加密钥到分片 {} 文件失败: 路径={}", chunkIndex, filePath, e);
-                throw new IOException("追加密钥到分片 " + chunkIndex + " 失败", e);
-            }
-        } else {
+    private void appendKeyToFile(
+            Path filePath,
+            byte[] keyBytes,
+            String expectedPlainHash,
+            int chunkIndex
+    ) throws IOException {
+        if (!Files.isRegularFile(filePath)) {
             log.error("处理后的分片文件未找到，无法追加密钥: {}", filePath);
             throw new FileNotFoundException("处理后的分片文件未找到: " + filePath.getFileName());
+        }
+        if (keyBytes == null || keyBytes.length == 0) {
+            throw new IOException("分片 " + chunkIndex + " 的下一个密钥为空");
+        }
+        if (hasExactNextKeyMetadata(filePath, expectedPlainHash, keyBytes)) {
+            log.info("分片 {} 已存在相同 NEXT_KEY 元数据，跳过重复发布: {}", chunkIndex, filePath);
+            return;
+        }
+
+        Path tempPath = filePath.resolveSibling(
+                filePath.getFileName() + ".next-key-" + UUID.randomUUID() + ".tmp");
+        byte[] metadata = (KEY_SEPARATOR + Base64.getEncoder().encodeToString(keyBytes))
+                .getBytes(StandardCharsets.UTF_8);
+        try {
+            try (InputStream input = Files.newInputStream(filePath, StandardOpenOption.READ);
+                 FileChannel tempChannel = FileChannel.open(
+                         tempPath, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+                 OutputStream output = Channels.newOutputStream(tempChannel)) {
+                input.transferTo(output);
+                output.write(metadata);
+                output.flush();
+                tempChannel.force(true);
+            }
+            Files.move(
+                    tempPath,
+                    filePath,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+            log.debug("已原子发布分片 {} 的下一个密钥", chunkIndex);
+        } catch (IOException publishError) {
+            log.error("原子发布分片 {} 的下一个密钥失败: 路径={}",
+                    chunkIndex, filePath, publishError);
+            throw new IOException("追加密钥到分片 " + chunkIndex + " 失败", publishError);
+        } finally {
+            tryDelete(tempPath);
         }
     }
 
     /**
-     * 判断分片尾部是否已包含 NEXT_KEY 元数据。
-     * 通过扫描文件尾部字节并校验 Base64 密钥格式，实现低成本幂等检测。
+     * 精确校验 processed 尾部：只能是可信 plain hash，或其后紧跟同一预期 NEXT_KEY。
+     * 半写、重复 separator、不同有效密钥和未知尾部都失败关闭且不修改原文件。
      *
      * @param filePath 分片文件路径
-     * @return true 表示已追加 NEXT_KEY；false 表示尚未追加
+     * @return true 表示已完整追加同一密钥；false 表示仍是未追加的干净 processed 文件
      */
-    private boolean isNextKeyAlreadyAppended(Path filePath) {
-        try {
-            long fileSize = Files.size(filePath);
-            if (fileSize <= KEY_SEPARATOR_BYTES.length) {
-                return false;
-            }
-
-            int scanSize = (int) Math.min(fileSize, NEXT_KEY_TAIL_SCAN_BYTES);
-            byte[] tailBytes = readFileTail(filePath, scanSize);
-            int separatorIndex = findLastBytesIndex(tailBytes, KEY_SEPARATOR_BYTES);
-            if (separatorIndex < 0) {
-                return false;
-            }
-
-            int keyStart = separatorIndex + KEY_SEPARATOR_BYTES.length;
-            if (keyStart >= tailBytes.length) {
-                return false;
-            }
-
-            String encodedKey = new String(tailBytes, keyStart, tailBytes.length - keyStart, StandardCharsets.UTF_8).trim();
-            if (encodedKey.isEmpty()) {
-                return false;
-            }
-
-            byte[] decodedKey = Base64.getDecoder().decode(encodedKey);
-            return decodedKey.length == 32;
-        } catch (IOException | IllegalArgumentException ex) {
-            log.debug("检测 NEXT_KEY 元数据失败，按未追加处理: {}", filePath, ex);
+    private boolean hasExactNextKeyMetadata(
+            Path filePath,
+            String expectedPlainHash,
+            byte[] expectedKey
+    ) throws IOException {
+        byte[] plainHashSuffix = (HASH_SEPARATOR + expectedPlainHash)
+                .getBytes(StandardCharsets.UTF_8);
+        long fileSize = Files.size(filePath);
+        int scanSize = (int) Math.min(fileSize, NEXT_KEY_TAIL_SCAN_BYTES);
+        byte[] tailBytes = readFileTail(filePath, scanSize);
+        int plainHashIndex = findLastBytesIndex(tailBytes, plainHashSuffix);
+        if (plainHashIndex < 0) {
+            throw new IOException("processed 文件缺少精确 plain hash 尾部证据");
+        }
+        int metadataStart = plainHashIndex + plainHashSuffix.length;
+        if (metadataStart == tailBytes.length) {
             return false;
         }
+        byte[] expectedMetadata = (KEY_SEPARATOR
+                + Base64.getEncoder().encodeToString(expectedKey))
+                .getBytes(StandardCharsets.UTF_8);
+        byte[] actualMetadata = Arrays.copyOfRange(
+                tailBytes, metadataStart, tailBytes.length);
+        if (!Arrays.equals(expectedMetadata, actualMetadata)) {
+            throw new IOException("processed 文件 NEXT_KEY 尾部不完整、重复或与预期密钥不一致");
+        }
+        return true;
     }
 
     /**
@@ -2280,121 +4348,6 @@ public class FileUploadServiceImpl implements FileUploadService {
     }
 
     /**
-     * 非阻塞方式等待分片处理完成
-     * 使用 CompletableFuture 和 ScheduledExecutorService
-     * <p>
-     *  flyingcoding
-     * - 基础等待时间: 60秒
-     * - 每个分片增加: 3秒 (考虑加密处理时间)
-     * - 最大等待时间: 1800秒 (30分钟，支持大文件)
-     *
-     * @param clientId       客户端ID
-     * @param expectedChunks 期望的分片总数
-     * @return 是否所有分片都已处理完成
-     */
-    private boolean waitForChunkProcessingCompletionNonBlocking(String clientId, int expectedChunks) {
-        // P0-4 修复：优化超时计算
-        // 基础60秒 + 每分片3秒，最大30分钟
-        final int maxWaitTimeSeconds = Math.min(1800, 60 + expectedChunks * 3);
-        final int checkIntervalMs = 500; // 检查间隔：500毫秒
-
-        log.info("--------------开始非阻塞等待分片处理完成: 客户端ID={}, 期望分片数={}, 最大等待时间={}秒--------------",
-                clientId, expectedChunks, maxWaitTimeSeconds);
-
-        // 创建一个 CompletableFuture 来处理异步等待
-        CompletableFuture<Boolean> completionFuture = new CompletableFuture<>();
-
-        // 使用 Spring 管理的 ScheduledExecutorService 进行定期检查，避免每次调用创建新线程池
-        final AtomicInteger checkCount = new AtomicInteger(0);
-        final AtomicInteger lastProcessedCount = new AtomicInteger(0);
-        final AtomicInteger stagnationCounter = new AtomicInteger(0);
-        final long startTime = System.currentTimeMillis();
-
-        AtomicReference<ScheduledFuture<?>> checkTaskRef = new AtomicReference<>();
-        try {
-            ScheduledFuture<?> checkTask = chunkProcessingWaitScheduler.scheduleAtFixedRate(() -> {
-                try {
-                    int currentCheckCount = checkCount.incrementAndGet();
-                    long elapsedTime = System.currentTimeMillis() - startTime;
-
-                    if (elapsedTime > maxWaitTimeSeconds * 1000L) {
-                        log.warn("等待超时: 客户端ID={}, 耗时={}ms", clientId, elapsedTime);
-                        completionFuture.complete(false);
-                        ScheduledFuture<?> f = checkTaskRef.get();
-                        if (f != null) f.cancel(false);
-                        return;
-                    }
-
-                    FileUploadState currentState = redisStateManager.getState(clientId);
-                    if (currentState == null) {
-                        log.warn("等待过程中状态丢失: 客户端ID={}", clientId);
-                        completionFuture.complete(false);
-                        ScheduledFuture<?> f = checkTaskRef.get();
-                        if (f != null) f.cancel(false);
-                        return;
-                    }
-
-                    int processedCount = currentState.getProcessedChunks().size();
-                    if (processedCount >= expectedChunks) {
-                        log.info("所有分片处理完成: 客户端ID={}, 耗时={}ms, 检查次数={}",
-                                clientId, elapsedTime, currentCheckCount);
-                        completionFuture.complete(true);
-                        ScheduledFuture<?> f = checkTaskRef.get();
-                        if (f != null) f.cancel(false);
-                        return;
-                    }
-
-                    int lastCount = lastProcessedCount.get();
-                    if (processedCount == lastCount) {
-                        int stagnation = stagnationCounter.incrementAndGet();
-                        if (stagnation >= 10) {
-                            log.warn("检测到进度停滞: 客户端ID={}, 已处理={}/{}, 停滞时间={}秒",
-                                    clientId, processedCount, expectedChunks, stagnation * checkIntervalMs / 1000);
-
-                            if (stagnation >= 30) {
-                                log.error("进度长时间停滞，可能存在处理异常: 客户端ID={}", clientId);
-                                completionFuture.complete(false);
-                                ScheduledFuture<?> f = checkTaskRef.get();
-                                if (f != null) f.cancel(false);
-                            }
-                        }
-                    } else {
-                        stagnationCounter.set(0);
-                        lastProcessedCount.set(processedCount);
-                    }
-
-                } catch (Exception e) {
-                    log.error("检查分片处理状态时发生异常: 客户端ID={}", clientId, e);
-                    completionFuture.completeExceptionally(e);
-                    ScheduledFuture<?> f = checkTaskRef.get();
-                    if (f != null) f.cancel(false);
-                }
-            }, 0, checkIntervalMs, TimeUnit.MILLISECONDS);
-            checkTaskRef.set(checkTask);
-
-            return completionFuture.get(maxWaitTimeSeconds + 10, TimeUnit.SECONDS);
-        } catch (RejectedExecutionException e) {
-            log.error("等待调度被拒绝: 客户端ID={}", clientId, e);
-            return false;
-        } catch (TimeoutException e) {
-            log.error("CompletableFuture 等待超时: 客户端ID={}", clientId, e);
-            return false;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.error("等待被中断: 客户端ID={}", clientId, e);
-            return false;
-        } catch (ExecutionException e) {
-            log.error("等待执行异常: 客户端ID={}", clientId, e.getCause());
-            return false;
-        } finally {
-            ScheduledFuture<?> f = checkTaskRef.get();
-            if (f != null) {
-                f.cancel(true);
-            }
-        }
-    }
-
-    /**
      * 收集处理后的文件（按分片索引顺序）
      */
     private List<File> collectProcessedFiles(String SUID, String clientId) {
@@ -2436,37 +4389,34 @@ public class FileUploadServiceImpl implements FileUploadService {
     }
 
     /**
-     * 收集文件哈希值（按分片索引顺序）
+     * 对已完成尾部元数据的密文分片按序流式计算 SHA-256，作为对象存储内容地址。
      */
-    private List<String> collectFileHashes(FileUploadState state) {
+    private List<String> collectCipherFileHashes(
+            FileUploadState state,
+            List<File> processedFiles
+    ) {
         int totalChunks = state.getTotalChunks();
         List<String> orderedHashes = new ArrayList<>(totalChunks);
-        Map<String, String> chunkHashes = state.getChunkHashes();
-
-        log.info("---------开始按顺序收集文件哈希值: 客户端ID={}, 总分片数={}------------", state.getClientId(), totalChunks);
-
-        // 按分片索引顺序收集哈希值
-        for (int i = 0; i < totalChunks; i++) {
-            String chunkKey = "chunk_" + i;
-            String hash = chunkHashes.get(chunkKey);
-
-            if (hash != null && !hash.trim().isEmpty()) {
-                orderedHashes.add(hash);
-                log.debug("收集分片哈希 {}: key={}, hash={}", i, chunkKey, hash);
-            } else {
-                log.error("分片哈希值缺失或为空: 索引={}, key={}, 客户端ID={}", i, chunkKey, state.getClientId());
+        if (processedFiles == null || processedFiles.size() != totalChunks) {
+            return null;
+        }
+        byte[] buffer = new byte[BUFFER_SIZE];
+        for (int index = 0; index < totalChunks; index++) {
+            File processedFile = processedFiles.get(index);
+            try (InputStream input = Files.newInputStream(processedFile.toPath())) {
+                MessageDigest digest = MessageDigest.getInstance(HASH_ALGORITHM);
+                int bytesRead;
+                while ((bytesRead = input.read(buffer)) != -1) {
+                    digest.update(buffer, 0, bytesRead);
+                }
+                orderedHashes.add(
+                        CONTENT_HASH_PREFIX + HexFormat.of().formatHex(digest.digest()));
+            } catch (IOException | NoSuchAlgorithmException hashError) {
+                log.error("计算密文分片内容地址失败: clientId={}, chunk={}",
+                        state.getClientId(), index, hashError);
                 return null;
             }
         }
-
-        // 验证收集的哈希数量
-        if (orderedHashes.size() != totalChunks) {
-            log.error("收集的哈希数量({})与预期分片数量({})不匹配: 客户端ID={}",
-                    orderedHashes.size(), totalChunks, state.getClientId());
-            return null;
-        }
-
-        log.info("成功按顺序收集了 {} 个分片哈希值: 客户端ID={}", orderedHashes.size(), state.getClientId());
         return orderedHashes;
     }
 
@@ -2517,8 +4467,11 @@ public class FileUploadServiceImpl implements FileUploadService {
      * @return 小写规范摘要
      */
     private String requireContentHash(String value) {
-        String normalized = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
-        if (!normalized.matches("^sha256:[0-9a-f]{64}$")) {
+        if (value == null || value.length() > 128) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "缺少可信的原文件内容哈希");
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        if (!DIRECT_SHA256_PATTERN.matcher(normalized).matches()) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "缺少可信的原文件内容哈希");
         }
         return normalized;
@@ -2529,12 +4482,15 @@ public class FileUploadServiceImpl implements FileUploadService {
      * 包含解密所需的初始密钥（最后一个分片的密钥）
      */
     private String generateFileParam(FileUploadState state) {
+        if (state.getStartTime() <= 0) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "上传会话缺少稳定开始时间");
+        }
         // 生成文件参数，包含必要的元数据
-        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> params = new LinkedHashMap<>();
         params.put("fileName", state.getFileName());
         params.put("fileSize", state.getFileSize());
         params.put("contentType", state.getContentType());
-        params.put("uploadTime", System.currentTimeMillis());
+        params.put("uploadTime", state.getStartTime());
         params.put("chunkCount", state.getTotalChunks());
         params.put("contentHash", requireContentHash(state.getContentHash()));
 

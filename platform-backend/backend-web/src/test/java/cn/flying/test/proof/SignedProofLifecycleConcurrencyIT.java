@@ -681,7 +681,7 @@ class SignedProofLifecycleConcurrencyIT extends BaseIntegrationTest {
         byte[] payload = discriminator.getBytes(StandardCharsets.UTF_8);
         String contentHash = sha256(payload);
         String storagePath = "tenant/" + TENANT_ID + "/upload/" + discriminator + "/chunk/0";
-        when(fileRemoteClient.storeFileOnChain(any()))
+        when(fileRemoteClient.storeFileOnChainOnce(any()))
                 .thenReturn(Result.success(new StoreFileResponse(
                         "0x-upload-" + discriminator,
                         "chain-record-" + discriminator)));

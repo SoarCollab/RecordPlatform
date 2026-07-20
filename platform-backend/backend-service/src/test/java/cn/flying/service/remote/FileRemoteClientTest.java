@@ -13,15 +13,16 @@ import cn.flying.platformapi.request.GetShareInfoRequest;
 import cn.flying.platformapi.request.GetAttestationBatchRequest;
 import cn.flying.platformapi.request.GetUserShareCodesRequest;
 import cn.flying.platformapi.request.StoreAttestationBatchRequest;
-import cn.flying.platformapi.response.StoreAttestationBatchResponse;
-import cn.flying.platformapi.response.GetAttestationBatchResponse;
 import cn.flying.platformapi.request.StoreFileRequest;
 import cn.flying.platformapi.request.StoreFileResponse;
 import cn.flying.platformapi.response.BlockChainMessage;
-import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.ContractRegistryEntryResponse;
+import cn.flying.platformapi.response.FileDetailVO;
+import cn.flying.platformapi.response.GetAttestationBatchResponse;
 import cn.flying.platformapi.response.SharingVO;
+import cn.flying.platformapi.response.StoreAttestationBatchResponse;
 import cn.flying.platformapi.security.BlockChainRpcAuth;
+import io.github.resilience4j.retry.annotation.Retry;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.dubbo.rpc.RpcContext;
 import org.junit.jupiter.api.AfterEach;
@@ -87,27 +88,25 @@ class FileRemoteClientTest {
     }
 
     /**
-     * 验证后端调用区块链服务时会携带共享令牌，且调用结束后清理 attachment。
+     * 验证直传最终化使用的单次链提交入口没有自动重试，并且一次调用只触发一次 RPC。
      */
     @Test
-    void storeFileOnChain_shouldAttachAndCleanRpcToken() {
+    void storeFileOnChainOnce_shouldNotDeclareRetryOrReplayRpc() throws NoSuchMethodException {
         StoreFileRequest request = new StoreFileRequest(
                 "user-1",
-                "a.txt",
+                "direct.txt",
                 "{}",
                 "content-hash"
         );
-        Result<StoreFileResponse> expected = Result.success(new StoreFileResponse("tx-1", "file-hash"));
+        Result<StoreFileResponse> expected = Result.success(new StoreFileResponse("tx-once", "file-hash-once"));
+        when(blockChainService.storeFile(request)).thenReturn(expected);
 
-        when(blockChainService.storeFile(request)).thenAnswer(invocation -> {
-            assertThat(RpcContext.getClientAttachment().getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY))
-                    .isEqualTo(RPC_TOKEN);
-            return expected;
-        });
+        Result<StoreFileResponse> actual = fileRemoteClient.storeFileOnChainOnce(request);
 
-        Result<StoreFileResponse> actual = fileRemoteClient.storeFileOnChain(request);
-
+        Method method = FileRemoteClient.class.getMethod("storeFileOnChainOnce", StoreFileRequest.class);
+        assertThat(method.getAnnotation(Retry.class)).isNull();
         assertThat(actual).isSameAs(expected);
+        verify(blockChainService).storeFile(request);
         assertThat(RpcContext.getClientAttachment().getAttachment(BlockChainRpcAuth.TOKEN_ATTACHMENT_KEY))
                 .isNull();
     }
@@ -193,10 +192,10 @@ class FileRemoteClientTest {
     }
 
     /**
-     * 验证非幂等 batch 写方法不再被框架透明重试，而只读查询仍允许安全重试。
+     * 验证普通文件与批量存证写方法都不被 Dubbo failover 透明重放，而只读查询仍允许应用重试。
      */
     @Test
-    void attestationBatchRpcAnnotations_shouldOnlyRetryReadQuery() throws Exception {
+    void blockchainWriteRpcAnnotations_shouldDisableDubboFailoverRetry() throws Exception {
         DubboReference blockChainReference = FileRemoteClient.class
                 .getDeclaredField("blockChainService")
                 .getAnnotation(DubboReference.class);
@@ -210,12 +209,15 @@ class FileRemoteClientTest {
                 .as("引用级重试策略不得影响无关区块链 RPC")
                 .isEqualTo((Integer) DubboReference.class.getMethod("retries").getDefaultValue());
         assertThat(blockChainReference.methods())
-                .as("仅批量存证写 RPC 禁用 Dubbo failover 重试")
-                .singleElement()
-                .satisfies(method -> {
-                    assertThat(method.name()).isEqualTo("storeAttestationBatch");
-                    assertThat(method.retries()).isZero();
-                });
+                .as("所有非幂等链写 RPC 都必须禁用 Dubbo failover 重试")
+                .extracting(
+                        org.apache.dubbo.config.annotation.Method::name,
+                        org.apache.dubbo.config.annotation.Method::retries
+                )
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple("storeFile", 0),
+                        org.assertj.core.groups.Tuple.tuple("storeAttestationBatch", 0)
+                );
         assertThat(write.getAnnotation(io.github.resilience4j.retry.annotation.Retry.class)).isNull();
         assertThat(query.getAnnotation(io.github.resilience4j.retry.annotation.Retry.class)).isNotNull();
     }

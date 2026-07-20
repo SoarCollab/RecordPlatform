@@ -3319,12 +3319,13 @@ export interface components {
         };
         /** @description 直传分片完成请求 */
         DirectUploadCompletePartRequest: {
-            etag?: string;
+            /** @description 对象存储返回的 ETag */
+            eTag: string;
             /**
              * Format: int32
              * @description 分片索引，从 0 开始
              */
-            index?: number;
+            index: number;
         };
         /** @description 直传上传完成请求 */
         DirectUploadCompleteRequest: {
@@ -3334,17 +3335,17 @@ export interface components {
         /** @description 直传上传完成响应 */
         DirectUploadCompleteVO: {
             /** @description 客户端会话 ID */
-            clientId?: string;
+            clientId: string;
             /** @description 链上文件哈希 */
-            fileHash?: string;
+            fileHash: string;
             /** @description 文件外部 ID */
-            fileId?: string;
+            fileId: string;
             /** @description chunk manifest hash */
-            manifestHash?: string;
+            manifestHash: string;
             /** @description 完成状态 */
-            status?: string;
+            status: string;
             /** @description 交易哈希 */
-            transactionHash?: string;
+            transactionHash: string;
         };
         /** @description 直传分片请求 */
         DirectUploadPartRequest: {
@@ -3356,40 +3357,40 @@ export interface components {
              * Format: int32
              * @description 分片索引，从 0 开始
              */
-            index?: number;
+            index: number;
             /** @description 明文分片哈希 */
             plainHash: string;
             /**
              * Format: int64
              * @description 分片字节数
              */
-            size?: number;
+            size: number;
         };
         /** @description 直传分片预签名 URL */
         DirectUploadPartUrlVO: {
             /** @description 密文分片哈希 */
-            cipherHash?: string;
+            cipherHash: string;
             /**
              * Format: int64
              * @description URL 过期时间（Unix 秒）
              */
-            expiresAtEpochSeconds?: number;
+            expiresAtEpochSeconds: number;
             /**
              * Format: int32
              * @description 分片索引，从 0 开始
              */
-            index?: number;
+            index: number;
             /** @description 明文分片哈希 */
-            plainHash?: string;
+            plainHash: string;
             /**
              * Format: int64
              * @description 分片字节数
              */
-            size?: number;
+            size: number;
             /** @description 完成后持久化的 chunk storagePath */
-            storagePath?: string;
+            storagePath: string;
             /** @description 预签名上传 URL */
-            uploadUrl?: string;
+            uploadUrl: string;
         };
         /** @description 直传上传会话创建请求 */
         DirectUploadSessionRequest: {
@@ -3397,7 +3398,7 @@ export interface components {
              * Format: int32
              * @description 分片大小
              */
-            chunkSize?: number;
+            chunkSize: number;
             /** @description 客户端会话 ID */
             clientId?: string;
             /** @description 文件类型 */
@@ -3410,14 +3411,14 @@ export interface components {
              * Format: int64
              * @description 文件大小
              */
-            fileSize?: number;
+            fileSize: number;
             /** @description 分片元数据 */
             parts: components["schemas"]["DirectUploadPartRequest"][];
             /**
              * Format: int32
              * @description 分片总数
              */
-            totalChunks?: number;
+            totalChunks: number;
         };
         /** @description 直传上传会话响应 */
         DirectUploadSessionVO: {
@@ -3425,20 +3426,20 @@ export interface components {
              * Format: int32
              * @description 分片大小
              */
-            chunkSize?: number;
+            chunkSize: number;
             /** @description 客户端会话 ID */
-            clientId?: string;
+            clientId: string;
             /** @description manifest schema id */
-            manifestSchemaId?: string;
+            manifestSchemaId: string;
             /** @description 分片预签名 URL 列表 */
-            parts?: components["schemas"]["DirectUploadPartUrlVO"][];
+            parts: components["schemas"]["DirectUploadPartUrlVO"][];
             /** @description 是否恢复既有会话 */
-            resumed?: boolean;
+            resumed: boolean;
             /**
              * Format: int32
              * @description 分片总数
              */
-            totalChunks?: number;
+            totalChunks: number;
         };
         /** @description 用户注册表单信息 */
         EmailRegisterVO: {

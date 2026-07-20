@@ -50,7 +50,10 @@ public class FileRemoteClient {
             id = "blockChainServiceFileRemoteClient",
             version = BlockChainService.VERSION,
             providedBy = "RecordPlatform_fisco",
-            methods = @Method(name = "storeAttestationBatch", retries = 0))
+            methods = {
+                    @Method(name = "storeFile", retries = 0),
+                    @Method(name = "storeAttestationBatch", retries = 0)
+            })
     private BlockChainService blockChainService;
 
     @DubboReference(id = "storageServiceFileRemoteClient", version = DistributedStorageService.VERSION, providedBy = "RecordPlatform_storage")
@@ -80,9 +83,14 @@ public class FileRemoteClient {
         return new Result<>(ResultEnum.FILE_SERVICE_ERROR, null);
     }
 
+    /**
+     * 单次提交普通文件链交易，供已持久化 CHAIN_ATTESTING 检查点的直传最终化使用。
+     *
+     * <p>该入口故意不配置 Retry。调用方无法区分“交易未提交”和“交易已提交但响应丢失”，
+     * 因此任何失败都必须进入人工对账，禁止自动重复提交。</p>
+     */
     @CircuitBreaker(name = "blockChainService", fallbackMethod = "storeFileOnChainFallback")
-    @Retry(name = "blockChainService")
-    public Result<StoreFileResponse> storeFileOnChain(StoreFileRequest request) {
+    public Result<StoreFileResponse> storeFileOnChainOnce(StoreFileRequest request) {
         return callBlockChain(() -> blockChainService.storeFile(request));
     }
 

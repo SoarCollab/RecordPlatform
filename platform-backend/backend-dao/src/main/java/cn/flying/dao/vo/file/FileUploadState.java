@@ -62,6 +62,12 @@ public class FileUploadState {
     private boolean directUpload;
     @Schema(description = "直传会话分片内部存储元数据")
     private List<DirectUploadPartState> directUploadParts = new ArrayList<>();
+    @Schema(description = "直传完成后经后端校验的对象存储证据")
+    private List<DirectUploadCompletedPartState> directCompletedParts = new ArrayList<>();
+    @Schema(description = "当前上传会话稳定绑定的 PREPARE 文件ID")
+    private Long preparedFileId;
+    @Schema(description = "直传最终化阶段检查点")
+    private String directFinalizationStage = "SESSION_CREATED";
     @Schema(description = "直传完成后的文件ID")
     private Long directFileId;
     @Schema(description = "直传完成后的文件哈希")
@@ -84,6 +90,9 @@ public class FileUploadState {
 
     @Schema(description = "清理重试次数（用于防止无限重试）")
     private Integer cleanupRetryCount = 0;
+
+    @Schema(description = "上传恢复协议版本；为空表示升级前会话，必须失败关闭")
+    private Integer recoverySchemaVersion;
 
     public FileUploadState(Long userId, String fileName, long fileSize, String contentType, String clientId, int chunkSize, int totalChunks) {
         this(userId, fileName, fileSize, contentType, clientId, chunkSize, totalChunks, null);
@@ -111,6 +120,8 @@ public class FileUploadState {
         this.contentType = contentType;
         this.chunkSize = chunkSize;
         this.totalChunks = totalChunks;
+        // 参数化构造只用于创建新会话；Jackson 读取旧 JSON 使用无参构造，缺字段仍保持 null。
+        this.recoverySchemaVersion = 1;
         this.startTime = System.currentTimeMillis();
         this.lastActivityTime = this.startTime;
         this.lastProgressLogTime = 0;
@@ -145,5 +156,23 @@ public class FileUploadState {
         private String stagingObjectName;
         private String finalObjectName;
         private String nodeName;
+    }
+
+    /**
+     * 保存对象存储完成响应中已经与可信上传计划逐字段核对的分片证据。
+     */
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Schema(description = "直传完成分片可信检查点")
+    public static class DirectUploadCompletedPartState {
+        private int index;
+        private String storagePath;
+        private long size;
+        private String eTag;
+        private String plainHash;
+        private String cipherHash;
+        private String checksumAlgorithm;
     }
 }

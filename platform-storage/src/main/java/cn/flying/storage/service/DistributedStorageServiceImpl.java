@@ -39,8 +39,6 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequ
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import java.io.ByteArrayOutputStream;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
@@ -87,6 +85,12 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     @Resource
     private DegradedWriteTracker degradedWriteTracker;
 
+    @Resource
+    private DirectUploadPromotionService directUploadPromotionService;
+
+    @Resource
+    private DirectUploadStagingTracker directUploadStagingTracker;
+
     //预签名链接有效期
     private final static Integer EXPIRY_HOURS = 24;
 
@@ -96,14 +100,17 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     // 文件操作超时时间（秒）
     private static final int FILE_OPERATION_TIMEOUT_SECONDS = 300;
 
+    // 单个直传会话的分片数量上限，限制 RPC 反序列化后的排序和编排开销。
+    private static final int MAX_DIRECT_UPLOAD_PARTS = 10_000;
+
+    // manifest 持久化列上限，同时用于约束条件请求中的 ETag。
+    private static final int MAX_DIRECT_UPLOAD_ETAG_LENGTH = 255;
+
     // 分块读取缓冲区大小（8KB）
     private static final int BUFFER_SIZE = 8192;
 
     private static final String METADATA_FILE_HASH = "file-hash";
     private static final String METADATA_TENANT_ID = "tenant-id";
-    private static final String METADATA_CHECKSUM_ALGORITHM = "checksum-algorithm";
-    private static final String METADATA_PLAIN_HASH = "plain-hash";
-    private static final String METADATA_CIPHER_HASH = "cipher-hash";
     private static final String CHECKSUM_ALGORITHM_SHA256 = "SHA-256";
     private static final String HASH_PREFIX_SHA256 = "sha256:";
     private static final String STAGING_PREFIX = "staging/direct-upload";
@@ -275,17 +282,19 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     @Override
     public Result<CreateDirectMultipartUploadResponse> createDirectMultipartUpload(
             CreateDirectMultipartUploadRequest request) {
-        if (request == null || request.sessionId() == null || request.sessionId().isBlank()
-                || CollectionUtils.isEmpty(request.parts())) {
+        if (!isValidDirectUploadCreateRequest(request)) {
             return Result.error(ResultEnum.PARAM_IS_INVALID, null);
         }
 
-        Long tenantId = TenantContextUtil.getTenantIdOrDefault();
+        Long tenantId = requireDirectUploadTenantId();
+        if (tenantId == null) {
+            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+        }
         List<DirectMultipartUploadPartUrl> urls = new ArrayList<>(request.parts().size());
-        for (DirectMultipartUploadPartRequest part : request.parts()) {
-            if (!isValidDirectUploadPart(part)) {
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
-            }
+        List<DirectMultipartUploadPartRequest> orderedParts = request.parts().stream()
+                .sorted(Comparator.comparingInt(DirectMultipartUploadPartRequest::partIndex))
+                .toList();
+        for (DirectMultipartUploadPartRequest part : orderedParts) {
             try {
                 urls.add(createPresignedPartUrl(request, part, tenantId));
             } catch (Exception e) {
@@ -300,8 +309,9 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     @Override
     public Result<CompleteDirectMultipartUploadResponse> completeDirectMultipartUpload(
             CompleteDirectMultipartUploadRequest request) {
-        if (request == null || request.sessionId() == null || request.sessionId().isBlank()
-                || CollectionUtils.isEmpty(request.parts())) {
+        if (request == null || !isValidDirectUploadSessionId(request.sessionId())
+                || CollectionUtils.isEmpty(request.parts())
+                || request.parts().size() > MAX_DIRECT_UPLOAD_PARTS) {
             return Result.error(ResultEnum.PARAM_IS_INVALID, null);
         }
 
@@ -311,34 +321,47 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         List<DirectMultipartCompletedPart> orderedParts = request.parts().stream()
                 .sorted(Comparator.comparingInt(DirectMultipartCompletedPart::partIndex))
                 .toList();
-        if (!hasContiguousDirectUploadParts(orderedParts)) {
+        if (!hasContiguousDirectUploadParts(orderedParts)
+                || !hasValidDirectUploadTotalSize(orderedParts)) {
             return Result.error(ResultEnum.PARAM_IS_INVALID, null);
         }
 
-        List<DirectMultipartCompletedPartVO> completedParts = new ArrayList<>(orderedParts.size());
-        MessageDigest contentDigest = sha256Digest();
-        Long tenantId = TenantContextUtil.getTenantIdOrDefault();
+        Long tenantId = requireDirectUploadTenantId();
+        if (tenantId == null) {
+            return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+        }
+        List<TrustedDirectUploadPart> trustedParts = new ArrayList<>(orderedParts.size());
         for (DirectMultipartCompletedPart part : orderedParts) {
-            TrustedDirectUploadPart trustedPart;
             try {
-                trustedPart = toTrustedDirectUploadPart(request.sessionId(), part, tenantId);
+                trustedParts.add(toTrustedDirectUploadPart(request.sessionId(), part, tenantId));
             } catch (IllegalArgumentException e) {
                 log.warn("直传分片完成请求参数无效: sessionId={}, partIndex={}, reason={}",
                         request.sessionId(), part != null ? part.partIndex() : null, e.getMessage());
                 return Result.error(ResultEnum.PARAM_IS_INVALID, null);
+            } catch (IllegalStateException e) {
+                log.warn("直传分片目标副本不足: sessionId={}, partIndex={}, reason={}",
+                        request.sessionId(), part != null ? part.partIndex() : null, e.getMessage());
+                return Result.error(ResultEnum.STORAGE_INSUFFICIENT_REPLICAS, null);
             }
+        }
+
+        List<DirectMultipartCompletedPartVO> completedParts = new ArrayList<>(trustedParts.size());
+        DirectUploadDigestAccumulator contentDigest = DirectUploadDigestAccumulator.sha256();
+        for (TrustedDirectUploadPart trustedPart : trustedParts) {
             try {
-                PromotedDirectUploadPart promotedPart = promoteDirectUploadPart(trustedPart);
-                completedParts.add(promotedPart.metadata());
-                contentDigest.update(promotedPart.plainBytes());
+                DirectUploadPromotionResult promotedPart = directUploadPromotionService.promote(
+                        trustedPart.toPromotionDescriptor(),
+                        contentDigest
+                );
+                completedParts.add(toDirectMultipartCompletedPartVO(trustedPart, promotedPart));
             } catch (Exception e) {
                 log.error("直传分片校验或晋级失败: sessionId={}, partIndex={}",
-                        request.sessionId(), part != null ? part.partIndex() : null, e);
+                        request.sessionId(), trustedPart.partIndex(), e);
                 return Result.error(ResultEnum.FILE_SERVICE_ERROR, null);
             }
         }
 
-        String contentHash = HASH_PREFIX_SHA256 + HexFormat.of().formatHex(contentDigest.digest());
+        String contentHash = contentDigest.finishHash();
         return Result.success(new CompleteDirectMultipartUploadResponse(
                 request.sessionId(),
                 contentHash,
@@ -358,30 +381,82 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         return true;
     }
 
+    /**
+     * 校验完成请求的分片总大小未溢出且不超过直传文件上限。
+     *
+     * @param parts 已按索引排序的完成分片
+     * @return 总大小是否在安全范围内
+     */
+    private boolean hasValidDirectUploadTotalSize(List<DirectMultipartCompletedPart> parts) {
+        long totalSize = 0;
+        try {
+            for (DirectMultipartCompletedPart part : parts) {
+                totalSize = Math.addExact(totalSize, part.size());
+            }
+        } catch (ArithmeticException e) {
+            return false;
+        }
+        return totalSize > 0
+                && totalSize <= storageProperties.getDirectUpload().getEffectiveMaxFileSizeBytes();
+    }
+
     @Override
     public Result<Boolean> abortDirectMultipartUpload(AbortDirectMultipartUploadRequest request) {
         if (request == null || CollectionUtils.isEmpty(request.parts())) {
             return Result.success(true);
         }
+        if (!isValidDirectUploadSessionId(request.sessionId())
+                || request.parts().size() > MAX_DIRECT_UPLOAD_PARTS) {
+            return Result.error(ResultEnum.PARAM_IS_INVALID, false);
+        }
 
-        Long tenantId = TenantContextUtil.getTenantIdOrDefault();
+        Long tenantId = requireDirectUploadTenantId();
+        if (tenantId == null) {
+            return Result.error(ResultEnum.PARAM_IS_INVALID, false);
+        }
+        List<DirectUploadStagingDescriptor> stagingDescriptors = new ArrayList<>(request.parts().size());
         for (DirectMultipartCompletedPart part : request.parts()) {
-            TrustedDirectUploadPart trustedPart;
             try {
-                trustedPart = toTrustedDirectUploadPart(request.sessionId(), part, tenantId);
+                stagingDescriptors.add(toTrustedDirectUploadStagingDescriptor(
+                        request.sessionId(),
+                        part,
+                        tenantId
+                ));
             } catch (IllegalArgumentException e) {
                 log.warn("直传分片终止请求参数无效: sessionId={}, partIndex={}, reason={}",
                         request.sessionId(), part != null ? part.partIndex() : null, e.getMessage());
-                return Result.error(ResultEnum.PARAM_IS_INVALID, null);
-            }
-            try {
-                deleteFromNode(trustedPart.nodeName(), trustedPart.stagingObjectName());
-            } catch (Exception e) {
-                log.warn("清理直传 staging 分片失败: sessionId={}, partIndex={}, node={}",
-                        request.sessionId(), part.partIndex(), trustedPart.nodeName(), e);
+                return Result.error(ResultEnum.PARAM_IS_INVALID, false);
             }
         }
+
+        boolean allCleaned = true;
+        for (DirectUploadStagingDescriptor stagingDescriptor : stagingDescriptors) {
+            try {
+                directUploadPromotionService.abort(stagingDescriptor);
+            } catch (Exception e) {
+                allCleaned = false;
+                log.warn("清理直传 staging 分片失败: sessionId={}, partIndex={}, node={}",
+                        request.sessionId(), stagingDescriptor.partIndex(), stagingDescriptor.nodeName(), e);
+            }
+        }
+        if (!allCleaned) {
+            return Result.error(ResultEnum.FILE_SERVICE_ERROR, false);
+        }
         return Result.success(true);
+    }
+
+    /**
+     * 解析直传写边界的显式租户，缺失或畸形 attachment 时失败关闭而不回退 tenant 0。
+     *
+     * @return 显式租户 ID；上下文不可用时返回 null
+     */
+    private Long requireDirectUploadTenantId() {
+        try {
+            return TenantContextUtil.requireTenantId();
+        } catch (IllegalStateException e) {
+            log.warn("拒绝缺少有效租户上下文的直传存储请求: {}", e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -392,282 +467,64 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             DirectMultipartUploadPartRequest part,
             Long tenantId) {
         String nodeName = selectWritableNode(part.objectName());
-        S3Client client = clientManager.getClient(nodeName);
-        S3Presigner presigner = clientManager.getPresigner(nodeName);
-        if (client == null || presigner == null) {
-            throw new IllegalStateException("S3 client or presigner is unavailable for node " + nodeName);
-        }
-
-        ensureBucketExists(client, nodeName, nodeName);
-
-        String directObjectName = normalizeHash(part.cipherHash());
-        String stagingObjectName = buildDirectUploadStagingObjectName(tenantId, request.sessionId(), part.partIndex());
-        String finalObjectName = buildDirectUploadFinalObjectName(tenantId, directObjectName);
-        PutObjectRequest putObjectRequest = PutObjectRequest.builder()
-                .bucket(nodeName)
-                .key(stagingObjectName)
-                .contentLength(part.size())
-                .build();
-        PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()
-                .signatureDuration(Duration.ofHours(EXPIRY_HOURS))
-                .putObjectRequest(putObjectRequest)
-                .build();
-        PresignedPutObjectRequest presignedRequest = presigner.presignPutObject(presignRequest);
-
-        long expiresAt = System.currentTimeMillis() / 1000L + TimeUnit.HOURS.toSeconds(EXPIRY_HOURS);
-        return new DirectMultipartUploadPartUrl(
-                part.partIndex(),
-                presignedRequest.url().toString(),
-                expiresAt,
-                buildDirectUploadStoragePath(tenantId, directObjectName),
-                stagingObjectName,
-                finalObjectName,
-                nodeName,
-                part.size()
-        );
-    }
-
-    /**
-     * Verifies a staging object and promotes it to enough final replicas to satisfy write quorum.
-     */
-    private PromotedDirectUploadPart promoteDirectUploadPart(TrustedDirectUploadPart part) {
-        S3Client client = clientManager.getClient(part.nodeName());
-        if (client == null) {
-            throw new IllegalStateException("S3 client is unavailable for node " + part.nodeName());
-        }
-        ensureBucketExists(client, part.nodeName(), part.nodeName());
-
-        HeadObjectResponse stagingHead;
-        try {
-            stagingHead = client.headObject(HeadObjectRequest.builder()
-                    .bucket(part.nodeName())
-                    .key(part.stagingObjectName())
-                    .build());
-        } catch (NoSuchKeyException e) {
-            log.info("直传 staging 分片已不存在，尝试按已晋级 final object 完成: partIndex={}, node={}",
-                    part.partIndex(), part.nodeName());
-            return completeAlreadyPromotedDirectUploadPart(part);
-        } catch (S3Exception e) {
-            if (isMissingObject(e)) {
-                log.info("直传 staging 分片已不存在，尝试按已晋级 final object 完成: partIndex={}, node={}",
-                        part.partIndex(), part.nodeName());
-                return completeAlreadyPromotedDirectUploadPart(part);
+        try (S3ClientManager.TopologyLease topology = clientManager.acquireTopologyLease()) {
+            S3Client client = topology.getClient(nodeName);
+            S3Presigner presigner = topology.getPresigner(nodeName);
+            if (client == null || presigner == null) {
+                throw new IllegalStateException("S3 client or presigner is unavailable for node " + nodeName);
             }
-            throw e;
-        }
-        if (stagingHead.contentLength() != part.size()) {
-            throw new IllegalArgumentException("staging object size mismatch");
-        }
-        if (part.eTag() != null && !part.eTag().isBlank()
-                && stagingHead.eTag() != null
-                && !normalizeEtag(stagingHead.eTag()).equals(normalizeEtag(part.eTag()))) {
-            throw new IllegalArgumentException("staging object eTag mismatch");
-        }
 
-        byte[] stagingBytes = readAndVerifyDirectUploadStagingObject(client, part, stagingHead);
-        Long tenantId = part.tenantId();
-        List<String> targetNodes = part.targetNodes();
-        List<CompletableFuture<String>> uploadFutures = new ArrayList<>(targetNodes.size());
-        for (String node : targetNodes) {
-            uploadFutures.add(uploadDirectFinalObjectAsync(node, part.finalObjectName(), stagingBytes, part, tenantId));
-        }
+            ensureBucketExists(client, nodeName, nodeName, topology.revision());
 
-        QuorumResult quorumResult;
-        try {
-            quorumResult = storeWithQuorum(uploadFutures, targetNodes, resolveDirectUploadQuorum(targetNodes), part.cipherHash());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            cancelPendingFutures(uploadFutures, "direct-upload-interrupted");
-            throw new IllegalStateException("direct-upload final replica write interrupted", e);
-        }
-        if (!quorumResult.isSuccess()) {
-            cancelPendingFutures(uploadFutures, "direct-upload-quorum-failure");
-            throw new IllegalStateException("direct-upload final replica quorum not reached");
-        }
-        scheduleRepairIfNeededForDomains(uploadFutures, targetNodes, part.finalObjectName());
+            String directObjectName = normalizeHash(part.cipherHash());
+            String stagingObjectName = buildDirectUploadStagingObjectName(
+                    tenantId,
+                    request.sessionId(),
+                    part.partIndex()
+            );
+            String finalObjectName = buildDirectUploadFinalObjectName(tenantId, directObjectName);
+            PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+                    .bucket(nodeName)
+                    .key(stagingObjectName)
+                    .contentLength(part.size())
+                    .build();
+            PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()
+                    .signatureDuration(Duration.ofHours(EXPIRY_HOURS))
+                    .putObjectRequest(putObjectRequest)
+                    .build();
+            PresignedPutObjectRequest presignedRequest = presigner.presignPutObject(presignRequest);
 
-        boolean isDegraded = targetNodes.size() < storageProperties.getEffectiveReplicationFactor();
-        StorageProperties.DegradedWriteConfig degradedWriteConfig = storageProperties.getDegradedWrite();
-        if (isDegraded && degradedWriteConfig != null && degradedWriteConfig.isTrackForSync()) {
-            degradedWriteTracker.recordDegradedWrite(part.cipherHash(), quorumResult.getSuccessNodes(), tenantId);
-        }
+            directUploadStagingTracker.record(new DirectUploadStagingDescriptor(
+                    tenantId,
+                    request.sessionId(),
+                    part.partIndex(),
+                    nodeName,
+                    stagingObjectName
+            ));
+            topology.verifyCurrent();
 
-        String headNode = quorumResult.getSuccessNodes().getFirst();
-        S3Client headClient = clientManager.getClient(headNode);
-        if (headClient == null) {
-            throw new IllegalStateException("S3 client is unavailable for completed node " + headNode);
+            long expiresAt = System.currentTimeMillis() / 1000L
+                    + TimeUnit.HOURS.toSeconds(EXPIRY_HOURS);
+            return new DirectMultipartUploadPartUrl(
+                    part.partIndex(),
+                    presignedRequest.url().toString(),
+                    expiresAt,
+                    buildDirectUploadStoragePath(tenantId, directObjectName),
+                    stagingObjectName,
+                    finalObjectName,
+                    nodeName,
+                    part.size()
+            );
         }
-        HeadObjectResponse finalHead = headClient.headObject(HeadObjectRequest.builder()
-                .bucket(headNode)
-                .key(part.finalObjectName())
-                .build());
-        try {
-            deleteFromNode(part.nodeName(), part.stagingObjectName());
-        } catch (Exception e) {
-            log.warn("清理已提升的直传 staging 分片失败: partIndex={}, node={}",
-                    part.partIndex(), part.nodeName(), e);
-        }
-
-        return new PromotedDirectUploadPart(
-                toDirectMultipartCompletedPartVO(part, finalHead),
-                stagingBytes);
-    }
-
-    /**
-     * Completes a retry after the original request already promoted the staging object to final replicas.
-     */
-    private PromotedDirectUploadPart completeAlreadyPromotedDirectUploadPart(TrustedDirectUploadPart part) {
-        for (String nodeName : part.targetNodes()) {
-            S3Client finalClient = clientManager.getClient(nodeName);
-            if (finalClient == null) {
-                continue;
-            }
-            try {
-                HeadObjectResponse finalHead = finalClient.headObject(HeadObjectRequest.builder()
-                        .bucket(nodeName)
-                        .key(part.finalObjectName())
-                        .build());
-                validateDirectUploadFinalObject(part, finalHead, part.tenantId());
-                byte[] finalBytes = readAndVerifyDirectUploadObject(
-                        finalClient,
-                        part,
-                        finalHead,
-                        nodeName,
-                        part.finalObjectName());
-                return new PromotedDirectUploadPart(
-                        toDirectMultipartCompletedPartVO(part, finalHead),
-                        finalBytes);
-            } catch (NoSuchKeyException e) {
-                log.debug("直传 final 分片不存在: partIndex={}, node={}", part.partIndex(), nodeName);
-            } catch (S3Exception e) {
-                if (isMissingObject(e)) {
-                    log.debug("直传 final 分片不存在: partIndex={}, node={}", part.partIndex(), nodeName);
-                    continue;
-                }
-                throw e;
-            }
-        }
-        throw new IllegalStateException("direct-upload staging object is missing and final object is unavailable");
-    }
-
-    /**
-     * Validates the already-promoted final object against backend-trusted direct-upload metadata.
-     */
-    private void validateDirectUploadFinalObject(TrustedDirectUploadPart part,
-                                                 HeadObjectResponse finalHead,
-                                                 Long tenantId) {
-        if (finalHead.contentLength() == null || finalHead.contentLength() != part.size()) {
-            throw new IllegalArgumentException("direct-upload final object size mismatch");
-        }
-        Map<String, String> metadata = finalHead.metadata() != null ? finalHead.metadata() : Map.of();
-        if (!normalizeHash(part.cipherHash()).equals(normalizeHash(metadata.get(METADATA_FILE_HASH)))
-                || !normalizeHash(part.cipherHash()).equals(normalizeHash(metadata.get(METADATA_CIPHER_HASH)))
-                || !normalizeHash(part.plainHash()).equals(normalizeHash(metadata.get(METADATA_PLAIN_HASH)))
-                || !normalizeChecksumAlgorithm(part.checksumAlgorithm())
-                        .equalsIgnoreCase(normalizeChecksumAlgorithm(metadata.get(METADATA_CHECKSUM_ALGORITHM)))
-                || !Objects.equals(String.valueOf(tenantId), metadata.get(METADATA_TENANT_ID))) {
-            throw new IllegalArgumentException("direct-upload final object metadata mismatch");
-        }
-    }
-
-    /**
-     * Converts verified final-object metadata into the direct-upload completion response part.
-     */
-    private DirectMultipartCompletedPartVO toDirectMultipartCompletedPartVO(TrustedDirectUploadPart part,
-                                                                            HeadObjectResponse finalHead) {
-        return new DirectMultipartCompletedPartVO(
-                part.partIndex(),
-                part.storagePath(),
-                finalHead.contentLength(),
-                finalHead.eTag(),
-                part.plainHash(),
-                part.cipherHash(),
-                part.checksumAlgorithm()
-        );
-    }
-
-    /**
-     * Reads the uploaded staging object once and verifies its checksum against backend-trusted metadata.
-     */
-    private byte[] readAndVerifyDirectUploadStagingObject(S3Client client,
-                                                          TrustedDirectUploadPart part,
-                                                          HeadObjectResponse stagingHead) {
-        return readAndVerifyDirectUploadObject(
-                client,
-                part,
-                stagingHead,
-                part.nodeName(),
-                part.stagingObjectName());
-    }
-
-    /**
-     * 读取并校验一个直传对象，首次完成和 final-object 重试共用同一可信摘要边界。
-     */
-    private byte[] readAndVerifyDirectUploadObject(S3Client client,
-                                                   TrustedDirectUploadPart part,
-                                                   HeadObjectResponse objectHead,
-                                                   String bucket,
-                                                   String objectName) {
-        if (!CHECKSUM_ALGORITHM_SHA256.equalsIgnoreCase(normalizeChecksumAlgorithm(part.checksumAlgorithm()))) {
-            throw new IllegalArgumentException("unsupported direct-upload checksum algorithm");
-        }
-        long objectSize = objectHead.contentLength() != null ? objectHead.contentLength() : -1L;
-        if (objectSize < 0) {
-            throw new IllegalArgumentException("direct-upload object size is missing");
-        }
-        if (objectSize > MAX_IN_MEMORY_FILE_SIZE) {
-            throw new IllegalArgumentException("direct-upload chunk exceeds in-memory verification limit");
-        }
-
-        MessageDigest digest = sha256Digest();
-        ByteArrayOutputStream output = new ByteArrayOutputStream((int) objectSize);
-        GetObjectRequest getRequest = GetObjectRequest.builder()
-                .bucket(bucket)
-                .key(objectName)
-                .build();
-        try (ResponseInputStream<GetObjectResponse> input = client.getObject(getRequest)) {
-            byte[] buffer = new byte[BUFFER_SIZE];
-            long totalRead = 0L;
-            int read;
-            while ((read = input.read(buffer)) != -1) {
-                digest.update(buffer, 0, read);
-                output.write(buffer, 0, read);
-                totalRead += read;
-                if (totalRead > MAX_IN_MEMORY_FILE_SIZE) {
-                    throw new IllegalArgumentException("direct-upload chunk exceeds in-memory verification limit");
-                }
-            }
-            if (totalRead != part.size()) {
-                throw new IllegalArgumentException("staging object read size mismatch");
-            }
-        } catch (Exception e) {
-            if (e instanceof IllegalArgumentException illegalArgumentException) {
-                throw illegalArgumentException;
-            }
-            throw new IllegalStateException("failed to read direct-upload object", e);
-        }
-
-        String actualCipherHash = HASH_PREFIX_SHA256 + HexFormat.of().formatHex(digest.digest());
-        if (!normalizeHash(actualCipherHash).equals(normalizeHash(part.cipherHash()))) {
-            throw new IllegalArgumentException("staging object checksum mismatch");
-        }
-        return output.toByteArray();
-    }
-
-    /**
-     * 保存一个已晋级分片的公开元数据和经过摘要校验的明文字节。
-     */
-    private record PromotedDirectUploadPart(
-            DirectMultipartCompletedPartVO metadata,
-            byte[] plainBytes
-    ) {
     }
 
     /**
      * Resolves target replica nodes and enforces the same degraded-write policy used by normal chunk uploads.
      */
     private List<String> resolveDirectUploadTargetNodes(String cipherHash) {
-        List<String> targetNodes = faultDomainManager.getTargetNodes(cipherHash);
+        storageProperties.validateDegradedWriteTracking();
+        List<String> targetNodes = new ArrayList<>(new LinkedHashSet<>(
+                faultDomainManager.getTargetNodes(cipherHash)));
         int requiredReplicas = storageProperties.getEffectiveReplicationFactor();
         StorageProperties.DegradedWriteConfig degradedWriteConfig = storageProperties.getDegradedWrite();
         if (targetNodes.size() < requiredReplicas) {
@@ -694,35 +551,6 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             return targetNodes.size();
         }
         return storageProperties.getEffectiveQuorum();
-    }
-
-    /**
-     * Writes a verified direct-upload chunk to one final replica node.
-     */
-    private CompletableFuture<String> uploadDirectFinalObjectAsync(String nodeName,
-                                                                   String finalObjectName,
-                                                                   byte[] data,
-                                                                   TrustedDirectUploadPart part,
-                                                                   Long tenantId) {
-        return CompletableFuture.supplyAsync(() -> {
-            if (!s3Monitor.isNodeOnline(nodeName)) {
-                throw new RuntimeException("Node '" + nodeName + "' is offline, cannot promote direct upload.");
-            }
-            S3Client targetClient = clientManager.getClient(nodeName);
-            if (targetClient == null) {
-                throw new RuntimeException("Cannot get S3Client for online node: " + nodeName);
-            }
-            ensureBucketExists(targetClient, nodeName, nodeName);
-            PutObjectRequest request = PutObjectRequest.builder()
-                    .bucket(nodeName)
-                    .key(finalObjectName)
-                    .contentLength((long) data.length)
-                    .metadata(buildDirectUploadObjectMetadata(part, tenantId))
-                    .build();
-            targetClient.putObject(request, RequestBody.fromBytes(data));
-            log.debug("已成功将直传分片 '{}' 提升到节点 '{}'", finalObjectName, nodeName);
-            return nodeName;
-        }, uploadExecutor);
     }
 
     /**
@@ -760,19 +588,75 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     }
 
     /**
+     * 校验 storage RPC 层的完整直传创建计划，避免绕过 backend 直接提交不连续或越界分片。
+     */
+    private boolean isValidDirectUploadCreateRequest(CreateDirectMultipartUploadRequest request) {
+        if (request == null
+                || !isValidDirectUploadSessionId(request.sessionId())
+                || request.fileName() == null
+                || request.fileName().isBlank()
+                || request.fileName().length() > 255
+                || request.contentType() == null
+                || request.contentType().isBlank()
+                || request.contentType().length() > 255
+                || CollectionUtils.isEmpty(request.parts())) {
+            return false;
+        }
+
+        StorageProperties.DirectUploadConfig config = storageProperties.getDirectUpload();
+        if (request.totalSize() <= 0
+                || request.totalSize() > config.getEffectiveMaxFileSizeBytes()
+                || request.chunkSize() <= 0
+                || request.chunkSize() > config.getEffectiveMaxPartSizeBytes()) {
+            return false;
+        }
+        long expectedPartCount = (request.totalSize() + request.chunkSize() - 1L)
+                / request.chunkSize();
+        if (expectedPartCount <= 0
+                || expectedPartCount > MAX_DIRECT_UPLOAD_PARTS
+                || request.parts().size() != expectedPartCount
+                || request.parts().stream().anyMatch(Objects::isNull)) {
+            return false;
+        }
+
+        List<DirectMultipartUploadPartRequest> orderedParts = request.parts().stream()
+                .sorted(Comparator.comparingInt(DirectMultipartUploadPartRequest::partIndex))
+                .toList();
+        long sizeSum = 0;
+        for (int index = 0; index < orderedParts.size(); index++) {
+            DirectMultipartUploadPartRequest part = orderedParts.get(index);
+            long expectedSize = Math.min(
+                    (long) request.chunkSize(),
+                    request.totalSize() - (long) index * request.chunkSize()
+            );
+            if (part.partIndex() != index
+                    || part.size() != expectedSize
+                    || !isValidDirectUploadPart(part)) {
+                return false;
+            }
+            try {
+                sizeSum = Math.addExact(sizeSum, part.size());
+            } catch (ArithmeticException e) {
+                return false;
+            }
+        }
+        return sizeSum == request.totalSize();
+    }
+
+    /**
      * Validates one requested direct-upload part.
      */
     private boolean isValidDirectUploadPart(DirectMultipartUploadPartRequest part) {
         return part != null
                 && part.partIndex() >= 0
                 && part.size() > 0
-                && part.size() <= MAX_IN_MEMORY_FILE_SIZE
+                && part.size() <= storageProperties.getDirectUpload().getEffectiveMaxPartSizeBytes()
                 && part.objectName() != null
                 && !part.objectName().isBlank()
                 && isSha256Hash(part.objectName())
                 && isSha256Hash(part.plainHash())
                 && isSha256Hash(part.cipherHash())
-                && CHECKSUM_ALGORITHM_SHA256.equalsIgnoreCase(normalizeChecksumAlgorithm(part.checksumAlgorithm()))
+                && CHECKSUM_ALGORITHM_SHA256.equals(part.checksumAlgorithm())
                 && normalizeHash(part.objectName()).equals(normalizeHash(part.cipherHash()))
                 && normalizeHash(part.plainHash()).equals(normalizeHash(part.cipherHash()));
     }
@@ -780,12 +664,14 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     /**
      * Validates one completed direct-upload part request.
      */
-    private boolean isValidCompletedDirectPart(DirectMultipartCompletedPart part) {
+    private boolean isValidCompletedDirectPart(
+            DirectMultipartCompletedPart part,
+            boolean requireEtag
+    ) {
         return part != null
                 && part.partIndex() >= 0
                 && part.size() > 0
-                && part.nodeName() != null
-                && !part.nodeName().isBlank()
+                && isValidDirectUploadNodeName(part.nodeName())
                 && part.stagingObjectName() != null
                 && !part.stagingObjectName().isBlank()
                 && part.finalObjectName() != null
@@ -794,9 +680,29 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 && !part.storagePath().isBlank()
                 && isSha256Hash(part.plainHash())
                 && isSha256Hash(part.cipherHash())
-                && CHECKSUM_ALGORITHM_SHA256.equalsIgnoreCase(normalizeChecksumAlgorithm(part.checksumAlgorithm()))
+                && CHECKSUM_ALGORITHM_SHA256.equals(part.checksumAlgorithm())
                 && normalizeHash(part.plainHash()).equals(normalizeHash(part.cipherHash()))
-                && part.size() <= MAX_IN_MEMORY_FILE_SIZE;
+                && part.size() <= storageProperties.getDirectUpload().getEffectiveMaxPartSizeBytes()
+                && (!requireEtag || isSafeDirectUploadEtag(part.eTag()));
+    }
+
+    /**
+     * 校验 ETag 只包含有界可见 ASCII，避免控制字符进入条件请求、日志或持久化证据。
+     *
+     * @param eTag provider 返回并由客户端回传的 ETag
+     * @return 长度和字符集均安全时返回 true
+     */
+    private boolean isSafeDirectUploadEtag(String eTag) {
+        if (eTag == null || eTag.length() < 1 || eTag.length() > MAX_DIRECT_UPLOAD_ETAG_LENGTH) {
+            return false;
+        }
+        for (int index = 0; index < eTag.length(); index++) {
+            char value = eTag.charAt(index);
+            if (value < 0x21 || value > 0x7E) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -807,7 +713,8 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             DirectMultipartCompletedPart part,
             Long tenantId
     ) {
-        if (sessionId == null || sessionId.isBlank() || !isValidCompletedDirectPart(part)) {
+        if (!isValidDirectUploadSessionId(sessionId)
+                || !isValidCompletedDirectPart(part, true)) {
             throw new IllegalArgumentException("invalid direct-upload part metadata");
         }
         String cipherHash = normalizeHash(part.cipherHash());
@@ -821,17 +728,108 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
 
         List<String> targetNodes = resolveDirectUploadTargetNodes(cipherHash);
-        if (!targetNodes.contains(part.nodeName())) {
-            throw new IllegalArgumentException("direct-upload node is not assigned to the chunk hash");
-        }
         return new TrustedDirectUploadPart(
                 part,
                 tenantId,
+                sessionId,
                 expectedStagingObjectName,
                 expectedFinalObjectName,
                 expectedStoragePath,
-                targetNodes
+                targetNodes,
+                resolveDirectUploadQuorum(targetNodes)
         );
+    }
+
+    /**
+     * 为 abort 重建规范 staging 身份，不依赖完成时可能已变化的目标拓扑。
+     */
+    private DirectUploadStagingDescriptor toTrustedDirectUploadStagingDescriptor(
+            String sessionId,
+            DirectMultipartCompletedPart part,
+            Long tenantId
+    ) {
+        if (!isValidDirectUploadSessionId(sessionId)
+                || !isValidCompletedDirectPart(part, false)) {
+            throw new IllegalArgumentException("invalid direct-upload staging metadata");
+        }
+        String cipherHash = normalizeHash(part.cipherHash());
+        String expectedStagingObjectName = buildDirectUploadStagingObjectName(
+                tenantId,
+                sessionId,
+                part.partIndex()
+        );
+        String expectedFinalObjectName = buildDirectUploadFinalObjectName(tenantId, cipherHash);
+        String expectedStoragePath = buildDirectUploadStoragePath(tenantId, cipherHash);
+        if (!expectedStagingObjectName.equals(part.stagingObjectName())
+                || !expectedFinalObjectName.equals(part.finalObjectName())
+                || !expectedStoragePath.equals(part.storagePath())) {
+            throw new IllegalArgumentException("direct-upload object paths do not match the session");
+        }
+        return new DirectUploadStagingDescriptor(
+                tenantId,
+                sessionId,
+                part.partIndex(),
+                part.nodeName(),
+                expectedStagingObjectName
+        );
+    }
+
+    /**
+     * 将 promotion service 的可信结果转换为现有 RPC 响应合同。
+     */
+    private DirectMultipartCompletedPartVO toDirectMultipartCompletedPartVO(
+            TrustedDirectUploadPart part,
+            DirectUploadPromotionResult result
+    ) {
+        return new DirectMultipartCompletedPartVO(
+                part.partIndex(),
+                part.storagePath(),
+                result.size(),
+                result.eTag(),
+                part.plainHash(),
+                part.cipherHash(),
+                part.checksumAlgorithm()
+        );
+    }
+
+    /**
+     * 校验 direct-upload session 与公开 REST 合同使用相同的安全字符集。
+     */
+    private boolean isValidDirectUploadSessionId(String sessionId) {
+        if (sessionId == null || sessionId.isBlank() || sessionId.length() > 64) {
+            return false;
+        }
+        for (int index = 0; index < sessionId.length(); index++) {
+            char value = sessionId.charAt(index);
+            if (!((value >= 'A' && value <= 'Z')
+                    || (value >= 'a' && value <= 'z')
+                    || (value >= '0' && value <= '9')
+                    || value == '-')) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 校验持久化节点名只包含 S3 bucket/node 配置允许的低风险字符。
+     */
+    private boolean isValidDirectUploadNodeName(String nodeName) {
+        if (nodeName == null || nodeName.isBlank() || nodeName.length() > 128) {
+            return false;
+        }
+        for (int index = 0; index < nodeName.length(); index++) {
+            char value = nodeName.charAt(index);
+            if (!((value >= 'A' && value <= 'Z')
+                    || (value >= 'a' && value <= 'z')
+                    || (value >= '0' && value <= '9')
+                    || value == '-'
+                    || value == '_'
+                    || value == '.')) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -839,7 +837,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      */
     private boolean isSha256Hash(String value) {
         String normalized = normalizeHash(value);
-        if (!normalized.startsWith(HASH_PREFIX_SHA256)) {
+        if (!normalized.equals(value) || !normalized.startsWith(HASH_PREFIX_SHA256)) {
             return false;
         }
         String hex = normalized.substring(HASH_PREFIX_SHA256.length());
@@ -861,10 +859,12 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     private record TrustedDirectUploadPart(
             DirectMultipartCompletedPart source,
             Long tenantId,
+            String sessionId,
             String stagingObjectName,
             String finalObjectName,
             String storagePath,
-            List<String> targetNodes
+            List<String> targetNodes,
+            int requiredQuorum
     ) {
         private TrustedDirectUploadPart {
             targetNodes = List.copyOf(targetNodes);
@@ -897,13 +897,27 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         private String checksumAlgorithm() {
             return source.checksumAlgorithm();
         }
-    }
 
-    /**
-     * Normalizes ETag quoting differences between clients and S3-compatible providers.
-     */
-    private String normalizeEtag(String value) {
-        return value == null ? "" : value.replace("\"", "").trim();
+        /**
+         * 构建不含完整对象字节的内部 promotion 合同。
+         */
+        private DirectUploadPartDescriptor toPromotionDescriptor() {
+            return new DirectUploadPartDescriptor(
+                    tenantId,
+                    sessionId,
+                    partIndex(),
+                    nodeName(),
+                    stagingObjectName,
+                    finalObjectName,
+                    size(),
+                    eTag(),
+                    plainHash(),
+                    cipherHash(),
+                    checksumAlgorithm(),
+                    targetNodes,
+                    requiredQuorum
+            );
+        }
     }
 
     /**
@@ -926,17 +940,6 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     private boolean isMissingObject(S3Exception e) {
         String errorCode = e.awsErrorDetails() != null ? e.awsErrorDetails().errorCode() : "";
         return e.statusCode() == 404 || "NoSuchKey".equalsIgnoreCase(errorCode);
-    }
-
-    /**
-     * Creates a SHA-256 digest instance for direct-upload content verification.
-     */
-    private MessageDigest sha256Digest() {
-        try {
-            return MessageDigest.getInstance(CHECKSUM_ALGORITHM_SHA256);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 digest is unavailable", e);
-        }
     }
 
     @Override
@@ -996,15 +999,25 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                     fileHash, quorumResult.getSuccessCount(), quorumResult.getSuccessCount(),
                     targetNodes.size(), logicalPath);
 
-            // 异步检查其他上传任务的状态，失败则触发修复
-            scheduleRepairIfNeededForDomains(uploadFutures, targetNodes, tenantObjectPath);
-
-            // 如果是降级写入，记录以便后续同步
-            boolean isDegraded = targetNodes.size() < requiredReplicas;
-            if (isDegraded && degradedWriteConfig != null && degradedWriteConfig.isTrackForSync()) {
-                degradedWriteTracker.recordDegradedWrite(fileHash, quorumResult.getSuccessNodes(), tenantId);
-                return Result.success(logicalPath); // 降级成功仍返回 SUCCESS
+            // 先持久化本次写入的权威成功节点，保证进程内修复失败时仍有可恢复入口。
+            boolean trackForSync = degradedWriteConfig != null && degradedWriteConfig.isTrackForSync();
+            if (trackForSync) {
+                degradedWriteTracker.recordAuthoritativeDegradedWrite(
+                        fileHash,
+                        quorumResult.getSuccessNodes(),
+                        tenantId
+                );
             }
+
+            // 异步检查其他上传任务的状态，修复真实成功后再清除对应降级记录。
+            scheduleRepairIfNeededForDomains(
+                    uploadFutures,
+                    targetNodes,
+                    tenantObjectPath,
+                    fileHash,
+                    tenantId,
+                    trackForSync
+            );
 
             return Result.success(logicalPath);
 
@@ -1101,6 +1114,13 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
             QuorumResult result = resultFuture.get(FILE_OPERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             if (result.isSuccess()) {
                 cancelPendingFutures(futures, "upload-after-quorum");
+                // 取消完成后重新快照，纳入仲裁返回与取消之间已经成功的节点。
+                return new QuorumResult(
+                        true,
+                        successCount.get(),
+                        new ArrayList<>(successNodes),
+                        new ArrayList<>(failedNodes)
+                );
             }
             return result;
         } catch (TimeoutException e) {
@@ -1149,7 +1169,11 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      * 检查故障域模式下其他上传任务的状态，失败则触发修复
      */
     private void scheduleRepairIfNeededForDomains(List<CompletableFuture<String>> futures,
-                                                   List<String> nodes, String objectPath) {
+                                                   List<String> nodes,
+                                                   String objectPath,
+                                                   String objectHash,
+                                                   Long tenantId,
+                                                   boolean trackForSync) {
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).whenComplete((v, ex) -> {
             if (!REPAIR_CHECK_SEMAPHORE.tryAcquire()) {
                 log.warn("修复检查队列已满，跳过本次修复检查: object={}", objectPath);
@@ -1174,7 +1198,39 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                     // 从成功节点复制到失败节点
                     String sourceNode = successNodes.getFirst();
                     for (String failedNode : failedNodes) {
-                        consistencyRepairService.scheduleImmediateRepairByNodes(objectPath, sourceNode, failedNode);
+                        CompletableFuture<Boolean> repairFuture;
+                        try {
+                            repairFuture = consistencyRepairService.scheduleImmediateRepairByNodesAsync(
+                                    objectPath,
+                                    sourceNode,
+                                    failedNode
+                            );
+                        } catch (RuntimeException repairScheduleError) {
+                            log.warn("调度立即修复失败，保留降级记录: object={}, source={}, target={}",
+                                    objectPath, sourceNode, failedNode, repairScheduleError);
+                            continue;
+                        }
+                        if (repairFuture == null) {
+                            log.warn("立即修复未返回完成结果，保留降级记录: object={}, source={}, target={}",
+                                    objectPath, sourceNode, failedNode);
+                            continue;
+                        }
+                        repairFuture.whenComplete((repaired, repairError) -> {
+                            if (repairError != null || !Boolean.TRUE.equals(repaired)) {
+                                log.warn("立即修复未成功，保留降级记录: object={}, source={}, target={}",
+                                        objectPath, sourceNode, failedNode, repairError);
+                                return;
+                            }
+                            if (!trackForSync) {
+                                return;
+                            }
+                            try {
+                                degradedWriteTracker.markNodeRepaired(objectHash, tenantId, failedNode);
+                            } catch (RuntimeException trackingError) {
+                                log.warn("立即修复成功但更新降级记录失败，将由后续同步重试: object={}, target={}",
+                                        objectPath, failedNode, trackingError);
+                            }
+                        });
                     }
                 } else if (failedNodes.isEmpty()) {
                     log.debug("所有副本都成功写入，无需修复");
@@ -1247,17 +1303,6 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         Map<String, String> metadata = new HashMap<>();
         metadata.put(METADATA_FILE_HASH, fileHash);
         metadata.put(METADATA_TENANT_ID, String.valueOf(tenantId));
-        return metadata;
-    }
-
-    /**
-     * Builds final-object metadata for verified direct-upload chunks.
-     */
-    private Map<String, String> buildDirectUploadObjectMetadata(TrustedDirectUploadPart part, Long tenantId) {
-        Map<String, String> metadata = buildObjectMetadata(part.cipherHash(), tenantId);
-        metadata.put(METADATA_CHECKSUM_ALGORITHM, normalizeChecksumAlgorithm(part.checksumAlgorithm()));
-        metadata.put(METADATA_PLAIN_HASH, part.plainHash());
-        metadata.put(METADATA_CIPHER_HASH, part.cipherHash());
         return metadata;
     }
 
@@ -1775,7 +1820,22 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
      * 确保指定的 Bucket 在给定的 S3 兼容存储节点上存在
      */
     private void ensureBucketExists(S3Client client, String nodeName, String bucketName) throws RuntimeException {
-        String cacheKey = nodeName + ":" + bucketName;
+        ensureBucketExists(client, nodeName, bucketName, null);
+    }
+
+    /**
+     * 按 topology revision 隔离直传桶缓存，避免把旧 endpoint 的存在性结论复用于新拓扑。
+     */
+    private void ensureBucketExists(
+            S3Client client,
+            String nodeName,
+            String bucketName,
+            Long topologyRevision
+    ) throws RuntimeException {
+        String topologyNamespace = topologyRevision == null
+                ? "legacy"
+                : "topology-" + topologyRevision;
+        String cacheKey = topologyNamespace + ":" + nodeName + ":" + bucketName;
         Boolean cached = bucketExistenceCache.getIfPresent(cacheKey);
         if (Boolean.TRUE.equals(cached)) {
             return;
