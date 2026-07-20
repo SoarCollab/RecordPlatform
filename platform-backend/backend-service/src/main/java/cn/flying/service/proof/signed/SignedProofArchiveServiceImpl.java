@@ -95,6 +95,8 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
     private static final int MAX_MANIFEST_CHUNKS = SignedProofBundleContract.MAX_CHUNKS;
     private static final int MAX_CONCURRENT_EXPORTS = 8;
     private static final int MAX_ISSUANCE_TRANSACTION_ATTEMPTS = 3;
+    private static final int MAX_PENDING_FINALIZATION_RECHECKS = 40;
+    private static final long PENDING_FINALIZATION_RECHECK_MILLIS = 25L;
     private static final long MAX_STORAGE_VALIDATION_NANOS = TimeUnit.SECONDS.toNanos(60);
     private static final ExecutorService STORAGE_VALIDATION_EXECUTOR = new ThreadPoolExecutor(
             MAX_CONCURRENT_EXPORTS,
@@ -334,11 +336,20 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
             SignedProofBundleModel.EvidencePayloads payloads
     ) {
         int remainingAttempts = MAX_ISSUANCE_TRANSACTION_ATTEMPTS;
+        int remainingFinalizationRechecks = MAX_PENDING_FINALIZATION_RECHECKS;
         while (true) {
             try {
                 ProofFinalizationOutcome outcome = transactionTemplate.execute(status ->
                         issueNewLocked(file, leaf, batch, payloads));
                 return requireSuccessfulOutcome(outcome);
+            } catch (PendingVersionFinalizationException pendingFinalization) {
+                remainingFinalizationRechecks--;
+                if (remainingFinalizationRechecks == 0) {
+                    throw new RetryableException(
+                            ResultEnum.SERVICE_UNAVAILABLE,
+                            Map.of("reason", "newer file version finalization is still pending"));
+                }
+                awaitPendingVersionFinalization();
             } catch (TransientDataAccessException contention) {
                 remainingAttempts--;
                 if (remainingAttempts == 0) {
@@ -401,6 +412,9 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
             concurrent = synchronizeSupersededStatus(file, concurrent);
             requireExportableStatus(concurrent);
             return rebuildExistingLocked(file, leaf, batch, payloads, concurrent);
+        }
+        if (hasNewerPendingFinalization(file)) {
+            throw new PendingVersionFinalizationException();
         }
 
         Date issuedAt = currentDate();
@@ -1369,6 +1383,54 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
                 .eq(File::getStatus, FileUploadStatus.SUCCESS.getCode())
                 .eq(File::getDeleted, 0));
         return count != null && count > 0;
+    }
+
+    /**
+     * 检测同版本链更高 PREPARE 版本的 durable finalization claim，避免短事务间隙误签 ACTIVE。
+     */
+    private boolean hasNewerPendingFinalization(File file) {
+        if (file.getVersionGroupId() == null || file.getVersion() == null) {
+            return false;
+        }
+        List<File> candidates = fileMapper.selectList(new LambdaQueryWrapper<File>()
+                .select(File::getFileParam)
+                .eq(File::getTenantId, file.getTenantId())
+                .eq(File::getVersionGroupId, file.getVersionGroupId())
+                .gt(File::getVersion, file.getVersion())
+                .eq(File::getStatus, FileUploadStatus.PREPARE.getCode())
+                .eq(File::getDeleted, 0));
+        if (candidates == null || candidates.isEmpty()) {
+            return false;
+        }
+        return candidates.stream().anyMatch(candidate -> {
+            try {
+                Map<?, ?> fileParam = JsonConverter.parse(candidate.getFileParam(), Map.class);
+                return fileParam != null && fileParam.containsKey("_finalizationClaim");
+            } catch (RuntimeException malformedFinalizationState) {
+                return true;
+            }
+        });
+    }
+
+    /**
+     * 在不持有版本组或签发行锁时短暂退避，让正在最终化的更高版本取得下一段事务锁。
+     */
+    private void awaitPendingVersionFinalization() {
+        try {
+            TimeUnit.MILLISECONDS.sleep(PENDING_FINALIZATION_RECHECK_MILLIS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new RetryableException(ResultEnum.SERVICE_UNAVAILABLE, interrupted);
+        }
+    }
+
+    /**
+     * 标记首次签发事务观察到更高版本仍在 durable finalization 中，需要释放锁后重判。
+     */
+    private static final class PendingVersionFinalizationException extends RuntimeException {
+        private PendingVersionFinalizationException() {
+            super(null, null, false, false);
+        }
     }
 
     /**

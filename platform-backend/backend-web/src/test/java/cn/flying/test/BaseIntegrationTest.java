@@ -143,10 +143,11 @@ public abstract class BaseIntegrationTest {
     }
 
     /**
-     * 确保测试数据库用户具备读取 performance_schema 的权限，避免 Flyway 在检测 foreign_key_checks 时触发权限错误。
+     * 配置隔离 MySQL 容器的触发器信任开关，并确保测试用户可读取 performance_schema。
      * <p>
      * GitHub Actions / Testcontainers 环境中，Flyway 可能会通过 performance_schema.user_variables_by_thread 读取变量值；
      * 若测试用户缺少相应 SELECT 权限，将导致 Spring 容器启动失败并引发大量级联用例报错。
+     * 触发器信任仅作用于一次性测试容器，应用测试用户不会获得 SUPER 权限。
      * </p>
      */
     private static void ensureMySqlTestUserCanReadPerformanceSchema() {
@@ -160,6 +161,7 @@ public abstract class BaseIntegrationTest {
                     "-lc",
                     """
                     mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "
+                    SET GLOBAL log_bin_trust_function_creators = 1;
                     CREATE USER IF NOT EXISTS 'test'@'%' IDENTIFIED BY 'test';
                     GRANT SELECT ON performance_schema.* TO 'test'@'%';
                     GRANT SELECT ON performance_schema.user_variables_by_thread TO 'test'@'%';
