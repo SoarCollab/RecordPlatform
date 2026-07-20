@@ -441,7 +441,11 @@ public class DirectUploadPromotionService {
                     ResponseInputStream<GetObjectResponse> stream = sourceClient.getObject(sourceRequest);
                     try {
                         ensureVerificationWithinDeadline(deadlineNanos, part.partIndex());
-                        return new DeadlineBoundInputStream(stream, bufferSize, deadlineNanos);
+                        return new DeadlineBoundInputStream(
+                                stream,
+                                bufferSize,
+                                deadlineNanos
+                        );
                     } catch (RuntimeException | Error e) {
                         closeRejectedSourceStream(stream, e);
                         throw e;
@@ -597,6 +601,7 @@ public class DirectUploadPromotionService {
             }
             throw new IllegalStateException("failed to stream direct-upload object", e);
         }
+        ensureVerificationWithinDeadline(verificationDeadline, part.partIndex());
 
         String actualCipherHash = HASH_PREFIX_SHA256
                 + HexFormat.of().formatHex(chunkDigest.digest());
@@ -1989,7 +1994,8 @@ public class DirectUploadPromotionService {
     /**
      * 到达共享截止时间时主动 abort 响应流，覆盖 GET 返回 headers 后的阻塞读取阶段。
      */
-    private final class DeadlineBoundInputStream extends BufferedInputStream {
+    private static final class DeadlineBoundInputStream extends BufferedInputStream {
+        private final ResponseInputStream<GetObjectResponse> response;
         private final ScheduledFuture<?> abortFuture;
 
         private DeadlineBoundInputStream(
@@ -1998,21 +2004,41 @@ public class DirectUploadPromotionService {
                 long deadlineNanos
         ) {
             super(response, bufferSize);
-            long delayNanos = Math.max(0L, remainingNanos(deadlineNanos));
+            this.response = response;
             this.abortFuture = DEADLINE_ABORT_SCHEDULER.schedule(
                     response::abort,
-                    delayNanos,
+                    Math.max(0L, deadlineNanos - System.nanoTime()),
                     TimeUnit.NANOSECONDS
             );
         }
 
         /**
-         * 正常关闭时撤销延迟 abort，并关闭底层 SDK 响应。
+         * 关闭底层 SDK 响应后再撤销延迟 abort；关闭失败时立即 abort，避免外层二次关闭失去兜底。
          */
         @Override
         public void close() throws IOException {
+            try {
+                super.close();
+            } catch (IOException closeFailure) {
+                abortAfterCloseFailure(closeFailure);
+                throw closeFailure;
+            } catch (RuntimeException | Error closeFailure) {
+                abortAfterCloseFailure(closeFailure);
+                throw closeFailure;
+            }
             abortFuture.cancel(false);
-            super.close();
+        }
+
+        /**
+         * 在底层关闭失败后主动中止响应，并保留 abort 失败作为 suppressed 诊断。
+         */
+        private void abortAfterCloseFailure(Throwable closeFailure) {
+            try {
+                response.abort();
+                abortFuture.cancel(false);
+            } catch (RuntimeException | Error abortFailure) {
+                closeFailure.addSuppressed(abortFailure);
+            }
         }
     }
 

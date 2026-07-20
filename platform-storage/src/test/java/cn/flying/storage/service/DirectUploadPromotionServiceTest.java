@@ -1136,6 +1136,87 @@ class DirectUploadPromotionServiceTest {
         verify(stagingTracker, never()).retainAfterDelete(any());
     }
 
+    /**
+     * 验证读取完成后的阻塞 close 仍由同一 deadline watchdog 主动 abort，且不会进入副本提升。
+     */
+    @Test
+    @DisplayName("verification deadline should remain active while the response stream closes")
+    void shouldAbortResponseWhenCloseBlocksPastVerificationDeadline() throws Exception {
+        byte[] content = "blocked-response-close".getBytes();
+        DirectUploadPartDescriptor descriptor = descriptor(content, List.of(TARGET_NODE), 1);
+        AbortUnblockingCloseInputStream blockedClose = new AbortUnblockingCloseInputStream(content);
+        directUploadConfig.setTransferTimeoutSeconds(1);
+        when(clientManager.getClient(SOURCE_NODE)).thenReturn(sourceClient);
+        when(sourceClient.headObject(any(HeadObjectRequest.class)))
+                .thenReturn(HeadObjectResponse.builder()
+                        .contentLength((long) content.length)
+                        .eTag("\"sealed-etag\"")
+                        .build());
+        when(sourceClient.getObject(any(GetObjectRequest.class)))
+                .thenReturn(responseStream(blockedClose, content.length, blockedClose::abort));
+
+        CompletableFuture<Throwable> completion = CompletableFuture.supplyAsync(() -> {
+            try {
+                service.promote(descriptor, digestAccumulator());
+                return null;
+            } catch (Throwable throwable) {
+                return throwable;
+            }
+        });
+
+        assertThat(blockedClose.awaitCloseStarted(1, TimeUnit.SECONDS)).isTrue();
+        Throwable failure = completion.get(2, TimeUnit.SECONDS);
+
+        assertThat(failure)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("verification timed out");
+        assertThat(blockedClose.wasAborted()).isTrue();
+        verifyNoInteractions(targetClient);
+        verify(sourceClient, never()).deleteObject(any(DeleteObjectRequest.class));
+        verify(stagingTracker, never()).retainAfterDelete(any());
+    }
+
+    /**
+     * 验证首次 close 抛错时立即 abort，使 try-with-resources 的第二次响应关闭不会永久阻塞。
+     */
+    @Test
+    @DisplayName("response close failure should abort before the outer resource closes again")
+    void shouldAbortAfterResponseCloseFailureBeforeOuterCloseRetries() throws Exception {
+        byte[] content = "close-failure-response".getBytes();
+        DirectUploadPartDescriptor descriptor = descriptor(content, List.of(TARGET_NODE), 1);
+        ThrowThenAbortUnblockingCloseInputStream closeFailure =
+                new ThrowThenAbortUnblockingCloseInputStream(content);
+        directUploadConfig.setTransferTimeoutSeconds(30);
+        when(clientManager.getClient(SOURCE_NODE)).thenReturn(sourceClient);
+        when(sourceClient.headObject(any(HeadObjectRequest.class)))
+                .thenReturn(HeadObjectResponse.builder()
+                        .contentLength((long) content.length)
+                        .eTag("\"sealed-etag\"")
+                        .build());
+        when(sourceClient.getObject(any(GetObjectRequest.class)))
+                .thenReturn(responseStream(closeFailure, content.length, closeFailure::abort));
+
+        CompletableFuture<Throwable> completion = CompletableFuture.supplyAsync(() -> {
+            try {
+                service.promote(descriptor, digestAccumulator());
+                return null;
+            } catch (Throwable throwable) {
+                return throwable;
+            }
+        });
+
+        Throwable failure = completion.get(2, TimeUnit.SECONDS);
+
+        assertThat(failure)
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("failed to stream direct-upload object");
+        assertThat(closeFailure.wasAborted()).isTrue();
+        assertThat(closeFailure.awaitSecondClose(1, TimeUnit.SECONDS)).isTrue();
+        verifyNoInteractions(targetClient);
+        verify(sourceClient, never()).deleteObject(any(DeleteObjectRequest.class));
+        verify(stagingTracker, never()).retainAfterDelete(any());
+    }
+
     @Test
     @DisplayName("executor saturation should fail closed before cleanup")
     void shouldPreserveStagingWhenExecutorRejectsPromotion() {
@@ -2068,6 +2149,142 @@ class DirectUploadPromotionServiceTest {
 
         /**
          * 返回 provider abort 是否被触发。
+         */
+        private boolean wasAborted() {
+            return aborted.get();
+        }
+    }
+
+    /**
+     * 正常返回完整 body，但在 close 阶段等待 provider abort，用于复现 Apache 排空竞态。
+     */
+    private static final class AbortUnblockingCloseInputStream extends InputStream {
+        private final ByteArrayInputStream delegate;
+        private final CountDownLatch closeStarted = new CountDownLatch(1);
+        private final CountDownLatch abortSignal = new CountDownLatch(1);
+        private final AtomicBoolean aborted = new AtomicBoolean(false);
+
+        private AbortUnblockingCloseInputStream(byte[] content) {
+            this.delegate = new ByteArrayInputStream(content);
+        }
+
+        /**
+         * 从已准备好的完整响应体读取单字节。
+         */
+        @Override
+        public int read() {
+            return delegate.read();
+        }
+
+        /**
+         * 从已准备好的完整响应体批量读取。
+         */
+        @Override
+        public int read(byte[] buffer, int offset, int length) {
+            return delegate.read(buffer, offset, length);
+        }
+
+        /**
+         * 模拟 Apache 客户端在关闭响应时等待排空剩余 body。
+         */
+        @Override
+        public void close() throws IOException {
+            closeStarted.countDown();
+            try {
+                abortSignal.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("blocked close interrupted", e);
+            }
+        }
+
+        /**
+         * 发布 provider abort 并唤醒阻塞关闭。
+         */
+        private void abort() {
+            aborted.set(true);
+            abortSignal.countDown();
+        }
+
+        /**
+         * 等待生产流进入底层 close。
+         */
+        private boolean awaitCloseStarted(long timeout, TimeUnit unit) throws InterruptedException {
+            return closeStarted.await(timeout, unit);
+        }
+
+        /**
+         * 返回 provider abort 是否在 deadline 到达后被触发。
+         */
+        private boolean wasAborted() {
+            return aborted.get();
+        }
+    }
+
+    /**
+     * 首次 close 抛错，第二次 close 等待 abort，用于复现嵌套响应资源的失败关闭竞态。
+     */
+    private static final class ThrowThenAbortUnblockingCloseInputStream extends InputStream {
+        private final ByteArrayInputStream delegate;
+        private final AtomicInteger closeCount = new AtomicInteger();
+        private final CountDownLatch secondCloseStarted = new CountDownLatch(1);
+        private final CountDownLatch abortSignal = new CountDownLatch(1);
+        private final AtomicBoolean aborted = new AtomicBoolean(false);
+
+        private ThrowThenAbortUnblockingCloseInputStream(byte[] content) {
+            this.delegate = new ByteArrayInputStream(content);
+        }
+
+        /**
+         * 从完整测试响应读取单字节。
+         */
+        @Override
+        public int read() {
+            return delegate.read();
+        }
+
+        /**
+         * 从完整测试响应批量读取。
+         */
+        @Override
+        public int read(byte[] buffer, int offset, int length) {
+            return delegate.read(buffer, offset, length);
+        }
+
+        /**
+         * 首次模拟 provider 关闭异常，后续关闭必须等到生产代码主动 abort。
+         */
+        @Override
+        public void close() throws IOException {
+            if (closeCount.incrementAndGet() == 1) {
+                throw new IOException("simulated response close failure");
+            }
+            secondCloseStarted.countDown();
+            try {
+                abortSignal.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("second close interrupted", e);
+            }
+        }
+
+        /**
+         * 发布 provider abort 并唤醒第二次关闭。
+         */
+        private void abort() {
+            aborted.set(true);
+            abortSignal.countDown();
+        }
+
+        /**
+         * 等待 try-with-resources 执行外层响应的第二次 close。
+         */
+        private boolean awaitSecondClose(long timeout, TimeUnit unit) throws InterruptedException {
+            return secondCloseStarted.await(timeout, unit);
+        }
+
+        /**
+         * 返回首次 close 失败后是否已主动 abort。
          */
         private boolean wasAborted() {
             return aborted.get();

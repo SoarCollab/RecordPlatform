@@ -532,6 +532,14 @@ public class CacheUtils {
                         return 0
                     end
                 end
+                local setType = redis.call('TYPE', KEYS[2]).ok
+                local pausedAtType = redis.call('TYPE', KEYS[3]).ok
+                local activityAtType = redis.call('TYPE', KEYS[4]).ok
+                if (setType ~= 'none' and setType ~= 'set')
+                        or (pausedAtType ~= 'none' and pausedAtType ~= 'string')
+                        or (activityAtType ~= 'none' and activityAtType ~= 'string') then
+                    return -3
+                end
                 redis.call('EXPIRE', KEYS[1], ARGV[3])
                 redis.call('SADD', KEYS[2], ARGV[1])
                 redis.call('SET', KEYS[3], ARGV[2], 'EX', ARGV[3])
@@ -567,6 +575,9 @@ public class CacheUtils {
         }
         if (result == -2L) {
             throw new IllegalStateException("JSON 主状态损坏，拒绝集合转换: " + stateKey);
+        }
+        if (result == -3L) {
+            throw new IllegalStateException("会话生命周期证据键类型损坏，拒绝集合转换: " + stateKey);
         }
         if (result != -1L && result != 0L && result != 1L) {
             throw new IllegalStateException("JSON 状态条件集合写入返回未知结果: " + stateKey);
@@ -627,6 +638,10 @@ public class CacheUtils {
                     if normalized == ARGV[i] then
                         return 0
                     end
+                end
+                local activityAtType = redis.call('TYPE', KEYS[2]).ok
+                if activityAtType ~= 'none' and activityAtType ~= 'string' then
+                    return -3
                 end
                 redis.call('EXPIRE', KEYS[1], ARGV[3])
                 redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
@@ -704,6 +719,14 @@ public class CacheUtils {
                     return -2
                 end
                 local normalized = string.lower(status)
+                local setType = redis.call('TYPE', KEYS[2]).ok
+                local pausedAtType = redis.call('TYPE', KEYS[3]).ok
+                local activityAtType = redis.call('TYPE', KEYS[4]).ok
+                if (setType ~= 'none' and setType ~= 'set')
+                        or (pausedAtType ~= 'none' and pausedAtType ~= 'string')
+                        or (activityAtType ~= 'none' and activityAtType ~= 'string') then
+                    return -3
+                end
                 for i = 4, #ARGV do
                     if normalized == ARGV[i] then
                         redis.call('SREM', KEYS[2], ARGV[1])
@@ -801,6 +824,10 @@ public class CacheUtils {
             throw new IllegalStateException("JSON 主状态损坏，拒绝" + operationName + ": "
                     + prefixKeys.getFirst());
         }
+        if (result == -3L) {
+            throw new IllegalStateException("会话生命周期证据键类型损坏，拒绝" + operationName + ": "
+                    + prefixKeys.getFirst());
+        }
         if (result < -1L || result > 2L) {
             throw new IllegalStateException(operationName + "返回未知结果: " + prefixKeys.getFirst());
         }
@@ -821,6 +848,14 @@ public class CacheUtils {
     public boolean atomicAddToSetAndHash(String setKey, String setValue,
                                          String hashKey, String hashField, String hashValue) {
         String luaScript = """
+                local setType = redis.call('TYPE', KEYS[1]).ok
+                local hashType = redis.call('TYPE', KEYS[2]).ok
+                if setType ~= 'none' and setType ~= 'set' then
+                    return -2
+                end
+                if hashType ~= 'none' and hashType ~= 'hash' then
+                    return -3
+                end
                 local current = redis.call('HGET', KEYS[2], ARGV[2])
                 if current and current ~= ARGV[3] then
                     return -1
@@ -844,6 +879,12 @@ public class CacheUtils {
         }
         if (result == -1L) {
             throw new IllegalStateException("同一分片哈希已存在不同稳定值: " + hashField);
+        }
+        if (result == -2L) {
+            throw new IllegalStateException("原子分片证据 Set 键类型损坏: " + setKey);
+        }
+        if (result == -3L) {
+            throw new IllegalStateException("原子分片证据 Hash 键类型损坏: " + hashKey);
         }
         if (result != 1L) {
             throw new IllegalStateException("原子分片证据写入未完成: " + setKey);

@@ -288,7 +288,7 @@ public class FaultDomainManager {
             ConsistentHashRing ring = rings.get(domain);
             String targetNode = ring == null || ring.isEmpty() ? null : ring.getNode(chunkHash);
             if (targetNode != null && !assignedNodes.add(targetNode)) {
-                log.error("节点 {} 同时成为对象 {} 的多个故障域目标，整份多副本计划失败关闭",
+                log.error("节点 {} 同时成为对象 {} 在故障域 {} 的目标，整份多副本计划失败关闭",
                         targetNode, chunkHash, domain);
                 physicalTopologyValid = false;
             }

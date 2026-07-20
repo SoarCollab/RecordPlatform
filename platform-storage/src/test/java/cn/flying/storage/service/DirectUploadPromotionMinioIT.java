@@ -395,6 +395,7 @@ class DirectUploadPromotionMinioIT {
     @Test
     @DisplayName("real Redis recovery should repair a degraded direct-upload replica in MinIO")
     void shouldRecoverDegradedReplicaThroughRealRedisAndMinio() throws Exception {
+        storageProperties.getDegradedWrite().setEnabled(true);
         createBucket(minioAClient, DEGRADED_SOURCE_BUCKET);
         createBucket(minioBClient, DEGRADED_TARGET_BUCKET);
         byte[] content = "direct-upload-degraded-repair".getBytes(StandardCharsets.UTF_8);
@@ -459,6 +460,7 @@ class DirectUploadPromotionMinioIT {
     @Test
     @DisplayName("deterministic MinIO content mismatch should close in the Redis dead letter lifecycle")
     void shouldDeadLetterDeterministicContentMismatchThroughRealMinioAndRedis() throws Exception {
+        storageProperties.getDegradedWrite().setEnabled(true);
         createBucket(minioAClient, DEAD_LETTER_SOURCE_BUCKET);
         createBucket(minioBClient, DEAD_LETTER_TARGET_BUCKET);
         byte[] declaredContent = "declared-canonical-content".getBytes(StandardCharsets.UTF_8);
@@ -828,6 +830,8 @@ class DirectUploadPromotionMinioIT {
                 .thenReturn(targetNode);
         when(faultDomainManager.getNodeDomain(sourceNode)).thenReturn("domain-a");
         when(faultDomainManager.getNodeDomain(targetNode)).thenReturn("domain-b");
+        when(faultDomainManager.areNodesOnIndependentPhysicalStorage(sourceNode, targetNode))
+                .thenReturn(true);
         return faultDomainManager;
     }
 
