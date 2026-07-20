@@ -3047,6 +3047,8 @@ public class FileUploadServiceImpl implements FileUploadService {
                     Map.of("reason", "direct finalization remains safely retryable before chain"));
         }
         if (durablePhase == FileService.FinalizationRecoveryPhase.CHAIN_ATTESTING) {
+            // 仅在 DB durable claim 明确证明链调用已开始后推进 Redis 诊断阶段。
+            state.setDirectFinalizationStage(DIRECT_STAGE_CHAIN_ATTESTING);
             retainDirectFinalizationForManualReconciliation(
                     state, "链调用结果不确定，禁止自动重放");
             throw new GeneralException(

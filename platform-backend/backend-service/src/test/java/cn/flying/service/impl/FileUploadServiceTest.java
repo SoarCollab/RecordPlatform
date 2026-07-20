@@ -1025,7 +1025,7 @@ class FileUploadServiceTest {
 
             assertEquals(ResultEnum.BLOCKCHAIN_ERROR, firstFailure.getResultEnum());
             assertEquals(ResultEnum.FILE_RECORD_ERROR, secondFailure.getResultEnum());
-            assertEquals("PREPARE_STORED", state.getDirectFinalizationStage());
+            assertEquals("CHAIN_ATTESTING", state.getDirectFinalizationStage());
             // durable ATTESTING 结果不确定后立即转人工，第二次请求不得再进入 FileService。
             verify(fileService, times(1)).attestDirectUploadedFile(
                     eq(USER_ID), eq(fileId), eq("direct.pdf"), anyList(), anyString(), eq(CLIENT_ID));
@@ -3433,7 +3433,7 @@ class FileUploadServiceTest {
 
             fileUploadService.cleanupExpiredUploadSessions();
 
-            assertEquals("PREPARE_STORED", state.getDirectFinalizationStage());
+            assertEquals("CHAIN_ATTESTING", state.getDirectFinalizationStage());
             verify(redisStateManager).retainManualReconciliationState(
                     same(state),
                     eq("finalization_manual_reconciliation_required"),
