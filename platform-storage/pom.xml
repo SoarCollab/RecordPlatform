@@ -26,6 +26,8 @@
         <skywalking.toolkit.version>9.6.0</skywalking.toolkit.version>
         <netty.version>4.2.16.Final</netty.version>
         <testcontainers.version>1.20.4</testcontainers.version>
+        <commons-compress.version>1.28.0</commons-compress.version>
+        <commons-lang3.version>3.20.0</commons-lang3.version>
         <maven-failsafe-plugin.version>3.5.5</maven-failsafe-plugin.version>
     </properties>
     <dependencies>
@@ -212,6 +214,17 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!-- Keep transitive test components on repository-approved versions. -->
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-compress</artifactId>
+                <version>${commons-compress.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-lang3</artifactId>
+                <version>${commons-lang3.version}</version>
+            </dependency>
             <!-- Override Bouncy Castle to fix CVE-2026-5598 (Covert Timing Channel)
                  Note: Project does not use Bouncy Castle directly or FrodoEngine.
                  Upgrading as a precaution. -->
@@ -257,6 +270,14 @@
                                 <requireJavaVersion>
                                     <version>[21,22)</version>
                                 </requireJavaVersion>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>org.apache.commons:commons-compress:(,1.26.0)</exclude>
+                                        <exclude>org.apache.commons:commons-lang3:(,3.18.0)</exclude>
+                                    </excludes>
+                                    <searchTransitive>true</searchTransitive>
+                                    <message>Commons dependency security floors: commons-compress must be at least 1.26.0 and commons-lang3 must be at least 3.18.0.</message>
+                                </bannedDependencies>
                             </rules>
                         </configuration>
                     </execution>
