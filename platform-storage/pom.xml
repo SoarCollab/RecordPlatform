@@ -15,7 +15,7 @@
     <description>S3-compatible distributed storage service</description>
     <properties>
         <java.version>21</java.version>
-        <jackson-bom.version>2.21.4</jackson-bom.version>
+        <jackson-bom.version>2.21.5</jackson-bom.version>
         <dubbo.version>3.3.6</dubbo.version>
         <protobuf.version>4.34.1</protobuf.version>
         <aws.sdk.version>2.44.4</aws.sdk.version>
@@ -191,12 +191,12 @@
             <dependency>
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
-                <version>3.1.4</version>
+                <version>3.1.5</version>
             </dependency>
             <dependency>
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
-                <version>3.1.4</version>
+                <version>3.1.5</version>
             </dependency>
             <dependency>
                 <groupId>io.netty</groupId>

@@ -17,7 +17,7 @@
     <properties>
         <java.version>21</java.version>
         <tomcat.version>10.1.55</tomcat.version>
-        <jackson-bom.version>2.21.4</jackson-bom.version>
+        <jackson-bom.version>2.21.5</jackson-bom.version>
         <hutool.version>5.8.44</hutool.version>
         <mybatis-plus-bom.version>3.5.16</mybatis-plus-bom.version>
         <testcontainers.version>1.20.4</testcontainers.version>
@@ -156,12 +156,12 @@
             <dependency>
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
-                <version>3.1.4</version>
+                <version>3.1.5</version>
             </dependency>
             <dependency>
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
-                <version>3.1.4</version>
+                <version>3.1.5</version>
             </dependency>
             <!-- Override Bouncy Castle to fix CVE-2026-5598 (Covert Timing Channel)
                  Note: Project does not use Bouncy Castle directly or FrodoEngine.
