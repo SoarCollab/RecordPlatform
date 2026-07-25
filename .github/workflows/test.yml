@@ -580,6 +580,10 @@ jobs:
           pnpm --version
           pnpm install --frozen-lockfile
 
+      - name: Audit frontend production and development dependencies
+        working-directory: .
+        run: corepack pnpm@10.26.1 -C platform-frontend audit --audit-level high
+
       - name: Check Formatting
         run: pnpm format:check
 
