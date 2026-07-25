@@ -15,7 +15,7 @@
     <description>fisco</description>
     <properties>
         <java.version>21</java.version>
-        <jackson-bom.version>2.21.4</jackson-bom.version>
+        <jackson-bom.version>2.21.5</jackson-bom.version>
         <!--
             byte-buddy-agent.version intentionally removed; use ${byte-buddy.version} from Spring Boot BOM
             so the agent path in argLine always matches the version Maven resolves transitively.
@@ -176,12 +176,12 @@
             <dependency>
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
-                <version>3.1.4</version>
+                <version>3.1.5</version>
             </dependency>
             <dependency>
                 <groupId>tools.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
-                <version>3.1.4</version>
+                <version>3.1.5</version>
             </dependency>
             <!-- Override transitive okhttp/okio from web3j to fix CVE (certificate validation + conversion error) -->
             <dependency>
