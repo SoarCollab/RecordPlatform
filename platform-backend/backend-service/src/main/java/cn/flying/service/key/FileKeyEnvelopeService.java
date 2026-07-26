@@ -19,7 +19,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Date;
 import java.util.List;
@@ -48,7 +47,6 @@ public class FileKeyEnvelopeService {
     private static final String RESULT_FAILURE = "FAILURE";
     private static final String RESULT_SKIPPED = "SKIPPED";
     private static final String RESULT_MISSING = "MISSING";
-    private static final int MAX_AUDIT_ERROR_LENGTH = 512;
 
     private static final TypeReference<Map<String, Object>> FILE_PARAM_TYPE = new TypeReference<>() {
     };
@@ -66,7 +64,7 @@ public class FileKeyEnvelopeService {
 
     private final FileKeyEnvelopeMapper fileKeyEnvelopeMapper;
     private final FileKeyAuditLogMapper fileKeyAuditLogMapper;
-    private final LocalKeyWrappingService wrappingService;
+    private final KeyWrappingProviderRegistry wrappingRegistry;
     private final FileKeyEnvelopeProperties properties;
     private final CryptoSuitePolicyService suitePolicy;
 
@@ -156,40 +154,84 @@ public class FileKeyEnvelopeService {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件密钥信封上下文不完整");
         }
 
-        markActiveOwnerEnvelopesSuperseded(tenantId, fileId, resolvedFileHash, ownerId);
-        byte[] aad = buildEnvelopeAad(
+        WrappingKeyReference target = wrappingRegistry.activeKeyReference(envelopeResult.keyVersion()).requireValue();
+        WrappingContext context = buildWrappingContext(
                 tenantId,
                 fileId,
                 resolvedFileHash,
                 RECIPIENT_TYPE_OWNER,
                 ownerId,
                 envelopeResult.keyVersion(),
-                envelopeResult.algorithmSuite()
+                envelopeResult.algorithmSuite(),
+                target.contextSchema()
         );
-        WrappedDataKey wrapped = wrappingService.wrap(envelopeResult.initialKey(), aad, envelopeResult.keyVersion());
+        WrappedDataKey wrapped = wrappingRegistry.wrap(new KeyWrapRequest(
+                PlaintextDataKey.of(envelopeResult.initialKey()),
+                context,
+                target,
+                envelopeResult.keyVersion()
+        )).requireValue();
+        markActiveOwnerEnvelopesSuperseded(tenantId, fileId, resolvedFileHash, ownerId);
 
-        FileKeyEnvelope envelope = new FileKeyEnvelope()
+        FileKeyEnvelope envelope = createEnvelope(
+                tenantId,
+                fileId,
+                resolvedFileHash,
+                RECIPIENT_TYPE_OWNER,
+                ownerId,
+                envelopeResult.algorithmSuite(),
+                envelopeResult.signatureSuite(),
+                envelopeResult.kemSuite(),
+                envelopeResult.proofSuite(),
+                envelopeResult.encryptionAlgorithm(),
+                parseDeprecatedAfter(envelopeResult.deprecatedAfter()),
+                wrapped,
+                context
+        );
+        fileKeyEnvelopeMapper.insert(envelope);
+    }
+
+    /**
+     * 基于 provider 结果创建完整持久化信封。
+     */
+    private FileKeyEnvelope createEnvelope(Long tenantId,
+                                           Long fileId,
+                                           String fileHash,
+                                           String recipientType,
+                                           Long recipientId,
+                                           String algorithmSuite,
+                                           String signatureSuite,
+                                           String kemSuite,
+                                           String proofSuite,
+                                           String encryptionAlgorithm,
+                                           Date deprecatedAfter,
+                                           WrappedDataKey wrapped,
+                                           WrappingContext context) {
+        WrappingKeyReference reference = wrapped.keyReference();
+        return new FileKeyEnvelope()
                 .setTenantId(tenantId)
                 .setFileId(fileId)
-                .setFileHash(resolvedFileHash)
-                .setRecipientType(RECIPIENT_TYPE_OWNER)
-                .setRecipientId(ownerId)
+                .setFileHash(fileHash)
+                .setRecipientType(recipientType)
+                .setRecipientId(recipientId)
                 .setKeyVersion(wrapped.keyVersion())
-                .setAlgorithmSuite(envelopeResult.algorithmSuite())
-                .setSignatureSuite(envelopeResult.signatureSuite())
-                .setKemSuite(envelopeResult.kemSuite())
-                .setProofSuite(envelopeResult.proofSuite())
-                .setEncryptionAlgorithm(envelopeResult.encryptionAlgorithm())
+                .setAlgorithmSuite(algorithmSuite)
+                .setSignatureSuite(signatureSuite)
+                .setKemSuite(kemSuite)
+                .setProofSuite(proofSuite)
+                .setEncryptionAlgorithm(encryptionAlgorithm)
                 .setWrappingAlgorithm(wrapped.wrappingAlgorithm())
                 .setKmsProvider(wrapped.kmsProvider())
+                .setProviderContractVersion(reference.providerContractVersion())
                 .setKmsKeyId(wrapped.kmsKeyId())
+                .setProviderKeyVersion(reference.providerKeyVersion())
+                .setContextSchema(reference.contextSchema())
                 .setEncryptedDataKey(wrapped.encryptedDataKey())
                 .setWrappingIv(wrapped.wrappingIv())
-                .setAadHash(hashAad(aad))
+                .setAadHash(context.sha256Hex())
                 .setStatus(STATUS_ACTIVE)
-                .setDeprecatedAfter(parseDeprecatedAfter(envelopeResult.deprecatedAfter()))
+                .setDeprecatedAfter(deprecatedAfter)
                 .setDeleted(0);
-        fileKeyEnvelopeMapper.insert(envelope);
     }
 
     /**
@@ -496,6 +538,7 @@ public class FileKeyEnvelopeService {
 
         CryptoSuiteMetadata targetMetadata = suitePolicy.currentMetadata(properties.getKeyVersion());
         Integer targetKeyVersion = targetMetadata.keyVersion();
+        WrappingKeyReference targetReference = wrappingRegistry.activeKeyReference(targetKeyVersion).requireValue();
         List<FileKeyEnvelope> envelopes = fileKeyEnvelopeMapper.selectList(new LambdaQueryWrapper<FileKeyEnvelope>()
                 .eq(FileKeyEnvelope::getTenantId, tenantId)
                 .eq(FileKeyEnvelope::getFileId, file.getId())
@@ -513,39 +556,60 @@ public class FileKeyEnvelopeService {
             return new KeyEnvelopeRotationResult(file.getFileHash(), targetKeyVersion, rotated, skipped);
         }
         for (FileKeyEnvelope envelope : envelopes) {
-            if (targetKeyVersion.equals(envelope.getKeyVersion())) {
+            WrappingContext sourceContext;
+            try {
+                validatePersistedEnvelopeMetadata(envelope);
+                sourceContext = buildContextFromEnvelope(envelope);
+            } catch (GeneralException exception) {
+                audit(envelope, OPERATION_ROTATE, actorId, RESULT_FAILURE, reason,
+                        KeyWrappingFailureCategory.INVALID_REQUEST);
+                throw exception;
+            }
+            if (!sourceContext.matchesHash(envelope.getAadHash())) {
+                KeyWrappingFailure failure = KeyWrappingFailure.of(
+                        KeyWrappingFailureCategory.INVALID_CIPHERTEXT, false);
+                audit(envelope, OPERATION_ROTATE, actorId, RESULT_FAILURE, reason,
+                        failure.category());
+                throw failure.toException();
+            }
+            if (hasTargetIdentity(envelope, targetReference, targetKeyVersion)) {
                 skipped++;
-                audit(envelope, OPERATION_ROTATE, actorId, RESULT_SKIPPED, reason, "already target key version");
+                audit(envelope, OPERATION_ROTATE, actorId, RESULT_SKIPPED, reason,
+                        KeyWrappingFailureCategory.NONE);
                 continue;
             }
-            if (hasActiveEnvelopeVersion(envelope, targetKeyVersion)) {
+            if (hasActiveEnvelopeTarget(envelope, targetReference, targetKeyVersion)) {
                 markEnvelopeSuperseded(envelope);
                 skipped++;
-                audit(envelope, OPERATION_ROTATE, actorId, RESULT_SKIPPED, reason, "target key version already active");
+                audit(envelope, OPERATION_ROTATE, actorId, RESULT_SKIPPED, reason,
+                        KeyWrappingFailureCategory.NONE);
                 continue;
             }
 
+            WrappingContext targetContext = buildWrappingContext(
+                    envelope.getTenantId(), envelope.getFileId(), envelope.getFileHash(),
+                    envelope.getRecipientType(), envelope.getRecipientId(), targetKeyVersion,
+                    envelope.getAlgorithmSuite(), targetReference.contextSchema());
+            KeyWrappingResult<WrappedDataKey> rotationResult;
             try {
-                String plaintextKey = unwrapEnvelopeForRotation(envelope);
-                byte[] targetAad = buildEnvelopeAad(
-                        envelope.getTenantId(),
-                        envelope.getFileId(),
-                        envelope.getFileHash(),
-                        envelope.getRecipientType(),
-                        envelope.getRecipientId(),
-                        targetKeyVersion,
-                        envelope.getAlgorithmSuite()
-                );
-                WrappedDataKey wrapped = wrappingService.wrap(plaintextKey, targetAad, targetKeyVersion);
-                markEnvelopeSuperseded(envelope);
-                FileKeyEnvelope rotatedEnvelope = copyForRotation(envelope, wrapped, targetAad);
-                fileKeyEnvelopeMapper.insert(rotatedEnvelope);
-                rotated++;
-                audit(rotatedEnvelope, OPERATION_ROTATE, actorId, RESULT_SUCCESS, reason, null);
-            } catch (GeneralException e) {
-                audit(envelope, OPERATION_ROTATE, actorId, RESULT_FAILURE, reason, e.getMessage());
-                throw e;
+                rotationResult = rotateEnvelopeMaterial(
+                        envelope, sourceContext, targetReference, targetContext, targetKeyVersion);
+            } catch (GeneralException exception) {
+                rotationResult = KeyWrappingResult.failure(KeyWrappingFailure.of(
+                        KeyWrappingFailureCategory.INVALID_REQUEST, false));
             }
+            if (!rotationResult.isSuccess()) {
+                audit(envelope, OPERATION_ROTATE, actorId, RESULT_FAILURE, reason,
+                        rotationResult.failure().category());
+                throw rotationResult.failure().toException();
+            }
+            WrappedDataKey wrapped = rotationResult.value();
+            markEnvelopeSuperseded(envelope);
+            FileKeyEnvelope rotatedEnvelope = copyForRotation(envelope, wrapped, targetContext);
+            fileKeyEnvelopeMapper.insert(rotatedEnvelope);
+            rotated++;
+            audit(rotatedEnvelope, OPERATION_ROTATE, actorId, RESULT_SUCCESS, reason,
+                    KeyWrappingFailureCategory.NONE);
         }
 
         return new KeyEnvelopeRotationResult(file.getFileHash(), targetKeyVersion, rotated, skipped);
@@ -583,16 +647,16 @@ public class FileKeyEnvelopeService {
     /**
      * Builds stable AAD for envelope wrapping and unwrapping.
      */
-    private byte[] buildEnvelopeAad(Long tenantId,
-                                    Long fileId,
-                                    String fileHash,
-                                    String recipientType,
-                                    Long recipientId,
-                                    Integer keyVersion,
-                                    String algorithmSuite) {
-        String aad = tenantId + "|" + fileId + "|" + fileHash + "|" + recipientType
-                + "|" + recipientId + "|" + keyVersion + "|" + algorithmSuite;
-        return aad.getBytes(StandardCharsets.UTF_8);
+    private WrappingContext buildWrappingContext(Long tenantId,
+                                                 Long fileId,
+                                                 String fileHash,
+                                                 String recipientType,
+                                                 Long recipientId,
+                                                 Integer keyVersion,
+                                                 String algorithmSuite,
+                                                 String contextSchema) {
+        return new WrappingContext(tenantId, fileId, fileHash, recipientType, recipientId,
+                keyVersion, algorithmSuite, contextSchema);
     }
 
     /**
@@ -632,31 +696,17 @@ public class FileKeyEnvelopeService {
         CryptoSuiteMetadata suiteMetadata = suitePolicy.currentMetadata(properties.getKeyVersion());
         Integer keyVersion = suiteMetadata.keyVersion();
         String algorithmSuite = suiteMetadata.algorithmSuite();
+        WrappingKeyReference target = wrappingRegistry.activeKeyReference(keyVersion).requireValue();
+        WrappingContext context = buildWrappingContext(tenantId, file.getId(), fileHash,
+                recipientType, recipientId, keyVersion, algorithmSuite, target.contextSchema());
+        WrappedDataKey wrapped = wrappingRegistry.wrap(new KeyWrapRequest(
+                PlaintextDataKey.of(initialKey), context, target, keyVersion)).requireValue();
         markActiveRecipientEnvelopesSuperseded(tenantId, file.getId(), fileHash, recipientType, recipientId);
-        byte[] aad = buildEnvelopeAad(tenantId, file.getId(), fileHash, recipientType, recipientId, keyVersion, algorithmSuite);
-        WrappedDataKey wrapped = wrappingService.wrap(initialKey, aad, keyVersion);
-
-        FileKeyEnvelope envelope = new FileKeyEnvelope()
-                .setTenantId(tenantId)
-                .setFileId(file.getId())
-                .setFileHash(fileHash)
-                .setRecipientType(recipientType)
-                .setRecipientId(recipientId)
-                .setKeyVersion(wrapped.keyVersion())
-                .setAlgorithmSuite(algorithmSuite)
-                .setSignatureSuite(suiteMetadata.signatureSuite())
-                .setKemSuite(suiteMetadata.kemSuite())
-                .setProofSuite(suiteMetadata.proofSuite())
-                .setEncryptionAlgorithm(properties.getEncryptionAlgorithm())
-                .setWrappingAlgorithm(wrapped.wrappingAlgorithm())
-                .setKmsProvider(wrapped.kmsProvider())
-                .setKmsKeyId(wrapped.kmsKeyId())
-                .setEncryptedDataKey(wrapped.encryptedDataKey())
-                .setWrappingIv(wrapped.wrappingIv())
-                .setAadHash(hashAad(aad))
-                .setStatus(STATUS_ACTIVE)
-                .setDeprecatedAfter(suiteMetadata.deprecatedAfterDate())
-                .setDeleted(0);
+        FileKeyEnvelope envelope = createEnvelope(
+                tenantId, file.getId(), fileHash, recipientType, recipientId,
+                algorithmSuite, suiteMetadata.signatureSuite(), suiteMetadata.kemSuite(),
+                suiteMetadata.proofSuite(), properties.getEncryptionAlgorithm(),
+                suiteMetadata.deprecatedAfterDate(), wrapped, context);
         fileKeyEnvelopeMapper.insert(envelope);
     }
 
@@ -742,37 +792,76 @@ public class FileKeyEnvelopeService {
      * Unwraps an envelope and records key access audit evidence.
      */
     private Optional<String> unwrapEnvelope(FileKeyEnvelope envelope, Long actorId, String reason) {
+        KeyWrappingResult<PlaintextDataKey> result = unwrapEnvelopeMaterial(envelope);
+        if (!result.isSuccess()) {
+            audit(envelope, OPERATION_UNWRAP, actorId, RESULT_FAILURE, reason,
+                    result.failure().category());
+            throw result.failure().toException();
+        }
+        audit(envelope, OPERATION_UNWRAP, actorId, RESULT_SUCCESS, reason,
+                KeyWrappingFailureCategory.NONE);
+        return Optional.of(result.value().reveal());
+    }
+
+    /**
+     * 校验上下文摘要后按持久化 provider 路由解封。
+     */
+    private KeyWrappingResult<PlaintextDataKey> unwrapEnvelopeMaterial(FileKeyEnvelope envelope) {
         try {
-            String plaintextKey = unwrapEnvelopeForRotation(envelope);
-            audit(envelope, OPERATION_UNWRAP, actorId, RESULT_SUCCESS, reason, null);
-            return Optional.of(plaintextKey);
-        } catch (GeneralException e) {
-            audit(envelope, OPERATION_UNWRAP, actorId, RESULT_FAILURE, reason, e.getMessage());
-            throw e;
+            validatePersistedEnvelopeMetadata(envelope);
+            WrappingContext context = buildContextFromEnvelope(envelope);
+            if (!context.matchesHash(envelope.getAadHash())) {
+                return KeyWrappingResult.failure(KeyWrappingFailure.of(
+                        KeyWrappingFailureCategory.INVALID_CIPHERTEXT, false));
+            }
+            return wrappingRegistry.unwrap(new KeyUnwrapRequest(toPersistedMaterial(envelope), context));
+        } catch (GeneralException exception) {
+            return KeyWrappingResult.failure(KeyWrappingFailure.of(
+                    KeyWrappingFailureCategory.INVALID_REQUEST, false));
         }
     }
 
     /**
-     * Unwraps an envelope without writing an unwrap audit event for internal rotation use.
+     * 优先执行同 Vault named key 原生 rewrap，否则受控解封后重新包封。
      */
-    private String unwrapEnvelopeForRotation(FileKeyEnvelope envelope) {
-        validatePersistedEnvelopeAadMetadata(envelope);
-        byte[] aad = buildEnvelopeAad(
-                envelope.getTenantId(),
-                envelope.getFileId(),
-                envelope.getFileHash(),
-                envelope.getRecipientType(),
-                envelope.getRecipientId(),
-                envelope.getKeyVersion(),
-                envelope.getAlgorithmSuite()
-        );
-        return wrappingService.unwrap(envelope, aad);
+    private KeyWrappingResult<WrappedDataKey> rotateEnvelopeMaterial(FileKeyEnvelope envelope,
+                                                                     WrappingContext sourceContext,
+                                                                     WrappingKeyReference targetReference,
+                                                                     WrappingContext targetContext,
+                                                                     Integer targetKeyVersion) {
+        if (!sourceContext.matchesHash(envelope.getAadHash())) {
+            return KeyWrappingResult.failure(KeyWrappingFailure.of(
+                    KeyWrappingFailureCategory.INVALID_CIPHERTEXT, false));
+        }
+        PersistedWrappedDataKey source = toPersistedMaterial(envelope);
+        boolean nativeEligible = source.keyReference().providerId().equals(targetReference.providerId())
+                && source.keyReference().providerContractVersion() == targetReference.providerContractVersion()
+                && source.keyReference().keyId().equals(targetReference.keyId())
+                && WrappingContext.EXTERNAL_CONTEXT_V2.equals(sourceContext.schema())
+                && WrappingContext.EXTERNAL_CONTEXT_V2.equals(targetContext.schema());
+        if (nativeEligible) {
+            KeyWrappingResult<WrappedDataKey> nativeResult = wrappingRegistry.rewrap(new KeyRewrapRequest(
+                    source, sourceContext, targetReference, targetContext, targetKeyVersion));
+            if (nativeResult.isSuccess()
+                    || nativeResult.failure().category() != KeyWrappingFailureCategory.UNSUPPORTED) {
+                return nativeResult;
+            }
+        }
+        KeyWrappingResult<PlaintextDataKey> unwrapped = wrappingRegistry.unwrap(
+                new KeyUnwrapRequest(source, sourceContext));
+        if (!unwrapped.isSuccess()) {
+            return KeyWrappingResult.failure(unwrapped.failure());
+        }
+        return wrappingRegistry.wrap(new KeyWrapRequest(
+                unwrapped.value(), targetContext, targetReference, targetKeyVersion));
     }
 
     /**
-     * Checks whether a target key version is already active for the same envelope recipient.
+     * 查询同 recipient 是否已存在完整目标身份的 active 信封。
      */
-    private boolean hasActiveEnvelopeVersion(FileKeyEnvelope envelope, Integer keyVersion) {
+    private boolean hasActiveEnvelopeTarget(FileKeyEnvelope envelope,
+                                            WrappingKeyReference target,
+                                            Integer keyVersion) {
         return fileKeyEnvelopeMapper.selectCount(new LambdaQueryWrapper<FileKeyEnvelope>()
                 .eq(FileKeyEnvelope::getTenantId, envelope.getTenantId())
                 .eq(FileKeyEnvelope::getFileId, envelope.getFileId())
@@ -780,7 +869,28 @@ public class FileKeyEnvelopeService {
                 .eq(FileKeyEnvelope::getRecipientType, envelope.getRecipientType())
                 .eq(FileKeyEnvelope::getRecipientId, envelope.getRecipientId())
                 .eq(FileKeyEnvelope::getKeyVersion, keyVersion)
+                .eq(FileKeyEnvelope::getKmsProvider, target.providerId())
+                .eq(FileKeyEnvelope::getProviderContractVersion, target.providerContractVersion())
+                .eq(FileKeyEnvelope::getKmsKeyId, target.keyId())
+                .eq(FileKeyEnvelope::getProviderKeyVersion, target.providerKeyVersion())
+                .eq(FileKeyEnvelope::getWrappingAlgorithm, target.wrappingAlgorithm())
+                .eq(FileKeyEnvelope::getContextSchema, target.contextSchema())
                 .eq(FileKeyEnvelope::getStatus, STATUS_ACTIVE)) > 0;
+    }
+
+    /**
+     * 判断当前信封是否已与完整目标身份一致。
+     */
+    private boolean hasTargetIdentity(FileKeyEnvelope envelope,
+                                      WrappingKeyReference target,
+                                      Integer keyVersion) {
+        return java.util.Objects.equals(envelope.getKeyVersion(), keyVersion)
+                && java.util.Objects.equals(envelope.getKmsProvider(), target.providerId())
+                && java.util.Objects.equals(envelope.getProviderContractVersion(), target.providerContractVersion())
+                && java.util.Objects.equals(envelope.getKmsKeyId(), target.keyId())
+                && java.util.Objects.equals(envelope.getProviderKeyVersion(), target.providerKeyVersion())
+                && java.util.Objects.equals(envelope.getWrappingAlgorithm(), target.wrappingAlgorithm())
+                && java.util.Objects.equals(envelope.getContextSchema(), target.contextSchema());
     }
 
     /**
@@ -798,28 +908,38 @@ public class FileKeyEnvelopeService {
      */
     private FileKeyEnvelope copyForRotation(FileKeyEnvelope source,
                                             WrappedDataKey wrapped,
-                                            byte[] aad) {
-        return new FileKeyEnvelope()
-                .setTenantId(source.getTenantId())
-                .setFileId(source.getFileId())
-                .setFileHash(source.getFileHash())
-                .setRecipientType(source.getRecipientType())
-                .setRecipientId(source.getRecipientId())
-                .setKeyVersion(wrapped.keyVersion())
-                .setAlgorithmSuite(source.getAlgorithmSuite())
-                .setSignatureSuite(source.getSignatureSuite())
-                .setKemSuite(source.getKemSuite())
-                .setProofSuite(source.getProofSuite())
-                .setEncryptionAlgorithm(source.getEncryptionAlgorithm())
-                .setWrappingAlgorithm(wrapped.wrappingAlgorithm())
-                .setKmsProvider(wrapped.kmsProvider())
-                .setKmsKeyId(wrapped.kmsKeyId())
-                .setEncryptedDataKey(wrapped.encryptedDataKey())
-                .setWrappingIv(wrapped.wrappingIv())
-                .setAadHash(hashAad(aad))
-                .setStatus(STATUS_ACTIVE)
-                .setDeprecatedAfter(cloneDate(source.getDeprecatedAfter()))
-                .setDeleted(0);
+                                            WrappingContext context) {
+        return createEnvelope(
+                source.getTenantId(), source.getFileId(), source.getFileHash(),
+                source.getRecipientType(), source.getRecipientId(), source.getAlgorithmSuite(),
+                source.getSignatureSuite(), source.getKemSuite(), source.getProofSuite(),
+                source.getEncryptionAlgorithm(), cloneDate(source.getDeprecatedAfter()), wrapped, context);
+    }
+
+    /**
+     * 从持久化信封重建严格 provider 路由材料。
+     */
+    private PersistedWrappedDataKey toPersistedMaterial(FileKeyEnvelope envelope) {
+        WrappingKeyReference reference = new WrappingKeyReference(
+                envelope.getKmsProvider(),
+                envelope.getProviderContractVersion(),
+                envelope.getKmsKeyId(),
+                envelope.getProviderKeyVersion(),
+                envelope.getWrappingAlgorithm(),
+                envelope.getContextSchema()
+        );
+        return new PersistedWrappedDataKey(
+                envelope.getEncryptedDataKey(), envelope.getWrappingIv(), reference, envelope.getKeyVersion());
+    }
+
+    /**
+     * 按持久化 context schema 重建精确认证上下文。
+     */
+    private WrappingContext buildContextFromEnvelope(FileKeyEnvelope envelope) {
+        return buildWrappingContext(
+                envelope.getTenantId(), envelope.getFileId(), envelope.getFileHash(),
+                envelope.getRecipientType(), envelope.getRecipientId(), envelope.getKeyVersion(),
+                envelope.getAlgorithmSuite(), envelope.getContextSchema());
     }
 
     /**
@@ -846,10 +966,19 @@ public class FileKeyEnvelopeService {
     /**
      * Requires the persisted suite field that participates in envelope AAD before unwrap.
      */
-    private void validatePersistedEnvelopeAadMetadata(FileKeyEnvelope envelope) {
-        if (!StringUtils.hasText(envelope.getAlgorithmSuite())) {
-            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件密钥信封缺少 algorithmSuite");
+    private void validatePersistedEnvelopeMetadata(FileKeyEnvelope envelope) {
+        if (envelope == null || !StringUtils.hasText(envelope.getAlgorithmSuite())
+                || !StringUtils.hasText(envelope.getKmsProvider())
+                || envelope.getProviderContractVersion() == null || envelope.getProviderContractVersion() <= 0
+                || !StringUtils.hasText(envelope.getKmsKeyId())
+                || !StringUtils.hasText(envelope.getProviderKeyVersion())
+                || !StringUtils.hasText(envelope.getWrappingAlgorithm())
+                || !StringUtils.hasText(envelope.getContextSchema())
+                || !StringUtils.hasText(envelope.getEncryptedDataKey())
+                || !StringUtils.hasText(envelope.getAadHash())) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件密钥信封 provider metadata 不完整");
         }
+        buildContextFromEnvelope(envelope).canonicalBytes();
     }
 
     /**
@@ -860,9 +989,18 @@ public class FileKeyEnvelopeService {
                        Long actorId,
                        String result,
                        String reason,
-                       String errorMessage) {
-        audit(envelope.getTenantId(), envelope.getFileId(), envelope.getFileHash(), envelope.getRecipientType(),
-                envelope.getRecipientId(), envelope.getKeyVersion(), operation, actorId, result, reason, errorMessage);
+                       KeyWrappingFailureCategory failureCategory) {
+        FileKeyAuditLog auditLog = baseAudit(
+                envelope.getTenantId(), envelope.getFileId(), envelope.getFileHash(), envelope.getRecipientType(),
+                envelope.getRecipientId(), envelope.getKeyVersion(), operation, actorId, result, reason)
+                .setKmsProvider(envelope.getKmsProvider())
+                .setProviderContractVersion(envelope.getProviderContractVersion())
+                .setProviderKeyVersion(envelope.getProviderKeyVersion())
+                .setKeyIdFingerprint(fingerprint(envelope.getKmsKeyId()))
+                .setWrappingAlgorithm(envelope.getWrappingAlgorithm())
+                .setAlgorithmSuite(envelope.getAlgorithmSuite())
+                .setFailureCategory(categoryName(failureCategory));
+        fileKeyAuditLogMapper.insert(auditLog);
     }
 
     /**
@@ -878,8 +1016,27 @@ public class FileKeyEnvelopeService {
                        Long actorId,
                        String result,
                        String reason,
-                       String errorMessage) {
-        FileKeyAuditLog auditLog = new FileKeyAuditLog()
+                       KeyWrappingFailureCategory failureCategory) {
+        FileKeyAuditLog auditLog = baseAudit(tenantId, fileId, fileHash, recipientType, recipientId,
+                keyVersion, operation, actorId, result, reason)
+                .setFailureCategory(categoryName(failureCategory));
+        fileKeyAuditLogMapper.insert(auditLog);
+    }
+
+    /**
+     * 创建不含 provider secret 的基础密钥审计记录。
+     */
+    private FileKeyAuditLog baseAudit(Long tenantId,
+                                      Long fileId,
+                                      String fileHash,
+                                      String recipientType,
+                                      Long recipientId,
+                                      Integer keyVersion,
+                                      String operation,
+                                      Long actorId,
+                                      String result,
+                                      String reason) {
+        return new FileKeyAuditLog()
                 .setTenantId(resolveAuditTenantId(tenantId))
                 .setFileId(fileId)
                 .setFileHash(fileHash)
@@ -890,19 +1047,15 @@ public class FileKeyEnvelopeService {
                 .setActorId(actorId)
                 .setResult(result)
                 .setReason(reason)
-                .setErrorMessage(truncate(errorMessage))
+                .setErrorMessage(null)
                 .setDeleted(0);
-        fileKeyAuditLogMapper.insert(auditLog);
     }
 
     /**
-     * Keeps audit failure messages bounded and free of large exception payloads.
+     * 返回可持久化的稳定失败分类名称。
      */
-    private String truncate(String value) {
-        if (value == null || value.length() <= MAX_AUDIT_ERROR_LENGTH) {
-            return value;
-        }
-        return value.substring(0, MAX_AUDIT_ERROR_LENGTH);
+    private String categoryName(KeyWrappingFailureCategory category) {
+        return (category == null ? KeyWrappingFailureCategory.NONE : category).name();
     }
 
     /**
@@ -957,19 +1110,22 @@ public class FileKeyEnvelopeService {
     }
 
     /**
-     * Hashes envelope AAD for audit/debug comparison without storing raw AAD.
+     * 计算 provider key reference 指纹，审计中不保存原始 key id。
      */
-    private String hashAad(byte[] aad) {
+    private String fingerprint(String keyId) {
+        if (!StringUtils.hasText(keyId)) {
+            return null;
+        }
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(aad);
+            byte[] hash = digest.digest(keyId.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             StringBuilder builder = new StringBuilder(hash.length * 2);
             for (byte b : hash) {
                 builder.append(String.format("%02x", b));
             }
             return builder.toString();
         } catch (Exception e) {
-            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR, "文件密钥信封 AAD 哈希失败");
+            throw new GeneralException(ResultEnum.ENCRYPTION_ERROR, "密钥引用指纹计算失败");
         }
     }
 }

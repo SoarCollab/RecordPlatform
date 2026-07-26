@@ -69,6 +69,16 @@ record-platform:
   rpc:
     blockchain-token: test-blockchain-rpc-token
 
+file:
+  key-envelope:
+    active-provider: local
+    active-provider-contract-version: 1
+    providers:
+      local:
+        key-id: test-local-file-key-v1
+        historical-key-ids: []
+        master-key: test-file-envelope-master-key-32chars
+
 # Disable Dubbo registry for tests (mock external services)
 dubbo:
   registry:

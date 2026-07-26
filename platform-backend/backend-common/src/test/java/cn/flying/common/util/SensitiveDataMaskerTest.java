@@ -52,7 +52,7 @@ class SensitiveDataMaskerTest {
     @DisplayName("验证码和文件解密密钥字段应被脱敏")
     void maskSensitiveFields_shouldMaskVerificationAndDecryptFields() {
         String json = """
-                {"email":"user@test.com","code":"123456","verificationCode":"654321","new_password":"newPass123","initialKey":"file-key","decryptKey":"decrypt-key","encryptedDataKey":"wrapped-key","wrappingIv":"nonce-value","kmsKeyId":"kms-key","clientId":"upload-session-secret","nonce":"public-nonce"}
+                {"email":"user@test.com","code":"123456","verificationCode":"654321","new_password":"newPass123","initialKey":"file-key","decryptKey":"decrypt-key","encryptedDataKey":"wrapped-key","wrappingIv":"nonce-value","kmsKeyId":"kms-key","keyId":"vault-key","keyName":"vault-key-name","historicalKeyIds":["old-key-id"],"ciphertext":"vault:v1:secret","vaultToken":"vault-token","context":"derived-context","wrappingContext":"context","clientId":"upload-session-secret","nonce":"public-nonce"}
                 """;
 
         String masked = SensitiveDataMasker.maskSensitiveFields(json);
@@ -66,6 +66,13 @@ class SensitiveDataMaskerTest {
         assertTrue(masked.contains("\"encryptedDataKey\":\"******\""));
         assertTrue(masked.contains("\"wrappingIv\":\"******\""));
         assertTrue(masked.contains("\"kmsKeyId\":\"******\""));
+        assertTrue(masked.contains("\"keyId\":\"******\""));
+        assertTrue(masked.contains("\"keyName\":\"******\""));
+        assertTrue(masked.contains("\"historicalKeyIds\":\"******\""));
+        assertTrue(masked.contains("\"ciphertext\":\"******\""));
+        assertTrue(masked.contains("\"vaultToken\":\"******\""));
+        assertTrue(masked.contains("\"context\":\"******\""));
+        assertTrue(masked.contains("\"wrappingContext\":\"******\""));
         assertTrue(masked.contains("\"clientId\":\"******\""));
         assertTrue(masked.contains("\"nonce\":\"public-nonce\""));
         assertFalse(masked.contains("123456"));

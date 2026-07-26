@@ -47,6 +47,32 @@ spring:
     username: YOUR_USERNAME
     password: YOUR_PASSWORD
 
+# ==============================================================================
+# 文件数据密钥包封配置
+# 生产密钥和 Vault token 应由部署 secret 注入；模板只引用环境变量，不保存明文凭据。
+# ==============================================================================
+file:
+  key-envelope:
+    active-provider: ${FILE_KEY_ENVELOPE_ACTIVE_PROVIDER:}
+    active-provider-contract-version: ${FILE_KEY_ENVELOPE_ACTIVE_PROVIDER_CONTRACT_VERSION:1}
+    providers:
+      local:
+        key-id: ${FILE_KEY_ENVELOPE_LOCAL_KEY_ID:}
+        historical-key-ids: ${FILE_KEY_ENVELOPE_LOCAL_HISTORICAL_KEY_IDS:}
+        master-key: ${FILE_KEY_ENVELOPE_MASTER_KEY:}
+      vault-transit:
+        address: ${FILE_KEY_ENVELOPE_VAULT_ADDRESS:}
+        token: ${FILE_KEY_ENVELOPE_VAULT_TOKEN:}
+        namespace: ${FILE_KEY_ENVELOPE_VAULT_NAMESPACE:}
+        mount: ${FILE_KEY_ENVELOPE_VAULT_MOUNT:transit}
+        key-name: ${FILE_KEY_ENVELOPE_VAULT_KEY_NAME:}
+        key-version: ${FILE_KEY_ENVELOPE_VAULT_KEY_VERSION:1}
+        allow-http: ${FILE_KEY_ENVELOPE_VAULT_ALLOW_HTTP:false}
+        connect-timeout: ${FILE_KEY_ENVELOPE_VAULT_CONNECT_TIMEOUT:2s}
+        request-timeout: ${FILE_KEY_ENVELOPE_VAULT_REQUEST_TIMEOUT:5s}
+        max-request-bytes: ${FILE_KEY_ENVELOPE_VAULT_MAX_REQUEST_BYTES:65536}
+        max-response-bytes: ${FILE_KEY_ENVELOPE_VAULT_MAX_RESPONSE_BYTES:65536}
+
 
 # ==============================================================================
 # RecordPlatform Storage Service Nacos 配置模板

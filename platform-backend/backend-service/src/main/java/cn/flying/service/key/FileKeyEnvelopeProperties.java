@@ -12,7 +12,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Configuration for file data-key envelope storage and wrapping.
+ * 文件数据密钥信封存储与包封配置。
  */
 @Getter
 @Setter
@@ -20,13 +20,11 @@ import java.util.Set;
 @ConfigurationProperties(prefix = "file.key-envelope")
 public class FileKeyEnvelopeProperties {
 
-    private String provider = "local";
+    private String activeProvider = LocalKeyWrappingService.PROVIDER_ID;
 
-    private String kmsKeyId = "local-file-key-v1";
+    private Integer activeProviderContractVersion = 1;
 
-    private String localMasterKey;
-
-    private Map<Integer, String> localMasterKeys = new LinkedHashMap<>();
+    private Providers providers = new Providers();
 
     private Integer keyVersion = 1;
 
@@ -61,4 +59,118 @@ public class FileKeyEnvelopeProperties {
     );
 
     private Set<String> deprecatedSuites = new LinkedHashSet<>();
+
+    /**
+     * 返回兼容旧调用方的 active provider 配置。
+     */
+    public String getProvider() {
+        return activeProvider;
+    }
+
+    /**
+     * 将旧 provider setter 映射到新的 active provider 配置。
+     */
+    public void setProvider(String provider) {
+        this.activeProvider = provider;
+    }
+
+    /**
+     * 返回兼容旧调用方的 local key id。
+     */
+    public String getKmsKeyId() {
+        return providers.local.keyId;
+    }
+
+    /**
+     * 将旧 key id setter 映射到 local provider 配置。
+     */
+    public void setKmsKeyId(String kmsKeyId) {
+        providers.local.keyId = kmsKeyId;
+    }
+
+    /**
+     * 返回兼容旧调用方的 local master key。
+     */
+    public String getLocalMasterKey() {
+        return providers.local.masterKey;
+    }
+
+    /**
+     * 将旧 master key setter 映射到 local provider 配置。
+     */
+    public void setLocalMasterKey(String localMasterKey) {
+        providers.local.masterKey = localMasterKey;
+    }
+
+    /**
+     * 返回兼容旧调用方的 local 历史 master key 映射。
+     */
+    public Map<Integer, String> getLocalMasterKeys() {
+        return providers.local.masterKeys;
+    }
+
+    /**
+     * 将旧历史 master key setter 映射到 local provider 配置。
+     */
+    public void setLocalMasterKeys(Map<Integer, String> localMasterKeys) {
+        providers.local.masterKeys = localMasterKeys == null ? new LinkedHashMap<>() : localMasterKeys;
+    }
+
+    /**
+     * 按 provider 隔离的包封配置集合。
+     */
+    @Getter
+    @Setter
+    public static class Providers {
+
+        private Local local = new Local();
+
+        private VaultTransit vaultTransit = new VaultTransit();
+    }
+
+    /**
+     * 用于开发和历史读取的 local provider 配置。
+     */
+    @Getter
+    @Setter
+    public static class Local {
+
+        private String keyId = "local-file-key-v1";
+
+        private Set<String> historicalKeyIds = new LinkedHashSet<>();
+
+        private String masterKey;
+
+        private Map<Integer, String> masterKeys = new LinkedHashMap<>();
+    }
+
+    /**
+     * Vault Transit provider 配置。
+     */
+    @Getter
+    @Setter
+    public static class VaultTransit {
+
+        private String address;
+
+        private String token;
+
+        private String namespace;
+
+        private String mount = "transit";
+
+        private String keyName;
+
+        private Integer keyVersion = 1;
+
+        private boolean allowHttp;
+
+        private java.time.Duration connectTimeout = java.time.Duration.ofSeconds(2);
+
+        private java.time.Duration requestTimeout = java.time.Duration.ofSeconds(5);
+
+        private int maxRequestBytes = 65_536;
+
+        private int maxResponseBytes = 65_536;
+    }
 }

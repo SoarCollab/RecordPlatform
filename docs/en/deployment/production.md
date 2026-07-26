@@ -6,6 +6,9 @@ Best practices for deploying RecordPlatform in production.
 
 - [ ] All environment variables configured
 - [ ] `JWT_KEY` has high entropy (≥32 chars)
+- [ ] `FILE_KEY_ENVELOPE_ACTIVE_PROVIDER` and contract version are explicit
+- [ ] Vault uses HTTPS and a least-privilege token, or local uses an independent ≥32-character master key
+- [ ] Historical provider/key versions remain available until envelope rotation completes
 - [ ] SSL certificates installed
 - [ ] Database backups configured
 - [ ] Monitoring and alerting set up
@@ -28,6 +31,12 @@ RecordPlatform provides ready-to-use scripts in the `scripts/` directory.
 ```
 
 This starts services in the correct order with SkyWalking agent attached.
+
+### Production key wrapping
+
+`application-prod.yml` deliberately has no default active provider and no `JWT_KEY` fallback. Startup fails if provider configuration is blank, unknown, unavailable, if Vault uses HTTP, or if an explicitly selected local master key is missing, too short, or equal to the JWT key.
+
+For `vault-transit`, inject `FILE_KEY_ENVELOPE_VAULT_ADDRESS`, `FILE_KEY_ENVELOPE_VAULT_TOKEN`, `FILE_KEY_ENVELOPE_VAULT_KEY_NAME`, and the explicit key version through the deployment secret system. Do not put the token in Git or Nacos plaintext. The token requires only `update` on the selected key's encrypt, decrypt, and rewrap paths. Vault Community provides an external centralized KMS but does not establish an HSM security boundary; that requires Vault Enterprise PKCS#11 seal wrap or Managed Keys with the applicable operational prerequisites.
 
 ### Start Individual Service
 

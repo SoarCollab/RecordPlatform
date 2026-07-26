@@ -279,6 +279,46 @@ file:
     cron: "0 0 3 * * ?"     # 每天凌晨 3 点执行
 ```
 
+## 文件密钥包封配置
+
+新文件数据密钥由显式配置的 `file.key-envelope.active-provider` 包封。历史读取不会回退到当前 provider，而是严格按信封中持久化的 provider ID 与合同版本路由。
+
+本地开发可使用 `local` 合同 v1，它保持历史 AES-GCM 信封格式不变。基础 profile 仅为本地开发兼容允许复用 `JWT_KEY`：
+
+```yaml
+file:
+  key-envelope:
+    active-provider: local
+    active-provider-contract-version: 1
+    providers:
+      local:
+        key-id: local-file-key-v1
+        historical-key-ids: ${FILE_KEY_ENVELOPE_LOCAL_HISTORICAL_KEY_IDS:}
+        master-key: ${FILE_KEY_ENVELOPE_MASTER_KEY:${JWT_KEY:}}
+```
+
+生产 profile 不提供 JWT 回退。若显式选择 `local`，`FILE_KEY_ENVELOPE_MASTER_KEY` 必须是与 JWT 不同且至少 32 字符的独立值。切换 local key ID 时，必须把仍被历史信封引用的旧 ID 以逗号分隔加入 `FILE_KEY_ENVELOPE_LOCAL_HISTORICAL_KEY_IDS` allowlist，轮换完成后再移除。使用 Vault Transit 时，先创建 derived `aes256-gcm96` key，再配置：
+
+```yaml
+file:
+  key-envelope:
+    active-provider: vault-transit
+    active-provider-contract-version: 1
+    providers:
+      vault-transit:
+        address: https://vault.example.com
+        token: ${FILE_KEY_ENVELOPE_VAULT_TOKEN}
+        namespace: ${FILE_KEY_ENVELOPE_VAULT_NAMESPACE:}
+        mount: transit
+        key-name: record-platform-file-key
+        key-version: 1
+        allow-http: false
+        connect-timeout: 2s
+        request-timeout: 5s
+```
+
+应用 token 只需对目标 key 的 `transit/encrypt`、`transit/decrypt`、`transit/rewrap` 路径拥有 `update` 能力。所有历史信封完成轮换前必须保留旧 provider/key 版本。context 绑定、迁移与 HSM 部署边界见[密钥管理安全文档](../../security/key-management.md)。
+
 ## 前端配置
 
 前端环境变量 (`platform-frontend/.env`):

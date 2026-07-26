@@ -42,6 +42,20 @@ public class FileKeyAuditLog implements Serializable {
 
     private Integer keyVersion;
 
+    private String kmsProvider;
+
+    private Integer providerContractVersion;
+
+    private String providerKeyVersion;
+
+    private String keyIdFingerprint;
+
+    private String wrappingAlgorithm;
+
+    private String algorithmSuite;
+
+    private String failureCategory;
+
     private String operation;
 
     private Long actorId;

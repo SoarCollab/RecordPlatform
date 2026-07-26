@@ -279,6 +279,46 @@ file:
     cron: "0 0 3 * * ?"     # Daily at 3:00 AM
 ```
 
+## File Key Wrapping Configuration
+
+New file data keys are wrapped by the explicit `file.key-envelope.active-provider`. Historical reads never fall back to the active provider: they route by the persisted provider ID and contract version.
+
+For local development, `local` contract v1 preserves the historical AES-GCM envelope format. The base profile may reuse `JWT_KEY` only for local development compatibility:
+
+```yaml
+file:
+  key-envelope:
+    active-provider: local
+    active-provider-contract-version: 1
+    providers:
+      local:
+        key-id: local-file-key-v1
+        historical-key-ids: ${FILE_KEY_ENVELOPE_LOCAL_HISTORICAL_KEY_IDS:}
+        master-key: ${FILE_KEY_ENVELOPE_MASTER_KEY:${JWT_KEY:}}
+```
+
+Production has no JWT fallback. If `local` is explicitly selected, `FILE_KEY_ENVELOPE_MASTER_KEY` must be an independent value of at least 32 characters. When changing the local key ID, list every still-referenced previous ID in the comma-separated `FILE_KEY_ENVELOPE_LOCAL_HISTORICAL_KEY_IDS` allowlist until rotation completes. For Vault Transit, provision a derived `aes256-gcm96` key and configure:
+
+```yaml
+file:
+  key-envelope:
+    active-provider: vault-transit
+    active-provider-contract-version: 1
+    providers:
+      vault-transit:
+        address: https://vault.example.com
+        token: ${FILE_KEY_ENVELOPE_VAULT_TOKEN}
+        namespace: ${FILE_KEY_ENVELOPE_VAULT_NAMESPACE:}
+        mount: transit
+        key-name: record-platform-file-key
+        key-version: 1
+        allow-http: false
+        connect-timeout: 2s
+        request-timeout: 5s
+```
+
+The application token needs only `update` capability on the selected key's `transit/encrypt`, `transit/decrypt`, and `transit/rewrap` paths. Keep old provider/key versions available until every historical envelope has been rotated. See [Key Management Security](../../security/key-management.md) for context binding, migration, and HSM deployment boundaries.
+
 ## Frontend Configuration
 
 Frontend environment variables (`platform-frontend/.env`):

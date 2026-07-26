@@ -180,6 +180,20 @@ file:
 
 Header: Magic `RP` (0x52 0x50) + Version (0x01) + Algorithm (0x01=AES, 0x02=ChaCha20)
 
+### Data-key wrapping providers
+
+The serialized file data key is removed from persisted file metadata and stored only as a wrapped `file_key_envelope`. The provider-neutral boundary supports `local` contract v1 and `vault-transit` contract v1:
+
+- new writes use the explicitly configured active provider;
+- reads use the persisted `(kmsProvider, providerContractVersion)` and never fall back;
+- `rp-file-envelope-aad-v1` permanently preserves the legacy local byte order;
+- local metadata validates key ID, provider key version, wrapping algorithm, and context schema; previous key IDs must be explicitly allowlisted while referenced;
+- external `rp-file-envelope-context-v2` binds tenant, file, hash, recipient, and suite, while Vault receives only the Base64 SHA-256 digest of those canonical bytes;
+- same-named Vault key rotation uses Transit `rewrap`; cross-provider rotation is a controlled unwrap/wrap operation;
+- audit and metrics contain stable failure categories and a key-ID fingerprint, never a raw key ID, wrapped blob, plaintext data key, token, or Vault error body.
+
+Vault Community integration tests prove the Transit API contract. They do not prove HSM custody. Production HSM-backed deployments require Vault Enterprise with PKCS#11 seal wrap or Managed Keys, plus the relevant licenses, hardware, and high-availability design.
+
 ## HTTPS Enforcement
 
 Production auto-redirects HTTP to HTTPS:

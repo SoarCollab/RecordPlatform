@@ -2,341 +2,217 @@
 
 ## 概述
 
-本文档描述 RecordPlatform 当前的密钥管理架构、安全假设、现有缓解措施以及已知限制。
+RecordPlatform 使用 provider-neutral 的文件数据密钥包封边界。文件分片仍由每文件唯一的 `initialKey` 加密，但该数据密钥不会持久化到 `file.file_param`，只会以包封后的 `file_key_envelope.encrypted_data_key` 保存。
 
-## 1. 当前架构
+当前实现支持两种版本化 provider：
 
-### 1.1 密钥存储
+| Provider | 合同版本 | 用途 | 密钥边界 |
+|---|---:|---|---|
+| `local` | 1 | 本地开发、历史信封兼容、显式配置的独立部署 | 应用进程持有 local master key |
+| `vault-transit` | 1 | 生产外部集中式 KMS | 应用只持有最小权限 Vault token，named key 留在 Vault |
 
-- **文件数据密钥令牌（initialKey）**：新上传文件不再持久化到 `file.file_param`
-- **存储位置**：`file_key_envelope` 表保存包封后的 `encrypted_data_key`、`wrapping_iv`、`algorithm_suite`、`key_version` 和 recipient 元数据
-- **包封机制**：当前实现使用本地 AES-GCM 包封 serialized initialKey，AAD 绑定 tenant、file、fileHash、recipient、keyVersion 和 algorithmSuite
-- **严格解封合同**：加密文件必须存在 active key envelope，且 envelope 必须包含完整的 `algorithmSuite`、`signatureSuite`、`kemSuite`、`proofSuite` 元数据；不再从 `fileParam.initialKey` 回退读取旧密钥
+新写入只使用显式配置的 active provider。历史读取严格按信封中持久化的 `(kms_provider, provider_contract_version)` 路由，未知 provider、合同版本或 context schema 会失败关闭，不会猜测或回退到 local。
 
-### 1.2 密钥派生
+## 1. 信封与上下文合同
 
-```
-initialKey (主密钥)
-    ↓
-per-chunk key = KDF(initialKey, chunkIndex, salt)
-    ↓
-用于加密文件分片
-```
+### 1.1 持久化字段
 
-- **派生函数**：基于 initialKey 和分片索引派生每个分片的加密密钥
-- **算法支持**：AES-GCM（默认）、ChaCha20-Poly1305
-- **熵来源**：SecureRandom 生成 initialKey，密码学安全伪随机数生成器
+`file_key_envelope` 保存：
 
-### 1.3 密钥生命周期
+- 逻辑 `key_version`，用于 RecordPlatform 密码套件和既有兼容合同；
+- `kms_provider` 与 `provider_contract_version`，用于精确选择 provider 实现；
+- `kms_key_id` 与 `provider_key_version`，用于标识 provider-native 包封 key；
+- `wrapping_algorithm`、`algorithm_suite` 与 `context_schema`；
+- `encrypted_data_key`、可空的 `wrapping_iv` 和规范上下文的 `aad_hash`；
+- tenant、file、fileHash、recipient 与生命周期状态。
 
-1. **生成**：文件上传时为每个文件生成唯一的 initialKey
-2. **包封**：上传完成写入文件记录前，将 initialKey 从 `fileParam` 移除并写入 owner envelope
-3. **使用**：下载/解密 metadata 通过授权检查后解封对应 recipient envelope；owner/admin 访问使用 `OWNER`，分享码访问使用 `SHARE`，好友分享访问使用 `FRIEND_SHARE`
-4. **撤销/删除**：分享码和好友分享取消时会将对应 recipient envelope 标记为 `REVOKED`；文件删除仍通过文件软删除隔离
-5. **轮换**：管理员可通过 `POST /api/v1/admin/files/{id}/key-envelopes/rotate` 将文件的 active envelopes 重新包封到当前配置的 `keyVersion`
+逻辑 key 版本和 provider-native key 版本是两个不同维度。Vault native 版本来自 ciphertext 的 `vault:vN:` 前缀，不得用逻辑 `key_version` 代替。
 
-### 1.4 架构限制
+### 1.2 Context schema
 
-- **未接入外部 KMS**：当前 KEK 来自 `FILE_KEY_ENVELOPE_MASTER_KEY`/`JWT_KEY` 派生的本地主密钥
-- **无硬件安全模块**：未使用 HSM 进行密钥保护
-- **自动密钥轮换未完成**：envelope 已记录 `key_version`，当前支持显式 rotation/revocation，但尚未接入自动轮换调度
-- **API 解密输出**：授权下载/解密 metadata 对加密文件仍返回 `initialKey` 供前端解密；未加密直传文件返回 `initialKey=null` 且 `encryptionAlgorithm=NONE`
+`rp-file-envelope-aad-v1` 是不可变的历史 local 合同，UTF-8 字节顺序永久固定为：
 
-## 2. 安全假设
-
-本系统依赖以下安全假设正常运行：
-
-### 2.1 基础设施安全
-
-| 假设 | 实现方式 | 风险 |
-|------|---------|------|
-| **数据库静态加密** | MySQL 数据库启用 encryption at rest | 磁盘被盗时密钥仍受保护 |
-| **网络传输加密** | TLS 1.2+ 用于所有服务间通信 | 中间人攻击无法窃取密钥 |
-| **内存隔离** | JVM 进程隔离，敏感数据不写入日志 | 内存转储风险降低 |
-
-### 2.2 访问控制
-
-| 假设 | 实现方式 | 风险 |
-|------|---------|------|
-| **认证必需** | JWT token 强制验证，无匿名访问 | 未授权访问被拒绝 |
-| **最小权限原则** | 数据库用户仅具备必要权限 | 权限提升攻击影响受限 |
-| **租户隔离** | MyBatis Plus 拦截器自动注入 `tenant_id` | 跨租户数据泄露风险 |
-
-### 2.3 运维安全
-
-- **日志审计完整**：所有密钥访问操作记录在审计日志
-- **定期备份**：数据库备份采用加密存储
-- **漏洞修复**：依赖项定期更新（Dependabot 自动监控）
-
-## 3. 当前缓解措施
-
-### 3.1 审计与监控
-
-```java
-@OperationLog(
-    module = OperationModule.FILE,
-    operationType = OperationType.DOWNLOAD,
-    description = "下载文件（触发密钥解密）"
-)
+```text
+tenantId|fileId|fileHash|recipientType|recipientId|keyVersion|algorithmSuite
 ```
 
-- **审计日志覆盖范围**：
-  - 密钥生成（文件上传）
-  - 密钥读取（文件下载、分享）
-  - 密钥删除（文件删除）
-  - 权限变更（文件所有权转移）
+`rp-file-envelope-context-v2` 用于外部 provider，规范字段绑定 tenant、file、fileHash、recipient 和 algorithm suite。Vault derived key 的 `context` 只接收：
 
-- **日志内容**：
-  - 操作时间戳
-  - 用户 ID 和租户 ID
-  - 操作类型（CREATE/READ/DELETE）
-  - 资源 ID（文件 ID）
-  - 操作结果（成功/失败及原因）
-
-### 3.2 速率限制
-
-```yaml
-# application.yml
-resilience4j:
-  ratelimiter:
-    instances:
-      fileDownload:
-        limit-for-period: 20      # 20 次请求
-        limit-refresh-period: 60s # 每分钟
+```text
+base64(SHA-256(canonical-v2-bytes))
 ```
 
-- **限流策略**：每用户每分钟最多 20 次下载请求
-- **超限响应**：HTTP 429 Too Many Requests + Retry-After header
-- **旁路保护**：Resilience4j 在 Dubbo 调用层面拦截，无法通过直接访问存储绕过
+原始 tenant ID、file ID、file hash、recipient 和 suite 不发送给 Vault。v2 context 不包含逻辑或 provider-native key version，因此同一 Vault named key 的版本升级可通过服务端 `rewrap` 完成；ciphertext 前缀仍认证实际 provider key 版本。
 
-### 3.3 权限检查
+每次 unwrap/rewrap 都会先按持久化 schema 重建规范字节，并使用常量时间比较 `aad_hash`。schema 未知、字段缺失或摘要不匹配时，不会调用 provider。
 
-```java
-@RequireOwnership(
-    resourceIdParam = "fileId",
-    ownerIdField = "userId",
-    resourceClass = File.class
-)
-public FileVO downloadFile(String fileId) {
-    // 仅文件所有者或管理员可下载
+## 2. Vault Transit 部署
+
+### 2.1 Key 与策略
+
+Vault key 必须是 derived `aes256-gcm96` Transit key。应用 token 只需要目标 key 的以下权限：
+
+```hcl
+path "transit/encrypt/record-platform-file-key" {
+  capabilities = ["update"]
+}
+
+path "transit/decrypt/record-platform-file-key" {
+  capabilities = ["update"]
+}
+
+path "transit/rewrap/record-platform-file-key" {
+  capabilities = ["update"]
 }
 ```
 
-- **归属验证**：AOP 切面自动验证资源所有权
-- **管理员权限**：支持跨租户查询（需 `@TenantScope(ignoreIsolation=true)`）
-- **分享链接**：独立权限体系，分享 token 验证 + 过期时间检查
+应用使用的接口为：
 
-### 3.4 密钥隔离
+- `POST /v1/{mount}/encrypt/{key}`：传递 Base64 plaintext、派生 context 和显式 `key_version`；
+- `POST /v1/{mount}/decrypt/{key}`：传递持久化的 `vault:vN:` ciphertext 和同一 context；
+- `POST /v1/{mount}/rewrap/{key}`：仅用于同一 named key 和相同 v2 context 的版本升级。
 
-- **租户隔离**：`file_key_envelope.tenant_id` 字段 + MyBatis 拦截器
-- **用户隔离**：仅文件所有者、管理员或拥有 active recipient envelope 的分享接收方可访问对应密钥
-- **S3 路径隔离**：`storage/tenant/{tenantId}/chunk/{hash}` 命名与 tenant metadata 校验共同防止跨租户对象混用
-- **AAD 绑定**：`OWNER`、`SHARE`、`FRIEND_SHARE` envelope 均与 tenant、file、fileHash、recipient、keyVersion、algorithmSuite 绑定，篡改上下文会导致 AES-GCM 解封失败
+应用使用 Java 21 `HttpClient`，禁用重定向，并限制连接超时、请求超时、请求体和响应体大小。token 只存在于配置绑定对象和单次 `X-Vault-Token` header 中。
 
-## 4. 已知限制
+### 2.2 生产配置
 
-### 4.1 密钥轮换
-
-**当前状态**：⚠️ 支持显式轮换，未接入自动调度
-
-- **已实现**：管理员接口可对指定文件 active envelopes 执行 rewrap/rotation，并写入审计日志
-- **限制**：缺少定期轮换调度、批量轮换任务和外部 KMS key policy 联动
-- **要求**：参与轮换的 active envelope 必须具备完整 crypto-suite 元数据；缺失字段会被视为数据错误而不是自动补齐
-
-### 4.2 硬件安全模块（HSM）
-
-**当前状态**：❌ 未集成
-
-- **问题**：当前使用本地主密钥包封，无法抵御应用主机完全失陷
-- **影响**：攻击者同时获得数据库和本地主密钥后可解封文件数据密钥
-- **workaround**：依赖数据库静态加密 + 严格访问控制
-
-### 4.3 单点故障
-
-**当前状态**：⚠️ 数据库是唯一密钥存储
-
-- **问题**：数据库不可用时所有加密文件无法解密
-- **影响**：备份恢复时需同时恢复密钥数据，否则文件永久丢失
-- **workaround**：
-  - 数据库主从复制（已配置读写分离）
-  - 定期加密备份（存储在独立位置）
-
-### 4.4 密钥管理服务（KMS）
-
-**当前状态**：❌ 未集成
-
-- **问题**：无中心化密钥管理，无法统一审计和权限控制
-- **影响**：密钥策略分散在应用代码中，难以统一修改
-- **workaround**：依赖应用层权限检查 + 审计日志 + 本地 envelope 主密钥
-
-### 4.5 密钥导出
-
-**当前状态**：❌ 不支持
-
-- **问题**：用户无法导出自己的密钥进行离线解密
-- **影响**：平台锁定（vendor lock-in），用户必须通过平台 API 访问文件
-- **workaround**：提供批量下载 API（解密后导出明文）
-
-## 5. 路线图（v2.0）
-
-### 5.1 KMS 集成
-
-**目标**：集成外部 KMS（AWS KMS / Azure Key Vault / HashiCorp Vault）
-
-**架构变更**：
-```
-当前: initialKey → file_key_envelope.encrypted_data_key (local AES-GCM wrapped)
-    ↓
-未来: Data Encryption Key (DEK) → Database
-      Key Encryption Key (KEK) → KMS
-      
-      解密流程: 
-      1. 从 Database 读取 encrypted DEK
-      2. 调用 KMS.decrypt(DEK, KEK_ID)
-      3. 用 DEK 解密文件分片
+```yaml
+file:
+  key-envelope:
+    active-provider: vault-transit
+    active-provider-contract-version: 1
+    providers:
+      vault-transit:
+        address: https://vault.example.com
+        token: ${FILE_KEY_ENVELOPE_VAULT_TOKEN}
+        namespace: ${FILE_KEY_ENVELOPE_VAULT_NAMESPACE:}
+        mount: transit
+        key-name: record-platform-file-key
+        key-version: 1
+        allow-http: false
+        connect-timeout: 2s
+        request-timeout: 5s
+        max-request-bytes: 65536
+        max-response-bytes: 65536
 ```
 
-**优势**：
-- KEK 永不离开 KMS 硬件边界
-- 中心化密钥策略管理
-- 统一审计和合规性报告
+生产 profile 强制 HTTPS。地址、token、mount、key name、版本、超时或资源边界无效时启动失败。生产不得通过 `allow-http` 绕过该限制。
 
-### 5.2 密钥轮换
+Vault token 必须由部署 secret 系统注入，不能提交到 Git、写入 Nacos 明文、镜像层、命令历史或普通应用日志。轮换 Vault token 时，不需要改写现有信封；轮换 named key 或 provider 时，必须保留旧 key/provider 的读取能力直到信封迁移完成。
 
-**目标**：支持密钥版本控制和自动轮换
+### 2.3 Community 与 HSM 边界
 
-**实现方案**：
-```sql
--- existing envelope fields used by rotation
-SELECT key_version, encrypted_data_key, kms_key_id, status
-FROM file_key_envelope
-WHERE tenant_id = ? AND file_id = ? AND status = 'ACTIVE';
+CI 使用固定官方镜像 `hashicorp/vault:1.21.4` 的 dev server，真实验证 Transit wrap/unwrap、context tamper、key rotate + native rewrap、permission denied 和 missing key。GitHub Actions 会读取 Failsafe XML，并要求 5 个测试、0 skip、0 failure、0 error。
 
--- 轮换流程
-1. 读取 active envelope 并解封 DEK
-2. 使用新 KEK/keyVersion 重新包封同一个 DEK
-3. 写入新 active envelope
-4. 将旧 envelope 标记为 SUPERSEDED/REVOKED
-5. 审计 rotation 结果
+这项证据只证明 Vault Community Transit HTTP API 合同，不证明 HSM 托管、FIPS 认证或生产高可用。若生产要求 KEK 处于 HSM 边界，最低部署形态为：
+
+- Vault Enterprise 与对应许可证；
+- PKCS#11 seal wrap，或受支持的 Managed Keys；
+- 已验证的 HSM 驱动、分区、凭据、备份和灾难恢复流程；
+- 多节点 Vault HA、存储后端、unseal/recovery 和审计设备设计；
+- 对实际硬件、固件、Vault 版本和故障切换路径进行独立验收。
+
+不能把 Community dev 容器测试表述为 HSM 验证。
+
+## 3. Local provider 安全边界
+
+`local` 合同 v1 保持历史 AES-256-GCM ciphertext、12 字节 IV、SHA-256 master-key 派生、版本 map 解析和 AAD v1 字节完全不变。
+
+基础 profile 为本地开发兼容，可在未设置 `FILE_KEY_ENVELOPE_MASTER_KEY` 时复用 `JWT_KEY`。`application-prod.yml` 会移除该回退，并要求：
+
+- 显式选择 `local`；
+- 配置非空 `FILE_KEY_ENVELOPE_LOCAL_KEY_ID`；
+- 切换 local key id 时，将仍有历史信封引用的旧值加入 `FILE_KEY_ENVELOPE_LOCAL_HISTORICAL_KEY_IDS`，直至轮换完成；
+- master key 至少 32 字符；
+- master key 与 `spring.security.jwt.key` 不相等。
+
+local provider 不能抵御应用主机完全失陷。生产优先使用外部 KMS；若因部署约束选择 local，master key 必须由独立 secret 系统管理，并保留旧版本映射直至历史信封全部轮换。
+
+## 4. 错误、审计和可观测性
+
+Provider 错误按稳定内部分类处理：
+
+| 条件 | 分类 | 重试语义 |
+|---|---|---|
+| Vault 400、无效请求、context/ciphertext 不一致 | `INVALID_REQUEST` / `INVALID_CIPHERTEXT` | 不重试 |
+| Vault 403（含仅有 update 权限时访问不存在的 named key） | `PERMISSION_DENIED` | 不重试 |
+| Vault 404 | `KEY_NOT_FOUND` | 不重试 |
+| Vault 429 | `THROTTLED` | 可重试 |
+| Vault 5xx、网络不可用 | `UNAVAILABLE` | 可重试 |
+| 请求超时 | `TIMEOUT` | 可重试 |
+| malformed success response | `INVALID_RESPONSE` | 不重试 |
+| 未注册 provider/contract 或配置无效 | `CONFIGURATION` | 不重试 |
+
+Vault 没有可依赖的公开 disabled-key 独立状态码，因此实现不会解析原始错误文案来伪造该分类。所有失败只转换为项目既有 `GeneralException` 或 `RetryableException`，原始 Vault `errors` 文本不会进入异常、审计或健康详情。
+
+`file_key_audit_log` 记录 provider ID、合同版本、provider key version、wrapping algorithm、algorithm suite、稳定 failure category，以及 `kms_key_id` 的 SHA-256 指纹。它不记录原始 key ID、明文 DEK、wrapped blob、IV、token、context 原值或 provider error body。
+
+Micrometer 指标只使用低基数标签 `provider`、`operation`、`outcome` 和 `failure_category`。Actuator health 只暴露 active provider ID、合同版本、能力列表、availability 和安全配置状态，不使用 `Health.withException`。
+
+日志脱敏器覆盖 `encryptedDataKey`、`wrappingIv`、`kmsKeyId`/`keyId`、`ciphertext`、Vault token 和 wrapping context 等字段。密钥模型的 `toString()` 对 plaintext、ciphertext、IV 和 key ID 进行固定脱敏。
+
+## 5. 轮换与事务语义
+
+当前管理员入口 `POST /api/v1/admin/files/{id}/key-envelopes/rotate` 对单文件 active 信封执行显式轮换。目标相等性使用完整身份：
+
+```text
+(provider, contract, keyId, providerKeyVersion,
+ logicalKeyVersion, wrappingAlgorithm, contextSchema)
 ```
 
-**触发条件**：
-- 定期轮换（每 90 天）
-- 安全事件触发（怀疑泄露）
-- 合规要求（如 PCI DSS）
+同一 Vault named key 和 v2 context 优先调用 Transit `rewrap`，明文 DEK 不返回应用。跨 provider、named key 或 schema 才由编排层执行受控 unwrap → wrap。远程操作成功并生成替换信封后才会 supersede 旧 active 信封；事务失败会保留旧信封可用。
 
-### 5.3 多区域密钥复制
+租户策略、批量任务、自动调度、重试、暂停/恢复属于 P3-2，不在当前合同中。不要把单文件显式接口当作自动轮换完成的证据。
 
-**目标**：支持跨数据中心密钥同步
+## 6. 数据库迁移与恢复
 
-**实现方案**：
-- 主区域 KMS 作为密钥源
-- 从区域定期同步加密后的 DEK
-- 区域间通信使用 TLS 1.3 + 客户端证书
+`V1.18.0__key_wrapping_provider_metadata.sql` 是唯一 schema 变更：
 
-### 5.4 密钥导出与离线解密
+- 新增 provider contract version、provider key version 和 context schema；
+- 将 `wrapping_iv` 改为可空，以支持 Vault ciphertext；
+- 扩展 `kms_key_id` 并增加完整目标索引；
+- 扩展 provider-neutral 审计字段；
+- 将历史 local 行确定性回填为 local contract v1、AAD v1，provider key version 来自既有逻辑版本。
 
-**目标**：允许用户导出密钥副本（加密）
+已发布的 V1.10.x 迁移不会改写。测试同时覆盖空库安装和 V1.17 → V1.18 升级。
 
-**实现方案**：
-```
-1. 用户生成 GPG 公钥上传
-2. 系统用用户公钥加密 DEK
-3. 用户下载 encrypted_dek_bundle.gpg
-4. 用户本地用 GPG 私钥解密，离线解密文件
-```
+数据库备份必须与 Vault snapshot/raft storage、unseal/recovery 材料和历史 key 可用性一起设计。只恢复数据库但无法访问对应 provider/key 时，wrapped DEK 无法解封。灾难恢复演练至少验证：
 
-**安全约束**：
-- 仅文件所有者可导出
-- 审计日志记录导出操作
-- 导出操作触发邮件通知
+1. 历史 local v1 信封可读取；
+2. 当前与旧 Vault key version 均可 decrypt；
+3. Vault token 轮换不影响历史信封；
+4. 恢复后 audit、tenant 和 recipient 隔离仍有效。
 
-## 6. 合规性考虑
+## 7. 已知限制与后续边界
 
-### 6.1 GDPR（通用数据保护条例）
+- Vault 可用性会直接影响加密文件下载；当前只提供稳定可重试语义，不在请求内做无界重试，也不回退 local。
+- 自动租户轮换作业属于 P3-2。
+- 多套件运行时策略和 provider 协商属于 P3-3。
+- 授权下载/解密 metadata 当前仍可能向前端返回 `initialKey`；更广泛的数据密钥暴露收敛属于 P3-4。
+- AWS KMS adapter 需在仓库具备受控 AWS 账户、OIDC role 和测试 key 后单独验收，不能用 mock 冒充真实云 KMS 证据。
 
-- **数据最小化**：仅存储必要的密钥元数据
-- **被遗忘权**：文件删除时级联删除密钥
-- **数据可移植性**：v2.0 提供密钥导出功能
+## 8. 运维检查清单
 
-### 6.2 等保 2.0（中国信息安全等级保护）
-
-- **三级系统要求**：
-  - ✅ 密钥存储加密
-  - ✅ 访问控制和审计
-  - ❌ 密钥备份与恢复（需人工流程）
-  - ❌ 密钥轮换（v2.0 支持）
-
-### 6.3 PCI DSS（支付卡行业数据安全标准）
-
-- **不适用**：本系统不存储支付信息
-- **参考实践**：密钥管理参考 PCI DSS 3.5/3.6 要求
-
-## 7. 应急响应
-
-### 7.1 密钥泄露事件
-
-**检测**：
-- 异常下载量（速率限制告警）
-- 非工作时间大量密钥访问
-- 跨租户访问尝试（审计日志）
-
-**响应流程**：
-1. 立即禁用受影响用户账户
-2. 导出审计日志进行取证分析
-3. 通知受影响用户
-4. 评估影响范围（哪些文件可能被解密）
-5. 手动轮换密钥（重新上传文件）
-
-### 7.2 数据库泄露
-
-**假设场景**：攻击者获取数据库备份
-
-**影响评估**：
-- ✅ 密钥以加密形式存储（依赖数据库静态加密）
-- ❌ 如数据库主密钥同时泄露，所有文件密钥可被解密
-
-**缓解措施**：
-- 数据库备份使用独立加密密钥
-- 备份文件存储在物理隔离的位置
-- 定期测试备份恢复流程
-
-## 8. 最佳实践建议
-
-### 8.1 开发人员
-
-- ❌ 禁止在日志中输出密钥内容
-- ❌ 禁止在异常堆栈中包含密钥
-- ✅ 使用 `@Slf4j` 时避免 `log.debug("key={}", key)`
-- ✅ 密钥对象使用后立即清零（`Arrays.fill(keyBytes, (byte) 0)`）
-
-### 8.2 运维人员
-
-- ✅ 数据库用户使用最小权限原则
-- ✅ 定期审查审计日志（每周）
-- ✅ 数据库备份加密存储，密钥异地保管
-- ❌ 禁止在生产环境执行 `SELECT * FROM encryption_keys`
-
-### 8.3 安全审计
-
-**月度检查**：
-- 审计日志完整性验证
-- 异常访问模式检测
-- 权限配置审查
-
-**季度检查**：
-- 依赖项漏洞扫描（Trivy）
-- 渗透测试（模拟密钥窃取攻击）
-- 灾难恢复演练（备份恢复测试）
+- [ ] 生产 active provider 与合同版本显式配置。
+- [ ] Vault 地址为 HTTPS，token 为最小权限且由 secret 系统注入。
+- [ ] Vault key 为 derived `aes256-gcm96`，目标版本与部署变更单一致。
+- [ ] 选择 local 时，master key 独立于 JWT 且至少 32 字符。
+- [ ] 历史 provider/key 读取能力在信封轮换完成前持续保留。
+- [ ] 审计、指标、health 和日志采集链路中不存在 token、plaintext DEK、wrapped blob 或原始 key ID。
+- [ ] 数据库与 Vault 备份、恢复和 HA 故障切换已联合演练。
+- [ ] 若声明 HSM-backed，已验证 Enterprise 许可证、PKCS#11/Managed Keys、实际硬件与故障切换证据。
 
 ## 9. 参考资料
 
-- [NIST SP 800-57: Key Management Recommendation](https://csrc.nist.gov/publications/detail/sp/800-57-part-1/rev-5/final)
+- [Vault Transit secrets engine](https://developer.hashicorp.com/vault/docs/secrets/transit)
+- [Vault Transit HTTP API](https://developer.hashicorp.com/vault/api-docs/secret/transit)
+- [Vault seal wrap](https://developer.hashicorp.com/vault/docs/enterprise/sealwrap)
+- [Vault Managed Keys](https://developer.hashicorp.com/vault/docs/enterprise/managed-keys)
+- [NIST SP 800-57 Part 1 Revision 5](https://csrc.nist.gov/pubs/sp/800/57/pt1/r5/final)
 - [OWASP Cryptographic Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html)
-- [AWS KMS Best Practices](https://docs.aws.amazon.com/kms/latest/developerguide/best-practices.html)
 
 ---
 
-**文档版本**：v1.0  
-**最后更新**：2026-06-14  
+**文档版本**：v2.0
+**最后更新**：2026-07-27
 **维护者**：Security Team
