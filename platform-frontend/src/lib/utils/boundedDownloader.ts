@@ -4,7 +4,11 @@ import type {
   FileDownloadPartVO,
 } from "$api/types";
 import { decryptChunk } from "./crypto";
-import { downloadFramedPart, MAX_FRAMES_PER_PART } from "./framedAead";
+import {
+  downloadFramedPart,
+  MAX_FRAMES_PER_PART,
+  validateFramedEncryption,
+} from "./framedAead";
 import { assertSha256, createSha256 } from "./downloadIntegrity";
 import {
   DownloadMetricsTracker,
@@ -369,32 +373,52 @@ async function fetchDownloadUrl(
   signal: AbortSignal | undefined,
   fetchImpl: typeof fetch,
 ): Promise<Response> {
+  /** 释放失败响应体，避免重试时遗留未消费的网络流。 */
+  const cancelErrorResponse = async (response: Response): Promise<void> => {
+    if (!response.body) return;
+    try {
+      await response.body.cancel("download request failed");
+    } catch {
+      // 响应体可能已由浏览器关闭，不能覆盖原始下载错误。
+    }
+  };
+
   let lastError: Error | null = null;
   for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt++) {
     if (signal?.aborted) throw new Error("Download cancelled");
+
+    let response: Response;
     try {
-      const response = await fetchImpl(url, { signal });
-      if (response.status === 401 || response.status === 403) {
-        throw new Error("下载地址已过期，请重新发起下载");
-      }
-      if (response.ok) return response;
-      const error = new Error(`分片 ${index + 1} 下载失败: ${response.status}`);
-      if (response.status < 500 || attempt === MAX_FETCH_ATTEMPTS) {
-        throw error;
-      }
-      lastError = error;
+      response = await fetchImpl(url, { signal });
     } catch (error) {
       if (signal?.aborted) {
         throw new Error("Download cancelled", { cause: error });
       }
-      lastError = error as Error;
-      if (
-        lastError.message.includes("下载地址已过期") ||
-        attempt === MAX_FETCH_ATTEMPTS
-      ) {
+      lastError =
+        error instanceof Error ? error : new Error(String(error ?? "网络错误"));
+      if (attempt === MAX_FETCH_ATTEMPTS) {
         throw lastError;
       }
+      await new Promise((resolve) =>
+        setTimeout(resolve, 200 * 2 ** (attempt - 1)),
+      );
+      continue;
     }
+
+    if (response.status === 401 || response.status === 403) {
+      await cancelErrorResponse(response);
+      throw new Error("下载地址已过期，请重新发起下载");
+    }
+    if (response.ok) return response;
+
+    const error = new Error(`分片 ${index + 1} 下载失败: ${response.status}`);
+    // 只有 5xx 才属于可重试的 HTTP 失败；4xx 立即失败，避免无效重试。
+    if (response.status < 500 || attempt === MAX_FETCH_ATTEMPTS) {
+      await cancelErrorResponse(response);
+      throw error;
+    }
+    await cancelErrorResponse(response);
+    lastError = error;
     await new Promise((resolve) =>
       setTimeout(resolve, 200 * 2 ** (attempt - 1)),
     );
@@ -688,16 +712,62 @@ function resolveLegacyPlainRange(
     metadata.fileSize - position,
   );
   const size = part.plainSize ?? inferredSize;
+  const end = position + size;
   if (
     !Number.isSafeInteger(position) ||
     position < 0 ||
     !Number.isSafeInteger(size) ||
     size <= 0 ||
-    position + size > metadata.fileSize
+    !Number.isSafeInteger(end) ||
+    end > metadata.fileSize
   ) {
     throw new Error("历史加密分片明文范围无效");
   }
   return { position, size };
+}
+
+/**
+ * 校验历史 v1 分片的明文范围连续覆盖整个文件，拒绝 gap、overlap 和尺寸漂移。
+ *
+ * v1 需要按固定分片偏移随机写入；FileSystem sink 不会替调用方检查稀疏区间，
+ * 因此必须在发起网络请求前确认每个可选 plainSize 都与上传计划一致。
+ */
+function validateLegacyPlainRanges(
+  metadata: FileDownloadMetadataVO,
+  parts: FileDownloadPartVO[],
+): Array<{ position: number; size: number }> {
+  if (
+    !Number.isSafeInteger(metadata.chunkSize) ||
+    metadata.chunkSize <= 0 ||
+    !Number.isSafeInteger(metadata.fileSize) ||
+    metadata.fileSize <= 0
+  ) {
+    throw new Error("历史加密文件范围合同无效");
+  }
+
+  const ranges: Array<{ position: number; size: number }> = [];
+  let nextPosition = 0;
+  for (const part of parts) {
+    const range = resolveLegacyPlainRange(metadata, part);
+    const expectedSize = Math.min(
+      metadata.chunkSize,
+      metadata.fileSize - range.position,
+    );
+    if (
+      range.position !== nextPosition ||
+      range.size !== expectedSize ||
+      !Number.isSafeInteger(nextPosition + range.size)
+    ) {
+      throw new Error("历史加密分片明文范围不连续或尺寸不一致");
+    }
+    nextPosition += range.size;
+    ranges.push(range);
+  }
+
+  if (nextPosition !== metadata.fileSize) {
+    throw new Error("历史加密分片明文范围未覆盖完整文件");
+  }
+  return ranges;
 }
 
 /** 执行历史 v1 环形密钥链兼容下载。 */
@@ -721,6 +791,8 @@ async function downloadLegacyFile(params: {
       throw new Error("历史加密分片超过兼容读取上限");
     }
   }
+  // 先验证所有随机写入范围，避免下载后才发现稀疏或重叠输出。
+  const plainRanges = validateLegacyPlainRanges(params.metadata, params.parts);
 
   let completed = 0;
   const lastPart = params.parts.at(-1)!;
@@ -738,7 +810,7 @@ async function downloadLegacyFile(params: {
   let firstKey: string;
   try {
     const result = await decryptChunk(lastCipher, params.metadata.initialKey);
-    const range = resolveLegacyPlainRange(params.metadata, lastPart);
+    const range = plainRanges.at(-1)!;
     await writeLegacyPlaintext({
       plaintext: result.plaintext,
       embeddedHash: result.hash,
@@ -770,7 +842,7 @@ async function downloadLegacyFile(params: {
     });
     try {
       const result = await decryptChunk(ciphertext, currentKey);
-      const range = resolveLegacyPlainRange(params.metadata, part);
+      const range = plainRanges[index];
       await writeLegacyPlaintext({
         plaintext: result.plaintext,
         embeddedHash: result.hash,
@@ -995,6 +1067,13 @@ export async function executeBoundedDownload(
   try {
     const parts = validateParts(options.metadata);
     const format = resolveDownloadFormat(options.metadata);
+    // 在签发/请求任何对象 URL 前完成 v2 suite、frame 和 nonce 合同校验。
+    if (format === "FRAMED_V2") {
+      if (!options.metadata.encryption) {
+        throw new Error("framed AEAD 文件缺少加密描述");
+      }
+      validateFramedEncryption(options.metadata.encryption);
+    }
     validateCanonicalManifest(
       options.metadata,
       parts,

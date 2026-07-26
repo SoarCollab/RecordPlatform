@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.HexFormat;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -142,6 +143,81 @@ class FramedAeadWriterTest {
         System.arraycopy(encoded, FramedAeadCrypto.CHUNK_HEADER_SIZE,
                 reordered, FramedAeadCrypto.CHUNK_HEADER_SIZE + recordSize, recordSize);
         verifyFailure(writeFile("reordered.bin", reordered), FILE_DEK, FILE_NONCE, 0, 1);
+    }
+
+    /**
+     * 验证随机生成的文件级 DEK 和 nonce 始终使用协议固定长度且每次返回独立数组。
+     */
+    @Test
+    void generateFileMaterial_shouldUseProtocolLengthsAndIndependentArrays() {
+        byte[] firstDek = writer.generateFileDek();
+        byte[] secondDek = writer.generateFileDek();
+        byte[] firstNonce = writer.generateFileNonce();
+        byte[] secondNonce = writer.generateFileNonce();
+
+        assertThat(firstDek).hasSize(FramedAeadCrypto.FILE_DEK_SIZE).isNotSameAs(secondDek);
+        assertThat(secondDek).hasSize(FramedAeadCrypto.FILE_DEK_SIZE);
+        assertThat(firstNonce).hasSize(FramedAeadCrypto.FILE_NONCE_SIZE).isNotSameAs(secondNonce);
+        assertThat(secondNonce).hasSize(FramedAeadCrypto.FILE_NONCE_SIZE);
+    }
+
+    /**
+     * 验证 manifest nonce 使用 Base64URL 无填充编码，并拒绝空值和错误长度。
+     */
+    @Test
+    void encodeFileNonce_shouldUseBase64UrlWithoutPaddingAndRejectInvalidLength() {
+        String encoded = writer.encodeFileNonce(FILE_NONCE);
+
+        assertThat(encoded)
+                .isEqualTo(Base64.getUrlEncoder().withoutPadding().encodeToString(FILE_NONCE))
+                .doesNotContain("=");
+        assertThrows(IllegalArgumentException.class, () -> writer.encodeFileNonce(null));
+        assertThrows(IllegalArgumentException.class, () -> writer.encodeFileNonce(new byte[15]));
+    }
+
+    /**
+     * 验证 writer/validator 对空路径、缺失文件和零字节明文均失败关闭。
+     */
+    @Test
+    void writeAndVerify_shouldRejectMissingPathsAndEmptyPlaintext() throws IOException {
+        Path missing = tempDir.resolve("missing.bin");
+        Path encrypted = tempDir.resolve("invalid-framed.bin");
+        Path empty = writeFile("empty.bin", new byte[0]);
+
+        assertThrows(IOException.class, () -> writer.write(
+                null, encrypted, FILE_DEK, FILE_NONCE, 0, 1, FRAME_SIZE));
+        assertThrows(IOException.class, () -> writer.write(
+                missing, encrypted, FILE_DEK, FILE_NONCE, 0, 1, FRAME_SIZE));
+        assertThrows(IOException.class, () -> writer.write(
+                empty, encrypted, FILE_DEK, FILE_NONCE, 0, 1, FRAME_SIZE));
+        assertThrows(IOException.class, () -> writer.verify(
+                null, FILE_DEK, FILE_NONCE, 0, 1, FRAME_SIZE));
+        assertThrows(IOException.class, () -> writer.verify(
+                missing, FILE_DEK, FILE_NONCE, 0, 1, FRAME_SIZE));
+    }
+
+    /**
+     * 验证文件密钥、文件 nonce 和 frame 大小的每个边界都在分配 frame 缓冲区前被拒绝。
+     */
+    @Test
+    void write_shouldRejectInvalidKeyNonceAndFrameBounds() throws IOException {
+        Path plaintext = writeFile("invalid-state-plain.bin", FIXED_PLAINTEXT);
+        Path encrypted = tempDir.resolve("invalid-state-framed.bin");
+
+        assertThrows(IllegalArgumentException.class, () -> writer.write(
+                plaintext, encrypted, null, FILE_NONCE, 0, 1, FRAME_SIZE));
+        assertThrows(IllegalArgumentException.class, () -> writer.write(
+                plaintext, encrypted, new byte[31], FILE_NONCE, 0, 1, FRAME_SIZE));
+        assertThrows(IllegalArgumentException.class, () -> writer.write(
+                plaintext, encrypted, FILE_DEK, null, 0, 1, FRAME_SIZE));
+        assertThrows(IllegalArgumentException.class, () -> writer.write(
+                plaintext, encrypted, FILE_DEK, new byte[15], 0, 1, FRAME_SIZE));
+        assertThrows(IllegalArgumentException.class, () -> writer.write(
+                plaintext, encrypted, FILE_DEK, FILE_NONCE, 0, 1,
+                FramedAeadCrypto.MIN_FRAME_PLAIN_SIZE - 1));
+        assertThrows(IllegalArgumentException.class, () -> writer.write(
+                plaintext, encrypted, FILE_DEK, FILE_NONCE, 0, 1,
+                FramedAeadCrypto.MAX_FRAME_PLAIN_SIZE + 1));
     }
 
     /**

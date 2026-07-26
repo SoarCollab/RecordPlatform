@@ -33,7 +33,9 @@ import cn.flying.service.FileService;
 import cn.flying.service.QuotaService;
 import cn.flying.service.assistant.FileUploadRedisStateManager;
 import cn.flying.service.encryption.AesGcmEncryptionStrategy;
+import cn.flying.service.encryption.EncryptionProperties;
 import cn.flying.service.encryption.EncryptionStrategyFactory;
+import cn.flying.service.encryption.FramedAeadWriter;
 import cn.flying.service.manifest.ChunkManifestDraft;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.ChunkManifestView;
@@ -69,13 +71,17 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -96,6 +102,12 @@ class FileUploadServiceTest {
 
     @Mock
     private EncryptionStrategyFactory encryptionStrategyFactory;
+
+    @Mock
+    private EncryptionProperties encryptionProperties;
+
+    @Mock
+    private FramedAeadWriter framedAeadWriter;
 
     @Mock
     private FileService fileService;
@@ -167,6 +179,7 @@ class FileUploadServiceTest {
     void setUp() throws InterruptedException {
         FileUploadStateTestBuilder.resetClientIdCounter();
         idUtilsMock.when(IdUtils::nextEntityId).thenReturn(7001L);
+        lenient().when(encryptionProperties.getWriterFormat()).thenReturn("v1");
         // Skip @PostConstruct initialization
         ReflectionTestUtils.setField(fileUploadService, "eventPublisher", eventPublisher);
         // 让异步分片处理在测试中同步执行，避免线程池/时序不稳定
@@ -3502,8 +3515,730 @@ class FileUploadServiceTest {
     }
 
     @Nested
+    @DisplayName("Framed Upload Encryption Contracts")
+    class FramedUploadEncryptionContracts {
+
+        /**
+         * 验证 framed v2 初始化会一次性持久化完整的文件级加密检查点。
+         */
+        @Test
+        void shouldInitializeFramedEncryptionCheckpoint() {
+            byte[] dek = new byte[FramedAeadCrypto.FILE_DEK_SIZE];
+            byte[] nonce = new byte[FramedAeadCrypto.FILE_NONCE_SIZE];
+            Arrays.fill(dek, (byte) 7);
+            Arrays.fill(nonce, (byte) 9);
+            when(encryptionProperties.getWriterFormat()).thenReturn(null);
+            when(encryptionProperties.getFramePlainSize())
+                    .thenReturn(ChunkManifestEncryption.MIN_FRAME_PLAIN_SIZE);
+            when(framedAeadWriter.generateFileDek()).thenReturn(dek);
+            when(framedAeadWriter.generateFileNonce()).thenReturn(nonce);
+
+            FileUploadState state = new FileUploadState(
+                    USER_ID, "framed.bin", 1024L, "application/octet-stream", "framed-init", 1024, 1);
+            ReflectionTestUtils.invokeMethod(fileUploadService, "initializeEncryptionState", state);
+
+            assertEquals(2, state.getEncryptionRecoveryVersion());
+            assertEquals(FramedAeadCrypto.FORMAT_VERSION, state.getEncryptionFormatVersion());
+            assertEquals(ChunkManifestEncryption.SUITE_FRAMED_V2, state.getEncryptionAlgorithmSuite());
+            assertSame(dek, state.getFileDataKey());
+            assertSame(nonce, state.getFileNonce());
+            assertEquals(ChunkManifestEncryption.MIN_FRAME_PLAIN_SIZE, state.getFramePlainSize());
+            assertEquals(ChunkManifestEncryption.DERIVATION_HKDF_SHA256, state.getKeyDerivation());
+            assertEquals(ChunkManifestEncryption.DERIVATION_HKDF_SHA256, state.getNonceDerivation());
+            assertEquals(ChunkManifestEncryption.AAD_SCHEMA_FRAMED_V2, state.getAadSchema());
+            assertEquals(FramedAeadCrypto.TAG_SIZE, state.getTagSize());
+            verify(framedAeadWriter).generateFileDek();
+            verify(framedAeadWriter).generateFileNonce();
+        }
+
+        /**
+         * 验证 legacy 别名和未注入配置时都会清空 framed 检查点，保持旧格式兼容。
+         */
+        @Test
+        void shouldInitializeLegacyEncryptionCheckpointForAliasesAndMissingConfig() {
+            FileUploadState state = framedState("legacy-init", 1);
+            when(encryptionProperties.getWriterFormat()).thenReturn(" legacy ");
+            ReflectionTestUtils.invokeMethod(fileUploadService, "initializeEncryptionState", state);
+
+            assertEquals(1, state.getEncryptionRecoveryVersion());
+            assertEquals(ChunkManifestEncryption.FORMAT_LEGACY_V1, state.getEncryptionFormatVersion());
+            assertNull(state.getEncryptionAlgorithmSuite());
+            assertNull(state.getFileDataKey());
+            assertNull(state.getFileNonce());
+            assertNull(state.getFramePlainSize());
+            assertNull(state.getKeyDerivation());
+            assertNull(state.getNonceDerivation());
+            assertNull(state.getAadSchema());
+            assertNull(state.getTagSize());
+
+            ReflectionTestUtils.setField(fileUploadService, "encryptionProperties", null);
+            FileUploadState fallback = new FileUploadState(
+                    USER_ID, "legacy-fallback.bin", 1L, "text/plain", "legacy-fallback", 1, 1);
+            ReflectionTestUtils.invokeMethod(fileUploadService, "initializeEncryptionState", fallback);
+            assertEquals(ChunkManifestEncryption.FORMAT_LEGACY_V1, fallback.getEncryptionFormatVersion());
+            assertNull(fallback.getFileDataKey());
+        }
+
+        /**
+         * 验证初始化入口拒绝空状态、越界 frame 大小和未知 writer-format。
+         */
+        @Test
+        void shouldRejectInvalidEncryptionInitializationInputs() {
+            GeneralException nullState = assertThrows(
+                    GeneralException.class,
+                    () -> ReflectionTestUtils.invokeMethod(
+                            fileUploadService, "initializeEncryptionState", (FileUploadState) null));
+            assertEquals(ResultEnum.FILE_UPLOAD_ERROR, nullState.getResultEnum());
+
+            when(encryptionProperties.getWriterFormat()).thenReturn("v2");
+            when(encryptionProperties.getFramePlainSize())
+                    .thenReturn(ChunkManifestEncryption.MIN_FRAME_PLAIN_SIZE - 1);
+            GeneralException tooSmall = assertThrows(
+                    GeneralException.class,
+                    () -> ReflectionTestUtils.invokeMethod(
+                            fileUploadService, "initializeEncryptionState", new FileUploadState()));
+            assertEquals(ResultEnum.PARAM_ERROR, tooSmall.getResultEnum());
+
+            when(encryptionProperties.getFramePlainSize())
+                    .thenReturn(ChunkManifestEncryption.MAX_FRAME_PLAIN_SIZE + 1);
+            GeneralException tooLarge = assertThrows(
+                    GeneralException.class,
+                    () -> ReflectionTestUtils.invokeMethod(
+                            fileUploadService, "initializeEncryptionState", new FileUploadState()));
+            assertEquals(ResultEnum.PARAM_ERROR, tooLarge.getResultEnum());
+
+            when(encryptionProperties.getWriterFormat()).thenReturn("v3");
+            GeneralException unsupported = assertThrows(
+                    GeneralException.class,
+                    () -> ReflectionTestUtils.invokeMethod(
+                            fileUploadService, "initializeEncryptionState", new FileUploadState()));
+            assertEquals(ResultEnum.PARAM_ERROR, unsupported.getResultEnum());
+            verifyNoInteractions(framedAeadWriter);
+        }
+
+        /**
+         * 验证 framed 完成态通过所有顶层和逐分片证据检查，且不依赖 v1 分片密钥链。
+         */
+        @Test
+        void shouldAcceptCompleteFramedChunkState() {
+            FileUploadState state = framedState("complete-framed", 2);
+            assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(
+                    fileUploadService, "requireCompleteChunkState", state, 2));
+            assertTrue(state.getKeys().isEmpty());
+        }
+
+        /**
+         * 验证 framed 完成态的每个检查点缺失都会返回可重试服务不可用错误。
+         */
+        @Test
+        void shouldRejectMissingFramedCompletionEvidence() {
+            List<Consumer<FileUploadState>> topLevelMutations = List.of(
+                    state -> state.setUploadedChunks(null),
+                    state -> state.setProcessedChunks(null),
+                    state -> state.setChunkHashes(null),
+                    state -> state.getUploadedChunks().remove(1),
+                    state -> state.getProcessedChunks().remove(1),
+                    state -> state.getChunkHashes().remove("chunk_1"),
+                    state -> state.setFileDataKey(null),
+                    state -> state.setFileDataKey(new byte[FramedAeadCrypto.FILE_DEK_SIZE - 1]),
+                    state -> state.setFileNonce(null),
+                    state -> state.setFileNonce(new byte[FramedAeadCrypto.FILE_NONCE_SIZE - 1]),
+                    state -> state.setFramePlainSize(null)
+            );
+            for (Consumer<FileUploadState> mutation : topLevelMutations) {
+                FileUploadState state = framedState("framed-missing-" + UUID.randomUUID(), 2);
+                mutation.accept(state);
+                RetryableException error = assertThrows(
+                        RetryableException.class,
+                        () -> ReflectionTestUtils.invokeMethod(
+                                fileUploadService, "requireCompleteChunkState", state, 2));
+                assertEquals(ResultEnum.SERVICE_UNAVAILABLE, error.getResultEnum());
+            }
+
+            List<Consumer<FileUploadState>> indexedMutations = List.of(
+                    state -> {
+                        state.getUploadedChunks().clear();
+                        state.getUploadedChunks().add(9);
+                    },
+                    state -> {
+                        state.getProcessedChunks().clear();
+                        state.getProcessedChunks().add(9);
+                    },
+                    state -> {
+                        state.getChunkHashes().clear();
+                        state.getChunkHashes().put("chunk_9", zeroDigestBase64Url());
+                    },
+                    state -> state.getChunkHashes().put("chunk_0", " ")
+            );
+            for (Consumer<FileUploadState> mutation : indexedMutations) {
+                FileUploadState state = framedState("framed-index-" + UUID.randomUUID(), 2);
+                mutation.accept(state);
+                assertThrows(
+                        RetryableException.class,
+                        () -> ReflectionTestUtils.invokeMethod(
+                                fileUploadService, "requireCompleteChunkState", state, 2));
+            }
+        }
+
+        /**
+         * 验证 legacy 完成态仍要求每个分片同时具备 hash、processed 和稳定密钥。
+         */
+        @Test
+        void shouldRejectMissingLegacyCompletionEvidence() {
+            FileUploadState valid = completionState("legacy-complete", true);
+            assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(
+                    fileUploadService, "requireCompleteChunkState", valid, 1));
+
+            List<Consumer<FileUploadState>> mutations = List.of(
+                    state -> state.setUploadedChunks(null),
+                    state -> state.setProcessedChunks(null),
+                    state -> state.setChunkHashes(null),
+                    state -> state.setKeys(null),
+                    state -> state.getUploadedChunks().clear(),
+                    state -> state.getProcessedChunks().clear(),
+                    state -> state.getChunkHashes().clear(),
+                    state -> state.getKeys().clear()
+            );
+            for (Consumer<FileUploadState> mutation : mutations) {
+                FileUploadState state = completionState("legacy-missing-" + UUID.randomUUID(), true);
+                mutation.accept(state);
+                assertThrows(
+                        RetryableException.class,
+                        () -> ReflectionTestUtils.invokeMethod(
+                                fileUploadService, "requireCompleteChunkState", state, 1));
+            }
+
+            List<Consumer<FileUploadState>> indexedMutations = List.of(
+                    state -> {
+                        state.getUploadedChunks().clear();
+                        state.getUploadedChunks().add(9);
+                    },
+                    state -> {
+                        state.getProcessedChunks().clear();
+                        state.getProcessedChunks().add(9);
+                    },
+                    state -> {
+                        state.getChunkHashes().clear();
+                        state.getChunkHashes().put("chunk_9", "hash");
+                    },
+                    state -> state.getChunkHashes().put("chunk_0", " "),
+                    state -> {
+                        state.getKeys().clear();
+                        state.getKeys().put(9, new byte[]{1});
+                    },
+                    state -> state.getKeys().put(0, new byte[0])
+            );
+            for (Consumer<FileUploadState> mutation : indexedMutations) {
+                FileUploadState state = completionState("legacy-index-" + UUID.randomUUID(), true);
+                mutation.accept(state);
+                assertThrows(
+                        RetryableException.class,
+                        () -> ReflectionTestUtils.invokeMethod(
+                                fileUploadService, "requireCompleteChunkState", state, 1));
+            }
+        }
+
+        /**
+         * 验证 Base64URL 分片摘要能规范化为 manifest 的 sha256: 十六进制格式。
+         */
+        @Test
+        void shouldCanonicalizeBase64UrlChunkDigest() {
+            byte[] digest = new byte[32];
+            Arrays.fill(digest, (byte) 0x2a);
+            String encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+            String expected = "sha256:" + HexFormat.of().formatHex(digest);
+            String actual = ReflectionTestUtils.invokeMethod(
+                    fileUploadService, "canonicalSha256FromBase64Url", encoded);
+            assertEquals(expected, actual);
+        }
+
+        /**
+         * 验证缺失、过长、非法 Base64 或错误摘要长度均失败关闭。
+         */
+        @Test
+        void shouldRejectInvalidBase64UrlChunkDigest() {
+            List<String> invalidValues = List.of(
+                    "***not-base64***",
+                    Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[31]),
+                    "x".repeat(129)
+            );
+            for (String value : invalidValues) {
+                GeneralException error = assertThrows(
+                        GeneralException.class,
+                        () -> ReflectionTestUtils.invokeMethod(
+                                fileUploadService, "canonicalSha256FromBase64Url", value));
+                assertEquals(ResultEnum.FILE_RECORD_ERROR, error.getResultEnum());
+            }
+            GeneralException nullError = assertThrows(
+                    GeneralException.class,
+                    () -> ReflectionTestUtils.invokeMethod(
+                            fileUploadService, "canonicalSha256FromBase64Url", (String) null));
+            assertEquals(ResultEnum.FILE_RECORD_ERROR, nullError.getResultEnum());
+        }
+
+        /**
+         * 验证 framed v2 文件参数公开完整 descriptor，并使用 file-level DEK 作为 initialKey。
+         */
+        @Test
+        void shouldGenerateFramedFileParam() {
+            FileUploadState state = framedState("framed-param", 1);
+            state.setContentHash(CONTENT_HASH);
+            String fileParam = ReflectionTestUtils.invokeMethod(
+                    fileUploadService, "generateFileParam", state);
+
+            assertTrue(fileParam.contains("\"encryptionAlgorithm\":\"FRAMED_AEAD_V2\""));
+            assertTrue(fileParam.contains(ChunkManifestEncryption.SUITE_FRAMED_V2));
+            assertTrue(fileParam.contains("\"formatVersion\":2"));
+            assertTrue(fileParam.contains("\"framePlainSize\":" + state.getFramePlainSize()));
+            assertTrue(fileParam.contains("\"keyDerivation\":\"HKDF-SHA256\""));
+            assertTrue(fileParam.contains("\"nonceDerivation\":\"HKDF-SHA256\""));
+            assertTrue(fileParam.contains(ChunkManifestEncryption.AAD_SCHEMA_FRAMED_V2));
+            assertTrue(fileParam.contains("\"tagSize\":16"));
+            assertTrue(fileParam.contains(
+                    Base64.getEncoder().encodeToString(state.getFileDataKey())));
+            assertTrue(fileParam.contains(
+                    Base64.getUrlEncoder().withoutPadding().encodeToString(state.getFileNonce())));
+            assertTrue(fileParam.contains(CONTENT_HASH));
+        }
+
+        /**
+         * 验证 framed 文件参数不会接受缺失或错误长度的稳定加密检查点。
+         */
+        @Test
+        void shouldRejectFramedFileParamWithoutStableCheckpoint() {
+            List<Consumer<FileUploadState>> mutations = List.of(
+                    state -> state.setFileDataKey(null),
+                    state -> state.setFileDataKey(new byte[FramedAeadCrypto.FILE_DEK_SIZE - 1]),
+                    state -> state.setFileNonce(null),
+                    state -> state.setFileNonce(new byte[FramedAeadCrypto.FILE_NONCE_SIZE - 1]),
+                    state -> state.setFramePlainSize(null)
+            );
+            for (Consumer<FileUploadState> mutation : mutations) {
+                FileUploadState state = framedState("framed-param-invalid-" + UUID.randomUUID(), 1);
+                state.setContentHash(CONTENT_HASH);
+                mutation.accept(state);
+                GeneralException error = assertThrows(
+                        GeneralException.class,
+                        () -> ReflectionTestUtils.invokeMethod(
+                                fileUploadService, "generateFileParam", state));
+                assertEquals(ResultEnum.FILE_RECORD_ERROR, error.getResultEnum());
+            }
+        }
+
+        /**
+         * 验证 framed 分片处理会校验原文摘要、原子发布密文并提交 processed 证据。
+         */
+        @Test
+        void shouldProcessFramedChunkAndCommitEvidence() throws Exception {
+            String clientId = "framed-process-" + UUID.randomUUID();
+            FileUploadState state = framedState(clientId, 1);
+            state.getProcessedChunks().clear();
+            byte[] plain = new byte[1024];
+            Arrays.fill(plain, (byte) 4);
+            Path root = Files.createTempDirectory("framed-process-");
+            Path rawPath = root.resolve("raw/chunk_0");
+            Path processedPath = root.resolve("processed/encrypted_chunk_0");
+            Path taskPath = root.resolve("processed/task.tmp");
+            Files.createDirectories(rawPath.getParent());
+            Files.write(rawPath, plain);
+            String trustedHash = ReflectionTestUtils.invokeMethod(
+                    fileUploadService, "calculateChunkHashBase64", rawPath);
+            state.getChunkHashes().put("chunk_0", trustedHash);
+            String plainHash = ReflectionTestUtils.invokeMethod(
+                    fileUploadService, "canonicalSha256FromBase64Url", trustedHash);
+            when(redisStateManager.getState(clientId)).thenReturn(state);
+            doAnswer(invocation -> {
+                state.getProcessedChunks().add(0);
+                return null;
+            }).when(redisStateManager).addProcessedChunk(clientId, 0);
+            when(framedAeadWriter.write(
+                    eq(rawPath), eq(taskPath), same(state.getFileDataKey()), same(state.getFileNonce()),
+                    eq(0), eq(1), eq(state.getFramePlainSize())))
+                    .thenAnswer(invocation -> {
+                        Files.write(taskPath, new byte[]{8, 9, 10});
+                        return new FramedAeadWriter.WriteResult(
+                                1024L, 3L, 1, plainHash, "sha256:" + "11".repeat(32));
+                    });
+
+            try {
+                ReflectionTestUtils.invokeMethod(
+                        fileUploadService,
+                        "processChunkWithSessionAndChunkLocks",
+                        SUID,
+                        state,
+                        state,
+                        0,
+                        rawPath,
+                        processedPath,
+                        taskPath,
+                        trustedHash);
+
+                assertTrue(Files.isRegularFile(processedPath));
+                assertArrayEquals(new byte[]{8, 9, 10}, Files.readAllBytes(processedPath));
+                verify(redisStateManager).addProcessedChunk(clientId, 0);
+                verify(framedAeadWriter).write(
+                        eq(rawPath), eq(taskPath), any(byte[].class), any(byte[].class), eq(0), eq(1),
+                        eq(state.getFramePlainSize()));
+                assertTrue(state.getKeys().isEmpty());
+            } finally {
+                deleteTempTree(root);
+            }
+        }
+
+        /**
+         * 验证 framed 分片检查点缺失、摘要漂移和 writer IO 失败都不会发布最终文件。
+         */
+        @Test
+        void shouldFailClosedWhenProcessingFramedChunkEvidenceIsInvalid() throws Exception {
+            String clientId = "framed-process-invalid-" + UUID.randomUUID();
+            FileUploadState state = framedState(clientId, 1);
+            state.getProcessedChunks().clear();
+            Path root = Files.createTempDirectory("framed-process-invalid-");
+            Path rawPath = root.resolve("raw/chunk_0");
+            Path processedPath = root.resolve("processed/encrypted_chunk_0");
+            Path taskPath = root.resolve("processed/task.tmp");
+            Files.createDirectories(rawPath.getParent());
+            Files.write(rawPath, new byte[1024]);
+            String trustedHash = ReflectionTestUtils.invokeMethod(
+                    fileUploadService, "calculateChunkHashBase64", rawPath);
+            state.getChunkHashes().put("chunk_0", trustedHash);
+
+            try {
+                state.setFileDataKey(null);
+                GeneralException checkpointError = assertThrows(
+                        GeneralException.class,
+                        () -> ReflectionTestUtils.invokeMethod(
+                                fileUploadService,
+                                "processChunkWithSessionAndChunkLocks",
+                                SUID, state, state, 0, rawPath, processedPath, taskPath, trustedHash));
+                assertEquals(ResultEnum.FILE_RECORD_ERROR, checkpointError.getResultEnum());
+                state.setFileDataKey(new byte[FramedAeadCrypto.FILE_DEK_SIZE]);
+
+                String wrongHash = zeroDigestBase64Url();
+                state.getChunkHashes().put("chunk_0", wrongHash);
+                GeneralException hashError = assertThrows(
+                        GeneralException.class,
+                        () -> ReflectionTestUtils.invokeMethod(
+                                fileUploadService,
+                                "processChunkWithSessionAndChunkLocks",
+                                SUID, state, state, 0, rawPath, processedPath, taskPath, trustedHash));
+                assertEquals(ResultEnum.FILE_UPLOAD_ERROR, hashError.getResultEnum());
+                state.getChunkHashes().put("chunk_0", trustedHash);
+
+                when(framedAeadWriter.write(
+                        any(), any(), any(byte[].class), any(byte[].class), eq(0), eq(1), anyInt()))
+                        .thenThrow(new IOException("writer unavailable"));
+                assertThrows(
+                        java.io.UncheckedIOException.class,
+                        () -> ReflectionTestUtils.invokeMethod(
+                                fileUploadService,
+                                "processChunkWithSessionAndChunkLocks",
+                                SUID, state, state, 0, rawPath, processedPath, taskPath, trustedHash));
+                assertFalse(Files.exists(processedPath));
+            } finally {
+                deleteTempTree(root);
+            }
+        }
+
+        /**
+         * 验证 framed 完成处理会重新认证全部对象，并拒绝尺寸或摘要证据漂移。
+         */
+        @Test
+        void shouldVerifyFramedChunksDuringCompletion() throws Throwable {
+            FileUploadState state = framedState("framed-complete-processing", 1);
+            String plainHash = "sha256:" + "00".repeat(32);
+            when(framedAeadWriter.verify(
+                    any(Path.class), any(byte[].class), any(byte[].class), eq(0), eq(1),
+                    eq(state.getFramePlainSize())))
+                    .thenReturn(new FramedAeadWriter.WriteResult(
+                            1024L, 100L, 1, plainHash, "sha256:" + "22".repeat(32)));
+
+            assertDoesNotThrow(() -> invokeChecked(
+                    "completeFileProcessing",
+                    new Class<?>[]{String.class, FileUploadState.class},
+                    SUID,
+                    state));
+            verify(framedAeadWriter).verify(
+                    eq(Path.of("processed").toAbsolutePath().normalize()
+                            .resolve(SUID).resolve(state.getClientId()).resolve("encrypted_chunk_0")),
+                    same(state.getFileDataKey()), same(state.getFileNonce()), eq(0), eq(1),
+                    eq(state.getFramePlainSize()));
+            verify(redisStateManager, never()).getChunkKeys(anyString());
+
+            when(framedAeadWriter.verify(
+                    any(Path.class), any(byte[].class), any(byte[].class), eq(0), eq(1),
+                    eq(state.getFramePlainSize())))
+                    .thenReturn(new FramedAeadWriter.WriteResult(
+                            1L, 100L, 1, plainHash, "sha256:" + "22".repeat(32)));
+            Throwable mismatch = assertThrows(
+                    IOException.class,
+                    () -> invokeChecked(
+                            "completeFileProcessing",
+                            new Class<?>[]{String.class, FileUploadState.class},
+                            SUID,
+                            state));
+            assertTrue(mismatch.getMessage().contains("认证结果"));
+
+            state.setFileDataKey(null);
+            assertThrows(
+                    IOException.class,
+                    () -> invokeChecked(
+                            "completeFileProcessing",
+                            new Class<?>[]{String.class, FileUploadState.class},
+                            SUID,
+                            state));
+        }
+
+        /**
+         * 验证 legacy 完成处理仍按环形顺序追加 NEXT_KEY，并支持幂等重入。
+         */
+        @Test
+        void shouldCompleteLegacyFileProcessingIdempotently() throws Throwable {
+            String clientId = "legacy-complete-processing-" + UUID.randomUUID();
+            FileUploadState state = new FileUploadState(
+                    USER_ID, "legacy.bin", 2048L, "application/octet-stream", clientId, 1024, 2);
+            state.setSuid(SUID);
+            state.getChunkHashes().put("chunk_0", "plain-0");
+            state.getChunkHashes().put("chunk_1", "plain-1");
+            byte[] key0 = new byte[]{1, 2, 3};
+            byte[] key1 = new byte[]{4, 5, 6};
+            Map<Integer, byte[]> keys = new HashMap<>();
+            keys.put(0, key0);
+            keys.put(1, key1);
+            when(redisStateManager.getChunkKeys(clientId)).thenReturn(keys);
+            Path directory = Path.of("processed").toAbsolutePath().normalize()
+                    .resolve(SUID).resolve(clientId);
+            Path first = directory.resolve("encrypted_chunk_0");
+            Path second = directory.resolve("encrypted_chunk_1");
+            Files.createDirectories(directory);
+            Files.writeString(first, "cipher-0\n--HASH--\nplain-0", StandardCharsets.UTF_8);
+            Files.writeString(second, "cipher-1\n--HASH--\nplain-1", StandardCharsets.UTF_8);
+
+            try {
+                invokeChecked(
+                        "completeFileProcessing",
+                        new Class<?>[]{String.class, FileUploadState.class},
+                        SUID,
+                        state);
+                String firstContent = Files.readString(first, StandardCharsets.UTF_8);
+                String secondContent = Files.readString(second, StandardCharsets.UTF_8);
+                assertTrue(firstContent.endsWith(
+                        "\n--NEXT_KEY--\n" + Base64.getEncoder().encodeToString(key1)));
+                assertTrue(secondContent.endsWith(
+                        "\n--NEXT_KEY--\n" + Base64.getEncoder().encodeToString(key0)));
+                invokeChecked(
+                        "completeFileProcessing",
+                        new Class<?>[]{String.class, FileUploadState.class},
+                        SUID,
+                        state);
+                assertEquals(firstContent, Files.readString(first, StandardCharsets.UTF_8));
+                assertEquals(secondContent, Files.readString(second, StandardCharsets.UTF_8));
+            } finally {
+                deleteTempTree(directory);
+            }
+        }
+
+        /**
+         * 验证 legacy 完成处理在密钥证据为空、数量不足或索引缺失时失败关闭。
+         */
+        @Test
+        void shouldRejectIncompleteLegacyFileProcessingKeys() throws Throwable {
+            FileUploadState state = new FileUploadState(
+                    USER_ID, "legacy-errors.bin", 2048L, "application/octet-stream",
+                    "legacy-key-errors", 1024, 2);
+            state.setSuid(SUID);
+
+            when(redisStateManager.getChunkKeys(state.getClientId())).thenReturn(null);
+            assertThrows(IOException.class, () -> invokeChecked(
+                    "completeFileProcessing",
+                    new Class<?>[]{String.class, FileUploadState.class}, SUID, state));
+
+            when(redisStateManager.getChunkKeys(state.getClientId()))
+                    .thenReturn(Map.of(0, new byte[]{1}));
+            assertThrows(IOException.class, () -> invokeChecked(
+                    "completeFileProcessing",
+                    new Class<?>[]{String.class, FileUploadState.class}, SUID, state));
+
+            Map<Integer, byte[]> missing = new HashMap<>();
+            missing.put(0, null);
+            missing.put(1, new byte[]{2});
+            when(redisStateManager.getChunkKeys(state.getClientId())).thenReturn(missing);
+            assertThrows(IOException.class, () -> invokeChecked(
+                    "completeFileProcessing",
+                    new Class<?>[]{String.class, FileUploadState.class}, SUID, state));
+
+            state.setTotalChunks(0);
+            when(redisStateManager.getChunkKeys(state.getClientId())).thenReturn(Map.of());
+            assertDoesNotThrow(() -> invokeChecked(
+                    "completeFileProcessing",
+                    new Class<?>[]{String.class, FileUploadState.class}, SUID, state));
+        }
+
+        /**
+         * 直接调用私有方法并向测试暴露其原始 checked exception，避免反射包装掩盖失败原因。
+         */
+        private Object invokeChecked(String methodName, Class<?>[] parameterTypes, Object... arguments)
+                throws Throwable {
+            Method method = FileUploadServiceImpl.class.getDeclaredMethod(methodName, parameterTypes);
+            method.setAccessible(true);
+            try {
+                return method.invoke(fileUploadService, arguments);
+            } catch (InvocationTargetException invocationError) {
+                throw invocationError.getCause();
+            }
+        }
+
+        /**
+         * 递归删除本组测试创建的临时目录。
+         */
+        private void deleteTempTree(Path root) throws IOException {
+            if (!Files.exists(root)) {
+                return;
+            }
+            try (var paths = Files.walk(root)) {
+                paths.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                    try {
+                        Files.deleteIfExists(path);
+                    } catch (IOException error) {
+                        throw new IllegalStateException(error);
+                    }
+                });
+            }
+        }
+
+        /**
+         * 构造包含稳定 framed v2 检查点和逐分片摘要的测试状态。
+         */
+        private FileUploadState framedState(String clientId, int totalChunks) {
+            int chunkSize = 1024;
+            FileUploadState state = new FileUploadState(
+                    USER_ID,
+                    "framed-" + clientId + ".bin",
+                    (long) chunkSize * totalChunks,
+                    "application/octet-stream",
+                    clientId,
+                    chunkSize,
+                    totalChunks);
+            state.setTenantId(77L);
+            state.setSuid(SUID);
+            state.setEncryptionRecoveryVersion(2);
+            state.setEncryptionFormatVersion(FramedAeadCrypto.FORMAT_VERSION);
+            state.setEncryptionAlgorithmSuite(ChunkManifestEncryption.SUITE_FRAMED_V2);
+            state.setFileDataKey(new byte[FramedAeadCrypto.FILE_DEK_SIZE]);
+            state.setFileNonce(new byte[FramedAeadCrypto.FILE_NONCE_SIZE]);
+            state.setFramePlainSize(ChunkManifestEncryption.MIN_FRAME_PLAIN_SIZE);
+            state.setKeyDerivation(ChunkManifestEncryption.DERIVATION_HKDF_SHA256);
+            state.setNonceDerivation(ChunkManifestEncryption.DERIVATION_HKDF_SHA256);
+            state.setAadSchema(ChunkManifestEncryption.AAD_SCHEMA_FRAMED_V2);
+            state.setTagSize(FramedAeadCrypto.TAG_SIZE);
+            for (int index = 0; index < totalChunks; index++) {
+                state.getUploadedChunks().add(index);
+                state.getProcessedChunks().add(index);
+                state.getChunkHashes().put("chunk_" + index, zeroDigestBase64Url());
+            }
+            return state;
+        }
+
+        /**
+         * 返回固定的 32 字节摘要，供反射测试构造稳定的 Base64URL 检查点。
+         */
+        private String zeroDigestBase64Url() {
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(new byte[32]);
+        }
+    }
+
+    @Nested
     @DisplayName("Framed DB SUCCESS Recovery")
     class FramedDbSuccessRecovery {
+
+        /**
+         * 验证 DB 已成功且 active manifest 可确认时，恢复流程先保存 manifest 检查点再清理临时证据。
+         */
+        @Test
+        void shouldRecoverFramedDbSuccessAfterManifestConfirmation() throws Exception {
+            String clientId = "framed-recovery-success-" + UUID.randomUUID();
+            long fileId = 9400L;
+            FileUploadState state = completionState(clientId, true);
+            state.getKeys().clear();
+            state.setPrepareStored(true);
+            state.setPreparedFileId(fileId);
+            state.setContentHash(CONTENT_HASH);
+            state.setEncryptionRecoveryVersion(2);
+            state.setEncryptionFormatVersion(FramedAeadCrypto.FORMAT_VERSION);
+            state.setEncryptionAlgorithmSuite(ChunkManifestEncryption.SUITE_FRAMED_V2);
+            state.setFileDataKey(new byte[FramedAeadCrypto.FILE_DEK_SIZE]);
+            state.setFileNonce(new byte[FramedAeadCrypto.FILE_NONCE_SIZE]);
+            state.setFramePlainSize(64 * 1024);
+            state.setKeyDerivation(ChunkManifestEncryption.DERIVATION_HKDF_SHA256);
+            state.setNonceDerivation(ChunkManifestEncryption.DERIVATION_HKDF_SHA256);
+            state.setAadSchema(ChunkManifestEncryption.AAD_SCHEMA_FRAMED_V2);
+            state.setTagSize(FramedAeadCrypto.TAG_SIZE);
+
+            Path uploadDir = Path.of("uploads").toAbsolutePath().normalize()
+                    .resolve(SUID).resolve(clientId);
+            Path processedDir = Path.of("processed").toAbsolutePath().normalize()
+                    .resolve(SUID).resolve(clientId);
+            Files.createDirectories(uploadDir);
+            Files.createDirectories(processedDir);
+            Files.writeString(uploadDir.resolve("raw-evidence"), "raw", StandardCharsets.UTF_8);
+            Files.write(processedDir.resolve("encrypted_chunk_0"), new byte[]{4, 5, 6});
+            state.setUploadTempPath(uploadDir.toString());
+            state.setProcessedTempPath(processedDir.toString());
+
+            File persistedFile = new File()
+                    .setId(fileId)
+                    .setUid(USER_ID)
+                    .setTenantId(77L)
+                    .setFileName(state.getFileName())
+                    .setFileSize(state.getFileSize())
+                    .setFileHash("persisted-file-hash")
+                    .setTransactionHash("tx-9400")
+                    .setContentHash(CONTENT_HASH)
+                    .setStatus(FileUploadStatus.SUCCESS.getCode());
+            ChunkManifestView manifest = new ChunkManifestView(
+                    1L,
+                    fileId,
+                    1,
+                    "cn.flying.chunk-manifest.v1",
+                    persistedFile.getFileHash(),
+                    "manifest-hash-9400",
+                    "SHA-256",
+                    state.getChunkSize(),
+                    state.getTotalChunks(),
+                    state.getFileSize(),
+                    null,
+                    "FRAMED_AEAD_V2",
+                    "S3",
+                    List.of());
+            when(fileService.getById(fileId)).thenReturn(persistedFile);
+            when(redisStateManager.getState(clientId)).thenReturn(state);
+            when(framedManifestFinalizationService.ensureManifest(
+                    eq(USER_ID), eq(persistedFile), eq(state), anyList(), anyList()))
+                    .thenReturn(Optional.of(manifest));
+
+            try {
+                Boolean recovered = ReflectionTestUtils.invokeMethod(
+                        fileUploadService,
+                        "recoverLegacySuccessFinalization",
+                        USER_ID,
+                        SUID,
+                        state);
+
+                assertTrue(recovered);
+                assertEquals("manifest-hash-9400", state.getManifestHash());
+                assertFalse(Files.exists(uploadDir));
+                assertFalse(Files.exists(processedDir));
+                verify(redisStateManager).updateState(state);
+                verify(redisStateManager).markCompleted(clientId, SUID, 300);
+                verify(framedManifestFinalizationService).ensureManifest(
+                        eq(USER_ID), eq(persistedFile), eq(state),
+                        argThat(files -> files.size() == 1),
+                        argThat(hashes -> hashes.size() == 1 && hashes.get(0).startsWith("sha256:")));
+            } finally {
+                deleteTree(uploadDir);
+                deleteTree(processedDir);
+            }
+        }
 
         /**
          * 验证 active manifest 校验或保存失败时，恢复流程不会先清理唯一临时证据或标记 completed。

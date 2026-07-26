@@ -410,6 +410,54 @@ describe("boundedDownloader", () => {
     expect(Array.from(sink.getData())).toEqual(Array.from(fixture.plaintext));
   });
 
+  it.each([
+    {
+      name: "unknown suite",
+      expected: "不支持的 framed AEAD 下载合同",
+      prepare: (metadata: FileDownloadMetadataVO) => {
+        if (!metadata.encryption) throw new Error("fixture 缺少加密描述");
+        metadata.encryption.algorithmSuite = "OTHER-SUITE";
+      },
+    },
+    {
+      name: "undersized frame",
+      expected: "不支持的 framed AEAD 下载合同",
+      prepare: (metadata: FileDownloadMetadataVO) => {
+        if (!metadata.encryption) throw new Error("fixture 缺少加密描述");
+        metadata.encryption.framePlainSize = 1;
+      },
+    },
+    {
+      name: "invalid file nonce",
+      expected: "framed AEAD fileNonce 必须为 16 字节",
+      prepare: (metadata: FileDownloadMetadataVO) => {
+        if (!metadata.encryption) throw new Error("fixture 缺少加密描述");
+        metadata.encryption.fileNonce = base64(new Uint8Array([1]));
+      },
+    },
+  ])(
+    "should reject framed v2 $name before fetching",
+    async ({ expected, prepare }) => {
+      const fixture = await framedMetadataFixture();
+      prepare(fixture.metadata);
+      const sink = trackingSink();
+      const fetchMock = vi.fn(async () => {
+        throw new Error("must not fetch");
+      });
+
+      await expect(
+        executeBoundedDownload({
+          metadata: fixture.metadata,
+          sink,
+          fetchImpl: fetchMock,
+        }),
+      ).rejects.toThrow(expected);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(sink.aborted).toBe(true);
+      expect(sink.closed).toBe(false);
+    },
+  );
+
   it("should fail closed on canonical manifest shape and binding drift", async () => {
     const cases: Array<{
       expected: string;
@@ -788,7 +836,7 @@ describe("boundedDownloader", () => {
 
   it("should preserve the v1 ring-key order while writing last part by offset", async () => {
     const plaintext0 = new TextEncoder().encode("first");
-    const plaintext1 = new TextEncoder().encode("second!");
+    const plaintext1 = new TextEncoder().encode("tail!");
     const key0 = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const key1 = Uint8Array.from({ length: 32 }, (_, index) => index + 33);
     const cipher0 = await encryptLegacyChunk(plaintext0, key0, key1);
@@ -830,7 +878,7 @@ describe("boundedDownloader", () => {
       sink,
       fetchImpl: async (url) => responses.get(String(url))!,
     });
-    expect(new TextDecoder().decode(sink.getData())).toBe("firstsecond!");
+    expect(new TextDecoder().decode(sink.getData())).toBe("firsttail!");
   });
 
   it("should reject legacy parts above the hard cap before fetching", async () => {
@@ -862,6 +910,81 @@ describe("boundedDownloader", () => {
     await expect(
       executeBoundedDownload({ metadata, sink, fetchImpl: fetchMock }),
     ).rejects.toThrow("兼容读取上限");
+  });
+
+  it.each([
+    { name: "gap", plainSizes: [4, 6] },
+    { name: "overlap", plainSizes: [6, 4] },
+  ])(
+    "should reject legacy v1 $name ranges before fetching",
+    async ({ plainSizes }) => {
+      const firstCipher = new Uint8Array([1]);
+      const secondCipher = new Uint8Array([2]);
+      const metadata = withCanonicalManifest({
+        fileId: "legacy-range-file",
+        fileHash: "legacy-range-hash",
+        fileName: "legacy-range.bin",
+        fileSize: 10,
+        contentType: "application/octet-stream",
+        initialKey: base64(new Uint8Array(32)),
+        manifestSchemaId: "v1",
+        manifestHash: "sha256:00",
+        hashAlgorithm: "SHA-256",
+        encryptionAlgorithm: "AES-GCM",
+        storageBackend: "S3",
+        chunkSize: 5,
+        totalChunks: 2,
+        parts: [
+          { ...part(0, firstCipher, "u0"), plainSize: plainSizes[0] },
+          { ...part(1, secondCipher, "u1"), plainSize: plainSizes[1] },
+        ],
+      });
+      const sink = trackingSink();
+      const fetchMock = vi.fn(async () => {
+        throw new Error("must not fetch");
+      });
+
+      await expect(
+        executeBoundedDownload({ metadata, sink, fetchImpl: fetchMock }),
+      ).rejects.toThrow("明文范围不连续或尺寸不一致");
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(sink.aborted).toBe(true);
+    },
+  );
+
+  it("should reject legacy v1 range overflow before fetching", async () => {
+    const metadata = withCanonicalManifest({
+      fileId: "legacy-overflow-file",
+      fileHash: "legacy-overflow-hash",
+      fileName: "legacy-overflow.bin",
+      fileSize: Number.MAX_SAFE_INTEGER,
+      contentType: "application/octet-stream",
+      initialKey: base64(new Uint8Array(32)),
+      manifestSchemaId: "v1",
+      manifestHash: "sha256:00",
+      hashAlgorithm: "SHA-256",
+      encryptionAlgorithm: "AES-GCM",
+      storageBackend: "S3",
+      chunkSize: Number.MAX_SAFE_INTEGER,
+      totalChunks: 2,
+      parts: [
+        {
+          ...part(0, new Uint8Array([1]), "u0"),
+          plainSize: Number.MAX_SAFE_INTEGER,
+        },
+        { ...part(1, new Uint8Array([2]), "u1"), plainSize: 1 },
+      ],
+    });
+    const sink = trackingSink();
+    const fetchMock = vi.fn(async () => {
+      throw new Error("must not fetch");
+    });
+
+    await expect(
+      executeBoundedDownload({ metadata, sink, fetchImpl: fetchMock }),
+    ).rejects.toThrow("明文范围无效");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(sink.aborted).toBe(true);
   });
 
   it("should stream no-manifest plain parts without buffering the full file", async () => {
@@ -1012,6 +1135,7 @@ describe("boundedDownloader", () => {
     try {
       const bytes = new Uint8Array([7]);
       let attempts = 0;
+      let transientBodiesCancelled = 0;
       const download = executeLegacyFallbackDownload({
         urls: ["u0"],
         fileSize: 1,
@@ -1020,20 +1144,30 @@ describe("boundedDownloader", () => {
         sink: new MemoryDownloadSink(1, 64),
         fetchImpl: async () => {
           attempts++;
-          return attempts < 3
-            ? new Response(null, { status: 503 })
-            : responseFor(bytes);
+          if (attempts < 3) {
+            return new Response(
+              new ReadableStream({
+                cancel() {
+                  transientBodiesCancelled++;
+                },
+              }),
+              { status: 503 },
+            );
+          }
+          return responseFor(bytes);
         },
       });
 
       await vi.runAllTimersAsync();
       await expect(download).resolves.toMatchObject({ bytesWritten: 1 });
       expect(attempts).toBe(3);
+      expect(transientBodiesCancelled).toBe(2);
     } finally {
       vi.useRealTimers();
     }
 
     let expiredAttempts = 0;
+    let expiredBodyCancelled = 0;
     await expect(
       executeLegacyFallbackDownload({
         urls: ["expired"],
@@ -1043,11 +1177,44 @@ describe("boundedDownloader", () => {
         sink: trackingSink(),
         fetchImpl: async () => {
           expiredAttempts++;
-          return new Response(null, { status: 403 });
+          return new Response(
+            new ReadableStream({
+              cancel() {
+                expiredBodyCancelled++;
+              },
+            }),
+            { status: 403 },
+          );
         },
       }),
     ).rejects.toThrow("下载地址已过期");
     expect(expiredAttempts).toBe(1);
+    expect(expiredBodyCancelled).toBe(1);
+
+    let notFoundAttempts = 0;
+    let notFoundBodyCancelled = 0;
+    await expect(
+      executeLegacyFallbackDownload({
+        urls: ["not-found"],
+        fileSize: 1,
+        totalChunks: 1,
+        encrypted: false,
+        sink: trackingSink(),
+        fetchImpl: async () => {
+          notFoundAttempts++;
+          return new Response(
+            new ReadableStream({
+              cancel() {
+                notFoundBodyCancelled++;
+              },
+            }),
+            { status: 404 },
+          );
+        },
+      }),
+    ).rejects.toThrow("分片 1 下载失败: 404");
+    expect(notFoundAttempts).toBe(1);
+    expect(notFoundBodyCancelled).toBe(1);
   });
 
   it("should enforce legacy fallback response bounds before decryption or commit", async () => {

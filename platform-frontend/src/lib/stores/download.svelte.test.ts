@@ -1050,6 +1050,281 @@ describe("download store extra branches", () => {
     );
   });
 
+  it("backend proxy 响应大小与声明不一致时应失败", async () => {
+    mocks.fileApi.publicDownloadFile.mockResolvedValueOnce(
+      new Blob(["tiny"], { type: "application/octet-stream" }),
+    );
+    const download = await loadDownloadStore();
+    const id = await download.startDownload(
+      "hash-size-mismatch",
+      "mismatch.bin",
+      { type: "public_share", shareCode: "share-mismatch" },
+      8,
+    );
+
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "failed",
+    );
+
+    expect(mocks.crypto.downloadBlob).not.toHaveBeenCalled();
+    expect(download.tasks.find((task) => task.id === id)?.error).toBe(
+      "共享文件响应超过 64 MiB 或与声明大小不一致",
+    );
+  });
+
+  it("dispatch 应拒绝无界策略并允许无 picker 的小文件 fallback", async () => {
+    mocks.fileSize.isStreamingSupported.mockReturnValue(false);
+    const download = await loadDownloadStore();
+
+    const oversizedShareId = await download.startDownload(
+      "hash-share-too-large",
+      "share-too-large.bin",
+      { type: "public_share", shareCode: "share-too-large" },
+      64 * 1024 * 1024 + 1,
+      "inmemory",
+    );
+    const backendProxyId = await download.startDownload(
+      "hash-owned-proxy",
+      "owned-proxy.bin",
+      { type: "owned" },
+      1024,
+      "backend_proxy",
+    );
+    const streamingFallbackId = await download.startDownload(
+      "hash-streaming-fallback",
+      "streaming-fallback.bin",
+      { type: "owned" },
+      1024,
+      "streaming",
+    );
+    const oversizedStreamingId = await download.startDownload(
+      "hash-streaming-too-large",
+      "streaming-too-large.bin",
+      { type: "owned" },
+      64 * 1024 * 1024 + 1,
+      "streaming",
+    );
+    const oversizedMemoryId = await download.startDownload(
+      "hash-memory-too-large",
+      "memory-too-large.bin",
+      { type: "owned" },
+      64 * 1024 * 1024 + 1,
+      "inmemory",
+    );
+
+    await waitForStatus(
+      () =>
+        download.tasks.find((task) => task.id === streamingFallbackId)?.status,
+      "completed",
+    );
+
+    expect(
+      download.tasks.find((task) => task.id === oversizedShareId)?.error,
+    ).toContain("共享文件大小无效或超过 64 MiB");
+    expect(
+      download.tasks.find((task) => task.id === backendProxyId)?.error,
+    ).toContain("Chrome 或 Edge");
+    expect(
+      download.tasks.find((task) => task.id === oversizedStreamingId)?.status,
+    ).toBe("failed");
+    expect(
+      download.tasks.find((task) => task.id === oversizedMemoryId)?.status,
+    ).toBe("failed");
+    expect(
+      mocks.boundedDownloader.executeBoundedDownload,
+    ).toHaveBeenCalledOnce();
+    expect(mocks.fileApi.publicDownloadFile).not.toHaveBeenCalled();
+  });
+
+  it("streaming 缺少文件保存 API 时应明确失败", async () => {
+    Object.defineProperty(window, "showSaveFilePicker", {
+      value: undefined,
+      configurable: true,
+    });
+
+    const download = await loadDownloadStore();
+    const id = await download.startDownload(
+      "hash-no-picker",
+      "no-picker.bin",
+      { type: "owned" },
+      1024,
+      "streaming",
+    );
+
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "failed",
+    );
+
+    expect(download.tasks.find((task) => task.id === id)?.error).toBe(
+      "Streaming download not supported in this browser",
+    );
+    expect(mocks.fileApi.getDownloadMetadata).not.toHaveBeenCalled();
+  });
+
+  it("streaming 在文件选择器打开期间取消后不得继续请求 metadata", async () => {
+    const picker = createDeferred<ReturnType<typeof createWritableHandle>>();
+    Object.defineProperty(window, "showSaveFilePicker", {
+      value: vi.fn(() => picker.promise),
+      configurable: true,
+    });
+
+    const download = await loadDownloadStore();
+    const id = await download.startDownload(
+      "hash-picker-cancel",
+      "picker-cancel.bin",
+      { type: "owned" },
+      1024,
+      "streaming",
+    );
+
+    await download.cancelDownload(id);
+    picker.resolve(createWritableHandle());
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "cancelled",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mocks.fileApi.getDownloadMetadata).not.toHaveBeenCalled();
+    expect(
+      mocks.boundedDownloader.executeBoundedDownload,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("legacy streaming 应通过文件系统 sink 完成并记录进度", async () => {
+    mocks.fileApi.getDownloadMetadata.mockRejectedValueOnce(
+      new Error("文件缺少分片 manifest"),
+    );
+
+    const download = await loadDownloadStore();
+    const id = await download.startDownload(
+      "hash-legacy-stream",
+      "legacy-stream.bin",
+      { type: "owned" },
+      1024,
+      "streaming",
+    );
+
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "completed",
+    );
+
+    expect(
+      mocks.boundedDownloader.executeLegacyFallbackDownload,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        urls: ["legacy-u1"],
+        fileSize: 1024,
+        totalChunks: 1,
+        encrypted: true,
+      }),
+    );
+    expect(download.tasks.find((task) => task.id === id)).toEqual(
+      expect.objectContaining({
+        status: "completed",
+        progress: 100,
+        downloadedChunks: 1,
+        downloadMetrics: expect.objectContaining({
+          partsCompleted: 1,
+          bytesWritten: 1024,
+        }),
+      }),
+    );
+    expect(mocks.crypto.downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it("legacy streaming 在下载器返回前取消后不得覆盖 cancelled", async () => {
+    mocks.fileApi.getDownloadMetadata.mockRejectedValueOnce(
+      new Error("文件缺少分片 manifest"),
+    );
+    const deferred = createDeferred<{
+      currentBufferedBytes: number;
+      peakBufferedBytes: number;
+      framesAuthenticated: number;
+      partsCompleted: number;
+      bytesWritten: number;
+    }>();
+    mocks.boundedDownloader.executeLegacyFallbackDownload.mockImplementationOnce(
+      async () => deferred.promise,
+    );
+
+    const download = await loadDownloadStore();
+    const id = await download.startDownload(
+      "hash-legacy-stream-cancel",
+      "legacy-stream-cancel.bin",
+      { type: "owned" },
+      1024,
+      "streaming",
+    );
+
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "streaming",
+    );
+    await download.cancelDownload(id);
+    deferred.resolve({
+      currentBufferedBytes: 0,
+      peakBufferedBytes: 1,
+      framesAuthenticated: 0,
+      partsCompleted: 1,
+      bytesWritten: 1024,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(download.tasks.find((task) => task.id === id)?.status).toBe(
+      "cancelled",
+    );
+  });
+
+  it("legacy 内存下载在下载器返回前取消后不得提交 Blob", async () => {
+    mocks.fileApi.getDownloadMetadata.mockRejectedValueOnce(
+      new Error("文件缺少分片 manifest"),
+    );
+    const deferred = createDeferred<{
+      currentBufferedBytes: number;
+      peakBufferedBytes: number;
+      framesAuthenticated: number;
+      partsCompleted: number;
+      bytesWritten: number;
+    }>();
+    mocks.boundedDownloader.executeLegacyFallbackDownload.mockImplementationOnce(
+      async () => deferred.promise,
+    );
+
+    const download = await loadDownloadStore();
+    const id = await download.startDownload(
+      "hash-legacy-memory-cancel",
+      "legacy-memory-cancel.bin",
+      { type: "owned" },
+      1024,
+      "inmemory",
+    );
+
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "downloading",
+    );
+    await download.cancelDownload(id);
+    deferred.resolve({
+      currentBufferedBytes: 0,
+      peakBufferedBytes: 1,
+      framesAuthenticated: 0,
+      partsCompleted: 1,
+      bytesWritten: 1024,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(download.tasks.find((task) => task.id === id)?.status).toBe(
+      "cancelled",
+    );
+    expect(mocks.crypto.downloadBlob).not.toHaveBeenCalled();
+  });
+
   it("streaming 选择文件阶段 AbortError 应标记 cancelled", async () => {
     Object.defineProperty(window, "showSaveFilePicker", {
       value: vi

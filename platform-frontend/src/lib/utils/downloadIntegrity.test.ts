@@ -28,8 +28,35 @@ describe("download integrity helpers", () => {
     expect(Array.from(decodeBase64("AQI-_w"))).toEqual([1, 2, 62, 255]);
     expect(equalBytes(new Uint8Array([1]), new Uint8Array([1]))).toBe(true);
     expect(equalBytes(new Uint8Array([1]), new Uint8Array([2]))).toBe(false);
+    expect(equalBytes(new Uint8Array([1]), new Uint8Array([1, 2]))).toBe(false);
     expect(() => assertSha256(new Uint8Array(32), "sha256:00", "测试")).toThrow(
       "Base64 数据格式无效",
+    );
+    expect(() =>
+      assertSha256(new Uint8Array(32), `sha256:${"01".repeat(32)}`, "测试"),
+    ).toThrow("测试 SHA-256 校验失败");
+  });
+
+  it("should reject non-canonical base64 and invalid digest lengths", () => {
+    const invalidBase64 = [
+      " AQI=",
+      "AQI===",
+      "A",
+      "AQI==",
+      "AQI-_w==",
+      "AQI+/w",
+      "!!!!",
+    ];
+
+    for (const value of invalidBase64) {
+      expect(() => decodeBase64(value)).toThrow("Base64 数据格式无效");
+    }
+
+    expect(() => parseExpectedSha256("AQI=")).toThrow(
+      "manifest SHA-256 摘要长度无效",
+    );
+    expect(parseExpectedSha256("AA".repeat(32))).toEqual(
+      new Uint8Array(32).fill(0xaa),
     );
   });
 });

@@ -13,6 +13,7 @@ import cn.flying.dao.entity.FriendFileShare;
 import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
+import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileVersionVO;
 import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.platformapi.constant.Result;
@@ -38,8 +39,11 @@ import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -466,6 +470,221 @@ class FileQueryServiceTest {
                 assertThat(failure.getData()).asString().contains("文件大小");
                 verify(fileRemoteClient, never()).getFileUrlListByHash(anyList(), anyList());
             }
+        }
+
+        /**
+         * 逐项验证下载 manifest 顶层、分片、尺寸和 canonical hash 的失败关闭分支。
+         */
+        @Test
+        @DisplayName("should reject every manifest contract drift")
+        void shouldRejectEveryManifestContractDrift() {
+            File file = framedOwnedFile(framedFileParam(V2_FILE_NONCE));
+            FileDecryptInfoVO decryptInfo = framedDecryptInfo(V2_FILE_SIZE, 1, V2_FILE_SIZE);
+            ChunkManifestView valid = framedManifest(
+                    "FRAMED_AEAD_V2", framedEncryption(), framedChunk(V2_CIPHER_SIZE, V2_FILE_SIZE, 2));
+
+            Map<String, Object> topLevelDrifts = new LinkedHashMap<>();
+            topLevelDrifts.put("fileId", FILE_ID + 1);
+            topLevelDrifts.put("fileHash", "other-hash");
+            topLevelDrifts.put("schemaId", "other-schema");
+            topLevelDrifts.put("hashAlgorithm", "SHA-512");
+            topLevelDrifts.put("chunkSize", 0L);
+            topLevelDrifts.put("totalSize", 0L);
+            topLevelDrifts.put("chunkCount", null);
+            topLevelDrifts.put("storageBackend", " ");
+            for (Map.Entry<String, Object> drift : topLevelDrifts.entrySet()) {
+                assertDownloadManifestFailure(
+                        file, FILE_HASH, decryptInfo,
+                        copyDownloadManifest(valid, drift.getKey(), drift.getValue()), V2_FILE_SIZE);
+            }
+
+            assertDownloadManifestFailure(
+                    file.setFileHash("persisted-other-hash"), FILE_HASH, decryptInfo, valid, V2_FILE_SIZE);
+            file.setFileHash(FILE_HASH);
+            assertDownloadManifestFailure(
+                    file, FILE_HASH, framedDecryptInfo(V2_FILE_SIZE, 2, V2_FILE_SIZE), valid, V2_FILE_SIZE);
+
+            Map<String, Object> chunkDrifts = new LinkedHashMap<>();
+            chunkDrifts.put("index", 1);
+            chunkDrifts.put("size", 0L);
+            chunkDrifts.put("plainHash", " ");
+            chunkDrifts.put("cipherHash", " ");
+            chunkDrifts.put("storagePath", " ");
+            for (Map.Entry<String, Object> drift : chunkDrifts.entrySet()) {
+                ChunkManifestChunk chunk = copyDownloadChunk(
+                        valid.chunks().getFirst(), drift.getKey(), drift.getValue());
+                assertDownloadManifestFailure(
+                        file, FILE_HASH, decryptInfo,
+                        copyDownloadManifest(valid, "chunks", List.of(chunk)), V2_FILE_SIZE);
+            }
+            assertDownloadManifestFailure(
+                    file, FILE_HASH, decryptInfo,
+                    copyDownloadManifest(valid, "chunks", java.util.Collections.singletonList(null)),
+                    V2_FILE_SIZE);
+
+            ChunkManifestView aggregateMismatch = new ChunkManifestView(
+                    10L, FILE_ID, 1, ChunkManifestCanonicalizer.SCHEMA_ID, FILE_HASH,
+                    "sha256:" + "a".repeat(64), ChunkManifestCanonicalizer.HASH_ALGORITHM,
+                    512L, 1, 513L, null, "AES-GCM", "S3", null,
+                    List.of(new ChunkManifestChunk(
+                            0, "plain", "cipher", 512L, "chunks/0", "S3", null, "SHA-256")));
+            assertDownloadManifestFailure(
+                    file, FILE_HASH, framedDecryptInfo(513L, 1, 512L), aggregateMismatch, 513L);
+            assertDownloadManifestFailure(
+                    file, FILE_HASH, decryptInfo, valid, V2_FILE_SIZE + 1);
+            assertDownloadManifestFailure(
+                    file, FILE_HASH, framedDecryptInfo(V2_FILE_SIZE, 1, 0L), valid, V2_FILE_SIZE);
+            assertDownloadManifestFailure(
+                    file, FILE_HASH, framedDecryptInfo(V2_FILE_SIZE, 1, V2_FILE_SIZE - 1), valid, V2_FILE_SIZE);
+
+            when(chunkManifestService.calculateManifestHash(any()))
+                    .thenThrow(new GeneralException(ResultEnum.FILE_RECORD_ERROR, "invalid canonical draft"));
+            assertDownloadManifestFailure(file, FILE_HASH, decryptInfo, valid, V2_FILE_SIZE);
+            doReturn("sha256:" + "a".repeat(64))
+                    .when(chunkManifestService).calculateManifestHash(any());
+            assertDownloadManifestFailure(
+                    file, FILE_HASH, decryptInfo,
+                    copyDownloadManifest(valid, "manifestHash", "not-a-hash"), V2_FILE_SIZE);
+            when(chunkManifestService.calculateManifestHash(any())).thenReturn("sha256:" + "d".repeat(64));
+            assertDownloadManifestFailure(file, FILE_HASH, decryptInfo, valid, V2_FILE_SIZE);
+        }
+
+        /**
+         * 验证 framed descriptor、分片公式、fileParam 和文件大小辅助函数的每个分支。
+         */
+        @Test
+        @DisplayName("should reject every framed descriptor and fileParam drift")
+        void shouldRejectEveryFramedDescriptorAndFileParamDrift() {
+            File file = framedOwnedFile(framedFileParam(V2_FILE_NONCE));
+            ChunkManifestView valid = framedManifest(
+                    "FRAMED_AEAD_V2", framedEncryption(), framedChunk(V2_CIPHER_SIZE, V2_FILE_SIZE, 2));
+
+            assertThat((Long) ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "resolveDownloadFileSize", file, framedDecryptInfo(null, 1, V2_FILE_SIZE)))
+                    .isEqualTo(V2_FILE_SIZE);
+            File withoutPersistedSize = framedOwnedFile("{}").setFileSize(null);
+            assertThat((Long) ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "resolveDownloadFileSize", withoutPersistedSize,
+                    framedDecryptInfo(V2_FILE_SIZE, 1, V2_FILE_SIZE))).isEqualTo(V2_FILE_SIZE);
+            assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "resolveDownloadFileSize", withoutPersistedSize,
+                    framedDecryptInfo(null, 1, V2_FILE_SIZE)));
+            assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "resolveDownloadFileSize", withoutPersistedSize,
+                    framedDecryptInfo(0L, 1, V2_FILE_SIZE)));
+
+            ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "validateEncryptionCoherence", valid, true, false);
+            assertDownloadEncryptionFailure(
+                    framedManifest("FRAMED_AEAD_V2", null, valid.chunks().getFirst()), false, false);
+            ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "validateEncryptionCoherence",
+                    framedManifest("AES-GCM", null, valid.chunks().getFirst()), false, false);
+            assertDownloadEncryptionFailure(
+                    framedManifest("AES-GCM", encryptionWithFormat(ChunkManifestEncryption.FORMAT_NONE),
+                            valid.chunks().getFirst()), false, false);
+            assertDownloadEncryptionFailure(
+                    framedManifest("NONE", encryptionWithFormat(ChunkManifestEncryption.FORMAT_LEGACY_V1),
+                            valid.chunks().getFirst()), false, true);
+            assertDownloadEncryptionFailure(
+                    framedManifest("NONE", framedEncryption(), valid.chunks().getFirst()), true, true);
+
+            Map<String, Object> chunkDrifts = new LinkedHashMap<>();
+            chunkDrifts.put("plainSize", null);
+            chunkDrifts.put("frameCount", null);
+            chunkDrifts.put("plainHash", "not-a-hash");
+            chunkDrifts.put("cipherHash", "not-a-hash");
+            chunkDrifts.put("size", V2_CIPHER_SIZE + 1);
+            for (Map.Entry<String, Object> drift : chunkDrifts.entrySet()) {
+                ChunkManifestChunk chunk = copyDownloadChunk(
+                        valid.chunks().getFirst(), drift.getKey(), drift.getValue());
+                assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
+                        fileQueryService, "validateFramedChunk",
+                        copyDownloadManifest(valid, "chunks", List.of(chunk)), chunk, 0));
+            }
+            ChunkManifestChunk zeroPlain = copyDownloadChunk(valid.chunks().getFirst(), "plainSize", 0L);
+            assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "validateFramedChunk",
+                    copyDownloadManifest(valid, "chunks", List.of(zeroPlain)), zeroPlain, 0));
+            ChunkManifestChunk zeroFrames = copyDownloadChunk(valid.chunks().getFirst(), "frameCount", 0);
+            assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "validateFramedChunk",
+                    copyDownloadManifest(valid, "chunks", List.of(zeroFrames)), zeroFrames, 0));
+            ChunkManifestChunk oversizedPlain = copyDownloadChunk(
+                    valid.chunks().getFirst(), "plainSize", V2_FILE_SIZE + 1);
+            assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "validateFramedChunk",
+                    copyDownloadManifest(valid, "chunks", List.of(oversizedPlain)), oversizedPlain, 0));
+            assertThat((Long) ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "validateFramedChunk", valid, valid.chunks().getFirst(), 0))
+                    .isEqualTo(V2_FILE_SIZE);
+
+            ChunkManifestEncryption missingFrameSize = new ChunkManifestEncryption(
+                    ChunkManifestEncryption.FORMAT_FRAMED_V2,
+                    ChunkManifestEncryption.SUITE_FRAMED_V2,
+                    V2_FILE_NONCE,
+                    null,
+                    ChunkManifestEncryption.DERIVATION_HKDF_SHA256,
+                    ChunkManifestEncryption.DERIVATION_HKDF_SHA256,
+                    ChunkManifestEncryption.AAD_SCHEMA_FRAMED_V2,
+                    FramedAeadCrypto.TAG_SIZE);
+            ChunkManifestView missingFrameSizeManifest = framedManifest(
+                    "FRAMED_AEAD_V2", missingFrameSize, valid.chunks().getFirst());
+            assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "validateFramedChunk",
+                    missingFrameSizeManifest, valid.chunks().getFirst(), 0));
+
+            ChunkManifestEncryption missingTagSize = new ChunkManifestEncryption(
+                    ChunkManifestEncryption.FORMAT_FRAMED_V2,
+                    ChunkManifestEncryption.SUITE_FRAMED_V2,
+                    V2_FILE_NONCE,
+                    V2_FRAME_SIZE,
+                    ChunkManifestEncryption.DERIVATION_HKDF_SHA256,
+                    ChunkManifestEncryption.DERIVATION_HKDF_SHA256,
+                    ChunkManifestEncryption.AAD_SCHEMA_FRAMED_V2,
+                    null);
+            ChunkManifestView missingTagSizeManifest = framedManifest(
+                    "FRAMED_AEAD_V2", missingTagSize, valid.chunks().getFirst());
+            assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "validateFramedChunk",
+                    missingTagSizeManifest, valid.chunks().getFirst(), 0));
+
+            Map<String, String> fileParamDrifts = new LinkedHashMap<>();
+            fileParamDrifts.put("null", "null");
+            fileParamDrifts.put("algorithm", framedFileParam(V2_FILE_NONCE)
+                    .replace("FRAMED_AEAD_V2", "NONE"));
+            fileParamDrifts.put("suite", framedFileParam(V2_FILE_NONCE)
+                    .replace("RP-AES256-GCM-FRAMED-V2", "OTHER-SUITE"));
+            fileParamDrifts.put("nonce", framedFileParam("ERITFBUWFxgZGhscHR4fIA"));
+            fileParamDrifts.put("keyDerivation", framedFileParam(V2_FILE_NONCE)
+                    .replace("\"keyDerivation\":\"HKDF-SHA256\"", "\"keyDerivation\":\"OTHER\""));
+            fileParamDrifts.put("nonceDerivation", framedFileParam(V2_FILE_NONCE)
+                    .replace("\"nonceDerivation\":\"HKDF-SHA256\"", "\"nonceDerivation\":\"OTHER\""));
+            fileParamDrifts.put("aad", framedFileParam(V2_FILE_NONCE)
+                    .replace("cn.flying.framed-aead.aad.v2", "other-aad"));
+            fileParamDrifts.put("format", framedFileParam(V2_FILE_NONCE)
+                    .replace("\"formatVersion\":2", "\"formatVersion\":1"));
+            fileParamDrifts.put("frameSize", framedFileParam(V2_FILE_NONCE)
+                    .replace("\"framePlainSize\":65536", "\"framePlainSize\":131072"));
+            fileParamDrifts.put("tag", framedFileParam(V2_FILE_NONCE)
+                    .replace("\"tagSize\":16", "\"tagSize\":12"));
+            fileParamDrifts.put("malformed", "{not-json");
+            for (String fileParam : fileParamDrifts.values()) {
+                assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
+                        fileQueryService, "validateV2FileParam",
+                        framedOwnedFile(fileParam), valid, true));
+            }
+            ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "validateV2FileParam", file, valid, true);
+            ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "validateV2FileParam", file, valid, false);
+
+            assertThat((Boolean) ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "numericEquals", 2L, 2)).isTrue();
+            assertThat((Boolean) ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "numericEquals", "2", 2)).isFalse();
+            assertThat((Boolean) ReflectionTestUtils.invokeMethod(
+                    fileQueryService, "numericEquals", 2, null)).isFalse();
         }
     }
 
@@ -1561,5 +1780,102 @@ class FileQueryServiceTest {
                 List.of(manifest.chunks().getFirst().storagePath()),
                 List.of(manifest.chunks().getFirst().cipherHash())))
                 .thenReturn(Result.success(urls));
+    }
+
+    /**
+     * 构造用于直接调用下载私有校验的解密信息。
+     */
+    private FileDecryptInfoVO framedDecryptInfo(Long fileSize, Integer chunkCount, Long chunkSize) {
+        return new FileDecryptInfoVO(
+                "file-dek", "framed.bin", fileSize, "application/octet-stream",
+                chunkCount, FILE_HASH, chunkSize);
+    }
+
+    /**
+     * 断言下载 manifest 私有校验失败。
+     */
+    private void assertDownloadManifestFailure(
+            File file,
+            String requestedHash,
+            FileDecryptInfoVO decryptInfo,
+            ChunkManifestView manifest,
+            long fileSize
+    ) {
+        assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
+                fileQueryService,
+                "validateDownloadManifest",
+                file,
+                requestedHash,
+                decryptInfo,
+                manifest,
+                fileSize));
+    }
+
+    /**
+     * 断言 encryptionAlgorithm 与 descriptor 的组合校验失败。
+     */
+    private void assertDownloadEncryptionFailure(
+            ChunkManifestView manifest,
+            boolean framedV2,
+            boolean unencrypted
+    ) {
+        assertThrows(GeneralException.class, () -> ReflectionTestUtils.invokeMethod(
+                fileQueryService, "validateEncryptionCoherence", manifest, framedV2, unencrypted));
+    }
+
+    /**
+     * 构造只替换格式版本的加密描述。
+     */
+    private ChunkManifestEncryption encryptionWithFormat(Integer formatVersion) {
+        ChunkManifestEncryption source = framedEncryption();
+        return new ChunkManifestEncryption(
+                formatVersion,
+                source.algorithmSuite(),
+                source.fileNonce(),
+                source.framePlainSize(),
+                source.keyDerivation(),
+                source.nonceDerivation(),
+                source.aadSchema(),
+                source.tagSize());
+    }
+
+    /**
+     * 复制下载 manifest 并替换一个字段。
+     */
+    @SuppressWarnings("unchecked")
+    private ChunkManifestView copyDownloadManifest(ChunkManifestView source, String field, Object value) {
+        return new ChunkManifestView(
+                source.manifestId(),
+                "fileId".equals(field) ? (Long) value : source.fileId(),
+                source.fileVersion(),
+                "schemaId".equals(field) ? (String) value : source.schemaId(),
+                "fileHash".equals(field) ? (String) value : source.fileHash(),
+                "manifestHash".equals(field) ? (String) value : source.manifestHash(),
+                "hashAlgorithm".equals(field) ? (String) value : source.hashAlgorithm(),
+                "chunkSize".equals(field) ? ((Number) value).longValue() : source.chunkSize(),
+                "chunkCount".equals(field) ? (Integer) value : source.chunkCount(),
+                "totalSize".equals(field) ? ((Number) value).longValue() : source.totalSize(),
+                source.merkleRoot(),
+                source.encryptionAlgorithm(),
+                "storageBackend".equals(field) ? (String) value : source.storageBackend(),
+                source.encryption(),
+                "chunks".equals(field) ? (List<ChunkManifestChunk>) value : source.chunks());
+    }
+
+    /**
+     * 复制下载 manifest 分片并替换一个字段。
+     */
+    private ChunkManifestChunk copyDownloadChunk(ChunkManifestChunk source, String field, Object value) {
+        return new ChunkManifestChunk(
+                "index".equals(field) ? ((Number) value).intValue() : source.index(),
+                "plainHash".equals(field) ? (String) value : source.plainHash(),
+                "cipherHash".equals(field) ? (String) value : source.cipherHash(),
+                "size".equals(field) ? ((Number) value).longValue() : source.size(),
+                "storagePath".equals(field) ? (String) value : source.storagePath(),
+                source.storageBackend(),
+                source.etag(),
+                source.checksumAlgorithm(),
+                "plainSize".equals(field) ? (Long) value : source.plainSize(),
+                "frameCount".equals(field) ? (Integer) value : source.frameCount());
     }
 }
