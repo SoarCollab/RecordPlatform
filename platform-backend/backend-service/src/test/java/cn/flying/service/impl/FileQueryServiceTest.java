@@ -19,10 +19,12 @@ import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FriendFileShareService;
+import cn.flying.service.encryption.FramedAeadCrypto;
 import cn.flying.service.key.FileKeyEnvelopeService;
 import cn.flying.service.manifest.ChunkManifestCanonicalizer;
 import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestDraft;
+import cn.flying.service.manifest.ChunkManifestEncryption;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.ChunkManifestView;
 import cn.flying.service.remote.FileRemoteClient;
@@ -90,6 +92,14 @@ class FileQueryServiceTest {
     private static final Long FILE_ID = 1L;
     private static final String FILE_HASH = "sha256_test_hash";
     private static final String TRANSACTION_HASH = "0xtxhash";
+    private static final int V2_FRAME_SIZE = 64 * 1024;
+    private static final long V2_FILE_SIZE = V2_FRAME_SIZE + 3L;
+    private static final long V2_CIPHER_SIZE = FramedAeadCrypto.CHUNK_HEADER_SIZE
+            + V2_FILE_SIZE
+            + 2L * (FramedAeadCrypto.FRAME_HEADER_SIZE + FramedAeadCrypto.TAG_SIZE);
+    private static final String V2_FILE_NONCE = "AQIDBAUGBwgJCgsMDQ4PEA";
+    private static final String V2_PLAIN_HASH = "sha256:" + "b".repeat(64);
+    private static final String V2_CIPHER_HASH = "sha256:" + "c".repeat(64);
     private static final ChunkManifestCanonicalizer CANONICALIZER = new ChunkManifestCanonicalizer();
 
     @BeforeEach
@@ -301,6 +311,159 @@ class FileQueryServiceTest {
 
                 assertEquals(ResultEnum.FILE_NOT_EXIST.getCode(), ex.getResultEnum().getCode());
                 verify(chunkManifestService, never()).findActiveManifest(any(), any());
+                verify(fileRemoteClient, never()).getFileUrlListByHash(anyList(), anyList());
+            }
+        }
+
+        /**
+         * 验证 framed v2 下载合同完整映射 descriptor、frame 证据和 file-level DEK。
+         */
+        @Test
+        @DisplayName("should build framed v2 download metadata from authenticated manifest")
+        void shouldBuildFramedV2DownloadMetadataFromAuthenticatedManifest() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class);
+                 MockedStatic<IdUtils> idUtilsMock = mockStatic(IdUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                idUtilsMock.when(() -> IdUtils.toExternalId(FILE_ID)).thenReturn("ext-v2-file");
+                File file = framedOwnedFile(framedFileParam(V2_FILE_NONCE));
+                ChunkManifestView manifest = framedManifest(
+                        "FRAMED_AEAD_V2",
+                        framedEncryption(),
+                        framedChunk(V2_CIPHER_SIZE, V2_FILE_SIZE, 2));
+                stubOwnedDownload(file, manifest, List.of("https://storage.example/v2-part-0"));
+
+                var metadata = fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH);
+
+                assertEquals("ext-v2-file", metadata.fileId());
+                assertEquals("file-dek", metadata.initialKey());
+                assertEquals(V2_FILE_SIZE, metadata.fileSize());
+                assertEquals(V2_FILE_SIZE, metadata.chunkSize());
+                assertThat(metadata.encryption()).isNotNull();
+                assertEquals(ChunkManifestEncryption.FORMAT_FRAMED_V2,
+                        metadata.encryption().formatVersion());
+                assertEquals(V2_FILE_NONCE, metadata.encryption().fileNonce());
+                assertEquals(V2_FRAME_SIZE, metadata.encryption().framePlainSize());
+                assertEquals(V2_FILE_SIZE, metadata.parts().getFirst().plainSize());
+                assertEquals(2, metadata.parts().getFirst().frameCount());
+                assertEquals(V2_CIPHER_SIZE, metadata.parts().getFirst().size());
+            }
+        }
+
+        /**
+         * 验证持久化 fileParam 的 nonce 与 active manifest 不一致时不会签发 URL。
+         */
+        @Test
+        @DisplayName("should reject framed metadata when fileParam descriptor drifts")
+        void shouldRejectFramedMetadataWhenFileParamDescriptorDrifts() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                File file = framedOwnedFile(framedFileParam("ERITFBUWFxgZGhscHR4fIA"));
+                ChunkManifestView manifest = framedManifest(
+                        "FRAMED_AEAD_V2",
+                        framedEncryption(),
+                        framedChunk(V2_CIPHER_SIZE, V2_FILE_SIZE, 2));
+                stubOwnedDownload(file, manifest, List.of("unused"));
+
+                GeneralException failure = assertThrows(GeneralException.class,
+                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH));
+
+                assertThat(failure.getData()).asString().contains("fileParam");
+                verify(fileRemoteClient, never()).getFileUrlListByHash(anyList(), anyList());
+            }
+        }
+
+        /**
+         * 验证 v2 分片的 frame 数量或密文字节公式不匹配时失败关闭。
+         */
+        @Test
+        @DisplayName("should reject framed chunk with inconsistent cipher size")
+        void shouldRejectFramedChunkWithInconsistentCipherSize() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                File file = framedOwnedFile(framedFileParam(V2_FILE_NONCE));
+                ChunkManifestView manifest = framedManifest(
+                        "FRAMED_AEAD_V2",
+                        framedEncryption(),
+                        framedChunk(V2_CIPHER_SIZE + 1, V2_FILE_SIZE, 2));
+                stubOwnedDownload(file, manifest, List.of("unused"));
+
+                GeneralException failure = assertThrows(GeneralException.class,
+                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH));
+
+                assertThat(failure.getData()).asString().contains("frame");
+                verify(fileRemoteClient, never()).getFileUrlListByHash(anyList(), anyList());
+            }
+        }
+
+        /**
+         * 验证 v2 descriptor 不得与 legacy encryptionAlgorithm 组合使用。
+         */
+        @Test
+        @DisplayName("should reject framed descriptor with conflicting algorithm")
+        void shouldRejectFramedDescriptorWithConflictingAlgorithm() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                File file = framedOwnedFile(framedFileParam(V2_FILE_NONCE));
+                ChunkManifestView manifest = framedManifest(
+                        "AES-GCM",
+                        framedEncryption(),
+                        framedChunk(V2_CIPHER_SIZE, V2_FILE_SIZE, 2));
+                stubOwnedDownload(file, manifest, List.of("unused"));
+
+                GeneralException failure = assertThrows(GeneralException.class,
+                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH));
+
+                assertThat(failure.getData()).asString().contains("加密算法声明不一致");
+                verify(fileRemoteClient, never()).getFileUrlListByHash(anyList(), anyList());
+            }
+        }
+
+        /**
+         * 验证对象存储返回空 URL 时不会构造伪成功下载 part。
+         */
+        @Test
+        @DisplayName("should reject blank presigned url for framed part")
+        void shouldRejectBlankPresignedUrlForFramedPart() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                File file = framedOwnedFile(framedFileParam(V2_FILE_NONCE));
+                ChunkManifestView manifest = framedManifest(
+                        "FRAMED_AEAD_V2",
+                        framedEncryption(),
+                        framedChunk(V2_CIPHER_SIZE, V2_FILE_SIZE, 2));
+                stubOwnedDownload(file, manifest, List.of(" "));
+
+                GeneralException failure = assertThrows(GeneralException.class,
+                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH));
+
+                assertThat(failure.getData()).asString().contains("空下载 URL");
+            }
+        }
+
+        /**
+         * 验证 DB 文件大小与 fileParam 明文大小冲突时在读取 manifest 前拒绝。
+         */
+        @Test
+        @DisplayName("should reject persisted and parameter file size mismatch")
+        void shouldRejectPersistedAndParameterFileSizeMismatch() {
+            try (MockedStatic<SecurityUtils> securityUtilsMock = mockStatic(SecurityUtils.class)) {
+                securityUtilsMock.when(SecurityUtils::isAdmin).thenReturn(false);
+                File file = framedOwnedFile(framedFileParam(V2_FILE_NONCE))
+                        .setFileSize(V2_FILE_SIZE + 1);
+                when(fileMapper.selectOne(any())).thenReturn(file);
+                when(fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
+                        file, FILE_HASH, USER_ID, USER_ID, "OWNER_DECRYPT"))
+                        .thenReturn(Optional.of("file-dek"));
+                when(chunkManifestService.findActiveManifest(USER_ID, FILE_ID))
+                        .thenReturn(Optional.of(framedManifest(
+                                "FRAMED_AEAD_V2",
+                                framedEncryption(),
+                                framedChunk(V2_CIPHER_SIZE, V2_FILE_SIZE, 2))));
+
+                GeneralException failure = assertThrows(GeneralException.class,
+                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH));
+
+                assertThat(failure.getData()).asString().contains("文件大小");
                 verify(fileRemoteClient, never()).getFileUrlListByHash(anyList(), anyList());
             }
         }
@@ -1286,5 +1449,117 @@ class FileQueryServiceTest {
                 .setFileHashes("[\"" + FILE_HASH + "\"]")
                 .setStatus(FriendFileShare.STATUS_ACTIVE)
                 .setIsRead(0);
+    }
+
+    /**
+     * 构造 framed v2 owner 文件记录。
+     */
+    private File framedOwnedFile(String fileParam) {
+        return new File()
+                .setId(FILE_ID)
+                .setUid(USER_ID)
+                .setTenantId(1L)
+                .setVersion(1)
+                .setFileName("framed.bin")
+                .setFileHash(FILE_HASH)
+                .setFileSize(V2_FILE_SIZE)
+                .setContentType("application/octet-stream")
+                .setStatus(FileUploadStatus.SUCCESS.getCode())
+                .setFileParam(fileParam);
+    }
+
+    /**
+     * 构造与 framed descriptor 对齐的持久化 fileParam。
+     */
+    private String framedFileParam(String fileNonce) {
+        return "{"
+                + "\"fileName\":\"framed.bin\","
+                + "\"fileSize\":" + V2_FILE_SIZE + ","
+                + "\"contentType\":\"application/octet-stream\","
+                + "\"chunkCount\":1,"
+                + "\"chunkSize\":" + V2_FILE_SIZE + ","
+                + "\"encryptionAlgorithm\":\"FRAMED_AEAD_V2\","
+                + "\"algorithmSuite\":\"RP-AES256-GCM-FRAMED-V2\","
+                + "\"fileNonce\":\"" + fileNonce + "\","
+                + "\"keyDerivation\":\"HKDF-SHA256\","
+                + "\"nonceDerivation\":\"HKDF-SHA256\","
+                + "\"aadSchema\":\"cn.flying.framed-aead.aad.v2\","
+                + "\"formatVersion\":2,"
+                + "\"framePlainSize\":" + V2_FRAME_SIZE + ","
+                + "\"tagSize\":16"
+                + "}";
+    }
+
+    /**
+     * 构造 allowlist 内的 framed v2 descriptor。
+     */
+    private ChunkManifestEncryption framedEncryption() {
+        return new ChunkManifestEncryption(
+                ChunkManifestEncryption.FORMAT_FRAMED_V2,
+                ChunkManifestEncryption.SUITE_FRAMED_V2,
+                V2_FILE_NONCE,
+                V2_FRAME_SIZE,
+                ChunkManifestEncryption.DERIVATION_HKDF_SHA256,
+                ChunkManifestEncryption.DERIVATION_HKDF_SHA256,
+                ChunkManifestEncryption.AAD_SCHEMA_FRAMED_V2,
+                FramedAeadCrypto.TAG_SIZE);
+    }
+
+    /**
+     * 构造单分片 framed v2 manifest。
+     */
+    private ChunkManifestView framedManifest(
+            String encryptionAlgorithm,
+            ChunkManifestEncryption encryption,
+            ChunkManifestChunk chunk
+    ) {
+        return new ChunkManifestView(
+                10L,
+                FILE_ID,
+                1,
+                ChunkManifestCanonicalizer.SCHEMA_ID,
+                FILE_HASH,
+                "sha256:" + "a".repeat(64),
+                ChunkManifestCanonicalizer.HASH_ALGORITHM,
+                V2_FILE_SIZE,
+                1,
+                V2_FILE_SIZE,
+                null,
+                encryptionAlgorithm,
+                "S3",
+                encryption,
+                List.of(chunk));
+    }
+
+    /**
+     * 构造精确 frame 证据的 manifest 分片。
+     */
+    private ChunkManifestChunk framedChunk(long cipherSize, long plainSize, int frameCount) {
+        return new ChunkManifestChunk(
+                0,
+                V2_PLAIN_HASH,
+                V2_CIPHER_HASH,
+                cipherSize,
+                "storage/tenant/1/chunk/" + V2_CIPHER_HASH,
+                "S3",
+                null,
+                ChunkManifestCanonicalizer.HASH_ALGORITHM,
+                plainSize,
+                frameCount);
+    }
+
+    /**
+     * 配置 owner、manifest、DEK 与预签名 URL 的完整下载边界。
+     */
+    private void stubOwnedDownload(File file, ChunkManifestView manifest, List<String> urls) {
+        when(fileMapper.selectOne(any())).thenReturn(file);
+        when(fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
+                file, FILE_HASH, USER_ID, USER_ID, "OWNER_DECRYPT"))
+                .thenReturn(Optional.of("file-dek"));
+        when(chunkManifestService.findActiveManifest(USER_ID, FILE_ID)).thenReturn(Optional.of(manifest));
+        when(fileRemoteClient.getFileUrlListByHash(
+                List.of(manifest.chunks().getFirst().storagePath()),
+                List.of(manifest.chunks().getFirst().cipherHash())))
+                .thenReturn(Result.success(urls));
     }
 }

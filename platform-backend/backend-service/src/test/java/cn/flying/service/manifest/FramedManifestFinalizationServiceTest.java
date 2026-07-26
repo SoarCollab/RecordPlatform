@@ -255,6 +255,294 @@ class FramedManifestFinalizationServiceTest {
     }
 
     /**
+     * 验证首次最终化会保存并返回由链上路径与 writer 认证共同构造的 active manifest。
+     */
+    @Test
+    void ensureManifest_shouldSaveVerifiedManifestForFirstFinalization() throws IOException {
+        File file = framedFile();
+        FileUploadState state = framedState();
+        Path processed = tempDir.resolve("encrypted_chunk_0");
+        Files.write(processed, new byte[]{1, 2, 3});
+        ChunkManifestView saved = activeManifest();
+        when(chunkManifestService.findActiveManifest(USER_ID, FILE_ID)).thenReturn(Optional.empty());
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH))
+                .thenReturn(Result.success(chainDetail(CIPHER_HASH, storagePath(CIPHER_HASH))));
+        when(framedAeadWriter.verify(
+                eq(processed), eq(FILE_DEK), eq(FILE_NONCE), eq(0), eq(1), eq(FRAME_SIZE)))
+                .thenReturn(new FramedAeadWriter.WriteResult(33L, 105L, 1, PLAIN_HASH, CIPHER_HASH));
+        when(chunkManifestService.calculateManifestHash(any())).thenReturn(MANIFEST_HASH);
+        when(chunkManifestService.saveManifest(eq(USER_ID), eq(FILE_ID), any())).thenReturn(saved);
+
+        Optional<ChunkManifestView> result = finalizationService.ensureManifest(
+                USER_ID, file, state, List.of(processed.toFile()), List.of(CIPHER_HASH));
+
+        assertThat(result).containsSame(saved);
+        verify(chunkManifestService).saveManifest(eq(USER_ID), eq(FILE_ID), any());
+    }
+
+    /**
+     * 验证 Redis 中的 manifest hash 检查点与当前对象证据不一致时禁止保存。
+     */
+    @Test
+    void ensureManifest_shouldRejectManifestCheckpointMismatch() throws IOException {
+        File file = framedFile();
+        FileUploadState state = framedState();
+        Path processed = tempDir.resolve("encrypted_chunk_0");
+        Files.write(processed, new byte[]{1, 2, 3});
+        when(chunkManifestService.findActiveManifest(USER_ID, FILE_ID)).thenReturn(Optional.empty());
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH))
+                .thenReturn(Result.success(chainDetail(CIPHER_HASH, storagePath(CIPHER_HASH))));
+        when(framedAeadWriter.verify(
+                eq(processed), eq(FILE_DEK), eq(FILE_NONCE), eq(0), eq(1), eq(FRAME_SIZE)))
+                .thenReturn(new FramedAeadWriter.WriteResult(33L, 105L, 1, PLAIN_HASH, CIPHER_HASH));
+        when(chunkManifestService.calculateManifestHash(any()))
+                .thenReturn("sha256:" + "d".repeat(64));
+
+        GeneralException failure = assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, file, state, List.of(processed.toFile()), List.of(CIPHER_HASH)));
+
+        assertThat(failure.getData()).asString().contains("manifest 检查点");
+        verify(chunkManifestService, never()).saveManifest(anyLong(), anyLong(), any());
+    }
+
+    /**
+     * 验证恢复版本、分片计划和 manifest hash 格式均属于不可变检查点。
+     */
+    @Test
+    void ensureManifest_shouldRejectInvalidFramedStateVariants() {
+        FileUploadState missingRecoveryVersion = framedState();
+        missingRecoveryVersion.setEncryptionRecoveryVersion(null);
+        assertThat(assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, framedFile(), missingRecoveryVersion, List.of(), List.of())).getData())
+                .asString()
+                .contains("检查点不完整");
+
+        FileUploadState inconsistentPlan = framedState();
+        inconsistentPlan.setTotalChunks(2);
+        assertThat(assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, framedFile(), inconsistentPlan, List.of(), List.of())).getData())
+                .asString()
+                .contains("分片计划");
+
+        FileUploadState malformedManifestHash = framedState();
+        malformedManifestHash.setManifestHash("sha256:BAD");
+        assertThat(assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, framedFile(), malformedManifestHash, List.of(), List.of())).getData())
+                .asString()
+                .contains("hash 检查点格式");
+
+        verifyNoInteractions(fileRemoteClient, chunkManifestService, framedAeadWriter);
+    }
+
+    /**
+     * 验证持久化 fileParam 的字段漂移与损坏 JSON 均失败关闭。
+     */
+    @Test
+    void ensureManifest_shouldRejectMismatchedOrMalformedFileParam() {
+        File mismatched = framedFile().setFileParam(
+                framedFile().getFileParam().replace("RP-AES256-GCM-FRAMED-V2", "OTHER-SUITE"));
+        GeneralException mismatchFailure = assertThrows(GeneralException.class,
+                () -> finalizationService.ensureManifest(
+                        USER_ID, mismatched, framedState(), List.of(), List.of()));
+        assertThat(mismatchFailure.getData()).asString().contains("fileParam");
+
+        File malformed = framedFile().setFileParam("{\"encryptionAlgorithm\":\"FRAMED_AEAD_V2\"");
+        GeneralException malformedFailure = assertThrows(GeneralException.class,
+                () -> finalizationService.ensureManifest(
+                        USER_ID, malformed, framedState(), List.of(), List.of()));
+        assertThat(malformedFailure.getData()).asString().contains("JSON 解析失败");
+
+        verifyNoInteractions(fileRemoteClient, chunkManifestService, framedAeadWriter);
+    }
+
+    /**
+     * 验证链记录缺失、格式损坏和摘要替换均在 writer 认证前失败关闭。
+     */
+    @Test
+    void ensureManifest_shouldRejectInvalidChainReferenceEvidence() {
+        when(chunkManifestService.findActiveManifest(USER_ID, FILE_ID)).thenReturn(Optional.empty());
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH))
+                .thenReturn(Result.success(chainDetailWithContent(" ")));
+        assertThat(assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, framedFile(), framedState(), List.of(new java.io.File("unused")),
+                List.of(CIPHER_HASH))).getData())
+                .asString()
+                .contains("引用缺失");
+
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH))
+                .thenReturn(Result.success(chainDetailWithContent("{not-json")));
+        assertThat(assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, framedFile(), framedState(), List.of(new java.io.File("unused")),
+                List.of(CIPHER_HASH))).getData())
+                .asString()
+                .contains("格式无效");
+
+        String substitutedHash = "sha256:" + "d".repeat(64);
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH))
+                .thenReturn(Result.success(chainDetail(substitutedHash, storagePath(substitutedHash))));
+        assertThat(assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, framedFile(), framedState(), List.of(new java.io.File("unused")),
+                List.of(CIPHER_HASH))).getData())
+                .asString()
+                .contains("摘要");
+
+        verifyNoInteractions(framedAeadWriter);
+        verify(chunkManifestService, never()).saveManifest(anyLong(), anyLong(), any());
+    }
+
+    /**
+     * 验证 writer 重新认证失败时保留对象证据并阻止 manifest 保存。
+     */
+    @Test
+    void ensureManifest_shouldRejectWriterVerificationFailure() throws IOException {
+        Path processed = tempDir.resolve("encrypted_chunk_0");
+        Files.write(processed, new byte[]{1, 2, 3});
+        when(chunkManifestService.findActiveManifest(USER_ID, FILE_ID)).thenReturn(Optional.empty());
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH))
+                .thenReturn(Result.success(chainDetail(CIPHER_HASH, storagePath(CIPHER_HASH))));
+        when(framedAeadWriter.verify(
+                eq(processed), eq(FILE_DEK), eq(FILE_NONCE), eq(0), eq(1), eq(FRAME_SIZE)))
+                .thenThrow(new IOException("tag mismatch"));
+
+        GeneralException failure = assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, framedFile(), framedState(), List.of(processed.toFile()), List.of(CIPHER_HASH)));
+
+        assertThat(failure.getData()).asString().contains("认证或长度校验失败");
+        assertThat(Files.isRegularFile(processed)).isTrue();
+        verify(chunkManifestService, never()).saveManifest(anyLong(), anyLong(), any());
+    }
+
+    /**
+     * 验证残缺 fileParam 的显式 v2 标识不会被当作 legacy 静默跳过。
+     */
+    @Test
+    void ensureManifest_shouldRejectMalformedExplicitV2FileParam() {
+        File malformed = framedFile().setFileParam("{FRAMED_AEAD_V2");
+        FileUploadState legacyState = new FileUploadState(
+                USER_ID, "legacy.bin", 33L, "application/octet-stream", "legacy-client", 33, 1);
+
+        GeneralException failure = assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, malformed, legacyState, List.of(), List.of()));
+
+        assertThat(failure.getData()).asString().contains("fileParam 格式无效");
+        verifyNoInteractions(fileRemoteClient, chunkManifestService, framedAeadWriter);
+    }
+
+    /**
+     * 验证文件 owner 与稳定上传用户不一致时拒绝恢复。
+     */
+    @Test
+    void ensureManifest_shouldRejectFileOwnerMismatch() {
+        File file = framedFile().setUid(200L);
+
+        GeneralException failure = assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, file, framedState(), List.of(), List.of()));
+
+        assertThat(failure.getResultEnum()).isEqualTo(ResultEnum.PERMISSION_UNAUTHORIZED);
+        verifyNoInteractions(fileRemoteClient, chunkManifestService, framedAeadWriter);
+    }
+
+    /**
+     * 验证没有完整 processed/cipher 证据时不读取链上引用或创建 manifest。
+     */
+    @Test
+    void ensureManifest_shouldRejectIncompleteObjectEvidence() {
+        when(chunkManifestService.findActiveManifest(USER_ID, FILE_ID)).thenReturn(Optional.empty());
+
+        GeneralException failure = assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, framedFile(), framedState(), List.of(), List.of()));
+
+        assertThat(failure.getData()).asString().contains("输入证据不完整");
+        verifyNoInteractions(fileRemoteClient, framedAeadWriter);
+        verify(chunkManifestService, never()).saveManifest(anyLong(), anyLong(), any());
+    }
+
+    /**
+     * 验证链上引用的数量、路径租户、摘要后缀和摘要编码均严格绑定。
+     */
+    @Test
+    void ensureManifest_shouldRejectReferenceBindingViolations() {
+        when(chunkManifestService.findActiveManifest(USER_ID, FILE_ID)).thenReturn(Optional.empty());
+        java.io.File placeholder = new java.io.File("unused");
+
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH))
+                .thenReturn(Result.success(chainDetailWithContent(
+                        "[{\"index\":0,\"cipherHash\":\"" + CIPHER_HASH
+                                + "\",\"storagePath\":\"" + storagePath(CIPHER_HASH)
+                                + "\"},{\"index\":1,\"cipherHash\":\"" + CIPHER_HASH
+                                + "\",\"storagePath\":\"" + storagePath(CIPHER_HASH) + "-1\"}]")));
+        assertThat(assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, framedFile(), framedState(), List.of(placeholder), List.of(CIPHER_HASH))).getData())
+                .asString()
+                .contains("数量不一致");
+
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH))
+                .thenReturn(Result.success(chainDetail(CIPHER_HASH, "../" + CIPHER_HASH)));
+        assertThat(assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, framedFile(), framedState(), List.of(placeholder), List.of(CIPHER_HASH))).getData())
+                .asString()
+                .contains("索引或路径无效");
+
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH))
+                .thenReturn(Result.success(chainDetail(CIPHER_HASH,
+                        "storage/tenant/999/chunk/" + CIPHER_HASH)));
+        assertThat(assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, framedFile(), framedState(), List.of(placeholder), List.of(CIPHER_HASH))).getData())
+                .asString()
+                .contains("租户不匹配");
+
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH))
+                .thenReturn(Result.success(chainDetail(CIPHER_HASH,
+                        storagePath("sha256:" + "d".repeat(64)))));
+        assertThat(assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, framedFile(), framedState(), List.of(placeholder), List.of(CIPHER_HASH))).getData())
+                .asString()
+                .contains("storagePath 与密文摘要");
+
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH))
+                .thenReturn(Result.success(chainDetail("not-a-digest", "storage/tenant/" + TENANT_ID
+                        + "/chunk/not-a-digest")));
+        assertThat(assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, framedFile(), framedState(), List.of(placeholder), List.of("not-a-digest"))).getData())
+                .asString()
+                .contains("摘要格式无效");
+
+        verifyNoInteractions(framedAeadWriter);
+        verify(chunkManifestService, never()).saveManifest(anyLong(), anyLong(), any());
+    }
+
+    /**
+     * 验证 writer 返回的密文摘要或明文大小与上传证据不一致时拒绝保存。
+     */
+    @Test
+    void ensureManifest_shouldRejectWriterEvidenceMismatch() throws IOException {
+        Path processed = tempDir.resolve("encrypted_chunk_0");
+        Files.write(processed, new byte[]{1, 2, 3});
+        when(chunkManifestService.findActiveManifest(USER_ID, FILE_ID)).thenReturn(Optional.empty());
+        when(fileRemoteClient.getFile(String.valueOf(USER_ID), FILE_HASH))
+                .thenReturn(Result.success(chainDetail(CIPHER_HASH, storagePath(CIPHER_HASH))));
+        when(framedAeadWriter.verify(
+                eq(processed), eq(FILE_DEK), eq(FILE_NONCE), eq(0), eq(1), eq(FRAME_SIZE)))
+                .thenReturn(new FramedAeadWriter.WriteResult(33L, 105L, 1, PLAIN_HASH,
+                        "sha256:" + "d".repeat(64)));
+
+        assertThat(assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, framedFile(), framedState(), List.of(processed.toFile()), List.of(CIPHER_HASH))).getData())
+                .asString()
+                .contains("密文摘要不一致");
+
+        when(framedAeadWriter.verify(
+                eq(processed), eq(FILE_DEK), eq(FILE_NONCE), eq(0), eq(1), eq(FRAME_SIZE)))
+                .thenReturn(new FramedAeadWriter.WriteResult(32L, 104L, 1, PLAIN_HASH, CIPHER_HASH));
+        assertThat(assertThrows(GeneralException.class, () -> finalizationService.ensureManifest(
+                USER_ID, framedFile(), framedState(), List.of(processed.toFile()), List.of(CIPHER_HASH))).getData())
+                .asString()
+                .contains("明文大小不一致");
+
+        verify(chunkManifestService, never()).saveManifest(anyLong(), anyLong(), any());
+    }
+
+    /**
      * 构造完整 framed v2 文件记录。
      */
     private File framedFile() {
@@ -331,6 +619,13 @@ class FramedManifestFinalizationServiceTest {
     private FileDetailVO chainDetail(String cipherHash, String storagePath) {
         String content = "[{\"index\":0,\"cipherHash\":\"" + cipherHash
                 + "\",\"storagePath\":\"" + storagePath + "\"}]";
+        return chainDetailWithContent(content);
+    }
+
+    /**
+     * 构造指定 content 的链上文件详情，用于损坏引用边界测试。
+     */
+    private FileDetailVO chainDetailWithContent(String content) {
         return new FileDetailVO(
                 String.valueOf(USER_ID), "framed.bin", "{}", content,
                 FILE_HASH, "2026-07-26T00:00:00Z", 1L, 33L,

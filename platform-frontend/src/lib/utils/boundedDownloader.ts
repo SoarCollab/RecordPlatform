@@ -27,12 +27,24 @@ const LEGACY_ENCRYPTION_ALGORITHMS = new Set([
   "CHACHA20-POLY1305",
 ]);
 const MANIFEST_SECRET_KEYS = new Set([
+  "key",
+  "keys",
+  "secret",
   "initialkey",
   "filedek",
   "dek",
   "datakey",
   "encrypteddatakey",
   "wrappeddatakey",
+  "decryptkey",
+  "decryptionkey",
+  "encryptionkey",
+  "filekey",
+  "filedatakey",
+  "wrappingiv",
+  "kmskeyid",
+  "privatekey",
+  "secretkey",
 ]);
 
 export type DownloadFormat = "NONE" | "LEGACY_V1" | "FRAMED_V2";

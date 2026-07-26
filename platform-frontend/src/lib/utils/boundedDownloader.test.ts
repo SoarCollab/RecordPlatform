@@ -1,5 +1,5 @@
 import { sha256 } from "@noble/hashes/sha2.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { FileDownloadMetadataVO } from "$api/types";
 
 import {
@@ -11,6 +11,15 @@ import {
 import { bytesToHex } from "./downloadIntegrity";
 import { DownloadMetricsTracker } from "./downloadMetrics";
 import { MemoryDownloadSink, type DownloadSink } from "./downloadSink";
+import {
+  buildFramedAad,
+  deriveFramedKeyMaterial,
+  FRAMED_AEAD_AAD_SCHEMA,
+  FRAMED_AEAD_FORMAT_VERSION,
+  FRAMED_AEAD_SUITE,
+  FRAMED_AEAD_TAG_BYTES,
+  MIN_FRAME_PLAIN_BYTES,
+} from "./framedAead";
 
 /** 构造可观察 abort/close 语义的测试 sink。 */
 function trackingSink(): DownloadSink & {
@@ -64,6 +73,28 @@ function responseFor(bytes: Uint8Array, sizes = [1, 5, 2]): Response {
   });
   return new Response(stream, {
     headers: { "content-length": String(bytes.length) },
+  });
+}
+
+/** 构造可控制响应声明长度和 reader cancel 行为的流式响应。 */
+function responseFromChunks(
+  chunks: Uint8Array[],
+  declaredLength?: number,
+  cancel?: (reason?: unknown) => void | Promise<void>,
+  close = true,
+): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      if (close) controller.close();
+    },
+    cancel,
+  });
+  return new Response(stream, {
+    headers:
+      declaredLength == null
+        ? undefined
+        : { "content-length": String(declaredLength) },
   });
 }
 
@@ -149,7 +180,7 @@ function hashManifestJson(value: string): string {
 async function encryptLegacyChunk(
   plaintext: Uint8Array,
   key: Uint8Array,
-  nextKey: Uint8Array,
+  nextKey: Uint8Array | null,
 ): Promise<Uint8Array> {
   const iv = Uint8Array.from({ length: 12 }, (_, index) => index + 11);
   const cryptoKey = await globalThis.crypto.subtle.importKey(
@@ -168,7 +199,7 @@ async function encryptLegacyChunk(
   );
   const header = new Uint8Array([0x52, 0x50, 1, 1]);
   const hash = `\n--HASH--\n${base64url(sha256(plaintext))}`;
-  const next = `\n--NEXT_KEY--\n${base64(nextKey)}`;
+  const next = nextKey ? `\n--NEXT_KEY--\n${base64(nextKey)}` : "";
   const encoded = new Uint8Array(
     header.length + iv.length + ciphertext.length + hash.length + next.length,
   );
@@ -183,6 +214,145 @@ async function encryptLegacyChunk(
   offset += hash.length;
   encoded.set(new TextEncoder().encode(next), offset);
   return encoded;
+}
+
+/** 原地修改 canonical JSON，并同步刷新 manifest 摘要。 */
+function mutateCanonicalManifest(
+  metadata: FileDownloadMetadataVO,
+  mutate: (manifest: Record<string, unknown>) => void,
+): void {
+  const manifest = JSON.parse(metadata.canonicalManifestJson) as Record<
+    string,
+    unknown
+  >;
+  mutate(manifest);
+  metadata.canonicalManifestJson = JSON.stringify(canonicalValue(manifest));
+  metadata.manifestHash = hashManifestJson(metadata.canonicalManifestJson);
+}
+
+/** 构造单分片 NONE metadata，便于覆盖失败关闭分支。 */
+function plainMetadata(bytes = new Uint8Array([1, 2])): FileDownloadMetadataVO {
+  return withCanonicalManifest({
+    fileId: "plain-file",
+    fileHash: "plain-hash",
+    fileName: "plain.bin",
+    fileSize: bytes.length,
+    contentType: "application/octet-stream",
+    initialKey: undefined,
+    manifestSchemaId: "v1",
+    manifestHash: "sha256:00",
+    hashAlgorithm: "SHA-256",
+    encryptionAlgorithm: "NONE",
+    storageBackend: "S3",
+    chunkSize: Math.max(bytes.length, 1),
+    totalChunks: 1,
+    parts: [part(0, bytes, "u0")],
+  });
+}
+
+/** 写入测试用 uint32 大端字段。 */
+function writeUint32(bytes: Uint8Array, offset: number, value: number): void {
+  new DataView(bytes.buffer).setUint32(offset, value, false);
+}
+
+/** 构造可被完整认证的一帧 framed v2 下载 fixture。 */
+async function framedMetadataFixture(): Promise<{
+  metadata: FileDownloadMetadataVO;
+  encoded: Uint8Array;
+  plaintext: Uint8Array;
+}> {
+  const plaintext = new TextEncoder().encode("bounded framed payload");
+  const fileNonce = Uint8Array.from({ length: 16 }, (_, index) => index + 1);
+  const fileDek = Uint8Array.from({ length: 32 }, (_, index) => index + 33);
+  const material = deriveFramedKeyMaterial({
+    fileDek,
+    fileNonce,
+    chunkIndex: 0,
+    frameIndex: 0,
+  });
+  const aad = buildFramedAad({
+    fileNonce,
+    chunkIndex: 0,
+    chunkCount: 1,
+    frameIndex: 0,
+    frameCount: 1,
+    plainLength: plaintext.length,
+    chunkPlainSize: plaintext.length,
+  });
+  const cryptoKey = await globalThis.crypto.subtle.importKey(
+    "raw",
+    material.key as unknown as BufferSource,
+    { name: "AES-GCM" },
+    false,
+    ["encrypt"],
+  );
+  const ciphertext = new Uint8Array(
+    await globalThis.crypto.subtle.encrypt(
+      {
+        name: "AES-GCM",
+        iv: material.nonce as unknown as BufferSource,
+        additionalData: aad as unknown as BufferSource,
+        tagLength: FRAMED_AEAD_TAG_BYTES * 8,
+      },
+      cryptoKey,
+      plaintext as unknown as BufferSource,
+    ),
+  );
+  const header = new Uint8Array(44);
+  header.set(new TextEncoder().encode("RPF2"), 0);
+  header[4] = FRAMED_AEAD_FORMAT_VERSION;
+  header[5] = 1;
+  writeUint32(header, 8, 0);
+  writeUint32(header, 12, 1);
+  writeUint32(header, 16, MIN_FRAME_PLAIN_BYTES);
+  writeUint32(header, 20, 1);
+  writeUint32(header, 24, plaintext.length);
+  header.set(fileNonce, 28);
+  const frameHeader = new Uint8Array(12);
+  writeUint32(frameHeader, 0, 0);
+  writeUint32(frameHeader, 4, plaintext.length);
+  writeUint32(frameHeader, 8, ciphertext.length);
+  const encoded = new Uint8Array(
+    header.length + frameHeader.length + ciphertext.length,
+  );
+  encoded.set(header, 0);
+  encoded.set(frameHeader, header.length);
+  encoded.set(ciphertext, header.length + frameHeader.length);
+
+  const encryption = {
+    formatVersion: FRAMED_AEAD_FORMAT_VERSION,
+    algorithmSuite: FRAMED_AEAD_SUITE,
+    fileNonce: base64(fileNonce),
+    framePlainSize: MIN_FRAME_PLAIN_BYTES,
+    keyDerivation: "HKDF-SHA256",
+    nonceDerivation: "HKDF-SHA256",
+    aadSchema: FRAMED_AEAD_AAD_SCHEMA,
+    tagSize: FRAMED_AEAD_TAG_BYTES,
+  };
+  const framedPart = {
+    ...part(0, encoded, "u0"),
+    plainHash: `sha256:${bytesToHex(sha256(plaintext))}`,
+    plainSize: plaintext.length,
+    frameCount: 1,
+  };
+  const metadata = withCanonicalManifest({
+    fileId: "framed-file",
+    fileHash: "framed-hash",
+    fileName: "framed.bin",
+    fileSize: plaintext.length,
+    contentType: "application/octet-stream",
+    initialKey: base64(fileDek),
+    manifestSchemaId: "v1",
+    manifestHash: "sha256:00",
+    hashAlgorithm: "SHA-256",
+    encryptionAlgorithm: "FRAMED_AEAD_V2",
+    storageBackend: "S3",
+    chunkSize: MIN_FRAME_PLAIN_BYTES,
+    totalChunks: 1,
+    parts: [framedPart],
+    encryption,
+  });
+  return { metadata, encoded, plaintext };
 }
 
 describe("boundedDownloader", () => {
@@ -218,6 +388,200 @@ describe("boundedDownloader", () => {
     });
     expect(metrics.bytesWritten).toBe(metadata.fileSize);
     expect(new TextDecoder().decode(sink.getData())).toBe("hello world");
+  });
+
+  it("should authenticate a framed v2 part through the bounded dispatcher", async () => {
+    const fixture = await framedMetadataFixture();
+    const sink = new MemoryDownloadSink(fixture.plaintext.length, 1024);
+
+    const metrics = await executeBoundedDownload({
+      metadata: fixture.metadata,
+      expectedFileHash: fixture.metadata.fileHash,
+      sink,
+      fetchImpl: async () => responseFor(fixture.encoded, [1, 7, 31]),
+    });
+
+    expect(metrics).toMatchObject({
+      currentBufferedBytes: 0,
+      framesAuthenticated: 1,
+      partsCompleted: 1,
+      bytesWritten: fixture.plaintext.length,
+    });
+    expect(Array.from(sink.getData())).toEqual(Array.from(fixture.plaintext));
+  });
+
+  it("should fail closed on canonical manifest shape and binding drift", async () => {
+    const cases: Array<{
+      expected: string;
+      prepare: (metadata: FileDownloadMetadataVO) => void;
+    }> = [
+      {
+        expected: "缺少 canonical manifest JSON",
+        prepare: (metadata) => {
+          metadata.canonicalManifestJson = " ";
+        },
+      },
+      {
+        expected: "fileHash 与任务不一致",
+        prepare: (metadata) => {
+          metadata.fileHash = "";
+        },
+      },
+      {
+        expected: "canonical manifest JSON 无效",
+        prepare: (metadata) => {
+          metadata.canonicalManifestJson = "{";
+          metadata.manifestHash = hashManifestJson("{");
+        },
+      },
+      {
+        expected: "canonical manifest 不是有效对象",
+        prepare: (metadata) => {
+          metadata.canonicalManifestJson = "[]";
+          metadata.manifestHash = hashManifestJson("[]");
+        },
+      },
+      {
+        expected: "字段 schema 与 metadata 不一致",
+        prepare: (metadata) => {
+          mutateCanonicalManifest(metadata, (manifest) => {
+            manifest.schema = "other-schema";
+          });
+        },
+      },
+      {
+        expected: "字段 chunkSize 与 metadata 不一致",
+        prepare: (metadata) => {
+          mutateCanonicalManifest(metadata, (manifest) => {
+            manifest.chunkSize = "2";
+          });
+        },
+      },
+      {
+        expected: "字段 encryptionAlgorithm 不应存在",
+        prepare: (metadata) => {
+          metadata.encryptionAlgorithm = undefined;
+        },
+      },
+      {
+        expected: "manifest 明文总量与文件大小不一致",
+        prepare: (metadata) => {
+          metadata.fileSize += 1;
+        },
+      },
+      {
+        expected: "manifest 分片数量与 metadata 不一致",
+        prepare: (metadata) => {
+          mutateCanonicalManifest(metadata, (manifest) => {
+            manifest.chunks = [];
+          });
+        },
+      },
+      {
+        expected: "manifest encryption 与 metadata 不一致",
+        prepare: (metadata) => {
+          mutateCanonicalManifest(metadata, (manifest) => {
+            manifest.encryption = {};
+          });
+        },
+      },
+      {
+        expected: "字段 etag 与 metadata 不一致",
+        prepare: (metadata) => {
+          metadata.parts[0].etag = "etag-after-signing";
+        },
+      },
+    ];
+
+    for (const scenario of cases) {
+      const metadata = plainMetadata();
+      scenario.prepare(metadata);
+      const sink = trackingSink();
+      await expect(
+        executeBoundedDownload({
+          metadata,
+          expectedFileHash: "plain-hash",
+          sink,
+          fetchImpl: async () => {
+            throw new Error("must not fetch");
+          },
+        }),
+      ).rejects.toThrow(scenario.expected);
+      expect(sink.aborted).toBe(true);
+    }
+
+    const framedFixture = await framedMetadataFixture();
+    mutateCanonicalManifest(framedFixture.metadata, (manifest) => {
+      delete manifest.encryption;
+    });
+    await expect(
+      executeBoundedDownload({
+        metadata: framedFixture.metadata,
+        sink: trackingSink(),
+        fetchImpl: async () => {
+          throw new Error("must not fetch");
+        },
+      }),
+    ).rejects.toThrow("缺少 encryption 描述");
+
+    const missingPlainSize = (await framedMetadataFixture()).metadata;
+    delete missingPlainSize.parts[0].plainSize;
+    await expect(
+      executeBoundedDownload({
+        metadata: missingPlainSize,
+        sink: trackingSink(),
+        fetchImpl: async () => {
+          throw new Error("must not fetch");
+        },
+      }),
+    ).rejects.toThrow("manifest 分片总量无效");
+  });
+
+  it("should cancel untrusted NONE responses on network and length violations", async () => {
+    const oversizedChunk = new Uint8Array(1024 * 1024 + 1);
+    const cases = [
+      {
+        metadata: plainMetadata(oversizedChunk),
+        chunks: [oversizedChunk],
+        declaredLength: oversizedChunk.byteLength,
+        keepOpen: true,
+        expected: "网络读取块超过有界下载上限",
+      },
+      {
+        metadata: plainMetadata(new Uint8Array([1])),
+        chunks: [new Uint8Array([1, 2])],
+        declaredLength: undefined,
+        keepOpen: true,
+        expected: "超过 manifest 声明大小",
+      },
+      {
+        metadata: plainMetadata(new Uint8Array([1, 2])),
+        chunks: [new Uint8Array([1])],
+        declaredLength: undefined,
+        keepOpen: false,
+        expected: "长度与 manifest 不一致",
+      },
+    ];
+
+    for (const scenario of cases) {
+      let cancelled = false;
+      const response = responseFromChunks(
+        scenario.chunks,
+        scenario.declaredLength,
+        () => {
+          cancelled = true;
+        },
+        !scenario.keepOpen,
+      );
+      await expect(
+        executeBoundedDownload({
+          metadata: scenario.metadata,
+          sink: trackingSink(),
+          fetchImpl: async () => response,
+        }),
+      ).rejects.toThrow(scenario.expected);
+      if (scenario.keepOpen) expect(cancelled).toBe(true);
+    }
   });
 
   it("should reject reordered metadata parts instead of sorting them", async () => {
@@ -287,45 +651,66 @@ describe("boundedDownloader", () => {
     expect(sink.aborted).toBe(true);
   });
 
-  it("should reject case-insensitive secret fields injected into canonical manifest", async () => {
-    const bytes = new TextEncoder().encode("secret-check");
-    const metadata = withCanonicalManifest({
-      fileId: "f",
-      fileHash: "file-hash",
-      fileName: "secret.txt",
-      fileSize: bytes.length,
-      contentType: "text/plain",
-      initialKey: undefined,
-      manifestSchemaId: "v1",
-      manifestHash: "sha256:00",
-      hashAlgorithm: "SHA-256",
-      encryptionAlgorithm: "NONE",
-      storageBackend: "S3",
-      chunkSize: bytes.length,
-      totalChunks: 1,
-      parts: [part(0, bytes, "u0")],
-    });
-    const injected = JSON.parse(metadata.canonicalManifestJson) as Record<
-      string,
-      unknown
-    >;
-    injected.audit = { Wrapped_DATA_Key: "secret-material" };
-    const canonicalManifestJson = JSON.stringify(canonicalValue(injected));
-    metadata.canonicalManifestJson = canonicalManifestJson;
-    metadata.manifestHash = hashManifestJson(canonicalManifestJson);
-    const sink = trackingSink();
+  it.each([
+    "KEY",
+    "key-s",
+    "Secret",
+    "INITIAL-Key",
+    "file_DEK",
+    "data-key",
+    "encrypted.DATA.key",
+    "Wrapped_DATA_Key",
+    "decrypt-key",
+    "Decryption_Key",
+    "encryption.KEY",
+    "file-key",
+    "file.DATA.key",
+    "wrapping-IV",
+    "KMS_key_ID",
+    "private-key",
+    "secret.KEY",
+  ])(
+    "should reject normalized secret field %s injected into canonical manifest",
+    async (secretField) => {
+      const bytes = new TextEncoder().encode("secret-check");
+      const metadata = withCanonicalManifest({
+        fileId: "f",
+        fileHash: "file-hash",
+        fileName: "secret.txt",
+        fileSize: bytes.length,
+        contentType: "text/plain",
+        initialKey: undefined,
+        manifestSchemaId: "v1",
+        manifestHash: "sha256:00",
+        hashAlgorithm: "SHA-256",
+        encryptionAlgorithm: "NONE",
+        storageBackend: "S3",
+        chunkSize: bytes.length,
+        totalChunks: 1,
+        parts: [part(0, bytes, "u0")],
+      });
+      const injected = JSON.parse(metadata.canonicalManifestJson) as Record<
+        string,
+        unknown
+      >;
+      injected.audit = { [secretField]: "secret-material" };
+      const canonicalManifestJson = JSON.stringify(canonicalValue(injected));
+      metadata.canonicalManifestJson = canonicalManifestJson;
+      metadata.manifestHash = hashManifestJson(canonicalManifestJson);
+      const sink = trackingSink();
 
-    await expect(
-      executeBoundedDownload({
-        metadata,
-        sink,
-        fetchImpl: async () => {
-          throw new Error("must not fetch");
-        },
-      }),
-    ).rejects.toThrow("密钥材料");
-    expect(sink.aborted).toBe(true);
-  });
+      await expect(
+        executeBoundedDownload({
+          metadata,
+          sink,
+          fetchImpl: async () => {
+            throw new Error("must not fetch");
+          },
+        }),
+      ).rejects.toThrow("密钥材料");
+      expect(sink.aborted).toBe(true);
+    },
+  );
 
   it("should abort a bounded sink when cancellation wins before close", async () => {
     const bytes = new TextEncoder().encode("cancel-before-close");
@@ -620,6 +1005,210 @@ describe("boundedDownloader", () => {
     ).rejects.toThrow("历史下载缺少分片 URL");
     expect(sink.aborted).toBe(true);
     expect(sink.closed).toBe(false);
+  });
+
+  it("should retry transient object failures but fail fast on expired URLs", async () => {
+    vi.useFakeTimers();
+    try {
+      const bytes = new Uint8Array([7]);
+      let attempts = 0;
+      const download = executeLegacyFallbackDownload({
+        urls: ["u0"],
+        fileSize: 1,
+        totalChunks: 1,
+        encrypted: false,
+        sink: new MemoryDownloadSink(1, 64),
+        fetchImpl: async () => {
+          attempts++;
+          return attempts < 3
+            ? new Response(null, { status: 503 })
+            : responseFor(bytes);
+        },
+      });
+
+      await vi.runAllTimersAsync();
+      await expect(download).resolves.toMatchObject({ bytesWritten: 1 });
+      expect(attempts).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    let expiredAttempts = 0;
+    await expect(
+      executeLegacyFallbackDownload({
+        urls: ["expired"],
+        fileSize: 1,
+        totalChunks: 1,
+        encrypted: false,
+        sink: trackingSink(),
+        fetchImpl: async () => {
+          expiredAttempts++;
+          return new Response(null, { status: 403 });
+        },
+      }),
+    ).rejects.toThrow("下载地址已过期");
+    expect(expiredAttempts).toBe(1);
+  });
+
+  it("should enforce legacy fallback response bounds before decryption or commit", async () => {
+    const plainCases = [
+      {
+        fileSize: 1,
+        response: () => responseFromChunks([new Uint8Array([1])], 2),
+        expected: "超过文件声明大小",
+      },
+      {
+        fileSize: 1,
+        response: () =>
+          responseFromChunks([new Uint8Array([1, 2])], undefined, undefined),
+        expected: "超过文件声明大小",
+      },
+      {
+        fileSize: 2,
+        response: () => responseFromChunks([new Uint8Array([1])], 2),
+        expected: "长度与响应声明不一致",
+      },
+      {
+        fileSize: 1,
+        response: () => responseFromChunks([]),
+        expected: "历史明文分片为空",
+      },
+    ];
+    for (const scenario of plainCases) {
+      await expect(
+        executeLegacyFallbackDownload({
+          urls: ["u0"],
+          fileSize: scenario.fileSize,
+          totalChunks: 1,
+          encrypted: false,
+          sink: trackingSink(),
+          fetchImpl: async () => scenario.response(),
+        }),
+      ).rejects.toThrow(scenario.expected);
+    }
+
+    await expect(
+      executeLegacyFallbackDownload({
+        urls: ["u0"],
+        fileSize: 1,
+        totalChunks: 1,
+        encrypted: true,
+        sink: trackingSink(),
+        fetchImpl: async () => responseFromChunks([new Uint8Array([1])], 2),
+        initialKey: base64(new Uint8Array(32)),
+      }),
+    ).rejects.toThrow("长度与响应声明不一致");
+
+    await expect(
+      executeLegacyFallbackDownload({
+        urls: ["u0"],
+        fileSize: 1,
+        totalChunks: 1,
+        encrypted: true,
+        sink: trackingSink(),
+        fetchImpl: async () => responseFromChunks([new Uint8Array([1, 2])], 1),
+        initialKey: base64(new Uint8Array(32)),
+      }),
+    ).rejects.toThrow("超过响应声明大小");
+  });
+
+  it("should reject legacy key and random-access contract violations", async () => {
+    await expect(
+      executeLegacyFallbackDownload({
+        urls: ["u0"],
+        fileSize: 1,
+        totalChunks: 1,
+        encrypted: true,
+        sink: trackingSink(),
+      }),
+    ).rejects.toThrow("缺少 initialKey");
+
+    const sequentialSink: DownloadSink = {
+      ...trackingSink(),
+      supportsRandomAccess: false,
+    };
+    await expect(
+      executeLegacyFallbackDownload({
+        urls: ["u0"],
+        fileSize: 1,
+        totalChunks: 1,
+        encrypted: true,
+        initialKey: base64(new Uint8Array(32)),
+        sink: sequentialSink,
+      }),
+    ).rejects.toThrow("支持随机写入");
+
+    const metadata = withCanonicalManifest({
+      fileId: "legacy-file",
+      fileHash: "legacy-hash",
+      fileName: "legacy.bin",
+      fileSize: 1,
+      contentType: "application/octet-stream",
+      initialKey: undefined,
+      manifestSchemaId: "v1",
+      manifestHash: "sha256:00",
+      hashAlgorithm: "SHA-256",
+      encryptionAlgorithm: "AES-GCM",
+      storageBackend: "S3",
+      chunkSize: 1,
+      totalChunks: 1,
+      parts: [part(0, new Uint8Array([1]), "u0")],
+    });
+    await expect(
+      executeBoundedDownload({
+        metadata,
+        sink: trackingSink(),
+        fetchImpl: async () => {
+          throw new Error("must not fetch");
+        },
+      }),
+    ).rejects.toThrow("缺少 initialKey");
+  });
+
+  it("should reject leaked buffers or mismatched write accounting before close", async () => {
+    const bytes = new Uint8Array([1]);
+    const leakedMetrics = new DownloadMetricsTracker();
+    leakedMetrics.acquire(1);
+    await expect(
+      executeBoundedDownload({
+        metadata: plainMetadata(bytes),
+        sink: new MemoryDownloadSink(1, 64),
+        metrics: leakedMetrics,
+        fetchImpl: async () => responseFor(bytes),
+      }),
+    ).rejects.toThrow("下载缓冲区未释放");
+
+    const mismatchedMetrics = new DownloadMetricsTracker();
+    mismatchedMetrics.wrote(1);
+    await expect(
+      executeLegacyFallbackDownload({
+        urls: ["u0"],
+        fileSize: 1,
+        totalChunks: 1,
+        encrypted: false,
+        sink: new MemoryDownloadSink(1, 64),
+        metrics: mismatchedMetrics,
+        fetchImpl: async () => responseFor(bytes),
+      }),
+    ).rejects.toThrow("写入长度不一致");
+  });
+
+  it.each([
+    [{ encryption: { formatVersion: 0 } }, "NONE"],
+    [{ encryptionAlgorithm: " none " }, "NONE"],
+    [
+      {
+        encryptionAlgorithm: "framed_aead_v2",
+        encryption: { formatVersion: 2 },
+      },
+      "FRAMED_V2",
+    ],
+    [
+      { encryptionAlgorithm: "CHACHA20", encryption: { formatVersion: 1 } },
+      "LEGACY_V1",
+    ],
+  ])("should resolve supported download contracts", (metadata, expected) => {
+    expect(resolveDownloadFormat(metadata as never)).toBe(expected);
   });
 
   it("should reject unknown format versions", () => {

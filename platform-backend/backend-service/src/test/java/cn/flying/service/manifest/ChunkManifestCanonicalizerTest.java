@@ -116,15 +116,7 @@ class ChunkManifestCanonicalizerTest {
      */
     @Test
     void normalize_shouldUsePlainSizeForFramedV2Total() {
-        ChunkManifestEncryption encryption = new ChunkManifestEncryption(
-                ChunkManifestEncryption.FORMAT_FRAMED_V2,
-                ChunkManifestEncryption.SUITE_FRAMED_V2,
-                "AAAAAAAAAAAAAAAAAAAAAA",
-                64 * 1024,
-                ChunkManifestEncryption.DERIVATION_HKDF_SHA256,
-                ChunkManifestEncryption.DERIVATION_HKDF_SHA256,
-                ChunkManifestEncryption.AAD_SCHEMA_FRAMED_V2,
-                ChunkManifestEncryption.TAG_SIZE_BYTES);
+        ChunkManifestEncryption encryption = framedEncryption();
         ChunkManifestDraft draft = new ChunkManifestDraft(
                 null,
                 "file-hash",
@@ -150,6 +142,168 @@ class ChunkManifestCanonicalizerTest {
         assertThat(canonicalizer.manifestHash(draft)).startsWith("sha256:");
     }
 
+    /**
+     * 验证 framed v2 descriptor 的持久化 JSON 能复用同一 allowlist 并无损往返。
+     */
+    @Test
+    void encryptionJson_shouldRoundTripValidatedFramedDescriptor() {
+        ChunkManifestEncryption encryption = framedEncryption();
+
+        String json = canonicalizer.encryptionJson(encryption);
+
+        assertThat(json).contains("\"formatVersion\":2", "\"algorithmSuite\":\"RP-AES256-GCM-FRAMED-V2\"");
+        assertThat(canonicalizer.parseEncryptionJson(json)).isEqualTo(encryption);
+        assertThat(canonicalizer.encryptionJson(null)).isNull();
+        assertThat(canonicalizer.parseEncryptionJson("  ")).isNull();
+    }
+
+    /**
+     * 验证数据库中的损坏 descriptor 会转换为稳定的文件记录错误。
+     */
+    @Test
+    void parseEncryptionJson_shouldRejectMalformedDescriptor() {
+        assertThatThrownBy(() -> canonicalizer.parseEncryptionJson("{not-json"))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getData())
+                        .asString()
+                        .contains("格式无效"));
+    }
+
+    /**
+     * 验证 NONE/legacy descriptor 不得夹带任何 framed v2 专属字段。
+     */
+    @Test
+    void normalize_shouldRejectLegacyDescriptorContainingFramedFields() {
+        ChunkManifestEncryption invalid = new ChunkManifestEncryption(
+                ChunkManifestEncryption.FORMAT_NONE,
+                ChunkManifestEncryption.SUITE_FRAMED_V2,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+
+        assertThatThrownBy(() -> canonicalizer.encryptionJson(invalid))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getData())
+                        .asString()
+                        .contains("must not contain v2 fields"));
+    }
+
+    /**
+     * 验证未知格式、套件、frame 上限和非规范 nonce 均失败关闭。
+     */
+    @Test
+    void normalize_shouldRejectInvalidFramedDescriptorVariants() {
+        assertThatThrownBy(() -> canonicalizer.encryptionJson(new ChunkManifestEncryption(
+                99, null, null, null, null, null, null, null)))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getData())
+                        .asString()
+                        .contains("formatVersion"));
+
+        assertThatThrownBy(() -> canonicalizer.encryptionJson(new ChunkManifestEncryption(
+                ChunkManifestEncryption.FORMAT_FRAMED_V2,
+                "UNKNOWN-SUITE",
+                "AAAAAAAAAAAAAAAAAAAAAA",
+                64 * 1024,
+                ChunkManifestEncryption.DERIVATION_HKDF_SHA256,
+                ChunkManifestEncryption.DERIVATION_HKDF_SHA256,
+                ChunkManifestEncryption.AAD_SCHEMA_FRAMED_V2,
+                ChunkManifestEncryption.TAG_SIZE_BYTES)))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getData())
+                        .asString()
+                        .contains("allowlist"));
+
+        assertThatThrownBy(() -> canonicalizer.encryptionJson(new ChunkManifestEncryption(
+                ChunkManifestEncryption.FORMAT_FRAMED_V2,
+                ChunkManifestEncryption.SUITE_FRAMED_V2,
+                "AAAAAAAAAAAAAAAAAAAAAA",
+                ChunkManifestEncryption.MIN_FRAME_PLAIN_SIZE - 1,
+                ChunkManifestEncryption.DERIVATION_HKDF_SHA256,
+                ChunkManifestEncryption.DERIVATION_HKDF_SHA256,
+                ChunkManifestEncryption.AAD_SCHEMA_FRAMED_V2,
+                ChunkManifestEncryption.TAG_SIZE_BYTES)))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getData())
+                        .asString()
+                        .contains("framePlainSize"));
+
+        assertThatThrownBy(() -> canonicalizer.encryptionJson(new ChunkManifestEncryption(
+                ChunkManifestEncryption.FORMAT_FRAMED_V2,
+                ChunkManifestEncryption.SUITE_FRAMED_V2,
+                "%%%",
+                64 * 1024,
+                ChunkManifestEncryption.DERIVATION_HKDF_SHA256,
+                ChunkManifestEncryption.DERIVATION_HKDF_SHA256,
+                ChunkManifestEncryption.AAD_SCHEMA_FRAMED_V2,
+                ChunkManifestEncryption.TAG_SIZE_BYTES)))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getData())
+                        .asString()
+                        .contains("fileNonce"));
+    }
+
+    /**
+     * 验证 v2 分片必须携带正数 plainSize/frameCount，并满足精确密文字节公式。
+     */
+    @Test
+    void normalize_shouldRejectInvalidFramedChunkEvidenceVariants() {
+        assertThatThrownBy(() -> canonicalizer.normalize(framedDraft(
+                new ChunkManifestChunk(0, canonicalHash('a'), canonicalHash('b'), 72L,
+                        "storage/tenant/7/chunk/0", "S3", null, "SHA-256", 0L, 1),
+                1L)))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getData())
+                        .asString()
+                        .contains("plainSize must be positive"));
+
+        assertThatThrownBy(() -> canonicalizer.normalize(framedDraft(
+                new ChunkManifestChunk(0, canonicalHash('a'), canonicalHash('b'), 73L,
+                        "storage/tenant/7/chunk/0", "S3", null, "SHA-256", 1L, 0),
+                1L)))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getData())
+                        .asString()
+                        .contains("frameCount must be positive"));
+
+        assertThatThrownBy(() -> canonicalizer.normalize(framedDraft(
+                new ChunkManifestChunk(0, canonicalHash('a'), canonicalHash('b'), 73L,
+                        "storage/tenant/7/chunk/0", "S3", null, "SHA-256", null, null),
+                1L)))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getData())
+                        .asString()
+                        .contains("plainSize and frameCount are required"));
+
+        assertThatThrownBy(() -> canonicalizer.normalize(framedDraft(
+                new ChunkManifestChunk(0, canonicalHash('a'), canonicalHash('b'), 74L,
+                        "storage/tenant/7/chunk/0", "S3", null, "SHA-256", 1L, 1),
+                1L)))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getData())
+                        .asString()
+                        .contains("inconsistent"));
+    }
+
+    /**
+     * 验证 v2 manifest 的 totalSize 明确按明文总量校验。
+     */
+    @Test
+    void normalize_shouldRejectFramedPlainTotalMismatch() {
+        ChunkManifestChunk chunk = new ChunkManifestChunk(
+                0, canonicalHash('a'), canonicalHash('b'), 73L,
+                "storage/tenant/7/chunk/0", "S3", null, "SHA-256", 1L, 1);
+
+        assertThatThrownBy(() -> canonicalizer.normalize(framedDraft(chunk, 2L)))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getData())
+                        .asString()
+                        .contains("sum of chunk plain sizes"));
+    }
+
     private ChunkManifestDraft draft(List<ChunkManifestChunk> chunks) {
         return new ChunkManifestDraft(
                 null,
@@ -166,5 +320,44 @@ class ChunkManifestCanonicalizerTest {
 
     private ChunkManifestChunk chunk(int index, String plainHash, String cipherHash, long size, String storagePath) {
         return new ChunkManifestChunk(index, plainHash, cipherHash, size, storagePath, null, null, null);
+    }
+
+    /**
+     * 构造 allowlist 内的 framed v2 descriptor。
+     */
+    private ChunkManifestEncryption framedEncryption() {
+        return new ChunkManifestEncryption(
+                ChunkManifestEncryption.FORMAT_FRAMED_V2,
+                ChunkManifestEncryption.SUITE_FRAMED_V2,
+                "AAAAAAAAAAAAAAAAAAAAAA",
+                64 * 1024,
+                ChunkManifestEncryption.DERIVATION_HKDF_SHA256,
+                ChunkManifestEncryption.DERIVATION_HKDF_SHA256,
+                ChunkManifestEncryption.AAD_SCHEMA_FRAMED_V2,
+                ChunkManifestEncryption.TAG_SIZE_BYTES);
+    }
+
+    /**
+     * 构造单分片 framed v2 draft，便于逐项验证分片证据。
+     */
+    private ChunkManifestDraft framedDraft(ChunkManifestChunk chunk, long totalSize) {
+        return new ChunkManifestDraft(
+                null,
+                "file-hash",
+                null,
+                64 * 1024L,
+                totalSize,
+                null,
+                "FRAMED_AEAD_V2",
+                "S3",
+                framedEncryption(),
+                List.of(chunk));
+    }
+
+    /**
+     * 构造规范 sha256 摘要。
+     */
+    private String canonicalHash(char value) {
+        return "sha256:" + String.valueOf(value).repeat(64);
     }
 }
