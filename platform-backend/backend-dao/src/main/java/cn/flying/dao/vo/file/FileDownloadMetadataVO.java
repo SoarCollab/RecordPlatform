@@ -25,6 +25,8 @@ public record FileDownloadMetadataVO(
         String manifestSchemaId,
         @Schema(description = "manifest hash")
         String manifestHash,
+        @Schema(description = "不含密钥材料的 canonical manifest JSON")
+        String canonicalManifestJson,
         @Schema(description = "哈希算法")
         String hashAlgorithm,
         @Schema(description = "加密算法")
@@ -35,7 +37,33 @@ public record FileDownloadMetadataVO(
         long chunkSize,
         @Schema(description = "分片总数")
         int totalChunks,
+        @Schema(description = "版本化加密格式描述；历史 manifest 可为空")
+        FileDownloadEncryptionVO encryption,
         @Schema(description = "有序分片下载 URL 列表")
         List<FileDownloadPartVO> parts
 ) {
+
+    /**
+     * 保留旧下载元数据构造调用，历史响应不携带版本化加密描述。
+     */
+    public FileDownloadMetadataVO(
+            String fileId,
+            String fileHash,
+            String fileName,
+            long fileSize,
+            String contentType,
+            String initialKey,
+            String manifestSchemaId,
+            String manifestHash,
+            String hashAlgorithm,
+            String encryptionAlgorithm,
+            String storageBackend,
+            long chunkSize,
+            int totalChunks,
+            List<FileDownloadPartVO> parts
+    ) {
+        this(fileId, fileHash, fileName, fileSize, contentType, initialKey,
+                manifestSchemaId, manifestHash, null, hashAlgorithm, encryptionAlgorithm,
+                storageBackend, chunkSize, totalChunks, null, parts);
+    }
 }

@@ -21,8 +21,10 @@ import cn.flying.service.encryption.*;
 import cn.flying.service.manifest.ChunkManifestCanonicalizer;
 import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestDraft;
+import cn.flying.service.manifest.ChunkManifestEncryption;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.ChunkManifestView;
+import cn.flying.service.manifest.FramedManifestFinalizationService;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.platformapi.request.AbortDirectMultipartUploadRequest;
 import cn.flying.platformapi.request.CompleteDirectMultipartUploadRequest;
@@ -107,6 +109,10 @@ public class FileUploadServiceImpl implements FileUploadService {
     private static final long QUOTA_COMPLETE_LOCK_WAIT_SECONDS = 5L;
     private static final int MAX_CLEANUP_RETRIES = 3;
     private static final int CURRENT_RECOVERY_SCHEMA_VERSION = 1;
+    private static final int CURRENT_ENCRYPTION_RECOVERY_VERSION = 2;
+    private static final String FRAMED_WRITER_FORMAT = "v2";
+    private static final String LEGACY_WRITER_FORMAT = "v1";
+    private static final String FRAMED_ENCRYPTION_ALGORITHM = "FRAMED_AEAD_V2";
     private static final String UPLOAD_SESSION_STATUS_CLEANUP_MANUAL_REQUIRED =
             "cleanup_manual_required";
     private static final String UPLOAD_SESSION_STATUS_FINALIZATION_RECOVERY_PENDING =
@@ -146,11 +152,14 @@ public class FileUploadServiceImpl implements FileUploadService {
     private final FileUploadRedisStateManager redisStateManager;
     // 加密策略工厂
     private final EncryptionStrategyFactory encryptionStrategyFactory;
+    private final EncryptionProperties encryptionProperties;
+    private final FramedAeadWriter framedAeadWriter;
     private final FileService fileService;
     private final QuotaService quotaService;
     private final RedissonClient redissonClient;
     private final FileRemoteClient fileRemoteClient;
     private final ChunkManifestService chunkManifestService;
+    private final FramedManifestFinalizationService framedManifestFinalizationService;
 
     @PostConstruct
     public void initialize() {
@@ -1002,6 +1011,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             );
             newState.setTenantId(tenantId);
             newState.setRecoverySchemaVersion(CURRENT_RECOVERY_SCHEMA_VERSION);
+            initializeEncryptionState(newState);
 
             // 确保客户端和会话的目录存在
             Path uploadDir = getUploadSessionDir(SUID, clientId);
@@ -1084,6 +1094,7 @@ public class FileUploadServiceImpl implements FileUploadService {
             state.setTenantId(tenantId);
             state.setSuid(suid);
             state.setRecoverySchemaVersion(CURRENT_RECOVERY_SCHEMA_VERSION);
+            state.setEncryptionRecoveryVersion(1);
             state.setDirectUpload(true);
             state.setDirectUploadParts(directUploadParts);
             state.setDirectFinalizationStage(DIRECT_STAGE_SESSION_CREATED);
@@ -1947,6 +1958,7 @@ public class FileUploadServiceImpl implements FileUploadService {
         params.put("contentType", state.getContentType());
         params.put("uploadTime", state.getStartTime());
         params.put("chunkCount", state.getTotalChunks());
+        params.put("chunkSize", state.getChunkSize());
         params.put("uploadMode", "DIRECT_MULTIPART");
         params.put("encryptionAlgorithm", "NONE");
         params.put("contentHash", requireContentHash(state.getContentHash()));
@@ -2300,6 +2312,72 @@ public class FileUploadServiceImpl implements FileUploadService {
             log.warn("无法确认上传证据是否提交，保留原始分片供重试: clientId={}, chunk={}",
                     clientId, chunkNumber, readError);
         }
+    }
+
+    /**
+     * 初始化普通代理上传的稳定加密检查点；重试只复用该检查点，不重新生成 DEK 或 nonce。
+     *
+     * @param state 新建的上传会话状态
+     */
+    private void initializeEncryptionState(FileUploadState state) {
+        if (state == null) {
+            throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR, "上传会话状态不能为空");
+        }
+        // 单元测试或旧手工构造未注入新配置时回退 legacy，生产 Spring Bean 仍默认使用 v2。
+        String configuredFormat = encryptionProperties == null
+                ? LEGACY_WRITER_FORMAT
+                : encryptionProperties.getWriterFormat();
+        String format = configuredFormat == null || configuredFormat.isBlank()
+                ? FRAMED_WRITER_FORMAT
+                : configuredFormat.trim().toLowerCase(Locale.ROOT);
+        if (FRAMED_WRITER_FORMAT.equals(format)) {
+            int framePlainSize = encryptionProperties.getFramePlainSize();
+            if (framePlainSize < ChunkManifestEncryption.MIN_FRAME_PLAIN_SIZE
+                    || framePlainSize > ChunkManifestEncryption.MAX_FRAME_PLAIN_SIZE) {
+                throw new GeneralException(ResultEnum.PARAM_ERROR,
+                        "framed v2 framePlainSize 超出有界范围");
+            }
+            byte[] fileDek = framedAeadWriter.generateFileDek();
+            byte[] fileNonce = framedAeadWriter.generateFileNonce();
+            state.setEncryptionRecoveryVersion(CURRENT_ENCRYPTION_RECOVERY_VERSION);
+            state.setEncryptionFormatVersion(FramedAeadCrypto.FORMAT_VERSION);
+            state.setEncryptionAlgorithmSuite(ChunkManifestEncryption.SUITE_FRAMED_V2);
+            state.setFileDataKey(fileDek);
+            state.setFileNonce(fileNonce);
+            state.setFramePlainSize(framePlainSize);
+            state.setKeyDerivation(ChunkManifestEncryption.DERIVATION_HKDF_SHA256);
+            state.setNonceDerivation(ChunkManifestEncryption.DERIVATION_HKDF_SHA256);
+            state.setAadSchema(ChunkManifestEncryption.AAD_SCHEMA_FRAMED_V2);
+            state.setTagSize(FramedAeadCrypto.TAG_SIZE);
+            return;
+        }
+        if (LEGACY_WRITER_FORMAT.equals(format) || "legacy".equals(format)) {
+            state.setEncryptionRecoveryVersion(1);
+            state.setEncryptionFormatVersion(ChunkManifestEncryption.FORMAT_LEGACY_V1);
+            state.setEncryptionAlgorithmSuite(null);
+            state.setFileDataKey(null);
+            state.setFileNonce(null);
+            state.setFramePlainSize(null);
+            state.setKeyDerivation(null);
+            state.setNonceDerivation(null);
+            state.setAadSchema(null);
+            state.setTagSize(null);
+            return;
+        }
+        throw new GeneralException(ResultEnum.PARAM_ERROR,
+                "不支持的普通上传 writer-format: " + configuredFormat);
+    }
+
+    /**
+     * 判断上传会话是否使用 framed AEAD v2 对象格式。
+     *
+     * @param state 上传会话状态
+     * @return 使用 v2 时返回 true
+     */
+    private boolean isFramedV2(FileUploadState state) {
+        return state != null
+                && Objects.equals(state.getEncryptionFormatVersion(), FramedAeadCrypto.FORMAT_VERSION)
+                && Objects.equals(state.getEncryptionAlgorithmSuite(), ChunkManifestEncryption.SUITE_FRAMED_V2);
     }
 
 
@@ -3290,6 +3368,22 @@ public class FileUploadServiceImpl implements FileUploadService {
                 && Objects.equals(
                     expectedState.getRecoverySchemaVersion(),
                     latestState.getRecoverySchemaVersion())
+                && Objects.equals(
+                    expectedState.getEncryptionRecoveryVersion(),
+                    latestState.getEncryptionRecoveryVersion())
+                && Objects.equals(
+                    expectedState.getEncryptionFormatVersion(),
+                    latestState.getEncryptionFormatVersion())
+                && Objects.equals(
+                    expectedState.getEncryptionAlgorithmSuite(),
+                    latestState.getEncryptionAlgorithmSuite())
+                && Arrays.equals(expectedState.getFileDataKey(), latestState.getFileDataKey())
+                && Arrays.equals(expectedState.getFileNonce(), latestState.getFileNonce())
+                && Objects.equals(expectedState.getFramePlainSize(), latestState.getFramePlainSize())
+                && Objects.equals(expectedState.getKeyDerivation(), latestState.getKeyDerivation())
+                && Objects.equals(expectedState.getNonceDerivation(), latestState.getNonceDerivation())
+                && Objects.equals(expectedState.getAadSchema(), latestState.getAadSchema())
+                && Objects.equals(expectedState.getTagSize(), latestState.getTagSize())
                 && hasSameDirectUploadPlan(expectedState, latestState);
     }
 
@@ -3381,6 +3475,31 @@ public class FileUploadServiceImpl implements FileUploadService {
         Set<Integer> processedChunks = state.getProcessedChunks();
         Map<String, String> chunkHashes = state.getChunkHashes();
         Map<Integer, byte[]> keys = state.getKeys();
+        if (isFramedV2(state)) {
+            if (uploadedChunks == null
+                    || processedChunks == null
+                    || chunkHashes == null
+                    || uploadedChunks.size() != expectedChunks
+                    || processedChunks.size() != expectedChunks
+                    || chunkHashes.size() != expectedChunks
+                    || state.getFileDataKey() == null
+                    || state.getFileDataKey().length != FramedAeadCrypto.FILE_DEK_SIZE
+                    || state.getFileNonce() == null
+                    || state.getFileNonce().length != FramedAeadCrypto.FILE_NONCE_SIZE
+                    || state.getFramePlainSize() == null) {
+                throw incompleteCompletionState(state, expectedChunks);
+            }
+            for (int index = 0; index < expectedChunks; index++) {
+                String hash = chunkHashes.get("chunk_" + index);
+                if (!uploadedChunks.contains(index)
+                        || !processedChunks.contains(index)
+                        || hash == null
+                        || hash.isBlank()) {
+                    throw incompleteCompletionState(state, expectedChunks);
+                }
+            }
+            return;
+        }
         if (uploadedChunks == null
                 || processedChunks == null
                 || chunkHashes == null
@@ -3491,6 +3610,24 @@ public class FileUploadServiceImpl implements FileUploadService {
 
         validateLegacySuccessEvidence(userId, state, persistedFile);
         try {
+            if (isFramedV2(state)) {
+                List<File> processedFiles = collectProcessedFiles(suid, state.getClientId());
+                List<String> cipherHashes = processedFiles == null
+                        ? List.of()
+                        : collectCipherFileHashes(state, processedFiles);
+                Optional<ChunkManifestView> manifest = framedManifestFinalizationService.ensureManifest(
+                        userId,
+                        persistedFile,
+                        state,
+                        processedFiles == null ? List.of() : processedFiles,
+                        cipherHashes == null ? List.of() : cipherHashes);
+                if (manifest.isEmpty()) {
+                    throw new GeneralException(ResultEnum.FILE_RECORD_ERROR,
+                            "普通 v2 上传缺少 active manifest");
+                }
+                state.setManifestHash(manifest.get().manifestHash());
+                redisStateManager.updateState(state);
+            }
             cleanupLegacyTemporaryFilesStrict(state);
             redisStateManager.markCompleted(state.getClientId(), suid, 300);
         } catch (IOException | RuntimeException completionStateError) {
@@ -3987,39 +4124,67 @@ public class FileUploadServiceImpl implements FileUploadService {
                 throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR, "原始分片与 Redis 哈希证据不一致");
             }
 
-            ChunkEncryptionStrategy strategy = encryptionStrategyFactory.getStrategy();
-            SecretKey candidateKey = strategy.generateKey();
-            byte[] stableKeyBytes = redisStateManager.getOrCreateChunkKey(
-                    clientId, chunkNumber, candidateKey.getEncoded());
-            SecretKey stableKey = new SecretKeySpec(
-                    stableKeyBytes, resolveSecretKeyAlgorithm(strategy));
-            byte[] iv = strategy.generateIv();
-            EncryptionContext encryptionContext = strategy.createEncryptionContext(stableKey, iv);
-
+            // legacy v1 在 getOrCreateChunkKey 中完成原子持久化；后续直接复用同一返回值，
+            // 避免再次读取辅助 hash 时遭遇过期快照或与本次处理不一致。
+            byte[] stableKeyBytes = null;
             Files.createDirectories(processedChunkPath.getParent());
-            try (InputStream input = Files.newInputStream(chunkPath);
-                 FileChannel tempChannel = FileChannel.open(
-                         taskTempPath, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
-                 OutputStream output = Channels.newOutputStream(tempChannel)) {
-                output.write(ChunkFileHeader.createHeader(strategy));
-                output.write(iv);
-                byte[] buffer = new byte[BUFFER_SIZE];
-                int bytesRead;
-                while ((bytesRead = input.read(buffer)) != -1) {
-                    byte[] encryptedBytes = strategy.encryptUpdate(
-                            encryptionContext, buffer, 0, bytesRead);
-                    if (encryptedBytes.length > 0) {
-                        output.write(encryptedBytes);
+            if (isFramedV2(latestState)) {
+                byte[] fileDek = latestState.getFileDataKey();
+                byte[] fileNonce = latestState.getFileNonce();
+                Integer framePlainSize = latestState.getFramePlainSize();
+                if (fileDek == null || fileNonce == null || framePlainSize == null) {
+                    throw new GeneralException(ResultEnum.FILE_RECORD_ERROR,
+                            "framed v2 上传检查点不完整");
+                }
+                FramedAeadWriter.WriteResult result = framedAeadWriter.write(
+                        chunkPath,
+                        taskTempPath,
+                        fileDek,
+                        fileNonce,
+                        chunkNumber,
+                        latestState.getTotalChunks(),
+                        framePlainSize);
+                long expectedPlainSize = expectedChunkSize(latestState, chunkNumber);
+                if (result.plainSize() != expectedPlainSize
+                        || !Objects.equals(
+                                result.plainHash(), canonicalSha256FromBase64Url(trustedHash))) {
+                    throw new GeneralException(ResultEnum.FILE_UPLOAD_ERROR,
+                            "framed v2 分片明文证据不一致");
+                }
+            } else {
+                ChunkEncryptionStrategy strategy = encryptionStrategyFactory.getStrategy();
+                SecretKey candidateKey = strategy.generateKey();
+                stableKeyBytes = redisStateManager.getOrCreateChunkKey(
+                        clientId, chunkNumber, candidateKey.getEncoded());
+                SecretKey stableKey = new SecretKeySpec(
+                        stableKeyBytes, resolveSecretKeyAlgorithm(strategy));
+                byte[] iv = strategy.generateIv();
+                EncryptionContext encryptionContext = strategy.createEncryptionContext(stableKey, iv);
+
+                try (InputStream input = Files.newInputStream(chunkPath);
+                     FileChannel tempChannel = FileChannel.open(
+                             taskTempPath, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+                     OutputStream output = Channels.newOutputStream(tempChannel)) {
+                    output.write(ChunkFileHeader.createHeader(strategy));
+                    output.write(iv);
+                    byte[] buffer = new byte[BUFFER_SIZE];
+                    int bytesRead;
+                    while ((bytesRead = input.read(buffer)) != -1) {
+                        byte[] encryptedBytes = strategy.encryptUpdate(
+                                encryptionContext, buffer, 0, bytesRead);
+                        if (encryptedBytes.length > 0) {
+                            output.write(encryptedBytes);
+                        }
                     }
+                    byte[] finalBytes = strategy.encryptFinal(encryptionContext);
+                    if (finalBytes.length > 0) {
+                        output.write(finalBytes);
+                    }
+                    output.write(HASH_SEPARATOR.getBytes(StandardCharsets.UTF_8));
+                    output.write(trustedHash.getBytes(StandardCharsets.UTF_8));
+                    output.flush();
+                    tempChannel.force(true);
                 }
-                byte[] finalBytes = strategy.encryptFinal(encryptionContext);
-                if (finalBytes.length > 0) {
-                    output.write(finalBytes);
-                }
-                output.write(HASH_SEPARATOR.getBytes(StandardCharsets.UTF_8));
-                output.write(trustedHash.getBytes(StandardCharsets.UTF_8));
-                output.flush();
-                tempChannel.force(true);
             }
 
             Files.move(
@@ -4030,7 +4195,14 @@ public class FileUploadServiceImpl implements FileUploadService {
             if (!Files.isRegularFile(processedChunkPath)) {
                 throw new IOException("原子发布后的处理分片不存在");
             }
-            latestState.getKeys().put(chunkNumber, stableKeyBytes);
+            if (!isFramedV2(latestState)) {
+                if (stableKeyBytes == null || stableKeyBytes.length == 0) {
+                    throw new GeneralException(ResultEnum.FILE_RECORD_ERROR,
+                            "legacy 分片稳定密钥缺失");
+                }
+                // v1 使用环形分片密钥；v2 仅持久化文件级 DEK/nonce，不写入分片密钥。
+                latestState.getKeys().put(chunkNumber, stableKeyBytes);
+            }
             redisStateManager.addProcessedChunk(clientId, chunkNumber);
             FileUploadState updatedState = redisStateManager.getState(clientId);
             if (updatedState != null) {
@@ -4049,6 +4221,12 @@ public class FileUploadServiceImpl implements FileUploadService {
             int chunkNumber,
             Path processedChunkPath
     ) {
+        if (isFramedV2(state)) {
+            if (!Files.isRegularFile(processedChunkPath)) {
+                throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "framed v2 processed 证据缺失");
+            }
+            return;
+        }
         byte[] stableKey = state.getKeys().get(chunkNumber);
         if (stableKey == null || stableKey.length == 0 || !Files.isRegularFile(processedChunkPath)) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "processed 证据缺少密钥或最终密文");
@@ -4084,6 +4262,27 @@ public class FileUploadServiceImpl implements FileUploadService {
             return Base64.getUrlEncoder().withoutPadding().encodeToString(digest.digest());
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 算法不可用", e);
+        }
+    }
+
+    /**
+     * 将 Redis 中的 Base64URL SHA-256 检查点规范化为 manifest 使用的 sha256: 十六进制形式。
+     *
+     * @param value Base64URL 摘要
+     * @return 规范 sha256: 摘要
+     */
+    private String canonicalSha256FromBase64Url(String value) {
+        if (value == null || value.length() > 128) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "分片哈希检查点无效");
+        }
+        try {
+            byte[] decoded = Base64.getUrlDecoder().decode(value);
+            if (decoded.length != 32) {
+                throw new IllegalArgumentException("digest length");
+            }
+            return CONTENT_HASH_PREFIX + HexFormat.of().formatHex(decoded);
+        } catch (IllegalArgumentException e) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "分片哈希检查点无效");
         }
     }
 
@@ -4140,6 +4339,10 @@ public class FileUploadServiceImpl implements FileUploadService {
      * 该步骤支持幂等重入，避免 completeUpload 重试时重复追加 NEXT_KEY 元数据。
      */
     private void completeFileProcessing(String SUID, FileUploadState state) throws IOException {
+        if (isFramedV2(state)) {
+            verifyFramedProcessedChunks(SUID, state);
+            return;
+        }
         log.info("------------开始最终处理步骤 (追加下一个分片密钥): 客户端ID={}--------------", state.getClientId());
         int totalChunks = state.getTotalChunks();
         Map<Integer, byte[]> keys = redisStateManager.getChunkKeys(state.getClientId());
@@ -4184,6 +4387,39 @@ public class FileUploadServiceImpl implements FileUploadService {
         }
 
         log.info("最终处理步骤 (追加下一个分片密钥) 完成: 客户端ID={}", state.getClientId());
+    }
+
+    /**
+     * 在发布存储事件前重新认证全部 v2 对象，确保恢复/重试不会绕过 frame 标签校验。
+     *
+     * @param suid 用户隔离目录标识
+     * @param state 上传会话状态
+     * @throws IOException 认证、长度或对象顺序不一致
+     */
+    private void verifyFramedProcessedChunks(String suid, FileUploadState state) throws IOException {
+        byte[] fileDek = state.getFileDataKey();
+        byte[] fileNonce = state.getFileNonce();
+        Integer framePlainSize = state.getFramePlainSize();
+        if (fileDek == null || fileNonce == null || framePlainSize == null) {
+            throw new IOException("framed v2 加密检查点不完整");
+        }
+        for (int index = 0; index < state.getTotalChunks(); index++) {
+            Path processedPath = getChunkProcessedPath(suid, state.getClientId(), index);
+            FramedAeadWriter.WriteResult result = framedAeadWriter.verify(
+                    processedPath,
+                    fileDek,
+                    fileNonce,
+                    index,
+                    state.getTotalChunks(),
+                    framePlainSize);
+            long expectedPlainSize = expectedChunkSize(state, index);
+            String expectedPlainHash = canonicalSha256FromBase64Url(
+                    requirePlainChunkHash(state, index));
+            if (result.plainSize() != expectedPlainSize
+                    || !Objects.equals(result.plainHash(), expectedPlainHash)) {
+                throw new IOException("framed v2 分片认证结果与上传证据不一致: " + index);
+            }
+        }
     }
 
     /**
@@ -4494,7 +4730,36 @@ public class FileUploadServiceImpl implements FileUploadService {
         params.put("contentType", state.getContentType());
         params.put("uploadTime", state.getStartTime());
         params.put("chunkCount", state.getTotalChunks());
+        params.put("chunkSize", state.getChunkSize());
         params.put("contentHash", requireContentHash(state.getContentHash()));
+
+        if (isFramedV2(state)) {
+            byte[] fileDek = state.getFileDataKey();
+            byte[] fileNonce = state.getFileNonce();
+            if (fileDek == null || fileDek.length != FramedAeadCrypto.FILE_DEK_SIZE
+                    || fileNonce == null || fileNonce.length != FramedAeadCrypto.FILE_NONCE_SIZE
+                    || state.getFramePlainSize() == null) {
+                throw new GeneralException(ResultEnum.FILE_RECORD_ERROR,
+                        "framed v2 文件参数缺少稳定加密检查点");
+            }
+            params.put("encryptionAlgorithm", FRAMED_ENCRYPTION_ALGORITHM);
+            params.put("algorithmSuite", ChunkManifestEncryption.SUITE_FRAMED_V2);
+            params.put("formatVersion", FramedAeadCrypto.FORMAT_VERSION);
+            params.put("fileNonce", Base64.getUrlEncoder().withoutPadding().encodeToString(fileNonce));
+            params.put("framePlainSize", state.getFramePlainSize());
+            params.put("keyDerivation", ChunkManifestEncryption.DERIVATION_HKDF_SHA256);
+            params.put("nonceDerivation", ChunkManifestEncryption.DERIVATION_HKDF_SHA256);
+            params.put("aadSchema", ChunkManifestEncryption.AAD_SCHEMA_FRAMED_V2);
+            params.put("tagSize", FramedAeadCrypto.TAG_SIZE);
+            // v2 的 initialKey 合同承载 file-level DEK，而不是 v1 的最后分片密钥。
+            params.put("initialKey", Base64.getEncoder().encodeToString(fileDek));
+            try {
+                return JsonConverter.toJson(params);
+            } catch (Exception e) {
+                log.error("生成 framed v2 文件参数失败: clientId={}", state.getClientId(), e);
+                throw new GeneralException(ResultEnum.JSON_PARSE_ERROR, "生成文件参数失败");
+            }
+        }
 
         // 存储初始密钥（最后一个分片的密钥）用于前端解密
         // 密钥链设计：chunk[i] 末尾包含 chunk[i+1] 的密钥，最后一个包含 chunk[0] 的密钥

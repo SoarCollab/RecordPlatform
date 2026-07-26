@@ -708,6 +708,7 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
                 manifest.merkleRoot(),
                 manifest.encryptionAlgorithm(),
                 manifest.storageBackend(),
+                manifest.encryption(),
                 manifest.chunks());
         String calculated = chunkManifestService.calculateManifestHash(draft);
         if (!manifest.manifestHash().equals(calculated)) {
@@ -729,15 +730,22 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
                 || !hasBoundedText(manifest.storageBackend(), 128)) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "chunk manifest 算法或顶层字段不合法");
         }
+        boolean framedV2 = manifest.encryption() != null
+                && Objects.equals(manifest.encryption().formatVersion(),
+                cn.flying.service.manifest.ChunkManifestEncryption.FORMAT_FRAMED_V2);
         long aggregateSize = 0L;
         for (int position = 0; position < manifest.chunks().size(); position++) {
             ChunkManifestChunk chunk = manifest.chunks().get(position);
             boolean finalChunk = position == manifest.chunks().size() - 1;
+            Long logicalChunkSize = framedV2 && chunk != null ? chunk.plainSize() : null;
             if (chunk == null
                     || chunk.index() != position
                     || chunk.size() <= 0
-                    || chunk.size() > manifest.chunkSize()
-                    || (!finalChunk && chunk.size() != manifest.chunkSize())
+                    || (framedV2 && (logicalChunkSize == null || logicalChunkSize <= 0))
+                    || (!framedV2 && chunk.size() > manifest.chunkSize())
+                    || (!framedV2 && !finalChunk && chunk.size() != manifest.chunkSize())
+                    || (framedV2 && logicalChunkSize > manifest.chunkSize())
+                    || (framedV2 && !finalChunk && logicalChunkSize != manifest.chunkSize())
                     || !hasBoundedText(chunk.storagePath(), 2048)
                     || chunk.storagePath().chars().anyMatch(Character::isISOControl)
                     || !ProofHashes.HASH_ALGORITHM.equals(chunk.checksumAlgorithm())) {
@@ -746,7 +754,9 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
             requireCanonicalSha256(chunk.plainHash(), "分片 plainHash 不合法");
             requireCanonicalSha256(chunk.cipherHash(), "分片 cipherHash 不合法");
             try {
-                aggregateSize = Math.addExact(aggregateSize, chunk.size());
+                aggregateSize = Math.addExact(
+                        aggregateSize,
+                        framedV2 ? logicalChunkSize : chunk.size());
             } catch (ArithmeticException e) {
                 throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "chunk manifest 分片大小溢出");
             }

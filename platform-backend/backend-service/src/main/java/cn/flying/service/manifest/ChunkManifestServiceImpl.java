@@ -164,6 +164,14 @@ public class ChunkManifestServiceImpl implements ChunkManifestService {
     }
 
     /**
+     * 返回与 manifestHash 使用同一规范化器生成的 JSON，不携带任何密钥材料。
+     */
+    @Override
+    public String calculateCanonicalJson(ChunkManifestDraft draft) {
+        return canonicalizer.canonicalJson(draft);
+    }
+
+    /**
      * Removes nulls and duplicates and enforces the database IN-clause safety limit.
      */
     private List<Long> normalizeBatchFileIds(List<Long> fileIds) {
@@ -247,6 +255,7 @@ public class ChunkManifestServiceImpl implements ChunkManifestService {
                 .setMerkleRoot(draft.merkleRoot())
                 .setEncryptionAlgorithm(draft.encryptionAlgorithm())
                 .setStorageBackend(draft.storageBackend())
+                .setEncryptionMetadata(canonicalizer.encryptionJson(draft.encryption()))
                 .setManifestJson(canonicalJson)
                 .setStatus(STATUS_ACTIVE)
                 .setDeleted(0);
@@ -268,6 +277,8 @@ public class ChunkManifestServiceImpl implements ChunkManifestService {
                     .setPlainHash(chunk.plainHash())
                     .setCipherHash(chunk.cipherHash())
                     .setSize(chunk.size())
+                    .setPlainSize(chunk.plainSize())
+                    .setFrameCount(chunk.frameCount())
                     .setStoragePath(chunk.storagePath())
                     .setStorageBackend(chunk.storageBackend())
                     .setEtag(chunk.etag())
@@ -309,6 +320,7 @@ public class ChunkManifestServiceImpl implements ChunkManifestService {
                 manifest.getMerkleRoot(),
                 manifest.getEncryptionAlgorithm(),
                 manifest.getStorageBackend(),
+                canonicalizer.parseEncryptionJson(manifest.getEncryptionMetadata()),
                 List.copyOf(chunks)
         );
     }
@@ -325,7 +337,9 @@ public class ChunkManifestServiceImpl implements ChunkManifestService {
                 item.getStoragePath(),
                 item.getStorageBackend(),
                 item.getEtag(),
-                item.getChecksumAlgorithm()
+                item.getChecksumAlgorithm(),
+                item.getPlainSize(),
+                item.getFrameCount()
         );
     }
 }

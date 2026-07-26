@@ -44,4 +44,12 @@ public interface ChunkManifestService {
      * @return sha256-prefixed canonical manifest hash
      */
     String calculateManifestHash(ChunkManifestDraft draft);
+
+    /**
+     * 计算不包含密钥材料的 canonical manifest JSON，供下载端独立重算哈希。
+     *
+     * @param draft manifest draft
+     * @return canonical JSON without manifestHash or initialKey
+     */
+    String calculateCanonicalJson(ChunkManifestDraft draft);
 }

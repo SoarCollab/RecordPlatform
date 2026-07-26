@@ -20,7 +20,9 @@ import cn.flying.platformapi.response.FileDetailVO;
 import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FriendFileShareService;
 import cn.flying.service.key.FileKeyEnvelopeService;
+import cn.flying.service.manifest.ChunkManifestCanonicalizer;
 import cn.flying.service.manifest.ChunkManifestChunk;
+import cn.flying.service.manifest.ChunkManifestDraft;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.ChunkManifestView;
 import cn.flying.service.remote.FileRemoteClient;
@@ -42,6 +44,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import org.mockito.ArgumentCaptor;
 import org.mockito.invocation.InvocationOnMock;
@@ -87,10 +90,17 @@ class FileQueryServiceTest {
     private static final Long FILE_ID = 1L;
     private static final String FILE_HASH = "sha256_test_hash";
     private static final String TRANSACTION_HASH = "0xtxhash";
+    private static final ChunkManifestCanonicalizer CANONICALIZER = new ChunkManifestCanonicalizer();
+
     @BeforeEach
     void setUp() {
         FileTestBuilder.resetIdCounter();
         AccountTestBuilder.resetIdCounter();
+        lenient().when(chunkManifestService.calculateManifestHash(any()))
+                .thenReturn("sha256:" + "a".repeat(64));
+        lenient().when(chunkManifestService.calculateCanonicalJson(any()))
+                .thenAnswer(invocation -> CANONICALIZER.canonicalJson(
+                        invocation.getArgument(0, ChunkManifestDraft.class)));
     }
 
     /**
@@ -131,7 +141,7 @@ class FileQueryServiceTest {
                         1,
                         "cn.flying.chunk-manifest.v1",
                         FILE_HASH,
-                        "sha256:manifest",
+                        "sha256:" + "a".repeat(64),
                         "SHA-256",
                         1024L,
                         2,
@@ -163,7 +173,10 @@ class FileQueryServiceTest {
 
                 assertEquals("ext-file-1", metadata.fileId());
                 assertEquals(FILE_HASH, metadata.fileHash());
-                assertEquals("sha256:manifest", metadata.manifestHash());
+                assertEquals("sha256:" + "a".repeat(64), metadata.manifestHash());
+                assertThat(metadata.canonicalManifestJson()).isNotBlank();
+                assertThat(metadata.canonicalManifestJson())
+                        .doesNotContain("initialKey", "fileDataKey");
                 assertEquals(2, metadata.totalChunks());
                 assertEquals("url-0", metadata.parts().get(0).downloadUrl());
                 assertEquals("chunks/1", metadata.parts().get(1).storagePath());
@@ -201,7 +214,7 @@ class FileQueryServiceTest {
                         1,
                         "cn.flying.chunk-manifest.v1",
                         FILE_HASH,
-                        "sha256:manifest",
+                        "sha256:" + "a".repeat(64),
                         "SHA-256",
                         512L,
                         1,
@@ -222,6 +235,9 @@ class FileQueryServiceTest {
 
                 assertNull(metadata.initialKey());
                 assertEquals("NONE", metadata.encryptionAlgorithm());
+                assertThat(metadata.canonicalManifestJson()).isNotBlank();
+                assertThat(metadata.canonicalManifestJson())
+                        .doesNotContain("initialKey", "fileDataKey");
                 assertEquals("url-0", metadata.parts().getFirst().downloadUrl());
                 verify(fileKeyEnvelopeService, never()).unwrapActiveOwnerInitialKey(
                         any(File.class),

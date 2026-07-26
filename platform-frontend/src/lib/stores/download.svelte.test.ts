@@ -35,9 +35,14 @@ const mocks = vi.hoisted(() => {
       performPreDownloadCheck: vi.fn(),
       formatFileSize: vi.fn(),
       isStreamingSupported: vi.fn(),
+      MAX_SAFE_INMEMORY_SIZE: 64 * 1024 * 1024,
     },
     streaming: {
       executeBufferedStreamingDownload: vi.fn(),
+    },
+    boundedDownloader: {
+      executeBoundedDownload: vi.fn(),
+      executeLegacyFallbackDownload: vi.fn(),
     },
   };
 });
@@ -54,6 +59,16 @@ vi.mock("$utils/downloadStorage", () => mocks.downloadStorage);
 vi.mock("$utils/crypto", () => mocks.crypto);
 vi.mock("$utils/fileSize", () => mocks.fileSize);
 vi.mock("$utils/streamingDownloader", () => mocks.streaming);
+vi.mock("$utils/boundedDownloader", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("$utils/boundedDownloader")>();
+  return {
+    ...actual,
+    executeBoundedDownload: mocks.boundedDownloader.executeBoundedDownload,
+    executeLegacyFallbackDownload:
+      mocks.boundedDownloader.executeLegacyFallbackDownload,
+  };
+});
 
 const AUTH_CONTEXT_HASH =
   "ef7b394c6766be8db576d762d728771fb2bc198bb24831d7a2b5cc628c4210e1";
@@ -114,6 +129,42 @@ async function waitForBatchStatus(
  */
 function createBlob(): Blob {
   return new Blob(["content"], { type: "application/octet-stream" });
+}
+
+/**
+ * 完成一次 store 级有界下载 mock，并保持 sink 的 close/读取语义。
+ */
+async function completeBoundedDownload(options: {
+  sink: { write(data: Uint8Array): Promise<void>; close(): Promise<void> };
+  metadata?: { fileSize: number; totalChunks: number };
+  fileSize?: number;
+  totalChunks?: number;
+  onPartComplete?: (completed: number, total: number) => void;
+}) {
+  const fileSize = options.metadata?.fileSize ?? options.fileSize ?? 0;
+  const totalChunks = options.metadata?.totalChunks ?? options.totalChunks ?? 0;
+  await options.sink.write(new Uint8Array(fileSize));
+  options.onPartComplete?.(totalChunks, totalChunks);
+  await options.sink.close();
+  return {
+    currentBufferedBytes: 0,
+    peakBufferedBytes: fileSize > 0 ? 1 : 0,
+    framesAuthenticated: 0,
+    partsCompleted: totalChunks,
+    bytesWritten: fileSize,
+  };
+}
+
+/** 创建可供 FileSystemDownloadSink 包装的事务性测试句柄。 */
+function createWritableHandle() {
+  return {
+    createWritable: vi.fn(async () => ({
+      write: vi.fn(async () => {}),
+      seek: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+      abort: vi.fn(async () => {}),
+    })),
+  };
 }
 
 /**
@@ -230,9 +281,15 @@ describe("download store", () => {
       success: true,
       bytesWritten: 100,
     });
+    mocks.boundedDownloader.executeBoundedDownload.mockImplementation(
+      completeBoundedDownload,
+    );
+    mocks.boundedDownloader.executeLegacyFallbackDownload.mockImplementation(
+      completeBoundedDownload,
+    );
 
     Object.defineProperty(window, "showSaveFilePicker", {
-      value: vi.fn().mockResolvedValue({ handle: "h" }),
+      value: vi.fn().mockResolvedValue(createWritableHandle()),
       configurable: true,
     });
   });
@@ -266,8 +323,8 @@ describe("download store", () => {
     expect(mocks.fileApi.getDownloadMetadata).toHaveBeenCalledWith("hash-1");
     expect(mocks.fileApi.getDownloadAddress).not.toHaveBeenCalled();
     expect(mocks.fileApi.getDecryptInfo).not.toHaveBeenCalled();
-    expect(mocks.chunkDownloader.downloadAllChunks).toHaveBeenCalled();
-    expect(mocks.crypto.decryptFile).toHaveBeenCalled();
+    expect(mocks.boundedDownloader.executeBoundedDownload).toHaveBeenCalled();
+    expect(mocks.crypto.decryptFile).not.toHaveBeenCalled();
     expect(mocks.crypto.downloadBlob).toHaveBeenCalled();
     expect(mocks.downloadStorage.saveTask).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -304,9 +361,15 @@ describe("download store", () => {
       "hash-legacy",
     );
     expect(mocks.fileApi.getDecryptInfo).toHaveBeenCalledWith("hash-legacy");
-    expect(mocks.chunkDownloader.downloadAllChunks).toHaveBeenCalledWith(
-      ["legacy-u1"],
-      expect.any(Object),
+    expect(
+      mocks.boundedDownloader.executeLegacyFallbackDownload,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        urls: ["legacy-u1"],
+        encrypted: true,
+        fileSize: 1024,
+        totalChunks: 1,
+      }),
     );
   });
 
@@ -372,6 +435,7 @@ describe("download store", () => {
       initialKey: null,
       encryptionAlgorithm: "NONE",
       contentType: "application/octet-stream",
+      fileSize: 3,
       totalChunks: 2,
       parts: [
         {
@@ -396,10 +460,24 @@ describe("download store", () => {
         },
       ],
     });
-    mocks.chunkDownloader.downloadAllChunks.mockResolvedValueOnce([
-      new Uint8Array([1, 2]),
-      new Uint8Array([3]),
-    ]);
+    mocks.boundedDownloader.executeBoundedDownload.mockImplementationOnce(
+      async (options: {
+        sink: {
+          write(data: Uint8Array): Promise<void>;
+          close(): Promise<void>;
+        };
+      }) => {
+        await options.sink.write(new Uint8Array([1, 2, 3]));
+        await options.sink.close();
+        return {
+          currentBufferedBytes: 0,
+          peakBufferedBytes: 3,
+          framesAuthenticated: 0,
+          partsCompleted: 2,
+          bytesWritten: 3,
+        };
+      },
+    );
 
     const download = await loadDownloadStore();
     const id = await download.startDownload(
@@ -495,17 +573,16 @@ describe("download store", () => {
       "completed",
     );
 
-    expect(mocks.streaming.executeBufferedStreamingDownload).toHaveBeenCalled();
+    expect(mocks.boundedDownloader.executeBoundedDownload).toHaveBeenCalled();
     expect(mocks.fileApi.getDownloadMetadata).toHaveBeenCalledWith(
       "hash-stream",
     );
   });
 
   it("streaming 失败为用户取消时应标记 cancelled", async () => {
-    mocks.streaming.executeBufferedStreamingDownload.mockResolvedValue({
-      success: false,
-      error: "File save cancelled by user",
-    });
+    mocks.boundedDownloader.executeBoundedDownload.mockRejectedValue(
+      new Error("Download cancelled"),
+    );
 
     const download = await loadDownloadStore();
     const id = await download.startDownload(
@@ -522,30 +599,58 @@ describe("download store", () => {
     );
   });
 
+  it("streaming 下载器在取消后返回也不得覆盖 cancelled 状态", async () => {
+    const deferred = createDeferred<{
+      currentBufferedBytes: number;
+      peakBufferedBytes: number;
+      framesAuthenticated: number;
+      partsCompleted: number;
+      bytesWritten: number;
+    }>();
+    mocks.boundedDownloader.executeBoundedDownload.mockImplementationOnce(
+      async () => deferred.promise,
+    );
+
+    const download = await loadDownloadStore();
+    const id = await download.startDownload(
+      "hash-finalize-cancel",
+      "cancel-finalize.bin",
+      { type: "owned" },
+      undefined,
+      "streaming",
+    );
+
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "streaming",
+    );
+    await download.cancelDownload(id);
+    deferred.resolve({
+      currentBufferedBytes: 0,
+      peakBufferedBytes: 1,
+      framesAuthenticated: 0,
+      partsCompleted: 1,
+      bytesWritten: 1024,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(download.tasks.find((task) => task.id === id)?.status).toBe(
+      "cancelled",
+    );
+  });
+
   it("pause/resume/cancel/retry/remove/clearCompleted 应按预期工作", async () => {
-    const deferred = createDeferred<Uint8Array[]>();
-    mocks.chunkDownloader.downloadAllChunks
+    const deferred = createDeferred<{
+      currentBufferedBytes: number;
+      peakBufferedBytes: number;
+      framesAuthenticated: number;
+      partsCompleted: number;
+      bytesWritten: number;
+    }>();
+    mocks.boundedDownloader.executeBoundedDownload
       .mockImplementationOnce(async () => deferred.promise)
-      .mockImplementation(
-        async (
-          _urls: string[],
-          options: {
-            onChunkComplete?: (result: {
-              index: number;
-              data: Uint8Array;
-            }) => Promise<void>;
-            onProgress?: (progress: {
-              completed: number;
-              total: number;
-            }) => void;
-          },
-        ) => {
-          const data = new Uint8Array([1]);
-          await options.onChunkComplete?.({ index: 0, data });
-          options.onProgress?.({ completed: 1, total: 1 });
-          return [data];
-        },
-      );
+      .mockImplementation(completeBoundedDownload);
 
     const download = await loadDownloadStore();
 
@@ -566,7 +671,13 @@ describe("download store", () => {
       "paused",
     );
 
-    deferred.resolve([new Uint8Array([1])]);
+    deferred.resolve({
+      currentBufferedBytes: 0,
+      peakBufferedBytes: 1,
+      framesAuthenticated: 0,
+      partsCompleted: 1,
+      bytesWritten: 1024,
+    });
 
     await download.resumeDownload(id);
     await waitForStatus(
@@ -762,8 +873,14 @@ describe("download store", () => {
   });
 
   it("批量下载中出现 paused 任务时应结束批次并标记失败", async () => {
-    const deferred = createDeferred<Uint8Array[]>();
-    mocks.chunkDownloader.downloadAllChunks.mockImplementationOnce(
+    const deferred = createDeferred<{
+      currentBufferedBytes: number;
+      peakBufferedBytes: number;
+      framesAuthenticated: number;
+      partsCompleted: number;
+      bytesWritten: number;
+    }>();
+    mocks.boundedDownloader.executeBoundedDownload.mockImplementationOnce(
       async () => deferred.promise,
     );
 
@@ -776,7 +893,13 @@ describe("download store", () => {
     await waitForStatus(() => download.tasks[0]?.status, "downloading");
 
     download.pauseDownload(download.tasks[0].id);
-    deferred.resolve([new Uint8Array([1])]);
+    deferred.resolve({
+      currentBufferedBytes: 0,
+      peakBufferedBytes: 1,
+      framesAuthenticated: 0,
+      partsCompleted: 1,
+      bytesWritten: 1024,
+    });
 
     const batch = await batchPromise;
     expect(batch.status).toBe("completed");
@@ -878,9 +1001,15 @@ describe("download store extra branches", () => {
       success: true,
       bytesWritten: 10,
     });
+    mocks.boundedDownloader.executeBoundedDownload.mockImplementation(
+      completeBoundedDownload,
+    );
+    mocks.boundedDownloader.executeLegacyFallbackDownload.mockImplementation(
+      completeBoundedDownload,
+    );
 
     Object.defineProperty(window, "showSaveFilePicker", {
-      value: vi.fn().mockResolvedValue({ handle: "h" }),
+      value: vi.fn().mockResolvedValue(createWritableHandle()),
       configurable: true,
     });
   });
@@ -897,6 +1026,28 @@ describe("download store extra branches", () => {
     );
 
     expect(mocks.fileApi.downloadFile).toHaveBeenCalledWith("hash-fallback");
+  });
+
+  it("backend proxy 响应超过 64 MiB 时应失败且不提交 Blob", async () => {
+    mocks.fileApi.publicDownloadFile.mockResolvedValueOnce({
+      size: 64 * 1024 * 1024 + 1,
+    } as Blob);
+    const download = await loadDownloadStore();
+    const id = await download.startDownload(
+      "hash-oversized-share",
+      "oversized.bin",
+      { type: "public_share", shareCode: "share-oversized" },
+    );
+
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "failed",
+    );
+
+    expect(mocks.crypto.downloadBlob).not.toHaveBeenCalled();
+    expect(download.tasks.find((task) => task.id === id)?.error).toContain(
+      "64 MiB",
+    );
   });
 
   it("streaming 选择文件阶段 AbortError 应标记 cancelled", async () => {
@@ -925,10 +1076,9 @@ describe("download store extra branches", () => {
   });
 
   it("streaming 执行返回普通失败时应进入 failed", async () => {
-    mocks.streaming.executeBufferedStreamingDownload.mockResolvedValue({
-      success: false,
-      error: "decrypt failed",
-    });
+    mocks.boundedDownloader.executeBoundedDownload.mockRejectedValue(
+      new Error("decrypt failed"),
+    );
 
     const download = await loadDownloadStore();
     const id = await download.startDownload(
@@ -952,6 +1102,10 @@ describe("download store extra branches", () => {
       encryptionAlgorithm: "NONE",
       contentType: "application/octet-stream",
     });
+    Object.defineProperty(window, "showSaveFilePicker", {
+      value: vi.fn().mockResolvedValue({ handle: "h" }),
+      configurable: true,
+    });
 
     const download = await loadDownloadStore();
     const id = await download.startDownload(
@@ -967,13 +1121,19 @@ describe("download store extra branches", () => {
       "failed",
     );
     expect(download.tasks.find((task) => task.id === id)?.error).toBe(
-      "Streaming download file handle is invalid",
+      "下载文件句柄无效",
     );
   });
 
   it("下载中 cancel 后应命中取消分支，resume/retry 非法状态应提前返回", async () => {
-    const deferred = createDeferred<Uint8Array[]>();
-    mocks.chunkDownloader.downloadAllChunks.mockImplementationOnce(
+    const deferred = createDeferred<{
+      currentBufferedBytes: number;
+      peakBufferedBytes: number;
+      framesAuthenticated: number;
+      partsCompleted: number;
+      bytesWritten: number;
+    }>();
+    mocks.boundedDownloader.executeBoundedDownload.mockImplementationOnce(
       async () => deferred.promise,
     );
 
@@ -996,7 +1156,13 @@ describe("download store extra branches", () => {
       "cancelled",
     );
 
-    deferred.resolve([new Uint8Array([1])]);
+    deferred.resolve({
+      currentBufferedBytes: 0,
+      peakBufferedBytes: 1,
+      framesAuthenticated: 0,
+      partsCompleted: 1,
+      bytesWritten: 1024,
+    });
 
     await download.resumeDownload("not-exist");
     await download.retryDownload("not-exist");
@@ -1005,8 +1171,14 @@ describe("download store extra branches", () => {
   });
 
   it("removeTask 在活动任务上应触发 abort 与清理", async () => {
-    const deferred = createDeferred<Uint8Array[]>();
-    mocks.chunkDownloader.downloadAllChunks.mockImplementationOnce(
+    const deferred = createDeferred<{
+      currentBufferedBytes: number;
+      peakBufferedBytes: number;
+      framesAuthenticated: number;
+      partsCompleted: number;
+      bytesWritten: number;
+    }>();
+    mocks.boundedDownloader.executeBoundedDownload.mockImplementationOnce(
       async () => deferred.promise,
     );
 
@@ -1027,7 +1199,13 @@ describe("download store extra branches", () => {
     await download.removeTask(id);
     expect(download.tasks.some((task) => task.id === id)).toBe(false);
 
-    deferred.resolve([new Uint8Array([1])]);
+    deferred.resolve({
+      currentBufferedBytes: 0,
+      peakBufferedBytes: 1,
+      framesAuthenticated: 0,
+      partsCompleted: 1,
+      bytesWritten: 1024,
+    });
   });
 
   it("restoreTasks 出错时应记录日志并完成初始化", async () => {

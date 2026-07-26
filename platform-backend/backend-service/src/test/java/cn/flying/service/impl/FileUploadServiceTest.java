@@ -37,6 +37,9 @@ import cn.flying.service.encryption.EncryptionStrategyFactory;
 import cn.flying.service.manifest.ChunkManifestDraft;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.ChunkManifestView;
+import cn.flying.service.manifest.FramedManifestFinalizationService;
+import cn.flying.service.encryption.FramedAeadCrypto;
+import cn.flying.service.manifest.ChunkManifestEncryption;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.test.builders.FileUploadStateTestBuilder;
 import org.junit.jupiter.api.*;
@@ -123,6 +126,9 @@ class FileUploadServiceTest {
 
     @Mock
     private ChunkManifestService chunkManifestService;
+
+    @Mock
+    private FramedManifestFinalizationService framedManifestFinalizationService;
 
     @InjectMocks
     private FileUploadServiceImpl fileUploadService;
@@ -3492,6 +3498,103 @@ class FileUploadServiceTest {
             assertInstanceOf(GeneralException.class, thrown.getCause());
             assertEquals(ResultEnum.PARAM_IS_INVALID,
                     ((GeneralException) thrown.getCause()).getResultEnum());
+        }
+    }
+
+    @Nested
+    @DisplayName("Framed DB SUCCESS Recovery")
+    class FramedDbSuccessRecovery {
+
+        /**
+         * 验证 active manifest 校验或保存失败时，恢复流程不会先清理唯一临时证据或标记 completed。
+         */
+        @Test
+        void shouldValidateFramedManifestBeforeCleaningRecoveryEvidence() throws Exception {
+            String clientId = "framed-recovery-" + UUID.randomUUID();
+            long fileId = 9401L;
+            FileUploadState state = completionState(clientId, true);
+            state.setPrepareStored(true);
+            state.setPreparedFileId(fileId);
+            state.setContentHash(CONTENT_HASH);
+            state.setEncryptionRecoveryVersion(2);
+            state.setEncryptionFormatVersion(FramedAeadCrypto.FORMAT_VERSION);
+            state.setEncryptionAlgorithmSuite(ChunkManifestEncryption.SUITE_FRAMED_V2);
+            state.setFileDataKey(new byte[FramedAeadCrypto.FILE_DEK_SIZE]);
+            state.setFileNonce(new byte[FramedAeadCrypto.FILE_NONCE_SIZE]);
+            state.setFramePlainSize(64 * 1024);
+            state.setKeyDerivation(ChunkManifestEncryption.DERIVATION_HKDF_SHA256);
+            state.setNonceDerivation(ChunkManifestEncryption.DERIVATION_HKDF_SHA256);
+            state.setAadSchema(ChunkManifestEncryption.AAD_SCHEMA_FRAMED_V2);
+            state.setTagSize(FramedAeadCrypto.TAG_SIZE);
+
+            Path uploadDir = Path.of("uploads").toAbsolutePath().normalize()
+                    .resolve(SUID).resolve(clientId);
+            Path processedDir = Path.of("processed").toAbsolutePath().normalize()
+                    .resolve(SUID).resolve(clientId);
+            Files.createDirectories(uploadDir);
+            Files.createDirectories(processedDir);
+            Path uploadEvidence = uploadDir.resolve("raw-evidence");
+            Path processedEvidence = processedDir.resolve("encrypted_chunk_0");
+            Files.writeString(uploadEvidence, "raw-evidence", StandardCharsets.UTF_8);
+            Files.write(processedEvidence, new byte[]{4, 5, 6});
+            state.setUploadTempPath(uploadDir.toString());
+            state.setProcessedTempPath(processedDir.toString());
+
+            File persistedFile = new File()
+                    .setId(fileId)
+                    .setUid(USER_ID)
+                    .setTenantId(77L)
+                    .setFileName(state.getFileName())
+                    .setFileSize(state.getFileSize())
+                    .setFileHash("persisted-file-hash")
+                    .setTransactionHash("tx-9401")
+                    .setContentHash(CONTENT_HASH)
+                    .setStatus(FileUploadStatus.SUCCESS.getCode());
+            when(fileService.getById(fileId)).thenReturn(persistedFile);
+            when(redisStateManager.getState(clientId)).thenReturn(state);
+            doThrow(new GeneralException(ResultEnum.FILE_RECORD_ERROR, "manifest evidence unavailable"))
+                    .when(framedManifestFinalizationService).ensureManifest(
+                            eq(USER_ID), eq(persistedFile), eq(state), anyList(), anyList());
+
+            try {
+                RetryableException failure = assertThrows(
+                        RetryableException.class,
+                        () -> ReflectionTestUtils.invokeMethod(
+                                fileUploadService,
+                                "recoverLegacySuccessFinalization",
+                                USER_ID,
+                                SUID,
+                                state));
+
+                assertEquals(ResultEnum.SERVICE_UNAVAILABLE, failure.getResultEnum());
+                assertTrue(Files.isRegularFile(uploadEvidence));
+                assertTrue(Files.isRegularFile(processedEvidence));
+                verify(framedManifestFinalizationService).ensureManifest(
+                        eq(USER_ID), eq(persistedFile), eq(state), anyList(), anyList());
+                verify(redisStateManager, never()).markCompleted(anyString(), anyString(), anyInt());
+            } finally {
+                deleteTree(uploadDir);
+                deleteTree(processedDir);
+            }
+        }
+
+        /**
+         * 递归清理本测试创建的隔离上传证据目录。
+         */
+        private void deleteTree(Path root) throws IOException {
+            if (!Files.exists(root)) {
+                return;
+            }
+            try (var paths = Files.walk(root)) {
+                paths.sorted(java.util.Comparator.reverseOrder())
+                        .forEach(path -> {
+                            try {
+                                Files.deleteIfExists(path);
+                            } catch (IOException exception) {
+                                throw new IllegalStateException(exception);
+                            }
+                        });
+            }
         }
     }
 }

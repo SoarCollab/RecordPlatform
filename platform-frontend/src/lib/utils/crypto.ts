@@ -123,16 +123,19 @@ async function decryptAesGcm(
 ): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey(
     "raw",
-    new Uint8Array(keyBytes).buffer as ArrayBuffer,
+    new Uint8Array(keyBytes) as unknown as BufferSource,
     { name: "AES-GCM" },
     false,
     ["decrypt"],
   );
 
   const decrypted = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: new Uint8Array(iv).buffer as ArrayBuffer },
+    {
+      name: "AES-GCM",
+      iv: new Uint8Array(iv) as unknown as BufferSource,
+    },
     key,
-    new Uint8Array(ciphertext).buffer as ArrayBuffer,
+    new Uint8Array(ciphertext) as unknown as BufferSource,
   );
 
   return new Uint8Array(decrypted);

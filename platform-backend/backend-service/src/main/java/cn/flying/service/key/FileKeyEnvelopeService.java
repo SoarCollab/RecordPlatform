@@ -108,7 +108,12 @@ public class FileKeyEnvelopeService {
 
         Integer keyVersion = properties.getKeyVersion();
         CryptoSuiteMetadata suiteMetadata = suitePolicy.currentMetadata(keyVersion);
-        String algorithmSuite = suiteMetadata.algorithmSuite();
+        String explicitAlgorithmSuite = resolveExplicitAlgorithmSuite(sanitized);
+        if (explicitAlgorithmSuite != null) {
+            suitePolicy.validateAlgorithmSuite(explicitAlgorithmSuite);
+        }
+        String algorithmSuite = explicitAlgorithmSuite != null
+                ? explicitAlgorithmSuite : suiteMetadata.algorithmSuite();
         sanitized.put(FIELD_KEY_ENVELOPE_STATUS, ENVELOPE_STATUS_ENVELOPED);
         sanitized.put(FIELD_ALGORITHM_SUITE, algorithmSuite);
         sanitized.put(FIELD_SIGNATURE_SUITE, suiteMetadata.signatureSuite());
@@ -920,6 +925,14 @@ public class FileKeyEnvelopeService {
             return algorithm;
         }
         return properties.getEncryptionAlgorithm();
+    }
+
+    /**
+     * 读取并规范化 file_param 中显式声明的算法套件，未知值交由策略服务拒绝。
+     */
+    private String resolveExplicitAlgorithmSuite(Map<String, Object> params) {
+        Object value = params.get(FIELD_ALGORITHM_SUITE);
+        return value instanceof String suite && StringUtils.hasText(suite) ? suite.trim() : null;
     }
 
     /**

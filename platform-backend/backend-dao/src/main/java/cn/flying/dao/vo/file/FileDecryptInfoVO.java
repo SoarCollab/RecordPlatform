@@ -19,6 +19,22 @@ public record FileDecryptInfoVO(
         @Schema(description = "分片数量")
         Integer chunkCount,
         @Schema(description = "文件哈希")
-        String fileHash
+        String fileHash,
+        @Schema(description = "原始上传分片大小；历史文件可能为空")
+        Long chunkSize
 ) {
+
+    /**
+     * 保留历史六参数构造调用，旧文件没有可用的分片大小证据时返回 null。
+     */
+    public FileDecryptInfoVO(
+            String initialKey,
+            String fileName,
+            Long fileSize,
+            String contentType,
+            Integer chunkCount,
+            String fileHash
+    ) {
+        this(initialKey, fileName, fileSize, contentType, chunkCount, fileHash, null);
+    }
 }

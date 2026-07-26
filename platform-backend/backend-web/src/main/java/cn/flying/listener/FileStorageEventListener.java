@@ -8,6 +8,7 @@ import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.FileUploadState;
 import cn.flying.service.FileService;
 import cn.flying.service.assistant.FileUploadRedisStateManager;
+import cn.flying.service.manifest.FramedManifestFinalizationService;
 import cn.flying.service.sse.SseEmitterManager;
 import cn.flying.service.sse.SseEvent;
 import cn.flying.service.sse.SseEventType;
@@ -41,6 +42,9 @@ public class FileStorageEventListener {
     @Resource
     private SseEmitterManager sseEmitterManager;
 
+    @Resource
+    private FramedManifestFinalizationService framedManifestFinalizationService;
+
     /**
      * 同步处理文件存证事件，使发布者仅在文件最终化成功后推进上传完成态。
      *
@@ -73,6 +77,22 @@ public class FileStorageEventListener {
             );
             if (storedFile == null) {
                 throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "存储结果为空");
+            }
+
+            // 普通 v2 上传必须先完成 manifest 认证和持久化，发布者才会清理临时目录并标记完成。
+            if (framedManifestFinalizationService != null) {
+                FileUploadState state = redisStateManager.getState(event.getClientId());
+                framedManifestFinalizationService.ensureManifest(
+                        event.getUid(),
+                        storedFile,
+                        state,
+                        event.getProcessedFiles(),
+                        event.getFileHashes()).ifPresent(manifest -> {
+                    if (state != null) {
+                        state.setManifestHash(manifest.manifestHash());
+                        redisStateManager.updateState(state);
+                    }
+                });
             }
 
             log.info("文件存储和上链成功: 用户={}, 文件名={}, 文件哈希={}",

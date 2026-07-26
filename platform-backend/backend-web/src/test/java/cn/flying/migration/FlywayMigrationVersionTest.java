@@ -47,6 +47,7 @@ class FlywayMigrationVersionTest {
         assertTrue(migrationFiles.contains("V1.13.0__attestation_contract_registry_snapshot.sql"));
         assertTrue(migrationFiles.contains("V1.14.0__signed_proof_bundle.sql"));
         assertTrue(migrationFiles.contains("V1.15.0__proof_status_timestamp_precision.sql"));
+        assertTrue(migrationFiles.contains("V1.16.0__framed_download_contract.sql"));
         assertFalse(migrationFiles.contains("V1.0.1__add_account_nickname.sql"));
         assertFalse(migrationFiles.contains("V1.5.0__integrity_alert.sql"));
 
@@ -335,6 +336,30 @@ class FlywayMigrationVersionTest {
         assertFalse(sql.matches("(?is).*ALTER\\s+TABLE\\s+`proof_signing_key`.*"));
         assertFalse(sql.matches("(?is).*UPDATE\\s+`proof_signing_key`.*"));
         assertFalse(sql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
+    }
+
+    /**
+     * 验证 framed 下载迁移只追加 nullable 描述列和分片证据列，不改写历史数据或删除结构。
+     */
+    @Test
+    @DisplayName("should add framed download columns through an additive forward migration")
+    void shouldAddFramedDownloadContractThroughForwardMigration() throws IOException {
+        Path migration = resolveMigrationDir().resolve("V1.16.0__framed_download_contract.sql");
+        assertTrue(Files.isRegularFile(migration), "Missing framed download contract migration");
+        String sql = Files.readString(migration);
+        String normalizedSql = sql.replaceAll("\\s+", " ").trim();
+
+        assertTrue(normalizedSql.contains("ALTER TABLE `file_chunk_manifest`"));
+        assertTrue(normalizedSql.contains(
+                "ADD COLUMN `encryption_metadata` JSON DEFAULT NULL"));
+        assertTrue(normalizedSql.contains("ALTER TABLE `file_chunk_manifest_item`"));
+        assertTrue(normalizedSql.contains("ADD COLUMN `plain_size` BIGINT DEFAULT NULL"));
+        assertTrue(normalizedSql.contains("ADD COLUMN `frame_count` INT DEFAULT NULL"));
+        assertTrue(normalizedSql.contains("Versioned framed-encryption descriptor"));
+        assertTrue(normalizedSql.contains("Plaintext bytes represented by this stored object"));
+        assertTrue(normalizedSql.contains("Authenticated frame count for framed encryption v2"));
+        assertFalse(normalizedSql.matches("(?is).*UPDATE\\s+`(?:file_chunk_manifest|file_chunk_manifest_item)`.*"));
+        assertFalse(normalizedSql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
     }
 
     /**

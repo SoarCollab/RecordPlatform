@@ -192,6 +192,9 @@ file:
     benchmark-data-size: 1048576
     # Benchmark iterations
     benchmark-iterations: 3
+    # 普通后端代理上传的对象格式；切回 v1 仅影响新上传，reader 始终保留兼容能力。
+    writer-format: v2
+    frame-plain-size: 1048576
   key-envelope:
     provider: local
     kms-key-id: local-file-key-v1
@@ -211,6 +214,7 @@ file:
     # deprecated-after: 2030-01-01T00:00:00Z
     supported-algorithm-suites:
       - RP-AES256-GCM-CHUNK-CHAIN-V1
+      - RP-AES256-GCM-FRAMED-V2
     supported-signature-suites:
       - UNSIGNED-V1
     supported-kem-suites:

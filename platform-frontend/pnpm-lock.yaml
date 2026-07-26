@@ -35,6 +35,9 @@ importers:
       '@noble/ciphers':
         specifier: ^2.2.0
         version: 2.2.0
+      '@noble/hashes':
+        specifier: ^2.2.0
+        version: 2.2.0
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
@@ -57,6 +60,9 @@ importers:
       '@lucide/svelte':
         specifier: ^1.14.0
         version: 1.16.0(svelte@5.55.7(@typescript-eslint/types@8.59.3))
+      '@playwright/test':
+        specifier: 1.61.1
+        version: 1.61.1
       '@sveltejs/adapter-static':
         specifier: ^3.0.10
         version: 3.0.10(@sveltejs/kit@2.69.1(@sveltejs/vite-plugin-svelte@6.2.4(svelte@5.55.7(@typescript-eslint/types@8.59.3))(vite@7.3.6(@types/node@25.8.0)(jiti@2.6.1)(lightningcss@1.32.0)(yaml@2.8.3)))(svelte@5.55.7(@typescript-eslint/types@8.59.3))(typescript@5.9.3)(vite@7.3.6(@types/node@25.8.0)(jiti@2.6.1)(lightningcss@1.32.0)(yaml@2.8.3)))
@@ -74,13 +80,13 @@ importers:
         version: 6.9.1
       '@testing-library/svelte':
         specifier: ^5.2.7
-        version: 5.3.1(svelte@5.55.7(@typescript-eslint/types@8.59.3))(vite@7.3.6(@types/node@25.8.0)(jiti@2.6.1)(lightningcss@1.32.0)(yaml@2.8.3))(vitest@3.2.6(@types/node@25.8.0)(jiti@2.6.1)(jsdom@29.1.1)(lightningcss@1.32.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(yaml@2.8.3))
+        version: 5.3.1(svelte@5.55.7(@typescript-eslint/types@8.59.3))(vite@7.3.6(@types/node@25.8.0)(jiti@2.6.1)(lightningcss@1.32.0)(yaml@2.8.3))(vitest@3.2.6(@types/node@25.8.0)(jiti@2.6.1)(jsdom@29.1.1(@noble/hashes@2.2.0))(lightningcss@1.32.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(yaml@2.8.3))
       '@types/node':
         specifier: ^25.6.2
         version: 25.8.0
       '@vitest/coverage-v8':
         specifier: 3.2.6
-        version: 3.2.6(vitest@3.2.6(@types/node@25.8.0)(jiti@2.6.1)(jsdom@29.1.1)(lightningcss@1.32.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(yaml@2.8.3))
+        version: 3.2.6(vitest@3.2.6(@types/node@25.8.0)(jiti@2.6.1)(jsdom@29.1.1(@noble/hashes@2.2.0))(lightningcss@1.32.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(yaml@2.8.3))
       bits-ui:
         specifier: ^2.18.1
         version: 2.18.1(@internationalized/date@3.12.1)(@sveltejs/kit@2.69.1(@sveltejs/vite-plugin-svelte@6.2.4(svelte@5.55.7(@typescript-eslint/types@8.59.3))(vite@7.3.6(@types/node@25.8.0)(jiti@2.6.1)(lightningcss@1.32.0)(yaml@2.8.3)))(svelte@5.55.7(@typescript-eslint/types@8.59.3))(typescript@5.9.3)(vite@7.3.6(@types/node@25.8.0)(jiti@2.6.1)(lightningcss@1.32.0)(yaml@2.8.3)))(svelte@5.55.7(@typescript-eslint/types@8.59.3))
@@ -98,7 +104,7 @@ importers:
         version: 17.6.0
       jsdom:
         specifier: ^29.1.1
-        version: 29.1.1
+        version: 29.1.1(@noble/hashes@2.2.0)
       lint-staged:
         specifier: ^16.4.0
         version: 16.4.0
@@ -140,7 +146,7 @@ importers:
         version: 7.3.6(@types/node@25.8.0)(jiti@2.6.1)(lightningcss@1.32.0)(yaml@2.8.3)
       vitest:
         specifier: 3.2.6
-        version: 3.2.6(@types/node@25.8.0)(jiti@2.6.1)(jsdom@29.1.1)(lightningcss@1.32.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(yaml@2.8.3)
+        version: 3.2.6(@types/node@25.8.0)(jiti@2.6.1)(jsdom@29.1.1(@noble/hashes@2.2.0))(lightningcss@1.32.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(yaml@2.8.3)
 
 packages:
 
@@ -547,6 +553,10 @@ packages:
     resolution: {integrity: sha512-Z6pjIZ/8IJcCGzb2S/0Px5J81yij85xASuk1teLNeg75bfT07MV3a/O2Mtn1I2se43k3lkVEcFaR10N4cgQcZA==}
     engines: {node: '>= 20.19.0'}
 
+  '@noble/hashes@2.2.0':
+    resolution: {integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==}
+    engines: {node: '>= 20.19.0'}
+
   '@open-draft/deferred-promise@2.2.0':
     resolution: {integrity: sha512-CecwLWx3rhxVQF6V4bAgPS5t+So2sTbPgAzafKkVizyi7tlwpcFpdFqq+wqF2OwNBmqFuu6tOyouTuxgpMfzmA==}
 
@@ -562,6 +572,11 @@ packages:
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
+
+  '@playwright/test@1.61.1':
+    resolution: {integrity: sha512-8nKv6+0RJSL9FE4jYOEGXnPeM/Hg12qZpmqzZjRh3qM0Y7c3z1mrOTfFLids72RDQYVh9WpLEfR5WdpNX4fkig==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   '@polka/url@1.0.0-next.29':
     resolution: {integrity: sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww==}
@@ -1407,6 +1422,11 @@ packages:
     resolution: {integrity: sha512-gIXjKqtFuWEgzFRJA9WCQeSJLZDjgJUOMCMzxtvFq/37KojM1BFGufqsCy0r4qSQmYLsZYMeyRqzIWOMup03sw==}
     engines: {node: '>=14'}
 
+  fsevents@2.3.2:
+    resolution: {integrity: sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==}
+    engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
+    os: [darwin]
+
   fsevents@2.3.3:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
@@ -1837,6 +1857,16 @@ packages:
   picomatch@4.0.4:
     resolution: {integrity: sha512-QP88BAKvMam/3NxH6vj2o21R6MjxZUAd6nlwAS/pnGvN9IVLocLHxGYIzFhg6fUQ+5th6P4dv4eW9jX3DSIj7A==}
     engines: {node: '>=12'}
+
+  playwright-core@1.61.1:
+    resolution: {integrity: sha512-h7Qlt6m4REp25qvIdvbDtVmD4LqVXfpRxhORv9L0jzETM05p4fuPJ3dKyuSXQxDSbXnmS79HAgi9589lGSpLkg==}
+    engines: {node: '>=18'}
+    hasBin: true
+
+  playwright@1.61.1:
+    resolution: {integrity: sha512-DWnY5o3YbLWK4GovuAVwpqL+1VwGNdUGrRr++8j8PtQQzvAVZUIMjKQ90fY689sEJZJBbZVw1rXaOKSTitkzPQ==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   pluralize@8.0.0:
     resolution: {integrity: sha512-Nc3IT5yHzflTfbjgqWcCPpo7DaKy4FnpB0l/zCAW0Tc7jxAiuqSxHasntB3D7887LSrA93kDJ9IXovxJYxyLCA==}
@@ -2642,7 +2672,9 @@ snapshots:
       '@eslint/core': 1.2.1
       levn: 0.4.1
 
-  '@exodus/bytes@1.15.0': {}
+  '@exodus/bytes@1.15.0(@noble/hashes@2.2.0)':
+    optionalDependencies:
+      '@noble/hashes': 2.2.0
 
   '@floating-ui/core@1.7.4':
     dependencies:
@@ -2742,6 +2774,8 @@ snapshots:
 
   '@noble/ciphers@2.2.0': {}
 
+  '@noble/hashes@2.2.0': {}
+
   '@open-draft/deferred-promise@2.2.0': {}
 
   '@open-draft/deferred-promise@3.0.0': {}
@@ -2755,6 +2789,10 @@ snapshots:
 
   '@pkgjs/parseargs@0.11.0':
     optional: true
+
+  '@playwright/test@1.61.1':
+    dependencies:
+      playwright: 1.61.1
 
   '@polka/url@1.0.0-next.29': {}
 
@@ -3003,14 +3041,14 @@ snapshots:
     dependencies:
       svelte: 5.55.7(@typescript-eslint/types@8.59.3)
 
-  '@testing-library/svelte@5.3.1(svelte@5.55.7(@typescript-eslint/types@8.59.3))(vite@7.3.6(@types/node@25.8.0)(jiti@2.6.1)(lightningcss@1.32.0)(yaml@2.8.3))(vitest@3.2.6(@types/node@25.8.0)(jiti@2.6.1)(jsdom@29.1.1)(lightningcss@1.32.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(yaml@2.8.3))':
+  '@testing-library/svelte@5.3.1(svelte@5.55.7(@typescript-eslint/types@8.59.3))(vite@7.3.6(@types/node@25.8.0)(jiti@2.6.1)(lightningcss@1.32.0)(yaml@2.8.3))(vitest@3.2.6(@types/node@25.8.0)(jiti@2.6.1)(jsdom@29.1.1(@noble/hashes@2.2.0))(lightningcss@1.32.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(yaml@2.8.3))':
     dependencies:
       '@testing-library/dom': 10.4.1
       '@testing-library/svelte-core': 1.0.0(svelte@5.55.7(@typescript-eslint/types@8.59.3))
       svelte: 5.55.7(@typescript-eslint/types@8.59.3)
     optionalDependencies:
       vite: 7.3.6(@types/node@25.8.0)(jiti@2.6.1)(lightningcss@1.32.0)(yaml@2.8.3)
-      vitest: 3.2.6(@types/node@25.8.0)(jiti@2.6.1)(jsdom@29.1.1)(lightningcss@1.32.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(yaml@2.8.3)
+      vitest: 3.2.6(@types/node@25.8.0)(jiti@2.6.1)(jsdom@29.1.1(@noble/hashes@2.2.0))(lightningcss@1.32.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(yaml@2.8.3)
 
   '@types/aria-query@5.0.4': {}
 
@@ -3134,7 +3172,7 @@ snapshots:
       '@typescript-eslint/types': 8.59.3
       eslint-visitor-keys: 5.0.1
 
-  '@vitest/coverage-v8@3.2.6(vitest@3.2.6(@types/node@25.8.0)(jiti@2.6.1)(jsdom@29.1.1)(lightningcss@1.32.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(yaml@2.8.3))':
+  '@vitest/coverage-v8@3.2.6(vitest@3.2.6(@types/node@25.8.0)(jiti@2.6.1)(jsdom@29.1.1(@noble/hashes@2.2.0))(lightningcss@1.32.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(yaml@2.8.3))':
     dependencies:
       '@ampproject/remapping': 2.3.0
       '@bcoe/v8-coverage': 1.0.2
@@ -3149,7 +3187,7 @@ snapshots:
       std-env: 3.10.0
       test-exclude: 7.0.2
       tinyrainbow: 2.0.0
-      vitest: 3.2.6(@types/node@25.8.0)(jiti@2.6.1)(jsdom@29.1.1)(lightningcss@1.32.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(yaml@2.8.3)
+      vitest: 3.2.6(@types/node@25.8.0)(jiti@2.6.1)(jsdom@29.1.1(@noble/hashes@2.2.0))(lightningcss@1.32.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(yaml@2.8.3)
     transitivePeerDependencies:
       - supports-color
 
@@ -3346,10 +3384,10 @@ snapshots:
 
   cssesc@3.0.0: {}
 
-  data-urls@7.0.0:
+  data-urls@7.0.0(@noble/hashes@2.2.0):
     dependencies:
       whatwg-mimetype: 5.0.0
-      whatwg-url: 16.0.1
+      whatwg-url: 16.0.1(@noble/hashes@2.2.0)
     transitivePeerDependencies:
       - '@noble/hashes'
 
@@ -3594,6 +3632,9 @@ snapshots:
       cross-spawn: 7.0.6
       signal-exit: 4.1.0
 
+  fsevents@2.3.2:
+    optional: true
+
   fsevents@2.3.3:
     optional: true
 
@@ -3629,9 +3670,9 @@ snapshots:
       '@types/set-cookie-parser': 2.4.10
       set-cookie-parser: 3.0.1
 
-  html-encoding-sniffer@6.0.0:
+  html-encoding-sniffer@6.0.0(@noble/hashes@2.2.0):
     dependencies:
-      '@exodus/bytes': 1.15.0
+      '@exodus/bytes': 1.15.0(@noble/hashes@2.2.0)
     transitivePeerDependencies:
       - '@noble/hashes'
 
@@ -3719,17 +3760,17 @@ snapshots:
     dependencies:
       argparse: 2.0.1
 
-  jsdom@29.1.1:
+  jsdom@29.1.1(@noble/hashes@2.2.0):
     dependencies:
       '@asamuzakjp/css-color': 5.1.11
       '@asamuzakjp/dom-selector': 7.1.1
       '@bramus/specificity': 2.4.2
       '@csstools/css-syntax-patches-for-csstree': 1.1.4(css-tree@3.2.1)
-      '@exodus/bytes': 1.15.0
+      '@exodus/bytes': 1.15.0(@noble/hashes@2.2.0)
       css-tree: 3.2.1
-      data-urls: 7.0.0
+      data-urls: 7.0.0(@noble/hashes@2.2.0)
       decimal.js: 10.6.0
-      html-encoding-sniffer: 6.0.0
+      html-encoding-sniffer: 6.0.0(@noble/hashes@2.2.0)
       is-potential-custom-element-name: 1.0.1
       lru-cache: 11.3.6
       parse5: 8.0.1
@@ -3740,7 +3781,7 @@ snapshots:
       w3c-xmlserializer: 5.0.0
       webidl-conversions: 8.0.1
       whatwg-mimetype: 5.0.0
-      whatwg-url: 16.0.1
+      whatwg-url: 16.0.1(@noble/hashes@2.2.0)
       xml-name-validator: 5.0.0
     transitivePeerDependencies:
       - '@noble/hashes'
@@ -3999,6 +4040,14 @@ snapshots:
   picocolors@1.1.1: {}
 
   picomatch@4.0.4: {}
+
+  playwright-core@1.61.1: {}
+
+  playwright@1.61.1:
+    dependencies:
+      playwright-core: 1.61.1
+    optionalDependencies:
+      fsevents: 2.3.2
 
   pluralize@8.0.0: {}
 
@@ -4425,7 +4474,7 @@ snapshots:
     optionalDependencies:
       vite: 7.3.6(@types/node@25.8.0)(jiti@2.6.1)(lightningcss@1.32.0)(yaml@2.8.3)
 
-  vitest@3.2.6(@types/node@25.8.0)(jiti@2.6.1)(jsdom@29.1.1)(lightningcss@1.32.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(yaml@2.8.3):
+  vitest@3.2.6(@types/node@25.8.0)(jiti@2.6.1)(jsdom@29.1.1(@noble/hashes@2.2.0))(lightningcss@1.32.0)(msw@2.14.6(@types/node@25.8.0)(typescript@5.9.3))(yaml@2.8.3):
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/expect': 3.2.6
@@ -4452,7 +4501,7 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 25.8.0
-      jsdom: 29.1.1
+      jsdom: 29.1.1(@noble/hashes@2.2.0)
     transitivePeerDependencies:
       - jiti
       - less
@@ -4475,9 +4524,9 @@ snapshots:
 
   whatwg-mimetype@5.0.0: {}
 
-  whatwg-url@16.0.1:
+  whatwg-url@16.0.1(@noble/hashes@2.2.0):
     dependencies:
-      '@exodus/bytes': 1.15.0
+      '@exodus/bytes': 1.15.0(@noble/hashes@2.2.0)
       tr46: 6.0.0
       webidl-conversions: 8.0.1
     transitivePeerDependencies:

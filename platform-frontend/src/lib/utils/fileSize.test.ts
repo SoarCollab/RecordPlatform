@@ -5,6 +5,7 @@ import {
   LARGE_FILE_WARNING_THRESHOLD,
   STREAMING_RECOMMENDED_THRESHOLD,
   MAX_SAFE_INMEMORY_SIZE,
+  VERY_LARGE_FILE_THRESHOLD,
   MAX_DOWNLOADABLE_SIZE,
   classifyFileSize,
   formatFileSize,
@@ -41,8 +42,10 @@ describe("fileSize utilities", () => {
     expect(classifyFileSize(STREAMING_RECOMMENDED_THRESHOLD)).toBe("medium");
     expect(classifyFileSize(STREAMING_RECOMMENDED_THRESHOLD + 1)).toBe("large");
 
-    expect(classifyFileSize(MAX_SAFE_INMEMORY_SIZE)).toBe("large");
-    expect(classifyFileSize(MAX_SAFE_INMEMORY_SIZE + 1)).toBe("very_large");
+    expect(classifyFileSize(MAX_SAFE_INMEMORY_SIZE)).toBe("small");
+    expect(classifyFileSize(MAX_SAFE_INMEMORY_SIZE + 1)).toBe("medium");
+    expect(classifyFileSize(VERY_LARGE_FILE_THRESHOLD)).toBe("large");
+    expect(classifyFileSize(VERY_LARGE_FILE_THRESHOLD + 1)).toBe("very_large");
 
     expect(classifyFileSize(MAX_DOWNLOADABLE_SIZE)).toBe("very_large");
     expect(classifyFileSize(MAX_DOWNLOADABLE_SIZE + 1)).toBe("too_large");
@@ -126,7 +129,7 @@ describe("fileSize utilities", () => {
     expect(large.warningMessage).not.toBeNull();
   });
 
-  it("should fall back to in-memory for large files when streaming is unavailable", () => {
+  it("should reject large files when streaming is unavailable", () => {
     const large = decideDownloadStrategy(STREAMING_RECOMMENDED_THRESHOLD + 1, {
       fileSystemAccess: false,
       streams: false,
@@ -134,10 +137,10 @@ describe("fileSize utilities", () => {
       indexedDB: true,
       blob: true,
     });
-    expect(large.strategy).toBe("inmemory");
-    expect(large.canProceed).toBe(true);
+    expect(large.strategy).toBe("backend_proxy");
+    expect(large.canProceed).toBe(false);
     expect(large.requiresUserConfirmation).toBe(true);
-    expect(large.warningMessage).toContain("2GB");
+    expect(large.warningMessage).toContain("64 MiB");
   });
 
   it("should warn on medium files for low-memory devices", () => {
@@ -151,10 +154,10 @@ describe("fileSize utilities", () => {
     expect(medium.strategy).toBe("streaming");
     expect(medium.canProceed).toBe(true);
     expect(medium.requiresUserConfirmation).toBe(true);
-    expect(medium.warningMessage).toContain("2GB");
+    expect(medium.warningMessage).toContain("written directly to disk");
   });
 
-  it("should allow medium files without confirmation for normal devices", () => {
+  it("should reject medium files when streaming is unavailable", () => {
     const medium = decideDownloadStrategy(LARGE_FILE_WARNING_THRESHOLD + 1, {
       fileSystemAccess: false,
       streams: false,
@@ -162,10 +165,10 @@ describe("fileSize utilities", () => {
       indexedDB: true,
       blob: true,
     });
-    expect(medium.strategy).toBe("inmemory");
-    expect(medium.canProceed).toBe(true);
-    expect(medium.requiresUserConfirmation).toBe(false);
-    expect(medium.warningMessage).toBeNull();
+    expect(medium.strategy).toBe("backend_proxy");
+    expect(medium.canProceed).toBe(false);
+    expect(medium.requiresUserConfirmation).toBe(true);
+    expect(medium.warningMessage).toContain("64 MiB");
   });
 
   it("should run a pre-download check with detected capabilities", () => {
