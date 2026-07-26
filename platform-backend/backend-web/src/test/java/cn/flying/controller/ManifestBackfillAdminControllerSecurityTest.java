@@ -13,8 +13,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.expression.method.MethodSecurityExpressionHandler;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -35,7 +35,7 @@ import static org.mockito.Mockito.when;
 /**
  * Exercises the real method-security proxy around manifest governance administration.
  */
-@SpringJUnitConfig(ManifestBackfillAdminControllerSecurityTest.TestConfiguration.class)
+@SpringJUnitConfig(ManifestBackfillAdminControllerSecurityTest.MethodSecurityTestConfiguration.class)
 class ManifestBackfillAdminControllerSecurityTest {
 
     private static final Long TENANT_ID = 11L;
@@ -96,9 +96,9 @@ class ManifestBackfillAdminControllerSecurityTest {
     /**
      * Minimal context that enables the production custom method-security expression handler.
      */
-    @Configuration
+    @TestConfiguration(proxyBeanMethods = false)
     @EnableMethodSecurity
-    static class TestConfiguration {
+    static class MethodSecurityTestConfiguration {
 
         /**
          * Registers the custom expression handler before method-security advisors initialize.
