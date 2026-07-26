@@ -56,6 +56,8 @@ public class FileChunkManifest implements Serializable {
 
     private String storageBackend;
 
+    private String encryptionMetadata;
+
     private String manifestJson;
 
     private String status;

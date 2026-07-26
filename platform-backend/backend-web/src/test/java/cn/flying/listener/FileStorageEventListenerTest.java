@@ -8,6 +8,8 @@ import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.FileUploadState;
 import cn.flying.service.FileService;
 import cn.flying.service.assistant.FileUploadRedisStateManager;
+import cn.flying.service.manifest.ChunkManifestView;
+import cn.flying.service.manifest.FramedManifestFinalizationService;
 import cn.flying.service.sse.SseEmitterManager;
 import cn.flying.service.sse.SseEvent;
 import org.junit.jupiter.api.DisplayName;
@@ -17,10 +19,12 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -83,6 +87,29 @@ class FileStorageEventListenerTest {
         );
     }
 
+    /**
+     * 为单个测试注入 framed manifest 最终化服务，保留其他历史用例的空依赖兼容分支。
+     *
+     * @return framed manifest 最终化服务 mock
+     */
+    private FramedManifestFinalizationService injectFramedManifestFinalizationService() {
+        FramedManifestFinalizationService service = mock(FramedManifestFinalizationService.class);
+        ReflectionTestUtils.setField(listener, "framedManifestFinalizationService", service);
+        return service;
+    }
+
+    /**
+     * 构造仅携带监听器所需 manifest 摘要的持久化视图。
+     *
+     * @param manifestHash manifest 摘要
+     * @return manifest 持久化视图
+     */
+    private ChunkManifestView buildManifest(String manifestHash) {
+        return new ChunkManifestView(
+                1L, 1L, 1, "v1", "hash-1", manifestHash, "SHA-256",
+                1024L, 1, 1024L, null, "FRAMED_AEAD_V2", "S3", List.of());
+    }
+
     @Test
     @DisplayName("success path should send file-record-success event")
     void successPathShouldSendFileRecordSuccessEvent() {
@@ -107,6 +134,89 @@ class FileStorageEventListenerTest {
         verify(fileService, never()).changeFileStatusById(anyLong(), anyLong(), anyInt());
         verify(fileService, never()).markFileUploadFailed(anyLong(), anyLong());
         verify(redisStateManager, never()).removeSession(anyString(), anyString());
+    }
+
+    /**
+     * 验证普通 framed v2 存储成功后把 active manifest 摘要回写到稳定 Redis 检查点。
+     */
+    @Test
+    void framedManifestShouldPersistHashIntoUploadState() {
+        FileStorageEvent event = buildEvent();
+        File storedFile = new File();
+        storedFile.setFileHash("hash-1");
+        FileUploadState state = new FileUploadState(
+                100L, "contract.pdf", 1024L, "application/pdf", "client-1", 1024, 1);
+        ChunkManifestView manifest = buildManifest("sha256:manifest");
+        FramedManifestFinalizationService finalizationService = injectFramedManifestFinalizationService();
+        when(fileService.storeFile(
+                anyLong(), any(Long.class), anyString(), anyList(), anyList(), anyString(), anyString()))
+                .thenReturn(storedFile);
+        when(redisStateManager.getState("client-1")).thenReturn(state);
+        when(finalizationService.ensureManifest(
+                eq(100L), same(storedFile), same(state),
+                same(event.getProcessedFiles()), same(event.getFileHashes())))
+                .thenReturn(Optional.of(manifest));
+
+        listener.handleFileStorageEvent(event);
+
+        assertThat(state.getManifestHash()).isEqualTo("sha256:manifest");
+        verify(finalizationService).ensureManifest(
+                eq(100L), same(storedFile), same(state),
+                same(event.getProcessedFiles()), same(event.getFileHashes()));
+        verify(redisStateManager).updateState(same(state));
+    }
+
+    /**
+     * 验证 legacy 或无需 manifest 的成功存储不会改写上传检查点。
+     */
+    @Test
+    void emptyFramedManifestShouldNotUpdateUploadState() {
+        FileStorageEvent event = buildEvent();
+        File storedFile = new File();
+        storedFile.setFileHash("hash-1");
+        FileUploadState state = new FileUploadState(
+                100L, "contract.pdf", 1024L, "application/pdf", "client-1", 1024, 1);
+        FramedManifestFinalizationService finalizationService = injectFramedManifestFinalizationService();
+        when(fileService.storeFile(
+                anyLong(), any(Long.class), anyString(), anyList(), anyList(), anyString(), anyString()))
+                .thenReturn(storedFile);
+        when(redisStateManager.getState("client-1")).thenReturn(state);
+        when(finalizationService.ensureManifest(
+                eq(100L), same(storedFile), same(state),
+                same(event.getProcessedFiles()), same(event.getFileHashes())))
+                .thenReturn(Optional.empty());
+
+        listener.handleFileStorageEvent(event);
+
+        assertThat(state.getManifestHash()).isNull();
+        verify(redisStateManager, never()).updateState(any());
+    }
+
+    /**
+     * 验证 Redis 会话已过期时仍允许复用 active manifest，但不得凭空创建状态。
+     */
+    @Test
+    void activeManifestWithoutUploadStateShouldSkipRedisUpdate() {
+        FileStorageEvent event = buildEvent();
+        File storedFile = new File();
+        storedFile.setFileHash("hash-1");
+        ChunkManifestView manifest = buildManifest("sha256:manifest");
+        FramedManifestFinalizationService finalizationService = injectFramedManifestFinalizationService();
+        when(fileService.storeFile(
+                anyLong(), any(Long.class), anyString(), anyList(), anyList(), anyString(), anyString()))
+                .thenReturn(storedFile);
+        when(redisStateManager.getState("client-1")).thenReturn(null);
+        when(finalizationService.ensureManifest(
+                eq(100L), same(storedFile), isNull(),
+                same(event.getProcessedFiles()), same(event.getFileHashes())))
+                .thenReturn(Optional.of(manifest));
+
+        listener.handleFileStorageEvent(event);
+
+        verify(finalizationService).ensureManifest(
+                eq(100L), same(storedFile), isNull(),
+                same(event.getProcessedFiles()), same(event.getFileHashes()));
+        verify(redisStateManager, never()).updateState(any());
     }
 
     @Test

@@ -94,6 +94,39 @@ public class FileUploadState {
     @Schema(description = "上传恢复协议版本；为空表示升级前会话，必须失败关闭")
     private Integer recoverySchemaVersion;
 
+    @Schema(description = "普通代理上传加密恢复版本")
+    private Integer encryptionRecoveryVersion;
+
+    @Schema(description = "普通代理上传对象格式版本：1=legacy，2=framed")
+    private Integer encryptionFormatVersion;
+
+    @Schema(description = "普通代理上传对象算法套件")
+    private String encryptionAlgorithmSuite;
+
+    @Schema(description = "普通代理上传文件级 DEK（仅受控 Redis 检查点）")
+    private byte[] fileDataKey;
+
+    @Schema(description = "普通代理上传文件级 nonce（仅受控 Redis 检查点）")
+    private byte[] fileNonce;
+
+    @Schema(description = "普通代理上传 framed 明文 frame 大小")
+    private Integer framePlainSize;
+
+    @Schema(description = "普通代理上传密钥派生算法")
+    private String keyDerivation;
+
+    @Schema(description = "普通代理上传 nonce 派生算法")
+    private String nonceDerivation;
+
+    @Schema(description = "普通代理上传 AAD 合同")
+    private String aadSchema;
+
+    @Schema(description = "普通代理上传 AEAD 标签大小")
+    private Integer tagSize;
+
+    @Schema(description = "普通代理上传 active manifest hash 检查点")
+    private String manifestHash;
+
     public FileUploadState(Long userId, String fileName, long fileSize, String contentType, String clientId, int chunkSize, int totalChunks) {
         this(userId, fileName, fileSize, contentType, clientId, chunkSize, totalChunks, null);
     }
@@ -122,6 +155,7 @@ public class FileUploadState {
         this.totalChunks = totalChunks;
         // 参数化构造只用于创建新会话；Jackson 读取旧 JSON 使用无参构造，缺字段仍保持 null。
         this.recoverySchemaVersion = 1;
+        this.encryptionRecoveryVersion = 1;
         this.startTime = System.currentTimeMillis();
         this.lastActivityTime = this.startTime;
         this.lastProgressLogTime = 0;

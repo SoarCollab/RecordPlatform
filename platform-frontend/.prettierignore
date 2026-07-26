@@ -4,3 +4,4 @@ dist
 coverage
 pnpm-lock.yaml
 src/lib/api/types/generated.ts
+output/

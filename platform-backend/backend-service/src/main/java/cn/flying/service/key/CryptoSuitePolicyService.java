@@ -51,6 +51,16 @@ public class CryptoSuitePolicyService {
     }
 
     /**
+     * 校验文件元数据显式声明的算法套件，允许受控回滚下的 v1/v2 allowlist。
+     */
+    public void validateAlgorithmSuite(String algorithmSuite) {
+        validateSuite("algorithmSuite", algorithmSuite, properties.getSupportedAlgorithmSuites());
+        if (properties.getDeprecatedAfter() != null && !properties.getDeprecatedAfter().isAfter(Instant.now())) {
+            throw new GeneralException(ResultEnum.PARAM_ERROR, "当前密码套件已废弃");
+        }
+    }
+
+    /**
      * Rejects blank, unsupported, or explicitly deprecated suite identifiers.
      */
     private void validateSuite(String field, String value, Set<String> supportedValues) {

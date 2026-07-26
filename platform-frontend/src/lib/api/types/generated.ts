@@ -3494,6 +3494,11 @@ export interface components {
              * @description 分片数量
              */
             chunkCount?: number;
+            /**
+             * Format: int64
+             * @description 原始上传分片大小；历史文件可能为空
+             */
+            chunkSize?: number;
             /** @description 文件MIME类型 */
             contentType?: string;
             /** @description 文件哈希 */
@@ -3508,8 +3513,38 @@ export interface components {
             /** @description 初始密钥（最后一个分片的解密密钥，Base64编码） */
             initialKey?: string;
         };
+        /** @description 文件下载加密格式描述 */
+        FileDownloadEncryptionVO: {
+            /** @description AAD 字节合同标识 */
+            aadSchema?: string;
+            /** @description 算法套件 */
+            algorithmSuite?: string;
+            /** @description 文件级 nonce，Base64URL 无填充 */
+            fileNonce?: string;
+            /**
+             * Format: int32
+             * @description 加密格式版本：0=NONE，1=legacy，2=framed AEAD
+             */
+            formatVersion?: number;
+            /**
+             * Format: int32
+             * @description 单帧明文大小
+             */
+            framePlainSize?: number;
+            /** @description 帧密钥派生算法 */
+            keyDerivation?: string;
+            /** @description 帧 nonce 派生算法 */
+            nonceDerivation?: string;
+            /**
+             * Format: int32
+             * @description AEAD 标签字节数
+             */
+            tagSize?: number;
+        };
         /** @description 文件预签名分片下载元数据 */
         FileDownloadMetadataVO: {
+            /** @description 不含密钥材料的 canonical manifest JSON */
+            canonicalManifestJson?: string;
             /**
              * Format: int64
              * @description 分片大小
@@ -3517,6 +3552,7 @@ export interface components {
             chunkSize?: number;
             /** @description 文件 MIME 类型 */
             contentType?: string;
+            encryption?: components["schemas"]["FileDownloadEncryptionVO"];
             /** @description 加密算法 */
             encryptionAlgorithm?: string;
             /** @description 文件哈希 */
@@ -3556,11 +3592,18 @@ export interface components {
             cipherHash?: string;
             /** @description 预签名下载 URL */
             downloadUrl?: string;
+            /** @description manifest 中的对象 ETag；历史 metadata 可为空 */
+            etag?: string;
             /**
              * Format: int64
              * @description URL 过期时间（Unix 秒）
              */
             expiresAtEpochSeconds?: number;
+            /**
+             * Format: int32
+             * @description 分片认证 frame 数量；非 v2 可为空
+             */
+            frameCount?: number;
             /**
              * Format: int32
              * @description 分片索引，从 0 开始
@@ -3570,9 +3613,16 @@ export interface components {
             plainHash?: string;
             /**
              * Format: int64
+             * @description 分片明文字节数；历史 manifest 可为空
+             */
+            plainSize?: number;
+            /**
+             * Format: int64
              * @description 分片字节数
              */
             size?: number;
+            /** @description manifest 归属的存储后端 */
+            storageBackend?: string;
             /** @description 分片 storagePath */
             storagePath?: string;
         };

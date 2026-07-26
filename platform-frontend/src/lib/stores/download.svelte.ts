@@ -9,13 +9,7 @@ import { env } from "$env/dynamic/public";
 import { getToken } from "$api/client";
 import * as fileApi from "$api/endpoints/files";
 import {
-  downloadAllChunks,
-  type ChunkDownloadResult,
-  type DownloadProgress,
-} from "$utils/chunkDownloader";
-import {
   saveTask,
-  saveChunk,
   getChunks,
   getPendingTasks,
   clearTaskData,
@@ -24,7 +18,20 @@ import {
   type PersistedDownloadTask,
   type DownloadSource,
 } from "$utils/downloadStorage";
-import { decryptFile, arrayToBlob, downloadBlob } from "$utils/crypto";
+import { arrayToBlob, downloadBlob } from "$utils/crypto";
+import {
+  executeBoundedDownload,
+  executeLegacyFallbackDownload,
+} from "$utils/boundedDownloader";
+import {
+  createFileSystemDownloadSink,
+  MemoryDownloadSink,
+} from "$utils/downloadSink";
+import {
+  DownloadMetricsTracker,
+  type DownloadStreamMetrics,
+} from "$utils/downloadMetrics";
+import type { FileDownloadMetadataVO } from "$api/types";
 import {
   buildBatchMetricsPayload,
   calculateRetryCount,
@@ -36,11 +43,8 @@ import {
   type BrowserCapabilities,
   formatFileSize,
   isStreamingSupported,
+  MAX_SAFE_INMEMORY_SIZE,
 } from "$utils/fileSize";
-import {
-  executeBufferedStreamingDownload,
-  type StreamingPhase,
-} from "$utils/streamingDownloader";
 
 // Re-export types
 export type { DownloadSource } from "$utils/downloadStorage";
@@ -94,6 +98,10 @@ export interface DownloadTask {
   abortController: AbortController | null;
   /** Download strategy used for this task */
   strategy: DownloadStrategy;
+  /** 已验证的 manifest 元数据，供重试复用同一合同。 */
+  downloadMetadata: FileDownloadMetadataVO | null;
+  /** 最近一次有界下载的内存、认证与写入指标。 */
+  downloadMetrics: DownloadStreamMetrics | null;
 }
 
 export interface BatchDownloadItem {
@@ -123,20 +131,11 @@ export interface BatchDownloadState {
   completedAt: number | null;
 }
 
-type WritableFileStreamLike = {
-  write(data: Blob | BufferSource | string): Promise<void>;
-  close(): Promise<void>;
-  abort?: () => Promise<void>;
-};
-
-type WritableFileHandleLike = {
-  createWritable(): Promise<WritableFileStreamLike>;
-};
-
 type PresignedUrlMetadata = {
   urls: string[];
   decryptInfo: fileApi.FileDecryptInfoVO;
   encryptionAlgorithm: string | null;
+  metadata: FileDownloadMetadataVO | null;
 };
 
 // ===== Pre-download Check Result =====
@@ -213,30 +212,6 @@ function isPlainDownload(
   encryptionAlgorithm: string | null | undefined,
 ): boolean {
   return encryptionAlgorithm?.trim().toUpperCase() === "NONE";
-}
-
-/**
- * 读取加密下载必需的 initialKey；缺失时立即失败，避免把 null 传给解密器。
- */
-function requireInitialKey(initialKey: string | null | undefined): string {
-  if (!initialKey) {
-    throw new Error("缺少加密文件初始密钥");
-  }
-  return initialKey;
-}
-
-/**
- * 将未加密分片按顺序拼接成单个字节数组。
- */
-function concatenatePlainChunks(chunks: Uint8Array[]): Uint8Array {
-  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
-  const result = new Uint8Array(totalLength);
-  let offset = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return result;
 }
 
 /**
@@ -383,7 +358,6 @@ async function executeBatchItem(
           item.fileName,
           item.source ?? { type: "owned" },
           item.fileSize,
-          "inmemory",
         );
       } else {
         await retryDownload(taskId);
@@ -441,6 +415,7 @@ async function fetchPresignedUrls(
         urls,
         decryptInfo,
         encryptionAlgorithm: metadata.encryptionAlgorithm ?? null,
+        metadata,
       };
     } catch (metadataError) {
       if (!isMissingManifestError(metadataError)) {
@@ -475,6 +450,7 @@ async function fetchLegacyPresignedUrls(
     urls,
     decryptInfo,
     encryptionAlgorithm: decryptInfo.initialKey ? null : "NONE",
+    metadata: null,
   };
 }
 
@@ -490,6 +466,7 @@ function isMissingManifestError(error: unknown): boolean {
 async function executeDownload(task: DownloadTask): Promise<void> {
   const taskId = task.id;
   const abortController = new AbortController();
+  let metricsTracker: DownloadMetricsTracker | null = null;
   updateTask(taskId, { abortController });
 
   try {
@@ -501,16 +478,18 @@ async function executeDownload(task: DownloadTask): Promise<void> {
     let fileName = task.fileName;
     let fileSize = task.fileSize;
     let encryptionAlgorithm = task.encryptionAlgorithm;
+    let downloadMetadata = task.downloadMetadata;
     const authContextHash = await getAuthContextHash();
 
     if (urls.length === 0 || areUrlsExpired(task.urlsFetchedAt)) {
       updateTask(taskId, { status: "fetching_urls" });
 
+      const fetchedMetadata = await fetchPresignedUrls(task);
       const {
         urls: newUrls,
         decryptInfo,
         encryptionAlgorithm: metadataEncryptionAlgorithm,
-      } = await fetchPresignedUrls(task);
+      } = fetchedMetadata;
       urls = newUrls;
       initialKey = decryptInfo.initialKey ?? null;
       totalChunks = decryptInfo.chunkCount;
@@ -518,6 +497,7 @@ async function executeDownload(task: DownloadTask): Promise<void> {
       fileName = decryptInfo.fileName;
       fileSize = decryptInfo.fileSize;
       encryptionAlgorithm = metadataEncryptionAlgorithm;
+      downloadMetadata = fetchedMetadata.metadata;
 
       updateTask(taskId, {
         presignedUrls: urls,
@@ -528,6 +508,7 @@ async function executeDownload(task: DownloadTask): Promise<void> {
         contentType,
         fileName,
         fileSize,
+        downloadMetadata,
         chunks: Array.from({ length: totalChunks }, (_, i) => ({
           index: i,
           status: "pending" as const,
@@ -552,85 +533,76 @@ async function executeDownload(task: DownloadTask): Promise<void> {
       }
     }
 
-    // Step 2: Load existing chunks from IndexedDB (for resume)
-    let existingChunks = downloadedChunksMap.get(taskId);
-    if (!existingChunks) {
-      existingChunks = authContextHash ? await getChunks(taskId) : new Map();
-      downloadedChunksMap.set(taskId, existingChunks);
-    }
-
-    // Update status
-    updateTask(taskId, {
-      status: "downloading",
-      startedAt: task.startedAt ?? Date.now(),
-      downloadedChunks: existingChunks.size,
-      progress: Math.round((existingChunks.size / totalChunks) * 100),
-    });
-
-    // Step 3: Download chunks
-    const allChunks = await downloadAllChunks(urls, {
-      concurrency,
-      signal: abortController.signal,
-      existingChunks,
-      onChunkComplete: async (result: ChunkDownloadResult) => {
-        // Update memory cache
-        existingChunks!.set(result.index, result.data);
-
-        // Persist to IndexedDB
-        if (authContextHash) {
-          await saveChunk(taskId, result.index, result.data);
-        }
-
-        // Update chunk state
-        const currentTask = getTask(taskId);
-        if (currentTask) {
-          const chunks = [...currentTask.chunks];
-          chunks[result.index] = {
-            ...chunks[result.index],
-            status: "completed",
-          };
-          updateTask(taskId, { chunks });
-        }
-      },
-      onProgress: (progress: DownloadProgress) => {
-        updateTask(taskId, {
-          downloadedChunks: progress.completed,
-          progress: Math.round((progress.completed / progress.total) * 100),
-        });
-      },
-    });
-
-    // Check if cancelled during download
-    const currentTask = getTask(taskId);
-    if (
-      !currentTask ||
-      currentTask.status === "cancelled" ||
-      currentTask.status === "paused"
-    ) {
+    // Manifest-backed downloads use the bounded reader for all three formats.
+    if (downloadMetadata) {
+      const sink = new MemoryDownloadSink(fileSize, MAX_SAFE_INMEMORY_SIZE);
+      metricsTracker = new DownloadMetricsTracker();
+      updateTask(taskId, { status: "downloading" });
+      const metrics = await executeBoundedDownload({
+        metadata: downloadMetadata,
+        expectedFileHash: task.fileHash,
+        sink,
+        metrics: metricsTracker,
+        signal: abortController.signal,
+        onPartComplete: (completed, total) => {
+          updateTask(taskId, {
+            status: "downloading",
+            downloadedChunks: completed,
+            progress: Math.round((completed / total) * 100),
+          });
+        },
+      });
+      if (abortController.signal.aborted) {
+        throw new Error("Download cancelled");
+      }
+      downloadBlob(arrayToBlob(sink.getData(), contentType), fileName);
+      await clearTaskData(taskId);
+      downloadedChunksMap.delete(taskId);
+      updateTask(taskId, {
+        status: "completed",
+        progress: 100,
+        downloadedChunks: totalChunks,
+        completedAt: Date.now(),
+        abortController: null,
+        downloadMetrics: metrics,
+      });
       return;
     }
 
-    // Step 4: Build the output bytes
-    const plainDownload = isPlainDownload(encryptionAlgorithm);
-    updateTask(taskId, { status: plainDownload ? "writing" : "decrypting" });
-
-    const outputData = plainDownload
-      ? concatenatePlainChunks(allChunks)
-      : await decryptFile(allChunks, requireInitialKey(initialKey));
-    const blob = arrayToBlob(outputData, contentType);
-
-    // Step 5: Trigger browser download
-    downloadBlob(blob, fileName);
-
-    // Step 6: Cleanup and mark complete
+    // 历史无 manifest 文件也必须逐分片读取，并对 v1 密文执行硬性 part 上限。
+    const sink = new MemoryDownloadSink(fileSize, MAX_SAFE_INMEMORY_SIZE);
+    metricsTracker = new DownloadMetricsTracker();
+    updateTask(taskId, { status: "downloading" });
+    const metrics = await executeLegacyFallbackDownload({
+      urls,
+      fileSize,
+      totalChunks,
+      initialKey,
+      encrypted: !isPlainDownload(encryptionAlgorithm),
+      sink,
+      signal: abortController.signal,
+      metrics: metricsTracker,
+      onPartComplete: (completed, total) => {
+        updateTask(taskId, {
+          status: "downloading",
+          downloadedChunks: completed,
+          progress: Math.round((completed / total) * 100),
+        });
+      },
+    });
+    if (abortController.signal.aborted) {
+      throw new Error("Download cancelled");
+    }
+    downloadBlob(arrayToBlob(sink.getData(), contentType), fileName);
     await clearTaskData(taskId);
     downloadedChunksMap.delete(taskId);
-
     updateTask(taskId, {
       status: "completed",
       progress: 100,
+      downloadedChunks: totalChunks,
       completedAt: Date.now(),
       abortController: null,
+      downloadMetrics: metrics,
     });
   } catch (error) {
     const err = error as Error;
@@ -645,6 +617,7 @@ async function executeDownload(task: DownloadTask): Promise<void> {
         updateTask(taskId, {
           status: "cancelled",
           abortController: null,
+          downloadMetrics: metricsTracker?.snapshot() ?? null,
         });
       }
       return;
@@ -654,66 +627,12 @@ async function executeDownload(task: DownloadTask): Promise<void> {
       status: "failed",
       error: err.message,
       abortController: null,
+      downloadMetrics: metricsTracker?.snapshot() ?? null,
     });
   }
 }
 
 // ===== Streaming Download (File System Access API) =====
-
-/**
- * 流式下载未加密分片并直接写入用户选择的文件。
- */
-async function executePlainStreamingDownload(params: {
-  contentType: string;
-  totalChunks: number;
-  presignedUrls: string[];
-  fileHandle: unknown;
-  signal: AbortSignal;
-  onProgress: (phase: StreamingPhase, current: number, total: number) => void;
-}): Promise<{ success: boolean; bytesWritten?: number; error?: string }> {
-  const fileHandle = params.fileHandle as Partial<WritableFileHandleLike>;
-  if (typeof fileHandle?.createWritable !== "function") {
-    return {
-      success: false,
-      error: "Streaming download file handle is invalid",
-    };
-  }
-
-  let writable: WritableFileStreamLike | null = null;
-  try {
-    writable = await fileHandle.createWritable();
-    let bytesWritten = 0;
-    for (let index = 0; index < params.presignedUrls.length; index++) {
-      if (params.signal.aborted) {
-        throw new Error("Download cancelled");
-      }
-      const response = await fetch(params.presignedUrls[index], {
-        signal: params.signal,
-      });
-      if (!response.ok) {
-        throw new Error(`分片 ${index + 1} 下载失败: ${response.status}`);
-      }
-      const chunk = new Uint8Array(await response.arrayBuffer());
-      if (params.signal.aborted) {
-        throw new Error("Download cancelled");
-      }
-      await writable.write(new Blob([chunk], { type: params.contentType }));
-      bytesWritten += chunk.byteLength;
-      params.onProgress("downloading", index + 1, params.totalChunks);
-    }
-    await writable.close();
-    params.onProgress("completed", params.totalChunks, params.totalChunks);
-    return { success: true, bytesWritten };
-  } catch (error) {
-    if (writable?.abort) {
-      await writable.abort();
-    }
-    if (params.signal.aborted) {
-      return { success: false, error: "Download cancelled" };
-    }
-    return { success: false, error: (error as Error).message };
-  }
-}
 
 /**
  * Execute streaming download for large files
@@ -722,6 +641,7 @@ async function executePlainStreamingDownload(params: {
 async function executeStreamingDownload(task: DownloadTask): Promise<void> {
   const taskId = task.id;
   const abortController = new AbortController();
+  let metricsTracker: DownloadMetricsTracker | null = null;
   updateTask(taskId, { abortController });
 
   let fileHandle: unknown;
@@ -764,15 +684,17 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
     let fileName = task.fileName;
     let fileSize = task.fileSize;
     let encryptionAlgorithm = task.encryptionAlgorithm;
+    let downloadMetadata = task.downloadMetadata;
 
     if (urls.length === 0 || areUrlsExpired(task.urlsFetchedAt)) {
       updateTask(taskId, { status: "fetching_urls" });
 
+      const fetchedMetadata = await fetchPresignedUrls(task);
       const {
         urls: newUrls,
         decryptInfo,
         encryptionAlgorithm: metadataEncryptionAlgorithm,
-      } = await fetchPresignedUrls(task);
+      } = fetchedMetadata;
       urls = newUrls;
       initialKey = decryptInfo.initialKey ?? null;
       totalChunks = decryptInfo.chunkCount;
@@ -780,6 +702,7 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
       fileName = decryptInfo.fileName;
       fileSize = decryptInfo.fileSize;
       encryptionAlgorithm = metadataEncryptionAlgorithm;
+      downloadMetadata = fetchedMetadata.metadata;
 
       updateTask(taskId, {
         presignedUrls: urls,
@@ -790,6 +713,7 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
         contentType,
         fileName,
         fileSize,
+        downloadMetadata,
         chunks: Array.from({ length: totalChunks }, (_, i) => ({
           index: i,
           status: "pending" as const,
@@ -804,66 +728,56 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
       startedAt: task.startedAt ?? Date.now(),
     });
 
-    const onStreamingProgress = (
-      phase: StreamingPhase,
-      current: number,
-      total: number,
-    ) => {
-      const currentTask = getTask(taskId);
-      if (
-        !currentTask ||
-        currentTask.status === "cancelled" ||
-        currentTask.status === "paused"
-      ) {
-        return;
-      }
-
-      const progress = Math.round((current / total) * 100);
-
-      switch (phase) {
-        case "downloading":
+    let result: { success: boolean; error?: string };
+    let completedMetrics: DownloadStreamMetrics | null = null;
+    if (downloadMetadata) {
+      const sink = await createFileSystemDownloadSink(fileHandle);
+      metricsTracker = new DownloadMetricsTracker();
+      const metrics = await executeBoundedDownload({
+        metadata: downloadMetadata,
+        expectedFileHash: task.fileHash,
+        sink,
+        signal: abortController.signal,
+        metrics: metricsTracker,
+        onPartComplete: (completed, total) => {
           updateTask(taskId, {
             status: "streaming",
-            downloadedChunks: current,
-            progress,
+            downloadedChunks: completed,
+            progress: Math.round((completed / total) * 100),
           });
-          break;
-        case "decrypting":
-          updateTask(taskId, {
-            status: "decrypting",
-            progress,
-          });
-          break;
-        case "writing":
-          updateTask(taskId, {
-            status: "writing",
-            progress,
-          });
-          break;
-        case "completed":
-          break;
+        },
+      });
+      completedMetrics = metrics;
+      if (abortController.signal.aborted) {
+        throw new Error("Download cancelled");
       }
-    };
-
-    const result = isPlainDownload(encryptionAlgorithm)
-      ? await executePlainStreamingDownload({
-          contentType,
-          totalChunks,
-          presignedUrls: urls,
-          fileHandle,
-          signal: abortController.signal,
-          onProgress: onStreamingProgress,
-        })
-      : await executeBufferedStreamingDownload({
-          fileName,
-          contentType,
-          totalChunks,
-          initialKey: requireInitialKey(initialKey),
-          presignedUrls: urls,
-          fileHandle,
-          signal: abortController.signal,
-          onProgress: onStreamingProgress,
-        });
+      result = { success: true };
+    } else {
+      const sink = await createFileSystemDownloadSink(fileHandle);
+      metricsTracker = new DownloadMetricsTracker();
+      const metrics = await executeLegacyFallbackDownload({
+        urls,
+        fileSize,
+        totalChunks,
+        initialKey,
+        encrypted: !isPlainDownload(encryptionAlgorithm),
+        sink,
+        signal: abortController.signal,
+        metrics: metricsTracker,
+        onPartComplete: (completed, total) => {
+          updateTask(taskId, {
+            status: "streaming",
+            downloadedChunks: completed,
+            progress: Math.round((completed / total) * 100),
+          });
+        },
+      });
+      completedMetrics = metrics;
+      if (abortController.signal.aborted) {
+        throw new Error("Download cancelled");
+      }
+      result = { success: true };
+    }
 
     // Check result
     if (!result.success) {
@@ -895,6 +809,7 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
       progress: 100,
       completedAt: Date.now(),
       abortController: null,
+      downloadMetrics: completedMetrics,
     });
   } catch (error) {
     const err = error as Error;
@@ -908,6 +823,7 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
         updateTask(taskId, {
           status: "cancelled",
           abortController: null,
+          downloadMetrics: metricsTracker?.snapshot() ?? null,
         });
       }
       return;
@@ -926,14 +842,86 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
       status: "failed",
       error: err.message,
       abortController: null,
+      downloadMetrics: metricsTracker?.snapshot() ?? null,
     });
   }
 }
 
 // ===== Fallback for shared files (backend proxy) =====
 
+const UNSUPPORTED_LARGE_DOWNLOAD_MESSAGE =
+  "当前浏览器不支持超过 64 MiB 的有界保存，请使用 Chrome 或 Edge。";
+
+/** 将不允许进入 Blob/backend proxy 的任务置为失败。 */
+function rejectUnboundedDownload(
+  taskId: string,
+  reason = UNSUPPORTED_LARGE_DOWNLOAD_MESSAGE,
+): void {
+  updateTask(taskId, {
+    status: "failed",
+    error: reason,
+    abortController: null,
+  });
+}
+
+/** 按来源、策略和文件大小统一调度下载，避免绕过内存硬上限。 */
+function dispatchDownloadTask(task: DownloadTask): void {
+  if (task.source.type !== "owned") {
+    if (
+      !Number.isSafeInteger(task.fileSize) ||
+      task.fileSize < 0 ||
+      task.fileSize > MAX_SAFE_INMEMORY_SIZE
+    ) {
+      rejectUnboundedDownload(
+        task.id,
+        "共享文件大小无效或超过 64 MiB，当前浏览器不支持有界保存。",
+      );
+      return;
+    }
+    void executeBackendProxyDownload(task);
+    return;
+  }
+
+  if (task.strategy === "backend_proxy") {
+    rejectUnboundedDownload(task.id);
+    return;
+  }
+
+  if (task.strategy === "streaming") {
+    if (canUseStreaming()) {
+      void executeStreamingDownload(task);
+      return;
+    }
+    if (
+      Number.isSafeInteger(task.fileSize) &&
+      task.fileSize > 0 &&
+      task.fileSize <= MAX_SAFE_INMEMORY_SIZE
+    ) {
+      void executeDownload(task);
+      return;
+    }
+    rejectUnboundedDownload(task.id);
+    return;
+  }
+
+  if (task.fileSize > MAX_SAFE_INMEMORY_SIZE) {
+    rejectUnboundedDownload(task.id);
+    return;
+  }
+  void executeDownload(task);
+}
+
 async function executeBackendProxyDownload(task: DownloadTask): Promise<void> {
   const taskId = task.id;
+
+  if (
+    !Number.isSafeInteger(task.fileSize) ||
+    task.fileSize < 0 ||
+    task.fileSize > MAX_SAFE_INMEMORY_SIZE
+  ) {
+    rejectUnboundedDownload(taskId);
+    return;
+  }
 
   try {
     updateTask(taskId, { status: "downloading", startedAt: Date.now() });
@@ -948,6 +936,16 @@ async function executeBackendProxyDownload(task: DownloadTask): Promise<void> {
     } else {
       // Fallback for owned files without presigned URLs
       blob = await fileApi.downloadFile(task.fileHash);
+    }
+
+    // 共享文件可能未携带预先知道的大小，必须以响应 Blob 的实际大小再次封顶。
+    if (
+      !blob ||
+      !Number.isSafeInteger(blob.size) ||
+      blob.size > MAX_SAFE_INMEMORY_SIZE ||
+      (task.fileSize > 0 && blob.size !== task.fileSize)
+    ) {
+      throw new Error("共享文件响应超过 64 MiB 或与声明大小不一致");
     }
 
     downloadBlob(blob, task.fileName);
@@ -1037,21 +1035,13 @@ async function startDownload(
     completedAt: null,
     abortController: null,
     strategy,
+    downloadMetadata: null,
+    downloadMetrics: null,
   };
 
   tasks = [...tasks, task];
 
-  // Choose execution method based on source and strategy
-  if (source.type !== "owned") {
-    // Shared files use backend proxy
-    executeBackendProxyDownload(task);
-  } else if (strategy === "streaming" && canUseStreaming()) {
-    // Large files with streaming support
-    executeStreamingDownload(task);
-  } else {
-    // Default in-memory download
-    executeDownload(task);
-  }
+  dispatchDownloadTask(task);
 
   return id;
 }
@@ -1219,14 +1209,7 @@ async function resumeDownload(id: string): Promise<void> {
   const updatedTask = getTask(id);
   if (!updatedTask) return;
 
-  // Choose execution method based on source and strategy
-  if (updatedTask.source.type !== "owned") {
-    executeBackendProxyDownload(updatedTask);
-  } else if (updatedTask.strategy === "streaming" && canUseStreaming()) {
-    executeStreamingDownload(updatedTask);
-  } else {
-    executeDownload(updatedTask);
-  }
+  dispatchDownloadTask(updatedTask);
 }
 
 /**
@@ -1260,20 +1243,14 @@ async function retryDownload(id: string): Promise<void> {
     error: null,
     downloadedChunks: 0,
     progress: 0,
+    downloadMetrics: null,
   });
 
   // Get fresh task reference after update
   const updatedTask = getTask(id);
   if (!updatedTask) return;
 
-  // Choose execution method based on source and strategy
-  if (updatedTask.source.type !== "owned") {
-    executeBackendProxyDownload(updatedTask);
-  } else if (updatedTask.strategy === "streaming" && canUseStreaming()) {
-    executeStreamingDownload(updatedTask);
-  } else {
-    executeDownload(updatedTask);
-  }
+  dispatchDownloadTask(updatedTask);
 }
 
 /**
@@ -1392,6 +1369,8 @@ async function restoreTasks(): Promise<void> {
         // Restored tasks use in-memory strategy since we've already downloaded some chunks
         // (streaming doesn't support resuming from partial chunks)
         strategy: "inmemory",
+        downloadMetadata: null,
+        downloadMetrics: null,
       };
 
       tasks = [...tasks, task];

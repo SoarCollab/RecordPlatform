@@ -230,6 +230,25 @@ export type DirectUploadCompleteVO = OpenApiSchema<"DirectUploadCompleteVO">;
  * 文件分片预签名下载元数据。
  * @see FileDownloadPartVO.java
  */
+export interface ChunkManifestEncryption {
+  /** 合同格式版本：0/1 为历史语义，2 为 framed AEAD。 */
+  formatVersion: number;
+  /** 允许的加密套件名称。 */
+  algorithmSuite: string;
+  /** 文件级 nonce，Base64 或 Base64URL。 */
+  fileNonce: string;
+  /** 每个 frame 的明文目标大小。 */
+  framePlainSize: number;
+  /** frame key 派生算法。 */
+  keyDerivation: string;
+  /** frame nonce 派生算法。 */
+  nonceDerivation: string;
+  /** AAD 规范标识。 */
+  aadSchema: string;
+  /** GCM tag 字节数。 */
+  tagSize: number;
+}
+
 export interface FileDownloadPartVO {
   /** 分片索引，从 0 开始 */
   index: number;
@@ -241,12 +260,20 @@ export interface FileDownloadPartVO {
   expiresAtEpochSeconds: number;
   /** 分片 storagePath */
   storagePath: string;
+  /** manifest 归属的存储后端；用于绑定 canonical manifest。 */
+  storageBackend?: string | null;
+  /** manifest 中的对象 ETag；历史 metadata 可能为空。 */
+  etag?: string | null;
   /** 明文分片哈希 */
   plainHash: string;
   /** 密文分片哈希 */
   cipherHash: string;
   /** 校验算法 */
   checksumAlgorithm?: string | null;
+  /** 明文分片字节数；历史 manifest 可能为空。 */
+  plainSize?: number | null;
+  /** framed v2 的 frame 数量；历史格式为空。 */
+  frameCount?: number | null;
 }
 
 /**
@@ -262,12 +289,16 @@ export interface FileDownloadMetadataVO {
   initialKey?: string;
   manifestSchemaId: string;
   manifestHash: string;
+  /** canonical manifest JSON，不包含 initialKey/file DEK。 */
+  canonicalManifestJson: string;
   hashAlgorithm: string;
   encryptionAlgorithm?: string;
   storageBackend: string;
   chunkSize: number;
   totalChunks: number;
   parts: FileDownloadPartVO[];
+  /** 可选加密描述；为空时按历史 v1/NONE 兼容语义读取。 */
+  encryption?: ChunkManifestEncryption | null;
 }
 
 /**
@@ -455,6 +486,8 @@ export interface FileDecryptInfoVO extends OpenApiSchema<"FileDecryptInfoVO"> {
   chunkCount: number;
   /** 文件哈希 */
   fileHash: string;
+  /** 原始上传分片大小；历史文件可能为空。 */
+  chunkSize?: number;
 }
 
 /**

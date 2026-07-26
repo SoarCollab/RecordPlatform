@@ -60,6 +60,16 @@ public class EncryptionProperties {
     private int benchmarkIterations = 3;
 
     /**
+     * 新建普通后端代理上传使用的对象格式，支持 v2 framed 或 legacy v1 回滚。
+     */
+    private String writerFormat = "v2";
+
+    /**
+     * framed v2 的 nominal 明文 frame 大小，默认 1MiB。
+     */
+    private int framePlainSize = 1024 * 1024;
+
+    /**
      * 获取解析后的算法枚举
      */
     public EncryptionAlgorithm getAlgorithmEnum() {

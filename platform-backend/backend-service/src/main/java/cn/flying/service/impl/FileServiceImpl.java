@@ -2401,6 +2401,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             String contentType = (String) params.get("contentType");
             Integer chunkCount = params.get("chunkCount") instanceof Number
                     ? ((Number) params.get("chunkCount")).intValue() : null;
+            Long chunkSize = params.get("chunkSize") instanceof Number
+                    ? ((Number) params.get("chunkSize")).longValue() : null;
 
             return new FileDecryptInfoVO(
                     initialKey,
@@ -2408,7 +2410,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                     fileSize,
                     contentType,
                     chunkCount,
-                    fileHash
+                    fileHash,
+                    chunkSize
             );
 
         } catch (GeneralException e) {
@@ -2457,6 +2460,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
             String contentType = (String) params.get("contentType");
             Integer chunkCount = params.get("chunkCount") instanceof Number
                     ? ((Number) params.get("chunkCount")).intValue() : null;
+            Long chunkSize = params.get("chunkSize") instanceof Number
+                    ? ((Number) params.get("chunkSize")).longValue() : null;
 
             return new FileDecryptInfoVO(
                     initialKey,
@@ -2464,7 +2469,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements Fi
                     fileSize,
                     contentType,
                     chunkCount,
-                    fileHash
+                    fileHash,
+                    chunkSize
             );
 
         } catch (GeneralException e) {

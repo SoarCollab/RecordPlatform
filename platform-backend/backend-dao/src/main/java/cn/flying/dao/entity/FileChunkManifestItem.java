@@ -44,6 +44,10 @@ public class FileChunkManifestItem implements Serializable {
 
     private Long size;
 
+    private Long plainSize;
+
+    private Integer frameCount;
+
     private String storagePath;
 
     private String storageBackend;

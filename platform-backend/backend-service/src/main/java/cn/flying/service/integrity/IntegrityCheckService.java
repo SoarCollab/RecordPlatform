@@ -493,6 +493,9 @@ public class IntegrityCheckService {
         if (manifest.chunkCount() == null || manifest.chunkCount() != chunks.size()) {
             return manifestInvalid("chunk_count_mismatch", manifest.chunkCount(), chunks.size(), null);
         }
+        boolean framedV2 = manifest.encryption() != null
+                && Objects.equals(manifest.encryption().formatVersion(),
+                cn.flying.service.manifest.ChunkManifestEncryption.FORMAT_FRAMED_V2);
         long aggregateSize = 0;
         for (int position = 0; position < chunks.size(); position++) {
             ChunkManifestChunk chunk = chunks.get(position);
@@ -504,7 +507,13 @@ public class IntegrityCheckService {
                         chunk.plainHash(), chunk.index());
             }
             try {
-                aggregateSize = Math.addExact(aggregateSize, chunk.size());
+                if (framedV2 && (chunk.plainSize() == null || chunk.plainSize() <= 0)) {
+                    return manifestInvalid("chunk_plain_size_invalid", ">0",
+                            chunk.plainSize(), chunk.index());
+                }
+                aggregateSize = Math.addExact(
+                        aggregateSize,
+                        framedV2 ? chunk.plainSize() : chunk.size());
             } catch (ArithmeticException e) {
                 return manifestInvalid("chunk_size_overflow", "signed-long", "overflow", chunk.index());
             }
@@ -579,6 +588,7 @@ public class IntegrityCheckService {
                 manifest.merkleRoot(),
                 manifest.encryptionAlgorithm(),
                 manifest.storageBackend(),
+                manifest.encryption(),
                 manifest.chunks());
     }
 

@@ -11,23 +11,23 @@ export const GB = 1024 * 1024 * 1024;
 /** 1 MB in bytes */
 export const MB = 1024 * 1024;
 
-/**
- * Maximum safe file size for in-memory download (Blob-based)
- * Beyond this, we need streaming download to avoid memory issues
- */
-export const MAX_SAFE_INMEMORY_SIZE = 2 * GB;
+/** 无文件选择器时允许的内存回退硬上限。 */
+export const MAX_SAFE_INMEMORY_SIZE = 64 * MB;
 
 /**
  * File size threshold for warning the user before download
  * Files above this size may cause issues on some devices
  */
-export const LARGE_FILE_WARNING_THRESHOLD = 500 * MB;
+export const LARGE_FILE_WARNING_THRESHOLD = MAX_SAFE_INMEMORY_SIZE;
 
 /**
  * File size threshold where streaming is strongly recommended
  * At this size, in-memory download will likely fail on most devices
  */
-export const STREAMING_RECOMMENDED_THRESHOLD = 1 * GB;
+export const STREAMING_RECOMMENDED_THRESHOLD = 500 * MB;
+
+/** 超大文件分级阈值，仅用于提示文案，不放宽内存回退。 */
+export const VERY_LARGE_FILE_THRESHOLD = 2 * GB;
 
 /**
  * Absolute maximum file size we support for download
@@ -54,7 +54,7 @@ export function classifyFileSize(sizeInBytes: number): FileSizeCategory {
   if (sizeInBytes <= STREAMING_RECOMMENDED_THRESHOLD) {
     return "medium";
   }
-  if (sizeInBytes <= MAX_SAFE_INMEMORY_SIZE) {
+  if (sizeInBytes <= VERY_LARGE_FILE_THRESHOLD) {
     return "large";
   }
   if (sizeInBytes <= MAX_DOWNLOADABLE_SIZE) {
@@ -170,7 +170,7 @@ export function decideDownloadStrategy(
     };
   }
 
-  // Small files - always use in-memory
+  // 小文件可以使用受控内存回退。
   if (category === "small") {
     return {
       strategy: "inmemory",
@@ -216,39 +216,32 @@ export function decideDownloadStrategy(
         reason: "Large file, using streaming for reliability",
       };
     }
-    // Fall back to in-memory with warning
-    const memoryWarning = capabilities.deviceMemory
-      ? ` Your device has ${capabilities.deviceMemory}GB of memory.`
-      : "";
     return {
-      strategy: "inmemory",
+      strategy: "backend_proxy",
       requiresUserConfirmation: true,
-      warningMessage: `This file (${formattedSize}) is large and may cause performance issues or fail.${memoryWarning} For better large file support, try Chrome or Edge.`,
-      canProceed: true,
-      reason: "Large file, falling back to in-memory (no streaming support)",
+      warningMessage: `This file (${formattedSize}) exceeds the 64 MiB browser fallback limit. Use Chrome or Edge and choose a save location.`,
+      canProceed: false,
+      reason: "Large file but browser does not support bounded saving",
     };
   }
 
-  // Medium files - use in-memory with optional warning
+  // 超过内存回退上限时必须使用文件系统流式写入。
   if (category === "medium") {
-    // Check if device memory is low
-    const lowMemory =
-      capabilities.deviceMemory && capabilities.deviceMemory < 4;
-    if (lowMemory) {
+    if (canStream) {
       return {
-        strategy: canStream ? "streaming" : "inmemory",
+        strategy: "streaming",
         requiresUserConfirmation: true,
-        warningMessage: `This file (${formattedSize}) may be challenging for your device with ${capabilities.deviceMemory}GB memory.`,
+        warningMessage: `This file (${formattedSize}) will be written directly to disk.`,
         canProceed: true,
-        reason: "Medium file on low-memory device",
+        reason: "File exceeds the in-memory fallback limit",
       };
     }
     return {
-      strategy: "inmemory",
-      requiresUserConfirmation: false,
-      warningMessage: null,
-      canProceed: true,
-      reason: "Medium file, in-memory download should work",
+      strategy: "backend_proxy",
+      requiresUserConfirmation: true,
+      warningMessage: `This file (${formattedSize}) exceeds the 64 MiB browser fallback limit. Use Chrome or Edge and choose a save location.`,
+      canProceed: false,
+      reason: "Browser does not support bounded large-file saving",
     };
   }
 

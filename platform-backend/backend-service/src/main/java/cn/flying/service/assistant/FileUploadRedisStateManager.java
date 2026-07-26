@@ -1262,6 +1262,23 @@ public class FileUploadRedisStateManager {
                 && Objects.equals(
                     expected.getRecoverySchemaVersion(),
                     persisted.getRecoverySchemaVersion())
+                && Objects.equals(
+                    expected.getEncryptionRecoveryVersion(),
+                    persisted.getEncryptionRecoveryVersion())
+                && Objects.equals(
+                    expected.getEncryptionFormatVersion(),
+                    persisted.getEncryptionFormatVersion())
+                && Objects.equals(
+                    expected.getEncryptionAlgorithmSuite(),
+                    persisted.getEncryptionAlgorithmSuite())
+                && Arrays.equals(expected.getFileDataKey(), persisted.getFileDataKey())
+                && Arrays.equals(expected.getFileNonce(), persisted.getFileNonce())
+                && Objects.equals(expected.getFramePlainSize(), persisted.getFramePlainSize())
+                && Objects.equals(expected.getKeyDerivation(), persisted.getKeyDerivation())
+                && Objects.equals(expected.getNonceDerivation(), persisted.getNonceDerivation())
+                && Objects.equals(expected.getAadSchema(), persisted.getAadSchema())
+                && Objects.equals(expected.getTagSize(), persisted.getTagSize())
+                && Objects.equals(expected.getManifestHash(), persisted.getManifestHash())
                 && Objects.equals(expected.getCleanupRetryCount(), persisted.getCleanupRetryCount());
     }
 
@@ -1312,6 +1329,33 @@ public class FileUploadRedisStateManager {
                 "recoverySchemaVersion",
                 current.getRecoverySchemaVersion(),
                 update.getRecoverySchemaVersion()));
+        update.setEncryptionRecoveryVersion(mergeStableValue(
+                "encryptionRecoveryVersion",
+                current.getEncryptionRecoveryVersion(),
+                update.getEncryptionRecoveryVersion()));
+        update.setEncryptionFormatVersion(mergeStableValue(
+                "encryptionFormatVersion",
+                current.getEncryptionFormatVersion(),
+                update.getEncryptionFormatVersion()));
+        update.setEncryptionAlgorithmSuite(mergeStableValue(
+                "encryptionAlgorithmSuite",
+                current.getEncryptionAlgorithmSuite(),
+                update.getEncryptionAlgorithmSuite()));
+        update.setFileDataKey(mergeStableBytes(
+                "fileDataKey", current.getFileDataKey(), update.getFileDataKey()));
+        update.setFileNonce(mergeStableBytes(
+                "fileNonce", current.getFileNonce(), update.getFileNonce()));
+        update.setFramePlainSize(mergeStableValue(
+                "framePlainSize", current.getFramePlainSize(), update.getFramePlainSize()));
+        update.setKeyDerivation(mergeStableValue(
+                "keyDerivation", current.getKeyDerivation(), update.getKeyDerivation()));
+        update.setNonceDerivation(mergeStableValue(
+                "nonceDerivation", current.getNonceDerivation(), update.getNonceDerivation()));
+        update.setAadSchema(mergeStableValue(
+                "aadSchema", current.getAadSchema(), update.getAadSchema()));
+        update.setTagSize(mergeStableValue("tagSize", current.getTagSize(), update.getTagSize()));
+        update.setManifestHash(mergeStableValue(
+                "manifestHash", current.getManifestHash(), update.getManifestHash()));
         update.setSuid(mergeStableValue("suid", current.getSuid(), update.getSuid()));
         update.setUploadTempPath(mergeStableValue(
                 "uploadTempPath", current.getUploadTempPath(), update.getUploadTempPath()));
@@ -1373,6 +1417,22 @@ public class FileUploadRedisStateManager {
                 || !Objects.equals(
                     current.getRecoverySchemaVersion(),
                     update.getRecoverySchemaVersion())
+                || !Objects.equals(
+                    current.getEncryptionRecoveryVersion(),
+                    update.getEncryptionRecoveryVersion())
+                || !Objects.equals(
+                    current.getEncryptionFormatVersion(),
+                    update.getEncryptionFormatVersion())
+                || !Objects.equals(
+                    current.getEncryptionAlgorithmSuite(),
+                    update.getEncryptionAlgorithmSuite())
+                || !Arrays.equals(current.getFileDataKey(), update.getFileDataKey())
+                || !Arrays.equals(current.getFileNonce(), update.getFileNonce())
+                || !Objects.equals(current.getFramePlainSize(), update.getFramePlainSize())
+                || !Objects.equals(current.getKeyDerivation(), update.getKeyDerivation())
+                || !Objects.equals(current.getNonceDerivation(), update.getNonceDerivation())
+                || !Objects.equals(current.getAadSchema(), update.getAadSchema())
+                || !Objects.equals(current.getTagSize(), update.getTagSize())
                 || (current.getFileName() != null && update.getFileName() != null
                     && !Objects.equals(current.getFileName(), update.getFileName()))
                 || current.getFileSize() != update.getFileSize()
@@ -1397,6 +1457,22 @@ public class FileUploadRedisStateManager {
             throw new IllegalStateException("上传会话稳定字段发生变化: " + field);
         }
         return current;
+    }
+
+    /**
+     * 合并只允许首次赋值的 byte[] 稳定字段，避免引用相等导致检查点漂移。
+     */
+    private byte[] mergeStableBytes(String field, byte[] current, byte[] update) {
+        if (current == null) {
+            return update == null ? null : update.clone();
+        }
+        if (update == null) {
+            return current.clone();
+        }
+        if (!Arrays.equals(current, update)) {
+            throw new IllegalStateException("上传会话稳定字段发生变化: " + field);
+        }
+        return current.clone();
     }
 
     /**

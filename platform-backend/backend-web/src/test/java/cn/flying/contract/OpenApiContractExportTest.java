@@ -315,6 +315,33 @@ class OpenApiContractExportTest {
         JsonNode integrityAlertSchema = rootNode.path("components").path("schemas").path("IntegrityAlertVO");
         assertThat(integrityAlertSchema.path("properties").has("severity")).isTrue();
         assertThat(integrityAlertSchema.path("properties").has("evidence")).isTrue();
+        JsonNode downloadMetadataSchema = rootNode.path("components").path("schemas")
+                .path("FileDownloadMetadataVO");
+        assertThat(downloadMetadataSchema.isMissingNode()).isFalse();
+        assertThat(downloadMetadataSchema.path("properties").has("encryption")).isTrue();
+        assertThat(downloadMetadataSchema.path("properties").has("canonicalManifestJson")).isTrue();
+        assertThat(downloadMetadataSchema.path("properties").path("canonicalManifestJson")
+                .path("type").asText()).isEqualTo("string");
+        JsonNode downloadEncryptionSchema = rootNode.path("components").path("schemas")
+                .path("FileDownloadEncryptionVO");
+        assertThat(downloadEncryptionSchema.path("properties").has("formatVersion")).isTrue();
+        assertThat(downloadEncryptionSchema.path("properties").has("algorithmSuite")).isTrue();
+        assertThat(downloadEncryptionSchema.path("properties").has("fileNonce")).isTrue();
+        assertThat(downloadEncryptionSchema.path("properties").has("framePlainSize")).isTrue();
+        assertThat(downloadEncryptionSchema.path("properties").has("keyDerivation")).isTrue();
+        assertThat(downloadEncryptionSchema.path("properties").has("nonceDerivation")).isTrue();
+        assertThat(downloadEncryptionSchema.path("properties").has("aadSchema")).isTrue();
+        assertThat(downloadEncryptionSchema.path("properties").has("tagSize")).isTrue();
+        JsonNode downloadPartSchema = rootNode.path("components").path("schemas")
+                .path("FileDownloadPartVO");
+        assertThat(downloadPartSchema.path("properties").has("plainSize")).isTrue();
+        assertThat(downloadPartSchema.path("properties").has("frameCount")).isTrue();
+        JsonNode downloadMetadataOperation = rootNode.path("paths")
+                .path("/api/v1/files/hash/{fileHash}/download-metadata").path("get");
+        assertThat(downloadMetadataOperation.isMissingNode()).isFalse();
+        assertThat(downloadMetadataOperation.path("responses").path("200")
+                .path("content").path("*/*").path("schema").path("$ref").asText())
+                .isEqualTo("#/components/schemas/ResultFileDownloadMetadataVO");
         JsonNode directCompletePartSchema = rootNode.path("components").path("schemas")
                 .path("DirectUploadCompletePartRequest");
         assertThat(directCompletePartSchema.path("properties").has("eTag")).isTrue();
