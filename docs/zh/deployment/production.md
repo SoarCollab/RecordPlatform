@@ -6,6 +6,9 @@ RecordPlatform 生产环境部署最佳实践。
 
 - [ ] 所有环境变量已配置
 - [ ] `JWT_KEY` 具有高熵值（≥32 字符）
+- [ ] 显式配置 `FILE_KEY_ENVELOPE_ACTIVE_PROVIDER` 与合同版本
+- [ ] Vault 使用 HTTPS 和最小权限 token，或 local 使用独立且至少 32 字符的 master key
+- [ ] 信封轮换完成前持续提供历史 provider/key 版本
 - [ ] SSL 证书已安装
 - [ ] 数据库备份已配置
 - [ ] 监控告警已设置
@@ -28,6 +31,12 @@ RecordPlatform 在 `scripts/` 目录提供现成的脚本。
 ```
 
 按正确顺序启动所有服务并挂载 SkyWalking Agent。
+
+### 生产密钥包封
+
+`application-prod.yml` 不设置默认 active provider，也不回退 `JWT_KEY`。provider 为空、未知、不可用，Vault 使用 HTTP，或显式选择的 local master key 缺失、过短、与 JWT key 相同时，应用会启动失败。
+
+使用 `vault-transit` 时，通过部署 secret 系统注入 `FILE_KEY_ENVELOPE_VAULT_ADDRESS`、`FILE_KEY_ENVELOPE_VAULT_TOKEN`、`FILE_KEY_ENVELOPE_VAULT_KEY_NAME` 和显式 key 版本。禁止把 token 写入 Git 或 Nacos 明文。token 只需对目标 key 的 encrypt、decrypt、rewrap 路径拥有 `update` 能力。Vault Community 能提供外部集中式 KMS，但不构成 HSM 安全边界；HSM-backed 部署需要 Vault Enterprise PKCS#11 seal wrap 或 Managed Keys 及其运维前置条件。
 
 ### 启动单个服务
 

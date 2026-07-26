@@ -180,6 +180,20 @@ file:
 
 Header: 魔数 `RP` (0x52 0x50) + 版本 (0x01) + 算法 (0x01=AES, 0x02=ChaCha20)
 
+### 数据密钥包封 provider
+
+序列化文件数据密钥会从持久化文件元数据中移除，仅以包封后的 `file_key_envelope` 保存。provider-neutral 边界支持 `local` 合同 v1 和 `vault-transit` 合同 v1：
+
+- 新写入只使用显式配置的 active provider；
+- 读取严格使用持久化的 `(kmsProvider, providerContractVersion)`，禁止回退；
+- `rp-file-envelope-aad-v1` 永久保持历史 local 字节顺序；
+- local metadata 会校验 key ID、provider key version、包封算法和 context schema；仍被引用的旧 key ID 必须显式加入 allowlist；
+- 外部 `rp-file-envelope-context-v2` 绑定 tenant、file、hash、recipient 和 suite，Vault 只接收规范字节的 Base64 SHA-256 摘要；
+- 同名 Vault key 轮换使用 Transit `rewrap`，跨 provider 轮换才执行受控 unwrap/wrap；
+- 审计与指标只记录稳定失败分类和 key ID 指纹，不记录原始 key ID、wrapped blob、明文数据密钥、token 或 Vault 错误体。
+
+Vault Community 集成测试只证明 Transit API 合同，不证明 HSM 托管。生产 HSM-backed 部署需要 Vault Enterprise 的 PKCS#11 seal wrap 或 Managed Keys，以及相应许可证、硬件与高可用设计。
+
 ## HTTPS 强制
 
 生产环境自动将 HTTP 重定向到 HTTPS：

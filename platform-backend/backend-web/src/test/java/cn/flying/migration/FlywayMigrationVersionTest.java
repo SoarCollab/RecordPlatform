@@ -49,6 +49,7 @@ class FlywayMigrationVersionTest {
         assertTrue(migrationFiles.contains("V1.15.0__proof_status_timestamp_precision.sql"));
         assertTrue(migrationFiles.contains("V1.16.0__framed_download_contract.sql"));
         assertTrue(migrationFiles.contains("V1.17.0__manifest_backfill_governance.sql"));
+        assertTrue(migrationFiles.contains("V1.18.0__key_wrapping_provider_metadata.sql"));
         assertFalse(migrationFiles.contains("V1.0.1__add_account_nickname.sql"));
         assertFalse(migrationFiles.contains("V1.5.0__integrity_alert.sql"));
 
@@ -59,6 +60,18 @@ class FlywayMigrationVersionTest {
             MigrationVersion version = MigrationVersion.fromVersion(matcher.group(1));
             assertTrue(versions.add(version), "Duplicate migration version: " + matcher.group(1));
         }
+    }
+
+    /**
+     * 验证 V1.18 目标索引覆盖冻结的完整 provider 轮换身份。
+     */
+    @Test
+    void shouldIndexCompleteKeyWrappingTargetIdentity() throws IOException {
+        String sql = Files.readString(resolveMigrationDir().resolve(
+                "V1.18.0__key_wrapping_provider_metadata.sql"));
+
+        assertTrue(sql.contains("`provider_contract_version`, `kms_key_id`(128)"));
+        assertTrue(sql.contains("`provider_key_version`, `key_version`, `wrapping_algorithm`, `context_schema`"));
     }
 
     /**
@@ -392,6 +405,30 @@ class FlywayMigrationVersionTest {
         assertTrue(normalizedSql.contains("`content_length` BIGINT NOT NULL"));
         assertTrue(normalizedSql.contains("`protection_until` DATETIME NOT NULL"));
         assertFalse(normalizedSql.matches("(?is).*UPDATE\\s+`(?:file|file_chunk_manifest)`.*"));
+        assertFalse(normalizedSql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
+    }
+
+    /**
+     * 验证密钥包装提供方元数据仅通过 V1.18 前向迁移扩展，并保留历史本地信封语义。
+     */
+    @Test
+    @DisplayName("should add key wrapping provider metadata through forward migration")
+    void shouldAddKeyWrappingProviderMetadataThroughForwardMigration() throws IOException {
+        Path migration = resolveMigrationDir().resolve("V1.18.0__key_wrapping_provider_metadata.sql");
+        assertTrue(Files.isRegularFile(migration), "Missing key wrapping provider migration");
+        String sql = Files.readString(migration);
+        String normalizedSql = sql.replaceAll("\\s+", " ").trim();
+
+        assertTrue(normalizedSql.contains("ADD COLUMN `provider_contract_version` INT NOT NULL DEFAULT 1"));
+        assertTrue(normalizedSql.contains("ADD COLUMN `provider_key_version` VARCHAR(128) DEFAULT NULL"));
+        assertTrue(normalizedSql.contains("ADD COLUMN `context_schema` VARCHAR(64) NOT NULL DEFAULT 'rp-file-envelope-aad-v1'"));
+        assertTrue(normalizedSql.contains("MODIFY COLUMN `kms_key_id` VARCHAR(512) NOT NULL"));
+        assertTrue(normalizedSql.contains("MODIFY COLUMN `wrapping_iv` VARCHAR(64) DEFAULT NULL"));
+        assertTrue(normalizedSql.contains("SET `kms_provider` = 'local'"));
+        assertTrue(normalizedSql.contains("`provider_key_version` = CAST(`key_version` AS CHAR)"));
+        assertTrue(normalizedSql.contains("ADD KEY `idx_file_key_envelope_target`"));
+        assertTrue(normalizedSql.contains("ADD COLUMN `failure_category` VARCHAR(64) DEFAULT NULL"));
+        assertTrue(normalizedSql.contains("ADD KEY `idx_file_key_audit_provider`"));
         assertFalse(normalizedSql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
     }
 

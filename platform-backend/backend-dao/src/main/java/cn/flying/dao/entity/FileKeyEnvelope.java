@@ -56,7 +56,13 @@ public class FileKeyEnvelope implements Serializable {
 
     private String kmsProvider;
 
+    private Integer providerContractVersion;
+
     private String kmsKeyId;
+
+    private String providerKeyVersion;
+
+    private String contextSchema;
 
     private String encryptedDataKey;
 

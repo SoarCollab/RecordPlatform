@@ -13,6 +13,7 @@ import cn.flying.dao.mapper.FileKeyAuditLogMapper;
 import cn.flying.dao.mapper.FileKeyEnvelopeMapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,6 +51,7 @@ class FileKeyEnvelopeServiceTest {
 
     private FileKeyEnvelopeProperties properties;
     private LocalKeyWrappingService wrappingService;
+    private KeyWrappingProviderRegistry wrappingRegistry;
     private CryptoSuitePolicyService suitePolicy;
     private FileKeyEnvelopeService envelopeService;
 
@@ -65,8 +67,11 @@ class FileKeyEnvelopeServiceTest {
         properties = new FileKeyEnvelopeProperties();
         properties.setLocalMasterKey("test-master-key-with-enough-entropy");
         wrappingService = new LocalKeyWrappingService(properties);
+        wrappingRegistry = new KeyWrappingProviderRegistry(
+                java.util.List.of(wrappingService), properties, new SimpleMeterRegistry());
         suitePolicy = new CryptoSuitePolicyService(properties);
-        envelopeService = new FileKeyEnvelopeService(fileKeyEnvelopeMapper, fileKeyAuditLogMapper, wrappingService, properties, suitePolicy);
+        envelopeService = new FileKeyEnvelopeService(
+                fileKeyEnvelopeMapper, fileKeyAuditLogMapper, wrappingRegistry, properties, suitePolicy);
     }
 
     /**
@@ -421,13 +426,24 @@ class FileKeyEnvelopeServiceTest {
         assertEquals("UNSIGNED-V1", envelope.getSignatureSuite());
         assertEquals("NONE-V1", envelope.getKemSuite());
         assertEquals("RP-MERKLE-SHA256-V1", envelope.getProofSuite());
+        assertEquals("local", envelope.getKmsProvider());
+        assertEquals(1, envelope.getProviderContractVersion());
+        assertEquals("1", envelope.getProviderKeyVersion());
+        assertEquals(WrappingContext.LOCAL_AAD_V1, envelope.getContextSchema());
         assertEquals(FileKeyEnvelopeService.STATUS_ACTIVE, envelope.getStatus());
 
+        clearInvocations(fileKeyAuditLogMapper);
         when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(envelope);
         Optional<String> unwrapped = envelopeService.unwrapActiveOwnerInitialKey(file, "hash-1", 100L);
 
         assertTrue(unwrapped.isPresent());
         assertEquals("serialized-key", unwrapped.get());
+        ArgumentCaptor<FileKeyAuditLog> auditCaptor = ArgumentCaptor.forClass(FileKeyAuditLog.class);
+        verify(fileKeyAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals("local", auditCaptor.getValue().getKmsProvider());
+        assertEquals("NONE", auditCaptor.getValue().getFailureCategory());
+        assertThat(auditCaptor.getValue().getKeyIdFingerprint()).hasSize(64);
+        assertThat(auditCaptor.getValue().getKeyIdFingerprint()).doesNotContain(envelope.getKmsKeyId());
     }
 
     /**
@@ -998,5 +1014,328 @@ class FileKeyEnvelopeServiceTest {
 
         assertEquals(0, secondRotation.rotatedCount());
         assertEquals(1, secondRotation.skippedCount());
+    }
+
+    /**
+     * 验证 AAD hash 篡改在 provider 调用前失败并写入稳定审计分类。
+     */
+    @Test
+    void shouldRejectTamperedAadHashWithStableAuditCategory() {
+        File file = new File().setId(10L).setTenantId(1L).setUid(100L).setFileHash("hash-1");
+        FileParamEnvelopeResult result = envelopeService.prepareFileParam(
+                "{\"initialKey\":\"serialized-key\"}");
+        ArgumentCaptor<FileKeyEnvelope> envelopeCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+        envelopeService.saveOwnerEnvelope(file, "hash-1", 100L, result);
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope tampered = envelopeCaptor.getValue().setAadHash("0".repeat(64));
+
+        clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(tampered);
+
+        assertThatThrownBy(() -> envelopeService.unwrapActiveOwnerInitialKey(file, "hash-1", 100L))
+                .isInstanceOf(GeneralException.class);
+        ArgumentCaptor<FileKeyAuditLog> auditCaptor = ArgumentCaptor.forClass(FileKeyAuditLog.class);
+        verify(fileKeyAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals("INVALID_CIPHERTEXT", auditCaptor.getValue().getFailureCategory());
+        assertThat(auditCaptor.getValue().getErrorMessage()).isNull();
+    }
+
+    /**
+     * 验证历史未知 provider 严格失败关闭且不回退 active local。
+     */
+    @Test
+    void shouldFailClosedForUnknownPersistedProvider() {
+        File file = new File().setId(10L).setTenantId(1L).setUid(100L).setFileHash("hash-1");
+        FileParamEnvelopeResult result = envelopeService.prepareFileParam(
+                "{\"initialKey\":\"serialized-key\"}");
+        ArgumentCaptor<FileKeyEnvelope> envelopeCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+        envelopeService.saveOwnerEnvelope(file, "hash-1", 100L, result);
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope unknown = envelopeCaptor.getValue().setKmsProvider("unknown-provider");
+
+        clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(unknown);
+
+        assertThatThrownBy(() -> envelopeService.unwrapActiveOwnerInitialKey(file, "hash-1", 100L))
+                .isInstanceOf(GeneralException.class);
+        ArgumentCaptor<FileKeyAuditLog> auditCaptor = ArgumentCaptor.forClass(FileKeyAuditLog.class);
+        verify(fileKeyAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals("CONFIGURATION", auditCaptor.getValue().getFailureCategory());
+    }
+
+    /**
+     * 验证未知 context schema 在解封前失败关闭并写入稳定审计分类。
+     */
+    @Test
+    void shouldFailClosedForUnknownPersistedContextSchema() {
+        File file = new File().setId(10L).setTenantId(1L).setUid(100L).setFileHash("hash-1");
+        FileParamEnvelopeResult result = envelopeService.prepareFileParam(
+                "{\"initialKey\":\"serialized-key\"}");
+        ArgumentCaptor<FileKeyEnvelope> envelopeCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+        envelopeService.saveOwnerEnvelope(file, "hash-1", 100L, result);
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope unknown = envelopeCaptor.getValue().setContextSchema("unknown-context-v99");
+
+        clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
+        when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(unknown);
+
+        assertThatThrownBy(() -> envelopeService.unwrapActiveOwnerInitialKey(file, "hash-1", 100L))
+                .isInstanceOf(GeneralException.class);
+        ArgumentCaptor<FileKeyAuditLog> auditCaptor = ArgumentCaptor.forClass(FileKeyAuditLog.class);
+        verify(fileKeyAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals("INVALID_REQUEST", auditCaptor.getValue().getFailureCategory());
+    }
+
+    /**
+     * 验证 rotation 使用完整目标身份，同逻辑版本但 key id 变化仍会重包封。
+     */
+    @Test
+    void shouldRotateWhenFullTargetIdentityChangesAtSameLogicalVersion() {
+        properties.setKmsKeyId("local-key-a");
+        File file = new File().setId(10L).setTenantId(1L).setUid(100L).setFileHash("hash-1");
+        FileParamEnvelopeResult result = envelopeService.prepareFileParam(
+                "{\"initialKey\":\"serialized-key\"}");
+        ArgumentCaptor<FileKeyEnvelope> envelopeCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+        envelopeService.saveOwnerEnvelope(file, "hash-1", 100L, result);
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope previous = envelopeCaptor.getValue().setId(501L);
+
+        clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
+        properties.setKmsKeyId("local-key-b");
+        properties.getProviders().getLocal().setHistoricalKeyIds(Set.of("local-key-a"));
+        when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(previous));
+        when(fileKeyEnvelopeMapper.selectCount(any())).thenReturn(0L);
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+
+        KeyEnvelopeRotationResult rotation = envelopeService.rotateActiveFileEnvelopes(file, 900L, "ROTATE_KEY_ID");
+
+        assertEquals(1, rotation.rotatedCount());
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        assertEquals("local-key-b", envelopeCaptor.getValue().getKmsKeyId());
+    }
+
+    /**
+     * 验证远程/配置包封失败发生在 supersede 之前，旧 active 信封保持可用。
+     */
+    @Test
+    void shouldNotSupersedeOldEnvelopeWhenTargetWrapFails() {
+        properties.setLocalMasterKeys(Map.of(1, "previous-local-master-key"));
+        properties.setLocalMasterKey(null);
+        properties.setKeyVersion(1);
+        File file = new File().setId(10L).setTenantId(1L).setUid(100L).setFileHash("hash-1");
+        FileParamEnvelopeResult result = envelopeService.prepareFileParam(
+                "{\"initialKey\":\"serialized-key\"}");
+        ArgumentCaptor<FileKeyEnvelope> envelopeCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+        envelopeService.saveOwnerEnvelope(file, "hash-1", 100L, result);
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope previous = envelopeCaptor.getValue().setId(501L);
+
+        clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
+        properties.setKeyVersion(2);
+        when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(previous));
+        when(fileKeyEnvelopeMapper.selectCount(any())).thenReturn(0L);
+
+        assertThatThrownBy(() -> envelopeService.rotateActiveFileEnvelopes(file, 900L, "ROTATE_FAIL"))
+                .isInstanceOf(GeneralException.class);
+        verify(fileKeyEnvelopeMapper, org.mockito.Mockito.never()).updateById(any(FileKeyEnvelope.class));
+        verify(fileKeyEnvelopeMapper, org.mockito.Mockito.never()).insert(any(FileKeyEnvelope.class));
+    }
+
+    /**
+     * 验证相同外部 named key 版本升级优先使用 provider 原生 rewrap。
+     */
+    @Test
+    void shouldPreferNativeProviderRewrapForSameExternalKey() {
+        properties.setActiveProvider("native-test");
+        properties.setKeyVersion(2);
+        NativeRewrapProvider provider = new NativeRewrapProvider();
+        KeyWrappingProviderRegistry registry = new KeyWrappingProviderRegistry(
+                java.util.List.of(provider), properties, new SimpleMeterRegistry());
+        FileKeyEnvelopeService service = new FileKeyEnvelopeService(
+                fileKeyEnvelopeMapper,
+                fileKeyAuditLogMapper,
+                registry,
+                properties,
+                suitePolicy);
+        File file = new File().setId(10L).setTenantId(1L).setUid(100L).setFileHash("hash-1");
+        WrappingContext sourceContext = new WrappingContext(
+                1L,
+                10L,
+                "hash-1",
+                FileKeyEnvelopeService.RECIPIENT_TYPE_OWNER,
+                100L,
+                1,
+                properties.getAlgorithmSuite(),
+                WrappingContext.EXTERNAL_CONTEXT_V2);
+        FileKeyEnvelope previous = new FileKeyEnvelope()
+                .setId(501L)
+                .setTenantId(1L)
+                .setFileId(10L)
+                .setFileHash("hash-1")
+                .setRecipientType(FileKeyEnvelopeService.RECIPIENT_TYPE_OWNER)
+                .setRecipientId(100L)
+                .setKeyVersion(1)
+                .setAlgorithmSuite(properties.getAlgorithmSuite())
+                .setSignatureSuite(properties.getSignatureSuite())
+                .setKemSuite(properties.getKemSuite())
+                .setProofSuite(properties.getProofSuite())
+                .setEncryptionAlgorithm(properties.getEncryptionAlgorithm())
+                .setWrappingAlgorithm("TEST-NATIVE")
+                .setKmsProvider("native-test")
+                .setProviderContractVersion(1)
+                .setKmsKeyId("shared-named-key")
+                .setProviderKeyVersion("1")
+                .setContextSchema(WrappingContext.EXTERNAL_CONTEXT_V2)
+                .setEncryptedDataKey("native:v1:ciphertext")
+                .setAadHash(sourceContext.sha256Hex())
+                .setStatus(FileKeyEnvelopeService.STATUS_ACTIVE)
+                .setDeleted(0);
+        when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(previous));
+        when(fileKeyEnvelopeMapper.selectCount(any())).thenReturn(0L);
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+
+        KeyEnvelopeRotationResult result = service.rotateActiveFileEnvelopes(file, 900L, "NATIVE_REWRAP");
+
+        assertEquals(1, result.rotatedCount());
+        assertEquals(1, provider.rewrapCalls);
+        assertEquals(0, provider.unwrapCalls);
+        assertEquals(0, provider.wrapCalls);
+        ArgumentCaptor<FileKeyEnvelope> inserted = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        verify(fileKeyEnvelopeMapper).insert(inserted.capture());
+        assertEquals("2", inserted.getValue().getProviderKeyVersion());
+        assertEquals("native:v2:ciphertext", inserted.getValue().getEncryptedDataKey());
+    }
+
+    /**
+     * 验证轮换遇到未知历史 context schema 时先审计失败且不替换旧 active 信封。
+     */
+    @Test
+    void shouldAuditUnknownContextSchemaBeforeRotationMutation() {
+        File file = new File().setId(10L).setTenantId(1L).setUid(100L).setFileHash("hash-1");
+        FileParamEnvelopeResult result = envelopeService.prepareFileParam(
+                "{\"initialKey\":\"serialized-key\"}");
+        ArgumentCaptor<FileKeyEnvelope> envelopeCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+        envelopeService.saveOwnerEnvelope(file, "hash-1", 100L, result);
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope previous = envelopeCaptor.getValue()
+                .setId(501L)
+                .setContextSchema("unknown-context-v99");
+
+        clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
+        properties.setKeyVersion(2);
+        when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(previous));
+
+        assertThatThrownBy(() -> envelopeService.rotateActiveFileEnvelopes(file, 900L, "UNKNOWN_CONTEXT"))
+                .isInstanceOf(GeneralException.class);
+        verify(fileKeyEnvelopeMapper, org.mockito.Mockito.never()).updateById(any(FileKeyEnvelope.class));
+        verify(fileKeyEnvelopeMapper, org.mockito.Mockito.never()).insert(any(FileKeyEnvelope.class));
+        ArgumentCaptor<FileKeyAuditLog> auditCaptor = ArgumentCaptor.forClass(FileKeyAuditLog.class);
+        verify(fileKeyAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals("INVALID_REQUEST", auditCaptor.getValue().getFailureCategory());
+    }
+
+    /**
+     * 验证目标身份已相等时仍先校验 AAD，篡改信封不能被幂等分支误报为跳过成功。
+     */
+    @Test
+    void shouldRejectTamperedAadBeforeIdempotentRotationSkip() {
+        File file = new File().setId(10L).setTenantId(1L).setUid(100L).setFileHash("hash-1");
+        FileParamEnvelopeResult result = envelopeService.prepareFileParam(
+                "{\"initialKey\":\"serialized-key\"}");
+        ArgumentCaptor<FileKeyEnvelope> envelopeCaptor = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+        envelopeService.saveOwnerEnvelope(file, "hash-1", 100L, result);
+        verify(fileKeyEnvelopeMapper).insert(envelopeCaptor.capture());
+        FileKeyEnvelope tampered = envelopeCaptor.getValue()
+                .setId(501L)
+                .setAadHash("0".repeat(64));
+
+        clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
+        when(fileKeyEnvelopeMapper.selectList(any())).thenReturn(java.util.List.of(tampered));
+
+        assertThatThrownBy(() -> envelopeService.rotateActiveFileEnvelopes(
+                file, 900L, "TAMPERED_IDEMPOTENT_ROTATION"))
+                .isInstanceOf(GeneralException.class);
+        verify(fileKeyEnvelopeMapper, org.mockito.Mockito.never()).updateById(any(FileKeyEnvelope.class));
+        verify(fileKeyEnvelopeMapper, org.mockito.Mockito.never()).insert(any(FileKeyEnvelope.class));
+        ArgumentCaptor<FileKeyAuditLog> auditCaptor = ArgumentCaptor.forClass(FileKeyAuditLog.class);
+        verify(fileKeyAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals("INVALID_CIPHERTEXT", auditCaptor.getValue().getFailureCategory());
+        assertEquals("FAILURE", auditCaptor.getValue().getResult());
+    }
+
+    /**
+     * 记录原生 rewrap 调用并拒绝编排层明文往返的测试 provider。
+     */
+    private static final class NativeRewrapProvider implements KeyWrappingProvider {
+
+        private int wrapCalls;
+        private int unwrapCalls;
+        private int rewrapCalls;
+
+        @Override
+        public String providerId() {
+            return "native-test";
+        }
+
+        @Override
+        public int contractVersion() {
+            return 1;
+        }
+
+        @Override
+        public Set<KeyWrappingCapability> capabilities() {
+            return Set.of(
+                    KeyWrappingCapability.WRAP,
+                    KeyWrappingCapability.UNWRAP,
+                    KeyWrappingCapability.NATIVE_REWRAP_SAME_KEY);
+        }
+
+        @Override
+        public KeyWrappingResult<WrappingKeyReference> activeKeyReference(Integer logicalKeyVersion) {
+            return KeyWrappingResult.success(new WrappingKeyReference(
+                    providerId(),
+                    contractVersion(),
+                    "shared-named-key",
+                    "2",
+                    "TEST-NATIVE",
+                    WrappingContext.EXTERNAL_CONTEXT_V2));
+        }
+
+        @Override
+        public KeyWrappingResult<WrappedDataKey> wrap(KeyWrapRequest request) {
+            wrapCalls++;
+            return KeyWrappingResult.failure(KeyWrappingFailure.of(
+                    KeyWrappingFailureCategory.INTERNAL, false));
+        }
+
+        @Override
+        public KeyWrappingResult<PlaintextDataKey> unwrap(KeyUnwrapRequest request) {
+            unwrapCalls++;
+            return KeyWrappingResult.failure(KeyWrappingFailure.of(
+                    KeyWrappingFailureCategory.INTERNAL, false));
+        }
+
+        @Override
+        public KeyWrappingResult<WrappedDataKey> rewrap(KeyRewrapRequest request) {
+            rewrapCalls++;
+            return KeyWrappingResult.success(new WrappedDataKey(
+                    "native:v2:ciphertext",
+                    null,
+                    request.target(),
+                    request.logicalKeyVersion()));
+        }
+
+        @Override
+        public KeyWrappingProviderDiagnostics diagnostics() {
+            return new KeyWrappingProviderDiagnostics(
+                    providerId(), contractVersion(), capabilities(), true, "configured");
+        }
     }
 }

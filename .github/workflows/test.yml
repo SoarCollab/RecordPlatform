@@ -81,6 +81,64 @@ jobs:
       - name: Run Backend Tests
         run: mvn -f platform-backend/pom.xml clean verify -pl backend-common,backend-service,backend-web -am -Pit
 
+      - name: Require Vault Transit Key Wrapping IT Execution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          report = Path(
+              "platform-backend/backend-web/target/failsafe-reports/"
+              "TEST-cn.flying.service.key.VaultTransitKeyWrappingProviderIT.xml"
+          )
+          if not report.is_file():
+              sys.exit(f"Missing required Failsafe report: {report}")
+
+          suite = ET.parse(report).getroot()
+          expected_counts = {
+              "tests": 5,
+              "skipped": 0,
+              "failures": 0,
+              "errors": 0,
+          }
+          for name, expected in expected_counts.items():
+              actual = int(suite.attrib.get(name, "-1"))
+              if actual != expected:
+                  sys.exit(
+                      f"VaultTransitKeyWrappingProviderIT {name}={actual}; expected {expected}"
+                  )
+          PY
+
+      - name: Require Key Wrapping Provider Migration IT Execution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          report = Path(
+              "platform-backend/backend-web/target/failsafe-reports/"
+              "TEST-cn.flying.migration.KeyWrappingProviderMigrationIT.xml"
+          )
+          if not report.is_file():
+              sys.exit(f"Missing required Failsafe report: {report}")
+
+          suite = ET.parse(report).getroot()
+          expected_counts = {
+              "tests": 2,
+              "skipped": 0,
+              "failures": 0,
+              "errors": 0,
+          }
+          for name, expected in expected_counts.items():
+              actual = int(suite.attrib.get(name, "-1"))
+              if actual != expected:
+                  sys.exit(
+                      f"KeyWrappingProviderMigrationIT {name}={actual}; expected {expected}"
+                  )
+          PY
+
       - name: Require Public Share Rate Limit IT Execution
         run: |
           python3 - <<'PY'
