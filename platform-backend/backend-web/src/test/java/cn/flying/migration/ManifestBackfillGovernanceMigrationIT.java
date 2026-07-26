@@ -82,6 +82,7 @@ class ManifestBackfillGovernanceMigrationIT {
             assertThat(countActiveManifests(connection)).isEqualTo(1);
 
             insertRunAndClaimItems(connection);
+            assertClaimQueryUsesDeterministicIndex(connection);
             assertClaimCompletionFence(connection);
             assertSkipLockedClaimsDistinctRows();
         }
@@ -250,13 +251,58 @@ class ManifestBackfillGovernanceMigrationIT {
     }
 
     /**
+     * 验证 claim 锁定读按确定性候选索引扫描，避免 filesort 扩大锁定范围。
+     */
+    private void assertClaimQueryUsesDeterministicIndex(Connection connection) throws SQLException {
+        try (var statement = connection.prepareStatement("""
+                EXPLAIN SELECT id
+                  FROM manifest_backfill_item FORCE INDEX (idx_manifest_backfill_item_claim)
+                 WHERE run_id = ?
+                   AND tenant_id = ?
+                   AND deleted = 0
+                   AND classification = 'BACKFILLABLE'
+                   AND attempt_count < 3
+                   AND (
+                        status = 'PENDING'
+                        OR (status = 'FAILED' AND retryable = 1
+                            AND (next_retry_at IS NULL OR next_retry_at <= NOW()))
+                        OR (status = 'RUNNING' AND lease_expires_at IS NOT NULL
+                            AND lease_expires_at <= NOW())
+                   )
+                 ORDER BY file_id, id
+                 LIMIT 1
+                """)) {
+            statement.setLong(1, RUN_ID);
+            statement.setLong(2, TENANT_ID);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                assertThat(resultSet.next()).isTrue();
+                assertThat(resultSet.getString("key"))
+                        .isEqualTo("idx_manifest_backfill_item_claim");
+                assertThat(resultSet.getString("Extra"))
+                        .doesNotContain("Using filesort");
+            }
+        }
+    }
+
+    /**
      * 锁定并返回下一条 pending item，跳过其他事务已持有的行锁。
      */
     private long selectNextPendingForUpdate(Connection connection) throws SQLException {
         try (var statement = connection.prepareStatement("""
                 SELECT id
-                  FROM manifest_backfill_item
-                 WHERE run_id = ? AND tenant_id = ? AND status = 'PENDING' AND deleted = 0
+                  FROM manifest_backfill_item FORCE INDEX (idx_manifest_backfill_item_claim)
+                 WHERE run_id = ?
+                   AND tenant_id = ?
+                   AND deleted = 0
+                   AND classification = 'BACKFILLABLE'
+                   AND attempt_count < 3
+                   AND (
+                        status = 'PENDING'
+                        OR (status = 'FAILED' AND retryable = 1
+                            AND (next_retry_at IS NULL OR next_retry_at <= NOW()))
+                        OR (status = 'RUNNING' AND lease_expires_at IS NOT NULL
+                            AND lease_expires_at <= NOW())
+                   )
                  ORDER BY file_id, id
                  LIMIT 1
                  FOR UPDATE SKIP LOCKED

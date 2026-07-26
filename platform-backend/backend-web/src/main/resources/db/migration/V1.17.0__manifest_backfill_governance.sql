@@ -87,7 +87,8 @@ CREATE TABLE IF NOT EXISTS `manifest_backfill_item` (
     `deleted`                  TINYINT      NOT NULL DEFAULT 0,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_manifest_backfill_item_candidate` (`run_id`, `tenant_id`, `file_id`, `file_version`),
-    KEY `idx_manifest_backfill_item_claim` (`run_id`, `tenant_id`, `status`, `next_retry_at`, `file_id`, `id`),
+    KEY `idx_manifest_backfill_item_claim`
+        (`run_id`, `tenant_id`, `deleted`, `classification`, `file_id`, `id`),
     KEY `idx_manifest_backfill_item_file` (`tenant_id`, `file_id`, `file_version`, `create_time`),
     KEY `idx_manifest_backfill_item_filter` (`run_id`, `status`, `classification`, `reason_code`, `id`),
     CONSTRAINT `fk_manifest_backfill_item_run`

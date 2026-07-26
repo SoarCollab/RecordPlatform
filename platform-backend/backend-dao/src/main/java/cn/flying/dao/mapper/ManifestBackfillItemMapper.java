@@ -58,7 +58,7 @@ public interface ManifestBackfillItemMapper extends BaseMapper<ManifestBackfillI
                    evidence_digest, evidence_payload, manifest_id, claim_token,
                    lease_expires_at, attempt_count, next_retry_at, last_error_class,
                    create_time, update_time, deleted
-            FROM manifest_backfill_item
+            FROM manifest_backfill_item FORCE INDEX (idx_manifest_backfill_item_claim)
             WHERE run_id = #{runId}
               AND tenant_id = #{tenantId}
               AND deleted = 0

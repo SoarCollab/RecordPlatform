@@ -57,6 +57,26 @@ class ManifestGovernanceStatusServiceTest {
     }
 
     /**
+     * 验证空身份与不带版本的完整性告警都使用稳定的治理状态映射。
+     */
+    @Test
+    void shouldHandleNullIdentityAndVersionlessAlertLookup() {
+        ManifestErrorDetail unclassified = new ManifestErrorDetail(
+                "REUPLOAD_REQUIRED", "UNCLASSIFIED", "MISSING_MANIFEST_UNCLASSIFIED", false);
+        ManifestBackfillItem item = new ManifestBackfillItem()
+                .setStatus("FAILED")
+                .setClassification("FAILED")
+                .setReasonCode("OBJECT_NOT_FOUND")
+                .setLegacyDownloadAllowed(0);
+        when(itemMapper.selectLatestForFileAnyVersion(20L, 10L)).thenReturn(item);
+
+        assertThat(service.missingManifest((File) null)).isEqualTo(unclassified);
+        assertThat(service.missingManifest(null, 10L)).isEqualTo(unclassified);
+        assertThat(service.missingManifest(20L, 10L)).isEqualTo(
+                new ManifestErrorDetail("FAILED", "FAILED", "OBJECT_NOT_FOUND", false));
+    }
+
+    /**
      * Verifies successful products share the same active-manifest vocabulary.
      */
     @Test

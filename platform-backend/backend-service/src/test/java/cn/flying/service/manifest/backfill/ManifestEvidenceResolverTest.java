@@ -86,10 +86,17 @@ class ManifestEvidenceResolverTest {
                 .thenReturn("sha256:" + "4".repeat(64));
 
         ManifestEvidenceResolution result = resolver.resolve(file);
+        ManifestBackfillEvidenceSnapshot snapshot = resolver.revalidate(
+                file,
+                result.evidencePayload(),
+                result.evidenceDigest());
 
         assertThat(result.classification()).isEqualTo(ManifestBackfillClassification.BACKFILLABLE);
         assertThat(result.reason()).isEqualTo(ManifestBackfillReason.BACKFILLABLE_EVIDENCE);
         assertThat(result.evidencePayload()).contains(CHAIN_RECORD_ID, CONTENT_HASH);
+        assertThat(snapshot.fileId()).isEqualTo(file.getId());
+        assertThat(snapshot.tenantId()).isEqualTo(TENANT_ID);
+        assertThat(snapshot.manifestHash()).isEqualTo("sha256:" + "4".repeat(64));
     }
 
     /**

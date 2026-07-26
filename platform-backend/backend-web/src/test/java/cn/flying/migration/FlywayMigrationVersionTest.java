@@ -383,6 +383,9 @@ class FlywayMigrationVersionTest {
         assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `manifest_backfill_item`"));
         assertTrue(normalizedSql.contains("`claim_token` VARCHAR(64) DEFAULT NULL"));
         assertTrue(normalizedSql.contains("`lease_expires_at` DATETIME DEFAULT NULL"));
+        assertTrue(normalizedSql.contains(
+                "KEY `idx_manifest_backfill_item_claim` (`run_id`, `tenant_id`, `deleted`, "
+                        + "`classification`, `file_id`, `id`)"));
         assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `manifest_reference_census`"));
         assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `manifest_reference_ledger`"));
         assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `manifest_reference_sweep_mark`"));

@@ -497,4 +497,34 @@ class FileRemoteClientTest {
         assertThat(result.getCode()).isEqualTo(ResultEnum.BLOCKCHAIN_ERROR.getCode());
         assertThat(result.getData()).isEmpty();
     }
+
+    /**
+     * 验证存储对象探测和降级写计数在 RPC 失败时返回稳定的存储服务错误。
+     */
+    @Test
+    void storageGovernanceFallbacks_shouldReturnStableErrors() {
+        Result<Long> expected = Result.success(2L);
+        when(storageService.getDegradedWriteCount()).thenReturn(expected);
+
+        Result<Long> actual = fileRemoteClient.getDegradedWriteCount();
+        @SuppressWarnings("unchecked")
+        Result<Object> headFallback = (Result<Object>) ReflectionTestUtils.invokeMethod(
+                fileRemoteClient,
+                "headObjectFallback",
+                "storage/tenant/7/chunk/hash",
+                "hash",
+                new IllegalStateException("head unavailable"));
+        @SuppressWarnings("unchecked")
+        Result<Long> countFallback = (Result<Long>) ReflectionTestUtils.invokeMethod(
+                fileRemoteClient,
+                "getDegradedWriteCountFallback",
+                new IllegalStateException("count unavailable"));
+
+        assertThat(actual).isSameAs(expected);
+        assertThat(headFallback.getCode()).isEqualTo(ResultEnum.FILE_SERVICE_ERROR.getCode());
+        assertThat(headFallback.getData()).isNull();
+        assertThat(countFallback.getCode()).isEqualTo(ResultEnum.FILE_SERVICE_ERROR.getCode());
+        assertThat(countFallback.getData()).isNull();
+        verify(storageService).getDegradedWriteCount();
+    }
 }
