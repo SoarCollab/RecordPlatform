@@ -1,5 +1,6 @@
 package cn.flying.contract;
 
+import cn.flying.common.annotation.OperationLog;
 import cn.flying.common.util.ControllerUtils;
 import cn.flying.common.util.JwtUtils;
 import cn.flying.config.SwaggerConfiguration;
@@ -18,6 +19,7 @@ import cn.flying.controller.FriendFileShareController;
 import cn.flying.controller.ImageController;
 import cn.flying.controller.IntegrityAlertController;
 import cn.flying.controller.MessageController;
+import cn.flying.controller.ManifestBackfillAdminController;
 import cn.flying.controller.PermissionController;
 import cn.flying.controller.QuotaAdminController;
 import cn.flying.controller.QuotaController;
@@ -48,6 +50,10 @@ import cn.flying.service.FriendFileShareService;
 import cn.flying.service.FriendService;
 import cn.flying.service.ImageService;
 import cn.flying.service.integrity.IntegrityCheckService;
+import cn.flying.service.manifest.backfill.ManifestBackfillRunService;
+import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
+import cn.flying.service.manifest.backfill.ManifestReferenceCensusService;
+import cn.flying.service.manifest.backfill.ManifestReferenceSweepService;
 import cn.flying.service.MessageService;
 import cn.flying.service.PermissionService;
 import cn.flying.service.QuotaRolloutAuditService;
@@ -72,6 +78,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.nio.charset.StandardCharsets;
@@ -84,6 +91,8 @@ import java.util.HexFormat;
 import java.util.List;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -183,6 +192,18 @@ class OpenApiContractExportTest {
     private IntegrityCheckService integrityCheckService;
 
     @MockitoBean
+    private ManifestGovernanceStatusService manifestGovernanceStatusService;
+
+    @MockitoBean
+    private ManifestBackfillRunService manifestBackfillRunService;
+
+    @MockitoBean
+    private ManifestReferenceCensusService manifestReferenceCensusService;
+
+    @MockitoBean
+    private ManifestReferenceSweepService manifestReferenceSweepService;
+
+    @MockitoBean
     private IntegrityAlertMapper integrityAlertMapper;
 
     @MockitoBean
@@ -246,6 +267,26 @@ class OpenApiContractExportTest {
     }
 
     /**
+     * 验证 manifest 治理入口统一受管理员权限和操作审计保护。
+     */
+    @Test
+    void shouldProtectAndAuditEveryManifestGovernanceOperation() {
+        PreAuthorize authorization = ManifestBackfillAdminController.class.getAnnotation(PreAuthorize.class);
+        assertThat(authorization).isNotNull();
+        assertThat(authorization.value()).isEqualTo("isAdmin()");
+
+        List<Method> publicOperations = java.util.Arrays.stream(
+                        ManifestBackfillAdminController.class.getDeclaredMethods())
+                .filter(method -> Modifier.isPublic(method.getModifiers()))
+                .toList();
+        assertThat(publicOperations).isNotEmpty();
+        assertThat(publicOperations)
+                .allSatisfy(method -> assertThat(method.getAnnotation(OperationLog.class))
+                        .as(method.getName() + " must be audited")
+                        .isNotNull());
+    }
+
+    /**
      * 拉取并规范化 OpenAPI 文档，用于导出与一致性校验。
      *
      * @return 规范化后的 OpenAPI 节点
@@ -263,6 +304,11 @@ class OpenApiContractExportTest {
         assertThat(rootNode.path("paths").has("/api/v1/files")).isTrue();
         assertThat(rootNode.path("paths").has("/api/v1/admin/quota/rollout/audits")).isTrue();
         assertThat(rootNode.path("paths").has("/api/v1/admin/integrity-alerts")).isTrue();
+        assertThat(rootNode.path("paths").has("/api/v1/admin/manifest-backfill-runs")).isTrue();
+        assertThat(rootNode.path("paths").has(
+                "/api/v1/admin/manifest-backfill-runs/{runId}/items")).isTrue();
+        assertThat(rootNode.path("paths").has(
+                "/api/v1/admin/manifest-backfill-runs/reference-census")).isTrue();
         assertThat(rootNode.path("paths").has(
                 "/api/v1/admin/attestation-batches/production/trigger")).isTrue();
         assertThat(rootNode.path("paths").has(
@@ -702,6 +748,7 @@ class OpenApiContractExportTest {
             FriendFileShareController.class,
             ImageController.class,
             IntegrityAlertController.class,
+            ManifestBackfillAdminController.class,
             MessageController.class,
             PermissionController.class,
             QuotaAdminController.class,

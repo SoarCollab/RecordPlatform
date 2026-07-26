@@ -69,6 +69,50 @@ public class ChunkManifestServiceImpl implements ChunkManifestService {
     }
 
     /**
+     * Locks the file row and publishes an insert-only active manifest for historical backfill.
+     */
+    @Override
+    @Transactional
+    public BackfilledManifestPublication createBackfilledManifestIfAbsent(
+            Long userId,
+            Long fileId,
+            ChunkManifestDraft draft
+    ) {
+        Long tenantId = TenantContext.requireTenantId();
+        File file = loadAndValidateFileForUpdate(userId, tenantId, fileId);
+        ChunkManifestDraft normalized = canonicalizer.normalize(draft);
+        validateFileHash(file, normalized);
+        String manifestHash = canonicalizer.manifestHash(normalized);
+
+        List<FileChunkManifest> activeRows = loadActiveManifestRows(tenantId, fileId);
+        if (activeRows.size() > 1) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR,
+                    "duplicate active manifests require manual review");
+        }
+        if (activeRows.size() == 1) {
+            FileChunkManifest existing = activeRows.get(0);
+            List<ChunkManifestChunk> chunks = loadChunks(tenantId, existing.getId());
+            ChunkManifestView view = toView(existing, chunks);
+            String existingHash = canonicalizer.manifestHash(new ChunkManifestDraft(
+                    view.schemaId(), view.fileHash(), view.hashAlgorithm(), view.chunkSize(),
+                    view.totalSize(), view.merkleRoot(), view.encryptionAlgorithm(),
+                    view.storageBackend(), view.encryption(), view.chunks()));
+            if (!Objects.equals(existing.getManifestHash(), existingHash)
+                    || !Objects.equals(existingHash, manifestHash)) {
+                throw new GeneralException(ResultEnum.FILE_RECORD_ERROR,
+                        "active manifest conflicts with frozen backfill evidence");
+            }
+            return new BackfilledManifestPublication(view, false);
+        }
+
+        String canonicalJson = canonicalizer.canonicalJson(normalized);
+        FileChunkManifest manifest = insertManifest(
+                tenantId, file, normalized, manifestHash, canonicalJson);
+        insertChunks(tenantId, fileId, manifest.getId(), normalized.chunks());
+        return new BackfilledManifestPublication(toView(manifest, normalized.chunks()), true);
+    }
+
+    /**
      * Loads the active manifest header and ordered chunks for a file.
      */
     @Override
@@ -207,6 +251,40 @@ public class ChunkManifestServiceImpl implements ChunkManifestService {
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "file does not belong to current user");
         }
         return file;
+    }
+
+    /**
+     * Locks and validates a file before insert-only publication.
+     */
+    private File loadAndValidateFileForUpdate(Long userId, Long tenantId, Long fileId) {
+        if (fileId == null) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "fileId is required");
+        }
+        File file = fileMapper.selectByIdForManifestBackfillUpdate(tenantId, fileId);
+        if (file == null) {
+            throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
+        }
+        if (file.getTenantId() != null && !tenantId.equals(file.getTenantId())) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
+        }
+        if (userId != null && file.getUid() != null && !userId.equals(file.getUid())) {
+            throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED);
+        }
+        return file;
+    }
+
+    /**
+     * Loads every active row so duplicate historical state cannot be hidden by LIMIT 1.
+     */
+    private List<FileChunkManifest> loadActiveManifestRows(Long tenantId, Long fileId) {
+        List<FileChunkManifest> rows = manifestMapper.selectList(
+                new LambdaQueryWrapper<FileChunkManifest>()
+                        .eq(FileChunkManifest::getTenantId, tenantId)
+                        .eq(FileChunkManifest::getFileId, fileId)
+                        .eq(FileChunkManifest::getStatus, STATUS_ACTIVE)
+                        .eq(FileChunkManifest::getDeleted, 0)
+                        .orderByAsc(FileChunkManifest::getId));
+        return rows == null ? List.of() : rows;
     }
 
     /**

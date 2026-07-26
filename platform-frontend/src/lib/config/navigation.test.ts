@@ -16,6 +16,7 @@ describe("navigation config", () => {
     const hrefs = adminItems.map((item) => item.href);
     expect(hrefs).toEqual([
       "/admin/files",
+      "/admin/manifest-backfill",
       "/admin/tickets",
       "/admin/monitor",
       "/admin/audit",

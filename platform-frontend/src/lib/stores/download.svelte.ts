@@ -6,7 +6,7 @@
 
 import { browser } from "$app/environment";
 import { env } from "$env/dynamic/public";
-import { getToken } from "$api/client";
+import { ApiError, getToken } from "$api/client";
 import * as fileApi from "$api/endpoints/files";
 import {
   saveTask,
@@ -31,7 +31,7 @@ import {
   DownloadMetricsTracker,
   type DownloadStreamMetrics,
 } from "$utils/downloadMetrics";
-import type { FileDownloadMetadataVO } from "$api/types";
+import type { FileDownloadMetadataVO, ManifestErrorDetail } from "$api/types";
 import {
   buildBatchMetricsPayload,
   calculateRetryCount,
@@ -102,6 +102,10 @@ export interface DownloadTask {
   downloadMetadata: FileDownloadMetadataVO | null;
   /** 最近一次有界下载的内存、认证与写入指标。 */
   downloadMetrics: DownloadStreamMetrics | null;
+  /** 后端是否明确允许用户选择受限的旧版兼容下载。 */
+  legacyRecoveryAllowed: boolean;
+  /** 用户是否已经对当前任务明确选择旧版兼容下载。 */
+  legacyRecoveryConfirmed: boolean;
 }
 
 export interface BatchDownloadItem {
@@ -137,6 +141,16 @@ type PresignedUrlMetadata = {
   encryptionAlgorithm: string | null;
   metadata: FileDownloadMetadataVO | null;
 };
+
+/**
+ * Signals that a typed backend response permits compatibility recovery but still requires user choice.
+ */
+class LegacyDownloadConfirmationRequiredError extends Error {
+  constructor() {
+    super("该历史文件缺少可信 Manifest；如需继续，请明确选择“兼容下载”");
+    this.name = "LegacyDownloadConfirmationRequiredError";
+  }
+}
 
 // ===== Pre-download Check Result =====
 
@@ -418,12 +432,14 @@ async function fetchPresignedUrls(
         metadata,
       };
     } catch (metadataError) {
-      if (!isMissingManifestError(metadataError)) {
+      if (!isLegacyDownloadEligible(metadataError)) {
         throw metadataError;
       }
+      if (!task.legacyRecoveryConfirmed) {
+        throw new LegacyDownloadConfirmationRequiredError();
+      }
       console.warn(
-        "[download] manifest metadata unavailable, using legacy endpoints",
-        metadataError,
+        "[download] explicitly eligible legacy manifest recovery path selected",
       );
       return fetchLegacyPresignedUrls(task.fileHash);
     }
@@ -455,11 +471,21 @@ async function fetchLegacyPresignedUrls(
 }
 
 /**
- * 判断 metadata 失败是否由历史文件缺少分片 manifest 引起。
+ * Allows legacy download only when the backend explicitly authorizes that compatibility path.
  */
-function isMissingManifestError(error: unknown): boolean {
+export function isLegacyDownloadEligible(error: unknown): boolean {
+  if (
+    !(error instanceof ApiError) ||
+    !error.detail ||
+    typeof error.detail !== "object"
+  ) {
+    return false;
+  }
+  const detail = error.detail as ManifestErrorDetail;
   return (
-    error instanceof Error && error.message.includes("文件缺少分片 manifest")
+    detail.manifestStatus === "REUPLOAD_REQUIRED" &&
+    detail.manifestClassification === "REUPLOAD_REQUIRED" &&
+    detail.legacyDownloadAllowed === true
   );
 }
 
@@ -606,6 +632,8 @@ async function executeDownload(task: DownloadTask): Promise<void> {
     });
   } catch (error) {
     const err = error as Error;
+    const requiresLegacyConfirmation =
+      error instanceof LegacyDownloadConfirmationRequiredError;
 
     // Check if cancelled
     if (
@@ -628,6 +656,9 @@ async function executeDownload(task: DownloadTask): Promise<void> {
       error: err.message,
       abortController: null,
       downloadMetrics: metricsTracker?.snapshot() ?? null,
+      legacyRecoveryAllowed: requiresLegacyConfirmation
+        ? true
+        : task.legacyRecoveryAllowed,
     });
   }
 }
@@ -813,6 +844,8 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
     });
   } catch (error) {
     const err = error as Error;
+    const requiresLegacyConfirmation =
+      error instanceof LegacyDownloadConfirmationRequiredError;
 
     if (
       abortController.signal.aborted ||
@@ -843,6 +876,9 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
       error: err.message,
       abortController: null,
       downloadMetrics: metricsTracker?.snapshot() ?? null,
+      legacyRecoveryAllowed: requiresLegacyConfirmation
+        ? true
+        : task.legacyRecoveryAllowed,
     });
   }
 }
@@ -1037,6 +1073,8 @@ async function startDownload(
     strategy,
     downloadMetadata: null,
     downloadMetrics: null,
+    legacyRecoveryAllowed: false,
+    legacyRecoveryConfirmed: false,
   };
 
   tasks = [...tasks, task];
@@ -1254,6 +1292,30 @@ async function retryDownload(id: string): Promise<void> {
 }
 
 /**
+ * Restarts an eligible failed task only after the user explicitly selects compatibility download.
+ */
+async function confirmLegacyDownload(id: string): Promise<void> {
+  const task = getTask(id);
+  if (!task || task.status !== "failed" || !task.legacyRecoveryAllowed) {
+    return;
+  }
+
+  updateTask(id, {
+    status: "pending",
+    error: null,
+    downloadedChunks: 0,
+    progress: 0,
+    downloadMetrics: null,
+    legacyRecoveryConfirmed: true,
+  });
+
+  const updatedTask = getTask(id);
+  if (updatedTask) {
+    dispatchDownloadTask(updatedTask);
+  }
+}
+
+/**
  * Remove a task from the list
  */
 async function removeTask(id: string): Promise<void> {
@@ -1371,6 +1433,8 @@ async function restoreTasks(): Promise<void> {
         strategy: "inmemory",
         downloadMetadata: null,
         downloadMetrics: null,
+        legacyRecoveryAllowed: false,
+        legacyRecoveryConfirmed: false,
       };
 
       tasks = [...tasks, task];
@@ -1455,6 +1519,7 @@ export function useDownload() {
     resumeDownload,
     cancelDownload,
     retryDownload,
+    confirmLegacyDownload,
     removeTask,
     clearCompleted,
     clearAllDownloads,

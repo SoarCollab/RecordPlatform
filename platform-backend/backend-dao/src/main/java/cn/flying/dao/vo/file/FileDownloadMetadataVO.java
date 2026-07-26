@@ -27,6 +27,14 @@ public record FileDownloadMetadataVO(
         String manifestHash,
         @Schema(description = "不含密钥材料的 canonical manifest JSON")
         String canonicalManifestJson,
+        @Schema(description = "Machine-readable active manifest lifecycle status")
+        String manifestStatus,
+        @Schema(description = "Manifest evidence classification")
+        String manifestClassification,
+        @Schema(description = "Manifest error/reason code; null for an active manifest")
+        String manifestErrorCode,
+        @Schema(description = "Whether a bounded typed legacy download path is explicitly allowed")
+        boolean legacyDownloadAllowed,
         @Schema(description = "哈希算法")
         String hashAlgorithm,
         @Schema(description = "加密算法")
@@ -63,7 +71,9 @@ public record FileDownloadMetadataVO(
             List<FileDownloadPartVO> parts
     ) {
         this(fileId, fileHash, fileName, fileSize, contentType, initialKey,
-                manifestSchemaId, manifestHash, null, hashAlgorithm, encryptionAlgorithm,
+                manifestSchemaId, manifestHash, null,
+                "ACTIVE", "ALREADY_MANIFEST", null, false,
+                hashAlgorithm, encryptionAlgorithm,
                 storageBackend, chunkSize, totalChunks, null, parts);
     }
 }

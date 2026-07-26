@@ -27,6 +27,8 @@ import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestDraft;
 import cn.flying.service.manifest.ChunkManifestEncryption;
 import cn.flying.service.manifest.ChunkManifestService;
+import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
+import cn.flying.dao.vo.file.ManifestErrorDetail;
 import cn.flying.service.manifest.ChunkManifestView;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.test.builders.AccountTestBuilder;
@@ -86,6 +88,9 @@ class FileQueryServiceTest {
     private ChunkManifestService chunkManifestService;
 
     @Mock
+    private ManifestGovernanceStatusService manifestGovernanceStatusService;
+
+    @Mock
     private FileKeyEnvelopeService fileKeyEnvelopeService;
 
     @InjectMocks
@@ -115,6 +120,8 @@ class FileQueryServiceTest {
         lenient().when(chunkManifestService.calculateCanonicalJson(any()))
                 .thenAnswer(invocation -> CANONICALIZER.canonicalJson(
                         invocation.getArgument(0, ChunkManifestDraft.class)));
+        lenient().when(manifestGovernanceStatusService.activeManifest())
+                .thenReturn(new ManifestErrorDetail("ACTIVE", "ALREADY_MANIFEST", null, false));
     }
 
     /**

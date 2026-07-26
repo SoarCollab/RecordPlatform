@@ -13,6 +13,7 @@ import cn.flying.dao.mapper.AttestationBatchMapper;
 import cn.flying.dao.mapper.AttestationLeafMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.vo.file.ProofBundleVO;
+import cn.flying.dao.vo.file.ManifestErrorDetail;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.StorageObjectHeadVO;
 import cn.flying.platformapi.response.ContractRegistryEntryResponse;
@@ -22,6 +23,7 @@ import cn.flying.service.key.CryptoSuitePolicyService;
 import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.ChunkManifestView;
+import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
 import cn.flying.service.remote.FileRemoteClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -55,6 +57,7 @@ public class ProofBundleServiceImpl implements ProofBundleService {
     private final AttestationBatchMapper batchMapper;
     private final FileRemoteClient fileRemoteClient;
     private final ChunkManifestService chunkManifestService;
+    private final ManifestGovernanceStatusService manifestGovernanceStatusService;
     private final CryptoSuitePolicyService suitePolicy;
     private final AttestationBatchPersistenceService attestationBatchPersistenceService;
 
@@ -173,12 +176,17 @@ public class ProofBundleServiceImpl implements ProofBundleService {
         ensureProofContractSupportsLeaf(leaf);
         String externalFileId = IdUtils.toExternalId(file.getId());
         String externalLeafId = IdUtils.toExternalId(leaf.getId());
+        ManifestErrorDetail manifestStatus = manifestGovernanceStatusService.activeManifest();
         ProofBundleVO.Manifest manifest = new ProofBundleVO.Manifest(
                 BUNDLE_TYPE,
                 BUNDLE_VERSION,
                 externalFileId,
                 externalLeafId,
-                batch.getBatchNo()
+                batch.getBatchNo(),
+                manifestStatus.manifestStatus(),
+                manifestStatus.manifestClassification(),
+                manifestStatus.manifestErrorCode(),
+                manifestStatus.legacyDownloadAllowed()
         );
 
         return new ProofBundleVO(
@@ -228,7 +236,9 @@ public class ProofBundleServiceImpl implements ProofBundleService {
      */
     private ProofBundleVO.StorageEvidence buildStorageEvidence(File file) {
         ChunkManifestView manifest = chunkManifestService.findActiveManifest(null, file.getId())
-                .orElseThrow(() -> new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件缺少分片 manifest"));
+                .orElseThrow(() -> new GeneralException(
+                        ResultEnum.FILE_RECORD_ERROR,
+                        manifestGovernanceStatusService.missingManifest(file)));
         if (manifest.chunks() == null || manifest.chunks().isEmpty()) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件分片 manifest 为空");
         }

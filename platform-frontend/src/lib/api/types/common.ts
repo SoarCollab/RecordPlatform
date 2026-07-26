@@ -21,6 +21,29 @@ export interface ErrorPayload {
 }
 
 /**
+ * Machine-readable lifecycle states returned by manifest governance endpoints.
+ */
+export type ManifestStatus =
+  | "ACTIVE"
+  | "PENDING"
+  | "RUNNING"
+  | "BACKFILLED"
+  | "REUPLOAD_REQUIRED"
+  | "UNRECOVERABLE"
+  | "FAILED"
+  | "IGNORED";
+
+/**
+ * Structured detail attached to a manifest-related API error.
+ */
+export interface ManifestErrorDetail {
+  manifestStatus?: ManifestStatus;
+  manifestClassification?: string;
+  manifestErrorCode?: string;
+  legacyDownloadAllowed?: boolean;
+}
+
+/**
  * 分页响应格式
  * @see MyBatis Plus IPage
  */

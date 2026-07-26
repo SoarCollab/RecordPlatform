@@ -26,6 +26,14 @@ public record IntegrityAlertVO(
         String severity,
         @Schema(description = "有界巡检证据")
         String evidence,
+        @Schema(description = "Machine-readable manifest lifecycle status")
+        String manifestStatus,
+        @Schema(description = "Manifest evidence classification")
+        String manifestClassification,
+        @Schema(description = "Manifest error/reason code")
+        String manifestErrorCode,
+        @Schema(description = "Whether typed legacy download compatibility is explicitly allowed")
+        boolean legacyDownloadAllowed,
         @Schema(description = "告警状态")
         Integer status,
         @Schema(description = "处理人ID（外部ID）")
@@ -37,4 +45,27 @@ public record IntegrityAlertVO(
         @Schema(description = "创建时间")
         Date createTime
 ) {
+
+    /**
+     * Keeps existing non-manifest alert construction source-compatible.
+     */
+    public IntegrityAlertVO(
+            String id,
+            String fileId,
+            String fileHash,
+            String actualHash,
+            String chainHash,
+            String alertType,
+            String severity,
+            String evidence,
+            Integer status,
+            String resolvedBy,
+            Date resolvedAt,
+            String note,
+            Date createTime
+    ) {
+        this(id, fileId, fileHash, actualHash, chainHash, alertType, severity, evidence,
+                "ACTIVE", "ALREADY_MANIFEST", null, false,
+                status, resolvedBy, resolvedAt, note, createTime);
+    }
 }

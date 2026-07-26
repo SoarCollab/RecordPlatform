@@ -21,6 +21,7 @@ import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileDownloadEncryptionVO;
 import cn.flying.dao.vo.file.FileDownloadMetadataVO;
 import cn.flying.dao.vo.file.FileDownloadPartVO;
+import cn.flying.dao.vo.file.ManifestErrorDetail;
 import cn.flying.dao.vo.file.FileShareVO;
 import cn.flying.dao.vo.file.FileVersionVO;
 import cn.flying.dao.vo.file.ShareFileVO;
@@ -38,6 +39,7 @@ import cn.flying.service.manifest.ChunkManifestDraft;
 import cn.flying.service.manifest.ChunkManifestEncryption;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.ChunkManifestView;
+import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.service.support.StoredObjectReference;
 import cn.flying.service.support.StoredObjectReferenceCodec;
@@ -113,6 +115,7 @@ public class FileQueryServiceImpl implements FileQueryService {
     private final FileShareMapper fileShareMapper;
     private final FriendFileShareService friendFileShareService;
     private final ChunkManifestService chunkManifestService;
+    private final ManifestGovernanceStatusService manifestGovernanceStatusService;
     private final FileKeyEnvelopeService fileKeyEnvelopeService;
     @Qualifier("virtualThreadExecutor")
     private final TaskExecutor virtualThreadExecutor;
@@ -281,9 +284,13 @@ public class FileQueryServiceImpl implements FileQueryService {
         File file = accessContext.file();
         FileDecryptInfoVO decryptInfo = buildFileDecryptInfo(accessContext, fileHash, userId);
         ChunkManifestView manifest = chunkManifestService.findActiveManifest(file.getUid(), file.getId())
-                .orElseThrow(() -> new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件缺少分片 manifest"));
+                .orElseThrow(() -> new GeneralException(
+                        ResultEnum.FILE_RECORD_ERROR,
+                        manifestGovernanceStatusService.missingManifest(file)));
         if (CommonUtils.isEmpty(manifest.chunks())) {
-            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件分片 manifest 为空");
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR,
+                    new ManifestErrorDetail("ACTIVE", "ALREADY_MANIFEST",
+                            "ACTIVE_MANIFEST_EMPTY", false));
         }
 
         Long fileSizeValue = resolveDownloadFileSize(file, decryptInfo);
@@ -317,6 +324,7 @@ public class FileQueryServiceImpl implements FileQueryService {
 
         long expiresAtEpochSeconds = System.currentTimeMillis() / 1000L + DOWNLOAD_URL_TTL_SECONDS;
         List<FileDownloadPartVO> parts = buildDownloadParts(manifest, downloadUrls, expiresAtEpochSeconds);
+        ManifestErrorDetail manifestStatus = manifestGovernanceStatusService.activeManifest();
 
         return new FileDownloadMetadataVO(
                 IdUtils.toExternalId(file.getId()),
@@ -328,6 +336,10 @@ public class FileQueryServiceImpl implements FileQueryService {
                 manifest.schemaId(),
                 manifest.manifestHash(),
                 canonicalManifestJson,
+                manifestStatus.manifestStatus(),
+                manifestStatus.manifestClassification(),
+                manifestStatus.manifestErrorCode(),
+                manifestStatus.legacyDownloadAllowed(),
                 manifest.hashAlgorithm(),
                 manifest.encryptionAlgorithm(),
                 manifest.storageBackend(),

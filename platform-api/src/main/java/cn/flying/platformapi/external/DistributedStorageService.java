@@ -57,6 +57,16 @@ public interface DistributedStorageService {
     Result<StorageObjectHeadVO> headObject(String filePath, String fileHash);
 
     /**
+     * Returns the global count of unresolved degraded-write repair records.
+     *
+     * <p>The backend uses this as a conservative unknown-reference hold. A non-zero
+     * count blocks object sweeping until storage repair state is empty.</p>
+     *
+     * @return unresolved degraded-write record count
+     */
+    Result<Long> getDegradedWriteCount();
+
+    /**
      * Creates presigned URLs for direct multipart chunk upload.
      *
      * @param request direct upload request

@@ -39,7 +39,13 @@
       task.status === "writing",
   );
   const canResume = $derived(task.status === "paused");
-  const canRetry = $derived(task.status === "failed" || task.status === "cancelled");
+  const canRetry = $derived(
+    task.status === "cancelled" ||
+      (task.status === "failed" && !task.legacyRecoveryAllowed),
+  );
+  const canUseLegacyRecovery = $derived(
+    task.status === "failed" && task.legacyRecoveryAllowed,
+  );
   const canRemove = $derived(!isActive);
 </script>
 
@@ -120,6 +126,16 @@
         onclick={() => download.retryDownload(task.id)}
       >
         <RotateCcw class="h-4 w-4" />
+      </button>
+    {/if}
+
+    {#if canUseLegacyRecovery}
+      <button
+        class="rounded border border-amber-500 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-950"
+        title="明确使用不含可信 Manifest 的旧版兼容下载"
+        onclick={() => download.confirmLegacyDownload(task.id)}
+      >
+        兼容下载
       </button>
     {/if}
 

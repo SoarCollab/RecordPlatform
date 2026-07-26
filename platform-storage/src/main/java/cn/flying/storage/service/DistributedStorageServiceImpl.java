@@ -219,25 +219,25 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
     @Override
     public Result<StorageObjectHeadVO> headObject(String filePath, String fileHash) {
         if (filePath == null || filePath.isBlank() || fileHash == null || fileHash.isBlank()) {
-            log.warn("headObject参数无效: filePath={}, fileHash={}", filePath, fileHash);
+            log.warn("headObject参数无效: hasPath={}, hasHash={}",
+                    filePath != null && !filePath.isBlank(), fileHash != null && !fileHash.isBlank());
             return Result.error(ResultEnum.PARAM_IS_INVALID, null);
         }
 
         TenantContextUtil.ParsedChunkPath parsedPath = TenantContextUtil.parseChunkPath(filePath);
         if (parsedPath == null) {
-            log.error("无效的分片路径格式: {}", filePath);
+            log.error("headObject收到无效的分片路径格式");
             return Result.error(ResultEnum.PARAM_IS_INVALID, null);
         }
 
         if (!fileHash.equals(parsedPath.objectName())) {
-            log.error("路径[{}]中的 fileHash '{}' 和 objectName '{}' 不匹配",
-                    filePath, fileHash, parsedPath.objectName());
+            log.error("headObject请求的哈希与路径对象身份不匹配");
             return Result.error(ResultEnum.PARAM_IS_INVALID, null);
         }
 
         List<String> candidateNodes = getReadCandidateNodes(fileHash, parsedPath);
         if (candidateNodes.isEmpty()) {
-            log.error("无法找到文件 '{}' 的候选存储节点", fileHash);
+            log.error("headObject无法找到候选存储节点");
             return Result.error(ResultEnum.FILE_SERVICE_ERROR,
                     StorageObjectHeadVO.missing(filePath, fileHash, parsedPath.tenantId()));
         }
@@ -252,7 +252,7 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 return Result.success(lookup.head());
             }
             unavailableObserved = lookup.status() == HeadLookupStatus.UNAVAILABLE;
-            log.warn("无法从主节点 '{}' 获取 '{}' 的对象元数据", primaryNode, objectPath);
+            log.warn("无法从主节点 '{}' 获取对象元数据", primaryNode);
         }
 
         for (String node : candidateNodes) {
@@ -270,13 +270,21 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
         }
 
         if (unavailableObserved) {
-            log.warn("候选节点 {} 无法完整确认 '{}' 的对象元数据", candidateNodes, objectPath);
+            log.warn("{} 个候选节点无法完整确认对象元数据", candidateNodes.size());
             return Result.error(ResultEnum.FILE_SERVICE_ERROR,
                     StorageObjectHeadVO.missing(filePath, fileHash, parsedPath.tenantId()));
         }
 
-        log.warn("无法从任何候选节点 {} 获取 '{}' 的对象元数据", candidateNodes, objectPath);
+        log.warn("无法从 {} 个候选节点获取对象元数据", candidateNodes.size());
         return Result.success(StorageObjectHeadVO.missing(filePath, fileHash, parsedPath.tenantId()));
+    }
+
+    /**
+     * Exposes only the bounded degraded-write count required by reference-aware cleanup.
+     */
+    @Override
+    public Result<Long> getDegradedWriteCount() {
+        return Result.success(degradedWriteTracker.getPendingCount());
     }
 
     @Override
@@ -1322,20 +1330,20 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                 // 解析分片路径
                 TenantContextUtil.ParsedChunkPath parsedPath = TenantContextUtil.parseChunkPath(filePath);
                 if (parsedPath == null) {
-                    errors.add(fileHash + ": invalid chunk path format");
+                    errors.add("invalid chunk path format");
                     continue;
                 }
 
                 // 校验 fileHash 与路径中的 objectName 匹配
                 if (!fileHash.equals(parsedPath.objectName())) {
-                    errors.add(fileHash + ": hash mismatch with path");
+                    errors.add("hash mismatch with path");
                     continue;
                 }
 
                 // 删除覆盖当前候选节点和所有活跃域节点，避免遗漏 fallback/rebalance 残留副本。
                 List<String> targetNodes = getDeleteCandidateNodes(fileHash, parsedPath);
                 if (targetNodes.isEmpty()) {
-                    errors.add(fileHash + ": no candidate nodes found");
+                    errors.add("no candidate nodes found");
                     continue;
                 }
 
@@ -1346,18 +1354,20 @@ public class DistributedStorageServiceImpl implements DistributedStorageService 
                     try {
                         deleteFromNode(nodeName, objectPath);
                     } catch (Exception e) {
-                        log.warn("Failed to delete {} from node {}: {}", objectPath, nodeName, e.getMessage());
+                        log.warn("Object delete failed on node {}, errorClass={}",
+                                nodeName, e.getClass().getSimpleName());
                     }
                 }
-                log.info("Deleted file chunk {} from nodes {}", fileHash, targetNodes);
+                log.info("Deleted one file chunk from {} candidate nodes", targetNodes.size());
             } catch (Exception e) {
-                log.error("Failed to delete file {}: {}", fileHash, e.getMessage());
-                errors.add(fileHash + ": " + e.getMessage());
+                log.error("Failed to delete one file chunk, errorClass={}",
+                        e.getClass().getSimpleName());
+                errors.add(e.getClass().getSimpleName());
             }
         }
 
         if (!errors.isEmpty()) {
-            log.warn("Some files failed to delete: {}", errors);
+            log.warn("Some file chunks failed to delete: failureCount={}", errors.size());
             return Result.error(ResultEnum.FILE_SERVICE_ERROR, false);
         }
         return Result.success(true);

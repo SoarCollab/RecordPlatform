@@ -44,6 +44,7 @@ export const menuItems: MenuItem[] = [
 
 export const adminItems: AdminItem[] = [
   { href: "/admin/files", icon: "file-search", label: "文件审计" },
+  { href: "/admin/manifest-backfill", icon: "database", label: "清单治理" },
   { href: "/admin/tickets", icon: "ticket", label: "工单管理" },
   { href: "/admin/monitor", icon: "activity", label: "系统监控" },
   { href: "/admin/audit", icon: "shield", label: "审计日志" },

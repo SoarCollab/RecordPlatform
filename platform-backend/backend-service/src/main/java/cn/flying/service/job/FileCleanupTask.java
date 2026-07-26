@@ -49,6 +49,9 @@ public class FileCleanupTask {
     @Value("${file.cleanup.batch-size:100}")
     private int batchSize;
 
+    @Value("${file.cleanup.legacy-physical-delete-enabled:false}")
+    private boolean legacyPhysicalDeleteEnabled;
+
     /**
      * 清理超过保留期的软删除文件。
      * 默认每天凌晨 3:00 执行。
@@ -58,6 +61,10 @@ public class FileCleanupTask {
     @Scheduled(cron = "${file.cleanup.cron:0 0 3 * * ?}")
     @DistributedLock(key = "file:cleanup", leaseTime = 3600)
     public void cleanDeletedFiles() {
+        if (!legacyPhysicalDeleteEnabled) {
+            log.info("旧版文件物理清理已关闭；对象删除仅允许经过 reference census/sweep 流程");
+            return;
+        }
         log.info("开始执行文件清理任务...");
 
         // 获取所有活跃租户
@@ -112,8 +119,8 @@ public class FileCleanupTask {
                 successCount++;
             } catch (Exception e) {
                 failCount++;
-                log.warn("租户 {} 清理文件失败: id={}, hash={}, error={}",
-                    tenantId, file.getId(), file.getFileHash(), e.getMessage());
+                log.warn("租户 {} 清理文件失败: id={}, errorClass={}",
+                    tenantId, file.getId(), e.getClass().getSimpleName());
             }
         }
 
@@ -148,8 +155,8 @@ public class FileCleanupTask {
         boolean hasOtherReferences = activeReferences != null && activeReferences > 0;
 
         if (hasOtherReferences) {
-            log.info("文件 {} 仍有 {} 个其他用户引用，仅删除数据库记录，保留存储数据",
-                    fileHash, activeReferences);
+            log.info("文件记录 {} 仍有 {} 个其他用户引用，仅删除数据库记录，保留存储数据",
+                    file.getId(), activeReferences);
         } else {
             // 没有其他引用，可以安全删除存储和区块链数据
             // 1. 尝试从区块链获取文件内容映射
@@ -165,7 +172,8 @@ public class FileCleanupTask {
                         try {
                             fileRemoteClient.deleteStorageFile(contentMap);
                         } catch (Exception e) {
-                            log.warn("存储删除失败: file={}, error={}", fileHash, e.getMessage());
+                            log.warn("存储删除失败: fileId={}, errorClass={}",
+                                    file.getId(), e.getClass().getSimpleName());
                         }
                     }
                 }
@@ -177,17 +185,19 @@ public class FileCleanupTask {
                             List.of(fileHash)
                     ));
                 } catch (Exception e) {
-                    log.warn("区块链删除失败: file={}, error={}", fileHash, e.getMessage());
+                    log.warn("区块链删除失败: fileId={}, errorClass={}",
+                            file.getId(), e.getClass().getSimpleName());
                 }
             } catch (Exception e) {
-                log.warn("获取文件详情失败: {}, 继续数据库清理: {}", fileHash, e.getMessage());
+                log.warn("获取文件详情失败，继续数据库清理: fileId={}, errorClass={}",
+                        file.getId(), e.getClass().getSimpleName());
             }
         }
 
         // 4. 物理删除数据库记录（带租户隔离）
         fileMapper.physicalDeleteById(file.getId(), tenantId);
 
-        log.debug("文件清理成功: tenantId={}, id={}, hash={}, 保留存储={}",
-                tenantId, file.getId(), fileHash, hasOtherReferences);
+        log.debug("文件清理成功: tenantId={}, id={}, 保留存储={}",
+                tenantId, file.getId(), hasOtherReferences);
     }
 }

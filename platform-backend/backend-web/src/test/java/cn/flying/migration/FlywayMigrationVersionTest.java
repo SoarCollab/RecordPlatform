@@ -48,6 +48,7 @@ class FlywayMigrationVersionTest {
         assertTrue(migrationFiles.contains("V1.14.0__signed_proof_bundle.sql"));
         assertTrue(migrationFiles.contains("V1.15.0__proof_status_timestamp_precision.sql"));
         assertTrue(migrationFiles.contains("V1.16.0__framed_download_contract.sql"));
+        assertTrue(migrationFiles.contains("V1.17.0__manifest_backfill_governance.sql"));
         assertFalse(migrationFiles.contains("V1.0.1__add_account_nickname.sql"));
         assertFalse(migrationFiles.contains("V1.5.0__integrity_alert.sql"));
 
@@ -359,6 +360,35 @@ class FlywayMigrationVersionTest {
         assertTrue(normalizedSql.contains("Plaintext bytes represented by this stored object"));
         assertTrue(normalizedSql.contains("Authenticated frame count for framed encryption v2"));
         assertFalse(normalizedSql.matches("(?is).*UPDATE\\s+`(?:file_chunk_manifest|file_chunk_manifest_item)`.*"));
+        assertFalse(normalizedSql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
+    }
+
+    /**
+     * Verifies the manifest backfill migration adds durable fencing without rewriting file truth.
+     */
+    @Test
+    @DisplayName("should add manifest backfill and reference sweep fencing through a forward migration")
+    void shouldAddManifestBackfillGovernanceThroughForwardMigration() throws IOException {
+        Path migration = resolveMigrationDir().resolve("V1.17.0__manifest_backfill_governance.sql");
+        assertTrue(Files.isRegularFile(migration), "Missing manifest backfill governance migration");
+        String sql = Files.readString(migration);
+        String normalizedSql = sql.replaceAll("\\s+", " ").trim();
+
+        assertTrue(normalizedSql.contains("SIGNAL SQLSTATE '45000'"));
+        assertTrue(normalizedSql.contains("duplicate active chunk manifests require manual review"));
+        assertTrue(normalizedSql.contains("GENERATED ALWAYS AS"));
+        assertTrue(normalizedSql.contains(
+                "UNIQUE KEY `uk_file_chunk_manifest_active` (`tenant_id`, `file_id`, `active_slot`)"));
+        assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `manifest_backfill_run`"));
+        assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `manifest_backfill_item`"));
+        assertTrue(normalizedSql.contains("`claim_token` VARCHAR(64) DEFAULT NULL"));
+        assertTrue(normalizedSql.contains("`lease_expires_at` DATETIME DEFAULT NULL"));
+        assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `manifest_reference_census`"));
+        assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `manifest_reference_ledger`"));
+        assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `manifest_reference_sweep_mark`"));
+        assertTrue(normalizedSql.contains("`content_length` BIGINT NOT NULL"));
+        assertTrue(normalizedSql.contains("`protection_until` DATETIME NOT NULL"));
+        assertFalse(normalizedSql.matches("(?is).*UPDATE\\s+`(?:file|file_chunk_manifest)`.*"));
         assertFalse(normalizedSql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
     }
 

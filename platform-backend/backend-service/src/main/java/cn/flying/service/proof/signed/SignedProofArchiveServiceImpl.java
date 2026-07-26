@@ -33,6 +33,7 @@ import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestDraft;
 import cn.flying.service.manifest.ChunkManifestService;
 import cn.flying.service.manifest.ChunkManifestView;
+import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.verifier.contract.SignedProofBundleContract;
 import cn.flying.verifier.contract.SignedProofBundleModel;
@@ -136,6 +137,7 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
     private final ProofSigningKeyMapper signingKeyMapper;
     private final FileRemoteClient fileRemoteClient;
     private final ChunkManifestService chunkManifestService;
+    private final ManifestGovernanceStatusService manifestGovernanceStatusService;
     private final AttestationBatchPersistenceService attestationBatchPersistenceService;
     private final MerkleTreeService merkleTreeService;
     private final DeterministicProofArchiveBuilder archiveBuilder;
@@ -683,7 +685,9 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
      */
     private ChunkManifestView loadAndValidateManifest(File file, AttestationLeaf leaf) {
         ChunkManifestView manifest = chunkManifestService.findActiveManifest(null, file.getId())
-                .orElseThrow(() -> new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件缺少 active chunk manifest"));
+                .orElseThrow(() -> new GeneralException(
+                        ResultEnum.FILE_RECORD_ERROR,
+                        manifestGovernanceStatusService.missingManifest(file)));
         if (!Objects.equals(leaf.getManifestId(), manifest.manifestId())
                 || !SignedProofBundleContract.SOURCE_CHUNK_MANIFEST_SCHEMA.equals(manifest.schemaId())
                 || !Objects.equals(file.getVersion(), manifest.fileVersion())

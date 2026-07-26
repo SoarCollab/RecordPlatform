@@ -18,6 +18,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -48,6 +49,7 @@ class FileCleanupTaskTest {
         ReflectionTestUtils.setField(fileCleanupTask, "fileRemoteClient", fileRemoteClient);
         ReflectionTestUtils.setField(fileCleanupTask, "retentionDays", 30);
         ReflectionTestUtils.setField(fileCleanupTask, "batchSize", 100);
+        ReflectionTestUtils.setField(fileCleanupTask, "legacyPhysicalDeleteEnabled", false);
     }
 
     /**
@@ -63,6 +65,7 @@ class FileCleanupTaskTest {
      */
     @Test
     void shouldPhysicallyDeleteExpiredFileWithoutListCacheMaintenance() {
+        ReflectionTestUtils.setField(fileCleanupTask, "legacyPhysicalDeleteEnabled", true);
         File file = new File()
                 .setId(10L)
                 .setTenantId(7L)
@@ -76,5 +79,15 @@ class FileCleanupTaskTest {
         fileCleanupTask.cleanDeletedFiles();
 
         verify(fileMapper).physicalDeleteById(10L, 7L);
+    }
+
+    /**
+     * Verifies the unsafe legacy deletion path is disabled unless rollout explicitly enables it.
+     */
+    @Test
+    void shouldSkipLegacyPhysicalDeletionByDefault() {
+        fileCleanupTask.cleanDeletedFiles();
+
+        verifyNoInteractions(fileMapper, tenantMapper, fileRemoteClient);
     }
 }

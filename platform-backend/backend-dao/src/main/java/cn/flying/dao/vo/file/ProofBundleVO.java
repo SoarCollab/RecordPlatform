@@ -45,8 +45,24 @@ public record ProofBundleVO(
             @Schema(description = "外部叶子 ID")
             String leafId,
             @Schema(description = "批量存证号")
-            String batchNo
+            String batchNo,
+            @Schema(description = "Machine-readable manifest lifecycle status")
+            String manifestStatus,
+            @Schema(description = "Manifest evidence classification")
+            String manifestClassification,
+            @Schema(description = "Manifest error/reason code; null for active proof evidence")
+            String manifestErrorCode,
+            @Schema(description = "Whether typed legacy download compatibility is explicitly allowed")
+            boolean legacyDownloadAllowed
     ) {
+
+        /**
+         * Keeps existing proof construction source-compatible while emitting active manifest fields.
+         */
+        public Manifest(String type, String version, String fileId, String leafId, String batchNo) {
+            this(type, version, fileId, leafId, batchNo,
+                    "ACTIVE", "ALREADY_MANIFEST", null, false);
+        }
     }
 
     /**

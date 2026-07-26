@@ -344,6 +344,30 @@ class RequestLogFilterTest {
         }
 
         /**
+         * 验证 manifest 治理响应中的证据摘要和对象身份不会进入常规响应日志。
+         */
+        @Test
+        @DisplayName("Should not wrap manifest governance responses")
+        void shouldNotWrapManifestGovernanceResponses() throws ServletException, IOException {
+            request.setRequestURI("/api/v1/admin/manifest-backfill-runs/run-id/items");
+            request.setServletPath("/api/v1/admin/manifest-backfill-runs/run-id/items");
+            request.setMethod("GET");
+
+            filter.doFilter(request, response, filterChain);
+
+            assertThat(filterChain.getResponse()).isNotInstanceOf(ContentCachingResponseWrapper.class);
+            String content = ReflectionTestUtils.invokeMethod(
+                    filter,
+                    "buildResponseLogContent",
+                    request,
+                    "application/json",
+                    HttpServletResponse.SC_OK,
+                    "{\"evidenceDigest\":\"sha256:secret\"}".getBytes(StandardCharsets.UTF_8)
+            );
+            assertThat(content).isEqualTo("<skipped>");
+        }
+
+        /**
          * 验证编码字面量和矩阵参数不能绕过公开分享响应体的缓存与日志禁用规则。
          */
         @Test
