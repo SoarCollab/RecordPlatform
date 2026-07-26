@@ -127,7 +127,9 @@ sequenceDiagram
         end
         Client->>Backend: POST /api/v1/upload-sessions/{clientId}/direct/complete
         Backend->>Storage: RPC: completeDirectMultipartUpload
-        Storage->>S3: 校验 staging 字节并写入最终副本
+        Storage->>S3: 校验身份/哈希并晋升 staging 对象
+        Note over Storage,S3: 同端点条件复制；跨端点有界流式传输
+        Storage->>Storage: 持久化 receipt；降级时调度修复/清理
         Backend->>Backend: 持久化文件记录和 active chunk manifest
     else 后端代理分片上传
         Client->>Backend: POST /api/v1/upload-sessions
@@ -167,32 +169,28 @@ sequenceDiagram
     Storage-->>Backend: 有序 URL 列表
     Backend-->>Client: 200 OK (URLs, manifest, hashes, decrypt metadata)
 
-    Note over Client, S3: 阶段 2: 并发下载分片
-    par 并发下载
-        Client->>S3: GET 预签名 URL (分片 1)
-        S3-->>Client: 加密分片数据
-    and
-        Client->>S3: GET 预签名 URL (分片 2)
-        S3-->>Client: 加密分片数据
-    and
-        Client->>S3: GET 预签名 URL (分片 N)
-        S3-->>Client: 加密分片数据
+    Note over Client, S3: 阶段 2: 有界有序读取
+    loop 按 manifest index 顺序处理分片
+        Client->>S3: GET 预签名 URL
+        S3-->>Client: 带背压的响应块（每块最大 1 MiB）
+        Client->>Client: 校验长度/哈希并解密 framed 或 legacy 格式
+        Client->>Client: 带背压写入所选 sink
     end
 
-    Note over Client: 阶段 3: 解密 & 组装
-    Client->>Client: 按密钥链顺序解密分片
-    Client->>Client: 合并分片 & 触发浏览器下载
+    Note over Client: 阶段 3: 提交或中止
+    Client->>Client: 全部完整性校验成功后才关闭 sink
+    Note over Client: 获取/解密/哈希/写入任一失败都会中止 sink
 ```
 
 **下载策略对比**：
 
 | 策略 | 适用场景 | 特点 |
 |------|----------|------|
-| **内存模式** | 小文件 (< 50MB) | 全部分片加载到内存后解密，速度快 |
-| **流式模式** | 大文件 (≥ 50MB) | 使用 StreamSaver.js，边下载边写入，内存占用低 |
-| **后端代理** | 特殊场景 | 后端代理下载，适用于无法直连 S3 的环境 |
+| **内存 sink** | 不超过 64 MiB | 受控 `Blob` 回退；总输出不得超过硬上限 |
+| **文件系统流式 sink** | 大于 64 MiB | 要求 File System Access API 与 Streams，reader 直接有界写入用户选择的文件 |
+| **浏览器不支持** | 大于 64 MiB 且无流式 sink | 失败闭合并提示浏览器能力；不存在无界后端代理回退 |
 
-**密钥链解密**：每个分片使用独立密钥加密，下载时按 `chunkIndex` 顺序匹配密钥进行解密。
+有界 reader 显式支持 `NONE`、历史 v1 AEAD 和 framed AEAD v2。历史密文分片上限约为 80 MiB + 4 KiB，单文件最多 10,000 个分片，响应网络块最大 1 MiB。单次获取最多三次尝试；401/403 立即要求刷新下载元数据，只有 5xx 才进行有限重试。长度、顺序、哈希、密钥、解密、取消或 sink 任一异常都会中止 sink。
 
 ### 文件分享流程
 
@@ -527,20 +525,18 @@ SSE 连接采用短期一次性令牌：
 
 ### 下载策略（前端）
 
-前端按文件大小和浏览器能力动态选择下载策略：
-
-- 小文件：内存下载（in-memory）
-- 大文件：优先流式下载（streaming）
-- 超大文件或浏览器能力不足：后端代理或阻断并提示
+前端按文件大小和浏览器能力选择有界 sink。64 MiB 是内存硬上限，不是调优建议。更大文件必须使用 File System Access API 与 Streams；浏览器不支持时会在传输前拒绝，不会转入无界代理。
 
 默认阈值（`platform-frontend/src/lib/utils/fileSize.ts`）：
 
 | 阈值常量 | 默认值 |
 |----------|--------|
-| `LARGE_FILE_WARNING_THRESHOLD` | 500MB |
-| `STREAMING_RECOMMENDED_THRESHOLD` | 1GB |
-| `MAX_SAFE_INMEMORY_SIZE` | 2GB |
-| `MAX_DOWNLOADABLE_SIZE` | 100GB |
+| `MAX_SAFE_INMEMORY_SIZE` / `LARGE_FILE_WARNING_THRESHOLD` | 64 MiB |
+| `STREAMING_RECOMMENDED_THRESHOLD` | 500 MiB |
+| `VERY_LARGE_FILE_THRESHOLD` | 2 GiB |
+| `MAX_DOWNLOADABLE_SIZE` | 100 GiB |
+
+自有文件下载要求 active chunk manifest，并暴露结构化治理字段。缺失时返回 `FILE_RECORD_ERROR`，`ManifestErrorDetail` 位于 `data.detail`；客户端应读取 `manifestStatus`、`manifestClassification`、`manifestErrorCode`、`legacyDownloadAllowed`，不能解析 `message`。详见[分片 Manifest 与历史数据治理](./chunk-manifest.md)。
 
 ### 配额治理
 

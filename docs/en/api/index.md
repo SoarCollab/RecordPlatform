@@ -127,6 +127,8 @@ The anonymous public-share surface is limited to the four exact `GET` routes abo
 | GET | `/api/v1/files/{id}/versions` | List version chain for a file |
 | POST | `/api/v1/files/{id}/versions` | Mark file as parent for a new version upload |
 
+Owned-file `download-metadata` requires an active `cn.flying.chunk-manifest.v1`. Success includes `canonicalManifestJson`, `manifestStatus=ACTIVE`, `manifestClassification=ALREADY_MANIFEST`, `manifestErrorCode=null`, and `legacyDownloadAllowed=false`. A missing manifest returns `FILE_RECORD_ERROR`; its standard `ErrorPayload` carries the four machine-readable governance fields under `data.detail`. The unclassified default is `REUPLOAD_REQUIRED / UNCLASSIFIED / MISSING_MANIFEST_UNCLASSIFIED / false`. Clients must not parse `message` or infer a legacy fallback. See [Chunk Manifest and Legacy Governance](/en/architecture/chunk-manifest).
+
 The exact anonymous public-share contract consists of `GET /api/v1/shares/{shareCode}/info`, `GET /api/v1/shares/{shareCode}/files`, `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`, and `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`. These routes require neither Bearer authentication nor a tenant header. Any supplied `X-Tenant-ID`, including `0`, another tenant, or a malformed value, is ignored for authorization and data selection. The backend resolves the owner tenant from the matching `shareCode` metadata; the cross-tenant scope is restricted to that metadata lookup, and subsequent file, key-envelope, access-count, and share-access-audit work runs in the owner tenant. Anonymous `sys_operation_log` rows use system tenant `0`; any `share_access_log` row uses the owner tenant. Both audit paths use the same canonical trusted-client IP.
 
 The public chunk and decrypt-info routes share one tenant-independent 30-request/60-second bucket, `rate:limit:public:share-access:v2:ip:<canonical-ip>`. Changing `X-Tenant-ID`, JWT role, endpoint, `X-Forwarded-For`, or `X-Real-IP` cannot split the bucket unless the direct peer is in the configured trusted-proxy allowlist and supplies a valid chain. The first 30 combined requests may enter the controller; the current 31st-request contract remains HTTP 200 with business code `70005`. Share visibility, active/expiry state, unknown type/status, and included-file checks remain fail closed. The current model has no share-password field; password-protected shares require a separate end-to-end feature. Share writes, saving a share into a user account, and the authenticated `/api/v1/shares/{shareCode}/files/{fileHash}/chunks` and `/decrypt-info` routes still require a Bearer token.
@@ -160,6 +162,24 @@ Both operations require the admin role and always use the authenticated current 
 |------|------|------|
 | POST | `/api/v1/admin/attestation-batches/production/trigger` | Force one bounded production run for the current tenant |
 | GET | `/api/v1/admin/attestation-batches/production/status` | Get effective limits, candidate backlog, and due batch count |
+
+### Admin Manifest Backfill (`/api/v1/admin/manifest-backfill-runs`)
+
+All operations require the admin role and are tenant-isolated. `SCAN` creates a source snapshot; `DRY_RUN` and `APPLY` require that snapshot's external ID. Apply, sweep mark, and sweep delete remain independently feature-gated.
+
+| Method | Endpoint | Description |
+|------|------|------|
+| POST | `/api/v1/admin/manifest-backfill-runs` | Create `SCAN`, `DRY_RUN`, or `APPLY` run |
+| GET | `/api/v1/admin/manifest-backfill-runs` | List bounded run history |
+| GET | `/api/v1/admin/manifest-backfill-runs/{runId}` | Inspect one run |
+| GET | `/api/v1/admin/manifest-backfill-runs/{runId}/items` | Cursor-list classified items (limit capped at 100) |
+| POST | `/api/v1/admin/manifest-backfill-runs/{runId}/pause` | Pause at a durable boundary |
+| POST | `/api/v1/admin/manifest-backfill-runs/{runId}/resume` | Resume the same snapshot/cursor |
+| POST | `/api/v1/admin/manifest-backfill-runs/{runId}/items/{itemId}/retry` | Retry an eligible failed item |
+| POST | `/api/v1/admin/manifest-backfill-runs/reference-census` | Seal current reference census evidence |
+| POST | `/api/v1/admin/manifest-backfill-runs/reference-sweep/marks` | Grace-mark an exact storage object |
+
+The default backfill worker is enabled but apply is disabled. Reference mark/delete are both disabled and use a 30-day protection window. Detailed states, classifications, and defaults are frozen in [Chunk Manifest and Legacy Governance](/en/architecture/chunk-manifest).
 
 ### Admin Integrity Alerts (`/api/v1/admin/integrity-alerts`)
 

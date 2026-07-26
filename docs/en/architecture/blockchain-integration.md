@@ -326,30 +326,21 @@ Current status is `ACTIVE`, `REVOKED`, `SUPERSEDED`, or `INVALID`. An older `ACT
 
 The archive does not contain raw file bytes, decrypt keys, RPC tokens, database-only IDs, signing private keys, or full `file_param`.
 
-### Independent Proof Verifier
+### Public Signed-ZIP Verifier
 
-P1-3 adds an offline verifier boundary for the `proof-bundle.v1.1` contract:
+`platform-verifier` is the delivered public verifier for signed ZIP v2. It contains a reusable SDK (`DefaultProofVerifier`), executable CLI, and Web verifier. The verifier streams the original file under explicit limits and enforces the fixed ZIP contract, canonical JSON and entry digests, original-file/chunk hashes, Merkle path, receipt and immutable registry snapshot, Ed25519 JWS, current proof status, and live chain root.
 
-- `ProofBundleVerifier.verify(byte[] originalFile, ProofBundleVO bundle)` validates a parsed bundle without backend session state.
-- `ProofBundleVerifier.verify(byte[] originalFile, String bundleJson)` parses exported JSON and returns the same structured result.
-- `ProofVerificationResult` reports `valid`, machine-readable issue codes, computed file hash, computed leaf hash, computed Merkle root, chain receipt fields, and issuer status. `valid=true` is reserved for proof formats that establish both structural consistency and authenticity.
+Verification has three outcomes:
 
-The verifier checks:
+| Outcome | Meaning |
+| --- | --- |
+| `VALID` | Every local prerequisite passed, the JWS verified against an explicitly trusted Ed25519 key, current online status is `ACTIVE`, and the live chain identity/root matches the signed evidence. |
+| `INVALID` | A deterministic structural, content, signature, status, registry, receipt, or live-chain mismatch was established. |
+| `INDETERMINATE` | Required trust or live evidence could not be resolved safely. This includes offline mode and unavailable key, status, or chain resolvers. |
 
-- required `verificationPolicy` suite metadata: `algorithmSuite`, `signatureSuite`, `kemSuite`, and `proofSuite`
-- SHA-256 of the original file against `file.fileHash`
-- `merkle.proofAlgorithm` against `SHA-256-MERKLE-V1`
-- `merkle.leafHash` from the public `leaf\n{fileHash}` rule
-- `merkle.proofPath` from leaf to `merkle.merkleRoot`
-- `chain.batchChainFileHash` against the Merkle root when present
-- when `chain.batchTransactionHash` is absent, whether `chain.batchConfirmationSource` is a supported business-key reconciliation source
-- issuer batch status and storage metadata mismatch flags
+Offline verification can prove local consistency, but it can never produce `VALID`: absent or unavailable key/status/chain resolution is `INDETERMINATE`, not success. CLI online mode must be enabled explicitly and requires trusted issuer/chain endpoints plus an exact host allowlist; plain HTTP and private addresses remain opt-in for local testing. CLI exit codes are `0` for `VALID`, `2` for `INVALID`, and `3` for `INDETERMINATE`.
 
-Missing or unsupported suite metadata is reported as `UNSUPPORTED_ALGORITHM`; the verifier does not resolve absent fields with runtime defaults.
-
-The verifier does not call platform APIs, query the database, read tenant context, or authenticate to FISCO. Direct transaction receipt validation remains a separate online verification step until a public chain gateway or signed receipt contract is introduced.
-
-The current Java `ProofBundleVerifier` still handles only legacy `proof-bundle.v1.1`, so it reports `AUTHENTICITY_NOT_VERIFIED` even when structural checks pass. The public SDK/CLI/Web verifier for signed ZIP v2 is the following P1-3 task. Until it is delivered, integrations must apply the exact eight-entry, digest, JWS, Merkle, registry, and online-status rules in `verification-policy.json` and `README.verify.md`; legacy verifier results must not be applied to signed ZIPs.
+The backend `ProofBundleVerifierImpl` is a compatibility-only reader for the deprecated unsigned JSON `proof-bundle.v1.1` contract. It is not the signed ZIP verifier, and its structural result must not be promoted to signed-proof authenticity. New integrations must use `platform-verifier` and the signed policy embedded in the archive.
 
 ### Transaction Verification
 

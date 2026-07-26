@@ -1,12 +1,10 @@
-# Chunk Manifest Contract
+# Chunk Manifest and Legacy Governance
 
-`cn.flying.chunk-manifest.v1` is the shared metadata model for large-file transfer, integrity checks, proof generation, storage migration, and partial repair.
+`cn.flying.chunk-manifest.v1` is the shared metadata contract for large-file transfer, integrity checks, proof generation, storage migration, and partial repair. The manifest contains metadata only: ordered object references and hashes are persisted, while file bytes remain in object storage.
 
-The manifest is metadata only. It records ordered chunk references and hashes, but it does not store file bytes in the backend database.
+## Canonical Contract
 
-## Canonical Payload
-
-The persisted manifest hash is calculated over canonical JSON without the `manifestHash` field:
+The persisted `manifestHash` is SHA-256 over canonical JSON without the `manifestHash` field:
 
 ```json
 {
@@ -30,30 +28,102 @@ The persisted manifest hash is calculated over canonical JSON without the `manif
 }
 ```
 
-`ChunkManifestCanonicalizer` sorts chunks by `index`, requires contiguous indexes starting at `0`, and calculates `sha256:<lowercase-hex>` from the canonical JSON bytes.
+`ChunkManifestCanonicalizer` sorts chunks by `index`, requires contiguous indexes beginning at `0`, and emits `sha256:<lowercase-hex>` from the canonical UTF-8 JSON bytes.
 
-The v1 name `fileHash` is retained for compatibility with the current file table. Its value mirrors `file.fileHash`, which is the blockchain record identifier in the current backend; it is **not** an object-content digest. Use chunk `plainHash` for plaintext evidence, chunk `cipherHash` for stored-object evidence, and `manifestHash` for the ordered canonical manifest digest.
+The v1 field name `fileHash` is retained for compatibility with the file table. Its value mirrors `file.fileHash`, which is the blockchain record identifier; it is **not** an object-content digest. Use:
 
-`merkleRoot` is optional in v1 and no chunk-Merkle construction algorithm is defined by this schema. When present it is covered by `manifestHash`. Integrity checks therefore use the canonical `manifestHash` as the defined proof of the ordered chunk set and only validate the optional root's SHA-256 shape; they do not invent a Merkle algorithm.
+- chunk `plainHash` for plaintext evidence;
+- chunk `cipherHash` for stored-object evidence;
+- `manifestHash` for the ordered canonical manifest digest;
+- signed proof `contentHash`/`file.hash` for the complete original-file digest.
 
-## Persistence
+`merkleRoot` is optional in v1, and this schema does not define a chunk-Merkle algorithm. When present, the value is covered by `manifestHash`; integrity checks validate its SHA-256 shape but do not invent a construction algorithm.
 
-`file_chunk_manifest` stores manifest-level metadata:
+## Persistence and Active Slot
 
-- `tenant_id`, `file_id`, and optional `file_version`
-- `schema_id`, `file_hash`, `manifest_hash`, and `hash_algorithm`
-- `chunk_size`, `chunk_count`, `total_size`
-- optional `merkle_root`, `encryption_algorithm`, `storage_backend`
-- `manifest_json` canonical payload
+`file_chunk_manifest` stores the manifest header and canonical JSON. `file_chunk_manifest_item` stores ordered chunk entries. Migration `V1.17.0` adds a tenant/file active-slot constraint so at most one undeleted active manifest exists for one file record. A version is represented by its stable file record; `file_version` remains evidence metadata rather than part of the unique key.
 
-`file_chunk_manifest_item` stores ordered chunk entries:
+Direct multipart completion persists the active manifest after validating every staging object against its declared `cipherHash`. The current direct-upload contract stores unencrypted object bytes, so `plainHash` and `cipherHash` must match and `encryptionAlgorithm` is `NONE`.
 
-- `manifest_id`, `file_id`, `chunk_index`
-- `plain_hash`, `cipher_hash`, `size`
-- `storage_path`, optional `storage_backend`, `etag`, `checksum_algorithm`
+Integrity checks batch-load active headers and chunks. Lightweight and medium checks use `storagePath` and `cipherHash` for each `HeadObject`; heavy checks download only configured sampled chunks and recompute `cipherHash`. A missing manifest is classified as `MANIFEST_MISSING`, not object corruption.
 
-Manifest-backed download metadata requires an active manifest. `GET /api/v1/files/hash/{fileHash}/download-metadata` returns `FILE_RECORD_ERROR` when the file has no active `cn.flying.chunk-manifest.v1` record instead of falling back to URL-only metadata.
+## Missing-Manifest Machine Contract
 
-Direct multipart upload completion persists the active manifest after validating every staging object against its declared `cipherHash`. The current direct-upload contract stores unencrypted object bytes, so `plainHash` and `cipherHash` must match and the manifest `encryption_algorithm` is `NONE`.
+`GET /api/v1/files/hash/{fileHash}/download-metadata` never silently substitutes legacy URL-only metadata for an owned file that needs an active manifest. Successful metadata includes:
 
-Integrity checks batch-load active manifest headers and chunks. Lightweight and medium checks use `storagePath`/`cipherHash` for every `HeadObject`; heavy checks download only configured sampled chunks and recompute their `cipherHash`. A missing active manifest is reported as `MANIFEST_MISSING` and is not treated as object corruption or silently checked through the legacy chain-record field.
+- `canonicalManifestJson`
+- `manifestStatus`
+- `manifestClassification`
+- `manifestErrorCode`
+- `legacyDownloadAllowed`
+
+An active manifest returns `manifestStatus=ACTIVE`, `manifestClassification=ALREADY_MANIFEST`, and `legacyDownloadAllowed=false`. A missing manifest returns business code `FILE_RECORD_ERROR`; the standard `ErrorPayload` carries a structured `ManifestErrorDetail` at `data.detail`. Before a governance item exists, that detail is:
+
+```json
+{
+  "manifestStatus": "REUPLOAD_REQUIRED",
+  "manifestClassification": "UNCLASSIFIED",
+  "manifestErrorCode": "MISSING_MANIFEST_UNCLASSIFIED",
+  "legacyDownloadAllowed": false
+}
+```
+
+After classification, `data.detail` reflects the latest governance item. Clients must branch on these fields rather than parsing `message`. `legacyDownloadAllowed` is an explicit policy output; it is never inferred from a missing row.
+
+## Backfill Modes and Classification
+
+An administrator creates a durable run in one of three modes:
+
+| Mode | Behavior |
+| --- | --- |
+| `SCAN` | Discover and classify candidates without generating or applying manifests. |
+| `DRY_RUN` | Produce a reviewable snapshot and proposed manifests without changing the active slot. |
+| `APPLY` | Apply only eligible proposals after the explicit apply gate is enabled. |
+
+Run states are `PLANNED`, `SCANNING`, `SNAPSHOT_READY`, `APPLYING`, `PAUSED`, `COMPLETED`, and `FAILED`. Item states are `PENDING`, `RUNNING`, `BACKFILLED`, `REUPLOAD_REQUIRED`, `UNRECOVERABLE`, `FAILED`, and `IGNORED`.
+
+Every candidate receives one classification:
+
+| Classification | Meaning |
+| --- | --- |
+| `ALREADY_MANIFEST` | A valid active manifest already exists. |
+| `BACKFILLABLE` | Existing evidence is sufficient to construct and verify a canonical manifest. |
+| `REUPLOAD_REQUIRED` | Trustworthy chunk evidence cannot be reconstructed; the owner must upload again. |
+| `UNRECOVERABLE` | Required source data is permanently absent or contradictory. |
+| `FAILED` | Processing failed and may be retried within the bounded attempt policy. |
+| `IGNORED` | The record is outside the selected governance scope. |
+
+The worker uses pages of 100 records, claims at most 20 items, allows three item attempts, and leases a claim for 120 seconds.
+
+## Safety Defaults
+
+Backfill and destructive sweep are fail-closed by default:
+
+| Setting | Default |
+| --- | ---: |
+| Backfill worker enabled | `true` |
+| Apply enabled | `false` |
+| Run lease | 300 seconds |
+| Worker delay | 5 seconds |
+| Sweep mark enabled | `false` |
+| Sweep delete enabled | `false` |
+| Sweep protection window | 30 days |
+| Sweep batch size | 20 (hard cap 100) |
+| Sweep lease | 120 seconds (minimum 30) |
+| Sweep worker delay | 60 seconds |
+
+`APPLY` mode does not bypass `apply-enabled=false`. Mark and delete are separate gates, and a deletion candidate remains protected by the time window and durable ledger.
+
+## Administrative API
+
+All endpoints require an administrator and are rooted at `/api/v1/admin/manifest-backfill-runs`:
+
+- `POST /` — create a run;
+- `GET /` and `GET /{runId}` — list and inspect runs;
+- `GET /{runId}/items` — cursor-list items by status, classification, or reason;
+- `POST /{runId}/pause` and `POST /{runId}/resume` — control worker admission;
+- `POST /{runId}/items/{itemId}/retry` — retry an eligible failed item;
+- `POST /reference-census` — take a durable reference census;
+- `POST /reference-sweep/marks` — mark candidates after census and protection checks.
+
+Use the detailed request/response contract in [API Documentation](/en/api/). Production rollout starts with `SCAN`, reviews the snapshot, exercises `DRY_RUN`, and enables apply or sweep gates only after an approved rollback window.

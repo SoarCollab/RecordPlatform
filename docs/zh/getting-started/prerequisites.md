@@ -96,8 +96,8 @@ services:
       - "9001:9001"
     command: server /data --console-address ":9001"
     environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:?请在 .env 中设置 MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:?请在 .env 中设置 MINIO_ROOT_PASSWORD}
 
   minio-b:
     image: minio/minio:RELEASE.2024-11-07T00-52-20Z
@@ -106,8 +106,8 @@ services:
       - "9011:9001"
     command: server /data --console-address ":9001"
     environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:?请在 .env 中设置 MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:?请在 .env 中设置 MINIO_ROOT_PASSWORD}
 ```
 
 ```bash
@@ -138,4 +138,3 @@ FISCO BCOS 需要单独配置，请参考官方文档：
 | Redis | `redis-cli ping` |
 | RabbitMQ | http://localhost:15672 (guest/guest) |
 | MinIO | http://localhost:9001 |
-

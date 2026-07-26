@@ -2,9 +2,9 @@
 
 本项目采用"单元测试优先 + 少量高价值集成测试"的策略，目标是在 CI 中尽早发现回归，同时保持本地开发的执行成本足够低。
 
-## 当前核心测试覆盖（244 test files: 177 backend + 27 storage + 40 frontend）
+## 当前测试文件快照（274 files）
 
-> 统计口径为 `*Test.java` / `*IT.java` / `*.test.ts` 文件；当前后端拆分为 `backend-common=13`、`backend-api=1`、`backend-service=75`、`backend-web=88`（合计 177）。以下长表用于说明代表性覆盖，不作为完整文件清单。
+> 2026-07-27 按 `*Test.java` / `*IT.java` / `*.test.ts` / `*.spec.ts` 统计：`platform-backend=177`、`platform-storage=27`、`platform-frontend=41`、`platform-verifier=15`、`platform-fisco=11`、`platform-api=3`，合计 274。后端拆分为 `backend-common=13`、`backend-api=1`、`backend-service=75`、`backend-web=88`。该数字是文件快照，不等同 test case 数；以下长表只说明代表性覆盖。
 
 ### 后端单元测试（backend-common，代表性测试类）
 
@@ -55,6 +55,11 @@
 | QuotaServiceImplTest | 配额查询与执行逻辑 |
 | QuotaRolloutAuditServiceImplTest | 配额灰度审计服务 |
 | IntegrityCheckServiceTest | 存储完整性校验（S3 存在性 + DB-链上哈希一致性） |
+| ChunkManifestCanonicalizerTest | canonical manifest、连续索引、hash 与版本化加密约束 |
+| ManifestBackfillRunServiceTest | SCAN/DRY_RUN/APPLY 快照、状态机、暂停/恢复/重试 |
+| ManifestEvidenceResolverTest | ALREADY_MANIFEST/BACKFILLABLE/REUPLOAD_REQUIRED 等证据分类 |
+| ManifestGovernanceStatusServiceTest | 缺失 manifest 的机器可读下载治理合同 |
+| ManifestReferenceLifecycleTest | reference census、mark/grace/delete 的开关与 fencing 生命周期 |
 
 ### 后端测试（backend-web，代表性测试文件）
 
@@ -293,6 +298,8 @@ F07、F09-F11 复用既有真实 MinIO/Redis 测试和确定性 service tests，
 - `platform-storage/target/direct-upload-load-smoke/report.json`
 - `platform-storage/target/direct-upload-load-smoke/report.md`
 
+P2-4 在 exact `main` 的 [Test Suite run 30209115456](https://github.com/SoarCollab/RecordPlatform/actions/runs/30209115456) 留下以下可复核快照：Linux amd64、Java 21.0.11、4 processors，4 并发完成 8/8 次迭代；256 KiB 负载 wall time 526 ms、p99 381 ms、吞吐约 3.98 MiB/s，heap delta 16 MiB、direct-buffer delta 3,080,192 bytes、thread delta 23；receipt/tombstone 从 8/8 回落到 0/0，最终对象与 Redis lifecycle 残留为零。该结果是对应 fingerprint 的 smoke 证据，不是生产 SLA。
+
 PR 硬门禁是零失败、零对象/Redis 残留、有界 deadline 与资源预算；吞吐和紧时延只记录，不作为共享 runner 的生产 SLA。96 MiB 对象 / 80 MiB heap 的对象级边界仍由以下独立 fork 证明：
 
 ```bash
@@ -314,17 +321,30 @@ baseline 仅在 flow/cleanup 样本、完成文件、p95/p99、吞吐和失败�
 - GitHub Actions 会执行：
   - 后端：`mvn -f platform-backend/pom.xml clean verify -pl backend-common,backend-service,backend-web -am -Pit`
   - FISCO：`mvn -f platform-fisco/pom.xml test`
-  - Storage：`mvn -f platform-storage/pom.xml test`
+  - Storage：`mvn -f platform-storage/pom.xml clean verify -Pit`，并精确校验 Failsafe XML、负载报告与零残留；另执行 `verify -Pdirect-upload-constrained-heap`
   - 前端质量门禁：
     - `pnpm lint`
     - `pnpm check`
     - `pnpm test:coverage`
+    - `pnpm audit --audit-level high`
+  - 安全阻断子集：Trivy 已修复 High/Critical 扫描使用 `exit-code: 1`；完整 `security-poc` 聚合仍为观察模式
   - 契约一致性门禁：
     - 后端导出 `platform-backend/backend-web/target/openapi/openapi.json`
     - 前端执行 `OPENAPI_SOURCE=../backend-openapi/openapi.json pnpm types:gen`
     - 校验 `platform-frontend/src/lib/api/types/generated.ts` 无未提交差异
 - 后端覆盖率报告由 JaCoCo 生成，CI 中会上传 `backend-common`、`backend-service`、`backend-web` 三模块的 `jacoco.xml`（见 `.github/workflows/test.yml`）。
 - 任一步骤失败都会阻断 PR 合并（包括 lint/check/contract-consistency）。
+
+### 文档与在线证据校验
+
+```bash
+python3 tools/docs/check_consistency.py \
+  --check-routes --check-env --check-roadmap --check-versions
+pnpm -C docs install --frozen-lockfile
+pnpm -C docs docs:build
+```
+
+`docs-consistency.yml` 负责 canonical `ROADMAP.md`、路由、环境变量、版本与文档构建；`docs.yml` 负责 Pages 构建部署。文档 leaf 合并后必须在 exact merge SHA 上通过两者，并以线上 Pages HTTP 200 作为发布验收。工作区或 PR 分支构建成功不能表述为已上线。
 
 ## 6. 存储完整性校验测试
 

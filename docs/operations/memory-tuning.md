@@ -1,473 +1,182 @@
-# 内存调优指南
+# 内存与有界传输调优指南
 
-> **适用版本**: v1.x  
-> **目标读者**: 运维团队、SRE  
-> **最后更新**: 2026-06-14
+> **适用范围**：当前 `main` 的直接分片上传、Manifest 下载与存储晋升链路
+>
+> **目标读者**：运维、SRE、容量规划人员
+>
+> **最后更新**：2026-07-27
 
----
+## 结论先行
 
-## 概述
+当前大文件主链路不再按“并发数 × 文件大小”聚合堆内存：
 
-RecordPlatform 后端服务在文件上传/下载链路中会临时加载分片数据到堆内存。本文档提供内存容量规划、监控配置和故障处理指南。
+- 浏览器将上传分片直接 PUT 到对象存储；backend 处理会话、配额、manifest 和存证元数据。
+- `platform-storage` 在同端点使用服务端 copy，在跨端点使用固定缓冲区流式校验/转发。
+- 浏览器下载按 manifest 顺序进行有界读取；64 MiB 是内存 sink 的硬上限，更大文件必须写入 File System Access API 流式 sink。
+- 文件总大小仍影响传输时长、磁盘空间和预签名 URL 生命周期，但不应再直接代入 JVM 堆公式。
 
-### 当前架构特点
+旧的后端代理分片接口仍是兼容链路，其容量模型与直接链路不同。只有确认流量确实经过兼容接口时，才按旧分片大小单独压测和扩容，不能把两种口径混在一起。
 
-- **上传链路**: 后端读取本地临时分片文件 → 加载到内存 → 通过 Dubbo 传输到存储服务
-- **下载链路**: 存储服务从 S3 读取对象 → 加载到内存 → 返回给后端 → 前端
-- **单分片上限**: 80MB（受 Dubbo 100MB 消息体限制）
-- **内存聚合点**: FileSagaOrchestrator + DistributedStorageServiceImpl
+## 固定边界
 
-### v2.0 改进计划
+### 直接上传与存储晋升
 
-参见 `ROADMAP.md` P2 任务（第 7-10 周）：
-- 前端使用 S3 Multipart Upload 直接上传到对象存储
-- 前端使用预签名 URL 直接下载并流式解密
-- 后端仅处理元数据和区块链存证，完全消除数据流代理
+| 边界 | 默认值 | 说明 |
+| --- | ---: | --- |
+| 单文件 | 4 GiB | `storage.direct-upload.max-file-size-bytes` |
+| 单分片 | 100 MiB | `storage.direct-upload.max-part-size-bytes` |
+| 跨端点流式缓冲 | 64 KiB | 有效范围 8 KiB–1 MiB |
+| 一组副本晋升超时 | 300 秒 | 最大 1,800 秒 |
+| 分片锁等待 | 5 秒 | 最大 60 秒 |
+| staging 保留 | 48 小时 | 有效最小值 48 小时 |
+| 清理批量 | 200 | 使用 600 秒 fencing claim lease |
 
----
+同端点 copy 不在 Java 堆中缓存完整对象。跨端点转发为每个活动流分配固定应用缓冲，同时 AWS SDK、TLS、HTTP 客户端和线程栈还有额外内存；规划时必须通过真实 RSS/Native Memory Tracking 校准这些非堆开销。
 
-## JVM 堆内存配置
+### 浏览器下载
 
-### 推荐配置（生产环境）
+| 边界 | 值 | 行为 |
+| --- | ---: | --- |
+| 内存 sink 硬上限 | 64 MiB | 仅在总输出不超过上限时构造 `Blob` |
+| 建议流式提示 | 500 MiB | 提示级别，不放宽 64 MiB 上限 |
+| 超大文件提示 | 2 GiB | 仍要求流式 sink |
+| 绝对下载上限 | 100 GiB | 超过即拒绝 |
+| 单网络响应块 | 1 MiB | 超限立即失败 |
+| 历史密文分片 | 约 80 MiB + 4 KiB | legacy v1 上限 |
+| 单文件分片数 | 10,000 | 超限立即失败 |
+| 获取尝试 | 3 次 | 401/403 刷新 metadata；仅 5xx 有限重试 |
 
-#### backend-web（主业务服务）
+下载支持 `NONE`、legacy v1 AEAD 和 framed AEAD v2。所有格式都必须验证长度、顺序和摘要；取消、解密、哈希、网络或写入失败会中止 sink，不能留下“成功”文件。
+
+## 容量模型
+
+### Backend
+
+直接上传与 manifest 下载的 backend 增量堆主要来自请求 DTO、canonical JSON、数据库对象、RPC 元数据和并发控制，不来自文件正文：
+
+```text
+backend 目标堆 = 空闲稳定堆
+               + 峰值并发请求 × 实测每请求元数据增量
+               + proof/manifest/查询 worker 的实测工作集
+               + GC 安全余量
+```
+
+不要使用“并发上传 × 分片大小 × 2”公式。若路由仍允许兼容的 backend-proxied chunk upload，应单独记录该路由的并发量和分片驻留，并设置独立限流。
+
+### Storage
+
+跨端点 direct-upload 晋升的可见应用缓冲近似为：
+
+```text
+应用流缓冲 ≈ 活动跨端点传输 lane × effectiveStreamBufferBytes
+storage 进程预算 = 空闲稳定 RSS
+                 + 应用流缓冲
+                 + SDK/TLS/direct-buffer/线程栈实测增量
+                 + repair 与 cleanup 并发实测增量
+                 + 安全余量
+```
+
+这个公式只描述由代码明确控制的缓冲，不代表完整 RSS。副本数会增加 provider 请求、连接和传输工作量；是否同时占用内存取决于实际 promotion lane，必须用目标拓扑压测。
+
+### Browser
+
+```text
+内存 sink：单任务输出上限 64 MiB + 网络/解密/Blob 开销
+流式 sink：有界网络块 + 格式解密状态 + 浏览器/文件系统缓冲
+```
+
+不要因为设备内存较大而提高 64 MiB 硬上限。File System Access API 不可用时，大于 64 MiB 的自有文件会失败闭合；后端代理不是无界兜底。
+
+## 调优步骤
+
+1. 在目标 JVM 参数、容器限制、对象存储拓扑和 TLS 配置下记录空闲基线。
+2. 分别运行同端点 copy、跨端点 stream、降级 repair、abort/cleanup，不把不同路径合并为一个平均值。
+3. 逐级提高并发，记录 heap、non-heap、direct buffer、RSS、线程、GC 暂停、连接池和 provider 延迟。
+4. 以 p99、错误率、残留 receipt/tombstone/repair 状态和资源回落共同判断稳定点。
+5. 在稳定点以下保留容量余量，再配置入口并发、线程池、连接池和容器 memory limit。
+6. 变更缓冲区、超时、副本拓扑或 SDK 后重新建立基线；不同 fingerprint 的结果不能直接比较。
+
+P2-4 的 exact-main 负载烟测使用 Linux amd64、Java 21.0.11、4 processors，4 并发完成 8/8 次迭代；256 KiB 负载下 wall time 526 ms、p99 381 ms、吞吐约 3.98 MiB/s，heap delta 16 MiB、direct-buffer delta 3,080,192 bytes、thread delta 23，receipt/tombstone 从 8/8 回落到 0/0，最终无残留。该结果只证明对应 fingerprint 与小负载冒烟门槛，不是生产容量承诺。完整证据见[交付证据矩阵](/zh/architecture/delivery-evidence)。
+
+## JVM 与容器配置
+
+以下模板只提供诊断能力，不代表固定生产规格。`-Xmx` 必须来自目标环境压测，并低于容器 memory limit，为 metaspace、direct buffer、线程栈、代码缓存和 libc 保留空间。
+
 ```bash
-JAVA_OPTS="-Xms2g -Xmx4g \
-  -XX:MetaspaceSize=256m -XX:MaxMetaspaceSize=512m \
-  -XX:+UseG1GC \
-  -XX:MaxGCPauseMillis=200 \
+JAVA_OPTS="-XX:+UseG1GC \
   -XX:+HeapDumpOnOutOfMemoryError \
-  -XX:HeapDumpPath=/var/log/record-platform/heapdump.hprof"
+  -XX:HeapDumpPath=/var/log/record-platform/heapdump.hprof \
+  -Xlog:gc*:file=/var/log/record-platform/gc.log:time,level,tags:filecount=10,filesize=20m"
 ```
 
-**说明**:
-- 初始堆 2GB，最大 4GB（根据并发量调整）
-- G1 GC 适合中大型堆，目标 GC 暂停 <200ms
-- OOM 时自动生成堆转储文件便于分析
-
-#### platform-storage（存储服务）
-```bash
-JAVA_OPTS="-Xms1g -Xmx2g \
-  -XX:MetaspaceSize=128m -XX:MaxMetaspaceSize=256m \
-  -XX:+UseG1GC \
-  -XX:+HeapDumpOnOutOfMemoryError \
-  -XX:HeapDumpPath=/var/log/record-platform/storage-heapdump.hprof"
-```
-
-**说明**:
-- 存储服务主要处理下载流量
-- 2GB 堆足够处理中等并发（~20 并发下载）
-
-#### platform-fisco（区块链服务）
-```bash
-JAVA_OPTS="-Xms512m -Xmx1g \
-  -XX:MetaspaceSize=128m -XX:MaxMetaspaceSize=256m \
-  -XX:+UseG1GC"
-```
-
-**说明**:
-- 区块链服务内存占用较小
-- 主要处理 RPC 调用和 Solidity 合约交互
-
-### 内存容量公式
-
-#### 上传场景
-```
-backend heap ≥ 并发上传数 × 平均分片大小 × 2 + 基础开销(1GB)
-```
-
-**示例**:
-- 20 并发上传，平均分片 60MB
-- 所需堆内存: `20 × 60MB × 2 + 1GB = 3.4GB`
-- **推荐配置**: 4GB
-
-#### 下载场景
-```
-storage heap ≥ 并发下载数 × 平均文件大小 + 基础开销(512MB)
-```
-
-**示例**:
-- 15 并发下载，平均文件 40MB
-- 所需堆内存: `15 × 40MB + 512MB = 1.1GB`
-- **推荐配置**: 2GB
-
----
-
-## 并发容量规划
-
-### 容量规划表
-
-| 部署规模 | 并发上传数 | 并发下载数 | backend heap | storage heap | 预期 GC 频率 |
-|----------|-----------|-----------|--------------|--------------|--------------|
-| 小型     | ≤10       | ≤10       | 2GB          | 1GB          | 1-2次/小时   |
-| 中型     | ≤30       | ≤20       | 4GB          | 2GB          | 3-5次/小时   |
-| 大型     | ≤50       | ≤30       | 6GB          | 3GB          | 5-10次/小时  |
-
-### 调优建议
-
-#### 小型部署（<50 用户）
-- backend: 2GB 堆
-- storage: 1GB 堆
-- 适合演示环境、开发团队内部使用
-
-#### 中型部署（50-200 用户）
-- backend: 4GB 堆（推荐配置）
-- storage: 2GB 堆
-- 适合企业内部文档管理、部门级应用
-
-#### 大型部署（>200 用户）
-- backend: 6GB+ 堆
-- storage: 3GB+ 堆
-- 需要配置并发限流（见下文）
-- 建议规划 v2.0 架构升级
-
----
-
-## 监控配置
-
-### 关键指标
-
-#### JVM 堆内存指标
-```
-jvm_memory_used_bytes{area="heap"}           # 堆内存使用量
-jvm_memory_max_bytes{area="heap"}            # 堆内存上限
-jvm_memory_committed_bytes{area="heap"}      # 已提交堆内存
-```
-
-#### GC 指标
-```
-jvm_gc_pause_seconds_sum                     # GC 暂停总时间
-jvm_gc_pause_seconds_count                   # GC 次数
-jvm_gc_memory_allocated_bytes_total          # 内存分配速率
-```
-
-#### 应用指标
-```
-upload_sessions_active                       # 当前活跃上传会话数
-download_concurrent_requests                 # 并发下载请求数
-saga_active_count                           # 活跃 Saga 数量
-```
-
-### Prometheus 告警规则
-
-创建 `monitoring/prometheus/alerts/memory-alerts.yml`:
-
-```yaml
-groups:
-  - name: memory_alerts
-    interval: 30s
-    rules:
-      # 堆内存使用率告警
-      - alert: BackendHeapMemoryHigh
-        expr: |
-          (jvm_memory_used_bytes{application="backend-web", area="heap"} 
-           / jvm_memory_max_bytes{application="backend-web", area="heap"}) > 0.85
-        for: 5m
-        labels:
-          severity: warning
-          component: backend
-        annotations:
-          summary: "后端堆内存使用率超过 85%"
-          description: "当前使用率 {{ $value | humanizePercentage }}，可能因高并发上传导致。建议检查活跃上传会话数。"
-
-      # GC 暂停时间告警
-      - alert: BackendGCPauseTooLong
-        expr: |
-          rate(jvm_gc_pause_seconds_sum{application="backend-web"}[5m]) > 1
-        for: 3m
-        labels:
-          severity: warning
-          component: backend
-        annotations:
-          summary: "后端 GC 暂停时间过长"
-          description: "过去 5 分钟平均 GC 暂停超过 1 秒，影响请求响应时间。"
-
-      # 并发上传数告警
-      - alert: HighConcurrentUploads
-        expr: upload_sessions_active > 40
-        for: 10m
-        labels:
-          severity: info
-          component: backend
-        annotations:
-          summary: "并发上传数接近上限"
-          description: "当前 {{ $value }} 个活跃上传会话，接近推荐上限 50。"
-
-      # OOM 风险预警
-      - alert: BackendOOMRisk
-        expr: |
-          (jvm_memory_used_bytes{application="backend-web", area="heap"} 
-           / jvm_memory_max_bytes{application="backend-web", area="heap"}) > 0.95
-        for: 2m
-        labels:
-          severity: critical
-          component: backend
-        annotations:
-          summary: "后端即将 OOM"
-          description: "堆内存使用率 {{ $value | humanizePercentage }}，立即检查并发上传数。"
-```
-
-### Grafana 仪表板
-
-关键图表：
-1. **堆内存使用趋势**（折线图）
-2. **GC 频率和暂停时间**（柱状图）
-3. **活跃上传/下载会话数**（面积图）
-4. **内存分配速率**（速率图）
-
----
-
-## 故障处理
-
-### OOM 场景处理
-
-#### 症状
-- 应用突然终止，日志中有 `java.lang.OutOfMemoryError: Java heap space`
-- 响应时间显著增加
-- GC 日志显示 Full GC 频繁发生
-
-#### 应急措施
-
-1. **立即检查并发量**
-   ```bash
-   # 查看活跃上传会话数
-   curl http://localhost:8000/record-platform/actuator/metrics/upload.sessions.active
-   
-   # 查看堆内存使用情况
-   jstat -gc <pid> 1000
-   ```
-
-2. **降低并发上限**（临时措施）
-   - 通过 Nacos 动态配置降低 `MAX_CONCURRENT_UPLOADS`
-   - 或重启服务并调整环境变量
-
-3. **重启服务释放内存**
-   ```bash
-   ./scripts/start.sh restart backend-web
-   ```
-
-4. **分析堆转储文件**
-   ```bash
-   # 使用 Eclipse MAT 或 jhat 分析
-   jhat /var/log/record-platform/heapdump.hprof
-   # 或上传到 https://heaphero.io 在线分析
-   ```
-
-#### 根因分析
-
-常见原因：
-- 并发上传数超过容量规划
-- 用户上传超大文件（接近 4GB 上限）
-- Saga 状态未正确清理导致内存泄漏
-- FileUploadState 缓存过期策略失效
-
-### 内存泄漏排查
-
-#### 1. 生成堆快照
-```bash
-# 方法一：使用 jmap
-jmap -dump:live,format=b,file=heap.bin <pid>
-
-# 方法二：通过 actuator（如果启用）
-curl -X POST http://localhost:8000/record-platform/actuator/heapdump -o heapdump.hprof
-```
-
-#### 2. 使用 MAT 分析
-
-关键检查点：
-- **Dominator Tree**: 查找占用内存最多的对象
-- **Histogram**: 统计对象实例数量
-- **Leak Suspects**: 自动识别疑似泄漏
-
-重点关注类：
-- `cn.flying.entity.saga.FileSaga`
-- `cn.flying.entity.FileUploadState`
-- `byte[]` 数组（分片数据）
-- `LinkedHashMap`（Saga payload context）
-
-#### 3. 检查代码逻辑
+诊断 non-heap 漂移时可在受控环境启用 Native Memory Tracking：
 
 ```bash
-# 检查 Saga 清理逻辑
-grep -r "deleteSaga\|removeSaga" platform-backend/backend-service/src/
-
-# 检查 FileUploadState 过期清理
-grep -r "@Scheduled.*cleanUp" platform-backend/backend-service/src/
+JAVA_OPTS="$JAVA_OPTS -XX:NativeMemoryTracking=summary"
+jcmd <pid> VM.native_memory baseline
+jcmd <pid> VM.native_memory summary.diff
 ```
 
-### 性能下降处理
+NMT 和详细 GC 日志有额外成本，应先在预生产验证，再决定生产采样窗口。
 
-#### 症状
-- 上传/下载响应时间变慢
-- CPU 使用率升高
-- GC 暂停时间增加
+## 监控与告警
 
-#### 诊断步骤
+至少按服务和实例监控：
 
-1. **检查 GC 日志**
-   ```bash
-   # 启用 GC 日志（在 JAVA_OPTS 中添加）
-   -Xlog:gc*:file=/var/log/record-platform/gc.log:time,uptime,level,tags
-   
-   # 分析 GC 日志
-   java -jar gceasy.jar /var/log/record-platform/gc.log
-   ```
+- JVM heap/non-heap used、committed、max；
+- process RSS、容器 working set 与 OOM kill；
+- direct/mapped buffer pool 数量与已用字节；
+- live/peak thread、连接池 pending/acquired、GC pause 与 allocation rate；
+- `storage_direct_upload_operations_total`；
+- `storage_direct_upload_transfers_total`；
+- `storage_direct_upload_staging_cleanup_total`；
+- staging lifecycle、promotion receipt、repair、tombstone 的待处理和超龄数量；
+- 浏览器端峰值 buffer、sink 类型、重试数、metadata refresh 与失败原因。
 
-2. **检查线程状态**
-   ```bash
-   # 生成线程转储
-   jstack <pid> > thread-dump.txt
-   
-   # 查找阻塞线程
-   grep -A 10 "BLOCKED\|WAITING" thread-dump.txt
-   ```
+建议以持续时间告警代替单点尖峰：例如 heap 使用率持续高位并伴随 old-gen 回收后不回落、RSS 接近容器限制、direct buffer 单调增长、staging 超过保留窗口或 receipt/tombstone 不归零。阈值应来自容量测试，而非复制通用百分比。
 
-3. **检查数据库连接池**
-   ```bash
-   # Druid 监控页面
-   curl http://localhost:8000/record-platform/druid/sql.html
-   ```
+## 故障定位
 
-#### 调优措施
+### Heap 高但 RSS 同步高
 
-- 调整 G1 GC 参数：`-XX:MaxGCPauseMillis=100`（降低目标暂停时间）
-- 增加堆内存：`-Xmx6g`
-- 启用并发限流（见下文）
-- 考虑水平扩展（增加实例数）
+1. 确认是否仍有流量进入 backend-proxied 兼容上传；下载侧则确认实际使用的是 64 MiB 内存 sink 还是 File System Access 流式 sink，不存在无界后端代理下载兜底。
+2. 按 class histogram 检查大 `byte[]`、JSON/manifest、proof ZIP 或缓存对象。
+3. 对照 GC 后存活集；只在有泄漏证据时采集 heap dump。
 
----
+### Heap 正常但 RSS 持续升高
 
-## 并发限流配置
+1. 查看 direct/mapped buffer pool 与 NMT 的 `Thread`、`Arena Chunk`、`Internal`、`Class`。
+2. 检查 HTTP/S3 连接是否归还、线程是否回落、取消路径是否关闭 response body 与 sink。
+3. 对照 `storage_direct_upload_transfers_total` 的结果标签与超时，定位 provider 阻塞。
 
-### Redis 分布式计数器
+### staging 或生命周期记录不回落
 
-在 `FileUploadServiceImpl` 中实现：
+1. 检查 cleanup 是否启用、claim lease 是否过期、分片锁是否长期占用。
+2. 核对 complete/abort 的 receipt、operation intent、tombstone 与 fencing generation。
+3. 不要手工批量删除 `staging/direct-upload`；先通过 reference census 和专用生命周期流程确认所有权。
+4. provider 404 属于幂等完成；其他异常应保留 lifecycle 记录重试。
 
-```java
-private static final String UPLOAD_CONCURRENCY_KEY = "upload:concurrency:global";
-private static final int MAX_CONCURRENT_UPLOADS = 50;  // 通过 @Value 注入
+### 浏览器大文件失败
 
-@Override
-public String startUploadSession(Long userId, String fileName, long fileSize) {
-    // 检查全局并发数
-    Long currentConcurrency = redisTemplate.opsForValue().increment(UPLOAD_CONCURRENCY_KEY, 0);
-    if (currentConcurrency != null && currentConcurrency >= MAX_CONCURRENT_UPLOADS) {
-        log.warn("上传并发数达到上限: current={}, max={}", currentConcurrency, MAX_CONCURRENT_UPLOADS);
-        throw new GeneralException(ResultEnum.SYSTEM_BUSY, "系统繁忙，请稍后重试");
-    }
-    
-    // 创建会话时递增
-    redisTemplate.opsForValue().increment(UPLOAD_CONCURRENCY_KEY);
-    redisTemplate.expire(UPLOAD_CONCURRENCY_KEY, 1, TimeUnit.HOURS);
-    
-    // ... 原有逻辑
-}
+1. 确认浏览器同时支持 File System Access API 和 Streams。
+2. 检查是否超过 100 GiB、10,000 parts、1 MiB 网络块或 legacy part 上限。
+3. 401/403 应刷新 metadata，不能原 URL 循环重试；5xx 最多三次尝试。
+4. 校验失败后确认 sink 已 abort，避免把部分文件误认为成功。
 
-@Override
-public void completeUpload(String sessionId) {
-    // 完成时递减
-    redisTemplate.opsForValue().decrement(UPLOAD_CONCURRENCY_KEY);
-    // ... 原有逻辑
-}
-```
+## 变更验收清单
 
-### Resilience4j 速率限制
+- [ ] 目标路径已确认是 direct、legacy proxy、repair 或 cleanup 中的哪一种
+- [ ] 同端点与跨端点场景分别压测
+- [ ] 记录 commit、配置、镜像、JDK、CPU、内存、对象存储和网络 fingerprint
+- [ ] 同时保存 heap、RSS、direct buffer、线程、GC 与 lifecycle 证据
+- [ ] p99、错误率、资源回落和零残留均满足门槛
+- [ ] OOM/取消/provider timeout 后 sink、response、lock、claim 可恢复
+- [ ] 未通过增大堆掩盖无界聚合或资源泄漏
 
-在 `application.yml` 配置：
+相关文档：
 
-```yaml
-resilience4j:
-  ratelimiter:
-    configs:
-      default:
-        register-health-indicator: true
-        event-consumer-buffer-size: 100
-    instances:
-      uploadRateLimiter:
-        limit-for-period: 10        # 10 次请求
-        limit-refresh-period: 60s   # 每 60 秒
-        timeout-duration: 5s        # 超时等待 5 秒
-      downloadRateLimiter:
-        limit-for-period: 20
-        limit-refresh-period: 60s
-        timeout-duration: 3s
-```
-
-应用到服务方法：
-
-```java
-@RateLimiter(name = "uploadRateLimiter", fallbackMethod = "uploadRateLimitFallback")
-public String startUploadSession(Long userId, String fileName, long fileSize) {
-    // ... 原有逻辑
-}
-
-private String uploadRateLimitFallback(Long userId, String fileName, long fileSize, Exception e) {
-    throw new GeneralException(ResultEnum.RATE_LIMIT_EXCEEDED, 
-        "上传请求过于频繁，请稍后重试");
-}
-```
-
----
-
-## 监控数据示例
-
-### 正常运行状态
-
-```
-jvm_memory_used_bytes{area="heap"}     = 1.2GB / 4GB (30%)
-jvm_gc_pause_seconds_sum (1h)         = 15s (平均 250ms/次)
-upload_sessions_active                = 8
-download_concurrent_requests          = 5
-```
-
-### 高负载状态（需关注）
-
-```
-jvm_memory_used_bytes{area="heap"}     = 3.2GB / 4GB (80%)
-jvm_gc_pause_seconds_sum (1h)         = 120s (平均 500ms/次)
-upload_sessions_active                = 42
-download_concurrent_requests          = 18
-```
-
-**建议操作**: 监控趋势，准备扩容或限流
-
-### OOM 风险状态（需立即处理）
-
-```
-jvm_memory_used_bytes{area="heap"}     = 3.8GB / 4GB (95%)
-jvm_gc_pause_seconds_sum (5m)         = 45s (频繁 Full GC)
-upload_sessions_active                = 58
-download_concurrent_requests          = 25
-```
-
-**立即操作**: 降低并发上限，重启服务，扩容
-
----
-
-## 附录
-
-### 相关文档
-
-- `ROADMAP.md` - P2 任务：S3 直传架构迁移
-- `CONTRIBUTING.md` - 编码规范和架构约束
-- `docs/architecture/saga-pattern.md` - Saga 补偿机制
-- `docs/deployment/production-checklist.md` - 生产环境检查清单
-
-### 代码位置
-
-- 上传内存聚合: `platform-backend/backend-service/src/main/java/cn/flying/service/saga/FileSagaOrchestrator.java:148`
-- 下载内存聚合: `platform-storage/src/main/java/cn/flying/storage/service/DistributedStorageServiceImpl.java:704`
-
-### 工具推荐
-
-- **MAT (Memory Analyzer Tool)**: Eclipse 堆分析工具
-- **GCeasy**: 在线 GC 日志分析 https://gceasy.io
-- **HeapHero**: 在线堆转储分析 https://heaphero.io
-- **VisualVM**: JVM 监控和性能分析
-- **Arthas**: 阿里开源的 Java 诊断工具
-
----
-
-**维护者**: 运维团队  
-**审核者**: 架构组  
-**下次审查**: v2.0 架构迁移前（预计 Week 7-10）
+- [系统架构](/zh/architecture/system-overview)
+- [分布式存储](/zh/architecture/distributed-storage)
+- [分片 Manifest 与历史数据治理](/zh/architecture/chunk-manifest)
+- [K6 负载测试](/zh/perf/k6-loadtest)
+- [交付证据矩阵](/zh/architecture/delivery-evidence)

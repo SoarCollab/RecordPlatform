@@ -150,17 +150,19 @@ The upload system uses dynamic chunk sizing:
 
 | File Size | Chunk Size |
 |-----------|------------|
-| < 10MB    | 2MB        |
-| < 100MB   | 5MB        |
-| < 500MB   | 10MB       |
-| < 2GB     | 20MB       |
-| >= 2GB    | 50MB       |
+| < 10 MiB  | 2 MiB      |
+| < 100 MiB | 5 MiB      |
+| < 500 MiB | 10 MiB     |
+| < 2 GiB   | 20 MiB     |
+| >= 2 GiB  | 50 MiB     |
 
 Upload process:
 1. Calculate optimal chunk size
-2. Start upload session (`/api/v1/upload-sessions`)
-3. Upload chunks with progress tracking
-4. Complete upload (`/api/v1/upload-sessions/{clientId}/complete`)
+2. Start a direct session (`POST /api/v1/upload-sessions/direct`) and receive presigned staging PUT URLs
+3. PUT each chunk directly to object storage and retain its ETag/hash evidence
+4. Complete with `POST /api/v1/upload-sessions/{clientId}/direct/complete`
+
+The backend-proxied `/api/v1/upload-sessions` plus `/complete` flow remains a compatibility path; new large-file uploads use direct sessions by default.
 
 ## Build for Production
 

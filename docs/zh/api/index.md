@@ -127,6 +127,8 @@ Authorization: Bearer <token>
 | GET | `/api/v1/files/{id}/versions` | 查询文件版本链列表 |
 | POST | `/api/v1/files/{id}/versions` | 将文件标记为新版本的父版本 |
 
+自有文件 `download-metadata` 要求 active `cn.flying.chunk-manifest.v1`。成功响应包含 `canonicalManifestJson`、`manifestStatus=ACTIVE`、`manifestClassification=ALREADY_MANIFEST`、`manifestErrorCode=null`、`legacyDownloadAllowed=false`。缺失 manifest 时返回 `FILE_RECORD_ERROR`；标准 `ErrorPayload` 把四个机器可读治理字段放在 `data.detail` 下，未分类默认值为 `REUPLOAD_REQUIRED / UNCLASSIFIED / MISSING_MANIFEST_UNCLASSIFIED / false`。客户端不得解析 `message` 或自行推断 legacy 回退。详见[分片 Manifest 与历史数据治理](/zh/architecture/chunk-manifest)。
+
 精确的匿名公开分享合同仅包含 `GET /api/v1/shares/{shareCode}/info`、`GET /api/v1/shares/{shareCode}/files`、`GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks` 和 `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`。这些路由既不需要 Bearer，也不需要租户头。调用者即使提供 `X-Tenant-ID=0`、其他租户或畸形值，该值也会在授权和数据选择中被忽略。后端只从匹配的 `shareCode` 元数据解析 owner tenant；跨租户范围仅覆盖这次元数据查询，后续文件、key envelope、访问计数和分享访问审计都在 owner tenant 内完成。匿名 `sys_operation_log` 固定使用 system tenant `0`；产生的 `share_access_log` 使用 owner tenant。两类审计使用同一个规范化可信客户端 IP。
 
 公开 chunks 与 decrypt-info 路由按 `rate:limit:public:share-access:v2:ip:<canonical-ip>` 共享一个无租户的固定 30 次/60 秒桶。除非 direct peer 命中已配置的 trusted-proxy allowlist 且提供合法代理链，否则修改 `X-Tenant-ID`、JWT 角色、端点、`X-Forwarded-For` 或 `X-Real-IP` 都不能拆分该桶。前 30 次合计请求可以进入 controller；当前第 31 次仍保持 HTTP 200，并返回业务码 `70005`。分享公开性、有效/过期状态、未知类型/状态和 included-file 校验继续失败关闭。当前模型没有分享密码字段；密码分享需要另建端到端功能任务。分享写入、保存分享文件到当前用户空间，以及登录态 `/api/v1/shares/{shareCode}/files/{fileHash}/chunks` 和 `/decrypt-info` 路由仍必须携带 Bearer。
@@ -160,6 +162,24 @@ Authorization: Bearer <token>
 |------|------|------|
 | POST | `/api/v1/admin/attestation-batches/production/trigger` | 为当前租户强制执行一轮有界生产处理 |
 | GET | `/api/v1/admin/attestation-batches/production/status` | 查询有效配置、candidate backlog 和 due batch 数 |
+
+### 管理员 Manifest 回填（`/api/v1/admin/manifest-backfill-runs`）
+
+所有操作要求管理员角色，并按当前租户隔离。`SCAN` 创建源快照；`DRY_RUN` 与 `APPLY` 必须提供该快照的外部 ID。Apply、sweep mark、sweep delete 仍使用独立 feature gate。
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| POST | `/api/v1/admin/manifest-backfill-runs` | 创建 `SCAN`、`DRY_RUN` 或 `APPLY` 任务 |
+| GET | `/api/v1/admin/manifest-backfill-runs` | 查询有界任务历史 |
+| GET | `/api/v1/admin/manifest-backfill-runs/{runId}` | 查看单个任务 |
+| GET | `/api/v1/admin/manifest-backfill-runs/{runId}/items` | 游标查询分类项（limit 最大 100） |
+| POST | `/api/v1/admin/manifest-backfill-runs/{runId}/pause` | 在持久化边界暂停 |
+| POST | `/api/v1/admin/manifest-backfill-runs/{runId}/resume` | 从同一快照/游标继续 |
+| POST | `/api/v1/admin/manifest-backfill-runs/{runId}/items/{itemId}/retry` | 重试符合条件的失败项 |
+| POST | `/api/v1/admin/manifest-backfill-runs/reference-census` | 封存当前引用普查证据 |
+| POST | `/api/v1/admin/manifest-backfill-runs/reference-sweep/marks` | 对精确存储对象执行 grace mark |
+
+默认启用回填 worker，但禁用 apply；引用 mark/delete 均默认关闭，并使用 30 天保护窗口。完整状态、分类和默认值见[分片 Manifest 与历史数据治理](/zh/architecture/chunk-manifest)。
 
 ### 管理员完整性告警（`/api/v1/admin/integrity-alerts`）
 

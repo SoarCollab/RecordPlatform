@@ -81,8 +81,16 @@ export default withMermaid(
                     link: "/en/architecture/system-overview",
                   },
                   {
+                    text: "Delivery Evidence",
+                    link: "/en/architecture/delivery-evidence",
+                  },
+                  {
                     text: "Distributed Storage",
                     link: "/en/architecture/distributed-storage",
+                  },
+                  {
+                    text: "Chunk Manifest",
+                    link: "/en/architecture/chunk-manifest",
                   },
                   {
                     text: "Blockchain Integration",
@@ -217,8 +225,16 @@ export default withMermaid(
                     link: "/zh/architecture/system-overview",
                   },
                   {
+                    text: "交付证据矩阵",
+                    link: "/zh/architecture/delivery-evidence",
+                  },
+                  {
                     text: "分布式存储",
                     link: "/zh/architecture/distributed-storage",
+                  },
+                  {
+                    text: "分片 Manifest",
+                    link: "/zh/architecture/chunk-manifest",
                   },
                   {
                     text: "区块链集成",

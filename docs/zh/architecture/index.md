@@ -5,7 +5,9 @@ RecordPlatform 技术架构文档。
 ## 目录
 
 - [系统架构总览](system-overview) - 整体架构、组件和数据流
+- [P0/P1/P2 交付证据矩阵](delivery-evidence) - 精确实现、测试、CI 与残余风险证据
 - [分布式存储](distributed-storage) - 故障域、一致性哈希、再平衡
+- [分片 Manifest](chunk-manifest) - 规范元数据、迁移分类与引用安全生命周期
 - [区块链集成](blockchain-integration) - 智能合约、多链适配器
 - [安全机制](security) - 认证、授权、加密
 - [文件版本链](file-version-chain) - 版本链模型、API、上传集成
@@ -45,6 +47,7 @@ RecordPlatform 技术架构文档。
 | 服务发现 | Nacos | 注册与配置 |
 | 分布式事务 | Saga + Outbox | 跨服务一致性 |
 | 存储 | S3 兼容 | 对象存储 |
+| 分片治理 | Canonical manifest + 引用 census | 安全下载、完整性、证明、迁移与 sweep |
 | 区块链 | FISCO BCOS | 不可篡改存证 |
 | 缓存 | Caffeine + Redis | 多级缓存 |
 | 弹性设计 | Resilience4j | 熔断、重试 |

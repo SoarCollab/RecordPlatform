@@ -28,6 +28,8 @@
   - [Quota Module](#17-quota-module)
   - [Integrity Alerts Module](#18-integrity-alerts-module-admin)
   - [Attestation Batch Production Module](#19-attestation-batch-production-module-admin)
+  - [Manifest Backfill Governance Module](#20-manifest-backfill-governance-module-admin)
+  - [Controller-Aligned Endpoint Checklist](#21-controller-aligned-endpoint-checklist)
 - [Appendix](#appendix)
 
 ---
@@ -1070,7 +1072,7 @@ DELETE /api/v1/files/{id}
 
 Get authorized pre-signed chunk download metadata for the normal owned-file download path. The response is built from the active chunk manifest and includes ordered chunk URLs, hash metadata, algorithm metadata, and decrypt metadata resolved from the active key envelope when the file is encrypted.
 
-`download-metadata` requires an active `cn.flying.chunk-manifest.v1` record. Files without an active manifest return `FILE_RECORD_ERROR` instead of falling back to URL-only download metadata.
+`download-metadata` requires an active `cn.flying.chunk-manifest.v1` record. Files without an active manifest return `FILE_RECORD_ERROR` with a machine-readable `ManifestErrorDetail`; they do not silently fall back to URL-only download metadata.
 
 ```
 GET /api/v1/files/hash/{fileHash}/download-metadata
@@ -1092,13 +1094,18 @@ GET /api/v1/files/hash/{fileHash}/download-metadata
   "message": "操作成功",
   "data": {
     "fileId": "9P6q...",
-    "fileHash": "sha256:...",
+    "fileHash": "chain-record-id",
     "fileName": "report.pdf",
     "fileSize": 2048,
     "contentType": "application/pdf",
     "initialKey": null,
     "manifestSchemaId": "cn.flying.chunk-manifest.v1",
     "manifestHash": "sha256:manifest",
+    "canonicalManifestJson": "{\"schema\":\"cn.flying.chunk-manifest.v1\",...}",
+    "manifestStatus": "ACTIVE",
+    "manifestClassification": "ALREADY_MANIFEST",
+    "manifestErrorCode": null,
+    "legacyDownloadAllowed": false,
     "hashAlgorithm": "SHA-256",
     "encryptionAlgorithm": "NONE",
     "storageBackend": "S3",
@@ -1111,8 +1118,8 @@ GET /api/v1/files/hash/{fileHash}/download-metadata
         "downloadUrl": "https://storage.example.com/chunk-0?signature=...",
         "expiresAtEpochSeconds": 1782806400,
         "storagePath": "chunks/0",
-        "plainHash": "plain-0",
-        "cipherHash": "cipher-0",
+        "plainHash": "sha256:plain-0",
+        "cipherHash": "sha256:cipher-0",
         "checksumAlgorithm": "SHA-256"
       }
     ]
@@ -1121,6 +1128,28 @@ GET /api/v1/files/hash/{fileHash}/download-metadata
 ```
 
 For encrypted files, `initialKey` contains the authorized envelope-unwrapped key. For unencrypted direct multipart uploads, `initialKey` is `null` and `encryptionAlgorithm` is `NONE`.
+
+For an active manifest, `manifestStatus=ACTIVE`, `manifestClassification=ALREADY_MANIFEST`, `manifestErrorCode=null`, and `legacyDownloadAllowed=false`. `canonicalManifestJson` excludes secret key material and binds the ordered part contract.
+
+The default missing-manifest error before an administrator classifies the record is:
+
+```json
+{
+  "code": 50010,
+  "message": "ManifestErrorDetail[manifestStatus=REUPLOAD_REQUIRED, manifestClassification=UNCLASSIFIED, manifestErrorCode=MISSING_MANIFEST_UNCLASSIFIED, legacyDownloadAllowed=false]",
+  "data": {
+    "traceId": "request-trace-id",
+    "detail": {
+      "manifestStatus": "REUPLOAD_REQUIRED",
+      "manifestClassification": "UNCLASSIFIED",
+      "manifestErrorCode": "MISSING_MANIFEST_UNCLASSIFIED",
+      "legacyDownloadAllowed": false
+    }
+  }
+}
+```
+
+The handler carries `ManifestErrorDetail` under the standard `ErrorPayload` at `data.detail`; `data.traceId` remains available for diagnostics. After governance classification, the four detail fields reflect the latest item. Clients must branch on `data.detail`, not the non-contractual `message` text. `legacyDownloadAllowed` is an explicit policy decision and must not be inferred from a missing row.
 
 `GET /api/v1/files/hash/{fileHash}/addresses` remains available as a URL-only endpoint for clients that intentionally manage decrypt metadata separately. New owned-file downloads should use `download-metadata` as the primary contract.
 
@@ -3876,11 +3905,78 @@ GET /api/v1/admin/attestation-batches/production/status
 ---
 
 
-## 20. Controller-Aligned Endpoint Checklist
+## 20. Manifest Backfill Governance Module (Admin)
+
+Base Path: `/api/v1/admin/manifest-backfill-runs`
+
+**Authentication**: Bearer Token + Admin role (`isAdmin()`). Every run, item, census, and sweep mark is tenant-isolated. API responses expose external IDs and withhold raw evidence payloads and claim tokens.
+
+### 20.1 Create a Governance Run
+
+```text
+POST /api/v1/admin/manifest-backfill-runs
+```
+
+```json
+{
+  "mode": "SCAN",
+  "snapshotRunId": null
+}
+```
+
+Modes are `SCAN`, `DRY_RUN`, and `APPLY`. `SCAN` creates the frozen source snapshot. `DRY_RUN` and `APPLY` require the external `snapshotRunId` of that scan. The server rejects unknown modes and snapshot drift. Creating an `APPLY` run does not bypass the independent `apply-enabled=false` safety gate.
+
+Run states are `PLANNED`, `SCANNING`, `SNAPSHOT_READY`, `APPLYING`, `PAUSED`, `COMPLETED`, and `FAILED`. The response includes external `id`/`snapshotRunId`, mode, state, snapshot version/digest, bounded counters, last error class, and timestamps.
+
+### 20.2 Inspect Runs and Items
+
+```text
+GET /api/v1/admin/manifest-backfill-runs?limit=50
+GET /api/v1/admin/manifest-backfill-runs/{runId}
+GET /api/v1/admin/manifest-backfill-runs/{runId}/items?cursor=&status=&classification=&reason=&limit=50
+```
+
+Run history is newest-first and bounded. Item listing is cursor-based; `limit` is capped at 100. An item returns classification, reason code, retry eligibility, explicit `legacyDownloadAllowed`, evidence digest, resulting manifest ID, attempt count, next retry, and error class. Raw storage evidence is not returned.
+
+Classifications are `ALREADY_MANIFEST`, `BACKFILLABLE`, `REUPLOAD_REQUIRED`, `UNRECOVERABLE`, `FAILED`, and `IGNORED`. Item states are `PENDING`, `RUNNING`, `BACKFILLED`, `REUPLOAD_REQUIRED`, `UNRECOVERABLE`, `FAILED`, and `IGNORED`.
+
+### 20.3 Pause, Resume, and Retry
+
+```text
+POST /api/v1/admin/manifest-backfill-runs/{runId}/pause
+POST /api/v1/admin/manifest-backfill-runs/{runId}/resume
+POST /api/v1/admin/manifest-backfill-runs/{runId}/items/{itemId}/retry
+```
+
+Pause takes effect at a durable keyset or claim boundary. Resume continues the same snapshot/cursor. Retry only requeues an eligible failed item under the same run; each item has at most three processing attempts.
+
+### 20.4 Reference Census and Sweep Mark
+
+```text
+POST /api/v1/admin/manifest-backfill-runs/reference-census
+POST /api/v1/admin/manifest-backfill-runs/reference-sweep/marks
+```
+
+Sweep mark request:
+
+```json
+{
+  "storagePath": "tenant/1/chunk/...",
+  "cipherHash": "sha256:..."
+}
+```
+
+The census seals a digest plus known-reference and unknown-hold counts. Marking is independently feature-gated and records the exact object identity, census, reason, and `protectionUntil`. Mark and delete are disabled by default, use separate gates, and retain a 30-day default protection window. A mark is not proof that deletion has run.
+
+Operational defaults: backfill worker enabled, apply disabled, run lease 300 seconds, worker delay 5 seconds; sweep mark/delete disabled, batch 20 (hard cap 100), lease 120 seconds (minimum 30), and worker delay 60 seconds.
+
+---
+
+## 21. Controller-Aligned Endpoint Checklist
 
 > This checklist is the P1 governance baseline. All endpoints use REST-style paths.
 
-### 20.1 Current Primary REST Endpoints
+### 21.1 Current Primary REST Endpoints
 
 - `POST /api/v1/auth/login` (Spring Security managed endpoint)
 - `POST /api/v1/auth/logout` (Spring Security managed endpoint)
@@ -3931,6 +4027,15 @@ GET /api/v1/admin/attestation-batches/production/status
 - `GET /api/v1/admin/quota/rollout/audits`
 - `POST /api/v1/admin/attestation-batches/production/trigger`
 - `GET /api/v1/admin/attestation-batches/production/status`
+- `POST /api/v1/admin/manifest-backfill-runs`
+- `GET /api/v1/admin/manifest-backfill-runs`
+- `GET /api/v1/admin/manifest-backfill-runs/{runId}`
+- `GET /api/v1/admin/manifest-backfill-runs/{runId}/items`
+- `POST /api/v1/admin/manifest-backfill-runs/{runId}/pause`
+- `POST /api/v1/admin/manifest-backfill-runs/{runId}/resume`
+- `POST /api/v1/admin/manifest-backfill-runs/{runId}/items/{itemId}/retry`
+- `POST /api/v1/admin/manifest-backfill-runs/reference-census`
+- `POST /api/v1/admin/manifest-backfill-runs/reference-sweep/marks`
 - `POST /api/v1/messages`
 - `PUT /api/v1/conversations/{id}/read-status`
 - `PUT /api/v1/announcements/{id}/read-status`
@@ -3952,7 +4057,7 @@ GET /api/v1/admin/attestation-batches/production/status
 - `POST /api/v1/system/audit/logs/backups`
 - `POST /api/v1/system/audit/anomalies/check`
 
-### 20.2 SSE Handshake and Event Types
+### 21.2 SSE Handshake and Event Types
 
 SSE short-lived token flow:
 
@@ -4110,6 +4215,7 @@ Behavior:
 ## Changelog
 
 - **v1.5** - Added deterministic Ed25519-signed proof ZIP export, immutable issuance snapshots, public status/versioned-key discovery, and explicit content-hash semantics
+- **v1.6** - Added manifest backfill governance, machine-readable missing-manifest errors, reference census/sweep marking, and bounded direct-path operational contracts
 - **v1.4** - Added crypto suite policy metadata for key envelopes and proof bundles
 - **v1.3** - Added Quota Module (user quota query, admin rollout audit), batch download metrics reporting endpoint, Friend System error codes (60010-60019), storage/system/data/permission error code additions (28 new codes total)
 - **v1.2** - Added Friend Module, Friend File Share Module, public share info endpoint, auth token endpoints

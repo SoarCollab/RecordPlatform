@@ -198,15 +198,16 @@ security:
 
 ## CI Security Pipeline
 
-Automated security observation is configured as a GitHub Actions workflow:
+Security automation has two distinct enforcement boundaries:
 
 - **Workflow**: `.github/workflows/security-poc.yml`
 - **Scope**: SAST static analysis, SCA dependency scanning, SBOM generation
-- **Current status**: Observation mode (informational, not blocking PRs)
+- **Current status**: The full `security-poc` aggregation remains observation-only and is not a required check
 - **Tooling**: Scripts and templates in `tools/security/`
 - **Slither** (`.github/workflows/contract-security.yml`) — Solidity smart contract static analysis, triggered on `.sol` file changes or workflow updates, SARIF results uploaded to GitHub Security panel
+- **Test Suite blocking subset** (`.github/workflows/test.yml`) — frontend `pnpm audit --audit-level high` and the explicit Trivy fixed High/Critical scan fail their job when findings breach the configured threshold
 
-> This pipeline is planned to be promoted to release-blocking in a future wave.
+These facts do not mean every security observation is blocking or that repository advisories are zero. P6 still owns a unified policy for the remaining scanners, advisory backlog, exceptions, and release enforcement.
 
 ## Security Checklist
 

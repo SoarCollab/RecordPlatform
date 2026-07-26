@@ -96,8 +96,8 @@ services:
       - "9001:9001"
     command: server /data --console-address ":9001"
     environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
 
   minio-b:
     image: minio/minio:RELEASE.2024-11-07T00-52-20Z
@@ -106,8 +106,8 @@ services:
       - "9011:9001"
     command: server /data --console-address ":9001"
     environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
 ```
 
 ```bash
@@ -138,4 +138,3 @@ After starting all services, verify connectivity:
 | Redis | `redis-cli ping` |
 | RabbitMQ | http://localhost:15672 (guest/guest) |
 | MinIO | http://localhost:9001 |
-
