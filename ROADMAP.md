@@ -1,6 +1,6 @@
 # RecordPlatform 演进路线图
 
-> 最后更新：2026-03-28
+> 最后更新：2026-07-26
 > 定位：个人维护的开源项目，以自动化流程替代人工管理
 
 ## 1. 文档目标
@@ -41,10 +41,10 @@
 
 | 指标 | 当前值 | 证据路径 |
 |------|--------|----------|
-| REST 控制器 | 30 | `platform-backend/backend-web/src/main/java` |
-| 后端服务类 | 138 | `platform-backend/backend-service/src/main/java` |
-| 后端测试文件 | 168 | `platform-backend/**/src/test/java` |
-| 数据库迁移 | 34（V1.0.0 ~ V1.16.0） | `platform-backend/backend-web/src/main/resources/db/migration` |
+| REST 控制器 | 31 | `platform-backend/backend-web/src/main/java` |
+| 后端服务类 | 155 | `platform-backend/backend-service/src/main/java` |
+| 后端测试文件 | 177 | `platform-backend/**/src/test/java` |
+| 数据库迁移 | 35（V1.0.0 ~ V1.17.0） | `platform-backend/backend-web/src/main/resources/db/migration` |
 | CI 流水线（核心） | 5 | `.github/workflows/test.yml`, `perf-smoke.yml`, `docs.yml`, `security-poc.yml`, `docs-consistency.yml` |
 
 ### 表 1：PR 合并阻断门禁（已就位）

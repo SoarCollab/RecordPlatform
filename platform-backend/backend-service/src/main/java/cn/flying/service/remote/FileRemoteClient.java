@@ -188,7 +188,21 @@ public class FileRemoteClient {
     }
 
     private Result<StorageObjectHeadVO> headObjectFallback(String filePath, String fileHash, Throwable t) {
-        log.error("Storage service headObject failed, path={}, hash={}", filePath, fileHash, t);
+        log.error("Storage service headObject failed, errorClass={}", t.getClass().getSimpleName());
+        return new Result<>(ResultEnum.FILE_SERVICE_ERROR, null);
+    }
+
+    /**
+     * Reads the unresolved degraded-write count used as a conservative cleanup hold.
+     */
+    @CircuitBreaker(name = "storageService", fallbackMethod = "getDegradedWriteCountFallback")
+    @Retry(name = "storageService")
+    public Result<Long> getDegradedWriteCount() {
+        return storageService.getDegradedWriteCount();
+    }
+
+    private Result<Long> getDegradedWriteCountFallback(Throwable t) {
+        log.error("Storage service getDegradedWriteCount failed", t);
         return new Result<>(ResultEnum.FILE_SERVICE_ERROR, null);
     }
 

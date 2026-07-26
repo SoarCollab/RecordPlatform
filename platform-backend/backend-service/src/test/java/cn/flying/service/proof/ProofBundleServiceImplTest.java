@@ -15,6 +15,7 @@ import cn.flying.dao.mapper.AttestationBatchMapper;
 import cn.flying.dao.mapper.AttestationLeafMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.vo.file.ProofBundleVO;
+import cn.flying.dao.vo.file.ManifestErrorDetail;
 import cn.flying.platformapi.constant.Result;
 import cn.flying.platformapi.response.StorageObjectHeadVO;
 import cn.flying.platformapi.response.ContractRegistryEntryResponse;
@@ -24,6 +25,7 @@ import cn.flying.service.key.CryptoSuitePolicyService;
 import cn.flying.service.key.FileKeyEnvelopeProperties;
 import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestService;
+import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
 import cn.flying.service.manifest.ChunkManifestView;
 import cn.flying.service.remote.FileRemoteClient;
 import org.junit.jupiter.api.AfterEach;
@@ -78,6 +80,9 @@ class ProofBundleServiceImplTest {
     private ChunkManifestService chunkManifestService;
 
     @Mock
+    private ManifestGovernanceStatusService manifestGovernanceStatusService;
+
+    @Mock
     private AttestationBatchPersistenceService attestationBatchPersistenceService;
 
     private FileKeyEnvelopeProperties suiteProperties;
@@ -95,11 +100,14 @@ class ProofBundleServiceImplTest {
                 batchMapper,
                 fileRemoteClient,
                 chunkManifestService,
+                manifestGovernanceStatusService,
                 new CryptoSuitePolicyService(suiteProperties),
                 attestationBatchPersistenceService
         );
         lenient().when(attestationBatchPersistenceService.requireContractRegistry(any()))
                 .thenReturn(contractRegistry());
+        lenient().when(manifestGovernanceStatusService.activeManifest())
+                .thenReturn(new ManifestErrorDetail("ACTIVE", "ALREADY_MANIFEST", null, false));
         TenantContext.setTenantId(TENANT_ID);
         ReflectionTestUtils.setField(
                 IdUtils.class,

@@ -9,8 +9,10 @@ import cn.flying.common.util.IdUtils;
 import cn.flying.dao.entity.IntegrityAlert;
 import cn.flying.dao.vo.file.IntegrityAlertVO;
 import cn.flying.dao.vo.file.IntegrityCheckStatsVO;
+import cn.flying.dao.vo.file.ManifestErrorDetail;
 import cn.flying.dao.vo.file.ResolveAlertVO;
 import cn.flying.service.integrity.IntegrityCheckService;
+import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
@@ -42,6 +44,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class IntegrityAlertController {
 
     private final IntegrityCheckService integrityCheckService;
+    private final ManifestGovernanceStatusService manifestGovernanceStatusService;
 
     /**
      * List integrity alerts with pagination and optional filters.
@@ -58,7 +61,7 @@ public class IntegrityAlertController {
 
         Page<IntegrityAlert> page = new Page<>(pageNum, pageSize);
         IPage<IntegrityAlert> result = integrityCheckService.listAlerts(tenantId, status, alertType, page);
-        IPage<IntegrityAlertVO> voPage = result.convert(IntegrityAlertController::toAlertVO);
+        IPage<IntegrityAlertVO> voPage = result.convert(this::toAlertVO);
         return Result.success(voPage);
     }
 
@@ -112,10 +115,11 @@ public class IntegrityAlertController {
     /**
      * Convert IntegrityAlert entity to IntegrityAlertVO, using external IDs.
      */
-    private static IntegrityAlertVO toAlertVO(IntegrityAlert alert) {
+    private IntegrityAlertVO toAlertVO(IntegrityAlert alert) {
         if (alert == null) {
             return null;
         }
+        ManifestErrorDetail manifestStatus = resolveManifestStatus(alert);
         return new IntegrityAlertVO(
                 IdUtils.toExternalId(alert.getId()),
                 IdUtils.toExternalId(alert.getFileId()),
@@ -125,11 +129,29 @@ public class IntegrityAlertController {
                 alert.getAlertType(),
                 alert.getSeverity(),
                 alert.getEvidence(),
+                manifestStatus.manifestStatus(),
+                manifestStatus.manifestClassification(),
+                manifestStatus.manifestErrorCode(),
+                manifestStatus.legacyDownloadAllowed(),
                 alert.getStatus(),
                 IdUtils.toExternalId(alert.getResolvedBy()),
                 alert.getResolvedAt(),
                 alert.getNote(),
                 alert.getCreateTime()
         );
+    }
+
+    /**
+     * Emits the typed governance state for manifest alerts and an active state for other alerts.
+     */
+    private ManifestErrorDetail resolveManifestStatus(IntegrityAlert alert) {
+        if (IntegrityAlert.AlertType.MANIFEST_MISSING.name().equals(alert.getAlertType())) {
+            return manifestGovernanceStatusService.missingManifest(alert.getTenantId(), alert.getFileId());
+        }
+        if (IntegrityAlert.AlertType.MANIFEST_INVALID.name().equals(alert.getAlertType())) {
+            return new ManifestErrorDetail(
+                    "ACTIVE", "ALREADY_MANIFEST", "ACTIVE_MANIFEST_INVALID", false);
+        }
+        return manifestGovernanceStatusService.activeManifest();
     }
 }

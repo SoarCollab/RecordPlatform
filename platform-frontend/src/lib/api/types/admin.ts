@@ -162,3 +162,101 @@ export const AdminShareStatusLabel: Record<number, string> = {
   [AdminShareStatus.ACTIVE]: "有效",
   [AdminShareStatus.EXPIRED]: "已过期",
 };
+
+/** Manifest backfill run mode. */
+export type ManifestBackfillMode = "SCAN" | "DRY_RUN" | "APPLY";
+
+/** Durable manifest backfill run state. */
+export type ManifestBackfillRunStatus =
+  | "PLANNED"
+  | "SCANNING"
+  | "SNAPSHOT_READY"
+  | "APPLYING"
+  | "PAUSED"
+  | "COMPLETED"
+  | "FAILED";
+
+/** Administrator request for a scan or frozen-snapshot derivative run. */
+export interface ManifestBackfillCreateRequest {
+  mode: ManifestBackfillMode;
+  snapshotRunId?: string;
+}
+
+/** Tenant-scoped immutable snapshot and execution counters. */
+export interface ManifestBackfillRunVO {
+  id: string;
+  snapshotRunId?: string;
+  mode: ManifestBackfillMode;
+  status: ManifestBackfillRunStatus;
+  snapshotVersion: string;
+  snapshotDigest?: string;
+  totalCount: number;
+  pendingCount: number;
+  backfilledCount: number;
+  reuploadCount: number;
+  unrecoverableCount: number;
+  ignoredCount: number;
+  failedCount: number;
+  lastErrorClass?: string;
+  startedAt?: string;
+  completedAt?: string;
+  createTime: string;
+  updateTime: string;
+}
+
+/** Access-controlled per-file governance result. */
+export interface ManifestBackfillItemVO {
+  id: string;
+  runId: string;
+  fileId: string;
+  fileVersion: number;
+  status: string;
+  classification: string;
+  reasonCode: string;
+  retryable: boolean;
+  legacyDownloadAllowed: boolean;
+  evidenceDigest: string;
+  manifestId?: string;
+  attemptCount: number;
+  nextRetryAt?: string;
+  lastErrorClass?: string;
+  updateTime: string;
+}
+
+/** Cursor page for run items. */
+export interface ManifestBackfillItemPageVO {
+  records: ManifestBackfillItemVO[];
+  nextCursor?: string;
+}
+
+/** Fresh reference census completion evidence. */
+export interface ManifestReferenceCensusVO {
+  id: string;
+  status: string;
+  censusDigest?: string;
+  knownReferenceCount: number;
+  unknownHoldCount: number;
+  lastErrorClass?: string;
+  completedAt?: string;
+  createTime: string;
+}
+
+/** Exact object identity proposed for reference-aware sweep marking. */
+export interface ManifestReferenceSweepMarkRequest {
+  storagePath: string;
+  cipherHash: string;
+}
+
+/** Independent mark/grace/delete lifecycle. */
+export interface ManifestReferenceSweepMarkVO {
+  id: string;
+  storagePath: string;
+  cipherHash: string;
+  contentLength: number;
+  etag?: string;
+  markCensusId: string;
+  status: string;
+  protectionUntil: string;
+  reasonCode?: string;
+  deletedAt?: string;
+}

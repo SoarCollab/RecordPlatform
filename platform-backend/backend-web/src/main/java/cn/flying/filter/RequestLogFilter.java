@@ -73,6 +73,7 @@ public class RequestLogFilter extends OncePerRequestFilter {
             "/stream",
             "/api/auth",
             "/api/v1/auth",
+            "/api/v1/admin/manifest-backfill-runs",
             "/api/file",
             "/api/v1/files",
             "/api/v1/shares",

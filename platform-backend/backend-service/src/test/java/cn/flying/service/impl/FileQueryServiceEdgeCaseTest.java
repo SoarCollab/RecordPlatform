@@ -16,6 +16,7 @@ import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.service.FriendFileShareService;
 import cn.flying.service.key.FileKeyEnvelopeService;
 import cn.flying.service.manifest.ChunkManifestService;
+import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
 import cn.flying.service.remote.FileRemoteClient;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.junit.jupiter.api.BeforeEach;
@@ -62,6 +63,9 @@ class FileQueryServiceEdgeCaseTest {
 
     @Mock
     private ChunkManifestService chunkManifestService;
+
+    @Mock
+    private ManifestGovernanceStatusService manifestGovernanceStatusService;
 
     @Mock
     private FileKeyEnvelopeService fileKeyEnvelopeService;

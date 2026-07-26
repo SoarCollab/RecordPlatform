@@ -260,6 +260,143 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/manifest-backfill-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List manifest backfill runs */
+        get: operations["listRuns"];
+        put?: never;
+        /** Create a manifest backfill governance run */
+        post: operations["createRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/manifest-backfill-runs/reference-census": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create a fresh manifest reference census */
+        post: operations["createCensus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/manifest-backfill-runs/reference-sweep/marks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark an unreferenced storage object for grace-period sweep */
+        post: operations["markSweepObject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/manifest-backfill-runs/{runId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a manifest backfill run */
+        get: operations["getRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/manifest-backfill-runs/{runId}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List manifest backfill run items */
+        get: operations["listItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/manifest-backfill-runs/{runId}/items/{itemId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry a failed manifest backfill item */
+        post: operations["retryItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/manifest-backfill-runs/{runId}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause a manifest backfill run */
+        post: operations["pause"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/manifest-backfill-runs/{runId}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume a manifest backfill run */
+        post: operations["resume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/quota/rollout/audits": {
         parameters: {
             query?: never;
@@ -3570,10 +3707,18 @@ export interface components {
             hashAlgorithm?: string;
             /** @description 初始密钥（最后一个分片的解密密钥，Base64 编码） */
             initialKey?: string;
+            /** @description Whether a bounded typed legacy download path is explicitly allowed */
+            legacyDownloadAllowed?: boolean;
+            /** @description Manifest evidence classification */
+            manifestClassification?: string;
+            /** @description Manifest error/reason code; null for an active manifest */
+            manifestErrorCode?: string;
             /** @description manifest hash */
             manifestHash?: string;
             /** @description manifest schema id */
             manifestSchemaId?: string;
+            /** @description Machine-readable active manifest lifecycle status */
+            manifestStatus?: string;
             /** @description 有序分片下载 URL 列表 */
             parts?: components["schemas"]["FileDownloadPartVO"][];
             /** @description 存储后端 */
@@ -4186,6 +4331,14 @@ export interface components {
             fileId?: string;
             /** @description 告警ID（外部ID） */
             id?: string;
+            /** @description Whether typed legacy download compatibility is explicitly allowed */
+            legacyDownloadAllowed?: boolean;
+            /** @description Manifest evidence classification */
+            manifestClassification?: string;
+            /** @description Manifest error/reason code */
+            manifestErrorCode?: string;
+            /** @description Machine-readable manifest lifecycle status */
+            manifestStatus?: string;
             /** @description 处理备注 */
             note?: string;
             /**
@@ -4255,10 +4408,123 @@ export interface components {
             fileId?: string;
             /** @description 外部叶子 ID */
             leafId?: string;
+            /** @description Whether typed legacy download compatibility is explicitly allowed */
+            legacyDownloadAllowed?: boolean;
+            /** @description Manifest evidence classification */
+            manifestClassification?: string;
+            /** @description Manifest error/reason code; null for active proof evidence */
+            manifestErrorCode?: string;
+            /** @description Machine-readable manifest lifecycle status */
+            manifestStatus?: string;
             /** @description 证明包类型 */
             type?: string;
             /** @description 证明包版本 */
             version?: string;
+        };
+        /** @description Manifest backfill run creation request */
+        ManifestBackfillCreateRequest: {
+            /**
+             * @description Run mode: SCAN, DRY_RUN, or APPLY
+             * @example SCAN
+             */
+            mode: string;
+            /** @description External source scan ID; required for DRY_RUN and APPLY */
+            snapshotRunId?: string;
+        };
+        /** @description Manifest backfill item cursor page */
+        ManifestBackfillItemPageVO: {
+            nextCursor?: string;
+            records?: components["schemas"]["ManifestBackfillItemVO"][];
+        };
+        /** @description Manifest backfill item */
+        ManifestBackfillItemVO: {
+            /** Format: int32 */
+            attemptCount?: number;
+            classification?: string;
+            evidenceDigest?: string;
+            fileId?: string;
+            /** Format: int32 */
+            fileVersion?: number;
+            id?: string;
+            lastErrorClass?: string;
+            legacyDownloadAllowed?: boolean;
+            manifestId?: string;
+            /** Format: date-time */
+            nextRetryAt?: string;
+            reasonCode?: string;
+            retryable?: boolean;
+            runId?: string;
+            status?: string;
+            /** Format: date-time */
+            updateTime?: string;
+        };
+        /** @description Manifest backfill governance run */
+        ManifestBackfillRunVO: {
+            /** Format: int64 */
+            backfilledCount?: number;
+            /** Format: date-time */
+            completedAt?: string;
+            /** Format: date-time */
+            createTime?: string;
+            /** Format: int64 */
+            failedCount?: number;
+            id?: string;
+            /** Format: int64 */
+            ignoredCount?: number;
+            lastErrorClass?: string;
+            mode?: string;
+            /** Format: int64 */
+            pendingCount?: number;
+            /** Format: int64 */
+            reuploadCount?: number;
+            snapshotDigest?: string;
+            snapshotRunId?: string;
+            snapshotVersion?: string;
+            /** Format: date-time */
+            startedAt?: string;
+            status?: string;
+            /** Format: int64 */
+            totalCount?: number;
+            /** Format: int64 */
+            unrecoverableCount?: number;
+            /** Format: date-time */
+            updateTime?: string;
+        };
+        /** @description Manifest reference census */
+        ManifestReferenceCensusVO: {
+            censusDigest?: string;
+            /** Format: date-time */
+            completedAt?: string;
+            /** Format: date-time */
+            createTime?: string;
+            id?: string;
+            /** Format: int64 */
+            knownReferenceCount?: number;
+            lastErrorClass?: string;
+            status?: string;
+            /** Format: int64 */
+            unknownHoldCount?: number;
+        };
+        /** @description Reference sweep mark request */
+        ManifestReferenceSweepMarkRequest: {
+            cipherHash: string;
+            storagePath: string;
+        };
+        /** @description Reference sweep mark */
+        ManifestReferenceSweepMarkVO: {
+            cipherHash?: string;
+            /** Format: int64 */
+            contentLength?: number;
+            /** Format: date-time */
+            deletedAt?: string;
+            etag?: string;
+            id?: string;
+            markCensusId?: string;
+            /** Format: date-time */
+            protectionUntil?: string;
+            reasonCode?: string;
+            status?: string;
+            storagePath?: string;
         };
         /** @description Merkle 证明 */
         MerkleEvidence: {
@@ -5143,6 +5409,18 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
+        ResultListManifestBackfillRunVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            /** @description 结果数据 */
+            data?: components["schemas"]["ManifestBackfillRunVO"][];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
         ResultListShareFileVO: {
             /**
              * Format: int32
@@ -5199,6 +5477,50 @@ export interface components {
             code?: number;
             /** @description 结果数据 */
             data?: components["schemas"]["UserTimeDistributionVO"][];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultManifestBackfillItemPageVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["ManifestBackfillItemPageVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultManifestBackfillRunVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["ManifestBackfillRunVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultManifestReferenceCensusVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["ManifestReferenceCensusVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultManifestReferenceSweepMarkVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["ManifestReferenceSweepMarkVO"];
             /** @description 提示信息 */
             message?: string;
         };
@@ -6672,6 +6994,213 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultString"];
+                };
+            };
+        };
+    };
+    listRuns: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultListManifestBackfillRunVO"];
+                };
+            };
+        };
+    };
+    createRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManifestBackfillCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultManifestBackfillRunVO"];
+                };
+            };
+        };
+    };
+    createCensus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultManifestReferenceCensusVO"];
+                };
+            };
+        };
+    };
+    markSweepObject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManifestReferenceSweepMarkRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultManifestReferenceSweepMarkVO"];
+                };
+            };
+        };
+    };
+    getRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultManifestBackfillRunVO"];
+                };
+            };
+        };
+    };
+    listItems: {
+        parameters: {
+            query?: {
+                classification?: string;
+                cursor?: string;
+                limit?: number;
+                reason?: string;
+                status?: string;
+            };
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultManifestBackfillItemPageVO"];
+                };
+            };
+        };
+    };
+    retryItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                itemId: string;
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultManifestBackfillRunVO"];
+                };
+            };
+        };
+    };
+    pause: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultManifestBackfillRunVO"];
+                };
+            };
+        };
+    };
+    resume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultManifestBackfillRunVO"];
                 };
             };
         };

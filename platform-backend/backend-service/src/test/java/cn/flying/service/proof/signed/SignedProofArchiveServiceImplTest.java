@@ -30,6 +30,7 @@ import cn.flying.service.attestation.MerkleProofNode;
 import cn.flying.service.attestation.MerkleTreeService;
 import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestService;
+import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
 import cn.flying.service.manifest.ChunkManifestView;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.verifier.contract.SignedProofBundleContract;
@@ -122,6 +123,9 @@ class SignedProofArchiveServiceImplTest {
     private FileRemoteClient fileRemoteClient;
     @Mock
     private ChunkManifestService chunkManifestService;
+
+    @Mock
+    private ManifestGovernanceStatusService manifestGovernanceStatusService;
     @Mock
     private AttestationBatchPersistenceService attestationBatchPersistenceService;
     @Mock
@@ -173,6 +177,7 @@ class SignedProofArchiveServiceImplTest {
                 signingKeyMapper,
                 fileRemoteClient,
                 chunkManifestService,
+                manifestGovernanceStatusService,
                 attestationBatchPersistenceService,
                 merkleTreeService,
                 archiveBuilder,

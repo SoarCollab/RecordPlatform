@@ -19,6 +19,19 @@ public interface ChunkManifestService {
     ChunkManifestView saveManifest(Long userId, Long fileId, ChunkManifestDraft draft);
 
     /**
+     * Publishes a historical backfill manifest without superseding an existing active row.
+     *
+     * @param userId optional owner user ID; null allows tenant-scoped system callers
+     * @param fileId internal file ID
+     * @param draft frozen and revalidated manifest evidence
+     * @return created manifest or the equal canonical concurrent winner
+     */
+    BackfilledManifestPublication createBackfilledManifestIfAbsent(
+            Long userId,
+            Long fileId,
+            ChunkManifestDraft draft);
+
+    /**
      * Finds the active manifest for a file without reading object content.
      *
      * @param userId optional owner user ID; null allows tenant-scoped system callers

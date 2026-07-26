@@ -1,7 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
+  class MockApiError extends Error {
+    code: number;
+    detail?: unknown;
+
+    constructor(code: number, message: string, detail?: unknown) {
+      super(message);
+      this.name = "ApiError";
+      this.code = code;
+      this.detail = detail;
+    }
+  }
+
   return {
+    MockApiError,
     fileApi: {
       getDownloadAddress: vi.fn(),
       getDownloadMetadata: vi.fn(),
@@ -50,6 +63,7 @@ const mocks = vi.hoisted(() => {
 vi.mock("$api/endpoints/files", () => mocks.fileApi);
 vi.mock("$api/client", () => ({
   getToken: mocks.apiClient.getToken,
+  ApiError: mocks.MockApiError,
 }));
 vi.mock("$env/dynamic/public", () => ({
   env: { PUBLIC_TENANT_ID: "0" },
@@ -72,6 +86,18 @@ vi.mock("$utils/boundedDownloader", async (importOriginal) => {
 
 const AUTH_CONTEXT_HASH =
   "ef7b394c6766be8db576d762d728771fb2bc198bb24831d7a2b5cc628c4210e1";
+
+/**
+ * Builds the explicit backend permission required for bounded legacy recovery.
+ */
+function legacyManifestRecoveryError(): Error {
+  return new mocks.MockApiError(50010, "manifest recovery required", {
+    manifestStatus: "REUPLOAD_REQUIRED",
+    manifestClassification: "REUPLOAD_REQUIRED",
+    manifestErrorCode: "LEGACY_ORDER_UNTRUSTED",
+    legacyDownloadAllowed: true,
+  });
+}
 
 /**
  * 重新导入 download store，隔离模块状态。
@@ -335,9 +361,9 @@ describe("download store", () => {
     expect(mocks.downloadStorage.clearTaskData).toHaveBeenCalledWith(id);
   });
 
-  it("owned legacy 文件缺少 manifest 时应回退旧下载元数据接口", async () => {
-    mocks.fileApi.getDownloadMetadata.mockRejectedValueOnce(
-      new Error("文件缺少分片 manifest"),
+  it("owned legacy 文件必须由用户明确选择后才调用旧下载接口", async () => {
+    mocks.fileApi.getDownloadMetadata.mockRejectedValue(
+      legacyManifestRecoveryError(),
     );
     const download = await loadDownloadStore();
 
@@ -349,6 +375,21 @@ describe("download store", () => {
       "inmemory",
     );
 
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "failed",
+    );
+
+    expect(download.tasks.find((task) => task.id === id)).toEqual(
+      expect.objectContaining({
+        legacyRecoveryAllowed: true,
+        legacyRecoveryConfirmed: false,
+      }),
+    );
+    expect(mocks.fileApi.getDownloadAddress).not.toHaveBeenCalled();
+    expect(mocks.fileApi.getDecryptInfo).not.toHaveBeenCalled();
+
+    await download.confirmLegacyDownload(id);
     await waitForStatus(
       () => download.tasks.find((task) => task.id === id)?.status,
       "completed",
@@ -374,8 +415,8 @@ describe("download store", () => {
   });
 
   it("owned legacy 回退接口失败时应保留回退错误", async () => {
-    mocks.fileApi.getDownloadMetadata.mockRejectedValueOnce(
-      new Error("文件缺少分片 manifest"),
+    mocks.fileApi.getDownloadMetadata.mockRejectedValue(
+      legacyManifestRecoveryError(),
     );
     mocks.fileApi.getDownloadAddress.mockRejectedValueOnce(
       new Error("legacy address failed"),
@@ -390,6 +431,13 @@ describe("download store", () => {
       "inmemory",
     );
 
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "failed",
+    );
+
+    expect(mocks.fileApi.getDownloadAddress).not.toHaveBeenCalled();
+    await download.confirmLegacyDownload(id);
     await waitForStatus(
       () => download.tasks.find((task) => task.id === id)?.status,
       "failed",
@@ -1194,8 +1242,8 @@ describe("download store extra branches", () => {
   });
 
   it("legacy streaming 应通过文件系统 sink 完成并记录进度", async () => {
-    mocks.fileApi.getDownloadMetadata.mockRejectedValueOnce(
-      new Error("文件缺少分片 manifest"),
+    mocks.fileApi.getDownloadMetadata.mockRejectedValue(
+      legacyManifestRecoveryError(),
     );
 
     const download = await loadDownloadStore();
@@ -1207,6 +1255,13 @@ describe("download store extra branches", () => {
       "streaming",
     );
 
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "failed",
+    );
+
+    expect(mocks.fileApi.getDownloadAddress).not.toHaveBeenCalled();
+    await download.confirmLegacyDownload(id);
     await waitForStatus(
       () => download.tasks.find((task) => task.id === id)?.status,
       "completed",
@@ -1237,8 +1292,8 @@ describe("download store extra branches", () => {
   });
 
   it("legacy streaming 在下载器返回前取消后不得覆盖 cancelled", async () => {
-    mocks.fileApi.getDownloadMetadata.mockRejectedValueOnce(
-      new Error("文件缺少分片 manifest"),
+    mocks.fileApi.getDownloadMetadata.mockRejectedValue(
+      legacyManifestRecoveryError(),
     );
     const deferred = createDeferred<{
       currentBufferedBytes: number;
@@ -1262,6 +1317,11 @@ describe("download store extra branches", () => {
 
     await waitForStatus(
       () => download.tasks.find((task) => task.id === id)?.status,
+      "failed",
+    );
+    await download.confirmLegacyDownload(id);
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
       "streaming",
     );
     await download.cancelDownload(id);
@@ -1281,8 +1341,8 @@ describe("download store extra branches", () => {
   });
 
   it("legacy 内存下载在下载器返回前取消后不得提交 Blob", async () => {
-    mocks.fileApi.getDownloadMetadata.mockRejectedValueOnce(
-      new Error("文件缺少分片 manifest"),
+    mocks.fileApi.getDownloadMetadata.mockRejectedValue(
+      legacyManifestRecoveryError(),
     );
     const deferred = createDeferred<{
       currentBufferedBytes: number;
@@ -1304,6 +1364,11 @@ describe("download store extra branches", () => {
       "inmemory",
     );
 
+    await waitForStatus(
+      () => download.tasks.find((task) => task.id === id)?.status,
+      "failed",
+    );
+    await download.confirmLegacyDownload(id);
     await waitForStatus(
       () => download.tasks.find((task) => task.id === id)?.status,
       "downloading",

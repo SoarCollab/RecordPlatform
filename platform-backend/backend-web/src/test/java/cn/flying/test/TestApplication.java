@@ -9,9 +9,10 @@ import cn.flying.service.SystemMonitorService;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
-import org.springframework.context.annotation.Bean;
 
 import cn.flying.BackendWebApplication;
 import cn.flying.health.FiscoHealthIndicator;
@@ -36,16 +37,22 @@ import java.util.Collections;
 @MapperScan(basePackages = "cn.flying.dao.mapper")
 @ComponentScan(
         basePackages = "cn.flying",
-        excludeFilters = @ComponentScan.Filter(
-                type = FilterType.ASSIGNABLE_TYPE,
-                classes = {
-                        BackendWebApplication.class,
-                        FileRemoteClient.class,
-                        SystemMonitorServiceImpl.class,
-                        FiscoHealthIndicator.class,
-                        S3StorageHealthIndicator.class
-                }
-        )
+        excludeFilters = {
+                @ComponentScan.Filter(
+                        type = FilterType.ASSIGNABLE_TYPE,
+                        classes = {
+                                BackendWebApplication.class,
+                                FileRemoteClient.class,
+                                SystemMonitorServiceImpl.class,
+                                FiscoHealthIndicator.class,
+                                S3StorageHealthIndicator.class
+                        }
+                ),
+                @ComponentScan.Filter(
+                        type = FilterType.ANNOTATION,
+                        classes = TestConfiguration.class
+                )
+        }
 )
 public class TestApplication {
     public static void main(String[] args) {

@@ -323,4 +323,49 @@ public interface FileMapper extends BaseMapper<File> {
      */
     @Select("SELECT COUNT(*) FROM file WHERE version_group_id = #{versionGroupId} AND tenant_id = #{tenantId} AND deleted = 0")
     int countVersionsInChain(@Param("versionGroupId") Long versionGroupId, @Param("tenantId") Long tenantId);
+
+    /**
+     * Reads a deterministic tenant-scoped page for manifest governance snapshot creation.
+     *
+     * @param tenantId tenant ID
+     * @param afterFileId exclusive keyset cursor
+     * @param limit bounded page size
+     * @return file rows ordered by ID
+     */
+    @InterceptorIgnore(tenantLine = "true")
+    @Select("""
+            SELECT id, tenant_id, uid, origin, shared_from_user_id, file_name, file_param,
+                   file_hash, content_hash, transaction_hash, status, deleted, version,
+                   parent_version_id, is_latest, version_group_id, create_time
+            FROM file
+            WHERE tenant_id = #{tenantId}
+              AND id > #{afterFileId}
+            ORDER BY id ASC
+            LIMIT #{limit}
+            """)
+    List<File> selectManifestBackfillCandidates(
+            @Param("tenantId") Long tenantId,
+            @Param("afterFileId") Long afterFileId,
+            @Param("limit") int limit);
+
+    /**
+     * Locks one exact tenant/file row while an insert-only backfill publication is committed.
+     *
+     * @param tenantId tenant ID
+     * @param fileId file ID
+     * @return locked file row or null
+     */
+    @InterceptorIgnore(tenantLine = "true")
+    @Select("""
+            SELECT id, tenant_id, uid, origin, shared_from_user_id, file_name, file_param,
+                   file_hash, content_hash, transaction_hash, status, deleted, version,
+                   parent_version_id, is_latest, version_group_id, create_time
+            FROM file
+            WHERE tenant_id = #{tenantId}
+              AND id = #{fileId}
+            FOR UPDATE
+            """)
+    File selectByIdForManifestBackfillUpdate(
+            @Param("tenantId") Long tenantId,
+            @Param("fileId") Long fileId);
 }

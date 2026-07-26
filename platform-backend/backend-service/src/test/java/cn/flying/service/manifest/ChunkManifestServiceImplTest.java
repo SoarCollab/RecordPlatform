@@ -271,6 +271,106 @@ class ChunkManifestServiceImplTest {
         verify(manifestItemMapper, never()).insert(any(FileChunkManifestItem.class));
     }
 
+    /**
+     * 首次历史回填在文件行锁内创建 insert-only 活跃清单。
+     */
+    @Test
+    void createBackfilledManifestIfAbsent_shouldInsertWhenNoActiveManifestExists() {
+        when(fileMapper.selectByIdForManifestBackfillUpdate(TENANT_ID, FILE_ID))
+                .thenReturn(successfulFile());
+        when(manifestMapper.selectList(any())).thenReturn(List.of());
+        when(snowflakeIdGenerator.nextId()).thenReturn(1000L, 1001L, 1002L);
+
+        BackfilledManifestPublication publication = service.createBackfilledManifestIfAbsent(
+                USER_ID, FILE_ID, draft());
+
+        assertThat(publication.created()).isTrue();
+        assertThat(publication.manifest().manifestId()).isEqualTo(1000L);
+        assertThat(publication.manifest().chunks())
+                .extracting(ChunkManifestChunk::index)
+                .containsExactly(0, 1);
+        verify(manifestMapper).insert(any(FileChunkManifest.class));
+        verify(manifestItemMapper, times(2)).insert(any(FileChunkManifestItem.class));
+        verify(manifestMapper, never()).update(any(), any());
+    }
+
+    /**
+     * 相同冻结证据命中既有活跃清单时返回幂等结果且不写新行。
+     */
+    @Test
+    void createBackfilledManifestIfAbsent_shouldReuseEquivalentActiveManifest() {
+        String manifestHash = service.calculateManifestHash(draft());
+        when(fileMapper.selectByIdForManifestBackfillUpdate(TENANT_ID, FILE_ID))
+                .thenReturn(successfulFile());
+        when(manifestMapper.selectList(any())).thenReturn(List.of(persistedDraftManifest(manifestHash)));
+        when(manifestItemMapper.selectList(any())).thenReturn(persistedDraftItems());
+
+        BackfilledManifestPublication publication = service.createBackfilledManifestIfAbsent(
+                USER_ID, FILE_ID, draft());
+
+        assertThat(publication.created()).isFalse();
+        assertThat(publication.manifest().manifestHash()).isEqualTo(manifestHash);
+        assertThat(publication.manifest().chunks())
+                .extracting(ChunkManifestChunk::plainHash)
+                .containsExactly("plain-0", "plain-1");
+        verify(manifestMapper, never()).insert(any(FileChunkManifest.class));
+        verify(manifestItemMapper, never()).insert(any(FileChunkManifestItem.class));
+    }
+
+    /**
+     * 重复活跃行或与冻结证据不一致的既有清单进入人工审查而不覆盖产品数据。
+     */
+    @Test
+    void createBackfilledManifestIfAbsent_shouldRejectDuplicateOrConflictingActiveManifest() {
+        String manifestHash = service.calculateManifestHash(draft());
+        when(fileMapper.selectByIdForManifestBackfillUpdate(TENANT_ID, FILE_ID))
+                .thenReturn(successfulFile());
+        when(manifestMapper.selectList(any())).thenReturn(
+                List.of(persistedDraftManifest(manifestHash), persistedDraftManifest(manifestHash).setId(1001L)),
+                List.of(persistedDraftManifest("sha256:" + "f".repeat(64))));
+
+        assertThatThrownBy(() -> service.createBackfilledManifestIfAbsent(USER_ID, FILE_ID, draft()))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getResultEnum())
+                        .isEqualTo(ResultEnum.FILE_RECORD_ERROR));
+
+        when(manifestItemMapper.selectList(any())).thenReturn(persistedDraftItems());
+        assertThatThrownBy(() -> service.createBackfilledManifestIfAbsent(USER_ID, FILE_ID, draft()))
+                .isInstanceOf(GeneralException.class)
+                .satisfies(ex -> assertThat(((GeneralException) ex).getResultEnum())
+                        .isEqualTo(ResultEnum.FILE_RECORD_ERROR));
+
+        verify(manifestMapper, never()).insert(any(FileChunkManifest.class));
+        verify(manifestItemMapper, never()).insert(any(FileChunkManifestItem.class));
+    }
+
+    /**
+     * 锁定加载阶段拒绝空 ID、缺失文件、跨租户文件与其他用户文件。
+     */
+    @Test
+    void createBackfilledManifestIfAbsent_shouldEnforceLockedFileOwnership() {
+        assertThatThrownBy(() -> service.createBackfilledManifestIfAbsent(USER_ID, null, draft()))
+                .isInstanceOf(GeneralException.class);
+
+        when(fileMapper.selectByIdForManifestBackfillUpdate(TENANT_ID, FILE_ID)).thenReturn(null);
+        assertThatThrownBy(() -> service.createBackfilledManifestIfAbsent(USER_ID, FILE_ID, draft()))
+                .isInstanceOf(GeneralException.class);
+
+        long otherTenantFileId = 100L;
+        when(fileMapper.selectByIdForManifestBackfillUpdate(TENANT_ID, otherTenantFileId))
+                .thenReturn(new File().setId(otherTenantFileId).setTenantId(8L).setUid(USER_ID));
+        assertThatThrownBy(() -> service.createBackfilledManifestIfAbsent(
+                USER_ID, otherTenantFileId, draft())).isInstanceOf(GeneralException.class);
+
+        long otherUserFileId = 101L;
+        when(fileMapper.selectByIdForManifestBackfillUpdate(TENANT_ID, otherUserFileId))
+                .thenReturn(new File().setId(otherUserFileId).setTenantId(TENANT_ID).setUid(43L));
+        assertThatThrownBy(() -> service.createBackfilledManifestIfAbsent(
+                USER_ID, otherUserFileId, draft())).isInstanceOf(GeneralException.class);
+
+        verify(manifestMapper, never()).selectList(any());
+    }
+
     private File successfulFile() {
         return FileTestBuilder.aFile(file -> file
                 .setId(FILE_ID)
@@ -278,6 +378,54 @@ class ChunkManifestServiceImplTest {
                 .setUid(USER_ID)
                 .setFileHash("file-hash")
                 .setVersion(3));
+    }
+
+    /**
+     * 创建与 draft 完全一致的持久化清单头。
+     */
+    private FileChunkManifest persistedDraftManifest(String manifestHash) {
+        return new FileChunkManifest()
+                .setId(1000L)
+                .setTenantId(TENANT_ID)
+                .setFileId(FILE_ID)
+                .setFileVersion(3)
+                .setSchemaId(ChunkManifestCanonicalizer.SCHEMA_ID)
+                .setFileHash("file-hash")
+                .setManifestHash(manifestHash)
+                .setHashAlgorithm(ChunkManifestCanonicalizer.HASH_ALGORITHM)
+                .setChunkSize(10L)
+                .setChunkCount(2)
+                .setTotalSize(10L)
+                .setEncryptionAlgorithm("CHACHA20_POLY1305")
+                .setStorageBackend("S3")
+                .setStatus("ACTIVE")
+                .setDeleted(0);
+    }
+
+    /**
+     * 创建与规范化 draft 顺序和默认值一致的持久化分片。
+     */
+    private List<FileChunkManifestItem> persistedDraftItems() {
+        return List.of(
+                new FileChunkManifestItem()
+                        .setManifestId(1000L)
+                        .setChunkIndex(0)
+                        .setPlainHash("plain-0")
+                        .setCipherHash("cipher-0")
+                        .setSize(6L)
+                        .setStoragePath("storage/tenant/7/chunk/0")
+                        .setStorageBackend("S3")
+                        .setChecksumAlgorithm("SHA-256"),
+                new FileChunkManifestItem()
+                        .setManifestId(1000L)
+                        .setChunkIndex(1)
+                        .setPlainHash("plain-1")
+                        .setCipherHash("cipher-1")
+                        .setSize(4L)
+                        .setStoragePath("storage/tenant/7/chunk/1")
+                        .setStorageBackend("S3")
+                        .setChecksumAlgorithm("SHA-256")
+        );
     }
 
     /**
