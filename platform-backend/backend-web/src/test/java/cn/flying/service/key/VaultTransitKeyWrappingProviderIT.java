@@ -10,6 +10,8 @@ import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.containers.wait.strategy.Wait;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -22,6 +24,7 @@ class VaultTransitKeyWrappingProviderIT {
 
     private static final String ROOT_TOKEN = "record-platform-vault-it-root";
     private static final String POLICY_NAME = "record-platform-file-key";
+    private static final String DENY_POLICY_NAME = "record-platform-file-key-deny";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final AtomicInteger KEY_SEQUENCE = new AtomicInteger();
 
@@ -51,9 +54,17 @@ class VaultTransitKeyWrappingProviderIT {
                 path \"transit/decrypt/record-platform-file-*\" { capabilities = [\"update\"] }
                 path \"transit/rewrap/record-platform-file-*\" { capabilities = [\"update\"] }
                 """;
+        String denyPolicy = """
+                path \"transit/encrypt/record-platform-file-*\" { capabilities = [\"deny\"] }
+                path \"transit/decrypt/record-platform-file-*\" { capabilities = [\"deny\"] }
+                path \"transit/rewrap/record-platform-file-*\" { capabilities = [\"deny\"] }
+                """;
         executeVault("sh", "-ec", "printf '%s' \"$1\" | vault policy write \"$2\" -", "sh", policy, POLICY_NAME);
+        executeVault(
+                "sh", "-ec", "printf '%s' \"$1\" | vault policy write \"$2\" -",
+                "sh", denyPolicy, DENY_POLICY_NAME);
         applicationToken = createToken("-policy=" + POLICY_NAME);
-        deniedToken = createToken("-no-default-policy");
+        deniedToken = createToken("-policy=" + DENY_POLICY_NAME, "-no-default-policy");
     }
 
     /**
@@ -151,10 +162,10 @@ class VaultTransitKeyWrappingProviderIT {
     }
 
     /**
-     * 验证不存在的 Transit key 被映射为固定 key-not-found 分类。
+     * 验证最小 update 权限访问不存在的 Transit key 时按 Vault 403 语义失败关闭。
      */
     @Test
-    void shouldClassifyMissingKey() {
+    void shouldClassifyMissingKeyWithoutCreatePermission() {
         String keyName = "record-platform-file-missing-" + KEY_SEQUENCE.incrementAndGet();
         VaultTransitKeyWrappingProvider provider = provider(keyName, 1, applicationToken);
 
@@ -165,7 +176,8 @@ class VaultTransitKeyWrappingProviderIT {
                 1));
 
         assertThat(result.isSuccess()).isFalse();
-        assertThat(result.failure().category()).isEqualTo(KeyWrappingFailureCategory.INVALID_REQUEST);
+        assertThat(result.failure().category()).isEqualTo(KeyWrappingFailureCategory.PERMISSION_DENIED);
+        assertThat(result.failure().retryable()).isFalse();
         assertThat(result.failure().providerCode()).isNull();
     }
 
@@ -181,11 +193,13 @@ class VaultTransitKeyWrappingProviderIT {
     }
 
     /**
-     * 使用指定 token 签发短生命周期测试 token，避免业务 provider 使用 root 权限。
+     * 使用显式策略签发测试 token，避免业务 provider 继承 root 权限。
      */
-    private static String createToken(String policyArgument) throws Exception {
-        Container.ExecResult result = executeVault(
-                "vault", "token", "create", "-orphan", "-format=json", policyArgument);
+    private static String createToken(String... policyArguments) throws Exception {
+        List<String> command = new ArrayList<>(List.of(
+                "vault", "token", "create", "-orphan", "-format=json"));
+        command.addAll(List.of(policyArguments));
+        Container.ExecResult result = executeVault(command.toArray(String[]::new));
         return OBJECT_MAPPER.readTree(result.getStdout()).path("auth").path("client_token").textValue();
     }
 

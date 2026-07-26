@@ -134,8 +134,8 @@ Provider 错误按稳定内部分类处理：
 
 | 条件 | 分类 | 重试语义 |
 |---|---|---|
-| Vault 400（含 update-only ACL 下 named key 不存在）、无效请求、context/ciphertext 不一致 | `INVALID_REQUEST` / `INVALID_CIPHERTEXT` | 不重试 |
-| Vault 403 | `PERMISSION_DENIED` | 不重试 |
+| Vault 400、无效请求、context/ciphertext 不一致 | `INVALID_REQUEST` / `INVALID_CIPHERTEXT` | 不重试 |
+| Vault 403（含仅有 update 权限时访问不存在的 named key） | `PERMISSION_DENIED` | 不重试 |
 | Vault 404 | `KEY_NOT_FOUND` | 不重试 |
 | Vault 429 | `THROTTLED` | 可重试 |
 | Vault 5xx、网络不可用 | `UNAVAILABLE` | 可重试 |
