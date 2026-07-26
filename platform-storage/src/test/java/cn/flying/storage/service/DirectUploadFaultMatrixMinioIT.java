@@ -207,7 +207,15 @@ class DirectUploadFaultMatrixMinioIT {
         stagingTracker = mock(DirectUploadStagingTracker.class);
         receiptStore = mock(DirectUploadPromotionReceiptStore.class);
         operationIntentStore = mock(DirectUploadOperationIntentStore.class);
-        operationIntent = mock(DirectUploadOperationIntentStore.OperationIntent.class);
+        operationIntent = new DirectUploadOperationIntentStore.OperationIntent(
+                "storage:direct-upload:operation-intent:v1:test",
+                "storage:direct-upload:operation-intent:v1:test:fence",
+                "v1|COMPLETE|" + "a".repeat(64) + "|" + "b".repeat(64),
+                DirectUploadOperationIntentStore.OperationMode.COMPLETE,
+                "a".repeat(64),
+                "b".repeat(64),
+                1L
+        );
         storageProperties = new StorageProperties();
         storageProperties.getReplication().setFactor(3);
         storageProperties.getReplication().setQuorum("2");
@@ -253,8 +261,12 @@ class DirectUploadFaultMatrixMinioIT {
                 for (S3Client client : caseClients) {
                     client.close();
                 }
-                executor.shutdownNow();
-                meterRegistry.close();
+                if (executor != null) {
+                    executor.shutdownNow();
+                }
+                if (meterRegistry != null) {
+                    meterRegistry.close();
+                }
             }
         }
     }

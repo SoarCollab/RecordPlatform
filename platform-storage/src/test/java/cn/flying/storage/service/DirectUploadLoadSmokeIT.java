@@ -68,10 +68,13 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -272,7 +275,11 @@ class DirectUploadLoadSmokeIT {
         Long tombstoneCountBeforeCleanup = redisTemplate.opsForZSet().zCard(EXPIRY_SET_KEY);
         assertThat(receiptCountBeforeCleanup).isEqualTo(ITERATIONS);
         assertThat(tombstoneCountBeforeCleanup).isEqualTo(ITERATIONS);
-        verify(degradedWriteTracker, never()).recordAuthoritativeDegradedWrite(any(), any(), any());
+        verify(degradedWriteTracker, times(ITERATIONS)).recordAuthoritativeDegradedWrite(
+                any(),
+                argThat(nodes -> nodes.size() == 1 && nodes.contains(TARGET_BUCKET)),
+                eq(7L)
+        );
         verify(repairService, never()).scheduleImmediateRepairByNodesAsync(any(), any(), any());
 
         cleanupRun(inputs);
