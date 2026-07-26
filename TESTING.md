@@ -2,11 +2,11 @@
 
 本项目采用"单元测试优先 + 少量高价值集成测试"的策略，目标是在 CI 中尽早发现回归，同时保持本地开发的执行成本足够低。
 
-## 当前测试覆盖（128 test files: 90 backend + 6 storage + 32 frontend）
+## 当前核心测试覆盖（244 test files: 177 backend + 27 storage + 40 frontend）
 
-> 当前后端口径拆分：`backend-common=10`、`backend-service=29`、`backend-web=51`（合计 90）。
+> 统计口径为 `*Test.java` / `*IT.java` / `*.test.ts` 文件；当前后端拆分为 `backend-common=13`、`backend-api=1`、`backend-service=75`、`backend-web=88`（合计 177）。以下长表用于说明代表性覆盖，不作为完整文件清单。
 
-### 后端单元测试（backend-common，10 个测试类）
+### 后端单元测试（backend-common，代表性测试类）
 
 | 测试类 | 覆盖范围 |
 |--------|----------|
@@ -21,7 +21,7 @@
 | DistributedRateLimiterPerformanceTest | 限流性能基准 |
 | DistributedLockAspectTest | 分布式锁 AOP 切面 |
 
-### 后端单元测试（backend-service，29 个测试类）
+### 后端单元测试（backend-service，代表性测试类）
 
 | 测试类 | 覆盖范围 |
 |--------|----------|
@@ -56,7 +56,7 @@
 | QuotaRolloutAuditServiceImplTest | 配额灰度审计服务 |
 | IntegrityCheckServiceTest | 存储完整性校验（S3 存在性 + DB-链上哈希一致性） |
 
-### 后端测试（backend-web，51 个测试文件）
+### 后端测试（backend-web，代表性测试文件）
 
 #### 控制器集成测试
 
@@ -125,7 +125,7 @@
 | BaseControllerIntegrationTest | 控制器集成测试基类 |
 | OpenApiContractExportTest | OpenAPI 契约导出与稳定性校验 |
 
-### 前端测试（platform-frontend，32 个测试文件）
+### 前端测试（platform-frontend，代表性测试文件）
 
 #### API 层测试
 
@@ -268,6 +268,46 @@ mvn -f platform-storage/pom.xml test
 - **S3 客户端**: 使用 Mockito Mock `S3Client`
 - **Redis**: 使用内嵌 Redis 或 Mock `RedisTemplate`
 - **事件发布**: Mock `ApplicationEventPublisher`
+
+#### 直传真实故障矩阵与负载 smoke
+
+PR 的存储事实源不是外部部署环境，而是固定版本 Testcontainers：三套数据面独立的 MinIO、Redis/Redisson 与两条独立 Toxiproxy 路径。执行命令：
+
+```bash
+mvn -f platform-storage/pom.xml clean verify -Pit
+```
+
+CI 必须精确校验以下 Failsafe XML，`skipped/failures/errors` 均为 `0`：
+
+| 测试类 | tests | 责任 |
+|--------|------:|------|
+| `DirectUploadPromotionMinioIT` | 8 | copy/stream/CORS、degraded repair、dead letter、complete/abort/cleanup、receipt restart |
+| `DirectUploadRedisLifecycleIT` | 7 | 多客户端 receipt、fence、tombstone 生命周期 |
+| `DirectUploadFaultMatrixMinioIT` | 9 | F01-F06、F12-F14 的真实 provider/network 故障 |
+| `DirectUploadLoadSmokeIT` | 1 | 4 并发、8 次迭代、资源与 lifecycle 报告、零残留 |
+
+F07、F09-F11 复用既有真实 MinIO/Redis 测试和确定性 service tests，不重复创建慢测试；F08 在矩阵中通过真实 repair callback + Toxiproxy timeout 断言 `RETRYABLE_DEFERRED`。`DirectUploadFaultMatrixMinioIT` 类注释维护完整 F01-F14 traceability。
+
+`DirectUploadLoadSmokeIT` 产物：
+
+- `platform-storage/target/direct-upload-load-smoke/report.json`
+- `platform-storage/target/direct-upload-load-smoke/report.md`
+
+PR 硬门禁是零失败、零对象/Redis 残留、有界 deadline 与资源预算；吞吐和紧时延只记录，不作为共享 runner 的生产 SLA。96 MiB 对象 / 80 MiB heap 的对象级边界仍由以下独立 fork 证明：
+
+```bash
+mvn -f platform-storage/pom.xml verify -Pdirect-upload-constrained-heap
+```
+
+本机无 Docker 时，真实容器命令会因环境不可用而阻塞或失败，不能表述为真实 IT 已通过；GitHub Actions 的精确 XML 断言会阻止缺报告或 skip 被误报为成功。
+
+#### 手工真实部署 direct-path k6
+
+`.github/workflows/perf-smoke.yml` 是手工外部环境验证入口，默认执行 `direct-path/smoke`。它消费现有 REST/预签名合同，执行 direct create、无平台鉴权头的 raw PUT、ETag 提交、direct complete、manifest download metadata、raw GET size/hash 复核和按 `RUN_ID` 清理。
+
+该工作流使用 digest 固定的 k6 镜像并归档 `direct-path-baseline.json`、`direct-path-report.md`、原始 summary/metrics 与 `run-meta.json`。资源或 lifecycle 端点分别记录运行开始与清理后结束的 availability；未配置时必须显示 `unavailable`，不得填充伪造的零值。direct 套件关闭日志并禁用 `url`/`name` system tags，避免预签名查询参数进入 artifact。
+
+baseline 仅在 flow/cleanup 样本、完成文件、p95/p99、吞吐和失败率完整时有效；比较器还要求环境指纹、k6 引擎/digest、profile/scenario、分片规模、executor、并发、时长和 VU pool 一致。缺指标返回 `INVALID_EVIDENCE`，负载或环境不同返回 `NOT_COMPARABLE`。外部 secrets 不参与 PR required gate。
 
 ## 5. CI 执行策略
 

@@ -2,8 +2,11 @@ import { sleep } from 'k6';
 import {
   ensureRequiredConfig,
   getBaseConfig,
+  getDirectPathThresholds,
   getGlobalThresholds,
   getQueryThresholds,
+  getSafeSystemTags,
+  getSummaryTrendStats,
   getUploadThresholds,
   mergeThresholds,
   parseBooleanEnv,
@@ -13,8 +16,10 @@ import { loginOrFail } from '../lib/auth.js';
 import { cleanupRunFiles } from '../lib/cleanup.js';
 import { createSummaryHandler } from '../lib/summary.js';
 import { runChunkUploadFlow } from '../chunk-upload.js';
+import { captureDirectSnapshotAvailability, runDirectPathFlow } from '../direct-path.js';
 import { runFileQueryFlow } from '../file-query.js';
 import { runCoreMixedIteration } from '../scenarios/core-mixed.js';
+import { directCleanupFailureRate } from '../lib/metrics.js';
 
 const baseConfig = getBaseConfig();
 ensureRequiredConfig(baseConfig);
@@ -33,7 +38,7 @@ function shouldEnableScenario(scenarioName) {
 /**
  * 构建本地 smoke 套件计划（默认 file-query + core-mixed）。
  *
- * @returns {{scenarios:Record<string, any>, includeQueryThreshold:boolean, includeUploadThreshold:boolean}} 套件计划
+ * @returns {{scenarios:Record<string, any>, includeQueryThreshold:boolean, includeUploadThreshold:boolean, includeDirectThreshold:boolean}} 套件计划
  */
 function buildSmokePlan() {
   const scenarios = {};
@@ -41,6 +46,7 @@ function buildSmokePlan() {
   const enableFileQuery = shouldEnableScenario('file-query');
   const enableCoreMixed = shouldEnableScenario('core-mixed');
   const enableChunkUpload = baseConfig.scenario === 'chunk-upload';
+  const enableDirectPath = baseConfig.scenario === 'direct-path';
 
   if (enableFileQuery) {
     scenarios.fileQuerySmoke = {
@@ -72,14 +78,25 @@ function buildSmokePlan() {
     };
   }
 
+  if (enableDirectPath) {
+    scenarios.directPathSmoke = {
+      executor: 'constant-vus',
+      exec: 'runDirectPathSmoke',
+      vus: parseIntEnv('SMOKE_DIRECT_PATH_VUS', 1, 1),
+      duration: __ENV.SMOKE_DIRECT_PATH_DURATION || '90s',
+      startTime: Object.keys(scenarios).length > 0 ? __ENV.SMOKE_DIRECT_PATH_START_TIME || '320s' : '0s',
+    };
+  }
+
   if (Object.keys(scenarios).length === 0) {
-    throw new Error(`K6_SCENARIO=${baseConfig.scenario} 无有效场景，可选值: all|file-query|core-mixed|chunk-upload`);
+    throw new Error(`K6_SCENARIO=${baseConfig.scenario} 无有效场景，可选值: all|file-query|core-mixed|chunk-upload|direct-path`);
   }
 
   return {
     scenarios,
     includeQueryThreshold: enableFileQuery || enableCoreMixed,
     includeUploadThreshold: enableChunkUpload || enableCoreMixed,
+    includeDirectThreshold: enableDirectPath,
   };
 }
 
@@ -87,10 +104,13 @@ const smokePlan = buildSmokePlan();
 
 export const options = {
   scenarios: smokePlan.scenarios,
+  summaryTrendStats: getSummaryTrendStats(),
+  systemTags: getSafeSystemTags(),
   thresholds: mergeThresholds(
     getGlobalThresholds(),
     smokePlan.includeQueryThreshold ? getQueryThresholds() : {},
     smokePlan.includeUploadThreshold ? getUploadThresholds() : {},
+    smokePlan.includeDirectThreshold ? getDirectPathThresholds() : {},
   ),
 };
 
@@ -101,10 +121,14 @@ export const options = {
  */
 export function setup() {
   const token = loginOrFail(baseConfig, 'local_smoke_setup', 1);
-  return {
+  const context = {
     token,
     config: baseConfig,
   };
+  if (smokePlan.includeDirectThreshold) {
+    captureDirectSnapshotAvailability(context, 'smoke_direct_path', 'start');
+  }
+  return context;
 }
 
 /**
@@ -138,19 +162,48 @@ export function runChunkUploadSmoke(data) {
 }
 
 /**
+ * 运行 direct-path smoke 场景。
+ *
+ * @param {{token:string, config:{baseUrl:string, tenantId:string, runId:string}}} data setup 返回上下文
+ */
+export function runDirectPathSmoke(data) {
+  runDirectPathFlow(data, 'smoke_direct_path');
+  sleep(1);
+}
+
+/**
  * 执行收尾清理，失败仅告警不抛错。
  *
  * @param {{token:string, config:{baseUrl:string, tenantId:string, runId:string}}} data setup 返回上下文
  */
 export function teardown(data) {
-  if (!cleanupEnabled) {
-    return;
-  }
-
   try {
-    cleanupRunFiles(data);
-  } catch (error) {
-    console.warn(`[k6-cleanup] local-smoke teardown 清理异常: ${error && error.message ? error.message : error}`);
+    if (!cleanupEnabled) {
+      if (smokePlan.includeDirectThreshold) {
+        directCleanupFailureRate.add(true, { reason: 'disabled' });
+        throw new Error('direct-path smoke 要求启用 CLEANUP');
+      }
+      return;
+    }
+
+    try {
+      const result = cleanupRunFiles(data);
+      if (smokePlan.includeDirectThreshold) {
+        directCleanupFailureRate.add(!result.ok, { reason: result.reason || 'none' });
+        if (!result.ok) {
+          throw new Error(`direct-path smoke 清理失败: ${result.reason}`);
+        }
+      }
+    } catch (error) {
+      if (smokePlan.includeDirectThreshold) {
+        throw error;
+      }
+      console.warn(`[k6-cleanup] local-smoke teardown 清理异常: ${error && error.message ? error.message : error}`);
+    }
+  } finally {
+    if (smokePlan.includeDirectThreshold) {
+      captureDirectSnapshotAvailability(data, 'smoke_direct_path', 'end');
+    }
   }
 }
 

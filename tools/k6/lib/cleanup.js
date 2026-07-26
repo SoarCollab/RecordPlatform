@@ -81,13 +81,21 @@ function deleteFiles(config, token, identifiers) {
 }
 
 /**
- * 根据 runId 兜底清理压测文件，失败时只告警不抛错。
+ * 根据 runId 兜底清理压测文件并返回可审计结果。
  *
  * @param {{config:{baseUrl:string, tenantId:string, runId:string}, token:string}} context 上下文
+ * @returns {{ok:boolean, queried:boolean, found:number, deleted:number, remaining:number|null, reason:string|null}} 清理结果
  */
 export function cleanupRunFiles(context) {
   if (!context || !context.config || !context.token) {
-    return;
+    return {
+      ok: false,
+      queried: false,
+      found: 0,
+      deleted: 0,
+      remaining: null,
+      reason: 'invalid_context',
+    };
   }
 
   const keyword = `k6-${context.config.runId}`;
@@ -101,7 +109,14 @@ export function cleanupRunFiles(context) {
     const result = queryFilesByKeyword(context.config, context.token, keyword, pageNum);
     if (!result.ok) {
       console.warn(`[k6-cleanup] 查询待删文件失败，keyword=${keyword}, pageNum=${pageNum}`);
-      break;
+      return {
+        ok: false,
+        queried: true,
+        found: allIdentifiers.length,
+        deleted: 0,
+        remaining: null,
+        reason: 'query_failed',
+      };
     }
 
     const identifiers = extractIdentifiers(result.records);
@@ -111,16 +126,72 @@ export function cleanupRunFiles(context) {
     pageNum += 1;
   }
 
+  if (totalPages > maxPages) {
+    return {
+      ok: false,
+      queried: true,
+      found: allIdentifiers.length,
+      deleted: 0,
+      remaining: null,
+      reason: 'page_limit_exceeded',
+    };
+  }
+
   const deduplicated = Array.from(new Set(allIdentifiers));
   if (deduplicated.length === 0) {
-    return;
+    return {
+      ok: true,
+      queried: true,
+      found: 0,
+      deleted: 0,
+      remaining: 0,
+      reason: null,
+    };
   }
 
   const success = deleteFiles(context.config, context.token, deduplicated);
   if (!success) {
     console.warn(`[k6-cleanup] 批量删除失败，count=${deduplicated.length}`);
-    return;
+    return {
+      ok: false,
+      queried: true,
+      found: deduplicated.length,
+      deleted: 0,
+      remaining: deduplicated.length,
+      reason: 'delete_failed',
+    };
   }
 
-  console.log(`[k6-cleanup] 批量删除成功，count=${deduplicated.length}`);
+  const verification = queryFilesByKeyword(context.config, context.token, keyword, 1);
+  if (!verification.ok) {
+    return {
+      ok: false,
+      queried: true,
+      found: deduplicated.length,
+      deleted: deduplicated.length,
+      remaining: null,
+      reason: 'verification_query_failed',
+    };
+  }
+  const remaining = extractIdentifiers(verification.records).length;
+  if (remaining > 0) {
+    return {
+      ok: false,
+      queried: true,
+      found: deduplicated.length,
+      deleted: deduplicated.length,
+      remaining,
+      reason: 'residual_files',
+    };
+  }
+
+  console.log(`[k6-cleanup] 批量删除并复核成功，count=${deduplicated.length}`);
+  return {
+    ok: true,
+    queried: true,
+    found: deduplicated.length,
+    deleted: deduplicated.length,
+    remaining: 0,
+    reason: null,
+  };
 }
