@@ -269,7 +269,7 @@ class DirectUploadFaultMatrixMinioIT {
         String target = createBucket("f01-target");
         byte[] content = bytes("missing-staging");
         DirectUploadPartDescriptor part = descriptor(
-                "fault-f01", source, List.of(target), 1, "missing-etag", content, content.length, hash(content));
+                "fault-f01", source, List.of(target), 1, "missing-etag", content.length, hash(content));
         configureNode(source, directClient, endpoint(MINIO_A), "physical-source");
         configureNode(target, directClient, endpoint(MINIO_A), "physical-target");
 
@@ -465,7 +465,7 @@ class DirectUploadFaultMatrixMinioIT {
         String key = stagingKey("fault-f14");
         String etag = putObject(source, key, content);
         DirectUploadPartDescriptor part = descriptor(
-                "fault-f14", source, List.of(target), 1, etag, content, content.length, hash(content));
+                "fault-f14", source, List.of(target), 1, etag, content.length, hash(content));
         configureNode(source, directClient, endpoint(MINIO_A), "physical-source");
         configureNode(target, firstProxyClient, proxyEndpoint(firstProxy), "physical-target");
         storageProperties.getDirectUpload().setTransferTimeoutSeconds(1);
@@ -540,7 +540,6 @@ class DirectUploadFaultMatrixMinioIT {
                 List.of(target),
                 1,
                 declaredEtag == null ? providerEtag : declaredEtag,
-                content,
                 declaredSize,
                 declaredHash
         );
@@ -564,7 +563,6 @@ class DirectUploadFaultMatrixMinioIT {
                 List.of(source, firstTarget, secondTarget),
                 2,
                 etag,
-                content,
                 content.length,
                 hash(content)
         );
@@ -615,7 +613,6 @@ class DirectUploadFaultMatrixMinioIT {
             List<String> targets,
             int quorum,
             String etag,
-            byte[] content,
             long declaredSize,
             String declaredHash
     ) {
