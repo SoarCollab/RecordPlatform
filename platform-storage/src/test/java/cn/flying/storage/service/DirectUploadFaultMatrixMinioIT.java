@@ -287,7 +287,7 @@ class DirectUploadFaultMatrixMinioIT {
 
         assertThatThrownBy(() -> service().promote(part, DirectUploadDigestAccumulator.sha256()))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("staging is missing");
+                .hasMessageContaining("promotion receipt is required when trustworthy staging is unavailable");
 
         assertThat(objectExists(target, part.finalObjectName())).isFalse();
         verify(receiptStore, never()).recordSuccess(any(), any(), any());
@@ -350,14 +350,15 @@ class DirectUploadFaultMatrixMinioIT {
     }
 
     /**
-     * F05：三个独立目标中一个真实网络断连时，两个成功副本应满足原始 quorum 并留下降级证据。
+     * F05：三个独立目标中一个真实 TCP reset 时，两个成功副本应满足原始 quorum 并留下降级证据。
      */
     @Test
-    @DisplayName("F05 one disconnected target should keep exact quorum success and degraded evidence")
+    @DisplayName("F05 one reset target should keep exact quorum success and degraded evidence")
     void shouldSucceedAtExactQuorumWithOneDisconnectedTarget() throws Exception {
         byte[] content = bytes("exact-quorum");
         QuorumCase quorumCase = quorumCase("f05", content);
-        secondProxy.setConnectionCut(true);
+        secondProxy.toxics().resetPeer("f05-reset-upstream", ToxicDirection.UPSTREAM, 0L);
+        secondProxy.toxics().resetPeer("f05-reset-downstream", ToxicDirection.DOWNSTREAM, 0L);
 
         DirectUploadPromotionResult result = service().promote(
                 quorumCase.part(), DirectUploadDigestAccumulator.sha256());
@@ -392,7 +393,7 @@ class DirectUploadFaultMatrixMinioIT {
         assertThatThrownBy(() -> service().promote(
                 quorumCase.part(), DirectUploadDigestAccumulator.sha256()))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("quorum");
+                .hasMessageContaining("timed out");
 
         assertThat(objectExists(quorumCase.source(), quorumCase.part().stagingObjectName())).isTrue();
         verify(receiptStore, never()).recordSuccess(any(), any(), any());
@@ -487,7 +488,7 @@ class DirectUploadFaultMatrixMinioIT {
 
         assertThatThrownBy(() -> service().promote(part, DirectUploadDigestAccumulator.sha256()))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("quorum");
+                .hasMessageContaining("timed out");
 
         assertThat(Duration.ofNanos(System.nanoTime() - startedAt)).isLessThan(Duration.ofSeconds(6));
         assertThat(objectExists(source, key)).isTrue();
