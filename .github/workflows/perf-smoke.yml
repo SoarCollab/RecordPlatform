@@ -3,29 +3,97 @@ name: Performance Smoke
 on:
   workflow_dispatch:
     inputs:
-      include_chunk_upload:
-        description: Include chunk-upload scenario in CI smoke
+      profile:
+        description: k6 execution profile
+        required: true
+        type: choice
+        options:
+          - smoke
+          - load
+        default: smoke
+      scenario:
+        description: k6 scenario
+        required: true
+        type: choice
+        options:
+          - direct-path
+          - all
+          - file-query
+          - core-mixed
+          - chunk-upload
+        default: direct-path
+      concurrency:
+        description: Smoke VUs or load arrival rate
+        required: true
+        type: string
+        default: "1"
+      duration:
+        description: Scenario duration, for example 60s or 3m
+        required: true
+        type: string
+        default: 60s
+      environment_fingerprint:
+        description: Stable target/runtime fingerprint; blank uses the masked target and runner facts
         required: false
-        type: boolean
-        default: false
+        type: string
+        default: ""
+      baseline_path:
+        description: Optional checked-out direct-path-baseline.json to compare
+        required: false
+        type: string
+        default: ""
+      resource_snapshot_path:
+        description: Optional same-origin resource snapshot path under BASE_URL
+        required: false
+        type: string
+        default: ""
+      lifecycle_snapshot_path:
+        description: Optional same-origin storage lifecycle snapshot path under BASE_URL
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
   perf-smoke:
-    name: K6 Performance Smoke
+    name: K6 ${{ inputs.profile }} / ${{ inputs.scenario }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       BASE_URL: ${{ secrets.BASE_URL }}
       TENANT_ID: ${{ secrets.TENANT_ID }}
       USERNAME: ${{ secrets.USERNAME }}
       PASSWORD: ${{ secrets.PASSWORD }}
+      K6_DOCKER_IMAGE: grafana/k6@sha256:8cd78f9d0de5f50bc8821cceecf356d5d9e839e6611c226a3fcf13c591080fbd
+      CLEANUP: "true"
+      ENVIRONMENT_FINGERPRINT: ${{ inputs.environment_fingerprint }}
+      SMOKE_FILE_QUERY_VUS: ${{ inputs.concurrency }}
+      SMOKE_CORE_MIXED_VUS: ${{ inputs.concurrency }}
+      SMOKE_CHUNK_UPLOAD_VUS: ${{ inputs.concurrency }}
+      SMOKE_DIRECT_PATH_VUS: ${{ inputs.concurrency }}
+      QUERY_RATE: ${{ inputs.concurrency }}
+      UPLOAD_RATE: ${{ inputs.concurrency }}
+      DIRECT_PATH_RATE: ${{ inputs.concurrency }}
+      SMOKE_FILE_QUERY_DURATION: ${{ inputs.duration }}
+      SMOKE_CORE_MIXED_DURATION: ${{ inputs.duration }}
+      SMOKE_CHUNK_UPLOAD_DURATION: ${{ inputs.duration }}
+      SMOKE_DIRECT_PATH_DURATION: ${{ inputs.duration }}
+      QUERY_DURATION: ${{ inputs.duration }}
+      UPLOAD_DURATION: ${{ inputs.duration }}
+      DIRECT_PATH_DURATION: ${{ inputs.duration }}
+      DIRECT_RESOURCE_SNAPSHOT_PATH: ${{ inputs.resource_snapshot_path }}
+      DIRECT_LIFECYCLE_SNAPSHOT_PATH: ${{ inputs.lifecycle_snapshot_path }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - name: Validate required secrets
+      - name: Validate required secrets and inputs
+        shell: bash
+        env:
+          INPUT_CONCURRENCY: ${{ inputs.concurrency }}
+          INPUT_DURATION: ${{ inputs.duration }}
         run: |
           missing=0
           for name in BASE_URL TENANT_ID USERNAME PASSWORD; do
@@ -34,11 +102,20 @@ jobs:
               missing=1
             fi
           done
+          if ! [[ "$INPUT_CONCURRENCY" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::concurrency must be a positive integer"
+            missing=1
+          fi
+          if ! [[ "$INPUT_DURATION" =~ ^[1-9][0-9]*(ms|s|m|h)$ ]]; then
+            echo "::error::duration must use a positive k6 duration such as 60s or 3m"
+            missing=1
+          fi
           if [ "$missing" -ne 0 ]; then
             exit 1
           fi
 
       - name: Prepare run context
+        shell: bash
         run: |
           RUN_ID="gh-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-$(date +%Y%m%d%H%M%S)"
           RESULT_DIR="tools/k6/results/${RUN_ID}"
@@ -46,35 +123,61 @@ jobs:
           echo "RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
           echo "RESULT_DIR=$RESULT_DIR" >> "$GITHUB_ENV"
 
-      - name: Resolve CI include chunk flag
+      - name: Run digest-pinned k6 profile
+        shell: bash
         run: |
-          INCLUDE_CHUNK=false
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.include_chunk_upload }}" = "true" ]; then
-            INCLUDE_CHUNK=true
-          fi
-          echo "CI_INCLUDE_CHUNK=$INCLUDE_CHUNK" >> "$GITHUB_ENV"
+          bash tools/k6/run-local.sh \
+            --profile "${{ inputs.profile }}" \
+            --scenario "${{ inputs.scenario }}" \
+            --engine docker \
+            --run-id "$RUN_ID" \
+            --result-dir "$RESULT_DIR"
 
-      - name: Run k6 CI smoke suite
+      - name: Validate direct-path evidence
+        if: ${{ inputs.scenario == 'direct-path' || (inputs.scenario == 'all' && inputs.profile == 'load') }}
+        shell: bash
         run: |
-          docker run --rm \
-            -v "$PWD:/workspace" \
-            -w /workspace \
-            -e BASE_URL="$BASE_URL" \
-            -e TENANT_ID="$TENANT_ID" \
-            -e USERNAME="$USERNAME" \
-            -e PASSWORD="$PASSWORD" \
-            -e K6_PROFILE="smoke" \
-            -e K6_SCENARIO="all" \
-            -e CI_INCLUDE_CHUNK="$CI_INCLUDE_CHUNK" \
-            -e RUN_ID="$RUN_ID" \
-            -e RESULT_DIR="$RESULT_DIR" \
-            grafana/k6:0.49.0 \
-            run tools/k6/suites/ci-smoke.js
+          node - "$RESULT_DIR/direct-path-baseline.json" "$RESULT_DIR/direct-path-report.md" <<'NODE'
+          const fs = require('node:fs');
+          const [baselinePath, reportPath] = process.argv.slice(2);
+          if (!fs.existsSync(baselinePath) || !fs.existsSync(reportPath)) {
+            throw new Error('direct-path baseline/report artifact is missing');
+          }
+          const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8'));
+          if (baseline.evidence?.valid !== true) {
+            throw new Error(`direct-path evidence is incomplete: ${JSON.stringify(baseline.evidence)}`);
+          }
+          if (baseline.failure.flowRate !== 0 || baseline.failure.cleanupRate !== 0) {
+            throw new Error(`direct-path failure rates must be zero: ${JSON.stringify(baseline.failure)}`);
+          }
+          if (!baseline.environment?.fingerprint) {
+            throw new Error('environment fingerprint is missing');
+          }
+          for (const name of ['resourceSnapshot', 'lifecycleSnapshot']) {
+            for (const stage of ['start', 'end']) {
+              if (!['available', 'unavailable'].includes(baseline[name]?.[stage]?.status)) {
+                throw new Error(`${name}.${stage} availability must be explicit`);
+              }
+            }
+          }
+          NODE
+
+      - name: Compare same-environment baseline
+        if: ${{ inputs.baseline_path != '' && (inputs.scenario == 'direct-path' || (inputs.scenario == 'all' && inputs.profile == 'load')) }}
+        shell: bash
+        env:
+          BASELINE_PATH: ${{ inputs.baseline_path }}
+        run: |
+          test -f "$BASELINE_PATH"
+          node tools/k6/scripts/compare-direct-baseline.mjs \
+            --baseline "$BASELINE_PATH" \
+            --candidate "$RESULT_DIR/direct-path-baseline.json" \
+            --output "$RESULT_DIR/direct-path-comparison.md"
 
       - name: Upload performance artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
-          name: perf-smoke-${{ env.RUN_ID }}
+          name: perf-${{ inputs.profile }}-${{ inputs.scenario }}-${{ env.RUN_ID }}
           path: ${{ env.RESULT_DIR }}
-          if-no-files-found: warn
+          if-no-files-found: error

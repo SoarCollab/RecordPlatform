@@ -16,6 +16,74 @@ export const businessErrorRate = new Rate('business_error_rate');
 export const uploadFileCount = new Counter('upload_file_count');
 
 /**
+ * 直传上传阶段耗时（毫秒）。
+ */
+export const directUploadE2eMs = new Trend('direct_upload_e2e_ms', true);
+
+/**
+ * 直传下载校验阶段耗时（毫秒）。
+ */
+export const directDownloadE2eMs = new Trend('direct_download_e2e_ms', true);
+
+/**
+ * 直传创建到下载校验完成的全链路耗时（毫秒）。
+ */
+export const directPathE2eMs = new Trend('direct_path_e2e_ms', true);
+
+/**
+ * 直传流程失败率。
+ */
+export const directFlowFailureRate = new Rate('direct_flow_failure_rate');
+
+/**
+ * 直传清理失败率。
+ */
+export const directCleanupFailureRate = new Rate('direct_cleanup_failure_rate');
+
+/**
+ * 直传上传字节数。
+ */
+export const directUploadedBytes = new Counter('direct_uploaded_bytes');
+
+/**
+ * 直传下载并校验通过的字节数。
+ */
+export const directDownloadedBytes = new Counter('direct_downloaded_bytes');
+
+/**
+ * 完成直传上传并下载校验的文件数。
+ */
+export const directFileCount = new Counter('direct_file_count');
+
+/**
+ * 目标资源快照可用率。
+ */
+export const directResourceSnapshotStartAvailability = new Rate(
+  'direct_resource_snapshot_start_availability',
+);
+
+/**
+ * 目标资源结束快照可用率。
+ */
+export const directResourceSnapshotEndAvailability = new Rate(
+  'direct_resource_snapshot_end_availability',
+);
+
+/**
+ * 存储生命周期快照可用率。
+ */
+export const directLifecycleSnapshotStartAvailability = new Rate(
+  'direct_lifecycle_snapshot_start_availability',
+);
+
+/**
+ * 存储生命周期结束快照可用率。
+ */
+export const directLifecycleSnapshotEndAvailability = new Rate(
+  'direct_lifecycle_snapshot_end_availability',
+);
+
+/**
  * 接口请求总量（按 endpoint tag 聚合）。
  */
 export const endpointRequestCount = new Counter('endpoint_request_count');
@@ -52,6 +120,47 @@ export function recordUploadE2e(durationMs, tags = {}) {
  */
 export function recordUploadFile(tags = {}) {
   uploadFileCount.add(1, tags);
+}
+
+/**
+ * 记录一次直传上传、下载和端到端结果。
+ *
+ * @param {{uploadMs:number, downloadMs:number, totalMs:number, uploadedBytes:number, downloadedBytes:number, ok:boolean}} result 直传结果
+ * @param {Record<string, string>} tags 指标标签
+ */
+export function recordDirectPathResult(result, tags = {}) {
+  directUploadE2eMs.add(result.uploadMs, tags);
+  directDownloadE2eMs.add(result.downloadMs, tags);
+  directPathE2eMs.add(result.totalMs, tags);
+  directUploadedBytes.add(result.uploadedBytes, tags);
+  directDownloadedBytes.add(result.downloadedBytes, tags);
+  directFlowFailureRate.add(!result.ok, tags);
+  if (result.ok) {
+    directFileCount.add(1, tags);
+  }
+}
+
+/**
+ * 记录目标资源与存储生命周期快照是否可用。
+ *
+ * @param {boolean} resourceAvailable 资源快照是否可用
+ * @param {boolean} lifecycleAvailable 生命周期快照是否可用
+ * @param {'start'|'end'} stage 快照阶段
+ * @param {Record<string, string>} tags 指标标签
+ */
+export function recordDirectSnapshotAvailability(
+  resourceAvailable,
+  lifecycleAvailable,
+  stage,
+  tags = {},
+) {
+  if (stage === 'start') {
+    directResourceSnapshotStartAvailability.add(resourceAvailable, tags);
+    directLifecycleSnapshotStartAvailability.add(lifecycleAvailable, tags);
+    return;
+  }
+  directResourceSnapshotEndAvailability.add(resourceAvailable, tags);
+  directLifecycleSnapshotEndAvailability.add(lifecycleAvailable, tags);
 }
 
 /**

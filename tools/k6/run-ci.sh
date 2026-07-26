@@ -8,6 +8,9 @@ Usage: tools/k6/run-ci.sh [options]
 
 Options:
   --include-chunk               在 CI smoke 中追加 chunk-upload 场景
+  --include-direct              在 CI smoke 中追加 direct-path 场景
+  --scenario <all|file-query|core-mixed|chunk-upload|direct-path>
+                                 场景过滤（默认：all）
   --engine <auto|local|docker>  执行引擎（默认：auto；auto 仅自动使用本地 k6）
   --run-id <id>                 自定义运行 ID（默认：ci-当前时间）
   --result-dir <dir>            自定义结果目录（默认：tools/k6/results/<run-id>）
@@ -19,6 +22,7 @@ Environment (required):
   USERNAME
   PASSWORD
   K6_DOCKER_IMAGE               Docker 引擎必填，且必须使用 digest 固定镜像
+  ENVIRONMENT_FINGERPRINT       同环境 baseline 比较标识（默认按目标掩码/引擎/OS 生成）
 USAGE
 }
 
@@ -29,6 +33,17 @@ USAGE
 has_command() {
   local cmd="$1"
   command -v "$cmd" >/dev/null 2>&1
+}
+
+# 校验运行标识可安全用于文件名、会话名和精确清理关键字。
+#
+# @param $1 运行 ID
+validate_run_id() {
+  local run_id="$1"
+  if [[ ! "$run_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
+    echo "[ERROR] run-id 必须为 1-64 位，首位为字母或数字，其余仅允许字母、数字、点、下划线或连字符。" >&2
+    exit 1
+  fi
 }
 
 # 根据输入参数解析最终执行引擎。
@@ -170,6 +185,22 @@ mask_base_url() {
   printf '%s' "$masked"
 }
 
+# 生成不包含凭证的环境指纹，供 baseline 比较前置校验。
+#
+# @param $1 脱敏目标地址
+# @param $2 engine
+# @returns 环境指纹
+build_environment_fingerprint() {
+  local target_mask="$1"
+  local engine="$2"
+  local source="target=${target_mask};engine=${engine};artifact=${K6_ENGINE_ARTIFACT:-unavailable};os=$(uname -s);arch=$(uname -m)"
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$source" | shasum -a 256 | awk '{print $1}'
+    return
+  fi
+  printf '%s' "$source" | sha256sum | awk '{print $1}'
+}
+
 # 写入运行元数据，供审计与报告回填使用。
 #
 # @param $1 结果目录
@@ -186,10 +217,20 @@ write_run_meta() {
   local timestamp
   local base_url
   local base_url_mask
+  local cpu_count
+  local memory_bytes
+  local os_name
+  local architecture
+  local k6_version
 
   timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   base_url="${BASE_URL:-http://localhost:8000/record-platform/api/v1}"
   base_url_mask="$(mask_base_url "$base_url")"
+  os_name="$(uname -s)"
+  architecture="$(uname -m)"
+  cpu_count="$(sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo unavailable)"
+  memory_bytes="$(sysctl -n hw.memsize 2>/dev/null || awk '/MemTotal/ {print $2 * 1024}' /proc/meminfo 2>/dev/null || echo unavailable)"
+  k6_version="${K6_ENGINE_ARTIFACT:-unavailable:not-configured}"
 
   cat >"${result_dir}/run-meta.json" <<EOF
 {
@@ -197,10 +238,31 @@ write_run_meta() {
   "profile": "${profile}",
   "scenario": "${scenario}",
   "engine": "${engine}",
+  "engineArtifact": "${K6_ENGINE_ARTIFACT:-unavailable:not-configured}",
+  "logOutput": "${K6_EFFECTIVE_LOG_OUTPUT:-stderr}",
   "timestamp": "${timestamp}",
-  "baseUrlMask": "${base_url_mask}"
+  "baseUrlMask": "${base_url_mask}",
+  "environmentFingerprint": "${ENVIRONMENT_FINGERPRINT}",
+  "host": {
+    "os": "${os_name}",
+    "architecture": "${architecture}",
+    "cpuCount": "${cpu_count}",
+    "memoryBytes": "${memory_bytes}",
+    "k6Version": "${k6_version}"
+  }
 }
 EOF
+}
+
+# 判断当前 CI 套件是否会访问带签名查询参数的对象存储 URL。
+#
+# @param $1 scenario
+# @param $2 include_direct
+# @returns 0=包含 direct-path，1=不包含
+includes_direct_path() {
+  local scenario="$1"
+  local include_direct="$2"
+  [[ "$scenario" == "direct-path" || ("$scenario" == "all" && "$include_direct" == "true") ]]
 }
 
 # 通过本地 k6 二进制执行压测。
@@ -208,7 +270,7 @@ EOF
 # @param $1 suite 脚本路径
 run_with_local_k6() {
   local suite_script="$1"
-  k6 run "$suite_script"
+  k6 run --log-output "${K6_EFFECTIVE_LOG_OUTPUT:-stderr}" "$suite_script"
 }
 
 # 通过 Docker 中的 grafana/k6 执行压测。
@@ -243,14 +305,38 @@ run_with_docker_k6() {
     -e PASSWORD \
     -e K6_PROFILE \
     -e K6_SCENARIO \
+    -e K6_SUITE \
+    -e K6_ENGINE \
+    -e K6_ENGINE_ARTIFACT \
     -e RUN_ID \
     -e RESULT_DIR \
     -e CLEANUP \
     -e CI_INCLUDE_CHUNK \
+    -e CI_INCLUDE_DIRECT \
     -e TOTAL_CHUNKS \
     -e CHUNK_SIZE \
+    -e DIRECT_TOTAL_CHUNKS \
+    -e DIRECT_CHUNK_SIZE \
+    -e DIRECT_P99_BUDGET_MS \
+    -e DIRECT_RESOURCE_SNAPSHOT_PATH \
+    -e DIRECT_LIFECYCLE_SNAPSHOT_PATH \
+    -e ENVIRONMENT_FINGERPRINT \
+    -e VUS \
+    -e DURATION \
+    -e MIX_QUERY_WEIGHT \
+    -e CI_FILE_QUERY_VUS \
+    -e CI_FILE_QUERY_DURATION \
+    -e CI_CORE_MIXED_VUS \
+    -e CI_CORE_MIXED_DURATION \
+    -e CI_CORE_MIXED_START_TIME \
+    -e CI_CHUNK_UPLOAD_VUS \
+    -e CI_CHUNK_UPLOAD_DURATION \
+    -e CI_CHUNK_START_TIME \
+    -e CI_DIRECT_PATH_VUS \
+    -e CI_DIRECT_PATH_DURATION \
+    -e CI_DIRECT_PATH_START_TIME \
     "$docker_image" \
-    run "$suite_script"
+    run --log-output "${K6_EFFECTIVE_LOG_OUTPUT:-stderr}" "$suite_script"
 }
 
 # 根据执行引擎分发到对应的运行入口。
@@ -288,6 +374,8 @@ validate_required_env() {
 # 主流程：解析参数并运行 CI smoke。
 main() {
   local include_chunk="${CI_INCLUDE_CHUNK:-false}"
+  local include_direct="${CI_INCLUDE_DIRECT:-false}"
+  local scenario="${K6_SCENARIO:-all}"
   local engine="${K6_ENGINE:-auto}"
   local default_base_url="http://localhost:8000/record-platform/api/v1"
   local original_base_url="${BASE_URL:-$default_base_url}"
@@ -299,6 +387,14 @@ main() {
       --include-chunk)
         include_chunk="true"
         shift
+        ;;
+      --include-direct)
+        include_direct="true"
+        shift
+        ;;
+      --scenario)
+        scenario="$2"
+        shift 2
         ;;
       --engine)
         engine="$2"
@@ -324,6 +420,8 @@ main() {
     esac
   done
 
+  validate_run_id "$run_id"
+
   local resolved_engine
   resolved_engine="$(resolve_engine "$engine")"
   validate_required_env
@@ -338,12 +436,29 @@ main() {
   result_dir="$(resolve_existing_dir_absolute_path "$result_dir")"
 
   export K6_PROFILE="smoke"
-  export K6_SCENARIO="${K6_SCENARIO:-all}"
+  export K6_SCENARIO="$scenario"
+  export K6_SUITE="ci"
   export K6_ENGINE="$resolved_engine"
+  if [[ "$resolved_engine" == "docker" ]]; then
+    export K6_ENGINE_ARTIFACT="$K6_DOCKER_IMAGE"
+  else
+    export K6_ENGINE_ARTIFACT="$(k6 version 2>/dev/null | head -1 | tr '"' "'")"
+  fi
   export BASE_URL="$runtime_base_url"
   export CI_INCLUDE_CHUNK="$include_chunk"
+  export CI_INCLUDE_DIRECT="$include_direct"
   export RUN_ID="$run_id"
   export RESULT_DIR="$result_dir"
+  export ENVIRONMENT_FINGERPRINT="${ENVIRONMENT_FINGERPRINT:-$(build_environment_fingerprint "$(mask_base_url "$runtime_base_url")" "$resolved_engine")}"
+  if [[ ! "$ENVIRONMENT_FINGERPRINT" =~ ^[A-Za-z0-9._:-]{1,128}$ ]]; then
+    echo "[ERROR] ENVIRONMENT_FINGERPRINT 仅允许 1-128 位字母、数字、点、下划线、冒号或连字符。" >&2
+    exit 1
+  fi
+  if includes_direct_path "$scenario" "$include_direct"; then
+    export K6_EFFECTIVE_LOG_OUTPUT="none"
+  else
+    export K6_EFFECTIVE_LOG_OUTPUT="${K6_LOG_OUTPUT:-stderr}"
+  fi
 
   if [[ "$resolved_engine" == "docker" && "$runtime_base_url" != "$original_base_url" ]]; then
     echo "[INFO] docker engine 检测到 loopback BASE_URL，已改写为: $(mask_base_url "$runtime_base_url")"
@@ -352,9 +467,8 @@ main() {
   write_run_meta "$result_dir" "$run_id" "$K6_PROFILE" "$K6_SCENARIO" "$resolved_engine"
 
   echo "[INFO] BASE_URL=$(mask_base_url "$BASE_URL")"
-  echo "[INFO] TENANT_ID=$TENANT_ID"
-  echo "[INFO] USERNAME=$USERNAME"
-  echo "[INFO] run_id=$RUN_ID result_dir=$RESULT_DIR include_chunk=$CI_INCLUDE_CHUNK engine=$K6_ENGINE"
+  echo "[INFO] run_id=$RUN_ID result_dir=$RESULT_DIR include_chunk=$CI_INCLUDE_CHUNK include_direct=$CI_INCLUDE_DIRECT engine=$K6_ENGINE"
+  echo "[INFO] k6_log_output=$K6_EFFECTIVE_LOG_OUTPUT"
 
   run_k6_suite "$resolved_engine" "tools/k6/suites/ci-smoke.js"
 }

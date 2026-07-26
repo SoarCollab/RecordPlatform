@@ -388,6 +388,49 @@ jobs:
       - name: Run Storage Tests and MinIO Provider Contracts
         run: mvn -f platform-storage/pom.xml clean verify -Pit
 
+      - name: Require Direct Upload Fault Matrix and Load Smoke Execution
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+          import xml.etree.ElementTree as ET
+
+          required_suites = {
+              "cn.flying.storage.service.DirectUploadFaultMatrixMinioIT": 9,
+              "cn.flying.storage.service.DirectUploadLoadSmokeIT": 1,
+          }
+
+          for class_name, expected_tests in required_suites.items():
+              report = Path(
+                  "platform-storage/target/failsafe-reports/"
+                  f"TEST-{class_name}.xml"
+              )
+              if not report.is_file():
+                  sys.exit(f"Missing required Failsafe report: {report}")
+
+              suite = ET.parse(report).getroot()
+              expected_counts = {
+                  "tests": expected_tests,
+                  "skipped": 0,
+                  "failures": 0,
+                  "errors": 0,
+              }
+              for name, expected in expected_counts.items():
+                  actual = int(suite.attrib.get(name, "-1"))
+                  if actual != expected:
+                      sys.exit(
+                          f"{class_name} {name}={actual}; expected {expected}"
+                      )
+          PY
+
+      - name: Upload Direct Upload Load Smoke Evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: direct-upload-load-smoke
+          path: platform-storage/target/direct-upload-load-smoke/
+          if-no-files-found: error
+
       - name: Require Direct Upload MinIO Provider Contract Execution
         run: |
           python3 - <<'PY'

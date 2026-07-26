@@ -1,8 +1,11 @@
 import {
   ensureRequiredConfig,
   getBaseConfig,
+  getDirectPathThresholds,
   getGlobalThresholds,
   getQueryThresholds,
+  getSafeSystemTags,
+  getSummaryTrendStats,
   getUploadThresholds,
   mergeThresholds,
   parseBooleanEnv,
@@ -12,7 +15,9 @@ import { loginOrFail } from '../lib/auth.js';
 import { cleanupRunFiles } from '../lib/cleanup.js';
 import { createSummaryHandler } from '../lib/summary.js';
 import { runChunkUploadFlow } from '../chunk-upload.js';
+import { captureDirectSnapshotAvailability, runDirectPathFlow } from '../direct-path.js';
 import { runFileQueryFlow } from '../file-query.js';
+import { directCleanupFailureRate } from '../lib/metrics.js';
 
 const baseConfig = getBaseConfig();
 ensureRequiredConfig(baseConfig);
@@ -31,13 +36,14 @@ function shouldEnableScenario(scenarioName) {
 /**
  * 构建本地 load 套件计划（场景 + 阈值开关）。
  *
- * @returns {{scenarios:Record<string, any>, includeQueryThreshold:boolean, includeUploadThreshold:boolean}} 套件计划
+ * @returns {{scenarios:Record<string, any>, includeQueryThreshold:boolean, includeUploadThreshold:boolean, includeDirectThreshold:boolean}} 套件计划
  */
 function buildLoadPlan() {
   const scenarios = {};
 
   const enableQuery = shouldEnableScenario('file-query');
   const enableUpload = shouldEnableScenario('chunk-upload');
+  const enableDirectPath = shouldEnableScenario('direct-path');
 
   if (enableQuery) {
     scenarios.fileQueryLoad = {
@@ -65,14 +71,28 @@ function buildLoadPlan() {
     };
   }
 
+  if (enableDirectPath) {
+    scenarios.directPathLoad = {
+      executor: 'constant-arrival-rate',
+      exec: 'runDirectPathLoad',
+      rate: parseIntEnv('DIRECT_PATH_RATE', 1, 1),
+      timeUnit: '1s',
+      duration: __ENV.DIRECT_PATH_DURATION || '3m',
+      preAllocatedVUs: parseIntEnv('DIRECT_PATH_PRE_ALLOCATED_VUS', 5, 1),
+      maxVUs: parseIntEnv('DIRECT_PATH_MAX_VUS', 20, 1),
+      startTime: enableQuery || enableUpload ? __ENV.LOAD_DIRECT_START_TIME || '6m20s' : '0s',
+    };
+  }
+
   if (Object.keys(scenarios).length === 0) {
-    throw new Error(`K6_SCENARIO=${baseConfig.scenario} 无有效场景，可选值: all|file-query|chunk-upload`);
+    throw new Error(`K6_SCENARIO=${baseConfig.scenario} 无有效场景，可选值: all|file-query|chunk-upload|direct-path`);
   }
 
   return {
     scenarios,
     includeQueryThreshold: enableQuery,
     includeUploadThreshold: enableUpload,
+    includeDirectThreshold: enableDirectPath,
   };
 }
 
@@ -80,10 +100,13 @@ const loadPlan = buildLoadPlan();
 
 export const options = {
   scenarios: loadPlan.scenarios,
+  summaryTrendStats: getSummaryTrendStats(),
+  systemTags: getSafeSystemTags(),
   thresholds: mergeThresholds(
     getGlobalThresholds(),
     loadPlan.includeQueryThreshold ? getQueryThresholds() : {},
     loadPlan.includeUploadThreshold ? getUploadThresholds() : {},
+    loadPlan.includeDirectThreshold ? getDirectPathThresholds() : {},
   ),
 };
 
@@ -94,10 +117,14 @@ export const options = {
  */
 export function setup() {
   const token = loginOrFail(baseConfig, 'local_load_setup', 1);
-  return {
+  const context = {
     token,
     config: baseConfig,
   };
+  if (loadPlan.includeDirectThreshold) {
+    captureDirectSnapshotAvailability(context, 'load_direct_path', 'start');
+  }
+  return context;
 }
 
 /**
@@ -119,19 +146,47 @@ export function runChunkUploadLoad(data) {
 }
 
 /**
+ * 运行 direct-path load 场景。
+ *
+ * @param {{token:string, config:{baseUrl:string, tenantId:string, runId:string}}} data setup 返回上下文
+ */
+export function runDirectPathLoad(data) {
+  runDirectPathFlow(data, 'load_direct_path');
+}
+
+/**
  * 执行收尾清理，失败仅告警不抛错。
  *
  * @param {{token:string, config:{baseUrl:string, tenantId:string, runId:string}}} data setup 返回上下文
  */
 export function teardown(data) {
-  if (!cleanupEnabled) {
-    return;
-  }
-
   try {
-    cleanupRunFiles(data);
-  } catch (error) {
-    console.warn(`[k6-cleanup] local-load teardown 清理异常: ${error && error.message ? error.message : error}`);
+    if (!cleanupEnabled) {
+      if (loadPlan.includeDirectThreshold) {
+        directCleanupFailureRate.add(true, { reason: 'disabled' });
+        throw new Error('direct-path load 要求启用 CLEANUP');
+      }
+      return;
+    }
+
+    try {
+      const result = cleanupRunFiles(data);
+      if (loadPlan.includeDirectThreshold) {
+        directCleanupFailureRate.add(!result.ok, { reason: result.reason || 'none' });
+        if (!result.ok) {
+          throw new Error(`direct-path load 清理失败: ${result.reason}`);
+        }
+      }
+    } catch (error) {
+      if (loadPlan.includeDirectThreshold) {
+        throw error;
+      }
+      console.warn(`[k6-cleanup] local-load teardown 清理异常: ${error && error.message ? error.message : error}`);
+    }
+  } finally {
+    if (loadPlan.includeDirectThreshold) {
+      captureDirectSnapshotAvailability(data, 'load_direct_path', 'end');
+    }
   }
 }
 

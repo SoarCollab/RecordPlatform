@@ -162,7 +162,7 @@ function buildEndpointMetricLines(endpointStats) {
     const durationValues = stat.durationValues || {};
     const errorRate = stat.requests > 0 ? stat.failures / stat.requests : undefined;
 
-    return `${endpoint} -> p50=${formatMs(durationValues['p(50)'])}, p90=${formatMs(durationValues['p(90)'])}, p95=${formatMs(durationValues['p(95)'])}, error=${formatRate(errorRate)}, requests=${formatCount(stat.requests)}`;
+    return `${endpoint} -> p50=${formatMs(durationValues['p(50)'])}, p90=${formatMs(durationValues['p(90)'])}, p95=${formatMs(durationValues['p(95)'])}, p99=${formatMs(durationValues['p(99)'])}, error=${formatRate(errorRate)}, requests=${formatCount(stat.requests)}`;
   });
 }
 
@@ -170,7 +170,7 @@ function buildEndpointMetricLines(endpointStats) {
  * 构建 endpoint 维度结构化快照，供报告自动回填使用。
  *
  * @param {Record<string, {durationValues:Record<string,number>, requests:number, failures:number}>} endpointStats 端点聚合结果
- * @returns {Record<string, {p50:number|null, p90:number|null, p95:number|null, errorRate:number|null, requests:number, failures:number}>} endpoint 快照
+ * @returns {Record<string, {p50:number|null, p90:number|null, p95:number|null, p99:number|null, errorRate:number|null, requests:number, failures:number}>} endpoint 快照
  */
 function buildEndpointMetricSnapshot(endpointStats) {
   const snapshot = {};
@@ -183,6 +183,7 @@ function buildEndpointMetricSnapshot(endpointStats) {
       p50: durationValues['p(50)'] ?? null,
       p90: durationValues['p(90)'] ?? null,
       p95: durationValues['p(95)'] ?? null,
+      p99: durationValues['p(99)'] ?? null,
       errorRate,
       requests: stat.requests,
       failures: stat.failures,
@@ -278,6 +279,220 @@ function buildMetricsSnapshot(metrics) {
 }
 
 /**
+ * 提取 Trend 指标的分位值，缺失时保留 null。
+ *
+ * @param {Record<string, any>} metrics 指标对象
+ * @param {string} metricName 指标名
+ * @returns {{p50:number|null,p95:number|null,p99:number|null,avg:number|null}} 分位值
+ */
+function readTrend(metrics, metricName) {
+  const values = metrics?.[metricName]?.values || {};
+  return {
+    p50: values['p(50)'] ?? null,
+    p95: values['p(95)'] ?? null,
+    p99: values['p(99)'] ?? null,
+    avg: values.avg ?? null,
+  };
+}
+
+/**
+ * 提取 Rate 指标并显式标识未采集状态。
+ *
+ * @param {Record<string, any>} metrics 指标对象
+ * @param {string} metricName 指标名
+ * @param {boolean} configured 是否配置了采集端点
+ * @returns {{status:string,rate:number|null,reason:string|null}} 可用性状态
+ */
+function readAvailability(metrics, metricName, configured) {
+  if (!configured) {
+    return {
+      status: 'unavailable',
+      rate: null,
+      reason: 'not_configured',
+    };
+  }
+  const values = metrics?.[metricName]?.values;
+  if (!values || values.rate === undefined || values.rate === null) {
+    return {
+      status: 'unavailable',
+      rate: null,
+      reason: 'no_samples',
+    };
+  }
+  return {
+    status: Number(values.rate) > 0 ? 'available' : 'unavailable',
+    rate: Number(values.rate),
+    reason: Number(values.rate) > 0 ? null : 'probe_failed',
+  };
+}
+
+/**
+ * 构建开始/结束两阶段快照可用性，禁止用单次探测冒充前后对照。
+ *
+ * @param {Record<string, any>} metrics 指标对象
+ * @param {string} prefix 指标前缀
+ * @param {boolean} configured 是否配置了快照端点
+ * @returns {{start:Record<string,any>,end:Record<string,any>}} 两阶段状态
+ */
+function readSnapshotPair(metrics, prefix, configured) {
+  return {
+    start: readAvailability(metrics, `${prefix}_start_availability`, configured),
+    end: readAvailability(metrics, `${prefix}_end_availability`, configured),
+  };
+}
+
+/**
+ * 读取 Counter 数值；指标缺失时返回 null，禁止把未执行伪装成零。
+ *
+ * @param {Record<string, any>} values Counter values
+ * @param {string} name 字段名
+ * @returns {number|null} 真实数值或不可用
+ */
+function readFiniteValue(values, name) {
+  const value = values?.[name];
+  return Number.isFinite(value) ? Number(value) : null;
+}
+
+/**
+ * 构建直传全链路基线，环境不一致时由比较器拒绝比较。
+ *
+ * @param {any} data k6 summary 数据
+ * @param {string} suiteName 套件名
+ * @param {{runId:string,profile:string,scenario:string,engine:string,environmentFingerprint:string,resourceSnapshotPath:string,lifecycleSnapshotPath:string,directExecution:Record<string,any>}} config 配置
+ * @returns {Record<string, any>} 直传基线
+ */
+function buildDirectPathBaseline(data, suiteName, config) {
+  const metrics = data.metrics || {};
+  const uploaded = metrics.direct_uploaded_bytes?.values || {};
+  const downloaded = metrics.direct_downloaded_bytes?.values || {};
+  const files = metrics.direct_file_count?.values || {};
+  const flowFailure = metrics.direct_flow_failure_rate?.values || {};
+  const cleanupFailure = metrics.direct_cleanup_failure_rate?.values || {};
+  const flowSamples = Number(flowFailure.passes || 0) + Number(flowFailure.fails || 0);
+  const cleanupSamples = Number(cleanupFailure.passes || 0) + Number(cleanupFailure.fails || 0);
+  const completedFiles = Number(files.count || 0);
+  const latency = {
+    upload: readTrend(metrics, 'direct_upload_e2e_ms'),
+    download: readTrend(metrics, 'direct_download_e2e_ms'),
+    endToEnd: readTrend(metrics, 'direct_path_e2e_ms'),
+  };
+  const throughput = {
+    uploadedBytes: readFiniteValue(uploaded, 'count'),
+    uploadedBytesPerSecond: readFiniteValue(uploaded, 'rate'),
+    downloadedBytes: readFiniteValue(downloaded, 'count'),
+    downloadedBytesPerSecond: readFiniteValue(downloaded, 'rate'),
+    completedFiles: readFiniteValue(files, 'count'),
+    completedFilesPerSecond: readFiniteValue(files, 'rate'),
+  };
+  const requiredNumbers = [
+    latency.upload.p95,
+    latency.upload.p99,
+    latency.download.p95,
+    latency.download.p99,
+    latency.endToEnd.p95,
+    latency.endToEnd.p99,
+    throughput.uploadedBytesPerSecond,
+    throughput.downloadedBytesPerSecond,
+    flowFailure.rate,
+    cleanupFailure.rate,
+  ];
+  const metricsComplete = requiredNumbers.every((value) => Number.isFinite(value));
+  const compatibilityComplete = Boolean(
+    config.environmentFingerprint &&
+    !String(config.environmentFingerprint).startsWith('unavailable:') &&
+    config.engine &&
+    config.engineArtifact &&
+    !String(config.engineArtifact).startsWith('unavailable:') &&
+    config.directPath &&
+    Number.isFinite(config.directPath.totalChunks) &&
+    Number.isFinite(config.directPath.chunkSize) &&
+    config.directExecution?.executor &&
+    Number.isFinite(config.directExecution?.concurrency) &&
+    config.directExecution?.duration,
+  );
+  return {
+    schemaVersion: 2,
+    runId: config.runId,
+    profile: config.profile,
+    scenario: config.scenario,
+    suite: suiteName,
+    generatedAt: new Date().toISOString(),
+    environment: {
+      fingerprint: config.environmentFingerprint || 'unavailable:not-configured',
+      engine: config.engine || 'unknown',
+      engineArtifact: config.engineArtifact || 'unavailable:not-configured',
+    },
+    workload: config.directPath || null,
+    execution: config.directExecution || null,
+    latencyMs: latency,
+    throughput,
+    failure: {
+      flowRate: flowFailure.rate ?? null,
+      cleanupRate: cleanupFailure.rate ?? null,
+    },
+    evidence: {
+      flowSamples,
+      cleanupSamples,
+      completedFiles,
+      metricsComplete,
+      compatibilityComplete,
+      valid: flowSamples > 0 && cleanupSamples > 0 && completedFiles > 0 &&
+        metricsComplete && compatibilityComplete,
+    },
+    resourceSnapshot: readSnapshotPair(
+      metrics,
+      'direct_resource_snapshot',
+      Boolean(config.resourceSnapshotPath),
+    ),
+    lifecycleSnapshot: readSnapshotPair(
+      metrics,
+      'direct_lifecycle_snapshot',
+      Boolean(config.lifecycleSnapshotPath),
+    ),
+  };
+}
+
+/**
+ * 渲染直传基线的人类可读 Markdown 报告。
+ *
+ * @param {Record<string, any>} baseline 直传基线
+ * @returns {string} Markdown 报告
+ */
+function buildDirectPathReport(baseline) {
+  const upload = baseline.latencyMs.upload;
+  const download = baseline.latencyMs.download;
+  const endToEnd = baseline.latencyMs.endToEnd;
+  const lines = [
+    '# Direct path load report',
+    '',
+    `- Run: \`${baseline.runId}\``,
+    `- Profile/scenario: \`${baseline.profile}/${baseline.scenario}\``,
+    `- Environment fingerprint: \`${baseline.environment.fingerprint}\``,
+    `- Engine: \`${baseline.environment.engine}\` (${baseline.environment.engineArtifact})`,
+    `- Workload: ${baseline.workload ? `${baseline.workload.totalChunks} chunks x ${baseline.workload.chunkSize} bytes` : 'unavailable'}`,
+    `- Execution: ${baseline.execution ? `${baseline.execution.executor}, concurrency=${baseline.execution.concurrency}, duration=${baseline.execution.duration}` : 'unavailable'}`,
+    '',
+    '| Metric | p50 | p95 | p99 |',
+    '|---|---:|---:|---:|',
+    `| Upload | ${formatMs(upload.p50)} | ${formatMs(upload.p95)} | ${formatMs(upload.p99)} |`,
+    `| Download | ${formatMs(download.p50)} | ${formatMs(download.p95)} | ${formatMs(download.p99)} |`,
+    `| End-to-end | ${formatMs(endToEnd.p50)} | ${formatMs(endToEnd.p95)} | ${formatMs(endToEnd.p99)} |`,
+    '',
+    `- Upload throughput: ${baseline.throughput.uploadedBytesPerSecond === null ? 'N/A' : `${Number(baseline.throughput.uploadedBytesPerSecond).toFixed(2)} bytes/s`}`,
+    `- Download throughput: ${baseline.throughput.downloadedBytesPerSecond === null ? 'N/A' : `${Number(baseline.throughput.downloadedBytesPerSecond).toFixed(2)} bytes/s`}`,
+    `- Flow failure rate: ${formatRate(baseline.failure.flowRate)}`,
+    `- Cleanup failure rate: ${formatRate(baseline.failure.cleanupRate)}`,
+    `- Evidence valid: ${baseline.evidence.valid} (flows=${baseline.evidence.flowSamples}, cleanup=${baseline.evidence.cleanupSamples}, files=${baseline.evidence.completedFiles})`,
+    `- Resource snapshot start/end: ${baseline.resourceSnapshot.start.status} / ${baseline.resourceSnapshot.end.status}`,
+    `- Lifecycle snapshot start/end: ${baseline.lifecycleSnapshot.start.status} / ${baseline.lifecycleSnapshot.end.status}`,
+    '',
+    '> unavailable 表示目标环境未配置或未成功返回观测快照，不会伪装成 0。',
+    '',
+  ];
+  return lines.join('\n');
+}
+
+/**
  * 生成人类可读文本报告。
  *
  * @param {any} data k6 summary 数据
@@ -292,6 +507,9 @@ function buildTextSummary(data, suiteName, config) {
   const failedValues = metrics.http_req_failed?.values || {};
   const checksValues = metrics.checks?.values || {};
   const uploadValues = metrics.upload_e2e_ms?.values || {};
+  const directUploadValues = metrics.direct_upload_e2e_ms?.values || {};
+  const directDownloadValues = metrics.direct_download_e2e_ms?.values || {};
+  const directPathValues = metrics.direct_path_e2e_ms?.values || {};
 
   const thresholdStatus = collectThresholdStatus(metrics);
   const endpointStats = collectEndpointStats(metrics);
@@ -304,10 +522,13 @@ function buildTextSummary(data, suiteName, config) {
   lines.push('');
   lines.push('== Global Metrics ==');
   lines.push(`http_reqs: count=${formatCount(requestValues.count)}`);
-  lines.push(`http_req_duration: avg=${formatMs(durationValues.avg)}, p90=${formatMs(durationValues['p(90)'])}, p95=${formatMs(durationValues['p(95)'])}`);
+  lines.push(`http_req_duration: avg=${formatMs(durationValues.avg)}, p90=${formatMs(durationValues['p(90)'])}, p95=${formatMs(durationValues['p(95)'])}, p99=${formatMs(durationValues['p(99)'])}`);
   lines.push(`http_req_failed: rate=${failedValues.rate !== undefined ? Number(failedValues.rate).toFixed(4) : 'N/A'}`);
   lines.push(`checks: rate=${checksValues.rate !== undefined ? Number(checksValues.rate).toFixed(4) : 'N/A'}`);
   lines.push(`upload_e2e_ms: p95=${formatMs(uploadValues['p(95)'])}`);
+  lines.push(`direct_upload_e2e_ms: p95=${formatMs(directUploadValues['p(95)'])}, p99=${formatMs(directUploadValues['p(99)'])}`);
+  lines.push(`direct_download_e2e_ms: p95=${formatMs(directDownloadValues['p(95)'])}, p99=${formatMs(directDownloadValues['p(99)'])}`);
+  lines.push(`direct_path_e2e_ms: p95=${formatMs(directPathValues['p(95)'])}, p99=${formatMs(directPathValues['p(99)'])}`);
   lines.push('');
 
   lines.push('== Endpoint Metrics ==');
@@ -351,7 +572,7 @@ function buildTextSummary(data, suiteName, config) {
  * @param {any} data k6 summary 数据
  * @param {string} suiteName 套件名
  * @param {{runId:string, profile:string, scenario:string}} config 配置
- * @returns {{runId:string, profile:string, scenario:string, suite:string, generatedAt:string, thresholdFailedCount:number, thresholds:Array<{metric:string, threshold:string, ok:boolean}>, endpoints:Record<string, {p50:number|null, p90:number|null, p95:number|null, errorRate:number|null, requests:number, failures:number}>}} 基线快照
+ * @returns {{runId:string, profile:string, scenario:string, suite:string, generatedAt:string, thresholdFailedCount:number, thresholds:Array<{metric:string, threshold:string, ok:boolean}>, endpoints:Record<string, {p50:number|null, p90:number|null, p95:number|null, p99:number|null, errorRate:number|null, requests:number, failures:number}>}} 基线快照
  */
 function buildQueryBaselineSnapshot(data, suiteName, config) {
   const metrics = data.metrics || {};
@@ -383,12 +604,16 @@ export function createSummaryHandler(config, suiteName) {
     const textSummary = buildTextSummary(data, suiteName, config);
     const metricsSnapshot = buildMetricsSnapshot(data.metrics || {});
     const queryBaselineSnapshot = buildQueryBaselineSnapshot(data, suiteName, config);
+    const directPathBaseline = buildDirectPathBaseline(data, suiteName, config);
+    const directPathReport = buildDirectPathReport(directPathBaseline);
 
     return {
       [buildResultPath(outputDir, 'summary.txt')]: textSummary,
       [buildResultPath(outputDir, 'summary.json')]: JSON.stringify(data, null, 2),
       [buildResultPath(outputDir, 'metrics.json')]: JSON.stringify(metricsSnapshot, null, 2),
       [buildResultPath(outputDir, 'query-baseline.json')]: JSON.stringify(queryBaselineSnapshot, null, 2),
+      [buildResultPath(outputDir, 'direct-path-baseline.json')]: JSON.stringify(directPathBaseline, null, 2),
+      [buildResultPath(outputDir, 'direct-path-report.md')]: directPathReport,
       stdout: textSummary,
     };
   };
