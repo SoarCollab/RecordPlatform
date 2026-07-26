@@ -127,7 +127,9 @@ sequenceDiagram
         end
         Client->>Backend: POST /api/v1/upload-sessions/{clientId}/direct/complete
         Backend->>Storage: RPC: completeDirectMultipartUpload
-        Storage->>S3: Verify staging bytes and write final replicas
+        Storage->>S3: Verify identity/hash and promote staging objects
+        Note over Storage,S3: Same endpoint: conditional copy; cross endpoint: bounded stream
+        Storage->>Storage: Persist receipt; schedule repair/cleanup if degraded
         Backend->>Backend: Persist file + active chunk manifest
     else Backend-proxied chunk upload
         Client->>Backend: POST /api/v1/upload-sessions
@@ -167,32 +169,28 @@ sequenceDiagram
     Storage-->>Backend: Ordered URL list
     Backend-->>Client: 200 OK (URLs, manifest, hashes, decrypt metadata)
 
-    Note over Client, S3: Phase 2: Concurrent Chunk Download
-    par Concurrent downloads
-        Client->>S3: GET presigned URL (chunk 1)
-        S3-->>Client: Encrypted chunk data
-    and
-        Client->>S3: GET presigned URL (chunk 2)
-        S3-->>Client: Encrypted chunk data
-    and
-        Client->>S3: GET presigned URL (chunk N)
-        S3-->>Client: Encrypted chunk data
+    Note over Client, S3: Phase 2: Bounded Ordered Read
+    loop Each manifest part in index order
+        Client->>S3: GET presigned URL
+        S3-->>Client: Backpressured response chunks (max 1 MiB each)
+        Client->>Client: Verify length/hash; decrypt framed or legacy format
+        Client->>Client: Write to selected sink with backpressure
     end
 
-    Note over Client: Phase 3: Decrypt & Assemble
-    Client->>Client: Decrypt chunks in key chain order
-    Client->>Client: Merge chunks & trigger browser download
+    Note over Client: Phase 3: Commit or Abort
+    Client->>Client: Close sink only after complete integrity success
+    Note over Client: Any fetch/decrypt/hash/write failure aborts the sink
 ```
 
 **Download Strategy Comparison**:
 
 | Strategy | Use Case | Characteristics |
 |----------|----------|-----------------|
-| **Memory Mode** | Small files (< 50MB) | Load all chunks into memory then decrypt, fast |
-| **Streaming Mode** | Large files (≥ 50MB) | Uses StreamSaver.js, download while writing, low memory |
-| **Backend Proxy** | Special scenarios | Backend proxies download, for environments without direct S3 access |
+| **Memory sink** | Files up to 64 MiB | Guarded `Blob` fallback; total output cannot exceed the hard ceiling |
+| **File-system stream sink** | Files above 64 MiB | Requires File System Access API plus Streams; bounded reader writes directly to the chosen file |
+| **Unsupported browser** | Files above 64 MiB without a stream sink | Fails closed with a browser-capability message; there is no unbounded backend-proxy fallback |
 
-**Key Chain Decryption**: Each chunk is encrypted with an independent key. During download, keys are matched by `chunkIndex` order for decryption.
+The bounded reader accepts explicit `NONE`, legacy v1 AEAD, and framed AEAD v2 formats. Legacy ciphertext parts are capped at about 80 MiB + 4 KiB, every file at 10,000 parts, and each response chunk at 1 MiB. A fetch has at most three attempts; 401/403 requires fresh download metadata immediately, while only 5xx responses receive finite retry. Every length, order, hash, key, decrypt, cancellation, or sink error aborts the sink.
 
 ### File Sharing Flow
 
@@ -527,20 +525,18 @@ Response shape includes:
 
 ### Download Strategy (Frontend)
 
-Frontend selects download strategy by file size and browser capability:
-
-- Small files: in-memory download
-- Large files: prefer streaming download
-- Very large files or unsupported browsers: backend proxy / guarded fallback
+Frontend selects a bounded sink by file size and browser capability. The 64 MiB threshold is a hard memory ceiling, not a tuning suggestion. Larger files require File System Access API plus Streams; unsupported browsers are rejected before transfer rather than routed through an unbounded proxy.
 
 Default thresholds (`platform-frontend/src/lib/utils/fileSize.ts`):
 
 | Threshold Constant | Default |
 |--------------------|---------|
-| `LARGE_FILE_WARNING_THRESHOLD` | 500MB |
-| `STREAMING_RECOMMENDED_THRESHOLD` | 1GB |
-| `MAX_SAFE_INMEMORY_SIZE` | 2GB |
-| `MAX_DOWNLOADABLE_SIZE` | 100GB |
+| `MAX_SAFE_INMEMORY_SIZE` / `LARGE_FILE_WARNING_THRESHOLD` | 64 MiB |
+| `STREAMING_RECOMMENDED_THRESHOLD` | 500 MiB |
+| `VERY_LARGE_FILE_THRESHOLD` | 2 GiB |
+| `MAX_DOWNLOADABLE_SIZE` | 100 GiB |
+
+Owned downloads require an active chunk manifest and expose structured governance fields. Missing metadata returns `FILE_RECORD_ERROR` with `ManifestErrorDetail` under `data.detail`; clients use `manifestStatus`, `manifestClassification`, `manifestErrorCode`, and `legacyDownloadAllowed` instead of parsing `message`. See [Chunk Manifest and Legacy Governance](./chunk-manifest.md).
 
 ### Quota Governance
 

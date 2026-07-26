@@ -46,7 +46,7 @@ RecordPlatform 是一个开源的企业级文件存证平台，将**区块链不
 ### 📦 存储与传输
 - **分布式存储** — 1~N 活跃故障域，仲裁写入，N-1 容错，备用域自动提升
 - **分片上传** — 断点续传、并发上传、动态分片大小
-- **流式下载** — 大文件使用 StreamSaver.js，自动策略选择
+- **有界下载** — 超过 64 MiB 内存 fallback 上限时使用 File System Access + Streams，失败时事务式 abort
 - **文件版本链** — 追踪文件历史，从已有文件派生新版本
 
 </td>
@@ -55,7 +55,7 @@ RecordPlatform 是一个开源的企业级文件存证平台，将**区块链不
 <td width="50%" valign="top">
 
 ### 👥 协作与分享
-- **文件分享** — 生成带访问次数、有效期、密码保护的分享码
+- **文件分享** — 生成带访问次数和有效期的分享码；当前模型没有分享密码字段
 - **分享审计与溯源** — 多级溯源链（A→B→C），完整访问日志
 - **好友系统** — 好友间直接分享，SSE 实时通知
 - **工单系统** — 内置工单系统，支持分类、优先级、管理员处理
@@ -208,6 +208,8 @@ cd platform-frontend && pnpm install && pnpm dev
 | [快速开始](docs/zh/getting-started/index.md) | 前置依赖、安装部署、配置说明 |
 | [公开验证器](docs/zh/getting-started/public-verifier.md) | 使用 SDK、CLI 或独立 Web 服务验证签名证明 ZIP |
 | [架构设计](docs/zh/architecture/index.md) | 系统架构、分布式存储、区块链、安全机制 |
+| [P0/P1/P2 交付证据矩阵](docs/zh/architecture/delivery-evidence.md) | 实现、自动测试、exact-main CI 与残余风险矩阵 |
+| [分片 Manifest](docs/zh/architecture/chunk-manifest.md) | 规范分片证据、历史分类与引用安全清理 |
 | [部署运维](docs/zh/deployment/index.md) | Docker Compose、生产环境、监控告警 |
 | [API 参考](docs/zh/api/index.md) | REST 端点、认证规则、错误码 |
 | [开发指南](docs/zh/development/index.md) | 贡献指南、本地开发、测试策略 |

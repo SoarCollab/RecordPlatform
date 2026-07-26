@@ -78,6 +78,35 @@ flowchart LR
 - **最小迁移**：增删节点仅影响 ~1/N 的数据
 - **加权分配**：权重越高 = 虚拟节点越多 = 数据越多
 
+## 直接分片上传晋升
+
+直接分片上传通过预签名 PUT URL，将浏览器字节写入租户/会话范围的 staging 对象。完成操作不信任 URL 或客户端路径：`platform-storage` 会重建 canonical staging 身份，校验声明的大小和 SHA-256，再将对象晋升到内容寻址的最终 key。
+
+- 同端点目标使用条件式服务端 copy，并重新校验目标元数据。
+- 跨端点目标使用固定大小、带背压的流式传输，不会把整个分片聚合到堆内。
+- 晋升满足配置的副本 quorum。降级成功会持久化修复任务，不会声称所有副本健康。
+- 持久化 Redis receipt 使重复 complete 在进程重启后仍保持幂等。
+- complete、abort 和生命周期清理共用分片锁、不可变操作意图与 fencing token；过期 worker 无法删除或覆盖新一代对象。
+- `staging/direct-upload` 由专用生命周期独占，并从通用一致性修复中排除。
+
+### 限制与生命周期默认值
+
+| 配置 | 默认值 | 有效边界 |
+| --- | ---: | --- |
+| `storage.direct-upload.max-file-size-bytes` | 4 GiB | 直传单文件上限 |
+| `storage.direct-upload.max-part-size-bytes` | 100 MiB | 直传单分片上限 |
+| `storage.direct-upload.stream-buffer-bytes` | 64 KiB | 限制在 8 KiB–1 MiB |
+| `storage.direct-upload.transfer-timeout-seconds` | 300 秒 | 最大 1,800 秒 |
+| `storage.direct-upload.lock-wait-seconds` | 5 秒 | 最大 60 秒 |
+| `storage.direct-upload.staging-retention-hours` | 48 小时 | 最小 48 小时，长于预签名 URL 生命周期 |
+| `storage.direct-upload.cleanup-enabled` | `true` | 启用有界生命周期回收 |
+| `storage.direct-upload.cleanup-interval-millis` | 3,600,000 | 1 小时 |
+| `storage.direct-upload.cleanup-initial-delay-millis` | 300,000 | 5 分钟 |
+| `storage.direct-upload.cleanup-batch-size` | 200 | 集群 claim 批量 |
+| `storage.direct-upload.cleanup-claim-lease-seconds` | 600 秒 | 带 fencing 的清理 claim lease |
+
+清理流程先 claim 已到期生命周期记录，再获取同一分片锁并校验当前 fencing token；provider 返回 404 时按幂等成功处理。无法在 lease 预算内完成的工作会重新调度，失败记录保留到后续轮次。Abort 会创建 tombstone，阻止延迟到达的 complete 复活已删除的 staging 内容。
+
 ## 自动故障转移
 
 ### 故障转移流程
@@ -202,7 +231,7 @@ storage:
 
   # 可选：外部访问端点（v3.2.0 新增）
   # 用于生成预签名 URL 时替换内部端点地址，解决跨网段（如 VPN）访问问题
-  external-endpoint: http://10.1.0.2:9000
+  external-endpoint: https://s3-secondary.example.com
 
   # 可选：备用域（用于故障转移）
   standby-domain: standby
@@ -264,8 +293,8 @@ storage:
   nodes:
     - name: local-minio
       endpoint: http://localhost:9000
-      accessKey: minioadmin
-      secretKey: minioadmin
+      accessKey: ${S3_ACCESS_KEY:?请在部署环境设置 S3_ACCESS_KEY}
+      secretKey: ${S3_SECRET_KEY:?请在部署环境设置 S3_SECRET_KEY}
       faultDomain: local
 ```
 

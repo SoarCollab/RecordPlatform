@@ -5,7 +5,9 @@ Technical architecture documentation for RecordPlatform.
 ## Contents
 
 - [System Overview](system-overview) - High-level architecture, components, and data flow
+- [P0/P1/P2 Delivery Evidence](delivery-evidence) - Exact implementation, test, CI, and residual-risk evidence
 - [Distributed Storage](distributed-storage) - Fault domains, consistent hashing, rebalancing
+- [Chunk Manifest](chunk-manifest) - Canonical metadata, migration classifications, and reference-safe lifecycle
 - [Blockchain Integration](blockchain-integration) - Smart contracts, multi-chain adapters
 - [Security](security) - Authentication, authorization, encryption
 - [File Version Chain](file-version-chain) - Version chain model, API, upload integration
@@ -45,6 +47,7 @@ Technical architecture documentation for RecordPlatform.
 | Service Discovery | Nacos | Registration, config |
 | Distributed Transaction | Saga + Outbox | Cross-service consistency |
 | Storage | S3-compatible | Object storage |
+| Chunk governance | Canonical manifest + reference census | Safe download, integrity, proof, migration, and sweep |
 | Blockchain | FISCO BCOS | Immutable attestation |
 | Caching | Caffeine + Redis | Multi-level caching |
 | Resilience | Resilience4j | Circuit breaker, retry |

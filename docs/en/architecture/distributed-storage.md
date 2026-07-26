@@ -78,6 +78,35 @@ flowchart LR
 - **Minimal migration**: Adding/removing nodes only affects ~1/N keys
 - **Weighted allocation**: Higher weight = more virtual nodes = more data
 
+## Direct Multipart Promotion
+
+Direct multipart upload sends bytes from the browser to tenant/session-scoped staging objects through presigned PUT URLs. Completion does not trust the URL or client path: `platform-storage` reconstructs the canonical staging identity, verifies declared size and SHA-256, and promotes the object to its content-addressed final key.
+
+- A same-endpoint target uses conditional server-side copy and rechecks destination metadata.
+- A cross-endpoint target uses a fixed-size, backpressured stream; it never aggregates a part in heap.
+- Promotion satisfies the configured replica quorum. A degraded success persists repair work instead of claiming all replicas are healthy.
+- A durable Redis receipt makes a repeated completion idempotent across process restarts.
+- Complete, abort, and lifecycle cleanup share a per-part lock, immutable operation intent, and fencing token. A stale worker cannot delete or overwrite a newer generation.
+- `staging/direct-upload` is owned by this lifecycle and is excluded from generic consistency repair.
+
+### Limits and Lifecycle Defaults
+
+| Property | Default | Effective boundary |
+| --- | ---: | --- |
+| `storage.direct-upload.max-file-size-bytes` | 4 GiB | Maximum direct-upload file |
+| `storage.direct-upload.max-part-size-bytes` | 100 MiB | Maximum direct-upload part |
+| `storage.direct-upload.stream-buffer-bytes` | 64 KiB | Clamped to 8 KiB–1 MiB |
+| `storage.direct-upload.transfer-timeout-seconds` | 300 s | Capped at 1,800 s |
+| `storage.direct-upload.lock-wait-seconds` | 5 s | Capped at 60 s |
+| `storage.direct-upload.staging-retention-hours` | 48 h | Minimum 48 h; longer than presigned-URL lifetime |
+| `storage.direct-upload.cleanup-enabled` | `true` | Enables bounded lifecycle reclamation |
+| `storage.direct-upload.cleanup-interval-millis` | 3,600,000 | 1 hour |
+| `storage.direct-upload.cleanup-initial-delay-millis` | 300,000 | 5 minutes |
+| `storage.direct-upload.cleanup-batch-size` | 200 | Cluster claim batch |
+| `storage.direct-upload.cleanup-claim-lease-seconds` | 600 s | Fenced cleanup claim lease |
+
+Cleanup first claims an expired lifecycle record, reacquires the same part lock, validates the current fencing token, and treats provider 404 as idempotent success. Work that cannot finish inside the lease budget is rescheduled; failure retains the record for a later attempt. Abort creates a tombstone so a delayed completion cannot resurrect deleted staging content.
+
 ## Automatic Failover
 
 ### Failover Flow
@@ -203,7 +232,7 @@ storage:
   # Optional: External endpoint (v3.2.0)
   # Used to replace internal endpoints when generating presigned URLs
   # Solves cross-network access issues (e.g., VPN)
-  external-endpoint: http://10.1.0.2:9000
+  external-endpoint: https://s3-secondary.example.com
 
   # Optional: Standby domain (for failover)
   standby-domain: standby
@@ -265,8 +294,8 @@ storage:
   nodes:
     - name: local-minio
       endpoint: http://localhost:9000
-      accessKey: minioadmin
-      secretKey: minioadmin
+      accessKey: ${S3_ACCESS_KEY:?Set S3_ACCESS_KEY in the deployment environment}
+      secretKey: ${S3_SECRET_KEY:?Set S3_SECRET_KEY in the deployment environment}
       faultDomain: local
 ```
 

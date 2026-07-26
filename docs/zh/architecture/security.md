@@ -198,15 +198,16 @@ security:
 
 ## CI 安全流水线
 
-自动化安全检测已配置为 GitHub Actions 工作流：
+安全自动化存在两个不同的执行边界：
 
 - **工作流**：`.github/workflows/security-poc.yml`
 - **范围**：SAST 静态分析、SCA 依赖扫描、SBOM 生成
-- **当前状态**：观察模式（仅提供信息，不阻塞 PR 合并）
+- **当前状态**：完整 `security-poc` 聚合仍为观察模式，不是 required check
 - **工具链**：脚本和模板位于 `tools/security/`
 - **Slither**（`.github/workflows/contract-security.yml`）— Solidity 智能合约静态分析，`.sol` 文件变更或 workflow 自身变更时触发，SARIF 结果上传至 GitHub Security 面板
+- **Test Suite 阻断子集**（`.github/workflows/test.yml`）— 前端 `pnpm audit --audit-level high` 与显式 Trivy 已修复 High/Critical 扫描在超出配置门槛时会使 job 失败
 
-> 该流水线计划在后续迭代中升级为发布阻断级别。
+这不表示所有安全观察都已阻断，也不表示仓库 advisory 为零。P6 仍负责统一剩余 scanner、advisory backlog、例外和发布执行策略。
 
 ## 安全检查清单
 

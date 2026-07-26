@@ -3,9 +3,11 @@ name: Docs Consistency
 on:
   pull_request:
     paths:
+      - 'ROADMAP*.md'
       - 'README.md'
       - 'README_CN.md'
       - 'API_DOCUMENTATION.md'
+      - 'CONTRIBUTING.md'
       - 'TESTING.md'
       - 'docs/**'
       - 'scripts/*.md'

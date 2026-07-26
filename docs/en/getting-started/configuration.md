@@ -166,8 +166,8 @@ storage:
 
   # Optional: External endpoint (v3.2.0+)
   # Used for generating presigned URLs, solves cross-network (e.g., VPN) access issues
-  # Format: http://host:port (no trailing slash)
-  external-endpoint: http://10.1.0.2:9000
+  # Format: https://host[:port] (no trailing slash)
+  external-endpoint: https://s3-secondary.example.com
 
   # Optional: Standby domain (for failover)
   standby-domain: standby

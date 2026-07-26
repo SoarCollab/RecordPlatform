@@ -166,8 +166,8 @@ storage:
 
   # 可选：外部访问端点（v3.2.0 新增）
   # 用于生成预签名 URL 时替换内部端点地址，解决跨网段（如 VPN）访问问题
-  # 格式：http://host:port（不带尾部斜杠）
-  external-endpoint: http://10.1.0.2:9000
+  # 格式：https://host[:port]（不带尾部斜杠）
+  external-endpoint: https://s3-secondary.example.com
 
   # 可选：备用域（用于故障转移）
   standby-domain: standby

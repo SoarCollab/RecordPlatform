@@ -46,7 +46,7 @@ Built for teams that need:
 ### 📦 Storage & Transfer
 - **Distributed Storage** — 1~N active fault domains, quorum writes, N-1 fault tolerance, auto-promotion from standby
 - **Chunked Upload** — resumable, concurrent, dynamic chunk sizing
-- **Streaming Download** — StreamSaver.js for large files; auto strategy selection
+- **Bounded Download** — File System Access + Streams for files over the 64 MiB memory fallback ceiling; transactional abort on failure
 - **File Version Chain** — track history, derive new versions from existing files
 
 </td>
@@ -55,7 +55,7 @@ Built for teams that need:
 <td width="50%" valign="top">
 
 ### 👥 Collaboration & Sharing
-- **File Sharing** — generate share codes with access limits, expiry, and password protection
+- **File Sharing** — generate share codes with access limits and expiry; the current model has no share-password field
 - **Share Audit & Provenance** — multi-level chain tracking (A→B→C), full access logs
 - **Friend System** — direct file sharing with friends, real-time SSE notifications
 - **Support Tickets** — built-in ticket system with categories, priorities, admin management
@@ -216,6 +216,8 @@ Verify the installation at:
 | [Getting Started](docs/en/getting-started/index.md) | Prerequisites, installation, configuration |
 | [Public Verifier](docs/en/getting-started/public-verifier.md) | Verify signed proof ZIPs through SDK, CLI, or standalone Web service |
 | [Architecture](docs/en/architecture/index.md) | System overview, distributed storage, blockchain, security |
+| [P0/P1/P2 Delivery Evidence](docs/en/architecture/delivery-evidence.md) | Implementation, automated-test, exact-main CI, and residual-risk matrix |
+| [Chunk Manifest](docs/en/architecture/chunk-manifest.md) | Canonical chunk evidence, historical classification, and reference-safe cleanup |
 | [Deployment](docs/en/deployment/index.md) | Docker Compose, production setup, monitoring |
 | [API Reference](docs/en/api/index.md) | REST endpoints, authentication, error codes |
 | [Development](docs/en/development/index.md) | Contributing, local dev, testing strategy |

@@ -334,28 +334,21 @@ ZIP 只允许以下八个根条目，并固定顺序、时间戳、STORED method
 
 证明包不包含原始文件字节、解密密钥、RPC token、数据库内部 ID、签名私钥或完整 `file_param`。
 
-### 离线证明校验器
+### 公开签名 ZIP 验证器
 
-`ProofBundleVerifier` 提供不依赖平台会话和数据库的离线校验边界：
+`platform-verifier` 是已经交付的签名 ZIP v2 公开验证器，包含可复用 SDK（`DefaultProofVerifier`）、可执行 CLI 和 Web 验证器。它在显式资源上限内流式读取原文件，并校验固定 ZIP 合同、canonical JSON 与条目摘要、原文件/分片哈希、Merkle 路径、回执与不可变 registry 快照、Ed25519 JWS、当前证明状态和实时链上 root。
 
-- `verify(byte[] originalFile, ProofBundleVO bundle)` 校验已解析证明包；
-- `verify(byte[] originalFile, String bundleJson)` 解析 JSON 后复用同一套校验逻辑；
-- `ProofVerificationResult` 返回 `valid`、机器可读 issue code、计算出的 file hash、leaf hash、Merkle root、链上回执字段和 issuer 状态；只有同时建立结构一致性和真实性的证明格式才允许返回 `valid=true`。
+验证结果分为三类：
 
-校验器会检查：
+| 结果 | 含义 |
+| --- | --- |
+| `VALID` | 所有本地前置检查通过，JWS 使用显式信任的 Ed25519 公钥验签成功，在线状态为 `ACTIVE`，且实时链身份/root 与签名证据一致。 |
+| `INVALID` | 已确定存在结构、内容、签名、状态、registry、回执或实时链不一致。 |
+| `INDETERMINATE` | 无法安全解析必需的信任或实时证据，包括离线模式以及 key、状态、链 resolver 不可用。 |
 
-- `verificationPolicy` 必须包含 `algorithmSuite`、`signatureSuite`、`kemSuite`、`proofSuite`；
-- 原始文件 SHA-256 是否匹配 `file.fileHash`；
-- `merkle.proofAlgorithm` 是否为 `SHA-256-MERKLE-V1`；
-- `merkle.leafHash` 是否符合公开的 `leaf\n{fileHash}` 规则；
-- `merkle.proofPath` 是否能从叶子推导到 `merkle.merkleRoot`；
-- `chain.batchChainFileHash` 存在时是否等于 Merkle root；
-- `chain.batchTransactionHash` 缺失时，`chain.batchConfirmationSource` 是否为受支持的业务键链查询恢复来源；
-- issuer batch 状态和 storage metadata mismatch 标记。
+离线校验可以证明本地一致性，但绝不能返回 `VALID`：key/status/chain 缺失或不可用时必须是 `INDETERMINATE`，不能当作成功。CLI 在线模式需要显式开启，并配置可信 issuer/chain 端点与精确 host allowlist；明文 HTTP 和私网地址只允许在本地测试时显式放行。CLI 退出码分别为 `VALID=0`、`INVALID=2`、`INDETERMINATE=3`。
 
-缺失或不支持的 suite 元数据会返回 `UNSUPPORTED_ALGORITHM`；校验器不会用运行时默认值补齐缺失字段。
-
-当前 Java `ProofBundleVerifier` 仍只处理 legacy `proof-bundle.v1.1`，所以即使结构检查通过也会返回 `AUTHENTICITY_NOT_VERIFIED`。签名 ZIP v2 的公开 SDK/CLI/Web 验证器属于后续 P1-3；在该验证器交付前，集成方必须严格按 ZIP 内 `verification-policy.json` 和 `README.verify.md` 执行八条目、摘要、JWS、Merkle、registry 与在线状态校验，不能把 legacy verifier 的结果用于签名 ZIP。
+后端 `ProofBundleVerifierImpl` 只是已废弃未签名 JSON `proof-bundle.v1.1` 的兼容读取器，不是签名 ZIP 验证器，其结构校验结果不能提升为签名证明真实性。新集成必须使用 `platform-verifier` 和归档内嵌的签名 policy。
 
 ### 交易验证
 

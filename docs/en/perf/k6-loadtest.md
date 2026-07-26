@@ -1,158 +1,139 @@
-# k6 Load Testing (Local + CI)
+# k6 Load Testing and Direct-Path Evidence
 
-Goal: provide a repeatable, gated, and archivable performance baseline and regression workflow.
+The repository provides repeatable, gated, and archivable k6 scenarios for query, backend-proxied chunk upload, mixed traffic, and the object-storage direct path.
 
-## 1. Start Backend (local profile)
+## Scope and Gate Boundary
 
-This repository ships with an optional local load-test seed. Enable it explicitly and set a password:
-- Tenant: `tenantId=1`
-- User: `loadtest` / value from `LOADTEST_PASSWORD`
+| Scenario | Covered flow |
+| --- | --- |
+| `file-query` | Basic, keyword, combined-filter file queries and file statistics |
+| `chunk-upload` | Create legacy upload session, upload chunks, complete, query progress, cleanup |
+| `core-mixed` | 70% query and 30% chunk upload by default |
+| `direct-path` | Direct create → raw presigned PUT → complete → manifest metadata → raw presigned GET → size/hash verification → cleanup |
+| `all` | Profile-dependent scenario composition |
 
-Set the JWT key (to avoid startup errors):
+`smoke/all` runs `file-query + core-mixed`. `load/all` runs `file-query + chunk-upload + direct-path`.
 
-```bash
-export JWT_KEY="ci-integration-jwt-key-32chars-xK9mN2pL5qR8vW3y"
-export LOADTEST_PASSWORD="<set-a-local-test-password>"
-```
+The external-environment workflow is manually triggered and is not a required pull-request check. Pull requests use the real MinIO/Redis/Toxiproxy integration gate from `platform-storage -Pit`; do not describe a manual k6 run as a PR gate.
 
-Start the backend (example):
+## Prerequisites
 
-```bash
-mvn -f platform-verifier/pom.xml -pl sdk -am clean install -DskipTests
-mvn -f platform-backend/pom.xml -pl backend-web -am spring-boot:run \
-  -Dspring-boot.run.profiles=local \
-  -Dspring-boot.run.arguments=--loadtest.seed.enabled=true
-```
+- Backend reachable at `BASE_URL` (default `http://localhost:8000/record-platform/api/v1`).
+- `TENANT_ID`, `USERNAME`, and `PASSWORD` provided explicitly; login also requires `X-Tenant-ID`.
+- Local k6 installed with `brew install k6`, or the explicit Docker engine.
 
-Default Base URL:
+`--engine auto` only selects a local k6 binary. Docker execution requires `--engine docker` and a digest-pinned `K6_DOCKER_IMAGE`. The workflow pins:
 
 ```text
-http://localhost:8000/record-platform/api/v1
+grafana/k6@sha256:8cd78f9d0de5f50bc8821cceecf356d5d9e839e6611c226a3fcf13c591080fbd
 ```
 
-## 2. Install k6 (macOS)
+## Run Profiles
 
 ```bash
-brew install k6
-```
-
-`--engine auto` only auto-selects a local `k6` binary. To run in Docker, use `--engine docker` and set a digest-pinned `K6_DOCKER_IMAGE`, for example `grafana/k6@sha256:<digest>`.
-
-## 3. Quick Run
-
-### 3.1 Smoke regression (recommended)
-
-When `K6_SCENARIO=all` (default), runs `file-query + core-mixed`.
-
-```bash
+# Daily query and mixed smoke regression
 bash tools/k6/run-local.sh --profile smoke --scenario all --engine auto
-```
 
-Set `USERNAME` and `PASSWORD` before running; the scripts no longer provide default credentials.
-
-The `core-mixed` scenario combines file query and chunk upload flows in a weighted mix. By default, 70% of iterations run query flows and 30% run upload flows. Control the query/upload ratio with the `MIX_QUERY_WEIGHT` environment variable (0-100, default 70):
-
-```bash
-MIX_QUERY_WEIGHT=50 bash tools/k6/run-local.sh --profile smoke --scenario core-mixed --engine auto
-```
-
-### 3.2 Load test
-
-When `K6_SCENARIO=all` (default), runs `file-query + chunk-upload`.
-
-```bash
+# Query, legacy upload, and direct-path load profile
 bash tools/k6/run-local.sh --profile load --scenario all --engine auto
+
+# Focused direct-path evidence
+bash tools/k6/run-local.sh --profile smoke --scenario direct-path --engine auto
 ```
 
-### 3.3 Single scenario
+Supported values are:
 
-```bash
-bash tools/k6/run-local.sh --profile smoke --scenario file-query --engine auto
-bash tools/k6/run-local.sh --profile smoke --scenario core-mixed --engine auto
-bash tools/k6/run-local.sh --profile smoke --scenario chunk-upload --engine auto
-bash tools/k6/run-local.sh --profile load --scenario chunk-upload --engine auto
-```
+- `K6_PROFILE=smoke|load`
+- `K6_SCENARIO=all|file-query|chunk-upload|core-mixed|direct-path`
+- `K6_ENGINE=auto|local|docker`
 
-## 4. API Contract (per backend code)
+The manual `.github/workflows/perf-smoke.yml` workflow defaults to `direct-path/smoke` and exposes profile, scenario, concurrency, duration, environment fingerprint, baseline path, resource snapshot path, and lifecycle snapshot path.
 
-### 4.1 Login
-- `POST /api/v1/auth/login`
-- `Content-Type: application/json`
-- Body: `{"username":"...","password":"..."}`
-- Must include `X-Tenant-ID` header
+## Direct-Path Contract
 
-### 4.2 Query chain
-- `GET /api/v1/files?pageNum=1&pageSize=10` (basic)
-- `GET /api/v1/files?pageNum=1&pageSize=10&keyword=...&keywordMode=PREFIX` (keyword)
-- `GET /api/v1/files?pageNum=1&pageSize=10&keyword=...&keywordMode=PREFIX&status=1&startTime=...&endTime=...` (combo)
-- `GET /api/v1/files/stats`
+Each direct iteration performs the complete lifecycle:
 
-### 4.3 Upload chain
-- `POST /api/v1/upload-sessions` (`@RequestParam`)
-  - `fileName/fileSize/contentType/chunkSize/totalChunks` (optional `clientId`)
-- `PUT /api/v1/upload-sessions/{clientId}/chunks/{chunkNumber}` (`multipart/form-data`)
-  - `file/clientId/chunkNumber`
-- `POST /api/v1/upload-sessions/{clientId}/complete` (`clientId`)
-- `GET /api/v1/upload-sessions/{clientId}/progress`
+1. Create a direct upload session and validate the canonical part plan.
+2. PUT deterministic bytes to every presigned staging URL.
+3. Complete the session with ETag and `sha256:<lowercase-hex>` evidence.
+4. Fetch manifest-backed download metadata.
+5. GET each presigned object and verify response size, part hash, total size, and complete-file hash.
+6. Delete the created file and verify cleanup evidence.
 
-### 4.4 Cleanup chain
-- `DELETE /api/v1/files?identifiers=...`
-- Teardown searches by `runId` and batch soft-deletes.
+Raw presigned PUT/GET requests must not receive platform `Authorization`, `X-Tenant-ID`, or JSON headers. ETag is only an object-version condition; SHA-256 is the content identity. The direct suite disables k6 `url`/`name` system tags and forces `--log-output none`, preventing signed query parameters from entering metrics, logs, failure samples, or artifacts.
 
-## 5. Gate Thresholds
+## Thresholds
 
-Global:
+Global thresholds:
+
 - `http_req_failed < 1%`
 - `checks > 99%`
 
-Query chain:
-- `files_basic p95 < 800ms`
-- `files_keyword p95 < 800ms`
-- `files_combo p95 < 1000ms`
-- `files_stats p95 < 800ms`
+Query thresholds:
 
-Upload chain:
-- `upload_start p95 < 1200ms`
-- `upload_chunk p95 < 1500ms`
-- `upload_complete p95 < 1500ms`
-- `upload_e2e_ms p95 < 6000ms`
+- `files_basic p95 < 800 ms`
+- `files_keyword p95 < 800 ms`
+- `files_combo p95 < 1,000 ms`
+- `files_stats p95 < 800 ms`
 
-## 6. Report Artifacts
+Legacy upload thresholds:
 
-Each run outputs to `RESULT_DIR`:
-- `summary.txt` (includes per-endpoint p50/p90/p95, error rate, request count, threshold results, failed samples)
-- `summary.json`
+- `upload_start p95 < 1,200 ms`
+- `upload_chunk p95 < 1,500 ms`
+- `upload_complete p95 < 1,500 ms`
+- `upload_e2e_ms p95 < 6,000 ms`
+
+Direct-path thresholds:
+
+- `direct_flow_failure_rate == 0`
+- `direct_cleanup_failure_rate == 0`
+- upload, download, and end-to-end `p99 < DIRECT_P99_BUDGET_MS`
+
+`DIRECT_P99_BUDGET_MS` defaults to 60,000 ms and is a test-level total budget, not a production SLA.
+
+## Observation and Artifacts
+
+Optional `DIRECT_RESOURCE_SNAPSHOT_PATH` and `DIRECT_LIFECYCLE_SNAPSHOT_PATH` are probed at run start and after cleanup. If a source is absent or cannot be read, the report records `unavailable` with a reason; it never invents zero heap, GC, thread, direct-buffer, staging, receipt, degraded, or repair values.
+
+Every `RESULT_DIR` contains:
+
+- `summary.txt` and `summary.json`
 - `metrics.json`
-- `query-baseline.json` (structured endpoint metrics + threshold results for report backfill)
-- `run-meta.json` (`runId/profile/scenario/engine/timestamp/baseUrlMask`)
+- `query-baseline.json`
+- `direct-path-baseline.json`
+- `direct-path-report.md`
+- `run-meta.json`
 
-Default directory: `tools/k6/results/<RUN_ID>/`
+The direct baseline requires at least one flow sample, one cleanup sample, and one completed file. Setup-only or zero-iteration output cannot become valid evidence.
 
-## 7. CI Smoke
+## Baseline Comparison
 
-Workflow: `.github/workflows/perf-smoke.yml`
+Only compare runs whose `environment.fingerprint` values and workload/execution contracts are identical:
 
-`run-ci.sh` required environment variables (unified naming only):
-- `BASE_URL`
-- `TENANT_ID`
-- `USERNAME`
-- `PASSWORD`
+```bash
+node tools/k6/scripts/compare-direct-baseline.mjs \
+  --baseline tools/k6/results/<BASE>/direct-path-baseline.json \
+  --candidate tools/k6/results/<CANDIDATE>/direct-path-baseline.json \
+  --output tools/k6/results/<CANDIDATE>/direct-path-comparison.md
+```
 
-GitHub Actions Secrets (same names as unified variables):
-- `BASE_URL`
-- `TENANT_ID`
-- `USERNAME`
-- `PASSWORD`
+The default comparison fails when p95/p99 regresses by more than 20%, upload/download throughput drops by more than 20%, or flow/cleanup changes from zero to non-zero. A different fingerprint, profile, scenario, engine, engine artifact, chunk plan, executor, concurrency, duration, or VU contract returns `NOT_COMPARABLE`, not a false regression result.
 
-Supports:
-- Manual trigger (`workflow_dispatch`)
+Query smoke/load results can be rendered into one Markdown evidence snippet:
 
-Optional:
-- When manually triggered, you can choose whether to include the `chunk-upload` scenario (`include_chunk_upload=true`).
+```bash
+node tools/k6/scripts/render-query-baseline.mjs \
+  --smoke-dir tools/k6/results/<SMOKE_RUN_ID> \
+  --load-dir tools/k6/results/<LOAD_RUN_ID> \
+  --output tools/k6/results/query-baseline-snippet.md
+```
 
-## 8. Common Failure Troubleshooting
+## Troubleshooting
 
-- `401`: Wrong username/password or invalid token.
-- `400 missing tenant identifier`: Request missing `X-Tenant-ID` header.
-- `429`: Global rate limit triggered; lower `VUS` or arrival `rate`.
-- Upload failure: Verify that `chunk` uses `multipart/form-data` with all required fields.
+- `401`: validate credentials and token. A raw presigned 401/403 usually means the URL expired; obtain fresh metadata.
+- Missing tenant identifier: include `X-Tenant-ID` for platform APIs, including login, but never for the raw signed URL.
+- Direct PUT/GET failure: verify MinIO CORS exposes ETag and no platform header was added to the signed request.
+- Cleanup threshold failure: retain the run artifacts and inspect the `RUN_ID`; a run with `CLEANUP=false` is not passing lifecycle evidence.
+- `NOT_COMPARABLE`: align commit, configuration, target, engine, OS/architecture, CPU/memory, and k6 image fingerprint before drawing a performance conclusion.
+
+The implementation-level variable list and script layout are maintained in [`tools/k6/README.md`](https://github.com/SoarCollab/RecordPlatform/blob/main/tools/k6/README.md).

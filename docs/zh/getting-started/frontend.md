@@ -150,17 +150,19 @@ const result = await filesApi.upload(file, {
 
 | 文件大小 | 分块大小 |
 |----------|----------|
-| < 10MB   | 2MB      |
-| < 100MB  | 5MB      |
-| < 500MB  | 10MB     |
-| < 2GB    | 20MB     |
-| >= 2GB   | 50MB     |
+| < 10 MiB  | 2 MiB      |
+| < 100 MiB | 5 MiB      |
+| < 500 MiB | 10 MiB     |
+| < 2 GiB   | 20 MiB     |
+| >= 2 GiB  | 50 MiB     |
 
 上传流程：
 1. 计算最优分块大小
-2. 启动上传会话（`/api/v1/upload-sessions`）
-3. 上传分块并跟踪进度
-4. 完成上传（`/api/v1/upload-sessions/{clientId}/complete`）
+2. 创建直传会话（`POST /api/v1/upload-sessions/direct`），获取 staging PUT 预签名 URL
+3. 将每个分片直接 PUT 到对象存储，并保留 ETag/hash 证据
+4. 调用 `POST /api/v1/upload-sessions/{clientId}/direct/complete` 完成
+
+后端代理的 `/api/v1/upload-sessions` + `/complete` 仍是兼容路径；新的大文件上传默认使用 direct session。
 
 ## 生产构建
 

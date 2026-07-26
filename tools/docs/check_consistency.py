@@ -374,12 +374,37 @@ def parse_leading_int(value: str) -> int | None:
 
 
 def check_roadmap(root: Path) -> CheckResult:
-    """Validate roadmap baseline snapshot values against filesystem-derived metrics."""
+    """校验 canonical 路线图、基线计数和旧候选文件引用均未回归。"""
     result = CheckResult("roadmap")
     roadmap_path = root / "ROADMAP.md"
     if not roadmap_path.exists():
         result.issues.append(f"Missing ROADMAP file: {roadmap_path}")
         return result
+
+    legacy_roadmap_path = root / "ROADMAP_new.md"
+    if legacy_roadmap_path.exists():
+        result.issues.append(
+            "Legacy roadmap candidate must not exist; ROADMAP.md is the only canonical source: ROADMAP_new.md"
+        )
+
+    reference_paths = [
+        root / rel_path
+        for rel_path in (
+            "README.md",
+            "README_CN.md",
+            "API_DOCUMENTATION.md",
+            "TESTING.md",
+            "CONTRIBUTING.md",
+            "scripts/README.md",
+            "tools/k6/README.md",
+        )
+    ]
+    reference_paths.extend((root / "docs").rglob("*.md"))
+    for reference_path in reference_paths:
+        if reference_path.exists() and "ROADMAP_new.md" in reference_path.read_text(encoding="utf-8"):
+            result.issues.append(
+                f"Documentation still references the legacy roadmap candidate: {reference_path.relative_to(root)}"
+            )
 
     roadmap_content = roadmap_path.read_text(encoding="utf-8")
 
@@ -400,7 +425,7 @@ def check_roadmap(root: Path) -> CheckResult:
         ("后端服务类", expected_services),
         ("后端测试文件", expected_tests),
         ("数据库迁移", expected_migration_count),
-        ("CI 流水线（核心）", expected_workflows),
+        ("核心工作流", expected_workflows),
     ]
 
     for label, expected in snapshot_checks:
@@ -546,7 +571,7 @@ def check_doc_contains(root: Path, rel_path: str, expected_tokens: Iterable[str]
 
 
 def check_versions(root: Path) -> CheckResult:
-    """Validate documented runtime versions against POM and package.json facts."""
+    """校验文档中的运行时版本与 POM、package.json 事实一致。"""
     result = CheckResult("versions")
     versions = collect_runtime_versions(root, result)
     if versions is None:

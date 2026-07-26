@@ -538,8 +538,8 @@ Nacos 动态刷新的配置项使用 `@RefreshScope` 或 `@NacosValue(autoRefres
 
 ### [P-02] 文件传输优化
 
-- 上传：动态 chunk 大小（2MB-50MB），根据文件大小自动调整
-- 下载：StreamSaver.js 流式下载，避免内存中缓存完整文件
+- 上传：动态 chunk 大小（2 MiB–50 MiB），默认使用 direct session + 预签名 staging PUT + direct complete
+- 下载：64 MiB 是内存 sink 硬上限；更大文件必须使用 File System Access API + Streams，浏览器不支持时失败闭合
 - 批量操作：流式处理，禁止将所有数据加载到内存
 
 ### [P-03] 查询优化
