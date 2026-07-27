@@ -28,7 +28,7 @@
 | --- | ---: | --- |
 | REST 控制器 | 32 | `platform-backend/backend-web/src/main/java` |
 | 后端服务类 | 189 | `platform-backend/backend-service/src/main/java` |
-| 后端测试文件 | 197 | `platform-backend/**/src/test/java` |
+| 后端测试文件 | 200 | `platform-backend/**/src/test/java` |
 | 数据库迁移 | 37（V1.0.0 ~ V1.19.0） | `platform-backend/backend-web/src/main/resources/db/migration` |
 | 核心工作流 | 5 | `test.yml`、`perf-smoke.yml`、`docs.yml`、`security-poc.yml`、`docs-consistency.yml` |
 
