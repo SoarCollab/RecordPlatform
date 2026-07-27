@@ -26,10 +26,10 @@
 
 | 指标 | 当前值 | 自动校验来源 |
 | --- | ---: | --- |
-| REST 控制器 | 31 | `platform-backend/backend-web/src/main/java` |
-| 后端服务类 | 174 | `platform-backend/backend-service/src/main/java` |
-| 后端测试文件 | 186 | `platform-backend/**/src/test/java` |
-| 数据库迁移 | 36（V1.0.0 ~ V1.18.0） | `platform-backend/backend-web/src/main/resources/db/migration` |
+| REST 控制器 | 32 | `platform-backend/backend-web/src/main/java` |
+| 后端服务类 | 189 | `platform-backend/backend-service/src/main/java` |
+| 后端测试文件 | 197 | `platform-backend/**/src/test/java` |
+| 数据库迁移 | 37（V1.0.0 ~ V1.19.0） | `platform-backend/backend-web/src/main/resources/db/migration` |
 | 核心工作流 | 5 | `test.yml`、`perf-smoke.yml`、`docs.yml`、`security-poc.yml`、`docs-consistency.yml` |
 
 | 组件 | 当前基线 | 演进原则 |
@@ -76,7 +76,8 @@
 | P0 | 建立不可绕过的质量与依赖自动化基线 | 已完成 | required checks、Dependabot、覆盖率和 Trivy 子集 |
 | P1 | 建立可追溯证明、发布、故障恢复与观测能力 | 已完成 | signed proof、public verifier、环境/合约工具、OTel/SLO、完整性治理 |
 | P2 | 收口大文件直传/下载、历史 manifest、真实故障与在线文档 | 功能已完成；在线状态由发布门禁判定 | P2-1–P2-Q3 已通过 exact-main；P2-5 以合并提交的 Docs/Pages 证据为最终判据 |
-| P3 | 内容寻址、隐私证明、跨链与 DID/VC | 条件触发 | 仅方向性评估，不承诺日期 |
+| P3 | 企业密钥治理：外部 KMS、自动轮换、运行时密码敏捷与密钥暴露收敛 | 进行中 | P3-1 已验收；P3-2 独立 leaf 正在验收 |
+| P4 | 内容寻址、隐私证明、跨链、DID/VC 与后量子探索 | 条件触发 | 仅方向性评估，不承诺日期 |
 | P6 | 统一安全策略与剩余 advisory 治理 | 预留 | 不在 P2 以局部零漏洞替代 |
 
 ## 4. P0：自动化质量基线（已完成）
@@ -204,41 +205,74 @@ Signed ZIP 的 `VALID` 要求：本地合同全部通过、显式信任的 Ed255
 
 在第 2–3 步完成前，本 leaf 只能表述为“文档实现完成/待发布验收”，不能表述为“已在线验证”。
 
-## 7. P3：远期探索（条件触发）
+## 7. P3：企业密钥治理（进行中）
 
-P3 不承诺实施时间；只有业务、合规或容量触发条件成立后，才创建独立 PRD、威胁模型和回滚计划。
+P3 将本地 AES-GCM envelope 演进为可替换、可接外部 KMS、可自动轮换、可按 provider/suite 治理且减少明文 DEK 暴露的企业密钥生命周期。四个 leaf 严格串行；每个 leaf 都必须从上一个已验收的 exact `main` 创建独立分支和 PR，合并、精确主线验收并归档后才可启动下一个。
 
-### P3-1 内容寻址与冷热分层
+### P3-1 Wrapping Provider 与外部 KMS（已完成）
+
+- provider SPI 明确 wrap/unwrap/rewrap、能力、诊断与稳定失败分类；历史读取按持久化 provider/contract 路由，未知合同失败关闭；
+- local v1 保留历史字节合同；生产外部 provider 使用 Vault Transit derived `aes256-gcm96`，真实官方容器覆盖 wrap、unwrap、context tamper、native rewrap 和权限失败；
+- 生产 profile 禁止 local master key 回退 JWT secret，外部 token/key 配置失败时启动关闭；
+- PR #317 已合并，exact `main@cfe9b9e54eefa01246dbddda7ab5a4c27717a3dc` 的 Test Suite、Deploy Docs、CodeQL、依赖和 Pages 验收通过。
+
+### P3-2 自动化 Envelope Rotation（本 leaf）
+
+- 每租户 policy 冻结目标 provider/key version、批量、限流、schedule、retry/backoff、claim lease、grace 和退休条件；
+- manual/scheduled/dry-run 使用不可变 run、上界快照与 keyset cursor；item 由 token、lease、`FOR UPDATE SKIP LOCKED` 和固定 candidate ID 保证多 worker/崩溃恢复幂等；
+- 候选先 `PENDING_VERIFICATION`，成功解封并与源 DEK 常量时间相等后才在短事务内切换 active；生成列唯一键阻止双 active，share 撤销不会被轮换重新授权；
+- 管理 API 支持 start/pause/resume/cancel/retry、进度分页、审计、低基数指标、终态告警和仅确认外部退休；应用不调用 provider disable/delete；
+- 完成定义仍包括独立 PR 全绿、exact-main Test Suite/Docs/安全检查、真实 MySQL 4-test 零跳过门禁及 Trellis 归档；在这些证据产生前只能表述为实现完成或待主线验收。
+
+### P3-3 运行时 Crypto Agility（待 P3-2 验收后启动）
+
+- provider/suite 能力协商、租户运行时策略、弃用窗口和 downgrade 防护；
+- unsupported provider/suite、未知版本和算法混淆必须失败关闭；
+- 保持历史读取窗口与新写策略可独立演进，并提供管理、审计和回归证据。
+
+### P3-4 密钥暴露收敛（待 P3-3 验收后启动）
+
+- 收敛授权下载中明文 `initialKey` 的响应、浏览器持久化、缓存、日志、遥测和错误暴露面；
+- 保持 owner/share/friend-share 和既有大文件流式下载合同可迁移、可回滚；
+- 以安全测试证明明文 key 的生命周期、可见范围和清理边界明显缩小。
+
+四个 leaf 全部完成后执行 validation-only P3 阶段回归；backend/frontend/config/docs/security 全量门禁、最新 main review、exact-main 和父任务归档缺一不可。
+
+## 8. P4：远期探索（条件触发）
+
+P4 不承诺实施时间；只有业务、合规或容量触发条件成立后，才创建独立 PRD、威胁模型和回滚计划。
+
+### P4-1 内容寻址与冷热分层
 
 - 保持 S3 API 为热数据统一接口，评估 IPFS/Filecoin 作为归档层。
 - 触发条件：存储成本或可验证存储成为明确指标。
 - 必须先解决租户隔离、删除语义、pin/repair、CID 与现有 `contentHash`/`manifestHash` 的非互换合同。
 
-### P3-2 零知识隐私存证
+### P4-2 零知识隐私存证
 
 - 目标是证明文件/属性存在而不公开内容。
 - 触发条件：出现明确隐私合规或客户合同要求。
 - 需要单独评估 trusted setup、证明大小、链上 verifier 成本和密钥生命周期。
 
-### P3-3 跨链互操作
+### P4-3 跨链互操作
 
 - 评估双链锚定、链间证明或受信 gateway，不预设桥接方案。
 - 触发条件：出现多机构互认或司法链对接需求。
 - 任何跨链结果都必须区分“本链事实”“远端链事实”“gateway 声明”。
 
-### P3-4 DID 与 Verifiable Credentials
+### P4-4 DID 与 Verifiable Credentials
 
 - 评估 W3C VC 2.0 与 FISCO 生态 DID 实现，将 signed proof 作为可组合证据输入。
 - 触发条件：验证方需要脱离平台账户体系进行标准化验证。
 - 公共 verifier 已交付，但不能因此声称 DID/VC 签发、撤销和选择性披露已经实现。
 
-### P3-5 后量子迁移准备
+### P4-5 后量子迁移准备
 
 - AES-256 与 SHA-256 当前继续使用；跟踪 ML-KEM、ML-DSA、SLH-DSA 及国内标准进展。
 - 触发条件：监管时间表、互操作方要求或 Java provider 达到生产可用。
 - PQC 调研不能顺带改变当前 Ed25519 signed-proof 合同；迁移必须版本化并支持双轨验证窗口。
 
-## 8. P6：统一安全治理（预留）
+## 9. P6：统一安全治理（预留）
 
 P6 接管 P2 不应扩大的剩余安全工作：
 
@@ -249,7 +283,7 @@ P6 接管 P2 不应扩大的剩余安全工作：
 
 在 P6 完成前，可以准确声称指定 workspace 或指定阻断子集通过，不能声称“仓库无漏洞”或“所有安全扫描均已阻断”。
 
-## 9. 依赖与存储演进原则
+## 10. 依赖与存储演进原则
 
 | 领域 | 原则 |
 | --- | --- |

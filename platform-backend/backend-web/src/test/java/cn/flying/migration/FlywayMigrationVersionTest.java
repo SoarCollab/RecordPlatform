@@ -50,6 +50,7 @@ class FlywayMigrationVersionTest {
         assertTrue(migrationFiles.contains("V1.16.0__framed_download_contract.sql"));
         assertTrue(migrationFiles.contains("V1.17.0__manifest_backfill_governance.sql"));
         assertTrue(migrationFiles.contains("V1.18.0__key_wrapping_provider_metadata.sql"));
+        assertTrue(migrationFiles.contains("V1.19.0__automated_key_rotation.sql"));
         assertFalse(migrationFiles.contains("V1.0.1__add_account_nickname.sql"));
         assertFalse(migrationFiles.contains("V1.5.0__integrity_alert.sql"));
 
@@ -72,6 +73,28 @@ class FlywayMigrationVersionTest {
 
         assertTrue(sql.contains("`provider_contract_version`, `kms_key_id`(128)"));
         assertTrue(sql.contains("`provider_key_version`, `key_version`, `wrapping_algorithm`, `context_schema`"));
+    }
+
+    /**
+     * Verifies V1.19 adds only forward rotation governance with explicit active and worker fences.
+     */
+    @Test
+    void shouldAddAutomatedKeyRotationThroughForwardMigration() throws IOException {
+        String sql = Files.readString(resolveMigrationDir().resolve(
+                "V1.19.0__automated_key_rotation.sql"));
+        String normalizedSql = sql.replaceAll("\\s+", " ").trim();
+
+        assertTrue(normalizedSql.contains("duplicate active key envelopes require manual review"));
+        assertTrue(normalizedSql.contains("GENERATED ALWAYS AS"));
+        assertTrue(normalizedSql.contains("UNIQUE KEY `uk_file_key_envelope_active`"));
+        assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `key_rotation_policy`"));
+        assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `key_rotation_run`"));
+        assertTrue(normalizedSql.contains("UNIQUE KEY `uk_key_rotation_run_trigger`"));
+        assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `key_rotation_item`"));
+        assertTrue(normalizedSql.contains("`claim_token` VARCHAR(64)"));
+        assertTrue(normalizedSql.contains("`lease_expires_at` DATETIME"));
+        assertTrue(normalizedSql.contains("CREATE TABLE IF NOT EXISTS `key_rotation_audit_log`"));
+        assertFalse(normalizedSql.matches("(?is).*DROP\\s+(TABLE|COLUMN).*"));
     }
 
     /**

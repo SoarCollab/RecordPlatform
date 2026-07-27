@@ -13,6 +13,7 @@ import cn.flying.dao.mapper.FileKeyAuditLogMapper;
 import cn.flying.dao.mapper.FileKeyEnvelopeMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -37,6 +38,7 @@ public class FileKeyEnvelopeService {
     public static final String RECIPIENT_TYPE_SHARE = "SHARE";
     public static final String RECIPIENT_TYPE_FRIEND_SHARE = "FRIEND_SHARE";
     public static final String STATUS_ACTIVE = "ACTIVE";
+    public static final String STATUS_PENDING_VERIFICATION = "PENDING_VERIFICATION";
     public static final String STATUS_SUPERSEDED = "SUPERSEDED";
     public static final String STATUS_REVOKED = "REVOKED";
 
@@ -67,6 +69,7 @@ public class FileKeyEnvelopeService {
     private final KeyWrappingProviderRegistry wrappingRegistry;
     private final FileKeyEnvelopeProperties properties;
     private final CryptoSuitePolicyService suitePolicy;
+    private final KeyEnvelopeRotationActivationService rotationActivationService;
 
     /**
      * Removes plaintext key material from file_param and returns envelope input metadata.
@@ -502,11 +505,8 @@ public class FileKeyEnvelopeService {
                                                 Long recipientId,
                                                 Long actorId,
                                                 String reason) {
-        List<FileKeyEnvelope> envelopes = fileKeyEnvelopeMapper.selectList(new LambdaQueryWrapper<FileKeyEnvelope>()
-                .eq(tenantId != null, FileKeyEnvelope::getTenantId, tenantId)
-                .eq(FileKeyEnvelope::getRecipientType, recipientType)
-                .eq(FileKeyEnvelope::getRecipientId, recipientId)
-                .eq(FileKeyEnvelope::getStatus, STATUS_ACTIVE));
+        List<FileKeyEnvelope> envelopes = fileKeyEnvelopeMapper.selectActiveRecipientForUpdate(
+                tenantId, recipientType, recipientId);
 
         if (envelopes == null || envelopes.isEmpty()) {
             audit(tenantId, null, null, recipientType, recipientId, null,
@@ -515,18 +515,17 @@ public class FileKeyEnvelopeService {
         }
 
         for (FileKeyEnvelope envelope : envelopes) {
-            FileKeyEnvelope update = new FileKeyEnvelope()
-                    .setId(envelope.getId())
-                    .setStatus(STATUS_REVOKED);
-            fileKeyEnvelopeMapper.updateById(update);
-            audit(envelope, OPERATION_REVOKE, actorId, RESULT_SUCCESS, reason, null);
+            int updated = fileKeyEnvelopeMapper.compareAndSetStatus(
+                    tenantId, envelope.getId(), STATUS_ACTIVE, STATUS_REVOKED);
+            if (updated == 1) {
+                audit(envelope, OPERATION_REVOKE, actorId, RESULT_SUCCESS, reason, null);
+            }
         }
     }
 
     /**
      * Rotates active envelopes for a file to the configured current key version.
      */
-    @Transactional(rollbackFor = Exception.class)
     public KeyEnvelopeRotationResult rotateActiveFileEnvelopes(File file, Long actorId, String reason) {
         if (file == null || file.getId() == null) {
             throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
@@ -556,63 +555,132 @@ public class FileKeyEnvelopeService {
             return new KeyEnvelopeRotationResult(file.getFileHash(), targetKeyVersion, rotated, skipped);
         }
         for (FileKeyEnvelope envelope : envelopes) {
-            WrappingContext sourceContext;
-            try {
-                validatePersistedEnvelopeMetadata(envelope);
-                sourceContext = buildContextFromEnvelope(envelope);
-            } catch (GeneralException exception) {
-                audit(envelope, OPERATION_ROTATE, actorId, RESULT_FAILURE, reason,
-                        KeyWrappingFailureCategory.INVALID_REQUEST);
-                throw exception;
-            }
-            if (!sourceContext.matchesHash(envelope.getAadHash())) {
-                KeyWrappingFailure failure = KeyWrappingFailure.of(
-                        KeyWrappingFailureCategory.INVALID_CIPHERTEXT, false);
-                audit(envelope, OPERATION_ROTATE, actorId, RESULT_FAILURE, reason,
-                        failure.category());
-                throw failure.toException();
-            }
-            if (hasTargetIdentity(envelope, targetReference, targetKeyVersion)) {
+            AutomatedEnvelopeRotationResult result = rotateEnvelopeForAutomation(
+                    envelope.getId(), IdWorker.getId(), targetReference, targetKeyVersion, actorId, reason);
+            if ("SUCCEEDED".equals(result.outcome())) {
+                rotated++;
+            } else if (result.failureCategory() == KeyWrappingFailureCategory.NONE) {
                 skipped++;
-                audit(envelope, OPERATION_ROTATE, actorId, RESULT_SKIPPED, reason,
-                        KeyWrappingFailureCategory.NONE);
-                continue;
+            } else {
+                throw KeyWrappingFailure.of(result.failureCategory(), result.retryable()).toException();
             }
-            if (hasActiveEnvelopeTarget(envelope, targetReference, targetKeyVersion)) {
-                markEnvelopeSuperseded(envelope);
-                skipped++;
-                audit(envelope, OPERATION_ROTATE, actorId, RESULT_SKIPPED, reason,
-                        KeyWrappingFailureCategory.NONE);
-                continue;
-            }
+        }
 
-            WrappingContext targetContext = buildWrappingContext(
-                    envelope.getTenantId(), envelope.getFileId(), envelope.getFileHash(),
-                    envelope.getRecipientType(), envelope.getRecipientId(), targetKeyVersion,
-                    envelope.getAlgorithmSuite(), targetReference.contextSchema());
+        return new KeyEnvelopeRotationResult(file.getFileHash(), targetKeyVersion, rotated, skipped);
+    }
+
+    /**
+     * Builds, verifies, and atomically activates one deterministic automated-rotation candidate.
+     */
+    public AutomatedEnvelopeRotationResult rotateEnvelopeForAutomation(Long sourceEnvelopeId,
+                                                                        Long candidateEnvelopeId,
+                                                                        WrappingKeyReference targetReference,
+                                                                        Integer targetKeyVersion,
+                                                                        Long actorId,
+                                                                        String reason) {
+        if (sourceEnvelopeId == null || candidateEnvelopeId == null || targetReference == null
+                || targetKeyVersion == null || targetKeyVersion <= 0) {
+            return AutomatedEnvelopeRotationResult.failed(KeyWrappingFailure.of(
+                    KeyWrappingFailureCategory.INVALID_REQUEST, false));
+        }
+        FileKeyEnvelope source = fileKeyEnvelopeMapper.selectById(sourceEnvelopeId);
+        Long tenantId = TenantContext.getTenantId();
+        if (source == null || tenantId == null || !tenantId.equals(source.getTenantId())) {
+            return AutomatedEnvelopeRotationResult.completed("SKIPPED_SOURCE_CHANGED", null);
+        }
+        if (STATUS_REVOKED.equals(source.getStatus())) {
+            return AutomatedEnvelopeRotationResult.completed("SKIPPED_REVOKED", null);
+        }
+        if (!STATUS_ACTIVE.equals(source.getStatus())) {
+            FileKeyEnvelope existingCandidate = fileKeyEnvelopeMapper.selectById(candidateEnvelopeId);
+            return AutomatedEnvelopeRotationResult.completed(
+                    existingCandidate != null && STATUS_ACTIVE.equals(existingCandidate.getStatus())
+                            ? "SUCCEEDED" : "SKIPPED_SOURCE_CHANGED",
+                    existingCandidate == null ? null : existingCandidate.getId());
+        }
+
+        WrappingContext sourceContext;
+        try {
+            validatePersistedEnvelopeMetadata(source);
+            sourceContext = buildContextFromEnvelope(source);
+        } catch (GeneralException exception) {
+            audit(source, OPERATION_ROTATE, actorId, RESULT_FAILURE, reason,
+                    KeyWrappingFailureCategory.INVALID_REQUEST);
+            return AutomatedEnvelopeRotationResult.failed(KeyWrappingFailure.of(
+                    KeyWrappingFailureCategory.INVALID_REQUEST, false));
+        }
+        if (!sourceContext.matchesHash(source.getAadHash())) {
+            audit(source, OPERATION_ROTATE, actorId, RESULT_FAILURE, reason,
+                    KeyWrappingFailureCategory.INVALID_CIPHERTEXT);
+            return AutomatedEnvelopeRotationResult.failed(KeyWrappingFailure.of(
+                    KeyWrappingFailureCategory.INVALID_CIPHERTEXT, false));
+        }
+
+        KeyWrappingResult<PlaintextDataKey> sourcePlaintext = unwrapEnvelopeMaterial(source);
+        if (!sourcePlaintext.isSuccess()) {
+            audit(source, OPERATION_ROTATE, actorId, RESULT_FAILURE, reason,
+                    sourcePlaintext.failure().category());
+            return AutomatedEnvelopeRotationResult.failed(sourcePlaintext.failure());
+        }
+        if (hasTargetIdentity(source, targetReference, targetKeyVersion)) {
+            audit(source, OPERATION_ROTATE, actorId, RESULT_SKIPPED, reason,
+                    KeyWrappingFailureCategory.NONE);
+            return AutomatedEnvelopeRotationResult.completed("SKIPPED_ALREADY_TARGET", null);
+        }
+
+        WrappingContext targetContext = buildWrappingContext(
+                source.getTenantId(), source.getFileId(), source.getFileHash(),
+                source.getRecipientType(), source.getRecipientId(), targetKeyVersion,
+                source.getAlgorithmSuite(), targetReference.contextSchema());
+        FileKeyEnvelope candidate = fileKeyEnvelopeMapper.selectById(candidateEnvelopeId);
+        if (candidate == null) {
             KeyWrappingResult<WrappedDataKey> rotationResult;
             try {
                 rotationResult = rotateEnvelopeMaterial(
-                        envelope, sourceContext, targetReference, targetContext, targetKeyVersion);
+                        source, sourceContext, targetReference, targetContext, targetKeyVersion);
             } catch (GeneralException exception) {
                 rotationResult = KeyWrappingResult.failure(KeyWrappingFailure.of(
                         KeyWrappingFailureCategory.INVALID_REQUEST, false));
             }
             if (!rotationResult.isSuccess()) {
-                audit(envelope, OPERATION_ROTATE, actorId, RESULT_FAILURE, reason,
+                audit(source, OPERATION_ROTATE, actorId, RESULT_FAILURE, reason,
                         rotationResult.failure().category());
-                throw rotationResult.failure().toException();
+                return AutomatedEnvelopeRotationResult.failed(rotationResult.failure());
             }
-            WrappedDataKey wrapped = rotationResult.value();
-            markEnvelopeSuperseded(envelope);
-            FileKeyEnvelope rotatedEnvelope = copyForRotation(envelope, wrapped, targetContext);
-            fileKeyEnvelopeMapper.insert(rotatedEnvelope);
-            rotated++;
-            audit(rotatedEnvelope, OPERATION_ROTATE, actorId, RESULT_SUCCESS, reason,
-                    KeyWrappingFailureCategory.NONE);
+            candidate = copyForRotation(source, rotationResult.value(), targetContext)
+                    .setId(candidateEnvelopeId)
+                    .setStatus(STATUS_PENDING_VERIFICATION);
+            fileKeyEnvelopeMapper.insert(candidate);
+        }
+        if (!sameRecipientAndTarget(source, candidate, targetReference, targetKeyVersion)
+                || (!STATUS_PENDING_VERIFICATION.equals(candidate.getStatus())
+                && !STATUS_ACTIVE.equals(candidate.getStatus()))) {
+            return AutomatedEnvelopeRotationResult.failed(KeyWrappingFailure.of(
+                    KeyWrappingFailureCategory.INVALID_REQUEST, false));
         }
 
-        return new KeyEnvelopeRotationResult(file.getFileHash(), targetKeyVersion, rotated, skipped);
+        KeyWrappingResult<PlaintextDataKey> candidatePlaintext = unwrapEnvelopeMaterial(candidate);
+        if (!candidatePlaintext.isSuccess()) {
+            audit(source, OPERATION_ROTATE, actorId, RESULT_FAILURE, reason,
+                    candidatePlaintext.failure().category());
+            return AutomatedEnvelopeRotationResult.failed(candidatePlaintext.failure());
+        }
+        if (!constantTimeSamePlaintext(sourcePlaintext.value(), candidatePlaintext.value())) {
+            fileKeyEnvelopeMapper.compareAndSetStatus(
+                    tenantId, candidateEnvelopeId, STATUS_PENDING_VERIFICATION, STATUS_SUPERSEDED);
+            audit(source, OPERATION_ROTATE, actorId, RESULT_FAILURE, reason,
+                    KeyWrappingFailureCategory.INVALID_CIPHERTEXT);
+            return AutomatedEnvelopeRotationResult.failed(KeyWrappingFailure.of(
+                    KeyWrappingFailureCategory.INVALID_CIPHERTEXT, false));
+        }
+
+        String outcome = rotationActivationService.activateVerifiedCandidate(
+                tenantId, sourceEnvelopeId, candidateEnvelopeId, targetReference, targetKeyVersion);
+        FileKeyEnvelope auditEnvelope = fileKeyEnvelopeMapper.selectById(candidateEnvelopeId);
+        audit(auditEnvelope == null ? source : auditEnvelope, OPERATION_ROTATE, actorId,
+                "SUCCEEDED".equals(outcome) ? RESULT_SUCCESS : RESULT_SKIPPED,
+                reason, KeyWrappingFailureCategory.NONE);
+        return AutomatedEnvelopeRotationResult.completed(outcome, candidateEnvelopeId);
     }
 
     /**
@@ -857,28 +925,6 @@ public class FileKeyEnvelopeService {
     }
 
     /**
-     * 查询同 recipient 是否已存在完整目标身份的 active 信封。
-     */
-    private boolean hasActiveEnvelopeTarget(FileKeyEnvelope envelope,
-                                            WrappingKeyReference target,
-                                            Integer keyVersion) {
-        return fileKeyEnvelopeMapper.selectCount(new LambdaQueryWrapper<FileKeyEnvelope>()
-                .eq(FileKeyEnvelope::getTenantId, envelope.getTenantId())
-                .eq(FileKeyEnvelope::getFileId, envelope.getFileId())
-                .eq(FileKeyEnvelope::getFileHash, envelope.getFileHash())
-                .eq(FileKeyEnvelope::getRecipientType, envelope.getRecipientType())
-                .eq(FileKeyEnvelope::getRecipientId, envelope.getRecipientId())
-                .eq(FileKeyEnvelope::getKeyVersion, keyVersion)
-                .eq(FileKeyEnvelope::getKmsProvider, target.providerId())
-                .eq(FileKeyEnvelope::getProviderContractVersion, target.providerContractVersion())
-                .eq(FileKeyEnvelope::getKmsKeyId, target.keyId())
-                .eq(FileKeyEnvelope::getProviderKeyVersion, target.providerKeyVersion())
-                .eq(FileKeyEnvelope::getWrappingAlgorithm, target.wrappingAlgorithm())
-                .eq(FileKeyEnvelope::getContextSchema, target.contextSchema())
-                .eq(FileKeyEnvelope::getStatus, STATUS_ACTIVE)) > 0;
-    }
-
-    /**
      * 判断当前信封是否已与完整目标身份一致。
      */
     private boolean hasTargetIdentity(FileKeyEnvelope envelope,
@@ -894,13 +940,27 @@ public class FileKeyEnvelopeService {
     }
 
     /**
-     * Marks one envelope superseded by primary key.
+     * Validates that a resumed deterministic candidate preserves authority and the frozen target.
      */
-    private void markEnvelopeSuperseded(FileKeyEnvelope envelope) {
-        FileKeyEnvelope update = new FileKeyEnvelope()
-                .setId(envelope.getId())
-                .setStatus(STATUS_SUPERSEDED);
-        fileKeyEnvelopeMapper.updateById(update);
+    private boolean sameRecipientAndTarget(FileKeyEnvelope source,
+                                           FileKeyEnvelope candidate,
+                                           WrappingKeyReference target,
+                                           Integer targetKeyVersion) {
+        return java.util.Objects.equals(source.getTenantId(), candidate.getTenantId())
+                && java.util.Objects.equals(source.getFileId(), candidate.getFileId())
+                && java.util.Objects.equals(source.getFileHash(), candidate.getFileHash())
+                && java.util.Objects.equals(source.getRecipientType(), candidate.getRecipientType())
+                && java.util.Objects.equals(source.getRecipientId(), candidate.getRecipientId())
+                && hasTargetIdentity(candidate, target, targetKeyVersion);
+    }
+
+    /**
+     * Compares verified plaintext keys without data-dependent early exit.
+     */
+    private boolean constantTimeSamePlaintext(PlaintextDataKey source, PlaintextDataKey candidate) {
+        byte[] sourceBytes = source.reveal().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] candidateBytes = candidate.reveal().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return MessageDigest.isEqual(sourceBytes, candidateBytes);
     }
 
     /**

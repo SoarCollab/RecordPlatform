@@ -317,7 +317,7 @@ file:
         request-timeout: 5s
 ```
 
-The application token needs only `update` capability on the selected key's `transit/encrypt`, `transit/decrypt`, and `transit/rewrap` paths. Keep old provider/key versions available until every historical envelope has been rotated. See [Key Management Security](../../security/key-management.md) for context binding, migration, and HSM deployment boundaries.
+The application token needs only `update` capability on the selected key's `transit/encrypt`, `transit/decrypt`, and `transit/rewrap` paths. Keep old provider/key versions available until every historical envelope has been rotated. See [Key Management Security](../../security/key-management.md) for context binding, migration, and HSM deployment boundaries, and the [Key Rotation Runbook](../../operations/key-rotation.md) for dry-run, APPLY, recovery, alert, and retirement procedures.
 
 ## Frontend Configuration
 

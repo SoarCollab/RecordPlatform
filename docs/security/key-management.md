@@ -151,30 +151,41 @@ Micrometer 指标只使用低基数标签 `provider`、`operation`、`outcome` �
 
 日志脱敏器覆盖 `encryptedDataKey`、`wrappingIv`、`kmsKeyId`/`keyId`、`ciphertext`、Vault token 和 wrapping context 等字段。密钥模型的 `toString()` 对 plaintext、ciphertext、IV 和 key ID 进行固定脱敏。
 
-## 5. 轮换与事务语义
+## 5. 自动轮换与事务语义
 
-当前管理员入口 `POST /api/v1/admin/files/{id}/key-envelopes/rotate` 对单文件 active 信封执行显式轮换。目标相等性使用完整身份：
+管理员可继续使用 `POST /api/v1/admin/files/{id}/key-envelopes/rotate` 对单文件执行显式轮换；租户级自动轮换控制面位于 `/api/v1/admin/key-rotation`。所有入口均要求当前租户管理员权限。
+
+租户策略冻结目标 provider 合同、provider key version、逻辑 key version、批量/限流、调度、最大尝试次数、指数退避、claim lease 和回滚宽限期。每次 manual、scheduled 或 dry-run 都创建不可变 run；候选扫描以创建时的 `snapshot_max_envelope_id` 为上界并使用 keyset cursor，不会一次加载全租户信封。
+
+目标相等性使用完整身份：
 
 ```text
 (provider, contract, keyId, providerKeyVersion,
  logicalKeyVersion, wrappingAlgorithm, contextSchema)
 ```
 
-同一 Vault named key 和 v2 context 优先调用 Transit `rewrap`，明文 DEK 不返回应用。跨 provider、named key 或 schema 才由编排层执行受控 unwrap → wrap。远程操作成功并生成替换信封后才会 supersede 旧 active 信封；事务失败会保留旧信封可用。
+同一 Vault named key 和 v2 context 优先调用 Transit `rewrap`；为了证明新信封可恢复同一 DEK，编排层仍会分别解封源和候选并进行常量时间比较。跨 provider、named key 或 schema 使用受控 unwrap → wrap。候选先以 `PENDING_VERIFICATION` 保存，不参与任何下载授权；校验通过后，短事务锁定源和候选，通过 CAS 将旧 `ACTIVE` 改为 `SUPERSEDED`，再将候选改为 `ACTIVE`。任一步失败都会回滚，旧信封继续可用。
 
-租户策略、批量任务、自动调度、重试、暂停/恢复属于 P3-2，不在当前合同中。不要把单文件显式接口当作自动轮换完成的证据。
+数据库生成列 `active_slot` 和唯一键保证每个 tenant/file/hash/recipient 最多一个可读信封。share/friend-share 撤销与轮换使用相同的行锁/CAS 边界：撤销先发生时候选会被废弃；轮换先发生时撤销随后锁定并撤销新 active，任务不会恢复已撤销权限。
+
+每个 item 由随机 claim token、过期 lease 和 `FOR UPDATE SKIP LOCKED` 领取。KMS throttle、timeout、unavailable 按策略退避重试；进程在 provider 调用或提交前崩溃时，lease 到期后其他 worker 可重领。候选 ID 固定为 item ID，因此“已激活但 item 未提交”的崩溃重放会识别同一候选并幂等完成。
+
+dry-run 只记录候选，不调用 provider、不改变信封，也不会覆盖上一轮 APPLY 的退休资格。pause/resume 保留 cursor 和尝试次数；cancel 只阻止后续发现/领取，已进入 provider 调用的 item 按 claim fence 收敛；显式 retry 只重置仍被稳定分类为 retryable 的失败项尝试计数，非重试分类修复后必须创建新的 run。
 
 ## 6. 数据库迁移与恢复
 
-`V1.18.0__key_wrapping_provider_metadata.sql` 是唯一 schema 变更：
+`V1.18.0__key_wrapping_provider_metadata.sql` 增加 provider-neutral 元数据；`V1.19.0__automated_key_rotation.sql` 在其后前向增加自动轮换治理：
 
 - 新增 provider contract version、provider key version 和 context schema；
 - 将 `wrapping_iv` 改为可空，以支持 Vault ciphertext；
 - 扩展 `kms_key_id` 并增加完整目标索引；
 - 扩展 provider-neutral 审计字段；
 - 将历史 local 行确定性回填为 local contract v1、AAD v1，provider key version 来自既有逻辑版本。
+- 迁移前检查历史数据是否存在同 recipient 多个 `ACTIVE`；存在歧义时失败关闭，要求人工核对后重试；
+- 通过生成列唯一键约束单 active，并新增 policy/run/item/audit 四张表；
+- run trigger、item source/candidate、claim token/lease 和索引共同提供幂等与多 worker 栅栏。
 
-已发布的 V1.10.x 迁移不会改写。测试同时覆盖空库安装和 V1.17 → V1.18 升级。
+已发布迁移不会改写。CI 的真实 MySQL 8 测试覆盖空库安装、V1.18 → V1.19 重复 active 失败预检、单 active 约束、双 worker `SKIP LOCKED`、trigger 唯一键和 claim-token 完成栅栏，且要求 4 个测试零跳过。
 
 数据库备份必须与 Vault snapshot/raft storage、unseal/recovery 材料和历史 key 可用性一起设计。只恢复数据库但无法访问对应 provider/key 时，wrapped DEK 无法解封。灾难恢复演练至少验证：
 
@@ -186,7 +197,6 @@ Micrometer 指标只使用低基数标签 `provider`、`operation`、`outcome` �
 ## 7. 已知限制与后续边界
 
 - Vault 可用性会直接影响加密文件下载；当前只提供稳定可重试语义，不在请求内做无界重试，也不回退 local。
-- 自动租户轮换作业属于 P3-2。
 - 多套件运行时策略和 provider 协商属于 P3-3。
 - 授权下载/解密 metadata 当前仍可能向前端返回 `initialKey`；更广泛的数据密钥暴露收敛属于 P3-4。
 - AWS KMS adapter 需在仓库具备受控 AWS 账户、OIDC role 和测试 key 后单独验收，不能用 mock 冒充真实云 KMS 证据。
@@ -198,6 +208,9 @@ Micrometer 指标只使用低基数标签 `provider`、`operation`、`outcome` �
 - [ ] Vault key 为 derived `aes256-gcm96`，目标版本与部署变更单一致。
 - [ ] 选择 local 时，master key 独立于 JWT 且至少 32 字符。
 - [ ] 历史 provider/key 读取能力在信封轮换完成前持续保留。
+- [ ] 先执行 dry-run，确认候选数量、recipient 分布和目标 provider version，再启动 APPLY。
+- [ ] `remaining` 与 `failed` 归零且回滚宽限期结束前，不禁用或删除旧 provider key。
+- [ ] 退休只由外部变更流程执行；RecordPlatform 仅记录 READY 和管理员 acknowledgement。
 - [ ] 审计、指标、health 和日志采集链路中不存在 token、plaintext DEK、wrapped blob 或原始 key ID。
 - [ ] 数据库与 Vault 备份、恢复和 HA 故障切换已联合演练。
 - [ ] 若声明 HSM-backed，已验证 Enterprise 许可证、PKCS#11/Managed Keys、实际硬件与故障切换证据。
@@ -213,6 +226,6 @@ Micrometer 指标只使用低基数标签 `provider`、`operation`、`outcome` �
 
 ---
 
-**文档版本**：v2.0
+**文档版本**：v3.0
 **最后更新**：2026-07-27
 **维护者**：Security Team

@@ -317,7 +317,7 @@ file:
         request-timeout: 5s
 ```
 
-应用 token 只需对目标 key 的 `transit/encrypt`、`transit/decrypt`、`transit/rewrap` 路径拥有 `update` 能力。所有历史信封完成轮换前必须保留旧 provider/key 版本。context 绑定、迁移与 HSM 部署边界见[密钥管理安全文档](../../security/key-management.md)。
+应用 token 只需对目标 key 的 `transit/encrypt`、`transit/decrypt`、`transit/rewrap` 路径拥有 `update` 能力。所有历史信封完成轮换前必须保留旧 provider/key 版本。context 绑定、迁移与 HSM 部署边界见[密钥管理安全文档](../../security/key-management.md)，dry-run、APPLY、恢复、告警和退休流程见[自动密钥轮换运维手册](../../operations/key-rotation.md)。
 
 ## 前端配置
 

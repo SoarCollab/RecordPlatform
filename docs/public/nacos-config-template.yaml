@@ -73,6 +73,17 @@ file:
         max-request-bytes: ${FILE_KEY_ENVELOPE_VAULT_MAX_REQUEST_BYTES:65536}
         max-response-bytes: ${FILE_KEY_ENVELOPE_VAULT_MAX_RESPONSE_BYTES:65536}
 
+# ==============================================================================
+# 自动信封轮换调度器
+# 仅负责跨租户轮询；目标 key、批量、限流、重试和回滚宽限期由管理员策略持久化。
+# ==============================================================================
+key:
+  rotation:
+    enabled: ${KEY_ROTATION_ENABLED:false}
+    poll-interval-ms: ${KEY_ROTATION_POLL_INTERVAL_MS:30000}
+    initial-delay-ms: ${KEY_ROTATION_INITIAL_DELAY_MS:30000}
+    max-tenants-per-poll: ${KEY_ROTATION_MAX_TENANTS_PER_POLL:100}
+
 
 # ==============================================================================
 # RecordPlatform Storage Service Nacos 配置模板

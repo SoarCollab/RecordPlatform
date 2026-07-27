@@ -18,6 +18,7 @@ import cn.flying.controller.FriendController;
 import cn.flying.controller.FriendFileShareController;
 import cn.flying.controller.ImageController;
 import cn.flying.controller.IntegrityAlertController;
+import cn.flying.controller.KeyRotationAdminController;
 import cn.flying.controller.MessageController;
 import cn.flying.controller.ManifestBackfillAdminController;
 import cn.flying.controller.PermissionController;
@@ -50,6 +51,9 @@ import cn.flying.service.FriendFileShareService;
 import cn.flying.service.FriendService;
 import cn.flying.service.ImageService;
 import cn.flying.service.integrity.IntegrityCheckService;
+import cn.flying.service.key.rotation.KeyRotationPolicyService;
+import cn.flying.service.key.rotation.KeyRotationRunCreationService;
+import cn.flying.service.key.rotation.KeyRotationRunService;
 import cn.flying.service.manifest.backfill.ManifestBackfillRunService;
 import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
 import cn.flying.service.manifest.backfill.ManifestReferenceCensusService;
@@ -192,6 +196,15 @@ class OpenApiContractExportTest {
     private IntegrityCheckService integrityCheckService;
 
     @MockitoBean
+    private KeyRotationPolicyService keyRotationPolicyService;
+
+    @MockitoBean
+    private KeyRotationRunCreationService keyRotationRunCreationService;
+
+    @MockitoBean
+    private KeyRotationRunService keyRotationRunService;
+
+    @MockitoBean
     private ManifestGovernanceStatusService manifestGovernanceStatusService;
 
     @MockitoBean
@@ -313,6 +326,12 @@ class OpenApiContractExportTest {
                 "/api/v1/admin/attestation-batches/production/trigger")).isTrue();
         assertThat(rootNode.path("paths").has(
                 "/api/v1/admin/attestation-batches/production/status")).isTrue();
+        assertThat(rootNode.path("paths").has(
+                "/api/v1/admin/key-rotation/policy")).isTrue();
+        assertThat(rootNode.path("paths").has(
+                "/api/v1/admin/key-rotation/runs")).isTrue();
+        assertThat(rootNode.path("paths").has(
+                "/api/v1/admin/key-rotation/runs/{runId}/items")).isTrue();
         assertThat(rootNode.path("paths").has(
                 "/api/v1/files/{id}/proof-bundle.zip")).isTrue();
         assertThat(rootNode.path("paths").has(
@@ -748,6 +767,7 @@ class OpenApiContractExportTest {
             FriendFileShareController.class,
             ImageController.class,
             IntegrityAlertController.class,
+            KeyRotationAdminController.class,
             ManifestBackfillAdminController.class,
             MessageController.class,
             PermissionController.class,
