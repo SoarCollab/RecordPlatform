@@ -79,6 +79,14 @@ public class VaultTransitKeyWrappingProvider implements KeyWrappingProvider {
     }
 
     /**
+     * Declares the exact Vault Transit derived-key wrapping suite supported by contract v1.
+     */
+    @Override
+    public Set<String> supportedWrappingAlgorithms() {
+        return Set.of(WRAPPING_ALGORITHM);
+    }
+
+    /**
      * 返回当前 Vault named key 与显式目标版本。
      */
     @Override

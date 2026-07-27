@@ -23,6 +23,11 @@ public interface KeyWrappingProvider {
     Set<KeyWrappingCapability> capabilities();
 
     /**
+     * Returns the closed wrapping algorithm identifiers implemented by this provider contract.
+     */
+    Set<String> supportedWrappingAlgorithms();
+
+    /**
      * 返回当前新写入的完整目标身份。
      */
     KeyWrappingResult<WrappingKeyReference> activeKeyReference(Integer logicalKeyVersion);

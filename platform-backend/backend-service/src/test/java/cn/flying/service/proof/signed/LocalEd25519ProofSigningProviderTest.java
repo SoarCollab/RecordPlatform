@@ -122,6 +122,27 @@ class LocalEd25519ProofSigningProviderTest {
     }
 
     /**
+     * Proves diagnostics distinguish disabled and invalid configuration without exposing key identities.
+     */
+    @Test
+    void shouldReportDisabledAndInvalidDiagnosticsAndRejectEmptySigningInput() {
+        properties.setEnabled(false);
+        ProofSigningProviderDiagnostic disabled = provider.diagnostics();
+        assertThat(disabled.available()).isFalse();
+        assertThat(disabled.configurationState()).isEqualTo("disabled");
+
+        properties.setEnabled(true);
+        properties.setPrivateKeyPkcs8("invalid-base64");
+        ProofSigningProviderDiagnostic invalid = provider.diagnostics();
+        assertThat(invalid.available()).isFalse();
+        assertThat(invalid.configurationState()).isEqualTo("invalid_configuration");
+        assertThat(invalid.toString()).doesNotContain("invalid-base64", "proof-key-main");
+
+        assertThatThrownBy(() -> provider.sign(null, null))
+                .isInstanceOf(GeneralException.class);
+    }
+
+    /**
      * 验证不匹配密钥对和 currentKey/sign 之间的轮换都失败关闭。
      */
     @Test

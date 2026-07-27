@@ -931,6 +931,10 @@ class SignedProofLifecycleConcurrencyIT extends BaseIntegrationTest {
                 .setId(IdUtils.nextEntityId())
                 .setKeyId(key.keyId())
                 .setKeyVersion(key.keyVersion())
+                .setSigningProvider(key.providerId())
+                .setSigningProviderContract(key.providerContractVersion())
+                .setSignatureSuite(key.signatureSuite())
+                .setProofSuite(key.proofSuite())
                 .setSignatureAlgorithm(key.algorithm())
                 .setPublicKeySpki(key.publicKeySpki())
                 .setPublicKeyFingerprint(key.publicKeyFingerprint())
@@ -955,10 +959,13 @@ class SignedProofLifecycleConcurrencyIT extends BaseIntegrationTest {
                 """
                         INSERT INTO proof_bundle_issuance(
                             id, tenant_id, proof_id, file_id, file_version, leaf_id,
-                            manifest_hash, manifest_json, signature_jws, signature_algorithm,
+                            manifest_hash, manifest_json, signature_jws,
+                            signing_provider, signing_provider_contract, signature_suite, proof_suite,
+                            signature_algorithm,
                             key_id, key_version, public_key_spki, public_key_fingerprint,
                             issued_status, status, status_version, issued_at, deleted
-                        ) VALUES (?, ?, ?, ?, 1, ?, ?, '{}', 'header.payload.signature', ?,
+                        ) VALUES (?, ?, ?, ?, 1, ?, ?, '{}', 'header.payload.signature',
+                                  ?, ?, ?, ?, ?,
                                   ?, ?, ?, ?, 'ACTIVE', 'ACTIVE', 1, NOW(3), 0)
                         """,
                 IdUtils.nextEntityId(),
@@ -967,6 +974,10 @@ class SignedProofLifecycleConcurrencyIT extends BaseIntegrationTest {
                 fileId,
                 leafId,
                 manifestHash,
+                key.providerId(),
+                key.providerContractVersion(),
+                key.signatureSuite(),
+                key.proofSuite(),
                 key.algorithm(),
                 key.keyId(),
                 key.keyVersion(),

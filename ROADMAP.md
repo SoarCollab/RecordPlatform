@@ -26,10 +26,10 @@
 
 | 指标 | 当前值 | 自动校验来源 |
 | --- | ---: | --- |
-| REST 控制器 | 32 | `platform-backend/backend-web/src/main/java` |
-| 后端服务类 | 189 | `platform-backend/backend-service/src/main/java` |
-| 后端测试文件 | 200 | `platform-backend/**/src/test/java` |
-| 数据库迁移 | 37（V1.0.0 ~ V1.19.0） | `platform-backend/backend-web/src/main/resources/db/migration` |
+| REST 控制器 | 33 | `platform-backend/backend-web/src/main/java` |
+| 后端服务类 | 206 | `platform-backend/backend-service/src/main/java` |
+| 后端测试文件 | 207 | `platform-backend/**/src/test/java` |
+| 数据库迁移 | 38（V1.0.0 ~ V1.20.0） | `platform-backend/backend-web/src/main/resources/db/migration` |
 | 核心工作流 | 5 | `test.yml`、`perf-smoke.yml`、`docs.yml`、`security-poc.yml`、`docs-consistency.yml` |
 
 | 组件 | 当前基线 | 演进原则 |
@@ -76,7 +76,7 @@
 | P0 | 建立不可绕过的质量与依赖自动化基线 | 已完成 | required checks、Dependabot、覆盖率和 Trivy 子集 |
 | P1 | 建立可追溯证明、发布、故障恢复与观测能力 | 已完成 | signed proof、public verifier、环境/合约工具、OTel/SLO、完整性治理 |
 | P2 | 收口大文件直传/下载、历史 manifest、真实故障与在线文档 | 功能已完成；在线状态由发布门禁判定 | P2-1–P2-Q3 已通过 exact-main；P2-5 以合并提交的 Docs/Pages 证据为最终判据 |
-| P3 | 企业密钥治理：外部 KMS、自动轮换、运行时密码敏捷与密钥暴露收敛 | 进行中 | P3-1 已验收；P3-2 独立 leaf 正在验收 |
+| P3 | 企业密钥治理：外部 KMS、自动轮换、运行时密码敏捷与密钥暴露收敛 | 进行中 | P3-1、P3-2 已验收；P3-3 独立 leaf 正在实现/验收 |
 | P4 | 内容寻址、隐私证明、跨链、DID/VC 与后量子探索 | 条件触发 | 仅方向性评估，不承诺日期 |
 | P6 | 统一安全策略与剩余 advisory 治理 | 预留 | 不在 P2 以局部零漏洞替代 |
 
@@ -216,19 +216,20 @@ P3 将本地 AES-GCM envelope 演进为可替换、可接外部 KMS、可自动�
 - 生产 profile 禁止 local master key 回退 JWT secret，外部 token/key 配置失败时启动关闭；
 - PR #317 已合并，exact `main@cfe9b9e54eefa01246dbddda7ab5a4c27717a3dc` 的 Test Suite、Deploy Docs、CodeQL、依赖和 Pages 验收通过。
 
-### P3-2 自动化 Envelope Rotation（本 leaf）
+### P3-2 自动化 Envelope Rotation（已完成）
 
 - 每租户 policy 冻结目标 provider/key version、批量、限流、schedule、retry/backoff、claim lease、grace 和退休条件；
 - manual/scheduled/dry-run 使用不可变 run、上界快照与 keyset cursor；item 由 token、lease、`FOR UPDATE SKIP LOCKED` 和固定 candidate ID 保证多 worker/崩溃恢复幂等；
 - 候选先 `PENDING_VERIFICATION`，成功解封并与源 DEK 常量时间相等后才在短事务内切换 active；生成列唯一键阻止双 active，share 撤销不会被轮换重新授权；
 - 管理 API 支持 start/pause/resume/cancel/retry、进度分页、审计、低基数指标、终态告警和仅确认外部退休；应用不调用 provider disable/delete；
-- 完成定义仍包括独立 PR 全绿、exact-main Test Suite/Docs/安全检查、真实 MySQL 4-test 零跳过门禁及 Trellis 归档；在这些证据产生前只能表述为实现完成或待主线验收。
+- PR #318 已合并；exact `main@a4ba5acf3864fd341219a7382d13b2cd30d3afde` 的 Test Suite、Docs、CodeQL、依赖和 Pages 验收通过，真实 MySQL 4-test 零跳过门禁通过，Trellis 已归档。
 
-### P3-3 运行时 Crypto Agility（待 P3-2 验收后启动）
+### P3-3 运行时 Crypto Agility（本 leaf）
 
-- provider/suite 能力协商、租户运行时策略、弃用窗口和 downgrade 防护；
-- unsupported provider/suite、未知版本和算法混淆必须失败关闭；
-- 保持历史读取窗口与新写策略可独立演进，并提供管理、审计和回归证据。
+- 闭集 suite registry 冻结 stable ID、type、provider/contract、生命周期、constraints、兼容和 re-encryption 边界；配置只能收紧，不能把未实现能力提升为 active；
+- tenant policy 以 optimistic version 管理新写的 wrapping/signature/KEM/proof 选择；历史 envelope/proof 只按持久化身份分派，默认漂移不触发 fallback 或 downgrade；
+- local/Vault wrapping 与 local Ed25519 proof provider 提供真实运行时 dispatch；ML-DSA/ML-KEM 仅为 experimental/unimplemented 目录项，生产写入永久拒绝；
+- 管理 API、指纹审计、低基数指标、V1.20 backfill/constraint/concurrency 迁移门禁和运维文档随本 leaf 验收；完成定义仍包括独立 PR、exact-main 全绿和 Trellis 归档。
 
 ### P3-4 密钥暴露收敛（待 P3-3 验收后启动）
 

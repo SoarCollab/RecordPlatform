@@ -60,6 +60,14 @@ public class LocalKeyWrappingService implements KeyWrappingProvider {
     }
 
     /**
+     * Declares the exact persisted wrapping algorithm supported by local contract v1.
+     */
+    @Override
+    public Set<String> supportedWrappingAlgorithms() {
+        return Set.of(CryptoSuiteIds.LOCAL_WRAPPING);
+    }
+
+    /**
      * 返回当前 local provider 的完整包封目标。
      */
     @Override

@@ -142,6 +142,11 @@ class KeyWrappingConfigurationValidatorTest {
         }
 
         @Override
+        public Set<String> supportedWrappingAlgorithms() {
+            return Set.of("TEST");
+        }
+
+        @Override
         public KeyWrappingResult<WrappingKeyReference> activeKeyReference(Integer logicalKeyVersion) {
             return KeyWrappingResult.success(new WrappingKeyReference(
                     providerId, 1, "key", "1", "TEST", WrappingContext.EXTERNAL_CONTEXT_V2));

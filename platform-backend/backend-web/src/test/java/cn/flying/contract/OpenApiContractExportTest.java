@@ -11,6 +11,7 @@ import cn.flying.controller.AnnouncementController;
 import cn.flying.controller.AuthorizeController;
 import cn.flying.controller.AttestationBatchAdminController;
 import cn.flying.controller.ConversationController;
+import cn.flying.controller.CryptoAgilityAdminController;
 import cn.flying.controller.FileAdminController;
 import cn.flying.controller.FileController;
 import cn.flying.controller.FileRestController;
@@ -54,6 +55,10 @@ import cn.flying.service.integrity.IntegrityCheckService;
 import cn.flying.service.key.rotation.KeyRotationPolicyService;
 import cn.flying.service.key.rotation.KeyRotationRunCreationService;
 import cn.flying.service.key.rotation.KeyRotationRunService;
+import cn.flying.service.key.CryptoSuitePolicyService;
+import cn.flying.service.key.CryptoSuiteRegistry;
+import cn.flying.service.key.KeyWrappingProviderRegistry;
+import cn.flying.service.key.TenantCryptoPolicyService;
 import cn.flying.service.manifest.backfill.ManifestBackfillRunService;
 import cn.flying.service.manifest.backfill.ManifestGovernanceStatusService;
 import cn.flying.service.manifest.backfill.ManifestReferenceCensusService;
@@ -68,6 +73,7 @@ import cn.flying.service.SystemMonitorService;
 import cn.flying.service.TicketService;
 import cn.flying.service.proof.ProofBundleService;
 import cn.flying.service.proof.signed.SignedProofArchiveService;
+import cn.flying.service.proof.signed.ProofSigningProviderRegistry;
 import cn.flying.service.sse.SseEmitterManager;
 import cn.flying.security.TrustedClientIpResolver;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -205,6 +211,21 @@ class OpenApiContractExportTest {
     private KeyRotationRunService keyRotationRunService;
 
     @MockitoBean
+    private TenantCryptoPolicyService tenantCryptoPolicyService;
+
+    @MockitoBean
+    private CryptoSuitePolicyService cryptoSuitePolicyService;
+
+    @MockitoBean
+    private CryptoSuiteRegistry cryptoSuiteRegistry;
+
+    @MockitoBean
+    private KeyWrappingProviderRegistry keyWrappingProviderRegistry;
+
+    @MockitoBean
+    private ProofSigningProviderRegistry proofSigningProviderRegistry;
+
+    @MockitoBean
     private ManifestGovernanceStatusService manifestGovernanceStatusService;
 
     @MockitoBean
@@ -332,6 +353,10 @@ class OpenApiContractExportTest {
                 "/api/v1/admin/key-rotation/runs")).isTrue();
         assertThat(rootNode.path("paths").has(
                 "/api/v1/admin/key-rotation/runs/{runId}/items")).isTrue();
+        assertThat(rootNode.path("paths").has(
+                "/api/v1/admin/crypto-agility/policy")).isTrue();
+        assertThat(rootNode.path("paths").has(
+                "/api/v1/admin/crypto-agility/diagnostics")).isTrue();
         assertThat(rootNode.path("paths").has(
                 "/api/v1/files/{id}/proof-bundle.zip")).isTrue();
         assertThat(rootNode.path("paths").has(
@@ -760,6 +785,7 @@ class OpenApiContractExportTest {
             AnnouncementController.class,
             AuthorizeController.class,
             ConversationController.class,
+            CryptoAgilityAdminController.class,
             FileAdminController.class,
             FileController.class,
             FileRestController.class,

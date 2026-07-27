@@ -23,11 +23,14 @@ public interface ProofSigningKeyMapper extends BaseMapper<ProofSigningKeyRecord>
     @InterceptorIgnore(tenantLine = "true")
     @Insert("""
             INSERT INTO proof_signing_key(
-                id, key_id, key_version, signature_algorithm,
+                id, key_id, key_version, signing_provider, signing_provider_contract,
+                signature_suite, proof_suite, signature_algorithm,
                 public_key_spki, public_key_fingerprint, status,
                 first_seen_at, deleted
             ) VALUES (
-                #{key.id}, #{key.keyId}, #{key.keyVersion}, #{key.signatureAlgorithm},
+                #{key.id}, #{key.keyId}, #{key.keyVersion},
+                #{key.signingProvider}, #{key.signingProviderContract},
+                #{key.signatureSuite}, #{key.proofSuite}, #{key.signatureAlgorithm},
                 #{key.publicKeySpki}, #{key.publicKeyFingerprint}, #{key.status},
                 #{key.firstSeenAt}, 0
             )
@@ -44,7 +47,8 @@ public interface ProofSigningKeyMapper extends BaseMapper<ProofSigningKeyRecord>
      */
     @InterceptorIgnore(tenantLine = "true")
     @Select("""
-            SELECT id, key_id, key_version, signature_algorithm,
+            SELECT id, key_id, key_version, signing_provider, signing_provider_contract,
+                   signature_suite, proof_suite, signature_algorithm,
                    public_key_spki, public_key_fingerprint, status,
                    first_seen_at, create_time, update_time, deleted
               FROM proof_signing_key
@@ -66,7 +70,8 @@ public interface ProofSigningKeyMapper extends BaseMapper<ProofSigningKeyRecord>
      */
     @InterceptorIgnore(tenantLine = "true")
     @Select("""
-            SELECT id, key_id, key_version, signature_algorithm,
+            SELECT id, key_id, key_version, signing_provider, signing_provider_contract,
+                   signature_suite, proof_suite, signature_algorithm,
                    public_key_spki, public_key_fingerprint, status,
                    first_seen_at, create_time, update_time, deleted
               FROM proof_signing_key

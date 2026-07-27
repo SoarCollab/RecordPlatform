@@ -84,6 +84,20 @@ key:
     initial-delay-ms: ${KEY_ROTATION_INITIAL_DELAY_MS:30000}
     max-tenants-per-poll: ${KEY_ROTATION_MAX_TENANTS_PER_POLL:100}
 
+# ==============================================================================
+# 运行时密码敏捷
+# 仅允许从内建闭集目录选择真实 provider/suite；未知或未实现能力会失败关闭。
+# ==============================================================================
+crypto:
+  agility:
+    production-mode: ${CRYPTO_AGILITY_PRODUCTION_MODE:true}
+    allow-experimental-writes: ${CRYPTO_AGILITY_ALLOW_EXPERIMENTAL_WRITES:false}
+    signing-provider: ${CRYPTO_AGILITY_SIGNING_PROVIDER:local-ed25519}
+    signing-provider-contract-version: ${CRYPTO_AGILITY_SIGNING_PROVIDER_CONTRACT_VERSION:1}
+    signed-proof-signature-suite: ${CRYPTO_AGILITY_SIGNED_PROOF_SIGNATURE_SUITE:JWS-EDDSA-ED25519-V1}
+    signed-proof-suite: ${CRYPTO_AGILITY_SIGNED_PROOF_SUITE:RP-SIGNED-PROOF-ZIP-V2}
+    suite-lifecycle: {}
+
 
 # ==============================================================================
 # RecordPlatform Storage Service Nacos 配置模板

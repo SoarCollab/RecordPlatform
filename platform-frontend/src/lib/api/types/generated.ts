@@ -55,6 +55,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/crypto-agility/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get sanitized runtime crypto diagnostics */
+        get: operations["diagnostics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/crypto-agility/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the effective tenant crypto policy */
+        get: operations["getPolicy_1"];
+        /** Create or update the tenant crypto policy */
+        put: operations["savePolicy_1"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/files": {
         parameters: {
             query?: never;
@@ -3660,6 +3695,96 @@ export interface components {
              */
             fileSize: number;
         };
+        /** @description 结果数据 */
+        CryptoAgilityDiagnosticsVO: {
+            policy?: components["schemas"]["CryptoAgilityPolicyVO"];
+            signingProviders?: components["schemas"]["CryptoProviderCapabilityVO"][];
+            suites?: components["schemas"]["CryptoSuiteCatalogEntryVO"][];
+            wrappingProviders?: components["schemas"]["CryptoProviderCapabilityVO"][];
+        };
+        CryptoAgilityPolicyRequest: {
+            /** @description Content encryption suite for new envelopes */
+            contentEncryptionSuite: string;
+            /** @description Envelope signature suite */
+            envelopeSignatureSuite: string;
+            /**
+             * Format: int64
+             * @description Current policy version; use zero to create
+             */
+            expectedVersion: number;
+            /** @description Envelope KEM suite */
+            kemSuite: string;
+            /** @description Envelope proof suite */
+            proofSuite: string;
+            /** @description Signed-proof signature suite */
+            signedProofSignatureSuite: string;
+            /** @description Signed-proof format suite */
+            signedProofSuite: string;
+            /** @description Signing provider ID */
+            signingProvider: string;
+            /**
+             * Format: int32
+             * @description Signing provider contract version
+             */
+            signingProviderContract: number;
+            /** @description Wrapping provider ID */
+            wrappingProvider: string;
+            /**
+             * Format: int32
+             * @description Wrapping provider contract version
+             */
+            wrappingProviderContract: number;
+        };
+        /** @description 结果数据 */
+        CryptoAgilityPolicyVO: {
+            contentEncryptionSuite?: string;
+            envelopeSignatureSuite?: string;
+            kemSuite?: string;
+            /** @description SHA-256 fingerprint of the non-secret policy */
+            policyFingerprint?: string;
+            /**
+             * Format: int64
+             * @description Persisted policy version; zero means operator defaults
+             */
+            policyVersion?: number;
+            proofSuite?: string;
+            signedProofSignatureSuite?: string;
+            signedProofSuite?: string;
+            signingProvider?: string;
+            /** Format: int32 */
+            signingProviderContract?: number;
+            wrappingProvider?: string;
+            /** Format: int32 */
+            wrappingProviderContract?: number;
+        };
+        CryptoProviderCapabilityVO: {
+            available?: boolean;
+            capabilities?: string[];
+            configurationState?: string;
+            /** Format: int32 */
+            contractVersion?: number;
+            providerId?: string;
+            providerType?: string;
+            suites?: string[];
+        };
+        CryptoSuiteCatalogEntryVO: {
+            compatibleWith?: string[];
+            /** Format: date-time */
+            deprecatedAt?: string;
+            /** Format: date-time */
+            disabledAt?: string;
+            id?: string;
+            /** Format: date-time */
+            introducedAt?: string;
+            keyConstraints?: string[];
+            productionWriteAllowed?: boolean;
+            /** Format: int32 */
+            providerContractVersion?: number;
+            providerId?: string;
+            status?: string;
+            transitionRequiresReencryption?: boolean;
+            type?: string;
+        };
         /** @description 直传分片完成请求 */
         DirectUploadCompletePartRequest: {
             /** @description 对象存储返回的 ETag */
@@ -5403,6 +5528,28 @@ export interface components {
             message?: string;
         };
         /** @description 返回结果封装 */
+        ResultCryptoAgilityDiagnosticsVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["CryptoAgilityDiagnosticsVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
+        ResultCryptoAgilityPolicyVO: {
+            /**
+             * Format: int32
+             * @description 操作代码
+             */
+            code?: number;
+            data?: components["schemas"]["CryptoAgilityPolicyVO"];
+            /** @description 提示信息 */
+            message?: string;
+        };
+        /** @description 返回结果封装 */
         ResultDirectUploadCompleteVO: {
             /**
              * Format: int32
@@ -7061,6 +7208,70 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ResultAttestationBatchProductionRunVO"];
+                };
+            };
+        };
+    };
+    diagnostics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultCryptoAgilityDiagnosticsVO"];
+                };
+            };
+        };
+    };
+    getPolicy_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultCryptoAgilityPolicyVO"];
+                };
+            };
+        };
+    };
+    savePolicy_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CryptoAgilityPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ResultCryptoAgilityPolicyVO"];
                 };
             };
         };

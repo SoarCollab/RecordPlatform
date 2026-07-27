@@ -5,8 +5,7 @@ import cn.flying.dao.entity.KeyRotationPolicy;
 import cn.flying.dao.entity.KeyRotationRun;
 import cn.flying.dao.mapper.KeyRotationPolicyMapper;
 import cn.flying.dao.mapper.KeyRotationRunMapper;
-import cn.flying.service.key.KeyWrappingProviderRegistry;
-import cn.flying.service.key.KeyWrappingResult;
+import cn.flying.service.key.CryptoSuitePolicyService;
 import cn.flying.service.key.WrappingKeyReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,7 +40,7 @@ class KeyRotationPolicyServiceTest {
     private KeyRotationRunMapper runMapper;
 
     @Mock
-    private KeyWrappingProviderRegistry wrappingRegistry;
+    private CryptoSuitePolicyService suitePolicyService;
 
     @Mock
     private KeyRotationAuditService auditService;
@@ -55,7 +54,7 @@ class KeyRotationPolicyServiceTest {
     @BeforeEach
     void setUp() {
         service = new KeyRotationPolicyService(
-                policyMapper, runMapper, wrappingRegistry, auditService);
+                policyMapper, runMapper, suitePolicyService, auditService);
         target = new WrappingKeyReference(
                 "vault-transit", 1, "tenant-key", "7", "VAULT-TRANSIT", "external-v2");
     }
@@ -65,7 +64,7 @@ class KeyRotationPolicyServiceTest {
      */
     @Test
     void shouldPersistExactActiveProviderSnapshot() {
-        when(wrappingRegistry.activeKeyReference(2)).thenReturn(KeyWrappingResult.success(target));
+        when(suitePolicyService.currentWrappingTarget(2)).thenReturn(target);
         when(policyMapper.selectTenantPolicyForUpdate(11L)).thenReturn(null);
         when(policyMapper.insert(any(KeyRotationPolicy.class))).thenAnswer(invocation -> {
             ((KeyRotationPolicy) invocation.getArgument(0)).setId(71L);
@@ -89,7 +88,7 @@ class KeyRotationPolicyServiceTest {
      */
     @Test
     void shouldRejectExpectedTargetMismatch() {
-        when(wrappingRegistry.activeKeyReference(2)).thenReturn(KeyWrappingResult.success(target));
+        when(suitePolicyService.currentWrappingTarget(2)).thenReturn(target);
         KeyRotationPolicyCommand mismatched = new KeyRotationPolicyCommand(
                 "vault-transit", 1, "8", 2, 25, 100,
                 true, 300L, 4, 5L, 60L, 120L, 600L);
@@ -112,7 +111,7 @@ class KeyRotationPolicyServiceTest {
         assertThatThrownBy(() -> service.save(11L, 51L, invalid))
                 .isInstanceOf(GeneralException.class);
 
-        verifyNoInteractions(policyMapper, wrappingRegistry);
+        verifyNoInteractions(policyMapper, suitePolicyService);
     }
 
     /**
@@ -141,7 +140,7 @@ class KeyRotationPolicyServiceTest {
         verify(policyMapper).updateById(policy);
         verify(auditService).recordPolicy(
                 policy, 51L, "RETIREMENT_ACKNOWLEDGE", "SUCCESS");
-        verify(wrappingRegistry, never()).activeKeyReference(any());
+        verify(suitePolicyService, never()).currentWrappingTarget(any());
     }
 
     /**
@@ -157,7 +156,7 @@ class KeyRotationPolicyServiceTest {
         KeyRotationPolicyCommand disabled = new KeyRotationPolicyCommand(
                 null, null, null, 2, 25, 100,
                 false, null, 4, 5L, 60L, 120L, 600L);
-        when(wrappingRegistry.activeKeyReference(2)).thenReturn(KeyWrappingResult.success(target));
+        when(suitePolicyService.currentWrappingTarget(2)).thenReturn(target);
         when(policyMapper.selectTenantPolicyForUpdate(11L)).thenReturn(existing);
 
         KeyRotationPolicy result = service.save(11L, 51L, disabled);
@@ -248,7 +247,7 @@ class KeyRotationPolicyServiceTest {
         assertThatThrownBy(() -> service.changeStatus(11L, 0L, KeyRotationStates.POLICY_ACTIVE))
                 .isInstanceOf(GeneralException.class);
 
-        verifyNoInteractions(policyMapper, wrappingRegistry);
+        verifyNoInteractions(policyMapper, suitePolicyService);
     }
 
     /**

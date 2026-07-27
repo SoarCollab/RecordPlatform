@@ -10,6 +10,7 @@ import org.springframework.util.StringUtils;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -35,7 +36,10 @@ public class KeyWrappingProviderRegistry {
         Map<ProviderKey, KeyWrappingProvider> discovered = new LinkedHashMap<>();
         for (KeyWrappingProvider provider : providerList) {
             ProviderKey key = new ProviderKey(provider.providerId(), provider.contractVersion());
+            Set<String> algorithms = provider.supportedWrappingAlgorithms();
             if (!StringUtils.hasText(key.providerId()) || key.contractVersion() <= 0
+                    || algorithms == null || algorithms.isEmpty()
+                    || algorithms.stream().anyMatch(algorithm -> !StringUtils.hasText(algorithm))
                     || discovered.putIfAbsent(key, provider) != null) {
                 throw new GeneralException(ResultEnum.PARAM_ERROR, "密钥包封 provider 注册重复或无效");
             }
@@ -49,7 +53,27 @@ public class KeyWrappingProviderRegistry {
      */
     public KeyWrappingResult<WrappingKeyReference> activeKeyReference(Integer logicalKeyVersion) {
         KeyWrappingProvider provider = requireActiveProvider();
-        return observe(provider, "resolve", () -> provider.activeKeyReference(logicalKeyVersion));
+        return keyReference(provider.providerId(), provider.contractVersion(), logicalKeyVersion);
+    }
+
+    /**
+     * Resolves an exact provider contract for a tenant policy and verifies its write capability.
+     */
+    public KeyWrappingResult<WrappingKeyReference> keyReference(String providerId,
+                                                                Integer contractVersion,
+                                                                Integer logicalKeyVersion) {
+        KeyWrappingProvider provider = contractVersion == null ? null : resolve(providerId, contractVersion);
+        if (provider == null || !provider.capabilities().contains(KeyWrappingCapability.WRAP)) {
+            return KeyWrappingResult.failure(KeyWrappingFailure.of(
+                    KeyWrappingFailureCategory.CONFIGURATION, false));
+        }
+        KeyWrappingResult<WrappingKeyReference> result = observe(
+                provider, "resolve", () -> provider.activeKeyReference(logicalKeyVersion));
+        if (!result.isSuccess() || supportsReference(provider, result.value())) {
+            return result;
+        }
+        return KeyWrappingResult.failure(KeyWrappingFailure.of(
+                KeyWrappingFailureCategory.CONFIGURATION, false));
     }
 
     /**
@@ -62,7 +86,9 @@ public class KeyWrappingProviderRegistry {
         }
         KeyWrappingProvider provider = resolve(request.target().providerId(),
                 request.target().providerContractVersion());
-        if (provider == null) {
+        if (provider == null
+                || !provider.capabilities().contains(KeyWrappingCapability.WRAP)
+                || !supportsReference(provider, request.target())) {
             return KeyWrappingResult.failure(KeyWrappingFailure.of(
                     KeyWrappingFailureCategory.CONFIGURATION, false));
         }
@@ -79,7 +105,9 @@ public class KeyWrappingProviderRegistry {
         }
         WrappingKeyReference source = request.source().keyReference();
         KeyWrappingProvider provider = resolve(source.providerId(), source.providerContractVersion());
-        if (provider == null) {
+        if (provider == null
+                || !provider.capabilities().contains(KeyWrappingCapability.UNWRAP)
+                || !supportsReference(provider, source)) {
             return KeyWrappingResult.failure(KeyWrappingFailure.of(
                     KeyWrappingFailureCategory.CONFIGURATION, false));
         }
@@ -102,7 +130,10 @@ public class KeyWrappingProviderRegistry {
                     KeyWrappingFailureCategory.UNSUPPORTED, false));
         }
         KeyWrappingProvider provider = resolve(source.providerId(), source.providerContractVersion());
-        if (provider == null || !provider.capabilities().contains(KeyWrappingCapability.NATIVE_REWRAP_SAME_KEY)) {
+        if (provider == null
+                || !provider.capabilities().contains(KeyWrappingCapability.NATIVE_REWRAP_SAME_KEY)
+                || !supportsReference(provider, source)
+                || !supportsReference(provider, request.target())) {
             return KeyWrappingResult.failure(KeyWrappingFailure.of(
                     KeyWrappingFailureCategory.UNSUPPORTED, false));
         }
@@ -124,6 +155,45 @@ public class KeyWrappingProviderRegistry {
     }
 
     /**
+     * Returns whether an exact provider contract declares an operation and wrapping algorithm.
+     */
+    public boolean supports(String providerId,
+                            Integer contractVersion,
+                            KeyWrappingCapability capability,
+                            String wrappingAlgorithm) {
+        KeyWrappingProvider provider = contractVersion == null ? null : resolve(providerId, contractVersion);
+        return provider != null
+                && capability != null
+                && provider.capabilities().contains(capability)
+                && StringUtils.hasText(wrappingAlgorithm)
+                && provider.supportedWrappingAlgorithms().contains(wrappingAlgorithm);
+    }
+
+    /**
+     * Returns sanitized diagnostics for every registered provider contract.
+     */
+    public List<KeyWrappingProviderDiagnostics> diagnostics() {
+        return providers.values().stream()
+                .map(KeyWrappingProvider::diagnostics)
+                .toList();
+    }
+
+    /**
+     * Returns sanitized operation and algorithm capability declarations for all provider contracts.
+     */
+    public List<KeyWrappingProviderCapabilityDiagnostic> capabilityDiagnostics() {
+        return providers.values().stream()
+                .map(provider -> {
+                    KeyWrappingProviderDiagnostics diagnostics = provider.diagnostics();
+                    return new KeyWrappingProviderCapabilityDiagnostic(
+                            provider.providerId(), provider.contractVersion(), provider.capabilities(),
+                            provider.supportedWrappingAlgorithms(), diagnostics.available(),
+                            diagnostics.configurationState());
+                })
+                .toList();
+    }
+
+    /**
      * 按稳定复合身份解析 provider。
      */
     private KeyWrappingProvider resolve(String providerId, int contractVersion) {
@@ -131,6 +201,19 @@ public class KeyWrappingProviderRegistry {
             return null;
         }
         return providers.get(new ProviderKey(providerId, contractVersion));
+    }
+
+    /**
+     * Confirms a provider result keeps the exact provider identity and declared algorithm set.
+     */
+    private boolean supportsReference(KeyWrappingProvider provider, WrappingKeyReference reference) {
+        if (provider == null || reference == null
+                || !provider.providerId().equals(reference.providerId())
+                || provider.contractVersion() != reference.providerContractVersion()) {
+            return false;
+        }
+        Set<String> algorithms = provider.supportedWrappingAlgorithms();
+        return algorithms != null && algorithms.contains(reference.wrappingAlgorithm());
     }
 
     /**

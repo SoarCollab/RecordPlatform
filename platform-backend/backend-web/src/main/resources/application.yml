@@ -248,6 +248,18 @@ key:
     initial-delay-ms: ${KEY_ROTATION_INITIAL_DELAY_MS:30000}
     max-tenants-per-poll: ${KEY_ROTATION_MAX_TENANTS_PER_POLL:100}
 
+# Closed runtime suite catalog. Tenant policy overrides are persisted in tenant_crypto_policy.
+crypto:
+  agility:
+    production-mode: ${CRYPTO_AGILITY_PRODUCTION_MODE:true}
+    allow-experimental-writes: ${CRYPTO_AGILITY_ALLOW_EXPERIMENTAL_WRITES:false}
+    signing-provider: ${CRYPTO_AGILITY_SIGNING_PROVIDER:local-ed25519}
+    signing-provider-contract-version: ${CRYPTO_AGILITY_SIGNING_PROVIDER_CONTRACT_VERSION:1}
+    signed-proof-signature-suite: ${CRYPTO_AGILITY_SIGNED_PROOF_SIGNATURE_SUITE:JWS-EDDSA-ED25519-V1}
+    signed-proof-suite: ${CRYPTO_AGILITY_SIGNED_PROOF_SUITE:RP-SIGNED-PROOF-ZIP-V2}
+    # Operators may only tighten lifecycle for known catalog IDs; unknown entries fail startup.
+    suite-lifecycle: {}
+
 # Quota governance configuration
 quota:
   enforcement-mode: SHADOW

@@ -46,6 +46,14 @@ public class ProofBundleIssuance implements Serializable {
 
     private String signatureJws;
 
+    private String signingProvider;
+
+    private Integer signingProviderContract;
+
+    private String signatureSuite;
+
+    private String proofSuite;
+
     private String signatureAlgorithm;
 
     private String keyId;

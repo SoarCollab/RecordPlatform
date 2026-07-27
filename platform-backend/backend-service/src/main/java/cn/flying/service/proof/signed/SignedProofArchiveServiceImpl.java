@@ -450,6 +450,10 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
                 .setManifestHash(archive.manifestHash())
                 .setManifestJson(new String(manifestBytes, StandardCharsets.UTF_8))
                 .setSignatureJws(archive.compactJws())
+                .setSigningProvider(key.providerId())
+                .setSigningProviderContract(key.providerContractVersion())
+                .setSignatureSuite(key.signatureSuite())
+                .setProofSuite(key.proofSuite())
                 .setSignatureAlgorithm(key.algorithm())
                 .setKeyId(key.keyId())
                 .setKeyVersion(key.keyVersion())
@@ -514,6 +518,10 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
             validateIssuanceBinding(file, leaf, issuance);
             validateIssuedManifest(file, batch, issuance, issuedManifest);
             ProofSigningKeyMetadata key = new ProofSigningKeyMetadata(
+                    issuance.getSigningProvider(),
+                    issuance.getSigningProviderContract(),
+                    issuance.getSignatureSuite(),
+                    issuance.getProofSuite(),
                     issuance.getSignatureAlgorithm(),
                     issuance.getKeyId(),
                     issuance.getKeyVersion(),
@@ -1283,6 +1291,11 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
                 || !Objects.equals(file.getVersion(), issuance.getFileVersion())
                 || !Objects.equals(leaf.getId(), issuance.getLeafId())
                 || !Objects.equals(deriveProofId(file, leaf), issuance.getProofId())
+                || !StringUtils.hasText(issuance.getSigningProvider())
+                || issuance.getSigningProviderContract() == null
+                || issuance.getSigningProviderContract() <= 0
+                || !StringUtils.hasText(issuance.getSignatureSuite())
+                || !StringUtils.hasText(issuance.getProofSuite())
                 || !ISSUED_PROOF_STATUS.contains(issuance.getIssuedStatus())
                 || issuance.getIssuedAt() == null) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "签发记录与证明证据不一致");
@@ -1300,6 +1313,10 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
                 .setId(snowflakeIdGenerator.nextId())
                 .setKeyId(key.keyId())
                 .setKeyVersion(key.keyVersion())
+                .setSigningProvider(key.providerId())
+                .setSigningProviderContract(key.providerContractVersion())
+                .setSignatureSuite(key.signatureSuite())
+                .setProofSuite(key.proofSuite())
                 .setSignatureAlgorithm(key.algorithm())
                 .setPublicKeySpki(key.publicKeySpki())
                 .setPublicKeyFingerprint(key.publicKeyFingerprint())
@@ -1335,6 +1352,10 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
     private boolean matchesKeyIdentity(ProofSigningKeyRecord record, ProofSigningKeyMetadata key) {
         return Objects.equals(record.getKeyId(), key.keyId())
                 && Objects.equals(record.getKeyVersion(), key.keyVersion())
+                && Objects.equals(record.getSigningProvider(), key.providerId())
+                && Objects.equals(record.getSigningProviderContract(), key.providerContractVersion())
+                && Objects.equals(record.getSignatureSuite(), key.signatureSuite())
+                && Objects.equals(record.getProofSuite(), key.proofSuite())
                 && Objects.equals(record.getSignatureAlgorithm(), key.algorithm())
                 && Objects.equals(record.getPublicKeySpki(), key.publicKeySpki())
                 && Objects.equals(record.getPublicKeyFingerprint(), key.publicKeyFingerprint());
@@ -1345,6 +1366,11 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
      */
     private boolean hasValidPublicKeyMetadata(ProofSigningKeyMetadata key) {
         if (key == null
+                || !StringUtils.hasText(key.providerId())
+                || key.providerContractVersion() == null
+                || key.providerContractVersion() <= 0
+                || !StringUtils.hasText(key.signatureSuite())
+                || !StringUtils.hasText(key.proofSuite())
                 || !JWS_SIGNATURE_ALGORITHM.equals(key.algorithm())
                 || !StringUtils.hasText(key.keyId())
                 || !KEY_ID_PATTERN.matcher(key.keyId()).matches()
@@ -1376,6 +1402,10 @@ public class SignedProofArchiveServiceImpl implements SignedProofArchiveService 
             return null;
         }
         return new ProofSigningKeyMetadata(
+                record.getSigningProvider(),
+                record.getSigningProviderContract(),
+                record.getSignatureSuite(),
+                record.getProofSuite(),
                 record.getSignatureAlgorithm(),
                 record.getKeyId(),
                 record.getKeyVersion(),

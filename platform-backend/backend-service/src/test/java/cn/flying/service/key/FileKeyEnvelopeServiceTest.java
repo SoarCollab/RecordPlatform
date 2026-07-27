@@ -11,6 +11,7 @@ import cn.flying.dao.entity.FileKeyAuditLog;
 import cn.flying.dao.entity.FileKeyEnvelope;
 import cn.flying.dao.mapper.FileKeyAuditLogMapper;
 import cn.flying.dao.mapper.FileKeyEnvelopeMapper;
+import cn.flying.dao.mapper.TenantCryptoPolicyMapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -53,6 +54,9 @@ class FileKeyEnvelopeServiceTest {
     @Mock
     private KeyEnvelopeRotationActivationService rotationActivationService;
 
+    @Mock
+    private TenantCryptoPolicyMapper tenantCryptoPolicyMapper;
+
     private FileKeyEnvelopeProperties properties;
     private LocalKeyWrappingService wrappingService;
     private KeyWrappingProviderRegistry wrappingRegistry;
@@ -74,7 +78,13 @@ class FileKeyEnvelopeServiceTest {
         wrappingService = new LocalKeyWrappingService(properties);
         wrappingRegistry = new KeyWrappingProviderRegistry(
                 java.util.List.of(wrappingService), properties, new SimpleMeterRegistry());
-        suitePolicy = new CryptoSuitePolicyService(properties);
+        CryptoAgilityProperties agilityProperties = new CryptoAgilityProperties();
+        suitePolicy = new CryptoSuitePolicyService(
+                properties,
+                agilityProperties,
+                new CryptoSuiteRegistry(agilityProperties, new SimpleMeterRegistry()),
+                wrappingRegistry,
+                tenantCryptoPolicyMapper);
         org.mockito.Mockito.lenient()
                 .when(rotationActivationService.activateVerifiedCandidate(any(), any(), any(), any(), any()))
                 .thenReturn("SUCCEEDED");
@@ -114,6 +124,26 @@ class FileKeyEnvelopeServiceTest {
         assertEquals("NONE-V1", sanitized.get("kemSuite"));
         assertEquals("RP-MERKLE-SHA256-V1", sanitized.get("proofSuite"));
         assertEquals(1, ((Number) sanitized.get("keyVersion")).intValue());
+    }
+
+    /**
+     * Proves one upload decision freezes its exact provider target instead of re-reading changed defaults.
+     */
+    @Test
+    void shouldPersistFrozenWrappingTargetWhenDefaultsDriftAfterPreparation() {
+        FileParamEnvelopeResult decision = envelopeService.prepareFileParam(
+                "{\"fileName\":\"a.txt\",\"initialKey\":\"serialized-key\"}");
+        File file = new File().setId(10L).setTenantId(1L).setUid(100L).setFileHash("hash-1");
+        properties.setActiveProvider("unregistered-after-decision");
+        when(fileKeyEnvelopeMapper.insert(any(FileKeyEnvelope.class))).thenReturn(1);
+
+        envelopeService.saveOwnerEnvelope(file, "hash-1", 100L, decision);
+
+        ArgumentCaptor<FileKeyEnvelope> envelope = ArgumentCaptor.forClass(FileKeyEnvelope.class);
+        verify(fileKeyEnvelopeMapper).insert(envelope.capture());
+        assertThat(envelope.getValue().getKmsProvider()).isEqualTo(LocalKeyWrappingService.PROVIDER_ID);
+        assertThat(envelope.getValue().getProviderContractVersion()).isEqualTo(1);
+        assertThat(envelope.getValue().getWrappingAlgorithm()).isEqualTo(CryptoSuiteIds.LOCAL_WRAPPING);
     }
 
     /**
@@ -468,7 +498,7 @@ class FileKeyEnvelopeServiceTest {
      */
     @Test
     @DisplayName("should unwrap historical envelope without non aad suite metadata")
-    void shouldUnwrapHistoricalEnvelopeWithoutNonAadSuiteMetadata() {
+    void shouldFailClosedForHistoricalEnvelopeWithoutSuiteMetadata() {
         File file = new File()
                 .setId(10L)
                 .setTenantId(1L)
@@ -490,9 +520,11 @@ class FileKeyEnvelopeServiceTest {
         clearInvocations(fileKeyEnvelopeMapper, fileKeyAuditLogMapper);
         when(fileKeyEnvelopeMapper.selectOne(any())).thenReturn(historicalEnvelope);
 
-        Optional<String> initialKey = envelopeService.unwrapActiveOwnerInitialKey(file, "hash-1", 100L);
-
-        assertThat(initialKey).contains("serialized-key");
+        assertThatThrownBy(() -> envelopeService.unwrapActiveOwnerInitialKey(file, "hash-1", 100L))
+                .isInstanceOf(GeneralException.class);
+        ArgumentCaptor<FileKeyAuditLog> auditCaptor = ArgumentCaptor.forClass(FileKeyAuditLog.class);
+        verify(fileKeyAuditLogMapper).insert(auditCaptor.capture());
+        assertEquals("CONFIGURATION", auditCaptor.getValue().getFailureCategory());
     }
 
     /**
@@ -1215,17 +1247,24 @@ class FileKeyEnvelopeServiceTest {
      */
     @Test
     void shouldPreferNativeProviderRewrapForSameExternalKey() {
-        properties.setActiveProvider("native-test");
+        properties.setActiveProvider(VaultTransitKeyWrappingProvider.PROVIDER_ID);
         properties.setKeyVersion(2);
         NativeRewrapProvider provider = new NativeRewrapProvider();
         KeyWrappingProviderRegistry registry = new KeyWrappingProviderRegistry(
                 java.util.List.of(provider), properties, new SimpleMeterRegistry());
+        CryptoAgilityProperties agilityProperties = new CryptoAgilityProperties();
+        CryptoSuitePolicyService nativeSuitePolicy = new CryptoSuitePolicyService(
+                properties,
+                agilityProperties,
+                new CryptoSuiteRegistry(agilityProperties, new SimpleMeterRegistry()),
+                registry,
+                tenantCryptoPolicyMapper);
         FileKeyEnvelopeService service = new FileKeyEnvelopeService(
                 fileKeyEnvelopeMapper,
                 fileKeyAuditLogMapper,
                 registry,
                 properties,
-                suitePolicy,
+                nativeSuitePolicy,
                 rotationActivationService);
         File file = new File().setId(10L).setTenantId(1L).setUid(100L).setFileHash("hash-1");
         WrappingContext sourceContext = new WrappingContext(
@@ -1250,8 +1289,8 @@ class FileKeyEnvelopeServiceTest {
                 .setKemSuite(properties.getKemSuite())
                 .setProofSuite(properties.getProofSuite())
                 .setEncryptionAlgorithm(properties.getEncryptionAlgorithm())
-                .setWrappingAlgorithm("TEST-NATIVE")
-                .setKmsProvider("native-test")
+                .setWrappingAlgorithm(CryptoSuiteIds.VAULT_TRANSIT_WRAPPING)
+                .setKmsProvider(VaultTransitKeyWrappingProvider.PROVIDER_ID)
                 .setProviderContractVersion(1)
                 .setKmsKeyId("shared-named-key")
                 .setProviderKeyVersion("1")
@@ -1348,7 +1387,7 @@ class FileKeyEnvelopeServiceTest {
 
         @Override
         public String providerId() {
-            return "native-test";
+            return VaultTransitKeyWrappingProvider.PROVIDER_ID;
         }
 
         @Override
@@ -1365,13 +1404,18 @@ class FileKeyEnvelopeServiceTest {
         }
 
         @Override
+        public Set<String> supportedWrappingAlgorithms() {
+            return Set.of(CryptoSuiteIds.VAULT_TRANSIT_WRAPPING);
+        }
+
+        @Override
         public KeyWrappingResult<WrappingKeyReference> activeKeyReference(Integer logicalKeyVersion) {
             return KeyWrappingResult.success(new WrappingKeyReference(
                     providerId(),
                     contractVersion(),
                     "shared-named-key",
                     "2",
-                    "TEST-NATIVE",
+                    CryptoSuiteIds.VAULT_TRANSIT_WRAPPING,
                     WrappingContext.EXTERNAL_CONTEXT_V2));
         }
 

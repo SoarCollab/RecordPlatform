@@ -108,7 +108,10 @@ public class FileKeyEnvelopeService {
         }
 
         Integer keyVersion = properties.getKeyVersion();
-        CryptoSuiteMetadata suiteMetadata = suitePolicy.currentMetadata(keyVersion);
+        CryptoSuitePolicySnapshot policySnapshot = suitePolicy.currentPolicy();
+        CryptoSuiteMetadata suiteMetadata = suitePolicy.metadataFor(policySnapshot, keyVersion);
+        WrappingKeyReference wrappingTarget = suitePolicy.validateWrappingSelection(
+                policySnapshot, suiteMetadata.keyVersion());
         String explicitAlgorithmSuite = resolveExplicitAlgorithmSuite(sanitized);
         if (explicitAlgorithmSuite != null) {
             suitePolicy.validateAlgorithmSuite(explicitAlgorithmSuite);
@@ -139,7 +142,8 @@ public class FileKeyEnvelopeService {
                 suiteMetadata.proofSuite(),
                 encryptionAlgorithm,
                 keyVersion,
-                suiteMetadata.deprecatedAfterIso()
+                suiteMetadata.deprecatedAfterIso(),
+                wrappingTarget
         );
     }
 
@@ -157,7 +161,10 @@ public class FileKeyEnvelopeService {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件密钥信封上下文不完整");
         }
 
-        WrappingKeyReference target = wrappingRegistry.activeKeyReference(envelopeResult.keyVersion()).requireValue();
+        WrappingKeyReference target = envelopeResult.wrappingTarget();
+        if (target == null) {
+            throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件密钥信封缺少冻结的包封目标");
+        }
         WrappingContext context = buildWrappingContext(
                 tenantId,
                 fileId,
@@ -535,9 +542,12 @@ public class FileKeyEnvelopeService {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件密钥信封上下文不完整");
         }
 
-        CryptoSuiteMetadata targetMetadata = suitePolicy.currentMetadata(properties.getKeyVersion());
+        CryptoSuitePolicySnapshot policySnapshot = suitePolicy.currentPolicy();
+        CryptoSuiteMetadata targetMetadata = suitePolicy.metadataFor(
+                policySnapshot, properties.getKeyVersion());
         Integer targetKeyVersion = targetMetadata.keyVersion();
-        WrappingKeyReference targetReference = wrappingRegistry.activeKeyReference(targetKeyVersion).requireValue();
+        WrappingKeyReference targetReference = suitePolicy.validateWrappingSelection(
+                policySnapshot, targetKeyVersion);
         List<FileKeyEnvelope> envelopes = fileKeyEnvelopeMapper.selectList(new LambdaQueryWrapper<FileKeyEnvelope>()
                 .eq(FileKeyEnvelope::getTenantId, tenantId)
                 .eq(FileKeyEnvelope::getFileId, file.getId())
@@ -602,7 +612,9 @@ public class FileKeyEnvelopeService {
         WrappingContext sourceContext;
         try {
             validatePersistedEnvelopeMetadata(source);
+            suitePolicy.validateRewrapTransition(source, targetReference);
             sourceContext = buildContextFromEnvelope(source);
+            sourceContext.canonicalBytes();
         } catch (GeneralException exception) {
             audit(source, OPERATION_ROTATE, actorId, RESULT_FAILURE, reason,
                     KeyWrappingFailureCategory.INVALID_REQUEST);
@@ -761,10 +773,12 @@ public class FileKeyEnvelopeService {
                                        String recipientType,
                                        Long recipientId,
                                        String initialKey) {
-        CryptoSuiteMetadata suiteMetadata = suitePolicy.currentMetadata(properties.getKeyVersion());
+        CryptoSuitePolicySnapshot policySnapshot = suitePolicy.currentPolicy();
+        CryptoSuiteMetadata suiteMetadata = suitePolicy.metadataFor(
+                policySnapshot, properties.getKeyVersion());
         Integer keyVersion = suiteMetadata.keyVersion();
         String algorithmSuite = suiteMetadata.algorithmSuite();
-        WrappingKeyReference target = wrappingRegistry.activeKeyReference(keyVersion).requireValue();
+        WrappingKeyReference target = suitePolicy.validateWrappingSelection(policySnapshot, keyVersion);
         WrappingContext context = buildWrappingContext(tenantId, file.getId(), fileHash,
                 recipientType, recipientId, keyVersion, algorithmSuite, target.contextSchema());
         WrappedDataKey wrapped = wrappingRegistry.wrap(new KeyWrapRequest(
@@ -877,6 +891,11 @@ public class FileKeyEnvelopeService {
     private KeyWrappingResult<PlaintextDataKey> unwrapEnvelopeMaterial(FileKeyEnvelope envelope) {
         try {
             validatePersistedEnvelopeMetadata(envelope);
+        } catch (GeneralException exception) {
+            return KeyWrappingResult.failure(KeyWrappingFailure.of(
+                    KeyWrappingFailureCategory.CONFIGURATION, false));
+        }
+        try {
             WrappingContext context = buildContextFromEnvelope(envelope);
             if (!context.matchesHash(envelope.getAadHash())) {
                 return KeyWrappingResult.failure(KeyWrappingFailure.of(
@@ -1038,7 +1057,7 @@ public class FileKeyEnvelopeService {
                 || !StringUtils.hasText(envelope.getAadHash())) {
             throw new GeneralException(ResultEnum.FILE_RECORD_ERROR, "文件密钥信封 provider metadata 不完整");
         }
-        buildContextFromEnvelope(envelope).canonicalBytes();
+        suitePolicy.validatePersistedEnvelopeForRead(envelope);
     }
 
     /**

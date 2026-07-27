@@ -6,7 +6,7 @@ import cn.flying.dao.entity.KeyRotationPolicy;
 import cn.flying.dao.entity.KeyRotationRun;
 import cn.flying.dao.mapper.KeyRotationPolicyMapper;
 import cn.flying.dao.mapper.KeyRotationRunMapper;
-import cn.flying.service.key.KeyWrappingProviderRegistry;
+import cn.flying.service.key.CryptoSuitePolicyService;
 import cn.flying.service.key.WrappingKeyReference;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.RequiredArgsConstructor;
@@ -33,7 +33,7 @@ public class KeyRotationPolicyService {
 
     private final KeyRotationPolicyMapper policyMapper;
     private final KeyRotationRunMapper runMapper;
-    private final KeyWrappingProviderRegistry wrappingRegistry;
+    private final CryptoSuitePolicyService suitePolicyService;
     private final KeyRotationAuditService auditService;
 
     /**
@@ -43,9 +43,8 @@ public class KeyRotationPolicyService {
     public KeyRotationPolicy save(Long tenantId, Long actorId, KeyRotationPolicyCommand command) {
         validateIdentity(tenantId, actorId);
         validateCommand(command);
-        WrappingKeyReference target = wrappingRegistry
-                .activeKeyReference(command.targetLogicalKeyVersion())
-                .requireValue();
+        WrappingKeyReference target = suitePolicyService
+                .currentWrappingTarget(command.targetLogicalKeyVersion());
         validateExpectedTarget(command, target);
 
         KeyRotationPolicy policy = policyMapper.selectTenantPolicyForUpdate(tenantId);
