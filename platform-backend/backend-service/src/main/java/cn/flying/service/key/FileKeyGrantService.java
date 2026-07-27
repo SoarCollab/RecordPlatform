@@ -877,14 +877,22 @@ public class FileKeyGrantService {
      * 读取必填 Long 字段。
      */
     private Long requiredLong(Map<String, String> fields, String key) {
-        return Long.valueOf(required(fields, key));
+        try {
+            return Long.valueOf(required(fields, key));
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("invalid long field", exception);
+        }
     }
 
     /**
      * 读取必填 Integer 字段。
      */
     private Integer requiredInteger(Map<String, String> fields, String key) {
-        return Integer.valueOf(required(fields, key));
+        try {
+            return Integer.valueOf(required(fields, key));
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("invalid integer field", exception);
+        }
     }
 
     /**
@@ -902,7 +910,14 @@ public class FileKeyGrantService {
      * 读取允许为空的 Long 字段。
      */
     private Long nullableLong(String value) {
-        return StringUtils.hasText(value) ? Long.valueOf(value) : null;
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        try {
+            return Long.valueOf(value);
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("invalid nullable long field", exception);
+        }
     }
 
     /**

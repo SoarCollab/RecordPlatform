@@ -725,12 +725,43 @@ class FileKeyGrantServiceTest {
                 .isEqualTo("GRANT_STATE_INVALID");
 
         stored.put("issuedAt", issuedAt);
-        stored.remove("fileHash");
+        Object fileHash = stored.remove("fileHash");
+        assertThatThrownBy(() -> service.consumeAuthenticated(grant.reference(), SESSION_ID, ACTOR_ID))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo("GRANT_STATE_INVALID");
+
+        stored.put("fileHash", fileHash);
+        Object fileId = stored.put("fileId", "not-a-long");
+        assertThatThrownBy(() -> service.consumeAuthenticated(grant.reference(), SESSION_ID, ACTOR_ID))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo("GRANT_STATE_INVALID");
+
+        stored.put("fileId", fileId);
+        Object fileVersion = stored.put("fileVersion", "not-an-integer");
+        assertThatThrownBy(() -> service.consumeAuthenticated(grant.reference(), SESSION_ID, ACTOR_ID))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo("GRANT_STATE_INVALID");
+
+        stored.put("fileVersion", fileVersion);
+        stored.put("envelopeId", "not-a-long");
         assertThatThrownBy(() -> service.consumeAuthenticated(grant.reference(), SESSION_ID, ACTOR_ID))
                 .isInstanceOf(GeneralException.class)
                 .extracting("data")
                 .isEqualTo("GRANT_STATE_INVALID");
         verify(fileMapper, never()).selectById(any());
+    }
+
+    /**
+     * 验证损坏的 Lua field/value 参数不会读取越界。
+     */
+    @Test
+    void shouldRejectMalformedIssueLuaArguments() {
+        assertThatThrownBy(() -> storedFields(new Object[]{60L, "orphan-field"}))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Malformed issue Lua arguments");
     }
 
     /**
@@ -993,8 +1024,11 @@ class FileKeyGrantServiceTest {
      * 将 issue Lua 的 field/value 参数还原为后续消费读取的 Redis hash。
      */
     private Map<Object, Object> storedFields(Object[] arguments) {
+        if (arguments == null || arguments.length < 1 || (arguments.length - 1) % 2 != 0) {
+            throw new IllegalArgumentException("Malformed issue Lua arguments");
+        }
         Map<Object, Object> fields = new LinkedHashMap<>();
-        for (int index = 1; index < arguments.length; index += 2) {
+        for (int index = 1; index + 1 < arguments.length; index += 2) {
             fields.put(arguments[index], arguments[index + 1]);
         }
         return fields;
