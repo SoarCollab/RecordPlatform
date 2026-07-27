@@ -177,6 +177,72 @@ class KeyWrappingProviderRegistryTest {
     }
 
     /**
+     * Proves every declared provider operation is routed by exact identity and exposed through sanitized diagnostics.
+     */
+    @Test
+    void shouldRouteDeclaredCapabilitiesAndExposeSanitizedDiagnostics() {
+        FileKeyEnvelopeProperties properties = new FileKeyEnvelopeProperties();
+        properties.setActiveProvider("test-provider");
+        TrackingProvider provider = new TrackingProvider("test-provider", 1, Set.of("TEST"), true);
+        KeyWrappingProviderRegistry registry = new KeyWrappingProviderRegistry(
+                List.of(provider), properties, new SimpleMeterRegistry());
+        WrappingContext context = context(WrappingContext.LOCAL_AAD_V1, 1);
+        WrappingKeyReference reference = registry.keyReference("test-provider", 1, 1).requireValue();
+        KeyWrapRequest wrapRequest = new KeyWrapRequest(
+                PlaintextDataKey.of("plain-key"), context, reference, 1);
+        WrappedDataKey wrapped = registry.wrap(wrapRequest).requireValue();
+        PersistedWrappedDataKey persisted = new PersistedWrappedDataKey(
+                wrapped.encryptedDataKey(), wrapped.wrappingIv(), reference, 1);
+
+        assertThat(registry.unwrap(new KeyUnwrapRequest(persisted, context)).requireValue().reveal())
+                .isEqualTo("key");
+        assertThat(registry.rewrap(new KeyRewrapRequest(
+                persisted, context, reference, context, 2)).requireValue().keyVersion()).isEqualTo(2);
+        assertThat(registry.supports("test-provider", 1, KeyWrappingCapability.WRAP, "TEST")).isTrue();
+        assertThat(registry.supports("test-provider", 1, KeyWrappingCapability.UNWRAP, "UNKNOWN")).isFalse();
+        assertThat(registry.activeProviderSupports(KeyWrappingCapability.NATIVE_REWRAP_SAME_KEY)).isTrue();
+        assertThat(registry.activeDiagnostics().configurationState()).isEqualTo("configured");
+        assertThat(registry.diagnostics()).singleElement().satisfies(diagnostic ->
+                assertThat(diagnostic.providerId()).isEqualTo("test-provider"));
+        assertThat(registry.capabilityDiagnostics()).singleElement().satisfies(diagnostic -> {
+            assertThat(diagnostic.wrappingAlgorithms()).containsExactly("TEST");
+            assertThat(diagnostic.capabilities()).contains(KeyWrappingCapability.NATIVE_REWRAP_SAME_KEY);
+        });
+        assertThat(provider.wrapCalls).isEqualTo(1);
+        assertThat(provider.unwrapCalls).isEqualTo(1);
+        assertThat(provider.rewrapCalls).isEqualTo(1);
+    }
+
+    /**
+     * Proves null requests and cross-provider native rewrap attempts fail before invoking a provider.
+     */
+    @Test
+    void shouldRejectMalformedRequestsAndCrossProviderRewrap() {
+        FileKeyEnvelopeProperties properties = new FileKeyEnvelopeProperties();
+        properties.setActiveProvider("test-provider");
+        TrackingProvider provider = new TrackingProvider("test-provider", 1, Set.of("TEST"), true);
+        KeyWrappingProviderRegistry registry = new KeyWrappingProviderRegistry(
+                List.of(provider), properties, new SimpleMeterRegistry());
+        WrappingContext context = context(WrappingContext.LOCAL_AAD_V1, 1);
+        WrappingKeyReference sourceReference = provider.activeKeyReference(1).requireValue();
+        PersistedWrappedDataKey source = new PersistedWrappedDataKey(
+                "cipher", "iv", sourceReference, 1);
+        WrappingKeyReference otherProvider = new WrappingKeyReference(
+                "other", 1, "key", "1", "TEST", WrappingContext.LOCAL_AAD_V1);
+
+        assertThat(registry.wrap(null).failure().category())
+                .isEqualTo(KeyWrappingFailureCategory.INVALID_REQUEST);
+        assertThat(registry.unwrap(null).failure().category())
+                .isEqualTo(KeyWrappingFailureCategory.INVALID_REQUEST);
+        assertThat(registry.rewrap(null).failure().category())
+                .isEqualTo(KeyWrappingFailureCategory.INVALID_REQUEST);
+        assertThat(registry.rewrap(new KeyRewrapRequest(
+                source, context, otherProvider, context, 2)).failure().category())
+                .isEqualTo(KeyWrappingFailureCategory.UNSUPPORTED);
+        assertThat(provider.rewrapCalls).isZero();
+    }
+
+    /**
      * 验证 provider-neutral 请求对象的字符串表示不泄漏原始上下文或密钥材料。
      */
     @Test
@@ -207,16 +273,27 @@ class KeyWrappingProviderRegistryTest {
         private final String providerId;
         private final int contractVersion;
         private final Set<String> algorithms;
+        private final boolean nativeRewrap;
+        private int wrapCalls;
         private int unwrapCalls;
+        private int rewrapCalls;
 
         private TrackingProvider(String providerId, int contractVersion) {
-            this(providerId, contractVersion, Set.of("TEST"));
+            this(providerId, contractVersion, Set.of("TEST"), false);
         }
 
         private TrackingProvider(String providerId, int contractVersion, Set<String> algorithms) {
+            this(providerId, contractVersion, algorithms, false);
+        }
+
+        private TrackingProvider(String providerId,
+                                 int contractVersion,
+                                 Set<String> algorithms,
+                                 boolean nativeRewrap) {
             this.providerId = providerId;
             this.contractVersion = contractVersion;
             this.algorithms = algorithms;
+            this.nativeRewrap = nativeRewrap;
         }
 
         @Override
@@ -231,7 +308,10 @@ class KeyWrappingProviderRegistryTest {
 
         @Override
         public Set<KeyWrappingCapability> capabilities() {
-            return Set.of(KeyWrappingCapability.WRAP, KeyWrappingCapability.UNWRAP);
+            return nativeRewrap
+                    ? Set.of(KeyWrappingCapability.WRAP, KeyWrappingCapability.UNWRAP,
+                    KeyWrappingCapability.NATIVE_REWRAP_SAME_KEY)
+                    : Set.of(KeyWrappingCapability.WRAP, KeyWrappingCapability.UNWRAP);
         }
 
         @Override
@@ -248,7 +328,9 @@ class KeyWrappingProviderRegistryTest {
 
         @Override
         public KeyWrappingResult<WrappedDataKey> wrap(KeyWrapRequest request) {
-            return KeyWrappingResult.failure(KeyWrappingFailure.of(KeyWrappingFailureCategory.UNSUPPORTED, false));
+            wrapCalls++;
+            return KeyWrappingResult.success(new WrappedDataKey(
+                    "cipher", "iv", request.target(), request.logicalKeyVersion()));
         }
 
         @Override
@@ -259,7 +341,9 @@ class KeyWrappingProviderRegistryTest {
 
         @Override
         public KeyWrappingResult<WrappedDataKey> rewrap(KeyRewrapRequest request) {
-            return KeyWrappingResult.failure(KeyWrappingFailure.of(KeyWrappingFailureCategory.UNSUPPORTED, false));
+            rewrapCalls++;
+            return KeyWrappingResult.success(new WrappedDataKey(
+                    "rewrapped", "iv", request.target(), request.logicalKeyVersion()));
         }
 
         @Override

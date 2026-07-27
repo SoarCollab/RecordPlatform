@@ -14,6 +14,7 @@ import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.util.Base64;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -53,12 +54,45 @@ class ProofSigningProviderRegistryTest {
         when(policyService.currentPolicy()).thenReturn(localPolicy());
         byte[] manifest = "canonical-manifest".getBytes(java.nio.charset.StandardCharsets.UTF_8);
 
+        registry.requireExportEnabled();
+        registry.validateConfiguration();
         ProofSigningKeyMetadata key = registry.currentKey();
         ProofSignature signature = registry.sign(manifest, key);
 
         assertThat(key.providerId()).isEqualTo(CryptoSuiteIds.LOCAL_ED25519_PROVIDER);
         assertThat(key.signatureSuite()).isEqualTo(CryptoSuiteIds.ED25519_JWS_V1);
         assertThat(registry.verify(manifest, signature.compactJws(), key)).isTrue();
+    }
+
+    /**
+     * Proves null persisted identities and provider-returned identity drift fail before signing is accepted.
+     */
+    @Test
+    void shouldRejectNullAndProviderMismatchedSigningResults() {
+        when(policyService.currentPolicy()).thenReturn(localPolicy());
+        assertThatThrownBy(() -> registry.sign(new byte[]{1}, null))
+                .isInstanceOf(GeneralException.class);
+
+        ProofSigningProviderAdapter provider = mock(ProofSigningProviderAdapter.class);
+        when(provider.providerId()).thenReturn(CryptoSuiteIds.LOCAL_ED25519_PROVIDER);
+        when(provider.contractVersion()).thenReturn(1);
+        when(provider.signatureSuite()).thenReturn(CryptoSuiteIds.ED25519_JWS_V1);
+        when(provider.proofSuites()).thenReturn(Set.of(CryptoSuiteIds.SIGNED_PROOF_ZIP_V2));
+        ProofSigningKeyMetadata valid = localProvider.currentKey();
+        ProofSigningKeyMetadata mismatched = new ProofSigningKeyMetadata(
+                "other", 1, valid.signatureSuite(), valid.proofSuite(), valid.algorithm(),
+                valid.keyId(), valid.keyVersion(), valid.publicKeySpki(), valid.publicKeyFingerprint());
+        when(provider.currentKey()).thenReturn(mismatched);
+        when(provider.sign(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new ProofSignature("jws", mismatched));
+        ProofSigningProviderRegistry mismatchedRegistry = new ProofSigningProviderRegistry(
+                List.of(provider), policyService,
+                new CryptoSuiteRegistry(new CryptoAgilityProperties(), new SimpleMeterRegistry()),
+                new SimpleMeterRegistry());
+
+        assertThatThrownBy(mismatchedRegistry::currentKey).isInstanceOf(GeneralException.class);
+        assertThatThrownBy(() -> mismatchedRegistry.sign(new byte[]{1}, valid))
+                .isInstanceOf(GeneralException.class);
     }
 
     /**

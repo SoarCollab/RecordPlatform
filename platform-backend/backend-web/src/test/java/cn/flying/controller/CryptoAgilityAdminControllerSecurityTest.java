@@ -22,6 +22,7 @@ import cn.flying.service.key.KeyWrappingCapability;
 import cn.flying.service.key.KeyWrappingProviderCapabilityDiagnostic;
 import cn.flying.service.key.KeyWrappingProviderRegistry;
 import cn.flying.service.key.LocalKeyWrappingService;
+import cn.flying.service.key.TenantCryptoPolicyCommand;
 import cn.flying.service.key.TenantCryptoPolicyService;
 import cn.flying.service.proof.signed.ProofSigningProviderDiagnostic;
 import cn.flying.service.proof.signed.ProofSigningProviderRegistry;
@@ -38,6 +39,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
+import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Modifier;
 import java.time.Instant;
@@ -48,6 +50,8 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
@@ -124,6 +128,40 @@ class CryptoAgilityAdminControllerSecurityTest {
         assertThat(policy.policyVersion()).isEqualTo(3L);
         assertThat(policy.policyFingerprint()).hasSize(64);
         verify(tenantPolicyService).getEffective(TENANT_ID);
+    }
+
+    /**
+     * Proves an administrator update maps every bounded request field into one optimistic policy command.
+     */
+    @Test
+    void shouldMapAdminUpdateToCompleteTenantPolicyCommand() {
+        MDC.put(Const.ATTR_USER_ROLE, UserRole.ROLE_ADMINISTER.getRole());
+        CryptoSuitePolicySnapshot snapshot = snapshot();
+        CryptoAgilityPolicyRequest request = new CryptoAgilityPolicyRequest(
+                3L,
+                snapshot.contentEncryptionSuite(),
+                snapshot.envelopeSignatureSuite(),
+                snapshot.kemSuite(),
+                snapshot.proofSuite(),
+                snapshot.wrappingProvider(),
+                snapshot.wrappingProviderContract(),
+                snapshot.signedProofSignatureSuite(),
+                snapshot.signedProofSuite(),
+                snapshot.signingProvider(),
+                snapshot.signingProviderContract());
+        when(tenantPolicyService.save(eq(TENANT_ID), eq(87L), any(TenantCryptoPolicyCommand.class)))
+                .thenReturn(snapshot);
+        when(policyService.fingerprint(snapshot)).thenReturn("f".repeat(64));
+
+        CryptoAgilityPolicyVO policy = controller.savePolicy(87L, TENANT_ID, request).getData();
+
+        ArgumentCaptor<TenantCryptoPolicyCommand> command =
+                ArgumentCaptor.forClass(TenantCryptoPolicyCommand.class);
+        verify(tenantPolicyService).save(eq(TENANT_ID), eq(87L), command.capture());
+        assertThat(command.getValue().expectedVersion()).isEqualTo(3L);
+        assertThat(command.getValue().wrappingProvider()).isEqualTo(LocalKeyWrappingService.PROVIDER_ID);
+        assertThat(command.getValue().signedProofSuite()).isEqualTo(CryptoSuiteIds.SIGNED_PROOF_ZIP_V2);
+        assertThat(policy.policyFingerprint()).isEqualTo("f".repeat(64));
     }
 
     /**

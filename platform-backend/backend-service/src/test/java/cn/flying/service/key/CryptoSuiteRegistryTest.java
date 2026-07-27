@@ -178,6 +178,77 @@ class CryptoSuiteRegistryTest {
     }
 
     /**
+     * Proves active entries support exact reads/writes and catalog membership never treats blanks as known IDs.
+     */
+    @Test
+    void shouldAcceptExactActiveIdentitiesAndExposeMembership() {
+        CryptoSuiteRegistry registry = registry(new CryptoAgilityProperties());
+
+        assertThat(registry.contains(CryptoSuiteIds.ED25519_JWS_V1)).isTrue();
+        assertThat(registry.contains(null)).isFalse();
+        assertThat(registry.contains("unknown")).isFalse();
+        assertThat(registry.requireForWrite(
+                CryptoSuiteType.SIGNATURE,
+                CryptoSuiteIds.ED25519_JWS_V1,
+                CryptoSuiteIds.LOCAL_ED25519_PROVIDER,
+                1).id()).isEqualTo(CryptoSuiteIds.ED25519_JWS_V1);
+        assertThat(registry.requireForRead(
+                CryptoSuiteType.PROOF,
+                CryptoSuiteIds.SIGNED_PROOF_ZIP_V2).id())
+                .isEqualTo(CryptoSuiteIds.SIGNED_PROOF_ZIP_V2);
+    }
+
+    /**
+     * Proves transition checks distinguish unknown identities, type confusion, and incompatible downgrade paths.
+     */
+    @Test
+    void shouldRejectUnknownTypeConfusedAndIncompatibleTransitions() {
+        CryptoSuiteRegistry registry = registry(new CryptoAgilityProperties());
+
+        assertFailure(
+                () -> registry.requireTransition(
+                        CryptoSuiteType.KEY_WRAPPING, "unknown", CryptoSuiteIds.LOCAL_WRAPPING),
+                ResultEnum.PARAM_IS_INVALID,
+                CryptoSuiteFailureReason.UNKNOWN_SUITE);
+        assertFailure(
+                () -> registry.requireTransition(
+                        CryptoSuiteType.KEM,
+                        CryptoSuiteIds.LOCAL_WRAPPING,
+                        CryptoSuiteIds.VAULT_TRANSIT_WRAPPING),
+                ResultEnum.PARAM_IS_INVALID,
+                CryptoSuiteFailureReason.TYPE_MISMATCH);
+        assertFailure(
+                () -> registry.requireTransition(
+                        CryptoSuiteType.SIGNATURE,
+                        CryptoSuiteIds.UNSIGNED_V1,
+                        CryptoSuiteIds.ED25519_JWS_V1),
+                ResultEnum.PARAM_IS_INVALID,
+                CryptoSuiteFailureReason.DOWNGRADE_BLOCKED);
+    }
+
+    /**
+     * Proves operator lifecycle configuration cannot target unknown IDs or predate suite introduction.
+     */
+    @Test
+    void shouldRejectUnknownAndPredatedLifecycleOverrides() {
+        CryptoAgilityProperties unknownProperties = new CryptoAgilityProperties();
+        unknownProperties.setSuiteLifecycle(Map.of("UNKNOWN", new CryptoAgilityProperties.Lifecycle()));
+        assertFailure(
+                () -> registry(unknownProperties),
+                ResultEnum.PARAM_IS_INVALID,
+                CryptoSuiteFailureReason.INVALID_LIFECYCLE);
+
+        CryptoAgilityProperties predatesProperties = new CryptoAgilityProperties();
+        CryptoAgilityProperties.Lifecycle predates = new CryptoAgilityProperties.Lifecycle();
+        predates.setDeprecatedAt(Instant.parse("2026-01-01T00:00:00Z"));
+        predatesProperties.setSuiteLifecycle(Map.of(CryptoSuiteIds.LOCAL_WRAPPING, predates));
+        assertFailure(
+                () -> registry(predatesProperties),
+                ResultEnum.PARAM_IS_INVALID,
+                CryptoSuiteFailureReason.INVALID_LIFECYCLE);
+    }
+
+    /**
      * Creates one registry with an isolated in-memory metrics boundary.
      */
     private CryptoSuiteRegistry registry(CryptoAgilityProperties properties) {
