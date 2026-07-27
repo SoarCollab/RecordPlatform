@@ -40,6 +40,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -132,6 +133,26 @@ class FileKeyGrantServiceTest {
 
         assertThat(productionConstructors).singleElement()
                 .satisfies(constructor -> assertThat(constructor.isAnnotationPresent(Autowired.class)).isTrue());
+    }
+
+    /**
+     * 验证生产构造入口可直接创建服务，且认证与公开消费均先校验调用者必填边界。
+     */
+    @Test
+    void shouldConstructProductionServiceAndRejectMissingConsumers() {
+        FileKeyGrantService productionService = new FileKeyGrantService(
+                redisTemplate, fileMapper, fileShareMapper, friendFileShareMapper,
+                envelopeService, properties, meterRegistry);
+
+        assertThat(productionService).isNotNull();
+        assertThatThrownBy(() -> productionService.consumeAuthenticated("A".repeat(43), SESSION_ID, null))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo("ACTOR_REQUIRED");
+        assertThatThrownBy(() -> productionService.consumePublic("A".repeat(43), SESSION_ID, " "))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo("CLIENT_REQUIRED");
     }
 
     /**
@@ -241,6 +262,12 @@ class FileKeyGrantServiceTest {
         assertThat(stored.values())
                 .noneMatch(value -> String.valueOf(value).contains("203.0.113.7"))
                 .noneMatch(value -> String.valueOf(value).contains(SESSION_ID));
+
+        assertThatThrownBy(() -> service.consumeAuthenticated(
+                grant.reference(), SESSION_ID, ACTOR_ID))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo("ENDPOINT_MISMATCH");
 
         TenantContext.clear();
         doAnswer(invocation -> {
@@ -475,6 +502,70 @@ class FileKeyGrantServiceTest {
     }
 
     /**
+     * 验证仍有效的认证分享在重新核验所有可变字段后可以完成一次即时解封。
+     */
+    @Test
+    void shouldConsumeCurrentlyAuthorizedShareGrant() {
+        FileKeyGrantEnvelopeBinding shareBinding = bindingWith(
+                102L, FileKeyEnvelopeService.RECIPIENT_TYPE_SHARE, 77L, false);
+        ArgumentCaptor<Object[]> issueArguments = ArgumentCaptor.forClass(Object[].class);
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), issueArguments.capture()))
+                .thenReturn(1L, 1L);
+        var grant = service.issue(new FileKeyGrantIssueContext(
+                file, shareBinding, FileKeyGrantAccessKind.AUTHENTICATED_SHARE,
+                ACTOR_ID, null, SESSION_ID));
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(any())).thenReturn(storedFields(issueArguments.getValue()));
+        when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+        when(fileShareMapper.selectById(77L)).thenReturn(new FileShare()
+                .setId(77L)
+                .setTenantId(TENANT_ID)
+                .setUserId(ACTOR_ID)
+                .setShareType(1)
+                .setFileHashes("[\"" + FILE_HASH + "\"]")
+                .setExpireTime(java.util.Date.from(NOW.plusSeconds(300)))
+                .setStatus(FileShare.STATUS_ACTIVE));
+        when(envelopeService.unwrapGrantBinding(
+                file, shareBinding, ACTOR_ID, "DOWNLOAD_GRANT_CONSUME"))
+                .thenReturn(Optional.of("share-key"));
+
+        assertThat(service.consumeAuthenticated(grant.reference(), SESSION_ID, ACTOR_ID).initialKey())
+                .isEqualTo("share-key");
+    }
+
+    /**
+     * 验证仍有效的好友分享绑定分享者、接收者和文件集合后可以完成即时解封。
+     */
+    @Test
+    void shouldConsumeCurrentlyAuthorizedFriendGrant() {
+        FileKeyGrantEnvelopeBinding friendBinding = bindingWith(
+                103L, FileKeyEnvelopeService.RECIPIENT_TYPE_FRIEND_SHARE, 88L, false);
+        ArgumentCaptor<Object[]> issueArguments = ArgumentCaptor.forClass(Object[].class);
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), issueArguments.capture()))
+                .thenReturn(1L, 1L);
+        var grant = service.issue(new FileKeyGrantIssueContext(
+                file, friendBinding, FileKeyGrantAccessKind.FRIEND_SHARE,
+                FRIEND_ACTOR_ID, null, SESSION_ID));
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(any())).thenReturn(storedFields(issueArguments.getValue()));
+        when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+        when(friendFileShareMapper.selectById(88L)).thenReturn(new FriendFileShare()
+                .setId(88L)
+                .setTenantId(TENANT_ID)
+                .setSharerId(ACTOR_ID)
+                .setFriendId(FRIEND_ACTOR_ID)
+                .setFileHashes("[\"" + FILE_HASH + "\"]")
+                .setStatus(FriendFileShare.STATUS_ACTIVE));
+        when(envelopeService.unwrapGrantBinding(
+                file, friendBinding, FRIEND_ACTOR_ID, "DOWNLOAD_GRANT_CONSUME"))
+                .thenReturn(Optional.of("friend-key"));
+
+        assertThat(service.consumeAuthenticated(
+                grant.reference(), SESSION_ID, FRIEND_ACTOR_ID).initialKey())
+                .isEqualTo("friend-key");
+    }
+
+    /**
      * 验证 Redis 状态字段被改写后绑定摘要校验失败，不会被重定向到其他文件。
      */
     @Test
@@ -536,6 +627,89 @@ class FileKeyGrantServiceTest {
     }
 
     /**
+     * 验证随机引用连续碰撞时停止签发并留下稳定审计原因。
+     */
+    @Test
+    void shouldRejectRepeatedGrantReferenceCollisions() {
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class)))
+                .thenReturn(0L);
+
+        assertThatThrownBy(() -> service.issue(authenticatedContext()))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo("KEY_GRANT_UNAVAILABLE");
+
+        verify(redisTemplate, org.mockito.Mockito.times(3))
+                .execute(any(RedisScript.class), anyList(), any(Object[].class));
+        verify(envelopeService).auditGrantDenial(binding, ACTOR_ID, "GRANT_REFERENCE_COLLISION");
+    }
+
+    /**
+     * 验证 Redis 中 grant 缺失与读取故障分别映射为授权失效和服务不可用。
+     */
+    @Test
+    void shouldRejectMissingAndUnavailableRedisGrantState() {
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(any())).thenReturn(Map.of());
+
+        assertThatThrownBy(() -> service.consumeAuthenticated("A".repeat(43), SESSION_ID, ACTOR_ID))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo("GRANT_MISSING_OR_EXPIRED");
+
+        when(hashOperations.entries(any())).thenThrow(new IllegalStateException("redis secret"));
+        assertThatThrownBy(() -> service.consumeAuthenticated("A".repeat(43), SESSION_ID, ACTOR_ID))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo("KEY_GRANT_UNAVAILABLE");
+    }
+
+    /**
+     * 验证 Lua 的全部非成功返回值均映射为闭集、低基数拒绝原因。
+     */
+    @Test
+    void shouldMapEveryReservationFailureToStableReason() {
+        assertReservationDenied(-1L, "GRANT_MISSING_OR_EXPIRED");
+        assertReservationDenied(-2L, "BINDING_MISMATCH");
+        assertReservationDenied(-3L, "SESSION_OR_PRINCIPAL_MISMATCH");
+        assertReservationDenied(0L, "GRANT_REPLAYED");
+    }
+
+    /**
+     * 验证签发入口拒绝不完整、错文件、错授权类型及不合法主体上下文。
+     */
+    @Test
+    void shouldRejectInvalidIssueContextsBeforeRedis() {
+        assertIssueDenied(null, "ISSUE_CONTEXT_INVALID");
+        assertIssueDenied(new FileKeyGrantIssueContext(
+                file, bindingWith(null, FileKeyEnvelopeService.RECIPIENT_TYPE_OWNER, ACTOR_ID, false),
+                FileKeyGrantAccessKind.OWNER, ACTOR_ID, null, SESSION_ID),
+                "ENVELOPE_BINDING_INVALID");
+        assertIssueDenied(new FileKeyGrantIssueContext(
+                new File().setId(FILE_ID).setTenantId(TENANT_ID).setUid(ACTOR_ID)
+                        .setVersion(4).setFileHash(FILE_HASH),
+                binding, FileKeyGrantAccessKind.OWNER, ACTOR_ID, null, SESSION_ID),
+                "FILE_BINDING_MISMATCH");
+        assertIssueDenied(new FileKeyGrantIssueContext(
+                file, binding, FileKeyGrantAccessKind.FRIEND_SHARE, ACTOR_ID, null, SESSION_ID),
+                "ACCESS_KIND_MISMATCH");
+        assertIssueDenied(new FileKeyGrantIssueContext(
+                file, bindingWith(101L, FileKeyEnvelopeService.RECIPIENT_TYPE_SHARE, 77L, false),
+                FileKeyGrantAccessKind.PUBLIC_SHARE, ACTOR_ID, "203.0.113.7", SESSION_ID),
+                "PUBLIC_CONTEXT_INVALID");
+        assertIssueDenied(new FileKeyGrantIssueContext(
+                file, binding, FileKeyGrantAccessKind.OWNER, null, null, SESSION_ID),
+                "AUTHENTICATED_CONTEXT_INVALID");
+        assertIssueDenied(new FileKeyGrantIssueContext(
+                file, binding, FileKeyGrantAccessKind.OWNER, FRIEND_ACTOR_ID, null, SESSION_ID),
+                "OWNER_CONTEXT_INVALID");
+        assertIssueDenied(new FileKeyGrantIssueContext(
+                file, binding, FileKeyGrantAccessKind.ADMIN, ACTOR_ID, null, SESSION_ID),
+                "ADMIN_CONTEXT_INVALID");
+        verify(redisTemplate, never()).execute(any(RedisScript.class), anyList(), any(Object[].class));
+    }
+
+    /**
      * 验证旧明文协议默认关闭且截止时间到达后不能被配置重新打开。
      */
     @Test
@@ -550,6 +724,28 @@ class FileKeyGrantServiceTest {
                 .extracting("data")
                 .isEqualTo("LEGACY_PROTOCOL_DISABLED");
         verify(envelopeService, never()).unwrapGrantBinding(any(), any(), any(), any());
+    }
+
+    /**
+     * 验证明文兼容窗口显式开启时可即时解封，并覆盖 owner、分享与好友分享指标分类。
+     */
+    @Test
+    void shouldDeliverLegacyPlaintextOnlyInsideCompatibilityWindow() {
+        properties.setLegacyPlaintextEnabled(true);
+        properties.setLegacyPlaintextNotAfter(NOW.plusSeconds(60));
+        when(envelopeService.unwrapGrantBinding(any(), any(), any(), any()))
+                .thenReturn(Optional.of("legacy-key"));
+        FileKeyGrantEnvelopeBinding shareBinding = bindingWith(
+                102L, FileKeyEnvelopeService.RECIPIENT_TYPE_SHARE, 77L, false);
+        FileKeyGrantEnvelopeBinding friendBinding = bindingWith(
+                103L, FileKeyEnvelopeService.RECIPIENT_TYPE_FRIEND_SHARE, 88L, false);
+
+        assertThat(service.isLegacyPlaintextAllowed()).isTrue();
+        assertThat(service.deliverLegacyPlaintext(file, binding, ACTOR_ID)).isEqualTo("legacy-key");
+        assertThat(service.deliverLegacyPlaintext(file, shareBinding, ACTOR_ID)).isEqualTo("legacy-key");
+        assertThat(service.deliverLegacyPlaintext(file, friendBinding, ACTOR_ID)).isEqualTo("legacy-key");
+        verify(envelopeService, org.mockito.Mockito.times(3))
+                .auditLegacyPlaintextDelivery(any(), org.mockito.ArgumentMatchers.eq(ACTOR_ID));
     }
 
     /**
@@ -580,6 +776,52 @@ class FileKeyGrantServiceTest {
                 redisTemplate, fileMapper, fileShareMapper, friendFileShareMapper,
                 envelopeService, properties,
                 meterRegistry, testClock, secureRandom);
+    }
+
+    /**
+     * 创建仅替换 recipient 路由字段的测试信封绑定。
+     */
+    private FileKeyGrantEnvelopeBinding bindingWith(Long envelopeId,
+                                                     String recipientType,
+                                                     Long recipientId,
+                                                     boolean legacyPlaintextAtRest) {
+        return new FileKeyGrantEnvelopeBinding(
+                envelopeId, TENANT_ID, FILE_ID, 3, FILE_HASH, recipientType, recipientId, 4,
+                "RP-AES256-GCM-FRAMED-V2", "UNSIGNED-V1", "NONE-V1",
+                "RP-MERKLE-SHA256-V1", "FRAMED_AEAD_V2", "vault-transit",
+                1, "9", legacyPlaintextAtRest);
+    }
+
+    /**
+     * 断言签发上下文在访问 Redis 前以指定稳定原因失败。
+     */
+    private void assertIssueDenied(FileKeyGrantIssueContext context, String reason) {
+        assertThatThrownBy(() -> service.issue(context))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo(reason);
+    }
+
+    /**
+     * 生成有效 grant 后模拟一次 Lua 预留拒绝并断言稳定原因。
+     */
+    private void assertReservationDenied(Long reservation, String reason) {
+        reset(redisTemplate, hashOperations, fileMapper, envelopeService);
+        ArgumentCaptor<Object[]> issueArguments = ArgumentCaptor.forClass(Object[].class);
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), issueArguments.capture()))
+                .thenReturn(1L, reservation);
+        FileKeyGrantService isolatedService = newService(Clock.fixed(NOW, ZoneOffset.UTC));
+        var grant = isolatedService.issue(authenticatedContext());
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(any())).thenReturn(storedFields(issueArguments.getValue()));
+        when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+
+        assertThatThrownBy(() -> isolatedService.consumeAuthenticated(
+                grant.reference(), SESSION_ID, ACTOR_ID))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo(reason);
+        verify(envelopeService).auditGrantDenial(binding, ACTOR_ID, reason);
     }
 
     /**

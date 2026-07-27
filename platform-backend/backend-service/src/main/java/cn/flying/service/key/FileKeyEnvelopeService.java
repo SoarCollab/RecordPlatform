@@ -491,13 +491,15 @@ public class FileKeyEnvelopeService {
     public Optional<FileKeyGrantEnvelopeBinding> resolveOwnerGrantBinding(File file,
                                                                           String fileHash,
                                                                           Long ownerId) {
+        String resolvedFileHash = StringUtils.hasText(fileHash)
+                ? fileHash : file == null ? null : file.getFileHash();
         Optional<FileKeyGrantEnvelopeBinding> binding = resolveGrantBinding(
-                file, fileHash, RECIPIENT_TYPE_OWNER, ownerId);
+                file, resolvedFileHash, RECIPIENT_TYPE_OWNER, ownerId);
         if (binding.isPresent()) {
             return binding;
         }
         return resolveLegacyInitialKey(file, ownerId).isPresent()
-                ? Optional.of(legacyGrantBinding(file, fileHash, ownerId))
+                ? Optional.of(legacyGrantBinding(file, resolvedFileHash, ownerId))
                 : Optional.empty();
     }
 

@@ -114,7 +114,9 @@ class PublicShareRateLimitIT {
                 .getMethod("publicDownload", String.class, String.class, jakarta.servlet.http.HttpServletRequest.class)
                 .getAnnotation(RateLimit.class);
         RateLimit decryptLimit = ShareRestController.class
-                .getMethod("publicDecryptInfo", String.class, String.class)
+                .getMethod("publicDecryptInfo", String.class, String.class, String.class, String.class,
+                        jakarta.servlet.http.HttpServletRequest.class,
+                        jakarta.servlet.http.HttpServletResponse.class)
                 .getAnnotation(RateLimit.class);
         ProceedingJoinPoint downloadJoinPoint = mock(ProceedingJoinPoint.class);
         ProceedingJoinPoint decryptJoinPoint = mock(ProceedingJoinPoint.class);
