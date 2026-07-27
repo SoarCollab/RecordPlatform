@@ -393,7 +393,7 @@ class DirectUploadFaultMatrixMinioIT {
         assertThatThrownBy(() -> service().promote(
                 quorumCase.part(), DirectUploadDigestAccumulator.sha256()))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("timed out");
+                .hasMessageContaining("final replica quorum not reached");
 
         assertThat(objectExists(quorumCase.source(), quorumCase.part().stagingObjectName())).isTrue();
         verify(receiptStore, never()).recordSuccess(any(), any(), any());
