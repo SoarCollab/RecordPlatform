@@ -18,6 +18,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.RedisScript;
@@ -118,6 +119,19 @@ class FileKeyGrantServiceTest {
     @AfterEach
     void tearDown() {
         TenantContext.clear();
+    }
+
+    /**
+     * 验证多构造函数服务显式标记生产注入入口，避免完整 Spring 上下文退化为查找无参构造。
+     */
+    @Test
+    void shouldDeclareProductionConstructorForSpringInjection() {
+        var productionConstructors = java.util.Arrays.stream(FileKeyGrantService.class.getConstructors())
+                .filter(constructor -> constructor.getParameterCount() == 7)
+                .toList();
+
+        assertThat(productionConstructors).singleElement()
+                .satisfies(constructor -> assertThat(constructor.isAnnotationPresent(Autowired.class)).isTrue());
     }
 
     /**

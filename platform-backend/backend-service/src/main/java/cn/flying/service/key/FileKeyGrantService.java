@@ -14,6 +14,7 @@ import cn.flying.dao.mapper.FriendFileShareMapper;
 import cn.flying.dao.vo.file.DownloadKeyGrantVO;
 import cn.flying.dao.vo.file.DownloadKeyMaterialVO;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
@@ -110,6 +111,7 @@ public class FileKeyGrantService {
     /**
      * 创建生产 grant 服务及预编译 Redis 脚本。
      */
+    @Autowired
     public FileKeyGrantService(StringRedisTemplate redisTemplate,
                                FileMapper fileMapper,
                                FileShareMapper fileShareMapper,
