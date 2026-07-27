@@ -139,6 +139,39 @@ class KeyRotationWorkerServiceTest {
     }
 
     /**
+     * Covers idle tenants and runs that stop being runnable at the discovery lock boundary.
+     */
+    @Test
+    void shouldReturnAcrossIdleAndLostRunnableBoundaries() {
+        KeyRotationRun run = run(KeyRotationStates.MODE_APPLY);
+        when(runService.findRunnable(11L)).thenReturn(null, run);
+        when(runService.discoverNextPage(eq(11L), eq(101L), any())).thenReturn(null);
+
+        service.runTenant(11L);
+        service.runTenant(11L);
+
+        verifyNoInteractions(claimService, envelopeService, auditService, metrics, alertService);
+    }
+
+    /**
+     * Proves an unexpected terminal failure emits the stable internal alert at the immutable attempt limit.
+     */
+    @Test
+    void shouldAlertWhenUnexpectedFailureExhaustsAttempts() {
+        KeyRotationRun run = run(KeyRotationStates.MODE_APPLY).setMaxAttempts(3);
+        KeyRotationItem item = item().setAttemptCount(3);
+        KeyRotationClaim claim = new KeyRotationClaim(11L, 101L, "claim", List.of(item));
+        arrangeApplyRun(run, claim);
+        when(envelopeService.rotateEnvelopeForAutomation(
+                eq(301L), eq(201L), any(WrappingKeyReference.class), eq(2), eq(51L), eq("AUTO_ROTATION")))
+                .thenThrow(new IllegalStateException("provider-secret-response"));
+
+        service.runTenant(11L);
+
+        verify(alertService).terminalFailure(KeyWrappingFailureCategory.INTERNAL.name());
+    }
+
+    /**
      * Arranges one runnable APPLY cycle with a supplied claim.
      */
     private void arrangeApplyRun(KeyRotationRun run, KeyRotationClaim claim) {

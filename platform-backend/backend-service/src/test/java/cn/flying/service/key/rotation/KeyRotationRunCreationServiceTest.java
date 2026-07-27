@@ -167,6 +167,90 @@ class KeyRotationRunCreationServiceTest {
     }
 
     /**
+     * Covers invalid manual identity, request keys, modes, and inactive policy boundaries.
+     */
+    @Test
+    void shouldRejectInvalidManualTriggersBeforeRunCreation() {
+        when(policyMapper.selectTenantPolicyForUpdate(11L))
+                .thenReturn(new KeyRotationPolicy().setStatus(KeyRotationStates.POLICY_PAUSED));
+
+        assertThatThrownBy(() -> service.startManual(11L, 51L, "UNKNOWN", "request-1", NOW))
+                .isInstanceOf(GeneralException.class);
+        assertThatThrownBy(() -> service.startManual(
+                11L, 0L, KeyRotationStates.MODE_APPLY, "request-1", NOW))
+                .isInstanceOf(GeneralException.class);
+        assertThatThrownBy(() -> service.startManual(
+                11L, 51L, KeyRotationStates.MODE_APPLY, "bad request", NOW))
+                .isInstanceOf(GeneralException.class);
+        assertThatThrownBy(() -> service.startManual(
+                11L, 51L, KeyRotationStates.MODE_APPLY, "request-1", NOW))
+                .isInstanceOf(GeneralException.class);
+
+        verify(runMapper, never()).insert(any(KeyRotationRun.class));
+    }
+
+    /**
+     * Covers an idle scheduler poll and creation of a due run with an empty envelope boundary.
+     */
+    @Test
+    void shouldCreateDueScheduledRunAfterIdlePoll() {
+        KeyRotationPolicy due = policy()
+                .setScheduleEnabled(1)
+                .setScheduleIntervalSeconds(300L)
+                .setNextRunAt(Date.from(NOW));
+        when(policyMapper.selectTenantPolicyForUpdate(11L)).thenReturn(null, due);
+        when(runMapper.selectOne(any())).thenReturn(null).thenReturn(null);
+        when(envelopeMapper.selectMaxEnvelopeId(11L)).thenReturn(null);
+        when(runMapper.insert(any(KeyRotationRun.class))).thenReturn(1);
+
+        assertThat(service.startScheduledIfDue(11L, NOW)).isNull();
+        KeyRotationRun scheduled = service.startScheduledIfDue(11L, NOW);
+
+        assertThat(scheduled.getTriggerType()).isEqualTo("SCHEDULED");
+        assertThat(scheduled.getMode()).isEqualTo(KeyRotationStates.MODE_APPLY);
+        assertThat(scheduled.getSnapshotMaxEnvelopeId()).isZero();
+        assertThat(due.getNextRunAt().toInstant()).isAfter(NOW);
+        verify(policyMapper, org.mockito.Mockito.atLeastOnce()).updateById(due);
+    }
+
+    /**
+     * Proves manual creation cannot overlap an unfinished run under the locked policy row.
+     */
+    @Test
+    void shouldRejectManualOverlapAfterIdempotencyLookup() {
+        KeyRotationPolicy policy = policy();
+        KeyRotationRun active = new KeyRotationRun()
+                .setId(88L)
+                .setStatus(KeyRotationStates.RUN_RUNNING);
+        when(policyMapper.selectTenantPolicyForUpdate(11L)).thenReturn(policy);
+        when(runMapper.selectOne(any())).thenReturn(null, active);
+
+        assertThatThrownBy(() -> service.startManual(
+                11L, 51L, KeyRotationStates.MODE_APPLY, "request-2", NOW))
+                .isInstanceOf(GeneralException.class);
+
+        verify(runMapper, never()).insert(any(KeyRotationRun.class));
+        verifyNoInteractions(envelopeMapper);
+    }
+
+    /**
+     * Proves a due schedule rejects an unsafe persisted interval before mutating run state.
+     */
+    @Test
+    void shouldRejectUnsafePersistedScheduleInterval() {
+        KeyRotationPolicy due = policy()
+                .setScheduleEnabled(1)
+                .setScheduleIntervalSeconds(null)
+                .setNextRunAt(Date.from(NOW));
+        when(policyMapper.selectTenantPolicyForUpdate(11L)).thenReturn(due);
+
+        assertThatThrownBy(() -> service.startScheduledIfDue(11L, NOW))
+                .isInstanceOf(GeneralException.class);
+
+        verifyNoInteractions(runMapper, envelopeMapper);
+    }
+
+    /**
      * Builds one active tenant policy containing every immutable run input.
      */
     private KeyRotationPolicy policy() {

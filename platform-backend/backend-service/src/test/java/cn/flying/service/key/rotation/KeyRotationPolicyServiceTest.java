@@ -145,6 +145,113 @@ class KeyRotationPolicyServiceTest {
     }
 
     /**
+     * Proves replacing an existing policy increments its version and can explicitly disable scheduling.
+     */
+    @Test
+    void shouldReplaceExistingPolicyWithSchedulingDisabled() {
+        KeyRotationPolicy existing = new KeyRotationPolicy()
+                .setId(71L)
+                .setTenantId(11L)
+                .setPolicyVersion(null)
+                .setNextRunAt(Date.from(NOW));
+        KeyRotationPolicyCommand disabled = new KeyRotationPolicyCommand(
+                null, null, null, 2, 25, 100,
+                false, null, 4, 5L, 60L, 120L, 600L);
+        when(wrappingRegistry.activeKeyReference(2)).thenReturn(KeyWrappingResult.success(target));
+        when(policyMapper.selectTenantPolicyForUpdate(11L)).thenReturn(existing);
+
+        KeyRotationPolicy result = service.save(11L, 51L, disabled);
+
+        assertThat(result.getPolicyVersion()).isEqualTo(1L);
+        assertThat(result.getScheduleEnabled()).isZero();
+        assertThat(result.getNextRunAt()).isNull();
+        verify(policyMapper).updateById(existing);
+        verify(policyMapper, never()).insert(any(KeyRotationPolicy.class));
+    }
+
+    /**
+     * Proves tenant policy lookup returns the scoped row and uses a stable not-found error.
+     */
+    @Test
+    void shouldGetTenantPolicyOrRejectMissingPolicy() {
+        KeyRotationPolicy policy = new KeyRotationPolicy().setId(71L).setTenantId(11L);
+        when(policyMapper.selectOne(any())).thenReturn(policy).thenReturn(null);
+
+        assertThat(service.get(11L)).isSameAs(policy);
+        assertThatThrownBy(() -> service.get(11L)).isInstanceOf(GeneralException.class);
+    }
+
+    /**
+     * Proves status changes reject unknown states and re-arm an active scheduled policy exactly once.
+     */
+    @Test
+    void shouldValidateStatusAndRearmActiveSchedule() {
+        KeyRotationPolicy policy = new KeyRotationPolicy()
+                .setId(71L)
+                .setTenantId(11L)
+                .setStatus(KeyRotationStates.POLICY_PAUSED)
+                .setPolicyVersion(null)
+                .setScheduleEnabled(1)
+                .setScheduleIntervalSeconds(300L)
+                .setNextRunAt(null);
+        when(policyMapper.selectTenantPolicyForUpdate(11L)).thenReturn(null).thenReturn(policy);
+
+        assertThatThrownBy(() -> service.changeStatus(11L, 51L, "UNKNOWN"))
+                .isInstanceOf(GeneralException.class);
+        assertThatThrownBy(() -> service.changeStatus(11L, 51L, KeyRotationStates.POLICY_PAUSED))
+                .isInstanceOf(GeneralException.class);
+
+        KeyRotationPolicy active = service.changeStatus(11L, 51L, KeyRotationStates.POLICY_ACTIVE);
+
+        assertThat(active.getStatus()).isEqualTo(KeyRotationStates.POLICY_ACTIVE);
+        assertThat(active.getPolicyVersion()).isEqualTo(1L);
+        assertThat(active.getNextRunAt()).isNotNull();
+        verify(policyMapper).updateById(policy);
+        verify(auditService).recordPolicy(policy, 51L, "POLICY_ACTIVE", "SUCCESS");
+    }
+
+    /**
+     * Proves external retirement acknowledgement rejects both incomplete policy and run gates.
+     */
+    @Test
+    void shouldRejectRetirementWhenPolicyOrRunIsNotReady() {
+        KeyRotationPolicy incomplete = new KeyRotationPolicy().setId(71L).setTenantId(11L);
+        KeyRotationPolicy ready = new KeyRotationPolicy()
+                .setId(71L)
+                .setTenantId(11L)
+                .setLastRunId(81L)
+                .setRetirementStatus(KeyRotationStates.RETIREMENT_READY)
+                .setRetirementEligibleAt(Date.from(NOW.minusSeconds(1)));
+        KeyRotationRun failed = new KeyRotationRun()
+                .setId(81L)
+                .setStatus(KeyRotationStates.RUN_COMPLETED_WITH_FAILURES)
+                .setRemainingCount(1L)
+                .setFailedCount(1L);
+        when(policyMapper.selectTenantPolicyForUpdate(11L)).thenReturn(incomplete, ready);
+        when(runMapper.selectById(81L)).thenReturn(failed);
+
+        assertThatThrownBy(() -> service.acknowledgeRetirement(11L, 51L, NOW))
+                .isInstanceOf(GeneralException.class);
+        assertThatThrownBy(() -> service.acknowledgeRetirement(11L, 51L, NOW))
+                .isInstanceOf(GeneralException.class);
+
+        verify(policyMapper, never()).updateById(any(KeyRotationPolicy.class));
+    }
+
+    /**
+     * Proves missing tenant or actor identities are rejected before provider and persistence access.
+     */
+    @Test
+    void shouldRejectMissingGovernanceIdentity() {
+        assertThatThrownBy(() -> service.save(null, 51L, command()))
+                .isInstanceOf(GeneralException.class);
+        assertThatThrownBy(() -> service.changeStatus(11L, 0L, KeyRotationStates.POLICY_ACTIVE))
+                .isInstanceOf(GeneralException.class);
+
+        verifyNoInteractions(policyMapper, wrappingRegistry);
+    }
+
+    /**
      * Builds one fully bounded, schedule-enabled policy command.
      */
     private KeyRotationPolicyCommand command() {

@@ -42,4 +42,23 @@ class KeyRotationMetricsTest {
                 .allSatisfy(meter -> assertThat(meter.getId().getTags().toString())
                         .doesNotContain("tenant-key-secret", "provider-error-secret"));
     }
+
+    /**
+     * Proves gauges clamp negative durable counters and blank labels normalize to the stable none token.
+     */
+    @Test
+    void shouldClampGaugesAndNormalizeBlankDimensions() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        KeyRotationMetrics metrics = new KeyRotationMetrics(registry);
+
+        metrics.refresh(-1L, -2L, true);
+        metrics.recordItem(" ", null);
+
+        assertThat(registry.get("app.key.rotation.remaining").gauge().value()).isZero();
+        assertThat(registry.get("app.key.rotation.failed").gauge().value()).isZero();
+        assertThat(registry.get("app.key.rotation.retirement_blocked").gauge().value()).isEqualTo(1.0);
+        assertThat(registry.get("app.key.rotation.items")
+                .tags("outcome", "none", "failure_category", "none")
+                .counter().count()).isEqualTo(1.0);
+    }
 }

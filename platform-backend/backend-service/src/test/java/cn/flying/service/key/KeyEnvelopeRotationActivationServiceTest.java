@@ -140,6 +140,69 @@ class KeyEnvelopeRotationActivationServiceTest {
     }
 
     /**
+     * Covers missing and stale source boundaries while ensuring pending candidates are retired.
+     */
+    @Test
+    void shouldRetirePendingCandidateWhenSourceIsMissingOrStale() {
+        FileKeyEnvelope pending = candidate(FileKeyEnvelopeService.STATUS_PENDING_VERIFICATION);
+        when(envelopeMapper.selectEnvelopeForUpdate(TENANT_ID, SOURCE_ID))
+                .thenReturn(null, source(FileKeyEnvelopeService.STATUS_SUPERSEDED));
+        when(envelopeMapper.selectEnvelopeForUpdate(TENANT_ID, CANDIDATE_ID)).thenReturn(pending);
+
+        assertThat(service.activateVerifiedCandidate(
+                TENANT_ID, SOURCE_ID, CANDIDATE_ID, target, 2))
+                .isEqualTo("SKIPPED_SOURCE_CHANGED");
+        assertThat(service.activateVerifiedCandidate(
+                TENANT_ID, SOURCE_ID, CANDIDATE_ID, target, 2))
+                .isEqualTo("SKIPPED_SOURCE_CHANGED");
+
+        verify(envelopeMapper, org.mockito.Mockito.times(2)).compareAndSetStatus(
+                TENANT_ID, CANDIDATE_ID,
+                FileKeyEnvelopeService.STATUS_PENDING_VERIFICATION,
+                FileKeyEnvelopeService.STATUS_SUPERSEDED);
+    }
+
+    /**
+     * Proves an active source cannot activate a candidate that no longer remains pending.
+     */
+    @Test
+    void shouldSkipCandidateThatLostPendingState() {
+        FileKeyEnvelope source = source(FileKeyEnvelopeService.STATUS_ACTIVE);
+        FileKeyEnvelope candidate = candidate(FileKeyEnvelopeService.STATUS_SUPERSEDED);
+        when(envelopeMapper.selectEnvelopeForUpdate(TENANT_ID, SOURCE_ID)).thenReturn(source);
+        when(envelopeMapper.selectEnvelopeForUpdate(TENANT_ID, CANDIDATE_ID)).thenReturn(candidate);
+
+        assertThat(service.activateVerifiedCandidate(
+                TENANT_ID, SOURCE_ID, CANDIDATE_ID, target, 2))
+                .isEqualTo("SKIPPED_SOURCE_CHANGED");
+
+        verify(envelopeMapper, never()).compareAndSetStatus(
+                TENANT_ID, SOURCE_ID,
+                FileKeyEnvelopeService.STATUS_ACTIVE,
+                FileKeyEnvelopeService.STATUS_SUPERSEDED);
+    }
+
+    /**
+     * Proves source authority loss aborts before attempting candidate activation.
+     */
+    @Test
+    void shouldFailTransactionWhenSourceCasIsLost() {
+        FileKeyEnvelope source = source(FileKeyEnvelopeService.STATUS_ACTIVE);
+        FileKeyEnvelope candidate = candidate(FileKeyEnvelopeService.STATUS_PENDING_VERIFICATION);
+        when(envelopeMapper.selectEnvelopeForUpdate(TENANT_ID, SOURCE_ID)).thenReturn(source);
+        when(envelopeMapper.selectEnvelopeForUpdate(TENANT_ID, CANDIDATE_ID)).thenReturn(candidate);
+        when(envelopeMapper.compareAndSetStatus(
+                TENANT_ID, SOURCE_ID,
+                FileKeyEnvelopeService.STATUS_ACTIVE,
+                FileKeyEnvelopeService.STATUS_SUPERSEDED)).thenReturn(0);
+
+        assertThatThrownBy(() -> service.activateVerifiedCandidate(
+                TENANT_ID, SOURCE_ID, CANDIDATE_ID, target, 2))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("source authority changed");
+    }
+
+    /**
      * Builds an exact source recipient row with a caller-selected lifecycle state.
      */
     private FileKeyEnvelope source(String status) {

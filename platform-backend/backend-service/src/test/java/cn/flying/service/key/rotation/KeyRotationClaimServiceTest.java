@@ -163,6 +163,100 @@ class KeyRotationClaimServiceTest {
     }
 
     /**
+     * Covers missing runs, non-runnable state, exhausted rate capacity, and empty claim pages.
+     */
+    @Test
+    void shouldReturnNoClaimAcrossUnavailableBoundaries() {
+        KeyRotationRun paused = run().setStatus(KeyRotationStates.RUN_PAUSED);
+        KeyRotationRun exhausted = run().setMaxItemsPerMinute(10).setRateWindowCount(10);
+        KeyRotationRun empty = run();
+        when(runMapper.selectRunForUpdate(11L, 101L))
+                .thenReturn(null, paused, exhausted, empty);
+        when(itemMapper.selectClaimableForUpdate(
+                eq(11L), eq(101L), eq(Date.from(NOW)), eq(3), eq(10)))
+                .thenReturn(List.of());
+
+        assertThat(service.claim(run(), 10, NOW)).isNull();
+        assertThat(service.claim(run(), 10, NOW)).isNull();
+        assertThat(service.claim(run(), 10, NOW)).isNull();
+        assertThat(service.claim(run(), 10, NOW)).isNull();
+    }
+
+    /**
+     * Proves a claim transaction aborts when the fenced update count differs from its locked rows.
+     */
+    @Test
+    void shouldRejectPartiallyClaimedLockedRows() {
+        KeyRotationRun run = run();
+        KeyRotationItem item = item(201L, 0);
+        when(runMapper.selectRunForUpdate(11L, 101L)).thenReturn(run);
+        when(itemMapper.selectClaimableForUpdate(
+                eq(11L), eq(101L), eq(Date.from(NOW)), eq(3), eq(10)))
+                .thenReturn(List.of(item));
+        when(itemMapper.claimSelected(
+                eq(11L), eq(101L), eq(List.of(201L)), any(), eq(Date.from(NOW)), any(), eq(3)))
+                .thenReturn(0);
+
+        assertThatThrownBy(() -> service.claim(run, 10, NOW))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("locked rows");
+    }
+
+    /**
+     * Covers successful lease renewal and stable rejection after a claim token is lost.
+     */
+    @Test
+    void shouldRenewOnlyTheCurrentClaimToken() {
+        KeyRotationRun run = run();
+        KeyRotationItem item = item(201L, 1);
+        when(itemMapper.renewLease(eq(11L), eq(101L), eq(201L), eq("claim"), any(Date.class)))
+                .thenReturn(1, 0);
+
+        service.renew(run, item, "claim", NOW);
+
+        assertThat(item.getLeaseExpiresAt().toInstant()).isEqualTo(NOW.plusSeconds(120));
+        assertThatThrownBy(() -> service.renew(run, item, "claim", NOW))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("lease was lost");
+    }
+
+    /**
+     * Covers skipped success mapping and overflow-safe retry backoff with a null internal failure.
+     */
+    @Test
+    void shouldMapSkippedSuccessAndBoundOverflowingBackoff() {
+        KeyRotationRun run = run();
+        KeyRotationItem skipped = item(201L, 1);
+        when(itemMapper.completeClaim(
+                11L, 101L, 201L, "claim",
+                KeyRotationStates.ITEM_SKIPPED, "SKIPPED_ALREADY_TARGET", 0,
+                301L, null, "NONE", null)).thenReturn(1);
+
+        service.complete(run, skipped, "claim",
+                AutomatedEnvelopeRotationResult.completed("SKIPPED_ALREADY_TARGET", 301L), NOW);
+
+        KeyRotationRun overflow = run()
+                .setMaxAttempts(20)
+                .setInitialBackoffSeconds(Long.MAX_VALUE)
+                .setMaxBackoffSeconds(60L);
+        KeyRotationItem retry = item(202L, 19);
+        when(itemMapper.completeClaim(
+                eq(11L), eq(101L), eq(202L), eq("overflow"),
+                eq(KeyRotationStates.ITEM_FAILED), eq("FAILED"), eq(1),
+                eq(null), any(Date.class), eq("INTERNAL"), eq("RuntimeException")))
+                .thenReturn(1);
+
+        service.failUnexpected(overflow, retry, "overflow", null, NOW);
+
+        ArgumentCaptor<Date> retryAt = ArgumentCaptor.forClass(Date.class);
+        verify(itemMapper).completeClaim(
+                eq(11L), eq(101L), eq(202L), eq("overflow"),
+                eq(KeyRotationStates.ITEM_FAILED), eq("FAILED"), eq(1),
+                eq(null), retryAt.capture(), eq("INTERNAL"), eq("RuntimeException"));
+        assertThat(retryAt.getValue().toInstant()).isEqualTo(NOW.plusSeconds(60));
+    }
+
+    /**
      * Builds one immutable run snapshot with deterministic retry and lease bounds.
      */
     private KeyRotationRun run() {

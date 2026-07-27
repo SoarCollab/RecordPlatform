@@ -1,5 +1,6 @@
 package cn.flying.service.key.rotation;
 
+import cn.flying.common.exception.GeneralException;
 import cn.flying.dao.entity.FileKeyEnvelope;
 import cn.flying.dao.entity.KeyRotationItem;
 import cn.flying.dao.entity.KeyRotationPolicy;
@@ -20,6 +21,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
@@ -242,6 +244,171 @@ class KeyRotationRunServiceTest {
         assertThat(run.getRetirementEligibleAt()).isNull();
         verify(itemMapper).retryFailed(11L, 101L);
         verify(auditService).record(refreshed, null, 51L, "RETRY", "SUCCESS", null);
+    }
+
+    /**
+     * Covers tenant-bounded runnable lookup and history limit normalization.
+     */
+    @Test
+    void shouldFindAndListTenantRunsWithBoundedLimits() {
+        KeyRotationRun run = run(KeyRotationStates.MODE_APPLY).setStatus(KeyRotationStates.RUN_RUNNING);
+        when(runMapper.selectOne(any())).thenReturn(run);
+        when(runMapper.selectList(any())).thenReturn(List.of(run));
+
+        assertThat(service.findRunnable(11L)).isSameAs(run);
+        assertThat(service.listRuns(11L, 0)).containsExactly(run);
+        assertThat(service.listRuns(11L, 999)).containsExactly(run);
+    }
+
+    /**
+     * Covers paused, already-sealed, and empty-page discovery boundaries without creating work items.
+     */
+    @Test
+    void shouldRespectEveryDiscoveryBoundary() {
+        KeyRotationRun paused = run(KeyRotationStates.MODE_APPLY)
+                .setStatus(KeyRotationStates.RUN_PAUSED);
+        KeyRotationRun sealed = run(KeyRotationStates.MODE_APPLY)
+                .setStatus(KeyRotationStates.RUN_RUNNING)
+                .setDiscoveryComplete(1);
+        KeyRotationRun empty = run(KeyRotationStates.MODE_APPLY)
+                .setStatus(KeyRotationStates.RUN_RUNNING)
+                .setDiscoveryComplete(0)
+                .setSnapshotMaxEnvelopeId(100L)
+                .setScanCursorId(null)
+                .setBatchSize(25);
+        KeyRotationRun refreshed = run(KeyRotationStates.MODE_APPLY)
+                .setStatus(KeyRotationStates.RUN_RUNNING)
+                .setDiscoveryComplete(1);
+        when(runMapper.selectRunForUpdate(11L, 101L)).thenReturn(paused, sealed, empty);
+        when(envelopeMapper.selectRotationCandidatePage(11L, 0L, 100L, 25)).thenReturn(List.of());
+        when(runMapper.selectById(101L)).thenReturn(refreshed);
+
+        assertThat(service.discoverNextPage(11L, 101L, NOW)).isSameAs(paused);
+        assertThat(service.discoverNextPage(11L, 101L, NOW)).isSameAs(sealed);
+        assertThat(service.discoverNextPage(11L, 101L, NOW)).isSameAs(refreshed);
+
+        assertThat(empty.getDiscoveryComplete()).isEqualTo(1);
+        verify(itemMapper, never()).insertIgnore(any());
+    }
+
+    /**
+     * Proves APPLY discovery creates executable pending work and leaves a full page unsealed.
+     */
+    @Test
+    void shouldDiscoverExecutableApplyWork() {
+        KeyRotationRun run = run(KeyRotationStates.MODE_APPLY)
+                .setStatus(KeyRotationStates.RUN_RUNNING)
+                .setDiscoveryComplete(0)
+                .setSnapshotMaxEnvelopeId(30L)
+                .setBatchSize(1);
+        when(runMapper.selectRunForUpdate(11L, 101L)).thenReturn(run);
+        when(envelopeMapper.selectRotationCandidatePage(11L, 0L, 30L, 1))
+                .thenReturn(List.of(envelope(10L, FileKeyEnvelopeService.RECIPIENT_TYPE_OWNER)));
+        when(runMapper.selectById(101L)).thenReturn(run);
+        ArgumentCaptor<KeyRotationItem> inserted = ArgumentCaptor.forClass(KeyRotationItem.class);
+
+        service.discoverNextPage(11L, 101L, NOW);
+
+        verify(itemMapper).insertIgnore(inserted.capture());
+        assertThat(inserted.getValue().getStatus()).isEqualTo(KeyRotationStates.ITEM_PENDING);
+        assertThat(inserted.getValue().getOutcome()).isNull();
+        assertThat(run.getScanCursorId()).isEqualTo(10L);
+        assertThat(run.getDiscoveryComplete()).isZero();
+    }
+
+    /**
+     * Covers early finalization, blocked work, and terminal failure completion with durable metrics.
+     */
+    @Test
+    void shouldFinalizeOnlyAfterAllRunnableWorkSettles() {
+        KeyRotationRun pending = run(KeyRotationStates.MODE_APPLY)
+                .setStatus(KeyRotationStates.RUN_RUNNING)
+                .setDiscoveryComplete(1)
+                .setPendingCount(1L)
+                .setRunningCount(0L)
+                .setFailedCount(0L)
+                .setRemainingCount(1L);
+        KeyRotationRun failed = run(KeyRotationStates.MODE_DRY_RUN)
+                .setStatus(KeyRotationStates.RUN_RUNNING)
+                .setDiscoveryComplete(1)
+                .setPendingCount(0L)
+                .setRunningCount(0L)
+                .setFailedCount(1L)
+                .setRemainingCount(1L);
+        when(runMapper.selectRunForUpdate(11L, 101L)).thenReturn(null, pending, failed);
+        when(itemMapper.selectCount(any())).thenReturn(0L);
+
+        assertThat(service.refreshAndFinalize(11L, 101L, NOW)).isNull();
+        assertThat(service.refreshAndFinalize(11L, 101L, NOW)).isSameAs(pending);
+        assertThat(service.refreshAndFinalize(11L, 101L, NOW)).isSameAs(failed);
+
+        assertThat(failed.getStatus()).isEqualTo(KeyRotationStates.RUN_COMPLETED_WITH_FAILURES);
+        assertThat(failed.getRetirementEligibleAt()).isNull();
+        verify(auditService).record(failed, null, 51L, "COMPLETE", "FAILURE", null);
+        verify(metrics).refresh(1L, 1L, true);
+    }
+
+    /**
+     * Covers retirement no-op gates and latest-policy delegation.
+     */
+    @Test
+    void shouldRefreshOnlyEligibleLatestRetirement() {
+        KeyRotationRun ineligible = run(KeyRotationStates.MODE_APPLY)
+                .setStatus(KeyRotationStates.RUN_RUNNING);
+        KeyRotationPolicy noRun = new KeyRotationPolicy().setTenantId(11L).setLastRunId(null);
+        KeyRotationPolicy latest = new KeyRotationPolicy()
+                .setTenantId(11L)
+                .setLastRunId(101L)
+                .setRetirementStatus(KeyRotationStates.RETIREMENT_NOT_READY);
+        KeyRotationRun ready = run(KeyRotationStates.MODE_APPLY)
+                .setStatus(KeyRotationStates.RUN_COMPLETED)
+                .setFailedCount(0L)
+                .setRemainingCount(0L)
+                .setRetirementStatus(KeyRotationStates.RETIREMENT_NOT_READY)
+                .setRetirementEligibleAt(java.util.Date.from(NOW.minusSeconds(1)));
+        when(runMapper.selectRunForUpdate(11L, 101L)).thenReturn(ineligible, ready);
+        when(policyMapper.selectOne(any())).thenReturn(noRun, latest);
+        when(policyMapper.selectTenantPolicyForUpdate(11L)).thenReturn(null);
+
+        assertThat(service.refreshRetirementReadiness(11L, 101L, NOW)).isSameAs(ineligible);
+        assertThat(service.refreshLatestRetirementReadiness(11L, NOW)).isNull();
+        assertThat(service.refreshLatestRetirementReadiness(11L, NOW)).isSameAs(ready);
+        assertThat(ready.getRetirementStatus()).isEqualTo(KeyRotationStates.RETIREMENT_READY);
+    }
+
+    /**
+     * Covers tenant-scoped run and item reads plus stable not-found behavior.
+     */
+    @Test
+    void shouldReadTenantRunAndCursorItems() {
+        KeyRotationRun run = run(KeyRotationStates.MODE_APPLY);
+        KeyRotationItem item = new KeyRotationItem().setId(201L).setRunId(101L).setTenantId(11L);
+        when(runMapper.selectOne(any())).thenReturn(run, run, null);
+        when(itemMapper.selectList(any())).thenReturn(List.of(item));
+
+        assertThat(service.getRun(11L, 101L)).isSameAs(run);
+        assertThat(service.listItems(11L, 101L, 200L, 500)).containsExactly(item);
+        assertThatThrownBy(() -> service.getRun(11L, 999L)).isInstanceOf(GeneralException.class);
+    }
+
+    /**
+     * Proves invalid lifecycle and retry requests cannot mutate a run.
+     */
+    @Test
+    void shouldRejectInvalidTransitionAndRetryRequests() {
+        KeyRotationRun terminal = run(KeyRotationStates.MODE_APPLY)
+                .setStatus(KeyRotationStates.RUN_COMPLETED);
+        KeyRotationRun failed = run(KeyRotationStates.MODE_APPLY)
+                .setStatus(KeyRotationStates.RUN_FAILED);
+        when(runMapper.selectRunForUpdate(11L, 101L)).thenReturn(terminal, failed);
+        when(itemMapper.retryFailed(11L, 101L)).thenReturn(0);
+
+        assertThatThrownBy(() -> service.pause(11L, 51L, 101L))
+                .isInstanceOf(GeneralException.class);
+        assertThatThrownBy(() -> service.retry(11L, 51L, 101L))
+                .isInstanceOf(GeneralException.class);
+
+        verify(runMapper, never()).updateById(terminal);
     }
 
     /**

@@ -1046,6 +1046,41 @@ class FileKeyEnvelopeServiceTest {
     }
 
     /**
+     * Verifies automated rotation returns stable idempotent outcomes before any provider operation.
+     */
+    @Test
+    void shouldHandleInvalidMissingRevokedAndAlreadyActivatedAutomationSources() {
+        WrappingKeyReference target = wrappingRegistry.activeKeyReference(1).requireValue();
+        FileKeyEnvelope revoked = new FileKeyEnvelope()
+                .setId(502L)
+                .setTenantId(1L)
+                .setStatus(FileKeyEnvelopeService.STATUS_REVOKED);
+        FileKeyEnvelope superseded = new FileKeyEnvelope()
+                .setId(503L)
+                .setTenantId(1L)
+                .setStatus(FileKeyEnvelopeService.STATUS_SUPERSEDED);
+        FileKeyEnvelope activated = new FileKeyEnvelope()
+                .setId(603L)
+                .setTenantId(1L)
+                .setStatus(FileKeyEnvelopeService.STATUS_ACTIVE);
+        when(fileKeyEnvelopeMapper.selectById(501L)).thenReturn(null);
+        when(fileKeyEnvelopeMapper.selectById(502L)).thenReturn(revoked);
+        when(fileKeyEnvelopeMapper.selectById(503L)).thenReturn(superseded);
+        when(fileKeyEnvelopeMapper.selectById(603L)).thenReturn(activated);
+
+        assertEquals("INVALID_REQUEST", envelopeService.rotateEnvelopeForAutomation(
+                null, 601L, target, 1, 900L, "ROTATE_INVALID").failureCategory().name());
+        assertEquals("SKIPPED_SOURCE_CHANGED", envelopeService.rotateEnvelopeForAutomation(
+                501L, 601L, target, 1, 900L, "ROTATE_MISSING").outcome());
+        assertEquals("SKIPPED_REVOKED", envelopeService.rotateEnvelopeForAutomation(
+                502L, 602L, target, 1, 900L, "ROTATE_REVOKED").outcome());
+        AutomatedEnvelopeRotationResult replay = envelopeService.rotateEnvelopeForAutomation(
+                503L, 603L, target, 1, 900L, "ROTATE_REPLAY");
+        assertEquals("SUCCEEDED", replay.outcome());
+        assertEquals(603L, replay.candidateEnvelopeId());
+    }
+
+    /**
      * 验证 AAD hash 篡改在 provider 调用前失败并写入稳定审计分类。
      */
     @Test
