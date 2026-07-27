@@ -566,6 +566,104 @@ class FileKeyGrantServiceTest {
     }
 
     /**
+     * 验证匿名公开分享在无租户上下文下仍按可信客户端、公开可见性和精确信封完成消费。
+     */
+    @Test
+    void shouldConsumeCurrentlyAuthorizedPublicGrant() {
+        FileKeyGrantEnvelopeBinding publicBinding = bindingWith(
+                104L, FileKeyEnvelopeService.RECIPIENT_TYPE_SHARE, 77L, false);
+        ArgumentCaptor<Object[]> issueArguments = ArgumentCaptor.forClass(Object[].class);
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), issueArguments.capture()))
+                .thenReturn(1L, 1L);
+        var grant = service.issue(new FileKeyGrantIssueContext(
+                file, publicBinding, FileKeyGrantAccessKind.PUBLIC_SHARE,
+                null, "203.0.113.7", SESSION_ID));
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(any())).thenReturn(storedFields(issueArguments.getValue()));
+        when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+        when(fileShareMapper.selectById(77L)).thenReturn(new FileShare()
+                .setId(77L)
+                .setTenantId(TENANT_ID)
+                .setUserId(ACTOR_ID)
+                .setShareType(0)
+                .setFileHashes("[\"" + FILE_HASH + "\"]")
+                .setExpireTime(java.util.Date.from(NOW.plusSeconds(300)))
+                .setStatus(FileShare.STATUS_ACTIVE));
+        when(envelopeService.unwrapGrantBinding(
+                file, publicBinding, null, "DOWNLOAD_GRANT_CONSUME"))
+                .thenReturn(Optional.of("public-key"));
+        TenantContext.clear();
+
+        assertThat(service.consumePublic(
+                grant.reference(), SESSION_ID, "203.0.113.7").initialKey())
+                .isEqualTo("public-key");
+        assertThat(TenantContext.getTenantId()).isNull();
+    }
+
+    /**
+     * 验证签发后文件所有者变化会在 Redis 预留和信封解封前撤销 owner 授权。
+     */
+    @Test
+    void shouldRejectOwnerGrantAfterOwnershipChanges() {
+        ArgumentCaptor<Object[]> issueArguments = ArgumentCaptor.forClass(Object[].class);
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), issueArguments.capture()))
+                .thenReturn(1L);
+        var grant = service.issue(authenticatedContext());
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(any())).thenReturn(storedFields(issueArguments.getValue()));
+        when(fileMapper.selectById(FILE_ID)).thenReturn(new File()
+                .setId(FILE_ID)
+                .setTenantId(TENANT_ID)
+                .setUid(999L)
+                .setVersion(3)
+                .setFileHash(FILE_HASH));
+
+        assertThatThrownBy(() -> service.consumeAuthenticated(grant.reference(), SESSION_ID, ACTOR_ID))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo("OWNER_AUTHORIZATION_CHANGED");
+        verify(envelopeService, never()).unwrapGrantBinding(any(), any(), any(), any());
+    }
+
+    /**
+     * 验证损坏或空的分享文件集合均失败关闭，不会进入 Redis 预留。
+     */
+    @Test
+    void shouldRejectMalformedAndEmptyShareFileSets() {
+        FileKeyGrantEnvelopeBinding shareBinding = bindingWith(
+                105L, FileKeyEnvelopeService.RECIPIENT_TYPE_SHARE, 77L, false);
+        ArgumentCaptor<Object[]> issueArguments = ArgumentCaptor.forClass(Object[].class);
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), issueArguments.capture()))
+                .thenReturn(1L);
+        var grant = service.issue(new FileKeyGrantIssueContext(
+                file, shareBinding, FileKeyGrantAccessKind.AUTHENTICATED_SHARE,
+                ACTOR_ID, null, SESSION_ID));
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(any())).thenReturn(storedFields(issueArguments.getValue()));
+        when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+        FileShare share = new FileShare()
+                .setId(77L)
+                .setTenantId(TENANT_ID)
+                .setUserId(ACTOR_ID)
+                .setShareType(1)
+                .setFileHashes("not-json")
+                .setStatus(FileShare.STATUS_ACTIVE);
+        when(fileShareMapper.selectById(77L)).thenReturn(share);
+
+        assertThatThrownBy(() -> service.consumeAuthenticated(grant.reference(), SESSION_ID, ACTOR_ID))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo("SHARE_AUTHORIZATION_CHANGED");
+
+        share.setFileHashes(" ");
+        assertThatThrownBy(() -> service.consumeAuthenticated(grant.reference(), SESSION_ID, ACTOR_ID))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo("SHARE_AUTHORIZATION_CHANGED");
+        verify(envelopeService, never()).unwrapGrantBinding(any(), any(), any(), any());
+    }
+
+    /**
      * 验证 Redis 状态字段被改写后绑定摘要校验失败，不会被重定向到其他文件。
      */
     @Test
@@ -605,6 +703,73 @@ class FileKeyGrantServiceTest {
                 .extracting("data")
                 .isEqualTo("GRANT_STATE_INVALID");
         verify(fileMapper, never()).selectById(any());
+    }
+
+    /**
+     * 验证缺失必填字段和非法生命周期都会在解析 Redis 状态时失败关闭。
+     */
+    @Test
+    void shouldRejectMissingFieldsAndInvalidGrantLifetime() {
+        ArgumentCaptor<Object[]> issueArguments = ArgumentCaptor.forClass(Object[].class);
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), issueArguments.capture()))
+                .thenReturn(1L);
+        var grant = service.issue(authenticatedContext());
+        Map<Object, Object> stored = storedFields(issueArguments.getValue());
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(any())).thenReturn(stored);
+        Object issuedAt = stored.put("issuedAt", "0");
+
+        assertThatThrownBy(() -> service.consumeAuthenticated(grant.reference(), SESSION_ID, ACTOR_ID))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo("GRANT_STATE_INVALID");
+
+        stored.put("issuedAt", issuedAt);
+        stored.remove("fileHash");
+        assertThatThrownBy(() -> service.consumeAuthenticated(grant.reference(), SESSION_ID, ACTOR_ID))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo("GRANT_STATE_INVALID");
+        verify(fileMapper, never()).selectById(any());
+    }
+
+    /**
+     * 验证 Redis 预留故障不暴露底层细节，动态拒绝信息仅记录稳定审计原因。
+     */
+    @Test
+    void shouldHideReservationDetailsAndNormalizeDynamicAuditReason() {
+        ArgumentCaptor<Object[]> issueArguments = ArgumentCaptor.forClass(Object[].class);
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), issueArguments.capture()))
+                .thenReturn(1L)
+                .thenThrow(new IllegalStateException("redis endpoint secret"));
+        var grant = service.issue(authenticatedContext());
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(any())).thenReturn(storedFields(issueArguments.getValue()));
+        when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+
+        assertThatThrownBy(() -> service.consumeAuthenticated(grant.reference(), SESSION_ID, ACTOR_ID))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo("KEY_GRANT_UNAVAILABLE");
+        verify(envelopeService).auditGrantDenial(binding, ACTOR_ID, "KEY_GRANT_UNAVAILABLE");
+
+        reset(redisTemplate, hashOperations, fileMapper, envelopeService);
+        when(redisTemplate.execute(any(RedisScript.class), anyList(), issueArguments.capture()))
+                .thenReturn(1L, 1L);
+        FileKeyGrantService isolatedService = newService(Clock.fixed(NOW, ZoneOffset.UTC));
+        var secondGrant = isolatedService.issue(authenticatedContext());
+        when(redisTemplate.opsForHash()).thenReturn(hashOperations);
+        when(hashOperations.entries(any())).thenReturn(storedFields(issueArguments.getValue()));
+        when(fileMapper.selectById(FILE_ID)).thenReturn(file);
+        when(envelopeService.unwrapGrantBinding(any(), any(), any(), any()))
+                .thenThrow(new GeneralException(cn.flying.common.constant.ResultEnum.FAIL, "dynamic detail"));
+
+        assertThatThrownBy(() -> isolatedService.consumeAuthenticated(
+                secondGrant.reference(), SESSION_ID, ACTOR_ID))
+                .isInstanceOf(GeneralException.class)
+                .extracting("data")
+                .isEqualTo("dynamic detail");
+        verify(envelopeService).auditGrantDenial(binding, ACTOR_ID, "GRANT_DENIED");
     }
 
     /**
