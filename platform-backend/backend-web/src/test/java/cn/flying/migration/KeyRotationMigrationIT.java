@@ -314,7 +314,7 @@ class KeyRotationMigrationIT {
     }
 
     /**
-     * Locks the oldest due item while skipping any row locked by another transaction.
+     * Locks the next due item in claim-index order while skipping rows locked by another transaction.
      */
     private long lockNextItem(Connection connection) throws SQLException {
         try (Statement statement = connection.createStatement();
@@ -322,7 +322,9 @@ class KeyRotationMigrationIT {
                      SELECT id FROM key_rotation_item FORCE INDEX (idx_key_rotation_item_claim)
                      WHERE tenant_id = 98190001 AND run_id = 98190020 AND deleted = 0
                        AND attempt_count < 3 AND status = 'PENDING'
-                     ORDER BY id ASC LIMIT 1 FOR UPDATE SKIP LOCKED
+                     ORDER BY status ASC, retryable ASC, next_retry_at ASC,
+                              lease_expires_at ASC, id ASC
+                     LIMIT 1 FOR UPDATE SKIP LOCKED
                      """)) {
             assertThat(resultSet.next()).isTrue();
             return resultSet.getLong(1);

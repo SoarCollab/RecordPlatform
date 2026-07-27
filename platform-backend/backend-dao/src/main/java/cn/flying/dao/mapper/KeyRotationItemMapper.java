@@ -39,7 +39,8 @@ public interface KeyRotationItemMapper extends BaseMapper<KeyRotationItem> {
     int insertIgnore(@Param("item") KeyRotationItem item);
 
     /**
-     * Locks a bounded claim page while skipping rows owned by other workers.
+     * Locks a bounded claim page in claim-index order so SKIP LOCKED workers do not
+     * filesort and lock the same page.
      */
     @InterceptorIgnore(tenantLine = "true")
     @Select("""
@@ -59,7 +60,8 @@ public interface KeyRotationItemMapper extends BaseMapper<KeyRotationItem> {
                     OR (status = 'RUNNING' AND lease_expires_at IS NOT NULL
                         AND lease_expires_at <= #{now})
               )
-            ORDER BY id ASC
+            ORDER BY status ASC, retryable ASC, next_retry_at ASC,
+                     lease_expires_at ASC, id ASC
             LIMIT #{limit}
             FOR UPDATE SKIP LOCKED
             """)
