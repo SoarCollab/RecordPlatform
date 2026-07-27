@@ -128,6 +128,14 @@ public final class SensitiveDataMasker {
             "presigned_url",
             "downloadurl",
             "download_url",
+            "grantreference",
+            "grant_reference",
+            "keygrant",
+            "key_grant",
+            "downloadsessionid",
+            "download_session_id",
+            "sessionid",
+            "session_id",
             "clientid",
             "client_id"
     );

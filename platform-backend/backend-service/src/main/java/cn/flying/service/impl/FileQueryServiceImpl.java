@@ -18,6 +18,7 @@ import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.DownloadKeyGrantVO;
 import cn.flying.dao.vo.file.FileDownloadEncryptionVO;
 import cn.flying.dao.vo.file.FileDownloadMetadataVO;
 import cn.flying.dao.vo.file.FileDownloadPartVO;
@@ -33,6 +34,10 @@ import cn.flying.service.FileQueryService;
 import cn.flying.service.FriendFileShareService;
 import cn.flying.service.encryption.FramedAeadCrypto;
 import cn.flying.service.key.FileKeyEnvelopeService;
+import cn.flying.service.key.FileKeyGrantAccessKind;
+import cn.flying.service.key.FileKeyGrantEnvelopeBinding;
+import cn.flying.service.key.FileKeyGrantIssueContext;
+import cn.flying.service.key.FileKeyGrantService;
 import cn.flying.service.manifest.ChunkManifestCanonicalizer;
 import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestDraft;
@@ -117,6 +122,7 @@ public class FileQueryServiceImpl implements FileQueryService {
     private final ChunkManifestService chunkManifestService;
     private final ManifestGovernanceStatusService manifestGovernanceStatusService;
     private final FileKeyEnvelopeService fileKeyEnvelopeService;
+    private final FileKeyGrantService fileKeyGrantService;
     @Qualifier("virtualThreadExecutor")
     private final TaskExecutor virtualThreadExecutor;
 
@@ -273,16 +279,20 @@ public class FileQueryServiceImpl implements FileQueryService {
     }
 
     /**
-     * Builds authorized presigned chunk-download metadata from the active chunk manifest.
+     * Builds authorized presigned metadata with negotiated key delivery.
      */
     @Override
-    public FileDownloadMetadataVO getDownloadMetadata(Long userId, String fileHash) {
+    public FileDownloadMetadataVO getDownloadMetadata(Long userId,
+                                                      String fileHash,
+                                                      String keyDeliveryProtocol,
+                                                      String downloadSessionId) {
         FileAccessContext accessContext = findAccessibleFile(userId, fileHash, true);
         if (accessContext == null) {
             throw new GeneralException(ResultEnum.FILE_NOT_EXIST);
         }
         File file = accessContext.file();
-        FileDecryptInfoVO decryptInfo = buildFileDecryptInfo(accessContext, fileHash, userId);
+        FileDecryptInfoVO decryptInfo = buildFileDecryptInfo(
+                accessContext, fileHash, userId, keyDeliveryProtocol, downloadSessionId, false);
         ChunkManifestView manifest = chunkManifestService.findActiveManifest(file.getUid(), file.getId())
                 .orElseThrow(() -> new GeneralException(
                         ResultEnum.FILE_RECORD_ERROR,
@@ -325,6 +335,8 @@ public class FileQueryServiceImpl implements FileQueryService {
         long expiresAtEpochSeconds = System.currentTimeMillis() / 1000L + DOWNLOAD_URL_TTL_SECONDS;
         List<FileDownloadPartVO> parts = buildDownloadParts(manifest, downloadUrls, expiresAtEpochSeconds);
         ManifestErrorDetail manifestStatus = manifestGovernanceStatusService.activeManifest();
+        FileDecryptInfoVO deliveredDecryptInfo = buildFileDecryptInfo(
+                accessContext, fileHash, userId, keyDeliveryProtocol, downloadSessionId, true);
 
         return new FileDownloadMetadataVO(
                 IdUtils.toExternalId(file.getId()),
@@ -332,7 +344,8 @@ public class FileQueryServiceImpl implements FileQueryService {
                 decryptInfo.fileName(),
                 fileSizeValue,
                 decryptInfo.contentType(),
-                decryptInfo.initialKey(),
+                deliveredDecryptInfo.initialKey(),
+                deliveredDecryptInfo.keyGrant(),
                 manifest.schemaId(),
                 manifest.manifestHash(),
                 canonicalManifestJson,
@@ -747,8 +760,14 @@ public class FileQueryServiceImpl implements FileQueryService {
         });
     }
 
+    /**
+     * Resolves legacy decrypt metadata with negotiated key delivery.
+     */
     @Override
-    public FileDecryptInfoVO getFileDecryptInfo(Long userId, String fileHash) {
+    public FileDecryptInfoVO getFileDecryptInfo(Long userId,
+                                                String fileHash,
+                                                String keyDeliveryProtocol,
+                                                String downloadSessionId) {
         FileAccessContext accessContext = findAccessibleFile(userId, fileHash, false);
         File file = accessContext != null ? accessContext.file() : null;
 
@@ -756,13 +775,19 @@ public class FileQueryServiceImpl implements FileQueryService {
             throw new GeneralException(ResultEnum.PERMISSION_UNAUTHORIZED, "文件不存在或无权限访问");
         }
 
-        return buildFileDecryptInfo(accessContext, fileHash, userId);
+        return buildFileDecryptInfo(
+                accessContext, fileHash, userId, keyDeliveryProtocol, downloadSessionId, true);
     }
 
     /**
      * Builds decrypt metadata from the stored file parameter JSON.
      */
-    private FileDecryptInfoVO buildFileDecryptInfo(FileAccessContext accessContext, String fileHash, Long actorId) {
+    private FileDecryptInfoVO buildFileDecryptInfo(FileAccessContext accessContext,
+                                                   String fileHash,
+                                                   Long actorId,
+                                                   String keyDeliveryProtocol,
+                                                   String downloadSessionId,
+                                                   boolean deliverKey) {
         File file = accessContext.file();
         String fileParam = file.getFileParam();
         if (CommonUtils.isEmpty(fileParam)) {
@@ -774,12 +799,17 @@ public class FileQueryServiceImpl implements FileQueryService {
             Map<String, Object> params = JsonConverter.parse(fileParam, Map.class);
 
             String initialKey = null;
-            if (requiresInitialKey(params)) {
-                Optional<String> envelopeInitialKey = resolveInitialKey(accessContext, fileHash, actorId);
-                initialKey = (envelopeInitialKey != null ? envelopeInitialKey : Optional.<String>empty())
-                        .orElse(null);
-                if (CommonUtils.isEmpty(initialKey)) {
-                    throw new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在");
+            DownloadKeyGrantVO keyGrant = null;
+            if (deliverKey && requiresInitialKey(params)) {
+                FileKeyGrantEnvelopeBinding binding = resolveGrantBinding(accessContext, fileHash)
+                        .orElseThrow(() -> new GeneralException(ResultEnum.FAIL, "文件解密密钥不存在"));
+                String protocol = normalizeKeyDeliveryProtocol(keyDeliveryProtocol);
+                if (FileKeyGrantService.PROTOCOL_PLAINTEXT_V0.equals(protocol)) {
+                    initialKey = fileKeyGrantService.deliverLegacyPlaintext(file, binding, actorId);
+                } else {
+                    FileKeyGrantAccessKind accessKind = resolveKeyGrantAccessKind(accessContext);
+                    keyGrant = fileKeyGrantService.issue(new FileKeyGrantIssueContext(
+                            file, binding, accessKind, actorId, null, downloadSessionId));
                 }
             }
 
@@ -794,6 +824,7 @@ public class FileQueryServiceImpl implements FileQueryService {
 
             return new FileDecryptInfoVO(
                     initialKey,
+                    keyGrant,
                     fileName != null ? fileName : file.getFileName(),
                     fileSize,
                     contentType,
@@ -811,32 +842,43 @@ public class FileQueryServiceImpl implements FileQueryService {
     }
 
     /**
-     * Resolves the decrypt key according to owner/admin or friend-share access mode.
+     * 将当前已授权文件来源收敛为 grant 持久化使用的闭集访问类型。
      */
-    private Optional<String> resolveInitialKey(FileAccessContext accessContext,
-                                               String fileHash,
-                                               Long actorId) {
-        File file = accessContext.file();
-        FriendFileShare friendShare = accessContext.friendShare();
-        if (friendShare != null) {
-            Optional<String> friendShareKey = fileKeyEnvelopeService.unwrapActiveFriendShareInitialKey(
-                    file,
-                    fileHash,
-                    friendShare,
-                    actorId,
-                    "FRIEND_SHARE_DECRYPT"
-            );
-            return friendShareKey != null ? friendShareKey : Optional.empty();
+    private FileKeyGrantAccessKind resolveKeyGrantAccessKind(FileAccessContext accessContext) {
+        if (SecurityUtils.isAdmin()) {
+            return FileKeyGrantAccessKind.ADMIN;
         }
+        return accessContext.friendShare() == null
+                ? FileKeyGrantAccessKind.OWNER
+                : FileKeyGrantAccessKind.FRIEND_SHARE;
+    }
 
-        Optional<String> ownerEnvelope = fileKeyEnvelopeService.unwrapActiveOwnerInitialKey(
-                file,
-                fileHash,
-                file.getUid(),
-                actorId,
-                "OWNER_DECRYPT"
-        );
-        return ownerEnvelope != null ? ownerEnvelope : Optional.empty();
+    /**
+     * Resolves a non-secret exact envelope binding for owner or friend-share access.
+     */
+    private Optional<FileKeyGrantEnvelopeBinding> resolveGrantBinding(FileAccessContext accessContext,
+                                                                      String fileHash) {
+        if (accessContext.friendShare() != null) {
+            return fileKeyEnvelopeService.resolveFriendShareGrantBinding(
+                    accessContext.file(), fileHash, accessContext.friendShare());
+        }
+        return fileKeyEnvelopeService.resolveOwnerGrantBinding(
+                accessContext.file(), fileHash, accessContext.file().getUid());
+    }
+
+    /**
+     * Normalizes the delivery protocol and rejects downgrade-like unknown values.
+     */
+    private String normalizeKeyDeliveryProtocol(String protocol) {
+        if (!StringUtils.hasText(protocol)) {
+            return FileKeyGrantService.PROTOCOL_GRANT_V1;
+        }
+        String normalized = protocol.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!FileKeyGrantService.PROTOCOL_GRANT_V1.equals(normalized)
+                && !FileKeyGrantService.PROTOCOL_PLAINTEXT_V0.equals(normalized)) {
+            throw new GeneralException(ResultEnum.PARAM_IS_INVALID, "KEY_DELIVERY_PROTOCOL_UNSUPPORTED");
+        }
+        return normalized;
     }
 
     /**
@@ -984,14 +1026,6 @@ public class FileQueryServiceImpl implements FileQueryService {
     public CompletableFuture<List<String>> getFileAddressAsync(Long userId, String fileHash) {
         return CompletableFuture.supplyAsync(
                 () -> getFileAddress(userId, fileHash),
-                virtualThreadExecutor
-        );
-    }
-
-    @Override
-    public CompletableFuture<FileDecryptInfoVO> getFileDecryptInfoAsync(Long userId, String fileHash) {
-        return CompletableFuture.supplyAsync(
-                () -> getFileDecryptInfo(userId, fileHash),
                 virtualThreadExecutor
         );
     }

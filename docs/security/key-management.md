@@ -217,7 +217,45 @@ crypto:
 
 详细变更步骤、诊断和回滚门禁见[运行时密码敏捷运维手册](../operations/crypto-agility.md)。
 
-## 7. 数据库迁移与恢复
+## 7. 下载密钥交付与暴露面
+
+### 7.1 `grant-v1` 默认合同
+
+加密下载的 `download-metadata` 和 decrypt-info 默认不再携带 plaintext `initialKey`。owner、friend-share、认证分享和公开分享在现有授权检查通过后返回短期 `keyGrant`。浏览器为单次下载创建内存会话标识，通过 `X-Download-Session-ID` 绑定 metadata 请求，并只在即将解密时把 grant 引用和同一会话放入 POST JSON 请求体：
+
+| 场景 | Metadata/decrypt-info | Consume |
+|---|---|---|
+| owner / friend-share | `GET /api/v1/files/hash/{fileHash}/download-metadata` 或 `/decrypt-info` | `POST /api/v1/files/key-grants/consume` |
+| 认证分享 | `GET /api/v1/shares/{shareCode}/files/{fileHash}/decrypt-info` | `POST /api/v1/files/key-grants/consume` |
+| 公开分享 | `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info` | `POST /api/v1/public/key-grants/consume` |
+
+grant 引用是 256-bit Base64URL 随机值，只允许出现在 POST body 和当前下载执行作用域，不进入 URL、query、referrer、任务持久化、日志、指标或错误。Redis key 只含引用的 SHA-256 摘要；hash 字段绑定 tenant、访问类型、文件 ID/hash/version、recipient、精确信封、provider/contract/key version、suite、会话摘要和签发/到期时间。actor 或规范化可信客户端身份与高熵下载会话共同摘要，避免 Redis 只读者直接对低熵用户 ID/IP 做离线字典反推；Redis 不保存原始身份、引用、分享码、预签名 URL、wrapped key 或 plaintext key。
+
+签发与 TTL 设置由同一 Lua 脚本原子完成。消费 Lua 把 `ISSUED` 原子推进到 `CONSUMED`。默认允许首次消费后在 10 秒内由同 actor/client 和同会话重试一次，用于响应丢失或 provider 短暂失败；它不会缓存 DEK，每次允许的尝试都会重新加载精确文件版本并要求原绑定信封仍为 `ACTIVE`。第三次、跨会话、跨 actor、跨租户、跨公开客户端身份、过期或损坏状态均拒绝。信封轮换/supersede/revoke、分享取消/到期/可见性收紧、好友分享取消或接收者变化都会在解封前重新核验并使旧 grant 失败，因此 grant 不会延长底层授权寿命。
+
+metadata、decrypt-info 和 consume 响应使用 `Cache-Control: no-store`（认证响应同时为 `private`）及 `Pragma: no-cache`。consume 采用独立的每用户或可信客户端 IP 20 次/60 秒限流。常规请求日志把 grant/session 视为敏感字段并跳过 key 路由响应体；`OperationLog` 不保存请求或响应 payload。`file_key_audit_log` 和 `app.file.key.grant` 只使用稳定操作、访问类型、结果和闭集原因，不记录引用、会话、客户端 IP 或密钥材料。通用 `FileVO.fileParam` 响应还会递归剥离历史明文/包封 key、key 标识、grant/session 与下载 URL 字段，损坏 JSON 失败关闭为 `null`，不能作为 decrypt-info 之外的旁路。
+
+### 7.2 浏览器生命周期与限制
+
+前端下载任务和恢复数据不包含 `initialKey`、grant 或 session。每次恢复都会重新授权并取得新 grant。framed v2 把 Base64 DEK 解码到可变 `Uint8Array`，立即导入 non-extractable HKDF `CryptoKey`，并在 `finally` 中覆盖原始数组；frame AES key 由 HKDF `deriveKey` 生成。legacy AES-GCM 每分片导入 non-extractable key 并覆盖解码字节。浏览器 WebCrypto 不提供 JavaScript 可验证的物理内存清零保证，Base64 字符串也不可原地覆盖；legacy ChaCha20-Poly1305 库仍需要短暂 raw key bytes。因此这里的保证是缩短生命周期、消除持久化和常规观测面，而不是声称浏览器内存取证不可能。
+
+### 7.3 `plaintext-v0` 迁移窗口
+
+旧协议只有在客户端显式发送 `X-Key-Delivery-Protocol: plaintext-v0`、服务端显式开启兼容开关且当前时间早于硬截止时间时才返回 `initialKey`。安全默认关闭：
+
+```yaml
+file:
+  key-delivery:
+    grant-ttl: 60s
+    retry-window: 10s
+    max-same-session-retries: 1
+    legacy-plaintext-enabled: false
+    legacy-plaintext-not-after: 2026-10-01T00:00:00Z
+```
+
+迁移期间先按 owner、friend-share、认证分享、公开分享分别观测 `legacy` 指标和审计；确认所有受支持客户端发送 `grant-v1`、恢复/并发下载成功、连续一个发布周期无 `plaintext-v0` 使用后，保持开关关闭并删除旧客户端支持。回滚只能在截止时间前短期开启，必须有变更单、告警和新的提前关闭时间；到达截止时间后即使误开开关也会失败关闭。不得延后截止时间来代替客户端迁移。
+
+## 8. 数据库迁移与恢复
 
 `V1.18.0__key_wrapping_provider_metadata.sql` 增加 provider-neutral 元数据；`V1.19.0__automated_key_rotation.sql` 前向增加自动轮换治理；`V1.20.0__runtime_crypto_agility.sql` 再增加运行时 suite/provider 身份和租户策略：
 
@@ -242,15 +280,16 @@ crypto:
 3. Vault token 轮换不影响历史信封；
 4. 恢复后 audit、tenant 和 recipient 隔离仍有效。
 
-## 8. 已知限制与后续边界
+## 9. 已知限制与后续边界
 
 - Vault 可用性会直接影响加密文件下载；当前只提供稳定可重试语义，不在请求内做无界重试，也不回退 local。
-- 授权下载/解密 metadata 当前仍可能向前端返回 `initialKey`；更广泛的数据密钥暴露收敛属于 P3-4。
+- TLS 终止点、浏览器进程和执行中的页面仍会在 consume 响应/解密期间短暂接触 plaintext DEK；`grant-v1` 不等同于端到端硬件隔离。
+- Redis 是 grant 可用性依赖；不可用时加密下载失败关闭，不回退到 plaintext。
 - 当前不存在可执行的 PQC/KEM provider，ML-DSA/ML-KEM 目录项不构成实现或合规声明。
 - 当前 proof 签名执行 provider 只有 `local-ed25519`/1；registry 已冻结历史路由合同，但新增外部 signer 必须以独立 adapter、真实集成测试和迁移计划验收。
 - AWS KMS adapter 需在仓库具备受控 AWS 账户、OIDC role 和测试 key 后单独验收，不能用 mock 冒充真实云 KMS 证据。
 
-## 9. 运维检查清单
+## 10. 运维检查清单
 
 - [ ] 生产 active provider 与合同版本显式配置。
 - [ ] Vault 地址为 HTTPS，token 为最小权限且由 secret 系统注入。
@@ -261,6 +300,9 @@ crypto:
 - [ ] `remaining` 与 `failed` 归零且回滚宽限期结束前，不禁用或删除旧 provider key。
 - [ ] 退休只由外部变更流程执行；RecordPlatform 仅记录 READY 和管理员 acknowledgement。
 - [ ] 审计、指标、health 和日志采集链路中不存在 token、plaintext DEK、wrapped blob 或原始 key ID。
+- [ ] `FILE_KEY_DELIVERY_LEGACY_PLAINTEXT_ENABLED=false`，TTL/重试窗口保持短且 Redis HA/ACL/传输加密符合部署基线。
+- [ ] 代理不会缓存 metadata/decrypt-info/consume 响应，也不会把 POST body、grant、session 或 `initialKey` 记录到访问日志、WAF 或 APM payload。
+- [ ] `plaintext-v0` 使用量为零且兼容截止时间、客户端移除条件和回滚负责人已登记。
 - [ ] 变更租户 suite/provider 策略前保存 diagnostics 和 policy fingerprint，并使用正确 `expectedVersion`。
 - [ ] 弃用窗口先进入 `DEPRECATED` 并证明历史读取仍可用；只有历史引用清零后才进入 `DISABLED`。
 - [ ] 任何内容加密 suite 变化都走重新加密任务，不使用 rewrap 冒充。
@@ -268,7 +310,7 @@ crypto:
 - [ ] 数据库与 Vault 备份、恢复和 HA 故障切换已联合演练。
 - [ ] 若声明 HSM-backed，已验证 Enterprise 许可证、PKCS#11/Managed Keys、实际硬件与故障切换证据。
 
-## 10. 参考资料
+## 11. 参考资料
 
 - [Vault Transit secrets engine](https://developer.hashicorp.com/vault/docs/secrets/transit)
 - [Vault Transit HTTP API](https://developer.hashicorp.com/vault/api-docs/secret/transit)
@@ -279,6 +321,6 @@ crypto:
 
 ---
 
-**文档版本**：v4.0
+**文档版本**：v5.0
 **最后更新**：2026-07-27
 **维护者**：Security Team

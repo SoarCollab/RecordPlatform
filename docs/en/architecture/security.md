@@ -32,12 +32,13 @@ The `X-Tenant-ID` header, `x-tenant-id` query value, and legacy `tenantId` query
 
 ## Anonymous Public-Share Tenant Boundary
 
-Only these four exact routes are anonymous:
+Only these five exact routes are anonymous:
 
 - `GET /api/v1/shares/{shareCode}/info`
 - `GET /api/v1/shares/{shareCode}/files`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/chunks`
 - `GET /api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info`
+- `POST /api/v1/public/key-grants/consume`
 
 They require neither JWT nor a tenant header. Caller-controlled `X-Tenant-ID` values are ignored rather than becoming an authoritative `TenantContext`. The service uses the matching `shareCode` metadata to resolve the owner tenant; only that share-metadata lookup crosses tenant isolation. File metadata, key envelopes, access-count changes, and share-access auditing then execute inside the owner tenant. Checks for public visibility, active/cancelled/expired or unknown state, supported share type, and file membership remain fail closed. The current model has no share-password field; password protection is outside this change.
 
@@ -191,6 +192,8 @@ The serialized file data key is removed from persisted file metadata and stored 
 - external `rp-file-envelope-context-v2` binds tenant, file, hash, recipient, and suite, while Vault receives only the Base64 SHA-256 digest of those canonical bytes;
 - same-named Vault key rotation uses Transit `rewrap`; cross-provider rotation is a controlled unwrap/wrap operation;
 - audit and metrics contain stable failure categories and a key-ID fingerprint, never a raw key ID, wrapped blob, plaintext data key, token, or Vault error body.
+
+Encrypted download metadata now returns a short-lived `grant-v1` reference rather than a plaintext data key. Redis stores only the reference digest and immutable authorization/envelope binding; a Lua state transition permits one initial consume and one bounded same-session retry. The consume path reloads the exact file version and exact active envelope, so rotation, revoke, share cancellation, actor/session/tenant/client drift, expiry, or replay fails closed before key release. Grant and transient-key responses are `no-store`, request/response payload logging is disabled, and the browser does not persist grants or data keys. See [Key Management Security](../../security/key-management.md#7-下载密钥交付与暴露面) for protocol and browser-memory limits.
 
 Vault Community integration tests prove the Transit API contract. They do not prove HSM custody. Production HSM-backed deployments require Vault Enterprise with PKCS#11 seal wrap or Managed Keys, plus the relevant licenses, hardware, and high-availability design.
 

@@ -239,6 +239,13 @@ file:
     supported-proof-suites:
       - RP-MERKLE-SHA256-V1
     deprecated-suites: []
+  # Browser key delivery uses short-lived one-time grants; plaintext-v0 is migration-only.
+  key-delivery:
+    grant-ttl: ${FILE_KEY_DELIVERY_GRANT_TTL:60s}
+    retry-window: ${FILE_KEY_DELIVERY_RETRY_WINDOW:10s}
+    max-same-session-retries: ${FILE_KEY_DELIVERY_MAX_SAME_SESSION_RETRIES:1}
+    legacy-plaintext-enabled: ${FILE_KEY_DELIVERY_LEGACY_PLAINTEXT_ENABLED:false}
+    legacy-plaintext-not-after: ${FILE_KEY_DELIVERY_LEGACY_PLAINTEXT_NOT_AFTER:2026-10-01T00:00:00Z}
 
 # Automated envelope rotation is opt-in; durable tenant policies own business limits.
 key:

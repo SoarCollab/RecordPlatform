@@ -6,6 +6,7 @@ import type {
 import { decryptChunk } from "./crypto";
 import {
   downloadFramedPart,
+  importFramedFileDek,
   MAX_FRAMES_PER_PART,
   validateFramedEncryption,
 } from "./framedAead";
@@ -55,6 +56,8 @@ export type DownloadFormat = "NONE" | "LEGACY_V1" | "FRAMED_V2";
 
 export interface BoundedDownloadOptions {
   metadata: FileDownloadMetadataVO;
+  /** grant-v1 消费后仅在当前执行作用域内存在的瞬时密钥。 */
+  initialKey?: string | null;
   /** 调用任务中已确认的文件 hash，用于阻止跨文件 metadata 替换。 */
   expectedFileHash?: string;
   sink: DownloadSink;
@@ -773,6 +776,7 @@ function validateLegacyPlainRanges(
 /** 执行历史 v1 环形密钥链兼容下载。 */
 async function downloadLegacyFile(params: {
   metadata: FileDownloadMetadataVO;
+  initialKey: string;
   parts: FileDownloadPartVO[];
   sink: DownloadSink;
   metrics: DownloadMetricsTracker;
@@ -782,9 +786,6 @@ async function downloadLegacyFile(params: {
 }): Promise<void> {
   if (!params.sink.supportsRandomAccess && params.metadata.fileSize > 0) {
     throw new Error("历史加密下载需要支持随机写入的临时文件");
-  }
-  if (!params.metadata.initialKey) {
-    throw new Error("历史加密文件缺少 initialKey");
   }
   for (const part of params.parts) {
     if (part.size > LEGACY_MAX_CIPHER_PART_BYTES) {
@@ -809,7 +810,7 @@ async function downloadLegacyFile(params: {
   });
   let firstKey: string;
   try {
-    const result = await decryptChunk(lastCipher, params.metadata.initialKey);
+    const result = await decryptChunk(lastCipher, params.initialKey);
     const range = plainRanges.at(-1)!;
     await writeLegacyPlaintext({
       plaintext: result.plaintext,
@@ -823,7 +824,7 @@ async function downloadLegacyFile(params: {
     if (params.parts.length > 1 && !result.nextKey) {
       throw new Error("历史最后分片缺少首分片密钥");
     }
-    firstKey = result.nextKey ?? params.metadata.initialKey;
+    firstKey = result.nextKey ?? params.initialKey;
   } finally {
     params.metrics.release(lastCipher.byteLength);
   }
@@ -1054,6 +1055,8 @@ export async function executeLegacyFallbackDownload(
       // abort 失败不覆盖原始下载错误。
     }
     throw error;
+  } finally {
+    options.initialKey = null;
   }
 }
 
@@ -1063,6 +1066,8 @@ export async function executeBoundedDownload(
 ): Promise<DownloadStreamMetrics> {
   const metrics = options.metrics ?? new DownloadMetricsTracker();
   const fetchImpl = options.fetchImpl ?? fetch;
+  let transientInitialKey: string | null | undefined =
+    options.initialKey ?? options.metadata.initialKey;
 
   try {
     const parts = validateParts(options.metadata);
@@ -1099,7 +1104,7 @@ export async function executeBoundedDownload(
       }
     } else if (format === "FRAMED_V2") {
       const encryption = options.metadata.encryption as ChunkManifestEncryption;
-      if (!options.metadata.initialKey) {
+      if (!transientInitialKey) {
         throw new Error("framed AEAD 文件缺少 file DEK");
       }
       const totalPlainSize = parts.reduce(
@@ -1109,6 +1114,9 @@ export async function executeBoundedDownload(
       if (totalPlainSize !== options.metadata.fileSize) {
         throw new Error("framed AEAD 明文总长度与文件大小不一致");
       }
+      const fileDek = await importFramedFileDek(transientInitialKey);
+      transientInitialKey = null;
+      options.initialKey = null;
       for (let index = 0; index < parts.length; index++) {
         const part = parts[index];
         const response = await fetchPart(part, options.signal, fetchImpl);
@@ -1117,7 +1125,7 @@ export async function executeBoundedDownload(
           part,
           partCount: parts.length,
           encryption,
-          fileDekBase64: options.metadata.initialKey,
+          fileDek,
           sink: options.sink,
           metrics,
           signal: options.signal,
@@ -1125,8 +1133,12 @@ export async function executeBoundedDownload(
         options.onPartComplete?.(index + 1, parts.length);
       }
     } else {
+      if (!transientInitialKey) {
+        throw new Error("历史加密文件缺少 initialKey");
+      }
       await downloadLegacyFile({
         metadata: options.metadata,
+        initialKey: transientInitialKey,
         parts,
         sink: options.sink,
         metrics,
@@ -1157,5 +1169,8 @@ export async function executeBoundedDownload(
       // abort 失败不覆盖原始下载错误。
     }
     throw error;
+  } finally {
+    options.initialKey = null;
+    options.metadata.initialKey = undefined;
   }
 }

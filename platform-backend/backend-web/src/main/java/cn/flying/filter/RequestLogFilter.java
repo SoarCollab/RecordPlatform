@@ -54,7 +54,7 @@ public class RequestLogFilter extends OncePerRequestFilter {
             "encryptedDataKey", "wrappedDataKey", "wrappingIv", "kmsKeyId", "fileDataKey",
             "shareCode", "sharingCode", "fileHash", "transactionHash",
             "contractABI", "input", "signature", "presignedUrl", "downloadUrl",
-            "clientId"
+            "clientId", "grantReference", "sessionId", "downloadSessionId"
     );
 
     private static final String MASK = "***";
@@ -66,6 +66,7 @@ public class RequestLogFilter extends OncePerRequestFilter {
             "/download",
             "/chunks",
             "/decrypt-info",
+            "/key-grants",
             "/tokens",
             "/password",
             "/verification-codes",

@@ -99,7 +99,7 @@ class SecurityConfigurationTest {
     }
 
     /**
-     * 验证公开分享只放行四个精确 GET 合同，近似前缀和写操作仍需认证。
+     * 验证公开分享只放行精确读取合同和公开 grant 消费 POST，近似前缀仍需认证。
      */
     @Test
     void shouldPermitOnlyExactPublicShareReadEndpoints() throws Exception {
@@ -113,6 +113,8 @@ class SecurityConfigurationTest {
                 "\"/api/v1/public/shares/*/files/*/chunks\","));
         assertTrue(securityConfiguration.contains(
                 "\"/api/v1/public/shares/*/files/*/decrypt-info\").permitAll()"));
+        assertTrue(securityConfiguration.contains(
+                ".requestMatchers(HttpMethod.POST, \"/api/v1/public/key-grants/consume\").permitAll()"));
         assertFalse(securityConfiguration.contains(
                 ".requestMatchers(HttpMethod.GET, \"/api/v1/public/shares/**\").permitAll()"));
         assertFalse(securityConfiguration.contains(

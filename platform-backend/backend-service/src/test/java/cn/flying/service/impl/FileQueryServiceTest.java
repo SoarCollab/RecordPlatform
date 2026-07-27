@@ -14,6 +14,7 @@ import cn.flying.dao.mapper.AccountMapper;
 import cn.flying.dao.mapper.FileMapper;
 import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.DownloadKeyGrantVO;
 import cn.flying.dao.vo.file.FileVersionVO;
 import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.platformapi.constant.Result;
@@ -22,6 +23,9 @@ import cn.flying.platformapi.response.TransactionVO;
 import cn.flying.service.FriendFileShareService;
 import cn.flying.service.encryption.FramedAeadCrypto;
 import cn.flying.service.key.FileKeyEnvelopeService;
+import cn.flying.service.key.FileKeyGrantAccessKind;
+import cn.flying.service.key.FileKeyGrantEnvelopeBinding;
+import cn.flying.service.key.FileKeyGrantService;
 import cn.flying.service.manifest.ChunkManifestCanonicalizer;
 import cn.flying.service.manifest.ChunkManifestChunk;
 import cn.flying.service.manifest.ChunkManifestDraft;
@@ -47,6 +51,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -93,6 +98,12 @@ class FileQueryServiceTest {
     @Mock
     private FileKeyEnvelopeService fileKeyEnvelopeService;
 
+    @Mock
+    private FileKeyGrantService fileKeyGrantService;
+
+    @Mock
+    private FileKeyGrantEnvelopeBinding keyGrantBinding;
+
     @InjectMocks
     private FileQueryServiceImpl fileQueryService;
 
@@ -101,6 +112,10 @@ class FileQueryServiceTest {
     private static final Long FILE_ID = 1L;
     private static final String FILE_HASH = "sha256_test_hash";
     private static final String TRANSACTION_HASH = "0xtxhash";
+    private static final String KEY_DELIVERY_PROTOCOL = FileKeyGrantService.PROTOCOL_GRANT_V1;
+    private static final String DOWNLOAD_SESSION_ID = "test-download-session-123456";
+    private static final DownloadKeyGrantVO DOWNLOAD_KEY_GRANT = new DownloadKeyGrantVO(
+            "A".repeat(43), KEY_DELIVERY_PROTOCOL, Instant.parse("2030-01-01T00:00:00Z"));
     private static final int V2_FRAME_SIZE = 64 * 1024;
     private static final long V2_FILE_SIZE = V2_FRAME_SIZE + 3L;
     private static final long V2_CIPHER_SIZE = FramedAeadCrypto.CHUNK_HEADER_SIZE
@@ -122,6 +137,11 @@ class FileQueryServiceTest {
                         invocation.getArgument(0, ChunkManifestDraft.class)));
         lenient().when(manifestGovernanceStatusService.activeManifest())
                 .thenReturn(new ManifestErrorDetail("ACTIVE", "ALREADY_MANIFEST", null, false));
+        lenient().when(fileKeyEnvelopeService.resolveOwnerGrantBinding(any(), anyString(), anyLong()))
+                .thenReturn(Optional.of(keyGrantBinding));
+        lenient().when(fileKeyEnvelopeService.resolveFriendShareGrantBinding(any(), anyString(), any()))
+                .thenReturn(Optional.of(keyGrantBinding));
+        lenient().when(fileKeyGrantService.issue(any())).thenReturn(DOWNLOAD_KEY_GRANT);
     }
 
     /**
@@ -190,7 +210,7 @@ class FileQueryServiceTest {
                 when(fileRemoteClient.getFileUrlListByHash(List.of("chunks/0", "chunks/1"),
                         List.of("cipher-0", "cipher-1"))).thenReturn(Result.success(List.of("url-0", "url-1")));
 
-                var metadata = fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH);
+                var metadata = fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID);
 
                 assertEquals("ext-file-1", metadata.fileId());
                 assertEquals(FILE_HASH, metadata.fileHash());
@@ -252,7 +272,7 @@ class FileQueryServiceTest {
                 when(fileRemoteClient.getFileUrlListByHash(List.of("chunks/0"), List.of("sha256:chunk")))
                         .thenReturn(Result.success(List.of("url-0")));
 
-                var metadata = fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH);
+                var metadata = fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID);
 
                 assertNull(metadata.initialKey());
                 assertEquals("NONE", metadata.encryptionAlgorithm());
@@ -267,6 +287,7 @@ class FileQueryServiceTest {
                         anyLong(),
                         anyString()
                 );
+                verify(fileKeyGrantService, never()).issue(any());
             }
         }
 
@@ -299,7 +320,7 @@ class FileQueryServiceTest {
                 when(chunkManifestService.findActiveManifest(USER_ID, FILE_ID)).thenReturn(Optional.empty());
 
                 GeneralException ex = assertThrows(GeneralException.class,
-                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH));
+                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID));
 
                 assertEquals(ResultEnum.FILE_RECORD_ERROR.getCode(), ex.getResultEnum().getCode());
                 verify(fileRemoteClient, never()).getFileUrlListByHash(anyList(), anyList());
@@ -318,7 +339,7 @@ class FileQueryServiceTest {
                 when(friendFileShareService.getActiveShareForFile(USER_ID, FILE_HASH)).thenReturn(null);
 
                 GeneralException ex = assertThrows(GeneralException.class,
-                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH));
+                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID));
 
                 assertEquals(ResultEnum.FILE_NOT_EXIST.getCode(), ex.getResultEnum().getCode());
                 verify(chunkManifestService, never()).findActiveManifest(any(), any());
@@ -343,10 +364,11 @@ class FileQueryServiceTest {
                         framedChunk(V2_CIPHER_SIZE, V2_FILE_SIZE, 2));
                 stubOwnedDownload(file, manifest, List.of("https://storage.example/v2-part-0"));
 
-                var metadata = fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH);
+                var metadata = fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID);
 
                 assertEquals("ext-v2-file", metadata.fileId());
-                assertEquals("file-dek", metadata.initialKey());
+                assertNull(metadata.initialKey());
+                assertEquals(DOWNLOAD_KEY_GRANT, metadata.keyGrant());
                 assertEquals(V2_FILE_SIZE, metadata.fileSize());
                 assertEquals(V2_FILE_SIZE, metadata.chunkSize());
                 assertThat(metadata.encryption()).isNotNull();
@@ -376,7 +398,7 @@ class FileQueryServiceTest {
                 stubOwnedDownload(file, manifest, List.of("unused"));
 
                 GeneralException failure = assertThrows(GeneralException.class,
-                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH));
+                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID));
 
                 assertThat(failure.getData()).asString().contains("fileParam");
                 verify(fileRemoteClient, never()).getFileUrlListByHash(anyList(), anyList());
@@ -399,7 +421,7 @@ class FileQueryServiceTest {
                 stubOwnedDownload(file, manifest, List.of("unused"));
 
                 GeneralException failure = assertThrows(GeneralException.class,
-                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH));
+                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID));
 
                 assertThat(failure.getData()).asString().contains("frame");
                 verify(fileRemoteClient, never()).getFileUrlListByHash(anyList(), anyList());
@@ -422,7 +444,7 @@ class FileQueryServiceTest {
                 stubOwnedDownload(file, manifest, List.of("unused"));
 
                 GeneralException failure = assertThrows(GeneralException.class,
-                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH));
+                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID));
 
                 assertThat(failure.getData()).asString().contains("加密算法声明不一致");
                 verify(fileRemoteClient, never()).getFileUrlListByHash(anyList(), anyList());
@@ -445,7 +467,7 @@ class FileQueryServiceTest {
                 stubOwnedDownload(file, manifest, List.of(" "));
 
                 GeneralException failure = assertThrows(GeneralException.class,
-                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH));
+                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID));
 
                 assertThat(failure.getData()).asString().contains("空下载 URL");
             }
@@ -472,7 +494,7 @@ class FileQueryServiceTest {
                                 framedChunk(V2_CIPHER_SIZE, V2_FILE_SIZE, 2))));
 
                 GeneralException failure = assertThrows(GeneralException.class,
-                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH));
+                        () -> fileQueryService.getDownloadMetadata(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID));
 
                 assertThat(failure.getData()).asString().contains("文件大小");
                 verify(fileRemoteClient, never()).getFileUrlListByHash(anyList(), anyList());
@@ -1215,31 +1237,28 @@ class FileQueryServiceTest {
                         .when(fileMapper).selectOne(any());
 
                 when(friendFileShareService.getActiveShareForFile(USER_ID, FILE_HASH)).thenReturn(friendShare);
-                when(fileKeyEnvelopeService.unwrapActiveFriendShareInitialKey(
+                when(fileKeyEnvelopeService.resolveFriendShareGrantBinding(
                         sharerFile,
                         FILE_HASH,
-                        friendShare,
-                        USER_ID,
-                        "FRIEND_SHARE_DECRYPT"
-                )).thenReturn(Optional.of("friend-envelope-key"));
+                        friendShare
+                )).thenReturn(Optional.of(keyGrantBinding));
 
                 // When
-                var result = fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH);
+                var result = fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID);
 
                 // Then
                 assertNotNull(result);
-                assertEquals("friend-envelope-key", result.initialKey());
+                assertNull(result.initialKey());
+                assertEquals(DOWNLOAD_KEY_GRANT, result.keyGrant());
                 assertEquals(1024L, result.fileSize());
                 assertEquals(FILE_HASH, result.fileHash());
 
                 // Verify friend share service was called
                 verify(friendFileShareService).getActiveShareForFile(USER_ID, FILE_HASH);
-                verify(fileKeyEnvelopeService).unwrapActiveFriendShareInitialKey(
+                verify(fileKeyEnvelopeService).resolveFriendShareGrantBinding(
                         sharerFile,
                         FILE_HASH,
-                        friendShare,
-                        USER_ID,
-                        "FRIEND_SHARE_DECRYPT"
+                        friendShare
                 );
                 verify(fileKeyEnvelopeService, never()).unwrapActiveOwnerInitialKey(
                         any(File.class),
@@ -1264,7 +1283,7 @@ class FileQueryServiceTest {
 
                 // When & Then
                 GeneralException ex = assertThrows(GeneralException.class, () ->
-                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH));
+                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID));
 
                 assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), ex.getResultEnum().getCode());
             }
@@ -1284,7 +1303,7 @@ class FileQueryServiceTest {
 
                 // When & Then - Sharer's file lookup also returns null
                 GeneralException ex = assertThrows(GeneralException.class, () ->
-                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH));
+                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID));
 
                 assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), ex.getResultEnum().getCode());
             }
@@ -1320,11 +1339,15 @@ class FileQueryServiceTest {
                 )).thenReturn(Optional.of("YWRtaW5rZXk="));
 
                 // When
-                var result = fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH);
+                var result = fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID);
 
                 // Then
                 assertNotNull(result);
-                assertEquals("YWRtaW5rZXk=", result.initialKey());
+                assertNull(result.initialKey());
+                assertEquals(DOWNLOAD_KEY_GRANT, result.keyGrant());
+                verify(fileKeyGrantService).issue(argThat(context ->
+                        context.accessKind() == FileKeyGrantAccessKind.ADMIN
+                                && USER_ID.equals(context.actorId())));
                 // Should not call friendFileShareService for admin
                 verify(friendFileShareService, never()).getActiveShareForFile(any(), any());
             }
@@ -1340,7 +1363,7 @@ class FileQueryServiceTest {
 
                 // When & Then - Throws PERMISSION_UNAUTHORIZED because no file matches the hash
                 GeneralException ex = assertThrows(GeneralException.class, () ->
-                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH));
+                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID));
 
                 assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED.getCode(), ex.getResultEnum().getCode());
             }
@@ -1377,11 +1400,12 @@ class FileQueryServiceTest {
                 )).thenReturn(Optional.of("c2VjcmV0a2V5"));
 
                 // When
-                var result = fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH);
+                var result = fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID);
 
                 // Then
                 assertNotNull(result);
-                assertEquals("c2VjcmV0a2V5", result.initialKey());
+                assertNull(result.initialKey());
+                assertEquals(DOWNLOAD_KEY_GRANT, result.keyGrant());
                 assertEquals(4096L, result.fileSize());
                 assertEquals("application/pdf", result.contentType());
                 assertEquals(2, result.chunkCount());
@@ -1413,7 +1437,7 @@ class FileQueryServiceTest {
                 )).thenReturn(Optional.of("a2V5"));
 
                 // When
-                var result = fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH);
+                var result = fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID);
 
                 // Then
                 assertEquals("entity_name.txt", result.fileName());
@@ -1434,10 +1458,12 @@ class FileQueryServiceTest {
                 });
 
                 when(fileMapper.selectOne(any())).thenReturn(file);
+                when(fileKeyEnvelopeService.resolveOwnerGrantBinding(file, FILE_HASH, USER_ID))
+                        .thenReturn(Optional.empty());
 
                 // When & Then
                 GeneralException ex = assertThrows(GeneralException.class, () ->
-                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH));
+                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID));
 
                 assertEquals(ResultEnum.FAIL.getCode(), ex.getResultEnum().getCode());
             }
@@ -1460,7 +1486,7 @@ class FileQueryServiceTest {
 
                 // When & Then
                 GeneralException ex = assertThrows(GeneralException.class, () ->
-                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH));
+                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID));
 
                 assertEquals(ResultEnum.FAIL.getCode(), ex.getResultEnum().getCode());
             }
@@ -1483,7 +1509,7 @@ class FileQueryServiceTest {
 
                 // When & Then
                 GeneralException ex = assertThrows(GeneralException.class, () ->
-                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH));
+                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID));
 
                 assertEquals(ResultEnum.JSON_PARSE_ERROR.getCode(), ex.getResultEnum().getCode());
             }
@@ -1506,7 +1532,7 @@ class FileQueryServiceTest {
 
                 // When & Then
                 GeneralException ex = assertThrows(GeneralException.class, () ->
-                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH));
+                        fileQueryService.getFileDecryptInfo(USER_ID, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID));
 
                 assertEquals(ResultEnum.FAIL.getCode(), ex.getResultEnum().getCode());
             }

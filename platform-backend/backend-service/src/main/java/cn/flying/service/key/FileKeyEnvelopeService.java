@@ -25,6 +25,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -45,6 +46,10 @@ public class FileKeyEnvelopeService {
     private static final String OPERATION_UNWRAP = "UNWRAP";
     private static final String OPERATION_ROTATE = "ROTATE";
     private static final String OPERATION_REVOKE = "REVOKE";
+    private static final String OPERATION_GRANT_ISSUE = "GRANT_ISSUE";
+    private static final String OPERATION_GRANT_CONSUME = "GRANT_CONSUME";
+    private static final String OPERATION_GRANT_DENY = "GRANT_DENY";
+    private static final String OPERATION_PLAINTEXT_V0 = "PLAINTEXT_V0";
     private static final String RESULT_SUCCESS = "SUCCESS";
     private static final String RESULT_FAILURE = "FAILURE";
     private static final String RESULT_SKIPPED = "SKIPPED";
@@ -481,6 +486,97 @@ public class FileKeyEnvelopeService {
     }
 
     /**
+     * 解析 owner 下载 grant 所绑定的精确信封，不执行解封。
+     */
+    public Optional<FileKeyGrantEnvelopeBinding> resolveOwnerGrantBinding(File file,
+                                                                          String fileHash,
+                                                                          Long ownerId) {
+        Optional<FileKeyGrantEnvelopeBinding> binding = resolveGrantBinding(
+                file, fileHash, RECIPIENT_TYPE_OWNER, ownerId);
+        if (binding.isPresent()) {
+            return binding;
+        }
+        return resolveLegacyInitialKey(file, ownerId).isPresent()
+                ? Optional.of(legacyGrantBinding(file, fileHash, ownerId))
+                : Optional.empty();
+    }
+
+    /**
+     * 解析分享码 recipient 下载 grant 所绑定的精确信封，不执行解封。
+     */
+    public Optional<FileKeyGrantEnvelopeBinding> resolveShareGrantBinding(File file,
+                                                                          String fileHash,
+                                                                          FileShare share) {
+        if (share == null) {
+            return Optional.empty();
+        }
+        return resolveGrantBinding(file, fileHash, RECIPIENT_TYPE_SHARE, share.getId());
+    }
+
+    /**
+     * 解析好友分享 recipient 下载 grant 所绑定的精确信封，不执行解封。
+     */
+    public Optional<FileKeyGrantEnvelopeBinding> resolveFriendShareGrantBinding(File file,
+                                                                                String fileHash,
+                                                                                FriendFileShare share) {
+        if (share == null) {
+            return Optional.empty();
+        }
+        return resolveGrantBinding(file, fileHash, RECIPIENT_TYPE_FRIEND_SHARE, share.getId());
+    }
+
+    /**
+     * 按 grant 快照解封精确 ACTIVE 信封，rotation、撤销或路由字段变化均失败关闭。
+     */
+    public Optional<String> unwrapGrantBinding(File file,
+                                               FileKeyGrantEnvelopeBinding binding,
+                                               Long actorId,
+                                               String reason) {
+        if (!matchesGrantFile(file, binding)) {
+            auditGrant(binding, OPERATION_GRANT_DENY, actorId, RESULT_FAILURE, "FILE_BINDING_MISMATCH");
+            return Optional.empty();
+        }
+        if (binding.legacyPlaintextAtRest()) {
+            Optional<String> legacy = resolveLegacyInitialKey(file, binding.recipientId());
+            auditGrant(binding, OPERATION_GRANT_CONSUME, actorId,
+                    legacy.isPresent() ? RESULT_SUCCESS : RESULT_MISSING, reason);
+            return legacy;
+        }
+
+        FileKeyEnvelope envelope = fileKeyEnvelopeMapper.selectById(binding.envelopeId());
+        if (!matchesGrantEnvelope(envelope, binding) || !STATUS_ACTIVE.equals(envelope.getStatus())) {
+            auditGrant(binding, OPERATION_GRANT_DENY, actorId, RESULT_FAILURE, "ENVELOPE_NOT_ACTIVE");
+            return Optional.empty();
+        }
+        Optional<String> initialKey = unwrapEnvelope(envelope, actorId, reason);
+        if (initialKey.isPresent()) {
+            auditGrant(binding, OPERATION_GRANT_CONSUME, actorId, RESULT_SUCCESS, reason);
+        }
+        return initialKey;
+    }
+
+    /**
+     * 记录下载 grant 生命周期审计，事件不包含 grant、会话或客户端地址。
+     */
+    public void auditGrantIssue(FileKeyGrantEnvelopeBinding binding, Long actorId, String reason) {
+        auditGrant(binding, OPERATION_GRANT_ISSUE, actorId, RESULT_SUCCESS, reason);
+    }
+
+    /**
+     * 记录受控 plaintext-v0 兼容使用审计。
+     */
+    public void auditLegacyPlaintextDelivery(FileKeyGrantEnvelopeBinding binding, Long actorId) {
+        auditGrant(binding, OPERATION_PLAINTEXT_V0, actorId, RESULT_SUCCESS, "COMPATIBILITY_WINDOW");
+    }
+
+    /**
+     * 记录 grant 校验拒绝，原因必须是调用方提供的稳定枚举文本。
+     */
+    public void auditGrantDenial(FileKeyGrantEnvelopeBinding binding, Long actorId, String reason) {
+        auditGrant(binding, OPERATION_GRANT_DENY, actorId, RESULT_FAILURE, reason);
+    }
+
+    /**
      * Revokes all active share-code recipient envelopes for a share.
      */
     @Transactional(rollbackFor = Exception.class)
@@ -722,6 +818,138 @@ public class FileKeyEnvelopeService {
         }
 
         return unwrapEnvelope(envelope, actorId, reason);
+    }
+
+    /**
+     * 查询指定 recipient 的最新 ACTIVE 信封并转换为无敏感材料的 grant 绑定。
+     */
+    private Optional<FileKeyGrantEnvelopeBinding> resolveGrantBinding(File file,
+                                                                      String fileHash,
+                                                                      String recipientType,
+                                                                      Long recipientId) {
+        if (file == null || file.getId() == null || recipientId == null) {
+            return Optional.empty();
+        }
+        Long tenantId = resolveTenantId(file);
+        String resolvedFileHash = StringUtils.hasText(fileHash) ? fileHash : file.getFileHash();
+        if (tenantId == null || !StringUtils.hasText(resolvedFileHash)) {
+            return Optional.empty();
+        }
+        FileKeyEnvelope envelope = fileKeyEnvelopeMapper.selectOne(new LambdaQueryWrapper<FileKeyEnvelope>()
+                .eq(FileKeyEnvelope::getTenantId, tenantId)
+                .eq(FileKeyEnvelope::getFileId, file.getId())
+                .eq(FileKeyEnvelope::getFileHash, resolvedFileHash)
+                .eq(FileKeyEnvelope::getRecipientType, recipientType)
+                .eq(FileKeyEnvelope::getRecipientId, recipientId)
+                .eq(FileKeyEnvelope::getStatus, STATUS_ACTIVE)
+                .orderByDesc(FileKeyEnvelope::getKeyVersion)
+                .orderByDesc(FileKeyEnvelope::getCreateTime)
+                .last("LIMIT 1"));
+        return Optional.ofNullable(envelope).map(value -> toGrantBinding(file, value));
+    }
+
+    /**
+     * 将持久化信封投影为下载 grant 允许持久化的路由字段。
+     */
+    private FileKeyGrantEnvelopeBinding toGrantBinding(File file, FileKeyEnvelope envelope) {
+        return new FileKeyGrantEnvelopeBinding(
+                envelope.getId(), envelope.getTenantId(), envelope.getFileId(), normalizedFileVersion(file),
+                envelope.getFileHash(),
+                envelope.getRecipientType(), envelope.getRecipientId(), envelope.getKeyVersion(),
+                envelope.getAlgorithmSuite(), envelope.getSignatureSuite(), envelope.getKemSuite(),
+                envelope.getProofSuite(), envelope.getEncryptionAlgorithm(), envelope.getKmsProvider(),
+                envelope.getProviderContractVersion(), envelope.getProviderKeyVersion(), false);
+    }
+
+    /**
+     * 为仍在迁移窗口内的 owner 历史明文记录创建无密钥 grant 绑定。
+     */
+    private FileKeyGrantEnvelopeBinding legacyGrantBinding(File file, String fileHash, Long ownerId) {
+        Map<String, Object> params = parsePersistedFileParam(file);
+        String encryptionAlgorithm = resolvePersistedEncryptionAlgorithm(params);
+        return new FileKeyGrantEnvelopeBinding(
+                null, resolveTenantId(file), file.getId(), normalizedFileVersion(file), fileHash,
+                RECIPIENT_TYPE_OWNER, ownerId,
+                numberValue(params.get(FIELD_KEY_VERSION)), stringValue(params.get(FIELD_ALGORITHM_SUITE)),
+                stringValue(params.get(FIELD_SIGNATURE_SUITE)), stringValue(params.get(FIELD_KEM_SUITE)),
+                stringValue(params.get(FIELD_PROOF_SUITE)),
+                StringUtils.hasText(encryptionAlgorithm) ? encryptionAlgorithm : "CHUNK_KEY_CHAIN",
+                "legacy-plaintext", 1, "legacy", true);
+    }
+
+    /**
+     * 校验当前文件仍与 grant 的不可变文件快照一致。
+     */
+    private boolean matchesGrantFile(File file, FileKeyGrantEnvelopeBinding binding) {
+        return file != null && binding != null
+                && Objects.equals(file.getTenantId(), binding.tenantId())
+                && Objects.equals(file.getId(), binding.fileId())
+                && Objects.equals(normalizedFileVersion(file), binding.fileVersion())
+                && Objects.equals(file.getFileHash(), binding.fileHash());
+    }
+
+    /**
+     * 将遗留空版本规范化为历史首版本，保证 grant 始终绑定不可变版本号。
+     */
+    private Integer normalizedFileVersion(File file) {
+        return file != null && file.getVersion() != null ? file.getVersion() : 1;
+    }
+
+    /**
+     * 校验数据库中的精确信封仍与 grant 全部路由字段一致。
+     */
+    private boolean matchesGrantEnvelope(FileKeyEnvelope envelope, FileKeyGrantEnvelopeBinding binding) {
+        return envelope != null && binding != null
+                && Objects.equals(envelope.getId(), binding.envelopeId())
+                && Objects.equals(envelope.getTenantId(), binding.tenantId())
+                && Objects.equals(envelope.getFileId(), binding.fileId())
+                && Objects.equals(envelope.getFileHash(), binding.fileHash())
+                && Objects.equals(envelope.getRecipientType(), binding.recipientType())
+                && Objects.equals(envelope.getRecipientId(), binding.recipientId())
+                && Objects.equals(envelope.getKeyVersion(), binding.keyVersion())
+                && Objects.equals(envelope.getAlgorithmSuite(), binding.algorithmSuite())
+                && Objects.equals(envelope.getSignatureSuite(), binding.signatureSuite())
+                && Objects.equals(envelope.getKemSuite(), binding.kemSuite())
+                && Objects.equals(envelope.getProofSuite(), binding.proofSuite())
+                && Objects.equals(envelope.getEncryptionAlgorithm(), binding.encryptionAlgorithm())
+                && Objects.equals(envelope.getKmsProvider(), binding.kmsProvider())
+                && Objects.equals(envelope.getProviderContractVersion(), binding.providerContractVersion())
+                && Objects.equals(envelope.getProviderKeyVersion(), binding.providerKeyVersion());
+    }
+
+    /**
+     * 记录 grant 事件；如精确信封仍存在则复用完整 provider 审计字段。
+     */
+    private void auditGrant(FileKeyGrantEnvelopeBinding binding,
+                            String operation,
+                            Long actorId,
+                            String result,
+                            String reason) {
+        if (binding == null) {
+            return;
+        }
+        FileKeyEnvelope envelope = binding.envelopeId() == null
+                ? null : fileKeyEnvelopeMapper.selectById(binding.envelopeId());
+        if (envelope != null && matchesGrantEnvelope(envelope, binding)) {
+            audit(envelope, operation, actorId, result, reason, KeyWrappingFailureCategory.NONE);
+            return;
+        }
+        audit(binding.tenantId(), binding.fileId(), binding.fileHash(), binding.recipientType(),
+                binding.recipientId(), binding.keyVersion(), operation, actorId, result, reason, null);
+    }
+
+    /**
+     * 将历史文件参数中的版本号安全转换为整数。
+     */
+    private Integer numberValue(Object value) {
+        return value instanceof Number number ? number.intValue() : 0;
+    }
+
+    /**
+     * 将历史文件参数中的 suite 字段安全转换为文本。
+     */
+    private String stringValue(Object value) {
+        return value instanceof String text && StringUtils.hasText(text) ? text : "legacy-unspecified";
     }
 
     /**

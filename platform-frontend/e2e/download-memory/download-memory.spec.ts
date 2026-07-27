@@ -65,6 +65,8 @@ async function runWithHeapSampling(
     if (!gate) throw new Error("download memory gate disappeared");
     return gate.wait(id);
   }, runId);
+  expect(result.metadataContainedPlaintextKey).toBe(false);
+  expect(result.keyGrantConsumed).toBe(options.format === "FRAMED_V2");
   const heapStartUsedBytes = heapSamples[0] ?? 0;
   const heapPeakUsedBytes = Math.max(...heapSamples, heapStartUsedBytes);
   const heapEndUsedBytes = heapSamples.at(-1) ?? heapStartUsedBytes;

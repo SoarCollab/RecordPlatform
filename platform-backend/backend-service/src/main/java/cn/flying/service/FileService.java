@@ -281,14 +281,6 @@ public interface FileService extends IService<File> {
     void saveShareFile(List<String> sharingFileIdList, String shareCode, String clientIp);
 
     /**
-     * 获取文件解密信息
-     * @param userId 用户ID
-     * @param fileHash 文件哈希
-     * @return 解密信息（包含初始密钥和元数据）
-     */
-    FileDecryptInfoVO getFileDecryptInfo(Long userId, String fileHash);
-
-    /**
      * 获取用户创建的分享列表
      * @param userId 用户ID
      * @param page 分页参数
@@ -337,12 +329,13 @@ public interface FileService extends IService<File> {
     List<byte[]> getPublicFile(String shareCode, String fileHash);
 
     /**
-     * 公开分享获取解密信息（无需认证）
-     * @param shareCode 分享码
-     * @param fileHash 文件哈希
-     * @return 解密信息
+     * 按版本化密钥交付协议读取公开分享解密元数据。
      */
-    FileDecryptInfoVO getPublicFileDecryptInfo(String shareCode, String fileHash);
+    FileDecryptInfoVO getPublicFileDecryptInfo(String shareCode,
+                                               String fileHash,
+                                               String keyDeliveryProtocol,
+                                               String downloadSessionId,
+                                               String publicClientIdentity);
 
     /**
      * 登录用户通过分享码下载文件（支持私密/公开分享）
@@ -354,13 +347,13 @@ public interface FileService extends IService<File> {
     List<byte[]> getSharedFileContent(Long userId, String shareCode, String fileHash);
 
     /**
-     * 登录用户通过分享码获取解密信息（支持私密/公开分享）
-     * @param userId 用户ID
-     * @param shareCode 分享码
-     * @param fileHash 文件哈希
-     * @return 解密信息
+     * 按版本化密钥交付协议读取认证分享解密元数据。
      */
-    FileDecryptInfoVO getSharedFileDecryptInfo(Long userId, String shareCode, String fileHash);
+    FileDecryptInfoVO getSharedFileDecryptInfo(Long userId,
+                                               String shareCode,
+                                               String fileHash,
+                                               String keyDeliveryProtocol,
+                                               String downloadSessionId);
 
     /**
      * 创建文件新版本（PREPARE 状态）

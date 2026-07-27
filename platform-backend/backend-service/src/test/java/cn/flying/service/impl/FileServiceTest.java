@@ -19,6 +19,7 @@ import cn.flying.dao.mapper.FileShareMapper;
 import cn.flying.dao.mapper.FileSourceMapper;
 import cn.flying.dao.mapper.ProofBundleIssuanceMapper;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.DownloadKeyGrantVO;
 import cn.flying.dao.vo.file.ShareFileVO;
 import cn.flying.dao.vo.file.ShareInfoVO;
 import cn.flying.dao.vo.file.UpdateShareVO;
@@ -31,6 +32,8 @@ import cn.flying.service.FileService;
 import cn.flying.service.QuotaService;
 import cn.flying.service.ShareAuditService;
 import cn.flying.service.key.FileKeyEnvelopeService;
+import cn.flying.service.key.FileKeyGrantEnvelopeBinding;
+import cn.flying.service.key.FileKeyGrantService;
 import cn.flying.service.key.FileParamEnvelopeResult;
 import cn.flying.service.remote.FileRemoteClient;
 import cn.flying.service.saga.FileSagaOrchestrator;
@@ -65,6 +68,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -124,6 +128,12 @@ class FileServiceTest {
     private FileKeyEnvelopeService fileKeyEnvelopeService;
 
     @Mock
+    private FileKeyGrantService fileKeyGrantService;
+
+    @Mock
+    private FileKeyGrantEnvelopeBinding keyGrantBinding;
+
+    @Mock
     private ProofBundleIssuanceMapper proofBundleIssuanceMapper;
 
     @InjectMocks
@@ -137,6 +147,11 @@ class FileServiceTest {
     private static final Long OTHER_USER_ID = 200L;
     private static final String SHARE_CODE = "ABC123";
     private static final String FILE_HASH = "sha256_test_hash";
+    private static final String KEY_DELIVERY_PROTOCOL = FileKeyGrantService.PROTOCOL_GRANT_V1;
+    private static final String DOWNLOAD_SESSION_ID = "share-download-session-12345";
+    private static final String PUBLIC_CLIENT_IDENTITY = "203.0.113.7";
+    private static final DownloadKeyGrantVO DOWNLOAD_KEY_GRANT = new DownloadKeyGrantVO(
+            "B".repeat(43), KEY_DELIVERY_PROTOCOL, Instant.parse("2030-01-01T00:00:00Z"));
 
     /**
      * 初始化 MyBatis-Plus Lambda 缓存，避免在纯 Mockito 场景下构造 LambdaWrapper 失败。
@@ -154,6 +169,9 @@ class FileServiceTest {
     void setUp() {
         FileTestBuilder.resetIdCounter();
         ReflectionTestUtils.setField(fileService, "baseMapper", fileMapper);
+        lenient().when(fileKeyEnvelopeService.resolveShareGrantBinding(any(), anyString(), any()))
+                .thenReturn(Optional.of(keyGrantBinding));
+        lenient().when(fileKeyGrantService.issue(any())).thenReturn(DOWNLOAD_KEY_GRANT);
     }
 
     /**
@@ -1139,21 +1157,20 @@ class FileServiceTest {
                 assertOwnerTenant(7L);
                 return sourceFile;
             });
-            when(fileKeyEnvelopeService.unwrapActiveShareInitialKey(
+            when(fileKeyEnvelopeService.resolveShareGrantBinding(
                     eq(sourceFile),
                     eq(FILE_HASH),
-                    eq(share),
-                    isNull(),
-                    eq("SHARE_DECRYPT")
+                    eq(share)
             )).thenAnswer(invocation -> {
                 assertOwnerTenant(7L);
-                return Optional.of("owner-share-key");
+                return Optional.of(keyGrantBinding);
             });
 
             TenantContext.setTenantId(99L);
-            FileDecryptInfoVO decryptInfo = fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH);
+            FileDecryptInfoVO decryptInfo = fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID, PUBLIC_CLIENT_IDENTITY);
 
-            assertEquals("owner-share-key", decryptInfo.initialKey());
+            assertNull(decryptInfo.initialKey());
+            assertEquals(DOWNLOAD_KEY_GRANT, decryptInfo.keyGrant());
             assertEquals(FILE_HASH, decryptInfo.fileHash());
             assertEquals(1, shareLookups.get());
             assertEquals(99L, TenantContext.getTenantId());
@@ -1174,7 +1191,7 @@ class FileServiceTest {
                     () -> fileService.getPublicFile(SHARE_CODE, FILE_HASH));
             GeneralException decryptError = assertThrows(
                     GeneralException.class,
-                    () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH));
+                    () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID, PUBLIC_CLIENT_IDENTITY));
 
             assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, downloadError.getResultEnum());
             assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, decryptError.getResultEnum());
@@ -1195,7 +1212,7 @@ class FileServiceTest {
                     () -> fileService.getPublicFile(SHARE_CODE, FILE_HASH));
             GeneralException decryptError = assertThrows(
                     GeneralException.class,
-                    () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH));
+                    () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID, PUBLIC_CLIENT_IDENTITY));
 
             assertEquals(ResultEnum.FAIL, downloadError.getResultEnum());
             assertEquals(ResultEnum.FAIL, decryptError.getResultEnum());
@@ -1216,7 +1233,7 @@ class FileServiceTest {
                     () -> fileService.getPublicFile(SHARE_CODE, FILE_HASH));
             GeneralException decryptError = assertThrows(
                     GeneralException.class,
-                    () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH));
+                    () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID, PUBLIC_CLIENT_IDENTITY));
 
             assertEquals(ResultEnum.SHARE_EXPIRED, downloadError.getResultEnum());
             assertEquals(ResultEnum.SHARE_EXPIRED, decryptError.getResultEnum());
@@ -1238,7 +1255,7 @@ class FileServiceTest {
                         () -> fileService.getPublicFile(SHARE_CODE, FILE_HASH));
                 GeneralException decryptError = assertThrows(
                         GeneralException.class,
-                        () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH));
+                        () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID, PUBLIC_CLIENT_IDENTITY));
 
                 assertEquals(ResultEnum.FAIL, downloadError.getResultEnum());
                 assertEquals(ResultEnum.FAIL, decryptError.getResultEnum());
@@ -1261,7 +1278,7 @@ class FileServiceTest {
                         () -> fileService.getPublicFile(SHARE_CODE, FILE_HASH));
                 GeneralException decryptError = assertThrows(
                         GeneralException.class,
-                        () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH));
+                        () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID, PUBLIC_CLIENT_IDENTITY));
 
                 assertEquals(ResultEnum.FAIL, downloadError.getResultEnum());
                 assertEquals(ResultEnum.FAIL, decryptError.getResultEnum());
@@ -1283,7 +1300,7 @@ class FileServiceTest {
                     () -> fileService.getSharedFileContent(OTHER_USER_ID, SHARE_CODE, FILE_HASH));
             GeneralException decryptError = assertThrows(
                     GeneralException.class,
-                    () -> fileService.getSharedFileDecryptInfo(OTHER_USER_ID, SHARE_CODE, FILE_HASH));
+                    () -> fileService.getSharedFileDecryptInfo(OTHER_USER_ID, SHARE_CODE, FILE_HASH, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID));
 
             assertEquals(ResultEnum.FAIL, downloadError.getResultEnum());
             assertEquals(ResultEnum.FAIL, decryptError.getResultEnum());
@@ -1325,7 +1342,7 @@ class FileServiceTest {
                     () -> fileService.getPublicFile(SHARE_CODE, unauthorizedHash));
             GeneralException decryptError = assertThrows(
                     GeneralException.class,
-                    () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, unauthorizedHash));
+                    () -> fileService.getPublicFileDecryptInfo(SHARE_CODE, unauthorizedHash, KEY_DELIVERY_PROTOCOL, DOWNLOAD_SESSION_ID, PUBLIC_CLIENT_IDENTITY));
 
             assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, downloadError.getResultEnum());
             assertEquals(ResultEnum.PERMISSION_UNAUTHORIZED, decryptError.getResultEnum());

@@ -18,6 +18,8 @@ import type {
   ShareAccessStatsVO,
   FileProvenanceVO,
   FileDownloadMetadataVO,
+  DownloadKeyGrantVO,
+  DownloadKeyMaterialVO,
 } from "../types";
 import { ShareType } from "../types";
 
@@ -26,14 +28,121 @@ export type { FileDecryptInfoVO, FileDownloadMetadataVO } from "../types";
 
 const BASE = "/files";
 
+const KEY_DELIVERY_PROTOCOL = "grant-v1";
+
 /**
- * 读取加密分片下载必需的 initialKey。
+ * 创建仅保存在当前下载执行作用域内的随机会话标识。
  */
-function requireInitialKey(initialKey: string | null | undefined): string {
-  if (!initialKey) {
-    throw new Error("缺少加密文件初始密钥");
+export function createDownloadSessionId(): string {
+  const bytes = new Uint8Array(24);
+  globalThis.crypto.getRandomValues(bytes);
+  try {
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary)
+      .replaceAll("+", "-")
+      .replaceAll("/", "_")
+      .replace(/=+$/u, "");
+  } finally {
+    bytes.fill(0);
   }
-  return initialKey;
+}
+
+/**
+ * 通过 POST 请求体即时消费 grant，reference 与密钥均不进入 URL。
+ */
+export async function consumeDownloadKeyGrant(
+  grant: DownloadKeyGrantVO,
+  sessionId: string,
+  publicAccess = false,
+): Promise<DownloadKeyMaterialVO> {
+  if (grant.protocol !== KEY_DELIVERY_PROTOCOL) {
+    throw new Error("不支持的下载密钥授权协议");
+  }
+  const path = publicAccess
+    ? "/public/key-grants/consume"
+    : `${BASE}/key-grants/consume`;
+  return api.post<DownloadKeyMaterialVO>(
+    path,
+    { grantReference: grant.reference, sessionId },
+    publicAccess
+      ? { skipAuth: true, skipTenant: true, retries: 1 }
+      : { retries: 1 },
+  );
+}
+
+/**
+ * 即时解析 grant-v1 或受控 plaintext-v0 响应中的密钥。
+ */
+async function resolveInitialKey(
+  decryptInfo: FileDecryptInfoVO,
+  sessionId: string,
+  publicAccess = false,
+): Promise<string> {
+  if (decryptInfo.keyGrant) {
+    const keyMaterial = await consumeDownloadKeyGrant(
+      decryptInfo.keyGrant,
+      sessionId,
+      publicAccess,
+    );
+    if (!keyMaterial.initialKey) {
+      throw new Error("下载密钥授权未返回可用密钥");
+    }
+    if (keyMaterial.protocol !== decryptInfo.keyGrant.protocol) {
+      throw new Error("下载密钥授权协议不一致");
+    }
+    return keyMaterial.initialKey;
+  }
+  if (decryptInfo.initialKey) {
+    return decryptInfo.initialKey;
+  }
+  throw new Error("缺少加密文件下载密钥授权");
+}
+
+/**
+ * 将未加密分片按服务端顺序合并，避免 NONE 文件被错误地要求提供 grant。
+ */
+function concatenatePlainChunks(chunks: Uint8Array[]): Uint8Array {
+  if (chunks.length === 0) {
+    throw new Error("没有分片数据");
+  }
+  const totalLength = chunks.reduce((sum, chunk) => {
+    const next = sum + chunk.byteLength;
+    if (!Number.isSafeInteger(next)) {
+      throw new Error("文件分片总长度超出安全范围");
+    }
+    return next;
+  }, 0);
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
+/**
+ * 在分片下载完成后即时消费加密 grant；NONE 文件则直接合并原始分片。
+ */
+async function materializeDownloadedChunks(
+  chunks: Uint8Array[],
+  decryptInfo: FileDecryptInfoVO,
+  sessionId: string,
+  publicAccess = false,
+): Promise<Blob> {
+  const { decryptFile, arrayToBlob } = await import("$utils/crypto");
+  if (!decryptInfo.keyGrant && !decryptInfo.initialKey) {
+    return arrayToBlob(concatenatePlainChunks(chunks), decryptInfo.contentType);
+  }
+
+  const initialKey = await resolveInitialKey(
+    decryptInfo,
+    sessionId,
+    publicAccess,
+  );
+  const decryptedData = await decryptFile(chunks, initialKey);
+  return arrayToBlob(decryptedData, decryptInfo.contentType);
 }
 
 /**
@@ -117,8 +226,14 @@ export async function downloadEncryptedChunks(
  */
 export async function getDecryptInfo(
   fileHash: string,
+  sessionId: string,
 ): Promise<FileDecryptInfoVO> {
-  return api.get<FileDecryptInfoVO>(`${BASE}/hash/${fileHash}/decrypt-info`);
+  return api.get<FileDecryptInfoVO>(`${BASE}/hash/${fileHash}/decrypt-info`, {
+    headers: {
+      "X-Key-Delivery-Protocol": KEY_DELIVERY_PROTOCOL,
+      "X-Download-Session-ID": sessionId,
+    },
+  });
 }
 
 /**
@@ -199,9 +314,16 @@ export async function getDownloadAddress(fileHash: string): Promise<string[]> {
  */
 export async function getDownloadMetadata(
   fileHash: string,
+  sessionId: string,
 ): Promise<FileDownloadMetadataVO> {
   return api.get<FileDownloadMetadataVO>(
     `${BASE}/hash/${fileHash}/download-metadata`,
+    {
+      headers: {
+        "X-Key-Delivery-Protocol": KEY_DELIVERY_PROTOCOL,
+        "X-Download-Session-ID": sessionId,
+      },
+    },
   );
 }
 
@@ -247,22 +369,15 @@ export async function saveSharedFiles(
  * @returns 解密后的 Blob
  */
 export async function downloadFile(fileHash: string): Promise<Blob> {
-  const { decryptFile, arrayToBlob } = await import("$utils/crypto");
-
-  const [chunksBase64, decryptInfo] = await Promise.all([
-    downloadEncryptedChunks(fileHash),
-    getDecryptInfo(fileHash),
-  ]);
+  const chunksBase64 = await downloadEncryptedChunks(fileHash);
+  const sessionId = createDownloadSessionId();
+  const decryptInfo = await getDecryptInfo(fileHash, sessionId);
 
   const chunks = chunksBase64.map((base64) =>
     Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
   );
 
-  const decryptedData = await decryptFile(
-    chunks,
-    requireInitialKey(decryptInfo.initialKey),
-  );
-  return arrayToBlob(decryptedData, decryptInfo.contentType);
+  return materializeDownloadedChunks(chunks, decryptInfo, sessionId);
 }
 
 // ==================== 公开分享端点（无需认证）====================
@@ -297,12 +412,17 @@ export async function publicDownloadEncryptedChunks(
 export async function publicGetDecryptInfo(
   shareCode: string,
   fileHash: string,
+  sessionId: string,
 ): Promise<FileDecryptInfoVO> {
   return api.get<FileDecryptInfoVO>(
     `/public/shares/${shareCode}/files/${fileHash}/decrypt-info`,
     {
       skipAuth: true,
       skipTenant: true,
+      headers: {
+        "X-Key-Delivery-Protocol": KEY_DELIVERY_PROTOCOL,
+        "X-Download-Session-ID": sessionId,
+      },
     },
   );
 }
@@ -318,22 +438,19 @@ export async function publicDownloadFile(
   shareCode: string,
   fileHash: string,
 ): Promise<Blob> {
-  const { decryptFile, arrayToBlob } = await import("$utils/crypto");
-
-  const [chunksBase64, decryptInfo] = await Promise.all([
-    publicDownloadEncryptedChunks(shareCode, fileHash),
-    publicGetDecryptInfo(shareCode, fileHash),
-  ]);
+  const chunksBase64 = await publicDownloadEncryptedChunks(shareCode, fileHash);
+  const sessionId = createDownloadSessionId();
+  const decryptInfo = await publicGetDecryptInfo(
+    shareCode,
+    fileHash,
+    sessionId,
+  );
 
   const chunks = chunksBase64.map((base64) =>
     Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
   );
 
-  const decryptedData = await decryptFile(
-    chunks,
-    requireInitialKey(decryptInfo.initialKey),
-  );
-  return arrayToBlob(decryptedData, decryptInfo.contentType);
+  return materializeDownloadedChunks(chunks, decryptInfo, sessionId, true);
 }
 
 /**
@@ -360,9 +477,16 @@ export async function shareDownloadEncryptedChunks(
 export async function shareGetDecryptInfo(
   shareCode: string,
   fileHash: string,
+  sessionId: string,
 ): Promise<FileDecryptInfoVO> {
   return api.get<FileDecryptInfoVO>(
     `/shares/${shareCode}/files/${fileHash}/decrypt-info`,
+    {
+      headers: {
+        "X-Key-Delivery-Protocol": KEY_DELIVERY_PROTOCOL,
+        "X-Download-Session-ID": sessionId,
+      },
+    },
   );
 }
 
@@ -377,22 +501,15 @@ export async function shareDownloadFile(
   shareCode: string,
   fileHash: string,
 ): Promise<Blob> {
-  const { decryptFile, arrayToBlob } = await import("$utils/crypto");
-
-  const [chunksBase64, decryptInfo] = await Promise.all([
-    shareDownloadEncryptedChunks(shareCode, fileHash),
-    shareGetDecryptInfo(shareCode, fileHash),
-  ]);
+  const chunksBase64 = await shareDownloadEncryptedChunks(shareCode, fileHash);
+  const sessionId = createDownloadSessionId();
+  const decryptInfo = await shareGetDecryptInfo(shareCode, fileHash, sessionId);
 
   const chunks = chunksBase64.map((base64) =>
     Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)),
   );
 
-  const decryptedData = await decryptFile(
-    chunks,
-    requireInitialKey(decryptInfo.initialKey),
-  );
-  return arrayToBlob(decryptedData, decryptInfo.contentType);
+  return materializeDownloadedChunks(chunks, decryptInfo, sessionId);
 }
 
 /**

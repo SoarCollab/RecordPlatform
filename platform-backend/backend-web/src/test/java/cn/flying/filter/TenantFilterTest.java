@@ -287,6 +287,56 @@ class TenantFilterTest {
     }
 
     /**
+     * 公开 grant 消费 POST 必须忽略所有调用者租户头，并且不建立租户权威上下文。
+     */
+    @Test
+    @DisplayName("should ignore every tenant header form for public key grant consume POST")
+    void shouldIgnoreEveryTenantHeaderFormForPublicKeyGrantConsumePost()
+            throws ServletException, IOException {
+        AtomicLong chainCalls = new AtomicLong();
+        doAnswer(invocation -> {
+            MockHttpServletRequest chainedRequest = invocation.getArgument(0);
+            assertNull(TenantContext.getTenantId());
+            assertNull(chainedRequest.getAttribute(Const.ATTR_TENANT_ID));
+            chainCalls.incrementAndGet();
+            return null;
+        }).when(filterChain).doFilter(any(), any());
+
+        String[] paths = {
+                "/api/v1/public/key-grants/consume",
+                "/api/v1/public/key-grants;c=1/consume",
+                "/api/v1/public/key-grants/./consume"
+        };
+        String[] tenantHeaders = {null, "0", "12", "invalid-tenant", ""};
+        for (String path : paths) {
+            for (String tenantHeader : tenantHeaders) {
+                MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
+                request.setServletPath(path);
+                if (tenantHeader != null) {
+                    request.addHeader("X-Tenant-ID", tenantHeader);
+                }
+                MockHttpServletResponse response = new MockHttpServletResponse();
+
+                filter.doFilterInternal(request, response, filterChain);
+
+                assertEquals(200, response.getStatus());
+                assertNull(request.getAttribute(Const.ATTR_TENANT_ID));
+                assertNull(TenantContext.getTenantId());
+            }
+        }
+
+        MockHttpServletRequest duplicateRequest = new MockHttpServletRequest(
+                "POST", "/api/v1/public/key-grants/consume");
+        duplicateRequest.setServletPath("/api/v1/public/key-grants/consume");
+        duplicateRequest.addHeader("X-Tenant-ID", "12");
+        duplicateRequest.addHeader("X-Tenant-ID", "13");
+        filter.doFilterInternal(duplicateRequest, new MockHttpServletResponse(), filterChain);
+
+        assertEquals(16L, chainCalls.get());
+        verify(filterChain, times(16)).doFilter(any(), any());
+    }
+
+    /**
      * 非公开资源白名单路径携带畸形租户头时应返回 400，且不得污染请求属性或线程租户上下文。
      */
     @Test
@@ -484,7 +534,9 @@ class TenantFilterTest {
                 {"POST", "/api/v1/shares/abc/files/hash-1/decrypt-info"},
                 {"POST", "/api/v1/public/shares/abc/files/hash-1/chunks"},
                 {"POST", "/api/v1/public/shares/abc/files/hash-1/decrypt-info"},
-                {"GET", "/api/v1/public/shares/abc/files/hash-1/metadata"}
+                {"GET", "/api/v1/public/shares/abc/files/hash-1/metadata"},
+                {"GET", "/api/v1/public/key-grants/consume"},
+                {"POST", "/api/v1/public/key-grants/consume/extra"}
         };
         for (String[] protectedRequest : protectedRequests) {
             String method = protectedRequest[0];

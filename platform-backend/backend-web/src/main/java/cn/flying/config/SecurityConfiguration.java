@@ -102,6 +102,7 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.GET,
                                 "/api/v1/public/shares/*/files/*/chunks",
                                 "/api/v1/public/shares/*/files/*/decrypt-info").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/public/key-grants/consume").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/public/proofs/*/status").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/public/proof-keys/*/versions/*").permitAll()
                         .requestMatchers("/api/v1/images/download/images/**").permitAll()

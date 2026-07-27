@@ -9,6 +9,7 @@ import {
   FRAMED_AEAD_FORMAT_VERSION,
   FRAMED_AEAD_SUITE,
   FRAMED_AEAD_TAG_BYTES,
+  importFramedFileDek,
 } from "./framedAead";
 import { bytesToHex } from "./downloadIntegrity";
 import { DownloadMetricsTracker } from "./downloadMetrics";
@@ -176,12 +177,16 @@ describe("framedAead", () => {
     const fixture = await makeFixture();
     const sink = new MemoryDownloadSink(fixture.plaintext.length, 1 << 20);
     const metrics = new DownloadMetricsTracker();
+    const importedFileDek = await importFramedFileDek(
+      btoa(String.fromCharCode(...fileDek)),
+    );
+    expect(importedFileDek.extractable).toBe(false);
     await downloadFramedPart({
       response: responseFromArbitraryChunks(fixture.encoded),
       part: fixture.part,
       partCount: 1,
       encryption: fixture.encryption,
-      fileDekBase64: btoa(String.fromCharCode(...fileDek)),
+      fileDek: importedFileDek,
       sink,
       metrics,
     });
@@ -201,13 +206,16 @@ describe("framedAead", () => {
     tampered[tampered.length - 1] ^= 0xff;
     const sink = new MemoryDownloadSink(fixture.plaintext.length, 1 << 20);
     const metrics = new DownloadMetricsTracker();
+    const importedFileDek = await importFramedFileDek(
+      btoa(String.fromCharCode(...fileDek)),
+    );
     await expect(
       downloadFramedPart({
         response: responseFromArbitraryChunks(tampered),
         part: fixture.part,
         partCount: 1,
         encryption: fixture.encryption,
-        fileDekBase64: btoa(String.fromCharCode(...fileDek)),
+        fileDek: importedFileDek,
         sink,
         metrics,
       }),
@@ -233,6 +241,9 @@ describe("framedAead", () => {
       }),
     );
     controller.abort();
+    const importedFileDek = await importFramedFileDek(
+      btoa(String.fromCharCode(...fileDek)),
+    );
 
     await expect(
       downloadFramedPart({
@@ -240,7 +251,7 @@ describe("framedAead", () => {
         part: fixture.part,
         partCount: 1,
         encryption: fixture.encryption,
-        fileDekBase64: btoa(String.fromCharCode(...fileDek)),
+        fileDek: importedFileDek,
         sink: new MemoryDownloadSink(fixture.plaintext.length, 1 << 20),
         metrics: new DownloadMetricsTracker(),
         signal: controller.signal,

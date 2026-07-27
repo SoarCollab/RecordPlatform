@@ -40,6 +40,8 @@ export interface DownloadMemoryResult {
   outputValid: boolean;
   outputSize: number;
   fileName: string;
+  metadataContainedPlaintextKey: boolean;
+  keyGrantConsumed: boolean;
 }
 
 export interface DownloadMemoryRunStatus {

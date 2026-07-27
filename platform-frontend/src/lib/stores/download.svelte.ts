@@ -31,7 +31,11 @@ import {
   DownloadMetricsTracker,
   type DownloadStreamMetrics,
 } from "$utils/downloadMetrics";
-import type { FileDownloadMetadataVO, ManifestErrorDetail } from "$api/types";
+import type {
+  DownloadKeyGrantVO,
+  FileDownloadMetadataVO,
+  ManifestErrorDetail,
+} from "$api/types";
 import {
   buildBatchMetricsPayload,
   calculateRetryCount,
@@ -89,7 +93,6 @@ export interface DownloadTask {
   presignedUrls: string[];
   urlsFetchedAt: number | null;
   chunks: ChunkState[];
-  initialKey: string | null;
   encryptionAlgorithm: string | null;
   source: DownloadSource;
   createdAt: number;
@@ -140,6 +143,9 @@ type PresignedUrlMetadata = {
   decryptInfo: fileApi.FileDecryptInfoVO;
   encryptionAlgorithm: string | null;
   metadata: FileDownloadMetadataVO | null;
+  keyGrant: DownloadKeyGrantVO | null;
+  downloadSessionId: string | null;
+  legacyInitialKey: string | null;
 };
 
 /**
@@ -412,24 +418,35 @@ async function fetchPresignedUrls(
 ): Promise<PresignedUrlMetadata> {
   if (task.source.type === "owned") {
     try {
-      const metadata = await fileApi.getDownloadMetadata(task.fileHash);
+      const downloadSessionId = fileApi.createDownloadSessionId();
+      const metadata = await fileApi.getDownloadMetadata(
+        task.fileHash,
+        downloadSessionId,
+      );
       const orderedParts = [...metadata.parts].sort(
         (a, b) => a.index - b.index,
       );
       const urls = orderedParts.map((part) => part.downloadUrl);
       const decryptInfo: fileApi.FileDecryptInfoVO = {
-        initialKey: metadata.initialKey,
         fileName: metadata.fileName,
         fileSize: metadata.fileSize,
         contentType: metadata.contentType,
         chunkCount: metadata.totalChunks,
         fileHash: metadata.fileHash,
       };
+      const safeMetadata: FileDownloadMetadataVO = {
+        ...metadata,
+        initialKey: undefined,
+        keyGrant: undefined,
+      };
       return {
         urls,
         decryptInfo,
         encryptionAlgorithm: metadata.encryptionAlgorithm ?? null,
-        metadata,
+        metadata: safeMetadata,
+        keyGrant: metadata.keyGrant ?? null,
+        downloadSessionId,
+        legacyInitialKey: metadata.initialKey ?? null,
       };
     } catch (metadataError) {
       if (!isLegacyDownloadEligible(metadataError)) {
@@ -458,16 +475,52 @@ async function fetchPresignedUrls(
 async function fetchLegacyPresignedUrls(
   fileHash: string,
 ): Promise<PresignedUrlMetadata> {
+  const downloadSessionId = fileApi.createDownloadSessionId();
   const [urls, decryptInfo] = await Promise.all([
     fileApi.getDownloadAddress(fileHash),
-    fileApi.getDecryptInfo(fileHash),
+    fileApi.getDecryptInfo(fileHash, downloadSessionId),
   ]);
   return {
     urls,
-    decryptInfo,
-    encryptionAlgorithm: decryptInfo.initialKey ? null : "NONE",
+    decryptInfo: {
+      ...decryptInfo,
+      initialKey: undefined,
+      keyGrant: undefined,
+    },
+    encryptionAlgorithm:
+      decryptInfo.keyGrant || decryptInfo.initialKey ? null : "NONE",
     metadata: null,
+    keyGrant: decryptInfo.keyGrant ?? null,
+    downloadSessionId,
+    legacyInitialKey: decryptInfo.initialKey ?? null,
   };
+}
+
+/**
+ * 在解密前即时消费 grant，未加密下载返回 null。
+ */
+async function consumeFetchedDownloadKey(
+  fetched: PresignedUrlMetadata,
+): Promise<string | null> {
+  if (!fetched.keyGrant) {
+    if (fetched.legacyInitialKey) return fetched.legacyInitialKey;
+    if (isPlainDownload(fetched.encryptionAlgorithm)) return null;
+    throw new Error("加密文件缺少短期下载密钥授权");
+  }
+  if (!fetched.downloadSessionId) {
+    throw new Error("下载密钥授权缺少会话绑定");
+  }
+  const material = await fileApi.consumeDownloadKeyGrant(
+    fetched.keyGrant,
+    fetched.downloadSessionId,
+  );
+  if (material.protocol !== fetched.keyGrant.protocol) {
+    throw new Error("下载密钥授权协议不一致");
+  }
+  if (!material.initialKey) {
+    throw new Error("下载密钥授权未返回可用密钥");
+  }
+  return material.initialKey;
 }
 
 /**
@@ -498,16 +551,20 @@ async function executeDownload(task: DownloadTask): Promise<void> {
   try {
     // Step 1: Fetch presigned URLs if needed
     let urls = task.presignedUrls;
-    let initialKey = task.initialKey;
     let totalChunks = task.totalChunks;
     let contentType = task.contentType;
     let fileName = task.fileName;
     let fileSize = task.fileSize;
     let encryptionAlgorithm = task.encryptionAlgorithm;
     let downloadMetadata = task.downloadMetadata;
+    let fetchedKeyContext: PresignedUrlMetadata | null = null;
     const authContextHash = await getAuthContextHash();
 
-    if (urls.length === 0 || areUrlsExpired(task.urlsFetchedAt)) {
+    if (
+      task.source.type === "owned" ||
+      urls.length === 0 ||
+      areUrlsExpired(task.urlsFetchedAt)
+    ) {
       updateTask(taskId, { status: "fetching_urls" });
 
       const fetchedMetadata = await fetchPresignedUrls(task);
@@ -516,8 +573,8 @@ async function executeDownload(task: DownloadTask): Promise<void> {
         decryptInfo,
         encryptionAlgorithm: metadataEncryptionAlgorithm,
       } = fetchedMetadata;
+      fetchedKeyContext = fetchedMetadata;
       urls = newUrls;
-      initialKey = decryptInfo.initialKey ?? null;
       totalChunks = decryptInfo.chunkCount;
       contentType = decryptInfo.contentType;
       fileName = decryptInfo.fileName;
@@ -528,7 +585,6 @@ async function executeDownload(task: DownloadTask): Promise<void> {
       updateTask(taskId, {
         presignedUrls: urls,
         urlsFetchedAt: Date.now(),
-        initialKey,
         encryptionAlgorithm,
         totalChunks,
         contentType,
@@ -561,23 +617,34 @@ async function executeDownload(task: DownloadTask): Promise<void> {
 
     // Manifest-backed downloads use the bounded reader for all three formats.
     if (downloadMetadata) {
+      let initialKey: string | null = null;
+      if (!fetchedKeyContext) {
+        throw new Error("下载密钥授权上下文不可用，请重新获取元数据");
+      }
+      initialKey = await consumeFetchedDownloadKey(fetchedKeyContext);
       const sink = new MemoryDownloadSink(fileSize, MAX_SAFE_INMEMORY_SIZE);
       metricsTracker = new DownloadMetricsTracker();
       updateTask(taskId, { status: "downloading" });
-      const metrics = await executeBoundedDownload({
-        metadata: downloadMetadata,
-        expectedFileHash: task.fileHash,
-        sink,
-        metrics: metricsTracker,
-        signal: abortController.signal,
-        onPartComplete: (completed, total) => {
-          updateTask(taskId, {
-            status: "downloading",
-            downloadedChunks: completed,
-            progress: Math.round((completed / total) * 100),
-          });
-        },
-      });
+      let metrics: DownloadStreamMetrics;
+      try {
+        metrics = await executeBoundedDownload({
+          metadata: downloadMetadata,
+          initialKey,
+          expectedFileHash: task.fileHash,
+          sink,
+          metrics: metricsTracker,
+          signal: abortController.signal,
+          onPartComplete: (completed, total) => {
+            updateTask(taskId, {
+              status: "downloading",
+              downloadedChunks: completed,
+              progress: Math.round((completed / total) * 100),
+            });
+          },
+        });
+      } finally {
+        initialKey = null;
+      }
       if (abortController.signal.aborted) {
         throw new Error("Download cancelled");
       }
@@ -596,26 +663,35 @@ async function executeDownload(task: DownloadTask): Promise<void> {
     }
 
     // 历史无 manifest 文件也必须逐分片读取，并对 v1 密文执行硬性 part 上限。
+    if (!fetchedKeyContext) {
+      throw new Error("下载密钥授权上下文不可用，请重新获取元数据");
+    }
+    let initialKey = await consumeFetchedDownloadKey(fetchedKeyContext);
     const sink = new MemoryDownloadSink(fileSize, MAX_SAFE_INMEMORY_SIZE);
     metricsTracker = new DownloadMetricsTracker();
     updateTask(taskId, { status: "downloading" });
-    const metrics = await executeLegacyFallbackDownload({
-      urls,
-      fileSize,
-      totalChunks,
-      initialKey,
-      encrypted: !isPlainDownload(encryptionAlgorithm),
-      sink,
-      signal: abortController.signal,
-      metrics: metricsTracker,
-      onPartComplete: (completed, total) => {
-        updateTask(taskId, {
-          status: "downloading",
-          downloadedChunks: completed,
-          progress: Math.round((completed / total) * 100),
-        });
-      },
-    });
+    let metrics: DownloadStreamMetrics;
+    try {
+      metrics = await executeLegacyFallbackDownload({
+        urls,
+        fileSize,
+        totalChunks,
+        initialKey,
+        encrypted: !isPlainDownload(encryptionAlgorithm),
+        sink,
+        signal: abortController.signal,
+        metrics: metricsTracker,
+        onPartComplete: (completed, total) => {
+          updateTask(taskId, {
+            status: "downloading",
+            downloadedChunks: completed,
+            progress: Math.round((completed / total) * 100),
+          });
+        },
+      });
+    } finally {
+      initialKey = null;
+    }
     if (abortController.signal.aborted) {
       throw new Error("Download cancelled");
     }
@@ -709,15 +785,19 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
 
     // Step 1: Fetch presigned URLs if needed
     let urls = task.presignedUrls;
-    let initialKey = task.initialKey;
     let totalChunks = task.totalChunks;
     let contentType = task.contentType;
     let fileName = task.fileName;
     let fileSize = task.fileSize;
     let encryptionAlgorithm = task.encryptionAlgorithm;
     let downloadMetadata = task.downloadMetadata;
+    let fetchedKeyContext: PresignedUrlMetadata | null = null;
 
-    if (urls.length === 0 || areUrlsExpired(task.urlsFetchedAt)) {
+    if (
+      task.source.type === "owned" ||
+      urls.length === 0 ||
+      areUrlsExpired(task.urlsFetchedAt)
+    ) {
       updateTask(taskId, { status: "fetching_urls" });
 
       const fetchedMetadata = await fetchPresignedUrls(task);
@@ -726,8 +806,8 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
         decryptInfo,
         encryptionAlgorithm: metadataEncryptionAlgorithm,
       } = fetchedMetadata;
+      fetchedKeyContext = fetchedMetadata;
       urls = newUrls;
-      initialKey = decryptInfo.initialKey ?? null;
       totalChunks = decryptInfo.chunkCount;
       contentType = decryptInfo.contentType;
       fileName = decryptInfo.fileName;
@@ -738,7 +818,6 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
       updateTask(taskId, {
         presignedUrls: urls,
         urlsFetchedAt: Date.now(),
-        initialKey,
         encryptionAlgorithm,
         totalChunks,
         contentType,
@@ -762,47 +841,66 @@ async function executeStreamingDownload(task: DownloadTask): Promise<void> {
     let result: { success: boolean; error?: string };
     let completedMetrics: DownloadStreamMetrics | null = null;
     if (downloadMetadata) {
+      if (!fetchedKeyContext) {
+        throw new Error("下载密钥授权上下文不可用，请重新获取元数据");
+      }
+      let initialKey = await consumeFetchedDownloadKey(fetchedKeyContext);
       const sink = await createFileSystemDownloadSink(fileHandle);
       metricsTracker = new DownloadMetricsTracker();
-      const metrics = await executeBoundedDownload({
-        metadata: downloadMetadata,
-        expectedFileHash: task.fileHash,
-        sink,
-        signal: abortController.signal,
-        metrics: metricsTracker,
-        onPartComplete: (completed, total) => {
-          updateTask(taskId, {
-            status: "streaming",
-            downloadedChunks: completed,
-            progress: Math.round((completed / total) * 100),
-          });
-        },
-      });
+      let metrics: DownloadStreamMetrics;
+      try {
+        metrics = await executeBoundedDownload({
+          metadata: downloadMetadata,
+          initialKey,
+          expectedFileHash: task.fileHash,
+          sink,
+          signal: abortController.signal,
+          metrics: metricsTracker,
+          onPartComplete: (completed, total) => {
+            updateTask(taskId, {
+              status: "streaming",
+              downloadedChunks: completed,
+              progress: Math.round((completed / total) * 100),
+            });
+          },
+        });
+      } finally {
+        initialKey = null;
+      }
       completedMetrics = metrics;
       if (abortController.signal.aborted) {
         throw new Error("Download cancelled");
       }
       result = { success: true };
     } else {
+      if (!fetchedKeyContext) {
+        throw new Error("下载密钥授权上下文不可用，请重新获取元数据");
+      }
+      let initialKey = await consumeFetchedDownloadKey(fetchedKeyContext);
       const sink = await createFileSystemDownloadSink(fileHandle);
       metricsTracker = new DownloadMetricsTracker();
-      const metrics = await executeLegacyFallbackDownload({
-        urls,
-        fileSize,
-        totalChunks,
-        initialKey,
-        encrypted: !isPlainDownload(encryptionAlgorithm),
-        sink,
-        signal: abortController.signal,
-        metrics: metricsTracker,
-        onPartComplete: (completed, total) => {
-          updateTask(taskId, {
-            status: "streaming",
-            downloadedChunks: completed,
-            progress: Math.round((completed / total) * 100),
-          });
-        },
-      });
+      let metrics: DownloadStreamMetrics;
+      try {
+        metrics = await executeLegacyFallbackDownload({
+          urls,
+          fileSize,
+          totalChunks,
+          initialKey,
+          encrypted: !isPlainDownload(encryptionAlgorithm),
+          sink,
+          signal: abortController.signal,
+          metrics: metricsTracker,
+          onPartComplete: (completed, total) => {
+            updateTask(taskId, {
+              status: "streaming",
+              downloadedChunks: completed,
+              progress: Math.round((completed / total) * 100),
+            });
+          },
+        });
+      } finally {
+        initialKey = null;
+      }
       completedMetrics = metrics;
       if (abortController.signal.aborted) {
         throw new Error("Download cancelled");
@@ -1063,7 +1161,6 @@ async function startDownload(
     presignedUrls: [],
     urlsFetchedAt: null,
     chunks: [],
-    initialKey: null,
     encryptionAlgorithm: null,
     source,
     createdAt: Date.now(),
@@ -1421,7 +1518,6 @@ async function restoreTasks(): Promise<void> {
           status: chunks.has(i) ? ("completed" as const) : ("pending" as const),
           retryCount: 0,
         })),
-        initialKey: null,
         encryptionAlgorithm: null,
         source: pt.source,
         createdAt: pt.createdAt,

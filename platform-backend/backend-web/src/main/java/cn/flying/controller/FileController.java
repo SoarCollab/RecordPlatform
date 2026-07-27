@@ -7,6 +7,7 @@ import cn.flying.common.constant.ResultEnum;
 import cn.flying.common.exception.GeneralException;
 import cn.flying.common.util.Const;
 import cn.flying.common.util.IdUtils;
+import cn.flying.common.util.JsonConverter;
 import cn.flying.dao.dto.File;
 import cn.flying.dao.vo.file.CreateVersionVO;
 import cn.flying.dao.vo.file.FileProvenanceVO;
@@ -56,8 +57,11 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 文件操作相关接口。
@@ -74,6 +78,13 @@ import java.util.Map;
 
 @RequiredArgsConstructor
 public class FileController {
+
+    private static final Set<String> SENSITIVE_FILE_PARAM_FIELDS = Set.of(
+            "initialkey", "decryptkey", "decryptionkey", "filekey", "filedatakey",
+            "wrappeddatakey", "encrypteddatakey", "wrappedkey", "encryptedkey",
+            "wrappingiv", "ciphertext", "kmskeyid", "keyid", "keyreference",
+            "providerkeyversion", "keyversion", "keygrant", "grantreference",
+            "sessionid", "downloadsessionid", "presignedurl", "downloadurl");
 
     private final FileQueryService fileQueryService;
 
@@ -488,7 +499,7 @@ public class FileController {
                 IdUtils.toExternalId(file.getId()),
                 file.getFileName(),
                 file.getClassification(),
-                file.getFileParam(),
+                sanitizeFileParamForResponse(file.getFileParam()),
                 file.getFileHash(),
                 file.getTransactionHash(),
                 file.getStatus(),
@@ -503,5 +514,56 @@ public class FileController {
                 file.getSharedFromUserName(),
                 file.getCreateTime()
         );
+    }
+
+    /**
+     * 从通用文件视图剥离历史明文、包封材料和密钥标识，阻断 grant 之外的下载密钥旁路。
+     */
+    private static String sanitizeFileParamForResponse(String fileParam) {
+        if (fileParam == null || fileParam.isBlank()) {
+            return null;
+        }
+        try {
+            Map<?, ?> parsed = JsonConverter.parse(fileParam, Map.class);
+            return JsonConverter.toJson(sanitizeFileParamValue(parsed));
+        } catch (GeneralException exception) {
+            return null;
+        }
+    }
+
+    /**
+     * 递归清理 JSON 对象和数组，防止把敏感字段嵌套后绕过顶层字段过滤。
+     */
+    private static Object sanitizeFileParamValue(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> sanitized = new LinkedHashMap<>();
+            map.forEach((rawKey, rawValue) -> {
+                if (!(rawKey instanceof String key)
+                        || SENSITIVE_FILE_PARAM_FIELDS.contains(normalizeFileParamFieldName(key))) {
+                    return;
+                }
+                sanitized.put(key, sanitizeFileParamValue(rawValue));
+            });
+            return sanitized;
+        }
+        if (value instanceof List<?> list) {
+            return list.stream().map(FileController::sanitizeFileParamValue).toList();
+        }
+        return value;
+    }
+
+    /**
+     * 统一大小写及分隔符后识别敏感字段，阻断 initial_key 等等价拼写绕过。
+     */
+    private static String normalizeFileParamFieldName(String fieldName) {
+        String lowerCase = fieldName.toLowerCase(Locale.ROOT);
+        StringBuilder normalized = new StringBuilder(lowerCase.length());
+        for (int index = 0; index < lowerCase.length(); index++) {
+            char character = lowerCase.charAt(index);
+            if ((character >= 'a' && character <= 'z') || (character >= '0' && character <= '9')) {
+                normalized.append(character);
+            }
+        }
+        return normalized.toString();
     }
 }

@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => {
       getDownloadAddress: vi.fn(),
       getDownloadMetadata: vi.fn(),
       getDecryptInfo: vi.fn(),
+      createDownloadSessionId: vi.fn(),
+      consumeDownloadKeyGrant: vi.fn(),
       publicDownloadFile: vi.fn(),
       shareDownloadFile: vi.fn(),
       downloadFile: vi.fn(),
@@ -207,7 +209,11 @@ function createDownloadMetadata(fileHash = "hash-1", downloadUrl = "u1") {
     fileName: "report.pdf",
     fileSize: 1024,
     contentType: "application/pdf",
-    initialKey: "k1",
+    keyGrant: {
+      reference: "grant-reference",
+      protocol: "grant-v1",
+      expiresAt: "2026-07-27T12:00:00Z",
+    },
     manifestSchemaId: "cn.flying.chunk-manifest.v1",
     manifestHash: "sha256:manifest",
     hashAlgorithm: "SHA-256",
@@ -252,11 +258,22 @@ describe("download store", () => {
       createDownloadMetadata(),
     );
     mocks.fileApi.getDecryptInfo.mockResolvedValue({
-      initialKey: "k1",
+      keyGrant: {
+        reference: "grant-reference",
+        protocol: "grant-v1",
+        expiresAt: "2026-07-27T12:00:00Z",
+      },
       chunkCount: 1,
       contentType: "application/pdf",
       fileName: "report.pdf",
       fileSize: 1024,
+    });
+    mocks.fileApi.createDownloadSessionId.mockReturnValue(
+      "download-session-123456",
+    );
+    mocks.fileApi.consumeDownloadKeyGrant.mockResolvedValue({
+      initialKey: "k1",
+      protocol: "grant-v1",
     });
     mocks.fileApi.publicDownloadFile.mockResolvedValue(createBlob());
     mocks.fileApi.shareDownloadFile.mockResolvedValue(createBlob());
@@ -346,7 +363,10 @@ describe("download store", () => {
       "completed",
     );
 
-    expect(mocks.fileApi.getDownloadMetadata).toHaveBeenCalledWith("hash-1");
+    expect(mocks.fileApi.getDownloadMetadata).toHaveBeenCalledWith(
+      "hash-1",
+      "download-session-123456",
+    );
     expect(mocks.fileApi.getDownloadAddress).not.toHaveBeenCalled();
     expect(mocks.fileApi.getDecryptInfo).not.toHaveBeenCalled();
     expect(mocks.boundedDownloader.executeBoundedDownload).toHaveBeenCalled();
@@ -397,11 +417,15 @@ describe("download store", () => {
 
     expect(mocks.fileApi.getDownloadMetadata).toHaveBeenCalledWith(
       "hash-legacy",
+      "download-session-123456",
     );
     expect(mocks.fileApi.getDownloadAddress).toHaveBeenCalledWith(
       "hash-legacy",
     );
-    expect(mocks.fileApi.getDecryptInfo).toHaveBeenCalledWith("hash-legacy");
+    expect(mocks.fileApi.getDecryptInfo).toHaveBeenCalledWith(
+      "hash-legacy",
+      "download-session-123456",
+    );
     expect(
       mocks.boundedDownloader.executeLegacyFallbackDownload,
     ).toHaveBeenCalledWith(
@@ -481,6 +505,7 @@ describe("download store", () => {
     mocks.fileApi.getDownloadMetadata.mockResolvedValueOnce({
       ...createDownloadMetadata("hash-direct", "u-direct-0"),
       initialKey: null,
+      keyGrant: undefined,
       encryptionAlgorithm: "NONE",
       contentType: "application/octet-stream",
       fileSize: 3,
@@ -624,6 +649,7 @@ describe("download store", () => {
     expect(mocks.boundedDownloader.executeBoundedDownload).toHaveBeenCalled();
     expect(mocks.fileApi.getDownloadMetadata).toHaveBeenCalledWith(
       "hash-stream",
+      "download-session-123456",
     );
   });
 
@@ -778,7 +804,7 @@ describe("download store", () => {
     expect(download.tasks[0].status).toBe("paused");
     expect(download.tasks[0].downloadedChunks).toBe(1);
     expect(download.tasks[0].presignedUrls).toEqual([]);
-    expect(download.tasks[0].initialKey).toBeNull();
+    expect(download.tasks[0]).not.toHaveProperty("initialKey");
   });
 
   it("clearAllDownloads 应清空内存任务和 IndexedDB 缓存", async () => {
@@ -1439,6 +1465,7 @@ describe("download store extra branches", () => {
     mocks.fileApi.getDownloadMetadata.mockResolvedValueOnce({
       ...createDownloadMetadata("hash-plain-stream", "u-plain-stream"),
       initialKey: null,
+      keyGrant: undefined,
       encryptionAlgorithm: "NONE",
       contentType: "application/octet-stream",
     });

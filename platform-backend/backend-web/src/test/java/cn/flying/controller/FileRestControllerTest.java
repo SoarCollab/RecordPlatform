@@ -1,6 +1,8 @@
 package cn.flying.controller;
 
 import cn.flying.common.constant.Result;
+import cn.flying.common.annotation.OperationLog;
+import cn.flying.common.annotation.RateLimit;
 import cn.flying.common.util.IdUtils;
 import cn.flying.common.util.SecureIdCodec;
 import cn.flying.dao.dto.File;
@@ -9,8 +11,11 @@ import cn.flying.dao.vo.file.FileDecryptInfoVO;
 import cn.flying.dao.vo.file.FileDownloadMetadataVO;
 import cn.flying.dao.vo.file.FileDownloadPartVO;
 import cn.flying.dao.vo.file.FileVO;
+import cn.flying.dao.vo.file.DownloadKeyGrantConsumeRequestVO;
+import cn.flying.dao.vo.file.DownloadKeyMaterialVO;
 import cn.flying.service.DownloadBatchMetricsService;
 import cn.flying.service.FileQueryService;
+import cn.flying.service.key.FileKeyGrantService;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +23,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.mock.web.MockHttpServletResponse;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -26,6 +32,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -44,6 +51,9 @@ class FileRestControllerTest {
     @Mock
     private DownloadBatchMetricsService downloadBatchMetricsService;
 
+    @Mock
+    private FileKeyGrantService fileKeyGrantService;
+
     private FileRestController controller;
 
     /**
@@ -56,7 +66,8 @@ class FileRestControllerTest {
                 "secureIdCodec",
                 new SecureIdCodec("SecureTestKey4UnitTests2026XyZ789AbCdEfGhIjKlMnOpQrStUvWxYz1234")
         );
-        controller = new FileRestController(fileQueryService, downloadBatchMetricsService);
+        controller = new FileRestController(
+                fileQueryService, downloadBatchMetricsService, fileKeyGrantService);
     }
 
     /**
@@ -70,9 +81,9 @@ class FileRestControllerTest {
         when(fileQueryService.getFileByHash(userId, fileHash)).thenReturn(new File());
         when(fileQueryService.getFileAddress(userId, fileHash)).thenReturn(List.of("url-1"));
         when(fileQueryService.getFile(userId, fileHash)).thenReturn(List.of("a".getBytes()));
-        when(fileQueryService.getFileDecryptInfo(userId, fileHash))
+        when(fileQueryService.getFileDecryptInfo(userId, fileHash, "grant-v1", "session-123456789"))
                 .thenReturn(new FileDecryptInfoVO("k", "n", 1L, "text/plain", 1, fileHash));
-        when(fileQueryService.getDownloadMetadata(userId, fileHash))
+        when(fileQueryService.getDownloadMetadata(userId, fileHash, "grant-v1", "session-123456789"))
                 .thenReturn(new FileDownloadMetadataVO(
                         "file-1",
                         fileHash,
@@ -98,13 +109,23 @@ class FileRestControllerTest {
                                 "SHA-256"
                         ))
                 ));
+        when(fileKeyGrantService.consumeAuthenticated(
+                "A".repeat(43), "session-123456789", userId))
+                .thenReturn(new DownloadKeyMaterialVO("transient-key", "grant-v1"));
 
         Result<Page<FileVO>> pageResult = controller.getFiles(userId, 1, 10, null, null, null, null, null);
         Result<FileVO> byHashResult = controller.getFileByHash(userId, fileHash);
         Result<List<String>> addressResult = controller.getFileAddresses(userId, fileHash);
-        Result<FileDownloadMetadataVO> metadataResult = controller.getDownloadMetadata(userId, fileHash);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        Result<FileDownloadMetadataVO> metadataResult = controller.getDownloadMetadata(
+                userId, fileHash, "grant-v1", "session-123456789", response);
         Result<List<byte[]>> chunksResult = controller.getFileChunks(userId, fileHash);
-        Result<FileDecryptInfoVO> decryptInfoResult = controller.getFileDecryptInfo(userId, fileHash);
+        Result<FileDecryptInfoVO> decryptInfoResult = controller.getFileDecryptInfo(
+                userId, fileHash, "grant-v1", "session-123456789", response);
+        Result<DownloadKeyMaterialVO> keyMaterialResult = controller.consumeDownloadKeyGrant(
+                userId,
+                new DownloadKeyGrantConsumeRequestVO("A".repeat(43), "session-123456789"),
+                response);
 
         assertNotNull(pageResult.getData());
         assertNotNull(byHashResult.getData());
@@ -112,11 +133,63 @@ class FileRestControllerTest {
         assertEquals("sha256:manifest", metadataResult.getData().manifestHash());
         assertEquals(1, chunksResult.getData().size());
         assertEquals(fileHash, decryptInfoResult.getData().fileHash());
+        assertEquals("transient-key", keyMaterialResult.getData().initialKey());
+        assertEquals("no-store, private", response.getHeader("Cache-Control"));
+        assertEquals("no-cache", response.getHeader("Pragma"));
         verify(fileQueryService).getFileByHash(userId, fileHash);
         verify(fileQueryService).getFileAddress(userId, fileHash);
-        verify(fileQueryService).getDownloadMetadata(userId, fileHash);
+        verify(fileQueryService).getDownloadMetadata(userId, fileHash, "grant-v1", "session-123456789");
         verify(fileQueryService).getFile(userId, fileHash);
-        verify(fileQueryService).getFileDecryptInfo(userId, fileHash);
+        verify(fileQueryService).getFileDecryptInfo(userId, fileHash, "grant-v1", "session-123456789");
+        verify(fileKeyGrantService).consumeAuthenticated(
+                "A".repeat(43), "session-123456789", userId);
+    }
+
+    /**
+     * 验证认证 grant 消费使用独立用户限流桶且操作日志不保存请求体。
+     */
+    @Test
+    void shouldProtectAuthenticatedGrantConsumeContract() throws NoSuchMethodException {
+        var method = FileRestController.class.getMethod(
+                "consumeDownloadKeyGrant",
+                Long.class,
+                DownloadKeyGrantConsumeRequestVO.class,
+                jakarta.servlet.http.HttpServletResponse.class);
+        RateLimit rateLimit = method.getAnnotation(RateLimit.class);
+        OperationLog operationLog = method.getAnnotation(OperationLog.class);
+
+        assertNotNull(rateLimit);
+        assertEquals(20, rateLimit.limit());
+        assertEquals(60, rateLimit.period());
+        assertEquals(RateLimit.LimitType.USER, rateLimit.type());
+        assertEquals("download:key-grant:consume", rateLimit.key());
+        assertNotNull(operationLog);
+        assertFalse(operationLog.saveRequestData());
+    }
+
+    /**
+     * 验证两个认证 grant 签发入口共享独立用户限流桶且不记录请求数据。
+     */
+    @Test
+    void shouldProtectAuthenticatedGrantIssueContracts() throws NoSuchMethodException {
+        var metadataMethod = FileRestController.class.getMethod(
+                "getDownloadMetadata", Long.class, String.class, String.class, String.class,
+                jakarta.servlet.http.HttpServletResponse.class);
+        var decryptMethod = FileRestController.class.getMethod(
+                "getFileDecryptInfo", Long.class, String.class, String.class, String.class,
+                jakarta.servlet.http.HttpServletResponse.class);
+
+        for (var method : List.of(metadataMethod, decryptMethod)) {
+            RateLimit rateLimit = method.getAnnotation(RateLimit.class);
+            OperationLog operationLog = method.getAnnotation(OperationLog.class);
+            assertNotNull(rateLimit);
+            assertEquals(60, rateLimit.limit());
+            assertEquals(60, rateLimit.period());
+            assertEquals(RateLimit.LimitType.USER, rateLimit.type());
+            assertEquals("download:key-grant:issue", rateLimit.key());
+            assertNotNull(operationLog);
+            assertFalse(operationLog.saveRequestData());
+        }
     }
 
     /**

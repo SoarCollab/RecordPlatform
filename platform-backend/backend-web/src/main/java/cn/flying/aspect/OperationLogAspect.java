@@ -351,6 +351,7 @@ public class OperationLogAspect {
                 || normalized.startsWith("/api/v1/files")
                 || normalized.startsWith("/api/v1/shares")
                 || normalized.startsWith("/api/v1/public/shares")
+                || normalized.startsWith("/api/v1/public/key-grants")
                 || normalized.startsWith("/api/v1/upload-sessions")
                 || normalized.startsWith("/api/v1/transactions");
     }

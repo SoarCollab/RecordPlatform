@@ -319,6 +319,22 @@ file:
 
 The application token needs only `update` capability on the selected key's `transit/encrypt`, `transit/decrypt`, and `transit/rewrap` paths. Keep old provider/key versions available until every historical envelope has been rotated. See [Key Management Security](../../security/key-management.md) for context binding, migration, and HSM deployment boundaries, and the [Key Rotation Runbook](../../operations/key-rotation.md) for dry-run, APPLY, recovery, alert, and retirement procedures.
 
+## Download Key Delivery
+
+Encrypted download metadata defaults to `grant-v1`: it returns a short-lived, session-bound grant instead of plaintext `initialKey`. Redis is required and an outage fails closed. Keep the production defaults short and never enable compatibility without a time-bounded client migration:
+
+```yaml
+file:
+  key-delivery:
+    grant-ttl: ${FILE_KEY_DELIVERY_GRANT_TTL:60s}
+    retry-window: ${FILE_KEY_DELIVERY_RETRY_WINDOW:10s}
+    max-same-session-retries: ${FILE_KEY_DELIVERY_MAX_SAME_SESSION_RETRIES:1}
+    legacy-plaintext-enabled: ${FILE_KEY_DELIVERY_LEGACY_PLAINTEXT_ENABLED:false}
+    legacy-plaintext-not-after: ${FILE_KEY_DELIVERY_LEGACY_PLAINTEXT_NOT_AFTER:2026-10-01T00:00:00Z}
+```
+
+`grant-ttl` must be positive and no more than five minutes. `retry-window` must be shorter than the TTL; zero to three same-session retries are accepted, with one as the default. `plaintext-v0` works only when the client explicitly negotiates it, the switch is enabled, and the deadline has not passed. After the deadline it fails closed even if the switch is accidentally enabled. Production proxies and APM/WAF agents must not cache or capture metadata, decrypt-info, grant POST bodies, consume responses, `X-Download-Session-ID`, grant references, or `initialKey`. See [Key Management Security](../../security/key-management.md#7-下载密钥交付与暴露面) for the binding, replay, browser-memory, removal, and rollback boundaries.
+
 ## Runtime Crypto Agility
 
 `crypto.agility` selects only from the closed built-in catalog of executable capabilities. Naming an unknown suite or provider does not load an algorithm dynamically; startup or the operation fails closed:

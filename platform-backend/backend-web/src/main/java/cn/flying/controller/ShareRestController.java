@@ -5,6 +5,8 @@ import cn.flying.common.annotation.RateLimit;
 import cn.flying.common.constant.Result;
 import cn.flying.common.util.Const;
 import cn.flying.dao.vo.file.FileDecryptInfoVO;
+import cn.flying.dao.vo.file.DownloadKeyGrantConsumeRequestVO;
+import cn.flying.dao.vo.file.DownloadKeyMaterialVO;
 import cn.flying.dao.vo.file.FileSharingVO;
 import cn.flying.dao.vo.file.SaveSharingFile;
 import cn.flying.dao.vo.file.ShareFileVO;
@@ -13,13 +15,16 @@ import cn.flying.security.TrustedClientIpResolver;
 import cn.flying.service.FileQueryService;
 import cn.flying.service.FileService;
 import cn.flying.service.ShareAuditService;
+import cn.flying.service.key.FileKeyGrantService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -27,6 +32,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -48,6 +54,8 @@ public class ShareRestController {
     private final ShareAuditService shareAuditService;
 
     private final TrustedClientIpResolver trustedClientIpResolver;
+
+    private final FileKeyGrantService fileKeyGrantService;
 
     /**
      * 创建分享（REST 新路径）。
@@ -162,11 +170,21 @@ public class ShareRestController {
      */
     @GetMapping("/api/v1/shares/{shareCode}/files/{fileHash}/decrypt-info")
     @Operation(summary = "分享获取解密信息（REST，需登录）")
-    @OperationLog(module = "文件操作", operationType = "查询", description = "分享获取解密信息（REST）")
+    @OperationLog(module = "文件操作", operationType = "查询",
+            description = "分享获取解密信息（REST）", saveRequestData = false)
+    @RateLimit(limit = 60, period = 60, type = RateLimit.LimitType.USER,
+            key = "download:key-grant:issue")
     public Result<FileDecryptInfoVO> getSharedDecryptInfo(@RequestAttribute(Const.ATTR_USER_ID) Long userId,
                                                           @PathVariable String shareCode,
-                                                          @PathVariable String fileHash) {
-        return Result.success(fileService.getSharedFileDecryptInfo(userId, shareCode, fileHash));
+                                                          @PathVariable String fileHash,
+                                                          @RequestHeader(value = "X-Key-Delivery-Protocol", required = false)
+                                                          String keyDeliveryProtocol,
+                                                          @RequestHeader(value = "X-Download-Session-ID", required = false)
+                                                          String downloadSessionId,
+                                                          HttpServletResponse response) {
+        disableSensitiveResponseCaching(response, true);
+        return Result.success(fileService.getSharedFileDecryptInfo(
+                userId, shareCode, fileHash, keyDeliveryProtocol, downloadSessionId));
     }
 
     /**
@@ -207,7 +225,8 @@ public class ShareRestController {
      * @param fileHash  文件哈希
      * @return 解密信息
      */
-    @OperationLog(module = "文件操作", operationType = "查询", description = "获取公开分享文件解密信息")
+    @OperationLog(module = "文件操作", operationType = "查询",
+            description = "获取公开分享文件解密信息", saveRequestData = false)
     @GetMapping("/api/v1/public/shares/{shareCode}/files/{fileHash}/decrypt-info")
     @SecurityRequirements
     @RateLimit(
@@ -223,8 +242,49 @@ public class ShareRestController {
                     + "并与公开下载接口共享规范客户端 IP 的 30 次/60 秒限流桶；第 31 次当前以 HTTP 200、"
                     + "业务码 70005 拒绝。")
     public Result<FileDecryptInfoVO> publicDecryptInfo(@Parameter(description = "分享码") @PathVariable String shareCode,
-                                                       @Parameter(description = "文件哈希") @PathVariable String fileHash) {
-        return Result.success(fileService.getPublicFileDecryptInfo(shareCode, fileHash));
+                                                       @Parameter(description = "文件哈希") @PathVariable String fileHash,
+                                                       @RequestHeader(value = "X-Key-Delivery-Protocol", required = false)
+                                                       String keyDeliveryProtocol,
+                                                       @RequestHeader(value = "X-Download-Session-ID", required = false)
+                                                       String downloadSessionId,
+                                                       HttpServletRequest request,
+                                                       HttpServletResponse response) {
+        disableSensitiveResponseCaching(response, false);
+        return Result.success(fileService.getPublicFileDecryptInfo(
+                shareCode, fileHash, keyDeliveryProtocol, downloadSessionId, getClientIp(request)));
+    }
+
+    /**
+     * 原子消费公开分享的短期下载密钥授权。
+     */
+    @PostMapping("/api/v1/public/key-grants/consume")
+    @SecurityRequirements
+    @Operation(summary = "消费公开分享短期下载密钥授权")
+    @OperationLog(module = "文件操作", operationType = "下载",
+            description = "消费公开分享短期下载密钥授权", saveRequestData = false)
+    @RateLimit(
+            limit = 20,
+            type = RateLimit.LimitType.IP,
+            key = "public:key-grant:consume",
+            tenantScoped = false,
+            clientIpMode = RateLimit.ClientIpMode.TRUSTED_PEER
+    )
+    public Result<DownloadKeyMaterialVO> consumePublicDownloadKeyGrant(
+            @RequestBody @Valid DownloadKeyGrantConsumeRequestVO requestBody,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        disableSensitiveResponseCaching(response, false);
+        return Result.success(fileKeyGrantService.consumePublic(
+                requestBody.grantReference(), requestBody.sessionId(), getClientIp(request)));
+    }
+
+    /**
+     * 禁止浏览器、代理与中间缓存保存分享 grant 或瞬时密钥响应。
+     */
+    private void disableSensitiveResponseCaching(HttpServletResponse response, boolean privateResponse) {
+        response.setHeader(HttpHeaders.CACHE_CONTROL,
+                privateResponse ? "no-store, private" : "no-store");
+        response.setHeader(HttpHeaders.PRAGMA, "no-cache");
     }
 
     /**
